@@ -12,7 +12,9 @@ import { COORDINATION_WORKER_SOURCE } from './coordination-worker-source.generat
 import { withCoordinationRebuild } from './coordination-rebuild-queue.mjs';
 import { SUPERVISION_BUCKETS } from './agent-supervision-state.mjs';
 
-const buckets = ['events', 'works', 'deliveries', 'mandates', 'decisions', 'transitions', 'inputBindings', ...SUPERVISION_BUCKETS];
+import { SESSION_CONTROL_BUCKETS } from './session-control-kernel.mjs';
+
+const buckets = [...SESSION_CONTROL_BUCKETS, 'events', 'works', 'deliveries', 'mandates', 'decisions', 'transitions', 'inputBindings', ...SUPERVISION_BUCKETS];
 const empty = () => ({ revision: 0, events: {}, works: {}, deliveries: {} });
 const token = file => { try { const s = statSync(file, { bigint: true }); return `${s.dev}:${s.ino}:${s.size}:${s.mtimeNs}:${s.ctimeNs}`; } catch (e) { if (e.code === 'ENOENT') return 'missing'; throw e; } };
 const fail = code => Object.assign(new Error(code), { code });
@@ -126,13 +128,21 @@ function apply(db, record, { blobs, receiptCache } = {}) {
   if (record.kind === 'usage_observed' && db.prepare('SELECT 1 FROM observations WHERE workId=? AND id=?').get(record.workId, record.observationId)) {
     const work = before.works[record.workId]; if (work?.budget) work.budget.observations = { [record.observationId]: true };
   }
+  if (record.kind === 'session_control' || record.patch?.controlOperationRef) {
+    before.sessionControls = {}; before.sessionControlHeads = {};
+    const sessionId = record.operation?.sessionId, current = sessionId && get(db, 'sessionControlHeads', sessionId);
+    if (current) before.sessionControlHeads[sessionId] = current;
+    for (const id of [record.operation?.operationId, current?.operationId, record.patch?.controlOperationRef].filter(Boolean)) {
+      const control = get(db, 'sessionControls', id); if (control) before.sessionControls[id] = control;
+    }
+  }
   const next = reduceCoordination(before, record);
   const supervision = record.kind.startsWith('agent_') || ['work_note_written', 'context_window_opened'].includes(record.kind)
     || SUPERVISION_BUCKETS.some(bucket => Object.keys(next[bucket] || {}).length);
   const closure = record.kind === 'agent_execution_completed' || record.transition?.minimumExecutorVersion === 3
     || Object.values(next.transitions || {}).some(row => row.minimumExecutorVersion === 3 || row.reconciliationRef)
     || Object.values(next.agentCommands || {}).some(row => row.completionRecorded === true);
-  putMeta(db, 'minimumFormatVersion', Math.max(getMeta(db, 'minimumFormatVersion') || 2, closure ? 6 : supervision ? 5 : record.kind.startsWith('history_') ? 4 : 2));
+  putMeta(db, 'minimumFormatVersion', Math.max(getMeta(db, 'minimumFormatVersion') || 2, record.kind === 'session_control' ? 7 : closure ? 6 : supervision ? 5 : record.kind.startsWith('history_') ? 4 : 2));
   for (const bucket of buckets) for (const [id, original] of Object.entries(next[bucket] || {})) {
     let value = original;
     if (bucket === 'works' && value.budget?.observations) {
@@ -257,7 +267,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
     if (existsSync(path.join(directory, 'coordination-fence.json')) && readMetadata(path.join(directory, 'coordination-fence.json')).status !== 'complete') throw fail('coordination_fence_incomplete');
     if (!existsSync(manifestFile)) throw fail(existsSync(path.join(directory, 'coordination-recovery.json')) ? 'coordination_repair_incomplete' : 'coordination_recovery_pending');
     const next = readMetadata(manifestFile);
-    if (next.schemaVersion !== 2 || ![2, 3, 4, 5, 6].includes(next.minimumReaderVersion) || next.minimumWriterVersion !== next.minimumReaderVersion) throw fail('coordination_schema_unsupported');
+    if (next.schemaVersion !== 2 || ![2, 3, 4, 5, 6, 7].includes(next.minimumReaderVersion) || next.minimumWriterVersion !== next.minimumReaderVersion) throw fail('coordination_schema_unsupported');
     if (next.minimumReaderVersion >= 3) {
       if (next.frozenLegacyFile !== 'baseline.jsonl' || !lstatSync(originalLegacyFile).isDirectory() || lstatSync(originalLegacyFile).isSymbolicLink() || !lstatSync(path.join(dir, 'baseline.jsonl')).isFile() || lstatSync(path.join(dir, 'baseline.jsonl')).isSymbolicLink()) throw fail('coordination_writer_fence_missing');
       legacyFile = path.join(dir, next.frozenLegacyFile);
@@ -447,13 +457,14 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
   return { active, prepare,
     enableSupervision(minimumVersion = 5) {
       assertOwner(); load();
-      if (![5,6].includes(minimumVersion)) throw fail('coordination_schema_unsupported');
+      if (![5,6,7].includes(minimumVersion)) throw fail('coordination_schema_unsupported');
       if (manifest.minimumWriterVersion >= minimumVersion) return;
       if (manifest.minimumWriterVersion < 3 || manifest.frozenLegacyFile !== 'baseline.jsonl') throw fail('coordination_writer_fence_required');
       const next = { ...manifest, minimumReaderVersion: minimumVersion, minimumWriterVersion: minimumVersion };
       durable(headFile, JSON.stringify({ ...readHead(headFile, manifest.generation), minimumWriterVersion: minimumVersion }));
       durable(manifestFile, JSON.stringify(next)); manifest = next;
     },
+    readSessionControl(sessionId) { load(); const head = get(db, 'sessionControlHeads', sessionId); return head ? get(db, 'sessionControls', head.operationId) : undefined; },
     readSupervision(bucket, id) {
       if (!SUPERVISION_BUCKETS.includes(bucket)) throw fail('supervision_query_invalid');
       load(); return get(db, bucket, id);

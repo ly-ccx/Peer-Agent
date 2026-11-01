@@ -202,7 +202,9 @@ export async function executeProjectedModelTool({
   }
 
   const dispatchPolicy = toolContext?.resolveAccessPolicy?.();
-  const workSessionGate = () => {
+  const dispatchPlanId = toolContext?.turnProfile?.planId ?? toolContext?.planId;
+  const dispatchPlan = dispatchPlanId ? goalPlanStore?.getPlan?.(dispatchPlanId) : null;
+  const workSessionGate = (resourceScopes = []) => {
     const accessDenial = toolContext?.checkAccessPolicy?.();
     if (accessDenial) return accessDenial;
     if (dispatchPolicy?.ok && dispatchPolicy.policy) {
@@ -211,11 +213,10 @@ export async function executeProjectedModelTool({
         || current.policy?.conversationId !== dispatchPolicy.policy.conversationId
         || current.policy?.revision !== dispatchPolicy.policy.revision) return 'permission_policy_changed';
     }
-    const planId = toolContext?.turnProfile?.planId ?? toolContext?.planId;
-    const plan = planId ? goalPlanStore?.getPlan?.(planId) : null;
-    const gate = evaluateWorkSessionWrite(plan, {
+    const gate = evaluateWorkSessionWrite(dispatchPlan, {
       capabilityId: projection.call.capabilityId, toolName: name,
-      permissionKind: projection.tool?.permissionPolicy?.kind, riskLevel: projection.capability?.riskLevel,
+      executionIdentity: toolContext?.turnProfile?.executionIdentity,
+      permissionKind: projection.tool?.permissionPolicy?.kind, riskLevel: projection.capability?.riskLevel, resourceScopes,
     });
     return gate.allowed ? null : gate.error;
   };

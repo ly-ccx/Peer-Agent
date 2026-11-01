@@ -1,5 +1,9 @@
 import { CONTINUITY_CAPABILITY_IDS } from './working-context-specs.mjs';
 import { controlProjectWork } from './work-control.mjs';
+import { executionAdmissionDenial } from './execution-admission.mjs';
+import { createSessionControl } from './session-control.mjs';
+import { createSessionResourceContention } from './session-resource-contention.mjs';
+import { executionIdentity, sameExecution } from './session-control-kernel.mjs';
 import { createSessionCancellation } from './session-cancellation.mjs';
 import { createSessionTakeover } from './session-takeover.mjs';
 import { takeoverBlocker } from './session-repair.mjs';
@@ -77,7 +81,11 @@ const ROLE_SLOTS = [
 ];
 
 export function evaluateWorkSessionWrite(plan, action = {}) {
+  if (plan?.delegationOrigin && action.executionIdentity && !sameExecution(action.executionIdentity, executionIdentity(plan)))
+    return { allowed: false, error: 'execution_revision_stale' };
   if (!sessionExecutionCurrent(plan)) return { allowed: false, error: 'work_execution_stopped' };
+  const resourceDenial = executionAdmissionDenial(plan, action);
+  if (resourceDenial) return { allowed: false, error: resourceDenial };
   if (plan?.delegationOrigin?.readOnly !== true) return { allowed: true };
   const capabilityId = typeof action.capabilityId === 'string' ? action.capabilityId : '';
   const permissionKind = typeof action.permissionKind === 'string' ? action.permissionKind : '';
@@ -137,11 +145,17 @@ export function createSessionSupervisor({
   const readConversationFacts = id => readQuery.memo(`conversation:${id}`, () => conversationFacts(id));
 
   executionScheduler ??= createExecutionScheduler({ rootDir: path.join(path.dirname(goalPlanStore.getStoreDir()), 'project-runtime'), now });
+  executionScheduler.configure({ ownsWorkspace: canManageWorkspace, currentPlan: plan => goalPlanStore.getPlan(plan.planId) || plan,
+    onResourceChanged: () => { void reconcileSessions().catch(() => {}); } });
+  const sessionControl = createSessionControl({ goalPlanStore, goalRunner, executionScheduler, canManageWorkspace, abortStream,
+    readMessages: id => conversationStore.getPersistedConversationHistory?.(id)?.messages || [], now });
+  const resourceContention = createSessionResourceContention({ goalPlanStore, sessionControl, canManageWorkspace, exclusive, promote });
+  executionScheduler.configure({ onResourceConflict: (plan, blocker) => resourceContention.request(plan, blocker) });
   const communication = createAgentCommunication({ conversationStore, goalPlanStore, goalRunner, findSession: findBySession,
     listSessions: delegatedPlans, canManageWorkspace, emitEvent, now });
   const recoveryHeld = plan => Boolean(plan && executionScheduler.inspect(plan).reason === 'coordination_reconciliation_required');
   const handoff = createSessionHandoff({ findBySession, goalPlanStore, goalRunner, canManageWorkspace, isRecoveryHeld: recoveryHeld, conversationStore, promote, now });
-  const continuity = createSessionContinuity({ goalPlanStore, conversationStore, goalRunner, executionScheduler,
+  const continuity = createSessionContinuity({ sessionControl, goalPlanStore, conversationStore, goalRunner, executionScheduler,
     findBySession, canManageWorkspace, abortStream, emit, now });
   const legacyCriteria = createLegacyCriterionRecovery({ store: goalPlanStore, readProvenance: readLegacyCriterionProvenance,
     holdsLease: planId => canManageWorkspace(goalPlanStore.getPlan(planId)?.delegationOrigin?.workspaceId), now });
@@ -169,10 +183,10 @@ export function createSessionSupervisor({
     }
   }
 
-  const cancellation = createSessionCancellation({ findBySession, goalPlanStore, goalRunner, executionScheduler, canManageWorkspace,
+  const cancellation = createSessionCancellation({ sessionControl, findBySession, goalPlanStore, goalRunner, executionScheduler, canManageWorkspace,
     abortStream, isolationPlanner, exclusive, project, emit, promote,
     readMessages: id => conversationStore.getPersistedConversationHistory?.(id)?.messages || [], now });
-  const takeover = createSessionTakeover({ findBySession, goalPlanStore, goalRunner, executionScheduler, exclusive, canManageWorkspace,
+  const takeover = createSessionTakeover({ sessionControl, findBySession, goalPlanStore, goalRunner, executionScheduler, exclusive, canManageWorkspace,
     abortStream, promote, emit, now, humanGateOf });
   coordination = createCoordinationLifecycle({ readSession: input => get(input),
     admitTask: (input, context) => checkDelegationCapabilities(input, context),
@@ -268,7 +282,7 @@ export function createSessionSupervisor({
   }
 
   function project(plan, plans = null) {
-    const origin = plan.delegationOrigin;
+    const origin = { ...plan.delegationOrigin, executionControl: sessionControl.read(plan) };
     const coordinationFacts = coordination?.forSession(origin.workspaceId, origin.sessionId);
     const conversation = readConversationFacts(plan.conversationId);
     const humanGate = humanGateOf(plan);
@@ -286,7 +300,7 @@ export function createSessionSupervisor({
       ...(origin.supersededBy ? { supersededBy: origin.supersededBy } : {}),
       ...(origin.phase === 'paused' ? { phase: 'paused' } : {}),
       ...(origin.phase === 'queued'
-        ? (({ queuedBehind, reason }) => ({ queuedBehind, queueReason: reason }))(executionScheduler.inspect(plan, Array.isArray(plans) ? plans : delegatedPlans())) : {}),
+        ? (({ queuedBehind, reason, blocker }) => ({ queuedBehind, queueReason: reason, ...(blocker ? { resourceBlocker: blocker } : {}) }))(executionScheduler.inspect(plan, Array.isArray(plans) ? plans : delegatedPlans())) : {}),
     });
     const report = buildReport(plan, session);
     if (sessionFactsFromPlan(plan).verificationActive) {
@@ -581,11 +595,12 @@ export function createSessionSupervisor({
       }
       if (replacingHolder && !hold) {
         const current = goalPlanStore.getPlan(plan.planId) || plan;
-        if (executionScheduler.inspect(current, delegatedPlans()).allowed) {
+        if (executionScheduler.inspect(current, delegatedPlans()).allowed && executionScheduler.reserveResources(current).allowed) {
           goalPlanStore.revisePlan(plan.planId, { status: 'executing', delegationOrigin: { ...current.delegationOrigin, phase: 'running' } },
             { reason: 'replacement inherited available slot', changedBy: 'session-supervisor' });
           executionScheduler.reconcile(delegatedPlans());
           if (typeof goalRunner?.start !== 'function') throw new Error('goal runner unavailable');
+          if (!executionScheduler.activateResources(goalPlanStore.getPlan(plan.planId))) throw new Error('execution_resource_owner_changed');
           await goalRunner.start(plan.planId, { awaitIdle: false });
         }
       }
@@ -640,6 +655,7 @@ export function createSessionSupervisor({
       && (autonomousCoordinationEnabled() || plan.delegationOrigin.phase !== 'queued'
         || coordination.forSession(plan.delegationOrigin.workspaceId, plan.delegationOrigin.sessionId)?.replacementSessionId !== plan.delegationOrigin.sessionId);
     let observed = delegatedPlans();
+    executionScheduler.reconcile(observed);
     if (isolationPlanner) {
       const virtual = observed.filter(eligible);
       let preparedAny = false;
@@ -656,7 +672,7 @@ export function createSessionSupervisor({
       if (preparedAny) observed = delegatedPlans();
     }
     const plans = observed.filter(eligible);
-    const { start, blocked } = executionScheduler.select(plans);
+    const { start, blocked } = executionScheduler.select(plans, { allPlans: observed });
     for (const plan of blocked) {
       goalPlanStore.revisePlan(plan.planId, {
         status: 'executing',
@@ -679,11 +695,16 @@ export function createSessionSupervisor({
     let spawnError;
     let failedStart = false;
     for (const plan of start) {
-      try { await goalRunner.start(plan.planId, { awaitIdle: false }); }
+      try {
+        const fresh = goalPlanStore.getPlan(plan.planId);
+        if (!sessionExecutionCurrent(fresh) || !executionScheduler.activateResources(fresh)) throw new Error('execution_resource_owner_changed');
+        await goalRunner.start(plan.planId, { awaitIdle: false });
+      }
       catch (error) {
         failedStart = true;
         goalPlanStore.setPlanStatus(plan.planId, 'failed');
         goalPlanStore.setRunnerState(plan.planId, { status: 'failed', lastError: error?.message || 'runner start failed' });
+        await sessionControl.settleEnded(goalPlanStore.getPlan(plan.planId));
         if (plan.planId === spawningPlanId) spawnError = error;
       }
     }
@@ -699,12 +720,13 @@ export function createSessionSupervisor({
     const userFollowUp = plan => input.kind === 'user' && input.conversationId === plan.delegationOrigin.parentConversationId;
     return delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === input.workspaceId && (related(plan) || userFollowUp(plan)))
       .map(plan => {
-        const origin = plan.delegationOrigin;
+        const origin = { ...plan.delegationOrigin, executionControl: sessionControl.read(plan) };
         const summary = { ...projectWorkSession(snapshotOf(plan), { sessionId: origin.sessionId, workspaceId: origin.workspaceId,
           acceptance: 'confirm', accepted: Boolean(plan.resultAcceptance?.acceptedAt), resultConfirmationRequired: humanGateOf(plan), spawnedAt: plan.createdAt || '',
           conversationId: plan.conversationId, origin, ...(sessionFactsFromPlan(plan).verificationActive ? { verifying: true } : {}),
           ...(origin.supersededBy ? { supersededBy: origin.supersededBy } : {}),
-          ...(origin.phase === 'paused' ? { phase: 'paused' } : {}) }),
+          ...(origin.phase === 'paused' ? { phase: 'paused' } : {}),
+          ...(origin.phase === 'queued' ? (({ queuedBehind, reason, blocker }) => ({ queuedBehind, queueReason: reason, resourceBlocker: blocker }))(executionScheduler.inspect(plan)) : {}) }),
           ...(sessionFactsFromPlan(plan).blockedReason ? { blockedReason: sessionFactsFromPlan(plan).blockedReason } : {}),
           metadataRevision: plan.updatedAt || plan.createdAt || '' };
         return { plan, summary };
@@ -1065,8 +1087,9 @@ export function createSessionSupervisor({
     const origin = plan?.delegationOrigin;
     if (!origin?.sessionId || !origin.workspaceId) return { ok: false, reason: 'not_delegated' };
     if (recoveryHeld(plan)) return { ok: false, reason: 'coordination_reconciliation_required' };
-    if (occupiesRunningSlot(plan)) return { ok: false, reason: 'still_running' };
+    if (occupiesRunningSlot(plan) && !['completed', 'failed', 'cancelled', 'stopped'].includes(plan.runner?.status)) return { ok: false, reason: 'still_running' };
     if (origin.phase !== 'running' || !settled(plan)) return { ok: false, reason: 'not_slot_holder' };
+    if (!await sessionControl.settleEnded(plan)) return { ok: false, reason: 'execution_stop_unconfirmed' };
     if (isolationPlanner) await isolationPlanner.cleanup(plan);
     await promote();
     return { ok: true, planId };
@@ -1102,6 +1125,7 @@ export function createSessionSupervisor({
       if (plan.status === 'completed' && plan.resultAcceptance?.acceptedAt && plan.delegationOrigin.handoffAuthorizedAt
         && plan.deliveryHandoff?.status !== 'delivered' && plan.deliveryHandoff?.status !== 'stopped'
         && typeof goalRunner?.handoffDelegatedPlan === 'function') await handoff.afterAcceptance(plan);
+      if (TERMINAL.has(plan.status) && executionScheduler.hasResourceClaim(plan)) await sessionControl.settleEnded(plan);
       if (plan.status === 'completed' && !plan.resultAcceptance?.acceptedAt) await settleLocked(plan.delegationOrigin.sessionId);
     }
     communication.recover({ includeLegacy: false, recoveringStarted: false });
@@ -1114,10 +1138,14 @@ export function createSessionSupervisor({
         reason: 'supersession_expired', promote: false });
     }
   }
-  const reconciled = deferRecovery ? Promise.resolve() : reconcileExpired().then(() => exclusive(() => reconcilePersistedQueues()));
+  const reconcileControls = workspaceId => sessionControl.reconcile(delegatedPlans().filter(plan => !workspaceId || plan.delegationOrigin.workspaceId === workspaceId));
+  function reconcileSessions() { return reconcileControls().then(() => resourceContention.reconcile(delegatedPlans()))
+    .then(() => reconcileExpired()).then(() => exclusive(() => reconcilePersistedQueues())); }
+  const reconciled = deferRecovery ? Promise.resolve() : reconcileControls().then(() => reconcileExpired()).then(() => exclusive(() => reconcilePersistedQueues()));
 
   return {
     executionScheduler,
+    sessionControl,
     async readWorkHistory(input, context) {
       const work = workBudgetBinding(context.workspaceId)?.store.readWork(input.workId);
       if (!work) return { error: 'work_not_found' };
@@ -1155,16 +1183,19 @@ export function createSessionSupervisor({
       });
     },
     resumeRecovered(workspaceId) {
-      return cancellation.recover(delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)).then(() => coordination.recover(workspaceId)).then(() => exclusive(async () => {
+      return reconcileControls(workspaceId).then(() => resourceContention.reconcile(delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)))
+        .then(() => cancellation.recover(delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId))).then(() => coordination.recover(workspaceId)).then(() => exclusive(async () => {
         if (!executionScheduler.isWorkspaceReady(workspaceId) || !canManageWorkspace(workspaceId)) return;
         for (const plan of delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)) {
           if (executionScheduler.inspect(plan).reason === 'coordination_reconciliation_required') continue;
           if (isHostHandoffPause(plan)) {
             const { pausedFromPhase, pausedRunnerIntent, ...origin } = plan.delegationOrigin;
-            goalPlanStore.revisePlan(plan.planId, {delegationOrigin:{...origin, phase:pausedFromPhase}},
+            sessionControl.resume(plan, `host-handoff:${plan.planId}:${plan.updatedAt}`);
+            goalPlanStore.revisePlan(plan.planId, {delegationOrigin:{...origin,
+              executionControl: goalPlanStore.getPlan(plan.planId).delegationOrigin.executionControl,
+              executionGeneration: goalPlanStore.getPlan(plan.planId).delegationOrigin.executionGeneration, phase:'queued'}},
               {reason:'host handoff recovered', changedBy:'session-supervisor'});
-            if (typeof goalRunner?.resume === 'function') await goalRunner.resume(plan.planId,
-              {awaitIdle:false, intent:pausedRunnerIntent || 'execute'});
+            goalPlanStore.setRunnerState(plan.planId, { status: 'paused', intent: pausedRunnerIntent || 'execute' });
             continue;
           }
           if (plan.delegationOrigin.phase !== 'running' || !['executing', 'interrupted'].includes(plan.status)
@@ -1186,7 +1217,7 @@ export function createSessionSupervisor({
       }
       return { ok: true };
     },
-    reconcile() { return reconcileExpired().then(() => exclusive(() => reconcilePersistedQueues())); },
+    reconcile: reconcileSessions,
     spawn(input, context) {
       return exclusive(() => spawnLocked(input, context || {}));
     },

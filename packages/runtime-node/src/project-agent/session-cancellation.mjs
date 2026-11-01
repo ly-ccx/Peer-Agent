@@ -1,6 +1,8 @@
+import { createSessionControl } from './session-control.mjs';
 import { randomUUID } from 'node:crypto';
 import { workBudgetBinding } from './work-budget.mjs';
 import { isCanonicalUserInput } from './user-priority.mjs';
+import { unsettledExecution } from './execution-resources.mjs';
 import { sessionFactsFromPlan } from './session-facts.mjs';
 
 /** Execution return is not cancellation settlement; accepted results stay immutable. */
@@ -13,7 +15,8 @@ export function sessionNeedsCancellation(session) {
 
 /** Register under the project writer, settle outside it, then conditionally commit. */
 export function createSessionCancellation({ findBySession, goalPlanStore, goalRunner, executionScheduler, canManageWorkspace,
-  abortStream, isolationPlanner, exclusive, project, emit, promote, readMessages = () => [], now }) {
+  sessionControl = null, abortStream, isolationPlanner, exclusive, project, emit, promote, readMessages = () => [], now }) {
+  sessionControl ??= createSessionControl({ goalPlanStore, goalRunner, executionScheduler, canManageWorkspace, abortStream, now });
   const pending = new Map();
   function withdrawalFor(plan, input, context) {
     const origin = plan.delegationOrigin;
@@ -41,26 +44,26 @@ export function createSessionCancellation({ findBySession, goalPlanStore, goalRu
     if (context.workspaceId && context.workspaceId !== origin.workspaceId || parent && parent !== origin.parentConversationId) return { error: 'out_of_scope' };
     if (!canManageWorkspace(origin.workspaceId)) return { error: 'lease_unavailable' };
     if (plan.resultAcceptance?.acceptedAt) return { error: 'session_not_running' };
-    if (plan.status === 'cancelled' && !sessionNeedsCancellation(project(plan))) return { completed: project(plan) };
+    if (plan.status === 'cancelled' && origin.takeover?.phase !== 'stopping' && !sessionNeedsCancellation(project(plan))) return { completed: project(plan) };
     const withdrawal = withdrawalFor(plan, input, context);
     if (context.currentInputAnchors?.length && !withdrawal) return { error: 'current_user_required' };
     const receipt = { ...(origin.cancellation || { operationId: input.operationId || `cancel-${randomUUID()}`, reason: input.reason || 'cancelled', requestedAt: now() }),
+      ...(withdrawal && withdrawal.inputId !== origin.cancellation?.withdrawal?.inputId ? { operationId: `cancel-user:${withdrawal.inputId}` } : {}),
       phase: 'stopping',
       ...(withdrawal ? { withdrawal } : {}),
       ...(input.preserveArtifacts === true || ['completed', 'failed'].includes(plan.status) ? { preserveArtifacts: true } : {}) };
     // pause() closes the runner pump before cancellation returns any acknowledgement.
-    goalRunner?.pause?.(plan.planId, receipt.reason);
+    const control = sessionControl.begin(plan, { kind: 'cancel', operationId: receipt.operationId,
+      authorityRef: withdrawal?.anchorMessageId || `cancellation:${receipt.operationId}`, reason: receipt.reason });
     const fresh = goalPlanStore.getPlan(plan.planId);
     goalPlanStore.revisePlan(plan.planId, { status: 'paused', delegationOrigin: { ...fresh.delegationOrigin, phase: 'paused', cancellation: receipt } },
       { reason: receipt.reason, changedBy: 'session-cancellation' });
     executionScheduler.cancelPlan(plan.planId);
-    return { planId: plan.planId, sessionId: input.sessionId, workspaceId: origin.workspaceId, conversationId: plan.conversationId, receipt };
+    return { planId: plan.planId, sessionId: input.sessionId, workspaceId: origin.workspaceId, conversationId: plan.conversationId, receipt, control };
   }
   async function settle(registration, input) {
     try {
-      await abortStream?.({ ...registration, reason: registration.receipt.reason });
-      await goalRunner?.waitForIdle?.(registration.planId);
-      await executionScheduler.waitForPlanIdle(registration.planId);
+      const stopReceipt = await sessionControl.drain(goalPlanStore.getPlan(registration.planId), registration.control);
       return await exclusive(async () => {
         const plan = goalPlanStore.getPlan(registration.planId);
         if (!canManageWorkspace(registration.workspaceId)) return { error: 'lease_unavailable' };
@@ -72,9 +75,10 @@ export function createSessionCancellation({ findBySession, goalPlanStore, goalRu
         if (sessionFactsFromPlan(plan).executionOwnership === 'live' || unknown?.some(row => binding.activeAttempts?.has(row.attemptId))) {
           return { error: 'execution_still_running', cancellationPending: true };
         }
-        if (unknown?.length && !registration.receipt.withdrawal) {
-          goalPlanStore.revisePlan(plan.planId, { delegationOrigin: { ...plan.delegationOrigin,
-            cancellation: { ...registration.receipt, phase: 'awaiting_outcome', evidenceCalls: unknown.map(row => row.toolCallId) } } },
+        const controlled = sessionControl.settle(plan, registration.control, stopReceipt, { withdrawal: Boolean(registration.receipt.withdrawal) });
+        if (controlled.phase === 'reconciling') {
+          goalPlanStore.revisePlan(plan.planId, { delegationOrigin: { ...goalPlanStore.getPlan(plan.planId).delegationOrigin,
+            cancellation: { ...registration.receipt, phase: 'awaiting_outcome', evidenceCalls: stopReceipt.unknownCalls } } },
           { reason: 'cancelled execution outcome requires reconciliation', changedBy: 'session-cancellation' });
           emit({ kind: 'interrupted', eventId: `coordination-outcome:${registration.receipt.operationId}`,
             sessionId: registration.sessionId, workspaceId: registration.workspaceId, planId: plan.planId,
@@ -82,12 +86,13 @@ export function createSessionCancellation({ findBySession, goalPlanStore, goalRu
           return { ...project(goalPlanStore.getPlan(plan.planId)), error: 'execution_outcome_unknown', cancellationPending: true };
         }
         // Withdraw responsibility without pretending to resolve or erase historical effects.
-        const disposition = unknown?.length ? { disposition: 'user_withdrawn',
-          evidenceCalls: [...new Set(unknown.map(row => row.toolCallId))], preserveArtifacts: true } : {};
-        goalPlanStore.revisePlan(plan.planId, { status: 'cancelled', delegationOrigin: { ...plan.delegationOrigin,
+        const disposition = stopReceipt.unknownCalls.length ? { disposition: 'user_withdrawn',
+          evidenceCalls: stopReceipt.unknownCalls, preserveArtifacts: true } : {};
+        goalPlanStore.revisePlan(plan.planId, { status: 'cancelled', delegationOrigin: { ...goalPlanStore.getPlan(plan.planId).delegationOrigin,
           cancellation: { ...registration.receipt, ...disposition, ...(['completed', 'failed'].includes(plan.status) ? { preserveArtifacts: true } : {}),
             phase: 'completed', completedAt: now(), cleanupPending: true } } },
         { reason: registration.receipt.reason, changedBy: 'session-cancellation' });
+        sessionControl.retireTakeover(goalPlanStore.getPlan(plan.planId), registration.control.operationId);
         await isolationPlanner?.cleanup(goalPlanStore.getPlan(plan.planId));
         const cleaned = goalPlanStore.getPlan(plan.planId);
         goalPlanStore.revisePlan(plan.planId, { delegationOrigin: { ...cleaned.delegationOrigin, cancellation: { ...cleaned.delegationOrigin.cancellation, cleanupPending: false } } },
@@ -118,5 +123,11 @@ export function createSessionCancellation({ findBySession, goalPlanStore, goalRu
     return wait ? done : { ...project(goalPlanStore.getPlan(registration.planId)), cancellationPending: true, operationId: registration.receipt.operationId };
   }
   return { request: (input, context) => request(input, false, context), cancel: (input, context) => request(input, true, context),
-    async recover(plans) { for (const plan of plans) if (plan.delegationOrigin?.cancellation && (plan.status !== 'cancelled' || plan.delegationOrigin.cancellation.cleanupPending)) await request({ sessionId: plan.delegationOrigin.sessionId }, false); } };
+    async recover(plans) { for (const plan of plans) {
+      const origin = plan.delegationOrigin;
+      if (!origin?.cancellation || plan.status === 'cancelled' && !origin.cancellation.cleanupPending) continue;
+      if (origin.cancellation.phase === 'awaiting_outcome'
+        && JSON.stringify(origin.cancellation.evidenceCalls || []) === JSON.stringify(unsettledExecution(plan))) continue;
+      await request({ sessionId: origin.sessionId }, false);
+    } } };
 }

@@ -1,3 +1,4 @@
+import { createSessionControl } from './session-control.mjs';
 import { hasCurrentUserUrgency, isCanonicalUserInput } from './user-priority.mjs';
 
 const ENDED = new Set(['completed', 'failed', 'cancelled']);
@@ -6,7 +7,8 @@ export const SUPERSESSION_RETENTION_MS = 7 * 24 * 60 * 60_000;
 
 /** Owns reversible suspension; execution and cleanup remain on the existing Goal ports. */
 export function createSessionContinuity({ goalPlanStore, conversationStore, goalRunner, executionScheduler,
-  findBySession, canManageWorkspace, abortStream, emit, now } = {}) {
+  sessionControl = null, findBySession, canManageWorkspace, abortStream, emit, now } = {}) {
+  sessionControl ??= createSessionControl({ goalPlanStore, goalRunner, executionScheduler, canManageWorkspace, abortStream, now });
   const error = (code) => ({ ok: false, error: code });
   function eligible(plan) {
     return Boolean(plan && !ENDED.has(plan.status) && !plan.resultAcceptance?.acceptedAt && !plan.delegationOrigin?.cancellation);
@@ -33,14 +35,17 @@ export function createSessionContinuity({ goalPlanStore, conversationStore, goal
     const checked = check(plan, context);
     if (!checked.ok) return checked;
     if (SUSPENDED.has(plan.delegationOrigin.phase) && plan.delegationOrigin.supersededBy === bySessionId) return { ok: true, plan };
+    const operation = sessionControl.begin(plan, { kind: 'pause', operationId: `suspend:${sessionId}:${bySessionId || plan.updatedAt}`,
+      authorityRef: `supersession:${bySessionId || sessionId}`, reason: 'superseded' });
     // Persist the admission gate before interrupting an asynchronous tool.
-    saveOrigin(plan, { phase: bySessionId ? 'superseded' : 'paused', supersededBy: bySessionId, supersededAt: now(),
+    saveOrigin(goalPlanStore.getPlan(plan.planId), { phase: bySessionId ? 'superseded' : 'paused', supersededBy: bySessionId, supersededAt: now(),
       pausedFromPhase: plan.delegationOrigin.pausedFromPhase || plan.delegationOrigin.phase,
       pausedRunnerIntent: plan.delegationOrigin.pausedRunnerIntent || plan.runner?.intent || 'execute' }, 'session superseded');
     executionScheduler.cancelPlan(plan.planId);
     goalRunner?.pause?.(plan.planId, 'superseded');
-    if (typeof abortStream === 'function') await abortStream({ sessionId, planId: plan.planId, conversationId: plan.conversationId, reason: 'superseded' });
-    if (typeof goalRunner?.waitForIdle === 'function') await goalRunner.waitForIdle(plan.planId);
+    const receipt = await sessionControl.drain(goalPlanStore.getPlan(plan.planId), operation);
+    const controlled = sessionControl.settle(goalPlanStore.getPlan(plan.planId), operation, receipt);
+    if (controlled.phase !== 'settled') return error('execution_outcome_unknown');
     const fresh = goalPlanStore.getPlan(plan.planId);
     if (!eligible(fresh)) {
       saveOrigin(fresh, { phase: 'running', supersededBy: null, supersededAt: null, pausedFromPhase: null }, 'finished before suspension');
@@ -81,9 +86,16 @@ export function createSessionContinuity({ goalPlanStore, conversationStore, goal
       }
     }
     const fresh = goalPlanStore.getPlan(plan.planId);
+    const previous = sessionControl.read(fresh);
+    if (previous && previous.phase !== 'settled') {
+      const receipt = await sessionControl.drain(fresh, previous);
+      if (sessionControl.settle(goalPlanStore.getPlan(plan.planId), previous, receipt).phase !== 'settled') return error('execution_outcome_unknown');
+    }
+    sessionControl.resume(goalPlanStore.getPlan(plan.planId), input.anchorMessageId);
+    const resumedOrigin = goalPlanStore.getPlan(plan.planId).delegationOrigin;
     const phase = fresh.delegationOrigin.pausedFromPhase === 'awaiting_approval' ? 'awaiting_approval' : 'queued';
     goalPlanStore.setRunnerState(plan.planId, { intent: fresh.delegationOrigin.pausedRunnerIntent || 'execute' });
-    const restored = saveOrigin(goalPlanStore.getPlan(plan.planId), { phase, supersededBy: null, supersededAt: null, pausedFromPhase: null, pausedRunnerIntent: null,
+    const restored = saveOrigin(goalPlanStore.getPlan(plan.planId), { executionControl: resumedOrigin.executionControl, phase, supersededBy: null, supersededAt: null, pausedFromPhase: null, pausedRunnerIntent: null,
       lastResumeAnchorMessageId: input.anchorMessageId }, 'user resumed session');
     emit({ kind: 'session_resumed', sessionId: input.sessionId, planId: plan.planId, workspaceId: context.workspaceId, anchorMessageId: input.anchorMessageId });
     return { ok: true, plan: restored };

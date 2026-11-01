@@ -1176,3 +1176,6 @@ export * from './resource-file-replace.ts';
 export * from './resource-edit-execution.ts';
 
 export { decideFollowUp, type FollowUpOwner, type FollowUpReason, type FollowUpProjection } from './task-overview.ts';
+
+export type { SessionExecutionIdentity, StopBarrierReceipt, SessionControlOperation, ExecutionResourceBlocker, ExecutionResourceClaim, ExecutionResourceScope } from './session-control.ts';
+export { controlPhasesForOrigin } from './session-control.ts';

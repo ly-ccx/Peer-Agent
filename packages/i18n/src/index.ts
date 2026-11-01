@@ -762,6 +762,12 @@ export type TranslationKey =
   | 'projectAgent.drawer.queuedBehind'
   | 'projectAgent.drawer.dependencyFailed'
   | 'projectAgent.drawer.dependencyMissing'
+  | 'projectAgent.drawer.resourceOutcomeUnknown'
+  | 'projectAgent.drawer.resourceStopUnconfirmed'
+  | 'projectAgent.drawer.resourceRecovery'
+  | 'projectAgent.drawer.resourceBusy'
+  | 'projectAgent.drawer.resourceScope'
+  | 'projectAgent.drawer.resourceSource'
   | 'projectAgent.drawer.diskSpace'
   | 'projectAgent.drawer.isolationFailed'
   | 'projectAgent.drawer.settings.autoHandoff'
@@ -2423,6 +2429,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.queuedBehind': '等待 {tasks}',
     'projectAgent.drawer.dependencyFailed': '前置任务需要处理：{tasks}',
     'projectAgent.drawer.dependencyMissing': '前置任务已缺失，请重新安排',
+    'projectAgent.drawer.resourceOutcomeUnknown': '暂不能写入：此前操作结果未确认',
+    'projectAgent.drawer.resourceStopUnconfirmed': '排队中：正在确认此前执行已停止',
+    'projectAgent.drawer.resourceRecovery': '排队中：正在核对本机资源状态',
+    'projectAgent.drawer.resourceBusy': '排队中：另一任务正在使用所需目录',
+    'projectAgent.drawer.resourceScope': '涉及目录',
+    'projectAgent.drawer.resourceSource': '查看此前任务',
     'projectAgent.drawer.diskSpace': '排队中：可用磁盘不足 2 GB',
     'projectAgent.drawer.isolationFailed': '排队中：隔离工作区暂不可用',
     'projectAgent.drawer.settings.autoHandoff': '策略签收后自动合回',
@@ -3849,6 +3861,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.queuedBehind': 'Waiting for {tasks}',
     'projectAgent.drawer.dependencyFailed': 'Dependency needs attention: {tasks}',
     'projectAgent.drawer.dependencyMissing': 'Dependency is missing; please replan',
+    'projectAgent.drawer.resourceOutcomeUnknown': 'Write blocked: a previous operation has an unknown outcome',
+    'projectAgent.drawer.resourceStopUnconfirmed': 'Queued: confirming the previous execution has stopped',
+    'projectAgent.drawer.resourceRecovery': 'Queued: reconciling local execution resources',
+    'projectAgent.drawer.resourceBusy': 'Queued: another task is using the required directory',
+    'projectAgent.drawer.resourceScope': 'Affected directory',
+    'projectAgent.drawer.resourceSource': 'View previous task',
     'projectAgent.drawer.diskSpace': 'Queued: less than 2 GB of free disk space',
     'projectAgent.drawer.isolationFailed': 'Queued: isolated workspace is unavailable',
     'projectAgent.drawer.settings.autoHandoff': 'Merge automatically after policy acceptance',
