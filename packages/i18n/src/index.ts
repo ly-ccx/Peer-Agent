@@ -1,6 +1,7 @@
 import { recoveryZh, recoveryEn, type RecoveryTranslationKey } from './recovery.ts';
 import { resourcesZh, resourcesEn, type ResourcesTranslationKey } from './resources.ts';
 import { formsZh, formsEn, type FormsTranslationKey } from './forms.ts';
+import { workPanelZh, workPanelEn, type WorkPanelTranslationKey } from './work-panel.ts';
 import type { CapabilityManifest, LocaleCode, LocalizedText } from '@peer-agent/protocol';
 import {remoteAccessZh,remoteAccessEn,type RemoteAccessTranslationKey} from './remote-access.ts';
 
@@ -11,6 +12,7 @@ export const DEFAULT_LOCALE: LocaleCode = 'zh-CN';
 export const AVAILABLE_LOCALES = ['zh-CN', 'en-US'] as const satisfies readonly LocaleCode[];
 
 export type TranslationKey =
+  | WorkPanelTranslationKey
   | RecoveryTranslationKey
   | RemoteAccessTranslationKey
   | ResourcesTranslationKey
@@ -1474,6 +1476,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
 
     ...remoteAccessZh,
     ...resourcesZh,
+    ...workPanelZh,
     ...formsZh,
     ...recoveryZh,
     'app.newTask': '新任务',
@@ -2899,6 +2902,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
 
     ...remoteAccessEn,
     ...resourcesEn,
+    ...workPanelEn,
     ...formsEn,
     ...recoveryEn,
     'app.newTask': 'New task',

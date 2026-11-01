@@ -26,7 +26,6 @@ test('conversation siblings keep distinct identities while loading, recovering a
     '../state/botActivityState': { replyDetailsRow: () => null },
     '../state/useReplyDetailsRow': { useReplyDetailsRow: () => ({ row: null, loading: false }) },
     '../state/taskConversationState': { taskConversationContext: () => null },
-    '../state/botWorkState': { backgroundWork: () => ({ count: 0, rows: [] }) },
     '../BotAvatar': { botAvatarDisplayColor: () => '#609ba6' },
     './BotInputContext': { BotInputContext: { Provider: component('Provider') } },
   };
@@ -45,7 +44,9 @@ test('conversation siblings keep distinct identities while loading, recovering a
   const render = (workspaceId: string) => {
     const tree = exports.BotConversation({ workspaceId, profile: {}, modelControls: { views: {} },
       avatar: { kind: 'generated', color: 'lake' }, i18n: { t: (key: string) => key } });
-    const children = tree.props.children.props.children.filter((child: unknown) =>
+    const panel = tree.props.children;
+    assert.equal(panel.type, component('BotWorkPanel'), 'one stable panel layout owns the conversation');
+    const children = panel.props.children.props.children.filter((child: unknown) =>
       child !== null && typeof child === 'object') as ReactElement[];
     const keys = children.flatMap(child => child.key === null ? [] : [child.key]);
     assert.equal(new Set(keys).size, keys.length, 'React cannot reconcile siblings with duplicate keys');
