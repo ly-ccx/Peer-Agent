@@ -98,7 +98,7 @@ export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recoverin
     setView(next);
   };
   const toggle = <button ref={trigger} type="button" className="bot-profile is-icon bot-work-panel-toggle"
-    aria-label={`${i18n.t(open ? 'projectAgent.workPanel.close' : 'projectAgent.workPanel.open')}${needsYou ? ` · ${i18n.t('projectAgent.workPanel.needsYou')}` : ''}`}
+    aria-label={[i18n.t(open ? 'projectAgent.workPanel.close' : 'projectAgent.workPanel.open'), needsYou ? i18n.t('projectAgent.workPanel.needsYou') : null].filter(Boolean).join(', ')}
     title={i18n.t(open ? 'projectAgent.workPanel.close' : 'projectAgent.workPanel.open')}
     aria-expanded={open} aria-controls={id} data-needs-user={needsYou} onClick={() => {
       if (open) close();
