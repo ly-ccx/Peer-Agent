@@ -63,10 +63,10 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
       return current;
     }
     if (current?.kind === 'cancel' && kind !== 'cancel' || plan.delegationOrigin.cancellation && kind !== 'cancel') throw new Error('work_execution_stopped');
-    goalRunner?.pause?.(plan.planId, reason);
+    if (kind !== 'resume') goalRunner?.pause?.(plan.planId, reason);
     executionScheduler.cancelPlan(plan.planId);
     executionScheduler.prepareResources?.();
-    const operation = persist(plan, { ...identity, requestDigest: controlDigest(identity), revision: 1,
+    const operation = persist(plan, { ...identity, reason, requestDigest: controlDigest(identity), revision: 1,
       workspaceId: plan.delegationOrigin.workspaceId, parentConversationId: plan.delegationOrigin.parentConversationId,
       sessionId: execution.sessionId, planId: execution.planId, expectedExecution: execution, hostEpoch, unproven, priorStopReceiptId, phase: 'recorded', updatedAt: now() });
     if (kind !== 'resume') executionScheduler.protectResources?.(plan, { operationId, state: 'draining' });
@@ -89,7 +89,7 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
       if ((operation.hostEpoch && operation.hostEpoch !== hostEpoch && !operation.stopReceipt || operation.unproven) && !ended)
         throw new Error('execution_stop_unconfirmed');
       const registration = { sessionId: operation.sessionId, planId: plan.planId, workspaceId: operation.workspaceId, conversationId: plan.conversationId };
-      await abortStream?.({ ...registration, reason: operation.kind });
+      await abortStream?.({ ...registration, reason: operation.reason || operation.kind });
       await stopExecutionHandles(plan.conversationId);
       await goalRunner?.waitForIdle?.(plan.planId);
       await executionScheduler.waitForPlanIdle(plan.planId);
@@ -165,9 +165,29 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
     } catch { return false; }
   }
   return { begin, drain, settle, read, retireTakeover, settleEnded,
+    async prepareResume(plan, authorityRef, exclusive) {
+      const barrier = await exclusive(() => {
+        const fresh = readPlan(plan.planId), current = read(fresh);
+        if (current?.kind === 'cancel' || fresh.delegationOrigin.cancellation) throw new Error('work_execution_stopped');
+        if (current?.operationId === `resume:${authorityRef}` && current.phase === 'settled'
+          || current?.phase === 'settled' && current.stopReceipt && sameExecution(current.expectedExecution, executionIdentity(fresh))) return null;
+        if (current && current.phase !== 'settled') {
+          if (current.kind !== 'pause') throw new Error('execution_stop_unconfirmed');
+          return current;
+        }
+        return begin(fresh, { kind: 'pause', operationId: `before:resume:${authorityRef}`, authorityRef, reason: 'resume barrier' });
+      });
+      if (!barrier) return;
+      // Result/handle commits may need the supervisor writer while this wait is pending.
+      const receipt = await drain(readPlan(plan.planId), barrier);
+      await exclusive(() => {
+        if (settle(readPlan(plan.planId), barrier, receipt).phase !== 'settled') throw new Error('execution_outcome_unknown');
+      });
+    },
     resume(plan, authorityRef) {
-      const current = read(plan);
-      const operationId = `resume:${authorityRef}`;
+      const current = read(plan), operationId = `resume:${authorityRef}`;
+      if (current?.operationId === operationId && current.phase === 'settled') return current;
+      if (!current?.stopReceipt || !sameExecution(current.expectedExecution, executionIdentity(plan))) throw new Error('execution_stop_unconfirmed');
       if (current && current.operationId !== operationId && current.phase !== 'settled') throw new Error(current.stopReceipt?.unknownCalls.length ? 'execution_outcome_unknown' : 'execution_stop_unconfirmed');
       const operation = begin(plan, { kind: 'resume', operationId, authorityRef, priorStopReceiptId: current?.stopReceipt?.receiptId || current?.priorStopReceiptId });
       const resumed = operation.phase === 'settled' ? operation : change(plan, operation, { phase: 'settled', outcome: 'applied' });

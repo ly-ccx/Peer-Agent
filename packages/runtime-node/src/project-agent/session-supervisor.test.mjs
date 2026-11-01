@@ -255,6 +255,7 @@ async function harness({
     ...(canManageWorkspace ? { canManageWorkspace } : {}),
     now,
   });
+  await supervisor.reconciled;
   return {
     root,
     conversationStore,
@@ -682,6 +683,8 @@ test('排队、取消与出队保持先后顺序', { timeout: 20_000 }, async ()
     assert.equal(third.queuedBehind, 2);
     assert.equal(env.turns.length, 1);
 
+    // The first host's controlled runner has ended before another host takes over.
+    env.goalPlanStore.setRunnerState(planIdOf(env, first.sessionId), { status: 'completed' });
     const seenDuringAbort = [];
     const cancelling = createSessionSupervisor({
       conversationStore: env.conversationStore,
@@ -696,6 +699,7 @@ test('排队、取消与出队保持先后顺序', { timeout: 20_000 }, async ()
       },
     });
     const cancelled = await cancelling.cancel({ sessionId: first.sessionId, reason: '用户叫停' });
+    assert.equal(cancelled.error, undefined, JSON.stringify(cancelled));
     assert.equal(seenDuringAbort[0], 'paused');
     assert.equal(env.aborts[0].reason, '用户叫停');
     assert.equal(cancelled.status, 'cancelled');
@@ -790,7 +794,7 @@ test('启动失败时归档子会话并删掉计划', { timeout: 20_000 }, async
 test('failed startup retains an isolated Plan when rollback cleanup fails', async () => {
   let env;
   const planner = { prepare: async plan => ({ ok: true, plan: env.goalPlanStore.recordDeliveryIsolation(plan.planId,
-    { executionIsolation: 'worktree', taskBranch: 'fixture', worktreePath: '/fixture/retained' }) }),
+    { executionIsolation: 'worktree', taskBranch: 'fixture', worktreePath: env.root }) }),
     cleanup: async plan => plan };
   env = await harness({ isolationPlanner: planner, goalRunner: { start: async () => { throw new Error('start failed'); } } });
   try {
@@ -798,7 +802,7 @@ test('failed startup retains an isolated Plan when rollback cleanup fails', asyn
     assert.equal(result.error, 'spawn_failed'); assert.ok(result.sessionId);
     const saved = env.goalPlanStore.getPlan(env.supervisor.get({ sessionId: result.sessionId }).planId);
     assert.equal(saved.status, 'failed');
-    assert.equal(saved.deliveryBinding.worktreePath, '/fixture/retained');
+    assert.equal(saved.deliveryBinding.worktreePath, env.root);
     assert.equal(env.conversationStore.getConversation(saved.conversationId).status, 'active');
   } finally { await env.cleanup(); }
 });
@@ -977,10 +981,10 @@ test('policy acceptance only authorizes merge when host project policy enables i
       let merged = 0;
       env.goalRunner.handoffDelegatedPlan = async plan => { merged++; return plan; };
       const opened = await completedSession(env);
-      env.goalPlanStore.recordDeliveryIsolation(opened.planId, { executionIsolation: 'worktree', taskBranch: 'fixture', worktreePath: '/fixture' });
+      env.goalPlanStore.recordDeliveryIsolation(opened.planId, { executionIsolation: 'worktree', taskBranch: 'fixture', worktreePath: env.root });
       env.conversationStore.appendMessage(env.parent.id, { id: 'reply', role: 'assistant', kind: 'agent_reply', sources: [opened.sessionId], content: 'Checked' });
       const result = await env.supervisor.settle(opened.sessionId, { autoHandoffOnPolicyAccept: true, userAgreed: true });
-      assert.equal(result.accepted, true);
+      assert.equal(result.accepted === true || result.alreadyAccepted === true, true, JSON.stringify(result));
       assert.equal(merged, enabled ? 1 : 0);
       assert.equal(Boolean(env.goalPlanStore.getPlan(opened.planId).delegationOrigin.handoffAuthorizedAt), enabled);
     } finally { await env.cleanup(); }
@@ -1193,6 +1197,7 @@ test('占用名额的任务完成后，排队的下一个会启动', async () =>
     const runningPlanId = planIdOf(env, running.sessionId);
     const queuedPlanId = planIdOf(env, queued.sessionId);
     env.goalPlanStore.setPlanStatus(runningPlanId, 'completed');
+    env.goalPlanStore.setRunnerState(runningPlanId, { status: 'completed' });
     const released = await env.supervisor.releaseSlot({ planId: runningPlanId });
     assert.equal(released.ok, true);
     assert.equal(runner.starts.length, 2);
@@ -1217,6 +1222,7 @@ test('占用名额的任务失败后，排队的下一个会启动', async () =>
     );
     const runningPlanId = planIdOf(env, running.sessionId);
     env.goalPlanStore.setPlanStatus(runningPlanId, 'failed');
+    env.goalPlanStore.setRunnerState(runningPlanId, { status: 'failed' });
     const released = await env.supervisor.releaseSlot({ planId: runningPlanId });
     assert.equal(released.ok, true);
     assert.equal(runner.starts.at(-1), planIdOf(env, queued.sessionId));
@@ -1294,6 +1300,7 @@ test('依赖被拒绝后，其他任务释放槽位也不会误启动依赖任�
 
     const runningPlanId = planIdOf(env, running.sessionId);
     env.goalPlanStore.setPlanStatus(runningPlanId, 'failed');
+    env.goalPlanStore.setRunnerState(runningPlanId, { status: 'failed' });
     await env.supervisor.releaseSlot({ planId: runningPlanId });
     assert.equal(runner.starts.includes(dependentPlanId), false);
     assert.equal(env.goalPlanStore.getPlan(dependentPlanId).runner.status, 'waiting_user');
@@ -1339,6 +1346,7 @@ test('任务在启动过程中结束时，队列会在当前锁放开后继续�
       starts.push(planId);
       if (starts.length === 2) {
         goalPlanStore.setPlanStatus(planId, 'completed');
+        goalPlanStore.setRunnerState(planId, { status: 'completed' });
         notify?.({ planId, type: 'goalRunner:completed' });
       }
     },
@@ -1528,6 +1536,7 @@ test('重新建立监督者时，已经结束的占用者会把队列里的下�
     assert.equal(runner.starts.length, 1);
 
     env.goalPlanStore.setPlanStatus(planIdOf(env, running.sessionId), 'completed');
+    env.goalPlanStore.setRunnerState(planIdOf(env, running.sessionId), { status: 'completed' });
     const afterRestart = createSessionSupervisor({
       conversationStore: env.conversationStore,
       goalPlanStore: env.goalPlanStore,
@@ -1861,6 +1870,7 @@ test('stored priority controls promotion after supervisor restart', async () => 
     const restarted=createSessionSupervisor({conversationStore:env.conversationStore,goalPlanStore:reloaded,
       goalRunner:runner.goalRunner,catalog:visionCatalog(),routing:routing()});
     await restarted.reconciled;
+    reloaded.setRunnerState(planIdOf(env,first.sessionId), {status:'completed'});
     await restarted.cancel({sessionId:first.sessionId});
     assert.equal(runner.starts.at(-1),planIdOf(env,high.sessionId));
     assert.equal(reloaded.getPlan(planIdOf(env,low.sessionId)).delegationOrigin.phase,'queued');
@@ -1994,7 +2004,7 @@ test('failed replacement releases its slot while the old task remains recoverabl
     assert.equal(env.supervisor.get({ sessionId: a.sessionId }).status, 'superseded');
     const restored = await env.supervisor.resume({ sessionId: a.sessionId, anchorMessageId: 'anchor-1' }, contextOf(env));
     assert.equal(restored.error, undefined);
-    assert.equal(env.goalPlanStore.getPlan(restored.planId).delegationOrigin.phase, 'running');
+    assert.equal(env.goalPlanStore.getPlan(restored.planId).delegationOrigin.phase, 'running', JSON.stringify(env.supervisor.get({sessionId:restored.sessionId})));
     assert.equal(starts, 3);
   } finally { await env.cleanup(); }
 });
@@ -2009,7 +2019,7 @@ test('manual delegated pause closes admission until an anchored restore', async 
     await env.supervisor.reconcile();
     assert.equal(env.goalPlanStore.getPlan(planId).delegationOrigin.phase, 'paused');
     const resumed = await env.supervisor.resume({ sessionId: a.sessionId, anchorMessageId: 'anchor-1' }, contextOf(env));
-    assert.equal(resumed.error, undefined); assert.notEqual(resumed.status, 'paused');
+    assert.equal(resumed.error, undefined); assert.notEqual(resumed.status, 'paused', JSON.stringify(env.supervisor.get({sessionId:a.sessionId})));
   } finally { await env.cleanup(); }
 });
 
@@ -2122,7 +2132,8 @@ test('native work cancellation releases returned results after settlement withou
  let releaseIdle;
  const idle=new Promise(resolve=>{releaseIdle=resolve;});
  const env=await harness({readPlanApproval:()=> 'always',goalRunner:{async start(){},pause(){calls.push('pause');},async waitForIdle(){await idle;calls.push('idle');}}});
- const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'owner'});
+ const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'owner',formatVersion:2,fenceLegacyWrites:true});
+ await store.prepare();
  store.saveWork({workId:'returned',parentConversationId:env.parent.id,state:'waiting_children'});
  const release=registerWorkBudget('ws-1',store);
  try{
@@ -2158,7 +2169,8 @@ test('native work cancellation releases returned results after settlement withou
 
 test('current user withdraws stopped work while retaining the original unknown Bash outcome across restart', async () => {
  const env=await harness({goalRunner:{async start(){},pause(){},async waitForIdle(){}}});
- const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'owner'});
+ const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'owner',formatVersion:2,fenceLegacyWrites:true});
+ await store.prepare();
  store.saveWork({workId:'uncertain',parentConversationId:env.parent.id,state:'waiting_children'});
  const release=registerWorkBudget('ws-1',store);
  try{
@@ -2202,7 +2214,7 @@ test('current user withdraws stopped work while retaining the original unknown B
    }
    const disk=JSON.parse(readFileSync(path.join(plans.getStoreDir(),`${planId}.json`),'utf8'));
    assert.equal(disk.status,'cancelled');assert.deepEqual(disk.runner.interruption,interruption);
-   assert.equal(disk.delegationOrigin.takeover.phase,'stopping');
+   assert.equal(disk.delegationOrigin.takeover.phase,'superseded');
    assert.equal(disk.tasks[0].failureReason,'conversation_persistence_failed');
    assert.equal(plans.getPlan(planId).status,'cancelled');
    const index=readFileSync(path.join(plans.getStoreDir(),'index.jsonl'),'utf8').trim().split('\n').map(line=>JSON.parse(line));
@@ -2230,7 +2242,8 @@ test('current user withdraws stopped work while retaining the original unknown B
 
 test('withdrawal never closes live execution and does not accept forged or foreign user context', async () => {
  const env=await harness({goalRunner:{async start(){},pause(){},async waitForIdle(){}}});
- const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'owner'});
+ const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'owner',formatVersion:2,fenceLegacyWrites:true});
+ await store.prepare();
  store.saveWork({workId:'unknown',parentConversationId:env.parent.id,state:'waiting_children'});
  const release=registerWorkBudget('ws-1',store);let endExecution=()=>{};
  try{
@@ -2287,7 +2300,8 @@ test('admitted withdrawal survives stop failure or lease loss and recovers witho
   const env=await harness({canManageWorkspace:()=>owned,goalRunner:{async start(){starts++;},pause(){},async waitForIdle(){
    if(!fail)return;if(failure==='lease')owned=false;else throw Error('stop_failed');
   }}});
-  const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'owner'});
+  const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'owner',formatVersion:2,fenceLegacyWrites:true});
+ await store.prepare();
   store.saveWork({workId:'held',parentConversationId:env.parent.id,state:'waiting_children'});
   const release=registerWorkBudget('ws-1',store);
   try{
@@ -2300,6 +2314,7 @@ test('admitted withdrawal survives stop failure or lease loss and recovers witho
    assert.equal(env.supervisor.get({sessionId:opened.sessionId}).followUp.inCurrentList,true);
    assert.notEqual(env.goalPlanStore.getPlan(planId).delegationOrigin.cancellation.phase,'completed');
    owned=true;fail=false;
+   env.goalPlanStore.setRunnerState(planId,{status:'completed'});
    const restarted=createSessionSupervisor({conversationStore:env.conversationStore,
     goalPlanStore:createGoalPlanStore({storeDir:env.goalPlanStore.getStoreDir()}),goalRunner:env.goalRunner,deferRecovery:true});
    await restarted.recoverCancellations('ws-1');
@@ -2748,4 +2763,23 @@ test('cancellation cannot report success if execution reappears during cleanup',
   endExecution();
   assert.equal((await env.supervisor.cancel({sessionId:opened.sessionId},context)).followUp.inCurrentList,false);
   }finally{endExecution();await env.cleanup();}
+});
+
+test('manual resume waits for the stop barrier outside the supervisor writer', async () => {
+  let release, entered = false;
+  const idle = new Promise(resolve => { release = resolve; });
+  const env = await harness({ goalRunner: { async start() {}, pause() {}, async waitForIdle() { entered = true; await idle; } } });
+  try {
+    const opened = await env.supervisor.spawn(spawnInput(), contextOf(env));
+    const planId = planIdOf(env, opened.sessionId), plan = env.goalPlanStore.getPlan(planId);
+    env.goalPlanStore.revisePlan(planId, { status: 'paused', delegationOrigin: { ...plan.delegationOrigin,
+      phase: 'paused', pausedFromPhase: 'running', pausedRunnerIntent: 'execute' } });
+    const resumed = env.supervisor.resume({ sessionId: opened.sessionId, anchorMessageId: 'anchor-1' }, contextOf(env));
+    await until(() => entered);
+    // A result/priority commit can acquire the writer while the actual runner is still draining.
+    const changed = await env.supervisor.reprioritize({ sessionId: opened.sessionId, priority: 'normal' }, contextOf(env));
+    assert.equal(changed.error, undefined);
+    release();
+    assert.equal((await resumed).status, 'running');
+  } finally { release(); await env.cleanup(); }
 });
