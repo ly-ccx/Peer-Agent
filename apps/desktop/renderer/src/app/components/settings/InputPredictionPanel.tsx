@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
-import { normalizeInputPredictionSettings, type InputPredictionSettings, type InputPredictionStatus } from '@peer-agent/protocol';
+import { normalizeInputPredictionSettings, type ModelRoutingMenuOption, type InputPredictionSettings, type InputPredictionStatus } from '@peer-agent/protocol';
 import { clientApi } from '../../../clientApi';
 import { publishInputPredictionPreferences } from '../../../chat/state/inputPredictionPreferences';
 import { Switch } from '../../../ui/boolean-controls/Switch';
@@ -8,17 +8,17 @@ import { SettingsGroup } from '../../../ui/settings/SettingsGroup';
 import { FormFeedback } from '../../../ui/forms/FormFeedback';
 import { useEditableResource } from '../../../ui/forms/useEditableResource';
 import { useUnsavedChanges } from '../../../ui/forms/UnsavedChanges';
-import { Dropdown } from '../Dropdown';
+import { ModelPicker } from '../../../ui/model-picker/ModelPicker';
+import { selectionGroupsFromRoutingModels } from '../../../ui/model-picker/modelSelection';
 
 export function InputPredictionPanel({ i18n }: { readonly i18n: I18nRuntime }) {
-  const descriptionId = useId(), disclosureId = useId();
+  const descriptionId = useId(), modelHelpId = useId();
   const [status, setStatus] = useState<InputPredictionStatus | null>(null);
-  const [models, setModels] = useState<{ value: string; label: string }[]>([]);
+  const [models, setModels] = useState<readonly ModelRoutingMenuOption[]>([]);
   const [modelId, setModelId] = useState(''), [modelBusy, setModelBusy] = useState(false);
   const [modelReadVersion, setModelReadVersion] = useState(0);
   const [modelError, setModelError] = useState(false), [modelRetry, setModelRetry] = useState('');
-  const [selectedWorkspace, setSelectedWorkspace] = useState('');
-  const [workspaces, setWorkspaces] = useState<{ id: string; name: string }[]>([]);
+  const [modelsLoaded, setModelsLoaded] = useState(false);
   const form = useEditableResource('settings.input-prediction', normalizeInputPredictionSettings(null), {
     read: async () => {
       const settings = await clientApi.getSettings();
@@ -37,12 +37,11 @@ export function InputPredictionPanel({ i18n }: { readonly i18n: I18nRuntime }) {
     void Promise.all([clientApi.getSettings(), clientApi.modelRoutingGet()]).then(([settings, routing]) => {
       if (!live) return;
       setModelError(false);
-      setModels(routing.providers.map(model => ({ value: model.id, label: model.label })));
+      setModels(routing.providers);
       const raw = settings.modelRouting as { roles?: { input_predictor?: { mode: string; modelProviderId?: string } } } | undefined;
       const selected = raw?.roles?.input_predictor;
       setModelId(selected?.mode === 'fixed' ? selected.modelProviderId ?? '' : selected ? 'configured' : '');
-      const projects = Array.isArray(settings.workspaces) ? settings.workspaces.filter(row => row.id && row.name) : [];
-      setWorkspaces(projects); setSelectedWorkspace(projects.find(row => row.path === settings.activeWorkspace)?.id ?? projects[0]?.id ?? '');
+      setModelsLoaded(true);
     }).catch(() => { if (live) setModelError(true); });
     return () => { live = false; };
   }, [modelReadVersion]);
@@ -52,11 +51,14 @@ export function InputPredictionPanel({ i18n }: { readonly i18n: I18nRuntime }) {
     return () => { live = false; };
   }, [form.saved, modelId]);
   async function selectModel(id: string) {
-    if (!id || id === 'configured' || modelBusy) return;
+    if (!id || id === 'configured' || modelBusy || !form.loaded || form.saving) return;
     setModelBusy(true); setModelError(false); setModelRetry(id);
     try {
       await clientApi.modelRoutingUpdate({ roles: { input_predictor: { mode: 'fixed', modelProviderId: id } } });
       setModelId(id); setModelRetry('');
+      // The model row discloses conversation and draft use before this explicit choice.
+      form.edit({ ...form.draft, continuationEnabled: true });
+      await form.save();
     } catch { setModelError(true); }
     finally { setModelBusy(false); }
   }
@@ -64,53 +66,41 @@ export function InputPredictionPanel({ i18n }: { readonly i18n: I18nRuntime }) {
     if (!form.loaded || form.saving) return;
     form.edit({ ...form.draft, ...patch }); await form.save();
   }
-  const disabled = !form.loaded || form.saving;
-  return <SettingsGroup title={i18n.t('inputPrediction.title')} description={i18n.t('inputPrediction.description')} className="general-section">
+  const disabled = !form.loaded || form.saving || modelBusy;
+  const unavailable = form.draft.enabled && modelId && status
+    ? ({ ready: null, disabled: null, model_unconfigured: null, budget: 'inputPrediction.statusBudget',
+      usage_unavailable: 'inputPrediction.statusUsage', provider_error: 'inputPrediction.statusProvider' } as const)[status.reason] : null;
+  return <SettingsGroup title={i18n.t('inputPrediction.title')} description={i18n.t('inputPrediction.description')}
+    className="general-section input-prediction-settings">
     <div className="general-setting-row">
-      <div className="general-setting-copy"><h3>{i18n.t('inputPrediction.enabled')}</h3><p id={descriptionId}>{i18n.t('inputPrediction.nextDisclosure')}</p></div>
-      <Switch checked={form.draft.enabled} disabled={disabled} aria-label={i18n.t('inputPrediction.enabled')}
-        aria-describedby={descriptionId} onCheckedChange={enabled => { void change({ enabled }); }} />
-    </div>
-    <div className="general-setting-row">
-      <div className="general-setting-copy"><h3>{i18n.t('inputPrediction.model')}</h3><p>{i18n.t('inputPrediction.modelHelp')}</p></div>
-      <div className="general-language-select"><Dropdown value={modelId} disabled={modelBusy || !models.length}
-        ariaLabel={i18n.t('inputPrediction.model')} placeholder={i18n.t('inputPrediction.chooseModel')}
-        options={[...(modelId === 'configured' ? [{ value: 'configured', label: i18n.t('inputPrediction.routing') }] : []), ...models]}
-        onChange={id => { void selectModel(id); }} /></div>
-    </div>
-    {!modelId && form.draft.enabled ? <p className="ui-form-feedback" role="status">{i18n.t('inputPrediction.chooseModel')}</p> : null}
-    {modelError ? <FormFeedback i18n={i18n} saveError={!!modelRetry} readError={!modelRetry}
-      onRetry={() => selectModel(modelRetry)} onReload={() => setModelReadVersion(value => value + 1)} /> : null}
-    <div className="general-setting-row">
-      <div className="general-setting-copy"><h3>{i18n.t('inputPrediction.continuation')}</h3><p id={disclosureId}>{i18n.t('inputPrediction.draftDisclosure')}</p></div>
-      <Switch checked={form.draft.continuationEnabled} disabled={disabled} aria-label={i18n.t('inputPrediction.continuation')}
-        aria-describedby={disclosureId} onCheckedChange={continuationEnabled => { void change({ continuationEnabled }); }} />
-    </div>
-    {(['dailyRequestLimit', 'dailyTokenLimit'] as const).map(key => <div className="general-setting-row" key={key}>
-      <label className="general-setting-copy" htmlFor={`${descriptionId}-${key}`}><h3>{i18n.t(key === 'dailyRequestLimit' ? 'inputPrediction.requestLimit' : 'inputPrediction.tokenLimit')}</h3><p>{i18n.t('inputPrediction.limitHelp')}</p></label>
-      <div className="general-language-select"><input id={`${descriptionId}-${key}`} type="number" min={0} step={1}
-        disabled={disabled} value={form.draft[key]} aria-invalid={!Number.isSafeInteger(form.draft[key]) || form.draft[key] < 0}
-        onChange={event => form.edit({ ...form.draft, [key]: Number(event.target.value) })}
-        onBlur={() => { if (Number.isSafeInteger(form.draft[key]) && form.draft[key] >= 0) void form.save(); }} /></div>
-    </div>)}
-    {workspaces.length > 0 ? <div className="general-setting-row">
-      <div className="general-setting-copy"><h3>{i18n.t('inputPrediction.project')}</h3></div>
-      <div className="general-bots-hours">
-        <Dropdown value={selectedWorkspace} options={workspaces.map(workspace => ({ value: workspace.id, label: workspace.name }))}
-          ariaLabel={i18n.t('inputPrediction.project')} onChange={setSelectedWorkspace} />
-        <Switch checked={!form.draft.disabledWorkspaceIds.includes(selectedWorkspace)} disabled={disabled || !selectedWorkspace}
-          aria-label={`${workspaces.find(row => row.id === selectedWorkspace)?.name ?? ''}: ${i18n.t('inputPrediction.enabled')}`}
-          onCheckedChange={enabled => { void change({ disabledWorkspaceIds: enabled
-            ? form.draft.disabledWorkspaceIds.filter(id => id !== selectedWorkspace)
-            : [...form.draft.disabledWorkspaceIds, selectedWorkspace] }); }} />
+      <div className="general-setting-copy">
+        <h3>{i18n.t('inputPrediction.enabled')}</h3>
+        <p id={descriptionId}>{i18n.t('inputPrediction.nextDisclosure')}</p>
+        <FormFeedback i18n={i18n} loading={!form.loaded && form.loading} readError={form.readError}
+          saveError={form.saveError} stale={form.stale} dirty={form.dirty && !form.saving}
+          onReload={form.reload} onRetry={form.save} />
       </div>
-    </div> : null}
-    {status ? <p className="ui-form-feedback" role="status">
-      {i18n.t(({ ready: 'inputPrediction.statusReady', disabled: 'inputPrediction.statusDisabled',
-        model_unconfigured: 'inputPrediction.chooseModel', budget: 'inputPrediction.statusBudget',
-        usage_unavailable: 'inputPrediction.statusUsage', provider_error: 'inputPrediction.statusProvider' } as const)[status.reason])}
-      {' '}{i18n.t('inputPrediction.usage')}: {status.requests} / {status.tokens}{status.estimated ? ` (${i18n.t('inputPrediction.estimated')})` : ''}
-    </p> : null}
-    <FormFeedback i18n={i18n} {...form} onReload={form.reload} onRetry={form.save} />
+      <Switch checked={form.draft.enabled} disabled={disabled} aria-label={i18n.t('inputPrediction.enabled')}
+        aria-busy={form.saving} aria-describedby={descriptionId}
+        onCheckedChange={enabled => { void change({ enabled, continuationEnabled: enabled }); }} />
+    </div>
+    <div className="general-setting-row">
+      <div className="general-setting-copy">
+        <h3>{i18n.t('inputPrediction.model')}</h3>
+        <p id={modelHelpId}>{i18n.t(modelsLoaded && !models.length ? 'inputPrediction.noModels' : 'inputPrediction.modelHelp')}</p>
+        {modelError ? <FormFeedback i18n={i18n} saveError={!!modelRetry} readError={!modelRetry}
+          onRetry={() => selectModel(modelRetry)} onReload={() => setModelReadVersion(value => value + 1)} /> : null}
+        {unavailable ? <p role="status">{i18n.t(unavailable)}</p> : null}
+      </div>
+      <div className="general-language-select" aria-busy={modelBusy}>
+        <ModelPicker selectedModelId={modelId} variant="field"
+          groups={selectionGroupsFromRoutingModels(models, i18n.locale.startsWith('zh'))}
+          disabled={!form.loaded} selectionDisabled={disabled || !models.length} busy={modelBusy}
+          ariaLabel={i18n.t('inputPrediction.model')} ariaDescribedBy={modelHelpId}
+          label={models.find(model => model.id === modelId)?.label
+            ?? i18n.t(modelId === 'configured' ? 'inputPrediction.routing' : 'inputPrediction.chooseModel')}
+          isZh={i18n.locale.startsWith('zh')} onSelectModel={selectModel} />
+      </div>
+    </div>
   </SettingsGroup>;
 }

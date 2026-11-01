@@ -223,22 +223,38 @@ try {
     await page.evaluate(() => window.peerAgent.updateSettings({ inputPrediction: { schemaVersion: 1, enabled: true, continuationEnabled: true,
       disabledWorkspaceIds: [], dailyRequestLimit: 100, dailyTokenLimit: 100000 } }));
   });
-  await check('feature settings are real controls and expose unsent-draft sharing and budget', async () => {
+  await check('feature settings disclose draft sharing beside the shared model picker and use one switch', async () => {
     await page.locator('.bot-app-menu-button').click(); await page.getByRole('menuitem', { name: '设置', exact: true }).click();
     await page.getByRole('heading', { name: '智能输入建议', exact: true }).waitFor();
     await page.getByRole('heading', { name: '智能输入建议', exact: true }).scrollIntoViewIfNeeded();
     await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+    const section = page.locator('.input-prediction-settings');
+    await section.scrollIntoViewIfNeeded();
+    await until(() => section.getByRole('switch').isEnabled(), Boolean);
+    await until(() => section.locator('.model-selection-trigger-label').innerText(), text => text.includes('Prediction fixture'));
     await capture('settings-input-prediction-light');
-    const continuation = page.getByRole('switch', { name: '续写未发送的草稿', exact: true });
-    await continuation.click();
-    await until(() => page.evaluate(() => window.peerAgent.getSettings()), value => value.inputPrediction.continuationEnabled === false);
-    await continuation.click();
+    assert.equal(await section.getByRole('switch').count(), 1);
+    const enabled = section.getByRole('switch', { name: '开启智能输入建议', exact: true });
+    await enabled.click();
+    await until(() => page.evaluate(() => window.peerAgent.getSettings()), value => value.inputPrediction.enabled === false);
+    await enabled.click();
+    await until(() => page.evaluate(() => window.peerAgent.getSettings()), value => value.inputPrediction.enabled === true && value.inputPrediction.continuationEnabled === true);
+    const picker = section.getByRole('button', { name: /^输入建议模型:/ });
+    const disclosure = await picker.getAttribute('aria-describedby');
+    assert.match(await page.locator(`[id="${disclosure}"]`).innerText(), /当前对话和未发送的草稿/);
+    await page.evaluate(() => window.peerAgent.updateSettings({ inputPrediction: { schemaVersion: 1, enabled: true, continuationEnabled: false,
+      disabledWorkspaceIds: [], dailyRequestLimit: 100, dailyTokenLimit: 100000 } }));
+    await page.locator('.settings-nav-header').getByRole('button', { name: '设置', exact: true }).click();
+    await page.locator('.bot-app-menu-button').click(); await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+    await page.getByRole('heading', { name: '智能输入建议', exact: true }).scrollIntoViewIfNeeded();
+    await picker.click();
+    await page.locator('.model-selection-model').filter({ has: page.getByText('Prediction fixture', { exact: true }) }).click();
     await until(() => page.evaluate(() => window.peerAgent.getSettings()), value => value.inputPrediction.continuationEnabled === true);
   });
   await check('unsent-draft sharing and the global switch stop requests immediately', async () => {
-    const continuation = page.getByRole('switch', { name: '续写未发送的草稿', exact: true });
-    await continuation.click();
-    await until(() => page.evaluate(() => window.peerAgent.getSettings()), value => value.inputPrediction.continuationEnabled === false);
+    // An existing explicit refusal stays effective without a removed UI switch.
+    await page.evaluate(() => window.peerAgent.updateSettings({ inputPrediction: { schemaVersion: 1, enabled: true, continuationEnabled: false,
+      disabledWorkspaceIds: [], dailyRequestLimit: 100, dailyTokenLimit: 100000 } }));
     await page.locator('.settings-nav-header').getByRole('button', { name: '设置', exact: true }).click();
     await newDraft('这份草稿不上传'); const calls = serverState.calls.length;
     await new Promise(resolve => setTimeout(resolve, 900)); assert.equal(serverState.calls.length, calls);

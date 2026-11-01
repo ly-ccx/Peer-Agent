@@ -41,7 +41,10 @@ function fixture(t) {
 }
 
 test('production host builds a bounded public-only Context and never admits private turns or credentials', async t => {
-  const f = fixture(t), result = await f.service.request(f.request, f.sender);
+  const f = fixture(t);
+  // Default-on settings still require the explicitly selected prediction role in the fixture.
+  delete f.settings.inputPrediction;
+  const result = await f.service.request(f.request, f.sender);
   assert.equal(result.kind, 'candidate'); assert.equal(f.bodies.length, 1);
   const body = JSON.stringify(f.bodies[0]);
   assert.match(body, /修改文章/); assert.doesNotMatch(body, /HIDDEN_TOOL_SECRET|fixture-key/);
@@ -60,8 +63,11 @@ test('untrusted windows, cross-workspace conversations and read-only task surfac
 
 test('explicit role selection is required; current Bot decisions suspend the real prediction service', async t => {
   const f = fixture(t);
+  delete f.settings.inputPrediction;
   delete f.settings.modelRouting.roles.input_predictor;
   assert.equal((await f.service.request(f.request, f.sender)).reason, 'model_unconfigured');
+  assert.equal(f.service.status(f.sender).reason, 'model_unconfigured');
+  assert.equal(f.bodies.length, 0);
   f.settings.modelRouting.roles.input_predictor = { mode: 'fixed', modelProviderId: 'p' };
   f.bot.item.state.needsYou = 1;
   assert.equal((await f.service.request({ ...f.request, surface: 'desktop_bot' }, f.sender)).reason, 'decision_or_reply');

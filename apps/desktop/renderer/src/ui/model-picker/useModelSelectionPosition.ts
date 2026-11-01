@@ -1,5 +1,5 @@
 import { useLayoutEffect, useState, type CSSProperties, type RefObject } from 'react';
-import { positionAnchoredOverlay } from '../../../app/components/anchoredOverlay';
+import { positionAnchoredOverlay } from '../../app/components/anchoredOverlay';
 
 type ModelSelectionStyle = CSSProperties & {
   '--model-selection-open-height': string;

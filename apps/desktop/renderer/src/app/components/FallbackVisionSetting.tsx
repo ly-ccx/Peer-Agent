@@ -1,21 +1,22 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { useId, useState } from 'react';
 import { PeerIcon } from '../../ui/icons';
-import { CascadingMenu, type CascadingMenuGroup } from './CascadingMenu';
+import { ModelPicker } from '../../ui/model-picker/ModelPicker';
+import type { SelectionProviderGroup } from '../../ui/model-picker/modelSelection';
 import { SettingsDisclosureContent } from './SettingsDisclosureContent';
 
 /** A quiet persisted-model summary; the actual model picker is disclosed on demand. */
 export function FallbackVisionSetting({ i18n, value, groups, saving, onChange }: {
   readonly i18n: I18nRuntime;
   readonly value: string;
-  readonly groups: readonly CascadingMenuGroup[];
+  readonly groups: readonly SelectionProviderGroup[];
   readonly saving: boolean;
   readonly onChange: (value: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const contentId = useId();
-  const group = groups.find(item => item.items.some(model => model.id === value));
-  const model = group?.items.find(item => item.id === value);
+  const group = groups.find(item => item.models.some(model => model.id === value));
+  const model = group?.models.find(item => item.id === value);
   const title = i18n.t('settings.fallbackVision');
   const rowLabel = i18n.locale === 'zh-CN' ? '备用视觉模型' : 'Fallback vision model';
   const summary = value
@@ -40,10 +41,10 @@ export function FallbackVisionSetting({ i18n, value, groups, saving, onChange }:
       </button>
       <SettingsDisclosureContent expanded={expanded} id={contentId}>
         <div className="llm-fallback-vision-select">
-          <CascadingMenu className="llm-fallback-vision-menu" value={value || '__none__'} groups={groups}
-            onChange={onChange} disabled={saving} ariaLabel={title}
-            placeholder={i18n.t('settings.fallbackVision.none')}
-            triggerLabel={value ? undefined : i18n.t('settings.fallbackVision.none')} menuPlacement="down" />
+          <ModelPicker className="llm-fallback-vision-menu" variant="field"
+            selectedModelId={value || '__none__'} groups={groups} onSelectModel={onChange}
+            selectionDisabled={saving} busy={saving} ariaLabel={title} label={summary}
+            isZh={i18n.locale.startsWith('zh')} />
         </div>
       </SettingsDisclosureContent>
     </section>

@@ -21,10 +21,9 @@ import type {
 } from '@peer-agent/protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
-import { getProviderDisplayName } from '../../chat/state/providerDisplay';
 import { Switch } from '../../ui/boolean-controls';
 import { PeerIcon } from '../../ui/icons';
-import type { CascadingMenuGroup } from './CascadingMenu';
+import { groupProviderModels, type SelectionProviderGroup } from '../../ui/model-picker/modelSelection';
 import { FallbackVisionSetting } from './FallbackVisionSetting';
 import { SettingsDisclosureContent } from './SettingsDisclosureContent';
 import './provider-settings.css';
@@ -659,46 +658,12 @@ export function LlmSettingsPanel({
   }, []);
 
   // 与底部模型选择器一致：一级 provider（groupId），二级 vision 模型；未配 Key 的模型置灰。
-  const fallbackVisionMenuGroups: readonly CascadingMenuGroup[] = useMemo(() => {
-    const isZh = i18n.locale === 'zh-CN';
-    // Model choices retain their service group; the empty choice uses a compact trigger label.
-    const noneGroupLabel = isZh ? '不使用' : 'None';
-    const noneItemLabel = i18n.t('settings.fallbackVision.none');
-    const order: string[] = [];
-    const byGroup = new Map<string, { label: string; items: { id: string; label: string; disabled: boolean }[] }>();
-    for (const prov of providers) {
-      if (!prov.supportsVision) continue;
-      const key = prov.groupId || prov.id;
-      let bucket = byGroup.get(key);
-      if (!bucket) {
-        bucket = { label: getProviderDisplayName(prov, isZh), items: [] };
-        byGroup.set(key, bucket);
-        order.push(key);
-      }
-      bucket.items.push({
-        id: prov.id,
-        label: prov.modelLabel || prov.model,
-        disabled: !prov.apiKeyConfigured,
-      });
-    }
-    const providerGroups = order.map((key) => {
-      const bucket = byGroup.get(key)!;
-      return {
-        id: key,
-        label: bucket.label,
-        items: bucket.items,
-        disabled: bucket.items.every((it) => it.disabled),
-      };
-    });
-    return [
-      {
-        id: '__none__',
-        label: noneGroupLabel,
-        items: [{ id: '__none__', label: noneItemLabel }],
-      },
-      ...providerGroups,
-    ];
-  }, [providers, i18n]);
+  const fallbackVisionMenuGroups: readonly SelectionProviderGroup[] = useMemo(() => [
+    { id: '__none__', label: i18n.locale.startsWith('zh') ? '不使用' : 'None', disabled: false,
+      models: [{ id: '__none__', label: i18n.t('settings.fallbackVision.none'), disabled: false,
+        supportsVision: false, authMethod: '', supportsReasoning: false }] },
+    ...groupProviderModels(providers.filter(provider => provider.supportsVision), i18n.locale.startsWith('zh')),
+  ], [providers, i18n]);
 
 
   useEffect(() => clientApi.onLlmOAuthPending((pending) => {

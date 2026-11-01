@@ -13,9 +13,10 @@ import type {
   ModelRoutingPreviewRow,
   ModelRoutingProviderOption,
 } from '../../../preload/contracts/bootstrapPreloadApi';
-import { Checkbox, Switch } from '../../../ui/boolean-controls';
+import { Switch } from '../../../ui/boolean-controls';
 import { SettingsGroup } from '../../../ui/settings/SettingsGroup';
-import { CascadingMenu } from '../CascadingMenu';
+import { ModelPicker } from '../../../ui/model-picker/ModelPicker';
+import { selectionGroupsFromMenuGroups } from '../../../ui/model-picker/modelSelection';
 import { Dropdown } from '../Dropdown';
 import './model-routing.css';
 import { RoutingParameterFields } from './RoutingParameterFields';
@@ -54,10 +55,6 @@ function asOptions(providers: readonly ModelRoutingProviderOption[]): RoutingMod
     reasoningEffortLevels: provider.reasoningEffortLevels,
     defaultReasoningEffort: provider.defaultReasoningEffort,
   }));
-}
-
-function optionLabel(option: RoutingModelOption, reason: ReturnType<typeof optionRejectReason>, i18n: I18nRuntime) {
-  return reason ? `${option.label} — ${i18n.t(reasonTranslationKey(reason))}` : option.label;
 }
 
 function tierPatch(tier: ModelTierName, primary: string, fallbacks: readonly string[], previous: ModelTierBinding): ModelRoutingPatch {
@@ -152,7 +149,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
             return (
               <div className="model-routing-row model-routing-tier" key={tier}>
                 <div className="model-routing-name">{tierLabel}</div>
-                <ModelDropdown
+                <RoutingModelPicker
                   value={binding.primary}
                   options={options}
                   target={{ kind: 'tier', tier }}
@@ -196,7 +193,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                       </span>
                     );
                   })}
-                  <ModelDropdown
+                  <RoutingModelPicker
                     value=""
                     options={addable}
                     target={{ kind: 'tier', tier }}
@@ -301,7 +298,7 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                     />
                   ) : null}
                   {setting.mode === 'fixed' ? (
-                    <ModelDropdown
+                    <RoutingModelPicker
                       value={setting.modelProviderId}
                       options={options}
                       target={{ kind: 'role', role }}
@@ -312,31 +309,19 @@ export function ModelRoutingPanel({ i18n }: { readonly i18n: I18nRuntime }) {
                     />
                   ) : null}
                   {setting.mode === 'auto' ? (
-                    <div className="model-routing-pool">
-                      {options.map((option) => {
-                        const reason = optionRejectReason(option, { kind: 'role', role });
-                        const checked = (setting.pool || []).includes(option.id);
-                        return (
-                          <label className="model-routing-pool-item" key={option.id}>
-                            <Checkbox
-                              checked={checked}
-                              disabled={readOnly || Boolean(reason)}
-                              onChange={() => {
-                                const pool = checked ? withoutId(setting.pool || [], option.id) : [...(setting.pool || []), option.id];
-                                const check = validateAutoPool(pool, options, role);
-                                if (!check.ok) {
-                                  setError(i18n.t('modelRouting.poolInvalid'));
-                                  return;
-                                }
-                                setError('');
-                                void save(rolePatch(role, { ...setting, pool }));
-                              }}
-                            />
-                            {optionLabel(option, reason, i18n)}
-                          </label>
-                        );
-                      })}
-                    </div>
+                    <ModelPicker variant="field" selectedModelIds={setting.pool || []}
+                      groups={selectionGroupsFromMenuGroups(routingMenuGroups(options, { kind: 'role', role },
+                        i18n.locale.startsWith('zh'), reason => i18n.t(reasonTranslationKey(reason))))}
+                      selectionDisabled={readOnly} busy={form.saving} isZh={i18n.locale.startsWith('zh')}
+                      label={(setting.pool || []).map(id => options.find(option => option.id === id)?.label
+                        ?? i18n.t('modelRouting.modelUnavailable')).join(' / ') || i18n.t('modelRouting.chooseModel')}
+                      ariaLabel={roleLabel}
+                      onSelectModel={id => {
+                        const pool = (setting.pool || []).includes(id) ? withoutId(setting.pool || [], id) : [...(setting.pool || []), id];
+                        const check = validateAutoPool(pool, options, role);
+                        if (!check.ok) { setError(i18n.t('modelRouting.poolInvalid')); return; }
+                        return save(rolePatch(role, { ...setting, pool }));
+                      }} />
                   ) : null}
                 </div>
                 <RoutingParameterFields
@@ -393,7 +378,7 @@ function resolutionText(row: ModelRoutingPreviewRow | undefined, role: ModelRole
   return `${relation}${label}`;
 }
 
-function ModelDropdown({
+function RoutingModelPicker({
   value,
   options,
   target,
@@ -420,17 +405,13 @@ function ModelDropdown({
   );
   const missing = Boolean(value) && !options.some(option => option.id === value);
   return (
-    <CascadingMenu
-      className="model-routing-model-menu"
-      value={value}
-      groups={groups}
-      disabled={disabled}
-      placeholder={placeholder ?? i18n.t('modelRouting.chooseModel')}
-      triggerLabel={missing ? i18n.t('modelRouting.modelUnavailable') : undefined}
-      title={missing ? i18n.t('modelRouting.modelUnavailable') : undefined}
+    <ModelPicker className="model-routing-model-menu" variant="field"
+      selectedModelId={value} groups={selectionGroupsFromMenuGroups(groups)}
+      selectionDisabled={disabled} isZh={i18n.locale.startsWith('zh')}
+      label={missing ? i18n.t('modelRouting.modelUnavailable') : options.find(option => option.id === value)?.label
+        ?? placeholder ?? i18n.t('modelRouting.chooseModel')}
       ariaLabel={missing ? `${ariaLabel}: ${i18n.t('modelRouting.modelUnavailable')}` : ariaLabel}
-      onChange={onChange}
-    />
+      onSelectModel={onChange} />
   );
 }
 

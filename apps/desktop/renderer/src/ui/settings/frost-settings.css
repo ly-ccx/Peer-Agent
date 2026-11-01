@@ -47,6 +47,9 @@
 .settings-content .general-setting-copy h3 { margin: 0; font-size: .875rem; font-weight: 600; line-height: 1.4; color: var(--graphite-base); }
 .settings-content .general-setting-copy p { margin: 3px 0 0; font-size: var(--settings-help-size); font-weight: 400; line-height: 1.55; color: var(--settings-help-color); }
 .settings-content .general-language-select { width: 100%; min-width: 0; }
+.settings-content .input-prediction-settings .peer-switch { justify-self: end; }
+.settings-content .input-prediction-settings .ui-form-feedback { margin-top: var(--space-2); font-size: var(--settings-help-size); }
+
 /* Shared selector geometry, including provider/routing and bot forms. */
 :is(.settings-content, .bot-drawer-body) .pa-dropdown-trigger,
 .settings-content .pa-cascading-trigger,

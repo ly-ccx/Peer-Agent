@@ -1,191 +1,30 @@
-import { MotionSurface } from '../../../app/components/MotionSurface';
 import './model-selection.css';
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { InteractionLayerContext, useInteractionLayer } from '../../../app/hooks/useInteractionLayer';
-import { isImeKey } from '../../state/compositionGuard';
-import { selectionNavigation } from '../../../app/components/selectionNavigation';
+import { MotionSurface } from '../../app/components/MotionSurface';
+import { InteractionLayerContext, useInteractionLayer } from '../../app/hooks/useInteractionLayer';
+import { selectionNavigation } from '../../app/components/selectionNavigation';
+import { isImeKey } from '../../chat/state/compositionGuard';
+import { effortShortLabel, isEffortLevel, type EffortLevel } from '../../chat/state/preferences';
+import { PeerIcon } from '../icons/PeerIcon';
 import { useModelSelectionPosition } from './useModelSelectionPosition';
 import { useModelSelectionTransition } from './useModelSelectionTransition';
-import { EffortSliderVisual } from './EffortSliderVisual';
-import type { LlmProviderConfigView } from '@peer-agent/protocol';
-import { PeerIcon } from '../../../ui/icons/PeerIcon';
-import { effortLabel, effortShortLabel, isEffortLevel, type EffortLevel } from '../../state/preferences';
-import {
-  effortIndexForLevel,
-  effortIndexFromValue,
-  effortLevelForDisplay,
-  snapEffortValue,
-} from './effortSlider';
-import {
-  enabledModelCount,
-  findSelectionModel,
-  groupProviderModels,
-  modelEffortLevels,
-  supportsComposerFastMode,
-  type SelectionProviderGroup,
-} from './modelSelection';
-
-function EffortRange({
-  effort,
-  levels,
-  isZh,
-  disabled,
-  onChange,
-}: {
-  readonly effort: EffortLevel;
-  readonly levels: readonly EffortLevel[];
-  readonly isZh: boolean;
-  readonly disabled: boolean;
-  readonly onChange: (level: EffortLevel) => void | Promise<unknown>;
-}) {
-  const selectedIndex = effortIndexForLevel(effort, levels);
-  const selectedValue = levels.length > 1 ? (selectedIndex / (levels.length - 1)) * 100 : 0;
-  const [dragValue, setDragValue] = useState(selectedValue);
-  const [dirty, setDirty] = useState(false);
-  const [dragging, setDragging] = useState(false);
-  const pointerStart = useRef<number | null>(null);
-  const committing = useRef(false), edited = useRef(false), cancelled = useRef(false);
-  const sliderRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (committing.current) return;
-    setDragValue(selectedValue);
-    setDirty(false); edited.current = false; cancelled.current = false;
-  }, [selectedValue]);
-
-  useLayoutEffect(() => {
-    const node = sliderRef.current;
-    if (!node || dirty) return;
-    const next = String(selectedValue);
-    if (node.value !== next) node.value = next;
-  }, [dirty, selectedValue]);
-
-  const commit = (value: number) => {
-    if (!edited.current || cancelled.current || committing.current || disabled) return;
-    const snapped = snapEffortValue(value, levels.length);
-    const next = levels[effortIndexFromValue(snapped, levels.length)];
-    setDragValue(snapped);
-    if (!next || next === effort) {
-      setDirty(false); edited.current = false;
-      return;
-    }
-    committing.current = true; edited.current = false;
-    const settled = () => { committing.current = false; setDirty(false); edited.current = false; };
-    // Keep the selected thumb while the owner waits for its actual save receipt.
-    try { Promise.resolve(onChange(next)).then(settled, settled); }
-    catch { settled(); }
-  };
-
-  const effectiveValue = dirty ? dragValue : selectedValue;
-  const displayed = effortLevelForDisplay(effort, levels, effectiveValue, dirty);
-  const displayLabel = effortShortLabel(displayed, isZh);
-  const fullLabel = effortLabel(displayed, isZh);
-
-  return (
-    <>
-      <div className="reasoning-effort-panel-heading">
-        <span>{isZh ? '思考强度' : 'Reasoning effort'}</span>
-        <strong>{displayLabel}</strong>
-      </div>
-      <div className="reasoning-effort-slider-shell is-animated" data-dragging={dragging}>
-        <EffortSliderVisual value={effectiveValue} disabled={disabled} />
-        {levels.map((level, index) => {
-          const t = levels.length > 1 ? index / (levels.length - 1) : 0;
-          const previewIndex = dirty
-            ? effortIndexFromValue(effectiveValue, levels.length)
-            : selectedIndex;
-          return (
-            <span
-              key={level}
-              className={`reasoning-effort-slider-tick${index <= previewIndex ? ' is-active' : ''}`}
-              style={{ left: `calc(var(--effort-thumb) / 2 + (100% - var(--effort-thumb)) * ${t})` }}
-              aria-hidden="true"
-            />
-          );
-        })}
-        <input
-          ref={sliderRef}
-          className="reasoning-effort-slider"
-          type="range"
-          min="0"
-          max="100"
-          step="1"
-          disabled={disabled}
-          defaultValue={selectedValue}
-          aria-label={isZh ? '思考强度' : 'Reasoning effort'}
-          aria-valuetext={fullLabel}
-          onInput={(event) => {
-            edited.current = true; cancelled.current = false; setDirty(true);
-            setDragValue(Number(event.currentTarget.value));
-          }}
-          onChange={(event) => {
-            edited.current = true; cancelled.current = false; setDirty(true);
-            setDragValue(Number(event.currentTarget.value));
-          }}
-          onPointerDown={event => { pointerStart.current = event.clientX; }}
-          onPointerMove={event => { if (pointerStart.current !== null && event.clientX !== pointerStart.current) setDragging(true); }}
-          onPointerUp={(event) => { pointerStart.current = null; setDragging(false); commit(Number(event.currentTarget.value)); }}
-          onPointerCancel={() => { pointerStart.current = null; setDragging(false); cancelled.current = true; edited.current = false; setDirty(false); setDragValue(selectedValue); }}
-          onKeyDown={event => {
-            if (event.key === 'Escape' && !isImeKey(event) && edited.current) { event.preventDefault(); event.stopPropagation(); cancelled.current = true; edited.current = false; setDirty(false); setDragValue(selectedValue); }
-          }}
-          onKeyUp={(event) => {
-            if (isImeKey(event) || event.defaultPrevented) return;
-            if (event.key.startsWith('Arrow') || event.key === 'Home' || event.key === 'End') {
-              commit(Number(event.currentTarget.value));
-            }
-          }}
-          onBlur={(event) => { pointerStart.current = null; setDragging(false); commit(Number(event.currentTarget.value)); }}
-        />
-      </div>
-    </>
-  );
-}
-
-function RequestChannelToggle({
-  fastMode,
-  isZh,
-  disabled,
-  onChange,
-}: {
-  readonly fastMode: boolean;
-  readonly isZh: boolean;
-  readonly disabled: boolean;
-  readonly onChange: (enabled: boolean) => void;
-}) {
-  return (
-    <div className="reasoning-request-channel">
-      <span className="reasoning-request-channel-label">{isZh ? '请求通道' : 'Request channel'}</span>
-      <div className="reasoning-request-channel-options" role="radiogroup" onKeyDown={event => {
-        if (isImeKey(event) || event.defaultPrevented) return;
-        const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('button')];
-        const next = selectionNavigation(buttons.map(button => ({ disabled: button.disabled })), buttons.indexOf(event.target as HTMLButtonElement), event.key, 'horizontal', getComputedStyle(event.currentTarget).direction === 'rtl');
-        if (next !== null) { event.preventDefault(); buttons[next]?.focus(); }
-      }} aria-label={isZh ? '请求通道' : 'Request channel'}>
-        <button type="button" className={!fastMode ? 'is-active' : ''} role="radio" aria-checked={!fastMode} tabIndex={!fastMode ? 0 : -1} disabled={disabled} onClick={() => onChange(false)}>
-          {isZh ? '正常' : 'Normal'}
-        </button>
-        <button type="button" className={fastMode ? 'is-active is-fast' : 'is-fast'} role="radio" aria-checked={fastMode} tabIndex={fastMode ? 0 : -1} disabled={disabled} onClick={() => onChange(true)}>
-          <PeerIcon name="bolt" size={12} fill="currentColor" stroke="none" />
-          {isZh ? '快速' : 'Fast'}
-        </button>
-      </div>
-    </div>
-  );
-}
+import { EffortRange, RequestChannelToggle } from './ModelParameters';
+import { findSelectionModel, modelEffortLevels, supportsComposerFastMode, type SelectionProviderGroup } from './modelSelection';
 
 export function ModelSelectionPanel({
   groups,
-  selectedModelId,
-  effort,
-  fastMode,
+  selectedModelId = '',
+  selectedModelIds,
+  effort = 'default',
+  fastMode = false,
   isZh,
   disabled = false,
   selectionDisabled = false,
   embedded = false,
   resetToken = 0,
   feedback,
+  emptyLabel,
   onSelectModel,
   onEffortChange,
   onFastModeChange,
@@ -193,9 +32,11 @@ export function ModelSelectionPanel({
   onDismiss,
 }: {
   readonly groups: readonly SelectionProviderGroup[];
-  readonly selectedModelId: string;
-  readonly effort: EffortLevel;
-  readonly fastMode: boolean;
+  readonly selectedModelId?: string;
+  /** Supplying this collection enables controlled multi-selection. */
+  readonly selectedModelIds?: readonly string[];
+  readonly effort?: EffortLevel;
+  readonly fastMode?: boolean;
   readonly isZh: boolean;
   readonly disabled?: boolean;
   /** Lock writes while preserving the current list and provider browsing. */
@@ -204,14 +45,17 @@ export function ModelSelectionPanel({
   /** Changes when the panel is opened again, so browsing starts from the committed provider. */
   readonly resetToken?: number;
   readonly feedback?: ReactNode;
-  readonly onSelectModel: (modelId: string) => void;
-  readonly onEffortChange: (level: EffortLevel) => void | Promise<unknown>;
+  readonly emptyLabel?: string;
+  readonly onSelectModel: (modelId: string) => void | Promise<unknown>;
+  readonly onEffortChange?: (level: EffortLevel) => void | Promise<unknown>;
   readonly onFastModeChange?: (enabled: boolean) => void;
   readonly onManageModels?: () => void;
   readonly onDismiss?: () => void;
 }) {
-  const selected = findSelectionModel(groups, selectedModelId);
+  const selected = findSelectionModel(groups, selectedModelId || selectedModelIds?.[0] || '');
   const modelId = selectedModelId, effortValue = effort, fast = fastMode;
+  const multiple = selectedModelIds !== undefined;
+  const checkedIds = new Set(selectedModelIds ?? [modelId]);
   const [browsedId, setBrowsedId] = useState(selected?.group.id ?? groups[0]?.id ?? '');
   const [providerMenuOpen, setProviderMenuOpen] = useState(false);
   const [menuBelow, setMenuBelow] = useState(embedded);
@@ -222,7 +66,7 @@ export function ModelSelectionPanel({
   const listId = useId();
 
   useEffect(() => {
-    const match = findSelectionModel(groups, selectedModelId);
+    const match = findSelectionModel(groups, selectedModelId || selectedModelIds?.[0] || '');
     setBrowsedId(match?.group.id ?? groups.find((group) => !group.disabled)?.id ?? groups[0]?.id ?? '');
     setProviderMenuOpen(false);
     setActiveModelIndex(-1);
@@ -232,10 +76,14 @@ export function ModelSelectionPanel({
   }, [resetToken, selectedModelId]);
 
   const browsed = groups.find((group) => group.id === browsedId) ?? selected?.group ?? groups[0];
+  const rows = browsed?.models ?? [];
+  const rowsDisabled = disabled || browsed?.disabled === true;
+  const firstSelected = rows.findIndex(item => checkedIds.has(item.id) && !item.disabled);
+  const tabStop = activeModelIndex >= 0 ? activeModelIndex : firstSelected >= 0 ? firstSelected : rows.findIndex(item => !item.disabled);
   const activeModel = findSelectionModel(groups, modelId)?.model;
   const selectionVisible = Boolean(browsed && activeModel && browsed.models.some((model) => model.id === activeModel.id));
-  const effortLevels = selectionVisible ? modelEffortLevels(activeModel) : [];
-  const fastAvailable = selectionVisible && supportsComposerFastMode(activeModel?.authMethod) && Boolean(onFastModeChange);
+  const effortLevels = selectionVisible && !multiple && onEffortChange ? modelEffortLevels(activeModel) : [];
+  const fastAvailable = selectionVisible && !multiple && supportsComposerFastMode(activeModel?.authMethod) && Boolean(onFastModeChange);
   useModelSelectionTransition(panelRef, bodyRef, browsed?.id, modelId, effortLevels.length, fastAvailable, embedded);
 
   useLayoutEffect(() => {
@@ -253,7 +101,7 @@ export function ModelSelectionPanel({
     setActiveModelIndex(-1);
     setBrowsedId(group.id);
     providerButtonRef.current?.focus({ preventScroll: true });
-    if (group.id !== selected?.group.id) {
+    if (!multiple && group.id !== selected?.group.id) {
       const firstModel = group.models.find((model) => !model.disabled);
       if (firstModel) chooseModel(firstModel.id);
     }
@@ -264,13 +112,16 @@ export function ModelSelectionPanel({
     const match = findSelectionModel(groups, nextId);
     if (!match || match.model.disabled || match.group.disabled) return;
     // Explicit provider/model selection uses the same owner commit; keyboard browsing alone never writes.
-    onSelectModel(nextId);
+    void onSelectModel(nextId);
   };
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.defaultPrevented || isImeKey(event)) return;
     if (event.key === 'Escape' && providerMenuOpen) {
       event.preventDefault(); event.stopPropagation(); setProviderMenuOpen(false); providerButtonRef.current?.focus(); return;
+    }
+    if (event.key === 'Escape' && onDismiss) {
+      event.preventDefault(); event.stopPropagation(); onDismiss(); return;
     }
     if (disabled) return;
     const target = event.target as HTMLElement;
@@ -281,7 +132,7 @@ export function ModelSelectionPanel({
     }
     const items = providerMenuOpen ? groups : browsed?.models ?? [];
     const current = providerMenuOpen ? groups.findIndex(group => group.id === browsedId) : activeModelIndex;
-    const index = selectionNavigation(items.map(item => ({ disabled: item.disabled || disabled })), current, event.key, 'vertical');
+    const index = selectionNavigation(items.map(item => ({ disabled: item.disabled || (providerMenuOpen ? disabled : rowsDisabled) })), current, event.key, 'vertical');
     if (index !== null) {
       event.preventDefault();
       if (providerMenuOpen) {
@@ -325,7 +176,7 @@ export function ModelSelectionPanel({
           aria-label={isZh ? '提供商' : 'Provider'}
         >
           {groups.map((group, index) => {
-            const selectedGroup = group.models.some((model) => model.id === modelId);
+            const selectedGroup = group.models.some((model) => checkedIds.has(model.id));
             return (
               <button
                 key={group.id}
@@ -353,22 +204,22 @@ export function ModelSelectionPanel({
       ) : null}</MotionSurface>
       <div ref={bodyRef} className="model-selection-body">
       <div className="model-selection-section-label">{isZh ? '模型' : 'Models'}</div>
-      {!browsed?.models.some(model => !model.disabled) ? <p className="ui-form-feedback">{isZh ? '当前没有可选模型，请检查服务连接与模型范围。' : 'No model is available. Check the service connection and model scope.'}</p> : null}
-      <div className="model-selection-models" role="listbox" aria-label={isZh ? '模型' : 'Models'}>
-        {(browsed?.models ?? []).map((model, index) => {
-          const selectedRow = model.id === modelId;
+      {browsed?.disabled || !rows.some(model => !model.disabled) ? <p className="ui-form-feedback">{emptyLabel ?? (isZh ? '当前没有可选模型，请检查服务连接与模型范围。' : 'No model is available. Check the service connection and model scope.')}</p> : null}
+      <div className="model-selection-models" role="listbox" aria-multiselectable={multiple || undefined} aria-label={isZh ? '模型' : 'Models'}>
+        {rows.map((model, index) => {
+          const selectedRow = checkedIds.has(model.id);
           return (
             <button
               key={model.id}
               type="button"
               role="option"
               data-model-index={index}
-              tabIndex={(activeModelIndex >= 0 ? index === activeModelIndex : selectedRow || !browsed?.models.some(item => item.id === modelId && !item.disabled) && index === browsed?.models.findIndex(item => !item.disabled)) ? 0 : -1}
+              tabIndex={index === tabStop ? 0 : -1}
               onFocus={() => setActiveModelIndex(index)}
               aria-selected={selectedRow}
               aria-disabled={selectionDisabled || undefined}
               className={`model-selection-model${selectedRow ? ' is-selected' : ''}${index === activeModelIndex ? ' is-active' : ''}`}
-              disabled={model.disabled || disabled}
+              disabled={model.disabled || rowsDisabled}
               onMouseEnter={() => { if (!model.disabled) setActiveModelIndex(index); }}
               onClick={() => chooseModel(model.id)}
             >
@@ -390,7 +241,7 @@ export function ModelSelectionPanel({
               isZh={isZh}
               disabled={disabled || selectionDisabled}
               onChange={(level) => {
-                return onEffortChange(level);
+                return onEffortChange?.(level);
               }}
             />
           ) : null}
@@ -412,10 +263,11 @@ export function ModelSelectionPanel({
   );
 }
 
-export function AnchoredModelSelectionMenu({
+export function ModelPicker({
   groups,
-  selectedModelId,
-  effort,
+  selectedModelId = '',
+  selectedModelIds,
+  effort = 'default',
   fastMode = false,
   isZh,
   disabled = false,
@@ -423,17 +275,23 @@ export function AnchoredModelSelectionMenu({
   busy = false,
   statusLabel,
   feedback,
+  emptyLabel,
   label,
   title,
   className,
+  variant = 'compact',
+  ariaLabel,
+  ariaDescribedBy,
   onSelectModel,
   onEffortChange,
   onFastModeChange,
   onManageModels,
 }: {
   readonly groups: readonly SelectionProviderGroup[];
-  readonly selectedModelId: string;
-  readonly effort: EffortLevel;
+  readonly selectedModelId?: string;
+  /** Supplying this collection enables controlled multi-selection. */
+  readonly selectedModelIds?: readonly string[];
+  readonly effort?: EffortLevel;
   readonly fastMode?: boolean;
   readonly isZh: boolean;
   readonly disabled?: boolean;
@@ -442,17 +300,21 @@ export function AnchoredModelSelectionMenu({
   readonly busy?: boolean;
   readonly statusLabel?: string;
   readonly feedback?: ReactNode;
+  readonly emptyLabel?: string;
   readonly label: string;
   readonly title?: string;
   readonly className?: string;
-  readonly onSelectModel: (modelId: string) => void;
-  readonly onEffortChange: (level: EffortLevel) => void | Promise<unknown>;
+  readonly variant?: 'compact' | 'field';
+  readonly ariaLabel?: string;
+  readonly ariaDescribedBy?: string;
+  readonly onSelectModel: (modelId: string) => void | Promise<unknown>;
+  readonly onEffortChange?: (level: EffortLevel) => void | Promise<unknown>;
   readonly onFastModeChange?: (enabled: boolean) => void;
   readonly onManageModels?: () => void;
 }) {
-  const selected = findSelectionModel(groups, selectedModelId);
-  const fastAvailable = supportsComposerFastMode(selected?.model.authMethod) && Boolean(onFastModeChange);
-  const effortLevels = modelEffortLevels(selected?.model);
+  const selected = findSelectionModel(groups, selectedModelId || selectedModelIds?.[0] || '');
+  const fastAvailable = !selectedModelIds && supportsComposerFastMode(selected?.model.authMethod) && Boolean(onFastModeChange);
+  const effortLevels = onEffortChange && !selectedModelIds ? modelEffortLevels(selected?.model) : [];
   const shortEffort = effortLevels.length > 1 && (effortLevels.includes(effort) || isEffortLevel(effort))
     ? effortShortLabel(effortLevels.includes(effort) ? effort : effortLevels[0], isZh)
     : '';
@@ -484,7 +346,7 @@ export function AnchoredModelSelectionMenu({
   });
 
   return (
-    <div ref={rootRef} className={className ?? 'model-selection-control composer-cascading-menu composer-model-dropdown'}>
+    <div ref={rootRef} className={`model-selection-control is-${variant} ${className ?? ''}`.trim()}>
       <button
         ref={triggerRef}
         type="button"
@@ -492,7 +354,8 @@ export function AnchoredModelSelectionMenu({
         aria-disabled={disabled || undefined}
         aria-busy={busy || undefined}
         title={statusLabel ? `${title || label} · ${statusLabel}` : title}
-        aria-label={[title || label, statusLabel].filter(Boolean).join(' · ')}
+        aria-label={[ariaLabel ? `${ariaLabel}: ${label}` : title || label, statusLabel].filter(Boolean).join(' · ')}
+        aria-describedby={ariaDescribedBy}
         aria-haspopup={disabled ? undefined : 'dialog'}
         aria-expanded={disabled ? undefined : open}
         aria-controls={disabled ? undefined : panelId}
@@ -519,12 +382,14 @@ export function AnchoredModelSelectionMenu({
           <ModelSelectionPanel
             groups={groups}
             selectedModelId={selectedModelId}
+            selectedModelIds={selectedModelIds}
             effort={isEffortLevel(effort) ? effort : 'default'}
             fastMode={fastMode}
             isZh={isZh}
             disabled={disabled}
             selectionDisabled={selectionDisabled || busy}
             feedback={feedback}
+            emptyLabel={emptyLabel}
             resetToken={resetToken}
             onSelectModel={onSelectModel}
             onEffortChange={onEffortChange}
@@ -536,59 +401,5 @@ export function AnchoredModelSelectionMenu({
           />
         </div>) : null}</MotionSurface></InteractionLayerContext.Provider>, document.body)}
     </div>
-  );
-}
-
-export function ComposerModelMenu({
-  providers,
-  selectedModelId,
-  effort,
-  fastMode,
-  isZh,
-  disabled = false,
-  title,
-  onSelectModel,
-  onEffortChange,
-  onFastModeChange,
-  onManageModels,
-}: {
-  readonly providers: readonly LlmProviderConfigView[];
-  readonly selectedModelId: string | null;
-  readonly effort: EffortLevel;
-  readonly fastMode: boolean;
-  readonly isZh: boolean;
-  readonly disabled?: boolean;
-  readonly title?: string;
-  readonly onSelectModel: (modelId: string) => void;
-  readonly onEffortChange: (level: EffortLevel) => void | Promise<unknown>;
-  readonly onFastModeChange?: (enabled: boolean) => void;
-  readonly onManageModels?: () => void;
-}) {
-  const groups = useMemo(() => groupProviderModels(providers, isZh), [isZh, providers]);
-  const selected = selectedModelId ? findSelectionModel(groups, selectedModelId) : null;
-  const model = selected?.model;
-  const effortLevels = modelEffortLevels(model);
-  const fastAvailable = supportsComposerFastMode(model?.authMethod) && Boolean(onFastModeChange);
-  const interactive = Boolean(model) && (enabledModelCount(groups) > 1 || effortLevels.length > 1 || fastAvailable);
-  const label = model?.label || (isZh ? '选择模型' : 'Choose a model');
-  const effortText = effortLevels.includes(effort) ? effortLabel(effort, isZh) : '';
-  const tooltip = [selected?.group.label, model?.label, effortText].filter(Boolean).join(' · ') || title;
-  if (!model) return null;
-  if (!interactive) return <span className="token-usage-model" title={tooltip}>{label}</span>;
-  return (
-    <AnchoredModelSelectionMenu
-      groups={groups}
-      selectedModelId={selectedModelId ?? model.id}
-      effort={effort}
-      fastMode={fastMode}
-      isZh={isZh}
-      disabled={disabled}
-      label={label}
-      title={tooltip}
-      onSelectModel={onSelectModel}
-      onEffortChange={onEffortChange}
-      onFastModeChange={onFastModeChange}
-      onManageModels={onManageModels}
-    />
   );
 }

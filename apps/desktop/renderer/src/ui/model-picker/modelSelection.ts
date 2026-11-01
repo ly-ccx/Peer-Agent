@@ -1,10 +1,10 @@
-import { modelMenuChannelName, type LlmProviderConfigView } from '@peer-agent/protocol';
+import { modelMenuChannelName, type ModelRoutingMenuOption, type LlmProviderConfigView } from '@peer-agent/protocol';
 import {
   hasTunableEffortLevels,
   normalizeEffortLevels,
   resolveModelSwitchEffort,
   type EffortLevel,
-} from '../../state/preferences';
+} from '../../chat/state/preferences.ts';
 
 /** ChatGPT / Grok subscription login may request the priority service tier. */
 export function supportsComposerFastMode(authMethod: string | null | undefined): boolean {
@@ -144,5 +144,27 @@ export function effortAfterModelSwitch(
 }
 
 export function enabledModelCount(groups: readonly SelectionProviderGroup[]): number {
-  return groups.reduce((count, group) => count + group.models.filter((model) => !model.disabled).length, 0);
+  return groups.reduce((count, group) => count + (group.disabled ? 0 : group.models.filter((model) => !model.disabled).length), 0);
+}
+
+/** Adapt already-governed menu groups; owners retain filtering and persistence. */
+export function selectionGroupsFromMenuGroups(groups: readonly {
+  readonly id: string; readonly label: string; readonly disabled?: boolean;
+  readonly items: readonly { readonly id: string; readonly label: string; readonly disabled?: boolean }[];
+}[]): readonly SelectionProviderGroup[] {
+  return groups.map(group => ({ id: group.id, label: group.label, disabled: group.disabled === true,
+    models: group.items.map(item => ({ id: item.id, label: item.label, disabled: item.disabled === true,
+      supportsVision: false, authMethod: '', supportsReasoning: false })),
+  }));
+}
+
+/** Routing menus carry public capabilities and availability, never provider credentials. */
+export function selectionGroupsFromRoutingModels(models: readonly ModelRoutingMenuOption[], isZh: boolean): readonly SelectionProviderGroup[] {
+  return selectionGroupsFromItems(models.map(model => ({
+    value: model.id, label: model.label, groupId: model.groupId || model.id,
+    group: modelMenuChannelName(model.providerName, model.model, model.authMethod, isZh),
+    disabled: model.available === false, supportsVision: model.supportsVision, authMethod: model.authMethod,
+    supportsReasoning: (model.reasoningEffortLevels?.length ?? 0) > 1,
+    reasoningEffortLevels: model.reasoningEffortLevels, reasoningDefaultEffort: model.defaultReasoningEffort,
+  })));
 }

@@ -184,6 +184,7 @@ Before a version release or RC release, perform the complete product regression:
 ## Implementation Expectations
 
 - UI icons must use SVG components. Reuse the shared `PeerIcon` or an existing SVG icon; do not use text characters, emoji, icon fonts, or CSS-generated glyphs as icons, including arrows, checks, close buttons, and disclosure indicators.
+- All selection of configured models must use the shared `ui/model-picker/ModelPicker` (or its `ModelSelectionPanel` for an existing embedded/native popover host), including multi-selection. Reuse the input composer's provider/model list and keyboard/focus behavior. Callers own eligibility, persisted scope and save receipts; do not build a model picker with `Dropdown`, `CascadingMenu`, or a separate model checklist. The component contract lives in `peer-knowledge/knowledge/specifications/model-picker.md`. Provider catalog import/configuration is a separate management flow.
 - Prefer existing protocol types, reducers, registries, providers, and stores.
 - Add a Provider adapter instead of adding `capabilityId` branches to central hosts.
 - Add reducer/kernel logic instead of growing a large React component.
