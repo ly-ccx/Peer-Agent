@@ -991,6 +991,8 @@ async function sendQoderPreparedStream({
   maxOutputTokens,
   signal,
   webContents,
+  eventSink = null,
+  tracePrivacy = 'default',
   streamId,
   endpoint = null,
   bufferThinkingDeltas = false,
@@ -1057,6 +1059,7 @@ async function sendQoderPreparedStream({
   const firstInit = await buildConnectionAttemptInit({ isRetry: false });
   const resolvedEffort = resolveQoderReasoningEffortParam(effort, metadata);
   const trace = createProviderStreamTrace({
+    privacy: tracePrivacy,
     provider: 'qoder',
     baseUrl: preparedUrl || endpoint,
     model: requestBody.model_config.key,
@@ -1108,7 +1111,7 @@ async function sendQoderPreparedStream({
     };
   }
 
-  const streamResult = await consumeHost(res, webContents, streamId, trace, signal, {
+  const streamResult = await consumeHost(res, eventSink ?? webContents, streamId, trace, signal, {
     bufferTextDeltas: true,
     bufferThinkingDeltas,
     emitBufferedThinkingDeltas,
@@ -1226,6 +1229,8 @@ export async function sendQoderPrivateStream({
   maxOutputTokens,
   signal,
   webContents,
+  eventSink = null,
+  tracePrivacy = 'default',
   streamId,
   endpoint = null,
   bufferThinkingDeltas = false,
@@ -1273,6 +1278,8 @@ export async function sendQoderPrivateStream({
       maxOutputTokens,
       signal,
       webContents,
+      eventSink,
+      tracePrivacy,
       streamId,
       endpoint,
       bufferThinkingDeltas,
@@ -1316,6 +1323,7 @@ export async function sendQoderPrivateStream({
 
   const firstInit = buildPrivateConnectionAttemptInit({ isRetry: false });
   const trace = createProviderStreamTrace({
+    privacy: tracePrivacy,
     provider: 'qoder',
     baseUrl: root,
     model: body.model,
@@ -1359,7 +1367,7 @@ export async function sendQoderPrivateStream({
     };
   }
 
-  const streamResult = await consumeHost(res, webContents, streamId, trace, signal, {
+  const streamResult = await consumeHost(res, eventSink ?? webContents, streamId, trace, signal, {
     bufferTextDeltas: true,
     bufferThinkingDeltas,
     emitBufferedThinkingDeltas,
