@@ -194,11 +194,18 @@ export async function checkBotHistoryMotion({ page, until, report, captureDirect
 }
 
 async function recordDisclosure(locator, open, reverse = false, observed) {
-  // Finish the previous finite disclosure transition before starting a new
-  // measurement. The recording keeps all original continuity assertions.
-  await locator.evaluate(node => Promise.all(node.getAnimations({ subtree: true })
-    .filter(animation => animation instanceof CSSTransition && ['height', 'opacity', 'content-visibility'].includes(animation.transitionProperty))
-    .map(animation => animation.finished.catch(() => {}))));
+  // Earlier scenarios can leave this same task open. Start from the opposite
+  // state so this capture measures the requested action rather than toggling it away.
+  const summary = locator.locator(':scope > summary');
+  if (await locator.evaluate(node => node.open) === open) await summary.click({ force: true });
+  await locator.evaluate(async node => {
+    const deadline = performance.now() + 5000;
+    while (node.getAnimations({ subtree: true }).some(animation => animation instanceof CSSTransition
+      && ['height', 'opacity', 'content-visibility'].includes(animation.transitionProperty) && animation.playState === 'running')) {
+      if (performance.now() >= deadline) throw new Error('disclosure transition did not settle');
+      await new Promise(resolve => requestAnimationFrame(resolve));
+    }
+  });
   const expectedClicks = reverse ? 2 : 1;
   // Install before input, then sample a complete interval after the last real click.
   // Remote Playwright dispatch time must not consume the closing observation window.
@@ -223,7 +230,7 @@ async function recordDisclosure(locator, open, reverse = false, observed) {
       summary.addEventListener('click', mark); raf = requestAnimationFrame(frame);
     });
   }, expectedClicks);
-  const summary = locator.locator(':scope > summary'); await summary.click({ force: true });
+  await summary.click({ force: true });
   if (reverse) { await new Promise(resolve => setTimeout(resolve, 85)); await summary.click({ force: true }); }
   const capture = await locator.evaluate(node => node.__rcDisclosureCapture);
   await locator.evaluate(node => { delete node.__rcDisclosureCapture; });
