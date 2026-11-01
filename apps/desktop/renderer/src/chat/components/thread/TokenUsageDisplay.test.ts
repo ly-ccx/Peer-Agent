@@ -6,7 +6,7 @@ import {
   effortIndexFromValue,
   effortLevelForDisplay,
   snapEffortValue,
-} from './effortSlider.ts';
+} from '../../../ui/model-picker/effortSlider.ts';
 import { resolveStickyContextDisplay } from './stickyContextDisplay.ts';
 
 const tokenUsageSource = readFileSync(new URL('./TokenUsageDisplay.tsx', import.meta.url), 'utf8');

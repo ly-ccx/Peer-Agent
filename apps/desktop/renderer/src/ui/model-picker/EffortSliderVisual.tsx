@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import { useMotionAllowed } from '../../../app/hooks/useMotionAllowed';
+import { useMotionAllowed } from '../../app/hooks/useMotionAllowed';
 
 const MOTE_LANES = [30, 72, 44, 80, 24, 64, 37, 76] as const;
 

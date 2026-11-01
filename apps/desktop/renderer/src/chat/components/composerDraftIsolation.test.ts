@@ -121,8 +121,8 @@ test('Fast mode is a ChatGPT/Grok subscription composer control and follows both
   const [surface, display, panel, selection, settings] = await Promise.all([
     readSource('./ChatSurface.tsx'),
     readSource('./thread/TokenUsageDisplay.tsx'),
-    readSource('./thread/ModelSelectionPanel.tsx'),
-    readSource('./thread/modelSelection.ts'),
+    readSource('../../ui/model-picker/ModelParameters.tsx'),
+    readSource('../../ui/model-picker/modelSelection.ts'),
     readSource('../../app/components/LlmSettingsPanel.tsx'),
   ]);
 

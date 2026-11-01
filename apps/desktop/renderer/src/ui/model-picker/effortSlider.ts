@@ -1,4 +1,4 @@
-import type { EffortLevel } from '../../state/preferences';
+import type { EffortLevel } from '../../chat/state/preferences';
 
 const EFFORT_ORDER: readonly EffortLevel[] = ['off', 'low', 'default', 'high', 'xhigh', 'max'];
 
