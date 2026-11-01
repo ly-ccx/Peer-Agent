@@ -163,7 +163,7 @@ try {
     if (finished && !await page.locator('.bot-live-reply').count() && (!largeHistory || Date.now()-start >= 120000)) break;
     await sampleInteraction();
     if (!drawerOpened) {
-      for (const selector of ['.bot-background-work:not([open]) > summary','.bot-work-row:not([open]) > summary']) { const trigger=page.locator(selector).first(); if(await trigger.isVisible()) await trigger.click(); }
+      for (const selector of ['.bot-work-panel-toggle[aria-expanded=false]','.bot-work-row:not([open]) > summary']) { const trigger=page.locator(selector).first(); if(await trigger.isVisible()) await trigger.click(); }
     }
     if (!drawerOpened && await page.getByRole('button', { name: /查看任务详情/ }).count()) {
       await page.getByRole('button', { name: /查看任务详情/ }).last().click(); drawerOpened = true;

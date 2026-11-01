@@ -39,6 +39,7 @@ export interface DrawerStore {
 }
 
 export interface DrawerSession {
+  readonly parentSessionId?: string;
   readonly followUp?: import('@peer-agent/protocol').FollowUpProjection;
   readonly planId?: string;
   readonly sourceRevision?: string;
@@ -259,6 +260,7 @@ export function readDrawerSession(raw: unknown): DrawerSession | null {
     && ['ready', 'requesting', 'tools', 'completed'].includes(progress.phase);
   return {
     sessionId,
+    ...(readString(origin.parentSessionId) ? { parentSessionId: readString(origin.parentSessionId) } : {}),
     ...(readString(report.planId) || readString(record.planId) ? { planId: readString(report.planId) || readString(record.planId) } : {}),
     sourceRevision: readString(record.sourceRevision),
     observationRevision: readString(record.observationRevision),

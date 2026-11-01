@@ -107,6 +107,7 @@ export function BotListShell({
   const profileButtonRef = useRef<HTMLButtonElement | null>(null);
   const drawerTriggerRef = useRef<HTMLElement | null>(null);
   const [replyDetailsTarget, setReplyDetailsTarget] = useState<HTMLDivElement | null>(null);
+  const [workPanelTarget, setWorkPanelTarget] = useState<HTMLSpanElement | null>(null);
   const [drawerLoadedFor, setDrawerLoadedFor] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [errorCode, setErrorCode] = useState('');
@@ -491,10 +492,13 @@ export function BotListShell({
                 <PeerIcon name="settings" size={16} strokeWidth={1.75} />
               </button>
               <BotResourceButton isZh={isZh} />
+              <span className="bot-work-panel-header-slot" ref={setWorkPanelTarget} />
             </header>
             <BotDocumentPreview key={opened.workspaceId} workspaceId={opened.workspaceId} i18n={i18n}>
             <BotConversation
               workIndex={work.index}
+              onRefreshWork={work.reload}
+              workPanelTarget={workPanelTarget}
               key={opened.workspaceId}
               workspaceId={opened.workspaceId}
               profile={opened.profile}

@@ -1,3 +1,5 @@
+import { openWorkPanel } from './bot-work-panel-checks.mjs';
+import { openReplyDetails, closeReplyDetails, scrollToBotMessage } from './bot-reply-details-checks.mjs';
 import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from 'node:fs';
@@ -126,17 +128,14 @@ export async function checkBotHistoryMotion({ page, until, report, captureDirect
   checks.push('light/dark and 390px large type fit; transient read failure can retry, true empty stays distinct, close/Escape restore the app-menu focus');
 
   await page.evaluate(({ theme, palette }) => { document.documentElement.dataset.theme = theme; document.documentElement.dataset.palette = palette; }, { theme, palette });
-  const background = page.locator('.bot-background-work');
-  await background.waitFor();
-  assert.equal(await background.locator(':scope > summary > svg:last-child').count(), 1);
-  assert.equal(await background.locator(':scope > summary').evaluate(node => getComputedStyle(node, '::after').content), 'none');
+  await openWorkPanel(page);
+  const panelToggle = page.locator('.bot-work-panel-toggle');
   const samples = report.disclosureFrames = {};
   const cast = await page.context().newCDPSession(page);
   const frameDir = path.join(captureDirectory, 'disclosure-cast'); mkdirSync(frameDir);
   let frameIndex = 0;
   const frameTimes = [];
-  const box = await background.boundingBox();
-  report.disclosureCaptureRect = { x: Math.max(0, box.x - 8), y: Math.max(0, box.y - 190), width: box.width + 16, height: box.height + 206 };
+  report.disclosureCaptureRect = await page.evaluate(() => ({ x: 0, y: 0, width: innerWidth, height: innerHeight }));
   cast.on('Page.screencastFrame', frame => {
     const file = `${String(frameIndex++).padStart(4, '0')}.png`;
     writeFileSync(path.join(frameDir, file), Buffer.from(frame.data, 'base64'));
@@ -144,25 +143,30 @@ export async function checkBotHistoryMotion({ page, until, report, captureDirect
     void cast.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {});
   });
   await cast.send('Page.startScreencast', { format: 'png', everyNthFrame: 2 });
-  await recordDisclosure(background, true, false, capture => { samples.outerOpen = capture; });
-  const work = background.locator('.bot-work-row').first();
-  await recordDisclosure(work, true, false, capture => { samples.innerOpen = capture; });
-  await recordDisclosure(work, false, false, capture => { samples.innerClose = capture; });
+  samples.panelClose = await recordPanelMotion(page, panelToggle, false);
+  samples.panelOpen = await recordPanelMotion(page, panelToggle, true);
+  await recordPanelMotion(page, panelToggle, false);
+  samples.panelReverse = await recordPanelMotion(page, panelToggle, true, true);
+  const workReply = page.locator('#bot-msg-rc-message-9999');
+  await scrollToBotMessage(page, workReply); await openReplyDetails(page, workReply);
+  const work = page.locator(BOT_DETAIL_SURFACE).locator('.bot-work-row').first();
+  await recordDisclosure(work, true, false, capture => { samples.taskOpen = capture; });
+  await recordDisclosure(work, false, false, capture => { samples.taskClose = capture; });
   await work.locator(':scope > summary').focus(); await page.keyboard.press('Tab');
   assert.equal(await work.locator('.bot-work-detail').evaluate(node => node.contains(document.activeElement)), false);
-  await recordDisclosure(background, false, false, capture => { samples.outerClose = capture; });
-  await recordDisclosure(background, true, true, capture => { samples.reverse = capture; });
+  await recordDisclosure(work, true, true, capture => { samples.taskReverse = capture; });
   await cast.send('Page.stopScreencast'); await cast.detach();
   report.disclosureCastFrames = frameIndex;
   writeFileSync(path.join(frameDir, 'timeline.json'), JSON.stringify(frameTimes));
-  assert.equal(await background.getAttribute('open'), null);
+  assert.equal(await work.getAttribute('open'), null);
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await background.locator(':scope > summary').focus(); await page.keyboard.press('Enter');
-  assert.equal(await background.getAttribute('open'), '');
-  assert.equal(await background.evaluate(node => getComputedStyle(node, '::details-content').transitionDuration), '0s');
-  await page.keyboard.press('Enter'); assert.equal(await background.getAttribute('open'), null);
+  await work.locator(':scope > summary').focus(); await page.keyboard.press('Enter');
+  assert.equal(await work.getAttribute('open'), '');
+  assert.equal(await work.evaluate(node => getComputedStyle(node, '::details-content').transitionDuration), '0s');
+  await page.keyboard.press('Enter'); assert.equal(await work.getAttribute('open'), null);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  checks.push('outer and inner task details interpolate opening and closing through real height frames, rotate SVG, reverse without jumps and exclude closed actions from Tab; reduced motion switches directly');
+  checks.push('work panel has real intermediate opacity frames and interruptible reversal; task disclosure has intermediate height, SVG and closed Tab behavior; reduced motion switches directly');
+  await closeReplyDetails(page);
 
   await openHistory(); await search.fill('引用'); await sheet.locator('.bot-history-row').click();
   await until(() => sheet.locator('.bot-history-line').count(), count => count === 2);
@@ -234,4 +238,34 @@ async function recordDisclosure(locator, open, reverse = false, observed) {
   assert.equal(samples.at(-1).open, reverse ? false : open);
   if (!open || reverse) assert.equal(samples.at(-1).visibility, 'hidden');
   return samples;
+}
+
+
+async function recordPanelMotion(page, toggle, open, reverse = false) {
+  await page.waitForFunction(() => document.querySelector('.bot-work-layout').getAnimations({ subtree: true }).every(a =>
+    a.playState !== 'running' || !Number.isFinite(a.effect?.getComputedTiming().endTime)), null, { timeout: 5000 });
+  await toggle.evaluate((button, expectedClicks) => {
+    button.__rcPanelCapture = new Promise(resolve => {
+      const samples = [], panel = document.querySelector('.bot-work-panel');
+      let clicks = 0, lastClick = null, raf;
+      const mark = () => { clicks++; lastClick = performance.now(); };
+      const finish = timedOut => { clearTimeout(deadline); cancelAnimationFrame(raf); button.removeEventListener('click', mark); resolve({ samples, clicks, timedOut }); };
+      const deadline = setTimeout(() => finish(true), 6000);
+      const frame = now => {
+        samples.push({ opacity: Number(getComputedStyle(panel).opacity), open: panel.dataset.motionOpen === 'true', inert: panel.inert });
+        if (clicks >= expectedClicks && now - lastClick >= 480) finish(false);
+        else raf = requestAnimationFrame(frame);
+      };
+      button.addEventListener('click', mark); raf = requestAnimationFrame(frame);
+    });
+  }, reverse ? 2 : 1);
+  await toggle.click();
+  if (reverse) { await new Promise(resolve => setTimeout(resolve, 85)); await toggle.click(); }
+  const capture = await toggle.evaluate(button => button.__rcPanelCapture);
+  await toggle.evaluate(button => { delete button.__rcPanelCapture; });
+  assert.equal(capture.timedOut, false); assert.equal(capture.clicks, reverse ? 2 : 1);
+  assert.ok(capture.samples.some(row => row.opacity > 0 && row.opacity < 1), 'work panel has actual intermediate frames');
+  assert.equal(capture.samples.at(-1).open, reverse ? false : open);
+  assert.equal(capture.samples.at(-1).inert, reverse || !open);
+  return capture;
 }
