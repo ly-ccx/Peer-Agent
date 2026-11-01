@@ -1,3 +1,5 @@
+import { useInputPrediction } from '../../chat/hooks/useInputPrediction';
+import { ComposerInputSuggestion } from '../../chat/components/ComposerInputSuggestion';
 import { ResourceFeedbackCards } from './ResourceFeedbackCards';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
@@ -27,7 +29,9 @@ export function BotComposer({
   draftRequest = null,
   onDraftPrepared,
   resourceRecipientConversationId,
+  predictionContext,
 }: {
+  readonly predictionContext?: { readonly workspaceId: string; readonly conversationId: string; readonly version: string; readonly eligible: boolean; readonly quoteMessageId?: string };
   readonly i18n: I18nRuntime;
   readonly botName: string;
   readonly resourceRecipientConversationId?: string;
@@ -61,6 +65,11 @@ export function BotComposer({
   const tooLong = trimmed.length > 100_000;
   const prompt = i18n.t('projectAgent.chat.placeholder', { name: botName });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const prediction = useInputPrediction({ textareaRef, text, setText, surface: 'desktop_bot',
+    workspaceId: predictionContext?.workspaceId ?? '', conversationId: predictionContext?.conversationId ?? '',
+    contextVersion: predictionContext?.version ?? '', quoteMessageId: predictionContext?.quoteMessageId,
+    eligible: !!predictionContext?.eligible && ready && !generating && !modelUpdating && !permissionSaving
+      && !uploads.reading && !uploads.attachments.length && !draft.resourceFeedback?.length && !resourceRecipientChanged });
   useLayoutEffect(() => {
     if (!draftRequest || !ready) return;
     // Preparing a follow-up never sends it, discards attachments or replaces an existing draft.
@@ -73,6 +82,7 @@ export function BotComposer({
 
   function send() {
     if (!ready || resourceRecipientChanged || !hasContent || tooLong || uploads.isReading() || modelUpdating || permissionSaving || composition.active()) return;
+    prediction.invalidate();
     onSend();
   }
 
@@ -115,17 +125,18 @@ export function BotComposer({
       }} />
       {uploads.attachments.length ? <BotAttachments attachments={uploads.attachments} i18n={i18n} onRemove={uploads.remove} /> : null}
       {dragging ? <span className="bot-file-drop-hint" aria-hidden="true">{i18n.t('projectAgent.chat.dropAttachments')}</span> : null}
+      <ComposerInputSuggestion prediction={prediction} text={text} i18n={i18n} />
       <textarea
         ref={textareaRef}
         value={text}
         disabled={!ready}
         rows={1}
-        placeholder={prompt}
+        placeholder={prediction.isPresented ? '' : prompt}
         aria-label={prompt}
         title={i18n.t('projectAgent.chat.hint')}
         aria-invalid={tooLong}
         aria-describedby={tooLong ? 'bot-input-error' : undefined}
-        onChange={(event) => setText(event.target.value)}
+        onChange={prediction.onChange}
         onPaste={event => {
           const files = getClipboardFiles(event.clipboardData.items);
           if (!files.length) return;
@@ -138,6 +149,7 @@ export function BotComposer({
         onBlur={() => composition.reset()}
         onKeyDown={(event) => {
           if (composition.keyDown(event.nativeEvent)) return;
+          if (prediction.onKeyDown(event)) return;
           if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault();
             send();

@@ -1,0 +1,42 @@
+.input-prediction-mirror {
+  position: absolute;
+  z-index: 1;
+  box-sizing: border-box;
+  overflow: hidden;
+  white-space: pre-wrap;
+  pointer-events: none;
+  user-select: none;
+  visibility: hidden;
+  color: var(--graphite-soft);
+}
+.input-prediction-prefix { visibility: hidden; }
+.input-prediction-accept {
+  position: absolute;
+  z-index: 2;
+  inset-block-start: calc(-1 * var(--space-6));
+  inset-inline-end: var(--space-3);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-color);
+  border-radius: var(--ui-radius-control-compact);
+  background: var(--control-fill);
+  color: var(--graphite-base);
+  font-size: var(--ui-font-meta);
+  cursor: pointer;
+}
+.input-prediction-accept:focus-visible { outline: 2px solid var(--azure-seal); outline-offset: 2px; }
+.input-prediction-accept kbd { font: inherit; }
+.input-prediction-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  user-select: none;
+}
+@media (forced-colors: active) {
+  .input-prediction-mirror { color: GrayText; }
+  .input-prediction-accept { color: ButtonText; background: ButtonFace; border-color: ButtonText; }
+}

@@ -182,3 +182,5 @@ export function taskAcceptanceFromMessages(
 ): ReturnType<typeof normalizeTaskAcceptance>;
 
 export function createAgentCommunicationPromptSource(): PromptSource;
+
+export function createInputPredictionPromptSource(): PromptSource;

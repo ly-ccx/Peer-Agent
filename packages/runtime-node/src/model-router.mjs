@@ -15,6 +15,7 @@ const ROLE_TIERS = {
   memory_curator: 'economy',
   objective_probe: 'economy',
   compactor: 'economy',
+  input_predictor: 'fast',
 };
 
 const ESSENTIAL_ROLES = new Set(['project_agent', 'session_worker']);
@@ -89,7 +90,7 @@ export function buildDefaultModelRouting(providers = []) {
   if (visionId) tiers.vision = tierBinding(visionId);
   const roles = {};
   for (const [role, tier] of Object.entries(ROLE_TIERS)) {
-    roles[role] = { mode: 'tier', tier };
+    if (role !== 'input_predictor') roles[role] = { mode: 'tier', tier };
   }
   return {
     tiers,

@@ -258,3 +258,10 @@ test('tier parameters survive reads, role clearing and constrained recovery with
   assert.deepEqual(cleared.candidateIds, [primary.id, normal.id]);
   assert.equal(JSON.stringify(stored), before);
 });
+
+test('unrelated model-routing saves cannot enable the optional input predictor', () => {
+  assert.equal(buildDefaultModelRouting([textModel]).roles.input_predictor, undefined);
+  assert.equal(resolveStoredModelRouting({ roles: { project_agent: { mode: 'fixed', modelProviderId: textModel.id } } }, [textModel]).roles.input_predictor, undefined);
+  const configured = { mode: 'fixed', modelProviderId: textModel.id };
+  assert.deepEqual(resolveStoredModelRouting({ roles: { input_predictor: configured } }, [textModel]).roles.input_predictor, configured);
+});

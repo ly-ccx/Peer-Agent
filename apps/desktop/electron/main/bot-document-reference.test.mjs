@@ -101,7 +101,9 @@ test('missing, permission denial, traversal, symlink escapes and unknown project
       { path: 'Peer-Knowledge/../private.md' }, { path: 'README.md', relativeTo: path.join(f.dir, 'private.md') }]) {
       assert.equal((await resolve({ workspaceId: 'bot', ...request })).status, 'scope_denied');
     }
-    assert.equal((await resolve({ workspaceId: 'bot', path: 'missing.md' })).status, 'not_found');
+    const missing = await resolve({ workspaceId: 'bot', path: 'missing.md' });
+    assert.equal(missing.status, 'not_found');
+    assert.equal(missing.attemptedRoot, f.root);
     assert.equal((await resolve({ workspaceId: 'unknown', path: 'README.md' })).status, 'workspace_unavailable');
     const denied = createBotDocumentResolver({ ...f.options, stat: target => {
       if (target.endsWith('README.md')) throw Object.assign(new Error('denied'), { code: 'EACCES' });

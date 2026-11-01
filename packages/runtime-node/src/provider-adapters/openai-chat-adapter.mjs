@@ -1,3 +1,4 @@
+import { emitProviderEvent } from './event-sink.mjs';
 import { consumeOpenAIChatStream } from '../openai-chat-stream.js';
 
 import { encodeOpenAIChatRequest } from '../provider-encoders/index.mjs';
@@ -222,12 +223,12 @@ function consumeOpenAIStreamLine(line, state, webContents, streamId, trace = nul
       if (parsed.delta?.type === 'text_delta' && parsed.delta.text) {
         state.content += parsed.delta.text;
         if (!options.bufferTextDeltas) {
-          webContents.send('chat:stream:delta', { streamId, content: parsed.delta.text });
+          emitProviderEvent(webContents, 'chat:stream:delta', { streamId, content: parsed.delta.text });
         }
       } else if (parsed.delta?.type === 'thinking_delta' && parsed.delta.thinking) {
         state.thinkingContent += parsed.delta.thinking;
         if (!options.bufferThinkingDeltas) {
-          webContents.send('chat:stream:thinking', { streamId, content: parsed.delta.thinking });
+          emitProviderEvent(webContents, 'chat:stream:thinking', { streamId, content: parsed.delta.thinking });
         }
       } else if (parsed.delta?.type === 'input_json_delta' && state.currentAnthropicToolIndex >= 0) {
         const entry = state.toolCalls[state.currentAnthropicToolIndex];
@@ -253,14 +254,14 @@ function consumeOpenAIStreamLine(line, state, webContents, streamId, trace = nul
     if (contentDelta) {
       state.content += contentDelta;
       if (!options.bufferTextDeltas) {
-        webContents.send('chat:stream:delta', { streamId, content: contentDelta });
+        emitProviderEvent(webContents, 'chat:stream:delta', { streamId, content: contentDelta });
       }
     }
     const reasoningDelta = extractOpenAIReasoningDelta(delta);
     if (reasoningDelta) {
       state.thinkingContent += reasoningDelta;
       if (!options.bufferThinkingDeltas) {
-        webContents.send('chat:stream:thinking', { streamId, content: reasoningDelta });
+        emitProviderEvent(webContents, 'chat:stream:thinking', { streamId, content: reasoningDelta });
       }
     }
     if (delta?.tool_calls) {
@@ -295,7 +296,7 @@ function consumeOpenAIStreamLine(line, state, webContents, streamId, trace = nul
         // 缓存写：上游无字段（Grok 等）时留空，区别于「真 0」；显示层渲染「—」。
         ...(cacheWriteTokens != null ? { cacheWriteTokens } : {}),
       };
-      webContents.send('chat:stream:usage', { streamId, usage: state.usage });
+      emitProviderEvent(webContents, 'chat:stream:usage', { streamId, usage: state.usage });
     }
   } catch (error) {
     trace?.recordParseError?.(payload, error);
@@ -367,10 +368,10 @@ export async function consumeOpenAIStream(res, webContents, streamId, trace = nu
     canEmitBufferedThinking &&
     !hasLiteralToolCallSyntax(state.thinkingContent)
   ) {
-    webContents.send('chat:stream:thinking', { streamId, content: state.thinkingContent });
+    emitProviderEvent(webContents, 'chat:stream:thinking', { streamId, content: state.thinkingContent });
   }
   if (options.bufferTextDeltas && state.content && !hasLiteralToolCallSyntax(state.content)) {
-    webContents.send('chat:stream:delta', { streamId, content: state.content });
+    emitProviderEvent(webContents, 'chat:stream:delta', { streamId, content: state.content });
   }
 
   return {
@@ -398,6 +399,8 @@ export async function sendOpenAIChatStream({
   reasoningEffortMap,
   signal,
   webContents,
+  eventSink = null,
+  tracePrivacy = 'default',
   streamId,
   usePublicStreamConsumer = false,
   fetchWithRecovery,
@@ -429,6 +432,7 @@ export async function sendOpenAIChatStream({
     supportsReasoning,
     streamId,
     requestBody: body,
+    privacy: tracePrivacy,
   });
 
   if (typeof fetchWithRecovery !== 'function') {
@@ -478,11 +482,11 @@ export async function sendOpenAIChatStream({
         onDone: () => trace.recordDoneMarker?.(),
         onEvent: (event) => {
           if (event.type === 'text.delta') {
-            webContents.send('chat:stream:delta', { streamId, content: event.content });
+            emitProviderEvent(eventSink ?? webContents, 'chat:stream:delta', { streamId, content: event.content });
             return;
           }
           if (event.type === 'reasoning.delta') {
-            webContents.send('chat:stream:thinking', { streamId, content: event.content });
+            emitProviderEvent(eventSink ?? webContents, 'chat:stream:thinking', { streamId, content: event.content });
             return;
           }
           if (event.type === 'tool_call.delta') {
@@ -503,7 +507,7 @@ export async function sendOpenAIChatStream({
             return;
           }
           if (event.type === 'usage') {
-            webContents.send('chat:stream:usage', { streamId, usage: event.usage });
+            emitProviderEvent(eventSink ?? webContents, 'chat:stream:usage', { streamId, usage: event.usage });
           }
         },
       }).then((result) => ({
@@ -513,7 +517,7 @@ export async function sendOpenAIChatStream({
         streamUsage: result.usage ?? null,
         streamError: result.streamError ?? null,
       }))
-    : await consumeOpenAIStream(res, webContents, streamId, trace, signal);
+    : await consumeOpenAIStream(res, eventSink ?? webContents, streamId, trace, signal);
   if (streamResult.streamError) {
     const errorText = `provider_stream_error: ${streamResult.streamError.message}`;
     const tracePath = await trace.finish({

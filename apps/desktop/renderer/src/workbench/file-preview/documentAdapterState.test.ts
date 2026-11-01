@@ -9,7 +9,7 @@ test('HTML/SVG and unsupported document formats have truthful static fallback, i
     assert.ok(documentAdapterNotice(path, false));
   }
   assert.match(documentAdapterNotice('diagram.svg', false)!, /not executed or loaded/);
-  assert.match(documentAdapterNotice('file.pdf', false)!, /No document adapter/);
+  assert.match(documentAdapterNotice('file.pdf', false)!, /cannot be previewed here/);
   assert.equal(documentAdapter('readme.md'), 'markdown');
   assert.equal(documentAdapter('config.json'), 'json');
   assert.equal(documentAdapter('photo.png'), 'raster');

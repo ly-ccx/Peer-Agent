@@ -519,6 +519,7 @@ export type TranslationKey =
   | 'projectAgent.model.defaults'
   | 'projectAgent.model.botOnly'
   | 'projectAgent.model.nextReply'
+  | 'projectAgent.model.replyLock'
   | 'projectAgent.model.runningReply'
   | 'projectAgent.model.unavailable'
   | 'projectAgent.model.select'
@@ -958,6 +959,30 @@ export type TranslationKey =
   | 'modelRouting.role.memory_curator'
   | 'modelRouting.role.objective_probe'
   | 'modelRouting.role.compactor'
+  | 'modelRouting.role.input_predictor'
+  | 'inputPrediction.title'
+  | 'inputPrediction.description'
+  | 'inputPrediction.enabled'
+  | 'inputPrediction.nextDisclosure'
+  | 'inputPrediction.model'
+  | 'inputPrediction.modelHelp'
+  | 'inputPrediction.chooseModel'
+  | 'inputPrediction.routing'
+  | 'inputPrediction.continuation'
+  | 'inputPrediction.draftDisclosure'
+  | 'inputPrediction.requestLimit'
+  | 'inputPrediction.tokenLimit'
+  | 'inputPrediction.limitHelp'
+  | 'inputPrediction.project'
+  | 'inputPrediction.accept'
+  | 'inputPrediction.available'
+  | 'inputPrediction.statusReady'
+  | 'inputPrediction.statusDisabled'
+  | 'inputPrediction.statusBudget'
+  | 'inputPrediction.statusUsage'
+  | 'inputPrediction.statusProvider'
+  | 'inputPrediction.usage'
+  | 'inputPrediction.estimated'
   | 'modelRouting.reason.vision'
   | 'modelRouting.reason.tools'
   | 'modelRouting.reason.structured'
@@ -1686,6 +1711,30 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'modelRouting.role.memory_curator': '记忆整理',
     'modelRouting.role.objective_probe': '目标探查',
     'modelRouting.role.compactor': '压缩',
+    'modelRouting.role.input_predictor': '输入建议',
+    'inputPrediction.statusReady': '输入建议已就绪；符合输入条件时显示。',
+    'inputPrediction.statusDisabled': '输入建议已关闭。',
+    'inputPrediction.statusBudget': '今日预测已达到请求或 Token 上限。',
+    'inputPrediction.statusUsage': '用量记录暂不可用，输入建议已暂停。',
+    'inputPrediction.statusProvider': '上次预测未成功，请检查模型连接；正常输入不受影响。',
+    'inputPrediction.usage': '今日请求 / Token',
+    'inputPrediction.estimated': '包含保守估算',
+    'inputPrediction.title': '智能输入建议',
+    'inputPrediction.description': '根据当前对话准备一句表达，按 Tab 或右方向键填入草稿。',
+    'inputPrediction.enabled': '预测下一句',
+    'inputPrediction.nextDisclosure': '将当前项目的公开对话上下文交给下方所选模型。建议不会自动发送。',
+    'inputPrediction.model': '输入建议模型',
+    'inputPrediction.modelHelp': '建议选择响应快的模型；独立计入用量，并遵守项目的模型范围。',
+    'inputPrediction.chooseModel': '请选择输入建议模型',
+    'inputPrediction.routing': '使用模型分工中的配置',
+    'inputPrediction.continuation': '续写未发送的草稿',
+    'inputPrediction.draftDisclosure': '开启后，当前未发送的草稿也会交给输入建议模型。可随时关闭。',
+    'inputPrediction.requestLimit': '每日预测请求上限',
+    'inputPrediction.tokenLimit': '每日 Token 上限',
+    'inputPrediction.limitHelp': '跨本机项目合计；0 表示暂停预测。取消的请求也可能产生用量。',
+    'inputPrediction.project': '在此项目提供输入建议',
+    'inputPrediction.accept': '采纳建议',
+    'inputPrediction.available': '有输入建议，可采纳或忽略：',
     'modelRouting.reason.vision': '不能看图',
     'modelRouting.reason.tools': '不能使用工具',
     'modelRouting.reason.structured': '不能输出结构化结果',
@@ -2180,6 +2229,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.model.defaults': '默认与档位',
     'projectAgent.model.botOnly': '本机器人',
     'projectAgent.model.nextReply': '修改用于后续回复或新任务',
+    'projectAgent.model.replyLock': '回复进行中，暂不能切换模型',
     'projectAgent.model.runningReply': '本轮正在使用的模型',
     'projectAgent.model.unavailable': '选择模型',
     'projectAgent.model.select': '选择机器人模型',
@@ -3112,6 +3162,30 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'modelRouting.role.memory_curator': 'Memory curator',
     'modelRouting.role.objective_probe': 'Objective probe',
     'modelRouting.role.compactor': 'Compactor',
+    'modelRouting.role.input_predictor': 'Input suggestions',
+    'inputPrediction.statusReady': 'Suggestions are ready and appear when input conditions allow.',
+    'inputPrediction.statusDisabled': 'Input suggestions are off.',
+    'inputPrediction.statusBudget': 'Today’s suggestion request or token limit has been reached.',
+    'inputPrediction.statusUsage': 'Usage records are unavailable. Suggestions are paused.',
+    'inputPrediction.statusProvider': 'The last prediction was unsuccessful. Check the model connection; normal typing is unaffected.',
+    'inputPrediction.usage': 'Today’s requests / tokens',
+    'inputPrediction.estimated': 'includes conservative estimates',
+    'inputPrediction.title': 'Smart input suggestions',
+    'inputPrediction.description': 'Suggest a message from the conversation. Press Tab or Right Arrow to add it to your draft.',
+    'inputPrediction.enabled': 'Suggest the next message',
+    'inputPrediction.nextDisclosure': 'Shares public conversation context from this project with the selected model. Suggestions are never sent automatically.',
+    'inputPrediction.model': 'Suggestion model',
+    'inputPrediction.modelHelp': 'Choose a responsive model. Usage is counted separately and project model restrictions apply.',
+    'inputPrediction.chooseModel': 'Choose a suggestion model',
+    'inputPrediction.routing': 'Use the configured model role',
+    'inputPrediction.continuation': 'Complete unsent drafts',
+    'inputPrediction.draftDisclosure': 'When enabled, your current unsent draft is also shared with the suggestion model. You can turn this off at any time.',
+    'inputPrediction.requestLimit': 'Daily suggestion request limit',
+    'inputPrediction.tokenLimit': 'Daily token limit',
+    'inputPrediction.limitHelp': 'Shared across projects on this device. Zero pauses suggestions. Cancelled requests may still incur usage.',
+    'inputPrediction.project': 'Allow input suggestions in this project',
+    'inputPrediction.accept': 'Accept suggestion',
+    'inputPrediction.available': 'Input suggestion available. Accept or ignore:',
     'modelRouting.reason.vision': 'Cannot see images',
     'modelRouting.reason.tools': 'Cannot use tools',
     'modelRouting.reason.structured': 'Cannot return structured output',
@@ -3606,6 +3680,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.model.defaults': 'Defaults and tiers',
     'projectAgent.model.botOnly': 'This bot',
     'projectAgent.model.nextReply': 'Applies to future replies or new tasks',
+    'projectAgent.model.replyLock': 'Can\'t switch models while a reply is in progress',
     'projectAgent.model.runningReply': 'Model used by the current reply',
     'projectAgent.model.unavailable': 'Choose model',
     'projectAgent.model.select': 'Choose bot model',

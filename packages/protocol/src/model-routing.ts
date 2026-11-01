@@ -14,7 +14,8 @@ export type ModelRole =
   | 'visual_verifier'
   | 'memory_curator'
   | 'objective_probe'
-  | 'compactor';
+  | 'compactor'
+  | 'input_predictor';
 
 export type RoleSetting = (
   | { readonly mode: 'tier'; readonly tier: ModelTier }
@@ -222,6 +223,7 @@ function roleNeeds(input: RoleModelRequest): { tools: boolean; vision: boolean; 
     case 'objective_probe':
       return { tools: true, vision: false, structured: false, minContext: 0 };
     case 'compactor':
+    case 'input_predictor':
       return { tools: false, vision: false, structured: false, minContext: Math.max(context, 1) };
     default:
       return { tools: false, vision: false, structured: false, minContext: 0 };

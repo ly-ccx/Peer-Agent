@@ -15,6 +15,25 @@ function tempRoot() {
   return mkdtempSync(path.join(os.tmpdir(), 'b2-13-directory-'));
 }
 
+test('active identity lookup preserves profile gating without reading conversation or task facts', () => {
+  const root = tempRoot();
+  try {
+    const unexpected = () => assert.fail('identity lookup must not project bot state');
+    const { entry, directory } = harness(root, {
+      readMessages: unexpected, readSummaryMessages: unexpected, listSessions: unexpected,
+      listApprovals: unexpected, listConfirmations: unexpected, readQuestionCards: unexpected,
+    });
+    assert.equal(directory.hasActiveBot(entry.workspaceId), true);
+    for (const id of [undefined, null, '', '../outside', 'missing']) {
+      assert.equal(directory.hasActiveBot(id), false);
+    }
+    const file = path.join(root, 'projects', entry.workspaceId, 'profile.json');
+    const profile = JSON.parse(readFileSync(file, 'utf8'));
+    writeFileSync(file, JSON.stringify({ ...profile, status: 'archived' }));
+    assert.equal(directory.hasActiveBot(entry.workspaceId), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('directory count and detail include the same open child decision without reading full cards', () => {
   const root = tempRoot();
   let answered = false;

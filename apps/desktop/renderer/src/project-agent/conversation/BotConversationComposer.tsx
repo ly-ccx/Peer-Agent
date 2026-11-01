@@ -37,6 +37,10 @@ export function BotConversationComposer({ workspaceId, conversation, profile, mo
   return <>
     <InputRecoveryNotice state={state} session={session} i18n={i18n} />
     <BotComposer
+      predictionContext={{ workspaceId, conversationId: profile.agentConversationId ?? '',
+        version: `${[...conversation.messages].reverse().find(message => message.kind === 'agent_reply' || message.role === 'user')?.id ?? ''}:${JSON.stringify(profile.modelPolicy)}`,
+        eligible: !state.error && state.pending.length === 0 && state.sending.length === 0,
+        quoteMessageId: quote?.messageId }}
       draft={state.draft}
       onDraftChange={session.edit}
       ready={state.ready}
@@ -53,7 +57,7 @@ export function BotConversationComposer({ workspaceId, conversation, profile, mo
       }}
       modelControls={<div className="bot-model-toolbar" aria-busy={!modelControls.loaded && modelControls.reading}><BotModelControls role="project_agent" compact
         policy={profile.modelPolicy} models={modelControls.models} view={modelControls.views.project_agent}
-        activeSelection={conversation.activeModelSelection} busy={modelControls.busy || conversation.generating}
+        activeSelection={conversation.activeModelSelection} busy={modelControls.busy} replying={conversation.generating}
         feedback={modelControls} i18n={i18n} onChange={policy => modelControls.save(policy)} /></div>}
       quote={quote?.text ?? ''}
       quoteSource={quoteSource}

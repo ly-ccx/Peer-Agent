@@ -14,6 +14,7 @@ export {
   resolveGitBranchPrefix,
 } from './host-config-instructions.mjs';
 export { createPromptSourceRegistry } from './prompt-source-registry.mjs';
+export { createInputPredictionPromptSource } from './sources/input-prediction-source.mjs';
 export { createAttachmentPromptSource } from './sources/attachment-source.mjs';
 export { createAutomationIntentPromptSource } from './sources/automation-intent-source.mjs';
 export { createBrainstormingPromptSource, renderBrainstormingPrompt } from './sources/brainstorming-source.mjs';

@@ -7,6 +7,7 @@ const DEFAULT_MAX_TEXT_FILE_BYTES = 2 * 1024 * 1024;
 /** Chat image preview: same ceiling as renderer attachment intake (8 MiB). */
 const DEFAULT_MAX_IMAGE_FILE_BYTES = 8 * 1024 * 1024;
 
+const PACKAGED_DOCUMENT_EXTENSIONS = new Set(['.pdf', '.docx', '.pptx', '.xlsx', '.doc', '.ppt', '.xls', '.odt', '.ods']);
 const IMAGE_EXT_TO_MIME = Object.freeze({
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -670,6 +671,9 @@ export function createFileAccessApplicationService(options = {}) {
           error: 'not_a_file',
           resolvedFrom,
         };
+      }
+      if (PACKAGED_DOCUMENT_EXTENSIONS.has(path.extname(target).toLowerCase())) {
+        return { ok: false, status: 'binary', content: '', size: stat.size, resolvedFrom, error: 'packaged_document' };
       }
       if (stat.size > maxTextFileBytes) {
         return {

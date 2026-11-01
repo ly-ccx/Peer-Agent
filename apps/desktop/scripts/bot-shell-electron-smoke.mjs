@@ -230,6 +230,15 @@ const seam = 'const agentTurnExecutor = createAgentTurnExecutor({ llmChatService
 assert.equal(mainText.split(seam).length, 2, 'exact production executor assembly seam required');
 let isolatedMain = mainText.replace(seam,
   'const agentTurnExecutor = createAgentTurnExecutor({ llmChatService: { ...globalThis.rcBotShellService, readDelegationCapabilities: input => llmChatService.readDelegationCapabilities(input) } });');
+// Hosted macOS desktops can be shorter than the fixed smoke viewport. Keep
+// native capture geometry equal to that viewport in the isolated CI window;
+// the production window and the strict native-size assertion stay unchanged.
+const oversizedCiWindow = process.platform === 'darwin' && process.env.CI === 'true';
+if (oversizedCiWindow) {
+  const windowSeam = 'const mainWindow = new BrowserWindow({';
+  assert.equal(isolatedMain.split(windowSeam).length, 2, 'exact production main window assembly seam required');
+  isolatedMain = isolatedMain.replace(windowSeam, `${windowSeam}\n    enableLargerThanScreen: true,`);
+}
 if (botModelFixtures.length) {
   const catalogueSeam = 'listModels: () => llmConfigStore.listProviders(),';
   assert.equal(isolatedMain.split(catalogueSeam).length, 2, 'exact production catalogue assembly seam required');
@@ -504,6 +513,11 @@ try {
   await app.context().tracing.start({ screenshots: true, snapshots: true }); tracing = true;
   for (const stream of [app.process().stdout, app.process().stderr]) stream.on('data', data => logs.push(String(data)));
   page = await until(() => app.windows().find(window => window.url().includes('/dist/index.html') && !window.url().includes('window=')), Boolean, 120000);
+  report.nativeDisplay = await app.evaluate(({ screen }) => {
+    const { bounds, workArea, scaleFactor } = screen.getPrimaryDisplay();
+    return { bounds, workArea, scaleFactor };
+  });
+  report.oversizedCiWindow = oversizedCiWindow;
   report.windowReadyMs = Date.now() - Date.parse(report.startedAt);
   page.setDefaultTimeout(15000); page.on('pageerror', error => report.pageErrors.push(error.message));
   if (startupOnly) {

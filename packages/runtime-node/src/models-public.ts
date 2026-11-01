@@ -1,4 +1,6 @@
 /** Stable models entry; implementations do not re-export the aggregate root. */
+export { createProviderTextInference } from './text-inference.mjs';
+export { createInputPredictionService } from './input-prediction/service.mjs';
 export {
   GROK_SUBSCRIPTION_BASE_URL,
   GROK_STABLE_RELEASE_URL,

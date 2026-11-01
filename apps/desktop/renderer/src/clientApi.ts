@@ -9,6 +9,10 @@ function unavailableMethod<T extends (...args: never[]) => unknown>(method: stri
 }
 
 const unavailableApi: ClientApi = {
+  inputPredictionRequest: unavailableMethod('inputPredictionRequest'),
+  inputPredictionCancel: unavailableMethod('inputPredictionCancel'),
+  inputPredictionValidate: unavailableMethod('inputPredictionValidate'),
+  inputPredictionStatus: unavailableMethod('inputPredictionStatus'),
   getBootstrap: unavailableMethod('getBootstrap'),
   automationsBootstrap: unavailableMethod('automationsBootstrap'),
   automationsList: unavailableMethod('automationsList'),

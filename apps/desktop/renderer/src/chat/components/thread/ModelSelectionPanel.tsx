@@ -464,6 +464,10 @@ export function AnchoredModelSelectionMenu({
   const panelId = useId();
   const panelStyle = useModelSelectionPosition(open, triggerRef, panelRef);
 
+  useLayoutEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
+
   const layer = useInteractionLayer(open, { roots: [panelRef], trigger: triggerRef, outside: true, dismissOnTab: true, closeOnTriggerRemoval: true,
     onClose: () => setOpen(false),
     onEscape: () => {
@@ -489,9 +493,9 @@ export function AnchoredModelSelectionMenu({
         aria-busy={busy || undefined}
         title={statusLabel ? `${title || label} · ${statusLabel}` : title}
         aria-label={[title || label, statusLabel].filter(Boolean).join(' · ')}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        aria-controls={panelId}
+        aria-haspopup={disabled ? undefined : 'dialog'}
+        aria-expanded={disabled ? undefined : open}
+        aria-controls={disabled ? undefined : panelId}
         onClick={() => {
           if (disabled) return;
           setOpen((value) => {
@@ -507,7 +511,7 @@ export function AnchoredModelSelectionMenu({
           <span className="model-selection-trigger-label">{label}</span>
           {shortEffort ? <span className="model-selection-trigger-effort">{shortEffort}</span> : null}
         </span>
-        {busy ? <PeerIcon name="loader" size={12} className="pa-cascading-caret motion-spin" /> : statusLabel
+        {disabled ? null : busy ? <PeerIcon name="loader" size={12} className="pa-cascading-caret motion-spin" /> : statusLabel
           ? <PeerIcon name="warning" size={12} className="pa-cascading-caret" />
           : <PeerIcon name="chevronDown" size={12} className={`pa-cascading-caret${open ? ' is-open' : ''}`} />}
       </button>

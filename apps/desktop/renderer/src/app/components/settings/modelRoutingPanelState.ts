@@ -12,6 +12,7 @@ export const MODEL_ROLES = [
   'memory_curator',
   'objective_probe',
   'compactor',
+  'input_predictor',
 ] as const;
 
 export type ModelTierName = (typeof MODEL_TIERS)[number];
@@ -117,6 +118,7 @@ export function optionRejectReason(
     case 'memory_curator':
       return option.supportsStructured === true ? null : 'structured';
     case 'compactor':
+    case 'input_predictor':
       return null;
     default:
       return option.supportsTools === true ? null : 'tools';
@@ -173,6 +175,7 @@ export function roleTranslationKey(role: string): TranslationKey | null {
     case 'memory_curator': return 'modelRouting.role.memory_curator';
     case 'objective_probe': return 'modelRouting.role.objective_probe';
     case 'compactor': return 'modelRouting.role.compactor';
+    case 'input_predictor': return 'modelRouting.role.input_predictor';
     default: return null;
   }
 }
