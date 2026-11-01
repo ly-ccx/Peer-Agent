@@ -145,7 +145,8 @@ function apply(db, record, { blobs, receiptCache } = {}) {
   const closure = record.kind === 'agent_execution_completed' || record.transition?.minimumExecutorVersion === 3
     || Object.values(next.transitions || {}).some(row => row.minimumExecutorVersion === 3 || row.reconciliationRef)
     || Object.values(next.agentCommands || {}).some(row => row.completionRecorded === true);
-  putMeta(db, 'minimumFormatVersion', Math.max(getMeta(db, 'minimumFormatVersion') || 2, record.kind.startsWith('intent_') || record.mandate?.intentSchemaVersion === 1 ? 8 : closure ? 6 : supervision ? 5 : record.kind.startsWith('history_') ? 4 : 2));
+  putMeta(db, 'minimumFormatVersion', Math.max(getMeta(db, 'minimumFormatVersion') || 2, record.kind.startsWith('intent_') || record.mandate?.intentSchemaVersion === 1
+    || ['reply_committed', 'reply_settlement_started', 'reply_settlement_failed', 'reply_settled'].includes(record.kind) ? 8 : closure ? 6 : supervision ? 5 : record.kind.startsWith('history_') ? 4 : 2));
   for (const bucket of buckets) for (const [id, original] of Object.entries(next[bucket] || {})) {
     let value = original;
     if (bucket === 'works' && value.budget?.observations) {
@@ -458,6 +459,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
     }
   }
   return { active, prepare,
+    supportsProtectedReceipts() { load(); return manifest.minimumWriterVersion >= 3 && manifest.frozenLegacyFile === 'baseline.jsonl'; },
     enableSupervision(minimumVersion = 5) {
       assertOwner(); load();
       if (![5,6,8].includes(minimumVersion)) throw fail('coordination_schema_unsupported');

@@ -20,7 +20,7 @@ import { createCollectingSink, createCallbackSink } from './turn-sinks.mjs';
 import { resolveDelegatedWorkTurn } from './work-session-profile.mjs';
 import { runContinuedVerification } from './verification-continuation.mjs';
 import { createVerificationContinuationPort } from './verification-continuation-port.mjs';
-import { verificationContentHash } from './verification-completion.mjs';
+import { verificationContentHash, verificationRequestRevision } from './verification-completion.mjs';
 import { runBoundedVerification } from './verifier-lifecycle.mjs';
 import { verifierEvidenceSnapshots, admitVerifierCommunicationEvidence } from './verifier-evidence.mjs';
 import { buildSessionReport } from './session-report.mjs';
@@ -580,9 +580,9 @@ export function createProjectGoalRunnerHost({
           conversationStore?.getPersistedConversationHistory?.(plan.conversationId));
         const workerReport = { summary: report.summary.slice(0, 30000), contentSource: report.contentSource ?? null,
           truncated: report.summary.length > 30000 };
-        const readSourceRevision = current => verificationContentHash(current, buildSessionReport(current,
+        const readSourceRevision = current => verificationRequestRevision(verificationContentHash(current, buildSessionReport(current,
           { sessionId: current.delegationOrigin?.sessionId || current.planId, status: current.status },
-          conversationStore?.getPersistedConversationHistory?.(current.conversationId)).summary);
+          conversationStore?.getPersistedConversationHistory?.(current.conversationId)).summary), goalReview);
         const sourceRevision = readSourceRevision(plan);
         const continuity = createVerificationContinuationPort({ plan, goalPlanStore, workId,
           sourceRevision, readSourceRevision, ownsPlan: current => delegatedPlanRunsWithLease(current,

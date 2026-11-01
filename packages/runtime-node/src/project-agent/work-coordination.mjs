@@ -57,7 +57,22 @@ export function reduceCoordination(state, entry) {
   } else if (entry.kind === 'reply_delivered') {
     const delivery = next.deliveries[entry.messageId];
     if (!delivery) throw new Error('reply_not_prepared');
+    if (delivery.canonicalCommittedAt && delivery.settlement?.status !== 'applied') throw new Error('coordination_delivery_unsettled');
     next.deliveries[entry.messageId] = { ...delivery, state: 'delivered' };
+  } else if (['reply_committed', 'reply_settlement_started', 'reply_settlement_failed', 'reply_settled'].includes(entry.kind)) {
+    const delivery = next.deliveries[entry.messageId];
+    if (!delivery || delivery.state !== 'prepared') throw new Error('coordination_delivery_conflict');
+    if (entry.kind === 'reply_committed') {
+      next.deliveries[entry.messageId] = { ...delivery, canonicalCommittedAt: entry.at };
+    } else {
+      if (entry.kind !== 'reply_settlement_failed' && !delivery.canonicalCommittedAt) throw new Error('coordination_delivery_uncommitted');
+      const attempts = delivery.settlement?.attempts || 0;
+      if (entry.kind === 'reply_settlement_started' && entry.attempt !== attempts + 1
+        || entry.kind !== 'reply_settlement_started' && entry.attempt !== attempts) throw new Error('coordination_delivery_attempt_conflict');
+      next.deliveries[entry.messageId] = { ...delivery, settlement: { operationId: `settlement:${entry.messageId}`,
+        attempts: entry.attempt, status: entry.kind === 'reply_settled' ? 'applied' : entry.kind === 'reply_settlement_started' ? 'pending' : 'failed',
+        updatedAt: entry.at, ...(entry.kind === 'reply_settlement_failed' ? { error: entry.error, phase: entry.phase, retryAt: entry.retryAt } : {}) } };
+    }
   } else if (entry.kind === 'reply_invalidated') {
     const delivery = next.deliveries[entry.messageId];
     if (!delivery) throw new Error('reply_not_prepared');

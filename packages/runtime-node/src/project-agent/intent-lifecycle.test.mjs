@@ -9,6 +9,7 @@ import { createCoordinationLifecycle } from './coordination-lifecycle.mjs';
 import { createRunnerCoordination } from './runner-coordination.mjs';
 import { validateDelegationInput } from './tool-specs.mjs';
 import { buildVerifierMessage } from './goal-runner-host.mjs';
+import { verificationRequestRevision } from './verification-completion.mjs';
 
 async function fixture(t) {
   const rootDir = mkdtempSync(path.join(os.tmpdir(), 'peer-intent-lifecycle-'));
@@ -97,4 +98,7 @@ test('root reviewer receives the entire canonical goal as factual input without 
   const message = buildVerifierMessage({ plan: { goal: 'Research', successCriteria: [] }, goalReview: { canonicalInputs: [{ text: 'Research AND implement' }], requirements: ['Research', 'Implement'] } });
   assert.match(message, /ALL root requirements/); assert.match(message, /Research AND implement/);
   assert.match(message, /never accepts a child/);
+  assert.equal(verificationRequestRevision('child-content'), 'child-content');
+  assert.notEqual(verificationRequestRevision('child-content', { goalRevision: 1 }), 'child-content');
+  assert.notEqual(verificationRequestRevision('child-content', { goalRevision: 1 }), verificationRequestRevision('child-content', { goalRevision: 2 }));
 });

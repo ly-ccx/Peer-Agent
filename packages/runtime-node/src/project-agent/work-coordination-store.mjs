@@ -98,6 +98,12 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
     }, close: storage.close,
     journalFile: file, readRecoveryCheckpoint, readContinuationCheckpoint,
     enableSupervision(minimumVersion = 5) { assertOwner(); if (!useV2()) throw new Error('coordination_recovery_pending'); storage.enableSupervision(minimumVersion); },
+    supportsSplitDelivery: () => useV2() && storage.supportsProtectedReceipts(),
+    recordDelivery(entry) {
+      assertOwner(); if (!useV2()) throw new Error('coordination_recovery_pending');
+      if (!['reply_committed', 'reply_settlement_started', 'reply_settlement_failed', 'reply_settled'].includes(entry.kind)) throw new Error('invalid_delivery_receipt');
+      storage.enableSupervision(INTENT_FORMAT_VERSION); return append(entry);
+    },
     readSupervision: (bucket, id) => useV2() ? storage.readSupervision(bucket, id) : undefined,
     querySupervision: (bucket, field, value, options) => useV2() ? storage.querySupervision(bucket, field, value, options) : [],
     observeUsage(workId, observationId, usage) {

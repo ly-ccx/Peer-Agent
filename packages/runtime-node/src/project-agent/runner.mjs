@@ -1,4 +1,5 @@
 import { createRunnerCoordination } from './runner-coordination.mjs';
+import { projectFailureScope, isHostCoordinationFailure } from './failure-scope.mjs';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as yieldToEventLoop } from 'node:timers/promises';
 import { classifyProjectAgentFailure, projectAgentFailureKind } from '@peer-agent/protocol';
@@ -114,7 +115,12 @@ export function createProjectAgentRunner({
   }
 
   const coordination = coordinationStore ? createRunnerCoordination({ store: coordinationStore, inbox,
-    workspaceId: workspace, conversationId: conversation, readMessages, remember, onReplied, resolveRoster, reconcileVerification, now: stamp }) : null;
+    workspaceId: workspace, conversationId: conversation, readMessages, remember, onReplied,
+    onDeliveryChanged: error => { if (disposed) return;
+      if (error) { setStatus('error'); return; }
+      try { armRecoveryTimer(); } catch { setStatus('error'); return; }
+      if (!pumping) void kick().catch(() => setStatus('error'));
+    }, resolveRoster, reconcileVerification, now: stamp }) : null;
 
   function armRecoveryTimer() {
     const at = !disposed && holdsLease() === true ? coordination?.nextRetryAt() : null;
@@ -236,8 +242,7 @@ export function createProjectAgentRunner({
   }
 
   async function pump() {
-    if (coordination) { try { await coordination.recover(); } catch { /* prepared delivery remains retryable */ } }
-    if (coordination?.hasPendingDelivery()) { setStatus('idle'); return; }
+    if (coordination) await coordination.recover();
     let drained = false;
     while (!disposed) {
       await yieldToEventLoop();
@@ -264,7 +269,8 @@ export function createProjectAgentRunner({
       drained = false;
       let outcome;
       try { outcome = await runJob(job); } catch (error) {
-        circuitBreaker?.failure({ turnId: job.turnId || `failed-${randomUUID()}`, reason: error?.message || String(error), retry: { kind: job.kind, userInputs: job.userInputs } });
+        if (isHostCoordinationFailure(error)) throw error;
+        if (!coordination || projectFailureScope(error?.message, error) === 'provider') circuitBreaker?.failure({ turnId: job.turnId || `failed-${randomUUID()}`, reason: error?.message || String(error), retry: { kind: job.kind, userInputs: job.userInputs } });
         outcome = 'error';
       }
       if (outcome === 'yielded') { setStatus('idle'); return; }
@@ -280,8 +286,10 @@ export function createProjectAgentRunner({
 
   async function runJob(job) {
     if (coordination && !coordination.prepare(job)) return 'preempted';
+    const model = job.kind !== 'digest' ? readModel() : null;
+    const providerScope = coordination && model?.modelProviderId ? { scopeKey: model.modelProviderId } : {};
     if (job.kind !== 'digest') {
-      const admitted = circuitBreaker?.admit({ manual: manualTrial });
+      const admitted = circuitBreaker?.admit({ manual: manualTrial, ...providerScope });
       manualTrial = false;
       if (admitted?.allowed === false) { coordination?.blockReservation(job); restoreCircuitCard(); return 'circuit_open'; }
     }
@@ -316,8 +324,9 @@ export function createProjectAgentRunner({
       const startedAt = stamp(), started = performance.now();
       const diagnosticTiming = outcome => ({ startedAt, finishedAt: stamp(), durationMs: performance.now() - started, outcome });
       let outcome;
-      try { outcome = await runRounds(job, signal); }
+      try { outcome = await runRounds(job, signal, model); }
       catch (error) {
+        if (isHostCoordinationFailure(error)) throw error;
         const previous = job.continuation ? coordination?.previousOutcome(job) : null;
         outcome = { turnId: job.attemptId, plan: planAgentTurn({ kind: job.kind, userInputs: job.userInputs, events: job.events, workspaceId: workspace }),
           rounds: previous?.rounds || [], failed: true, reason: error?.message || String(error), memoryIds: [], failure: error?.providerRecovery,
@@ -353,7 +362,7 @@ export function createProjectAgentRunner({
         if (decision.end !== 'no_progress') {
           // A persisted, progressing slice proves the request path recovered.
           // Keeping its half-open trial would reject the next continuation forever.
-          circuitBreaker?.success();
+          circuitBreaker?.success(providerScope);
           setStatus('idle'); return 'yielded';
         }
         outcome.failed = true; outcome.reason = 'agent_no_progress'; job.explicitRetryOnly = true;
@@ -385,14 +394,14 @@ export function createProjectAgentRunner({
         }
       }
       if (exhausted || outcome.silentWait) circuitBreaker?.abandonTrial();
-      else if (outcome.failed || finished.failed) {
-        const failure = circuitBreaker?.failure({ turnId: outcome.turnId, reason: outcome.reason || 'invalid reply', retry: { kind: job.kind, userInputs: job.userInputs } });
+      else if ((outcome.failed || finished.failed) && (!coordination || projectFailureScope(outcome.reason, outcome.failure) === 'provider')) {
+        const failure = circuitBreaker?.failure({ turnId: outcome.turnId, reason: outcome.reason || 'invalid reply', retry: { kind: job.kind, userInputs: job.userInputs }, ...providerScope });
         if (failure?.opened) for (const message of finished.messages) if (message.card === 'agent_unavailable') {
           const content = `代理连续失败，已暂停自动推进。十分钟后再试，也可以现在手动重试。`;
           message.content = content; message.meta = { ...message.meta, circuitOpenUntil: failure.openUntil };
           for (const card of message.cards || []) card.content = content;
         }
-      }
+      } else if (outcome.failed || finished.failed) circuitBreaker?.abandonTrial();
       if (!stampLearned(finished.messages, learned)) pendingLearned.unshift(...learned);
       if (disposed) return 'disposed';
       acceptingStop = false;
@@ -425,7 +434,8 @@ export function createProjectAgentRunner({
           try {
             const delivered = await coordination.deliver(message);
             if (delivered?.delivered) for (const id of message.sources || []) reportedSessionIds.add(id);
-          } catch { deliveryPending = true; }
+            if (delivered?.pending || delivered?.held) deliveryPending = true;
+          } catch (error) { if (isHostCoordinationFailure(error)) throw error; deliveryPending = true; }
           continue;
         }
         remember(message);
@@ -437,7 +447,7 @@ export function createProjectAgentRunner({
         failed: outcome.failed || finished.failed, deliveryPending, budgetLimited: exhausted }, readSlot(resolveRoster, job.kind));
       activity.finish(outcome.failed || finished.failed ? 'error' : 'done');
       if ((outcome.failed || finished.failed) && !exhausted) return 'error';
-      if (!exhausted && !outcome.silentWait) circuitBreaker?.success();
+      if (!exhausted && !outcome.silentWait) circuitBreaker?.success(providerScope);
       commit(job.throughSeq);
       if (job.kind === 'user' && typeof onInputsCompleted === 'function') {
         try { await onInputsCompleted(job.userInputs); } catch { /* Canonical replies let the host repair a missing execution acknowledgement. */ }
@@ -476,9 +486,8 @@ export function createProjectAgentRunner({
     return 'ok';
   }
 
-  async function runRounds(job, signal) {
+  async function runRounds(job, signal, model = readModel()) {
     const turnId = job.attemptId || `turn-${randomUUID()}`;
-    const model = readModel();
     const plan = planAgentTurn({
       kind: job.kind,
       userInputs: job.userInputs,

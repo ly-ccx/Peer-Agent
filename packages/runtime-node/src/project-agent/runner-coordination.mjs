@@ -13,7 +13,7 @@ import { reconcileRepairCustody } from './repair-custody.mjs';
 import { intentWorkDisposition, intentReviewCurrent } from './intent-lifecycle.mjs';
 
 const ROUTINE = new Set(['session_started', 'progress', 'session_spawned', 'session_progress']);
-export function createRunnerCoordination({ store, inbox, workspaceId, conversationId, readMessages, remember, onReplied, resolveRoster, reconcileVerification = null, now = () => new Date().toISOString() }) {
+export function createRunnerCoordination({ store, inbox, workspaceId, conversationId, readMessages, remember, onReplied, onDeliveryChanged, resolveRoster, reconcileVerification = null, now = () => new Date().toISOString() }) {
   const dispatchRecovery = createVerificationDispatchRecovery({ store, readMessages, reconcileVerification, now,
     activeAttempts: () => workBudgetBinding(workspaceId)?.activeAttempts });
   const readSnapshot = () => typeof store.readSnapshot === 'function' ? store.readSnapshot() : store.read();
@@ -30,11 +30,11 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     if (!message?.operationId) return true;
     return store.readSupervision?.('agentCommands', message.operationId)?.delivery === 'observed';
   };
-  const delivery = createReplyDelivery({ store, readMessages, appendMessage: remember, accept: onReplied,
+  const delivery = createReplyDelivery({ store, readMessages, appendMessage: remember, accept: onReplied, now, onChanged: onDeliveryChanged,
     validate: message => (message.meta?.sessionStates || []).every(source => {
       const current = rows().find(row => row.sessionId === source.sessionId);
       return current && source.sourceRevision && current.sourceRevision === source.sourceRevision
-        && current.observationRevision === source.observationRevision
+        && (current.observationRevision === source.observationRevision || source.status === 'result_ready' && current.status === 'accepted')
         && (current.status === source.status || source.status === 'result_ready' && current.status === 'accepted');
     }),
     onRecovered: message => {
@@ -160,6 +160,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     return {
       choose(userOnly) {
         const candidates = Object.values(decision().works).filter(work => !historyExecutionHeld(work) && (!userOnly || work.anchorInputIds?.length)
+          && !delivery.pending(decision(), work.workId)
           && (work.state === 'runnable' && work.checkpointRef
             || work.checkpointRef && recoveryReservationDue(work, now())
             || work.state === 'blocked_system' && work.stopScope !== 'work' && work.recovery?.dispatchesReconciled
@@ -210,7 +211,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       const missing = (events || []).filter(event => !known[event.eventId]);
       if (missing.length) store.transfer(missing);
     },
-    transfer, deliver: delivery.deliver, prepareReplies: delivery.prepare, async recover() { dispatchRecovery.reconcileAll(); return delivery.recover(); }, hasPendingDelivery: delivery.pending,
+    transfer, deliver: delivery.dispatch, prepareReplies: delivery.prepare, async recover() { dispatchRecovery.reconcileAll(); return delivery.recover(); }, hasPendingDelivery: delivery.pending,
     turnFacts(job) {
       const state = readSnapshot(), work = state.works[job.workId], intent = work?.intentCoordination;
       return { workId: job.workId, workRevision: intent?.revision || 0, goalRevision: state.mandates?.[job.workId]?.goalRevision || 0,
@@ -242,7 +243,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       return Object.values(readSnapshot().works).filter(work => work.state === 'retry_wait' && work.recovery?.reservationId
         && work.waitFor?.some(wait => wait.kind === 'retry_timer' && wait.id === work.recovery.reservationId)
         && Date.parse(work.recovery.deadlineAt) > Date.parse(at) && !hasUnsettledDispatch(work))
-        .map(work => work.recovery.retryAt).filter(at => Number.isFinite(Date.parse(at))).sort()[0] || null;
+        .map(work => work.recovery.retryAt).concat(delivery.nextRetryAt()).filter(at => Number.isFinite(Date.parse(at))).sort()[0] || null;
     },
     recoverUserJob() { return this.recoverJob({ userOnly: true }); },
     recoverJob({ userOnly = false } = {}) { return recoverySelection().choose(userOnly); },
