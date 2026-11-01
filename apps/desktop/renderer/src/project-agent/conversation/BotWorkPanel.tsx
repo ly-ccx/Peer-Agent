@@ -108,14 +108,16 @@ export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recoverin
   return <div ref={root} className="bot-work-layout" data-work-panel-open={open} data-work-panel-wide={wide}>
     {headerTarget ? createPortal(toggle, headerTarget) : <div className="bot-work-panel-local-trigger">{toggle}</div>}
     <div className="bot-work-primary">{children}</div>
-    <aside ref={panel} id={id} hidden={!open} className="bot-work-panel" aria-labelledby={`${id}-title`} onKeyDown={event => {
+    <div className="bot-work-panel-space motion-inline-space" aria-hidden="true" />
+    <aside ref={panel} id={id} inert={!open} aria-hidden={!open} data-motion-open={open}
+      className="bot-work-panel motion-inline-panel" aria-labelledby={`${id}-title`} onKeyDown={event => {
       if (wide && event.key === 'Escape' && !event.defaultPrevented && !isImeKey(event.nativeEvent)
         && !interactionLayers.topInteractive() && panel.current?.contains(event.target as Node)) { event.preventDefault(); event.stopPropagation(); close(); }
     }}>
       <header className="bot-work-panel-head"><h2 id={`${id}-title`}><PeerIcon name="blocks" size={16} />{i18n.t('projectAgent.workPanel.title')}</h2>
         <button ref={closeButton} type="button" className="ui-button is-icon" aria-label={i18n.t('projectAgent.workPanel.close')} onClick={close}><PeerIcon name="panelRight" size={16} /></button>
       </header>
-      <div className="bot-work-panel-scroll" hidden={view !== 'overview'}>
+      <div className="bot-work-panel-scroll motion-enter-fade" hidden={view !== 'overview'}>
         <section className="bot-work-panel-attention" aria-label={i18n.t('projectAgent.workPanel.attention')}>
           <h3><PeerIcon name="circle" size={13} />{i18n.t('projectAgent.workPanel.attention')}</h3>
           <p className="bot-work-panel-focus">{recovering ? i18n.t('projectAgent.workPanel.recovering') : focusLabel ?? i18n.t('projectAgent.workPanel.quiet')}</p>
@@ -151,7 +153,7 @@ export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recoverin
           {!materials.length && data.loaded && !data.error ? <p className="bot-work-panel-empty">{i18n.t('projectAgent.workPanel.emptyMaterials')}</p> : null}
         </section>
       </div>
-      <div className="bot-work-panel-scroll" hidden={view !== 'materials'}>
+      <div className="bot-work-panel-scroll motion-enter-fade" hidden={view !== 'materials'}>
         <button ref={backButton} type="button" className="bot-work-panel-back" onClick={() => setMaterialsView('overview')}><PeerIcon name="back" size={14} />{i18n.t('projectAgent.workPanel.back')}</button>
         <p className="bot-work-panel-note">{i18n.t('projectAgent.workPanel.materialScope')}</p>
         <button type="button" className="ui-button is-compact" disabled={!resources?.ready} onClick={() => resources?.openReference({ workspaceId, path: '.', kind: 'directory' })}>

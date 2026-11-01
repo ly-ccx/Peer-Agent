@@ -433,6 +433,34 @@
   animation: motion-exit-fade var(--za-motion-fast) var(--za-ease-accelerate) both;
 }
 
+/* Kept-mounted side panels preserve reading state. CSS reverses from the current
+ * frame; no completion callback, timer or animation API owns their visibility.
+ * Consumers remove interaction immediately with inert/aria-hidden, and provide
+ * the real inline size on their independent layout spacer. */
+.motion-inline-space {
+  transition: inline-size var(--za-motion-medium) var(--za-ease-standard);
+}
+.motion-inline-panel {
+  --motion-inline-shift: var(--za-motion-shift);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate3d(var(--motion-inline-shift), 0, 0);
+  transition: opacity var(--za-motion-fast) var(--za-ease-accelerate),
+    transform var(--za-motion-fast) var(--za-ease-accelerate),
+    visibility 0s linear var(--za-motion-fast);
+}
+.motion-inline-panel:dir(rtl) { --motion-inline-shift: calc(-1 * var(--za-motion-shift)); }
+.motion-inline-panel[data-motion-open='true'] {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: none;
+  transition: opacity var(--za-motion-medium) var(--za-ease-decelerate),
+    transform var(--za-motion-medium) var(--za-ease-decelerate),
+    visibility 0s;
+}
+
 /* Native disclosures retain their own keyboard/focus semantics and static fallback. */
 @supports (interpolate-size: allow-keywords) and selector(details::details-content) {
   .motion-details {
