@@ -2,6 +2,24 @@
 
 All notable changes to Peer Agent are tracked here.
 
+## 0.1.0-rc.32 - 2026-11-01
+
+### 新功能、修复与优化
+
+- 加入任务、子 Agent、注意力与产出资料工作面板；保留主对话、草稿、独立第四栏和回复引用，整理文件阅读层次。
+- 智能输入建议使用一个开关与专用模型，未选模型不请求，并在选择旁说明对话与草稿外发；各入口共用模型选择器。
+- 整合原目标持续协调、当前覆盖核验与实际交付后的唯一关闭；停止屏障和设备资源移交共用正式接口，未知结果继续受保护。
+- 保留用户确认顺畅的长会话输入修复，修复旧任务缺标识查询、资源账本初始化顺序，以及窗口缩窄时面板留位导致的阅读位置和划词引用丢失。
+- 引入联合协调格式 9；升级前完整备份并保持各入口版本匹配。更新双语 README、使用文档、落地页与网站更新日志。
+
+### Improvements (English)
+
+- Add a work panel for tasks, child Agents, attention and materials; preserve the conversation, draft, fourth pane and quoting, and clarify document reading controls.
+- Use one suggestion switch and a dedicated model with adjacent conversation/draft disclosure; require a selected model before requests and share model controls across entry points.
+- Continue the original goal with current verification and actual delivery before unique root closure; unify stop barriers and resource handoff while protecting unknown outcomes.
+- Retain the user-confirmed long-conversation typing fix; repair missing legacy IDs, resource-ledger initialization ordering, and reading/selection disruption from panel reservation during narrowing.
+- Introduce combined coordination format 9, requiring complete backups and matching executors. Update bilingual READMEs, user docs, landing copy and website changelog.
+
 ## 0.1.0-rc.31 - 2026-10-31
 
 ### 修复与优化

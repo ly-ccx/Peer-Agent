@@ -72,7 +72,7 @@ export const copy = {
   'download.title': ['Start a working relationship.', '从你的下一个项目开始。'],
   'download.body': ['Choose the project Bot preview, the classic stable release, or the terminal. Read the release notes for platform availability and upgrade guidance.', '选择项目 Bot 预览版、经典正式版或终端入口。各平台可用包和升级说明以发布页为准。'],
   'release.preview': ['Project Bot preview', '项目 Bot 预览版'],
-  'release.preview.body': ['The 0.1 interface shown here: project Bots, delegated work, memory, goals and a side-by-side workspace. Preview software is still evolving.', '本页展示的 0.1 界面：项目机器人、工作委托、记忆、目标与并排工作区。预览版本仍在演进。'],
+  'release.preview.body': ['The 0.1 preview brings project Bots, a work panel for tasks and child Agents, memory, goals and an independent reading workspace. Optional input suggestions require a dedicated model. Preview software is still evolving.', '0.1 预览版包含项目机器人、任务与子 Agent 工作面板、记忆、目标和独立阅读工作区。可选输入建议需选择专用模型。预览版本仍在演进。'],
   'release.preview.action': ['Open preview downloads', '查看预览版下载'],
   'release.preview.note': ['Back up the full data directory before upgrading. Follow the release-specific compatibility notes.', '升级前备份完整数据目录，并按对应版本说明处理兼容性。'],
   'release.stable': ['Classic stable release', '经典正式版'],
