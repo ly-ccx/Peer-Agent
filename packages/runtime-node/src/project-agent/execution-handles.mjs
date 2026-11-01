@@ -5,7 +5,9 @@ export function observeExecutionHandles(conversationId, observer) {
   observers.set(conversationId, observer);
   return () => { if (observers.get(conversationId) === observer) observers.delete(conversationId); };
 }
-/** Provider-owned handles only. Tool text and a persisted running flag cannot register a live process. */
+/** Provider-owned handles only. Tool text and a persisted running flag cannot register a live process.
+ * @param {{ conversationId: any, handleId: any, toolCallId: any, completion: any, stop: any, query?: (() => any) | null }} input
+ */
 export function trackExecutionHandle({ conversationId, handleId, toolCallId, completion, stop, query = null }) {
   if (!conversationId) return;
   if (!handleId || !toolCallId || !completion || typeof stop !== 'function') throw new Error('execution_handle_invalid');
