@@ -2,6 +2,8 @@ import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { createEvidenceBundle } from '@peer-agent/runtime-core';
 import {
+  trackExecutionHandle,
+  providerExecutionScopes,
   createNodeShellSessionManager,
   supportsPersistentShellSession,
 } from '@peer-agent/runtime-node';
@@ -455,13 +457,14 @@ export function createLocalShellProvider({
         ? classification.cwd
         : undefined;
       const sessionResult = await sessionManager.runCommand({
+        toolCallId: call.toolCallId,
         conversationId: context.conversationId,
         command,
         cwd: requestedCwd,
         timeoutMs: clampTimeoutMs(args.timeoutMs),
         signal: context.signal,
-        beforeExecute: () => {
-          const reason = context.toolContext?.checkAccessPolicy?.()
+        beforeExecute: cwd => {
+          const reason = context.toolContext?.checkAccessPolicy?.(providerExecutionScopes(cwd))
             || (typeof decision.validate === 'function' && !decision.validate() ? 'permission_policy_changed' : null);
           if (reason) throw Object.assign(new Error(reason), { code: 'execution_authority_denied' });
         },
@@ -516,6 +519,9 @@ export function createLocalShellProvider({
       };
     }
 
+    const resourceDenial = context.toolContext?.checkAccessPolicy?.(providerExecutionScopes(classification.cwd));
+    if (resourceDenial) throw new Error(resourceDenial);
+    if (typeof decision.validate === 'function' && !decision.validate()) throw new Error('permission_policy_changed');
     const task = taskManager.runTask({
       runInBackground,
       conversationId: context.conversationId ?? null,
@@ -526,6 +532,8 @@ export function createLocalShellProvider({
       description: typeof args.description === 'string' ? args.description : call.reason,
       classification,
     });
+    trackExecutionHandle({ conversationId: context.conversationId, handleId: task.taskId, toolCallId: call.toolCallId,
+      completion: task.completion, query: () => taskManager.listTasks().find(row => row.taskId === task.taskId), stop: () => taskManager.stopTask(task.taskId) });
     const stopOnAbort = () => {
       taskManager.stopTask(task.taskId);
     };

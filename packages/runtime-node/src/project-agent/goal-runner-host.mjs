@@ -271,6 +271,7 @@ export function createProjectGoalRunnerHost({
     ? path.join(path.dirname(goalPlanStore.getStoreDir()), 'project-runtime') : null });
   const isolationPlanner = typeof goalWorktreeAdapter?.inspectIsolationFacts === 'function'
     ? createIsolationPlanner({
+      inspectResources: plan => executionScheduler.inspectResources(plan),
       readFacts: plan => goalWorktreeAdapter.inspectIsolationFacts(plan),
       isolatePlan: plan => goalWorktreeAdapter.isolatePlan(plan, { ensureTaskBranch: goalTaskBranchAdapter?.ensureTaskBranch }),
       recordIsolation: (plan, isolation) => goalPlanStore.recordDeliveryIsolation(plan.planId, isolation),

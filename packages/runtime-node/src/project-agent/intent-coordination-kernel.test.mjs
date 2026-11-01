@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { admitIntentAssessment, admitIntentClosure, reduceIntentCoordination } from './intent-coordination-kernel.mjs';
+import { controlDigest } from './session-control-kernel.mjs';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
 import { createCoordinationJournalReader } from './coordination-journal-reader.mjs';
 
@@ -65,7 +66,7 @@ test('accepted research, missing coverage, stale goal, undelivered reply and unv
   assert.equal(admitIntentClosure(s2, close, reviewed).error, 'intent_closure_conflict');
 });
 
-test('v8 intent facts survive index loss, preserve format floor, fence legacy writers and reject unimplemented v7', async () => {
+test('v9 intent facts survive index loss, preserve format floor, fence legacy writers and reject future formats', async () => {
   const rootDir = mkdtempSync(path.join(os.tmpdir(), 'peer-intent-'));
   const options = { rootDir, workspaceId: 'w', holdsLease: () => true, leaseEpoch: () => 'owner', formatVersion: 2, fenceLegacyWrites: true };
   let store = createWorkCoordinationStore(options);
@@ -82,8 +83,8 @@ test('v8 intent facts survive index loss, preserve format floor, fence legacy wr
     store = createWorkCoordinationStore(options); await store.prepare();
     assert.deepEqual(store.read(), expected);
     const file = path.join(base, 'coordination-v2/manifest.json'), manifest = JSON.parse(readFileSync(file));
-    assert.equal(manifest.minimumReaderVersion, 8); assert.equal(manifest.minimumWriterVersion, 8);
-    writeFileSync(file, JSON.stringify({ ...manifest, minimumReaderVersion: 7, minimumWriterVersion: 7 }));
+    assert.equal(manifest.minimumReaderVersion, 9); assert.equal(manifest.minimumWriterVersion, 9);
+    writeFileSync(file, JSON.stringify({ ...manifest, minimumReaderVersion: 10, minimumWriterVersion: 10 }));
     assert.throws(() => store.read(), /coordination_schema_unsupported/);
   } finally { store.close(); rmSync(rootDir, { recursive: true, force: true }); }
 });
@@ -98,4 +99,43 @@ test('withdrawal needs an applied current control and stopped managed sessions; 
   const closed = admitIntentClosure(s, request, { ...host, appliedControlRef: 'cancel', pendingManagedSessions: false });
   assert.equal(closed.ok, true); s = reduceIntentCoordination(s, closed.entry);
   assert.equal(s.works.g.intentCoordination.lifecycle, 'cancelled'); assert.equal(s.works.g.budget.uncertainDispatches.length, 1);
+});
+
+// Real historical record shapes remain reducible; version numbers alone do not migrate state.
+for (const version of [7, 8]) test(`historical format ${version} reopens and coexists with both format-nine record families`, async () => {
+  const rootDir = mkdtempSync(path.join(os.tmpdir(), 'peer-combined-format-'));
+  const options = { rootDir, workspaceId: 'w', holdsLease: () => true, leaseEpoch: () => 'owner', formatVersion: 2, fenceLegacyWrites: true };
+  let store = createWorkCoordinationStore(options);
+  const base = path.join(rootDir, 'w'), manifestFile = path.join(base, 'coordination-v2/manifest.json');
+  const operation = { operationId: 'stop', kind: 'cancel', authorityRef: 'input', requestDigest: 'historical-digest', revision: 1,
+    workspaceId: 'w', parentConversationId: 'p', sessionId: 's', planId: 'plan', expectedExecution: { planId: 'plan', sessionId: 's', executionEpoch: 'epoch' },
+    phase: 'recorded', updatedAt: host.now };
+  operation.requestDigest = controlDigest({ kind: operation.kind, operationId: operation.operationId, authorityRef: operation.authorityRef, execution: operation.expectedExecution });
+  const a = assessment(); a.expectedGoalRevision = 0; a.coverage.forEach(row => { row.sources = []; row.status = 'remaining'; });
+  try {
+    await store.prepare(); store.saveWork(state().works.g); store.enableSupervision(version);
+    if (version === 7) store.append({ kind: 'session_control', operation, expectedRevision: 0, expectedCurrentOperationId: null });
+    else store.append({ ...admitIntentAssessment(store.read(), a, host).entry, minimumExecutorVersion: 8 });
+    const historical = store.read(); store.close();
+    rmSync(path.join(base, '.read-models'), { recursive: true, force: true });
+    store = createWorkCoordinationStore(options); await store.prepare();
+    assert.deepEqual(store.read(), historical);
+    assert.equal(JSON.parse(readFileSync(manifestFile)).minimumWriterVersion, version);
+    if (version === 7) {
+      store.writeSessionControl({ ...operation, revision: 2, phase: 'draining' }, 1, operation.operationId);
+      assert.equal(store.assessIntent(a, host).ok, true);
+    } else store.writeSessionControl(operation, 0, null);
+    const combined = store.read(); assert.ok(combined.sessionControls.stop); assert.ok(combined.intentDecisions.d);
+    store.close();
+    rmSync(path.join(base, '.read-models'), { recursive: true, force: true });
+    rmSync(manifestFile);
+    store = createWorkCoordinationStore(options); await store.prepare();
+    assert.deepEqual(store.read(), combined);
+    const manifest = JSON.parse(readFileSync(manifestFile)); assert.equal(manifest.minimumWriterVersion, 9);
+    // A stale/lost manifest cannot weaken the durable head's active contract.
+    writeFileSync(manifestFile, JSON.stringify({ ...manifest, minimumReaderVersion: version, minimumWriterVersion: version }));
+    assert.throws(() => store.read(), /coordination_recovery_pending/);
+    await store.prepare(); assert.equal(JSON.parse(readFileSync(manifestFile)).minimumReaderVersion, 9);
+    assert.deepEqual(store.read(), combined);
+  } finally { store.close(); rmSync(rootDir, { recursive: true, force: true }); }
 });

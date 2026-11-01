@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 export const COORDINATION_ACTIONS = Object.freeze(['parallel', 'augment', 'revise', 'query', 'answer', 'cancel', 'replace', 'handoff', 'resume']);
 const revisions = new Set(['revise', 'cancel', 'replace']);
 const phases = { recorded: ['stopping', 'ready', 'completed', 'blocked'], stopping: ['awaiting_outcome', 'ready', 'completed', 'blocked'],
-  awaiting_outcome: ['stopping', 'ready', 'completed', 'blocked'], ready: ['started', 'completed', 'blocked'], started: ['completed', 'blocked'], blocked: ['stopping', 'ready'], completed: [] };
+  awaiting_outcome: ['stopping', 'ready', 'completed', 'blocked'], ready: ['started', 'completed', 'blocked'], started: ['completed', 'blocked'], blocked: ['stopping', 'ready', 'completed'], completed: [] };
 const unique = values => [...new Set(values || [])];
 const fingerprint = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
@@ -101,6 +101,11 @@ export function reduceCoordinationDecision(state, entry) {
     if (!transition || transition.phase !== entry.expectedPhase) throw new Error('transition_phase_conflict');
     if (entry.patch.phase !== undefined && entry.patch.phase !== transition.phase
       && !phases[transition.phase]?.includes(entry.patch.phase)) throw new Error('invalid_transition_phase');
+    if (entry.patch.phase === 'completed' && transition.phase === 'blocked' && !entry.patch.controlOperationRef) throw new Error('control_receipt_required');
+    if (entry.patch.controlOperationRef) {
+      const control = state.sessionControls?.[entry.patch.controlOperationRef];
+      if (!control || control.kind !== 'cancel' || control.sessionId !== transition.oldSessionId || !control.stopReceipt) throw new Error('control_receipt_required');
+    }
     if (entry.patch.executionAdmission !== undefined && !['queued', 'admitted', 'rejected'].includes(entry.patch.executionAdmission)
       || entry.patch.executionEffect !== undefined && !['pending', 'applied', 'unknown', 'rejected'].includes(entry.patch.executionEffect)) throw new Error('invalid_execution_receipt');
     if (entry.patch.executionEffect === 'applied' && (!entry.patch.executionAttemptRef

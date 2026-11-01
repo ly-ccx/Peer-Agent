@@ -70,6 +70,7 @@ function manifestToToolDefinition(manifest: CapabilityManifest): RuntimeToolDefi
 function toCoreContext(
   context: Record<string, unknown>,
   workspaceRoot: string,
+  executionGate?: (scopes?: readonly import('@peer-agent/protocol').ExecutionResourceScope[]) => string | null | undefined,
 ): CapabilityExecutionContext {
   const sessionId = typeof context.sessionId === 'string'
     ? context.sessionId
@@ -81,6 +82,7 @@ function toCoreContext(
     workspace: { root: workspaceRoot },
     signal: context.signal instanceof AbortSignal ? context.signal : undefined,
     metadata: {
+      ...(executionGate ? { executionGate } : {}),
       ...(typeof context.locale === 'string' ? { locale: context.locale } : {}),
       ...(context.toolContext && typeof context.toolContext === 'object'
         ? { permissionPolicy: (context.toolContext as { permissionPolicy?: unknown }).permissionPolicy } : {}),
@@ -199,7 +201,7 @@ export function createNodeProviderBundle(
             input: request.call.arguments,
           },
           input: request.call.arguments,
-        }, toCoreContext(context, workspaceRoot));
+        }, toCoreContext(context, workspaceRoot, scopes => options.executionGate?.(request.call, scopes)));
         return {
           result: {
             toolCallId: result.toolCallId,

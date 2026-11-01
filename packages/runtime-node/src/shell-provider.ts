@@ -1,3 +1,5 @@
+import { trackExecutionHandle } from './project-agent/execution-handles.mjs';
+import { providerExecutionScopes } from './project-agent/execution-scopes.mjs';
 import { resolve } from 'node:path';
 
 import type {
@@ -396,14 +398,17 @@ export function createNodeShellProvider(options: NodeShellProviderOptions): Node
             ? classification.cwd
             : undefined;
           const sessionResult = await sessionManager.runCommand({
+            toolCallId: call.toolCallId,
             conversationId: sessionConversationId(context),
             command,
             cwd: requestedCwd,
             timeoutMs,
             signal: context.signal,
-            beforeExecute: () => {
+            beforeExecute: cwd => {
               if (context.signal?.aborted) throw new Error('aborted');
               if (approvalValidate && !approvalValidate()) throw new Error('permission_policy_changed');
+              const reason = typeof context.metadata?.executionGate === 'function' ? context.metadata.executionGate(providerExecutionScopes(cwd)) : null;
+              if (reason) throw new Error(reason);
             },
           });
           const stopReason = sessionResult.timedOut
@@ -490,6 +495,12 @@ export function createNodeShellProvider(options: NodeShellProviderOptions): Node
         }
 
         const task = await taskManager.runTask({
+          beforeExecute: () => {
+            if (context.signal?.aborted) throw new Error('aborted');
+            if (approvalValidate && !approvalValidate()) throw new Error('permission_policy_changed');
+            const reason = typeof context.metadata?.executionGate === 'function' ? context.metadata.executionGate(providerExecutionScopes(classification.cwd)) : null;
+            if (reason) throw new Error(reason);
+          },
           toolCallId: call.toolCallId,
           command,
           cwd: classification.cwd,
@@ -498,6 +509,8 @@ export function createNodeShellProvider(options: NodeShellProviderOptions): Node
           signal: background ? undefined : context.signal,
         });
 
+        trackExecutionHandle({ conversationId: sessionConversationId(context), handleId: task.taskId, toolCallId: call.toolCallId,
+          completion: task.completion, query: () => taskManager.getTask(task.taskId), stop: () => taskManager.stopTask(task.taskId, 'cancelled') });
         if (background) {
           const artifactRefs = task.artifact.artifactRefs;
           const output = {

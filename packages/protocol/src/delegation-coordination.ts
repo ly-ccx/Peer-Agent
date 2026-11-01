@@ -58,6 +58,7 @@ export interface TaskTransition {
   executionEffect?: 'pending' | 'applied' | 'unknown' | 'rejected';
   executionAttemptRef?: string;
   reconciliationRef?: string;
+  controlOperationRef?: string;
   updatedAt: string;
 }
 export interface CoordinationExecutionBinding {

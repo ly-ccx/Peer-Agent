@@ -46,6 +46,10 @@ export function createWorkBudgetGuard(profile) {
       const transition = Object.values(state.transitions || {}).find(row => row.executionEpoch === profile.coordinationBinding.executionEpoch);
       if (!executionBindingCurrent(mandate, transition, profile.coordinationBinding)) throw new Error('execution_revision_stale');
     }
+    if (requireActive && profile.sessionId) {
+      const control = store.readSessionControl?.(profile.sessionId);
+      if (control && (control.phase !== 'settled' || control.kind === 'cancel')) throw new Error('work_execution_stopped');
+    }
     const limits = effectiveWorkLimits(work.budget, binding.limits);
     const budget = { modelRequests: 0, toolCalls: 0, tokens: 0, costUsd: 0, unknownUsage: false, unknownCost: false, attempts: {},
       ...(legacyBudgetMigration(work, binding.limits) || work.budget), limits };

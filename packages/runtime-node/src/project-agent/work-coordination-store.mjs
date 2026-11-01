@@ -97,12 +97,25 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
       if (fenceLegacyWrites && await protectCoordinationWriter({ directory: dir, assertOwner })) await storage.prepare();
     }, close: storage.close,
     journalFile: file, readRecoveryCheckpoint, readContinuationCheckpoint,
+    writerEpoch() { assertOwner(); return epoch; },
+    readSessionControl(sessionId) {
+      if (useV2()) return storage.readSessionControl(sessionId);
+      const state = reader.readSnapshot(), head = state.sessionControlHeads?.[sessionId];
+      return head ? structuredClone(state.sessionControls?.[head.operationId]) : undefined;
+    },
+    writeSessionControl(operation, expectedRevision, expectedCurrentOperationId) {
+      assertOwner();
+      if (!useV2()) throw new Error('coordination_writer_upgrade_required');
+      storage.enableSupervision(9);
+      append({ kind: 'session_control', minimumExecutorVersion: 9, operation, expectedRevision, expectedCurrentOperationId }, { returnState: false });
+      return operation;
+    },
     enableSupervision(minimumVersion = 5) { assertOwner(); if (!useV2()) throw new Error('coordination_recovery_pending'); storage.enableSupervision(minimumVersion); },
     supportsSplitDelivery: () => useV2() && storage.supportsProtectedReceipts(),
     recordDelivery(entry) {
       assertOwner(); if (!useV2()) throw new Error('coordination_recovery_pending');
       if (!['reply_committed', 'reply_settlement_started', 'reply_settlement_failed', 'reply_settled', 'reply_deferred', 'reply_held', 'reply_aggregated'].includes(entry.kind)) throw new Error('invalid_delivery_receipt');
-      storage.enableSupervision(INTENT_FORMAT_VERSION); return append(entry);
+      storage.enableSupervision(INTENT_FORMAT_VERSION); return append({ ...entry, minimumExecutorVersion: INTENT_FORMAT_VERSION });
     },
     readSupervision: (bucket, id) => useV2() ? storage.readSupervision(bucket, id) : undefined,
     querySupervision: (bucket, field, value, options) => useV2() ? storage.querySupervision(bucket, field, value, options) : [],
@@ -146,7 +159,7 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
           if (!useV2()) throw new Error('coordination_recovery_pending');
           storage.enableSupervision(6);
         }
-        append(admitted.entry);
+        append(admitted.entry.mandate?.intentSchemaVersion === 1 ? { ...admitted.entry, minimumExecutorVersion: INTENT_FORMAT_VERSION } : admitted.entry);
       }
       return admitted;
     },
@@ -171,7 +184,7 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
     bindSession(workId, goalRevision, sessionId, binding) { return append({ kind: 'coordination_binding', workId, goalRevision, sessionId, binding }); },
     advanceTransition(operationId, expectedPhase, patch) {
       assertOwner();
-      if (Object.keys(patch).some(key => !['phase', 'replacementSessionId', 'error', 'updatedAt', 'handoff', 'executionAdmission', 'executionEffect', 'executionAttemptRef', 'reconciliationRef'].includes(key))) throw new Error('invalid_transition_patch');
+      if (Object.keys(patch).some(key => !['phase', 'replacementSessionId', 'error', 'updatedAt', 'handoff', 'executionAdmission', 'executionEffect', 'executionAttemptRef', 'reconciliationRef', 'controlOperationRef'].includes(key))) throw new Error('invalid_transition_patch');
       return append({ kind: 'coordination_transition', operationId, expectedPhase, patch: { ...patch, updatedAt: now() } });
     },
     checkpoint(workId, checkpoint) {

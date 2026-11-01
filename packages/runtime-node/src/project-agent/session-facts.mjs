@@ -1,4 +1,5 @@
-import { deriveSessionFacts } from '@peer-agent/protocol';
+import { executionHandlesLive } from './execution-handles.mjs';
+import { deriveSessionFacts, controlPhasesForOrigin } from '@peer-agent/protocol';
 
 // Execution ownership is process-local. A stale persisted flag cannot prove a live verifier after restart.
 const attempts = new Map();
@@ -47,7 +48,7 @@ const ENDED_RUNNER_STATUSES = new Set(['completed', 'failed', 'cancelled', 'stop
  */
 export function executionOwnershipOf(plan) {
   if (plan?.planId && attempts.has(plan.planId)) return 'live';
-  if (conversationExecutionLive(plan?.conversationId)) return 'live';
+  if (executionHandlesLive(plan?.conversationId) || conversationExecutionLive(plan?.conversationId)) return 'live';
   const runnerStatus = plan?.runner?.status;
   if (typeof runnerStatus === 'string' && ENDED_RUNNER_STATUSES.has(runnerStatus)) return 'ended';
   return 'unknown';
@@ -58,7 +59,7 @@ export function sessionFactsFromPlan(plan) {
   const executionOwnership = executionOwnershipOf(plan);
   return { ...deriveSessionFacts({ status: plan?.status, runnerStatus: plan?.runner?.status,
     phase: plan?.delegationOrigin?.phase, superseded: Boolean(plan?.delegationOrigin?.supersededBy),
-    cancellationPhase: plan?.delegationOrigin?.cancellation?.phase, takeoverPhase: plan?.delegationOrigin?.takeover?.phase,
+    ...controlPhasesForOrigin(plan?.delegationOrigin || {}),
     cancellationDisposition: plan?.delegationOrigin?.cancellation?.disposition,
     accepted: Boolean(plan?.resultAcceptance?.acceptedAt),
     needsUser: plan?.delegationOrigin?.phase === 'awaiting_approval' || plan?.status === 'awaiting_approval'

@@ -1,3 +1,4 @@
+import { executionIdentity } from './session-control-kernel.mjs';
 /**
  * 带 delegationOrigin 的 GoalPlan 是任务。
  * 任务回合使用开任务时冻结的模型；没有快照时由调用方传入 B1-09 的解析结果。
@@ -103,6 +104,7 @@ export function resolveWorkSessionProfile({ plan, kind = 'worker', fallback = nu
   return {
     role: 'work_session',
     agentKind: kind,
+    executionIdentity: executionIdentity(plan),
     ...(text(origin.workId) ? { workId: text(origin.workId) } : {}),
     ...(origin.coordinationBinding ? { coordinationBinding: structuredClone(origin.coordinationBinding) } : {}),
     ...(workspaceId ? { workspaceId } : {}),

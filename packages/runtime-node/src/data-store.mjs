@@ -77,7 +77,10 @@ export const DATA_STORE_ENTRIES = {
   // input-drafts/<surface>.json and input-draft-blobs/<digest>.json retain device-local UI intent only; never model context or execution truth.
   // resource-edits/store.sqlite holds device-local text drafts, retained versions and modification receipts.
   // It is not portable configuration, permission truth, or an execution queue; recovery never starts writes.
+  // execution-resources.sqlite (+ WAL/SHM) is device-local claim/hold authority; never export it.
+  // Missing/corrupt state requires reconciliation, never deletion to unlock. Back up through SQLite.
   projectRuntime:    { rel: 'project-runtime',         kind: 'dir',  scope: 'device'   },
+  executionResources: { rel: 'project-runtime/execution-resources.sqlite', kind: 'file', scope: 'device' },
 };
 
 /** 返回数据根并确保其存在。mkdir recursive 对已存在目录是 no-op，可安全多次调用。 */

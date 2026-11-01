@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { reduceCoordinationDecision } from './coordination-kernel.mjs';
 import { applyWorkUpdate } from './work-delta.mjs';
 import { admitHistoryResumption, retainHistoricalWork, retainHistoricalSession } from './history-resumption.mjs';
+import { reduceSessionControl } from './session-control-kernel.mjs';
 import { reduceAgentSupervision } from './agent-supervision-state.mjs';
 import { reduceIntentCoordination } from './intent-coordination-kernel.mjs';
 /** Durable event transfer and handling are different receipts. Replay is deterministic. */
@@ -14,7 +15,9 @@ export function reduceCoordination(state, entry) {
   let next = { ...previous, events: { ...previous.events }, works: { ...previous.works }, deliveries: { ...previous.deliveries } };
   if (entry.revision !== next.revision + 1) throw new Error('coordination_revision_gap');
   next.revision = entry.revision;
-  if (entry.kind.startsWith('intent_')) {
+  if (entry.kind === 'session_control') {
+    next = reduceSessionControl(next, entry);
+  } else if (entry.kind.startsWith('intent_')) {
     next = reduceIntentCoordination(next, entry);
   } else if (entry.kind.startsWith('agent_') || entry.kind === 'work_note_written' || entry.kind === 'context_window_opened') {
     next = reduceAgentSupervision(next, entry);

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { intentDeliveredReplyRefs, intentReplyRefsProveDelivery } from './intent-reply-bindings.mjs';
 
-export const INTENT_FORMAT_VERSION = 8;
+export const INTENT_FORMAT_VERSION = 9;
 const intentKinds = new Set(['discuss', 'answer', 'delegate', 'augment', 'revise', 'withdraw']);
 const intentText = (value, max = 500) => typeof value === 'string' && value.trim().length > 0 && value.length <= max;
 const intentIds = (values, max = 64) => Array.isArray(values) && values.length <= max
@@ -102,7 +102,7 @@ export function admitIntentAssessment(state, assessment, host) {
 }
 
 export function reduceIntentCoordination(state, entry) {
-  if (entry.minimumExecutorVersion !== INTENT_FORMAT_VERSION) intentRaise('intent_executor_unsupported');
+  if (![8, INTENT_FORMAT_VERSION].includes(entry.minimumExecutorVersion)) intentRaise('intent_executor_unsupported');
   const work = state.works?.[entry.workId];
   if (!work) intentRaise('intent_work_missing');
   if (entry.kind === 'intent_reviewed') {
