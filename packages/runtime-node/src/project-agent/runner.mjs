@@ -1,4 +1,5 @@
 import { createRunnerCoordination } from './runner-coordination.mjs';
+import { projectFailureScope, isHostCoordinationFailure } from './failure-scope.mjs';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as yieldToEventLoop } from 'node:timers/promises';
 import { classifyProjectAgentFailure, projectAgentFailureKind } from '@peer-agent/protocol';
@@ -43,6 +44,7 @@ export function createProjectAgentRunner({
   onStatus = null,
   onDigest = null,
   onDigestDelivered = null,
+  onDigestDiscarded = null,
   onCurator = null,
   onReplied = null,
   coordinationStore = null,
@@ -114,7 +116,13 @@ export function createProjectAgentRunner({
   }
 
   const coordination = coordinationStore ? createRunnerCoordination({ store: coordinationStore, inbox,
-    workspaceId: workspace, conversationId: conversation, readMessages, remember, onReplied, resolveRoster, reconcileVerification, now: stamp }) : null;
+    workspaceId: workspace, conversationId: conversation, readMessages, remember, onReplied,
+    onDeferred: typeof onDigest === 'function' ? message => onDigest({ message, id: message.id, text: message.content || '', at: stamp() }) : null,
+    onDeliveryChanged: error => { if (disposed) return;
+      if (error) { setStatus('error'); return; }
+      try { armRecoveryTimer(); } catch { setStatus('error'); return; }
+      if (!pumping) void kick().catch(() => setStatus('error'));
+    }, resolveRoster, reconcileVerification, now: stamp }) : null;
 
   function armRecoveryTimer() {
     const at = !disposed && holdsLease() === true ? coordination?.nextRetryAt() : null;
@@ -236,8 +244,7 @@ export function createProjectAgentRunner({
   }
 
   async function pump() {
-    if (coordination) { try { await coordination.recover(); } catch { /* prepared delivery remains retryable */ } }
-    if (coordination?.hasPendingDelivery()) { setStatus('idle'); return; }
+    if (coordination) await coordination.recover();
     let drained = false;
     while (!disposed) {
       await yieldToEventLoop();
@@ -264,7 +271,8 @@ export function createProjectAgentRunner({
       drained = false;
       let outcome;
       try { outcome = await runJob(job); } catch (error) {
-        circuitBreaker?.failure({ turnId: job.turnId || `failed-${randomUUID()}`, reason: error?.message || String(error), retry: { kind: job.kind, userInputs: job.userInputs } });
+        if (isHostCoordinationFailure(error)) throw error;
+        if (!coordination || projectFailureScope(error?.message, error) === 'provider') circuitBreaker?.failure({ turnId: job.turnId || `failed-${randomUUID()}`, reason: error?.message || String(error), retry: { kind: job.kind, userInputs: job.userInputs } });
         outcome = 'error';
       }
       if (outcome === 'yielded') { setStatus('idle'); return; }
@@ -280,8 +288,10 @@ export function createProjectAgentRunner({
 
   async function runJob(job) {
     if (coordination && !coordination.prepare(job)) return 'preempted';
+    const model = job.kind !== 'digest' ? readModel() : null;
+    const providerScope = coordination && model?.modelProviderId ? { scopeKey: model.modelProviderId } : {};
     if (job.kind !== 'digest') {
-      const admitted = circuitBreaker?.admit({ manual: manualTrial });
+      const admitted = circuitBreaker?.admit({ manual: manualTrial, ...providerScope });
       manualTrial = false;
       if (admitted?.allowed === false) { coordination?.blockReservation(job); restoreCircuitCard(); return 'circuit_open'; }
     }
@@ -295,11 +305,18 @@ export function createProjectAgentRunner({
     const endExecution = beginExecutionAttempt(conversation, job.turnId);
     try {
       if (job.kind === 'digest') {
-        if (job.message) remember(job.message);
-        if (job.message && typeof onReplied === 'function') {
+        if (job.message && !job.message.conversationId) job.message = { ...job.message, conversationId: conversation };
+        let committed = !coordination;
+        if (job.message && coordination) {
+          const prepared = await coordination.prepareDigest(job.message);
+          if (prepared.held) return 'ok';
+          if (prepared.invalidated) { onDigestDiscarded?.(job.message); return 'ok'; }
+          await coordination.deliver(job.message); committed = coordination.deliveryCommitted(job.message.id);
+        } else if (job.message) remember(job.message);
+        if (!coordination && job.message && typeof onReplied === 'function') {
           try { await onReplied(job.message); } catch { /* 已投递的小结不重复执行。 */ }
         }
-        if (job.message && typeof onDigestDelivered === 'function') {
+        if (committed && job.message && typeof onDigestDelivered === 'function') {
           try { onDigestDelivered(job.message); } catch { /* 正文已写入；确认失败时下次还能再送 */ }
         }
         return 'ok';
@@ -316,8 +333,9 @@ export function createProjectAgentRunner({
       const startedAt = stamp(), started = performance.now();
       const diagnosticTiming = outcome => ({ startedAt, finishedAt: stamp(), durationMs: performance.now() - started, outcome });
       let outcome;
-      try { outcome = await runRounds(job, signal); }
+      try { outcome = await runRounds(job, signal, model); }
       catch (error) {
+        if (isHostCoordinationFailure(error)) throw error;
         const previous = job.continuation ? coordination?.previousOutcome(job) : null;
         outcome = { turnId: job.attemptId, plan: planAgentTurn({ kind: job.kind, userInputs: job.userInputs, events: job.events, workspaceId: workspace }),
           rounds: previous?.rounds || [], failed: true, reason: error?.message || String(error), memoryIds: [], failure: error?.providerRecovery,
@@ -353,7 +371,7 @@ export function createProjectAgentRunner({
         if (decision.end !== 'no_progress') {
           // A persisted, progressing slice proves the request path recovered.
           // Keeping its half-open trial would reject the next continuation forever.
-          circuitBreaker?.success();
+          circuitBreaker?.success(providerScope);
           setStatus('idle'); return 'yielded';
         }
         outcome.failed = true; outcome.reason = 'agent_no_progress'; job.explicitRetryOnly = true;
@@ -385,23 +403,24 @@ export function createProjectAgentRunner({
         }
       }
       if (exhausted || outcome.silentWait) circuitBreaker?.abandonTrial();
-      else if (outcome.failed || finished.failed) {
-        const failure = circuitBreaker?.failure({ turnId: outcome.turnId, reason: outcome.reason || 'invalid reply', retry: { kind: job.kind, userInputs: job.userInputs } });
+      else if ((outcome.failed || finished.failed) && (!coordination || projectFailureScope(outcome.reason, outcome.failure) === 'provider')) {
+        const failure = circuitBreaker?.failure({ turnId: outcome.turnId, reason: outcome.reason || 'invalid reply', retry: { kind: job.kind, userInputs: job.userInputs }, ...providerScope });
         if (failure?.opened) for (const message of finished.messages) if (message.card === 'agent_unavailable') {
           const content = `代理连续失败，已暂停自动推进。十分钟后再试，也可以现在手动重试。`;
           message.content = content; message.meta = { ...message.meta, circuitOpenUntil: failure.openUntil };
           for (const card of message.cards || []) card.content = content;
         }
-      }
+      } else if (outcome.failed || finished.failed) circuitBreaker?.abandonTrial();
       if (!stampLearned(finished.messages, learned)) pendingLearned.unshift(...learned);
       if (disposed) return 'disposed';
       acceptingStop = false;
       let deliveryPending = false;
       const reportedSessionIds = new Set();
       if (coordination) {
-        const replies = finished.messages.filter(message => message.kind === 'agent_reply' && message.meta?.surfacing !== 'digest');
+        const replies = finished.messages.filter(message => message.kind === 'agent_reply');
         for (const message of replies) message.meta = { ...message.meta, workId: job.workId };
-        coordination.prepareReplies(replies);
+        coordination.bindReplies(replies, job);
+        coordination.prepareReplies(replies.filter(message => message.meta?.surfacing !== 'digest'), job);
       }
       for (const message of finished.messages) {
         if (coordination) message.meta = { ...message.meta, workId: job.workId };
@@ -412,7 +431,8 @@ export function createProjectAgentRunner({
           events: job.events, throughSeq: job.throughSeq,
         };
         if (message?.kind === 'agent_reply' && message?.meta?.surfacing === 'digest' && typeof onDigest === 'function') {
-          onDigest({
+          if (coordination) { await coordination.deferReply(message); deliveryPending = true; }
+          else onDigest({
             message,
             id: message.id,
             text: typeof message.content === 'string' ? message.content : '',
@@ -425,7 +445,8 @@ export function createProjectAgentRunner({
           try {
             const delivered = await coordination.deliver(message);
             if (delivered?.delivered) for (const id of message.sources || []) reportedSessionIds.add(id);
-          } catch { deliveryPending = true; }
+            if (delivered?.pending || delivered?.held) deliveryPending = true;
+          } catch (error) { if (isHostCoordinationFailure(error)) throw error; deliveryPending = true; }
           continue;
         }
         remember(message);
@@ -437,7 +458,7 @@ export function createProjectAgentRunner({
         failed: outcome.failed || finished.failed, deliveryPending, budgetLimited: exhausted }, readSlot(resolveRoster, job.kind));
       activity.finish(outcome.failed || finished.failed ? 'error' : 'done');
       if ((outcome.failed || finished.failed) && !exhausted) return 'error';
-      if (!exhausted && !outcome.silentWait) circuitBreaker?.success();
+      if (!exhausted && !outcome.silentWait) circuitBreaker?.success(providerScope);
       commit(job.throughSeq);
       if (job.kind === 'user' && typeof onInputsCompleted === 'function') {
         try { await onInputsCompleted(job.userInputs); } catch { /* Canonical replies let the host repair a missing execution acknowledgement. */ }
@@ -476,9 +497,8 @@ export function createProjectAgentRunner({
     return 'ok';
   }
 
-  async function runRounds(job, signal) {
+  async function runRounds(job, signal, model = readModel()) {
     const turnId = job.attemptId || `turn-${randomUUID()}`;
-    const model = readModel();
     const plan = planAgentTurn({
       kind: job.kind,
       userInputs: job.userInputs,
@@ -496,6 +516,11 @@ export function createProjectAgentRunner({
       if (retryContinuity) plan.turnProfile.context = { ...plan.turnProfile.context, retryContinuity };
     }
     if (job.workId) plan.turnProfile.workId = job.workId;
+    const intentFacts = coordination?.turnFacts?.(job);
+    if (intentFacts) {
+      plan.turnProfile.context = { ...plan.turnProfile.context, decisionFrame: intentFacts };
+      if (intentFacts.sourceDecisionRef) plan.turnProfile.sourceDecisionRef = intentFacts.sourceDecisionRef;
+    }
     if (model.selection) plan.turnProfile.modelSelection = model.selection;
     if (model.candidateIds?.length) plan.turnProfile.recoveryCandidateIds = model.candidateIds;
     activity.begin({ turnId, workId: job.workId, modelSelection: model.selection, replyTo: (plan.userInputs || []).map(input => input.messageId || `input-${input.inputId}`),
@@ -547,17 +572,22 @@ export function createProjectAgentRunner({
       if (result.yielded) return { turnId, plan, rounds, yielded: true, providerCheckpoint: result.providerCheckpoint, memoryIds };
       if (result.memoryIds?.length) memoryIds = result.memoryIds;
       toolCallsUsed += result.toolCallCount;
+      if (plan.kind === 'user' && coordination?.requiresTaskReply?.(job)) plan.requiresStructuredReply = true;
       const keepGoing = result.hasPostReply
         ? false
         : result.continued === true && result.toolCallCount > 0;
-      if (!keepGoing && !result.hasPostReply && plan.requiresStructuredReply && !deliveryRepairUsed) {
+      const missingDisposition = coordination?.dispositionMissing?.(job) === true;
+      if (!keepGoing && ((!result.hasPostReply && plan.requiresStructuredReply) || missingDisposition) && !deliveryRepairUsed) {
         deliveryRepairUsed = true;
         plan.turnProfile.context = { ...plan.turnProfile.context,
+          decisionFrame: coordination?.turnFacts?.(job),
+          dispositionRequired: missingDisposition,
           retryContinuity: readRetryContinuity([{ id: turnId, kind: 'agent_turn', rounds }], turnId) };
         continue;
       }
       if (!keepGoing) break;
     }
+    if (coordination?.dispositionMissing?.(job)) return { turnId, plan, rounds, failed: true, reason: 'work_disposition_required', memoryIds };
     return { turnId, plan, rounds, failed: false, memoryIds };
   }
 

@@ -9,6 +9,11 @@ export function verificationContentHash(plan, report = '') {
   ])).digest('hex');
 }
 
+/** A root review must never resume a child-stage review's native Provider checkpoint. */
+export function verificationRequestRevision(contentRevision, goalReview) {
+  return goalReview ? createHash('sha256').update(JSON.stringify([contentRevision, goalReview])).digest('hex') : contentRevision;
+}
+
 /** Resolve an unchanged idle verification blocker, never replay its completed worker. */
 export function canCompleteAfterRecheck({ plan, contentHash, currentHash, gate, active = false }) {
   const verifierBlocked = plan?.status === 'executing' && plan.runner?.status === 'blocked'

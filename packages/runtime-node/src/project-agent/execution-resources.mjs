@@ -65,7 +65,11 @@ export function createExecutionResources({ rootDir, now = () => new Date().toISO
     if (rootDir) { mkdirSync(rootDir, { recursive: true }); if (existsSync(file) && lstatSync(file).isSymbolicLink()) throw new Error('execution_resource_store_invalid'); }
     if (rootDir && !existsSync(file)) for (const name of readdirSync(rootDir)) {
       const manifest = path.join(rootDir, name, 'coordination-v2', 'manifest.json');
-      if (existsSync(manifest) && JSON.parse(readFileSync(manifest, 'utf8')).minimumWriterVersion >= 7) throw new Error('execution_resource_store_missing');
+      if (existsSync(manifest)) {
+        const version = JSON.parse(readFileSync(manifest, 'utf8')).minimumWriterVersion;
+        // Independent intent format 8 predates the resource ledger.
+        if (version === 7 || version >= 9) throw new Error('execution_resource_store_missing');
+      }
     }
     const connection = new DatabaseSync(file);
     if (rootDir) chmodSync(file, 0o600);

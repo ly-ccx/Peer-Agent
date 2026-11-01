@@ -1,8 +1,13 @@
 /** Coordination authority is issued by the local host, never by model arguments. */
+export type { ReplyDeliveryReceipt, IntentReplyBinding, ReplyGoalScope } from './reply-delivery.ts';
+export type { InputDispositionKind, InputDisposition, IntentRequirement, IntentInterpretation, GoalCoverageItem,
+  WorkDisposition, IntentAssessment, IntentCoordination, IntentClosureRequest, IntentDecisionReceipt,
+  IntentCoordinationRequest, CoordinationDecisionFrame, ProgressObservation } from './intent-coordination.ts';
 export type CoordinationAction = 'parallel' | 'augment' | 'revise' | 'query' | 'answer' | 'cancel' | 'replace' | 'handoff' | 'resume';
 export type CoordinationLifecycle = 'active' | 'paused' | 'cancelled' | 'fulfilled';
 export interface CoordinationMandate {
   schemaVersion: 1;
+  intentSchemaVersion?: 1;
   mandateId: string;
   workId: string;
   workspaceId: string;
@@ -25,6 +30,7 @@ export interface CoordinationDecision {
   expectedRevision: number;
   action: CoordinationAction;
   sourceInputIds: string[];
+  sourceDecisionRef?: string;
   sourceEventIds: string[];
   sessionId?: string;
   reason: string;

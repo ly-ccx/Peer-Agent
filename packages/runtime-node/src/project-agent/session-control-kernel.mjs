@@ -16,6 +16,7 @@ export function sameExecution(a, b) {
 }
 /** A control transaction owns only execution control. Task and permission truth stay elsewhere. */
 export function reduceSessionControl(state, entry) {
+  if (entry.minimumExecutorVersion !== undefined && ![7, 9].includes(entry.minimumExecutorVersion)) throw new Error('session_control_executor_unsupported');
   const controls = { ...state.sessionControls }, heads = { ...state.sessionControlHeads };
   const operation = structuredClone(entry.operation), old = controls[operation?.operationId];
   if (!operation || !['pause', 'cancel', 'takeover', 'resume'].includes(operation.kind)

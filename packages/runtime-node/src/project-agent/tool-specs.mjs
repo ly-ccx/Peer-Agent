@@ -6,6 +6,32 @@ import { OBJECTIVE_TOOL_SPECS, validateObjectiveToolInput } from './objective-to
 import { TOOL_LEVELS } from './digest.mjs';
 import { WORK_SESSION_STATUSES } from '@peer-agent/protocol';
 import { validCapabilityRequirements } from './capability-admission.mjs';
+import { validIntentAssessment } from './intent-coordination-kernel.mjs';
+const intentIdsSchema = { type: 'array', maxItems: 64, items: { type: 'string', maxLength: 200 } };
+const intentAssessmentSchema = { type: 'object', additionalProperties: false,
+  required: ['workId', 'expectedWorkRevision', 'expectedGoalRevision', 'sourceInputIds', 'sourceEventIds', 'inputs', 'coverage', 'disposition', 'reason'],
+  properties: {
+    workId: { type: 'string', maxLength: 200 }, expectedWorkRevision: { type: 'integer', minimum: 0 }, expectedGoalRevision: { type: 'integer', minimum: 0 },
+    sourceInputIds: intentIdsSchema, sourceEventIds: intentIdsSchema, sourceDecisionRef: { type: 'string', maxLength: 200 },
+    inputs: { type: 'array', maxItems: 64, items: { type: 'object', required: ['inputId', 'kind', 'reason'], additionalProperties: false,
+      properties: { inputId: { type: 'string' }, kind: { type: 'string', enum: ['discuss', 'answer', 'delegate', 'augment', 'revise', 'withdraw'] }, reason: { type: 'string', maxLength: 500 } } } },
+    interpretation: { type: 'object', additionalProperties: false, required: ['outcome', 'constraints', 'nonGoals', 'openQuestions', 'requirements'], properties: {
+      outcome: { type: 'string', maxLength: 4000 }, ...Object.fromEntries(['constraints', 'nonGoals', 'openQuestions'].map(key => [key, { type: 'array', maxItems: 16, items: { type: 'string', maxLength: 500 } }])),
+      requirements: { type: 'array', minItems: 1, maxItems: 32, items: { type: 'object', required: ['requirementId', 'text', 'sourceInputIds'], additionalProperties: false,
+        properties: { requirementId: { type: 'string', maxLength: 200 }, text: { type: 'string', maxLength: 1000 }, sourceInputIds: intentIdsSchema } } } } },
+    coverage: { type: 'array', maxItems: 32, items: { type: 'object', additionalProperties: false, required: ['requirementId', 'status', 'explanation', 'sources'], properties: {
+      requirementId: { type: 'string' }, status: { type: 'string', enum: ['remaining', 'covered', 'uncertain'] }, explanation: { type: 'string', maxLength: 1000 },
+      sources: { type: 'array', maxItems: 32, items: { type: 'object', additionalProperties: false, required: ['sessionId', 'sourceRevision', 'evidenceRefs'], properties: {
+        sessionId: { type: 'string' }, sourceRevision: { type: 'string' }, evidenceRefs: intentIdsSchema } } } } } },
+    disposition: { oneOf: [
+      { type: 'object', required: ['kind', 'operationRefs'], additionalProperties: false, properties: { kind: { const: 'continue' }, operationRefs: intentIdsSchema } },
+      { type: 'object', required: ['kind', 'waitFor'], additionalProperties: false, properties: { kind: { const: 'wait' }, waitFor: { type: 'array', minItems: 1, maxItems: 32, items: {
+        type: 'object', required: ['kind', 'id', 'revision'], additionalProperties: false, properties: { kind: { type: 'string', enum: ['session', 'human_request', 'resource', 'recovery'] }, id: { type: 'string' }, revision: { type: 'string' } } } } } },
+      { type: 'object', required: ['kind', 'replyRef'], additionalProperties: false, properties: { kind: { const: 'return' }, replyRef: { type: 'string' } } },
+      { type: 'object', required: ['kind', 'code', 'recoveryRef'], additionalProperties: false, properties: { kind: { const: 'blocked_system' }, code: { type: 'string' }, recoveryRef: { type: 'string' } } },
+      { type: 'object', required: ['kind', 'controlRef'], additionalProperties: false, properties: { kind: { const: 'withdraw' }, controlRef: { type: 'string' } } },
+    ] }, reason: { type: 'string', maxLength: 1000 },
+  } };
 const SPAWN_INPUT_SCHEMA = {
     type: 'object',
     properties: {
@@ -57,7 +83,11 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
   ...OBJECTIVE_TOOL_SPECS,
   spec('coordinate_work', 'local.delegation.coordinate_work', {
     type: 'object', properties: {
-      action: { type: 'string', enum: ['parallel','augment','revise','query','answer','cancel','replace','handoff','resume'] },
+      action: { type: 'string', enum: ['parallel','augment','revise','query','answer','cancel','replace','handoff','resume','assess'] },
+      assessment: intentAssessmentSchema,
+      afterSessionId: { type: 'string', maxLength: 200 },
+      eventId: { type: 'string', maxLength: 200 }, payloadOffset: { type: 'integer', minimum: 0 },
+      inputId: { type: 'string', maxLength: 200 }, afterInputId: { type: 'string', maxLength: 200 }, expectedWorkRevision: { type: 'integer', minimum: 0 },
       workId: { type: 'string', maxLength: 200 }, sessionId: { type: 'string', maxLength: 200 },
       expectedRevision: { type: 'integer', minimum: 0, description: 'Use the exact numeric goalRevision returned by coordinate_work query (for example 1, never "1.0"). Query does not require a revision.' }, reason: { type: 'string', maxLength: 500 },
       text: { type: 'string', maxLength: 4000 }, replyTo: { type: 'string', maxLength: 200 }, task: SPAWN_INPUT_SCHEMA,
@@ -210,12 +240,23 @@ export function validateDelegationInput(name, raw) {
   const input = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   if (OBJECTIVE_TOOL_SPECS.some(spec => spec.name === name)) return validateObjectiveToolInput(name, raw);
   if (name === 'coordinate_work') {
-    if (Object.keys(input).some(key => !['action','workId','sessionId','expectedRevision','reason','text','replyTo','task'].includes(key))
-      || !['parallel','augment','revise','query','answer','cancel','replace','handoff','resume'].includes(input.action) || !text(input.reason,500)) return invalid('A scoped coordination action and reason are required. Authority is assigned by the host.');
+    if (Object.keys(input).some(key => !['action','workId','sessionId','expectedRevision','reason','text','replyTo','task','assessment','afterSessionId','eventId','payloadOffset','inputId','afterInputId','expectedWorkRevision'].includes(key))
+      || !['parallel','augment','revise','query','answer','cancel','replace','handoff','resume','assess'].includes(input.action) || !text(input.reason,500)) return invalid('A scoped coordination action and reason are required. Authority is assigned by the host.');
+    if (input.action === 'assess') {
+      if (input.assessment?.operationId !== undefined || !validIntentAssessment({ ...input.assessment, operationId: 'host' })) return invalid('A bounded intent assessment with both current revisions and source identities is required. The host assigns its operationId.');
+      return { ok: true, value: { action: 'assess', reason: input.reason.trim(), assessment: structuredClone(input.assessment) } };
+    }
+    if (input.assessment !== undefined) return invalid('assessment is only valid for action assess.');
+    if (input.afterSessionId !== undefined && (input.action !== 'query' || !text(input.afterSessionId,200) || !Number.isSafeInteger(input.expectedRevision))) return invalid('Frame pagination requires query, afterSessionId and current expectedRevision.');
+    if (input.eventId !== undefined && (input.action !== 'query' || !text(input.eventId,200))
+      || input.inputId !== undefined && (input.action !== 'query' || !text(input.inputId,200) || input.eventId)
+      || input.expectedWorkRevision !== undefined && (input.action !== 'query' || !Number.isSafeInteger(input.expectedWorkRevision) || input.expectedWorkRevision < 0)
+      || input.afterInputId !== undefined && (input.action !== 'query' || !text(input.afterInputId,200) || !Number.isSafeInteger(input.expectedWorkRevision))
+      || input.payloadOffset !== undefined && ((!input.eventId && !input.inputId) || !Number.isSafeInteger(input.payloadOffset) || input.payloadOffset < 0)) return invalid('Factual retrieval requires query, a scoped inputId/eventId and a non-negative integer payloadOffset; input paging also requires current expectedWorkRevision.');
     if (input.workId !== undefined && !text(input.workId,200) || input.sessionId !== undefined && !text(input.sessionId,200)) return invalid('workId and sessionId must be non-empty strings of at most 200 characters.');
     if (input.expectedRevision !== undefined && (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0)) return invalid('expectedRevision must be a non-negative integer, not a string. Call coordinate_work query for this session, then use its numeric goalRevision unchanged. No new user confirmation is implied by this input error.');
 
-    if (input.action === 'query' && !text(input.sessionId,200)) return invalid('Select a real session to discover its current facts and goalRevision.');
+    if (input.action === 'query' && !text(input.sessionId,200) && !text(input.workId,200)) return invalid('Select a real session or workId to discover current facts and revisions.');
     if (!['parallel','query'].includes(input.action) && (!text(input.sessionId,200) || !Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0)) return invalid('Select a real session and its current goalRevision.');
     if (['parallel','replace'].includes(input.action) && (!input.task || input.task.supersedes || input.task.objectiveId)) return invalid('A task specification is required; objective and supersession authorities are host-owned.');
     if (['augment','revise','answer'].includes(input.action) && !text(input.text,4000)) return invalid('A bounded work instruction is required.');
@@ -223,6 +264,10 @@ export function validateDelegationInput(name, raw) {
     const task = input.task ? validateSpawn(input.task) : null;
     if (task && !task.ok) return task;
     return { ok:true, value:{action:input.action,reason:input.reason.trim(),
+      ...(input.afterSessionId ? { afterSessionId: input.afterSessionId } : {}),
+      ...(input.eventId ? { eventId: input.eventId, ...(input.payloadOffset !== undefined ? { payloadOffset: input.payloadOffset } : {}) } : {}),
+      ...(input.inputId ? { inputId: input.inputId, ...(input.payloadOffset !== undefined ? { payloadOffset: input.payloadOffset } : {}) } : {}),
+      ...(input.afterInputId ? { afterInputId: input.afterInputId } : {}), ...(input.expectedWorkRevision !== undefined ? { expectedWorkRevision: input.expectedWorkRevision } : {}),
       ...(input.workId ? {workId:input.workId} : {}), ...(input.sessionId ? {sessionId:input.sessionId} : {}),
       ...(input.expectedRevision !== undefined ? {expectedRevision:input.expectedRevision} : {}),
       ...(input.text ? {text:input.text.trim()} : {}), ...(input.replyTo ? {replyTo:input.replyTo.trim()} : {}), ...(task ? {task:task.value} : {})} };

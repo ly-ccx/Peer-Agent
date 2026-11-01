@@ -95,7 +95,7 @@ export function createCoordinationJournalReader({ file, onRead = () => {} }) {
       const state = readState();
       return structuredClone({ revision: state.revision, mandates: state.mandates || {},
         transitions: state.transitions || {}, decisions: state.decisions || {},
-        workStates: Object.fromEntries(Object.entries(state.works).map(([id, work]) => [id, { state: work.state, stopScope: work.stopScope }])) });
+        workStates: Object.fromEntries(Object.entries(state.works).map(([id, work]) => [id, { state: work.state, stopScope: work.stopScope, intentCoordination: work.intentCoordination }])) });
     },
     committed: state => publish(structuredClone(state)), clear };
 }

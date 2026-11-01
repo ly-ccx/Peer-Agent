@@ -192,6 +192,8 @@ export function createSessionSupervisor({
   const takeover = createSessionTakeover({ sessionControl, findBySession, goalPlanStore, goalRunner, executionScheduler, exclusive, canManageWorkspace,
     abortStream, promote, emit, now, humanGateOf });
   coordination = createCoordinationLifecycle({ readSession: input => get(input),
+    readGoalFacts: sessionId => { const plan = findBySession(sessionId); return plan ? hostFacts(plan).hostAuthority : null; },
+    verifyGoal: input => goalRunner?.verifyDelegatedSession?.(input),
     admitTask: (input, context) => checkDelegationCapabilities(input, context),
     readSessionSummary: input => {
       const plan = findBySession(input.sessionId);
@@ -737,7 +739,8 @@ export function createSessionSupervisor({
           metadataRevision: plan.updatedAt || plan.createdAt || '' };
         return { plan, summary };
       }).filter(({plan,summary}) => related(plan) || userFollowUp(plan) && summary.followUp.inCurrentList)
-      .sort((a,b) => Number(Boolean(related(b.plan))) - Number(Boolean(related(a.plan)))
+      .sort((a,b) => Number(ids.has(b.plan.delegationOrigin.sessionId)) - Number(ids.has(a.plan.delegationOrigin.sessionId))
+        || Number(Boolean(related(b.plan))) - Number(Boolean(related(a.plan)))
         || String(b.plan.updatedAt || '').localeCompare(String(a.plan.updatedAt || '')))
       .slice(0, 24).map(({summary}) => summary);
   }

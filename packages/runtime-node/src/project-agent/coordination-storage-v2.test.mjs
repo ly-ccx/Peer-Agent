@@ -21,8 +21,8 @@ test('warm metadata reads reject external same-size schema changes, replacement 
     const base = path.join(w.rootDir, 'w'), manifestFile = path.join(base, 'coordination-v2/manifest.json');
     const original = readFileSync(manifestFile, 'utf8'), before = statSync(manifestFile);
     assert.equal(store.readSnapshot().revision, 0);
-    const future = JSON.parse(original); future.minimumReaderVersion = 9; future.minimumWriterVersion = 9;
-    writeFileSync(manifestFile, JSON.stringify(future)); utimesSync(manifestFile, before.atime, before.mtime);
+    const unsupported = JSON.parse(original); unsupported.minimumReaderVersion = 0; unsupported.minimumWriterVersion = 0;
+    writeFileSync(manifestFile, JSON.stringify(unsupported)); utimesSync(manifestFile, before.atime, before.mtime);
     assert.throws(() => store.readSnapshot(), /coordination_schema_unsupported/);
     assert.throws(() => store.saveWork({ workId: 'forbidden', state: 'runnable' }), /coordination_schema_unsupported/);
     writeFileSync(manifestFile, original); assert.equal(store.readSnapshot().revision, 0);

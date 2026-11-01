@@ -248,13 +248,11 @@ test('legacy adoption requires this turn canonical human input; human approval r
   assert.deepEqual(f.store.read().mandates.goal.rootInputIds,['u2']);
 });
 
-test('a fulfilled mandate cannot create work from a late event; a fresh human correction preserves the accepted result',async t=>{
+test('accepted stages retain new root responsibility and a human correction preserves the accepted stage',async t=>{
   const f=await fixture(t), a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
   f.sessions.get(a.sessionId).status='accepted';
   f.store.transfer([{eventId:'done',sessionId:a.sessionId,kind:'result_ready'}]);
-  assert.equal(f.lifecycle.facts('w','parent')[0].lifecycle,'fulfilled');
-  const wake=await f.lifecycle.coordinate({action:'parallel',reason:'repeat',task:f.task('u1')},f.context('','wake',{currentInputAnchors:[],events:[{eventId:'done',sessionId:a.sessionId}]}));
-  assert.equal(wake.error,'mandate_inactive');
+  assert.equal(f.lifecycle.facts('w','parent')[0].lifecycle,'active');
   const corrected=await f.lifecycle.coordinate({action:'replace',reason:'new requirement',sessionId:a.sessionId,expectedRevision:1,task:f.task('u2')},f.context('u2','correct'));
   assert.equal(corrected.phase,'completed'); assert.equal(f.sessions.get(a.sessionId).status,'accepted');
   assert.equal(f.cancellations.length,0); assert.equal(f.spawns.length,2);
@@ -267,9 +265,20 @@ test('session lifecycle queries do not clone execution history or authorize from
   const original=f.store.read;f.store.read=()=>{throw Error('full-state probe');};
   try {
     assert.equal(f.lifecycle.forSession('w',a.sessionId).phase,'completed');
-    assert.equal(f.lifecycle.facts('w','parent')[0].lifecycle,'fulfilled');
+    assert.equal(f.lifecycle.facts('w','parent')[0].lifecycle,'active');
     f.store.saveWork({workId:'goal',state:'cancelled',stopScope:'work'});
     assert.equal(f.lifecycle.facts('w','parent')[0].lifecycle,'cancelled');
     await assert.rejects(f.lifecycle.coordinate({action:'parallel',reason:'B',task:f.task('u2')},f.context('u2','b')),/full-state probe/);
   } finally {f.store.read=original;}
+});
+
+test('legacy mandates keep child-based historical closure and cannot be restarted by a late event', async t => {
+  const f = await fixture(t);
+  const decision = { operationId: 'legacy', workId: 'goal', expectedRevision: 0, action: 'parallel', sourceInputIds: ['u1'], sourceEventIds: [], reason: 'Legacy goal',
+    payload: { task: f.task('u1'), context: { workspaceId: 'w', parentConversationId: 'parent' } } };
+  assert.equal(f.store.decide(decision, { parentConversationId: 'parent', currentInputIds: ['u1'] }).ok, true);
+  await f.lifecycle.recover('w'); f.sessions.get('s1').status = 'accepted';
+  assert.equal(f.lifecycle.facts('w', 'parent')[0].lifecycle, 'fulfilled');
+  const event = { eventId: 'late', sessionId: 's1' }; f.store.transfer([event]);
+  assert.equal((await f.lifecycle.coordinate({ action: 'parallel', task: f.task('u1'), reason: 'Repeat' }, f.context('', 'late', { currentInputAnchors: [], events: [event] }))).error, 'mandate_inactive');
 });

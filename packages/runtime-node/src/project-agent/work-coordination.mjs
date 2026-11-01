@@ -4,6 +4,7 @@ import { applyWorkUpdate } from './work-delta.mjs';
 import { admitHistoryResumption, retainHistoricalWork, retainHistoricalSession } from './history-resumption.mjs';
 import { reduceSessionControl } from './session-control-kernel.mjs';
 import { reduceAgentSupervision } from './agent-supervision-state.mjs';
+import { reduceIntentCoordination } from './intent-coordination-kernel.mjs';
 /** Durable event transfer and handling are different receipts. Replay is deterministic. */
 export function reduceCoordination(state, entry) {
   if (entry.schemaVersion !== undefined && entry.schemaVersion !== 1) throw new Error('coordination_schema_unsupported');
@@ -16,6 +17,8 @@ export function reduceCoordination(state, entry) {
   next.revision = entry.revision;
   if (entry.kind === 'session_control') {
     next = reduceSessionControl(next, entry);
+  } else if (entry.kind.startsWith('intent_')) {
+    next = reduceIntentCoordination(next, entry);
   } else if (entry.kind.startsWith('agent_') || entry.kind === 'work_note_written' || entry.kind === 'context_window_opened') {
     next = reduceAgentSupervision(next, entry);
   } else if (['coordination_decision', 'coordination_binding', 'coordination_transition'].includes(entry.kind)) {
@@ -46,6 +49,18 @@ export function reduceCoordination(state, entry) {
     if (!entry.owner?.workId || !Array.isArray(entry.retired) || entry.retired.some(work => work.state !== 'coalesced'
       || work.continuationOwnerWorkId !== entry.owner.workId || work.workId === entry.owner.workId)) throw new Error('invalid_continuation_custody');
     for (const work of [entry.owner, ...entry.retired]) next.works[work.workId] = structuredClone(work);
+  } else if (entry.kind === 'reply_deferred') {
+    if (!next.deliveries[entry.message.id]) next.deliveries[entry.message.id] = { message: structuredClone(entry.message), state: 'deferred' };
+  } else if (entry.kind === 'reply_held') {
+    const delivery = next.deliveries[entry.messageId];
+    if (delivery?.state !== 'deferred') throw new Error('coordination_delivery_conflict');
+    next.deliveries[entry.messageId] = { ...delivery, heldAt: entry.at };
+  } else if (entry.kind === 'reply_aggregated') {
+    const delivery = next.deliveries[entry.messageId], aggregate = next.deliveries[entry.aggregateId];
+    if (delivery?.state !== 'deferred' || aggregate?.state !== 'delivered'
+      || !aggregate.message.meta?.digestReplyIds?.includes(entry.messageId)
+      || !aggregate.message.content?.includes(delivery.message.content?.trim())) throw new Error('coordination_aggregate_unproven');
+    next.deliveries[entry.messageId] = { ...delivery, state: 'aggregated', deliveredBy: entry.aggregateId };
   } else if (entry.kind === 'reply_prepared') {
     if (!next.deliveries[entry.message.id]) {
       const question = entry.message.question;
@@ -57,7 +72,22 @@ export function reduceCoordination(state, entry) {
   } else if (entry.kind === 'reply_delivered') {
     const delivery = next.deliveries[entry.messageId];
     if (!delivery) throw new Error('reply_not_prepared');
+    if (delivery.canonicalCommittedAt && delivery.settlement?.status !== 'applied') throw new Error('coordination_delivery_unsettled');
     next.deliveries[entry.messageId] = { ...delivery, state: 'delivered' };
+  } else if (['reply_committed', 'reply_settlement_started', 'reply_settlement_failed', 'reply_settled'].includes(entry.kind)) {
+    const delivery = next.deliveries[entry.messageId];
+    if (!delivery || delivery.state !== 'prepared') throw new Error('coordination_delivery_conflict');
+    if (entry.kind === 'reply_committed') {
+      next.deliveries[entry.messageId] = { ...delivery, canonicalCommittedAt: entry.at };
+    } else {
+      if (entry.kind !== 'reply_settlement_failed' && !delivery.canonicalCommittedAt) throw new Error('coordination_delivery_uncommitted');
+      const attempts = delivery.settlement?.attempts || 0;
+      if (entry.kind === 'reply_settlement_started' && entry.attempt !== attempts + 1
+        || entry.kind !== 'reply_settlement_started' && entry.attempt !== attempts) throw new Error('coordination_delivery_attempt_conflict');
+      next.deliveries[entry.messageId] = { ...delivery, settlement: { operationId: `settlement:${entry.messageId}`,
+        attempts: entry.attempt, status: entry.kind === 'reply_settled' ? 'applied' : entry.kind === 'reply_settlement_started' ? 'pending' : 'failed',
+        updatedAt: entry.at, ...(entry.kind === 'reply_settlement_failed' ? { error: entry.error, phase: entry.phase, retryAt: entry.retryAt } : {}) } };
+    }
   } else if (entry.kind === 'reply_invalidated') {
     const delivery = next.deliveries[entry.messageId];
     if (!delivery) throw new Error('reply_not_prepared');

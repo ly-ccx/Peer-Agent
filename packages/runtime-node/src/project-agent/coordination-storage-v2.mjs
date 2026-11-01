@@ -14,7 +14,7 @@ import { SUPERVISION_BUCKETS } from './agent-supervision-state.mjs';
 
 import { SESSION_CONTROL_BUCKETS } from './session-control-kernel.mjs';
 
-const buckets = [...SESSION_CONTROL_BUCKETS, 'events', 'works', 'deliveries', 'mandates', 'decisions', 'transitions', 'inputBindings', ...SUPERVISION_BUCKETS];
+const buckets = [...SESSION_CONTROL_BUCKETS, 'events', 'works', 'deliveries', 'mandates', 'decisions', 'transitions', 'inputBindings', 'intentDecisions', ...SUPERVISION_BUCKETS];
 const empty = () => ({ revision: 0, events: {}, works: {}, deliveries: {} });
 const token = file => { try { const s = statSync(file, { bigint: true }); return `${s.dev}:${s.ino}:${s.size}:${s.mtimeNs}:${s.ctimeNs}`; } catch (e) { if (e.code === 'ENOENT') return 'missing'; throw e; } };
 const fail = code => Object.assign(new Error(code), { code });
@@ -117,6 +117,7 @@ function apply(db, record, { blobs, receiptCache } = {}) {
   if (record.kind.startsWith('reply_')) {
     const id = record.message?.id || record.messageId, value = get(db, 'deliveries', id);
     if (value) before.deliveries[id] = value;
+    if (record.aggregateId) { const aggregate = get(db, 'deliveries', record.aggregateId); if (aggregate) before.deliveries[record.aggregateId] = aggregate; }
     const requestId = record.message?.question?.agentRequestId || value?.message?.question?.agentRequestId;
     if (requestId) {
       before.agentRequests = {};
@@ -125,6 +126,23 @@ function apply(db, record, { blobs, receiptCache } = {}) {
     }
   }
   if (record.kind.startsWith('coordination_')) for (const key of ['mandates', 'decisions', 'transitions', 'inputBindings']) before[key] = all(db, key);
+  if (record.kind.startsWith('intent_')) {
+    before.mandates = {};
+    const mandate = get(db, 'mandates', record.workId);
+    if (mandate) before.mandates[record.workId] = mandate;
+    if (record.kind === 'intent_closed') for (const id of record.receipt?.replyRefs || [record.receipt?.replyRef].filter(Boolean)) {
+      const delivery = get(db, 'deliveries', id); if (delivery) before.deliveries[id] = delivery;
+    }
+    if (record.kind === 'intent_closed' && record.receipt?.controlRef) {
+      before.transitions = {};
+      const control = get(db, 'transitions', record.receipt.controlRef);
+      if (control) before.transitions[record.receipt.controlRef] = control;
+    }
+    before.intentDecisions = {};
+    for (const id of [record.assessment?.operationId, record.assessment?.sourceDecisionRef, record.receipt?.operationId].filter(Boolean)) {
+      const receipt = get(db, 'intentDecisions', id); if (receipt) before.intentDecisions[id] = receipt;
+    }
+  }
   if (record.kind === 'usage_observed' && db.prepare('SELECT 1 FROM observations WHERE workId=? AND id=?').get(record.workId, record.observationId)) {
     const work = before.works[record.workId]; if (work?.budget) work.budget.observations = { [record.observationId]: true };
   }
@@ -142,7 +160,11 @@ function apply(db, record, { blobs, receiptCache } = {}) {
   const closure = record.kind === 'agent_execution_completed' || record.transition?.minimumExecutorVersion === 3
     || Object.values(next.transitions || {}).some(row => row.minimumExecutorVersion === 3 || row.reconciliationRef)
     || Object.values(next.agentCommands || {}).some(row => row.completionRecorded === true);
-  putMeta(db, 'minimumFormatVersion', Math.max(getMeta(db, 'minimumFormatVersion') || 2, record.kind === 'session_control' ? 7 : closure ? 6 : supervision ? 5 : record.kind.startsWith('history_') ? 4 : 2));
+  const intent = record.kind.startsWith('intent_') || record.mandate?.intentSchemaVersion === 1
+    || ['reply_committed', 'reply_settlement_started', 'reply_settlement_failed', 'reply_settled', 'reply_deferred', 'reply_held', 'reply_aggregated'].includes(record.kind);
+  const semanticFloor = record.kind === 'session_control' ? (record.minimumExecutorVersion >= 9 ? 9 : 7)
+    : intent ? (record.minimumExecutorVersion >= 9 ? 9 : 8) : closure ? 6 : supervision ? 5 : record.kind.startsWith('history_') ? 4 : 2;
+  putMeta(db, 'minimumFormatVersion', Math.max(getMeta(db, 'minimumFormatVersion') || 2, semanticFloor));
   for (const bucket of buckets) for (const [id, original] of Object.entries(next[bucket] || {})) {
     let value = original;
     if (bucket === 'works' && value.budget?.observations) {
@@ -267,7 +289,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
     if (existsSync(path.join(directory, 'coordination-fence.json')) && readMetadata(path.join(directory, 'coordination-fence.json')).status !== 'complete') throw fail('coordination_fence_incomplete');
     if (!existsSync(manifestFile)) throw fail(existsSync(path.join(directory, 'coordination-recovery.json')) ? 'coordination_repair_incomplete' : 'coordination_recovery_pending');
     const next = readMetadata(manifestFile);
-    if (next.schemaVersion !== 2 || ![2, 3, 4, 5, 6, 7].includes(next.minimumReaderVersion) || next.minimumWriterVersion !== next.minimumReaderVersion) throw fail('coordination_schema_unsupported');
+    if (next.schemaVersion !== 2 || ![2, 3, 4, 5, 6, 7, 8, 9].includes(next.minimumReaderVersion) || next.minimumWriterVersion !== next.minimumReaderVersion) throw fail('coordination_schema_unsupported');
     if (next.minimumReaderVersion >= 3) {
       if (next.frozenLegacyFile !== 'baseline.jsonl' || !lstatSync(originalLegacyFile).isDirectory() || lstatSync(originalLegacyFile).isSymbolicLink() || !lstatSync(path.join(dir, 'baseline.jsonl')).isFile() || lstatSync(path.join(dir, 'baseline.jsonl')).isSymbolicLink()) throw fail('coordination_writer_fence_missing');
       legacyFile = path.join(dir, next.frozenLegacyFile);
@@ -311,6 +333,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
     }
     {
       const expected = readHead(headFile, manifest.generation, readMetadata);
+      if ((expected.minimumWriterVersion || 2) > manifest.minimumWriterVersion || (getMeta(db, 'minimumFormatVersion') || 2) > manifest.minimumWriterVersion) throw fail('coordination_recovery_pending');
       if (expected.legacyVersion !== manifest.legacyVersion) throw fail('coordination_legacy_changed');
       if ((getMeta(db, 'revision') || 0) < expected.revision
         || (getMeta(db, 'revision') || 0) === expected.revision && (getMeta(db, 'eventHash') || '') !== expected.hash) throw fail('coordination_journal_missing');
@@ -394,6 +417,18 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
         durable(manifestFile, JSON.stringify(value));
         syncPath(directory); syncPath(path.dirname(directory));
       }
+      if (existsSync(manifestFile)) {
+        const current = JSON.parse(readFileSync(manifestFile, 'utf8'));
+        const candidate = database(published);
+        let floor;
+        try { floor = Math.max(current.minimumWriterVersion, priorHead?.minimumWriterVersion || 2, getMeta(candidate, 'minimumFormatVersion') || 2); }
+        finally { candidate.close(); }
+        if (![2,3,4,5,6,7,8,9].includes(floor)) throw fail('coordination_schema_unsupported');
+        if (floor > current.minimumWriterVersion) {
+          durable(headFile, JSON.stringify({ ...readHead(headFile, generation), minimumWriterVersion: floor }));
+          durable(manifestFile, JSON.stringify({ ...current, minimumReaderVersion: floor, minimumWriterVersion: floor }));
+        }
+      }
       load();
       finishRecovery();
     })().finally(() => { preparing = undefined; });
@@ -455,9 +490,10 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
     }
   }
   return { active, prepare,
+    supportsProtectedReceipts() { load(); return manifest.minimumWriterVersion >= 3 && manifest.frozenLegacyFile === 'baseline.jsonl'; },
     enableSupervision(minimumVersion = 5) {
       assertOwner(); load();
-      if (![5,6,7].includes(minimumVersion)) throw fail('coordination_schema_unsupported');
+      if (![5,6,7,8,9].includes(minimumVersion)) throw fail('coordination_schema_unsupported');
       if (manifest.minimumWriterVersion >= minimumVersion) return;
       if (manifest.minimumWriterVersion < 3 || manifest.frozenLegacyFile !== 'baseline.jsonl') throw fail('coordination_writer_fence_required');
       const next = { ...manifest, minimumReaderVersion: minimumVersion, minimumWriterVersion: minimumVersion };
@@ -483,7 +519,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
     readSnapshot() { load(); const revision = getMeta(db, 'revision') || 0; if (!cached || cachedRevision !== revision) { cached = freeze(snapshot(db)); cachedRevision = revision; } return cached; },
     readWork(id) { load(); return head(db, id); },
     readLifecycleFacts() { load(); const state = { revision: getMeta(db, 'revision') || 0 }; for (const key of ['mandates', 'transitions', 'decisions']) state[key] = all(db, key);
-      state.workStates = Object.fromEntries(Object.entries(all(db, 'works')).map(([id, work]) => [id, { state: work.state, stopScope: work.stopScope }])); return state; },
+      state.workStates = Object.fromEntries(Object.entries(all(db, 'works')).map(([id, work]) => [id, { state: work.state, stopScope: work.stopScope, intentCoordination: work.intentCoordination }])); return state; },
     commitEntry: (entry, _persist, options) => write(entry, options),
     hasObservation(workId, id) { load(); return Boolean(db.prepare('SELECT 1 FROM observations WHERE workId=? AND id=?').get(workId, id)); },
     dispatchOrigin(workId, attemptId, callId) { load(); const row = db.prepare('SELECT value FROM dispatches WHERE workId=? AND attemptId=? AND callId=?').get(workId, attemptId, callId); return row ? JSON.parse(row.value) : null; },

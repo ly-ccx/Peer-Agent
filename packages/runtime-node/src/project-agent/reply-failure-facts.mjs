@@ -6,14 +6,16 @@ export function replyFailureStatus(message, messages, works, deliveries, session
   const index = messages.indexOf(message);
   const later = messages.slice(index + 1);
   const recovered = work && later.find(row => row.kind === 'agent_reply' && row.turnId !== message.turnId
-    && row.meta?.workId === work.workId && deliveries[row.id]?.state === 'delivered');
+    && (row.meta?.workId === work.workId || row.meta?.intentBindings?.some(binding => binding.workId === work.workId))
+    && (!work.intentCoordination || row.meta?.intentScopes?.some(scope => scope.workId === work.workId && scope.goalRevision === work.intentCoordination.goalRevision))
+    && deliveries[row.id]?.state === 'delivered');
   const newer = work && later.some(row => row.kind === 'agent_turn' && row.meta?.workId === work.workId);
   const active = sessions.filter(row => work?.sessionIds?.includes(row.sessionId)
     && ['queued', 'starting', 'running', 'verifying'].includes(row.status)).map(row => row.sessionId);
   const reserved = work?.state === 'retry_wait' && work.recovery?.reservationId
     && work.waitFor?.some(wait => wait.kind === 'retry_timer' && wait.id === work.recovery.reservationId)
     && Date.parse(work.recovery.deadlineAt) > Date.parse(now);
-  const phase = work?.state === 'cancelled' ? 'cancelled' : work?.state === 'paused' ? 'paused'
+  const phase = work?.state === 'cancelled' || work?.intentCoordination?.lifecycle === 'cancelled' ? 'cancelled' : work?.state === 'paused' ? 'paused'
     : recovered ? 'recovered' : newer ? 'superseded'
     : work?.state === 'runnable' || reserved ? 'retrying' : 'current';
   return { phase, turnKind: turn?.turnKind === 'wake' ? 'wake' : 'user', activeSessionIds: active,

@@ -40,6 +40,14 @@ const OBJECTIVE_RULES = `Objective autonomy contract.
 - Objective tasks require user confirmation at acceptance unless the user explicitly enabled automatic acceptance on that objective. Verifier and side effect gates still apply.
 - On objective_proposal_stale, objective_report_only, objective_observation_unproven or current_user_work_required stop and ask; do not retry with omitted objectiveId or another old anchor.`;
 
+const INTENT_RULES = `Intent and responsibility contract.
+- Ordinary discussion and direct answers stay lightweight: no GoalPlan, classification request or semantic assessment is required without a delegated goal.
+- For a delegated goal, use coordinate_work query with its workId and assess within the original turn. Interpret every current input, retain the full original outcome, constraints, non-goals and remaining requirements. Model interpretation grants no permission and proves no execution.
+- Before ending a non-yielded coordination turn, persist one current disposition: continue with real operation references or requirement:<remaining requirementId>, wait with a real versioned source, return with query.currentReplyRef, blocked_system with a concrete code and work:<workId> recovery reference, or withdraw with an applied current-user cancel operation. When dispositionRequired is true, correct it once within the existing turn budget.
+- A signed-off research stage may leave implementation outstanding. Keep the root responsibility active and continue the admitted next stage through its persisted decision; do not ask the user to say continue again. Accepted child results remain historical and are never resumed to represent unrelated next-stage work.
+- Before return, mark every requirement covered using current session sourceRevision and actual Evidence references. The host reuses qualifying verification or runs the existing readonly review; a failed root review requires further work, not a completion claim. post_reply is expression and delivery, never root completion authority.
+- A wait must refer to an actual session revision, native user request or recovery condition. Agent questions are answered by the parent where authorized; native human/permission/acceptance gates remain human. Do not invent resource capabilities or replace missing disposition with a summary.`;
+
 export function createProjectAgentPromptSource() {
   return {
     id: 'project-agent',
@@ -56,7 +64,7 @@ export function createProjectAgentPromptSource() {
         layer: 'L1_AGENT',
         priority: 20,
         title: 'Project agent rules',
-        content: `${RULES}\n${INTERRUPT_RULES}\n${FAILURE_RULES}\n${STATUS_RULES}\n${OBJECTIVE_RULES}`,
+        content: `${RULES}\n${INTERRUPT_RULES}\n${FAILURE_RULES}\n${STATUS_RULES}\n${OBJECTIVE_RULES}\n${INTENT_RULES}`,
         source: {
           id: 'project-agent',
           kind: 'project-agent-rules',

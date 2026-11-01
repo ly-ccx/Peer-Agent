@@ -239,9 +239,12 @@ test('two terminal compositions start only one project turn and takeover preserv
 
 test('shared terminal composition completes delegation, real file evidence, independent verification and a governed reply',async()=>{
   const f=fixture();writeFileSync(path.join(f.workspacePath,'README.md'),'verified terminal fixture');
+  const previousDataHome=process.env.PEER_AGENT_HOME;process.env.PEER_AGENT_HOME=f.dataHome;
+  cleanups.push(()=>{if(previousDataHome===undefined)delete process.env.PEER_AGENT_HOME;else process.env.PEER_AGENT_HOME=previousDataHome;});
   const runtimeCleanup: TestCleanup[] = [];
   let host:ReturnType<typeof createTuiProjectHost>;
-  let sequence=0, verified=false;
+  let sequence=0, verified=false, rootReviews=0;
+  let disposition:'wait'|'return'='wait', currentInputs:string[]=[];
   const call=(name:string,args:object)=>({content:'',toolCalls:[{id:`chain-${++sequence}`,name,arguments:JSON.stringify(args)}]});
   host=createTuiProjectHost({...f,autoStart:false,
     getSettings:()=>({providers:[provider],projectAgent:{concurrency:2},memory:{enabled:false}}),
@@ -256,6 +259,11 @@ test('shared terminal composition completes delegation, real file evidence, inde
           const plans=host.plans.listPlans().map((row:any)=>host.plans.getPlan(row.planId)).filter(Boolean);
           const plan=plans.find((row:any)=>row.delegationOrigin?.workspaceId===f.workspaceId);
           if(content.includes('Verifier mission for plan')){
+            if(content.includes('host-bound root goal review')){
+              rootReviews++;
+              expect(content).toContain('Read README and verify it');
+              expect(content).toContain('canonicalInputs');
+            }
             const refs=host.plans.listEvidenceIndex().filter((row:any)=>row.planId===plan?.planId&&row.bodyPreview?.text?.includes('verified terminal fixture')).map((row:any)=>row.evidenceRef);
             expect(refs.length).toBeGreaterThan(0);
             const text=JSON.stringify({passed:true,failedCriteria:[],missingEvidence:[],risks:[],evidenceRefs:[refs[0]],summary:'independent verification passed'});
@@ -271,13 +279,35 @@ test('shared terminal composition completes delegation, real file evidence, inde
             const session=host.supervisor.sessionsForProject(f.workspaceId)[0];
             if(!session)return call('spawn_session',{anchorMessageIds:['input-chain'],title:'Read README',brief:'Read README.md and verify its contents',kind:'research',readOnly:true,isolation:'none',successCriteria:[{kind:'file-exists',description:'README exists',path:'README.md'}]});
             if(session.status==='result_ready'&&!verified){verified=true;return call('verify_session',{sessionId:session.sessionId});}
-            if(lastTool?.name==='verify_session')return call('post_reply',{text:'已完成 README 检查并通过验收。',sources:[session.sessionId],replyTo:[],proactive:true,statusClaims:[{sessionId:session.sessionId,status:session.status}]});
             if(lastTool?.name==='post_reply')return {content:'',toolCalls:[]};
-            if(lastTool?.name==='spawn_session'){
-              expect(lastTool.content).toContain(session.sessionId);
-              return call('post_reply',{text:'已开始检查 README。',sources:[session.sessionId],replyTo:['input-chain'],statusClaims:[{sessionId:session.sessionId,status:session.status}]});
+            if(lastTool?.name==='coordinate_work'){
+              const encoded=JSON.parse(lastTool.content),result=encoded.output ?? encoded;
+              expect(result.ok).toBe(true);
+              if(result.decisionFrame){
+                const ready=verified&&session.status==='result_ready';
+                disposition=ready?'return':'wait'; currentInputs=result.sourceInputIds;
+                const row=result.decisionFrame.sessions.find((row:any)=>row.sessionId===session.sessionId);
+                const refs=host.plans.listEvidenceIndex().filter((row:any)=>row.planId===plan?.planId&&row.bodyPreview?.text?.includes('verified terminal fixture')).map((row:any)=>row.evidenceRef);
+                return call('coordinate_work',{action:'assess',reason:'Record the original README responsibility',assessment:{
+                  workId:result.workId,expectedWorkRevision:result.workRevision,expectedGoalRevision:result.goalRevision,
+                  sourceInputIds:result.sourceInputIds,sourceEventIds:result.sourceEventIds,sourceDecisionRef:result.sourceDecisionRef,
+                  inputs:result.sourceInputIds.map((inputId:string)=>({inputId,kind:'delegate',reason:'Read and verify the README'})),
+                  ...(!result.intent?{interpretation:{outcome:'Read README and verify it',constraints:[],nonGoals:[],openQuestions:[],
+                    requirements:[{requirementId:'readme',text:'README exists and its contents are verified',sourceInputIds:['chain']}]}}:{}),
+                  coverage:[{requirementId:'readme',status:ready?'covered':'remaining',explanation:ready?'The real file evidence was independently verified':'The delegated read is still in progress',
+                    sources:ready?[{sessionId:session.sessionId,sourceRevision:row.sourceRevision,evidenceRefs:refs}]:[]}],
+                  disposition:ready?{kind:'return',replyRef:result.currentReplyRef}:{kind:'wait',waitFor:[{kind:'session',id:session.sessionId,revision:row.observationRevision||row.sourceRevision}]},
+                  reason:ready?'Return the verified original result':'Wait for the actual delegated result',
+                }});
+              }
+              if(disposition==='return'){
+                expect(result.review?.passed).toBe(true);
+                return call('post_reply',{text:'已完成 README 检查并通过验收。',sources:[session.sessionId],replyTo:currentInputs.length?['input-chain']:[],proactive:!currentInputs.length,statusClaims:[{sessionId:session.sessionId,status:session.status}]});
+              }
+              if(currentInputs.length)return call('post_reply',{text:'已开始检查 README。',sources:[session.sessionId],replyTo:['input-chain'],statusClaims:[{sessionId:session.sessionId,status:session.status}]});
+              return {content:'',toolCalls:[]};
             }
-            return {content:'',toolCalls:[]};
+            return call('coordinate_work',{action:'query',workId:session.origin!.workId,reason:'Read the current goal and source versions'});
           }
           if(!lastTool)return call('read_file',{path:'README.md'});
           if(lastTool.name==='read_file')return call('goal_update_task',{planId:plan!.planId,taskId:plan!.tasks[0].taskId,status:'completed',result:'README read',evidenceRefs:[`tool-result://${lastTool.toolCallId}`],criterionResults:[{criterionId:'c1',passed:true,evidenceRef:`tool-result://${lastTool.toolCallId}`,detail:'Real read confirms README exists'}]});
@@ -291,12 +321,15 @@ test('shared terminal composition completes delegation, real file evidence, inde
   client.submit('Read README and verify it',{inputId:'chain'});await host.tick();
   const deadline=Date.now()+6000;
   while(Date.now()<deadline){await new Promise(resolve=>setTimeout(resolve,20));await host.tick();
-    if((await client.poll(true)).messages.some(row=>row.kind==='agent_reply'&&row.content.includes('通过验收')))break;}
+    if((await client.poll(true)).messages.some(row=>row.kind==='agent_reply'&&row.content.includes('通过验收'))
+      &&host.supervisor.coordinationFacts(f.workspaceId,f.conversationId,null).some((row:any)=>row.lifecycle==='fulfilled'))break;}
   const snapshot=await client.poll(true),session=snapshot.sessions[0];
   expect(session).toBeDefined();
   expect(snapshot.messages.some(row=>row.kind==='agent_reply'&&row.content.includes('通过验收'))).toBe(true);
   const plan=host.plans.getPlan(session.planId)!;
   expect(plan.hostVerification?.independentVerifier).toBe('passed');
+  expect(rootReviews).toBe(1);
+  expect(host.supervisor.coordinationFacts(f.workspaceId,f.conversationId,null).some((row:any)=>row.lifecycle==='fulfilled')).toBe(true);
   expect(host.plans.listEvidenceIndex().some((row:any)=>row.planId===plan.planId&&row.bodyPreview?.text==='verified terminal fixture')).toBe(true);
   const before=JSON.parse(JSON.stringify({status:plan.status,runner:plan.runner,origin:plan.delegationOrigin}));
   await host.close();

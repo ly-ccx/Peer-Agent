@@ -6,7 +6,7 @@ import path from 'node:path';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
 import { controlDigest } from './session-control-kernel.mjs';
 
-test('control receipts survive a new reader and retain the version-seven writer fence', async () => {
+test('control receipts survive a new reader and retain the combined version-nine writer fence', async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'peer-control-journal-'));
   const options = { rootDir: root, workspaceId: 'workspace', holdsLease: () => true, leaseEpoch: () => 'host', formatVersion: 2, fenceLegacyWrites: true };
   let store = createWorkCoordinationStore(options);
@@ -27,8 +27,8 @@ test('control receipts survive a new reader and retain the version-seven writer 
     assert.deepEqual(store.readSessionControl('session').stopReceipt.unknownCalls, ['unresolved-call']);
     assert.equal(store.readSessionControl('session').outcome, 'applied');
     const manifest = JSON.parse(readFileSync(path.join(root, 'workspace/coordination-v2/manifest.json'), 'utf8'));
-    assert.equal(manifest.minimumReaderVersion, 7);
-    assert.equal(manifest.minimumWriterVersion, 7);
+    assert.equal(manifest.minimumReaderVersion, 9);
+    assert.equal(manifest.minimumWriterVersion, 9);
     assert.deepEqual(Object.keys(store.read().mandates || {}), [], 'legacy cancellation does not fabricate a coordination mandate');
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });

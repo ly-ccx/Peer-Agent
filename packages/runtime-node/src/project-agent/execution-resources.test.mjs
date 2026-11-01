@@ -148,6 +148,15 @@ test('bootstrap imports foreign workspace protection before admitting a director
   assert.equal(first.inspect(own).blocker.kind,'protection');
 });
 
+for (const version of [7, 8, 9]) test(`missing ledger uses the actual resource contract in coordination format ${version}`, t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'peer-resource-floor-'));
+  const directory = path.join(root, 'w', 'coordination-v2'); mkdirSync(directory, { recursive: true });
+  writeFileSync(path.join(directory, 'manifest.json'), JSON.stringify({ minimumWriterVersion: version }));
+  const resources = createExecutionResources({ rootDir: root });
+  t.after(() => { resources.close(); rmSync(root, { recursive: true, force: true }); });
+  if (version === 8) assert.equal(resources.revision(), 0, 'independent intent history predates resource storage');
+  else assert.throws(() => resources.revision(), /execution_resource_store_missing/);
+});
 
 test('a legacy session without a work identity retains its unknown calls without querying an absent key', () => {
   let reads = 0;

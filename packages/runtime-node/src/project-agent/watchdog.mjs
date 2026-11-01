@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { sessionFactsFromPlan } from './session-facts.mjs';
 import { verificationProgressFromPlan } from './verification-progress.mjs';
+import { stableFailureClass, normalizeProgressMaterial } from './progress-policy.mjs';
 /**
  * 停滞与失败的纯判断。不读盘，不发事件，不执行工具。
  * 事件映射只消费这里的结论；代理规则决定重试、换法、停掉或问用户。
@@ -67,6 +68,7 @@ export function describeFailure(session) {
     lastError,
     summary: parts.join('；'),
     cause: normalizeCause(reason || lastError),
+    causeClass: stableFailureClass(session?.interruption?.code || session?.runner?.interruption?.code || reason || lastError),
   };
 }
 
@@ -78,17 +80,18 @@ export function describeFailure(session) {
 export function assessSameCause(session, failure = describeFailure(session)) {
   const cause = normalizeCause(failure?.cause) || describeFailure(session).cause;
   const taskKey = taskKeyOf(session);
+  const causeClass = stableFailureClass(failure?.causeClass || cause);
   if (!cause) {
     return { taskKey, cause: '', count: 0, askUser: false, stopAutoRetry: false };
   }
   let count = 1;
   for (const entry of priorAttempts(session)) {
     if (!sameTask(entry, taskKey)) continue;
-    const entryCause = normalizeCause(entry?.cause) || describeFailure(entry).cause;
-    if (entryCause === cause) count += 1;
+    const entryCause = stableFailureClass(entry?.causeClass || entry?.cause || describeFailure(entry).causeClass);
+    if (entryCause === causeClass) count += 1;
   }
   const askUser = count >= SAME_CAUSE_RETRY_LIMIT;
-  return { taskKey, cause, count, askUser, stopAutoRetry: askUser };
+  return { taskKey, cause, causeClass, count, askUser, stopAutoRetry: askUser };
 }
 
 const PRIOR_EVENT_TYPES = new Set(['step_failed', 'network_interrupted']);
@@ -109,6 +112,7 @@ function attemptsFromRunTrace(session) {
     const reason = text(event?.payload?.reason) || text(event?.payload?.message);
     if (!reason) continue;
     attempts.push({
+      workId: session.workId, goalRevision: session.goalRevision,
       taskId: session?.taskId,
       planId: session?.planId,
       sessionId: session?.sessionId,
@@ -125,6 +129,7 @@ function attemptsFromRunnerCount(session) {
   if (!cause) return [];
   const prior = Math.trunc(count);
   const entry = {
+    workId: session.workId, goalRevision: session.goalRevision,
     taskId: session?.taskId,
     planId: session?.planId,
     sessionId: session?.sessionId,
@@ -151,6 +156,7 @@ export function watchFactsFromPlan(plan) {
     && !['running', 'starting', 'waiting_provider', 'resuming_after_compaction'].includes(plan.runner?.status);
   return {
     sessionId,
+    ...(origin.workId ? { workId: origin.workId, goalRevision: origin.coordinationBinding?.goalRevision } : {}),
     workspaceId: text(origin?.workspaceId),
     ...(text(plan?.planId) ? { planId: text(plan.planId) } : {}),
     ...(text(plan?.runner?.currentTaskId) ? { taskId: text(plan.runner.currentTaskId) } : {}),
@@ -158,8 +164,8 @@ export function watchFactsFromPlan(plan) {
     status: plan.status === 'interrupted' && plan.runner?.status === 'failed' ? 'interrupted' : sessionFactsFromPlan(plan).status,
     ...(facts.status === 'waiting_agent' && plan.runner?.status === 'blocked' ? {
       blockedReason: text(plan.runner.blockedReason),
-      repairRevision: createHash('sha256').update(JSON.stringify([plan.runner.blockedReason,
-        terminalVerifierRevision(plan), reportMaterial(plan.tasks)])).digest('hex'),
+      repairRevision: createHash('sha256').update(JSON.stringify([stableFailureClass(plan.runner.blockedReason),
+        terminalVerifierRevision(plan), normalizeProgressMaterial(reportMaterial(plan.tasks))])).digest('hex'),
     } : {}),
     ...(plan.status === 'completed' ? { completedAt: text(plan.timing?.completedAt) || text(plan.updatedAt) } : {}),
     ...(terminalVerifierRevision(plan) ? { resultRevision: terminalVerifierRevision(plan) } : {}),
@@ -198,7 +204,9 @@ function terminalVerifierRevision(plan) {
   const latest = runs.at(-1);
   const endedAt = text(latest?.completedAt) || text(latest?.updatedAt);
   if (!['passed', 'failed'].includes(latest?.status) || !endedAt) return '';
-  return JSON.stringify([text(latest.verifierRunId), latest.status, endedAt]);
+  return JSON.stringify({ status: latest.status, failure: stableFailureClass(latest.failureReason),
+    failedCriteria: (latest.report?.failedCriteria || []).map(row => ({ criterionId: row.criterionId, cause: stableFailureClass(row.reason) })),
+    missingEvidence: (latest.report?.missingEvidence || []).map(row => row.taskId) });
 }
 
 function needsFromPlan(plan, sessionId) {
@@ -289,6 +297,7 @@ function anchorToken(value, ms) {
 }
 
 function taskKeyOf(record) {
+  if (record?.workId) return `${record.workId}:${record.goalRevision || 0}`;
   return text(record?.taskId) || text(record?.planId) || text(record?.sessionId);
 }
 
