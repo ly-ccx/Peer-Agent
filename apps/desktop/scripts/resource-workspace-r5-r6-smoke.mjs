@@ -124,7 +124,7 @@ try {
   await open('./broken.png'); await body().getByRole('alert').filter({ hasText: '图片解码失败' }).waitFor();
   await body().getByRole('button', { name: '重新读取', exact: true }).click(); await body().getByRole('alert').filter({ hasText: '图片解码失败' }).waitFor();
   report.checks.push('R6 valid PNG native decoding and fit/zoom; truncated PNG produces local decoder failure and explicit retry');
-  await open('./source.ts'); await active().getByRole('button', { name: 'Diff', exact: true }).click();
+  await open('./source.ts'); await active().getByRole('tab', { name: 'Diff', exact: true }).click();
   await body().locator('.diff-line--add').waitFor(); assert.ok((await body().innerText()).includes('version = 2'));
   await shot('06-code-diff');
   git('update-index', '--chmod=+x', 'source.ts'); await active().getByRole('button', { name: '刷新', exact: true }).click();

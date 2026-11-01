@@ -120,12 +120,12 @@ try {
   assert.equal(otherBot.ok, false); assert.equal(otherBot.content || '', '');
   report.checks.push('production host rejects outside-scope and other-Bot references without returning their body');
   await content().evaluate(el => { el.scrollTop = 320; el.dispatchEvent(new Event('scroll')); });
-  await active().getByRole('button', { name: '源码', exact: true }).click();
+  await active().getByRole('tab', { name: '源码', exact: true }).click();
   await until(() => content().locator('[data-source-line]').count(), value => value > 100, 'source rows');
   await content().evaluate(el => { el.scrollTop = 650; el.dispatchEvent(new Event('scroll')); });
-  await active().getByRole('button', { name: '正文', exact: true }).click();
+  await active().getByRole('tab', { name: '正文', exact: true }).click();
   assert.ok(Math.abs(await content().evaluate(el => el.scrollTop) - 320) < 2);
-  await active().getByRole('button', { name: '源码', exact: true }).click();
+  await active().getByRole('tab', { name: '源码', exact: true }).click();
   assert.ok(Math.abs(await content().evaluate(el => el.scrollTop) - 650) < 2);
   const currentVersion = `sha256:${createHash('sha256').update(revised).digest('hex')}`;
   await until(async () => JSON.parse(readFileSync(settingsPath, 'utf8')).workbench?.documentSessions, sessions => sessions && Object.values(sessions).some(session => session.tabs?.some(tab =>
@@ -139,7 +139,7 @@ try {
   await until(() => content().locator('[data-source-line]').count(), value => value > 100, 'restored source');
   await until(() => content().evaluate(el => el.scrollTop), value => Math.abs(value - 650) < 2, 'source read position after full process restart');
   await capture('06-restarted-source-position');
-  await active().getByRole('button', { name: '正文', exact: true }).click();
+  await active().getByRole('tab', { name: '正文', exact: true }).click();
   assert.ok(Math.abs(await content().evaluate(el => el.scrollTop) - 320) < 2);
   report.checks.push('real settings persist content observation and separate source/preview coordinates; fresh Electron process revalidates and restores both');
   assert.equal(readFileSync(file, 'utf8'), revised, 'only the fixture editor changed file contents');

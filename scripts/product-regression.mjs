@@ -39,7 +39,7 @@ const requiredShots = [...recoveryShots, ...settingsFloatingShots, ...startupSho
   'task-detail-760-dark.png', 'task-detail-760-light.png', 'work-running.png', 'work-waiting.png', 'work-waiting-760-light.png', 'bot-overview.png', 'bot-memory.png', 'chat-process-summary.png',
   'task-cancel-failed-dark.png', 'task-cancelled-dark.png', 'task-cancel-detail-760-light.png',
   'long-error-760-dark.png', 'long-error-docked-light.png',
-  'background-work-1600-dark.png', 'background-work-760-light.png', 'parallel-work-1280-dark.png', 'parallel-work-760-light.png',
+  'work-panel-unavailable.png', 'work-panel-1600-dark.png', 'work-panel-760-light.png', 'parallel-work-1280-dark.png', 'parallel-work-760-light.png',
   'fallback-vision-1280-dark.png', 'fallback-vision-1280-light.png', 'fallback-vision-760-dark.png', 'fallback-vision-760-light.png',
   'providers-1280-dark.png', 'providers-expanded-1280-dark.png',
   'composer-empty-1280-dark.png', 'composer-empty-1280-light.png', 'composer-empty-760-dark.png',
@@ -92,7 +92,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     throw new Error('Agent activity identity or duplicate-report regression failed');
   if (!machine.parallelWork?.neutralGroup || ![[1280, 'dark'], [760, 'light']].every(([width, appearance]) =>
     machine.parallelWork.cases?.some(row => row.width === width && row.appearance === appearance
-      && row.sameLevel && row.uniqueRows && row.independentExpansion))) throw new Error('Parallel task grouping regression failed');
+      && row.sameLevel && row.uniqueRows && row.independentNavigation))) throw new Error('Parallel task grouping regression failed');
   const requiredStates = ['running', 'waiting_user', 'result_ready', 'accepted', 'failed', 'queued', 'paused', 'cancelled', 'unavailable'];
   const requiredErrorLayouts = [[1280, false], [1280, true], [760, false]].flatMap(([width, docked]) =>
     ['dark', 'light'].map(appearance => ({ width, docked, appearance })));
@@ -158,7 +158,8 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     || !['compactControls','persistedModel','persistedEffort','perBot','failedSaveRetained','keyboardTrigger','aligned','sentSelection'].every(check => machine.quickChatBots?.[check] === true)
     || !machine.replyEvidenceReturn?.sameReply || !machine.replyEvidenceReturn?.focusInDetails
     || !['namedSources','savedFile','exactHistory','missingBodyExplained','unknownRefDistinct','diagnosticsCollapsed','commandReadable','narrowFits'].every(check=>machine.evidenceSources?.[check]===true)
-    || !machine.delegatedWorkHandoff?.reply || !machine.delegatedWorkHandoff?.background
+    || !['hostOwner', 'botFollowUp', 'userRequest'].every(key => machine.workPanelOwnership?.[key] === true)
+    || !machine.delegatedWorkHandoff?.reply || !machine.delegatedWorkHandoff?.workPanel
     || !machine.delegatedWorkHandoff?.noDirectHandling || !machine.delegatedWorkHandoff?.detailReturnsToBot
     || !['dark', 'light'].every(appearance => machine.delegatedWorkHandoff?.hintChecks?.some(item =>
       item.appearance === appearance && item.contrast >= 4.5 && item.fits && item.hintSize < item.progressSize))
@@ -167,8 +168,8 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     || !machine.fallbackVision?.openingAnimated || !machine.fallbackVision?.closingAnimated
     || !machine.fallbackVision?.persisted || !machine.fallbackVision?.serviceManagement || !machine.fallbackVision?.keyboard
     || ![1600, 1280, 760].every(width => ['dark', 'light'].every(appearance => [false, true].every(expanded =>
-      machine.backgroundWorkLayout?.some(item => item.width === width && item.appearance === appearance && item.expanded === expanded
-        && item.aligned && item.contentFits && item.expandedFits))))
+      machine.workPanelLayout?.some(item => item.width === width && item.appearance === appearance && item.expanded === expanded
+        && item.aligned && item.contentFits && item.panelFits && item.continuity))))
     || ![1280, 760].every(width => ['dark', 'light'].every(appearance => machine.fallbackVision?.cases?.some(item =>
       item.width === width && item.appearance === appearance && item.centered && item.fits && item.helpSize < item.labelSize)))
     || !requiredErrorLayouts.every(expected => machine.messageLayout.cases?.some(item =>
@@ -193,7 +194,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     checks: { startupSurface: machine.startupSurface, conversationTypography: machine.conversationTypography, userReceipt: machine.userReceipt, attention: machine.attention, historyRegression: machine.historyRegression, disclosureFrames: machine.disclosureFrames,
       quickChatBots: machine.quickChatBots, taskDetails: machine.taskDetails, autonomousCoordination: machine.autonomousCoordination, modelSwitch: machine.modelSwitch, messageLayout: machine.messageLayout, workSurfaces: machine.workSurfaces, windowMaterial: machine.windowMaterial,
       botAccessPolicy: machine.botAccessPolicy, chatDetails: machine.chatDetails, imagePermissionLifecycle: machine.imagePermissionLifecycle, imageFullAccess: machine.imageFullAccess, conversationFlow: machine.conversationFlow, composerLayout: machine.composerLayout, botMessageColors: machine.botMessageColors, accessibility: machine.accessibility, fallbackVision: machine.fallbackVision,
-      backgroundWorkLayout: machine.backgroundWorkLayout, parallelWork: machine.parallelWork, pendingReplyLayout: machine.pendingReplyLayout, evidenceSources: machine.evidenceSources,
+      workPanelLayout: machine.workPanelLayout, workPanelOwnership: machine.workPanelOwnership, parallelWork: machine.parallelWork, pendingReplyLayout: machine.pendingReplyLayout, evidenceSources: machine.evidenceSources,
       delegatedWorkHandoff: machine.delegatedWorkHandoff, taskCancellation: machine.taskCancellation, completionReview: machine.completionReview,
       processEmptyLayout: machine.processEmptyLayout, processTiming: machine.processTiming, budgetFailure: machine.budgetFailure, replyRecovery: machine.replyRecovery, agentActivity: machine.agentActivity, manualWakeRetry: machine.manualWakeRetry, streamingFailureRecovery: machine.streamingFailureRecovery, choiceSendMotion: machine.choiceSendMotion, updaterMinimize: machine.updaterMinimize,
       replyDetailsEntry: machine.replyDetailsEntry, verificationPresentation: machine.verificationPresentation,

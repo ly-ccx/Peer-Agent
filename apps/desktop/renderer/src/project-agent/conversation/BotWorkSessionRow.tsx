@@ -17,7 +17,8 @@ export function BotWorkSessionRow({ session, overview, parent, question, variant
   const needsUser = workPanelNeedsUser(session);
   const blocked = needsUser || session.followUp?.reason === 'technical_block' || session.followUp?.reason === 'verification_failed';
   const knownStatus = WORK_SESSION_STATUSES.find(value => value === session.status);
-  const status = session.coordination?.phase === 'stopping' || ['stopping', 'awaiting_outcome'].includes(session.status)
+  const status = session.status === 'waiting_user' && session.followUp?.owner === 'bot' ? i18n.t('projectAgent.chat.work.waiting')
+    : session.coordination?.phase === 'stopping' || ['stopping', 'awaiting_outcome'].includes(session.status)
     || session.status === 'result_ready' && !needsUser ? formatDrawerSessionStatus(session, i18n)
     : knownStatus ? i18n.t(`projectAgent.chat.sessionState.${knownStatus}`) : i18n.t('projectAgent.chat.work.unavailable');
   const title = session.title && session.title !== session.sessionId ? session.title : i18n.t('projectAgent.chat.work.related');

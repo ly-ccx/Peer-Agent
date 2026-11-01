@@ -120,9 +120,9 @@ try {
   await openPath('guide.md');
   await page.locator('.resource-document[data-active="true"] h1').filter({ hasText: 'DOCUMENT_BODY_OK' }).waitFor();
   assert.equal(await draft.inputValue(), 'COMPOSER_DRAFT_OK');
-  await panel.getByRole('button', { name: '源码', exact: true }).click();
+  await panel.getByRole('tab', { name: '源码', exact: true }).click();
   await until(() => page.locator('.resource-document[data-active="true"] .resource-document-body').innerText(), text => text.includes('# DOCUMENT_BODY_OK'));
-  await panel.getByRole('button', { name: '正文', exact: true }).click();
+  await panel.getByRole('tab', { name: '正文', exact: true }).click();
   report.checks.push('Markdown body/source and Composer draft survive opening');
   await openPath('./long.md');
   const documentBody = page.locator('.resource-document[data-active="true"] .resource-document-body');
@@ -132,12 +132,12 @@ try {
   assert.equal(readingGeometry.position, 'absolute'); assert.ok(readingGeometry.height < readingGeometry.viewport);
   assert.ok(readingGeometry.scroll > readingGeometry.height + 1000, 'the document body, not the entire tab page, owns scrolling');
   await documentBody.evaluate(el => { el.scrollTop = 600; el.dispatchEvent(new Event('scroll')); });
-  await panel.getByRole('button', { name: '源码', exact: true }).click();
+  await panel.getByRole('tab', { name: '源码', exact: true }).click();
   await until(() => documentBody.locator('[data-source-line]').count(), count => count > 100);
   await documentBody.evaluate(el => { el.scrollTop = 1000; el.dispatchEvent(new Event('scroll')); });
-  await panel.getByRole('button', { name: '正文', exact: true }).click();
+  await panel.getByRole('tab', { name: '正文', exact: true }).click();
   assert.ok(Math.abs(await documentBody.evaluate(el => el.scrollTop) - 600) < 2);
-  await panel.getByRole('button', { name: '源码', exact: true }).click();
+  await panel.getByRole('tab', { name: '源码', exact: true }).click();
   assert.ok(Math.abs(await documentBody.evaluate(el => el.scrollTop) - 1000) < 2);
   await openPath('./long.md#L120');
   await until(() => documentBody.evaluate(el => Math.abs(el.querySelector('[data-source-line="120"]').getBoundingClientRect().top - el.getBoundingClientRect().top)), value => value < 2);
