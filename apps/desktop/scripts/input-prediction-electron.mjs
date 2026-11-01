@@ -236,11 +236,14 @@ try {
     await until(() => page.evaluate(() => window.peerAgent.getSettings()), value => value.inputPrediction.enabled === false);
     await enabled.click();
     await until(() => page.evaluate(() => window.peerAgent.getSettings()), value => value.inputPrediction.enabled === true && value.inputPrediction.continuationEnabled === true);
-    const picker = section.getByRole('button', { name: '输入建议模型', exact: true });
+    const picker = section.getByRole('button', { name: /^输入建议模型:/ });
     const disclosure = await picker.getAttribute('aria-describedby');
     assert.match(await page.locator(`[id="${disclosure}"]`).innerText(), /当前对话和未发送的草稿/);
     await page.evaluate(() => window.peerAgent.updateSettings({ inputPrediction: { schemaVersion: 1, enabled: true, continuationEnabled: false,
       disabledWorkspaceIds: [], dailyRequestLimit: 100, dailyTokenLimit: 100000 } }));
+    await page.locator('.settings-nav-header').getByRole('button', { name: '设置', exact: true }).click();
+    await page.locator('.bot-app-menu-button').click(); await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+    await page.getByRole('heading', { name: '智能输入建议', exact: true }).scrollIntoViewIfNeeded();
     await picker.click();
     await page.locator('.model-selection-model').filter({ has: page.getByText('Prediction fixture', { exact: true }) }).click();
     await until(() => page.evaluate(() => window.peerAgent.getSettings()), value => value.inputPrediction.continuationEnabled === true);
