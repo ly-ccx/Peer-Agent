@@ -3,11 +3,16 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { createConversationStore } from '@peer-agent/conversation-store';
-import { openReplyDetails, closeReplyDetails } from './bot-reply-details-checks.mjs';
+import { openReplyDetails, closeReplyDetails, selectBotByName, scrollToBotMessage } from './bot-reply-details-checks.mjs';
 
 /** One canonical reply referencing three tasks must remain one input acknowledgement. */
 export async function checkBotUserReceipt({ page, until, report, captureDirectory, home, bot, commandFile }) {
   const previousSearch = await page.locator('.bot-search').inputValue();
+  await selectBotByName(page, 'project-000');
+  await page.locator('.bot-thread[aria-busy="false"]').waitFor();
+  await page.locator('.bot-thread').focus();
+  await page.keyboard.press('Home');
+  await page.locator('.bot-thread-latest').waitFor();
   const initial = JSON.parse(readFileSync(commandFile, 'utf8'));
   const titles = ['入口样式收尾', '中断原因核查收尾', '设置按钮记录核对'];
   const sessions = titles.map((title, index) => ({ ...initial.sessions[0], sessionId: `receipt-task-${index}`,
@@ -30,13 +35,18 @@ export async function checkBotUserReceipt({ page, until, report, captureDirector
   await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
   await until(() => page.evaluate(workspaceId => window.peerAgent.projectAgentListSessions({ workspaceId }), bot.workspaceId),
     result => result.sessions?.some(session => session.sessionId === sessions[0].sessionId));
+  await until(() => page.evaluate(workspaceId => window.peerAgent.projectAgentReadConversation({ workspaceId, latest: true }), bot.workspaceId),
+    result => result.messages?.some(message => message.id === 'receipt-reply'));
   const user = page.locator('#bot-msg-receipt-input');
   const reply = page.locator('#bot-msg-receipt-reply');
+  // Reading position intentionally survives Bot navigation. Explicitly choose
+  // latest before expecting newly appended virtual rows to enter the DOM.
+  await page.locator('.bot-thread-latest').click();
   const cases = [];
   for (const [width, appearance] of [[1280, 'dark'], [760, 'light']]) {
     await page.setViewportSize({ width, height: 860 });
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, appearance);
-    await reply.waitFor(); await reply.scrollIntoViewIfNeeded();
+    await scrollToBotMessage(page, reply);
     await until(() => user.locator('.bot-user-marks').innerText(), text => text === '已回复');
     assert.equal(await user.locator('.bot-user-marks > span').count(), 1);
     assert.equal(await user.locator('.bot-user-marks > button').count(), 0);
