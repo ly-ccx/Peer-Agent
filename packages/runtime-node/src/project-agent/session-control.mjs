@@ -98,7 +98,8 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
       if (!canManageWorkspace(operation.workspaceId)) throw new Error('lease_unavailable');
       if (!sameExecution(executionIdentity(fresh), operation.expectedExecution)) throw new Error('execution_revision_stale');
       if (sessionFactsFromPlan(fresh).executionOwnership === 'live') throw new Error('execution_still_running');
-      const binding = workBudgetBinding(operation.workspaceId), work = binding?.store.readWork?.(fresh.delegationOrigin.workId);
+      const binding = workBudgetBinding(operation.workspaceId), workId = fresh.delegationOrigin.workId;
+      const work = typeof workId === 'string' && workId ? binding?.store.readWork?.(workId) : undefined;
       const activeUnknown = work?.budget?.uncertainDispatches?.some(row => (!row.planId || row.planId === plan.planId) && binding.activeAttempts?.has(row.attemptId));
       if (activeUnknown) throw new Error('execution_still_running');
       if (executionScheduler.hasUnsettledHandles?.(fresh)) throw new Error('execution_stop_unconfirmed');

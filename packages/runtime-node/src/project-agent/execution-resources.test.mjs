@@ -1,9 +1,10 @@
+import { registerWorkBudget } from './work-budget.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createExecutionResources, executionProtection } from './execution-resources.mjs';
+import { createExecutionResources, executionProtection, unsettledExecution } from './execution-resources.mjs';
 import { executionIdentity } from './session-control-kernel.mjs';
 import { beginExecutionAttempt } from './session-facts.mjs';
 import { providerExecutionScopes, providerFileScopes } from './execution-scopes.mjs';
@@ -145,4 +146,15 @@ test('bootstrap imports foreign workspace protection before admitting a director
   first.reconcile([foreign,own],()=> 'own-host',workspaceId=>workspaceId==='own');
   assert.equal(first.reserve(own,'own-host').allowed,false);
   assert.equal(first.inspect(own).blocker.kind,'protection');
+});
+
+
+test('a legacy session without a work identity retains its unknown calls without querying an absent key', () => {
+  let reads = 0;
+  const release = registerWorkBudget('legacy-resource-query', { readWork() { reads++; throw new Error('absent work identity'); } });
+  try {
+    const legacy = { planId: 'old', delegationOrigin: { workspaceId: 'legacy-resource-query', sessionId: 'session',
+      cancellation: { evidenceCalls: ['unknown-call'] } } };
+    assert.deepEqual(unsettledExecution(legacy), ['unknown-call']); assert.equal(reads, 0);
+  } finally { release(); }
 });
