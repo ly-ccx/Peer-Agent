@@ -26,7 +26,8 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
   }
   function persist(plan, operation) {
     if (!canManageWorkspace(plan.delegationOrigin.workspaceId)) throw new Error('lease_unavailable');
-    const store = journal(plan), previous = read(plan);
+    const currentPlan = readPlan(plan.planId);
+    const store = journal(currentPlan), previous = read(currentPlan);
     if (typeof store?.writeSessionControl === 'function') {
       store.writeSessionControl(operation, previous?.operationId === operation.operationId ? previous.revision : 0, previous?.operationId || null);
     } else {
@@ -72,6 +73,7 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
     return change(plan, operation, { phase: 'draining' });
   }
   async function drain(plan, operation) {
+    plan = readPlan(plan.planId);
     if (read(plan)?.operationId !== operation.operationId) throw new Error('session_control_superseded');
     if (!sameExecution(executionIdentity(plan), operation.expectedExecution)) throw new Error('execution_revision_stale');
     if (operation.stopReceipt && JSON.stringify(operation.stopReceipt.unknownCalls) === JSON.stringify(unsettledExecution(plan))

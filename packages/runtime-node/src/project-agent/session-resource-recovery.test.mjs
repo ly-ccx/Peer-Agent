@@ -27,9 +27,9 @@ test('a legacy cancellation with unknown execution protects its directory until 
   scheduler.reconcile([old, fresh]);
   assert.equal(scheduler.inspect(fresh).blocker.code, 'execution_stop_unconfirmed');
   assert.equal(old.delegationOrigin.executionControl, undefined, 'a cancellation string is not a new stop receipt');
-  await control.reconcile([old, fresh]);
+  assert.deepEqual(await control.reconcile([old, fresh]), []);
   assert.equal(old.delegationOrigin.executionControl.phase, 'settled');
-  assert.equal(scheduler.inspect(fresh).allowed, true);
+  assert.deepEqual(scheduler.select([old, fresh]).start.map(plan => plan.planId), ['new']);
 });
 
 test('the legacy cancelled/stopping shape retires its takeover and admits an independent queued worktree without replay', async t => {
@@ -51,7 +51,7 @@ test('the legacy cancelled/stopping shape retires its takeover and admits an ind
   const control=createSessionControl({goalPlanStore,executionScheduler:scheduler,canManageWorkspace:()=>true,
     goalRunner:{pause(){},async waitForIdle(){}},readMessages:()=>[{id:'input',inputId:'input',role:'user',kind:'user_input'}]});
   scheduler.reconcile([old,fresh]);
-  await control.reconcile([old,fresh]);
+  assert.deepEqual(await control.reconcile([old,fresh]), []);
   assert.equal(old.delegationOrigin.takeover.phase,'superseded');
   assert.equal(old.delegationOrigin.executionControl.phase,'settled');
   assert.deepEqual(old.delegationOrigin.cancellation.evidenceCalls,['historical-unknown']);

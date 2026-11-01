@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createExecutionResources, executionProtection } from './execution-resources.mjs';
@@ -73,10 +73,12 @@ test('a stale revision and a changed body under an existing receipt cannot relea
   assert.throws(() => first.settle(a, { ...current, unknownCalls: ['changed'] }, 'a'), /receipt_conflict/);
 });
 
-test('completed cancellation outranks stale takeover but cannot hide a live executor', () => {
+test('completed cancellation requires ended execution and cannot hide a live executor', () => {
   const a = plan('stale', '/unused');
   a.status = 'cancelled'; a.delegationOrigin.cancellation = { phase: 'completed' };
   a.delegationOrigin.takeover = { phase: 'stopping' };
+  assert.equal(executionProtection(a), 'reconciling');
+  a.runner = { status: 'cancelled' };
   assert.equal(executionProtection(a), 'released');
   const end = beginExecutionAttempt(a.conversationId, 'actual-attempt');
   try { assert.equal(executionProtection(a), 'active'); } finally { end(); }
@@ -111,7 +113,7 @@ test('worktree shell scopes include the actual shared Git directory', t => {
   first.reserve(a,'a'); first.settle(a,stopped(first,a,'unknown',['call']),'a');
   assert.equal(second.reserve(b,'b').allowed,true,'isolated file work can be admitted');
   assert.equal(second.reserve(b,'b',providerExecutionScopes(worktree)).allowed,false,'shell must not pretend shared refs are isolated');
-  assert.deepEqual(providerFileScopes(path.join(worktree,'new-file')), [{kind:'directory',path:worktree}]);
+  assert.deepEqual(providerFileScopes(path.join(worktree,'new-file')), [{kind:'directory',path:realpathSync(worktree)}]);
 });
 
 test('a refused expansion survives release and requeue as a complete resource request', t => {
