@@ -2,7 +2,7 @@
 
 All notable changes to Peer Agent are tracked here.
 
-## 0.1.0-rc.32 - 2026-11-01
+## 0.1.0-rc.33 - 2026-11-01
 
 ### 新功能、修复与优化
 
@@ -10,6 +10,7 @@ All notable changes to Peer Agent are tracked here.
 - 智能输入建议使用一个开关与专用模型，未选模型不请求，并在选择旁说明对话与草稿外发；各入口共用模型选择器。
 - 整合原目标持续协调、当前覆盖核验与实际交付后的唯一关闭；停止屏障和设备资源移交共用正式接口，未知结果继续受保护。
 - 保留用户确认顺畅的长会话输入修复，修复旧任务缺标识查询、资源账本初始化顺序，以及窗口缩窄时面板留位导致的阅读位置和划词引用丢失。
+- 发布的 Desktop 和 CLI macOS 构建迁移至受支持的 macOS 15 runner，保留 arm64、签名与公证门禁；RC32 因旧 runner 停用未生成 Release。
 - 引入联合协调格式 9；升级前完整备份并保持各入口版本匹配。更新双语 README、使用文档、落地页与网站更新日志。
 
 ### Improvements (English)
@@ -18,6 +19,7 @@ All notable changes to Peer Agent are tracked here.
 - Use one suggestion switch and a dedicated model with adjacent conversation/draft disclosure; require a selected model before requests and share model controls across entry points.
 - Continue the original goal with current verification and actual delivery before unique root closure; unify stop barriers and resource handoff while protecting unknown outcomes.
 - Retain the user-confirmed long-conversation typing fix; repair missing legacy IDs, resource-ledger initialization ordering, and reading/selection disruption from panel reservation during narrowing.
+- Move macOS Desktop and CLI releases to supported macOS 15 runners while preserving arm64, signing and notarization gates. RC32 produced no Release after the old runner was unavailable.
 - Introduce combined coordination format 9, requiring complete backups and matching executors. Update bilingual READMEs, user docs, landing copy and website changelog.
 
 ## 0.1.0-rc.31 - 2026-10-31
