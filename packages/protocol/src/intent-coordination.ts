@@ -58,6 +58,16 @@ export interface IntentCoordination {
   readonly decision: IntentAssessment;
   readonly lifecycle: 'active' | 'fulfilled' | 'cancelled';
   readonly updatedAt: string;
+  readonly review?: {
+    readonly reviewRef: string;
+    readonly passed: boolean;
+    readonly goalRevision: number;
+    readonly intentRevision: number;
+    readonly coverageDigest: string;
+    readonly sources: readonly { readonly sessionId: string; readonly sourceRevision: string; readonly observationRevision: string }[];
+    readonly evidenceRefs: readonly string[];
+    readonly at: string;
+  };
   readonly closure?: { readonly operationId: string; readonly replyRef?: string; readonly reviewRef?: string; readonly at: string };
 }
 export interface IntentClosureRequest {
@@ -76,7 +86,7 @@ export interface IntentDecisionReceipt {
 }
 export type IntentCoordinationRequest =
   | { readonly action: 'query'; readonly workId: string }
-  | { readonly action: 'assess'; readonly assessment: IntentAssessment };
+  | { readonly action: 'assess'; readonly assessment: Omit<IntentAssessment, 'operationId'> };
 /** Bounded host projection. Available actions are a snapshot, not grants. */
 export interface CoordinationDecisionFrame {
   readonly workId: string;

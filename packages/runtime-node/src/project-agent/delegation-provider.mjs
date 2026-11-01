@@ -102,7 +102,8 @@ export function createDelegationProvider({
     let input = validated.value;
     const coordinationFacts = typeof supervisor?.coordinationFacts === 'function' ? await supervisor.coordinationFacts(view.workspaceId, view.conversationId) : [];
     const wakeMandate = Array.isArray(coordinationFacts) && coordinationFacts.find(row => row.workId === view.workId && row.lifecycle === 'active'
-      && view.events.some(event => row.sessionIds.includes(event.sessionId)));
+      && (view.events.some(event => row.sessionIds.includes(event.sessionId))
+        || view.sourceDecisionRef && row.intent?.decision?.operationId === view.sourceDecisionRef && row.intent.decision.disposition.kind === 'continue'));
     if (item.name === 'spawn_session' && !view.currentInputAnchors.length && !view.objectiveWakeIds.length && !wakeMandate) {
       return finish({ call, capabilityId, name: item.name, locale, status: 'failed',
         output: { ok: false, error: 'current_user_required', message: 'Historical user messages cannot authorize new tasks during an ordinary wake.' } });

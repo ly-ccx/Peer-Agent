@@ -16,7 +16,7 @@ export function admitCoordinationDecision(state, decision, host) {
     || !Number.isSafeInteger(decision.expectedRevision) || decision.expectedRevision < 0
     || !Array.isArray(decision.sourceInputIds) || !Array.isArray(decision.sourceEventIds)) return reject('invalid_coordination_decision');
   // Model-controlled fields must not impersonate a host-issued mandate or execution lease.
-  if (Object.keys(decision).some(key => !['operationId', 'workId', 'expectedRevision', 'action', 'sourceInputIds', 'sourceEventIds', 'sessionId', 'reason', 'payload'].includes(key))) return reject('untrusted_coordination_authority');
+  if (Object.keys(decision).some(key => !['operationId', 'workId', 'expectedRevision', 'action', 'sourceInputIds', 'sourceEventIds', 'sourceDecisionRef', 'sessionId', 'reason', 'payload'].includes(key))) return reject('untrusted_coordination_authority');
   if (!host?.holdsLease || !host.workspaceId || !host.parentConversationId) return reject('coordination_lease_lost');
   const digest = fingerprint(decision);
   const prior = state.mandates?.[decision.workId];
@@ -26,7 +26,13 @@ export function admitCoordinationDecision(state, decision, host) {
   if ((prior?.goalRevision || 0) !== decision.expectedRevision) return reject('goal_revision_conflict');
   const inputs = unique(decision.sourceInputIds), events = unique(decision.sourceEventIds);
   if (inputs.some(id => !host.currentInputIds?.includes(id)) || events.some(id => !host.eventIds?.includes(id))) return reject('source_not_admitted');
-  if (!inputs.length && !events.length) return reject('coordination_source_required');
+  const intent = state.works?.[decision.workId]?.intentCoordination;
+  if (intent && intent.lifecycle !== 'active') return reject('mandate_inactive');
+  const continuation = !inputs.length && !events.length && decision.sourceDecisionRef
+    && decision.sourceDecisionRef === host.sourceDecisionRef && intent?.lifecycle === 'active'
+    && intent.goalRevision === prior?.goalRevision && intent.decision.operationId === decision.sourceDecisionRef
+    && intent.decision.disposition.kind === 'continue';
+  if (!inputs.length && !events.length && !continuation) return reject('coordination_source_required');
   if (!inputs.length && (!prior || prior.lifecycle !== 'active')) return reject('mandate_inactive');
   const adopted = !prior && inputs.length && decision.sessionId && host.adoptSessionIds?.includes(decision.sessionId);
   if (!prior && (!inputs.length || decision.action !== 'parallel' && !adopted)) return reject('mandate_required');
@@ -43,6 +49,7 @@ export function admitCoordinationDecision(state, decision, host) {
   const executionBindings = { ...prior?.executionBindings };
   if (decision.sessionId && ['revise', 'cancel', 'replace', 'handoff', 'resume'].includes(decision.action)) delete executionBindings[decision.sessionId];
   const mandate = { schemaVersion: 1, mandateId: prior?.mandateId || `mandate-${fingerprint([host.workspaceId, decision.workId])}`,
+    ...(prior?.intentSchemaVersion === 1 || host.intentRequired === true ? { intentSchemaVersion: 1 } : {}),
     workId: decision.workId, workspaceId: host.workspaceId, parentConversationId: host.parentConversationId,
     rootInputIds: prior?.rootInputIds || inputs, revisionInputIds: unique([...(prior?.revisionInputIds || []), ...inputs]),
     goalRevision, allowedActions: prior?.allowedActions || [...COORDINATION_ACTIONS], sessionIds: prior?.sessionIds || (adopted ? [decision.sessionId] : []),

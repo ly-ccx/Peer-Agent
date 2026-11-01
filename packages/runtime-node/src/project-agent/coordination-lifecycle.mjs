@@ -4,18 +4,22 @@ import { isCanonicalUserInput } from './user-priority.mjs';
 import { historyExecutionHeld } from './history-resumption.mjs';
 import { transitionReconciliation } from './supervision-recovery.mjs';
 import { sessionNeedsCancellation } from './session-cancellation.mjs';
+import { createIntentLifecycle } from './intent-lifecycle.mjs';
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const ended = new Set(['accepted', 'result_ready', 'cancelled']);
 
 /** Recoverable coordination effects over the existing task ports, never a second task engine. */
-export function createCoordinationLifecycle({ readSession, readSessionSummary = readSession, readMessages, checkTakeover, admitTask = () => ({ ok: true }), spawn, requestCancel, send, takeover, holdsLease, canExecute = () => true, isEnabled = () => true }) {
+export function createCoordinationLifecycle({ readSession, readSessionSummary = readSession, readMessages, readGoalFacts, verifyGoal, now, checkTakeover, admitTask = () => ({ ok: true }), spawn, requestCancel, send, takeover, holdsLease, canExecute = () => true, isEnabled = () => true }) {
   const drains = new Map();
   const queued = new Set();
   const storeFor = workspaceId => workBudgetBinding(workspaceId)?.store;
+  const intents = createIntentLifecycle({ storeFor, readSession, readMessages, readGoalFacts, verifyGoal, holdsLease, canExecute, now });
   const lifecycleFacts = store => typeof store?.readLifecycleFacts === 'function' ? store.readLifecycleFacts() : store?.read();
   function lifecycleOf(state, mandate, summary = false) {
     const work=(state.workStates || state.works)[mandate.workId];
     if (work?.stopScope === 'work' && ['paused','cancelled'].includes(work.state)) return 'cancelled';
+    if (work?.intentCoordination) return work.intentCoordination.lifecycle;
+    if (mandate.intentSchemaVersion === 1) return mandate.lifecycle;
     const sessions=mandate.sessionIds.map(sessionId=>(summary ? readSessionSummary : readSession)({sessionId}));
     const pending=Object.values(state.transitions || {}).some(row=>row.workId===mandate.workId && !['completed','blocked'].includes(row.phase));
     return sessions.length && sessions.every(row=>row && ['accepted','cancelled'].includes(row.status)) && !pending ? 'fulfilled' : mandate.lifecycle;
@@ -25,6 +29,7 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
     return Object.values(state?.mandates || {}).filter(row => row.parentConversationId === parentConversationId)
       .filter(row => !scope || row.workId === scope.workId || row.sessionIds.some(id => scope.sessionIds?.includes(id)))
       .slice(-24).map(row => ({ workId: row.workId, goalRevision: row.goalRevision, lifecycle: lifecycleOf(state,row,true),
+        intent: (state.workStates || state.works)?.[row.workId]?.intentCoordination,
         sessionIds: row.sessionIds.filter(id => !row.revokedSessionIds?.includes(id)), rootInputIds: row.rootInputIds,
         transitions: Object.values(state.transitions || {}).filter(item => item.workId === row.workId && item.phase !== 'completed')
           .slice(-8).map(item => ({ operationId: item.operationId, action: item.action, phase: item.phase, oldSessionId: item.oldSessionId, replacementSessionId: item.replacementSessionId })) }));
@@ -36,6 +41,8 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
     if (!store || !holdsLease(workspaceId)) return { ok: false, error: 'coordination_host_unavailable' };
     const operationId = context.deliveryKey || `coordination-${hash([context.turnId, context.toolCallOrdinal, input])}`;
     const state = store.read();
+    if (input.action === 'assess') return intents.assess(input, context);
+    if (input.action === 'query' && !input.sessionId) return intents.query(input, context);
     if (input.action === 'query') {
       const session = readSession({ sessionId: input.sessionId, detail: 'report' });
       if (!session || session.workspaceId !== workspaceId || session.origin?.parentConversationId !== parentConversationId
@@ -56,7 +63,8 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
       if (previous.payload?.requestIdentity !== hash(input)) return { ok: false, error: 'operation_identity_conflict' };
       const owner = state.mandates[previous.workId];
       if (owner.workspaceId !== workspaceId || owner.parentConversationId !== parentConversationId
-        || !previous.sourceInputIds.some(id => sourceInputIds.includes(id)) && !previous.sourceEventIds.some(id => events.some(row => row.eventId === id))) return { ok: false, error: 'out_of_scope' };
+        || !previous.sourceInputIds.some(id => sourceInputIds.includes(id)) && !previous.sourceEventIds.some(id => events.some(row => row.eventId === id))
+          && !(previous.sourceDecisionRef && previous.sourceDecisionRef === context.sourceDecisionRef && previous.workId === context.workId)) return { ok: false, error: 'out_of_scope' };
       await recover(workspaceId);
       return receipt(store, operationId, true);
     }
@@ -98,8 +106,10 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
       if (!admission.ok) return admission;
     }
     const repair = input.action === 'resume' && (target?.status === 'result_ready' || target?.origin?.takeover?.repair === true);
+    const sourceDecisionRef = !sourceInputIds.length && !eventIds.length && context.sourceDecisionRef;
     const decision = { operationId, workId, expectedRevision: input.expectedRevision ?? (input.action === 'parallel' ? mandate?.goalRevision || 0 : -1),
       action: input.action, sourceInputIds, sourceEventIds: sourceInputIds.length ? [] : eventIds,
+      ...(sourceDecisionRef ? { sourceDecisionRef } : {}),
       ...(target ? { sessionId: target.sessionId } : {}), reason: input.reason,
       payload: { requestIdentity: hash(input), ...(repair ? {repair:true} : {}), ...(input.task ? { task: input.task } : {}), ...(input.text ? { text: input.text } : {}), ...(input.replyTo ? { replyTo: input.replyTo } : {}),
         context: { workspaceId, parentConversationId, workspacePath: context.workspacePath || '', surface: context.surface,
@@ -110,7 +120,8 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
       && state.transitions?.[row.operationId]?.phase === 'blocked');
     if (failures.length >= 2) return { ok: false, error: 'coordination_no_progress' };
     if (['resume', 'handoff', 'revise'].includes(input.action)) store.enableSupervision();
-    const admitted = store.decide(decision, { parentConversationId, currentInputIds: sourceInputIds, eventIds, materialRefs,
+    const admitted = store.decide(decision, { parentConversationId, currentInputIds: sourceInputIds, eventIds, materialRefs, sourceDecisionRef,
+      intentRequired: !mandate || mandate.intentSchemaVersion === 1,
       ...(!mandate && current.length && target ? { adoptSessionIds: [target.sessionId] } : {}),
       ...(scopedSessionIds ? { scopedSessionIds } : {}) });
     if (!admitted.ok) return admitted;

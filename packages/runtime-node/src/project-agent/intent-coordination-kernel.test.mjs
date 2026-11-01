@@ -54,6 +54,7 @@ test('accepted research, missing coverage, stale goal, undelivered reply and unv
   s2.deliveries.reply = { state: 'delivered', message: { workId: 'g' } };
   assert.equal(admitIntentClosure(s2, close, host).error, 'goal_review_required');
   const reviewed = { ...host, pendingObligations: false, verifiedGoalRevision: 1, reviewRef: 'review:1' };
+  s2.works.g.intentCoordination.review = { reviewRef: 'review:1', passed: true, goalRevision: 1, intentRevision: 2 };
   const admitted = admitIntentClosure(s2, close, reviewed); assert.equal(admitted.ok, true);
   const closed = reduceIntentCoordination(s2, admitted.entry);
   assert.equal(closed.works.g.intentCoordination.lifecycle, 'fulfilled');

@@ -175,6 +175,8 @@ export function createSessionSupervisor({
   const takeover = createSessionTakeover({ findBySession, goalPlanStore, goalRunner, executionScheduler, exclusive, canManageWorkspace,
     abortStream, promote, emit, now, humanGateOf });
   coordination = createCoordinationLifecycle({ readSession: input => get(input),
+    readGoalFacts: sessionId => { const plan = findBySession(sessionId); return plan ? hostFacts(plan).hostAuthority : null; },
+    verifyGoal: input => goalRunner?.verifyDelegatedSession?.(input),
     admitTask: (input, context) => checkDelegationCapabilities(input, context),
     readSessionSummary: input => {
       const plan = findBySession(input.sessionId);

@@ -496,6 +496,11 @@ export function createProjectAgentRunner({
       if (retryContinuity) plan.turnProfile.context = { ...plan.turnProfile.context, retryContinuity };
     }
     if (job.workId) plan.turnProfile.workId = job.workId;
+    const intentFacts = coordination?.turnFacts?.(job);
+    if (intentFacts) {
+      plan.turnProfile.context = { ...plan.turnProfile.context, decisionFrame: intentFacts };
+      if (intentFacts.sourceDecisionRef) plan.turnProfile.sourceDecisionRef = intentFacts.sourceDecisionRef;
+    }
     if (model.selection) plan.turnProfile.modelSelection = model.selection;
     if (model.candidateIds?.length) plan.turnProfile.recoveryCandidateIds = model.candidateIds;
     activity.begin({ turnId, workId: job.workId, modelSelection: model.selection, replyTo: (plan.userInputs || []).map(input => input.messageId || `input-${input.inputId}`),
@@ -547,17 +552,22 @@ export function createProjectAgentRunner({
       if (result.yielded) return { turnId, plan, rounds, yielded: true, providerCheckpoint: result.providerCheckpoint, memoryIds };
       if (result.memoryIds?.length) memoryIds = result.memoryIds;
       toolCallsUsed += result.toolCallCount;
+      if (plan.kind === 'user' && coordination?.requiresTaskReply?.(job)) plan.requiresStructuredReply = true;
       const keepGoing = result.hasPostReply
         ? false
         : result.continued === true && result.toolCallCount > 0;
-      if (!keepGoing && !result.hasPostReply && plan.requiresStructuredReply && !deliveryRepairUsed) {
+      const missingDisposition = coordination?.dispositionMissing?.(job) === true;
+      if (!keepGoing && ((!result.hasPostReply && plan.requiresStructuredReply) || missingDisposition) && !deliveryRepairUsed) {
         deliveryRepairUsed = true;
         plan.turnProfile.context = { ...plan.turnProfile.context,
+          decisionFrame: coordination?.turnFacts?.(job),
+          dispositionRequired: missingDisposition,
           retryContinuity: readRetryContinuity([{ id: turnId, kind: 'agent_turn', rounds }], turnId) };
         continue;
       }
       if (!keepGoing) break;
     }
+    if (coordination?.dispositionMissing?.(job)) return { turnId, plan, rounds, failed: true, reason: 'work_disposition_required', memoryIds };
     return { turnId, plan, rounds, failed: false, memoryIds };
   }
 

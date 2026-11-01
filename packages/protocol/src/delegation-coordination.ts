@@ -6,6 +6,7 @@ export type CoordinationAction = 'parallel' | 'augment' | 'revise' | 'query' | '
 export type CoordinationLifecycle = 'active' | 'paused' | 'cancelled' | 'fulfilled';
 export interface CoordinationMandate {
   schemaVersion: 1;
+  intentSchemaVersion?: 1;
   mandateId: string;
   workId: string;
   workspaceId: string;
@@ -28,6 +29,7 @@ export interface CoordinationDecision {
   expectedRevision: number;
   action: CoordinationAction;
   sourceInputIds: string[];
+  sourceDecisionRef?: string;
   sourceEventIds: string[];
   sessionId?: string;
   reason: string;

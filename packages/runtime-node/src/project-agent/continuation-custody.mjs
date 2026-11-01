@@ -10,7 +10,7 @@ export function reconcileContinuationCustody({ store, conversationId, sessions }
   const roster = () => snapshot ??= typeof sessions === 'function' ? sessions() : sessions;
   const prepared = new Set(Object.values(state.deliveries || {}).filter(row => row.state === 'prepared').map(row => row.message.meta?.workId));
   for (const work of Object.values(state.works)) {
-    if (work.parentConversationId !== conversationId || work.anchorInputIds?.length || work.stopScope === 'work'
+    if (work.parentConversationId !== conversationId || work.anchorInputIds?.length || work.intentCoordination || work.stopScope === 'work'
       || !['runnable', 'waiting_children', 'waiting_user'].includes(work.state) || !work.checkpointRef
       || work.recovery || work.pendingControl || prepared.has(work.workId) || hasUnsettledDispatch(work)
       || Object.keys(work.budget?.attempts || {}).some(id => workBudgetBinding(work.workspaceId)?.activeAttempts?.has(id))

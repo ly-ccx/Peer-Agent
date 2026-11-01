@@ -7,6 +7,7 @@ export function executionView(context) {
   return {
     coordinationBinding: context?.turnProfile?.coordinationBinding ?? nested.turnProfile?.coordinationBinding,
     workId: text(context?.turnProfile?.workId) || text(nested.turnProfile?.workId),
+    sourceDecisionRef: text(context?.turnProfile?.sourceDecisionRef) || text(nested.turnProfile?.sourceDecisionRef),
     sessionId: text(context?.turnProfile?.sessionId) || text(nested.turnProfile?.sessionId),
     planId: text(context?.turnProfile?.planId) || text(nested.turnProfile?.planId),
     agentKind: context?.turnProfile?.agentKind ?? nested.turnProfile?.agentKind,

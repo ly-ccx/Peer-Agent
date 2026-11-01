@@ -132,6 +132,10 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
       assertOwner();
       const admitted = admitCoordinationDecision(read(), decision, { ...host, workspaceId, holdsLease: true, now: now() });
       if (admitted.ok && !admitted.replayed) {
+        if (admitted.entry.mandate.intentSchemaVersion === 1) {
+          if (!useV2()) throw new Error('coordination_recovery_pending');
+          storage.enableSupervision(INTENT_FORMAT_VERSION);
+        }
         if (admitted.entry.transition.minimumExecutorVersion === 3) {
           if (!useV2()) throw new Error('coordination_recovery_pending');
           storage.enableSupervision(6);

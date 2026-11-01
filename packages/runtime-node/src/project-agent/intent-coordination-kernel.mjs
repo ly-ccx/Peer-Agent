@@ -88,7 +88,7 @@ export function admitIntentAssessment(state, assessment, host) {
   if (assessment.coverage.length !== requirements.length || requirements.some(id => !assessment.coverage.some(row => row.requirementId === id))) return intentReject('goal_coverage_incomplete');
   if (assessment.coverage.some(row => row.sources.some(source => !mandate?.sessionIds.includes(source.sessionId)))) return intentReject('coverage_out_of_scope');
   const receipt = { operationId: assessment.operationId, workId: work.workId, digest, workRevision: assessment.expectedWorkRevision + 1,
-    goalRevision, at: host.now };
+    goalRevision, at: host.now, ...(host.turnId ? { turnId: host.turnId } : {}) };
   return { ok: true, receipt, entry: { kind: 'intent_assessed', minimumExecutorVersion: INTENT_FORMAT_VERSION, workId: work.workId, assessment: structuredClone(assessment), receipt } };
 }
 
@@ -96,6 +96,15 @@ export function reduceIntentCoordination(state, entry) {
   if (entry.minimumExecutorVersion !== INTENT_FORMAT_VERSION) intentRaise('intent_executor_unsupported');
   const work = state.works?.[entry.workId];
   if (!work) intentRaise('intent_work_missing');
+  if (entry.kind === 'intent_reviewed') {
+    const intent = work.intentCoordination, review = entry.review;
+    if (!intent || intent.lifecycle !== 'active' || review?.goalRevision !== intent.goalRevision
+      || review.intentRevision !== intent.revision || !intentText(review.reviewRef, 200)
+      || review.coverageDigest !== intentDigest(intent.coverage) || typeof review.passed !== 'boolean'
+      || !Array.isArray(review.sources) || !intentIds(review.evidenceRefs, 200)
+      || !intentText(review.at, 100)) intentRaise('intent_review_conflict');
+    return { ...state, works: { ...state.works, [entry.workId]: { ...work, intentCoordination: { ...intent, review: structuredClone(review) } } } };
+  }
   if (entry.kind === 'intent_closed') {
     const prior = work.intentCoordination, receipt = entry.receipt;
     if (!prior || prior.lifecycle !== 'active' || receipt?.workId !== work.workId
@@ -103,6 +112,11 @@ export function reduceIntentCoordination(state, entry) {
       || receipt.goalRevision !== (state.mandates?.[work.workId]?.goalRevision || 0)
       || !['fulfilled', 'cancelled'].includes(receipt.lifecycle) || !intentText(receipt.at, 100)
       || !intentText(receipt.operationId, 200) || state.intentDecisions?.[receipt.operationId]) intentRaise('intent_closure_conflict');
+    if (receipt.lifecycle === 'fulfilled' && (prior.decision.disposition.kind !== 'return'
+      || prior.decision.disposition.replyRef !== receipt.replyRef || state.deliveries?.[receipt.replyRef]?.state !== 'delivered'
+      || prior.review?.passed !== true || prior.review.reviewRef !== receipt.reviewRef
+      || prior.review.goalRevision !== prior.goalRevision || prior.review.intentRevision !== prior.revision
+      || prior.coverage.some(row => row.status !== 'covered') || prior.interpretation.openQuestions.length)) intentRaise('intent_closure_unproven');
     return { ...state, works: { ...state.works, [work.workId]: { ...work, intentCoordination: { ...prior,
       revision: receipt.workRevision, lifecycle: receipt.lifecycle, closure: structuredClone(receipt), updatedAt: receipt.at } } },
     intentDecisions: { ...state.intentDecisions, [receipt.operationId]: structuredClone(receipt) } };
@@ -139,8 +153,10 @@ export function admitIntentClosure(state, request, host) {
     if (intent.decision.disposition.kind !== 'return' || intent.interpretation.openQuestions.length
       || intent.coverage.some(row => row.status !== 'covered')) return intentReject('goal_coverage_incomplete');
     const delivery = state.deliveries?.[intent.decision.disposition.replyRef];
-    if (delivery?.state !== 'delivered' || delivery.message.workId !== work.workId) return intentReject('goal_delivery_pending');
-    if (host.pendingObligations !== false || host.verifiedGoalRevision !== intent.goalRevision || !intentText(host.reviewRef, 200)) return intentReject('goal_review_required');
+    if (delivery?.state !== 'delivered' || (delivery.message.meta?.workId || delivery.message.workId) !== work.workId) return intentReject('goal_delivery_pending');
+    if (host.pendingObligations !== false || host.verifiedGoalRevision !== intent.goalRevision || !intentText(host.reviewRef, 200)
+      || intent.review?.passed !== true || intent.review.reviewRef !== host.reviewRef
+      || intent.review.goalRevision !== intent.goalRevision || intent.review.intentRevision !== intent.revision) return intentReject('goal_review_required');
   } else if (request.lifecycle !== 'cancelled' || intent.decision.disposition.kind !== 'withdraw'
     || host.appliedControlRef !== intent.decision.disposition.controlRef) return intentReject('goal_control_required');
   const receipt = { operationId: request.operationId, workId: work.workId, workRevision: intent.revision + 1,

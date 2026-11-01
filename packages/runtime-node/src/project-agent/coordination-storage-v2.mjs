@@ -127,6 +127,10 @@ function apply(db, record, { blobs, receiptCache } = {}) {
     before.mandates = {};
     const mandate = get(db, 'mandates', record.workId);
     if (mandate) before.mandates[record.workId] = mandate;
+    if (record.kind === 'intent_closed' && record.receipt?.replyRef) {
+      const delivery = get(db, 'deliveries', record.receipt.replyRef);
+      if (delivery) before.deliveries[record.receipt.replyRef] = delivery;
+    }
     before.intentDecisions = {};
     for (const id of [record.assessment?.operationId, record.assessment?.sourceDecisionRef, record.receipt?.operationId].filter(Boolean)) {
       const receipt = get(db, 'intentDecisions', id); if (receipt) before.intentDecisions[id] = receipt;
@@ -141,7 +145,7 @@ function apply(db, record, { blobs, receiptCache } = {}) {
   const closure = record.kind === 'agent_execution_completed' || record.transition?.minimumExecutorVersion === 3
     || Object.values(next.transitions || {}).some(row => row.minimumExecutorVersion === 3 || row.reconciliationRef)
     || Object.values(next.agentCommands || {}).some(row => row.completionRecorded === true);
-  putMeta(db, 'minimumFormatVersion', Math.max(getMeta(db, 'minimumFormatVersion') || 2, record.kind.startsWith('intent_') ? 8 : closure ? 6 : supervision ? 5 : record.kind.startsWith('history_') ? 4 : 2));
+  putMeta(db, 'minimumFormatVersion', Math.max(getMeta(db, 'minimumFormatVersion') || 2, record.kind.startsWith('intent_') || record.mandate?.intentSchemaVersion === 1 ? 8 : closure ? 6 : supervision ? 5 : record.kind.startsWith('history_') ? 4 : 2));
   for (const bucket of buckets) for (const [id, original] of Object.entries(next[bucket] || {})) {
     let value = original;
     if (bucket === 'works' && value.budget?.observations) {
@@ -481,7 +485,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
     readSnapshot() { load(); const revision = getMeta(db, 'revision') || 0; if (!cached || cachedRevision !== revision) { cached = freeze(snapshot(db)); cachedRevision = revision; } return cached; },
     readWork(id) { load(); return head(db, id); },
     readLifecycleFacts() { load(); const state = { revision: getMeta(db, 'revision') || 0 }; for (const key of ['mandates', 'transitions', 'decisions']) state[key] = all(db, key);
-      state.workStates = Object.fromEntries(Object.entries(all(db, 'works')).map(([id, work]) => [id, { state: work.state, stopScope: work.stopScope }])); return state; },
+      state.workStates = Object.fromEntries(Object.entries(all(db, 'works')).map(([id, work]) => [id, { state: work.state, stopScope: work.stopScope, intentCoordination: work.intentCoordination }])); return state; },
     commitEntry: (entry, _persist, options) => write(entry, options),
     hasObservation(workId, id) { load(); return Boolean(db.prepare('SELECT 1 FROM observations WHERE workId=? AND id=?').get(workId, id)); },
     dispatchOrigin(workId, attemptId, callId) { load(); const row = db.prepare('SELECT value FROM dispatches WHERE workId=? AND attemptId=? AND callId=?').get(workId, attemptId, callId); return row ? JSON.parse(row.value) : null; },

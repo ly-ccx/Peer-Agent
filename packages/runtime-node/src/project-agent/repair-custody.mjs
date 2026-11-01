@@ -11,6 +11,7 @@ export function reconcileRepairCustody({ store, conversationId, sessions }) {
   const works = Object.values(state.works);
   const candidates = works.filter(work => work.parentConversationId === conversationId
     && ['delivered','waiting_user'].includes(work.state) && work.checkpointRef
+    && (!work.intentCoordination || work.intentCoordination.lifecycle === 'active')
     && work.stopScope !== 'work' && !historyExecutionHeld(work) && !work.pendingControl
     && !work.reportedWait && !work.recovery?.blockedCode && !hasUnsettledDispatch(work)
     && !Object.keys(work.budget?.attempts || {}).some(id => workBudgetBinding(work.workspaceId)?.activeAttempts?.has(id)))
