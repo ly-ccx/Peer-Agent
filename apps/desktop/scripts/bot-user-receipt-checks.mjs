@@ -21,6 +21,11 @@ export async function checkBotUserReceipt({ page, until, report, captureDirector
     content: '收尾结果已经整理。三个关联任务的处理记录保留在回复详情中。' });
   const change = state => { writeFileSync(commandFile + '.next', JSON.stringify(state)); renameSync(commandFile + '.next', commandFile); };
   change({ ...initial, seq: initial.seq + 1, sessions });
+  // The fixture writes outside the running host, so it emits no conversation
+  // update event. A real navigation must reload it even if this Bot is already selected.
+  await page.locator('.bot-search').fill('project-001');
+  await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-001' }) }).click();
+  await until(() => page.locator('.bot-composer textarea').getAttribute('placeholder'), text => text?.includes('project-001'));
   await page.locator('.bot-search').fill('project-000');
   await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
   await until(() => page.evaluate(workspaceId => window.peerAgent.projectAgentListSessions({ workspaceId }), bot.workspaceId),
