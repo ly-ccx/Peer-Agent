@@ -62,6 +62,8 @@ export interface PendingApproval {
 export interface TuiExecutionContext {
   /** Overwritten by execute for this dispatch; callers cannot supply authority through it. */
   readonly accessPolicyStamp?: string;
+  /** Bound by the host at dispatch, so a late callback cannot adopt a replacement epoch. */
+  readonly executionPlan?: ReturnType<ReturnType<typeof createTuiGoalBridge>['store']['getPlan']>;
   readonly toolCallId?: string;
   readonly sessionId: string;
   readonly conversationId?: string;
@@ -357,7 +359,7 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
       hookRunner,
       requestPermission,
       git: { artifactRoot: path.join(userDataPath, 'artifacts') },
-      executionGate: call => projectAuthorityReason(executionContext.getStore(), call.capabilityId),
+      executionGate: (call, scopes) => projectAuthorityReason(executionContext.getStore(), call.capabilityId, scopes),
       shell: {
         taskManager: shellTaskManager,
         sessionManager: shellSessionManager,
@@ -411,19 +413,21 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
     } },
   }) });
 
-  function projectAuthorityReason(context: TuiExecutionContext | undefined, capabilityId: string) {
+  function projectAuthorityReason(context: TuiExecutionContext | undefined, capabilityId: string, resourceScopes?: readonly import('@peer-agent/protocol').ExecutionResourceScope[]) {
     if (context?.signal?.aborted) return 'execution_cancelled';
     if (context?.project && !context.project.holdsLease()) return 'host_unavailable';
     if (!accessFor(context).valid) return 'access_identity_invalid';
     if (context?.accessPolicyStamp && context.accessPolicyStamp !== accessFor(context).stamp) return 'permission_policy_changed';
     const modeGate = evaluateProjectAgentTurn({ mode: context?.mode, role: context?.toolContext?.turnRole ?? (context?.toolContext?.turnProfile as any)?.role, capabilityId });
     if (!modeGate.allowed) return modeGate.reason ?? 'project_agent_capability_denied';
-    const plan = context?.project?.planId ? goalBridge.store.getPlan(context.project.planId) : null;
+    const plan = context?.executionPlan ?? (context?.project?.planId ? goalBridge.store.getPlan(context.project.planId) : null);
     const readOnly = plan?.delegationOrigin?.readOnly === true || context?.project?.readOnly === true;
     const bundle = bundleForMode(normalizeTuiRuntimeMode(context?.mode));
     const manifest = [...bundle.manifests, ...(resolvedOptions.providers?.flatMap(item => item.manifests) ?? [])]
       .find(item => item.capabilityId === capabilityId);
-    const gate = evaluateWorkSessionWrite({ delegationOrigin: { readOnly } }, { capabilityId, riskLevel: manifest?.riskLevel });
+    const profile = context?.toolContext?.turnProfile as { executionIdentity?: import('@peer-agent/protocol').SessionExecutionIdentity } | undefined;
+    const gate = evaluateWorkSessionWrite(plan || { delegationOrigin: { readOnly } }, { capabilityId, riskLevel: manifest?.riskLevel, resourceScopes,
+      executionIdentity: profile?.executionIdentity });
     return gate.allowed ? null : gate.error ?? 'read_only';
   }
 
@@ -600,7 +604,8 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
 
   // AsyncLocalStorage applies to every Provider seam, including Goal and Skill/MCP.
   const execute: TuiHost['execute'] = (capabilityId, args, context) => {
-    const bound = context ? { ...context, accessPolicyStamp: accessFor(context).stamp } : undefined;
+    const bound = context ? { ...context, accessPolicyStamp: accessFor(context).stamp,
+      executionPlan: context.project?.planId ? goalBridge.store.getPlan(context.project.planId) : undefined } : undefined;
     return bound ? executionContext.run(bound, () => executeInternal(capabilityId, args, bound))
       : executeInternal(capabilityId, args, bound);
   };

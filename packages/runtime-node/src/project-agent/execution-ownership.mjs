@@ -5,6 +5,9 @@ import { workBudgetBinding } from './work-budget.mjs';
 export function sessionExecutionCurrent(plan) {
   const origin = plan?.delegationOrigin;
   if (origin?.cancellation) return false;
+  if (['paused', 'superseded'].includes(origin?.phase)) return false;
+  const control = workBudgetBinding(origin?.workspaceId)?.store.readSessionControl?.(origin?.sessionId) || origin?.executionControl;
+  if (control && (control.phase !== 'settled' || control.kind === 'cancel')) return false;
   const binding = origin?.coordinationBinding;
   if (!binding) return true; // Legacy plans retain their existing enforcement, never obtain a mandate.
   const state = workBudgetBinding(origin.workspaceId)?.store.read();

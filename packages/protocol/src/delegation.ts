@@ -3,6 +3,7 @@
  * The user-visible conclusion of a work session is `decideLifecycle`'s conclusion.
  */
 
+import { controlPhasesForOrigin } from './session-control.ts';
 import type { ModelSelectionSnapshot } from './model-routing.ts';
 import {
   decideLifecycle,
@@ -34,7 +35,9 @@ export type InputSurface = 'desktop' | 'quick_chat' | 'tui' | 'remote';
 
 export interface DelegationOrigin {
   readonly capabilityAdmission?: import('./capability-admission.ts').DelegationCapabilityAdmission;
-  readonly takeover?: { operationId: string; phase: 'stopping' | 'completed'; text: string; binding: import('./delegation-coordination.ts').CoordinationExecutionBinding; requestedAt: string; completedAt?: string; repair?: boolean };
+  readonly executionGeneration?: string;
+  readonly executionControl?: import('./session-control.ts').SessionControlOperation;
+  readonly takeover?: { operationId: string; phase: 'stopping' | 'completed' | 'superseded' | 'rejected'; supersededBy?: string; text: string; binding: import('./delegation-coordination.ts').CoordinationExecutionBinding; requestedAt: string; completedAt?: string; repair?: boolean };
   readonly coordinationBinding?: import('./delegation-coordination.ts').CoordinationExecutionBinding;
   readonly cancellation?: { readonly operationId: string; readonly reason: string; readonly phase: 'stopping' | 'awaiting_outcome' | 'completed'; readonly requestedAt: string; readonly completedAt?: string; readonly evidenceCalls?: readonly string[]; readonly preserveArtifacts?: boolean;
     readonly disposition?: 'user_withdrawn';
@@ -63,8 +66,9 @@ export interface DelegationOrigin {
 }
 
 export interface SessionQueueFacts {
+  readonly resourceBlocker?: import('./session-control.ts').ExecutionResourceBlocker;
   readonly queuedBehind?: readonly { readonly sessionId: string; readonly title: string }[];
-  readonly queueReason?: 'dependencies' | 'dependency_missing' | 'dependency_failed' | 'read_slot' | 'write_slot' | 'disk_space' | 'isolation_failed' | null;
+  readonly queueReason?: 'dependencies' | 'dependency_missing' | 'dependency_failed' | 'read_slot' | 'write_slot' | 'disk_space' | 'isolation_failed' | 'resource_protection' | 'resource_recovery' | null;
 }
 
 export interface WorkSessionConversationMeta extends SessionQueueFacts {
@@ -505,15 +509,11 @@ export function projectWorkSession(
     blockedReason: plan.agentWaiting ? 'waiting_parent_agent' : plan.blockedReason,
     interrupted: plan.interrupted,
     interruptionOrigin: plan.interruptionOrigin,
-    ...(conversationMeta.origin.cancellation?.phase
-      ? { cancellationPhase: conversationMeta.origin.cancellation.phase }
-      : {}),
+    ...controlPhasesForOrigin(conversationMeta.origin),
     ...(conversationMeta.origin.cancellation?.disposition ? { cancellationDisposition: conversationMeta.origin.cancellation.disposition } : {}),
-    ...(conversationMeta.coordination?.phase === 'awaiting_outcome'
+    ...(!conversationMeta.origin.executionControl && conversationMeta.coordination?.phase === 'awaiting_outcome'
       ? { takeoverPhase: 'awaiting_outcome' }
-      : conversationMeta.origin.takeover?.phase
-        ? { takeoverPhase: conversationMeta.origin.takeover.phase }
-        : {}),
+      : {}),
   });
   const status = projected.status;
   return {
@@ -533,6 +533,7 @@ export function projectWorkSession(
     spawnedAt: conversationMeta.spawnedAt ?? plan.updatedAt ?? '',
     ...(conversationMeta.conversationId ? { conversationId: conversationMeta.conversationId } : {}),
     origin: conversationMeta.origin,
+    ...(conversationMeta.resourceBlocker ? { resourceBlocker: conversationMeta.resourceBlocker } : {}),
     ...(conversationMeta.queuedBehind ? { queuedBehind: conversationMeta.queuedBehind.map(item => ({ ...item })) } : {}),
     ...(conversationMeta.queueReason ? { queueReason: conversationMeta.queueReason } : {}),
     ...(conversationMeta.supersededBy ? { supersededBy: conversationMeta.supersededBy } : {}),

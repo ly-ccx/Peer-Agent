@@ -52,14 +52,18 @@ test('inbox diagnostics select the latest numbered archives and remain bounded w
 test('scheduler diagnostics observe both occupied task slots and model-turn waits without admission or release', async t => {
   const root=mkdtempSync(path.join(os.tmpdir(),'peer-diagnostic-scheduler-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
   const scheduler=createExecutionScheduler({rootDir:root,getConcurrency:()=>1});
-  const plans=['running','queued'].map((id,i)=>({planId:id,status:i?'paused':'executing',createdAt:'2026-10-01T00:00:00.000Z',delegationOrigin:{workspaceId:'ws',sessionId:id,phase:i?'queued':'running',readOnly:false,priority:'high'}}));
-  scheduler.reconcile(plans);
+  const plans=['running','queued'].map((id,i)=>({planId:id,status:i?'paused':'executing',createdAt:'2026-10-01T00:00:00.000Z',targetWorkspacePath:root,delegationOrigin:{workspaceId:'ws',sessionId:id,phase:i?'queued':'running',readOnly:false,priority:'high'}}));
+  plans[0].delegationOrigin.phase='queued';
+  scheduler.select(plans);
+  plans[0].delegationOrigin.phase='running';
+  scheduler.reconcile(plans);scheduler.activateResources(plans[0]);
   let release, invoked=0;
   const first=scheduler.withTurn({workspaceId:'ws',planId:'running'},()=>new Promise(resolve=>{release=resolve;}));await Promise.resolve();
-  const second=scheduler.withTurn({workspaceId:'ws',planId:'queued'},()=>{invoked++;});
+  // Two admitted rounds share the model limit; the separate queued task still waits for its directory.
+  const second=scheduler.withTurn({workspaceId:'ws',planId:'running'},()=>{invoked++;});
   const before=checksum(root), snapshot=scheduler.diagnosticSnapshot();
   assert.deepEqual(snapshot.stats,{active:1,waiting:1,limit:1});assert.equal(snapshot.projects[0].slots.write,1);
-  assert.equal(snapshot.projects[0].queue[0].reason,'write_slot');assert.equal(snapshot.queue[0].planId,'queued');
+  assert.equal(snapshot.projects[0].queue[0].reason,'write_slot');assert.equal(snapshot.queue[0].planId,'running');
   assert.equal(invoked,0);assert.deepEqual(checksum(root),before);assert.deepEqual(scheduler.diagnosticSnapshot(),snapshot);
   release();await Promise.all([first,second]);assert.equal(invoked,1);
 });

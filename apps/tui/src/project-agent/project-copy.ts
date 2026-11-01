@@ -49,7 +49,11 @@ export function projectCopy(locale:TuiLocale,key:keyof typeof english) { return 
 export function projectStatus(locale:TuiLocale,value:string) {return value in english ? projectCopy(locale,value as keyof typeof english):value;}
 export function actionLabel(locale:TuiLocale,action:any) {return action.payload?.text || projectStatus(locale,action.id);}
 
-export function projectSessionStatus(locale: TuiLocale, session: { status?: string; followUp?: { owner: string } }) {
+export function projectSessionStatus(locale: TuiLocale, session: { status?: string; followUp?: { owner: string }; resourceBlocker?: import('@peer-agent/protocol').ExecutionResourceBlocker }) {
+  if (session.resourceBlocker?.kind === 'protection') return locale === 'en-US'
+    ? session.resourceBlocker.code === 'execution_outcome_unknown' ? 'Write blocked: previous outcome unknown' : 'Confirming previous execution has stopped'
+    : session.resourceBlocker.code === 'execution_outcome_unknown' ? '暂不能写入：此前操作结果未确认' : '正在确认此前执行已停止';
+  if (session.resourceBlocker?.kind === 'recovery') return locale === 'en-US' ? 'Reconciling local execution resources' : '正在核对本机资源状态';
   if (session.status === 'result_ready' && session.followUp?.owner === 'bot') return locale === 'en-US' ? 'Reviewing the result' : '正在核对结果';
   return projectStatus(locale, session.status || '');
 }

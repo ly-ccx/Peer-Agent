@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { providerFileScopes } from './project-agent/execution-scopes.mjs';
 import {
   mkdir,
   readFile,
@@ -314,8 +315,13 @@ export function createNodeFileProvider(options: NodeFileProviderOptions): Capabi
             });
           }
           if (context.signal?.aborted) return cancelledResult(call, clock);
+          const scopeDenial = typeof context.metadata?.executionGate === 'function' ? context.metadata.executionGate(providerFileScopes(targetPath)) : null;
+          if (scopeDenial) throw new Error(scopeDenial);
           await mkdir(dirname(targetPath), { recursive: true });
           if (typeof approval.validate === 'function' && !approval.validate()) throw new Error('permission_policy_changed');
+          const reason = typeof context.metadata?.executionGate === 'function' ? context.metadata.executionGate(providerFileScopes(targetPath)) : null;
+          if (reason) throw new Error(reason);
+          if (context.signal?.aborted) return cancelledResult(call, clock);
           await writeFile(targetPath, content, 'utf8');
           readSnapshots.set(targetPath, hashContent(content));
           const operation = request.capabilityId.endsWith('.edit') ? 'edit' : 'write';

@@ -96,6 +96,20 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
       if (fenceLegacyWrites && await protectCoordinationWriter({ directory: dir, assertOwner })) await storage.prepare();
     }, close: storage.close,
     journalFile: file, readRecoveryCheckpoint, readContinuationCheckpoint,
+    writerEpoch() { assertOwner(); return epoch; },
+    readSessionControl(sessionId) {
+      if (typeof sessionId !== 'string' || !sessionId) return undefined;
+      if (useV2()) return storage.readSessionControl(sessionId);
+      const state = reader.readSnapshot(), head = state.sessionControlHeads?.[sessionId];
+      return head ? structuredClone(state.sessionControls?.[head.operationId]) : undefined;
+    },
+    writeSessionControl(operation, expectedRevision, expectedCurrentOperationId) {
+      assertOwner();
+      if (!useV2()) throw new Error('coordination_writer_upgrade_required');
+      storage.enableSupervision(7);
+      append({ kind: 'session_control', operation, expectedRevision, expectedCurrentOperationId }, { returnState: false });
+      return operation;
+    },
     enableSupervision(minimumVersion = 5) { assertOwner(); if (!useV2()) throw new Error('coordination_recovery_pending'); storage.enableSupervision(minimumVersion); },
     readSupervision: (bucket, id) => useV2() ? storage.readSupervision(bucket, id) : undefined,
     querySupervision: (bucket, field, value, options) => useV2() ? storage.querySupervision(bucket, field, value, options) : [],
@@ -142,7 +156,7 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
     bindSession(workId, goalRevision, sessionId, binding) { return append({ kind: 'coordination_binding', workId, goalRevision, sessionId, binding }); },
     advanceTransition(operationId, expectedPhase, patch) {
       assertOwner();
-      if (Object.keys(patch).some(key => !['phase', 'replacementSessionId', 'error', 'updatedAt', 'handoff', 'executionAdmission', 'executionEffect', 'executionAttemptRef', 'reconciliationRef'].includes(key))) throw new Error('invalid_transition_patch');
+      if (Object.keys(patch).some(key => !['phase', 'replacementSessionId', 'error', 'updatedAt', 'handoff', 'executionAdmission', 'executionEffect', 'executionAttemptRef', 'reconciliationRef', 'controlOperationRef'].includes(key))) throw new Error('invalid_transition_patch');
       return append({ kind: 'coordination_transition', operationId, expectedPhase, patch: { ...patch, updatedAt: now() } });
     },
     checkpoint(workId, checkpoint) {

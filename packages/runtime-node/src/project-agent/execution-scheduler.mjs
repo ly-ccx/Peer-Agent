@@ -3,6 +3,11 @@ import path from 'node:path';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { sessionExecutionCurrent } from './execution-ownership.mjs';
+import { createExecutionResources, executionProtection } from './execution-resources.mjs';
+import { observeExecutionHandles } from './execution-handles.mjs';
+import { executionIdentity, sameExecution } from './session-control-kernel.mjs';
+import { registerExecutionAdmission } from './execution-admission.mjs';
+import { workBudgetBinding } from './work-budget.mjs';
 
 const AGE_MS = 30 * 60_000;
 const PRIORITY = { low: 0, normal: 1, high: 2 };
@@ -21,8 +26,7 @@ function failed(plan) {
         && runner.recoverableInterruptionCount >= runner.maxRecoverableInterruptionRetries);
 }
 function occupying(plan) {
-  if (plan.delegationOrigin?.cancellation && plan.delegationOrigin.cancellation.phase !== 'completed') return slot(plan) !== 'read';
-  if (plan.delegationOrigin?.takeover?.phase === 'stopping') return slot(plan) !== 'read';
+  if (slot(plan) !== 'read') return executionProtection(plan) !== 'released';
   const waiting = plan.runner?.status === 'waiting_user' || Boolean(plan.delegationOrigin?.agentWaitMessageId);
   return plan.delegationOrigin?.phase === 'running' && !TERMINAL.has(plan.status) && !failed(plan)
     && !(waiting && slot(plan) === 'read');
@@ -41,7 +45,29 @@ export function createExecutionScheduler({ rootDir = null, getConcurrency = () =
   const turnContext = new AsyncLocalStorage();
   let isWorkspaceReady = () => true;
   let isPlanRecoveryHeld = () => false;
+  let ownsWorkspace = () => true;
+  let currentPlan = plan => plansById.get(plan.planId) || plan;
+  let resources;
+  let onResourceChanged = () => {};
+  let onResourceConflict = () => {};
+  let resourceNotificationPending = false;
+  function notifyResourceChanged() {
+    if (resourceNotificationPending) return;
+    resourceNotificationPending = true;
+    queueMicrotask(() => { resourceNotificationPending = false; onResourceChanged(); });
+  }
+  const admissionPorts = new Map();
+  const resourceStore = () => rootDir ? (resources ||= createExecutionResources({ rootDir, now })) : null;
+  const hostEpochFor = workspaceId => workBudgetBinding(workspaceId)?.store.writerEpoch?.() || `legacy-host:${process.pid}`;
+  function resourceFailure(error) { return { allowed: false, reason: 'resource_recovery', queuedBehind: [],
+    blocker: { kind: 'recovery', nextAction: 'inspect_resource_recovery', code: error?.code || error?.message || 'execution_resource_unavailable' } }; }
+  function reserveResources(plan) {
+    if (!ownsWorkspace(plan.delegationOrigin.workspaceId)) return resourceFailure(new Error('lease_unavailable'));
+    try { return resourceStore()?.reserve(plan, hostEpochFor(plan.delegationOrigin.workspaceId)) || { allowed: true }; }
+    catch (error) { return resourceFailure(error); }
+  }
   const turnsByPlan = new Map();
+  const admittedExecutions = new Map();
   const queues = new Map();
   let plansById = new Map();
   let active = 0;
@@ -77,6 +103,36 @@ export function createExecutionScheduler({ rootDir = null, getConcurrency = () =
       for (const [id, plan] of plansById) if (plan.delegationOrigin?.workspaceId === onlyWorkspace) plansById.delete(id);
       for (const plan of plans) if (plan.delegationOrigin?.workspaceId === onlyWorkspace) plansById.set(plan.planId, plan);
     } else plansById = new Map(plans.map(plan => [plan.planId, plan]));
+    for (const plan of plans) if (plan.delegationOrigin && ownsWorkspace(plan.delegationOrigin.workspaceId) && !admissionPorts.has(plan.planId)) {
+      const releaseAdmission = registerExecutionAdmission(plan.planId, (snapshot, action = {}) => {
+        const fresh = currentPlan(snapshot);
+        if (!sameExecution(executionIdentity(snapshot), executionIdentity(fresh))) return 'execution_revision_stale';
+        if (!ownsWorkspace(fresh.delegationOrigin.workspaceId)) return 'lease_unavailable';
+        try {
+          const decision = inspect(fresh);
+          if (!decision.allowed) return decision.blocker?.code || decision.reason;
+          if (['L0_inert', 'L0_pure', 'L1_readonly'].includes(action.riskLevel) || fresh.delegationOrigin.readOnly) return null;
+          if (action.resourceScopes?.length) {
+            const scoped = resourceStore()?.reserve(fresh, hostEpochFor(fresh.delegationOrigin.workspaceId), action.resourceScopes, {recordConflict:true});
+            if (scoped && !scoped.allowed) {
+              onResourceConflict(fresh, scoped.blocker);
+              return scoped.blocker?.code || 'execution_resource_unavailable';
+            }
+          }
+          return (resourceStore()?.admitted(fresh, hostEpochFor(fresh.delegationOrigin.workspaceId)) ?? true) ? null : 'execution_resource_owner_unknown';
+        } catch (error) { return error.message || 'execution_resource_unavailable'; }
+      });
+      const handles = new Map();
+      const releaseHandles = plan.conversationId ? observeExecutionHandles(plan.conversationId, handle => {
+        const source = handle.state === 'active' ? currentPlan(plan) : handles.get(handle.handleId);
+        if (!source || !ownsWorkspace(source.delegationOrigin.workspaceId)) throw new Error('lease_unavailable');
+        if (handle.state === 'active') handles.set(handle.handleId, source);
+        resourceStore()?.markHandle(source, handle);
+        if (handle.state === 'ended') { handles.delete(handle.handleId); notifyResourceChanged(); }
+      }) : () => {};
+      admissionPorts.set(plan.planId, () => { releaseAdmission(); releaseHandles(); });
+    }
+    if (rootDir) resourceStore().reconcile(plans.filter(plan => plan.delegationOrigin), hostEpochFor, ownsWorkspace);
     const admittedAt = at();
     const workspaces = new Set([...queues.keys(), ...plans.map(plan => plan.delegationOrigin?.workspaceId).filter(Boolean)]);
     for (const workspaceId of workspaces) {
@@ -111,13 +167,20 @@ export function createExecutionScheduler({ rootDir = null, getConcurrency = () =
     if (unmet.length) return { allowed: false, reason: 'dependencies', queuedBehind: describe(unmet) };
     if (origin.isolationBlock) return { allowed: false, reason: origin.isolationBlock, queuedBehind: [] };
     const kind = slot(plan);
+    if (kind !== 'read' && rootDir) {
+      try {
+        const decision = resourceStore().inspect(plan, hostEpochFor(origin.workspaceId));
+        if (!decision.allowed) return { ...decision, reason: decision.blocker.kind === 'owner' ? 'write_slot' : 'resource_protection',
+          queuedBehind: decision.blocker.kind === 'owner' ? [{ sessionId: decision.blocker.sessionId, title: decision.blocker.title }] : [] };
+      } catch (error) { return resourceFailure(error); }
+    }
     const occupants = sameProject.filter(item => item.planId !== plan.planId && !isPlanRecoveryHeld(item) && occupying(item) && slot(item) === kind);
     const limit = kind === 'read' ? 2 : kind === 'write' ? 1 : Infinity;
     if (occupants.length >= limit) return { allowed: false, reason: `${kind}_slot`, queuedBehind: describe(occupants) };
     return { allowed: true, reason: null, queuedBehind: [] };
   }
-  function select(plans) {
-    reconcile(plans);
+  function select(plans, { allPlans = plans } = {}) {
+    reconcile(allPlans);
     const metadata = new Map([...queues.values()].flat().map(item => [item.sessionId, item]));
     const currentTime = Date.parse(at());
     const candidates = plans.filter(plan => isWorkspaceReady(plan.delegationOrigin?.workspaceId) === true && metadata.has(plan.delegationOrigin?.sessionId))
@@ -126,12 +189,12 @@ export function createExecutionScheduler({ rootDir = null, getConcurrency = () =
         return rank(b.delegationOrigin.priority, bb.enqueuedAt, currentTime) - rank(a.delegationOrigin.priority, aa.enqueuedAt, currentTime)
           || aa.enqueuedAt.localeCompare(bb.enqueuedAt) || aa.order - bb.order || a.planId.localeCompare(b.planId);
       });
-    const virtual = [...plans];
+    const virtual = [...allPlans];
     const start = [], blocked = [];
     for (const candidate of candidates) {
       const decision = inspect(candidate, virtual);
       if (decision.reason === 'dependency_failed' || decision.reason === 'dependency_missing') blocked.push(candidate);
-      if (!decision.allowed) continue;
+      if (!decision.allowed || !reserveResources(candidate).allowed) continue;
       start.push(candidate);
       const index = virtual.findIndex(item => item.planId === candidate.planId);
       virtual[index] = { ...candidate, status: 'executing', delegationOrigin: { ...candidate.delegationOrigin, phase: 'running' } };
@@ -173,14 +236,47 @@ export function createExecutionScheduler({ rootDir = null, getConcurrency = () =
   }
   return {
     configure(options = {}) {
-      if (options.rootDir && options.rootDir !== rootDir) { rootDir = options.rootDir; queues.clear(); }
+      if (options.rootDir && options.rootDir !== rootDir) { resources?.close(); resources = undefined; rootDir = options.rootDir; queues.clear(); }
       if (typeof options.getConcurrency === 'function') getConcurrency = options.getConcurrency;
       if (typeof options.isWorkspaceReady === 'function') isWorkspaceReady = options.isWorkspaceReady;
       if (typeof options.isPlanRecoveryHeld === 'function') isPlanRecoveryHeld = options.isPlanRecoveryHeld;
+      if (typeof options.onResourceChanged === 'function') onResourceChanged = options.onResourceChanged;
+      if (typeof options.onResourceConflict === 'function') onResourceConflict = options.onResourceConflict;
+      if (typeof options.ownsWorkspace === 'function') ownsWorkspace = options.ownsWorkspace;
+      if (typeof options.currentPlan === 'function') currentPlan = options.currentPlan;
       drain();
     },
+    reserveResources,
+    prepareResources() { resourceStore()?.revision(); },
+    inspectResources(plan) {
+      try { return resourceStore()?.inspect(plan, hostEpochFor(plan.delegationOrigin.workspaceId)) || { allowed: true }; }
+      catch (error) { return resourceFailure(error); }
+    },
+    protectResources(plan, options) { if (!ownsWorkspace(plan.delegationOrigin.workspaceId)) throw new Error('lease_unavailable');
+      resourceStore()?.protect(plan, { ...options, hostEpoch: hostEpochFor(plan.delegationOrigin.workspaceId) }); },
+    settleResources(plan, receipt) { if (!ownsWorkspace(plan.delegationOrigin.workspaceId)) throw new Error('lease_unavailable');
+      return resourceStore()?.settle(plan, receipt, hostEpochFor(plan.delegationOrigin.workspaceId)); },
+    activateResources(plan) {
+      const admitted = ownsWorkspace(plan.delegationOrigin.workspaceId) && (resourceStore()?.activate(plan, hostEpochFor(plan.delegationOrigin.workspaceId)) ?? true);
+      if (admitted) admittedExecutions.set(plan.planId, executionIdentity(plan).executionEpoch);
+      return admitted;
+    },
+    currentExecutionKnown(plan) { return admittedExecutions.get(plan.planId) === (executionIdentity(plan).executionEpoch); },
+    resourceRevision() { return resourceStore()?.revision() || 0; },
+    rebindResourceRequirements(from, to, receiptId) { resourceStore()?.rebindRequirements(from, to, receiptId); },
+    resourceSnapshot() { return resourceStore()?.snapshot() || []; },
+    resourceClaimsFor(plan) { return (resourceStore()?.claimsFor(plan) || []).map(({ claimId, revision }) => ({ claimId, revision })); },
+    hasUnsettledHandles(plan) { return Boolean(resourceStore()?.unsettledHandles(plan).length); },
+    hasResourceClaim(plan) { return resourceStore()?.hasClaim(plan) || false; },
+    close() { resources?.close(); for (const release of admissionPorts.values()) release(); admissionPorts.clear(); },
     reconcile, inspect, select, isWorkspaceReady: workspaceId => isWorkspaceReady(workspaceId) === true,
-    canRunPlan(plan) { return !plan?.delegationOrigin || sessionExecutionCurrent(plan) && isWorkspaceReady(plan.delegationOrigin.workspaceId) === true && plan.delegationOrigin.phase === 'running' && inspect(plan).allowed; },
+    canRunPlan(plan) {
+      if (!plan?.delegationOrigin) return true;
+      try { return sessionExecutionCurrent(plan) && isWorkspaceReady(plan.delegationOrigin.workspaceId) === true
+        && plan.delegationOrigin.phase === 'running' && inspect(plan).allowed
+        && (resourceStore()?.admitted(plan, hostEpochFor(plan.delegationOrigin.workspaceId)) ?? true); } catch { return false; }
+    },
+    hasPlanTurns(planId) { return Boolean(turnsByPlan.get(planId)?.size); },
     async waitForPlanIdle(planId) {
       while (turnsByPlan.get(planId)?.size) await Promise.allSettled([...turnsByPlan.get(planId)].map(controller => controller.settled));
     },
@@ -191,6 +287,12 @@ export function createExecutionScheduler({ rootDir = null, getConcurrency = () =
       const plan = plansById.get(input.planId);
       if (isPlanRecoveryHeld(plan)) return { ok: false, terminalStatus: 'aborted', retryable: false, error: 'coordination_reconciliation_required' };
       if (plan?.delegationOrigin && !isWorkspaceReady(plan.delegationOrigin.workspaceId)) return { ok: false, terminalStatus: 'aborted', retryable: false, error: 'recovery_pending' };
+      // A final verifier may start after the worker has released its directory.
+      // Reacquire before reading that mutable snapshot; never borrow another task's claim.
+      if (plan?.delegationOrigin && plan.status === 'completed') {
+        if (!sessionExecutionCurrent(plan) || !reserveResources(plan).allowed || !this.activateResources(plan))
+          return { ok: false, terminalStatus: 'aborted', retryable: false, error: 'execution_resource_unavailable' };
+      }
       const controller = new AbortController();
       let settle; controller.settled = new Promise(resolve => { settle = resolve; });
       const relayAbort = () => controller.abort();
@@ -207,6 +309,11 @@ export function createExecutionScheduler({ rootDir = null, getConcurrency = () =
         if (controller.signal.aborted) return { ok: false, terminalStatus: 'aborted', retryable: false, error: 'aborted' };
         if (isPlanRecoveryHeld(plan)) return { ok: false, terminalStatus: 'aborted', retryable: false, error: 'coordination_reconciliation_required' };
         if (plan?.delegationOrigin && !isWorkspaceReady(plan.delegationOrigin.workspaceId)) return { ok: false, terminalStatus: 'aborted', retryable: false, error: 'recovery_pending' };
+        const fresh = plan && currentPlan(plan);
+        if (fresh?.delegationOrigin && (!sameExecution(executionIdentity(plan), executionIdentity(fresh))
+          || !sessionExecutionCurrent(fresh) || !ownsWorkspace(fresh.delegationOrigin.workspaceId)
+          || !inspect(fresh).allowed || !(resourceStore()?.admitted(fresh, hostEpochFor(fresh.delegationOrigin.workspaceId)) ?? true)))
+          return { ok: false, terminalStatus: 'aborted', retryable: false, error: 'execution_revision_stale' };
         return await turnContext.run(context, () => run(controller.signal));
       } finally {
         if (context?.active) { context.active = false; context.release(); }

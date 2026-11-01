@@ -3,7 +3,7 @@
  * 设置写入由调用方只经已有 IPC 发出。
  */
 
-import type { CoordinationSessionFacts, SessionVerificationDetail, VerificationProgress } from '@peer-agent/protocol';
+import type { ExecutionResourceBlocker, CoordinationSessionFacts, SessionVerificationDetail, VerificationProgress } from '@peer-agent/protocol';
 import type { I18nRuntime } from '@peer-agent/i18n';
 
 export const DRAWER_WIDTH = 380;
@@ -61,6 +61,7 @@ export interface DrawerSession {
   readonly summary: string;
   readonly evidenceRefs: readonly string[];
   readonly progress: string;
+  readonly resourceBlocker?: ExecutionResourceBlocker;
   readonly queuedBehind?: readonly { readonly sessionId: string; readonly title: string }[];
   readonly queueReason?: string;
   readonly supersededBy?: string;
@@ -222,6 +223,9 @@ export function formatDrawerSessionStatus(session: DrawerSession, i18n: Pick<I18
   if (session.status === 'result_ready' && session.followUp?.owner === 'bot') return i18n.t('projectAgent.chat.work.resultSettling');
   if (['stopping','awaiting_outcome'].includes(session.status)) return i18n.t(`projectAgent.chat.sessionState.${session.status}` as 'projectAgent.chat.sessionState.stopping' | 'projectAgent.chat.sessionState.awaiting_outcome');
   if (session.coordination?.action === 'handoff' && session.coordination.phase === 'stopping') return i18n.t('projectAgent.task.coordination.handoff');
+  if (session.resourceBlocker?.kind === 'protection') return i18n.t(session.resourceBlocker.code === 'execution_outcome_unknown'
+    ? 'projectAgent.drawer.resourceOutcomeUnknown' : 'projectAgent.drawer.resourceStopUnconfirmed');
+  if (session.resourceBlocker?.kind === 'recovery') return i18n.t('projectAgent.drawer.resourceRecovery');
   if (session.queueReason === 'dependency_missing') return i18n.t('projectAgent.drawer.dependencyMissing');
   if (session.queueReason === 'disk_space') return i18n.t('projectAgent.drawer.diskSpace');
   if (session.queueReason === 'isolation_failed') return i18n.t('projectAgent.drawer.isolationFailed');
@@ -278,6 +282,7 @@ export function readDrawerSession(raw: unknown): DrawerSession | null {
     evidenceRefs: readStringList(report.evidenceRefs),
     progress: readString(record.statusLabel),
     queueReason: readString(record.queueReason),
+    ...(readResourceBlocker(record.resourceBlocker) ? { resourceBlocker: readResourceBlocker(record.resourceBlocker) } : {}),
     supersededBy: readString(record.supersededBy),
     queuedBehind: Array.isArray(record.queuedBehind) ? record.queuedBehind.flatMap(item => {
       if (!item || typeof item !== 'object') return [];
@@ -421,4 +426,19 @@ function readFollowUpProjection(value: unknown): import('@peer-agent/protocol').
     inCurrentList: owner !== 'none',
     reason: reason as import('@peer-agent/protocol').FollowUpProjection['reason'],
   };
+}
+
+function readResourceBlocker(raw: unknown): ExecutionResourceBlocker | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const row = raw as Record<string, unknown>;
+  if (row.kind === 'recovery' && readString(row.code)) return { kind: 'recovery', code: readString(row.code), nextAction: 'inspect_resource_recovery', resourceRef: readString(row.resourceRef) || undefined };
+  const resourceRef = readString(row.resourceRef), claimId = readString(row.claimId);
+  if (!resourceRef || !claimId) return undefined;
+  if (row.kind === 'owner' && row.code === 'resource_busy' && readString(row.sessionId)) return {
+    kind: 'owner', code: 'resource_busy', resourceRef, claimId, sessionId: readString(row.sessionId), title: readString(row.title) };
+  if (row.kind === 'protection' && (row.code === 'execution_outcome_unknown' || row.code === 'execution_stop_unconfirmed')) return {
+    kind: 'protection', code: row.code, resourceRef, claimId, sessionId: readString(row.sessionId) || undefined,
+    nextAction: row.code === 'execution_outcome_unknown' ? 'reconcile_execution_outcome' : 'confirm_execution_stopped',
+    operationId: readString(row.operationId) || undefined, evidenceCalls: readStringList(row.evidenceCalls) };
+  return undefined;
 }

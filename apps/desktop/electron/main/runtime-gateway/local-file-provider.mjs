@@ -17,6 +17,7 @@ import { readFile, readdir, stat as statAsync } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, relative, resolve } from 'node:path';
 import {
   FileReadRangeError,
+  providerFileScopes,
   detectLocalImageMediaType,
   parseFileReadLineRange,
   sliceFileReadLines,
@@ -85,8 +86,8 @@ function throwIfAborted(signal) {
   throw error;
 }
 
-function recheckFileAuthority(toolContext, pathPermission) {
-  return toolContext?.checkAccessPolicy?.()
+function recheckFileAuthority(toolContext, pathPermission, filePath) {
+  return toolContext?.checkAccessPolicy?.(providerFileScopes(filePath))
     || (typeof pathPermission.approval?.validate === 'function' && !pathPermission.approval.validate() ? 'permission_policy_changed' : null);
 }
 
@@ -737,7 +738,7 @@ async function runUnlockedFileTool({ name, args, cwd, toolContext, requestPermis
           permission: pathPermission.approval?.reason || 'not_granted',
         });
       }
-      const accessDenial = recheckFileAuthority(toolContext, pathPermission);
+      const accessDenial = recheckFileAuthority(toolContext, pathPermission, filePath);
       if (accessDenial) return formatToolFailure('edit_file', 'blocked', accessDenial, { path: filePath });
       const latest = validateFreshReadState(toolContext, filePath);
       if (!latest.ok) return formatToolFailure('edit_file', 'blocked', latest.reason, { path: filePath });
@@ -809,7 +810,7 @@ async function runUnlockedFileTool({ name, args, cwd, toolContext, requestPermis
         });
       }
 
-      const accessDenial = recheckFileAuthority(toolContext, pathPermission);
+      const accessDenial = recheckFileAuthority(toolContext, pathPermission, filePath);
       if (accessDenial) return formatToolFailure('write_file', 'blocked', accessDenial, { path: filePath });
       if (exists) {
         const latest = validateFreshReadState(toolContext, filePath);

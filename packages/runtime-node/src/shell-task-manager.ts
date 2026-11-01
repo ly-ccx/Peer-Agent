@@ -75,6 +75,7 @@ export interface NodeShellStopResult {
 }
 
 export interface RunNodeShellTaskOptions {
+  readonly beforeExecute?: () => void;
   readonly toolCallId: string;
   readonly command: string;
   readonly cwd: string;
@@ -263,6 +264,8 @@ export function createNodeShellTaskManager(
         stopReason: null,
       };
       const artifact = await artifactStore.createTaskArtifact(metadata);
+      runOptions.beforeExecute?.();
+      if (runOptions.signal?.aborted) throw new Error('aborted');
       const child = spawn(shellPath, ['-lc', runOptions.command], {
         cwd: runOptions.cwd,
         env: { ...process.env, ...options.env },
