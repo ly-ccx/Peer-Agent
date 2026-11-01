@@ -17,7 +17,7 @@ test('isolation matrix honors read-only, non-git, explicit choices, dirty state 
   assert.equal(decideIsolation(p, { ...clean, dirty: true }).isolation, 'worktree');
   assert.equal(decideIsolation(plan('explicit', { isolation: 'worktree' }), clean).isolation, 'worktree');
   assert.deepEqual(decideIsolation(plan('explicit', { isolation: 'none' }), clean, [writer]), { isolation: 'none', reason: 'write_slot' });
-  assert.equal(decideIsolation(p, clean, [{ ...writer, status: 'completed' }]).isolation, 'none');
+  assert.equal(decideIsolation(p, clean, [{ ...writer, status: 'completed', runner: { status: 'completed' } }]).isolation, 'none');
   assert.equal(decideIsolation(p, clean, [plan('foreign', { workspaceId: 'other', phase: 'running' })]).isolation, 'none');
   assert.deepEqual(decideIsolation(p, { ...clean, dirty: true, freeBytes: MIN_WORKTREE_FREE_BYTES - 1 }), { isolation: 'wait', reason: 'disk_space' });
   assert.equal(decideIsolation(p, { ...clean, dirty: true, freeBytes: undefined }).reason, 'isolation_failed');

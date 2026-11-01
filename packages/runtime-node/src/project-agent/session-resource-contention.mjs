@@ -17,8 +17,8 @@ export function createSessionResourceContention({ goalPlanStore, sessionControl,
       plan = goalPlanStore.getPlan(planId); control = sessionControl.read(plan);
       if (!canManageWorkspace(plan.delegationOrigin.workspaceId) || plan.delegationOrigin.cancellation
         || plan.delegationOrigin.phase !== 'paused' || control?.phase !== 'settled' || control.outcome !== 'applied') return;
-      if (contention(control)) sessionControl.resume(plan, `resource-resume:${control.operationId}`);
-      else if (resuming(control)) sessionControl.resume(plan, control.authorityRef);
+      if (contention(control)) await sessionControl.resume(plan, `resource-resume:${control.operationId}`);
+      else if (resuming(control)) await sessionControl.resume(plan, control.authorityRef);
       else return;
       const fresh = goalPlanStore.getPlan(planId);
       goalPlanStore.revisePlan(planId, { status: 'paused', delegationOrigin: { ...fresh.delegationOrigin, phase: 'queued' } },

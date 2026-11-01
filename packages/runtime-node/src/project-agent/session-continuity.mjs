@@ -91,7 +91,7 @@ export function createSessionContinuity({ goalPlanStore, conversationStore, goal
       const receipt = await sessionControl.drain(fresh, previous);
       if (sessionControl.settle(goalPlanStore.getPlan(plan.planId), previous, receipt).phase !== 'settled') return error('execution_outcome_unknown');
     }
-    sessionControl.resume(goalPlanStore.getPlan(plan.planId), input.anchorMessageId);
+    await sessionControl.resume(goalPlanStore.getPlan(plan.planId), input.anchorMessageId);
     const resumedOrigin = goalPlanStore.getPlan(plan.planId).delegationOrigin;
     const phase = fresh.delegationOrigin.pausedFromPhase === 'awaiting_approval' ? 'awaiting_approval' : 'queued';
     goalPlanStore.setRunnerState(plan.planId, { intent: fresh.delegationOrigin.pausedRunnerIntent || 'execute' });
@@ -113,5 +113,18 @@ export function createSessionContinuity({ goalPlanStore, conversationStore, goal
     return plan?.delegationOrigin?.phase === 'superseded' && eligible(plan) && Number.isFinite(at)
       && Date.parse(now()) - at >= SUPERSESSION_RETENTION_MS;
   }
-  return { replacement, suspend, resume, reprioritize, expired };
+  async function prepareResume(input, context, exclusive) {
+    const checked = await exclusive(() => {
+      const plan = findBySession(input.sessionId), result = check(plan, context);
+      if (!result.ok) return result;
+      if (!anchor(plan, input.anchorMessageId)) return error('invalid_anchor');
+      if (plan.delegationOrigin.lastResumeAnchorMessageId === input.anchorMessageId) return { ok: true, replayed: true };
+      if (!SUSPENDED.has(plan.delegationOrigin.phase)) return error('session_not_paused');
+      return { ok: true, plan };
+    });
+    if (!checked.ok || checked.replayed) return checked;
+    try { await sessionControl.prepareResume(checked.plan, input.anchorMessageId, exclusive); return { ok: true }; }
+    catch (failure) { return error(failure.message); }
+  }
+  return { replacement, suspend, resume, prepareResume, reprioritize, expired };
 }

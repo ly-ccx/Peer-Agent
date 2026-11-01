@@ -175,7 +175,10 @@ export function createSessionSupervisor({
   }
 
   function emit(event) {
-    if (['cancelled', 'session_resumed', 'interrupted'].includes(event.kind)) queueMicrotask(() => { void coordination?.recover(event.workspaceId); });
+    if (['cancelled', 'session_resumed', 'interrupted'].includes(event.kind)) queueMicrotask(() => {
+      // Background recovery keeps its durable pending state; explicit callers still receive failures.
+      void coordination?.recover(event.workspaceId).catch(() => {});
+    });
     try {
       emitEvent?.({ ...event, at: event.at || now() });
     } catch {
@@ -627,6 +630,7 @@ export function createSessionSupervisor({
       if (releasedHolder && planId && spawnedSessionId) {
         goalPlanStore.setPlanStatus(planId, 'failed');
         goalPlanStore.setRunnerState(planId, { status: 'failed', lastError: reason });
+        await sessionControl.settleEnded(goalPlanStore.getPlan(planId));
         if (isolationPlanner) await isolationPlanner.cleanup(goalPlanStore.getPlan(planId));
         await promote();
         if (input.objectiveId) objectives.linkSession(workspaceId,input.objectiveId,spawnedSessionId);
@@ -700,7 +704,9 @@ export function createSessionSupervisor({
       try {
         const fresh = goalPlanStore.getPlan(plan.planId);
         if (!sessionExecutionCurrent(fresh) || !executionScheduler.activateResources(fresh)) throw new Error('execution_resource_owner_changed');
-        await goalRunner.start(plan.planId, { awaitIdle: false });
+        if (fresh.delegationOrigin.executionControl?.kind === 'resume' && typeof goalRunner.resume === 'function')
+          await goalRunner.resume(plan.planId, { awaitIdle: false, intent: fresh.runner?.intent || 'execute' });
+        else await goalRunner.start(plan.planId, { awaitIdle: false });
       }
       catch (error) {
         failedStart = true;
@@ -1187,13 +1193,18 @@ export function createSessionSupervisor({
     },
     resumeRecovered(workspaceId) {
       return reconcileControls(workspaceId).then(() => resourceContention.reconcile(delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)))
-        .then(() => cancellation.recover(delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId))).then(() => coordination.recover(workspaceId)).then(() => exclusive(async () => {
+        .then(() => cancellation.recover(delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId))).then(() => coordination.recover(workspaceId)).then(async () => {
+        for (const plan of delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId && isHostHandoffPause(plan))) {
+          if (canManageWorkspace(workspaceId) && executionScheduler.isWorkspaceReady(workspaceId))
+            await sessionControl.prepareResume(plan, `host-handoff:${plan.planId}:${plan.delegationOrigin.pausedRunnerIntent || plan.runner?.intent || 'execute'}`, exclusive);
+        }
+      }).then(() => exclusive(async () => {
         if (!executionScheduler.isWorkspaceReady(workspaceId) || !canManageWorkspace(workspaceId)) return;
         for (const plan of delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)) {
           if (executionScheduler.inspect(plan).reason === 'coordination_reconciliation_required') continue;
           if (isHostHandoffPause(plan)) {
             const { pausedFromPhase, pausedRunnerIntent, ...origin } = plan.delegationOrigin;
-            sessionControl.resume(plan, `host-handoff:${plan.planId}:${plan.updatedAt}`);
+            await sessionControl.resume(plan, `host-handoff:${plan.planId}:${plan.delegationOrigin.pausedRunnerIntent || plan.runner?.intent || 'execute'}`);
             goalPlanStore.revisePlan(plan.planId, {delegationOrigin:{...origin,
               executionControl: goalPlanStore.getPlan(plan.planId).delegationOrigin.executionControl,
               executionGeneration: goalPlanStore.getPlan(plan.planId).delegationOrigin.executionGeneration, phase:'queued'}},
@@ -1224,7 +1235,9 @@ export function createSessionSupervisor({
     spawn(input, context) {
       return exclusive(() => spawnLocked(input, context || {}));
     },
-    resume(input, context = {}) {
+    async resume(input, context = {}) {
+      const prepared = await continuity.prepareResume(input, context, exclusive);
+      if (!prepared.ok) return prepared;
       return exclusive(async () => {
         const result = await continuity.resume(input, context);
         if (!result.ok) return result;
@@ -1255,7 +1268,10 @@ export function createSessionSupervisor({
         sessions: () => delegatedPlans().filter(row => row.delegationOrigin.workspaceId === context.workspaceId).map(project),
         pause: id => continuity.suspend(id, null, context),
         cancel: id => cancellation.cancel({ sessionId: id, reason: 'user cancelled work', anchorMessageId: input.anchorMessageId }, context),
-        resume: (sessionId, anchorMessageId) => continuity.resume({ sessionId, anchorMessageId }, context),
+        resume: async (sessionId, anchorMessageId) => {
+          const prepared = await continuity.prepareResume({ sessionId, anchorMessageId }, context, exclusive);
+          return prepared.ok ? exclusive(() => continuity.resume({ sessionId, anchorMessageId }, context)) : prepared;
+        },
       });
       if (controlled.ok && input.action === 'resume') await exclusive(() => promote());
       return controlled;
