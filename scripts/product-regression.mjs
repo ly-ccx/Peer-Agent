@@ -152,7 +152,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     || !['legacyHidden', 'botExplanation', 'historyKeyboard', 'staleHidden', 'retry', 'activeProgressOnly'].every(key => machine.taskVerification?.[key] === true)
     || !['passed', 'failed', 'partial', 'unverifiable'].every(outcome => machine.taskVerification?.outcomes?.includes(outcome))
     || !machine.verificationPresentation?.currentPhaseWins || !machine.verificationPresentation?.exitsToFollowUp || !machine.verificationPresentation?.technicalOwnedByBot
-    || !['directWaitingAction', 'keyboard', 'detailAction', 'sharedPending', 'failureRetry', 'latestReceipt', 'noDuplicate', 'unrelatedPreserved', 'narrowFits', 'focusReturned', 'deferredStopReceipt', 'focusPreserved'].every(check => machine.taskCancellation?.[check] === true)
+    || !['panelTaskAction', 'keyboard', 'detailAction', 'sharedPending', 'failureRetry', 'latestReceipt', 'noDuplicate', 'unrelatedPreserved', 'narrowFits', 'focusReturned', 'deferredStopReceipt', 'focusPreserved'].every(check => machine.taskCancellation?.[check] === true)
     || !['internalInstructionsHidden', 'relatedNoteLocated', 'followUpDraftFocused', 'existingDraftPreserved', 'concreteQuestionLocated', 'noAutomaticExecution']
       .every(check => machine.taskDetails?.[check] === true)
     || !['compactControls','persistedModel','persistedEffort','perBot','failedSaveRetained','keyboardTrigger','aligned','sentSelection'].every(check => machine.quickChatBots?.[check] === true)
