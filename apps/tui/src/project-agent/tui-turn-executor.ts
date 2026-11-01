@@ -113,6 +113,8 @@ export function createTuiTurnExecutor(options: {
     }
     const unsubscribeApproval = runtime.host.subscribeApproval(approval => options.onApproval?.(approval, streamId));
     const calls: any[] = [];
+    const checkpointIdentity = { provider: 'tui', modelProviderId: input.modelProviderId, providerId: input.modelProviderId,
+      model: profile.modelSelection?.modelId, modelFamily: profile.modelSelection?.family };
     let toolReservations = 0, streamedText = '';
     if (profile.providerCheckpoint && (profile.providerCheckpoint.provider !== 'tui' || profile.providerCheckpoint.modelProviderId !== input.modelProviderId)) throw new Error('continuity_model_changed');
     const saved = profile.role === 'project_agent' && profile.providerCheckpoint?.provider === 'tui'
@@ -135,7 +137,7 @@ export function createTuiTurnExecutor(options: {
     };
     const model = { ...runtime.model,
       checkpoint(state: ChatModelState, executions: readonly RuntimePipelineToolExecution<ChatModelToolCall, RuntimeSdkProviderExecution>[]) {
-        input.budgetGuard?.checkpoint({ provider: 'tui', modelProviderId: input.modelProviderId, messages: state.modelMessages }, executions);
+        input.budgetGuard?.checkpoint({ ...checkpointIdentity, messages: state.modelMessages }, executions);
       },
       runTurn(state: ChatModelState, context: any) {
       input.budgetGuard?.beforeRequest();
@@ -215,7 +217,7 @@ export function createTuiTurnExecutor(options: {
       if (!input.ephemeral) options.persistTurn?.(input, { text, calls, usage: result.state?.usage,
         interrupted: !ok });
       return { ok, text, toolCalls: calls, toolCallCount: calls.length,
-        ...(result.status === 'yielded' ? { turnEnd: 'yielded', providerCheckpoint: { provider: 'tui', modelProviderId: input.modelProviderId, messages: result.state?.modelMessages } } : {}),
+        ...(result.status === 'yielded' ? { turnEnd: 'yielded', providerCheckpoint: { ...checkpointIdentity, messages: result.state?.modelMessages } } : {}),
         ...(requestedUserInput ? { requestedUserInput: true } : {}),
         continued: result.status === 'exhausted', terminalStatus: controller.signal.aborted ? 'aborted' : ok ? 'completed' : 'error',
         usage: result.state?.usage, ...(ok ? {} : { error: result.reason || result.status, failureReason: result.reason || result.status, retryable: false }) };

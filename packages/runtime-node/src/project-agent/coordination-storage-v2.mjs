@@ -115,6 +115,7 @@ function apply(db, record, { blobs, receiptCache } = {}) {
   if (record.kind.startsWith('reply_')) {
     const id = record.message?.id || record.messageId, value = get(db, 'deliveries', id);
     if (value) before.deliveries[id] = value;
+    if (record.aggregateId) { const aggregate = get(db, 'deliveries', record.aggregateId); if (aggregate) before.deliveries[record.aggregateId] = aggregate; }
     const requestId = record.message?.question?.agentRequestId || value?.message?.question?.agentRequestId;
     if (requestId) {
       before.agentRequests = {};
@@ -127,9 +128,13 @@ function apply(db, record, { blobs, receiptCache } = {}) {
     before.mandates = {};
     const mandate = get(db, 'mandates', record.workId);
     if (mandate) before.mandates[record.workId] = mandate;
-    if (record.kind === 'intent_closed' && record.receipt?.replyRef) {
-      const delivery = get(db, 'deliveries', record.receipt.replyRef);
-      if (delivery) before.deliveries[record.receipt.replyRef] = delivery;
+    if (record.kind === 'intent_closed') for (const id of record.receipt?.replyRefs || [record.receipt?.replyRef].filter(Boolean)) {
+      const delivery = get(db, 'deliveries', id); if (delivery) before.deliveries[id] = delivery;
+    }
+    if (record.kind === 'intent_closed' && record.receipt?.controlRef) {
+      before.transitions = {};
+      const control = get(db, 'transitions', record.receipt.controlRef);
+      if (control) before.transitions[record.receipt.controlRef] = control;
     }
     before.intentDecisions = {};
     for (const id of [record.assessment?.operationId, record.assessment?.sourceDecisionRef, record.receipt?.operationId].filter(Boolean)) {
@@ -146,7 +151,7 @@ function apply(db, record, { blobs, receiptCache } = {}) {
     || Object.values(next.transitions || {}).some(row => row.minimumExecutorVersion === 3 || row.reconciliationRef)
     || Object.values(next.agentCommands || {}).some(row => row.completionRecorded === true);
   putMeta(db, 'minimumFormatVersion', Math.max(getMeta(db, 'minimumFormatVersion') || 2, record.kind.startsWith('intent_') || record.mandate?.intentSchemaVersion === 1
-    || ['reply_committed', 'reply_settlement_started', 'reply_settlement_failed', 'reply_settled'].includes(record.kind) ? 8 : closure ? 6 : supervision ? 5 : record.kind.startsWith('history_') ? 4 : 2));
+    || ['reply_committed', 'reply_settlement_started', 'reply_settlement_failed', 'reply_settled', 'reply_deferred', 'reply_held', 'reply_aggregated'].includes(record.kind) ? 8 : closure ? 6 : supervision ? 5 : record.kind.startsWith('history_') ? 4 : 2));
   for (const bucket of buckets) for (const [id, original] of Object.entries(next[bucket] || {})) {
     let value = original;
     if (bucket === 'works' && value.budget?.observations) {

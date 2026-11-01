@@ -1,8 +1,8 @@
 /** Coordination authority is issued by the local host, never by model arguments. */
-export type { ReplyDeliveryReceipt } from './reply-delivery.ts';
+export type { ReplyDeliveryReceipt, IntentReplyBinding, ReplyGoalScope } from './reply-delivery.ts';
 export type { InputDispositionKind, InputDisposition, IntentRequirement, IntentInterpretation, GoalCoverageItem,
   WorkDisposition, IntentAssessment, IntentCoordination, IntentClosureRequest, IntentDecisionReceipt,
-  IntentCoordinationRequest, CoordinationDecisionFrame } from './intent-coordination.ts';
+  IntentCoordinationRequest, CoordinationDecisionFrame, ProgressObservation } from './intent-coordination.ts';
 export type CoordinationAction = 'parallel' | 'augment' | 'revise' | 'query' | 'answer' | 'cancel' | 'replace' | 'handoff' | 'resume';
 export type CoordinationLifecycle = 'active' | 'paused' | 'cancelled' | 'fulfilled';
 export interface CoordinationMandate {

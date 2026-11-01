@@ -46,6 +46,18 @@ export function reduceCoordination(state, entry) {
     if (!entry.owner?.workId || !Array.isArray(entry.retired) || entry.retired.some(work => work.state !== 'coalesced'
       || work.continuationOwnerWorkId !== entry.owner.workId || work.workId === entry.owner.workId)) throw new Error('invalid_continuation_custody');
     for (const work of [entry.owner, ...entry.retired]) next.works[work.workId] = structuredClone(work);
+  } else if (entry.kind === 'reply_deferred') {
+    if (!next.deliveries[entry.message.id]) next.deliveries[entry.message.id] = { message: structuredClone(entry.message), state: 'deferred' };
+  } else if (entry.kind === 'reply_held') {
+    const delivery = next.deliveries[entry.messageId];
+    if (delivery?.state !== 'deferred') throw new Error('coordination_delivery_conflict');
+    next.deliveries[entry.messageId] = { ...delivery, heldAt: entry.at };
+  } else if (entry.kind === 'reply_aggregated') {
+    const delivery = next.deliveries[entry.messageId], aggregate = next.deliveries[entry.aggregateId];
+    if (delivery?.state !== 'deferred' || aggregate?.state !== 'delivered'
+      || !aggregate.message.meta?.digestReplyIds?.includes(entry.messageId)
+      || !aggregate.message.content?.includes(delivery.message.content?.trim())) throw new Error('coordination_aggregate_unproven');
+    next.deliveries[entry.messageId] = { ...delivery, state: 'aggregated', deliveredBy: entry.aggregateId };
   } else if (entry.kind === 'reply_prepared') {
     if (!next.deliveries[entry.message.id]) {
       const question = entry.message.question;

@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
 import { isCanonicalUserInput } from './user-priority.mjs';
-import { validIntentAssessment, INTENT_FORMAT_VERSION } from './intent-coordination-kernel.mjs';
+import { validIntentAssessment, INTENT_FORMAT_VERSION, intentContentDigest } from './intent-coordination-kernel.mjs';
+import { createDecisionFrame, publicEventPayload, publicDecisionText } from './decision-frame.mjs';
+import { hasUnsettledDispatch } from './recovery-policy.mjs';
+import { historyExecutionHeld } from './history-resumption.mjs';
 
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const stopped = work => work?.stopScope === 'work' && ['paused', 'cancelled'].includes(work.state);
@@ -25,14 +28,50 @@ export function createIntentLifecycle({ storeFor, readSession, readMessages, rea
   function query(input, context) {
     const s = scope(context, input.workId); if (!s) return { ok: false, error: 'out_of_scope' };
     const intent = s.work.intentCoordination;
+    if (input.expectedRevision !== undefined && input.expectedRevision !== (s.mandate?.goalRevision || 0)) return { ok: false, error: 'frame_revision_changed' };
+    if (input.expectedWorkRevision !== undefined && input.expectedWorkRevision !== (intent?.revision || 0)) return { ok: false, error: 'frame_revision_changed' };
+    if (input.inputId) {
+      const admitted = new Set([...(s.work.anchorInputIds || []), ...(s.mandate?.rootInputIds || []), ...(s.mandate?.revisionInputIds || []), ...Object.keys(intent?.inputs || {})]);
+      const message = s.messages.find(row => isCanonicalUserInput(row) && (row.inputId === input.inputId || row.id === input.inputId) && admitted.has(row.inputId || row.id));
+      if (!message) return { ok: false, error: 'input_out_of_scope' };
+      const body = publicDecisionText(typeof message.content === 'string' ? message.content : message.text, Infinity), offset = input.payloadOffset || 0;
+      if (offset > body.length) return { ok: false, error: 'input_offset_out_of_range' };
+      return { ok: true, workId: s.workId, inputId: message.inputId || message.id, messageId: message.id, inputText: body.slice(offset, offset + 8000),
+        payloadOffset: offset, totalCharacters: body.length, truncated: offset + 8000 < body.length,
+        ...(offset + 8000 < body.length ? { nextPayloadOffset: offset + 8000 } : {}) };
+    }
+    if (input.eventId) {
+      const event = s.state.events?.[input.eventId]?.event;
+      if (!event || event.workspaceId && event.workspaceId !== s.workspaceId
+        || event.sessionId && !s.mandate?.sessionIds.includes(event.sessionId) && !s.work.sessionIds?.includes(event.sessionId)
+        || !event.sessionId && ![...(s.work.pendingEventIds || []), ...(s.work.consumedEventIds || []), ...(context.events || []).map(row => row.eventId)].includes(event.eventId)) return { ok: false, error: 'event_out_of_scope' };
+      const payload = JSON.stringify(publicEventPayload(event, Infinity)), offset = input.payloadOffset || 0;
+      if (offset > payload.length) return { ok: false, error: 'event_offset_out_of_range' };
+      return { ok: true, workId: s.workId, goalRevision: s.mandate?.goalRevision || 0, eventId: event.eventId, sessionId: event.sessionId, kind: event.kind,
+        payloadJson: payload.slice(offset, offset + 8000), payloadOffset: offset, totalCharacters: payload.length, truncated: offset + 8000 < payload.length,
+        ...(offset + 8000 < payload.length ? { nextPayloadOffset: offset + 8000 } : {}) };
+    }
+    const related = (s.mandate?.sessionIds || []).map(sessionId => readSession({ sessionId })).filter(Boolean);
+    if (input.afterSessionId && !related.some(row => row.sessionId === input.afterSessionId)) return { ok: false, error: 'frame_cursor_out_of_scope' };
+    const frame = createDecisionFrame({ state: s.state, workspaceId: s.workspaceId, parentConversationId: s.parentConversationId,
+      workId: s.workId, sessions: related, currentInputIds: s.current.map(row => row.inputId || row.id),
+      originDecisionRef: context.sourceDecisionRef, turnId: context.turnId,
+      eventIds: [...new Set([...(context.events || []).map(row => row.eventId), ...(s.work.pendingEventIds || [])])], afterSessionId: input.afterSessionId });
+    const inputs = Object.entries(intent?.inputs || {}).sort(([a], [b]) => a.localeCompare(b));
+    if (input.afterInputId && !Object.hasOwn(intent?.inputs || {}, input.afterInputId)) return { ok: false, error: 'frame_cursor_out_of_scope' };
+    const inputStart = input.afterInputId ? inputs.findIndex(([id]) => id === input.afterInputId) + 1 : 0, inputPage = inputs.slice(inputStart, inputStart + 64);
     return { ok: true, workId: s.workId, workRevision: intent?.revision || 0, goalRevision: s.mandate?.goalRevision || 0,
-      lifecycle: intent?.lifecycle || 'active', intent: intent || null,
+      decisionFrame: frame,
+      lifecycle: intent?.lifecycle || 'active', intent: intent ? { ...intent, inputs: Object.fromEntries(inputPage) } : null,
+      inputPage: { total: inputs.length, omitted: Math.max(0, inputs.length - inputStart - inputPage.length),
+        ...(inputStart + inputPage.length < inputs.length ? { afterInputId: inputPage.at(-1)[0], expectedWorkRevision: intent.revision } : {}) },
       sourceInputIds: s.current.map(row => row.inputId || row.id), sourceEventIds: (context.events || []).map(row => row.eventId),
-      sourceDecisionRef: intent?.decision.disposition.kind === 'continue' ? intent.decision.operationId : undefined,
+      eventInventoryIds: [...new Set([...(context.events || []).map(row => row.eventId), ...(s.work.pendingEventIds || []), ...(s.work.consumedEventIds || [])])].slice(-128),
+      sourceDecisionRef: frame?.sourceDecisionRef,
       currentReplyRef: `${context.turnId}-reply-1`,
       operations: Object.values(s.state.transitions || {}).filter(row => row.workId === s.workId).slice(-16)
         .map(row => ({ operationId: row.operationId, phase: row.phase, error: row.error })),
-      availableActions: ['assess', 'query'].map(action => ({ action, allowed: !stopped(s.work) })) };
+      availableActions: frame?.availableActions || [] };
   }
   function dispositionError(assessment, s, context) {
     const d = assessment.disposition, intent = assessment.interpretation || s.work.intentCoordination?.interpretation;
@@ -59,14 +98,27 @@ export function createIntentLifecycle({ storeFor, readSession, readMessages, rea
       }
     }
     if (d.kind === 'return' && d.replyRef !== `${context.turnId}-reply-1`
-      && s.state.deliveries?.[d.replyRef]?.message.meta?.workId !== s.workId) return 'reply_reference_out_of_scope';
+      && !(s.work.intentCoordination?.decision.operationId === assessment.operationId
+        && s.work.intentCoordination.decision.disposition.replyRef === d.replyRef)) return 'reply_reference_out_of_scope';
     if (d.kind === 'withdraw') {
       const control = s.state.transitions?.[d.controlRef], source = s.state.decisions?.[d.controlRef];
       if (!s.current.length || control?.workId !== s.workId || control.action !== 'cancel' || control.phase !== 'completed'
         || !source?.sourceInputIds.some(id => s.current.some(row => (row.inputId || row.id) === id))) return 'withdrawal_unproven';
+      if (s.mandate?.sessionIds.some(id => !['accepted', 'cancelled'].includes(readSession({ sessionId: id })?.status))) return 'withdrawal_incomplete';
     }
-    if (d.kind === 'blocked_system' && d.recoveryRef !== `work:${s.workId}`
-      && !s.state.transitions?.[d.recoveryRef]) return 'recovery_reference_missing';
+    if (d.kind === 'blocked_system') {
+      if (d.recoveryRef === `work:${s.workId}`) {
+        if (d.code === 'intent_decision_unresolved') {
+          if (s.mandate?.sessionIds.some(id => { const session = readSession({ sessionId: id });
+            return ['queued', 'starting', 'running', 'verifying', 'waiting_user'].includes(session?.status)
+              || session?.followUp?.owner === 'user' || session?.resultConfirmationRequired === true; })) return 'existing_work_requires_wait';
+        } else if (d.code !== s.work.recovery?.failureKind && d.code !== s.work.recovery?.blockedCode
+          && !(d.code === 'execution_outcome_unknown' && hasUnsettledDispatch(s.work))) return 'failure_reference_unproven';
+      } else {
+        const failure = s.state.transitions?.[d.recoveryRef];
+        if (failure?.workId !== s.workId || !['blocked', 'awaiting_outcome'].includes(failure.phase) || failure.error !== d.code) return 'failure_reference_unproven';
+      }
+    }
     return null;
   }
   async function assess(input, context) {
@@ -77,8 +129,22 @@ export function createIntentLifecycle({ storeFor, readSession, readMessages, rea
     if (!validIntentAssessment(assessment)) return { ok: false, error: 'invalid_intent_assessment' };
     const error = dispositionError(assessment, s, context); if (error) return { ok: false, error };
     const admitted = s.store.assessIntent(assessment, { parentConversationId: s.parentConversationId,
-      currentInputIds: s.current.map(row => row.inputId || row.id), eventIds: (context.events || []).map(row => row.eventId), turnId: context.turnId });
+      currentInputIds: s.current.map(row => row.inputId || row.id), eventIds: (context.events || []).map(row => row.eventId), turnId: context.turnId,
+      originDecisionRef: context.sourceDecisionRef });
     if (!admitted.ok) return admitted;
+    if (assessment.disposition.kind === 'withdraw') {
+      s.store.closeIntent({ operationId: `close:${assessment.operationId}`, workId: s.workId,
+        expectedWorkRevision: admitted.receipt.workRevision, expectedGoalRevision: admitted.receipt.goalRevision, lifecycle: 'cancelled' },
+      { parentConversationId: s.parentConversationId, appliedControlRef: assessment.disposition.controlRef, pendingManagedSessions: false });
+    }
+    if (s.workId !== context.workId && s.current.length && !stopped(s.work) && !historyExecutionHeld(s.work)) {
+      const d = assessment.disposition;
+      const state = hasUnsettledDispatch(s.work) ? 'blocked_system' : d.kind === 'continue' ? 'runnable'
+        : d.kind === 'wait' ? d.waitFor.some(row => row.kind === 'human_request') ? 'waiting_user' : 'waiting_children'
+        : d.kind === 'return' ? 'retry_wait' : d.kind === 'withdraw' ? 'cancelled' : 'blocked_system';
+      s.store.saveWork({ workId: s.workId, state, ...(d.kind === 'wait' ? { waitFor: d.waitFor } : {}),
+        ...(!hasUnsettledDispatch(s.work) ? { recovery: undefined, reportedWait: undefined } : {}) }, { returnState: false });
+    }
     if (assessment.disposition.kind === 'return') {
       const reviewed = await review(s.store, s.workId);
       return { ...admitted, entry: undefined, review: reviewed, nextAction: reviewed.passed ? 'deliver_referenced_reply' : 'resolve_remaining_goal_obligations' };
@@ -129,7 +195,7 @@ export function createIntentLifecycle({ storeFor, readSession, readMessages, rea
     if (current.works[workId]?.intentCoordination?.revision !== intent.revision || current.mandates?.[workId]?.goalRevision !== intent.goalRevision
       || !sourcesCurrent({ passed: true, goalRevision: intent.goalRevision, sources }, current, workId)) return { passed: false, error: 'goal_review_stale' };
     const receipt = { reviewRef: `intent-review:${hash([workId, intent.revision, sources])}`, passed: true,
-      goalRevision: intent.goalRevision, intentRevision: intent.revision, coverageDigest: hash(intent.coverage),
+      goalRevision: intent.goalRevision, intentRevision: intent.revision, coverageDigest: intentContentDigest(intent.coverage),
       sources, evidenceRefs: [...new Set(result.evidenceRefs)].slice(0, 200), at: now() };
     store.append({ kind: 'intent_reviewed', minimumExecutorVersion: INTENT_FORMAT_VERSION, workId, review: receipt });
     return receipt;
@@ -139,23 +205,25 @@ export function createIntentLifecycle({ storeFor, readSession, readMessages, rea
 
 /** Closing is distinct from assessment and runs after delivery/settlement with fresh host facts. */
 export function intentWorkDisposition({ work, state, sessions, store, parentConversationId, sourcesCurrent }) {
-  const intent = work.intentCoordination; if (!intent || intent.lifecycle !== 'active') return null;
+  const intent = work.intentCoordination; if (!intent) return null;
+  if (intent.lifecycle !== 'active') return intent.lifecycle === 'cancelled' ? { state: 'cancelled', end: 'user_stopped' } : { state: 'delivered', end: 'delivered' };
   const disposition = intent.decision.disposition, mandate = state.mandates?.[work.workId];
   if (intent.goalRevision !== (mandate?.goalRevision || 0)) return { state: 'runnable', end: 'yielded' };
   if (disposition.kind === 'continue') return { state: 'runnable', end: 'yielded' };
-  if (disposition.kind === 'wait') return { state: disposition.waitFor.some(row => row.kind === 'human_request') ? 'waiting_user' : 'waiting_children', end: 'awaiting_children', waitFor: disposition.waitFor };
+  if (disposition.kind === 'wait') return { state: disposition.waitFor.some(row => row.kind === 'human_request'
+    || row.kind === 'session' && sessions.some(session => session.sessionId === row.id && session.followUp?.owner === 'user')) ? 'waiting_user' : 'waiting_children', end: 'awaiting_children', waitFor: disposition.waitFor };
   if (disposition.kind === 'blocked_system') return { state: 'blocked_system', end: 'no_progress', blockedCode: disposition.code };
   if (disposition.kind === 'withdraw') {
     const result = store.closeIntent({ operationId: `close:${intent.decision.operationId}`, workId: work.workId,
       expectedWorkRevision: intent.revision, expectedGoalRevision: intent.goalRevision, lifecycle: 'cancelled' },
-    { parentConversationId, appliedControlRef: disposition.controlRef });
+    { parentConversationId, appliedControlRef: disposition.controlRef, pendingManagedSessions: sessions.some(row => !['accepted', 'cancelled'].includes(row.status)) });
     return result.ok ? { state: 'cancelled', end: 'user_stopped' } : { state: 'blocked_system', end: result.error };
   }
-  const pending = sessions.some(row => !['accepted', 'cancelled'].includes(row.status) || row.needsUser?.length
+  const pending = hasUnsettledDispatch(work) || sessions.some(row => !['accepted', 'cancelled'].includes(row.status) || row.needsUser?.length
       || row.executionOwnership?.active || row.completionReviewRequired)
     || Object.values(state.transitions || {}).some(row => row.workId === work.workId && !['completed', 'blocked'].includes(row.phase))
     || Object.values(state.agentRequests || {}).some(row => mandate?.sessionIds.includes(row.sessionId) && row.status === 'open')
-    || Object.values(state.agentCommands || {}).some(row => row.workId === work.workId && ['pending', 'unknown'].includes(row.effect));
+    || Object.values(state.agentCommands || {}).some(row => (row.workId === work.workId || mandate?.sessionIds.includes(row.sessionId)) && ['pending', 'unknown'].includes(row.effect));
   const validReview = sourcesCurrent(intent.review, state, work.workId);
   const closed = store.closeIntent({ operationId: `close:${intent.decision.operationId}`, workId: work.workId,
     expectedWorkRevision: intent.revision, expectedGoalRevision: intent.goalRevision, lifecycle: 'fulfilled' },
@@ -164,6 +232,3 @@ export function intentWorkDisposition({ work, state, sessions, store, parentConv
     : { state: pending ? sessions.some(row => row.followUp?.owner === 'user') ? 'waiting_user' : 'waiting_children' : 'blocked_system',
       end: closed.error, blockedCode: closed.error };
 }
-
-export const intentReviewCurrent = (review, state, workId, sessions) => Boolean(review?.passed && review.goalRevision === state.mandates?.[workId]?.goalRevision
-  && review.sources.every(source => sessions.some(row => row.sessionId === source.sessionId && row.sourceRevision === source.sourceRevision)));

@@ -8,6 +8,7 @@ import { createReplyDelivery } from './reply-delivery.mjs';
 import { createProjectAgentRunner } from './runner.mjs';
 import { createProjectInbox } from './project-inbox.mjs';
 import { createCircuitBreaker } from './circuit-breaker.mjs';
+import { createDigestQueue } from './digest.mjs';
 
 async function fixture(t) {
   const rootDir = mkdtempSync(path.join(os.tmpdir(), 'peer-delivery-isolation-'));
@@ -104,6 +105,22 @@ test('lease loss after settlement keeps an unknown pending receipt and stops hos
   assert.equal(f.store.read().deliveries.lease.state, 'prepared');
   assert.equal(f.store.read().deliveries.lease.settlement.status, 'pending');
   await assert.rejects(delivery.recover(), /coordination_lease_lost/);
+});
+
+test('deferred reply recovery is idempotent on both sides of the digest hold crash window', async t => {
+  for (const window of ['before-hold', 'after-hold']) await t.test(window, async t => {
+    const f = await fixture(t), file = path.join(f.rootDir, 'digest.json'), queue = createDigestQueue({ file }); let armed = true;
+    const fail = () => { armed = false; throw new Error('coordination_simulated_crash'); };
+    const store = { ...f.store, recordDelivery(entry) { const saved = f.store.recordDelivery(entry); if (armed && window === 'before-hold' && entry.kind === 'reply_deferred') fail(); return saved; } };
+    const hold = message => queue.hold('w', { id: message.id, text: message.content, message });
+    const delivery = createReplyDelivery({ ...f.ports, store, onDeferred: message => { hold(message); if (armed && window === 'after-hold') fail(); } });
+    await assert.rejects(delivery.defer(reply('deferred')), /simulated_crash/);
+    assert.equal(f.store.read().deliveries.deferred.state, 'deferred'); assert.equal(f.messages.length, 0);
+    await createReplyDelivery({ ...f.ports, onDeferred: hold }).recover();
+    await createReplyDelivery({ ...f.ports, onDeferred: hold }).recover();
+    assert.equal(createDigestQueue({ file }).pending('w'), 1); assert.ok(f.store.read().deliveries.deferred.heldAt);
+    assert.equal(f.messages.length, 0); assert.equal(f.effects(), 0);
+  });
 });
 
 test('local semantic failures do not trip Provider health, and real Provider failure stays scoped to its configured channel', async t => {

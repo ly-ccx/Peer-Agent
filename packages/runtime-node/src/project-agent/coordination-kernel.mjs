@@ -29,9 +29,11 @@ export function admitCoordinationDecision(state, decision, host) {
   const intent = state.works?.[decision.workId]?.intentCoordination;
   if (intent && intent.lifecycle !== 'active') return reject('mandate_inactive');
   const continuation = !inputs.length && !events.length && decision.sourceDecisionRef
-    && decision.sourceDecisionRef === host.sourceDecisionRef && intent?.lifecycle === 'active'
-    && intent.goalRevision === prior?.goalRevision && intent.decision.operationId === decision.sourceDecisionRef
-    && intent.decision.disposition.kind === 'continue';
+    && decision.sourceDecisionRef === host.sourceDecisionRef && intent?.lifecycle === 'active' && intent.goalRevision === prior?.goalRevision
+    && (intent.decision.operationId === decision.sourceDecisionRef && intent.decision.disposition.kind === 'continue'
+      || typeof host.turnId === 'string' && host.turnId.length > 0 && intent.decisionTurnId === host.turnId && decision.sourceDecisionRef === host.originDecisionRef
+        && state.intentDecisions?.[decision.sourceDecisionRef]?.continuation === true
+        && state.intentDecisions[decision.sourceDecisionRef].goalRevision === prior.goalRevision);
   if (!inputs.length && !events.length && !continuation) return reject('coordination_source_required');
   if (!inputs.length && (!prior || prior.lifecycle !== 'active')) return reject('mandate_inactive');
   const adopted = !prior && inputs.length && decision.sessionId && host.adoptSessionIds?.includes(decision.sessionId);

@@ -34,6 +34,7 @@ test('one operation is idempotent; a consumed event continues through the persis
   const a = assessment(), admitted = admitIntentAssessment(state(), a, host);
   const s = reduceIntentCoordination(state(), admitted.entry);
   assert.equal(admitIntentAssessment(s, a, host).replayed, true);
+  assert.equal(admitIntentAssessment(s, { ...Object.fromEntries(Object.entries(a).reverse()), interpretation: Object.fromEntries(Object.entries(a.interpretation).reverse()) }, host).replayed, true);
   assert.equal(admitIntentAssessment(s, { ...a, reason: 'changed' }, host).error, 'operation_identity_conflict');
   const next = { ...a, operationId: 'd2', expectedWorkRevision: 1, sourceInputIds: [], inputs: [], interpretation: undefined, sourceDecisionRef: 'd' };
   assert.equal(admitIntentAssessment(s, next, { ...host, currentInputIds: [] }).ok, true);
@@ -47,14 +48,15 @@ test('accepted research, missing coverage, stale goal, undelivered reply and unv
   const request = { operationId: 'close', workId: 'g', expectedWorkRevision: 1, expectedGoalRevision: 1, lifecycle: 'fulfilled' };
   assert.equal(admitIntentClosure(s, request, host).error, 'goal_coverage_incomplete');
   const next = { ...assessment(), operationId: 'return', expectedWorkRevision: 1, disposition: { kind: 'return', replyRef: 'reply' },
-    coverage: assessment().coverage.map(row => ({ ...row, status: 'covered' })) };
+    coverage: assessment().coverage.map(row => ({ ...row, status: 'covered', sources: assessment().coverage[0].sources })) };
   const s2 = reduceIntentCoordination(s, admitIntentAssessment(s, next, host).entry);
   const close = { ...request, expectedWorkRevision: 2 };
   assert.equal(admitIntentClosure(s2, close, host).error, 'goal_delivery_pending');
-  s2.deliveries.reply = { state: 'delivered', message: { workId: 'g' } };
+  s2.deliveries.reply = { state: 'delivered', message: { id: 'reply', content: 'Actual delivered result', meta: { workId: 'g', sessionStates: [{ sessionId: 's', sourceRevision: 'r1', status: 'result_ready' }], intentBindings: [
+    { workId: 'g', goalRevision: 1, intentRevision: 2, decisionRef: 'return' }] } } };
   assert.equal(admitIntentClosure(s2, close, host).error, 'goal_review_required');
   const reviewed = { ...host, pendingObligations: false, verifiedGoalRevision: 1, reviewRef: 'review:1' };
-  s2.works.g.intentCoordination.review = { reviewRef: 'review:1', passed: true, goalRevision: 1, intentRevision: 2 };
+  s2.works.g.intentCoordination.review = { reviewRef: 'review:1', passed: true, goalRevision: 1, intentRevision: 2, sources: [{ sessionId: 's', sourceRevision: 'r1' }] };
   const admitted = admitIntentClosure(s2, close, reviewed); assert.equal(admitted.ok, true);
   const closed = reduceIntentCoordination(s2, admitted.entry);
   assert.equal(closed.works.g.intentCoordination.lifecycle, 'fulfilled');
@@ -70,7 +72,7 @@ test('v8 intent facts survive index loss, preserve format floor, fence legacy wr
   try {
     await store.prepare(); store.saveWork(state().works.g);
     // Goal revision zero is valid for pre-delegation interpretation; it grants no execution rights.
-    const a = assessment(); a.expectedGoalRevision = 0; a.coverage.forEach(row => { row.sources = []; });
+    const a = assessment(); a.expectedGoalRevision = 0; a.coverage.forEach(row => { row.sources = []; row.status = 'remaining'; });
     const result = store.assessIntent(a, host); assert.equal(result.ok, true);
     assert.equal(store.assessIntent(a, host).replayed, true);
     const expected = store.read(); store.close();
@@ -84,4 +86,16 @@ test('v8 intent facts survive index loss, preserve format floor, fence legacy wr
     writeFileSync(file, JSON.stringify({ ...manifest, minimumReaderVersion: 7, minimumWriterVersion: 7 }));
     assert.throws(() => store.read(), /coordination_schema_unsupported/);
   } finally { store.close(); rmSync(rootDir, { recursive: true, force: true }); }
+});
+
+test('withdrawal needs an applied current control and stopped managed sessions; it retains unknown history without fulfilling the goal', () => {
+  let s = state(); s.transitions = { cancel: { workId: 'g', action: 'cancel', phase: 'completed', expectedGoalRevision: 1 } };
+  s.works.g.budget = { uncertainDispatches: [{ toolCallId: 'historical-unknown' }] };
+  const a = { ...assessment(), disposition: { kind: 'withdraw', controlRef: 'cancel' } };
+  s = reduceIntentCoordination(s, admitIntentAssessment(s, a, host).entry);
+  const request = { operationId: 'withdraw', workId: 'g', expectedWorkRevision: 1, expectedGoalRevision: 1, lifecycle: 'cancelled' };
+  assert.equal(admitIntentClosure(s, request, { ...host, appliedControlRef: 'cancel', pendingManagedSessions: true }).error, 'goal_control_required');
+  const closed = admitIntentClosure(s, request, { ...host, appliedControlRef: 'cancel', pendingManagedSessions: false });
+  assert.equal(closed.ok, true); s = reduceIntentCoordination(s, closed.entry);
+  assert.equal(s.works.g.intentCoordination.lifecycle, 'cancelled'); assert.equal(s.works.g.budget.uncertainDispatches.length, 1);
 });

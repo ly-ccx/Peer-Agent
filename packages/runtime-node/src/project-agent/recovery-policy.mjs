@@ -41,6 +41,9 @@ export function recoveryReservationDue(work, at) {
 export function recoveryCheckpointAvailable(work, checkpoint, readCheckpoint) {
   if (!checkpoint || typeof checkpoint !== 'object') return false;
   const rounds = checkpoint?.outcome?.rounds || [];
+  if (work.intentCoordination?.lifecycle === 'active' && work.intentCoordination.decision.disposition.kind === 'continue'
+    && checkpoint.outcome?.yielded !== true && !hasUnsettledDispatch(work)
+    && rounds.every(round => (round.toolCalls || []).every(call => call.result !== undefined))) return true;
   // A fully committed progress reply starts a fresh reasoning step over current
   // child facts. It does not replay this turn's tools and needs no native tail.
   if (work.repairSessionIds?.length && checkpoint.outcome?.failed !== true
@@ -64,7 +67,7 @@ export function replyCheckpointForModel(outcome, selection) {
   const saved = outcome?.providerCheckpoint;
   if (!saved || !selection?.modelProviderId || !selection?.modelId) return outcome;
   const same = saved.providerId === selection.modelProviderId && saved.model === selection.modelId
-    && (!selection.family || saved.provider === selection.family);
+    && (!selection.family || (saved.provider === 'tui' ? saved.modelFamily : saved.provider) === selection.family);
   if (same) return outcome;
   // The caller first reconciles the durable dispatch ledger. Do not discard an
   // unpaired result even if the old Provider would subsequently reject it.

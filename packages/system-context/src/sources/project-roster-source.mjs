@@ -1,5 +1,6 @@
 // 当前任务名册和本次唤醒的事件批。事实只进 L7。
-import { clipText, firstArray, hasRole, looksSensitive, turnBag } from './project-context.mjs';
+import { clipText as neutralText, firstArray, hasRole, looksSensitive, turnBag } from './project-context.mjs';
+const clipText = (value, max) => looksSensitive(value) ? '[sensitive content omitted]' : neutralText(value, max);
 
 const MAX_SESSIONS = 24;
 const MAX_EVENTS = 16;
@@ -54,12 +55,15 @@ function normalizeEvent(event) {
   if (!event || typeof event !== 'object') return null;
   const kind = clipText(event.kind || event.type, 80);
   const sessionId = clipText(event.sessionId, 200);
-  const summary = clipText(event.summary || event.text || event.title, TEXT_MAX);
+  const payload = event.payload || {};
+  const summary = clipText(event.summary || event.text || event.title || payload.summary || payload.reason || payload.error, TEXT_MAX);
   if (!kind && !summary) return null;
   return {
     kind: kind || 'event',
     sessionId,
     summary,
+    payload: Object.fromEntries(['reason', 'lastError', 'cause', 'error', 'errorCode', 'failureKind', 'sourceRevision', 'observationRevision']
+      .filter(key => typeof payload[key] === 'string').map(key => [key, looksSensitive(payload[key]) ? '[sensitive content omitted]' : clipText(payload[key], 300)])),
     objectiveId:clipText(event.objectiveId,200),watchId:clipText(event.watchId,200),eventId:clipText(event.eventId,200),
   };
 }
@@ -109,7 +113,8 @@ function formatRoster(sessions, events, inputAnchors, objectives=[], proposals=[
     for (const event of events) {
       const who = event.sessionId ? ` ${event.sessionId}` : '';
       const summary = event.summary ? `: ${event.summary}` : '';
-      lines.push(`- ${event.kind}${who}${summary}${event.objectiveId?`; objectiveId=${event.objectiveId}; watchId=${event.watchId}; eventId=${event.eventId}`:""}`);
+      lines.push(`- ${event.kind}${who}${summary}${event.objectiveId?`; objectiveId=${event.objectiveId}; watchId=${event.watchId}; eventId=${event.eventId}`:`; eventId=${event.eventId}`}`);
+      if (Object.keys(event.payload || {}).length) lines.push(`  payload: ${JSON.stringify(event.payload)}`);
     }
   }
   if (coordination.length) lines.push('Coordination mandates and transitions (host facts; task completion remains in sessions):', ...coordination.map(item => JSON.stringify(item)));
@@ -131,7 +136,7 @@ export function createProjectRosterPromptSource() {
     observe(input = {}) {
       if (!hasRole(input, 'project_agent')) return { sessions: [], events: [] };
       return {
-        sessions: sessionsOf(input).map(normalizeSession).filter(Boolean).slice(0, MAX_SESSIONS),
+        sessions: prioritizeSessions(input).map(normalizeSession).filter(Boolean).slice(0, MAX_SESSIONS),
         events: eventsOf(input).map(normalizeEvent).filter(Boolean).slice(0, MAX_EVENTS),
         inputAnchors: inputAnchorsOf(input),
         decisionFrame: minimalDecisionFrame(turnBag(input).decisionFrame, turnBag(input).dispositionRequired),
@@ -179,13 +184,36 @@ export function createProjectRosterPromptSource() {
   };
 }
 
+const frameKeys = new Set(['workId', 'workRevision', 'goalRevision', 'sourceInputIds', 'sourceEventIds', 'sourceDecisionRef', 'intent', 'lifecycle', 'outcome',
+  'constraints', 'nonGoals', 'openQuestions', 'openQuestionCount', 'remainingRequirementCount', 'inputDispositions', 'inputId', 'requirements', 'requirementId', 'text', 'status', 'disposition', 'review', 'reviewRef', 'passed', 'current', 'sessions',
+  'sessionId', 'title', 'sourceRevision', 'observationRevision', 'followUp', 'owner', 'reason', 'inCurrentList', 'blockedReason', 'humanGate', 'reportSummary',
+  'events', 'eventId', 'kind', 'at', 'summary', 'payload', 'lastError', 'cause', 'error', 'errorCode', 'blockedCode', 'failureKind', 'sameCauseCount', 'stopAutoRetry', 'askUser', 'leafIds',
+  'agentMessage', 'messageId', 'requestId', 'purpose', 'questions', 'revision', 'responder', 'userRequestRef', 'prompt', 'operations', 'operationId', 'action', 'phase',
+  'executionAdmission', 'executionEffect', 'unknownEffects', 'effect', 'nextAction', 'controls', 'state', 'stopScope', 'pendingControl', 'recovery', 'retryAt',
+  'availableActions', 'allowed', 'omitted', 'retrieval', 'tool', 'expectedRevision', 'afterSessionId', 'truncated', 'progressObservation', 'observed', 'admitted', 'advanced', 'dispositionRequired']);
 function minimalDecisionFrame(value, required) {
   if (!value || typeof value.workId !== 'string') return null;
-  const intent = value.intent;
-  return { workId: clipText(value.workId, 200), workRevision: value.workRevision, goalRevision: value.goalRevision,
-    dispositionRequired: required === true, sourceDecisionRef: clipText(value.sourceDecisionRef, 200),
-    intent: intent ? { lifecycle: clipText(intent.lifecycle, 40), outcome: looksSensitive(intent.interpretation?.outcome) ? '[sensitive content omitted]' : clipText(intent.interpretation?.outcome, 1000),
-      requirements: (intent.interpretation?.requirements || []).slice(0, 32).map(row => ({ requirementId: clipText(row.requirementId, 200), text: looksSensitive(row.text) ? '[sensitive content omitted]' : clipText(row.text, 500) })),
-      coverage: (intent.coverage || []).slice(0, 32).map(row => ({ requirementId: clipText(row.requirementId, 200), status: clipText(row.status, 30) })),
-      disposition: clipText(intent.decision?.disposition?.kind, 40) } : null };
+  let remaining = 3000, admissionTruncated = false;
+  function admit(row, depth = 0) {
+    if (depth > 9 || --remaining < 0) { admissionTruncated = true; return undefined; }
+    if (typeof row === 'string') return looksSensitive(row) ? '[sensitive content omitted]' : clipText(row, 1200);
+    if (typeof row === 'boolean' || row === null || typeof row === 'number' && Number.isFinite(row)) return row;
+    if (Array.isArray(row)) return row.slice(0, 32).map(item => admit(item, depth + 1));
+    if (row && typeof row === 'object') return Object.fromEntries(Object.entries(row).filter(([key]) => frameKeys.has(key))
+      .map(([key, item]) => [key, admit(item, depth + 1)]).filter(([, item]) => item !== undefined));
+  }
+  const frame = admit({ ...value, dispositionRequired: required === true });
+  if (admissionTruncated) frame.truncated = true;
+  while (new TextEncoder().encode(JSON.stringify(frame)).length > 24000) {
+    const arrays = [frame.events, frame.sessions, frame.operations, frame.intent?.requirements, frame.questions, frame.unknownEffects,
+      frame.intent?.constraints, frame.intent?.nonGoals, frame.intent?.openQuestions, frame.sourceInputIds, frame.sourceEventIds, frame.availableActions].filter(row => row?.length);
+    if (!arrays.length) break;
+    arrays.sort((a, b) => JSON.stringify(b).length - JSON.stringify(a).length)[0].pop(); frame.truncated = true;
+  }
+  return frame;
+}
+function prioritizeSessions(input) {
+  const eventIds = new Set(eventsOf(input).map(row => row.sessionId)), frameIds = new Set(turnBag(input).decisionFrame?.sessions?.map(row => row.sessionId) || []);
+  return sessionsOf(input).map((row, index) => ({ row, index })).sort((a, b) => Number(eventIds.has(b.row.sessionId)) - Number(eventIds.has(a.row.sessionId))
+    || Number(frameIds.has(b.row.sessionId)) - Number(frameIds.has(a.row.sessionId)) || a.index - b.index).map(item => item.row);
 }

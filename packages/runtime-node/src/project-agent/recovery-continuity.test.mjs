@@ -562,6 +562,12 @@ test('model rebasing preserves matching checkpoints and refuses unpaired tool fa
   const completed = { ...outcome, rounds: [{ toolCalls: [{ name: 'read_file', result: { ok: true } }] }] };
   assert.equal(replyCheckpointForModel(completed, { modelProviderId: 'old', modelId: 'model', family: 'openai' }), completed);
   assert.equal(replyCheckpointForModel(completed, { modelProviderId: 'new', modelId: 'model', family: 'openai' }).providerCheckpoint, undefined);
+  const tui = { ...completed, providerCheckpoint: { provider: 'tui', modelProviderId: 'old', providerId: 'old', model: 'model', modelFamily: 'openai', messages: [] } };
+  assert.equal(replyCheckpointForModel(tui, { modelProviderId: 'old', modelId: 'model', family: 'openai' }), tui);
+  for (const selection of [{modelProviderId:'new',modelId:'model',family:'openai'}, {modelProviderId:'old',modelId:'other',family:'openai'}, {modelProviderId:'old',modelId:'model',family:'anthropic'}]) {
+    assert.equal(replyCheckpointForModel(tui, selection).providerCheckpoint, undefined);
+  }
+  assert.equal(replyCheckpointForModel({ ...tui, providerCheckpoint: {provider:'tui',modelProviderId:'old',messages:[]} }, {modelProviderId:'old',modelId:'model',family:'openai'}).providerCheckpoint, undefined);
 });
 
 test('foreground input waits for an active tool result instead of cancelling a dispatched capability', async () => {

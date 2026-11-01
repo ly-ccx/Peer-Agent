@@ -101,7 +101,7 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
     supportsSplitDelivery: () => useV2() && storage.supportsProtectedReceipts(),
     recordDelivery(entry) {
       assertOwner(); if (!useV2()) throw new Error('coordination_recovery_pending');
-      if (!['reply_committed', 'reply_settlement_started', 'reply_settlement_failed', 'reply_settled'].includes(entry.kind)) throw new Error('invalid_delivery_receipt');
+      if (!['reply_committed', 'reply_settlement_started', 'reply_settlement_failed', 'reply_settled', 'reply_deferred', 'reply_held', 'reply_aggregated'].includes(entry.kind)) throw new Error('invalid_delivery_receipt');
       storage.enableSupervision(INTENT_FORMAT_VERSION); return append(entry);
     },
     readSupervision: (bucket, id) => useV2() ? storage.readSupervision(bucket, id) : undefined,

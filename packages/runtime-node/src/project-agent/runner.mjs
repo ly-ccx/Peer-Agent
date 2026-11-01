@@ -44,6 +44,7 @@ export function createProjectAgentRunner({
   onStatus = null,
   onDigest = null,
   onDigestDelivered = null,
+  onDigestDiscarded = null,
   onCurator = null,
   onReplied = null,
   coordinationStore = null,
@@ -116,6 +117,7 @@ export function createProjectAgentRunner({
 
   const coordination = coordinationStore ? createRunnerCoordination({ store: coordinationStore, inbox,
     workspaceId: workspace, conversationId: conversation, readMessages, remember, onReplied,
+    onDeferred: typeof onDigest === 'function' ? message => onDigest({ message, id: message.id, text: message.content || '', at: stamp() }) : null,
     onDeliveryChanged: error => { if (disposed) return;
       if (error) { setStatus('error'); return; }
       try { armRecoveryTimer(); } catch { setStatus('error'); return; }
@@ -303,11 +305,18 @@ export function createProjectAgentRunner({
     const endExecution = beginExecutionAttempt(conversation, job.turnId);
     try {
       if (job.kind === 'digest') {
-        if (job.message) remember(job.message);
-        if (job.message && typeof onReplied === 'function') {
+        if (job.message && !job.message.conversationId) job.message = { ...job.message, conversationId: conversation };
+        let committed = !coordination;
+        if (job.message && coordination) {
+          const prepared = await coordination.prepareDigest(job.message);
+          if (prepared.held) return 'ok';
+          if (prepared.invalidated) { onDigestDiscarded?.(job.message); return 'ok'; }
+          await coordination.deliver(job.message); committed = coordination.deliveryCommitted(job.message.id);
+        } else if (job.message) remember(job.message);
+        if (!coordination && job.message && typeof onReplied === 'function') {
           try { await onReplied(job.message); } catch { /* 已投递的小结不重复执行。 */ }
         }
-        if (job.message && typeof onDigestDelivered === 'function') {
+        if (committed && job.message && typeof onDigestDelivered === 'function') {
           try { onDigestDelivered(job.message); } catch { /* 正文已写入；确认失败时下次还能再送 */ }
         }
         return 'ok';
@@ -408,9 +417,10 @@ export function createProjectAgentRunner({
       let deliveryPending = false;
       const reportedSessionIds = new Set();
       if (coordination) {
-        const replies = finished.messages.filter(message => message.kind === 'agent_reply' && message.meta?.surfacing !== 'digest');
+        const replies = finished.messages.filter(message => message.kind === 'agent_reply');
         for (const message of replies) message.meta = { ...message.meta, workId: job.workId };
-        coordination.prepareReplies(replies);
+        coordination.bindReplies(replies, job);
+        coordination.prepareReplies(replies.filter(message => message.meta?.surfacing !== 'digest'), job);
       }
       for (const message of finished.messages) {
         if (coordination) message.meta = { ...message.meta, workId: job.workId };
@@ -421,7 +431,8 @@ export function createProjectAgentRunner({
           events: job.events, throughSeq: job.throughSeq,
         };
         if (message?.kind === 'agent_reply' && message?.meta?.surfacing === 'digest' && typeof onDigest === 'function') {
-          onDigest({
+          if (coordination) { await coordination.deferReply(message); deliveryPending = true; }
+          else onDigest({
             message,
             id: message.id,
             text: typeof message.content === 'string' ? message.content : '',

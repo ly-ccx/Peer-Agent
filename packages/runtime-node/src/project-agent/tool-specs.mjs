@@ -85,6 +85,9 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
     type: 'object', properties: {
       action: { type: 'string', enum: ['parallel','augment','revise','query','answer','cancel','replace','handoff','resume','assess'] },
       assessment: intentAssessmentSchema,
+      afterSessionId: { type: 'string', maxLength: 200 },
+      eventId: { type: 'string', maxLength: 200 }, payloadOffset: { type: 'integer', minimum: 0 },
+      inputId: { type: 'string', maxLength: 200 }, afterInputId: { type: 'string', maxLength: 200 }, expectedWorkRevision: { type: 'integer', minimum: 0 },
       workId: { type: 'string', maxLength: 200 }, sessionId: { type: 'string', maxLength: 200 },
       expectedRevision: { type: 'integer', minimum: 0, description: 'Use the exact numeric goalRevision returned by coordinate_work query (for example 1, never "1.0"). Query does not require a revision.' }, reason: { type: 'string', maxLength: 500 },
       text: { type: 'string', maxLength: 4000 }, replyTo: { type: 'string', maxLength: 200 }, task: SPAWN_INPUT_SCHEMA,
@@ -237,13 +240,19 @@ export function validateDelegationInput(name, raw) {
   const input = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   if (OBJECTIVE_TOOL_SPECS.some(spec => spec.name === name)) return validateObjectiveToolInput(name, raw);
   if (name === 'coordinate_work') {
-    if (Object.keys(input).some(key => !['action','workId','sessionId','expectedRevision','reason','text','replyTo','task','assessment'].includes(key))
+    if (Object.keys(input).some(key => !['action','workId','sessionId','expectedRevision','reason','text','replyTo','task','assessment','afterSessionId','eventId','payloadOffset','inputId','afterInputId','expectedWorkRevision'].includes(key))
       || !['parallel','augment','revise','query','answer','cancel','replace','handoff','resume','assess'].includes(input.action) || !text(input.reason,500)) return invalid('A scoped coordination action and reason are required. Authority is assigned by the host.');
     if (input.action === 'assess') {
       if (input.assessment?.operationId !== undefined || !validIntentAssessment({ ...input.assessment, operationId: 'host' })) return invalid('A bounded intent assessment with both current revisions and source identities is required. The host assigns its operationId.');
       return { ok: true, value: { action: 'assess', reason: input.reason.trim(), assessment: structuredClone(input.assessment) } };
     }
     if (input.assessment !== undefined) return invalid('assessment is only valid for action assess.');
+    if (input.afterSessionId !== undefined && (input.action !== 'query' || !text(input.afterSessionId,200) || !Number.isSafeInteger(input.expectedRevision))) return invalid('Frame pagination requires query, afterSessionId and current expectedRevision.');
+    if (input.eventId !== undefined && (input.action !== 'query' || !text(input.eventId,200))
+      || input.inputId !== undefined && (input.action !== 'query' || !text(input.inputId,200) || input.eventId)
+      || input.expectedWorkRevision !== undefined && (input.action !== 'query' || !Number.isSafeInteger(input.expectedWorkRevision) || input.expectedWorkRevision < 0)
+      || input.afterInputId !== undefined && (input.action !== 'query' || !text(input.afterInputId,200) || !Number.isSafeInteger(input.expectedWorkRevision))
+      || input.payloadOffset !== undefined && ((!input.eventId && !input.inputId) || !Number.isSafeInteger(input.payloadOffset) || input.payloadOffset < 0)) return invalid('Factual retrieval requires query, a scoped inputId/eventId and a non-negative integer payloadOffset; input paging also requires current expectedWorkRevision.');
     if (input.workId !== undefined && !text(input.workId,200) || input.sessionId !== undefined && !text(input.sessionId,200)) return invalid('workId and sessionId must be non-empty strings of at most 200 characters.');
     if (input.expectedRevision !== undefined && (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0)) return invalid('expectedRevision must be a non-negative integer, not a string. Call coordinate_work query for this session, then use its numeric goalRevision unchanged. No new user confirmation is implied by this input error.');
 
@@ -255,6 +264,10 @@ export function validateDelegationInput(name, raw) {
     const task = input.task ? validateSpawn(input.task) : null;
     if (task && !task.ok) return task;
     return { ok:true, value:{action:input.action,reason:input.reason.trim(),
+      ...(input.afterSessionId ? { afterSessionId: input.afterSessionId } : {}),
+      ...(input.eventId ? { eventId: input.eventId, ...(input.payloadOffset !== undefined ? { payloadOffset: input.payloadOffset } : {}) } : {}),
+      ...(input.inputId ? { inputId: input.inputId, ...(input.payloadOffset !== undefined ? { payloadOffset: input.payloadOffset } : {}) } : {}),
+      ...(input.afterInputId ? { afterInputId: input.afterInputId } : {}), ...(input.expectedWorkRevision !== undefined ? { expectedWorkRevision: input.expectedWorkRevision } : {}),
       ...(input.workId ? {workId:input.workId} : {}), ...(input.sessionId ? {sessionId:input.sessionId} : {}),
       ...(input.expectedRevision !== undefined ? {expectedRevision:input.expectedRevision} : {}),
       ...(input.text ? {text:input.text.trim()} : {}), ...(input.replyTo ? {replyTo:input.replyTo.trim()} : {}), ...(task ? {task:task.value} : {})} };

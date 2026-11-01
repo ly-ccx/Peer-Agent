@@ -1,5 +1,5 @@
 import { createVerificationDispatchRecovery } from './verification-dispatch-recovery.mjs';
-import { createReplyDelivery } from './reply-delivery.mjs';
+import { createRunnerReplyLifecycle } from './runner-reply-lifecycle.mjs';
 import { coordinationWorkId } from './work-coordination.mjs';
 import { repairOwnership, stateAfterReply, ownedSessions, repairProgressDecision } from './repair-ownership.mjs';
 import { workBudgetBinding } from './work-budget.mjs';
@@ -10,63 +10,29 @@ import { reconcileContinuationCustody } from './continuation-custody.mjs';
 import { reportedWaitFor, reportedWaitCurrent } from './reported-wait.mjs';
 import { historyExecutionHeld } from './history-resumption.mjs';
 import { reconcileRepairCustody } from './repair-custody.mjs';
-import { intentWorkDisposition, intentReviewCurrent } from './intent-lifecycle.mjs';
+import { createDecisionFrame } from './decision-frame.mjs';
+import { intentDecisionAdmittedForTurn } from './intent-reply-bindings.mjs';
 
 const ROUTINE = new Set(['session_started', 'progress', 'session_spawned', 'session_progress']);
-export function createRunnerCoordination({ store, inbox, workspaceId, conversationId, readMessages, remember, onReplied, onDeliveryChanged, resolveRoster, reconcileVerification = null, now = () => new Date().toISOString() }) {
+export function createRunnerCoordination({ store, inbox, workspaceId, conversationId, readMessages, remember, onReplied, onDeferred, onDeliveryChanged, resolveRoster, reconcileVerification = null, now = () => new Date().toISOString() }) {
   const dispatchRecovery = createVerificationDispatchRecovery({ store, readMessages, reconcileVerification, now,
     activeAttempts: () => workBudgetBinding(workspaceId)?.activeAttempts });
   const readSnapshot = () => typeof store.readSnapshot === 'function' ? store.readSnapshot() : store.read();
   const readWork = id => typeof store.readWork === 'function' ? store.readWork(id) : readSnapshot().works[id];
   const rows = () => { const roster = resolveRoster?.(); return Array.isArray(roster) ? roster : roster?.items || roster?.sessions || []; };
-  function resolveIntent(work, roster = rows()) {
-    const state = readSnapshot(), mandate = state.mandates?.[work.workId];
-    const related = roster.filter(row => mandate?.sessionIds.includes(row.sessionId));
-    return intentWorkDisposition({ work, state, sessions: related, store, parentConversationId: conversationId,
-      sourcesCurrent: (review, snapshot, id) => intentReviewCurrent(review, snapshot, id, related) });
-  }
   const eventObserved = event => {
     const message = event?.kind === 'agent_message' && event.payload?.agentMessage;
     if (!message?.operationId) return true;
     return store.readSupervision?.('agentCommands', message.operationId)?.delivery === 'observed';
   };
-  const delivery = createReplyDelivery({ store, readMessages, appendMessage: remember, accept: onReplied, now, onChanged: onDeliveryChanged,
-    validate: message => (message.meta?.sessionStates || []).every(source => {
-      const current = rows().find(row => row.sessionId === source.sessionId);
-      return current && source.sourceRevision && current.sourceRevision === source.sourceRevision
-        && (current.observationRevision === source.observationRevision || source.status === 'result_ready' && current.status === 'accepted')
-        && (current.status === source.status || source.status === 'result_ready' && current.status === 'accepted');
-    }),
-    onRecovered: message => {
-      const work = readWork(message.meta?.workId);
-      if (!work || !['runnable', 'retry_wait'].includes(work.state) || work.attemptId && work.attemptId !== message.turnId) return;
-      const sessionIds = [...new Set([...(work.sessionIds || []), ...(message.sources || [])])];
-      const related = rows().filter(row => sessionIds.includes(row.sessionId));
-      const events = (work.pendingEventIds || []).map(id => readSnapshot().events[id]?.event).filter(Boolean);
-      const unseen = events.filter(event => !eventObserved(event));
-      const semantic = resolveIntent(work);
-      store.saveWork({ ...work, sessionIds, ...semantic, intentCoordination: readWork(work.workId).intentCoordination,
-        state: unseen.length ? 'runnable' : semantic?.state || stateAfterReply(related), repairSessionIds: repairOwnership(related).repairSessionIds }, { returnState: false });
-      store.handled(events.filter(eventObserved).map(event => event.eventId));
-    },
-    onInvalidated: message => {
-      const work = readWork(message.meta?.workId);
-      if (!work || ['paused', 'cancelled'].includes(work.state)) return;
-      const current = rows().filter(row => message.meta?.sessionStates?.some(source => source.sessionId === row.sessionId));
-      store.transfer(current.map(row => ({ eventId: `reply-refresh:${message.id}:${row.sourceRevision}:${row.observationRevision || ''}:${row.status}`,
-        kind: 'report_available', sessionId: row.sessionId, at: new Date().toISOString(), payload: { sourceRevision: row.sourceRevision, observationRevision: row.observationRevision, status: row.status } })));
-      store.saveWork({ ...work, state: 'waiting_children' }, { returnState: false });
-      if (readMessages().some(row => row.id === message.id)) remember({ id: `${message.id}:updated`, kind: 'agent_reply', role: 'assistant',
-        content: '结果有更新，我再核对一下。', meta: { workId: work.workId } });
-    },
-  });
+  const delivery = createRunnerReplyLifecycle({ store, workspaceId, conversationId, readMessages, remember, onReplied, onDeferred, onDeliveryChanged, resolveRoster: rows, eventObserved, now });
   function start(job) {
     const inputs = (job.userInputs || []).map(input => input.inputId);
     const events = job.events || [];
     const missing = events.filter(event => !readSnapshot().events[event.eventId]);
     if (missing.length) store.transfer(missing);
     // A fresh batch must not replace an unfinished slice's protected checkpoint.
-    const linked = Object.values(readSnapshot().works).find(work => !['runnable', 'retry_wait', 'coalesced', 'paused', 'cancelled'].includes(work.state)
+    const linked = Object.values(readSnapshot().works).find(work => work.parentConversationId === conversationId && !['runnable', 'retry_wait', 'coalesced', 'paused', 'cancelled'].includes(work.state)
       && events.some(event => work.sessionIds?.includes(event.sessionId)));
     job.workId ||= (!inputs.length && linked?.workId) || coordinationWorkId(conversationId, inputs.length ? inputs : events.map(event => event.eventId));
     dispatchRecovery.reconcile(job.workId);
@@ -101,7 +67,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     return pending.filter(event => !routine.includes(event));
   }
   function expireReservations() {
-    for (const work of Object.values(readSnapshot().works)) if (work.state === 'retry_wait' && work.recovery?.reservationId
+    for (const work of Object.values(readSnapshot().works)) if (work.parentConversationId === conversationId && work.state === 'retry_wait' && work.recovery?.reservationId
       && (Date.parse(work.recovery.deadlineAt) <= Date.parse(now()) || hasUnsettledDispatch(work))) {
       const unknown = hasUnsettledDispatch(work);
       store.saveWork({ ...work, state: 'blocked_system', ...(unknown ? { end: 'fatal' } : {}),
@@ -124,8 +90,12 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     const works = Object.values(snapshot.works);
     // An owned batch continues through its durable job, never a duplicate wake.
     const owned = new Set(works.flatMap(work => [...(work.pendingEventIds || []), ...(work.consumedEventIds || [])]));
+    const pending = store.pendingEvents().filter(event => !ROUTINE.has(event.kind) && !owned.has(event.eventId));
+    if (!pending.length) return [];
     const history = snapshot.lastRecovery;
-    return store.pendingEvents().filter(event => !ROUTINE.has(event.kind) && !owned.has(event.eventId)
+    const foreign = new Set(Object.values(snapshot.mandates || {}).filter(row => row.parentConversationId !== conversationId).flatMap(row => row.sessionIds));
+    for (const row of rows()) if (row.origin?.parentConversationId && row.origin.parentConversationId !== conversationId) foreign.add(row.sessionId);
+    return pending.filter(event => !foreign.has(event.sessionId)
       && !history?.quarantinedSessionIds?.includes(event.sessionId) && !history?.quarantinedEventIds?.includes(event.eventId)
       && !works.some(work => historyExecutionHeld(work) && work.sessionIds?.includes(event.sessionId))
       && !works.some(work => work.sessionIds?.includes(event.sessionId) && work.stopScope === 'work' && ['paused', 'cancelled'].includes(work.state)));
@@ -159,7 +129,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     decisionSnapshot = undefined;
     return {
       choose(userOnly) {
-        const candidates = Object.values(decision().works).filter(work => !historyExecutionHeld(work) && (!userOnly || work.anchorInputIds?.length)
+        const candidates = Object.values(decision().works).filter(work => work.parentConversationId === conversationId && !historyExecutionHeld(work) && (!userOnly || work.anchorInputIds?.length)
           && !delivery.pending(decision(), work.workId)
           && (work.state === 'runnable' && work.checkpointRef
             || work.checkpointRef && recoveryReservationDue(work, now())
@@ -211,26 +181,32 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       const missing = (events || []).filter(event => !known[event.eventId]);
       if (missing.length) store.transfer(missing);
     },
-    transfer, deliver: delivery.dispatch, prepareReplies: delivery.prepare, async recover() { dispatchRecovery.reconcileAll(); return delivery.recover(); }, hasPendingDelivery: delivery.pending,
+    transfer, deliver: delivery.dispatch, deferReply: delivery.defer, deliveryCommitted: delivery.committed,
+    bindReplies: delivery.bindReplies, prepareReplies: delivery.prepareReplies, prepareDigest: delivery.prepareDigest,
+    async recover() { dispatchRecovery.reconcileAll(); return delivery.recover(); }, hasPendingDelivery: delivery.pending,
     turnFacts(job) {
-      const state = readSnapshot(), work = state.works[job.workId], intent = work?.intentCoordination;
-      return { workId: job.workId, workRevision: intent?.revision || 0, goalRevision: state.mandates?.[job.workId]?.goalRevision || 0,
-        intent: intent || null, sourceDecisionRef: job.sourceDecisionRef || (intent?.decision.disposition.kind === 'continue' ? intent.decision.operationId : undefined) };
+      const state = readSnapshot();
+      return createDecisionFrame({ state, workspaceId, parentConversationId: conversationId, workId: job.workId, sessions: rows(),
+        originDecisionRef: job.sourceDecisionRef, turnId: job.attemptId,
+        eventIds: (job.events || []).map(row => row.eventId), currentInputIds: (job.userInputs || []).map(row => row.inputId) });
     },
     dispositionMissing(job) {
-      const state = readSnapshot(), intent = state.works[job.workId]?.intentCoordination;
+      const state = readSnapshot(), work = state.works[job.workId], intent = work?.intentCoordination;
       if (state.mandates?.[job.workId]?.intentSchemaVersion !== 1 && !intent) return false; // Legacy and lightweight discussion retain their contract.
-      return !intent || state.intentDecisions?.[intent.decision.operationId]?.turnId !== job.attemptId;
+      return !intent || !intentDecisionAdmittedForTurn(state, work, job.attemptId,
+        job.resumedIntentDecisionRef ? { workId: job.workId, decisionRef: job.resumedIntentDecisionRef } : undefined);
     },
     requiresTaskReply(job) {
       const state = readSnapshot();
-      return Boolean(state.mandates?.[job.workId]?.intentSchemaVersion === 1 || state.works[job.workId]?.intentCoordination);
+      return Boolean(state.mandates?.[job.workId]?.intentSchemaVersion === 1 || state.works[job.workId]?.intentCoordination
+        || Object.values(state.works).some(work => work.intentCoordination?.decision.disposition.kind === 'return'
+          && state.intentDecisions?.[work.intentCoordination.decision.operationId]?.turnId === job.attemptId));
     },
     pending() {
       if (store.coalesceWorks) reconcileContinuationCustody({ store, conversationId, sessions: rows });
       return pendingFrom(readSnapshot());
     },
-    ownedInputIds() { const state = readSnapshot(); return [...new Set([...Object.values(state.works).flatMap(work => work.anchorInputIds || []), ...(state.lastRecovery?.quarantinedInputIds || [])])]; },
+    ownedInputIds() { const state = readSnapshot(); return [...new Set([...Object.values(state.works).filter(work => work.parentConversationId === conversationId).flatMap(work => work.anchorInputIds || []), ...(state.lastRecovery?.quarantinedInputIds || [])])]; },
     ownsInput(inputId) { return this.ownedInputIds().includes(inputId); },
     canPreemptRequest(workId) {
       const work = readWork(workId);
@@ -240,7 +216,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     nextRetryAt() {
       expireReservations();
       const at = now();
-      return Object.values(readSnapshot().works).filter(work => work.state === 'retry_wait' && work.recovery?.reservationId
+      return Object.values(readSnapshot().works).filter(work => work.parentConversationId === conversationId && work.state === 'retry_wait' && work.recovery?.reservationId
         && work.waitFor?.some(wait => wait.kind === 'retry_timer' && wait.id === work.recovery.reservationId)
         && Date.parse(work.recovery.deadlineAt) > Date.parse(at) && !hasUnsettledDispatch(work))
         .map(work => work.recovery.retryAt).concat(delivery.nextRetryAt()).filter(at => Number.isFinite(Date.parse(at))).sort()[0] || null;
@@ -304,7 +280,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       if (reportedWaitFor({ job, outcome, state: readSnapshot(), messages: readMessages(), sessions: Array.isArray(roster) ? roster : roster?.items || roster?.sessions || [] })) return false;
       const previous = readWork(job.workId);
       const sources = ownedSessions(previous, job, roster);
-      return repairOwnership(sources).repairSessionIds.length > 0
+      return (repairOwnership(sources).repairSessionIds.length > 0 || previous.intentCoordination?.lifecycle === 'active')
         && repairProgressDecision(previous, outcome, roster, sources).end === 'no_progress';
     },
     finish(job, outcome, roster) {
@@ -332,8 +308,8 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       if (unseenEvents.length && !outcome.failed && !outcome.stopped && !outcome.budgetLimited && !outcome.deliveryPending
         && !['blocked_system', 'waiting_user'].includes(state)) state = 'runnable';
       let semantic;
-      if (previous.intentCoordination && !outcome.failed && !outcome.stopped && !outcome.budgetLimited && !outcome.deliveryPending && !outcome.yielded) {
-        semantic = resolveIntent(previous, Array.isArray(roster) ? roster : roster?.items || roster?.sessions || []);
+      if (previous.intentCoordination && decision.state !== 'blocked_system' && !outcome.failed && !outcome.stopped && !outcome.budgetLimited && !outcome.deliveryPending && !outcome.yielded) {
+        semantic = delivery.resolveIntent(previous, Array.isArray(roster) ? roster : roster?.items || roster?.sessions || []);
         if (semantic) state = semantic.state;
       }
       const end = state === 'runnable' ? 'yielded' : state === 'waiting_children' ? 'awaiting_children' : state === 'waiting_user' ? 'awaiting_user'
@@ -354,15 +330,23 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     dispatchRecoveryFacts: dispatchRecovery.facts,
     resume(job, selection) {
       const work = readWork(job.workId);
+      delete job.resumedIntentDecisionRef;
       if (hasUnsettledDispatch(work)) throw new Error('execution_outcome_unknown');
       const checkpoint = readProtectedWork(work);
       if (!recoveryCheckpointAvailable(work, checkpoint, store.readCheckpoint)) throw new Error('continuity_checkpoint_missing');
       const outcome = checkpoint?.outcome;
+      if (job.sourceDecisionRef && !outcome?.yielded) return outcome ? { ...outcome, providerCheckpoint: undefined } : null;
       // A finished public update starts the next reasoning step with current
       // roster facts. Only an actual yield resumes a native Provider slice.
       const resumed = outcome && work.nativeCheckpointRef && (!work.repairSessionIds?.length || outcome.yielded)
         ? { ...outcome, providerCheckpoint: store.readCheckpoint(work.nativeCheckpointRef) } : outcome;
-      return replyCheckpointForModel(resumed, selection);
+      const result = replyCheckpointForModel(resumed, selection), intent = work.intentCoordination;
+      if (selection?.modelProviderId && selection.modelId && result?.providerCheckpoint && outcome?.yielded && !outcome.failed && !outcome.stopped && !outcome.preempted && !outcome.budgetLimited
+        && intent?.lifecycle === 'active' && intent.goalRevision === readSnapshot().mandates?.[work.workId]?.goalRevision
+        && (intent.decisionTurnId === outcome.turnId || checkpoint.job?.resumedIntentDecisionRef === intent.decision.operationId)) {
+        job.resumedIntentDecisionRef = intent.decision.operationId;
+      }
+      return result;
     },
   };
 }

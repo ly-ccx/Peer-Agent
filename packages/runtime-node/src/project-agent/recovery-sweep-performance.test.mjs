@@ -15,14 +15,14 @@ test('an empty work inventory avoids repair scans but the next selection sees ne
   });
   assert.equal(coordination.recoverJob(), null);
   assert.equal(reads, 1, 'an empty inventory needs one authority read, not several empty repair passes');
-  state.works['new-work'] = { workId: 'new-work', state: 'runnable', checkpointRef: 'checkpoint', sessionIds: [] };
+  state.works['new-work'] = { workId: 'new-work', parentConversationId: 'c', state: 'runnable', checkpointRef: 'checkpoint', sessionIds: [] };
   assert.deepEqual(coordination.recoverJob(), { ...checkpoint.job, continuation: true });
   assert.ok(reads > 1, 'a later call must see the newly durable work');
 });
 
 test('an empty work inventory still selects pending child events and prepared delivery', () => {
   const event = { eventId: 'child-result', kind: 'report_available', sessionId: 'child' };
-  const state = { works: {}, deliveries: { reply: { state: 'prepared', message: { id: 'reply' } } } };
+  const state = { works: {}, deliveries: { reply: { state: 'prepared', message: { id: 'reply', conversationId: 'c' } } } };
   const coordination = createRunnerCoordination({ workspaceId: 'ws', conversationId: 'c',
     store: { readSnapshot: () => state, pendingEvents: () => [event] },
   });
@@ -38,7 +38,7 @@ test('continuation admission shares one current inventory for work and prepared 
   });
   assert.equal(coordination.hasContinuation(), false);
   assert.equal(reads, 1);
-  state.deliveries.reply = { state: 'prepared', message: { id: 'reply' } };
+  state.deliveries.reply = { state: 'prepared', message: { id: 'reply', conversationId: 'c' } };
   assert.equal(coordination.hasContinuation(), true);
   assert.equal(reads, 2, 'a new invocation must observe the new prepared delivery');
   state.lastRecovery = { quarantinedDeliveryIds: ['reply'] };
@@ -80,7 +80,7 @@ test('an event transfer shares one lazy roster and the next transfer rechecks it
 });
 
 test('delivered-reply recovery reads the owning work without cloning every unrelated work', async () => {
-  const works = Object.fromEntries(Array.from({ length: 200 }, (_, n) => [`w${n}`, { workId: `w${n}`, state: 'delivered' }]));
+  const works = Object.fromEntries(Array.from({ length: 200 }, (_, n) => [`w${n}`, { workId: `w${n}`, parentConversationId: 'c', state: 'delivered' }]));
   const deliveries = Object.fromEntries(Object.keys(works).map(id => [id, { state: 'delivered', message: { id, meta: { workId: id } } }]));
   let fullReads = 0, workReads = 0;
   const coordination = createRunnerCoordination({ workspaceId: 'ws', conversationId: 'c',
@@ -123,7 +123,7 @@ test('disposing during the event-loop handoff prevents the queued model request'
 
 test('pending input ownership is read once for the batch and does not imply completion', () => {
   let reads=0;
-  const works={a:{anchorInputIds:['i1','i2'],state:'runnable'}, b:{anchorInputIds:['i2','i3'],state:'cancelled'}};
+  const works={a:{parentConversationId:'c',anchorInputIds:['i1','i2'],state:'runnable'}, b:{parentConversationId:'c',anchorInputIds:['i2','i3'],state:'cancelled'}};
   const coordination=createRunnerCoordination({workspaceId:'ws',conversationId:'c',store:{read(){reads++;return{works};}}});
   assert.deepEqual(coordination.ownedInputIds(),['i1','i2','i3']);assert.equal(reads,1);
   works.a.anchorInputIds.push('new');assert.ok(coordination.ownedInputIds().includes('new'));assert.equal(reads,2);

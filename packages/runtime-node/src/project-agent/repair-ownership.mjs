@@ -21,9 +21,10 @@ export function stateAfterReply(sessions) {
 
 export function ownedSessions(work, job, roster, reportedSessionIds = []) {
   return (Array.isArray(roster) ? roster : roster?.items || roster?.sessions || []).filter(row =>
+    (!row.origin?.workId || row.origin.workId === work.workId) && (
     work.sessionIds.includes(row.sessionId) || reportedSessionIds.includes(row.sessionId)
     || (job.events || []).some(event => event.sessionId === row.sessionId)
-    || row.origin?.anchorMessageId && work.anchorInputIds.some(id => `input-${id}` === row.origin.anchorMessageId));
+    || row.origin?.anchorMessageId && work.anchorInputIds.some(id => `input-${id}` === row.origin.anchorMessageId)));
 }
 
 export function repairProgressDecision(previous, outcome, roster, sources) {

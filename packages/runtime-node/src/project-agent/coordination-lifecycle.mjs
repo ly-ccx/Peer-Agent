@@ -5,6 +5,7 @@ import { historyExecutionHeld } from './history-resumption.mjs';
 import { transitionReconciliation } from './supervision-recovery.mjs';
 import { sessionNeedsCancellation } from './session-cancellation.mjs';
 import { createIntentLifecycle } from './intent-lifecycle.mjs';
+import { stableOperationFailureKey } from './progress-policy.mjs';
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const ended = new Set(['accepted', 'result_ready', 'cancelled']);
 
@@ -106,7 +107,9 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
       if (!admission.ok) return admission;
     }
     const repair = input.action === 'resume' && (target?.status === 'result_ready' || target?.origin?.takeover?.repair === true);
-    const sourceDecisionRef = !sourceInputIds.length && !eventIds.length && context.sourceDecisionRef;
+    const semantic = state.works[workId]?.intentCoordination;
+    const sourceDecisionRef = !sourceInputIds.length && !eventIds.length && (context.turnId && semantic?.decisionTurnId === context.turnId && semantic.decision.disposition.kind === 'continue'
+      ? semantic.decision.operationId : context.sourceDecisionRef);
     const decision = { operationId, workId, expectedRevision: input.expectedRevision ?? (input.action === 'parallel' ? mandate?.goalRevision || 0 : -1),
       action: input.action, sourceInputIds, sourceEventIds: sourceInputIds.length ? [] : eventIds,
       ...(sourceDecisionRef ? { sourceDecisionRef } : {}),
@@ -115,13 +118,15 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
         context: { workspaceId, parentConversationId, workspacePath: context.workspacePath || '', surface: context.surface,
           anchorMessageIds: anchors, currentInputAnchors: current.map(row => row.id),
           ...(context.manualCriterionAuthorities ? { manualCriterionAuthorities: context.manualCriterionAuthorities } : {}) } } };
-    const failures = Object.values(state.decisions || {}).filter(row => row.workId === workId && JSON.stringify(row.sourceInputIds) === JSON.stringify(decision.sourceInputIds)
-      && row.action === decision.action && row.sessionId === decision.sessionId && row.reason === decision.reason
-      && state.transitions?.[row.operationId]?.phase === 'blocked');
-    if (failures.length >= 2) return { ok: false, error: 'coordination_no_progress' };
+    const failures = Object.values(state.decisions || {}).filter(row => row.workId === workId && row.goalRevision === mandate?.goalRevision
+      && row.action === decision.action && row.sessionId === decision.sessionId && state.transitions?.[row.operationId]?.phase === 'blocked');
+    const causes = new Map();
+    for (const row of failures) { const key = stableOperationFailureKey({ ...row, error: state.transitions[row.operationId].error }); causes.set(key, (causes.get(key) || 0) + 1); }
+    if (!current.length && [...causes.values()].some(count => count >= 2)) return { ok: false, error: 'coordination_no_progress' };
     if (['resume', 'handoff', 'revise'].includes(input.action)) store.enableSupervision();
     const admitted = store.decide(decision, { parentConversationId, currentInputIds: sourceInputIds, eventIds, materialRefs, sourceDecisionRef,
       intentRequired: !mandate || mandate.intentSchemaVersion === 1,
+      turnId: context.turnId, originDecisionRef: context.sourceDecisionRef,
       ...(!mandate && current.length && target ? { adoptSessionIds: [target.sessionId] } : {}),
       ...(scopedSessionIds ? { scopedSessionIds } : {}) });
     if (!admitted.ok) return admitted;

@@ -179,6 +179,7 @@ export function createProjectAgentHost({
         const date = message?.meta?.digestDate;
         if (typeof date === 'string') digests.acknowledge(workspaceId, date);
       },
+      onDigestDiscarded: message => { const date = message?.meta?.digestDate; if (typeof date === 'string') digests.acknowledge(workspaceId, date); },
       onCurator: typeof onCurator === 'function'
         ? (info) => onCurator({ ...info, workspaceId })
         : null,
