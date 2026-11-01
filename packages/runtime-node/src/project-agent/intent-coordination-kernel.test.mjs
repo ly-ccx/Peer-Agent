@@ -7,6 +7,7 @@ import { admitIntentAssessment, admitIntentClosure, reduceIntentCoordination } f
 import { controlDigest } from './session-control-kernel.mjs';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
 import { createCoordinationJournalReader } from './coordination-journal-reader.mjs';
+import { createExecutionResources } from './execution-resources.mjs';
 
 const host = { holdsLease: true, workspaceId: 'w', parentConversationId: 'p', currentInputIds: ['i'], eventIds: [], now: '2026-11-01T00:00:00Z' };
 const state = () => ({ works: { g: { workId: 'g', workspaceId: 'w', parentConversationId: 'p', state: 'runnable', anchorInputIds: ['i'] } },
@@ -101,6 +102,26 @@ test('withdrawal needs an applied current control and stopped managed sessions; 
   assert.equal(s.works.g.intentCoordination.lifecycle, 'cancelled'); assert.equal(s.works.g.budget.uncertainDispatches.length, 1);
 });
 
+test('first intent creates the device ledger before format nine; losing it cannot silently unlock resources', async () => {
+  const rootDir = mkdtempSync(path.join(os.tmpdir(), 'peer-intent-resource-bootstrap-'));
+  const options = { rootDir, workspaceId: 'w', holdsLease: () => true, leaseEpoch: () => 'owner', formatVersion: 2, fenceLegacyWrites: true };
+  let store = createWorkCoordinationStore(options);
+  const a = assessment(); a.expectedGoalRevision = 0; a.coverage.forEach(row => { row.sources = []; row.status = 'remaining'; });
+  try {
+    await store.prepare(); store.saveWork(state().works.g);
+    assert.equal(store.assessIntent(a, host).ok, true);
+    const resources = createExecutionResources({ rootDir });
+    try { assert.equal(resources.revision(), 0); assert.deepEqual(resources.snapshot(), []); } finally { resources.close(); }
+    assert.equal(JSON.parse(readFileSync(path.join(rootDir, 'w/coordination-v2/manifest.json'))).minimumWriterVersion, 9);
+    store.close(); rmSync(path.join(rootDir, 'execution-resources.sqlite'));
+    store = createWorkCoordinationStore(options); await store.prepare();
+    assert.throws(() => store.enableSupervision(9), /execution_resource_store_missing/);
+    const missing = createExecutionResources({ rootDir });
+    try { assert.throws(() => missing.revision(), /execution_resource_store_missing/); } finally { missing.close(); }
+    assert.ok(store.read().intentDecisions.d, 'readable intent history is retained without inventing resource release');
+  } finally { store.close(); rmSync(rootDir, { recursive: true, force: true }); }
+});
+
 // Real historical record shapes remain reducible; version numbers alone do not migrate state.
 for (const version of [7, 8]) test(`historical format ${version} reopens and coexists with both format-nine record families`, async () => {
   const rootDir = mkdtempSync(path.join(os.tmpdir(), 'peer-combined-format-'));
@@ -113,7 +134,9 @@ for (const version of [7, 8]) test(`historical format ${version} reopens and coe
   operation.requestDigest = controlDigest({ kind: operation.kind, operationId: operation.operationId, authorityRef: operation.authorityRef, execution: operation.expectedExecution });
   const a = assessment(); a.expectedGoalRevision = 0; a.coverage.forEach(row => { row.sources = []; row.status = 'remaining'; });
   try {
-    await store.prepare(); store.saveWork(state().works.g); store.enableSupervision(version);
+    await store.prepare(); store.saveWork(state().works.g);
+    if (version === 7) { const resources = createExecutionResources({ rootDir }); resources.revision(); resources.close(); }
+    store.enableSupervision(version);
     if (version === 7) store.append({ kind: 'session_control', operation, expectedRevision: 0, expectedCurrentOperationId: null });
     else store.append({ ...admitIntentAssessment(store.read(), a, host).entry, minimumExecutorVersion: 8 });
     const historical = store.read(); store.close();
