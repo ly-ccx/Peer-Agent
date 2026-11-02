@@ -47,8 +47,9 @@ export function createSessionCancellation({ findBySession, goalPlanStore, goalRu
     if (plan.status === 'cancelled' && origin.takeover?.phase !== 'stopping' && !sessionNeedsCancellation(project(plan))) return { completed: project(plan) };
     const withdrawal = withdrawalFor(plan, input, context);
     if (context.currentInputAnchors?.length && !withdrawal) return { error: 'current_user_required' };
+    // One user input may stop several plans in the workspace-wide control journal.
     const receipt = { ...(origin.cancellation || { operationId: input.operationId || `cancel-${randomUUID()}`, reason: input.reason || 'cancelled', requestedAt: now() }),
-      ...(withdrawal && withdrawal.inputId !== origin.cancellation?.withdrawal?.inputId ? { operationId: `cancel-user:${withdrawal.inputId}` } : {}),
+      ...(withdrawal && withdrawal.inputId !== origin.cancellation?.withdrawal?.inputId ? { operationId: `cancel-user:${withdrawal.inputId}:${plan.planId}` } : {}),
       phase: 'stopping',
       ...(withdrawal ? { withdrawal } : {}),
       ...(input.preserveArtifacts === true || ['completed', 'failed'].includes(plan.status) ? { preserveArtifacts: true } : {}) };
