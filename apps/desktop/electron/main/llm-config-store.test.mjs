@@ -225,6 +225,25 @@ test('GPT-6.1 Sol subscription selection and context survive updates and reload'
   assert.equal(restored.longContextOutputPrice, 15);
 }));
 
+test('GPT-6.1 Terra selection survives reload and retains its own metadata', () => withStore(({ configFile }) => {
+  const store = createLlmConfigStore({ configFile });
+  const selected = store.addProvider({ provider: 'openai', authMethod: 'oauth_chatgpt', model: 'gpt-6.1-terra' });
+  assert.equal(selected.model, 'gpt-6.1-terra');
+  store.updateProvider(selected.id, { modelOptionValues: { contextTier: 1_000_000 } });
+  const restored = createLlmConfigStore({ configFile }).listProviders().find(row => row.id === selected.id);
+  assert.equal(restored.model, 'gpt-6.1-terra');
+  assert.equal(restored.modelLabel, 'GPT-6.1 Terra');
+  assert.equal(restored.contextWindow, 1_000_000);
+  assert.equal(restored.maxOutputTokens, 128_000);
+  assert.deepEqual(restored.reasoningEffortLevels, ['low', 'medium', 'high', 'xhigh', 'max']);
+  assert.equal(restored.inputPrice, 1);
+  assert.equal(restored.outputPrice, 5);
+  assert.equal(restored.cacheReadPrice, 0.05);
+  assert.equal(restored.longContextInputPrice, 2);
+  assert.equal(restored.longContextCacheReadPrice, 0.1);
+  assert.equal(restored.longContextOutputPrice, 7.5);
+}));
+
 test('GPT-5.6 subscription model persists prompt cache and reasoning effort metadata', () => withStore(({ configFile }) => {
   const store = createLlmConfigStore({ configFile });
   const provider = store.addProvider({
