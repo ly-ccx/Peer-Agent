@@ -49,6 +49,8 @@ export function createProjectAgentRunner({
   onReplied = null,
   coordinationStore = null,
   reconcileVerification = null,
+  findEvidenceRecords = null,
+  readResourceClaims,
   circuitBreaker = null,
   onInputsCompleted = null,
   onActivity = null,
@@ -122,7 +124,7 @@ export function createProjectAgentRunner({
       if (error) { setStatus('error'); return; }
       try { armRecoveryTimer(); } catch { setStatus('error'); return; }
       if (!pumping) void kick().catch(() => setStatus('error'));
-    }, resolveRoster, reconcileVerification, now: stamp }) : null;
+    }, resolveRoster, reconcileVerification, findEvidenceRecords, readResourceClaims, now: stamp }) : null;
 
   function armRecoveryTimer() {
     const at = !disposed && holdsLease() === true ? coordination?.nextRetryAt() : null;
@@ -856,6 +858,7 @@ export function createProjectAgentRunner({
   restoreRecoverableTurn();
   armRecoveryTimer();
   return {
+    reconcileDispatches: () => coordination?.reconcileDispatches(),
     workspaceId: workspace,
     conversationId: conversation,
     enqueueUserInputs,

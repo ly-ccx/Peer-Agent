@@ -1,4 +1,4 @@
-import { registerWorkBudget } from './work-budget.mjs';
+import { registerWorkBudget, workBudgetBinding } from './work-budget.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -25,6 +25,23 @@ function fixture(t) {
   t.after(() => { first.close(); second.close(); rmSync(root, { recursive: true, force: true }); });
   return { root, directory, first, second };
 }
+
+test('a live coordinator dispatch is not an unknown execution of its newly queued child', t => {
+  const { directory, first } = fixture(t), child = plan('child', directory, 'workspace');
+  child.delegationOrigin.phase = 'queued'; child.delegationOrigin.workId = 'work'; child.status = 'paused';
+  const work = { budget: { attempts: { parent: { role: 'project_agent', pendingTools: [{ toolCallId: 'spawn', capabilityId: 'spawn_session' }] } } } };
+  const release = registerWorkBudget('workspace', { readWork: () => work }); t.after(release);
+  workBudgetBinding('workspace').activeAttempts.add('parent');
+  first.reconcile([child], () => 'host', () => true);
+  assert.deepEqual(first.snapshot(), []);
+  assert.deepEqual(unsettledExecution(child), []);
+  assert.equal(first.reserve(child, 'host').allowed, true);
+  workBudgetBinding('workspace').activeAttempts.delete('parent');
+  assert.deepEqual(unsettledExecution(child), ['spawn'], 'an inactive unpaired dispatch still requires a real receipt');
+  work.budget.attempts.parent = { ...work.budget.attempts.parent, role: 'work_session', planId: child.planId };
+  workBudgetBinding('workspace').activeAttempts.add('parent');
+  assert.deepEqual(unsettledExecution(child), ['spawn'], 'the child own live effect stays protected');
+});
 
 test('independent connections and workspace IDs arbitrate the same physical directory', t => {
   const { directory, first, second } = fixture(t), a = plan('a', directory), b = plan('b', directory);

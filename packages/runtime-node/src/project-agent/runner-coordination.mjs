@@ -1,4 +1,5 @@
 import { createVerificationDispatchRecovery } from './verification-dispatch-recovery.mjs';
+import { createDelegationDispatchRecovery } from './delegation-dispatch-recovery.mjs';
 import { createRunnerReplyLifecycle } from './runner-reply-lifecycle.mjs';
 import { coordinationWorkId } from './work-coordination.mjs';
 import { repairOwnership, stateAfterReply, ownedSessions, repairProgressDecision } from './repair-ownership.mjs';
@@ -14,9 +15,12 @@ import { createDecisionFrame } from './decision-frame.mjs';
 import { intentDecisionAdmittedForTurn } from './intent-reply-bindings.mjs';
 
 const ROUTINE = new Set(['session_started', 'progress', 'session_spawned', 'session_progress']);
-export function createRunnerCoordination({ store, inbox, workspaceId, conversationId, readMessages, remember, onReplied, onDeferred, onDeliveryChanged, resolveRoster, reconcileVerification = null, now = () => new Date().toISOString() }) {
+export function createRunnerCoordination({ store, inbox, workspaceId, conversationId, readMessages, remember, onReplied, onDeferred, onDeliveryChanged, resolveRoster, reconcileVerification = null, findEvidenceRecords = null, readResourceClaims, now = () => new Date().toISOString() }) {
+  const delegationRecovery = createDelegationDispatchRecovery({ store, readMessages, findEvidenceRecords, readResourceClaims, now,
+    activeAttempts: () => workBudgetBinding(workspaceId)?.activeAttempts });
   const dispatchRecovery = createVerificationDispatchRecovery({ store, readMessages, reconcileVerification, now,
     activeAttempts: () => workBudgetBinding(workspaceId)?.activeAttempts });
+  const reconcileDispatches = () => { delegationRecovery.reconcileAll(); dispatchRecovery.reconcileAll(); };
   const readSnapshot = () => typeof store.readSnapshot === 'function' ? store.readSnapshot() : store.read();
   const readWork = id => typeof store.readWork === 'function' ? store.readWork(id) : readSnapshot().works[id];
   const rows = () => { const roster = resolveRoster?.(); return Array.isArray(roster) ? roster : roster?.items || roster?.sessions || []; };
@@ -35,6 +39,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     const linked = Object.values(readSnapshot().works).find(work => work.parentConversationId === conversationId && !['runnable', 'retry_wait', 'coalesced', 'paused', 'cancelled'].includes(work.state)
       && events.some(event => work.sessionIds?.includes(event.sessionId)));
     job.workId ||= (!inputs.length && linked?.workId) || coordinationWorkId(conversationId, inputs.length ? inputs : events.map(event => event.eventId));
+    delegationRecovery.reconcile(job.workId);
     dispatchRecovery.reconcile(job.workId);
     const existing = readWork(job.workId);
     if (existing?.recovery?.dispatchesReconciled) job.continuation = true;
@@ -112,7 +117,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       pending: () => pendingFrom(inventory),
       deliveryPending: () => delivery.pending(inventory),
     };
-    dispatchRecovery.reconcileAll();
+    reconcileDispatches();
     expireReservations();
     let snapshot, decisionSnapshot;
     const roster = () => snapshot ??= rows();
@@ -183,7 +188,8 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     },
     transfer, deliver: delivery.dispatch, deferReply: delivery.defer, deliveryCommitted: delivery.committed,
     bindReplies: delivery.bindReplies, prepareReplies: delivery.prepareReplies, prepareDigest: delivery.prepareDigest,
-    async recover() { dispatchRecovery.reconcileAll(); return delivery.recover(); }, hasPendingDelivery: delivery.pending,
+    reconcileDispatches,
+    async recover() { reconcileDispatches(); return delivery.recover(); }, hasPendingDelivery: delivery.pending,
     turnFacts(job) {
       const state = readSnapshot();
       return createDecisionFrame({ state, workspaceId, parentConversationId: conversationId, workId: job.workId, sessions: rows(),
@@ -235,7 +241,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       return events.length ? { events } : { job: selection.choose(false) };
     },
     retryJob(turnId) {
-      dispatchRecovery.reconcileAll();
+      reconcileDispatches();
       const work = Object.values(readSnapshot().works).find(work => work.parentConversationId === conversationId && work.checkpointRef
         && (work.recovery?.failedTurnId === turnId || work.attemptId === turnId));
       const checkpoint = readProtectedWork(work);

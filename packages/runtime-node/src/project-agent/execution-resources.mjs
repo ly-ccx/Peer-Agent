@@ -15,7 +15,9 @@ export function unsettledExecution(plan) {
   const work = typeof origin?.workId === 'string' && origin.workId ? binding?.store.readWork?.(origin.workId) : undefined;
   const relevant = row => !row.planId || row.planId === plan.planId;
   const rows = [...(work?.budget?.uncertainDispatches || []).filter(relevant),
-    ...Object.values(work?.budget?.attempts || {}).filter(relevant).flatMap(attempt => attempt.pendingTools || [])];
+    ...Object.entries(work?.budget?.attempts || {}).filter(([attemptId, attempt]) => relevant(attempt)
+      && !(attempt.role === 'project_agent' && !attempt.planId && binding?.activeAttempts.has(attemptId)))
+      .flatMap(([, attempt]) => attempt.pendingTools || [])];
   return [...new Set([...rows.map(row => row.toolCallId).filter(Boolean), ...(!work ? origin?.cancellation?.evidenceCalls || [] : [])])];
 }
 /** Cancellation completion outranks a superseded takeover, but never actual execution. */

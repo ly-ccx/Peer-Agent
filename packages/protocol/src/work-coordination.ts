@@ -67,6 +67,19 @@ export interface VerificationDispatchReconciliation {
   readonly at: string;
 }
 
+/** A registered, paired delegation result settles its dispatch, never its task. */
+export interface SettledDelegationDispatch {
+  readonly attemptId?: string;
+  readonly turnId: string;
+  readonly toolCallId: string;
+  readonly evidenceRef: string;
+  readonly operationId: string;
+  readonly sessionId: string;
+  readonly executionEpoch: string;
+  readonly goalRevision: number;
+  readonly at: string;
+}
+
 export interface ProjectWorkReceipt {
   readonly schemaVersion: 1;
   readonly workId: string;
@@ -105,6 +118,7 @@ export interface ProjectWorkReceipt {
       readonly checkpointRef?: string;
       readonly pendingTools?: readonly { readonly toolCallId: string | null; readonly capabilityId: string | null; readonly verificationSessionId?: string }[] }>>;
     readonly reconciledDispatches?: readonly VerificationDispatchReconciliation[];
+    readonly settledDispatches?: readonly SettledDelegationDispatch[];
     readonly uncertainDispatches?: readonly { readonly attemptId: string; readonly role: string;
       readonly toolCallId: string | null; readonly capabilityId: string | null; readonly verificationSessionId?: string }[];
   };

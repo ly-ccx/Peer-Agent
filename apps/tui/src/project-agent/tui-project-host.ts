@@ -199,6 +199,8 @@ export function createTuiProjectHost(options: {
     recoverTasks:(id: string)=>goalRunner.recoverContextCheckpoints({workspaceId:id,deferPump:true} as never), activateSessions:supervisor.resumeRecovered,
     restoreWatches:watches.restore,stopWatches:watches.stopWorkspace, reconcileSessions:supervisor.reconcile,
     reconcileVerification: (input: any) => verification.reconcileInterrupted(input),
+    findEvidenceRecords: (refs: string[]) => plans.findEvidenceIndexRecords(refs),
+    readResourceClaims: (workspaceId: string) => scheduler.resourceSnapshot().filter((row: any) => row.workspaceId === workspaceId),
     readSettings:getSettings, inputQueue:inputs, inbox, onStatus:changed,
     onCurator:(input: any)=>curator.consider(input), onMaintenance:(input: any)=>{if(holds(input.workspaceId)&&memoryEnabled(input.workspaceId))maintenance.runDue(input);},
     readFacts:(id: string)=>delegationFactsForWorkspace(plans.listPlans().map((row: any)=>plans.getPlan(row.planId)),id),
