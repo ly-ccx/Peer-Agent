@@ -79,7 +79,7 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
     if (!sameExecution(executionIdentity(plan), operation.expectedExecution)) throw new Error('execution_revision_stale');
     if (operation.stopReceipt && JSON.stringify(operation.stopReceipt.unknownCalls) === JSON.stringify(unsettledExecution(plan))
       && sessionFactsFromPlan(plan).executionOwnership !== 'live' && !executionScheduler.hasUnsettledHandles?.(plan)
-      && (executionScheduler.resourceClaimsFor?.(plan) || []).every(ref => operation.stopReceipt.resourceClaims.some(old => old.claimId === ref.claimId && old.revision === ref.revision))) return operation.stopReceipt;
+      && (operation.phase === 'settled' || (executionScheduler.resourceClaimsFor?.(plan) || []).every(ref => operation.stopReceipt.resourceClaims.some(old => old.claimId === ref.claimId && old.revision === ref.revision)))) return operation.stopReceipt;
     const factsDigest = recoveryFacts(plan);
     if (operation.nextAction && operation.recoveryFactsDigest === factsDigest) throw new Error(operation.nextAction);
     const hostEpoch = journal(plan)?.writerEpoch?.() || `legacy-host:${process.pid}`;
