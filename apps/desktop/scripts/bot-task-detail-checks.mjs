@@ -1,4 +1,4 @@
-import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
+import { openFullTask, BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
@@ -28,6 +28,7 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
     await page.getByRole('tab', { name: '任务', exact: true }).click();
     if (reset && await page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail').count()) await page.getByRole('button', { name: '任务列表', exact: true }).click();
     if (!await page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail').count()) await page.locator('.bot-task-row').filter({ hasText: task.title }).click();
+    await openFullTask(page);
     const pendingQuestion = conversationMessages.at(-1).cards?.find(card => card.kind === 'question' && card.resolvedState !== 'resolved');
     if (pendingQuestion) await until(() => page.locator('.bot-task-question').innerText(), text => text === pendingQuestion.content);
     else await until(() => page.locator('.bot-task-update-preview').innerText(), text => text.includes(noteHeadline));
@@ -84,6 +85,14 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
       .locator('.bot-tasks-heading h2').innerText(), expectedGroup, `task classification: ${status}`);
     await page.locator('.bot-task-row').filter({ hasText: task.title }).click();
     await until(() => detail.locator('.bot-task-instructions').textContent(), text => text.includes(instructions));
+    const full = detail.locator('.bot-task-full');
+    assert.equal(await full.getAttribute('open'), null, 'task selection starts with compact progress');
+    const compact = await detail.innerText();
+    assert.doesNotMatch(compact, /取消任务|核验结果|下一步由|继续追问|任务信息|创建于|internal-/);
+    assert.match(compact, /打开完整任务/);
+    assert.equal(await detail.locator('.bot-task-cancel button').isVisible(), false);
+    if (['running', 'waiting_user', 'accepted', 'failed'].includes(status)) await detail.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `task-detail-${status}.png`) });
+    await openFullTask(page);
     const visible = await detail.innerText();
     if (status === 'waiting_user' || status === 'result_ready') {
       assert.match(await detail.locator('.bot-task-status').innerText(), status === 'waiting_user' ? /等待跟进/ : /结果待确认/);
@@ -103,7 +112,6 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
     assert.ok(previewSize.height <= previewSize.lineHeight * 3 + 1, 'a long multi-paragraph Markdown reply stays a three-line preview');
     assert.equal(await detail.locator('.bot-task-update-preview button').count(), 0, 'the preview never creates hidden Markdown actions');
     assert.equal(await detail.locator('.bot-task-information').getAttribute('open'), null);
-    if (['running', 'waiting_user', 'accepted', 'failed'].includes(status)) await detail.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `task-detail-${status}.png`) });
   }
   const beforeEndedFollowUp = readTurns();
   await detail.getByRole('button', { name: `向 ${botName} 追问`, exact: true }).click();

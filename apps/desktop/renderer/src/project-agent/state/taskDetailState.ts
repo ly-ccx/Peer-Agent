@@ -1,5 +1,6 @@
 import type { DrawerSession } from './drawerState';
 import { formatDrawerSessionStatus, readDrawerSession } from './drawerState.ts';
+import { WORK_SESSION_STATUSES } from '@peer-agent/protocol';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { TaskConversationContext } from './taskConversationState';
 
@@ -32,6 +33,8 @@ export function taskProgressPreview(session: DrawerSession, context: TaskConvers
   if (session.status === 'verifying' && session.verificationProgress) return i18n.t('projectAgent.chat.agent.verificationProgress', {
     count: session.verificationProgress.observationCount,
   });
+  const status = WORK_SESSION_STATUSES.find(value => value === session.status);
+  if (status && session.statusLabel && session.statusLabel !== i18n.t(`projectAgent.chat.sessionState.${status}`)) return current;
   const related = context?.sessionId === session.sessionId ? context : null;
   const needsYou = session.followUp ? session.followUp.owner === 'user' : session.status === 'waiting_user' || session.status === 'result_ready';
   const note = needsYou ? related?.question?.content : related?.content;

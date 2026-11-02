@@ -1,4 +1,4 @@
-import { BOT_DETAIL_CLOSE, BOT_DETAIL_SURFACE } from './bot-detail-surface-selectors.mjs';
+import { openFullTask, BOT_DETAIL_CLOSE, BOT_DETAIL_SURFACE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
@@ -45,6 +45,7 @@ export async function checkBotVerification({ page, until, report, captureDirecto
     await page.getByRole('tab', { name: '任务', exact: true }).click();
     if (await page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail').count()) await page.getByRole('button', { name: '任务列表', exact: true }).click();
     await page.locator('.bot-task-row').filter({ hasText: session.title }).click();
+    await openFullTask(page);
     for (const outcome of ['passed', 'failed', 'partial', 'unverifiable']) {
       change(outcome);
       const detail = page.locator('.bot-task-verification');
