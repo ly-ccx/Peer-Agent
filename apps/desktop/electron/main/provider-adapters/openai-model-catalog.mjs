@@ -76,6 +76,25 @@ const SUBSCRIPTION_CATALOG = [
     reasoningEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
   },
   {
+    // https://developers.openai.com/api/docs/models/gpt-6.1-terra (2026-11-02)
+    // OAuth reuses Peer's existing local context tiers, not the public API window.
+    // Codex advertises low..max; API-only none and delegated ultra are not mapped here.
+    id: 'gpt-6.1-terra',
+    label: 'GPT-6.1 Terra',
+    maxOutputTokens: 128_000,
+    inputPrice: 1,
+    outputPrice: 5,
+    cacheReadPrice: 0.05,
+    longContextInputThreshold: 272_000,
+    longContextInputPrice: 2,
+    longContextCacheReadPrice: 0.1,
+    longContextOutputPrice: 7.5,
+    supportsVision: true,
+    supportsReasoning: true,
+    supportsPromptCaching: true,
+    reasoningEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+  },
+  {
     id: 'gpt-6-sol',
     label: 'GPT-6 Sol',
     contextWindow: 272_000,
