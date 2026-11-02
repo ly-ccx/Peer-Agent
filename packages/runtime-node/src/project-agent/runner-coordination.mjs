@@ -20,8 +20,12 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     activeAttempts: () => workBudgetBinding(workspaceId)?.activeAttempts });
   const dispatchRecovery = createVerificationDispatchRecovery({ store, readMessages, reconcileVerification, now,
     activeAttempts: () => workBudgetBinding(workspaceId)?.activeAttempts });
-  const reconcileDispatches = () => { delegationRecovery.reconcileAll(); dispatchRecovery.reconcileAll(); };
   const readSnapshot = () => typeof store.readSnapshot === 'function' ? store.readSnapshot() : store.read();
+  const reconcileDispatches = () => {
+    const inventory = readSnapshot();
+    delegationRecovery.reconcileAll(inventory);
+    dispatchRecovery.reconcileAll(inventory);
+  };
   const readWork = id => typeof store.readWork === 'function' ? store.readWork(id) : readSnapshot().works[id];
   const rows = () => { const roster = resolveRoster?.(); return Array.isArray(roster) ? roster : roster?.items || roster?.sessions || []; };
   const eventObserved = event => {

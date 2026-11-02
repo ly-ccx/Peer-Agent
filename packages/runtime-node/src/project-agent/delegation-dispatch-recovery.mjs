@@ -89,9 +89,10 @@ export function createDelegationDispatchRecovery({ store, readMessages, findEvid
       store.saveWork({ ...work, budget }, { returnState: false });
     }
   }
-  return { reconcile, reconcileAll() {
+  return { reconcile, reconcileAll(inventory) {
+    if (typeof findEvidenceRecords !== 'function') return;
     const claims = readResourceClaims();
-    for (const work of Object.values(snapshot().works)) if (pending(work).some(row => SPAWN.has(row.capabilityId))
+    for (const work of Object.values((inventory || snapshot()).works)) if (pending(work).some(row => SPAWN.has(row.capabilityId))
       || claimsFor(work, claims).some(claim => claim.evidenceCalls?.length)) reconcile(work.workId);
   } };
 }

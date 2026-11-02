@@ -86,9 +86,11 @@ test('delivered-reply recovery reads the owning work without cloning every unrel
   const coordination = createRunnerCoordination({ workspaceId: 'ws', conversationId: 'c',
     store: { read() { fullReads++; return structuredClone({ works, deliveries }); },
       readWork(id) { workReads++; return structuredClone(works[id]); } },
+    findEvidenceRecords() { assert.fail('unrelated historical work cannot require delegation evidence'); },
+    readResourceClaims: () => [],
   });
   await coordination.recover();
-  assert.equal(fullReads, 2, 'one verification inventory and one delivery inventory');
+  assert.equal(fullReads, 2, 'one shared dispatch inventory and one delivery inventory');
   assert.equal(workReads, 200, 'each delivered receipt reads only its own current work');
 });
 
