@@ -510,6 +510,18 @@
   max-width: 100%;
 }
 
+.bot-reply-task-references {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.bot-reply-task-references > button {
+  gap: var(--space-2);
+}
+
 .bot-reply-source {
   box-sizing: border-box;
   width: 100%;
