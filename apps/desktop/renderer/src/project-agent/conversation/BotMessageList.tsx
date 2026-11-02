@@ -177,7 +177,7 @@ export function BotMessageList({
         ) : null}
         {row.type === 'reply' ? <ContinuousReply workspaceId={workspaceId} reply={row} referenceIds={references.get(row) ?? []}
           i18n={i18n} anchors={anchors} highlighted={replyRowContains(row, highlighted)} onJump={onJump} onQuote={onQuote}
-          onReload={onReload} onOpenDetails={onOpenDetails} /> : row.type === 'separator' ? (
+          onReload={onReload} onOpenDetails={onOpenDetails} workIndex={workIndex} onOpenWork={onLocateSession} /> : row.type === 'separator' ? (
           <p key={row.id} className="bot-separator">{separatorText(row, i18n)}</p>
         ) : row.message.kind === 'user_input' ? (
           <UserBubble
@@ -230,6 +230,8 @@ export function BotMessageList({
             onJump={onJump}
             onQuote={(excerpt) => onQuote(row.message.id, excerpt)}
             onOpenDetails={onOpenDetails ? () => onOpenDetails(row.message.id) : undefined}
+            workIndex={workIndex}
+            onOpenWork={onLocateSession}
           />
         )}
         </ConversationRowView>

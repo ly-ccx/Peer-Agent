@@ -632,7 +632,7 @@ try {
       fixtureRows: historyFixtures, workspaceId: fixture.bots[0].workspaceId, home });
   } else if (process.argv.includes('--reply-quote-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
-    await page.locator('#bot-msg-rc-message-9999 .bot-reply-bar').click();
+    await page.locator('#bot-msg-rc-message-9999 .bot-reply-source').click();
     // This isolated scenario has not paged history like the full smoke. Each
     // navigation reads at most four pages; continue through its recovery UI.
     for (let batch = 0; batch < 2; batch++) {
@@ -795,7 +795,7 @@ try {
   await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();
   report.checks.push('scrolling up loads older messages from a 10000-message conversation');
   await scrollToBotMessage(page, page.locator('#bot-msg-rc-message-9999'));
-  const unloadedQuote = page.locator('#bot-msg-rc-message-9999 .bot-reply-bar');
+  const unloadedQuote = page.locator('#bot-msg-rc-message-9999 .bot-reply-source');
   assert.equal(await unloadedQuote.locator('.bot-reply-bar-label').textContent(), '引用');
   assert.equal((await unloadedQuote.getAttribute('aria-label')).includes('rc-message-9500'), false);
   await unloadedQuote.click();
@@ -814,7 +814,7 @@ try {
   await page.getByRole('button', { name: '回到最新消息', exact: true }).click();
   await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();
   await scrollToBotMessage(page, page.locator('#bot-msg-rc-message-9999'));
-  await page.locator('#bot-msg-rc-message-9999 .bot-reply-bar').click();
+  await page.locator('#bot-msg-rc-message-9999 .bot-reply-source').click();
   await page.locator('#bot-msg-rc-message-9500.is-anchored').waitFor();
   await page.getByRole('button', { name: '回到最新消息', exact: true }).click();
   await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();

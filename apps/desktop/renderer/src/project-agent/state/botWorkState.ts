@@ -19,6 +19,19 @@ export function indexBotWork(sessions: readonly DrawerSession[], available: bool
   return { byId, byAnchor, available };
 }
 export interface BotWorkRow { readonly id: string; readonly session?: DrawerSession; readonly status: WorkSessionStatus | null }
+/** Public task references retain the host state recorded with the reply, even after later task changes. */
+export function replyTaskReferences(messages: readonly Pick<BotChatMessage, 'kind' | 'sources' | 'meta'>[], index: BotWorkIndex): BotWorkRow[] {
+  const references = new Map<string, BotWorkRow>();
+  for (const message of messages) {
+    if (message.kind !== 'agent_reply') continue;
+    for (const id of message.sources) {
+      const state = message.meta.sessionStates?.find(state => state.sessionId === id);
+      const status = state && WORK_SESSION_STATUSES.some(status => status === state.status) ? state.status : null;
+      references.set(id, { id, session: index.byId.get(id), status });
+    }
+  }
+  return [...references.values()].slice(0, 100);
+}
 export function canCancelTask(status: string | null, cancelable?: boolean): boolean {
   // 生命周期决策给出的 cancelable 优先；缺字段时才退回状态表，避免出现第二套规则。
   if (typeof cancelable === 'boolean') return cancelable;

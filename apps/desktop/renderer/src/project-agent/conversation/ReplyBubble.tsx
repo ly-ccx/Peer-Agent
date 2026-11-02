@@ -10,6 +10,8 @@ import { ReplyAnchors } from './ReplyAnchors';
 import type { ReplyAnchor } from '../state/replyReferenceState';
 import { BotNarration } from './BotNarration';
 import type { BotNarrationSegment } from '../state/botNarrationState';
+import { ReplyTaskReferences } from './ReplyTaskReferences';
+import type { BotWorkIndex } from '../state/botWorkState';
 
 export function ReplyBubble({
   workspaceId,
@@ -21,6 +23,8 @@ export function ReplyBubble({
   onJump,
   onQuote,
   onOpenDetails,
+  workIndex,
+  onOpenWork,
   narration = [],
 }: {
   readonly workspaceId: string;
@@ -32,6 +36,8 @@ export function ReplyBubble({
   readonly onJump: (messageId: string) => void;
   readonly onQuote: (excerpt: string) => void;
   readonly onOpenDetails?: () => void;
+  readonly workIndex: BotWorkIndex;
+  readonly onOpenWork: (sessionId: string) => void;
   readonly narration?: readonly BotNarrationSegment[];
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -48,6 +54,7 @@ export function ReplyBubble({
           <ReplyResourceContext references={message.resourceReferences}><MarkdownMessage content={message.content} /></ReplyResourceContext>
         </div>
       </div>
+      <ReplyTaskReferences messages={[message]} workIndex={workIndex} i18n={i18n} onOpen={onOpenWork} />
       <CardView workspaceId={workspaceId} cards={message.cards} i18n={i18n} />
       <BotSelectionQuote root={bodyRef} label={i18n.t('projectAgent.chat.quote')} onQuote={onQuote} />
       <ReplyContext i18n={i18n} onOpenDetails={onOpenDetails}

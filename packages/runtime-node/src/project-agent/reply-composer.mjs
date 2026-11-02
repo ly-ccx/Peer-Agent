@@ -100,7 +100,7 @@ export function composeReply(input = {}) {
   const missingSources = (Array.isArray(input.unreportedResults) ? input.unreportedResults : [])
     .filter(item => anchors.includes(item?.anchorMessageId) && !sources.ids.includes(item.sessionId));
   if (missingSources.length) {
-    return fail('result_source_required', 'Cite the completed tasks for this anchor before reporting their result.', {
+    return fail('result_source_required', 'Cite the affected tasks for this anchor before reporting their current state.', {
       sessionStates: missingSources.map(item => actualStates.get(item.sessionId)).filter(Boolean),
     });
   }

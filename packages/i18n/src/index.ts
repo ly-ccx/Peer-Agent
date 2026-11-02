@@ -429,6 +429,7 @@ export type TranslationKey =
   | 'projectAgent.chat.work.heading'
   | 'projectAgent.chat.work.more'
   | 'projectAgent.chat.work.related'
+  | 'projectAgent.chat.work.reportedState'
   | 'projectAgent.chat.work.unavailable'
   | 'projectAgent.chat.work.unavailableHint'
   | 'projectAgent.chat.work.waiting'
@@ -2151,6 +2152,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.work.heading': '关联任务',
     'projectAgent.chat.work.more': '另有 {count} 项任务',
     'projectAgent.chat.work.related': '关联任务',
+    'projectAgent.chat.work.reportedState': '回复时：{status}',
     'projectAgent.chat.work.unavailable': '状态暂不可用',
     'projectAgent.chat.work.unavailableHint': '暂时无法获取最新任务状态，请打开任务查看。',
     'projectAgent.chat.work.waiting': '等待跟进',
@@ -3613,6 +3615,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.work.heading': 'Related work',
     'projectAgent.chat.work.more': '{count} more tasks',
     'projectAgent.chat.work.related': 'Related task',
+    'projectAgent.chat.work.reportedState': 'At reply: {status}',
     'projectAgent.chat.work.unavailable': 'Status unavailable',
     'projectAgent.chat.work.unavailableHint': 'The latest status is unavailable. Open the task to check.',
     'projectAgent.chat.work.waiting': 'Awaiting follow-up',

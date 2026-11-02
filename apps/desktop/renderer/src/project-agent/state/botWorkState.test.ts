@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { backgroundWork, indexBotWork, replyWork, workProgress, canCancelTask } from './botWorkState.ts';
+import { backgroundWork, indexBotWork, replyWork, replyTaskReferences, workProgress, canCancelTask } from './botWorkState.ts';
 import { createI18n } from '@peer-agent/i18n';
 import type { BotChatMessage } from './botConversationState';
 import type { DrawerSession } from './drawerState';
@@ -11,6 +11,26 @@ function session(id: string, status = 'running', anchorMessageId = ''): DrawerSe
 const reply: Pick<BotChatMessage, 'sources' | 'marks' | 'meta' | 'replyTo'> = {
   sources: ['work-1'], marks: [], meta: { sessionStates: [{ sessionId: 'work-1', status: 'running' }] }, replyTo: ['input-1'],
 };
+
+test('public task references keep per-task reply facts and exclude unrelated anchor associations', () => {
+  const index = indexBotWork([session('cancelled', 'running', 'input-1'), session('stopping', 'cancelled'), session('unrelated', 'cancelled', 'input-1')], true);
+  const messages = [{ kind: 'agent_reply' as const, sources: ['cancelled', 'stopping'],
+    meta: { sessionStates: [{ sessionId: 'cancelled', status: 'cancelled' as const }, { sessionId: 'stopping', status: 'stopping' as const }] } }];
+  assert.deepEqual(replyTaskReferences(messages, index).map(row => [row.id, row.status]), [['cancelled', 'cancelled'], ['stopping', 'stopping']]);
+  assert.equal(replyTaskReferences(messages, { ...index, available: false })[0].status, 'cancelled');
+  assert.equal(replyTaskReferences(messages, index)[0].session?.title, '核查历史记录');
+});
+
+test('continuous task references deduplicate by session and never infer cancellation from prose or live state', () => {
+  const index = indexBotWork([session('s', 'cancelled')], true);
+  const first = { kind: 'agent_reply' as const, sources: ['s'], meta: { sessionStates: [{ sessionId: 's', status: 'stopping' as const }] } };
+  const last = { ...first, meta: { sessionStates: [{ sessionId: 's', status: 'cancelled' as const }] } };
+  assert.deepEqual(replyTaskReferences([first, last], index).map(row => [row.id, row.status]), [['s', 'cancelled']]);
+  assert.equal(replyTaskReferences([{ kind: 'agent_reply', sources: ['s'], meta: {} }], index)[0].status, null);
+  assert.deepEqual(replyTaskReferences([{ kind: 'agent_reply', sources: [], meta: {} }], index), []);
+  assert.deepEqual(replyTaskReferences([{ ...last, kind: 'agent_turn' }], index), []);
+  assert.equal(replyTaskReferences([last], indexBotWork([], false))[0].id, 's');
+});
 test('stopping and unknown outcomes remain visible without replaying stale human-wait text',()=>{
   const i18n=createI18n('zh-CN');
   for (const status of ['stopping','awaiting_outcome']) {

@@ -102,6 +102,39 @@ test('a started-task reply does not count as delivery of its completed result', 
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('cancellation sources follow the actual user withdrawal and require a fresh report for each host state', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'peer-cancellation-references-'));
+  const messages = [];
+  const rows = ['s1', 's2'].map(sessionId => ({ sessionId, status: 'stopping', sourceRevision: `source-${sessionId}`,
+    origin: { anchorMessageId: 'original-task', cancellation: { withdrawal: {
+      workspaceId: 'w', parentConversationId: 'parent', sessionId, anchorMessageId: 'cancel-all',
+    } } } }));
+  const expected = rows.map(row => ({ sessionId: row.sessionId, anchorMessageId: 'cancel-all' }));
+  try {
+    const facts = createDesktopProjectFacts({ runtimeRoot: root,
+      supervisor: { sessionsForProject: () => rows, acceptance: () => null },
+      profileStore: { read: () => ({ agentConversationId: 'parent' }) },
+      conversationStore: { getPersistedConversationHistory: () => ({ messages }) },
+      readCoordination: () => { throw Error('Reply references must not scan the coordination journal'); } });
+    assert.deepEqual(facts.delivery('w').unreportedResults, expected);
+    messages.push({ kind: 'agent_reply', sources: ['s1'], meta: { sessionStates: [
+      { sessionId: 's1', status: 'stopping', sourceRevision: 'source-s1' },
+    ] } });
+    assert.deepEqual(facts.delivery('w').unreportedResults, [expected[1]]);
+    rows[0].status = 'cancelled';
+    assert.deepEqual(facts.delivery('w').unreportedResults, expected);
+    messages.push({ kind: 'agent_reply', sources: ['s1', 's2'], meta: {
+      sessionStates: rows.map(row => ({ sessionId: row.sessionId, status: row.status, sourceRevision: row.sourceRevision })),
+    } });
+    assert.deepEqual(facts.delivery('w').unreportedResults, []);
+    rows[0].origin.cancellation.withdrawal.parentConversationId = 'other-parent';
+    messages.length = 0;
+    assert.deepEqual(facts.delivery('w').unreportedResults, [expected[1]]);
+    rows[1].origin.cancellation.withdrawal.sessionId = 'other-session';
+    assert.deepEqual(facts.delivery('w').unreportedResults, []);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('failed dependency facts produce a stable decision card without a fabricated tool call', () => {
   const root=mkdtempSync(path.join(os.tmpdir(),'b4-dependency-card-'));
   let status='waiting_user';const messages=[];
