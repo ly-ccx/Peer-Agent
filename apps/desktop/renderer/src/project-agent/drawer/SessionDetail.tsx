@@ -3,8 +3,8 @@ export { ConversationSceneDrawer } from './ConversationScene';
 import { MotionDetails } from '../../app/components/MotionDetails';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { WORK_SESSION_STATUSES } from '@peer-agent/protocol';
-import { useState } from 'react';
-import { useResourceWorkspace } from '../../workbench/ResourceWorkspaceContext';
+import { useId, useState } from 'react';
+import { TaskConversationButton } from './TaskConversationButton';
 import { formatDrawerSessionStatus, formatDrawerStamp, type DrawerSession } from '../state/drawerState';
 import { PeerIcon } from '../../ui/icons';
 import type { TaskConversationContext, TaskConversationRequest } from '../state/taskConversationState';
@@ -47,7 +47,8 @@ export function SessionDetail({
   readonly onSelect?: (sessionId:string)=>void;
 }) {
   const [sceneOpen, setSceneOpen] = useState(false);
-  const resources = useResourceWorkspace();
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const detailsId = useId();
   const status = WORK_SESSION_STATUSES.find(value => value === session.status);
   const followUp = session.followUp;
   const needsYou = followUp ? followUp.owner === 'user' : session.status === 'waiting_user' || session.status === 'result_ready';
@@ -78,12 +79,16 @@ export function SessionDetail({
       <section className="bot-task-progress" aria-label={i18n.t('projectAgent.drawer.progress')}>
         <p className="bot-task-progress-text">{progress && progress !== session.status ? progress : label}</p>
       </section>
-      <MotionDetails className="bot-task-full" key={session.sessionId}>
-        <summary className="ui-button is-primary bot-task-full-toggle">
-          <span className="bot-task-full-open">{i18n.t('projectAgent.drawer.task.openFull')}</span>
-          <span className="bot-task-full-close">{i18n.t('projectAgent.drawer.task.closeFull')}</span>
-          <PeerIcon name="chevronRight" size={14} />
-        </summary>
+      <div className="bot-task-actions">
+        <button type="button" className="ui-button bot-task-full-toggle" aria-expanded={detailsOpen} aria-controls={detailsId}
+          onClick={() => setDetailsOpen(open => !open)}>
+          {i18n.t(detailsOpen ? 'projectAgent.drawer.task.closeFull' : 'projectAgent.drawer.task.openFull')}
+          <PeerIcon name="chevronDown" size={14} />
+        </button>
+        <TaskConversationButton className="ui-button is-primary bot-task-scene" workspaceId={workspaceId} workspacePath={workspacePath}
+          session={session} title={title} i18n={i18n} onOpenFallback={() => setSceneOpen(true)} onOpenBot={() => onConversation({})} />
+      </div>
+      <section className="bot-task-full" id={detailsId} hidden={!detailsOpen} aria-label={i18n.t('projectAgent.drawer.task.openFull')}>
         <div className="bot-task-full-content">
           {stamp && <time className="bot-task-created" dateTime={session.spawnedAt}>{i18n.t('projectAgent.drawer.task.created', { time: stamp })}</time>}
           <p className="bot-task-hint">{i18n.t(`projectAgent.drawer.task.hint.${hint}`, { name: botName })}</p>
@@ -129,18 +134,9 @@ export function SessionDetail({
                 <dd><EvidencePreview refs={session.evidenceRefs} i18n={i18n} inline={embedded} workspaceId={workspaceId}
                   task={session.planId ? { sessionId: session.sessionId, planId: session.planId } : undefined} /></dd></div>}
             </dl>
-            {session.conversationId && <button type="button" className="bot-task-scene" disabled={!!resources && !resources.ready} onClick={() => {
-              if (resources) {
-                resources.openConversation({ workspaceId, workspacePath, conversationId: session.conversationId, title,
-                  task: session.planId ? { sessionId: session.sessionId, planId: session.planId } : undefined,
-                  onOpenBot: () => onConversation({}) });
-              } else setSceneOpen(true);
-            }}>
-              <PeerIcon name="terminal" size={14} />{i18n.t('projectAgent.drawer.openScene')}
-            </button>}
           </MotionDetails>
         </div>
-      </MotionDetails>
+      </section>
     </div>
       {sceneOpen && session.conversationId ? (
         <ConversationSceneDrawer

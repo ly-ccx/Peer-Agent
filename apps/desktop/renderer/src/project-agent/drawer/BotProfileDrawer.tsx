@@ -8,6 +8,7 @@ import { useEffect, useState, useRef, type RefObject } from 'react';
 import { collectFocusable } from '../../app/hooks/focusScope';
 import { useBotDrawerFocus } from './useBotDrawerFocus';
 import { Drawer } from '../../app/components/Drawer';
+import type { ResourceConversation } from '../../workbench/resourceConversationState';
 import { useResourceWorkspace } from '../../workbench/ResourceWorkspaceContext';
 import { useMotionAllowed } from '../../app/hooks/useMotionAllowed';
 import { watchVisualMotion } from '../../app/state/visualMotion';
@@ -112,7 +113,7 @@ export function BotProfileDrawer({
   const [history, setHistory] = useState<readonly HistoryConversation[]>([]);
   const [goals, setGoals] = useState<readonly ClassicGoalRow[]>([]);
   const [historyId, setHistoryId] = useState<string | null>(null);
-  const [classicScene, setClassicScene] = useState<{ conversationId: string; title: string } | null>(null);
+  const [classicScene, setClassicScene] = useState<Pick<ResourceConversation, 'conversationId' | 'title' | 'task'> | null>(null);
   useEffect(() => { setClassicScene(null); }, [memory.tab, memory.sessionId, inspect?.replyId, inspect?.evidence?.evidenceRef]);
   const layout = drawerLayout(width);
   const reserveProfileWidth = resources?.reserveProfileWidth;
@@ -299,6 +300,14 @@ export function BotProfileDrawer({
       {memory.tab === 'tasks' && !sessionsAvailable ? <p role="status">{i18n.t('projectAgent.chat.work.unavailableHint')}</p> : null}
       {memory.tab === 'tasks' && sessionsAvailable && !taskDetail ? (
         <TasksTab
+          workspaceId={workspaceId}
+          workspacePath={path}
+          onOpenBot={() => onTaskConversation({})}
+          onOpenSession={session => {
+            if (!session.conversationId) return;
+            setClassicScene({ conversationId: session.conversationId, title: session.title,
+              task: session.planId ? { sessionId: session.sessionId, planId: session.planId } : undefined });
+          }}
           sessions={sessions}
           onOpenObjective={(objectiveId) => onMemory({...memory,tab:'objectives',sessionId:null,objectiveId})}
           history={history}
@@ -377,6 +386,7 @@ export function BotProfileDrawer({
           workspacePath={path}
           conversationId={classicScene.conversationId}
           title={classicScene.title}
+          task={classicScene.task}
           i18n={i18n}
           isZh={isZh}
           onClose={() => setClassicScene(null)}

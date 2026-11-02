@@ -46,7 +46,9 @@ export async function checkBotLifecycleGates({page, until, report, captureDirect
       const detail = page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail');
       await until(()=>detail.locator('.bot-task-progress-text').innerText(),text=>text===expected);
       assert.equal(await detail.getAttribute('data-status'),decision.status);
-      assert.equal(await detail.locator('.bot-task-full').getAttribute('open'),null);
+      assert.equal(await detail.locator('.bot-task-full').isVisible(),false);
+      assert.equal(await detail.locator('.bot-task-full-toggle').getAttribute('aria-expanded'),'false');
+      assert.equal(await detail.locator('.bot-task-scene').isVisible(),true);
       assert.equal(await detail.getByRole('button',{name:`取消任务 ${plan.title}`,exact:true}).isVisible(),false);
       await openFullTask(page);
       assert.equal(await detail.getByRole('button',{name:`取消任务 ${plan.title}`,exact:true}).isVisible(),decision.cancelable);
