@@ -87,8 +87,8 @@ export function createVerificationDispatchRecovery({ store, readMessages, active
   }
   return {
     reconcile,
-    reconcileAll() {
-      for (const work of Object.values(readSnapshot().works)) {
+    reconcileAll(inventory = readSnapshot()) {
+      for (const work of Object.values(inventory.works)) {
         const pending = [...(work.budget?.uncertainDispatches || []),
           ...Object.entries(work.budget?.attempts || {}).flatMap(([attemptId, attempt]) =>
             activeAttempts()?.has(attemptId) ? [] : (attempt.pendingTools || []).map(row => ({ ...row, role: attempt.role })))];

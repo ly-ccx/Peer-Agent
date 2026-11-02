@@ -427,6 +427,8 @@ export function registerDesktopProjectAgent({
     resolveTurnRoster: scope => supervisor.summaries(scope),
     reconcileSessions: () => supervisor.reconcile(),
     reconcileVerification: input => verification.reconcileInterrupted(input),
+    findEvidenceRecords: refs => goalPlanStore.findEvidenceIndexRecords(refs),
+    readResourceClaims: workspaceId => executionScheduler.resourceSnapshot().filter(row => row.workspaceId === workspaceId),
     ...createProjectLifecycleEffects({ objectiveService,profileStore, lifecycle, supervisor, conversationStore, resolveConversationId, broadcast,
       memoryEnabled: workspaceId => memoryUseEnabled({ settings: readRuntimePolicy(), profile: profileStore.read(workspaceId) }),
       resolveEvidence: ref => readEvidenceBody(ref)?.text || '' }),

@@ -168,6 +168,36 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
       return settle(readPlan(plan.planId), draining, receipt).phase === 'settled';
     } catch { return false; }
   }
+  async function settleQueued(plan) {
+    const origin = plan.delegationOrigin, execution = executionIdentity(plan);
+    if (origin.phase !== 'queued' || plan.runner || origin.cancellation || origin.takeover
+      || sessionFactsFromPlan(plan).executionOwnership === 'live' || unsettledExecution(plan).length
+      || executionScheduler.hasUnsettledHandles?.(plan)) return false;
+    const work = journal(plan)?.readWork?.(origin.workId);
+    if (!work || work.stopScope === 'work' && ['paused', 'cancelled', 'coalesced', 'budget_limited'].includes(work.state)) return false;
+    const proofs = work.budget?.settledDispatches?.filter(row => row.sessionId === origin.sessionId
+      && row.executionEpoch === execution.executionEpoch && row.goalRevision === execution.goalRevision) || [];
+    const proof = proofs[0];
+    if (!proof) return false;
+    const unsettled = executionScheduler.resourceSnapshot?.().filter(claim => sameExecution(claim.execution, execution));
+    if (!unsettled || unsettled.some(claim => (claim.evidenceCalls || []).some(id => !proofs.some(row => row.toolCallId === id)))) return false;
+    const claims = executionScheduler.resourceClaimsFor?.(plan) || [];
+    if (!claims.length) return false;
+    const existing = read(plan), authorityRef = `queued-dispatch:${proof.evidenceRef}`;
+    if (existing?.kind === 'cancel' || existing && existing.phase !== 'settled' && existing.authorityRef !== authorityRef) return false;
+    const operationId = `queued:${plan.planId}:${proof.operationId}:${controlDigest(claims)}`;
+    const identity = { kind: 'pause', operationId, authorityRef, execution };
+    const operation = existing?.phase !== 'settled' && existing?.authorityRef === authorityRef ? existing : persist(plan, {
+      ...identity, requestDigest: controlDigest(identity), revision: 1, workspaceId: origin.workspaceId,
+      parentConversationId: origin.parentConversationId, sessionId: origin.sessionId, planId: plan.planId,
+      expectedExecution: execution, hostEpoch: journal(plan)?.writerEpoch?.(), phase: 'recorded', updatedAt: now() });
+    if (operation.phase === 'recorded') executionScheduler.protectResources?.(plan, { operationId: operation.operationId, state: 'draining' });
+    const draining = operation.phase === 'recorded' ? change(plan, operation, { phase: 'draining' }) : operation;
+    try {
+      const receipt = await drain(readPlan(plan.planId), draining);
+      return settle(readPlan(plan.planId), draining, receipt).phase === 'settled';
+    } catch { return false; }
+  }
   return { begin, drain, settle, read, retireTakeover, settleEnded,
     async prepareResume(plan, authorityRef, exclusive) {
       const barrier = await exclusive(() => {
@@ -209,6 +239,7 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
         if (!canManageWorkspace(origin.workspaceId)) continue;
         const current = read(plan);
         if (origin.cancellation?.phase !== 'completed') {
+          await settleQueued(plan);
           // Old hosts could persist takeover.stopping after both the worker and verifier
           // had returned. Import those structured end receipts, then run today's barrier.
           if (!current && legacyTakeoverIdle(plan)) {

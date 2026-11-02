@@ -46,6 +46,8 @@ export function createProjectAgentHost({
   subscribePlans = null,
   reconcileSessions = null,
   reconcileVerification = null,
+  findEvidenceRecords = null,
+  readResourceClaims = null,
   restoreQueue = null,
   recoverTasks = null,
   restoreWatches = null,
@@ -156,6 +158,8 @@ export function createProjectAgentHost({
       onInputsCompleted: inputs => queue.completeExecution?.(workspaceId, inputs.map(input => input.inputId)),
       executeTurn,
       reconcileVerification,
+      findEvidenceRecords,
+      readResourceClaims: typeof readResourceClaims === 'function' ? () => readResourceClaims(workspaceId) : undefined,
       appendMessage,
       readMessages: () => typeof readMessages === 'function' ? readMessages(conversationId) : [],
       hasMessage,
@@ -190,6 +194,8 @@ export function createProjectAgentHost({
     });
     const disposeRunner = runner.dispose;
     runner.dispose = () => { unregisterBudget(); disposeRunner(); coordinationStore.close(); };
+    try { runner.reconcileDispatches(); }
+    catch (error) { runner.dispose(); throw error; }
     runners.set(workspaceId, runner);
     return runner;
   }
