@@ -1,3 +1,4 @@
+import { legacyCancellationStopped, legacyTakeoverIdle } from './legacy-stop-proof.mjs';
 import { stopExecutionHandles } from './execution-handles.mjs';
 import { randomUUID } from 'node:crypto';
 import { workBudgetBinding } from './work-budget.mjs';
@@ -8,7 +9,7 @@ import { controlDigest, executionIdentity, sameExecution, reduceSessionControl }
 
 /** One stop barrier shared by cancellation, takeover and reversible suspension. */
 export function createSessionControl({ goalPlanStore, goalRunner, executionScheduler, canManageWorkspace, abortStream,
-  readMessages = () => [], stopTimeoutMs = 30_000, now = () => new Date().toISOString() }) {
+  readMessages = () => [], onStopReceipt = () => {}, stopTimeoutMs = 30_000, now = () => new Date().toISOString() }) {
   const drains = new Map();
   const readPlan = id => goalPlanStore.getPlan(id);
   const journal = plan => workBudgetBinding(plan.delegationOrigin.workspaceId)?.store;
@@ -22,7 +23,7 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
   }
   function recoveryFacts(plan) {
     return controlDigest([unsettledExecution(plan), sessionFactsFromPlan(plan).executionOwnership, plan.runner?.status,
-      executionScheduler.resourceClaimsFor?.(plan), read(plan)?.stopReceipt?.receiptId]);
+      executionScheduler.resourceClaimsFor?.(plan), read(plan)?.stopReceipt?.receiptId, legacyCancellationStopped(plan), legacyTakeoverIdle(plan)]);
   }
   function persist(plan, operation) {
     if (!canManageWorkspace(plan.delegationOrigin.workspaceId)) throw new Error('lease_unavailable');
@@ -52,10 +53,10 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
     if (!canManageWorkspace(plan.delegationOrigin.workspaceId)) throw new Error('lease_unavailable');
     const current = read(plan), execution = executionIdentity(plan);
     const legacyStop = plan.delegationOrigin.cancellation?.phase === 'completed'
-      && Number.isFinite(Date.parse(plan.delegationOrigin.cancellation.completedAt)) && withdrawalValid(plan);
+      && Number.isFinite(Date.parse(plan.delegationOrigin.cancellation.completedAt)) && (withdrawalValid(plan) || legacyCancellationStopped(plan));
     const mayHaveDispatched = plan.delegationOrigin.phase === 'running' || plan.delegationOrigin.takeover || plan.delegationOrigin.cancellation;
     const unproven = Boolean(mayHaveDispatched && sessionFactsFromPlan(plan).executionOwnership === 'unknown'
-      && !legacyStop && !(current?.stopReceipt && sameExecution(current.expectedExecution, execution)) && !executionScheduler.currentExecutionKnown?.(plan));
+      && !legacyStop && !legacyTakeoverIdle(plan) && !(current?.stopReceipt && sameExecution(current.expectedExecution, execution)) && !executionScheduler.currentExecutionKnown?.(plan));
     const hostEpoch = journal(plan)?.writerEpoch?.() || `legacy-host:${process.pid}`;
     const identity = { kind, operationId, authorityRef, execution };
     if (current?.operationId === operationId) {
@@ -77,7 +78,8 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
     if (read(plan)?.operationId !== operation.operationId) throw new Error('session_control_superseded');
     if (!sameExecution(executionIdentity(plan), operation.expectedExecution)) throw new Error('execution_revision_stale');
     if (operation.stopReceipt && JSON.stringify(operation.stopReceipt.unknownCalls) === JSON.stringify(unsettledExecution(plan))
-      && sessionFactsFromPlan(plan).executionOwnership !== 'live' && !executionScheduler.hasUnsettledHandles?.(plan)) return operation.stopReceipt;
+      && sessionFactsFromPlan(plan).executionOwnership !== 'live' && !executionScheduler.hasUnsettledHandles?.(plan)
+      && (operation.phase === 'settled' || (executionScheduler.resourceClaimsFor?.(plan) || []).every(ref => operation.stopReceipt.resourceClaims.some(old => old.claimId === ref.claimId && old.revision === ref.revision)))) return operation.stopReceipt;
     const factsDigest = recoveryFacts(plan);
     if (operation.nextAction && operation.recoveryFactsDigest === factsDigest) throw new Error(operation.nextAction);
     const hostEpoch = journal(plan)?.writerEpoch?.() || `legacy-host:${process.pid}`;
@@ -86,7 +88,7 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
     let timedOut = false, timeout;
     const work = (async () => {
       const ended = sessionFactsFromPlan(readPlan(plan.planId)).executionOwnership === 'ended';
-      if ((operation.hostEpoch && operation.hostEpoch !== hostEpoch && !operation.stopReceipt || operation.unproven) && !ended)
+      if ((operation.hostEpoch && operation.hostEpoch !== hostEpoch && !operation.stopReceipt || operation.unproven) && !ended && !legacyCancellationStopped(readPlan(plan.planId)) && !legacyTakeoverIdle(readPlan(plan.planId)))
         throw new Error('execution_stop_unconfirmed');
       const registration = { sessionId: operation.sessionId, planId: plan.planId, workspaceId: operation.workspaceId, conversationId: plan.conversationId };
       await abortStream?.({ ...registration, reason: operation.reason || operation.kind });
@@ -110,8 +112,9 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
         resourceClaims, unknownCalls, scope: 'managed_execution', completedAt: now() };
       const current = read(fresh);
       if (current?.operationId !== operation.operationId) throw new Error('session_control_superseded');
-      if (timedOut) throw new Error('execution_stop_unconfirmed');
-      change(fresh, current, { stopReceipt: receipt });
+      change(fresh, current, { stopReceipt: receipt, nextAction: undefined, recoveryFactsDigest: undefined });
+      // The deadline reports a pending stop; it must not discard a later real idle receipt.
+      if (timedOut) void Promise.resolve().then(() => onStopReceipt(fresh.delegationOrigin.workspaceId)).catch(() => {});
       return receipt;
     })();
     const deadline = new Promise((_, reject) => { timeout = setTimeout(() => {
@@ -144,7 +147,7 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
         ...(['applied', 'unknown'].includes(transition.executionEffect) ? {} : { executionEffect: 'rejected' }) });
     goalPlanStore.revisePlan(plan.planId, { delegationOrigin: { ...origin,
       takeover: { ...takeover, phase: 'superseded', supersededBy: operationId, completedAt: now() } } },
-    { reason: 'takeover superseded by cancellation', changedBy: 'session-control' });
+    { reason: 'takeover superseded by settled control', changedBy: 'session-control' });
   }
   async function settleEnded(plan) {
     if (!['completed', 'failed', 'cancelled', 'stopped'].includes(plan.runner?.status)) return false;
@@ -206,8 +209,22 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
         if (!canManageWorkspace(origin.workspaceId)) continue;
         const current = read(plan);
         if (origin.cancellation?.phase !== 'completed') {
+          // Old hosts could persist takeover.stopping after both the worker and verifier
+          // had returned. Import those structured end receipts, then run today's barrier.
+          if (!current && legacyTakeoverIdle(plan)) {
+            try {
+              const operation = begin(plan, { kind: 'pause', operationId: `legacy-takeover-stop:${origin.takeover.operationId}`,
+                authorityRef: `legacy-takeover:${origin.takeover.operationId}`, reason: 'legacy idle takeover settlement' });
+              const receipt = await drain(readPlan(plan.planId), operation);
+              if (settle(readPlan(plan.planId), operation, receipt).phase === 'settled') retireTakeover(readPlan(plan.planId), operation.operationId);
+            } catch (error) { failures.push({ planId: plan.planId, sessionId: origin.sessionId, error: error.message }); }
+          }
           if (current?.kind === 'pause' && current.phase !== 'settled') {
-            try { const receipt = await drain(plan, current); settle(readPlan(plan.planId), current, receipt); }
+            try {
+              const receipt = await drain(plan, current);
+              const settled = settle(readPlan(plan.planId), current, receipt);
+              if (settled.phase === 'settled' && current.authorityRef.startsWith('legacy-takeover:')) retireTakeover(readPlan(plan.planId), current.operationId);
+            }
             catch (error) { failures.push({ planId: plan.planId, sessionId: origin.sessionId, error: error.message }); }
           }
           continue;
