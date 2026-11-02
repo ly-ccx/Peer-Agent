@@ -16,6 +16,7 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
 
   const taskReference = reply.locator('.bot-reply-task-references button[data-session-id]');
   assert.equal(await taskReference.count(), 1);
+  await taskReference.getByText('核查历史任务完成情况', { exact: true }).waitFor();
   assert.match(await taskReference.innerText(), /核查历史任务完成情况[\s\S]*回复时：正在运行中/);
   const referenceSessionId = await taskReference.getAttribute('data-session-id');
   const draftBeforeReference = await page.locator('.bot-composer textarea').inputValue();

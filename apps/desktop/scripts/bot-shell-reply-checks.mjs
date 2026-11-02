@@ -108,6 +108,12 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   await scrollToBotMessage(page, reply);
   await quote.focus();
   await quote.press('Tab');
+  const taskReferences = reply.locator('.bot-reply-task-references button[data-session-id]');
+  for (let index = 0; index < await taskReferences.count(); index++) {
+    assert.equal(await taskReferences.nth(index).evaluate(node => node === document.activeElement), true,
+      'task references follow the original-message quote in keyboard order');
+    await page.keyboard.press('Tab');
+  }
   assert.equal(await reply.locator('.bot-reply-context > button').first().evaluate(node => node === document.activeElement), true);
   // Source navigation can virtualize this reply out and remount its closed
   // disclosure. Reopen through the UI before testing the nested action.
