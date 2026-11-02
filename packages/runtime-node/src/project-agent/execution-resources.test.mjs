@@ -167,3 +167,39 @@ test('a legacy session without a work identity retains its unknown calls without
     assert.deepEqual(unsettledExecution(legacy), ['unknown-call']); assert.equal(reads, 0);
   } finally { release(); }
 });
+
+test('recovery replays a durable stop before importing a reconciling mirror', t => {
+  const { directory, first, second } = fixture(t), a = plan('stopped', directory), b = plan('next', directory);
+  first.reserve(a, 'old-host'); first.protect(a, { hostEpoch: 'old-host', operationId: 'stop' });
+  const receipt = stopped(first, a);
+  // Crash after the journal receipt, before its SQLite release and settled mirror.
+  a.delegationOrigin.executionControl = { phase: 'draining', expectedExecution: executionIdentity(a), stopReceipt: receipt };
+  first.reconcile([a], () => 'new-host', () => true);
+  assert.equal(second.reserve(b, 'new-host').allowed, true);
+  const revision = first.revision();
+  first.reconcile([a], () => 'new-host', () => true);
+  assert.equal(first.revision(), revision);
+  assert.equal(first.claimsFor(b).length, 1, 'replayed old receipt cannot release the next owner');
+});
+
+test('rechecking the same unknown hold does not keep changing its resource revision', t => {
+  const { directory, first } = fixture(t), a = plan('unknown', directory);
+  first.reserve(a, 'host');
+  first.settle(a, stopped(first, a, 'stop', ['call']), 'host');
+  const before = first.claimsFor(a)[0].revision, revision = first.revision();
+  const refreshed = { ...stopped(first, a, 'stop', ['call']), receiptId: 'refreshed-stop' };
+  first.settle(a, refreshed, 'host');
+  assert.equal(first.claimsFor(a)[0].revision, before);
+  assert.equal(first.revision(), revision);
+  assert.equal(first.inspect(plan('next', directory)).blocker.code, 'execution_outcome_unknown');
+});
+
+test('a stop receipt predating a new unknown call cannot release its directory on recovery', t => {
+  const { directory, first } = fixture(t), a = plan('changed-outcome', directory);
+  first.reserve(a, 'host'); const receipt = stopped(first, a);
+  a.delegationOrigin.executionControl = { phase: 'draining', expectedExecution: executionIdentity(a), stopReceipt: receipt };
+  a.delegationOrigin.cancellation = { evidenceCalls: ['new-unknown'] };
+  first.reconcile([a], () => 'host', () => true);
+  assert.equal(first.inspect(plan('next', directory)).allowed, false);
+  assert.deepEqual(first.claimsFor(a)[0].evidenceCalls, ['new-unknown']);
+});

@@ -16,6 +16,7 @@ export function createSessionTakeover({ findBySession, goalPlanStore, goalRunner
       if (!plan || plan.delegationOrigin.workspaceId !== context.workspaceId || plan.delegationOrigin.parentConversationId !== context.parentConversationId
         || !canManageWorkspace(context.workspaceId) || !transition || transition.executionEpoch !== input.binding.executionEpoch
         || transition.oldSessionId !== input.sessionId || !['handoff', 'revise', 'resume'].includes(transition.action)) return { error: 'out_of_scope' };
+      if (pending.has(input.operationId)) return { pending: true };
       const humanGate = takeoverBlocker(plan, transition.action, humanGateOf(plan));
       if (humanGate) return { error: humanGate };
       const repair = plan.status === 'completed' || plan.delegationOrigin.takeover?.repair === true;
@@ -36,7 +37,7 @@ export function createSessionTakeover({ findBySession, goalPlanStore, goalRunner
       { reason: 'coordinator executor takeover', changedBy: 'session-takeover' });
       return { planId: plan.planId, conversationId: plan.conversationId, control };
     });
-    if (registration.error || registration.replayed) return registration;
+    if (registration.error || registration.replayed || registration.pending) return registration;
     if (!pending.has(input.operationId)) {
       const done = Promise.resolve().then(async () => {
         const stopReceipt = await sessionControl.drain(goalPlanStore.getPlan(registration.planId), registration.control);
@@ -112,6 +113,10 @@ export function createSessionTakeover({ findBySession, goalPlanStore, goalRunner
       }).catch(error => {
         if (!canManageWorkspace(context.workspaceId)) return;
         const plan = goalPlanStore.getPlan(registration.planId), control = sessionControl.read(plan);
+        // A pending barrier is recoverable, not a rejected executor proposal. The
+        // durable control deduplicates unchanged facts; a real result wakes recovery.
+        if (control?.operationId === input.operationId && control.phase === 'reconciling'
+          && !control.stopReceipt) return;
         if (control?.operationId === input.operationId && control.stopReceipt && !plan.delegationOrigin.cancellation) {
           if (control.phase !== 'settled') sessionControl.settle(plan, control, control.stopReceipt, { outcome: 'rejected' });
           const fresh = goalPlanStore.getPlan(plan.planId);

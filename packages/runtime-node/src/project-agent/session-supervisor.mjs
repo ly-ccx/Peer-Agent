@@ -148,7 +148,8 @@ export function createSessionSupervisor({
   executionScheduler.configure({ ownsWorkspace: canManageWorkspace, currentPlan: plan => goalPlanStore.getPlan(plan.planId) || plan,
     onResourceChanged: () => { void reconcileSessions().catch(() => {}); } });
   const sessionControl = createSessionControl({ goalPlanStore, goalRunner, executionScheduler, canManageWorkspace, abortStream,
-    readMessages: id => conversationStore.getPersistedConversationHistory?.(id)?.messages || [], now });
+    readMessages: id => conversationStore.getPersistedConversationHistory?.(id)?.messages || [],
+    onStopReceipt: () => { void reconcileSessions().catch(() => {}); }, now });
   const resourceContention = createSessionResourceContention({ goalPlanStore, sessionControl, canManageWorkspace, exclusive, promote });
   executionScheduler.configure({ onResourceConflict: (plan, blocker) => resourceContention.request(plan, blocker) });
   const communication = createAgentCommunication({ conversationStore, goalPlanStore, goalRunner, findSession: findBySession,
@@ -1148,7 +1149,14 @@ export function createSessionSupervisor({
     }
   }
   const reconcileControls = workspaceId => sessionControl.reconcile(delegatedPlans().filter(plan => !workspaceId || plan.delegationOrigin.workspaceId === workspaceId));
-  function reconcileSessions() { return reconcileControls().then(() => resourceContention.reconcile(delegatedPlans()))
+  async function recoverStops() {
+    const workspaces = new Set(delegatedPlans().map(plan => plan.delegationOrigin.workspaceId));
+    for (const workspaceId of workspaces) if (canManageWorkspace(workspaceId)) {
+      await cancellation.recover(delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId));
+      await coordination.recover(workspaceId);
+    }
+  }
+  function reconcileSessions() { return reconcileControls().then(() => recoverStops()).then(() => resourceContention.reconcile(delegatedPlans()))
     .then(() => reconcileExpired()).then(() => exclusive(() => reconcilePersistedQueues())); }
   const reconciled = deferRecovery ? Promise.resolve() : reconcileControls().then(() => reconcileExpired()).then(() => exclusive(() => reconcilePersistedQueues()));
 

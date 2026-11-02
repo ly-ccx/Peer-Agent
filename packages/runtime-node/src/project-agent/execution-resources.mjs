@@ -216,6 +216,8 @@ export function createExecutionResources({ rootDir, now = () => new Date().toISO
           // The caller rechecks the current project writer. The matching durable stop
           // receipt, rather than the expired host's PID, authorizes an ownership handoff.
           const unknown = [...new Set(receipt.unknownCalls || [])];
+          if (unknown.length && claim.state === 'reconciling' && claim.operationId === receipt.operationId
+            && JSON.stringify(claim.evidenceCalls) === JSON.stringify(unknown)) continue;
           put(connection, { ...claim, state: unknown.length ? 'reconciling' : 'released', evidenceCalls: unknown,
             operationId: receipt.operationId, revision: claim.revision + 1, updatedAt: now() });
           connection.prepare('INSERT INTO resource_events(resource,operationId) VALUES (?,?)').run(claim.resourceRef, receipt.operationId);
@@ -251,11 +253,16 @@ export function createExecutionResources({ rootDir, now = () => new Date().toISO
         const native = this.unsettledHandles(plan);
         const state = native.length && sessionFactsFromPlan(plan).executionOwnership !== 'live' ? 'reconciling' : executionProtection(plan), hostEpoch = hostEpochFor(plan.delegationOrigin.workspaceId);
         try {
-          if (state === 'released') {
-            const control = workBudgetBinding(plan.delegationOrigin.workspaceId)?.store.readSessionControl?.(plan.delegationOrigin.sessionId) || plan.delegationOrigin.executionControl;
-            if (control?.stopReceipt && sameExecution(control.expectedExecution, executionIdentity(plan))) this.settle(plan, control.stopReceipt, hostEpoch);
+          const control = workBudgetBinding(plan.delegationOrigin.workspaceId)?.store.readSessionControl?.(plan.delegationOrigin.sessionId) || plan.delegationOrigin.executionControl;
+          // A durable stop may precede the SQLite commit or its GoalPlan mirror. Replay
+          // it before importing protection; import must not invalidate its claim revisions.
+          if (control?.stopReceipt && sameExecution(control.expectedExecution, executionIdentity(plan))
+            && JSON.stringify(control.stopReceipt.unknownCalls) === JSON.stringify(unsettledExecution(plan))
+            && sessionFactsFromPlan(plan).executionOwnership !== 'live' && !native.length) {
+            this.settle(plan, control.stopReceipt, hostEpoch);
             continue;
           }
+          if (state === 'released') continue;
           if (state === 'active') {
             const previous = rows(open()).find(row => sameExecution(row.execution, executionIdentity(plan)));
             if (!previous && sessionFactsFromPlan(plan).executionOwnership === 'unknown') {

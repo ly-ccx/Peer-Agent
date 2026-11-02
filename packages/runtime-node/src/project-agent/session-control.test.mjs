@@ -76,3 +76,67 @@ test('a blocked stop has a deadline and unchanged recovery facts do not repeat s
   await control.reconcile([goalPlanStore.getPlan()]);
   assert.equal(signals, 1);
 });
+
+test('a real idle result after the diagnostic deadline persists a receipt and wakes settlement', async () => {
+  let finish, wake;
+  const idle = new Promise(resolve => { finish = resolve; });
+  const woken = new Promise(resolve => { wake = resolve; });
+  const { control, goalPlanStore } = fixture({ stopTimeoutMs: 5,
+    goalRunner: { pause() {}, waitForIdle: () => idle }, onStopReceipt: wake });
+  const operation = control.begin(goalPlanStore.getPlan(), { kind: 'cancel', operationId: 'slow', authorityRef: 'input' });
+  await assert.rejects(control.drain(goalPlanStore.getPlan(), operation), /execution_stop_unconfirmed/);
+  assert.equal(control.read(goalPlanStore.getPlan()).stopReceipt, undefined);
+  finish(); await woken;
+  const current = control.read(goalPlanStore.getPlan());
+  assert.ok(current.stopReceipt);
+  const receipt = await control.drain(goalPlanStore.getPlan(), current);
+  assert.equal(control.settle(goalPlanStore.getPlan(), current, receipt).phase, 'settled');
+});
+
+test('an audited automatic legacy cancellation recovers an existing unproven operation', async () => {
+  const { control, goalPlanStore } = fixture({ readMessages: () => [] });
+  await control.reconcile([goalPlanStore.getPlan()]);
+  assert.equal(control.read(goalPlanStore.getPlan()).unproven, true);
+  const plan = goalPlanStore.getPlan(), cancellation = plan.delegationOrigin.cancellation;
+  cancellation.requestedAt = '2026-10-31T00:00:00.000Z'; cancellation.reason = 'superseded';
+  plan.revisionHistory = [{ changedBy: 'session-cancellation', changedAt: cancellation.completedAt, reason: cancellation.reason }];
+  goalPlanStore.revisePlan('plan', plan);
+  await control.reconcile([goalPlanStore.getPlan()]);
+  assert.equal(control.read(goalPlanStore.getPlan()).phase, 'settled');
+  assert.equal(goalPlanStore.getPlan().delegationOrigin.takeover.phase, 'superseded');
+});
+
+test('a timed-out old drain cannot commit over a newer cancellation', async () => {
+  let finish;
+  const idle = new Promise(resolve => { finish = resolve; });
+  let wakes = 0;
+  const { control, goalPlanStore } = fixture({ stopTimeoutMs: 5,
+    goalRunner: { pause() {}, waitForIdle: () => idle }, onStopReceipt() { wakes++; } });
+  const first = control.begin(goalPlanStore.getPlan(), { kind: 'cancel', operationId: 'old', authorityRef: 'input' });
+  await assert.rejects(control.drain(goalPlanStore.getPlan(), first), /execution_stop_unconfirmed/);
+  control.begin(goalPlanStore.getPlan(), { kind: 'cancel', operationId: 'new', authorityRef: 'new-input' });
+  finish();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(control.read(goalPlanStore.getPlan()).operationId, 'new');
+  assert.equal(control.read(goalPlanStore.getPlan()).stopReceipt, undefined);
+  assert.equal(wakes, 0);
+});
+
+test('legacy idle takeover is stopped and retired without resuming the old worker', async () => {
+  const { control, goalPlanStore } = fixture();
+  const plan = goalPlanStore.getPlan();
+  plan.status = 'paused'; plan.runner = { status: 'paused' }; plan.delegationOrigin.cancellation = undefined;
+  const requestedAt = '2026-11-01T00:00:00.000Z';
+  plan.delegationOrigin.takeover.requestedAt = requestedAt;
+  plan.revisionHistory = [{ changedBy: 'session-verification', reason: 'verification verdict', changedAt: requestedAt },
+    { changedBy: 'session-takeover', reason: 'coordinator executor takeover', changedAt: requestedAt }];
+  plan.runTrace = { events: [{ goalPlanId: 'plan', type: 'step_started', payload: { summaryCode: 'turn_started', turnNumber: 1 } },
+    { goalPlanId: 'plan', type: 'step_completed', createdAt: requestedAt,
+      payload: { summaryCode: 'turn_completed', turnNumber: 1, terminalStatus: 'done' } }] };
+  goalPlanStore.revisePlan('plan', plan);
+  await control.reconcile([goalPlanStore.getPlan()]);
+  const settled = goalPlanStore.getPlan();
+  assert.equal(settled.status, 'paused');
+  assert.equal(settled.delegationOrigin.takeover.phase, 'superseded');
+  assert.equal(control.read(settled).phase, 'settled');
+});
