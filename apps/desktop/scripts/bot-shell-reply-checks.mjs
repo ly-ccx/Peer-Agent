@@ -25,7 +25,7 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
   const checks = report.replyInteraction = [];
   const reply = page.locator('#bot-msg-rc-message-9999');
   await scrollToBotMessage(page, reply);
-  const quote = reply.locator('.bot-reply-bar');
+  const quote = reply.locator('.bot-reply-source');
   assert.equal(await quote.evaluate(node => Boolean(node.closest('.bot-reply-body'))), true,
     'reply reference must belong to the reply bubble, rather than a detached short-text card');
   assert.ok((await quote.textContent()).includes('请帮我梳理项目现状'));
@@ -60,7 +60,7 @@ export async function checkBotShellReply({ page, until, report, captureDirectory
         const item = node.querySelector(selector) ?? document.querySelector(`.bot-reply-details ${selector}`), style = getComputedStyle(item);
         return { background: style.backgroundColor, color: style.color, border: style.borderTopWidth, borderStyle: style.borderTopStyle, edge: style.borderInlineStartWidth, shadow: style.boxShadow, height: item.getBoundingClientRect().height, width: item.getBoundingClientRect().width, font: style.fontSize, whiteSpace: style.whiteSpace, textOverflow: style.textOverflow };
       };
-      return { quote: read('.bot-reply-bar'), source: read('.bot-reply-bar-label'), excerpt: read('.bot-reply-bar-excerpt'), action: read('.bot-reply-context > button'), delivery: read('.bot-reply-delivery') };
+      return { quote: read('.bot-reply-source'), source: read('.bot-reply-bar-label'), excerpt: read('.bot-reply-bar-excerpt'), action: read('.bot-reply-context > button'), delivery: read('.bot-reply-delivery') };
     });
     report.replyStyles.push({ theme, ...sample });
     assert.equal(sample.quote.border, '0px');
@@ -229,7 +229,7 @@ async function checkShortReplyQuote({ page, report, captureDirectory }) {
   const viewport = page.viewportSize() ?? await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   const theme = await page.evaluate(() => document.documentElement.dataset.theme);
   const reply = page.locator('#bot-msg-rc-message-9996');
-  const quote = reply.locator('.bot-reply-bar');
+  const quote = reply.locator('.bot-reply-source');
   report.shortReplyQuote = [];
   for (const width of [1280, 760]) for (const appearance of ['dark', 'light']) {
     await page.setViewportSize({ width, height: 860 });

@@ -13,6 +13,28 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   const reply = page.locator('#bot-msg-rc-message-9999');
   await scrollToBotMessage(page, reply);
   await reply.locator('.bot-reply-body').click();
+
+  const taskReference = reply.locator('.bot-reply-task-references button[data-session-id]');
+  assert.equal(await taskReference.count(), 1);
+  assert.match(await taskReference.innerText(), /核查历史任务完成情况[\s\S]*回复时：正在运行中/);
+  const referenceSessionId = await taskReference.getAttribute('data-session-id');
+  const draftBeforeReference = await page.locator('.bot-composer textarea').inputValue();
+  await taskReference.focus(); await page.keyboard.press('Enter');
+  const referencedDetail = page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail');
+  await referencedDetail.waitFor({ state: 'visible' });
+  assert.equal(await referencedDetail.locator('h2').innerText(), '核查历史任务完成情况');
+  assert.equal(await referencedDetail.getAttribute('data-status'), 'running');
+  assert.equal(await referencedDetail.locator('.bot-task-full').getAttribute('open'), null);
+  assert.match(await referencedDetail.innerText(), /打开完整任务/);
+  assert.doesNotMatch(await referencedDetail.innerText(), /取消任务|创建于|核验结果/);
+  await page.locator(BOT_DETAIL_CLOSE).click();
+  await referencedDetail.waitFor({ state: 'hidden' });
+  assert.equal(await page.locator('.bot-composer textarea').inputValue(), draftBeforeReference);
+  await scrollToBotMessage(page, reply);
+  report.replyTaskReferences = { sessionId: referenceSessionId, originalTaskOpened: true, recordedStateLabeled: true,
+    defaultDetailsCollapsed: true, draftPreserved: true };
+  checks.push('keyboard reply task reference opens the original task with compact progress and preserves the draft');
+
   const context = page.locator(BOT_DETAIL_SURFACE).locator('.bot-reply-details');
   assert.equal(await reply.getByRole('button', { name: '回复详情', exact: true }).innerText(), '回复详情');
   assert.equal(await reply.locator('.bot-work-row, .bot-evidence-list').count(), 0);
@@ -46,7 +68,7 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   checks.push('keyboard work disclosure uses a thin inset focus indicator, without the clipped white frame');
   await until(() => work.innerText(), text => text.includes('逐条核对历史记录'));
   assert.match(await work.innerText(), /逐条核对历史记录/);
-  assert.doesNotMatch(await reply.locator('.bot-reply-bar').innerText(), /rc-message-/);
+  assert.doesNotMatch(await reply.locator('.bot-reply-source').innerText(), /rc-message-/);
   await waitForWorkDisclosure(work, until);
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'work-running.png') });
   checks.push('named running work scans visibly and expands by keyboard to its actual progress');
@@ -88,6 +110,8 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   change([{ ...initial.sessions[0], status: 'waiting_user', followUp: { owner: 'bot', reason: 'technical_block', inCurrentList: true }, report: { summary: '需要确认是否只使用可读取的历史记录。' } }]);
   await until(() => work.getAttribute('data-status'), value => value === 'waiting_user');
   assert.doesNotMatch(await work.innerText(), /正在核对执行结果/);
+  assert.match(await taskReference.innerText(), /回复时：正在运行中/, 'historical reply state must not change with the live task');
+  report.replyTaskReferences.recordedStateRetained = true;
   report.verificationPresentation.exitsToFollowUp = true;
   assert.match(await work.locator(':scope > summary').innerText(), /等待跟进/);
   assert.doesNotMatch(await work.innerText(), /需要你处理|查看并处理/);
