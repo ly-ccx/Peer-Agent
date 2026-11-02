@@ -2,6 +2,20 @@
 
 All notable changes to Peer Agent are tracked here.
 
+## 0.1.0-rc.35 - 2026-11-02
+
+### 修复与恢复
+
+- 核对成功派发的登记 Evidence、完整调用结果与协调操作，修复父执行已退役后遗留资源记录导致的排队自阻塞。
+- 原任务经真实停止屏障结清自身保护后恢复正常调度；保留身份、历史、预算与其他未知调用，不重放工具。
+- 活跃父协调调用不再冒充子执行的未知效果；Desktop 与 CLI/TUI 共用恢复路径。
+
+### Fixes and recovery (English)
+
+- Reconcile registered delegation Evidence, complete results and completed coordination operations to recover queued self-holds left after the parent attempt retired.
+- Restore normal scheduling of the original task through the existing stop barrier; retain identity, history, budget and unrelated unknown effects without replaying tools.
+- Keep live parent coordination calls out of child unknown-execution protection across Desktop and CLI/TUI.
+
 ## 0.1.0-rc.34 - 2026-11-02
 
 ### 新功能、修复与优化
