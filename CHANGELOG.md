@@ -2,6 +2,22 @@
 
 All notable changes to Peer Agent are tracked here.
 
+## 0.1.0-rc.34 - 2026-11-02
+
+### 新功能、修复与优化
+
+- 任务详情默认只保留当前进度、状态与完整任务入口，其余资料和操作按需展开。
+- ChatGPT 订阅目录新增 GPT-6.1 Terra，补齐独立能力、推理与计价元数据，保留现有默认选择。
+- 修复旧取消/接管停止确认、诊断期限后的实际收尾与资源回执幂等恢复，保留活跃执行和未知结果保护。
+- 主 Bot 输入框复用 Frost 表面与阴影，增强悬浮层次而不改变输入和草稿行为。
+
+### Improvements (English)
+
+- Default task details to status, short progress and the full-task entry; disclose all remaining information and controls on demand.
+- Add GPT-6.1 Terra to the ChatGPT subscription catalog with independent capabilities, reasoning and pricing metadata; preserve defaults.
+- Repair audited legacy stops, late drain completion and idempotent resource settlement while protecting live execution and unknown outcomes.
+- Reuse Frost composer surface and shadow tokens for clearer floating depth without changing input or draft behavior.
+
 ## 0.1.0-rc.33 - 2026-11-01
 
 ### 新功能、修复与优化
