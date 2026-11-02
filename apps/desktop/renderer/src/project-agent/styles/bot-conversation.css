@@ -855,8 +855,8 @@
   padding: 14px 14px 10px;
   border: 1px solid var(--composer-edge);
   border-radius: var(--ui-radius-composer);
-  background: var(--composer-surface);
-  box-shadow: none;
+  background: var(--control-composer);
+  box-shadow: var(--shadow-composer);
   transition: border-color var(--za-motion-fast) var(--za-ease-standard);
 }
 
@@ -1124,7 +1124,7 @@
 }
 
 .bot-composer-bar button:disabled {
-  background: color-mix(in srgb, var(--graphite-base) 12%, var(--composer-surface));
+  background: color-mix(in srgb, var(--graphite-base) 12%, var(--control-composer));
   color: var(--graphite-soft);
   box-shadow: none;
   cursor: default;
