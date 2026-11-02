@@ -2167,6 +2167,71 @@ test('native work cancellation releases returned results after settlement withou
  }finally{releaseIdle();release();await env.cleanup();}
 });
 
+test('one user input cancels multiple works and sibling sessions with separate durable stop receipts', async () => {
+  const env = await harness({ readPlanApproval: () => 'always', goalRunner: { async start() {}, pause() {}, async waitForIdle() {} } });
+  const store = createWorkCoordinationStore({ rootDir: env.root, workspaceId: 'ws-1',
+    holdsLease: () => true, leaseEpoch: () => 'owner', formatVersion: 2, fenceLegacyWrites: true });
+  await store.prepare();
+  for (const workId of ['first-work', 'second-work']) {
+    store.saveWork({ workId, parentConversationId: env.parent.id, state: 'waiting_children' });
+  }
+  const release = registerWorkBudget('ws-1', store);
+  try {
+    const sessions = [];
+    for (const [index, workId] of ['first-work', 'second-work', 'second-work'].entries()) {
+      const session = await env.supervisor.spawn(spawnInput({ title: `Task ${index}` }),
+        contextOf(env, { workId, inputId: `spawn-${index}` }));
+      assert.ok(session.sessionId);
+      sessions.push(session);
+    }
+    env.conversationStore.appendMessage(env.parent.id, { id: 'cancel-all', inputId: 'cancel-input',
+      role: 'user', kind: 'user_input', content: '全部取消' });
+    const context = { ...contextOf(env), role: 'project_agent', mode: 'project_agent',
+      conversationId: env.parent.id, currentInputAnchors: ['cancel-all'],
+      messages: env.conversationStore.getPersistedConversationHistory(env.parent.id).messages };
+    const provider = createDelegationProvider({ supervisor: env.supervisor });
+    const cancel = async (sessionId, toolCallId) => {
+      const tool = await provider.executeCapability({ call: { capabilityId: 'local.delegation.control_work', toolCallId,
+        arguments: { sessionId, action: 'cancel', anchorMessageId: 'cancel-all' } } }, { ...context, turnId: toolCallId });
+      assert.equal(tool.grant.granted, true);
+      const output = JSON.parse(tool.result.outputPreview.legacyResult.output);
+      assert.equal(output.ok, true);
+      return output;
+    };
+    await cancel(sessions[0].sessionId, 'cancel-first-work');
+    await cancel(sessions[1].sessionId, 'cancel-second-work');
+    const operations = sessions.map(session => store.readSessionControl(session.sessionId));
+    assert.equal(new Set(operations.map(operation => operation.operationId)).size, sessions.length);
+    for (const [index, operation] of operations.entries()) {
+      assert.equal(operation.phase, 'settled');
+      assert.equal(operation.outcome, 'applied');
+      assert.equal(operation.authorityRef, 'cancel-all');
+      assert.equal(operation.stopReceipt.execution.sessionId, sessions[index].sessionId);
+      assert.deepEqual(operation.stopReceipt.unknownCalls, []);
+      const session = env.supervisor.get({ sessionId: sessions[index].sessionId });
+      assert.equal(session.status, 'cancelled');
+      assert.equal(session.followUp.inCurrentList, false);
+      assert.equal(session.actionRight, 'terminal');
+      assert.equal(session.nextAction, 'none');
+    }
+    assert.equal(env.aborts.length, sessions.length);
+    assert.equal((await cancel(sessions[0].sessionId, 'repeat-first-work')).replayed, true);
+    assert.equal((await cancel(sessions[1].sessionId, 'repeat-second-work')).replayed, true);
+    assert.equal(env.aborts.length, sessions.length);
+    assert.deepEqual(sessions.map(session => store.readSessionControl(session.sessionId)), operations);
+    const reloaded = createGoalPlanStore({ storeDir: env.goalPlanStore.getStoreDir() });
+    for (const operation of operations) {
+      const plan = reloaded.getPlan(operation.planId);
+      assert.equal(plan.delegationOrigin.cancellation.operationId, operation.operationId);
+      assert.equal(plan.delegationOrigin.cancellation.phase, 'completed');
+      assert.equal(plan.resultAcceptance?.acceptedAt, undefined);
+    }
+    for (const workId of ['first-work', 'second-work']) {
+      assert.equal(store.readWork(workId).pendingControl, null);
+    }
+  } finally { release(); store.close(); await env.cleanup(); }
+});
+
 test('current user withdraws stopped work while retaining the original unknown Bash outcome across restart', async () => {
  const env=await harness({goalRunner:{async start(){},pause(){},async waitForIdle(){}}});
  const store=createWorkCoordinationStore({rootDir:env.root,workspaceId:'ws-1',holdsLease:()=>true,leaseEpoch:()=> 'owner',formatVersion:2,fenceLegacyWrites:true});
