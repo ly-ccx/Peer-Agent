@@ -1,5 +1,5 @@
 import { openWorkPanel } from './bot-work-panel-checks.mjs';
-import { BOT_DETAIL_CLOSE, BOT_DETAIL_SURFACE } from './bot-detail-surface-selectors.mjs';
+import { openFullTask, BOT_DETAIL_CLOSE, BOT_DETAIL_SURFACE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
@@ -33,6 +33,7 @@ export async function checkBotTaskCancellation({ page, until, report, captureDir
   await panelTasks.filter({ has: page.getByText(first.title, { exact: true }) }).click();
   const waiting = page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail');
   await waiting.waitFor();
+  await openFullTask(page);
   assert.equal(await waiting.getByRole('button', { name: `取消任务 ${first.title}`, exact: true }).count(), 1);
   const cancelFromTask = waiting.locator('.bot-task-cancel button');
   await cancelFromTask.focus(); await page.keyboard.press('Enter');
@@ -75,6 +76,7 @@ export async function checkBotTaskCancellation({ page, until, report, captureDir
   await panelTasks.filter({ has: page.getByText(first.title, { exact: true }) }).click();
   const detail = page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail');
   await detail.waitFor();
+  await openFullTask(page);
   await page.setViewportSize({ width: 760, height: 860 });
   await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
   const detailCancel = detail.locator('.bot-task-cancel button');

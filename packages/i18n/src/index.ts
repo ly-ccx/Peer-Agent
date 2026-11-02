@@ -629,6 +629,10 @@ export type TranslationKey =
   | 'projectAgent.drawer.task.instructions'
   | 'projectAgent.drawer.task.description'
   | 'projectAgent.drawer.task.descriptionMissing'
+  | 'projectAgent.drawer.task.openFull'
+  | 'projectAgent.drawer.task.closeFull'
+  | 'projectAgent.drawer.task.progressNote'
+  | 'projectAgent.drawer.task.progressPending'
   | 'projectAgent.drawer.task.information'
   | 'projectAgent.drawer.task.readingReport'
   | 'projectAgent.drawer.task.reportUnavailable'
@@ -2347,6 +2351,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.task.instructions': "内部任务指令",
     'projectAgent.drawer.task.description': '任务说明',
     'projectAgent.drawer.task.descriptionMissing': '暂未读取到任务说明，可回到对话查看原始要求。',
+    'projectAgent.drawer.task.openFull': '打开完整任务',
+    'projectAgent.drawer.task.closeFull': '收起完整任务',
+    'projectAgent.drawer.task.progressNote': '最近说明：{content}',
+    'projectAgent.drawer.task.progressPending': '暂无新的进度说明。',
     'projectAgent.drawer.task.information': '任务信息',
     'projectAgent.drawer.task.readingReport': '正在读取任务资料…',
     'projectAgent.drawer.task.reportUnavailable': '任务资料暂时无法读取，请重试。',
@@ -3805,6 +3813,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.task.instructions': "Internal task instructions",
     'projectAgent.drawer.task.description': 'Task description',
     'projectAgent.drawer.task.descriptionMissing': 'The task description is unavailable. Return to the conversation to see the original request.',
+    'projectAgent.drawer.task.openFull': 'Open full task',
+    'projectAgent.drawer.task.closeFull': 'Collapse full task',
+    'projectAgent.drawer.task.progressNote': 'Latest note: {content}',
+    'projectAgent.drawer.task.progressPending': 'No further progress update yet.',
     'projectAgent.drawer.task.information': 'Task information',
     'projectAgent.drawer.task.readingReport': 'Reading task information…',
     'projectAgent.drawer.task.reportUnavailable': 'Task information is unavailable. Please retry.',

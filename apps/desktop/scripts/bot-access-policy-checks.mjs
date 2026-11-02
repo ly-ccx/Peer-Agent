@@ -1,4 +1,4 @@
-import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
+import { openFullTask, BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
@@ -15,6 +15,7 @@ export async function setFixtureBotAccess(page, workspaceId, accessLevel) {
 }
 
 async function openTaskScene(page, scene) {
+  await openFullTask(page);
   const information = page.locator('.bot-task-information');
   if (await information.getAttribute('open') === null) await information.locator(':scope > summary').click();
   // Native details keeps descendant rectangles at their final positions while

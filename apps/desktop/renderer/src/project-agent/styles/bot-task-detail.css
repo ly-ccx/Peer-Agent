@@ -1,4 +1,4 @@
-.bot-drawer-detail.bot-task-detail { gap: 22px; padding: 4px 2px 16px; }
+.bot-drawer-detail.bot-task-detail { gap: 16px; padding: 4px 2px 16px; }
 .bot-task-detail .bot-task-back,
 .bot-task-detail .bot-task-scene {
   display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
@@ -13,9 +13,9 @@
 .bot-task-status { padding: 3px 7px; border-radius: var(--ui-radius-control-compact); background: var(--chrome-hover); color: var(--graphite-soft); }
 .bot-task-detail section { display: flex; flex-direction: column; gap: 7px; }
 .bot-task-detail h3 { margin: 0; font-size: 11px; font-weight: 500; line-height: 1.5; color: var(--graphite-secondary); }
-.bot-task-progress { padding: 14px; border-radius: var(--ui-radius-panel); background: var(--chrome-canvas); }
+.bot-task-progress { padding: 0; }
 .bot-task-detail p { margin: 0; overflow-wrap: anywhere; }
-.bot-task-progress-text { font-size: 14px; line-height: 1.6; font-weight: 500; color: var(--graphite-base); }
+.bot-task-progress-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font-size: var(--ui-font-body-lg); line-height: var(--ui-line-body); color: var(--graphite-base); }
 .bot-task-hint { font-size: 11px; line-height: 1.6; color: var(--graphite-secondary); }
 .bot-task-next { padding-bottom: 16px; border-bottom: 1px solid var(--chrome-hairline); }
 .bot-task-next h3 { font-size: 13px; color: var(--graphite-base); }
@@ -62,3 +62,14 @@
   .bot-task-information::details-content,
   .bot-task-information > summary .peer-icon { transition-duration: 1ms; }
 }
+
+/* The compact task is a read model; full controls remain in one native disclosure. */
+.bot-task-full { align-self: stretch; }
+.bot-task-full > .bot-task-full-toggle { display: inline-flex; gap: 8px; list-style: none; }
+.bot-task-full > summary::-webkit-details-marker { display: none; }
+.bot-task-full-close { display: none; }
+.bot-task-full[open] > summary .bot-task-full-open { display: none; }
+.bot-task-full[open] > summary .bot-task-full-close { display: inline; }
+.bot-task-full[open] > summary .peer-icon { transform: rotate(90deg); }
+.bot-task-full-content { display: flex; flex-direction: column; gap: 22px; margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--chrome-hairline); }
+.bot-task-created { font-size: var(--ui-font-meta); color: var(--graphite-secondary); }

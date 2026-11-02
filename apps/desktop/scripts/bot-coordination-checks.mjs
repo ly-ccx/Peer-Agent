@@ -1,4 +1,4 @@
-import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
+import { openFullTask, BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync,renameSync} from 'node:fs';
 import path from 'node:path';
@@ -28,6 +28,7 @@ export async function checkBotCoordination({page,until,report,captureDirectory,c
       const detail=page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail');
       const label=state==='handoff'?'正在接手':state==='stopping'?'正在停止':state==='cancelled'?'已取消':'执行结果待核实';
       await until(()=>detail.locator('.bot-task-status').innerText(),text=>text===label);
+      await openFullTask(page);
       const info=detail.locator('.bot-task-information');
       if (await info.getAttribute('open')===null) await info.locator(':scope > summary').click();
       await until(()=>info.getAttribute('open'),value=>value!==null);

@@ -6,6 +6,7 @@ import ts from 'typescript';
 import { createI18n } from '@peer-agent/i18n';
 import { WORK_SESSION_STATUSES } from '@peer-agent/protocol';
 import { formatDrawerSessionStatus, formatDrawerStamp, readDrawerSession } from '../state/drawerState.ts';
+import { taskProgressPreview } from '../state/taskDetailState.ts';
 
 // Render the actual component's read model without invoking child execution controls.
 const exports: Record<string, any> = {};
@@ -14,6 +15,7 @@ const modules: Record<string, unknown> = {
   react: { useState: () => [false, () => {}] }, 'react/jsx-runtime': jsx,
   '@peer-agent/protocol': { WORK_SESSION_STATUSES },
   '../state/drawerState': { formatDrawerSessionStatus, formatDrawerStamp },
+  '../state/taskDetailState': { taskProgressPreview },
   './ConversationScene': { ConversationSceneDrawer: 'scene' },
   '../../workbench/ResourceWorkspaceContext': { useResourceWorkspace: () => resourcePane },
   '../../app/components/MotionDetails': { MotionDetails: 'details' }, '../../ui/icons': { PeerIcon: 'icon' },
@@ -78,4 +80,18 @@ test('opening a child scene keeps its task provenance and targets the independen
     resourcePane.ready = false;
     assert.equal(find(render({ conversationId: 'child' }), 'bot-task-scene').props.disabled, true);
   } finally { resourcePane = null; }
+});
+
+test('task details start compact and keep verification, evidence and controls behind the full-task entry', () => {
+  const tree = render({ status: 'running', conversationId: 'child', spawnedAt: '2026-10-29T04:13:00Z' });
+  const full = find(tree, 'bot-task-full');
+  assert.ok(full);
+  assert.notEqual(full.props.open, true, 'full details must not start expanded');
+  assert.equal(full.props.children[0].type, 'summary');
+  assert.ok(find(full, 'bot-task-full-open'));
+  assert.ok(find(full, 'bot-task-next'));
+  assert.ok(find(full, 'bot-task-information'));
+  assert.ok(find(full, 'bot-task-created'));
+  assert.ok(find(full, 'bot-task-full-content').props.children.some((child: any) => child?.type === 'cancel'));
+  assert.equal(find(tree, 'bot-task-detail-meta').props.children.type, 'span', 'creation time stays out of the compact header');
 });

@@ -393,7 +393,7 @@ writeFileSync(quickCommand, JSON.stringify({ seq: 0 }));
 writeFileSync(quickReceipt, JSON.stringify({ seq: 0 }));
 writeFileSync(updaterCommand, JSON.stringify({ seq: 0 }));
 writeFileSync(updaterReceipt, JSON.stringify({ seq: 0 }));
-writeFileSync(entry, `import {app,dialog,BrowserWindow,Menu,ipcMain} from 'electron';
+writeFileSync(entry, `import {app,dialog,BrowserWindow,Menu,ipcMain,screen} from 'electron';
 import {readFileSync,writeFileSync,renameSync} from 'node:fs';
 import {installQuickChatNativeFixture} from ${JSON.stringify(pathToFileURL(path.join(source, 'apps/desktop/scripts/quick-chat-native-fixture.mjs')).href)};
 installQuickChatNativeFixture({BrowserWindow,Menu,commandFile:${JSON.stringify(quickCommand)},receiptFile:${JSON.stringify(quickReceipt)}});
@@ -408,10 +408,12 @@ app.getVersion=()=>${JSON.stringify(JSON.parse(readFileSync(path.join(source, 'a
 ${process.argv.includes('--diagnostics') ? `dialog.showSaveDialog=async()=>({canceled:false,filePath:${JSON.stringify(diagnosticsFile)}});` : ''}
 globalThis.rcBotModelFixtures=${JSON.stringify(botModelFixtures)};
 const observations={reads:[],list:[],search:[],turns:[]};
-globalThis.rcBotShellRecord=(key,value)=>{
-  observations[key].push(value);
+const publishObservations=()=>{
   const file=${JSON.stringify(observedFile)};
   writeFileSync(file+'.next',JSON.stringify(observations));renameSync(file+'.next',file);
+};
+globalThis.rcBotShellRecord=(key,value)=>{
+  observations[key].push(value);publishObservations();
 };
 globalThis.rcBotShellService={
   resolveGoalRole(input){return resolveRoleRoute({...input,providers:[...globalThis.rcBotModelFixtures,{id:'rc-scripted',model:'scripted-fixture',enabled:true,apiKeyConfigured:true,supportsTools:true,supportsStructured:true,supportsVision:false,isDefault:true}]});},
@@ -467,7 +469,11 @@ ipcMain.handle=(channel,handler)=>register(channel,channel==='bootstrap:get'?asy
   let state;while(!(state=JSON.parse(readFileSync(${JSON.stringify(startupCommand)},'utf8'))).release)await new Promise(resolve=>setTimeout(resolve,25));
   if(state.error)throw Error('RC_STARTUP_UNAVAILABLE');return result;
 }:handler);` : ''}
-app.whenReady().then(()=>import(${JSON.stringify(pathToFileURL(main).href)})).catch(error=>{console.error(error);app.exit(1)});
+app.whenReady().then(()=>{
+  const {bounds,workArea,scaleFactor}=screen.getPrimaryDisplay();
+  observations.nativeDisplay={bounds,workArea,scaleFactor};publishObservations();
+  return import(${JSON.stringify(pathToFileURL(main).href)});
+}).catch(error=>{console.error(error);app.exit(1)});
 `);
 const env = { ...process.env, PEER_AGENT_HOME: home, PEER_AGENT_DISABLE_LEGACY_MIGRATION: '1',
   PEER_WORKSPACE_ROOT: fixture.bots[0].path };
@@ -513,10 +519,7 @@ try {
   await app.context().tracing.start({ screenshots: true, snapshots: true }); tracing = true;
   for (const stream of [app.process().stdout, app.process().stderr]) stream.on('data', data => logs.push(String(data)));
   page = await until(() => app.windows().find(window => window.url().includes('/dist/index.html') && !window.url().includes('window=')), Boolean, 120000);
-  report.nativeDisplay = await app.evaluate(({ screen }) => {
-    const { bounds, workArea, scaleFactor } = screen.getPrimaryDisplay();
-    return { bounds, workArea, scaleFactor };
-  });
+  report.nativeDisplay = await until(() => readObserved('nativeDisplay'), Boolean);
   report.oversizedCiWindow = oversizedCiWindow;
   report.windowReadyMs = Date.now() - Date.parse(report.startedAt);
   page.setDefaultTimeout(15000); page.on('pageerror', error => report.pageErrors.push(error.message));
