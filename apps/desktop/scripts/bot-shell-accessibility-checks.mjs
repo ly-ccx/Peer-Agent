@@ -176,6 +176,12 @@ export async function checkBotShellAccessibility({ page, app, quickNative, until
 async function checkSettings({ page, until, report, captureDirectory, effortCommandFile }) {
   const form = page.locator('.bot-settings-tab');
   await form.waitFor();
+  const pressSwitch = async control => {
+    // Durable profile publication can precede the renderer's save completion.
+    // Keyboard press does not wait for an enabled control as click does.
+    await until(() => control.isEnabled(), Boolean);
+    await control.press('Space');
+  };
   const workspaceId = (await page.locator('.bot-row.is-open').getAttribute('id')).slice('bot-row-'.length);
   const profile = () => page.evaluate(async workspaceId => (await window.peerAgent.projectAgentGet({ workspaceId })).item.profile, workspaceId);
   const original = await profile();
@@ -196,9 +202,9 @@ async function checkSettings({ page, until, report, captureDirectory, effortComm
   assert.equal(switchPaint.track.height, 23);
   assert.equal(switchPaint.thumb.width, 15);
   assert.notEqual(switchPaint.trackColor, switchPaint.thumbColor, 'switch thumb must be visible');
-  await handoff.focus(); await handoff.press('Space');
+  await handoff.focus(); await pressSwitch(handoff);
   await until(profile, p => p.autoHandoffOnPolicyAccept === !(original.autoHandoffOnPolicyAccept === true));
-  await handoff.press('Space');
+  await pressSwitch(handoff);
   await until(profile, p => p.autoHandoffOnPolicyAccept === (original.autoHandoffOnPolicyAccept === true));
   await form.getByRole('button', { name: '开工前批准计划', exact: true }).click();
   await page.getByRole('option', { name: '所有任务先批准', exact: true }).click();
@@ -209,8 +215,8 @@ async function checkSettings({ page, until, report, captureDirectory, effortComm
   await advanced.locator('summary').focus(); await advanced.locator('summary').press('Enter');
   assert.notEqual(await advanced.getAttribute('open'), null);
   const local = advanced.getByRole('switch', { name: '只使用本地模型', exact: true });
-  await local.press('Space'); await until(profile, p => p.modelPolicy?.scope?.localOnly === true);
-  await local.press('Space'); await until(profile, p => p.modelPolicy?.scope?.localOnly === false);
+  await pressSwitch(local); await until(profile, p => p.modelPolicy?.scope?.localOnly === true);
+  await pressSwitch(local); await until(profile, p => p.modelPolicy?.scope?.localOnly === false);
   if (captureDirectory) await page.screenshot({ path: path.join(captureDirectory, 'settings-advanced.png') });
   await advanced.locator('summary').press('Enter');
   await runtime.locator('summary').press('Enter');
@@ -241,7 +247,7 @@ async function checkSettings({ page, until, report, captureDirectory, effortComm
       document.documentElement.dataset.palette = palette;
     }, { theme, palette });
     for (const checked of [false, true]) {
-      if ((await handoff.getAttribute('aria-checked') === 'true') !== checked) await handoff.press('Space');
+      if ((await handoff.getAttribute('aria-checked') === 'true') !== checked) await pressSwitch(handoff);
       await until(profile, p => (p.autoHandoffOnPolicyAccept === true) === checked);
       await settleColorTransitions(page);
       const paint = await handoff.evaluate(node => {
@@ -261,10 +267,10 @@ async function checkSettings({ page, until, report, captureDirectory, effortComm
         await page.screenshot({ path: path.join(captureDirectory, `settings-default-${theme}.png`) });
       }
     }
-    await handoff.press('Space');
+    await pressSwitch(handoff);
     await until(profile, p => p.autoHandoffOnPolicyAccept !== true);
   }
-  if (original.autoHandoffOnPolicyAccept === true) await handoff.press('Space');
+  if (original.autoHandoffOnPolicyAccept === true) await pressSwitch(handoff);
   await until(profile, p => (p.autoHandoffOnPolicyAccept === true) === (original.autoHandoffOnPolicyAccept === true));
   await settleColorTransitions(page);
   await settingsFirstScreen(page);
