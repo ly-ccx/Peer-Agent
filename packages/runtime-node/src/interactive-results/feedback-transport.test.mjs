@@ -38,7 +38,7 @@ async function fixture(t) {
   const saved = states.save({ reference, identity, writer, expectedRevision: 0, requestId: 'save-1', values: { $x: 4, $name: '固定条件' }, inputDrafts: {} }, () => true);
   const frozen = await states.prepareFollowup({ reference, identity, writer, stateRevision: saved.stateRevision, stateDigest: saved.stateDigest, fields: ['$x', '$name'], requestId: 'followup-1' }, () => true);
   const feedback = interactiveFeedbackFromFollowup(frozen); assert.ok(feedback);
-  const admission = createInteractiveFeedbackAdmission({ stateStore: states }), options = { rootDir, resolveConversationId: () => owner.conversationId,
+  const admission = createInteractiveFeedbackAdmission({ stateStore: states, conversationStore: conversations }), options = { rootDir, resolveConversationId: () => owner.conversationId,
     holdsLease: () => true, hasMessage: (_conversation, id) => conversations.getConversation(parent.id).messages.some(message => message.id === id),
     appendMessage: (conversation, message) => conversations.appendMessage(conversation, message) };
   return { rootDir, conversations, owner, results, states, feedback, frozen, admission, options, reference, identity, writer,
@@ -81,8 +81,11 @@ test('known attachments carry the complete selection through a real already-open
   f.states.save({ reference: f.reference, identity: f.identity, writer: f.writer, expectedRevision: 1, requestId: 'save-2', values: { $x: 6, $name: 'Later edit' }, inputDrafts: {} }, () => true);
   assert.equal(queue.findSubmission(f.owner.workspaceId, 'selected').resourceFeedback[0].version.values.$x, 4);
   assert.deepEqual(queue.submitInput(f.input('selected')).resourceFeedback, [f.feedback]);
-  const code = readFileSync(new URL('../../../conversation-store/src/index.mjs', import.meta.url), 'utf8');
-  assert.equal(createHash('sha256').update(code).digest('hex'), 'a5f25527c02bdda6917680538ae480cd57f9d80bc55f259f290c4daf630d9e5e', 'the actual shared Conversation writer must still equal the pinned source');
+  const code = readFileSync(new URL('../../../conversation-store/src/index.mjs', import.meta.url), 'utf8')
+    .replace("import { acquireMessageRetentionGuard } from './message-retention-guard.mjs';\n", '')
+    .replace('    acquireMessageRetentionGuard: ids => acquireMessageRetentionGuard(indexFile, convFile, ids),\n', '');
+  assert.equal(createHash('sha256').update(code).digest('hex'), 'a5f25527c02bdda6917680538ae480cd57f9d80bc55f259f290c4daf630d9e5e',
+    'the shared Conversation writer must match the pinned source after removing only the independent guard entry');
 });
 test('the pinned old queue demonstrably skips an unknown direct union, so the test cannot pass by merely adding a version marker', async t => {
   const f = await fixture(t), legacy = createLegacyQueue(f.options);
@@ -152,6 +155,50 @@ test('format 3 fences the actual old draft writer, stays sticky after removal an
     assert.equal(drafts.read(address).ok, false); assert.equal(drafts.write({ ...base, revision: saved.revision, uploads: [] }).ok, false); assert.equal(readFileSync(file, 'utf8'), before);
   }
 });
+test('canonical message retention pins confirmed carriers in the full durable history and excludes sidecar-only content', async t => {
+  const f = await fixture(t), id = f.owner.conversationId;
+  const carrier = interactiveFeedbackAttachment(f.feedback);
+  const child = f.conversations.createConversation({ title: 'Second guarded conversation' });
+  const conversationModule = new URL('../../../conversation-store/src/index.mjs', import.meta.url).href;
+  f.conversations.appendMessage(id, { id: 'streaming', role: 'assistant', content: 'working' });
+  f.conversations.appendMessage(id, { id: 'user-selection', role: 'user', content: '', attachments: [carrier] });
+  f.conversations.appendMessage(child.id, { id: 'provisional', role: 'assistant', content: 'working' });
+  f.conversations.patchStreamingMessage(id, 'streaming', { content: 'provisional' });
+  f.conversations.patchStreamingMessage(child.id, 'provisional', { attachments: [carrier] });
+  assert.equal(f.conversations.getPersistedConversationHistory(id).messages.length, 0);
+  assert.throws(() => f.admission.acquireMessageRoots(f.owner, [child.id]), /interactive_retention_unavailable/);
+  assert.throws(() => f.admission.acquireMessageRoots(f.owner, [id, 'missing']), /CONVERSATION_RETENTION_MISSING/);
+  const guard = f.admission.acquireMessageRoots(f.owner, [id, child.id]);
+  try {
+    assert.deepEqual(guard.selections, [{ reference: f.reference, followupId: f.frozen.followupId }]);
+    assert.match(guard.revision, /^sha256:[a-f0-9]{64}$/);
+    assert.throws(() => f.admission.acquireMessageRoots(f.owner, [id]), /CONVERSATION_RETENTION_BUSY/);
+    const script = `import { createConversationStore } from ${JSON.stringify(conversationModule)};
+      const [storeDir, id, childId] = JSON.parse(process.argv[1]);
+      const store = createConversationStore({ storeDir });
+      const now = Date.now; let offset = 0;
+      Date.now = () => now() + (offset += 5100);
+      const row = { id: 'new', role: 'user', content: 'queued' };
+      for (const operation of [() => store.appendMessage(id, row), () => store.replaceMessages(childId, [row])]) {
+        try { operation(); console.log('wrote'); } catch (error) { console.log(error.code); }
+      }`;
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', script,
+      JSON.stringify([path.join(f.rootDir, 'conversations'), id, child.id])], { encoding: 'utf8', timeout: 5000 });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim(), 'EEXIST\nEEXIST');
+    assert.equal(guard.assertCurrent(), true);
+  } finally { guard.release(); }
+  assert.equal(guard.assertCurrent(), false);
+  assert.equal(f.conversations.appendMessage(id, { id: 'unblocked', role: 'user', content: 'now' }).messages.length, 3);
+  const file = path.join(f.rootDir, 'conversations', id + '.jsonl');
+  appendFileSync(file, '{\n');
+  assert.throws(() => f.admission.acquireMessageRoots(f.owner, [id]), /CONVERSATION_RETENTION_CORRUPT/);
+  const invalid = { ...carrier, text: carrier.text.replace('peer-interactive-selection-1', 'peer-interactive-selection-9') };
+  f.conversations.replaceMessages(id, [{ id: 'replacement', role: 'user', content: 'unsafe', attachments: [invalid] }]);
+  assert.throws(() => f.admission.acquireMessageRoots(f.owner, [id]), { code: 'INTERACTIVE_FEEDBACK_TRANSPORT_INCOMPATIBLE' });
+  assert.equal(f.conversations.replaceMessages(id, [{ id: 'replacement', role: 'user', content: 'safe' }]).messages.length, 1);
+});
+
 test('draft retention pins typed and legacy-carried selections while old writers respect every surface lock', async t => {
   const f = await fixture(t);
   const drafts = createProjectInputDraftStore({ rootDir: f.rootDir, validateInteractiveFeedback: f.admission.validate });

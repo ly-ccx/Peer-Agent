@@ -10,6 +10,7 @@ import { validateSelectionReference } from './selection-reference.mjs';
 import { createBackgroundSnapshotStore } from './background-snapshot-store.mjs';
 import path from 'node:path';
 import { contextAccountingModelKey, normalizeContextUsageBreakdown } from '@peer-agent/protocol';
+import { acquireMessageRetentionGuard } from './message-retention-guard.mjs';
 import { withFileLock, withFileLockAsync } from './conversation-file-lock.mjs';
 import { createTerminalMessageCommitter, conversationFileVersion } from './terminal-message-committer.mjs';
 
@@ -1880,6 +1881,7 @@ export function createConversationStore(options = {}) {
     readInteractionProcess: interactions.readProcess,
     createHistoryProjection,
     getPersistedConversationHistories,
+    acquireMessageRetentionGuard: ids => acquireMessageRetentionGuard(indexFile, convFile, ids),
     resolveSelectionReference,
     createSelectionChild: changed(createSelectionChild, 'created'),
     createChildConversation: changed(createChildConversation, 'created'),

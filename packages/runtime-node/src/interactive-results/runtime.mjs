@@ -20,7 +20,7 @@ export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationS
   const retention = createInteractiveRetention({ resultStore, stateStore, acquireRoots: acquireRetentionRoots,
     assertOwner: owner => enabled?.(owner.workspaceId) === true && holdsLease?.(owner.workspaceId) === true
       && getBotConversationId?.(owner.workspaceId) === owner.conversationId, ...(now ? { now } : {}) });
-  const feedback = createInteractiveFeedbackAdmission({ stateStore });
+  const feedback = createInteractiveFeedbackAdmission({ stateStore, conversationStore });
   const publications = createInteractivePublicationSource({ resultStore, goalPlanStore, getBotConversationId, getSession });
   const verification = createInteractiveVerification({ resultStore, feedback, goalPlanStore, conversationStore, getBotConversationId, holdsLease, enabled });
   const authority = createInteractiveAuthority({ goalPlanStore, conversationStore, resultStore, getBotConversationId, holdsLease, enabled, classifyContext,
