@@ -15,8 +15,7 @@ export function createPublicationAttempts(storage) {
       || saved.phase === 'failed' && (typeof saved.code !== 'string' || !['failed', 'denied', 'cancelled', 'timeout'].includes(saved.status))) throw problem('interactive_storage_corrupt');
     return saved;
   }
-  function read(callRef) {
-    const context = storage.connect(callRef.owner.workspaceId);
+  function read(callRef, context = storage.connect(callRef.owner.workspaceId)) {
     const row = context?.db.prepare('SELECT body FROM attempts WHERE id=?').get(key(callRef));
     return row ? savedAttempt(row.body, callRef) : null;
   }

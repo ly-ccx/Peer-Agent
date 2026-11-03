@@ -20,7 +20,15 @@ test('fresh store instances retain preparation identity, active candidate and re
   assert.throws(() => second.beginAttempt(a, () => true), { code: 'publication_unknown' });
   assert.throws(() => second.beginAttempt(input('other-concurrent'), () => true), { code: 'publication_preparation_pending' });
   assert.throws(() => second.beginAttempt({ ...a, draft: { ...a.draft, title: 'changed' } }, () => true), { code: 'publication_parameter_conflict' });
-  first.finishAttempt(a.callRef, { code: 'unsupported_node', contentFailure: true });
+  assert.equal(second.reconcileStoppedPreparation(a.callRef, () => false), null);
+  assert.equal(first.getAttempt(a.callRef).phase, 'prepared');
+  const stopped = second.reconcileStoppedPreparation(a.callRef, row => row.source.executionEpoch === 'epoch-a');
+  assert.equal(stopped.code, 'publication_interrupted');
+  assert.equal(stopped.status, 'cancelled');
+  assert.equal(second.reconcileStoppedPreparation(a.callRef, () => true), null);
+  const invalid = input('invalid-first');
+  first.beginAttempt(invalid, () => true);
+  first.finishAttempt(invalid.callRef, { code: 'unsupported_node', contentFailure: true });
   for (const id of ['repair-one', 'repair-two']) {
     const current = input(id); second.beginAttempt(current, () => true);
     second.finishAttempt(current.callRef, { code: 'unsupported_node', contentFailure: true });

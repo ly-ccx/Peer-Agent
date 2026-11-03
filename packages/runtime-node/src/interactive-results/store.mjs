@@ -77,6 +77,15 @@ export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'
     const call = requireCall(rawCall), context = storage.connect(call.owner.workspaceId);
     return context ? clone(operation(context, call)) : null;
   }
+  function reconcileStoppedPreparation(rawCall, assertStopped) {
+    const callRef = requireCall(rawCall);
+    if (!attempts.read(callRef)) return null;
+    return storage.transaction(callRef.owner.workspaceId, context => {
+      const saved = attempts.read(callRef, context);
+      if (saved?.phase !== 'prepared' || operation(context, callRef) || assertStopped?.(saved) !== true) return null;
+      return attempts.finishInTransaction(context, callRef, { code: 'publication_interrupted', status: 'cancelled' });
+    });
+  }
   /** @param {{owner: import('@peer-agent/protocol').InteractiveOwner, source: import('@peer-agent/protocol').InteractivePublishedResult['source'],
    * draft: import('@peer-agent/protocol').InteractiveResultDraft, content: import('@peer-agent/protocol').InteractiveContent,
    * provenance: readonly import('@peer-agent/protocol').InteractiveMaterialProvenance[], dataLevel: import('@peer-agent/protocol').DataLevel,
@@ -252,6 +261,7 @@ export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'
       if (privacy.current(owner, dataLevel) !== dataLevel) return;
       return storage.transaction(owner.workspaceId, context => { requireCurrent(assertOwner); privacy.remember(context, owner, dataLevel); });
     },
+    reconcileStoppedPreparation,
     getAttempt: raw => attempts.read(requireCall(raw)),
     beginAttempt: (input, assertCurrent) => attempts.begin({ ...input, callRef: requireCall(input.callRef) }, assertCurrent),
     finishAttempt: (raw, outcome) => attempts.finish(requireCall(raw), outcome),
