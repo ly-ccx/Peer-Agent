@@ -11,7 +11,7 @@ import {
   PROJECT_AGENT_ALLOWED_CAPABILITIES,
   evaluateProjectAgentTurn,
 } from './mode-policy.mjs';
-import { DELEGATION_CAPABILITY_IDS } from './tool-specs.mjs';
+import { DELEGATION_CAPABILITY_IDS, validateDelegationInput } from './tool-specs.mjs';
 
 const USER = { id: 'u1', role: 'user', kind: 'user_input' };
 const ASSISTANT = { id: 'a1', role: 'assistant' };
@@ -879,4 +879,20 @@ test('pure task queries read fresh facts without opening or rewriting the effect
   assert.equal(outputOf(first).sessions[0].sourceRevision, '1');
   assert.equal(outputOf(second).sessions[0].sourceRevision, '2');
   assert.ok(first.result.evidence);
+});
+
+
+test('assessment input errors identify the nested shape and missing fields without accepting them', () => {
+  const assessment = { workId: 'w', expectedWorkRevision: 0, expectedGoalRevision: 1,
+    sourceInputIds: [], sourceEventIds: [], inputs: [], coverage: [],
+    disposition: { kind: 'wait', waitFor: [{ kind: 'session', id: 's', revision: 'obs:s' }] } };
+  const call = { action: 'assess', reason: 'Record current responsibility' };
+  const flattened = validateDelegationInput('coordinate_work', { ...call, ...assessment });
+  assert.equal(flattened.ok, false);
+  assert.match(flattened.message, /nested assessment object/);
+  const missing = validateDelegationInput('coordinate_work', { ...call, assessment });
+  assert.equal(missing.ok, false);
+  assert.match(missing.message, /assessment\.reason/);
+  assert.equal(validateDelegationInput('coordinate_work', { ...call,
+    assessment: { ...assessment, reason: 'Session is still running' } }).ok, true);
 });

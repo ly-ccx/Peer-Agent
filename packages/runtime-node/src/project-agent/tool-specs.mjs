@@ -9,6 +9,7 @@ import { validCapabilityRequirements } from './capability-admission.mjs';
 import { validIntentAssessment } from './intent-coordination-kernel.mjs';
 const intentIdsSchema = { type: 'array', maxItems: 64, items: { type: 'string', maxLength: 200 } };
 const intentAssessmentSchema = { type: 'object', additionalProperties: false,
+  description: 'For action assess, put the work ID, revisions, source IDs, decision fields and assessment reason inside this object.',
   required: ['workId', 'expectedWorkRevision', 'expectedGoalRevision', 'sourceInputIds', 'sourceEventIds', 'inputs', 'coverage', 'disposition', 'reason'],
   properties: {
     workId: { type: 'string', maxLength: 200 }, expectedWorkRevision: { type: 'integer', minimum: 0 }, expectedGoalRevision: { type: 'integer', minimum: 0 },
@@ -242,10 +243,20 @@ export function validateDelegationInput(name, raw) {
   if (OBJECTIVE_TOOL_SPECS.some(spec => spec.name === name)) return validateObjectiveToolInput(name, raw);
   if (name === 'coordinate_work') {
     if (Object.keys(input).some(key => !['action','workId','sessionId','expectedRevision','reason','text','replyTo','task','assessment','afterSessionId','eventId','payloadOffset','inputId','afterInputId','expectedWorkRevision'].includes(key))
-      || !['parallel','augment','revise','query','answer','cancel','replace','handoff','resume','assess'].includes(input.action) || !text(input.reason,500)) return invalid('A scoped coordination action and reason are required. Authority is assigned by the host.');
+      || !['parallel','augment','revise','query','answer','cancel','replace','handoff','resume','assess'].includes(input.action) || !text(input.reason,500)) {
+      return invalid(input.action === 'assess'
+        ? 'Send action, reason and a nested assessment object. Put the work ID, both revisions, source IDs, inputs, coverage and disposition inside assessment.'
+        : 'A scoped coordination action and reason are required. Authority is assigned by the host.');
+    }
     if (input.action === 'assess') {
-      if (input.assessment?.operationId !== undefined || !validIntentAssessment({ ...input.assessment, operationId: 'host' })) return invalid('A bounded intent assessment with both current revisions and source identities is required. The host assigns its operationId.');
-      return { ok: true, value: { action: 'assess', reason: input.reason.trim(), assessment: structuredClone(input.assessment) } };
+      const assessment = input.assessment;
+      if (!assessment || typeof assessment !== 'object' || Array.isArray(assessment)) {
+        return invalid('Action assess requires a nested assessment object containing both current revisions and source identities.');
+      }
+      const missing = intentAssessmentSchema.required.filter(key => !Object.hasOwn(assessment, key));
+      if (missing.length) return invalid(`Missing assessment fields: ${missing.map(key => `assessment.${key}`).join(', ')}.`);
+      if (assessment.operationId !== undefined || !validIntentAssessment({ ...assessment, operationId: 'host' })) return invalid('A bounded intent assessment with both current revisions and source identities is required. The host assigns its operationId.');
+      return { ok: true, value: { action: 'assess', reason: input.reason.trim(), assessment: structuredClone(assessment) } };
     }
     if (input.assessment !== undefined) return invalid('assessment is only valid for action assess.');
     if (input.afterSessionId !== undefined && (input.action !== 'query' || !text(input.afterSessionId,200) || !Number.isSafeInteger(input.expectedRevision))) return invalid('Frame pagination requires query, afterSessionId and current expectedRevision.');
