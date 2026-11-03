@@ -35,8 +35,12 @@ for (const passed of [true, false]) test(`task verification and main-bot reporti
   const context = { mode: 'project_agent', role: 'project_agent', workspaceId: 'ws', parentConversationId: parent.id,
     messages: [{ id: 'input', role: 'user', kind: 'user_input' }] };
   const call = (name, args) => ({ call: { toolCallId: name, capabilityId: `local.delegation.${name}`, arguments: args } });
+  const baseline = await provider.executeCapability(call('get_verification_detail', { sessionId: 'session' }), context);
   const endAutomaticReview = beginVerificationAttempt(plan.planId, 'automatic-review');
   try {
+    const pending = await provider.executeCapability(call('get_verification_detail', { sessionId: 'session' }), context);
+    assert.equal(pending.result.output.verificationInProgress, true);
+    assert.equal(pending.result.output.outcome, baseline.result.output.outcome);
     const busy = await provider.executeCapability(call('verify_session', { sessionId: 'session' }), context);
     assert.equal(busy.result.status, 'failed');
     assert.equal(busy.result.output.error, 'verifier_in_progress');
@@ -67,6 +71,7 @@ for (const passed of [true, false]) test(`task verification and main-bot reporti
   const { ok, ...body } = toolDetail;
   assert.deepEqual(detail, body, 'task drawer and model tool use the same current verification');
   assert.equal(detail.outcome, result.status);
+  assert.equal(detail.verificationInProgress, undefined);
   assert.ok(detail.checks.some(check => check.evidenceRefs.includes('tool-result://fact')));
   const session = supervisor.get({ sessionId: 'session' });
   const reply = composeReply({ messageId: 'reply', kind: 'user', replyTo: ['input'], sources: ['session'],

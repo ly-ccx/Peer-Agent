@@ -33,6 +33,7 @@ export function buildVerificationDetail(facts = {}) {
   return {
     sessionId: typeof facts.sessionId === 'string' ? facts.sessionId : '',
     outcome: verdict.outcome,
+    ...(facts.verificationInProgress === true ? { verificationInProgress: true } : {}),
     checks: verdict.checks.map((check) => ({
       name: check.name,
       result: check.passed === true ? 'passed' : 'failed',

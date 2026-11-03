@@ -285,6 +285,8 @@ export interface VerificationVerdict {
 export interface SessionVerificationDetail {
   readonly sessionId: string;
   readonly outcome: VerificationOutcome;
+  /** A host review is active. The outcome describes evidence already recorded. */
+  readonly verificationInProgress?: true;
   readonly checks: readonly {
     readonly name: string;
     readonly result: 'passed' | 'failed';

@@ -119,7 +119,7 @@ export function createSessionVerification({
     facts(sessionId) {
       const plan = findPlan(sessionId);
       if (!plan) return null;
-      return factsFor(plan);
+      return { ...factsFor(plan), verificationInProgress: sessionFactsFromPlan(plan).verificationActive };
     },
     async markVerifying(sessionId) {
       const plan = findPlan(sessionId);
