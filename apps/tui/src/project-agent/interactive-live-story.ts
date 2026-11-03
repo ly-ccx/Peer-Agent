@@ -24,8 +24,19 @@ const CAPABILITIES = [
   'local.goal.get_plan', 'local.goal.update_task', 'local.interactive.publish', 'local.interactive.inspect',
 ];
 const INITIAL_INPUT = 'live-story-publish', FROZEN_INPUT = 'live-story-verify';
-const INITIAL_TASK = 'Delegate one read-only research session for the following example. Declare local.interactive.publish and a model_review criterion for the fixed program and its two rows. Use the current input anchor. The worker should use goal_get_plan to learn the leaf task and mark it complete with the actual published interactive artifact Evidence. When the result is available, I will send a second input with selected conditions. Keep the original result and do not declare human acceptance. Worker brief: ' + INTERACTIVE_LIVE_TASK;
-const FROZEN_TASK = 'Use this attached frozen budget selection to check the same saved result. Delegate a new read-only research session from this exact current input anchor. It must use the selected result without publishing another version. Declare local.interactive.inspect and a model_review criterion requiring program, complete facts binding, initial evaluation and attached frozen evaluation. The worker should inspect the fixed result and report actual inspection Evidence on its goal task. Ask the independent Verifier to inspect program, data binding facts, initial evaluation and frozen evaluation using the attachment followupId. Its JSON evidenceRefs must contain the four canonical interactive-inspection references. In your final post_reply cite both the original publication session and the independently verified follow-up session. Include the two calculated remainders, distinguish model-constructed inputs from verified arithmetic and avoid any claim of human acceptance.';
+const INITIAL_TASK = [
+  'Delegate one read-only research task using spawn_session and the current input anchor. Use isolation none and require local.interactive.publish.',
+  'Use one model_review criterion: independently inspect the published program, complete facts binding, and initial evaluation. Verify the two synthetic costs and initial remainder.',
+  'The worker must read its exact plan and task IDs with goal_get_plan, publish once, then use goal_update_task with the returned fixed artifact Evidence. Stop after recording it. Leave inspection to the Verifier.',
+  'I will send the selected budget after publication. Keep the original result and do not claim human acceptance.',
+  'Worker brief: ' + INTERACTIVE_LIVE_TASK,
+].join('\n');
+const FROZEN_TASK = [
+  'Please delegate this new request via spawn_session now, using this exact current input anchor to carry the attached frozen selection. Use read-only research, isolation none, and require local.interactive.inspect.',
+  'The new worker should use goal_get_plan, then inspect the attached fixed result once with view evaluate and the attached followupId, then record that actual result and evidence on its leaf with goal_update_task.',
+  'The new model_review criterion requires an independent Verifier to make four inspect_interactive_result calls on the attached fixed reference: program, data binding facts, initial evaluate, and evaluate with the attached followupId. Run them together. Cite only the four canonical interactive-inspection references.',
+  'Do not republish or substitute direct Bot inspection for this delegation. After the independent review, use post_reply with both the original publication session and the follow-up session as sources. Explain the two remainders and distinguish synthetic inputs, verified arithmetic and human acceptance.',
+].join('\n');
 
 type Phase = keyof typeof INTERACTIVE_STORY_BUDGET.requests;
 interface Observation { phase: Phase; tools: string[]; returnedTools?: string[]; durationMs?: number; usage?: ModelUsage; error?: string }
@@ -60,6 +71,11 @@ export async function runInteractiveLiveStory(options: {
     if (!created.ok) throw Error('story_bot_unavailable');
     const conversationId: string = created.profile.agentConversationId;
     const callCounts = { bot: 0, worker: 0, verifier: 0 };
+    let budgetError: Error | undefined;
+    function exhausted(code: string, phase: Phase): never {
+      budgetError ??= new Error(`${code}:${phase}`);
+      throw budgetError;
+    }
     const host = createTuiProjectHost({ dataHome: directory, workspacePath, autoStart: false,
       getSettings: () => ({ providers: [provider], localAccessLevel: 'full_local',
         projectAgent: { interactiveResults: true, concurrency: 2 }, memory: { enabled: false } }),
@@ -71,7 +87,7 @@ export async function runInteractiveLiveStory(options: {
             : request.messages.some(row => typeof row.content === 'string' && row.content.includes('Verifier mission for plan')) ? 'verifier' : 'worker';
           const prior = report.requests.filter(row => row.phase === phase);
           if (prior.length >= INTERACTIVE_STORY_BUDGET.requests[phase]
-            || report.requests.length >= INTERACTIVE_STORY_BUDGET.totalRequests) throw Error('story_request_limit');
+            || report.requests.length >= INTERACTIVE_STORY_BUDGET.totalRequests) exhausted('story_request_limit', phase);
           const observation: Observation = { phase, tools: names };
           report.requests.push(observation);
           const start = Date.now();
@@ -82,7 +98,7 @@ export async function runInteractiveLiveStory(options: {
             observation.returnedTools = result.toolCalls.map(call => call.name);
             callCounts[phase] += result.toolCalls.length;
             if (callCounts[phase] > INTERACTIVE_STORY_BUDGET.calls[phase])
-              throw Error('story_tool_limit');
+              exhausted('story_tool_limit', phase);
             return result;
           } catch (error) { observation.error = sanitize(error); throw error; }
           finally { observation.durationMs = Date.now() - start; persist(); }
@@ -108,6 +124,7 @@ export async function runInteractiveLiveStory(options: {
         tick();
         const value = read();
         if (value !== undefined) return value;
+        if (budgetError) throw budgetError;
         await delay(100, undefined, { signal });
       }
       throw Error('story_deadline');
