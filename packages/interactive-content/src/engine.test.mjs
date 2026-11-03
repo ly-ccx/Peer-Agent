@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { boundedJSON, canonicalJSON, catalogIdentity, createPeerLibrary, evaluate, projectText, validateDraft, validateState } from './index.mjs';
+import { boundedJSON, canonicalJSON, catalogIdentity, createPeerLibrary, evaluate, prepareEvaluator, projectText, validateDraft, validateState } from './index.mjs';
 
 const bindings = { rows: [{ name: 'A', cost: 25, group: 'one' }, { name: 'B', cost: 75, group: 'one' }] };
 const program = '$budget = 1000\nroot = Col([Title("Comparison"), NumberInput("budget", "Budget", $budget, 0, 10000, 1), Metric("Remaining", $budget - @Total(@Data("rows"), "cost"), "USD"), Table("Options", [{key:"name",label:"Name"},{key:"cost",label:"Cost"}], @Data("rows"), "name")])';
@@ -35,6 +35,36 @@ test('catalog and state identities are stable across instances; unsupported cata
   assert.match(await catalogIdentity(), /^sha256:[a-f0-9]{64}$/);
   const content = await validateDraft(draft(), { bindings });
   await assert.rejects(evaluate({ ...content, specHash: 'sha256:' + '0'.repeat(64) }), { code: 'incompatible_catalog' });
+});
+
+test('prepared UI evaluation is synchronous, isolated from caller mutation and strict before SDK state changes', async () => {
+  const content = await validateDraft(draft('$x=2\nroot=Col([NumberInput("x","Divisor",$x,0,10,1),Metric("Ratio",10/$x)])'));
+  const prepared = await prepareEvaluator(content);
+  content.program = 'root=Text("changed")'; content.initialValues.$x = 9;
+  assert.equal(prepared.evaluate({ $x: 5 }).tree.props.children[1].props.value, 2);
+  assert.throws(() => prepared.evaluate({ $x: 0 }), { code: 'division_by_zero' });
+  assert.equal(prepared.evaluate({ $x: 2 }).tree.props.children[1].props.value, 5);
+  const forged = await validateDraft(draft('$x=2\nroot=NumberInput("x","x",$x,0,10,1)'));
+  forged.stateSchema.$x.max = 100;
+  forged.stateSchemaHash = await (await import('./engine.mjs')).digestJSON(forged.stateSchema);
+  await assert.rejects(prepareEvaluator(forged), { code: 'incompatible_state_schema' });
+});
+
+test('local actions use only an admitted SDK plan and apply Set/Reset atomically under the state schema', async () => {
+  const content = await validateDraft(draft('$x=2\nroot=Col([NumberInput("x","x",$x,0,10,1),Metric("x",$x),Button("Next",@Action([@Set($x,$x+1),@Set($x,$x*2)])),Button("Reset",@Reset($x))])'));
+  const prepared = await prepareEvaluator(content), input = { $x: 2 };
+  const [next, reset] = content.tree.props.children.slice(2).map(node => node.props.action);
+  assert.equal(prepared.applyAction(next, input).values.$x, 6);
+  assert.deepEqual(input, { $x: 2 });
+  assert.equal(prepared.applyAction(reset, { $x: 7 }).values.$x, 2);
+  assert.throws(() => prepared.applyAction(next, { $x: 8 }), { code: 'invalid_state' });
+  assert.throws(() => prepared.applyAction({ steps: [{ type: 'open_url', url: 'https://example.com' }] }, input), { code: 'unsupported_action' });
+  assert.throws(() => prepared.applyAction({ steps: [{ type: 'set', target: '$x', valueAST: { k: 'Num', v: 9 } }] }, input), { code: 'unsupported_action' });
+});
+
+test('nested action syntax cannot multiply the declared local action budget', async () => {
+  const group = '@Action([' + Array.from({ length: 16 }, () => '@Set($x,2)').join(',') + '])';
+  await assert.rejects(validateDraft(draft(`$x=1\nroot=Button("Many",@Action([${group},${group}]))`)), { code: 'unsupported_action' });
 });
 
 test('policy rejects all capability calls before parse/evaluation, including unused and skipped lines', async () => {

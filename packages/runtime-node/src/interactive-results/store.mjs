@@ -33,7 +33,10 @@ function contentDigest(body) {
   return jsonDigest({ encoding: body.encoding, content: body.content, provenance, dataLevel: body.dataLevel });
 }
 
-/** Immutable publication identity and operation/outbox truth; no execution or UI permission authority. */
+/** Immutable publication identity and operation/outbox truth; no execution or UI permission authority.
+ * @param {{rootDir?: string, now?: () => string, assertCompatibility?: (workspaceId: string) => boolean,
+ * onStep?: (step: string) => void, maxBytes?: number, hostEpoch?: string}} [options]
+ */
 export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'), now = () => new Date().toISOString(),
   assertCompatibility, onStep = () => {}, maxBytes, hostEpoch } = {}) {
   const storage = createInteractiveStorage({ rootDir, assertCompatibility, maxBytes, hostEpoch });
@@ -66,6 +69,12 @@ export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'
     const call = requireCall(rawCall), context = storage.connect(call.owner.workspaceId);
     return context ? clone(operation(context, call)) : null;
   }
+  /** @param {{owner: import('@peer-agent/protocol').InteractiveOwner, source: import('@peer-agent/protocol').InteractivePublishedResult['source'],
+   * draft: import('@peer-agent/protocol').InteractiveResultDraft, content: import('@peer-agent/protocol').InteractiveContent,
+   * provenance: readonly import('@peer-agent/protocol').InteractiveMaterialProvenance[], dataLevel: import('@peer-agent/protocol').DataLevel,
+   * grant: {granted: boolean, toolCallId: string, grantId: string, scope?: import('@peer-agent/protocol').InteractivePublicationPermissionScope, policyRevision?: string},
+   * evidenceId?: string, streamId?: string}} input
+   * @param {() => boolean} assertCurrent */
   function commitPublication({ owner: rawOwner, source, draft, content, provenance, grant, dataLevel, evidenceId = randomUUID(), streamId }, assertCurrent) {
     const owner = requireOwner(rawOwner);
     if (!source || !['conversationId', 'planId', 'sessionId', 'toolCallId'].every(field => interactiveToken(source[field]))

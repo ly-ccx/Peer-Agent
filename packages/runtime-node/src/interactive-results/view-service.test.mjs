@@ -1,0 +1,113 @@
+import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import test from 'node:test';
+import { validateDraft } from '@peer-agent/interactive-content';
+import { createInteractiveResultStore } from './store.mjs';
+import { createInteractiveStateStore } from './state-store.mjs';
+import { createInteractiveViewService } from './view-service.mjs';
+
+const owner = { workspaceId: 'bot-a', conversationId: 'parent-a' };
+const current = () => true;
+function sender() { const value = new EventEmitter(); value.isDestroyed = () => value.destroyed === true; return value; }
+async function fixture(t, options = {}) {
+  const rootDir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'interactive-views-')));
+  const results = createInteractiveResultStore({ rootDir, assertCompatibility: () => true });
+  const states = createInteractiveStateStore({ resultStore: results });
+  const draft = { publication: { kind: 'create' }, title: 'Trial', textFallback: 'Model trial, unverified.', inputs: [],
+    program: '$budget=100\nroot=Col([NumberInput("budget","Budget",$budget,0,1000,1),Metric("Cost",$budget*2)])' };
+  const receipt = results.commitPublication({ owner, source: { conversationId: 'worker-a', planId: 'plan-a', sessionId: 'session-a', toolCallId: 'publish-a', executionEpoch: 'epoch-a' },
+    draft, content: await validateDraft(draft), provenance: [], dataLevel: 'D3_private', grant: { toolCallId: 'publish-a', grantId: 'grant-a', granted: true } }, current);
+  results.markIndexed(receipt.callRef, receipt.indexEntry);
+  const a = sender(), b = sender();
+  let allowed = true, admissions = 0;
+  const service = createInteractiveViewService({ resultStore: results, stateStore: states,
+    resolveSource: (actual, ref) => { admissions++; return allowed && [a, b].includes(actual) && JSON.stringify(ref.owner) === JSON.stringify(owner)
+      ? { owner, assertCurrent: () => allowed && !actual.isDestroyed() } : null; }, ...options });
+  t.after(() => { service.dispose(); states.close(); results.close(); rmSync(rootDir, { recursive: true, force: true }); });
+  const open = (actual = a, requestId = 'open-a', reference = receipt.reference) => service.open(actual, { requestId, reference });
+  return { results, states, service, a, b, receipt, open, admissionCount: () => admissions, revoke: () => { allowed = false; } };
+}
+
+test('human view service binds the actual sender and immutable version, saves state and freezes conditions without new publication facts', async t => {
+  const f = await fixture(t), opened = await f.open();
+  assert.equal(opened.ok, true);
+  assert.deepEqual(opened.result.reference, f.receipt.reference);
+  assert.equal(opened.result.operationId, undefined);
+  assert.equal(opened.result.grantAudit, undefined);
+  const repeated = await f.open(); assert.deepEqual(repeated.handle, opened.handle); assert.equal(f.admissionCount(), 1);
+  const acquired = f.service.acquire(f.a, { handle: opened.handle, expectedRevision: 0 });
+  assert.equal(acquired.ok, true);
+  const save = { handle: opened.handle, writer: acquired.writer, expectedRevision: 0, requestId: 'save-a', values: { $budget: 200 }, inputDrafts: { $budget: '200' } };
+  const saved = f.service.save(f.a, save);
+  assert.equal(saved.ok, true); assert.equal(saved.state.stateRevision, 1);
+  assert.deepEqual(f.service.save(f.a, save), saved);
+  const frozen = f.service.prepareFollowup(f.a, { handle: opened.handle, stateRevision: 1, stateDigest: saved.state.stateDigest, fields: ['$budget'], requestId: 'followup-a' });
+  assert.equal(frozen.ok, true); assert.equal(frozen.followup.values.$budget, 200);
+  assert.equal(f.service.readState(f.b, { handle: opened.handle }).code, 'interactive_view_stale');
+  assert.equal(f.service.save(f.b, save).code, 'interactive_view_stale');
+  assert.equal(f.service.readState(f.a, { handle: opened.handle, reference: { ...f.receipt.reference, resultId: 'other' } }).code, 'interactive_request_invalid');
+  assert.equal(f.service.readState(f.a, { handle: { ...opened.handle, windowId: 'other-window' } }).code, 'interactive_view_stale');
+  assert.equal((await f.open(f.a, 'open-a', { ...f.receipt.reference, resultId: 'other' })).code, 'interactive_open_parameter_conflict');
+  const counts = f.results.storage.connect(owner.workspaceId).db.prepare('SELECT (SELECT COUNT(*) FROM versions) AS versions,(SELECT COUNT(*) FROM operations) AS operations').get();
+  assert.equal(Number(counts.versions), 1); assert.equal(Number(counts.operations), 1);
+});
+
+test('a second view needs explicit takeover; old saves and old releases cannot overwrite or release the successor', async t => {
+  const f = await fixture(t), a = await f.open(), b = await f.open(f.b, 'open-b');
+  const writer = f.service.acquire(f.a, { handle: a.handle, expectedRevision: 0 }).writer;
+  assert.equal(f.service.acquire(f.b, { handle: b.handle, expectedRevision: 0 }).code, 'interactive_writer_busy');
+  assert.equal(f.service.prepareFollowup(f.b, { handle: b.handle, stateRevision: 0, stateDigest: a.state.stateDigest, fields: [], requestId: 'followup-b' }).code, 'interactive_writer_required');
+  const successor = f.service.acquire(f.b, { handle: b.handle, expectedRevision: 0, takeover: true }).writer;
+  assert.equal(f.service.save(f.a, { handle: a.handle, writer, expectedRevision: 0, requestId: 'late-save', values: { $budget: 999 }, inputDrafts: {} }).code, 'interactive_writer_stale');
+  assert.equal(f.service.release(f.a, { handle: a.handle, writer }).ok, true);
+  assert.equal(f.service.release(f.a, { handle: a.handle, writer }).ok, true, 'a lost close acknowledgment is idempotent');
+  assert.equal(f.service.release(f.b, { handle: a.handle, writer }).code, 'interactive_view_stale');
+  assert.equal(f.service.save(f.b, { handle: b.handle, writer: successor, expectedRevision: 0, requestId: 'save-b', values: { $budget: 250 }, inputDrafts: {} }).ok, true);
+  assert.equal(f.service.readState(f.a, { handle: a.handle }).code, 'interactive_view_stale');
+});
+
+test('owner revocation blocks reads and saves; real sender destruction releases only its writer', async t => {
+  const f = await fixture(t), a = await f.open(), b = await f.open(f.b, 'open-b');
+  f.service.acquire(f.a, { handle: a.handle, expectedRevision: 0 });
+  f.a.destroyed = true; f.a.emit('destroyed');
+  assert.equal(f.service.readState(f.a, { handle: a.handle }).code, 'interactive_view_stale');
+  const writer = f.service.acquire(f.b, { handle: b.handle, expectedRevision: 0 }).writer;
+  assert.ok(writer);
+  f.revoke();
+  assert.equal(f.service.readState(f.b, { handle: b.handle }).code, 'interactive_view_stale');
+  assert.equal(f.service.save(f.b, { handle: b.handle, writer, expectedRevision: 0, requestId: 'revoked', values: { $budget: 900 }, inputDrafts: {} }).code, 'interactive_view_stale');
+  assert.equal(f.states.read(f.receipt.reference, current).stateRevision, 0);
+});
+
+test('pending open is idempotent and cancelable; late source resolution cannot create a retired view', async t => {
+  let complete, calls = 0;
+  const f = await fixture(t, { maxViews: 1, resolveSource: actual => {
+    calls++; return new Promise(resolve => { complete = () => resolve({ owner, assertCurrent: () => !actual.isDestroyed() }); });
+  } });
+  const first = f.open(), repeated = f.open();
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(calls, 1);
+  assert.equal((await f.open(f.b, 'over-limit')).code, 'interactive_view_limit');
+  f.service.closeSender(f.a);
+  assert.equal((await first).code, 'interactive_view_stale');
+  assert.equal((await repeated).code, 'interactive_view_stale');
+  complete(); await Promise.resolve();
+  const next = f.open(f.b, 'open-b'); await Promise.resolve(); await Promise.resolve();
+  complete(); const reply = await next;
+  assert.equal(reply.ok, true);
+  f.service.dispose(); assert.equal(f.service.readState(f.b, { handle: reply.handle }).code, 'interactive_view_stale');
+});
+
+test('unsupported fields, forged owner and an arbitrary sender cannot open content', async t => {
+  const f = await fixture(t);
+  assert.equal((await f.open(sender())).code, 'interactive_scope_denied');
+  assert.equal((await f.open(f.a, 'foreign', { ...f.receipt.reference, owner: { ...owner, conversationId: 'other-bot' } })).code, 'interactive_scope_denied');
+  assert.equal((await f.service.open(f.a, { requestId: 'forged', reference: f.receipt.reference, granted: true })).code, 'interactive_request_invalid');
+  const opened = await f.open();
+  assert.equal(f.service.acquire(f.a, { handle: opened.handle, expectedRevision: 0, takeover: 'yes' }).code, 'interactive_request_invalid');
+  assert.equal(f.service.acquire(f.a, { handle: opened.handle, expectedRevision: 4 }).code, 'interactive_state_conflict');
+  assert.equal(f.service.readState(f.a, { handle: opened.handle }).state.stateRevision, 0);
+});

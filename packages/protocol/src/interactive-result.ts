@@ -167,7 +167,7 @@ export const INTERACTIVE_RESULT_LIMITS = Object.freeze({
   stateBytes: 64 * 1024, collectionItems: 500, textChars: 8192, tablePageRows: 100,
   tablePageCells: 1000, chartSeries: 6, chartPoints: 500, evaluationSteps: 40_000,
   workerTimeoutMs: 2000, resultsPerBot: 256, storeBytes: 128 * 1024 * 1024,
-  manifestBytes: 2 * 1024 * 1024, contentRepairs: 2,
+  manifestBytes: 2 * 1024 * 1024, contentRepairs: 2, localActionSteps: 16,
 });
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
   && [Object.prototype, null].includes(Object.getPrototypeOf(v))
@@ -204,6 +204,16 @@ export function normalizeInteractiveReference(raw: unknown): InteractiveResultRe
   if (!object(raw) || !keys(raw, ['owner', 'resultId', 'contentVersion']) || !interactiveToken(raw.resultId) || !interactiveDigest(raw.contentVersion)) return;
   const owner = normalizeInteractiveOwner(raw.owner);
   return owner ? { owner, resultId: raw.resultId, contentVersion: raw.contentVersion } : undefined;
+}
+export function normalizeInteractiveViewHandle(raw: unknown): InteractiveViewHandle | undefined {
+  if (!object(raw) || !keys(raw, ['viewId', 'windowId', 'generation']) || !interactiveToken(raw.viewId)
+    || !interactiveToken(raw.windowId) || !interactiveToken(raw.generation)) return;
+  return { viewId: raw.viewId, windowId: raw.windowId, generation: raw.generation };
+}
+export function normalizeInteractiveWriter(raw: unknown): InteractiveWriter | undefined {
+  if (!object(raw) || !keys(raw, ['viewId', 'generation', 'token']) || !interactiveToken(raw.viewId)
+    || !interactiveToken(raw.generation) || !interactiveToken(raw.token)) return;
+  return { viewId: raw.viewId, generation: raw.generation, token: raw.token };
 }
 export function normalizeInteractivePublicationReference(raw: unknown): InteractivePublicationCallReference | undefined {
   if (!object(raw) || !keys(raw, ['owner', 'conversationId', 'toolCallId']) || !interactiveToken(raw.conversationId) || !interactiveToken(raw.toolCallId)) return;

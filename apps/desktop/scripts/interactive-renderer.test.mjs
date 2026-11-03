@@ -1,0 +1,117 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { createRequire } from 'node:module';
+import { mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { _electron } from 'playwright-core';
+import { build } from 'vite';
+
+const desktop = fileURLToPath(new URL('..', import.meta.url)), require = createRequire(new URL('../package.json', import.meta.url));
+const program = '$divisor=2\n$label="Trial"\n$mode="all"\n$include=true\n$budget=100\nrows=$mode=="all" ? @Data("facts") : @RowsWhere(@Data("facts"),"cost","gt",100)\nroot=Col([Title($label),Input("label","Trial name",$label),NumberInput("divisor","Divisor",$divisor,0,10,1),Select("mode","Rows",$mode,[{value:"all",label:"All"},{value:"expensive",label:"Above 100"}]),Checkbox("include","Include calculation",$include),Slider("budget","Budget",$budget,0,1000,1),Metric("Trial total",$include ? $budget/$divisor : 0),Table("Observations",[{key:"id",label:"ID"},{key:"cost",label:"Cost"}],rows,"id"),Chart("Costs","bar","id",[{key:"cost",label:"Cost"}],rows),Button("Reset budget",@Reset($budget)),SourceReference("facts","Fixed observations")])';
+
+async function buildFixture(output, mode) {
+  const entryId = '\0peer-interactive-fixture.tsx';
+  const contents = `
+    import React from 'react'; import {createRoot} from 'react-dom/client';
+    import {validateDraft,prepareEvaluator,digestJSON,validateState} from '@peer-agent/interactive-content';
+    import {InteractiveSurface} from './renderer/src/workbench/interactive/InteractiveSurface.tsx';
+    import {createInteractiveSession} from './renderer/src/workbench/interactive/interactiveSession.ts';
+    import './renderer/src/styles.css';
+    (async()=>{
+      const content=await validateDraft({title:'Fixed observations',textFallback:'Model trial, unverified.',program:${JSON.stringify(program)}},
+        {bindings:{facts:Array.from({length:120},(_,id)=>({id,cost:id+1}))}});
+      const owner={workspaceId:'fixture-bot',conversationId:'fixture-parent'};
+      const reference={owner,resultId:'fixture-result',contentVersion:'sha256:'+'a'.repeat(64)};
+      let state={result:reference,specHash:content.specHash,stateSchemaHash:content.stateSchemaHash,stateRevision:0,values:content.initialValues,inputDrafts:{},stateDigest:await digestJSON({values:content.initialValues,inputDrafts:{}}),updatedAt:new Date().toISOString(),requestId:'initial'};
+      const handle={viewId:'fixture-view',windowId:'fixture-window',generation:'fixture-generation'};
+      const writer={viewId:handle.viewId,generation:'fixture-writer',token:'fixture-token'};
+      const provenance=[{bindingId:'facts',source:{kind:'model-data',contentDigest:'sha256:'+'b'.repeat(64)},truncated:false,redacted:false,dataLevel:'D3_private'}];
+      const opened={handle,result:{reference,content,provenance},state};
+      const api={readState:async()=>({ok:true,state}),acquire:async()=>({ok:true,writer}),
+        save:async request=>{if(request.expectedRevision!==state.stateRevision)return{ok:false,code:'interactive_state_conflict'};
+          const values=validateState(request.values,content.stateSchema,request.inputDrafts);
+          state={...state,...values,stateRevision:state.stateRevision+1,stateDigest:await digestJSON(values),requestId:request.requestId,updatedAt:new Date().toISOString()};return{ok:true,state};},release:async()=>({ok:true})};
+      const session=createInteractiveSession({api,opened,evaluator:await prepareEvaluator(content)}); await session.acquire();
+      globalThis.interactiveFixture={snapshot:()=>session.snapshot(),setBudget:value=>session.editValue('$budget',value)};
+      createRoot(document.getElementById('root')).render(React.createElement('main',{style:{padding:24,maxWidth:1000,margin:'0 auto'}},React.createElement(InteractiveSurface,{session,provenance,isZh:false})));
+    })().catch(error=>{document.getElementById('root').textContent='Fixture failed: '+error.stack;throw error;});`;
+  await build({ root: desktop, configFile: path.join(desktop, 'vite.config.ts'), base: './', mode, logLevel: 'error',
+    define: { 'process.env.NODE_ENV': JSON.stringify(mode) },
+    plugins: [{ name: 'peer-interactive-isolated-component', resolveId(id, importer) {
+      if (id === entryId) return entryId;
+      if (importer === entryId && id.startsWith('./')) return path.resolve(desktop, id);
+    }, load(id) { if (id === entryId) return contents; } }],
+    build: { outDir: output, emptyOutDir: true, target: 'esnext', cssCodeSplit: false, rollupOptions: { input: entryId,
+      output: { entryFileNames: 'fixture.js', format: 'iife', inlineDynamicImports: true } } } });
+  const css = readdirSync(path.join(output, 'assets')).filter(name => name.endsWith('.css')).map(name => `<link rel="stylesheet" href="./assets/${name}">`).join('');
+  writeFileSync(path.join(output, 'index.html'), `<!doctype html><html data-theme="light"><meta charset="utf-8">${css}<style>html,body,#root{min-width:0;min-height:100%;height:auto;overflow:auto}body{margin:0;background:var(--paper-sheet)}</style><body><div id="root"></div><script src="./fixture.js"></script></body></html>`);
+}
+
+test('the real SDK mounts Peer controls in production and development without tools, telemetry or devtools', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'peer-interactive-renderer-'));
+  for (const mode of ['production', 'development']) {
+    const output = path.join(root, mode); await buildFixture(output, mode);
+    const main = path.join(output, 'main.cjs');
+    writeFileSync(main, `const{app,BrowserWindow}=require('electron');app.setPath('userData',${JSON.stringify(path.join(root, `data-${mode}`))});app.whenReady().then(()=>new BrowserWindow({width:1100,height:900,show:false,webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true}}).loadURL('data:text/html,<!doctype html><html><body></body></html>'));`);
+    const app = await _electron.launch({ executablePath: process.env.PEER_TEST_ELECTRON ?? require('electron'), args: [main] });
+    try {
+      const page = await app.firstWindow(), external = [], errors = [];
+      page.on('pageerror', error => errors.push(error.message));
+      page.on('websocket', socket => external.push(socket.url()));
+      await page.route(/^https?:/, route => { external.push(route.request().url()); return route.abort(); });
+      await page.goto(pathToFileURL(path.join(output, 'index.html')).href);
+      await page.getByLabel('Divisor', { exact: true }).waitFor();
+      await page.waitForFunction(() => document.querySelector('.interactive-metric dd')?.textContent === '50');
+      const divisor = page.getByLabel('Divisor', { exact: true }), element = await divisor.elementHandle();
+      await divisor.fill('0');
+      await page.getByText('These conditions divide by zero. Adjust the inputs.', { exact: true }).waitFor();
+      assert.equal(await page.locator('.interactive-metric').isVisible(), false);
+      assert.equal(await divisor.inputValue(), '0');
+      assert.equal(await element.evaluate(node => node === document.activeElement), true);
+      await divisor.fill('5');
+      await page.waitForFunction(() => document.querySelector('.interactive-metric dd')?.textContent === '20');
+      assert.equal(await divisor.evaluate((node, old) => node === old, element), true);
+      await page.getByLabel('Rows', { exact: true }).selectOption('expensive');
+      await page.waitForFunction(() => document.querySelector('.interactive-table tbody')?.children.length === 20);
+      await page.getByLabel('Rows', { exact: true }).selectOption('all');
+      await page.waitForFunction(() => document.querySelector('.interactive-table tbody')?.children.length === 100);
+      await page.getByRole('button', { name: 'Next', exact: true }).first().click();
+      assert.equal(await page.locator('.interactive-table tbody').first().locator('tr').count(), 20);
+      await page.getByLabel('Include calculation', { exact: true }).focus();
+      await page.getByLabel('Include calculation', { exact: true }).press('Space');
+      await page.waitForFunction(() => document.querySelector('.interactive-metric dd')?.textContent === '0');
+      await page.locator('label.interactive-check').click();
+      assert.equal(await page.getByLabel('Include calculation', { exact: true }).isChecked(), true);
+      assert.equal(await page.locator('.interactive-table tbody').first().locator('tr').count(), 20, 'unrelated parameter changes retain the table page');
+      const label = page.getByLabel('Trial name', { exact: true }); await label.focus();
+      await label.evaluate(node => {
+        node.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(node, '中文试算');
+        node.dispatchEvent(new InputEvent('input', { bubbles: true, data: '中文试算', isComposing: true }));
+      });
+      assert.equal(await page.evaluate(() => interactiveFixture.snapshot().composing), true);
+      assert.equal(await label.inputValue(), '中文试算');
+      assert.equal(await page.evaluate(() => interactiveFixture.snapshot().values.$label), 'Trial');
+      await label.evaluate(node => node.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '中文试算' })));
+      await page.waitForFunction(() => document.querySelector('.interactive-title')?.textContent === '中文试算');
+      assert.equal(await label.evaluate(node => node === document.activeElement), true);
+      await page.evaluate(() => interactiveFixture.setBudget(300));
+      await page.waitForFunction(() => document.querySelector('.interactive-metric dd')?.textContent === '60');
+      await page.getByRole('button', { name: 'Reset budget', exact: true }).click();
+      await page.waitForFunction(() => document.querySelector('.interactive-metric dd')?.textContent === '20');
+      for (const [width, theme] of [[1100, 'light'], [420, 'dark']]) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+        assert.equal(await page.locator('.interactive-chart svg [x],[y],[width],[height],[points]').evaluateAll(nodes => nodes.some(node => [...node.attributes].some(attr => /NaN|Infinity/.test(attr.value)))), false);
+        await page.screenshot({ path: path.join(root, `${mode}-${width}-${theme}.png`), fullPage: true, animations: 'disabled' });
+      }
+      assert.deepEqual(external, []);
+      assert.deepEqual(errors, []);
+      assert.equal(await page.locator('[data-openui-devtools-auto-mount]').count(), 0);
+    } finally { await app.close(); }
+  }
+  console.log(`Interactive SDK component screenshots: ${root}`);
+});

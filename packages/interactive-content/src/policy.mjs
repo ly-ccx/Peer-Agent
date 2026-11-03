@@ -60,7 +60,7 @@ export function inspectProgram(program, bindings) {
     if (action) {
       if (node.k !== 'Comp' || !ACTIONS.has(node.name)) reject('unsupported_action', statementId);
       if (node.name === 'Action') {
-        if (node.args.length !== 1 || node.args[0].k !== 'Arr' || node.args[0].els.length > 16) reject('unsupported_action');
+        if (node.args.length !== 1 || node.args[0].k !== 'Arr' || node.args[0].els.length > L.localActionSteps) reject('unsupported_action');
         for (const step of node.args[0].els) visit(step, depth + 1, statementId, true);
       } else {
         if (node.name === 'Set' && node.args.length !== 2 || node.name === 'Reset' && !node.args.length) reject('unsupported_action');

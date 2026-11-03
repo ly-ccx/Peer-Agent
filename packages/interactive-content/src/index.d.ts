@@ -17,4 +17,10 @@ export function digestJSON(value: unknown): Promise<string>;
 export function validateState(values: InteractiveStateValues, schema: InteractiveStateSchema, drafts?: Readonly<Record<string, string>>): { values: InteractiveStateValues; inputDrafts: Readonly<Record<string, string>> };
 export function validateDraft(draft: { title: string; textFallback: string; program: string }, options?: { bindings?: Readonly<Record<string, InteractiveJSON>>; expectedSpecHash?: string }): Promise<InteractiveContent>;
 export function evaluate(content: InteractiveContent & { contentVersion?: string }, values?: InteractiveStateValues): Promise<{ tree: InteractiveElement; componentCount: number; evaluationSteps: number; values: InteractiveStateValues; stateDigest: string; contentVersion: string | null; specHash: string }>;
+export interface InteractiveEvaluation { readonly tree: InteractiveElement; readonly componentCount: number; readonly evaluationSteps: number; readonly values: InteractiveStateValues; readonly contentVersion: string | null; readonly specHash: string }
+export interface InteractiveEvaluator {
+  evaluate(values?: InteractiveStateValues): InteractiveEvaluation;
+  applyAction(plan: unknown, values: InteractiveStateValues): InteractiveEvaluation & { readonly changedFields: readonly string[] };
+}
+export function prepareEvaluator(content: InteractiveContent & { contentVersion?: string }): Promise<InteractiveEvaluator>;
 export function projectText(tree: InteractiveElement, maxChars?: number): { text: string; truncated: boolean };

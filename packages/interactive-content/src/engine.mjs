@@ -1,4 +1,4 @@
-import { createParser, createStore, evaluateRoot } from '@openuidev/lang-core';
+import { createParser, createStore, evaluate as evaluateExpression, evaluateRoot } from '@openuidev/lang-core';
 import { catalogSpec, COMPONENT_SCHEMAS, createPeerLibrary, runtimeFunctions } from './catalog.mjs';
 import { boundedJSON, canonicalJSON, CONTENT_SCHEMA_VERSION, ENGINE_VERSION, INTERACTIVE_LIMITS as L, LIBRARY_VERSION, reject, utf8Bytes } from './limits.mjs';
 import { inspectProgram, rejectEngineData } from './policy.mjs';
@@ -66,6 +66,8 @@ function render(compiled, values, refineSchema = false) {
       ids.add(props.id);
     }
     // Action plans are validated against their original AST by policy; no callbacks enter data.
+    if (current.typeName === 'Button' && (!Array.isArray(props.action?.steps) || props.action.steps.length > L.localActionSteps
+      || props.action.steps.some(step => !['set', 'reset'].includes(step.type)))) reject('unsupported_action');
     const checkProps = current.typeName === 'Button' ? { ...props, action: { type: 'local' } } : props;
     const checked = COMPONENT_SCHEMAS[current.typeName].strict().safeParse(checkProps);
     if (!checked.success) reject('invalid_component_props', current.typeName, checked.error.issues[0]?.path.join('.'));
@@ -127,12 +129,57 @@ export async function validateDraft(draft, { bindings = {}, expectedSpecHash } =
   };
 }
 
-export async function evaluate(content, values = content.initialValues) {
+/** Compile/hash once at the renderer seam, then strictly evaluate bounded local candidates synchronously. */
+export async function prepareEvaluator(rawContent) {
+  if (!rawContent || typeof rawContent !== 'object' || ![Object.prototype, null].includes(Object.getPrototypeOf(rawContent))) reject('invalid_json');
+  const descriptors = Object.entries(Object.getOwnPropertyDescriptors(rawContent));
+  if (descriptors.some(([, descriptor]) => !('value' in descriptor))) reject('invalid_json');
+  // A derived render cache is not a second content truth or an executable input.
+  const content = boundedJSON(Object.fromEntries(descriptors.filter(([key]) => key !== 'tree').map(([key, descriptor]) => [key, descriptor.value])),
+    { maxBytes: L.inputBytes * 2, maxItems: 1000, maxStringChars: L.programBytes, maxDepth: L.astDepth });
   if (content.schemaVersion !== CONTENT_SCHEMA_VERSION || content.engine !== ENGINE_VERSION || content.libraryVersion !== LIBRARY_VERSION
     || content.specHash !== await catalogIdentity() || content.stateSchemaHash !== await digestJSON(content.stateSchema)) reject('incompatible_catalog');
-  const state = validateValues(values, content.stateSchema);
   const compiled = compile(content.program, normalizeBindings(content.bindings));
-  return { ...render(compiled, state), values: state, stateDigest: await digestJSON(state), contentVersion: content.contentVersion ?? null, specHash: content.specHash };
+  const initial = render(compiled, compiled.policy.defaults, true);
+  if (canonicalJSON(content.initialValues) !== canonicalJSON(compiled.policy.defaults)
+    || canonicalJSON(content.stateSchema) !== canonicalJSON(initial.stateSchema)) reject('incompatible_state_schema');
+  function evaluateValues(values = content.initialValues) {
+    const state = validateValues(values, content.stateSchema);
+    return { ...render(compiled, state), values: state, contentVersion: content.contentVersion ?? null, specHash: content.specHash };
+  }
+  function applyAction(rawPlan, values) {
+    const state = validateValues(values, content.stateSchema), current = evaluateValues(state);
+    const requested = canonicalJSON(boundedJSON(rawPlan, { maxBytes: L.programBytes }));
+    let admitted;
+    function visit(node) {
+      if (node.typeName === 'Button' && canonicalJSON(node.props.action) === requested) admitted = node.props.action;
+      for (const child of node.props.children ?? []) visit(child);
+    }
+    visit(current.tree);
+    if (!admitted) reject('unsupported_action');
+    const budget = { remaining: L.evaluationSteps }, functions = runtimeFunctions(compiled.library, budget);
+    const context = { getState: key => state[key], functions, reportError: () => reject('evaluation_failed'), resolveRef: name => {
+      if (!compiled.policy.declarations.has(name)) reject('invalid_reference');
+      return evaluateExpression(compiled.policy.declarations.get(name), context);
+    } };
+    const changedFields = new Set();
+    for (const step of admitted.steps) {
+      if (step.type === 'set') {
+        const expressions = new Map(compiled.policy.declarations); expressions.set('__peer_action', step.valueAST);
+        checkNumericExpressions(expressions, state, functions);
+        state[step.target] = evaluateExpression(step.valueAST, context);
+        changedFields.add(step.target);
+      } else for (const key of step.targets) { state[key] = content.initialValues[key]; changedFields.add(key); }
+      validateValues(state, content.stateSchema);
+    }
+    return { ...evaluateValues(state), changedFields: [...changedFields] };
+  }
+  return { evaluate: evaluateValues, applyAction };
+}
+
+export async function evaluate(content, values = content.initialValues) {
+  const result = (await prepareEvaluator(content)).evaluate(values);
+  return { ...result, stateDigest: await digestJSON(result.values) };
 }
 
 /** Bounded factual view; a model-authored fallback remains labeled separately by the host. */
