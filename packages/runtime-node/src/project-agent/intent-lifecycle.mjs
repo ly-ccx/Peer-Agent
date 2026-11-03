@@ -145,7 +145,11 @@ export function createIntentLifecycle({ storeFor, readSession, readMessages, rea
     const admitted = s.store.assessIntent(assessment, { parentConversationId: s.parentConversationId,
       currentInputIds: s.current.map(row => row.inputId || row.id), eventIds: (context.events || []).map(row => row.eventId), turnId: context.turnId,
       originDecisionRef: context.sourceDecisionRef });
-    if (!admitted.ok) return admitted;
+    if (!admitted.ok) {
+      if (admitted.error === 'intent_revision_required') return { ...admitted,
+        message: 'The goal interpretation is already recorded. Omit assessment.interpretation and keep its existing requirement IDs when updating coverage or disposition. Changing the goal requires an admitted goal revision.' };
+      return admitted;
+    }
     if (assessment.disposition.kind === 'withdraw') {
       s.store.closeIntent({ operationId: `close:${assessment.operationId}`, workId: s.workId,
         expectedWorkRevision: admitted.receipt.workRevision, expectedGoalRevision: admitted.receipt.goalRevision, lifecycle: 'cancelled' },

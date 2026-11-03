@@ -52,6 +52,12 @@ test('research acceptance retains the original goal, continues without user inpu
   await f.coordinate({ action: 'parallel', task: { anchorMessageIds: ['input-i'], brief: 'Research' } }, f.context('spawn', { currentInputAnchors: ['input-i'] }));
   const initial = await f.coordinate({ action: 'assess', assessment: f.initial }, f.context('t1', { currentInputAnchors: ['input-i'] }));
   assert.equal(initial.ok, true, JSON.stringify(initial));
+  const edited = await f.coordinate({ action: 'assess', assessment: { ...f.initial, expectedWorkRevision: 1,
+    interpretation: { ...f.initial.interpretation, outcome: 'Rephrased outcome' } } },
+  f.context('t1', { currentInputAnchors: ['input-i'], deliveryKey: 't1:rewrite' }));
+  assert.equal(edited.error, 'intent_revision_required');
+  assert.match(edited.message, /Omit assessment\.interpretation/);
+  assert.equal(f.store.readWork('g').intentCoordination.revision, 1);
   f.coordinator.finish(f.job, { rounds: [] }, [...f.sessions.values()]);
   assert.equal(f.store.readWork('g').state, 'waiting_children');
   f.sessions.get('s1').status = 'accepted';

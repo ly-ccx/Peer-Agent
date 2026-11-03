@@ -16,7 +16,7 @@ const intentAssessmentSchema = { type: 'object', additionalProperties: false,
     sourceInputIds: intentIdsSchema, sourceEventIds: intentIdsSchema, sourceDecisionRef: { type: 'string', maxLength: 200 },
     inputs: { type: 'array', maxItems: 64, items: { type: 'object', required: ['inputId', 'kind', 'reason'], additionalProperties: false,
       properties: { inputId: { type: 'string' }, kind: { type: 'string', enum: ['discuss', 'answer', 'delegate', 'augment', 'revise', 'withdraw'] }, reason: { type: 'string', maxLength: 500 } } } },
-    interpretation: { type: 'object', additionalProperties: false, required: ['outcome', 'constraints', 'nonGoals', 'openQuestions', 'requirements'], properties: {
+    interpretation: { type: 'object', additionalProperties: false, description: 'Provide on first assessment or an admitted goal revision. Omit when updating coverage or disposition for the same goal.', required: ['outcome', 'constraints', 'nonGoals', 'openQuestions', 'requirements'], properties: {
       outcome: { type: 'string', maxLength: 4000 }, ...Object.fromEntries(['constraints', 'nonGoals', 'openQuestions'].map(key => [key, { type: 'array', maxItems: 16, items: { type: 'string', maxLength: 500 } }])),
       requirements: { type: 'array', minItems: 1, maxItems: 32, items: { type: 'object', required: ['requirementId', 'text', 'sourceInputIds'], additionalProperties: false,
         properties: { requirementId: { type: 'string', maxLength: 200 }, text: { type: 'string', maxLength: 1000 }, sourceInputIds: intentIdsSchema } } } } },
