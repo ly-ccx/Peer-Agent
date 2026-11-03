@@ -3,8 +3,9 @@ import path from 'node:path';
 import { createConversationStore } from '@peer-agent/conversation-store';
 import { createApprovalStore, createGoalPlanStore } from '@peer-agent/runtime-node/storage';
 import { createProjectRegistry, encodeProviderToolResult } from '@peer-agent/runtime-node/providers';
-import { createBotLifecycle, resolveWorkSessionProfile } from '@peer-agent/runtime-node/project-agent';
+import { createBotLifecycle, createProjectGoalRunnerHost, createSessionVerification, resolveWorkSessionProfile } from '@peer-agent/runtime-node/project-agent';
 import { createInteractiveRuntime, runInteractiveValidation } from '@peer-agent/runtime-node/interactive-results';
+import { encodeResourceFeedbackTransport, interactiveFeedbackFromFollowup } from '@peer-agent/protocol';
 import type { ModelMessage, ModelProvider, ModelUsage } from '@peer-agent/runtime-node/models';
 import { createTuiHost } from '../tui-host.ts';
 import { restrictTuiHostTools } from '../cli-host-filter.ts';
@@ -15,9 +16,9 @@ import { createInteractiveToolProvider } from './interactive-tool-provider.ts';
 import { createTuiTurnExecutor } from './tui-turn-executor.ts';
 import { createTurnTestRuntime, drainTestCleanup, type TestCleanup } from './turn-test-support.ts';
 
-export type InteractiveLiveScenario = 'publish' | 'repair' | 'denied';
-export const INTERACTIVE_LIVE_SCENARIOS: readonly InteractiveLiveScenario[] = ['publish', 'repair', 'denied'];
-export const INTERACTIVE_LIVE_BUDGET = Object.freeze({ requests: 4, outputTokens: 1800, requestMs: 45_000, caseMs: 150_000, toolCalls: 4 });
+export type InteractiveLiveScenario = 'publish' | 'repair' | 'denied' | 'verify';
+export const INTERACTIVE_LIVE_SCENARIOS: readonly InteractiveLiveScenario[] = ['publish', 'repair', 'denied', 'verify'];
+export const INTERACTIVE_LIVE_BUDGET = Object.freeze({ requests: 4, verificationRequests: 4, outputTokens: 1800, requestMs: 45_000, caseMs: 150_000, toolCalls: 4, verificationToolCalls: 8 });
 const PUBLISH = 'local.interactive.publish', INSPECT = 'local.interactive.inspect';
 export const INTERACTIVE_LIVE_TASK = 'Use only the projected interactive tools. Publish one result for this synthetic, model-constructed planning example: rows [{"name":"A","cost":20},{"name":"B","cost":35}] under bindingId "facts". Use model-data, not tool observations. Program must have $budget=100, a NumberInput labelled Budget (0 to 200, step 1), a Metric labelled Remaining with value $budget-@Total(@Data("facts"),"cost"), and a Table showing both rows. Text fallback must disclose model-constructed and unverified. Use supported Peer catalog components/functions exactly. Do not read files, execute commands, access external data, or claim verification/acceptance. If publishing returns a validation error, repair within the allowed budget and retry. If permission is denied, stop publishing and explain the denial honestly in plain text without requesting expanded permissions. Otherwise end with a short plain-text explanation. Do not publish twice after success.';
 
@@ -28,7 +29,7 @@ export const INTERACTIVE_LIVE_DRAFT = {
 };
 
 interface RequestObservation {
-  ordinal: number; tools: string[]; startedAt: string; durationMs?: number;
+  ordinal: number; phase: 'worker' | 'verifier'; tools: string[]; startedAt: string; durationMs?: number;
   usage?: ModelUsage; returnedTools?: string[]; textChars?: number; error?: string;
 }
 export interface InteractiveLiveReport {
@@ -42,6 +43,7 @@ export interface InteractiveLiveReport {
   canonicalIndexConfirmed?: boolean; reference?: unknown; contentFile?: string;
   persistedCounts?: { versions: number; publishedOperations: number };
   computation?: { initialRemaining: number[]; changedRemaining: number[]; tableRows: number[]; projectionTruncated: boolean };
+  verification?: { passed: boolean; followupId: string; receipts: unknown[]; verdict: unknown };
   invoiceCost: null; invoiceCostReason: string;
 }
 
@@ -74,6 +76,8 @@ export async function runInteractiveLiveCase(options: {
   const cleanups: TestCleanup[] = [];
   let interactive: ReturnType<typeof createInteractiveRuntime> | undefined;
   let executor: ReturnType<typeof createTuiTurnExecutor> | undefined;
+  let phase: RequestObservation['phase'] = 'worker';
+  const signal = AbortSignal.timeout(INTERACTIVE_LIVE_BUDGET.caseMs);
   try {
     const workspacePath = path.join(directory, 'workspace'); mkdirSync(workspacePath);
     const registry = createProjectRegistry({ filePath: path.join(directory, 'projects/registry.json') });
@@ -92,7 +96,10 @@ export async function runInteractiveLiveCase(options: {
     const plans = createGoalPlanStore({ storeDir: path.join(directory, 'plans') });
     const selection = { modelProviderId: model.credentialId, providerId: model.providerId, modelId: model.model, family: model.providerId };
     const plan = plans.createPlan({ title: 'Synthetic comparison', goal: INTERACTIVE_LIVE_TASK, conversationId: child.id, status: 'executing',
-      tasks: [{ taskId: 'generate', title: 'Publish comparison', status: 'pending' }], delegationOrigin: {
+      tasks: [{ taskId: 'generate', title: 'Publish comparison', status: 'pending' }],
+      ...(scenario === 'verify' ? { successCriteria: [{ id: 'meaning', kind: 'model_review',
+        description: 'Verify that the fixed comparison subtracts both costs and displays both rows, under both the original and the selected budget.' }] } : {}),
+      delegationOrigin: {
         workspaceId, parentConversationId: parentId, sessionId: 'live-session', anchorMessageId: 'anchor', inputId: 'live-input',
         phase: 'running', readOnly: true, executionGeneration: 'live-generation',
         modelSelection: { worker: selection, explorer: selection, verifier: selection, resolvedAt: new Date().toISOString() },
@@ -133,14 +140,18 @@ export async function runInteractiveLiveCase(options: {
       createRuntime(runtimeOptions) {
         const host = restrictTuiHostTools(createTuiHost(runtimeOptions), [PUBLISH, INSPECT]);
         const observed: ModelProvider = { async stream(request) {
-          if (report.requests.length >= INTERACTIVE_LIVE_BUDGET.requests) throw new Error('live_request_limit');
+          const limit = phase === 'worker' ? INTERACTIVE_LIVE_BUDGET.requests : INTERACTIVE_LIVE_BUDGET.verificationRequests;
+          if (report.requests.filter(row => row.phase === phase).length >= limit) throw new Error('live_request_limit');
           const started = Date.now(), row: RequestObservation = { ordinal: report.requests.length + 1,
-            tools: request.tools?.map(tool => tool.name) ?? [], startedAt: new Date().toISOString() };
+            phase, tools: request.tools?.map(tool => tool.name) ?? [], startedAt: new Date().toISOString() };
           report.requests.push(row); persist();
           try {
             const response = await options.provider.stream({ ...request, maxOutputTokens: INTERACTIVE_LIVE_BUDGET.outputTokens,
               signal: AbortSignal.any([...(request.signal ? [request.signal] : []), AbortSignal.timeout(INTERACTIVE_LIVE_BUDGET.requestMs)]) });
             row.usage = response.usage; row.returnedTools = response.toolCalls.map(call => call.name); row.textChars = response.content.length;
+            if (phase === 'verifier' && report.requests.filter(item => item.phase === phase)
+              .reduce((total, item) => total + (item.returnedTools?.length ?? 0), 0) > INTERACTIVE_LIVE_BUDGET.verificationToolCalls)
+              throw new Error('live_verification_tool_limit');
             return response;
           } catch (error) { row.error = sanitize(error); throw error; }
           finally { row.durationMs = Date.now() - started; persist(); }
@@ -151,7 +162,7 @@ export async function runInteractiveLiveCase(options: {
       } });
     const result = await executor.runTurn({ workspaceId, workspacePath, conversationId: child.id, mode: 'goal', turnProfile: profile,
       plan, modelProviderId: model.credentialId, messages, limits: { maxRounds: 3, maxToolCalls: INTERACTIVE_LIVE_BUDGET.toolCalls }, ephemeral: scenario !== 'denied',
-      signal: AbortSignal.timeout(INTERACTIVE_LIVE_BUDGET.caseMs), sink: { send() {} } });
+      signal, sink: { send() {} } });
     report.turnOk = result.ok; report.terminalStatus = result.terminalStatus; report.text = sanitize(result.text ?? ''); report.usage = result.usage;
     if (!result.ok && result.error) report.error = sanitize(result.error);
     report.toolCalls = result.toolCalls.map((call: any) => ({ name: call.name, status: call.execution.result.status,
@@ -198,6 +209,36 @@ export async function runInteractiveLiveCase(options: {
           && item.props.min === 0 && item.props.max === 200 && item.props.step === 1)
         && JSON.stringify(report.computation.initialRemaining) === '[45]' && JSON.stringify(report.computation.changedRemaining) === '[25]'
         && JSON.stringify(report.computation.tableRows) === '[2]' && !report.computation.projectionTruncated;
+      if (scenario === 'verify' && report.ok) {
+        report.ok = false;
+        plans.recordTaskEvidence(plan.planId, 'generate', { status: 'completed', result: result.text || 'Published the fixed comparison.',
+          evidenceRefs: [fixed.artifactRef] });
+        const identity = { viewId: 'synthetic-conditions', windowId: 'synthetic-window', generation: 'synthetic-generation' };
+        const initialState = interactive.stateStore.read(fixed.reference, () => true);
+        const writer = interactive.stateStore.acquire({ reference: fixed.reference, identity, expectedRevision: initialState.stateRevision }, () => true);
+        const saved = interactive.stateStore.save({ reference: fixed.reference, identity, writer, expectedRevision: initialState.stateRevision,
+          requestId: 'synthetic-save', values: { ...fixed.content.initialValues, $budget: 80 }, inputDrafts: {} }, () => true);
+        const frozen = await interactive.stateStore.prepareFollowup({ reference: fixed.reference, identity, writer,
+          requestId: 'synthetic-freeze', stateRevision: saved.stateRevision, stateDigest: saved.stateDigest, fields: ['$budget'] }, () => true);
+        interactive.stateStore.release({ reference: fixed.reference, identity, writer }, () => true);
+        conversations.appendMessage(child.id, { id: 'synthetic-user-selection', role: 'user', content: 'Also review the selected budget.',
+          ...encodeResourceFeedbackTransport([interactiveFeedbackFromFollowup(frozen)!]) });
+        const host = createProjectGoalRunnerHost({ goalPlanStore: plans, conversationStore: conversations,
+          agentTurnExecutor: executor, llmChatService: {}, hostLeases: { holds: () => true }, broadcast() {}, workspaceRoot: workspacePath,
+          resolveConversationModelProviderId: () => model.credentialId, getInteractiveVerification: () => interactive!.verification });
+        phase = 'verifier';
+        const verification = createSessionVerification({ goalPlanStore: plans,
+          verifySession: (current: any) => host.verifierRunner.runVerifier({ plan: current, verifierRunId: 'live-review', stage: 'delegated', signal,
+            focus: 'Read the fixed program, the whole facts binding, the initial evaluation, and the frozen evaluation using the exact admitted target and followup ID. You can issue these four read calls in parallel. Cite the returned inspection Evidence refs in your verifier report. Explain how both computed results follow from the actual program and data.',
+            workId: undefined, goalReview: undefined }) } as never);
+        const verdict = await verification.run({ sessionId: 'live-session' });
+        const receipts = plans.listEvidenceIndex().filter((row: any) => row.planId === plan.planId && row.interactiveInspection)
+          .map((row: any) => ({ evidenceRef: row.evidenceRef, inspection: row.interactiveInspection }));
+        const passed = verdict.ok && 'facts' in verdict && verdict.facts?.independentVerifier === 'passed';
+        report.verification = { passed, followupId: frozen.followupId, receipts, verdict };
+        report.ok = passed;
+      }
+
     }
   } catch (error) { report.error = sanitize(error); }
   finally {

@@ -16,15 +16,16 @@ const repositoryRoot = fileURLToPath(new URL('../../../../', import.meta.url));
 export const INTERACTIVE_LIVE_HELP = `Opt-in interactive-result validation; uses configured API keys and synthetic data only.
 Usage: pnpm --filter @peer-agent/tui qa:interactive:live --list [--user-data DIRECTORY]
        pnpm --filter @peer-agent/tui qa:interactive:live --run --model ENTRY_ID [--model ENTRY_ID]
-         [--scenario publish|repair|denied] [--output EXISTING_DIRECTORY] [--user-data DIRECTORY]
+         [--scenario publish|repair|denied|verify] [--output EXISTING_DIRECTORY] [--user-data DIRECTORY]
 --list and --help make no model requests and do not read credentials.
---run requires explicit configured model entry IDs. Defaults: all three scenarios, temporary output.
+--run requires explicit configured model entry IDs. Defaults: publish, repair and denied; verify is explicit.
 Only OpenAI Chat / Anthropic Messages API-key wires are included in this validation command.
 Per model/scenario: at most 4 model requests, 1800 output tokens/request, 45s/request, 150s/case,
-4 tool calls. Native permission requests are denied. No user configuration, workspace or app is changed.
+4 worker tool calls. Verify permits 4 additional Verifier requests and up to 8 readonly calls within the same case deadline.
+Native permission requests are denied. User configuration and the daily app are left alone.
 Repair supplies an actual failed Tool Result as explicit user factual context from a test-driver seed.
 It does not fabricate assistant/thinking history or count the seed as a natural model failure.
-Runtime token usage is recorded; billing receipts and independent semantic acceptance are not supplied.
+Runtime token usage is recorded. Verify records the separate semantic review; billing receipts and task acceptance remain separate.
 Set PEER_CREDENTIAL_HELPER_PATH if the repository helper has not been built here.\n`;
 
 export function parseInteractiveLiveArgs(args: readonly string[]) {
@@ -48,7 +49,7 @@ export function parseInteractiveLiveArgs(args: readonly string[]) {
   }
   if (!options.help && (options.run === options.list || (options.run && !options.models.length))) throw new Error('live_explicit_selection_required');
   options.models = [...new Set(options.models)];
-  options.scenarios = options.scenarios.length ? [...new Set(options.scenarios)] : [...INTERACTIVE_LIVE_SCENARIOS];
+  options.scenarios = options.scenarios.length ? [...new Set(options.scenarios)] : ['publish', 'repair', 'denied'];
   if (options.models.length > 4) throw new Error('live_model_limit');
   return options;
 }

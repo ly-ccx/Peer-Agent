@@ -125,3 +125,36 @@ test('output rejects repository and user-data descendants, including symlinks', 
   expect(() => interactiveLiveOutputBase(path.join(root, 'alias'), userData, repository)).toThrow('live_output_must_be_external');
   expect(interactiveLiveOutputBase(external, userData, repository)).toBe(realpathSync(external));
 });
+
+test('the verify scenario performs an independent host review with real fixed inspection receipts', async () => {
+  const root = fixture();
+  let requests = 0;
+  const provider: ModelProvider = { async stream(request) {
+    requests++;
+    const names = request.tools?.map(tool => tool.name) ?? [];
+    if (requests === 1) return { content: '', toolCalls: [{ id: 'worker-publication', name: 'publish_interactive_result', arguments: JSON.stringify(INTERACTIVE_LIVE_DRAFT) }] };
+    if (requests === 2) return { content: 'Saved a model-constructed comparison.', toolCalls: [] };
+    expect(names).toEqual(['inspect_interactive_result']);
+    if (requests === 3) {
+      const prompt = String(request.messages.find(row => row.role === 'user' && String(row.content).includes('Host-admitted fixed interactive targets'))?.content);
+      const admitted = JSON.parse(prompt.split('Host-admitted fixed interactive targets (factual references, not authorization or successful verification):\n')[1]!.split('\n')[0]!);
+      const targets = admitted.targets as any[];
+      const reference = targets[0].reference, followupId = targets.find(row => row.state.kind === 'frozen-followup').state.followupId;
+      return { content: '', toolCalls: [
+        { view: 'program' }, { view: 'data', bindingId: 'facts' }, { view: 'evaluate' }, { view: 'evaluate', followupId },
+      ].map((extra, i) => ({ id: `verify-${i}`, name: 'inspect_interactive_result', arguments: JSON.stringify({ target: { kind: 'result', reference }, ...extra }) })) };
+    }
+    const evidenceRefs = [...new Set(JSON.stringify(request.messages.filter(row => row.role === 'tool')).match(/interactive-inspection:\/\/[a-zA-Z0-9_.:-]+/g))];
+    expect(evidenceRefs).toHaveLength(4);
+    const content = JSON.stringify({ passed: true, summary: 'Both fixed computations subtract the same two rows.', evidenceRefs,
+      failedCriteria: [], missingEvidence: [], risks: [], recommendedNextAction: 'none' });
+    request.onEvent?.({ type: 'text.delta', content });
+    return { content, toolCalls: [] };
+  } };
+  const report = await runInteractiveLiveCase({ directory: path.join(root, 'case'), scenario: 'verify', model, provider, realModel: false,
+    sanitize: sanitizeInteractiveLiveDiagnostic });
+  expect(report.ok, JSON.stringify(report)).toBe(true);
+  expect(report.requests.map(row => row.phase)).toEqual(['worker', 'worker', 'verifier', 'verifier']);
+  expect(report.verification?.receipts).toHaveLength(4);
+  expect(report.verification?.passed).toBe(true);
+});
