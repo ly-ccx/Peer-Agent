@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { createInteractiveResultStore } from './store.mjs';
@@ -104,7 +105,33 @@ test('shared host recovery consumes only a current, in-scope stop receipt after 
   journal.writeSessionControl({ ...resume, revision: 2, phase: 'settled', outcome: 'applied' }, 1, resume.operationId);
   plan.delegationOrigin.executionGeneration = resume.operationId;
   assert.equal(journal.readSessionControl('session').stopReceipt, undefined);
-  assert.deepEqual(recover(), { ok: true, items: [{ callRef: superseded, publicationStatus: 'not_committed', code: 'publication_interrupted' }] });
+  release(); runtime.close(); journal.close();
+  const childFile = path.join(root, 'recover.mjs');
+  writeFileSync(childFile, `
+    import { createInteractiveRuntime } from ${JSON.stringify(new URL('./runtime.mjs', import.meta.url).href)};
+    import { createWorkCoordinationStore } from ${JSON.stringify(new URL('../project-agent/work-coordination-store.mjs', import.meta.url).href)};
+    import { registerWorkBudget } from ${JSON.stringify(new URL('../project-agent/work-budget.mjs', import.meta.url).href)};
+    const { root, owner, plan } = JSON.parse(process.argv[2]);
+    const journal = createWorkCoordinationStore({ rootDir: root + '/coordination', workspaceId: owner.workspaceId,
+      holdsLease: () => true, leaseEpoch: () => 'host', formatVersion: 2, fenceLegacyWrites: true });
+    await journal.prepare();
+    const release = registerWorkBudget(owner.workspaceId, journal);
+    const runtime = createInteractiveRuntime({ rootDir: root, goalPlanStore: {
+      getPlan: id => id === plan.planId ? plan : null, assertInteractiveEvidenceCompatible: () => true,
+    }, getBotConversationId: () => owner.conversationId, holdsLease: () => true });
+    try { process.stdout.write(JSON.stringify(runtime.recoverWorkspace(owner.workspaceId))); }
+    finally { release(); runtime.close(); journal.close(); }
+  `);
+  const child = spawnSync(process.execPath, [childFile, JSON.stringify({ root, owner, plan })], {
+    encoding: 'utf8', timeout: 15_000,
+  });
+  assert.equal(child.status, 0, child.error?.message || child.stderr);
+  assert.deepEqual(JSON.parse(child.stdout), { ok: true, items: [{ callRef: superseded, publicationStatus: 'not_committed', code: 'publication_interrupted' }] });
+  journal = createWorkCoordinationStore(journalOptions);
+  await journal.prepare();
+  runtime = createInteractiveRuntime(runtimeOptions);
+  release = registerWorkBudget(owner.workspaceId, journal);
+  assert.equal(runtime.resultStore.getAttempt(superseded).phase, 'failed');
   assert.equal(runtime.resultStore.getAttempt(unmatched).phase, 'prepared');
   assert.deepEqual(recover(), { ok: true, items: [] });
 });
