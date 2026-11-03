@@ -661,6 +661,7 @@ export { agentDelivery, recordAgentContextAdmission } from './project-agent/agen
 export { createAgentEventPublisher } from './project-agent/agent-activity.mjs';
 
 export { agentCommunicationExcludedPrefixes } from './project-agent/work-session-profile.mjs';
+export { sessionWaitProjected } from './project-agent/wake-wait.mjs';
 export { createLocalImageProvider, detectLocalImageMediaType, isLocalImageObservation } from './local-image-provider.mjs';
 export { LOCAL_IMAGE_TOOL_DEFINITIONS } from './local-image-tools.mjs';
 export {

@@ -22,7 +22,7 @@ import type {
   ModelToolDefinition,
 } from '@peer-agent/runtime-node';
 import { modelAssistantMessage } from './provider-continuation.ts';
-import { encodeProviderToolResult, readOnlyWorkCapabilityAllowed, agentCommunicationExcludedPrefixes, admitInteractiveToolSet } from '@peer-agent/runtime-node';
+import { encodeProviderToolResult, readOnlyWorkCapabilityAllowed, agentCommunicationExcludedPrefixes, admitInteractiveToolSet, sessionWaitProjected } from '@peer-agent/runtime-node';
 import type { RuntimeSdkProviderExecution, RuntimeSdkStreamDiscardEvent } from '@peer-agent/runtime-sdk';
 
 import type {
@@ -317,7 +317,8 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
   const toolDefinitionsForMode = (mode: TuiRuntimeMode) =>
     options.toolDefinitionsForMode?.(mode) ?? defaultToolDefinitions;
   const toolsForTurn = (mode: TuiRuntimeMode, input: Pick<ChatModelInput, 'systemContextInput'>) => admitInteractiveToolSet(toolDefinitionsForMode(mode).filter(tool =>
-    !agentCommunicationExcludedPrefixes(input.systemContextInput).some((prefix: string) => tool.capabilityId.startsWith(prefix))
+    (tool.capabilityId !== 'local.delegation.wait_for_sessions' || sessionWaitProjected(input.systemContextInput))
+    && !agentCommunicationExcludedPrefixes(input.systemContextInput).some((prefix: string) => tool.capabilityId.startsWith(prefix))
     && ((input.systemContextInput?.workSessionOrigin as { readOnly?: boolean } | undefined)?.readOnly !== true
       || readOnlyWorkCapabilityAllowed({ ...tool, turnProfile: input.systemContextInput }))));
   const systemMessagesFor = (context: ProviderSystemPromptContext, projectedTools: readonly RuntimeToolDefinition[]): readonly ModelMessage[] => {

@@ -11,7 +11,7 @@ import {
 import { normalizeTurnProfile, projectTurnSystemContext, textField } from "./chat-runtime/turn-context.mjs";
 import { agentMessagesForContext, readWorkingContext, recordAgentContextAdmission } from '@peer-agent/runtime-node/project-agent';
 export { projectTurnSystemContext } from "./chat-runtime/turn-context.mjs";
-import { agentCommunicationExcludedPrefixes } from "@peer-agent/runtime-node/project-agent";
+import { agentCommunicationExcludedPrefixes, sessionWaitProjected } from "@peer-agent/runtime-node/project-agent";
 import {
   buildAnthropicTools,
   buildAnthropicToolsFromModelProjection,
@@ -1058,7 +1058,8 @@ export function createLlmChatService({
 
         const runtimeTools = buildRuntimeTools({
           mcpRegistry, skillStore, providerType: resolvedChannel.legacyProvider, mode: runtimeMode,
-          excludeCapabilityPrefixes: [...(profile?.excludeCapabilityPrefixes ?? []), ...agentCommunicationExcludedPrefixes(profile)],
+          excludeCapabilityPrefixes: [...(profile?.excludeCapabilityPrefixes ?? []), ...agentCommunicationExcludedPrefixes(profile),
+            ...(sessionWaitProjected(profile) ? [] : ['local.delegation.wait_for_sessions'])],
           readOnlyWorkSession: goalPlanStore?.getPlan?.(profile?.planId)?.delegationOrigin?.readOnly === true, turnProfile: profile,
         });
         const interactiveResultCapabilities = runtimeTools.runtimeProjection.capabilities

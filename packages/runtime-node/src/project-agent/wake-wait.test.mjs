@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { hostWakeWait, waitResult } from './wake-wait.mjs';
+import { hostWakeWait, sessionWaitProjected, waitResult } from './wake-wait.mjs';
 import { createDelegationProvider } from './delegation-provider.mjs';
 import { validateDelegationInput } from './tool-specs.mjs';
 
@@ -19,6 +19,18 @@ test('host waiting is confined to routine current owned execution, never human w
   assert.equal(hostWakeWait(job, { ...work, recovery: { failureKind: 'fatal' } }, rows), null);
   assert.equal(hostWakeWait(job, { ...work, sessionIds: [] }, rows), null);
   assert.equal(hostWakeWait(job, work, [{ ...rows[0], needsUser: true }]), null);
+});
+
+test('both host turn shapes project waiting only for a background event with no user input', () => {
+  const profile = { role: 'project_agent', workId: 'work' };
+  const turn = { turnKind: 'wake', events: [{ sessionId: 's' }] };
+  for (const field of ['context', 'turnContext']) {
+    assert.equal(sessionWaitProjected({ ...profile, [field]: turn }), true);
+    assert.equal(sessionWaitProjected({ ...profile, [field]: { ...turn, turnKind: 'user' } }), false);
+    assert.equal(sessionWaitProjected({ ...profile, [field]: { ...turn, inputAnchors: [{ messageId: 'new' }] } }), false);
+    assert.equal(sessionWaitProjected({ ...profile, [field]: { ...turn, events: [] } }), false);
+    assert.equal(sessionWaitProjected({ role: 'project_agent', [field]: turn }), false);
+  }
 });
 
 test('waiting tool validates current ownership and returns paired grant, evidence and terminal control', async () => {

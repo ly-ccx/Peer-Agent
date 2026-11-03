@@ -1248,3 +1248,20 @@ test('interactive language enters actual model System Context only with the corr
     expect(system.includes('Peer interactive result')).toBe(inspect);
   }
 });
+
+test('the provider receives session wait only on a bound background wake', async () => {
+  const requests: ModelProviderRequest[] = [];
+  const model = createProviderChatModel({ model: 'test-model', provider: {
+    async stream(request) { requests.push(request); return completed('done'); },
+  }, toolDefinitions: [{ name: 'wait_for_sessions', capabilityId: 'local.delegation.wait_for_sessions',
+    description: 'Background wait', inputSchema: { type: 'object' } }] });
+  for (const turnKind of ['user', 'wake'] as const) {
+    const input = { content: 'Continue', history: [], modelMessages: [], turnId: turnKind, turnIndex: 0,
+      systemContextInput: { role: 'project_agent', workId: 'work', turnContext: { turnKind, events: [{ sessionId: 's' }] } } };
+    const context = { run: { mode: 'project_agent', streamId: turnKind, conversationId: 'test', input },
+      signal: new AbortController().signal, emit() { return null; } } as any;
+    const state = await model.initialize({ input } as any, context);
+    await model.runTurn(state, context);
+  }
+  expect(requests.map(request => request.tools?.some(tool => tool.name === 'wait_for_sessions') ?? false)).toEqual([false, true]);
+});
