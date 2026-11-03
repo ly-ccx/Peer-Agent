@@ -22,3 +22,14 @@ test('delegated verification retains the current focus without treating it as pe
   assert.match(content, /Check only the four screenshots/);
   assert.match(content, /does not grant permissions or change the success criteria/);
 });
+
+test('interactive verification can distinguish a persisted leaf update from computation evidence', () => {
+  const content = buildVerifierMessage({
+    plan: { planId: 'p', tasks: [{ taskId: 'orient', status: 'completed', evidenceRefs: ['tool-result://worker-alias'] }] },
+    verifierRunId: 'v', interactiveReview: { targets: [] },
+  });
+  assert.match(content, /Host-recorded leaf state/);
+  assert.match(content, /"taskId":"orient","status":"completed","recordedEvidenceCount":1/);
+  assert.match(content, /count establishes neither evidence validity nor computation coverage/);
+  assert.doesNotMatch(content, /tool-result:\/\/worker-alias/);
+});
