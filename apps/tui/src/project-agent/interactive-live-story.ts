@@ -28,7 +28,8 @@ const INITIAL_TASK = [
   `Delegate one task with spawn_session. Use anchorMessageIds ["input-${INITIAL_INPUT}"], kind "research", readOnly true, isolation "none", and requiredCapabilities ["local.interactive.publish"].`,
   'Set successCriteria to [{"kind":"model_review","description":"Independently inspect the program, full facts binding and initial evaluation. Check both costs and the remainder."}]. Keep the longer instructions in brief.',
   'The worker must read its exact plan and task IDs with goal_get_plan, publish once, then use goal_update_task with the returned fixed artifact Evidence. Stop after recording it. Leave inspection to the Verifier.',
-  'I will send the selected budget when the publication task is ready. Acknowledge once with post_reply. If a background wake arrives while the worker is still advancing, end it with wait_for_sessions using its session ID. Keep the original result and do not claim human acceptance.',
+  'After spawning, use coordinate_work query with the current workId. Before post_reply, persist an assess decision with the exact current work and goal revisions, source IDs, input disposition, coverage, and a wait on the running session revision. The reply alone does not record a disposition.',
+  'Send the published result through post_reply after independent verification, citing its session and current status. I will send the selected budget after receiving that result. On a routine background wake while the worker is still advancing, use wait_for_sessions if projected. Keep the original result and do not claim human acceptance.',
   'Worker brief: ' + INTERACTIVE_LIVE_TASK,
 ].join('\n');
 const FROZEN_TASK = [
@@ -171,6 +172,16 @@ export async function runInteractiveLiveStory(options: {
         || facts[0]?.name !== 'A' || facts[0]?.cost !== 20 || facts[1]?.name !== 'B' || facts[1]?.cost !== 35)
         throw Error('story_publication_mismatch');
       report.publication = { evidenceRef: publication.row.evidenceRef, reference: fixed.reference, source: fixed.source };
+      report.stage = 'initial-delivery';
+      persist();
+      await waitFor(() => {
+        const history = host.conversations.getPersistedConversationHistory!(conversationId)?.messages ?? [];
+        return history.find((message: any) => message.kind === 'agent_reply' && message.fallback !== true
+          && message.meta?.replyTo?.includes(`input-${INITIAL_INPUT}`)
+          && message.meta?.sessionStates?.some((source: { sessionId: string; status: string }) =>
+            source.sessionId === fixed.source.sessionId && (source.status === 'result_ready' || source.status === 'accepted'))
+          && message.meta?.evidenceRefs?.includes(fixed.artifactRef));
+      });
       report.stage = 'frozen-input';
       const { stateStore } = host.interactive, current = () => host.holdsLease(workspaceId);
       const identity = { viewId: 'story-view', windowId: 'story-window', generation: 'story-generation' };
