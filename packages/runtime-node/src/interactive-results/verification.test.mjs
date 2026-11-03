@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, realpathSync, rmSync, openSync, writeSync, fsyncSync, closeSync, readFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, openSync, writeFileSync, writeSync, fsyncSync, closeSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { collectToolEvidenceRefs } from '@peer-agent/runtime-core';
@@ -77,6 +77,40 @@ async function fixture(t, { program, facts } = {}) {
   return { root, plans, conversations, current, profile, runtime, owner, child, draft, published, reference, publicationRef, publish, prepare, inspect, read, freeze,
     setEnabled: v => { enabled = v; }, setLeased: v => { leased = v; }, setOwner: v => { parentId = v; }, setContextLevel: v => { contextLevel = v; } };
 }
+
+test('durable delegated plans pin fixed and inspection evidence after reopen, even without an index entry', async t => {
+  const f = await fixture(t), frozen = await f.freeze(), review = f.prepare();
+  const { refs } = await f.read(review, 'evaluate', { followupId: frozen.followupId });
+  review.close();
+  const plan = f.current();
+  f.plans.setRunnerState(plan.planId, { verificationContinuation: { schemaVersion: 1, planId: plan.planId,
+    continuationId: 'continuation', sourceRevision: review.sourceRevision, modelKey: 'fixture', phase: 'ready',
+    deadlineAt: new Date().toISOString(), modelRequests: 1, toolCalls: 1, formatAttempt: 0, evidenceRefs: refs } });
+  rmSync(path.join(f.root, 'plans', 'index.jsonl'));
+  const plans = createGoalPlanStore({ storeDir: path.join(f.root, 'plans') });
+  const conversations = createConversationStore({ storeDir: path.join(f.root, 'conversations') });
+  const runtime = createInteractiveRuntime({ rootDir: path.join(f.root, 'runtime'), goalPlanStore: plans, conversationStore: conversations,
+    getBotConversationId: () => f.owner.conversationId, holdsLease: () => true, enabled: () => true });
+  t.after(() => runtime.close());
+  const messages = runtime.feedback.acquireMessageRoots(f.owner);
+  try {
+    const snapshot = runtime.acquireDelegationRoots(f.owner, messages);
+    assert.deepEqual(snapshot.references, [f.reference]);
+    assert.deepEqual(snapshot.followupIds, [frozen.followupId]);
+    assert.equal(snapshot.assertCurrent(), true);
+    plans.setRunnerState(plan.planId, { verificationContinuation: { ...plans.getPlan(plan.planId).runner.verificationContinuation,
+      evidenceRefs: ['interactive-inspection://missing'] } });
+    assert.equal(snapshot.assertCurrent(), false);
+    assert.throws(() => runtime.acquireDelegationRoots(f.owner, messages), { code: 'interactive_delegation_corrupt' });
+    const file = path.join(f.root, 'plans', plan.planId + '.json');
+    const historical = JSON.parse(readFileSync(file, 'utf8'));
+    historical.status = 'completed';
+    historical.runner = { status: 'idle' };
+    historical.resultAcceptance = { acceptedAt: new Date().toISOString(), acceptedBy: 'user' };
+    writeFileSync(file, JSON.stringify(historical));
+    assert.deepEqual(runtime.acquireDelegationRoots(f.owner, messages).references, [], 'settled plan evidence is historical');
+  } finally { messages.release(); }
+});
 
 test('the leased verifier guard pins real review targets and invalidates a cleanup preview when the review ends', async t => {
   const f = await fixture(t), frozen = await f.freeze(), review = f.prepare(), verification = f.runtime.verification;

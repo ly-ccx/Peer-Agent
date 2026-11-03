@@ -37,7 +37,7 @@ export function createInteractiveFeedbackAdmission({ stateStore, conversationSto
         }
       }
       if (!guard.assertCurrent()) throw problem('interactive_retention_stale');
-      return { revision: guard.revision, selections, conversationIds: [...guard.histories.keys()], assertCurrent: guard.assertCurrent, release: guard.release };
+      return { revision: guard.revision, selections, conversationIds: [...guard.histories.keys()], delegatedSessions: guard.delegatedSessions, assertCurrent: guard.assertCurrent, release: guard.release };
     } catch (error) { guard.release(); throw error; }
   }
   return { validate, restore, acquireMessageRoots };

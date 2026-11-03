@@ -194,6 +194,7 @@ export interface ConversationStore {
   /** Internal canonical message guard. The host attests Bot ownership and releases after commit. */
   acquireMessageRetentionGuard?(scope: readonly string[] | { conversationId: string; workspaceId: string }): {
     histories: ReadonlyMap<string, readonly Record<string, unknown>[]>;
+    delegatedSessions: ReadonlyMap<string, string> | null;
     revision: string;
     assertCurrent(): boolean;
     release(): void;

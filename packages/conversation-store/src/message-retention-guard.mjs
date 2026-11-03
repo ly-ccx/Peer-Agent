@@ -106,6 +106,7 @@ export function acquireMessageRetentionGuard(indexFile, convFile, scope) {
     };
     if (!assertCurrent()) throw fail('CONVERSATION_RETENTION_STALE');
     const revision = `sha256:${createHash('sha256').update(JSON.stringify([[...ids].sort(), ...versions.values()])).digest('hex')}`;
-    return { histories, revision, assertCurrent, release };
+    const delegatedSessions = explicit ? null : new Map(ids.slice(1).map(id => [id, metadata.get(id).delegation.sessionId]));
+    return { histories, delegatedSessions, revision, assertCurrent, release };
   } catch (error) { release(); throw error; }
 }

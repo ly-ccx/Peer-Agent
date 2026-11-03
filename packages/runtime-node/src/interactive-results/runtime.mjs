@@ -9,6 +9,7 @@ import { createInteractiveUserMaterials } from './user-materials.mjs';
 import { createInteractiveFeedbackAdmission } from './feedback-admission.mjs';
 import { createInteractiveVerification } from './verification.mjs';
 import { createInteractivePublicationSource } from './publication-source.mjs';
+import { createDelegationRetention } from './delegation-retention.mjs';
 import { createInteractiveRetention } from './retention.mjs';
 
 /** One shared domain instance per host. Composition roots supply real local facts. */
@@ -17,9 +18,10 @@ export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationS
   const resultStore = createInteractiveResultStore({ ...(rootDir ? { rootDir } : {}), ...(now ? { now } : {}),
     assertCompatibility: () => goalPlanStore?.assertInteractiveEvidenceCompatible?.() === true });
   const stateStore = createInteractiveStateStore({ resultStore, ...(now ? { now } : {}) });
-  const retention = createInteractiveRetention({ resultStore, stateStore, acquireRoots: acquireRetentionRoots,
-    assertOwner: owner => enabled?.(owner.workspaceId) === true && holdsLease?.(owner.workspaceId) === true
-      && getBotConversationId?.(owner.workspaceId) === owner.conversationId, ...(now ? { now } : {}) });
+  const assertOwner = owner => enabled?.(owner.workspaceId) === true && holdsLease?.(owner.workspaceId) === true
+    && getBotConversationId?.(owner.workspaceId) === owner.conversationId;
+  const retention = createInteractiveRetention({ resultStore, stateStore, acquireRoots: acquireRetentionRoots, assertOwner, ...(now ? { now } : {}) });
+  const acquireDelegationRoots = createDelegationRetention({ goalPlanStore, resultStore, stateStore, assertOwner });
   const feedback = createInteractiveFeedbackAdmission({ stateStore, conversationStore });
   const publications = createInteractivePublicationSource({ resultStore, goalPlanStore, getBotConversationId, getSession });
   const verification = createInteractiveVerification({ resultStore, feedback, goalPlanStore, conversationStore, getBotConversationId, holdsLease, enabled });
@@ -46,7 +48,7 @@ export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationS
   });
   const provider = createInteractiveResultProvider({ store: resultStore, stateStore, materialSource, resolveAuthority: authority.resolve,
     index: goalPlanStore, ...(now ? { now } : {}), ...(validate ? { validate } : {}) });
-  return { resultStore, stateStore, retention, provider, authority, feedback, verification, publications, captureExecution: createInteractiveCapture({ resultStore, resolveAuthority: authority.resolve,
+  return { resultStore, stateStore, retention, acquireDelegationRoots, provider, authority, feedback, verification, publications, captureExecution: createInteractiveCapture({ resultStore, resolveAuthority: authority.resolve,
     resolveObservationAuthority: authority.resolveObservation, ...(now ? { now } : {}) }),
     userMaterialNotices(toolContext) {
       try { const context = authority.resolve({ toolContext });
