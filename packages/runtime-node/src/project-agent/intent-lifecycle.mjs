@@ -184,10 +184,15 @@ export function createIntentLifecycle({ storeFor, readSession, readMessages, rea
     const sessions = [...new Set(sourceRows.map(row => row.sessionId))].map(sessionId => readSession({ sessionId }));
     if (!sessions.length || sessions.some(row => !row || !mandate?.sessionIds.includes(row.sessionId))) return { passed: false, error: 'goal_evidence_missing' };
     const facts = sessions.map(session => readGoalFacts(session.sessionId));
-    if (sourceRows.some(source => {
-      const i = sessions.findIndex(row => row.sessionId === source.sessionId), allowed = new Set(facts[i]?.evidenceIndex || []);
-      return source.sourceRevision !== sessions[i].sourceRevision || !source.evidenceRefs.length || source.evidenceRefs.some(ref => !allowed.has(ref));
-    })) return { passed: false, error: 'goal_evidence_stale' };
+    const sourceIssues = intent.coverage.flatMap(row => row.sources.flatMap(source => {
+      const i = sessions.findIndex(session => session.sessionId === source.sessionId);
+      const session = sessions[i], allowed = new Set(facts[i]?.evidenceIndex || []);
+      const reason = source.sourceRevision !== session.sourceRevision ? 'source_revision_changed'
+        : !source.evidenceRefs.length || source.evidenceRefs.some(ref => !allowed.has(ref)) ? 'reference_not_indexed' : null;
+      return reason ? [{ requirementId: row.requirementId, sessionId: source.sessionId, sourceRevision: session.sourceRevision, reason }] : [];
+    }));
+    if (sourceIssues.length) return { passed: false, error: 'goal_evidence_stale', sourceIssues: sourceIssues.slice(0, 16),
+      message: 'Use the current session sourceRevision and evidence cited by its task report. A Bot query or tool receipt is not task evidence unless that reference is indexed for the cited session.' };
     const sources = sessions.map(row => ({ sessionId: row.sessionId, sourceRevision: row.sourceRevision, observationRevision: revisionOf(row) }));
     const requirements = intent.interpretation.requirements;
     const inputIds = new Set([...(mandate.rootInputIds || []), ...(mandate.revisionInputIds || [])]);

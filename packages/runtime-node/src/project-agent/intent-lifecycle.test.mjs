@@ -368,6 +368,26 @@ test('stale session waits return only current in-scope facts and cannot park a r
   assert.equal(f.store.readWork('g').intentCoordination, undefined);
 });
 
+test('root review identifies stale versions and unindexed references without exposing the task index', async t => {
+  const f = await fixture(t);
+  const context = f.context('t1', { currentInputAnchors: ['input-i'] });
+  await f.coordinate({ action: 'parallel', task: { anchorMessageIds: ['input-i'], brief: 'Original' } }, context);
+  const result = await f.coordinate({ action: 'assess', assessment: { ...f.initial,
+    coverage: f.initial.coverage.map((row, index) => ({ ...row, status: 'covered', sources: [{
+      sessionId: 's1', sourceRevision: index === 0 ? 'stale' : 'source:s1', evidenceRefs: ['tool-result://bot-query'],
+    }] })),
+    disposition: { kind: 'return', replyRef: 'current_turn_reply' },
+  } }, { ...context, deliveryKey: 'review' });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.review.sourceIssues, [
+    { requirementId: 'research', sessionId: 's1', sourceRevision: 'source:s1', reason: 'source_revision_changed' },
+    { requirementId: 'fix', sessionId: 's1', sourceRevision: 'source:s1', reason: 'reference_not_indexed' },
+  ]);
+  assert.equal(result.review.error, 'goal_evidence_stale');
+  assert.doesNotMatch(JSON.stringify(result.review), /ev:s1|bot-query/);
+  assert.equal(f.reviews(), 0);
+});
+
 test('a model cannot invent physical failure truth or borrow another work failure; semantic unresolved responsibility remains active', async t => {
   const f = await fixture(t);
   await f.coordinate({ action: 'parallel', task: { anchorMessageIds: ['input-i'], brief: 'Original' } }, f.context('spawn', { currentInputAnchors: ['input-i'] }));
