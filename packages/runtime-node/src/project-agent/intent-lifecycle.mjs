@@ -142,10 +142,15 @@ export function createIntentLifecycle({ storeFor, readSession, readMessages, rea
       assessment.disposition = { ...assessment.disposition, replyRef: `${context.turnId}-reply-1` };
     }
     const failure = dispositionFailure(assessment, s, context); if (failure) return failure;
+    const sourceInputIds = s.current.map(row => row.inputId || row.id);
+    const sourceEventIds = (context.events || []).map(row => row.eventId);
     const admitted = s.store.assessIntent(assessment, { parentConversationId: s.parentConversationId,
-      currentInputIds: s.current.map(row => row.inputId || row.id), eventIds: (context.events || []).map(row => row.eventId), turnId: context.turnId,
+      currentInputIds: sourceInputIds, eventIds: sourceEventIds, turnId: context.turnId,
       originDecisionRef: context.sourceDecisionRef });
     if (!admitted.ok) {
+      if (['source_not_admitted', 'input_disposition_required'].includes(admitted.error)) return { ...admitted,
+        sourceInputIds, sourceEventIds,
+        message: 'Use sources admitted in this turn. Supply one inputs entry for each selected sourceInputIds entry. On an event-only turn, use empty sourceInputIds and inputs arrays. Keep earlier inputs as goal context without repeating their dispositions.' };
       if (admitted.error === 'intent_revision_required') return { ...admitted,
         message: 'The goal interpretation is already recorded. Omit assessment.interpretation and keep its existing requirement IDs when updating coverage or disposition. Changing the goal requires an admitted goal revision.' };
       return admitted;
