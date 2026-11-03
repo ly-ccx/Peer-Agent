@@ -25,16 +25,16 @@ const CAPABILITIES = [
 ];
 const INITIAL_INPUT = 'live-story-publish', FROZEN_INPUT = 'live-story-verify';
 const INITIAL_TASK = [
-  'Delegate one read-only research task using spawn_session and the current input anchor. Use isolation none and require local.interactive.publish.',
-  'Use one model_review criterion: independently inspect the published program, complete facts binding, and initial evaluation. Verify the two synthetic costs and initial remainder.',
+  `Delegate one task with spawn_session. Use anchorMessageIds ["input-${INITIAL_INPUT}"], kind "research", readOnly true, isolation "none", and requiredCapabilities ["local.interactive.publish"].`,
+  'Include successCriteria as an array with one object of kind "model_review". Its description must require independent inspection of the program, complete facts binding and initial evaluation, checking both costs and the remainder.',
   'The worker must read its exact plan and task IDs with goal_get_plan, publish once, then use goal_update_task with the returned fixed artifact Evidence. Stop after recording it. Leave inspection to the Verifier.',
   'I will send the selected budget after publication. Keep the original result and do not claim human acceptance.',
   'Worker brief: ' + INTERACTIVE_LIVE_TASK,
 ].join('\n');
 const FROZEN_TASK = [
-  'Please delegate this new request via spawn_session now, using this exact current input anchor to carry the attached frozen selection. Use read-only research, isolation none, and require local.interactive.inspect.',
+  `Delegate this new request via spawn_session now. Use anchorMessageIds ["input-${FROZEN_INPUT}"] to carry the attached frozen selection. Set kind "research", readOnly true, isolation "none", and requiredCapabilities ["local.interactive.inspect"].`,
   'The new worker should use goal_get_plan, then inspect the attached fixed result once with view evaluate and the attached followupId, then record that actual result and evidence on its leaf with goal_update_task.',
-  'The new model_review criterion requires an independent Verifier to make four inspect_interactive_result calls on the attached fixed reference: program, data binding facts, initial evaluate, and evaluate with the attached followupId. Run them together. Cite only the four canonical interactive-inspection references.',
+  'Include successCriteria as an array with one object of kind "model_review" and a description requiring an independent Verifier to make four inspect_interactive_result calls on the attached fixed reference: program, data binding facts, initial evaluate, and evaluate with the attached followupId. Run them together. Cite only the four canonical interactive-inspection references.',
   'Do not republish or substitute direct Bot inspection for this delegation. After the independent review, use post_reply with both the original publication session and the follow-up session as sources. Explain the two remainders and distinguish synthetic inputs, verified arithmetic and human acceptance.',
 ].join('\n');
 
