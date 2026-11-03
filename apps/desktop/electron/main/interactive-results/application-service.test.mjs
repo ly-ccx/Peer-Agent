@@ -73,7 +73,7 @@ test('native view uses the real window binding, enforces one writer and cannot r
   assert.equal((await f.host.read(native, { identity: result.context, operation: 'content' })).status, 'scope_denied');
   assert.equal(f.fileReads(), 0); assert.equal(f.legacyHistory(), undefined);
   assert.equal(f.app.readLayout(native, { workspaceId: owner.workspaceId }).code, 'interactive_scope_denied');
-  assert.equal(f.app.writeLayout(f.main, { workspaceId: owner.workspaceId, expectedRevision: 0, order: ['interactive:fixed'], recent: [] }).ok, true);
+  assert.equal(f.app.writeLayout(f.main, { workspaceId: owner.workspaceId, expectedRevision: 0, order: ['interactive:fixed'], recent: [], interactive: { tabs: [], activeTabId: null } }).ok, true);
   f.setOwner('new-conversation');
   assert.equal(f.app.readState(native, { handle: opened.handle }).code, 'interactive_view_stale');
   assert.equal(f.app.save(native, { handle: opened.handle, writer: successor.writer, expectedRevision: 1, requestId: 'wrong-owner', values: { $x: 8 }, inputDrafts: {} }).code, 'interactive_view_stale');

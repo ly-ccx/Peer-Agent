@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { normalizeResourceLayout, normalizeResourceWindowNavigation, normalizeResourceWindowOwner, normalizeResourceWindowRequest, resourceWindowWorkspaceId, resourceWindowTask } from './resource-window.ts';
+import { normalizeResourceInteractiveSession, normalizeResourceLayout, normalizeResourceLayoutSnapshot, normalizeResourceRecentReference, normalizeResourceWindowNavigation, normalizeResourceWindowOwner, normalizeResourceWindowRequest, resourceWindowWorkspaceId, resourceWindowTask } from './resource-window.ts';
 const reference = { workspaceId: 'bot', path: '/project/a.md', task: { sessionId: 'session', planId: 'plan' } };
 const request = { resource: { kind: 'document', reference, mode: 'preview' }, sourceTabId: 'tab', navigation: { top: 250, left: 0 } };
 test('only read-only resource references and bounded presentation values cross the window seam', () => {
@@ -55,10 +55,38 @@ test('interactive windows use fixed domain identity and bounded reading hints wi
   assert.equal(normalizeResourceWindowRequest({ resource: { ...resource, reference: { ...reference, contentVersion: 'latest' } } }), undefined);
   assert.equal(normalizeResourceWindowNavigation({ top: 0, left: 0, mode: 'source' }, 'interactive'), undefined);
   assert.equal(normalizeResourceWindowNavigation({ top: 0, left: 0, positions: [] }, 'interactive'), undefined);
-  assert.deepEqual(normalizeResourceLayout({ order: ['document:a', 'interactive:b'], recent: ['interactive:b'] }), { order: ['document:a', 'interactive:b'], recent: ['interactive:b'] });
-  assert.equal(normalizeResourceLayout({ order: ['interactive:a', 'interactive:a'], recent: [] }), undefined);
-  assert.equal(normalizeResourceLayout({ order: ['permission:full'], recent: [] }), undefined);
-  assert.equal(normalizeResourceLayout({ order: ['interactive:a'], recent: [], revision: 0 }), undefined);
+  const interactive = { tabs: [], activeTabId: null };
+  assert.deepEqual(normalizeResourceLayout({ order: ['document:a', 'interactive:b'], recent: ['interactive:b'], interactive }), { order: ['document:a', 'interactive:b'], recent: ['interactive:b'], interactive });
+  assert.equal(normalizeResourceLayout({ order: ['interactive:a', 'interactive:a'], recent: [], interactive }), undefined);
+  assert.equal(normalizeResourceLayout({ order: ['permission:full'], recent: [], interactive }), undefined);
+  assert.equal(normalizeResourceLayout({ order: ['interactive:a'], recent: [], interactive, revision: 0 }), undefined);
+});
+
+test('mixed layout retains bounded domain references, document/Diff/browser recents and no user state or writer claims', () => {
+  const reference = { owner: { workspaceId: 'bot-a', conversationId: 'parent-a' }, resultId: 'result-a', contentVersion: 'sha256:' + 'a'.repeat(64) };
+  const tab = { id: 'tab-a', reference, title: 'Trial', navigation: { top: 120, left: 0 } }, interactive = { tabs: [tab], activeTabId: 'tab-a' };
+  const recents = [{ kind: 'document', path: '/repo/a.md', task: { sessionId: 'session', planId: 'plan' } },
+    { kind: 'comparison', path: '/repo', comparison: { fromRef: 'HEAD', comparison: 'staged' } },
+    { kind: 'browser', url: 'https://example.com/facts' }, { kind: 'interactive', reference, title: 'Trial' }];
+  const layout = { order: ['document:a', 'comparison:workspace', 'browser:b', 'interactive:tab-a'], recent: recents.map(value => JSON.stringify(value)), interactive };
+  assert.deepEqual(normalizeResourceLayout(layout), layout);
+  const snapshot = { ...layout, formatVersion: 2, revision: 1, updatedAt: '2026-11-03T00:00:00.000Z' };
+  assert.deepEqual(normalizeResourceLayoutSnapshot(snapshot), snapshot);
+  assert.equal(normalizeResourceLayoutSnapshot({ ...snapshot, formatVersion: 3 }), undefined);
+  assert.equal(normalizeResourceLayoutSnapshot({ ...snapshot, revision: 0 }), undefined);
+  assert.equal(normalizeResourceLayoutSnapshot({ ...snapshot, writer: { token: 'fake' } }), undefined);
+  assert.equal(normalizeResourceLayout({ order: [], recent: [] }), undefined, 'old writes cannot erase the new domain session');
+  for (const extra of [{ values: { $x: 2 } }, { writer: { token: 'fake' } }, { program: 'root=Text("fake")' }, { permission: 'full' }]) {
+    assert.equal(normalizeResourceInteractiveSession({ tabs: [{ ...tab, ...extra }], activeTabId: 'tab-a' }), undefined);
+  }
+  assert.equal(normalizeResourceInteractiveSession({ tabs: [tab, { ...tab, id: 'duplicate-reference' }], activeTabId: 'tab-a' }), undefined);
+  assert.equal(normalizeResourceInteractiveSession({ tabs: [tab], activeTabId: 'missing-tab' }), undefined);
+  assert.equal(normalizeResourceInteractiveSession({ tabs: [{ ...tab, navigation: { top: Infinity, left: 0 } }], activeTabId: 'tab-a' }), undefined);
+  assert.equal(normalizeResourceRecentReference({ kind: 'document', path: '/repo/a.md', permission: 'full' }), undefined);
+  assert.equal(normalizeResourceRecentReference({ kind: 'comparison', path: '/repo', comparison: { fromRef: 'HEAD' } }), undefined);
+  assert.equal(normalizeResourceRecentReference({ kind: 'browser', url: 'https://secret@example.com/' }), undefined);
+  assert.equal(normalizeResourceLayout({ ...layout, recent: [JSON.stringify({ kind: 'interactive', reference, values: { $x: 2 } })] }), undefined);
+  assert.equal(normalizeResourceLayout({ ...layout, recent: [JSON.stringify({ kind: 'browser', url: 'https://example.com/' + '中'.repeat(1000) })] }), undefined, 'URL canonicalization must not expand a saved descriptor beyond its own readable budget');
 });
 
 test('a single-file Diff must carry its actual index/worktree base rather than choosing one implicitly', () => {

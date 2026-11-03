@@ -7,9 +7,11 @@ import { validateDraft } from '@peer-agent/interactive-content';
 import { createInteractiveResultStore } from './store.mjs';
 import { createInteractivePresentationStore } from './presentation-store.mjs';
 import { encode } from './storage.mjs';
+import { createInteractivePresentationStore as createV1PresentationStore } from './test-fixtures/presentation-v1-writer.mjs';
 
 const owner = { workspaceId: 'bot-a', conversationId: 'parent-a' };
 const current = () => true;
+const emptySession = { tabs: [], activeTabId: null };
 async function fixture(t, { publish = true } = {}) {
   const rootDir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'interactive-presentation-')));
   let allowed = true, ticks = 0;
@@ -32,7 +34,7 @@ test('dormant presentation reads do not create a domain and ordinary layout writ
   const f = await fixture(t, { publish: false });
   assert.equal(f.presentation.readLayout(owner), null);
   assert.deepEqual(f.presentation.history.list(owner), { ok: true, status: 'ok', entries: [] });
-  assert.throws(() => f.presentation.writeLayout(owner, { expectedRevision: 0, order: ['launcher'], recent: [] }), { code: 'interactive_presentation_unavailable' });
+  assert.throws(() => f.presentation.writeLayout(owner, { expectedRevision: 0, order: ['launcher'], recent: [], interactive: emptySession }), { code: 'interactive_presentation_unavailable' });
   assert.equal(existsSync(path.join(f.rootDir, owner.workspaceId)), false);
 });
 
@@ -66,7 +68,7 @@ test('history rejects forged owner/source and corrupt metadata without replacing
 });
 
 test('mixed layout has independent durable CAS and refuses corruption, over-budget keys and owner changes', async t => {
-  const f = await fixture(t), input = { expectedRevision: 0, order: ['document:a', 'interactive:fixed-a'], recent: ['interactive:fixed-a'] };
+  const f = await fixture(t), input = { expectedRevision: 0, order: ['document:a', 'interactive:fixed-a'], recent: ['interactive:fixed-a'], interactive: emptySession };
   const first = f.presentation.writeLayout(owner, input);
   assert.equal(first.revision, 1); assert.deepEqual(f.presentation.readLayout(owner), first);
   assert.throws(() => f.presentation.writeLayout(owner, input), { code: 'interactive_layout_conflict' });
@@ -87,8 +89,37 @@ test('mixed layout has independent durable CAS and refuses corruption, over-budg
 test('a cached writer checks the subdomain version again before presentation writes', async t => {
   const f = await fixture(t), db = f.results.storage.connect(owner.workspaceId, true).db;
   db.exec('PRAGMA user_version=4');
-  assert.throws(() => f.presentation.writeLayout(owner, { expectedRevision: 0, order: ['interactive:a'], recent: [] }), { code: 'interactive_storage_incompatible' });
+  assert.throws(() => f.presentation.writeLayout(owner, { expectedRevision: 0, order: ['interactive:a'], recent: [], interactive: emptySession }), { code: 'interactive_storage_incompatible' });
   assert.equal(f.presentation.history.list(owner).ok, false);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM presentation').get().n, 0);
   db.exec('PRAGMA user_version=5');
+});
+
+test('known v1 layout upgrades without losing hints; a real already-open v1 writer cannot overwrite the new row', async t => {
+  const f = await fixture(t), legacy = createV1PresentationStore({ resultStore: f.results, assertOwner: current });
+  const before = legacy.writeLayout(owner, { expectedRevision: 0, order: ['document:old', 'browser:old'], recent: ['document:old'] });
+  assert.equal(before.revision, 1, 'the pinned old writer genuinely works before the format change');
+  const loaded = f.presentation.readLayout(owner); assert.equal(loaded.revision, 1); assert.deepEqual(loaded.order, before.order);
+  assert.deepEqual(loaded.recent, before.recent); assert.deepEqual(loaded.interactive, emptySession);
+  const interactive = { tabs: [{ id: 'result-tab', reference: f.resource.reference, title: 'Saved trial', navigation: { top: 240, left: 0 } }], activeTabId: 'result-tab' };
+  const next = f.presentation.writeLayout(owner, { expectedRevision: 1, order: [...before.order, 'comparison:workspace', 'interactive:result-tab'], recent: before.recent, interactive });
+  assert.equal(next.formatVersion, 2); assert.equal(next.revision, 2); assert.deepEqual(next.interactive, interactive);
+  assert.throws(() => legacy.readLayout(owner), { code: 'interactive_presentation_corrupt' });
+  assert.throws(() => legacy.writeLayout(owner, { expectedRevision: 2, order: ['document:replacement'], recent: [] }), { code: 'interactive_presentation_corrupt' });
+  assert.deepEqual(f.presentation.readLayout(owner), next);
+  assert.throws(() => f.presentation.writeLayout(owner, { expectedRevision: 2, order: [], recent: [] }), { code: 'interactive_layout_invalid' });
+  assert.deepEqual(f.presentation.readLayout(owner), next);
+});
+
+test('new layout checks owner for tabs and recent refs, refuses future/corrupt formats and never normalizes them to empty', async t => {
+  const f = await fixture(t), foreign = { ...f.resource.reference, owner: { ...owner, conversationId: 'other-parent' } };
+  const input = { expectedRevision: 0, order: ['interactive:a'], recent: [], interactive: { tabs: [{ id: 'a', reference: foreign }], activeTabId: 'a' } };
+  assert.throws(() => f.presentation.writeLayout(owner, input), { code: 'interactive_scope_denied' });
+  assert.throws(() => f.presentation.writeLayout(owner, { ...input, interactive: emptySession, recent: [JSON.stringify({ kind: 'interactive', reference: foreign })] }), { code: 'interactive_scope_denied' });
+  const saved = f.presentation.writeLayout(owner, { ...input, interactive: emptySession });
+  const db = f.results.storage.connect(owner.workspaceId, true).db;
+  db.prepare("UPDATE presentation SET body=? WHERE category='mixed-resource-layout'").run(encode({ ...saved, formatVersion: 3 }));
+  assert.throws(() => f.presentation.readLayout(owner), { code: 'interactive_presentation_corrupt' });
+  assert.throws(() => f.presentation.writeLayout(owner, { ...input, expectedRevision: 1, interactive: emptySession }), { code: 'interactive_presentation_corrupt' });
+  assert.equal(JSON.parse(db.prepare("SELECT body FROM presentation WHERE category='mixed-resource-layout'").get().body).formatVersion, 3);
 });

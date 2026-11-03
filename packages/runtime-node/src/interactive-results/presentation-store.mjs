@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { interactiveToken, normalizeInteractiveOwner, normalizeInteractiveReference, normalizeResourceLayout,
+import { interactiveToken, normalizeInteractiveOwner, normalizeInteractiveReference, normalizeResourceLayout, normalizeResourceLayoutSnapshot,
   normalizeResourceWindowOwner, normalizeResourceWindowRequest } from '@peer-agent/protocol';
 import { decode, encode, jsonDigest, problem } from './storage.mjs';
 
@@ -39,16 +39,24 @@ export function createInteractivePresentationStore({ resultStore, assertOwner, n
     }).sort((a, b) => b.savedAt.localeCompare(a.savedAt));
   }
   function checkedLayout(raw) {
-    const layout = normalizeResourceLayout({ order: raw?.order, recent: raw?.recent });
-    if (!raw || Object.keys(raw).some(key => !['revision', 'order', 'recent', 'updatedAt'].includes(key)) || !layout
-      || !Number.isSafeInteger(raw.revision) || raw.revision < 1 || typeof raw.updatedAt !== 'string' || raw.updatedAt.length > 40
-      || !Number.isFinite(Date.parse(raw.updatedAt))) throw problem('interactive_presentation_corrupt');
-    return { ...layout, revision: raw.revision, updatedAt: raw.updatedAt };
+    const legacy = raw?.formatVersion === undefined;
+    if (!raw || legacy && Object.keys(raw).some(key => !['revision', 'order', 'recent', 'updatedAt'].includes(key))) throw problem('interactive_presentation_corrupt');
+    const snapshot = normalizeResourceLayoutSnapshot(legacy ? { ...raw, formatVersion: 2, interactive: { tabs: [], activeTabId: null } } : raw);
+    if (!snapshot) throw problem('interactive_presentation_corrupt');
+    return snapshot;
   }
   function readLayout(rawOwner) {
     const owner = current(rawOwner), context = storage.connect(owner.workspaceId);
     const row = context?.db.prepare('SELECT body FROM presentation WHERE category=? AND id=? AND owner=?').get(LAYOUT, 'current', encode(owner));
-    return row ? checkedLayout(decode(row.body)) : null;
+    if (!row) return null;
+    const snapshot = checkedLayout(decode(row.body));
+    assertLayoutOwner(owner, snapshot); return snapshot;
+  }
+  function assertLayoutOwner(owner, layout) {
+    const references = [...layout.interactive.tabs.map(tab => tab.reference), ...layout.recent.flatMap(raw => {
+      try { const value = JSON.parse(raw); return value.kind === 'interactive' ? [value.reference] : []; } catch { return []; }
+    })];
+    if (references.some(reference => !same(owner, reference.owner))) throw problem('interactive_scope_denied');
   }
   return {
     history: {
@@ -86,9 +94,10 @@ export function createInteractivePresentationStore({ resultStore, assertOwner, n
       },
     },
     readLayout,
-    writeLayout(rawOwner, { expectedRevision, order, recent }) {
-      const owner = current(rawOwner), layout = normalizeResourceLayout({ order, recent });
+    writeLayout(rawOwner, { expectedRevision, order, recent, interactive }) {
+      const owner = current(rawOwner), layout = normalizeResourceLayout({ order, recent, interactive });
       if (!layout || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw problem('interactive_layout_invalid');
+      assertLayoutOwner(owner, layout);
       // A dormant feature must not create a private domain during ordinary file navigation.
       const existing = storage.connect(owner.workspaceId);
       const published = existing?.db.prepare("SELECT v.metadata FROM versions v JOIN operations o ON o.id=json_extract(v.metadata,'$.operationId') WHERE v.owner=? AND v.availability='available' AND o.phase='published' LIMIT 1").get(encode(owner));
@@ -98,7 +107,7 @@ export function createInteractivePresentationStore({ resultStore, assertOwner, n
         current(owner);
         const before = readLayout(owner);
         if ((before?.revision ?? 0) !== expectedRevision) throw problem('interactive_layout_conflict');
-        const next = checkedLayout({ ...layout, revision: expectedRevision + 1, updatedAt: now() });
+        const next = checkedLayout({ formatVersion: 2, ...layout, revision: expectedRevision + 1, updatedAt: now() });
         context.db.prepare('INSERT INTO presentation VALUES(?,?,?,?) ON CONFLICT(category,id,owner) DO UPDATE SET body=excluded.body')
           .run(LAYOUT, 'current', encode(owner), encode(next));
         current(owner); return copy(next);

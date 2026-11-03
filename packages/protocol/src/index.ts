@@ -1167,8 +1167,8 @@ export * from './project-input-recovery.ts';
 export { botResourceReferences } from './resource-reference-hints.ts';
 
 export type { ResourceWindowCheckpointRequest, ResourceWindowCheckpointAck, ResourceWindowCloseBlocked, ResourceWindowReturnRequest, ResourceWindowReturnAck, ResourceWindowHistoryEntry, ResourceWindowHistoryResult, ResourceWindowReadRequest, ResourceWindowReadResult, ResourceWindowResource, ResourceWindowNavigation, ResourceWindowOpenRequest, ResourceWindowOwner, ResourceWindowIdentity, ResourceWindowContext, ResourceWindowStatus, ResourceWindowResult } from './resource-window.ts';
-export { normalizeResourceWindowRequest, normalizeResourceWindowOwner, normalizeResourceWindowNavigation, resourceWindowWorkspaceId, resourceWindowTask, normalizeResourceLayout } from './resource-window.ts';
-export type { ResourceLayoutSnapshot, ResourcePresentationApi } from './resource-window.ts';
+export { normalizeResourceWindowRequest, normalizeResourceWindowOwner, normalizeResourceWindowNavigation, resourceWindowWorkspaceId, resourceWindowTask, normalizeResourceLayout, normalizeResourceLayoutSnapshot, normalizeResourceInteractiveSession, normalizeResourceRecentReference, interactiveReferenceKey } from './resource-window.ts';
+export type { ResourceLayoutSnapshot, ResourcePresentationApi, ResourceInteractiveTab, ResourceInteractiveSession, ResourceRecentReference } from './resource-window.ts';
 export * from './browser-window.js';
 export * from './resource-feedback.js';
 

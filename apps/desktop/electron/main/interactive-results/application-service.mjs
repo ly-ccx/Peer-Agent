@@ -89,7 +89,7 @@ export function createDesktopInteractiveApplication({ getRole, getOwner, getNati
       return { ok: true, snapshot: instance().presentation.readLayout(ownerOf(request.workspaceId)) };
     }),
     writeLayout: (sender, request) => run(() => {
-      if (getRole(sender) !== 'main' || !validRequest(request, ['workspaceId', 'expectedRevision', 'order', 'recent']) || !interactiveToken(request.workspaceId)) return fail('interactive_scope_denied');
+      if (getRole(sender) !== 'main' || !validRequest(request, ['workspaceId', 'expectedRevision', 'order', 'recent', 'interactive']) || !interactiveToken(request.workspaceId)) return fail('interactive_scope_denied');
       return { ok: true, snapshot: instance().presentation.writeLayout(ownerOf(request.workspaceId), request) };
     }),
     dispose() {
