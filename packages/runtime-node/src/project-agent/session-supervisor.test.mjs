@@ -310,6 +310,30 @@ test('structured Git requirements survive plan storage and idempotent spawn repl
   } finally { await env.cleanup(); }
 });
 
+test('interactive delivery admission requires the actual Verifier inventory before creating any child', async () => {
+  const calls = [];
+  let verifierReady = false;
+  const env = await harness({ readDelegationCapabilities: input => {
+    calls.push(input);
+    return input.agentKind === 'verifier' ? verifierReady ? ['local.interactive.inspect'] : ['local.file.read']
+      : ['local.interactive.publish', 'local.interactive.inspect'];
+  } });
+  try {
+    const input = spawnInput({ kind: 'research', readOnly: true, requiredCapabilities: ['local.interactive.publish'],
+      successCriteria: [{ id: 'interactive', kind: 'model_review', description: 'Check fixed program and data', requiredCapabilities: ['local.interactive.inspect'] }] });
+    const before = env.conversationStore.listChildren(env.parent.id, { role: 'work_session' }).length;
+    const denied = await env.supervisor.spawn(input, contextOf(env));
+    assert.equal(denied.error, 'delegation_capability_unavailable');
+    assert.equal(denied.diagnostic.role, 'verifier');
+    assert.deepEqual(denied.diagnostic.missing, ['local.interactive.inspect']);
+    assert.equal(env.conversationStore.listChildren(env.parent.id, { role: 'work_session' }).length, before);
+    assert.deepEqual(calls.at(-1), { readOnly: true, workspaceId: 'ws-1', agentKind: 'verifier' });
+    verifierReady = true;
+    const opened = await env.supervisor.spawn(input, contextOf(env));
+    assert.equal(opened.error, undefined);
+  } finally { await env.cleanup(); }
+});
+
 function spawnInput(extra = {}) {
   return {
     anchorMessageIds: ['anchor-1'],

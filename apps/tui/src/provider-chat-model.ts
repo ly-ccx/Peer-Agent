@@ -21,7 +21,7 @@ import type {
   ModelToolCall,
   ModelToolDefinition,
 } from '@peer-agent/runtime-node';
-import { encodeProviderToolResult, evaluateWorkSessionWrite, agentCommunicationExcludedPrefixes } from '@peer-agent/runtime-node';
+import { encodeProviderToolResult, readOnlyWorkCapabilityAllowed, agentCommunicationExcludedPrefixes, admitInteractiveToolSet } from '@peer-agent/runtime-node';
 import type { RuntimeSdkProviderExecution, RuntimeSdkStreamDiscardEvent } from '@peer-agent/runtime-sdk';
 
 import type {
@@ -313,11 +313,15 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
   const defaultToolDefinitions = options.toolDefinitions ?? [];
   const toolDefinitionsForMode = (mode: TuiRuntimeMode) =>
     options.toolDefinitionsForMode?.(mode) ?? defaultToolDefinitions;
-  const toolsForTurn = (mode: TuiRuntimeMode, input: ChatModelInput) => toolDefinitionsForMode(mode).filter(tool =>
+  const toolsForTurn = (mode: TuiRuntimeMode, input: Pick<ChatModelInput, 'systemContextInput'>) => admitInteractiveToolSet(toolDefinitionsForMode(mode).filter(tool =>
     !agentCommunicationExcludedPrefixes(input.systemContextInput).some((prefix: string) => tool.capabilityId.startsWith(prefix))
-    && evaluateWorkSessionWrite({ delegationOrigin: { readOnly: (input.systemContextInput?.workSessionOrigin as { readOnly?: boolean } | undefined)?.readOnly === true } }, tool).allowed);
-  const systemMessagesFor = (context: ProviderSystemPromptContext): readonly ModelMessage[] => {
-    const content = options.getSystemPrompt?.(context) ?? options.systemPrompt;
+    && ((input.systemContextInput?.workSessionOrigin as { readOnly?: boolean } | undefined)?.readOnly !== true
+      || readOnlyWorkCapabilityAllowed({ ...tool, turnProfile: input.systemContextInput }))));
+  const systemMessagesFor = (context: ProviderSystemPromptContext, projectedTools: readonly RuntimeToolDefinition[]): readonly ModelMessage[] => {
+    const content = options.getSystemPrompt?.({ ...context, systemContextInput: { ...context.systemContextInput,
+      interactiveResultCapabilities: projectedTools
+        .map(tool => tool.capabilityId).filter(id => id.startsWith('local.interactive.')),
+    } }) ?? options.systemPrompt;
     return content ? [{ role: 'system', content }] : [];
   };
 
@@ -388,22 +392,24 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
 
   return {
     projectSystemMessages(context) {
+      const mode = normalizeTuiRuntimeMode(context.mode);
       return systemMessagesFor({
-        mode: normalizeTuiRuntimeMode(context.mode),
+        mode,
         ...(context.conversationId ? { conversationId: context.conversationId } : {}),
         systemContextBlocks: context.systemContextBlocks,
         systemContextInput: context.systemContextInput,
-      });
+      }, toolsForTurn(mode, { systemContextInput: context.systemContextInput }));
     },
     summarizeCompaction,
     initialize(input, context) {
       const mode = normalizeTuiRuntimeMode(context.run.mode);
+      const projectedTools = toolsForTurn(mode, input.input);
       const systemMessages = systemMessagesFor({
         mode,
         ...(context.run.conversationId ? { conversationId: context.run.conversationId } : {}),
         systemContextBlocks: input.input.systemContextBlocks,
         systemContextInput: input.input.systemContextInput,
-      });
+      }, projectedTools);
       const userContent = toUserModelContent(input.input.content, input.input.images);
       // System Context is assembled from current host facts at UserTurn start,
       // then pinned for inner ModelSteps. Never accumulate duplicate system messages.
@@ -415,7 +421,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         ...historyWithoutSystem,
         ...(input.input.omitCurrentUser ? [] : [{ role: 'user' as const, content: userContent }]),
       ];
-      const pinnedTools = toolsForTurn(mode, input.input).map(toModelTool);
+      const pinnedTools = projectedTools.map(toModelTool);
       return {
         messages: [
           ...input.input.history,
@@ -459,7 +465,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
               ...(context.run.conversationId ? { conversationId: context.run.conversationId } : {}),
               systemContextBlocks: context.run.input.systemContextBlocks,
               systemContextInput: context.run.input.systemContextInput,
-            }),
+            }, projectedToolDefinitions),
             tools: projectedToolDefinitions.map(toModelTool),
           };
       const tools = pinnedPrefix.tools;

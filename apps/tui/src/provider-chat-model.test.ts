@@ -1171,3 +1171,28 @@ test('Agent communication tools are projected only to the main Bot and its worke
     expect(requests[0]?.tools?.some(tool => tool.name === 'send_agent_message') ?? false).toBe(allowed);
   }
 });
+
+test('interactive language enters actual model System Context only with the corresponding role projection', async () => {
+  for (const [role, agentKind, inspectorAvailable, publish, inspect] of [
+    ['work_session', 'worker', true, true, true], ['project_agent', undefined, true, false, true],
+    ['work_session', 'verifier', true, false, true], ['work_session', 'explorer', true, false, false],
+    ['work_session', 'worker', false, false, false],
+  ] as const) {
+    const requests: ModelProviderRequest[] = [];
+    const model = createProviderChatModel({ model: 'test-model', provider: { async stream(request) { requests.push(request); return completed('done'); } },
+      toolDefinitions: [{ name: 'publish_interactive_result', capabilityId: 'local.interactive.publish', description: 'Internal publication', inputSchema: { type: 'object' } },
+        ...(inspectorAvailable ? [{ name: 'inspect_interactive_result', capabilityId: 'local.interactive.inspect', description: 'Read fixed result', inputSchema: { type: 'object' } }] : [])],
+      getSystemPrompt: context => buildTuiSystemPrompt({}, context.systemContextInput),
+    });
+    const input = { content: 'Compare', history: [], modelMessages: [], turnId: 'test', turnIndex: 0,
+      systemContextInput: { role, turnContext: { agentKind }, interactiveResultCapabilities: ['local.interactive.publish', 'local.interactive.inspect'] } };
+    const context = { run: { mode: 'goal', streamId: 'test', conversationId: 'test', input }, signal: new AbortController().signal, emit() { return null; } } as any;
+    const state = await model.initialize({ input } as any, context);
+    await model.runTurn(state, context);
+    expect(requests[0]?.tools?.some(tool => tool.name === 'publish_interactive_result') ?? false).toBe(publish);
+    expect(requests[0]?.tools?.some(tool => tool.name === 'inspect_interactive_result') ?? false).toBe(inspect);
+    const system = requests[0]?.messages.filter(message => message.role === 'system').map(message => message.content).join('\n') ?? '';
+    expect(system.includes('Components:\nCol(')).toBe(publish);
+    expect(system.includes('Peer interactive result')).toBe(inspect);
+  }
+});

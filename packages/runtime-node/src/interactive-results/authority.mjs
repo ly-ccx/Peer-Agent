@@ -1,22 +1,11 @@
-import { INTERACTIVE_INSPECT_CAPABILITY as INSPECT, INTERACTIVE_PUBLISH_CAPABILITY as PUBLISH,
-  interactiveToken, normalizeInteractiveOwner, normalizeInteractiveReference } from '@peer-agent/protocol';
+import { interactiveToken, normalizeInteractiveOwner, normalizeInteractiveReference } from '@peer-agent/protocol';
+import { interactiveExecutionRole, interactiveCapabilitiesForProfile } from './role-policy.mjs';
+export { interactiveExecutionRole, interactiveCapabilitiesForProfile } from './role-policy.mjs';
 import { executionIdentity, sameExecution } from '../project-agent/session-control-kernel.mjs';
 import { sessionExecutionCurrent } from '../project-agent/execution-ownership.mjs';
 import { encode, problem } from './storage.mjs';
 
 const same = (a, b) => encode(a) === encode(b);
-export function interactiveExecutionRole(profile = {}) {
-  if (profile.role === 'project_agent') return 'project_agent';
-  if (profile.role === 'work_session') {
-    const kind = profile.agentKind ?? profile.turnContext?.agentKind;
-    return kind === 'worker' ? 'session_worker' : ['verifier', 'visual_verifier'].includes(kind) ? kind : null;
-  }
-  return null;
-}
-export function interactiveCapabilitiesForProfile(profile) {
-  const role = interactiveExecutionRole(profile);
-  return role === 'session_worker' ? [PUBLISH, INSPECT] : role ? [INSPECT] : [];
-}
 function requireTrue(value, code = 'interactive_scope_denied') { if (value !== true) throw problem(code); }
 
 /** Reconstruct authority from current canonical host facts, never tool arguments or assistant prose. */
@@ -52,15 +41,16 @@ export function createInteractiveAuthority({ goalPlanStore, conversationStore, r
     }
     requireTrue(current(), 'interactive_execution_stale');
     const dataLevel = classifyContext?.({ owner, plan, toolContext });
+    const admittedVersions = new Map();
     const history = () => conversationStore?.getPersistedConversationHistory?.(toolContext.conversationId)?.messages ?? [];
     function frozenFeedback() {
       return history().filter(message => message.role === 'user').flatMap(message => message.resourceFeedback ?? [])
         .filter(feedback => normalizeInteractiveOwner(feedback?.recipient) && same(feedback.recipient, owner) && feedback.resource?.kind === 'interactive'
           && normalizeInteractiveReference(feedback.resource.reference));
     }
-    function fixedOrigin(reference) {
+    function fixedOrigin(reference, { allowPending = false } = {}) {
       try {
-        const fixed = resultStore.getVersion(reference, { allowPending: true });
+        const fixed = resultStore.getVersion(reference, { allowPending });
         const sourcePlan = goalPlanStore.getPlan(fixed.source.planId), origin = sourcePlan?.delegationOrigin;
         if (!origin || origin.workspaceId !== owner.workspaceId || origin.parentConversationId !== owner.conversationId
           || sourcePlan.conversationId !== fixed.source.conversationId || origin.sessionId !== fixed.source.sessionId) return null;
@@ -72,22 +62,32 @@ export function createInteractiveAuthority({ goalPlanStore, conversationStore, r
       if (!reference || !same(reference.owner, owner)) return false;
       const fixed = fixedOrigin(reference);
       if (!fixed) return false;
-      if (role === 'project_agent') return true;
-      if (fixed.source.planId === plan.planId && sameExecution(fixed.source, expectedExecution)) return true;
-      return frozenFeedback().some(feedback => same(feedback.resource.reference, reference));
+      const allowed = role === 'project_agent' || fixed.source.planId === plan.planId && sameExecution(fixed.source, expectedExecution)
+        || frozenFeedback().some(feedback => same(feedback.resource.reference, reference));
+      if (allowed) admittedVersions.set(encode(reference), fixed);
+      return allowed;
     }
     function admitPublication(reference) {
       if (!same(reference.owner, owner)) return false;
       const saved = resultStore.getOperation(reference);
-      if (!saved || !fixedOrigin(saved.reference)) return false;
+      if (!saved) {
+        const attempt = resultStore.getAttempt?.(reference), origin = attempt && goalPlanStore.getPlan(attempt.source.planId)?.delegationOrigin;
+        return !!origin && origin.workspaceId === owner.workspaceId && origin.parentConversationId === owner.conversationId
+          && (role === 'project_agent' || reference.conversationId === toolContext.conversationId);
+      }
+      if (!saved || !fixedOrigin(saved.reference, { allowPending: true })) return false;
       return role === 'project_agent' || reference.conversationId === toolContext.conversationId;
     }
-    function admitMaterial(source) {
+    function admitMaterial(source, selector) {
       if (role !== 'session_worker' && !['verifier', 'visual_verifier'].includes(role)) return false;
-      if (source.kind === 'tool-result') return source.conversationId === toolContext.conversationId;
-      if (source.kind === 'user-material') return history().some(message => message.id === source.messageId && message.role === 'user'
-        && message.attachments?.some(item => item.id === source.attachmentId && item.sourceKind === 'user_upload'));
-      return false;
+      if (source.kind === 'tool-result' && source.conversationId === toolContext.conversationId) return true;
+      if (source.kind === 'user-material' && history().some(message => message.id === source.messageId && message.role === 'user'
+        && message.attachments?.some(item => item.id === source.attachmentId && item.sourceKind === 'user_upload'))) return true;
+      // A carried fixed result admits only its already selected snapshot range,
+      // never the rest of the original tool observation or another work's files.
+      for (const feedback of frozenFeedback()) admitResult(feedback.resource.reference);
+      return [...admittedVersions.values()].some(fixed => (fixed.provenance ?? []).some(record =>
+        same(record.source, source) && same(record.selector ?? {}, selector ?? {})));
     }
     return { owner, role, dataLevel, capabilityIds: interactiveCapabilitiesForProfile(profile), assertCurrent: current,
       ...(policyRevision ? { policyRevision } : {}),

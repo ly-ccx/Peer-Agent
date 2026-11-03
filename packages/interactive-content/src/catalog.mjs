@@ -92,4 +92,4 @@ export function runtimeFunctions(library, budget = { remaining: L.evaluationStep
   }]));
 }
 
-export const catalogSpec = () => ({ version: LIBRARY_VERSION, schema: createPeerLibrary().toJSONSchema() });
+export const catalogSpec = () => ({ version: LIBRARY_VERSION, schema: createPeerLibrary().toJSONSchema(), limits: L });

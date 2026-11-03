@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { INTERACTIVE_PUBLISH_CAPABILITY, INTERACTIVE_RESULT_LIMITS as L, interactiveArtifactRef, interactiveDigest, interactiveToken, normalizeInteractiveOwner, normalizeInteractiveReference, normalizeInteractivePublicationReference } from '@peer-agent/protocol';
 import { pathOf } from '../data-store.mjs';
 import { createInteractiveStorage, decode, encode, jsonDigest, problem } from './storage.mjs';
+import { createPublicationAttempts } from './publication-attempts.mjs';
 
 const clone = value => structuredClone(value);
 const same = (a, b) => encode(a) === encode(b);
@@ -31,6 +32,7 @@ function contentDigest(body) {
 export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'), now = () => new Date().toISOString(),
   assertCompatibility, onStep = () => {}, maxBytes, hostEpoch } = {}) {
   const storage = createInteractiveStorage({ rootDir, assertCompatibility, maxBytes, hostEpoch });
+  const attempts = createPublicationAttempts(storage);
   function operation(context, call) {
     const row = context.db.prepare('SELECT * FROM operations WHERE id=?').get(operationKey(call));
     if (!row) return null;
@@ -49,7 +51,7 @@ export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'
     if (contentDigest(body) !== ref.contentVersion || metadata.dataLevel !== body.dataLevel) throw problem('interactive_content_corrupt');
     return { ...metadata, content: body.content, provenance: body.provenance, publicationStatus: status };
   }
-  function getVersion(rawReference, options) {
+  function getVersion(rawReference, options = {}) {
     const ref = requireReference(rawReference), context = storage.connect(ref.owner.workspaceId);
     if (!context) throw problem('interactive_result_unavailable');
     return clone(version(context, ref, options));
@@ -119,9 +121,10 @@ export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'
     onStep('committed');
     return clone(committed);
   }
-  function markIndexed(rawCall, actualIndexRecord) {
+  function markIndexed(rawCall, actualIndexRecord, assertCurrent = () => true) {
     const callRef = requireCall(rawCall);
     return storage.transaction(callRef.owner.workspaceId, context => {
+      requireCurrent(assertCurrent);
       const saved = operation(context, callRef);
       if (!saved) throw problem('publication_unknown');
       if (saved.unchanged) return saved;
@@ -132,6 +135,7 @@ export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'
         || !actualIndexRecord.userArtifacts?.some(artifact => artifact.kind === 'interactive' && artifact.ref === saved.metadata.artifactRef
           && same(artifact.reference, saved.reference) && artifact.specHash === saved.indexEntry.userArtifacts[0].specHash)) throw problem('publication_index_conflict');
       version(context, saved.reference, { allowPending: true });
+      requireCurrent(assertCurrent);
       context.db.prepare("UPDATE operations SET phase='published' WHERE id=?").run(operationKey(callRef));
       return { ...saved, publicationStatus: 'published' };
     });
@@ -181,5 +185,8 @@ export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'
     return { ...metadata, value: storage.readObject(context, row.object), canonical: true, available: true };
   }
   return { commitPublication, getOperation, getVersion, markIndexed, listPending, head, recordMaterial, readMaterial,
+    getAttempt: raw => attempts.read(requireCall(raw)),
+    beginAttempt: (input, assertCurrent) => attempts.begin({ ...input, callRef: requireCall(input.callRef) }, assertCurrent),
+    finishAttempt: (raw, outcome) => attempts.finish(requireCall(raw), outcome),
     storage, close: () => storage.close() };
 }

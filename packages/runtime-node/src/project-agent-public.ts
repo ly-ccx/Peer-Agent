@@ -10,6 +10,7 @@ export { createDelegationProvider } from './project-agent/delegation-provider.mj
 export {
   createSessionSupervisor,
   evaluateWorkSessionWrite,
+  readOnlyWorkCapabilityAllowed,
 } from './project-agent/session-supervisor.mjs';
 export {
   PROGRESS_THROTTLE_MS,

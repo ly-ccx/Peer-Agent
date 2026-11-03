@@ -27,6 +27,7 @@ const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/;
 export function defaultProjectAgentSettings() {
   return {
     concurrency: 4,
+    interactiveResults: false,
     proactivity: 'standard',
     quietHours: { enabled: false, start: '22:00', end: '08:00' },
     digestTime: '09:00',
@@ -44,6 +45,7 @@ export function normalizeProjectAgentSettings(value) {
     : {};
   return {
     concurrency: normalizeConcurrency(source.concurrency),
+    interactiveResults: source.interactiveResults === true,
     proactivity: GLOBAL_LEVELS.includes(source.proactivity) ? source.proactivity : defaults.proactivity,
     quietHours: {
       enabled: hours.enabled === true,

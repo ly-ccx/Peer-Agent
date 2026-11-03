@@ -4,6 +4,7 @@ import { createInteractiveMaterialSource } from './material-source.mjs';
 import { createInteractiveResultProvider } from './provider.mjs';
 import { createInteractiveStateStore } from './state-store.mjs';
 import { createInteractiveResultStore } from './store.mjs';
+import { normalizeInteractiveOwner } from '@peer-agent/protocol';
 
 /** One shared domain instance per host. Composition roots supply real local facts. */
 export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationStore, getBotConversationId,
@@ -14,7 +15,7 @@ export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationS
   const authority = createInteractiveAuthority({ goalPlanStore, conversationStore, resultStore, getBotConversationId, holdsLease, enabled, classifyContext });
   const materialSource = createInteractiveMaterialSource({
     readToolResult: (source, execution) => resultStore.readMaterial(execution.owner, source), readUserMaterial,
-    admitSource: (source, execution) => execution.assertCurrent() === true && execution.admitMaterial(source) === true,
+    admitSource: (source, execution, selector) => execution.assertCurrent() === true && execution.admitMaterial(source, selector) === true,
     ...(now ? { now } : {}),
   });
   const provider = createInteractiveResultProvider({ store: resultStore, stateStore, materialSource, resolveAuthority: authority.resolve,
@@ -22,5 +23,12 @@ export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationS
   return { resultStore, stateStore, provider, authority, captureExecution: createInteractiveCapture({ resultStore, resolveAuthority: authority.resolve, ...(now ? { now } : {}) }),
     recoverOwner(owner) { return provider.recoverOwner(owner, candidate => holdsLease?.(candidate.workspaceId) === true
       && getBotConversationId?.(candidate.workspaceId) === candidate.conversationId); },
+    recoverWorkspace(workspaceId) {
+      const owner = normalizeInteractiveOwner({ workspaceId, conversationId: getBotConversationId?.(workspaceId) });
+      if (!owner || holdsLease?.(workspaceId) !== true) return { ok: false, code: 'interactive_scope_denied' };
+      try { return { ok: true, items: provider.recoverOwner(owner, () => holdsLease(workspaceId) === true
+        && getBotConversationId(workspaceId) === owner.conversationId) }; }
+      catch (error) { return { ok: false, code: error.code ?? 'publication_unknown' }; }
+    },
     close() { stateStore.close(); resultStore.close(); } };
 }

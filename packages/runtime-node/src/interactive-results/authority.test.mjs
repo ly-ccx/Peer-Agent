@@ -77,6 +77,25 @@ test('main Bot authority is read only and bound to the registered canonical pare
   assert.throws(() => f.resolve({ conversationId: 'forged-parent', turnProfile: { role: 'project_agent', workspaceId: 'bot-a' } }), { code: 'interactive_execution_stale' });
 });
 
+test('an admitted prior result permits exactly its fixed material and selected range, without widening source access', () => {
+  const f = fixture();
+  const source = { kind: 'tool-result', conversationId: 'worker-b', toolCallId: 'read-old', expectedContentVersion: `sha256:${'b'.repeat(64)}` };
+  const selector = { path: ['rows'], fields: ['name', 'cost'], start: 1, limit: 3 };
+  f.fixedResult.source = { ...executionIdentity(f.other), conversationId: 'worker-b', toolCallId: 'publish-old' };
+  f.fixedResult.provenance = [{ bindingId: 'old-data', source, selector }];
+  const authority = f.resolve();
+  assert.equal(authority.admitMaterial(source, selector), false);
+  const feedback = { recipient: owner, resource: { kind: 'interactive', reference: fixed } };
+  f.messages.push({ role: 'assistant', resourceFeedback: [feedback] });
+  assert.equal(authority.admitMaterial(source, selector), false);
+  f.messages.push({ role: 'user', resourceFeedback: [feedback] });
+  assert.equal(authority.admitMaterial(structuredClone(source), structuredClone(selector)), true);
+  assert.equal(authority.admitMaterial(source), false);
+  assert.equal(authority.admitMaterial(source, { ...selector, limit: 4 }), false);
+  assert.equal(authority.admitMaterial({ ...source, expectedContentVersion: `sha256:${'c'.repeat(64)}` }, selector), false);
+  assert.equal(authority.admitMaterial({ ...source, toolCallId: 'another-call' }, selector), false);
+});
+
 test('dynamic Bot policy revision is pinned for grant audit and rechecked after every asynchronous step', () => {
   const f = fixture();
   let revision = 2;

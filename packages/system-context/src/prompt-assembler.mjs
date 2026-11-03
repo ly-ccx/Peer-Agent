@@ -1,5 +1,6 @@
 import { createWorkingContextPromptSource } from './sources/working-context-source.mjs';
 import { createAgentCommunicationPromptSource } from './sources/agent-communication-source.mjs';
+import { createInteractiveResultPromptSource } from './sources/interactive-result-source.mjs';
 import { createHash } from 'node:crypto';
 // This is the only System Context assembly Implementation. Hosts inject facts.
 import { joinPromptSections } from './rendering.mjs';
@@ -113,6 +114,7 @@ export function createDefaultPromptSourceRegistry() {
       createWorkSessionPromptSource(),
       createAgentCommunicationPromptSource(),
       createWorkingContextPromptSource(),
+      createInteractiveResultPromptSource(),
       createContinuityPromptSource(),
     ],
   });

@@ -61,6 +61,7 @@ export interface CreateTuiRuntimeOptions {
   readonly oneTimeApprovals?: { match(input: object): boolean };
   readonly goalPlanStore?: ReturnType<typeof createGoalPlanStore>;
   readonly sessionApprovals?: Set<string>;
+  readonly captureExecution?: import('./tui-host.ts').CreateTuiHostOptions['captureExecution'];
 }
 
 export interface TuiRuntime {
@@ -91,6 +92,7 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
     oneTimeApprovals: options.oneTimeApprovals,
     goalPlanStore: options.goalPlanStore,
     sessionApprovals: options.sessionApprovals,
+    captureExecution: options.captureExecution,
   });
   if (options.toolAllowlist) {
     host = restrictTuiHostTools(host, options.toolAllowlist);

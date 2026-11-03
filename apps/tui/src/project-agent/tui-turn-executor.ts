@@ -7,7 +7,8 @@ import {
   runBoundedVerification,
   isVerificationTurn,
   verificationExecutionBudget,
-  evaluateWorkSessionWrite
+  readOnlyWorkCapabilityAllowed,
+  agentCommunicationExcludedPrefixes
 } from "@peer-agent/runtime-node/project-agent";
 import {
   resolveRoleRoute,
@@ -67,6 +68,7 @@ export function createTuiTurnExecutor(options: {
   readMemory(workspaceId: string): readonly any[];
   memoryEnabled(workspaceId: string): boolean;
   getProviders(): readonly TuiCapabilityProvider[];
+  captureExecution?: import('../tui-host.ts').CreateTuiHostOptions['captureExecution'];
   onApproval?(approval: PendingApproval | null, streamId: string): void;
   oneTimeApprovals?: { match(input: object): boolean };
   goalPlanStore?: ReturnType<typeof createGoalPlanStore>;
@@ -101,7 +103,7 @@ export function createTuiTurnExecutor(options: {
     const mode = (input.mode ?? (profile.role === 'project_agent' ? 'project_agent' : 'chat')) as TuiRuntimeMode;
     const streamId = input.streamId || randomUUID();
     const runtime: TuiRuntime = runtimeFactory({ workspaceRoot: workspacePath, userDataPath: options.dataHome,
-      accessLevel: options.getSettings().localAccessLevel ?? 'restricted_local', providers: options.getProviders(), oneTimeApprovals: options.oneTimeApprovals, goalPlanStore: options.goalPlanStore, sessionApprovals });
+      accessLevel: options.getSettings().localAccessLevel ?? 'restricted_local', providers: options.getProviders(), oneTimeApprovals: options.oneTimeApprovals, goalPlanStore: options.goalPlanStore, sessionApprovals, captureExecution: options.captureExecution });
     const selectedId = input.modelProviderId || profile.modelSelection?.modelProviderId;
     runtime.setSessionFastMode(profile.modelSelection?.fastMode === true);
     if (selectedId) {
@@ -263,12 +265,15 @@ export function createTuiTurnExecutor(options: {
     return done;
   }
   return { runTurn, resolveGoalRole, executionScheduler,
-    async readDelegationCapabilities({ readOnly, workspaceId }: { readOnly: boolean; workspaceId: string }) {
+    async readDelegationCapabilities({ readOnly, workspaceId, agentKind = 'worker' }: { readOnly: boolean; workspaceId: string; agentKind?: string }) {
       const host = createTuiHost({ workspaceRoot: options.resolveWorkspacePath(workspaceId), userDataPath: options.dataHome,
         accessLevel: options.getSettings().localAccessLevel, providers: options.getProviders(), goalPlanStore: options.goalPlanStore });
       try {
+        const turnProfile = { role: 'work_session', agentKind, workspaceId };
+        const excluded = agentCommunicationExcludedPrefixes(turnProfile);
         return (host.toolDefinitionsForMode?.('goal') || []).filter(tool => !tool.capabilityId.startsWith('local.web.control.')
-          && evaluateWorkSessionWrite({ delegationOrigin: { readOnly } }, { capabilityId: tool.capabilityId, riskLevel: tool.metadata?.riskLevel }).allowed)
+          && !excluded.some((prefix: string) => tool.capabilityId.startsWith(prefix))
+          && (!readOnly || readOnlyWorkCapabilityAllowed({ capabilityId: tool.capabilityId, riskLevel: tool.metadata?.riskLevel, turnProfile })))
           .map(tool => tool.capabilityId);
       } finally { await host.dispose(); }
     },

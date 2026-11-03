@@ -53,6 +53,8 @@ import {
 } from "@peer-agent/runtime-node/project-agent";
 import { resolveGitBranchPrefix } from '@peer-agent/system-context';
 import { createProjectToolProvider } from './project-tool-provider.ts';
+import { createInteractiveRuntime } from '@peer-agent/runtime-node/interactive-results';
+import { createInteractiveToolProvider } from './interactive-tool-provider.ts';
 import { createTuiTurnExecutor } from './tui-turn-executor.ts';
 import type { PendingApproval } from '../tui-host.ts';
 
@@ -101,11 +103,17 @@ export function createTuiProjectHost(options: {
     isPlanRecoveryHeld: (plan: any) => host?.sessionHeld(plan?.delegationOrigin?.workspaceId, plan?.delegationOrigin?.sessionId) === true });
   const leases = createHostLease({ rootDir: runtimeRoot, hostId: `tui-${randomUUID()}`, surface: 'tui', appVersion: options.appVersion ?? '',
     projectAgentEnabled: () => !closed, botWorkspaceIds: () => selectedId && profiles.read(selectedId)?.status === 'active' ? [selectedId] : [] } as never);
+  const interactiveEnabled = (id: string) => holds(id) && getSettings().projectAgent?.interactiveResults === true;
+  const interactive = createInteractiveRuntime({ rootDir: runtimeRoot, goalPlanStore: plans, conversationStore: conversations,
+    getBotConversationId: (id: string) => profiles.read(id)?.agentConversationId, holdsLease: holds, enabled: interactiveEnabled,
+    classifyContext: () => 'D3_private' });
+  const interactiveProvider = createInteractiveToolProvider(interactive);
   const executor = createTuiTurnExecutor({ dataHome, getSettings, holdsLease: holds,
     resolveWorkspacePath: id => registry.get(id)?.path ?? options.workspacePath,
     readMessages, readInteractionContext: async id => (await conversations.readInteractionContext(id))?.messages || [],
     readMemory: id => memory.list({workspaceId: id, status: 'active'}).filter(item => isEffectiveMemory(item)),
-    memoryEnabled, getProviders: () => toolProvider ? [toolProvider] : [], scheduler, oneTimeApprovals, goalPlanStore: plans, createRuntime: options.createRuntime,
+    memoryEnabled, getProviders: () => [...(toolProvider ? [toolProvider] : []), ...(interactiveEnabled(selectedId) ? [interactiveProvider] : [])],
+    captureExecution: interactive.captureExecution, scheduler, oneTimeApprovals, goalPlanStore: plans, createRuntime: options.createRuntime,
     onApproval(approval, streamId) { if (approval) liveApprovals.set(streamId, approval); else liveApprovals.delete(streamId); changed(); },
     persistTurn(input, output) {
       if (!input.conversationId || !input.assistantMessageId) return;
@@ -219,7 +227,7 @@ export function createTuiProjectHost(options: {
     const next = currentWakeStamp();
     if (running.size && next === wakeStamp) return Promise.allSettled([...running]);
     wakeStamp = next;
-    const job = host.sync([selectedId]).finally(()=>{running.delete(job);});
+    const job = host.sync([selectedId]).then(() => { interactive.recoverWorkspace(selectedId); }).finally(()=>{running.delete(job);});
     running.add(job);
     return job;
   }
@@ -237,7 +245,7 @@ export function createTuiProjectHost(options: {
   const timer = options.autoStart === false ? null : setInterval(()=>void tick().catch(()=>changed()),1000);
   timer?.unref();
   if(options.autoStart!==false){watches.start(()=>selectedId?[selectedId]:[]);void tick();}
-  return { registry, profiles, directory, conversations, plans, approvals, memory, objectives, supervisor, host, leases, executor, inputs, lifecycle, readEvidence,
+  return { registry, profiles, directory, conversations, plans, approvals, memory, objectives, supervisor, host, leases, executor, inputs, lifecycle, readEvidence, interactive,
     workspaceId:()=>selectedId, holdsLease:holds, tick,
     async selectWorkspace(id: string) {if(id===selectedId)return;admissionClosed=true;const old=selectedId;if(old){await stopExecution(old);leases.release(old);}selectedId=id;admissionClosed=false;await host.restart(id);changed();},
     async takeover() {if(!selectedId)return {requested:false};const request=leases.requestTakeover(selectedId);if(request.reason==='free')leases.acquire(selectedId);await tick();return request;},
@@ -273,6 +281,6 @@ export function createTuiProjectHost(options: {
       else if(planApproval)await supervisor.cancel({sessionId:record.sessionId,reason:'plan_approval_denied'});
       if(!saved){saved=approvals.append({...record,state:decision==='approve'?'approved':decision==='cancel'?'cancelled':'denied',decidedAt:new Date().toISOString(),decidedBy:'local_ui',...(decision==='cancel'?{decisionReason:'permission_cancelled'}:{})});if(!saved)return {ok:false,error:'approval_store_failed'};}changed();return {ok:true,approval:approvals.list({workspaceId:selectedId}).find(row=>row.approvalId===approvalId)};
     },
-    async close() {admissionClosed=true;if(timer)clearInterval(timer);if(selectedId)await stopExecution(selectedId);closed=true;host.dispose();watches.dispose();toolProvider.dispose();leases.close();},
+    async close() {admissionClosed=true;if(timer)clearInterval(timer);if(selectedId)await stopExecution(selectedId);closed=true;interactive.close();host.dispose();watches.dispose();toolProvider.dispose();leases.close();},
   };
 }

@@ -49,7 +49,7 @@ export function createInteractiveMaterialSource({ readToolResult, readUserMateri
           const body = canonicalJSON(value);
           record = { value, contentVersion: digest(body), observedAt: now(), truncated: false, redacted: false, dataLevel: inheritedDataLevel, evidenceRefs: [] };
         } else {
-          if (typeof admitSource !== 'function' || await admitSource(source, executionBinding) !== true) fail('material_scope_denied');
+          if (typeof admitSource !== 'function' || await admitSource(source, executionBinding, input.selector) !== true) fail('material_scope_denied');
           check();
           const reader = source.kind === 'tool-result' ? readToolResult : source.kind === 'user-material' ? readUserMaterial : null;
           if (typeof reader !== 'function') fail('material_snapshot_unavailable');

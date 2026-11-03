@@ -55,7 +55,7 @@ export function createInteractiveStorage({ rootDir, assertCompatibility, maxByte
     try {
       db.exec('PRAGMA busy_timeout=0;');
       const version = Number(db.prepare('PRAGMA user_version').get()?.user_version);
-      if (![0, 2].includes(version) || !create && version !== 2 || db.prepare('PRAGMA quick_check').get()?.quick_check !== 'ok') throw problem('interactive_storage_incompatible');
+      if (![0, 3].includes(version) || !create && version !== 3 || db.prepare('PRAGMA quick_check').get()?.quick_check !== 'ok') throw problem('interactive_storage_incompatible');
       if (version === 0 && db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().length) throw problem('interactive_storage_corrupt');
       if (create) db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA journal_size_limit=8388608; PRAGMA wal_autocheckpoint=128;');
       if (version === 0) db.exec(`BEGIN IMMEDIATE;
@@ -67,11 +67,13 @@ export function createInteractiveStorage({ rootDir, assertCompatibility, maxByte
         CREATE TABLE saves(id TEXT NOT NULL, version TEXT NOT NULL, requestId TEXT NOT NULL, argsDigest TEXT NOT NULL, receipt TEXT NOT NULL, PRIMARY KEY(id,version,requestId));
         CREATE TABLE followups(id TEXT PRIMARY KEY, owner TEXT NOT NULL, argsDigest TEXT NOT NULL, snapshot TEXT NOT NULL);
         CREATE TABLE materials(id TEXT PRIMARY KEY, owner TEXT NOT NULL, object TEXT NOT NULL, metadata TEXT NOT NULL);
-        PRAGMA user_version=2; COMMIT;`);
+        CREATE TABLE attempts(id TEXT PRIMARY KEY, body TEXT NOT NULL);
+        CREATE TABLE publication_candidates(id TEXT PRIMARY KEY, failures INTEGER NOT NULL, active TEXT);
+        PRAGMA user_version=3; COMMIT;`);
       const context = { db, file, readOnly: !create, hostEpoch, assertFile() {
         assertDirectory(path.dirname(folder)); assertDirectory(folder);
         if (identity !== fileIdentity(file)) throw problem('interactive_storage_replaced');
-        if (Number(db.prepare('PRAGMA user_version').get()?.user_version) !== 2) throw problem('interactive_storage_incompatible');
+        if (Number(db.prepare('PRAGMA user_version').get()?.user_version) !== 3) throw problem('interactive_storage_incompatible');
         for (const suffix of ['-wal', '-shm', '-journal']) if (existsSync(file + suffix)) fileIdentity(file + suffix);
       } };
       connections.set(workspaceId, context); return context;
@@ -80,10 +82,10 @@ export function createInteractiveStorage({ rootDir, assertCompatibility, maxByte
   function budget(context) {
     const stored = context.db.prepare('SELECT COALESCE(SUM(bytes),0) AS bytes FROM objects').get().bytes;
     let manifest = 0;
-    const metadata = ['versions', 'operations', 'states', 'followups', 'materials', 'saves'].reduce((sum, table) => {
-      const field = ({ versions: 'metadata', operations: 'receipt', states: 'snapshot', followups: 'snapshot', materials: 'metadata', saves: 'receipt' })[table];
+    const metadata = ['versions', 'operations', 'states', 'followups', 'materials', 'saves', 'attempts'].reduce((sum, table) => {
+      const field = ({ versions: 'metadata', operations: 'receipt', states: 'snapshot', followups: 'snapshot', materials: 'metadata', saves: 'receipt', attempts: 'body' })[table];
       const bytes = Number(context.db.prepare(`SELECT COALESCE(SUM(length(CAST(${field} AS BLOB))),0) AS bytes FROM ${table}`).get().bytes);
-      if (['versions', 'operations', 'materials'].includes(table)) manifest += bytes;
+      if (['versions', 'operations', 'materials', 'attempts'].includes(table)) manifest += bytes;
       return sum + bytes;
     }, 0);
     if (Number(stored) + metadata > maxBytes) throw problem('interactive_store_limit');

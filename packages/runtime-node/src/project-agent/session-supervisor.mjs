@@ -1,4 +1,6 @@
 import { CONTINUITY_CAPABILITY_IDS } from './working-context-specs.mjs';
+import { INTERACTIVE_INSPECT_CAPABILITY, INTERACTIVE_PUBLISH_CAPABILITY } from '@peer-agent/protocol';
+import { interactiveRoleAllows } from '../interactive-results/role-policy.mjs';
 import { controlProjectWork } from './work-control.mjs';
 import { executionAdmissionDenial } from './execution-admission.mjs';
 import { createSessionControl } from './session-control.mjs';
@@ -68,6 +70,7 @@ const READ_ONLY_CAPABILITIES = new Set([
   ...CONTINUITY_CAPABILITY_IDS,
   'local.file.read', 'local.file.list', 'local.file.search', 'local.search.aggregate', 'local.image.read',
   'local.git.query',
+  INTERACTIVE_INSPECT_CAPABILITY,
   'local.goal.get_plan', 'local.goal.update_task', 'local.goal.revise_plan',
   'local.goal.record_evidence', 'local.interaction.request_user_input',
   'local.goal.explore',
@@ -86,7 +89,15 @@ export function evaluateWorkSessionWrite(plan, action = {}) {
   if (!sessionExecutionCurrent(plan)) return { allowed: false, error: 'work_execution_stopped' };
   const resourceDenial = executionAdmissionDenial(plan, action);
   if (resourceDenial) return { allowed: false, error: resourceDenial };
+  if (!interactiveRoleAllows(action.capabilityId, action.turnProfile)) return { allowed: false, error: 'interactive_role_denied' };
+  if (action.capabilityId === INTERACTIVE_PUBLISH_CAPABILITY && (!plan?.delegationOrigin || !action.executionIdentity
+    || !sameExecution(action.executionIdentity, executionIdentity(plan)))) return { allowed: false, error: 'interactive_execution_stale' };
   if (plan?.delegationOrigin?.readOnly !== true) return { allowed: true };
+  return readOnlyWorkCapabilityAllowed(action) ? { allowed: true } : { allowed: false, error: 'read_only', message: '只读任务不能写入。' };
+}
+
+/** Inventory has no execution grant. Actual dispatch additionally checks plan/epoch above. */
+export function readOnlyWorkCapabilityAllowed(action = {}) {
   const capabilityId = typeof action.capabilityId === 'string' ? action.capabilityId : '';
   const permissionKind = typeof action.permissionKind === 'string' ? action.permissionKind : '';
   const toolName = typeof action.toolName === 'string'
@@ -98,8 +109,9 @@ export function evaluateWorkSessionWrite(plan, action = {}) {
   // Bookkeeping of task facts and loading Skill text do not execute project mutations.
   const reading = READ_ONLY_CAPABILITIES.has(capabilityId) || capabilityId.startsWith('local.skill.')
     || (capabilityId.startsWith('local.mcp.') && ['L0_inert', 'L1_local_read'].includes(action.riskLevel));
-  if (!writing && reading) return { allowed: true };
-  return { allowed: false, error: 'read_only', message: '只读任务不能写入。' };
+  const internalPublication = capabilityId === INTERACTIVE_PUBLISH_CAPABILITY && interactiveRoleAllows(capabilityId, action.turnProfile)
+    && (action.riskLevel === undefined || ['L2_local_write', 'L2_low_write'].includes(action.riskLevel));
+  return !writing && (reading || internalPublication) && interactiveRoleAllows(capabilityId, action.turnProfile);
 }
 
 export function resolvePlanApproval(policy, input = {}) {
@@ -400,7 +412,13 @@ export function createSessionSupervisor({
     let availableCapabilities;
     try { availableCapabilities = await readDelegationCapabilities?.({ readOnly: input.readOnly === true, workspaceId }); }
     catch { availableCapabilities = undefined; }
-    return evaluateDelegationCapabilities(input, availableCapabilities);
+    const worker = evaluateDelegationCapabilities(input, availableCapabilities);
+    if (!worker.ok || !worker.required.includes(INTERACTIVE_PUBLISH_CAPABILITY)) return worker;
+    let verifierCapabilities;
+    try { verifierCapabilities = await readDelegationCapabilities?.({ readOnly: true, workspaceId, agentKind: 'verifier' }); }
+    catch { verifierCapabilities = undefined; }
+    const verifier = evaluateDelegationCapabilities({ requiredCapabilities: [INTERACTIVE_INSPECT_CAPABILITY] }, verifierCapabilities);
+    return verifier.ok ? worker : { ...verifier, diagnostic: { ...verifier.diagnostic, role: 'verifier' } };
   }
 
   async function spawnLocked(input, context) {

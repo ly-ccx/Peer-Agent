@@ -39,6 +39,7 @@ const DEFAULT_SOURCE_IDS = [
   'work-session',
   'agent-communication',
   'working-context',
+  'interactive-results',
   'runtime.continuity',
 ];
 

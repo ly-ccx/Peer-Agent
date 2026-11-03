@@ -19,9 +19,11 @@ const page = (text, request) => {
 /** Governed execution. Authority, permission and canonical index ports come only from the host. */
 export function createInteractiveResultProvider({ store, stateStore, materialSource, resolveAuthority, index,
   validate = runInteractiveValidation, now = () => new Date().toISOString() }) {
-  function reconcile(rawCall) {
+  function reconcile(rawCall, assertCurrent) {
+    if (assertCurrent() !== true) fail('interactive_execution_stale', 'denied');
     const saved = store.getOperation(rawCall);
     if (!saved) fail('publication_unknown');
+    store.finishAttempt(saved.callRef);
     if (saved.unchanged || saved.publicationStatus === 'published') return saved;
     if (saved.publicationStatus !== 'index_pending') fail('publication_unknown');
     if (!index?.recordEvidenceRefs || !index?.findEvidenceIndexRecords) fail('publication_index_pending');
@@ -29,20 +31,22 @@ export function createInteractiveResultProvider({ store, stateStore, materialSou
     const entry = saved.indexEntry;
     index.recordEvidenceRefs({ ...entry, evidenceRefs: [entry.evidenceRef] }, { durable: true });
     const actual = index.findEvidenceIndexRecords([entry.evidenceRef])[0];
-    return store.markIndexed(saved.callRef, actual);
+    return store.markIndexed(saved.callRef, actual, assertCurrent);
   }
   function recoverOwner(owner, assertOwner) {
     if (!normalizeInteractiveOwner(owner) || typeof assertOwner !== 'function' || assertOwner(owner) !== true) fail('interactive_scope_denied', 'denied');
     return store.listPending(owner).map(receipt => {
-      try { return reconcile(receipt.callRef); }
+      try { return reconcile(receipt.callRef, () => assertOwner(owner) === true); }
       catch (error) { return { callRef: receipt.callRef, publicationStatus: 'index_pending', code: error.code ?? 'publication_index_pending' }; }
     });
   }
   return { providerId: 'interactive-result-provider', capabilityIds: [PUBLISH, INSPECT], recoverOwner,
+    /** @param {{call: {toolCallId: string, capabilityId: string, arguments?: unknown}}} request
+     * @param {{locale?: string, toolContext?: Record<string, any>, signal?: AbortSignal, requestPermission?: (request: any) => any}} [context] */
     async executeCapability({ call }, { locale = 'zh-CN', toolContext = {}, signal, requestPermission } = {}) {
       if (![PUBLISH, INSPECT].includes(call.capabilityId)) return null;
       let grant = createPermissionGrant({ toolCallId: call.toolCallId, granted: false, scope: call.capabilityId });
-      let authority, callRef, dataLevel = 'D2_sensitive';
+      let authority, callRef, validationStarted = false, attemptStarted = false, dataLevel = 'D2_sensitive';
       const validations = [];
       const guard = () => {
         if (signal?.aborted) fail('interactive_cancelled', 'cancelled');
@@ -82,8 +86,11 @@ export function createInteractiveResultProvider({ store, stateStore, materialSou
             if (prior.argsDigest !== jsonDigest(draft)) fail('publication_parameter_conflict');
             // Reading/reconciling an already committed call never reuses its stored grant or executes it again.
             grant = createPermissionGrant({ toolCallId: call.toolCallId, granted: true, scope: { capabilityId: PUBLISH, operation: 'receipt-read', callRef } });
-            return published(reconcile(callRef));
+            return published(reconcile(callRef, guard));
           }
+          const prepared = store.getAttempt(callRef);
+          if (prepared && prepared.argsDigest !== jsonDigest(draft)) fail('publication_parameter_conflict');
+          if (prepared?.phase === 'failed') fail(prepared.code, prepared.status);
           if (draft.publication.kind === 'revise' && (!same(draft.publication.base.owner, authority.owner)
             || await authority.admitResult?.(draft.publication.base) !== true)) fail('interactive_scope_denied', 'denied');
           guard();
@@ -99,13 +106,17 @@ export function createInteractiveResultProvider({ store, stateStore, materialSou
           guard();
           grant = { ...createPermissionGrant({ toolCallId: call.toolCallId, granted: true, scope }),
             ...(authority.policyRevision ? { policyRevision: authority.policyRevision } : {}) };
+          store.beginAttempt({ callRef, source: authority.source, draft }, guard); attemptStarted = true;
           const resolved = await materialSource.resolveInputs(draft.inputs, authority, { signal, inheritedDataLevel: dataLevel });
           dataLevel = resolved.dataLevel; guard();
+          validationStarted = true;
           const content = await validate({ operation: 'validate', draft, bindings: resolved.bindings }, { signal });
+          validationStarted = false;
           guard();
           const receipt = store.commitPublication({ owner: authority.owner, source: authority.source, draft, content,
             provenance: resolved.provenance, dataLevel, grant, ...(authority.streamId ? { streamId: authority.streamId } : {}) }, guard);
-          return published(receipt.publicationStatus === 'published' ? receipt : reconcile(callRef));
+          store.finishAttempt(callRef);
+          return published(receipt.publicationStatus === 'published' ? receipt : reconcile(callRef, guard));
         }
         const request = normalizeInteractiveInspect(call.arguments);
         if (!request) fail('interactive_inspect_invalid');
@@ -118,8 +129,14 @@ export function createInteractiveResultProvider({ store, stateStore, materialSou
         grant = createPermissionGrant({ toolCallId: call.toolCallId, granted: true, scope: { capabilityId: INSPECT, target, view: request.view } });
         if (target.kind === 'publication') {
           let receipt = store.getOperation(target.reference);
-          if (!receipt) fail('publication_unknown');
-          try { receipt = reconcile(target.reference); } catch (error) {
+          if (!receipt) {
+            const attempted = store.getAttempt(target.reference);
+            if (!attempted) fail('publication_unknown');
+            guard(); return result({ kind: 'interactive_publication_status', callRef: target.reference,
+              publicationStatus: attempted.phase === 'prepared' ? 'unknown' : 'not_committed', effectCommitted: false,
+              preparationStatus: attempted.phase, ...(attempted.code ? { diagnostic: { code: attempted.code } } : {}) });
+          }
+          try { receipt = reconcile(target.reference, guard); } catch (error) {
             if (error.code === 'publication_index_conflict') throw error;
           }
           const committed = store.getVersion(receipt.reference, { allowPending: true });
@@ -131,7 +148,8 @@ export function createInteractiveResultProvider({ store, stateStore, materialSou
         dataLevel = fixed.dataLevel;
         const base = { kind: 'interactive_inspection', reference: fixed.reference, specHash: content.specHash, view: request.view,
           dataLevel, source: fixed.source, evidenceRef: fixed.evidenceRef };
-        const sources = fixed.provenance.map(({ bindingId, source, contentVersion, observedAt, truncated, redacted, dataLevel }) => ({ bindingId, source, contentVersion, observedAt, truncated, redacted, dataLevel }));
+        const sources = fixed.provenance.map(({ bindingId, source, contentVersion, selectedDigest, selector, observedAt, truncated, redacted, dataLevel }) =>
+          ({ bindingId, source, contentVersion, selectedDigest, ...(selector ? { selector } : {}), observedAt, truncated, redacted, dataLevel }));
         let output;
         if (request.view === 'metadata') output = { ...base, title: content.title, publicationStatus: 'published', sources, ...(fixed.predecessor ? { predecessor: fixed.predecessor } : {}) };
         else if (request.view === 'text') output = { ...base, classification: 'model-text-fallback', ...page(content.textFallback, request) };
@@ -163,10 +181,15 @@ export function createInteractiveResultProvider({ store, stateStore, materialSou
         let receipt, operationUnreadable = false;
         if (callRef) { try { receipt = store.getOperation(callRef); } catch { operationUnreadable = true; } }
         const committed = !!receipt;
+        const status = error.status ?? (code === 'interactive_cancelled' ? 'cancelled' : code === 'interactive_validation_timeout' ? 'timeout' : 'failed');
+        if (attemptStarted && !operationUnreadable) {
+          try { store.finishAttempt(callRef, committed ? undefined : { code,
+            status, contentFailure: validationStarted && !['interactive_cancelled', 'interactive_validation_timeout'].includes(code) && !code.startsWith('interactive_worker_') }); }
+          catch { /* Original failure/unknown remains visible; immutable call binding is retained. */ }
+        }
         const reason = operationUnreadable ? 'publication_unknown'
           : committed && receipt.publicationStatus === 'index_pending' && code !== 'publication_parameter_conflict'
             ? (code === 'publication_index_conflict' ? code : 'publication_index_pending') : code;
-        const status = error.status ?? (code === 'interactive_cancelled' ? 'cancelled' : code === 'interactive_validation_timeout' ? 'timeout' : 'failed');
         const failed = createFailedClientToolResult({ call, locale, reason, status, dataLevel });
         failed.outputPreview = { ...failed.outputPreview,
           ...(call.capabilityId === PUBLISH ? { publicationStatus: operationUnreadable ? 'unknown' : committed ? receipt.publicationStatus : 'not_committed' } : {}),

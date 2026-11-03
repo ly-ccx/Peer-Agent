@@ -166,7 +166,7 @@ export const INTERACTIVE_RESULT_LIMITS = Object.freeze({
   stateBytes: 64 * 1024, collectionItems: 500, textChars: 8192, tablePageRows: 100,
   tablePageCells: 1000, chartSeries: 6, chartPoints: 500, evaluationSteps: 40_000,
   workerTimeoutMs: 2000, resultsPerBot: 256, storeBytes: 128 * 1024 * 1024,
-  manifestBytes: 2 * 1024 * 1024,
+  manifestBytes: 2 * 1024 * 1024, contentRepairs: 2,
 });
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
   && [Object.prototype, null].includes(Object.getPrototypeOf(v))

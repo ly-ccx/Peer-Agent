@@ -1,4 +1,5 @@
 import { collectToolEvidenceRefs } from '@peer-agent/runtime-core';
+import { appendInteractiveMaterialNotice } from './interactive-results/capture.mjs';
 
 import {
   materializeToolResultContent,
@@ -192,7 +193,7 @@ export function encodeProviderToolResult(
     conversationId: input.conversationId,
     toolCallId,
     tool: input.tool,
-    content,
+    content: appendInteractiveMaterialNotice(content, input.execution),
     isError: result.status === 'failed',
     baseDir: input.baseDir,
     ...(inlineMaxChars ? { inlineMaxChars } : {}),
@@ -218,6 +219,7 @@ export function encodeProviderToolResult(
   const view: Record<string, unknown> = {
     ...(result.status ? { status: result.status } : {}),
     ...(result.output === undefined ? {} : { output: result.output }),
+    ...(result.output === undefined && result.outputPreview !== undefined ? { outputPreview: result.outputPreview } : {}),
     ...(result.error === undefined ? {} : { error: result.error }),
     ...(evidenceRefs.length > 0 ? { evidenceRefs: [...evidenceRefs] } : {}),
   };

@@ -1,6 +1,8 @@
 import { collectToolEvidenceRefs } from '@peer-agent/runtime-core';
 import { materializeToolResultContent, isLocalImageObservation } from '@peer-agent/runtime-node';
 import { isDesktopPreviewObservation } from '../runtime-gateway/desktop-preview-service.mjs';
+import { appendInteractiveMaterialNotice } from '@peer-agent/runtime-node/interactive-results';
+import { captureDesktopInteractiveExecution } from '../interactive-results/runtime-port.mjs';
 
 import { executeProjectedModelTool } from './projected-tool-executor.mjs';
 import {
@@ -496,6 +498,7 @@ export async function executeModelToolCall({
     automationProposalService,
     ensureBrowserReady,
   });
+  if (result.execution) result.execution = captureDesktopInteractiveExecution(result.execution, toolContext);
   if(result.execution&&typeof toolContext.onToolExecution==='function')toolContext.onToolExecution(result.execution);
   if (signal?.aborted) {
     const endedAtMs = Date.now();
@@ -510,7 +513,7 @@ export async function executeModelToolCall({
     });
     return { aborted: true, args, output: '' };
   }
-  const rawOutput = materializeToolOutput(result);
+  const rawOutput = appendInteractiveMaterialNotice(materializeToolOutput(result), result.execution);
   const evidenceRefs = collectToolEvidenceRefs({ toolCallId, execution: result.execution });
   if (evidenceRefs.length > 0 && typeof goalPlanStore?.recordEvidenceRefs === 'function') {
     try {

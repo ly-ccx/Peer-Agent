@@ -6,4 +6,5 @@ export { createInteractiveResultProvider } from './interactive-results/provider.
 export { INTERACTIVE_TOOL_DEFINITIONS } from './interactive-results/tool-specs.mjs';
 export { createInteractiveAuthority, interactiveExecutionRole, interactiveCapabilitiesForProfile } from './interactive-results/authority.mjs';
 export { createInteractiveRuntime } from './interactive-results/runtime.mjs';
+export { admitInteractiveToolSet } from './interactive-results/role-policy.mjs';
 export { canonicalInteractiveObservation, appendInteractiveMaterialNotice } from './interactive-results/capture.mjs';

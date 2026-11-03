@@ -10,7 +10,8 @@
       "default": "./src/index.mjs"
     },
     "./values": { "types": "./src/values.d.ts", "default": "./src/limits.mjs" },
-    "./state": { "types": "./src/state.d.ts", "default": "./src/state.mjs" }
+    "./state": { "types": "./src/state.d.ts", "default": "./src/state.mjs" },
+    "./context": { "types": "./src/context.d.ts", "default": "./src/context.generated.mjs" }
   },
   "files": [
     "src",
@@ -19,7 +20,7 @@
     "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
-    "build": "node --check src/index.mjs",
+    "build": "node scripts/build-context.mjs && node --check src/index.mjs",
     "typecheck": "node --check src/index.mjs",
     "test": "OPENUI_TELEMETRY_DISABLED=1 node --test src/*.test.mjs"
   },

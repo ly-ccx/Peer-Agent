@@ -120,7 +120,7 @@ test('unknown schema, removed database and tampered immutable bytes remain error
   const db = new DatabaseSync(file);
   db.exec('PRAGMA user_version=999');
   assert.throws(() => store.getVersion(first.reference), { code: 'interactive_storage_incompatible' });
-  db.exec('PRAGMA user_version=2');
+  db.exec('PRAGMA user_version=3');
   db.prepare("UPDATE objects SET body=replace(body,'Trial','False')").run();
   assert.throws(() => store.getVersion(first.reference), { code: 'interactive_content_corrupt' });
   db.close(); store.close(); rmSync(file);

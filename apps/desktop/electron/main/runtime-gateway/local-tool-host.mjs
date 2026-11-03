@@ -30,6 +30,7 @@ import { createLocalExternalBrowserProvider } from './local-external-browser-pro
 import { createConfiguredHookRunner } from './hook-config.mjs';
 import { appendHookEvidence } from './hook-evidence.mjs';
 import { createFailedClientToolResult, createPermissionGrant } from './tool-result-factory.mjs';
+import { createDesktopInteractiveProvider } from '../interactive-results/runtime-port.mjs';
 
 export function createLocalToolHost({
   workspaceRoot,
@@ -99,6 +100,7 @@ export function createLocalToolHost({
       activeShellProvider,
       goalProvider,
       activeDelegationProvider,
+      createDesktopInteractiveProvider(),
       activeMemoryProvider,
       createWorkingContextProvider({ supervisor: liveDelegationSupervisor() }),
       interactionProvider,

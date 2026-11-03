@@ -29,6 +29,7 @@
     "typecheck": "node --check src/index.mjs"
   },
   "dependencies": {
+    "@peer-agent/interactive-content": "workspace:*",
     "@peer-agent/runtime-core": "workspace:*"
   }
 }

@@ -89,6 +89,31 @@ test('committed pending publication reports actual effect, survives cancellation
   assert.deepEqual(f.store.getVersion(preview.reference).reference, preview.reference);
   assert.throws(() => f.provider.recoverOwner(owner, () => false), { code: 'interactive_scope_denied' });
 });
+
+test('failed preparation pins call parameters and permits only two content repairs across new wire call IDs', async t => {
+  const f = fixture(t), invalid = { ...draft, program: 'root=HtmlView("forbidden")' };
+  const first = await f.publish(invalid, 'bad-a');
+  assert.equal(first.result.status, 'failed');
+  const permissions = f.counts.permissions;
+  const replay = await f.publish(invalid, 'bad-a');
+  assert.equal(replay.result.outputPreview.reason, first.result.outputPreview.reason);
+  assert.equal(f.counts.permissions, permissions);
+  assert.equal((await f.publish(draft, 'bad-a')).result.outputPreview.reason, 'publication_parameter_conflict');
+  for (const id of ['bad-b', 'bad-c']) assert.notEqual((await f.publish(invalid, id)).result.outputPreview.reason, 'interactive_repair_limit');
+  assert.equal((await f.publish(draft, 'bad-d')).result.outputPreview.reason, 'interactive_repair_limit');
+  const status = await f.execute(INSPECT, { target: { kind: 'publication', reference: { owner, conversationId: 'worker-a', toolCallId: 'bad-a' } }, view: 'metadata' }, 'read-bad');
+  assert.equal(status.result.outputPreview.publicationStatus, 'not_committed');
+  assert.equal(status.result.outputPreview.preparationStatus, 'failed');
+  assert.equal(f.index.listEvidenceIndex().length, 0);
+});
+
+test('a successful corrected candidate resets the content repair budget for a subsequent independent result', async t => {
+  const f = fixture(t), invalid = { ...draft, program: 'root=HtmlView("forbidden")' };
+  assert.equal((await f.publish(invalid, 'bad-a')).result.status, 'failed');
+  assert.equal((await f.publish(draft, 'good-a')).result.status, 'success');
+  for (const id of ['bad-b', 'bad-c', 'bad-d']) assert.notEqual((await f.publish(invalid, id)).result.outputPreview.reason, 'interactive_repair_limit');
+  assert.equal((await f.publish(draft, 'bad-e')).result.outputPreview.reason, 'interactive_repair_limit');
+});
 test('a lost durable index acknowledgment reconciles without another index row or user artifact', async t => {
   const f = fixture(t); f.setIndexAcknowledged(false);
   const failed = await f.publish();
@@ -99,6 +124,25 @@ test('a lost durable index acknowledgment reconciles without another index row o
   assert.equal(statSync(file).size, bytes);
   assert.equal(f.index.listEvidenceIndex().length, 1);
   assert.equal(f.counts.permissions, 1);
+});
+
+test('recovery losing the current owner lease cannot clear the pending responsibility after index append', async t => {
+  const f = fixture(t); f.setIndex(false);
+  const pending = await f.publish();
+  let owned = true;
+  const recovery = createInteractiveResultProvider({ store: f.store, index: {
+    assertInteractiveEvidenceCompatible: () => true,
+    recordEvidenceRefs(entry, options) { f.index.recordEvidenceRefs(entry, options); owned = false; },
+    findEvidenceIndexRecords: refs => f.index.findEvidenceIndexRecords(refs),
+  } });
+  const first = recovery.recoverOwner(owner, () => owned);
+  assert.equal(first[0].code, 'interactive_execution_stale');
+  assert.equal(f.store.listPending(owner).length, 1);
+  assert.equal(f.index.listEvidenceIndex().length, 1);
+  owned = true; f.setIndex(true);
+  assert.equal(f.provider.recoverOwner(owner, () => owned)[0].publicationStatus, 'published');
+  assert.deepEqual(f.store.getVersion(pending.result.outputPreview.reference).reference, pending.result.outputPreview.reference);
+  assert.equal(f.index.listEvidenceIndex().length, 1);
 });
 test('the same model wire call ID in two worker conversations has separate canonical publication evidence', async t => {
   const f = fixture(t), first = await f.publish();

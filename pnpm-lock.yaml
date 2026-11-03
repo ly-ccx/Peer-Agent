@@ -329,6 +329,9 @@ importers:
 
   packages/system-context:
     dependencies:
+      '@peer-agent/interactive-content':
+        specifier: workspace:*
+        version: link:../interactive-content
       '@peer-agent/runtime-core':
         specifier: workspace:*
         version: link:../runtime-core

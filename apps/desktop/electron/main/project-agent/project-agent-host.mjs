@@ -75,6 +75,8 @@ import { createDesktopProjectFacts } from './project-facts.mjs';
 import { createProjectLifecycleEffects } from './project-lifecycle-effects.mjs';
 import { createDiagnosticsExport } from './diagnostics-export.mjs';
 import { retryProjectAgentTurn } from './response-retry.mjs';
+import { createInteractiveRuntime } from '@peer-agent/runtime-node/interactive-results';
+import { installDesktopInteractiveRuntime } from '../interactive-results/runtime-port.mjs';
 import { createDesktopRecoveryController } from './project-recovery-controller.mjs';
 
 /** Current user inputs become the model messages, including bounded image thumbnails. */
@@ -176,6 +178,11 @@ export function registerDesktopProjectAgent({
   const accessAuthority = createBotAccessPolicyAuthority({ dataHome, profileStore, conversationStore, goalPlanStore,
     legacyAccessLevel: getSettings()?.localAccessLevel });
   accessAuthority.initialize();
+  const interactiveEnabled = workspaceId => ownsProject(workspaceId) && readRuntimePolicy()?.projectAgent?.interactiveResults === true;
+  const interactive = createInteractiveRuntime({ rootDir: runtimeRoot, goalPlanStore, conversationStore,
+    getBotConversationId: id => profileStore.read(id)?.agentConversationId, holdsLease: ownsProject, enabled: interactiveEnabled,
+    classifyContext: () => 'D3_private' });
+  const uninstallInteractive = installDesktopInteractiveRuntime({ runtime: interactive, enabled: interactiveEnabled });
   const memoryStore = createMemoryStore({ rootDir: dataHome });
   configurePermissions?.(approvalStore);
   const memoryChanged = workspaceId => {
@@ -411,7 +418,7 @@ export function registerDesktopProjectAgent({
     acquireLease: workspaceId => { if (runtimeEnabled() && profileStore.read(workspaceId)?.status === 'active') return acquireLease?.(workspaceId); },
     readMessages: readCanonicalMessages,
     readInputFacts: inputFacts || readCanonicalMessages,
-    restoreQueue: workspaceId => { applyStartupApprovalRecovery({approvalStore, goalPlanStore, canRecover: row => row.workspaceId === workspaceId}); return supervisor.recoverQueue(workspaceId); },
+    restoreQueue: workspaceId => { interactive.recoverWorkspace(workspaceId); applyStartupApprovalRecovery({approvalStore, goalPlanStore, canRecover: row => row.workspaceId === workspaceId}); return supervisor.recoverQueue(workspaceId); },
     recoverTasks: workspaceId => goalRunner?.recoverContextCheckpoints?.({ workspaceId, deferPump: true }),
     restoreWatches:objectiveWatches.restore,stopWatches:objectiveWatches.stopWorkspace,
     activateSessions: workspaceId => supervisor.resumeRecovered(workspaceId),
@@ -647,7 +654,8 @@ export function registerDesktopProjectAgent({
       supervisor,
       objectives,
       objectiveWatches,
-      dispose: () => { accessAuthority.close(); projectAgent.dispose(); uninstallYield?.(); host.dispose();void objectiveWatches.dispose(); uninstallDelegation(); uninstallVerification(); uninstallDelivery(); uninstallProactivity(); uninstallMemory(); },
+      interactive,
+      dispose: () => { uninstallInteractive(); interactive.close(); accessAuthority.close(); projectAgent.dispose(); uninstallYield?.(); host.dispose();void objectiveWatches.dispose(); uninstallDelegation(); uninstallVerification(); uninstallDelivery(); uninstallProactivity(); uninstallMemory(); },
     });
   }
   const memory = createProjectMemoryService({
