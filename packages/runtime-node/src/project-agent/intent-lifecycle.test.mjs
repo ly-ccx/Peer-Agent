@@ -323,6 +323,8 @@ test('assessment query has no child requirement, forged typed waits fail, and si
   const f = await fixture(t);
   const query = await f.coordinate({ action: 'query', workId: 'g' }, f.context('t1'));
   assert.equal(query.ok, true); assert.equal(query.goalRevision, 0); assert.equal(query.currentReplyRef, 't1-reply-1');
+  assert.equal(query.decisionFrame.currentReplyRef, 't1-reply-1');
+  assert.equal(f.coordinator.turnFacts({ ...f.job, attemptId: 'new-attempt' }).currentReplyRef, 'new-attempt-reply-1');
   assert.equal(f.coordinator.dispositionMissing(f.job), false); assert.equal(f.store.read().mandates, undefined);
   const result = await f.coordinate({ action: 'assess', assessment: { ...f.initial, expectedGoalRevision: 0 } }, f.context('t1', { currentInputAnchors: ['input-i'] }));
   assert.equal(result.error, 'wait_source_stale');

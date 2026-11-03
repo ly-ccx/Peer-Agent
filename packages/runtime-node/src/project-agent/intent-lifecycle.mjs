@@ -68,7 +68,7 @@ export function createIntentLifecycle({ storeFor, readSession, readMessages, rea
       sourceInputIds: s.current.map(row => row.inputId || row.id), sourceEventIds: (context.events || []).map(row => row.eventId),
       eventInventoryIds: [...new Set([...(context.events || []).map(row => row.eventId), ...(s.work.pendingEventIds || []), ...(s.work.consumedEventIds || [])])].slice(-128),
       sourceDecisionRef: frame?.sourceDecisionRef,
-      currentReplyRef: `${context.turnId}-reply-1`,
+      currentReplyRef: frame.currentReplyRef,
       operations: Object.values(s.state.transitions || {}).filter(row => row.workId === s.workId).slice(-16)
         .map(row => ({ operationId: row.operationId, phase: row.phase, error: row.error })),
       availableActions: frame?.availableActions || [] };

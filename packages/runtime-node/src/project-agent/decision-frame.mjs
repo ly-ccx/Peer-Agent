@@ -32,7 +32,9 @@ export function createDecisionFrame({ state, workspaceId, parentConversationId, 
   const related = sessions.filter(row => scopeOf(row, workspaceId, parentConversationId) && relatedIds.has(row.sessionId))
     .sort((a, b) => Number(eventSessions.has(b.sessionId)) - Number(eventSessions.has(a.sessionId)) || a.sessionId.localeCompare(b.sessionId));
   const start = afterSessionId ? related.findIndex(row => row.sessionId === afterSessionId) + 1 : 0;
-  const frame = { workId, workRevision: intent?.revision || 0, goalRevision, sourceInputIds: ids(currentInputIds).slice(0, 16), sourceEventIds: ids(eventIds).slice(0, 16),
+  const frame = { workId, workRevision: intent?.revision || 0, goalRevision,
+    ...(typeof turnId === 'string' && turnId ? { currentReplyRef: `${turnId}-reply-1` } : {}),
+    sourceInputIds: ids(currentInputIds).slice(0, 16), sourceEventIds: ids(eventIds).slice(0, 16),
     sourceDecisionRef: intent?.decision.disposition.kind === 'continue' ? intent.decision.operationId : sameTurnOrigin ? originDecisionRef : undefined,
     intent: intent ? { lifecycle: intent.lifecycle, outcome: text(intent.interpretation.outcome, 1000),
       constraints: intent.interpretation.constraints.slice(0, 8).map(row => text(row, 250)), nonGoals: intent.interpretation.nonGoals.slice(0, 8).map(row => text(row, 250)),
