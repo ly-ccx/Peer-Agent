@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createRequire } from 'node:module';
-import { mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -107,6 +107,28 @@ test('native resource window uses actual preload, authorized IPC, domain state a
     await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; }); await page.setViewportSize({ width: 480, height: 700 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.screenshot({ path: path.join(root, 'native-restored-dark.png'), animations: 'disabled' });
+    const surfaceChunk = readdirSync(path.join(output, 'assets')).find(name => /^InteractiveSurface-.*\.js$/.test(name));
+    assert.ok(surfaceChunk, 'the SDK surface remains a separate optional chunk');
+    const chunk = path.join(output, 'assets', surfaceChunk), unavailable = `${chunk}.unavailable`;
+    const closedForFailure = page.waitForEvent('close'); await electron.evaluate(() => globalThis.nativeFixture.close()); await closedForFailure;
+    renameSync(chunk, unavailable);
+    try {
+      const retryWindow = electron.waitForEvent('window').catch(() => null);
+      const reopened = await electron.evaluate((_electron, id) => globalThis.nativeFixture.restore(id), history.entries[0].id);
+      assert.equal(reopened.ok, true, JSON.stringify(reopened)); page = await retryWindow; assert.ok(page);
+      await page.getByText('The calculation view could not load. Your input and fixed result are preserved. Save drafts before reopening.', { exact: true }).waitFor();
+      await page.getByText('Saved model summary, unverified', { exact: true }).waitFor();
+      assert.equal(await page.getByLabel('Divisor', { exact: true }).count(), 0);
+      assert.equal((await electron.evaluate(() => globalThis.nativeFixture.snapshot())).values.$x, 5);
+      assert.equal((await electron.evaluate(() => globalThis.nativeFixture.history())).entries[0].request.navigation.top >= 400, true);
+      await page.screenshot({ path: path.join(root, 'native-chunk-unavailable.png'), animations: 'disabled' });
+      renameSync(unavailable, chunk);
+      await page.getByRole('button', { name: 'Save drafts and reload view', exact: true }).click();
+      await page.getByLabel('Divisor', { exact: true }).waitFor();
+      assert.equal(await page.getByLabel('Divisor', { exact: true }).inputValue(), '5');
+      assert.equal(await page.getByLabel('Trial name', { exact: true }).inputValue(), '中文试算');
+      await page.waitForFunction(() => document.querySelector('.resource-interactive-body').scrollTop >= 400);
+    } finally { if (existsSync(unavailable)) renameSync(unavailable, chunk); }
     await electron.evaluate(() => globalThis.nativeFixture.corrupt()); await page.reload();
     await page.getByText('Saved model summary, unverified', { exact: true }).waitFor();
     assert.equal(await page.getByLabel('Divisor', { exact: true }).count(), 0);

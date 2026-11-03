@@ -78,6 +78,21 @@ test('lost save acknowledgment retries the original request before saving newer 
   assert.equal(f.states.read(f.receipt.reference, () => true).values.$x, 5);
 });
 
+test('explicit recovery of a lost composition surface saves raw text without promoting it to effective or frozen values', async t => {
+  const f = await fixture(t); await f.session.acquire();
+  f.session.editText('$name', '未完成的输入', true);
+  assert.equal(await f.session.flush(), false);
+  f.session.preserveInterruptedComposition();
+  assert.equal(f.session.snapshot().composing, false);
+  assert.equal(f.session.snapshot().values.$name, 'Trial');
+  assert.equal(f.session.snapshot().inputDrafts.$name, '未完成的输入');
+  assert.equal(f.session.snapshot().calculationError, 'input_incomplete');
+  assert.equal(await f.session.flush(), true);
+  const saved = f.states.read(f.receipt.reference, () => true);
+  assert.equal(saved.inputDrafts.$name, '未完成的输入'); assert.equal(saved.values.$name, 'Trial');
+  assert.equal(await f.session.prepareSelection(['$name']), null);
+});
+
 test('preparation saves the clicked candidate before freezing; edits during the acknowledgment stay in the original view', async t => {
   const f = await fixture(t), save = f.api.save;
   let acknowledge: (() => void) | undefined;

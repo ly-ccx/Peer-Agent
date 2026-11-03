@@ -158,6 +158,12 @@ export function createInteractiveSession({ api, opened, evaluator, createId = ()
       if (!editable() || composing.size) return false;
       setValues(clone(content.initialValues), {}); return true;
     },
+    preserveInterruptedComposition() {
+      // Explicit recovery after a control surface is lost. Preserve raw text as
+      // a draft; it must not become an effective value or frozen condition.
+      if (!composing.size) return;
+      composing.clear(); changed({ composing: false }); calculate();
+    },
     flush,
     prepareSelection(fields: readonly string[]) {
       if (!editable() || composing.size || fields.length > 64 || new Set(fields).size !== fields.length || fields.some(key => !Object.hasOwn(content.stateSchema, key)
