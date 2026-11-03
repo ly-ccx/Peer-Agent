@@ -103,6 +103,7 @@ test('live CLI requires opt-in, exact selection and bounded valid scenarios', ()
     expect(() => parseInteractiveLiveArgs(args)).toThrow();
   }
   expect(parseInteractiveLiveArgs(['--run', '--model', 'id', '--model', 'id', '--scenario', 'repair']).models).toEqual(['id']);
+  expect(parseInteractiveLiveArgs(['--run', '--model', 'id', '--scenario', 'story']).scenarios).toEqual(['story']);
   expect(parseInteractiveLiveArgs(['--run', '--model', 'id']).scenarios).toEqual(['publish', 'repair', 'denied'] satisfies InteractiveLiveScenario[]);
 });
 

@@ -12,16 +12,19 @@ import { createTuiProviderFetch } from '../provider-transport.ts';
 import { resolveTuiWire } from '../provider-wire-matrix.ts';
 import { INTERACTIVE_LIVE_BUDGET, INTERACTIVE_LIVE_SCENARIOS, runInteractiveLiveCase, type InteractiveLiveScenario } from './interactive-live-validation.ts';
 
+import { INTERACTIVE_STORY_BUDGET, runInteractiveLiveStory } from './interactive-live-story.ts';
+
 const repositoryRoot = fileURLToPath(new URL('../../../../', import.meta.url));
 export const INTERACTIVE_LIVE_HELP = `Opt-in interactive-result validation; uses configured API keys and synthetic data only.
 Usage: pnpm --filter @peer-agent/tui qa:interactive:live --list [--user-data DIRECTORY]
        pnpm --filter @peer-agent/tui qa:interactive:live --run --model ENTRY_ID [--model ENTRY_ID]
-         [--scenario publish|repair|denied|verify] [--output EXISTING_DIRECTORY] [--user-data DIRECTORY]
+         [--scenario publish|repair|denied|verify|story] [--output EXISTING_DIRECTORY] [--user-data DIRECTORY]
 --list and --help make no model requests and do not read credentials.
---run requires explicit configured model entry IDs. Defaults: publish, repair and denied; verify is explicit.
+--run requires explicit configured model entry IDs. Defaults: publish, repair and denied; verify and story are explicit.
 Only OpenAI Chat / Anthropic Messages API-key wires are included in this validation command.
 Per model/scenario: at most 4 model requests, 1800 output tokens/request, 45s/request, 150s/case,
 4 worker tool calls. Verify permits 4 additional Verifier requests and up to 8 readonly calls within the same case deadline.
+Story permits up to 32 model requests across Bot, workers and Verifiers in 240s.
 Native permission requests are denied. User configuration and the daily app are left alone.
 Repair supplies an actual failed Tool Result as explicit user factual context from a test-driver seed.
 It does not fabricate assistant/thinking history or count the seed as a natural model failure.
@@ -29,7 +32,7 @@ Runtime token usage is recorded. Verify records the separate semantic review; bi
 Set PEER_CREDENTIAL_HELPER_PATH if the repository helper has not been built here.\n`;
 
 export function parseInteractiveLiveArgs(args: readonly string[]) {
-  const options = { run: false, list: false, help: false, models: [] as string[], scenarios: [] as InteractiveLiveScenario[],
+  const options = { run: false, list: false, help: false, models: [] as string[], scenarios: [] as Array<InteractiveLiveScenario | 'story'>,
     userData: path.join(os.homedir(), '.peer-agent'), output: os.tmpdir() };
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
@@ -41,8 +44,8 @@ export function parseInteractiveLiveArgs(args: readonly string[]) {
       if (!value || value.startsWith('--')) throw new Error('live_option_value_missing');
       if (arg === '--model') options.models.push(value);
       else if (arg === '--scenario') {
-        if (!INTERACTIVE_LIVE_SCENARIOS.includes(value as InteractiveLiveScenario)) throw new Error('live_scenario_invalid');
-        options.scenarios.push(value as InteractiveLiveScenario);
+        if (value !== 'story' && !INTERACTIVE_LIVE_SCENARIOS.includes(value as InteractiveLiveScenario)) throw new Error('live_scenario_invalid');
+        options.scenarios.push(value as InteractiveLiveScenario | 'story');
       } else if (arg === '--user-data') options.userData = path.resolve(value);
       else options.output = path.resolve(value);
     } else throw new Error('live_option_unknown');
@@ -95,9 +98,9 @@ export async function runInteractiveLiveCommand(args: readonly string[], log: (l
   const source = { commit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot, encoding: 'utf8' }).trim(),
     dirty: Boolean(execFileSync('git', ['status', '--porcelain'], { cwd: repositoryRoot, encoding: 'utf8' }).trim()) };
   const summary = { schemaVersion: 1, source, startedAt: new Date().toISOString(), finishedAt: '', realModel: true,
-    syntheticInput: true, installedBuild: false, independentReview: false, budget: INTERACTIVE_LIVE_BUDGET,
+    syntheticInput: true, installedBuild: false, independentReview: false, budget: INTERACTIVE_LIVE_BUDGET, storyBudget: INTERACTIVE_STORY_BUDGET,
     scope: 'Actual TUI turn, tool, permission and encoder ports; isolated Bot/Plan and checked headless runtime fixture. Not full goal acceptance.',
-    samples: [] as Array<{ entryId?: string; provider: string; model: string; scenario: InteractiveLiveScenario; report: string; ok: boolean; httpRequests: number; error?: string }>, ok: false };
+    samples: [] as Array<{ entryId?: string; provider: string; model: string; scenario: InteractiveLiveScenario | 'story'; report: string; ok: boolean; httpRequests: number; error?: string }>, ok: false };
   const persist = () => writeFileSync(path.join(output, 'report.json'), `${JSON.stringify(summary, null, 2)}\n`, { mode: 0o600 });
   persist(); log(JSON.stringify({ output, source, cases: selected.length * options.scenarios.length }));
   const credentials = createTuiSharedModelCredentialStore({ dataHome: options.userData });
@@ -117,7 +120,7 @@ export async function runInteractiveLiveCommand(args: readonly string[], log: (l
         // Disable transport recovery here so the physical HTTP budget is independently bounded.
         const transport = createTuiProviderFetch({ connectionRecovery: false });
         const countedFetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
-          if (++sample.httpRequests > 8) throw new Error('live_http_limit');
+          if (++sample.httpRequests > (scenario === 'story' ? INTERACTIVE_STORY_BUDGET.totalRequests : 8)) throw new Error('live_http_limit');
           return transport(input, init);
         }) as typeof fetch;
         const wire = supportedWire(metadata)!;
@@ -127,10 +130,11 @@ export async function runInteractiveLiveCommand(args: readonly string[], log: (l
           ? createOpenAICompatibleProvider({ config: { providerId: metadata.credentialId, apiKey: secret, baseUrl, headers: extraHeaders }, fetch: countedFetch })
           : createAnthropicMessagesProvider({ providerId: metadata.credentialId, baseUrl, extraHeaders, getApiKey: async () => secret,
             sendStream: streamArgs => sendAnthropicMessagesStream({ ...streamArgs, fetchImpl: countedFetch }) });
-        const report = await runInteractiveLiveCase({ directory, scenario, model: metadata, realModel: true, provider,
-          sanitize: value => sanitizeInteractiveLiveDiagnostic(value, [secret]),
-          onProgress(report) { log(JSON.stringify({ provider: metadata.providerId, model: metadata.model, scenario,
-            requests: report.requests.length, approvals: report.approvals, finished: Boolean(report.finishedAt) })); } });
+        const common = { directory, model: metadata, provider,
+          sanitize: (value: unknown) => sanitizeInteractiveLiveDiagnostic(value, [secret]),
+          onProgress(report: { requests: unknown[]; approvals?: number; finishedAt?: string }) { log(JSON.stringify({ provider: metadata.providerId, model: metadata.model, scenario,
+            requests: report.requests.length, approvals: report.approvals, finished: Boolean(report.finishedAt) })); } };
+        const report = scenario === 'story' ? await runInteractiveLiveStory(common) : await runInteractiveLiveCase({ ...common, scenario, realModel: true });
         sample.ok = report.ok;
       } catch (error) { sample.error = sanitizeInteractiveLiveDiagnostic(error, [secret]); }
       finally { secret = ''; persist(); }
