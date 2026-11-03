@@ -149,6 +149,16 @@ test('the main workspace opens canonical interactive deliveries, restores result
     await page.getByText('Deliveries', { exact: true }).click();
     await page.getByRole('button', { name: 'Open interactive result', exact: true }).click();
     await page.getByLabel('Divisor', { exact: true }).waitFor();
+    const beforeProtected = await electron.evaluate(() => globalThis.workspaceFixture.snapshot());
+    const protectedName = page.getByLabel('Trial name', { exact: true });
+    await protectedName.fill('sk-examplecredential012345678901234567890');
+    await page.getByRole('button', { name: 'Save conditions', exact: true }).click();
+    await page.getByRole('alert').filter({ hasText: 'Credentials or native permission payloads cannot be saved as trial conditions.' }).waitFor();
+    assert.equal(await protectedName.inputValue(), 'sk-examplecredential012345678901234567890');
+    assert.deepEqual(await electron.evaluate(() => globalThis.workspaceFixture.snapshot()), beforeProtected);
+    await page.screenshot({ path: path.join(root, 'workspace-protected-input.png'), animations: 'disabled' });
+    await protectedName.fill('Workspace trial');
+    await page.getByText('Conditions saved', { exact: true }).waitFor();
     await page.getByLabel('Divisor', { exact: true }).fill('5'); await page.getByText('Conditions saved', { exact: true }).waitFor();
     assert.equal((await electron.evaluate(() => globalThis.workspaceFixture.snapshot())).values.$x, 5);
     await page.getByRole('button', { name: 'Add current conditions to draft', exact: true }).click();

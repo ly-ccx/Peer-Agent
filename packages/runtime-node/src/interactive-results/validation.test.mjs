@@ -18,6 +18,18 @@ test('real isolated worker validates and evaluates fixed content with telemetry 
 test('real worker rejects dangerous AST before evaluation and reports bounded diagnostics', async () => {
   await assert.rejects(runInteractiveValidation({ operation: 'validate', draft: { ...draft, program: 'root=Col([HtmlView("<script>fetch()</script>")])' }, bindings: {} }), { code: 'unsupported_node' });
 });
+
+test('the packaged Worker enforces protected initial, evaluation and condition-description state without echo', async () => {
+  const program = '$note="Trial"\nroot=Input("note","Note",$note)';
+  const content = await runInteractiveValidation({ operation: 'validate', draft: { ...draft, program }, bindings: {} });
+  const protectedValue = 'sk-examplecredential012345678901234567890';
+  for (const operation of ['evaluate', 'describe-state']) {
+    await assert.rejects(runInteractiveValidation({ operation, content, values: { $note: protectedValue }, fields: ['$note'] }),
+      error => error.code === 'interactive_state_protected' && error.path === '' && error.details === '' && !error.message.includes(protectedValue));
+  }
+  await assert.rejects(runInteractiveValidation({ operation: 'validate', draft: { ...draft,
+    program: `$note=${JSON.stringify(protectedValue)}\nroot=Input("note","Note",$note)` }, bindings: {} }), { code: 'interactive_state_protected' });
+});
 test('the isolated worker reconstructs condition labels from the published program, including a currently invalid calculation', async () => {
   const content = await runInteractiveValidation({ operation: 'validate', draft: { ...draft,
     program: '$x=2\n$name="Original label"\nroot=Col([NumberInput("x",$name,$x,0,10,1),Input("name","Trial name",$name),Metric("Ratio",10/$x)])' }, bindings: {} });

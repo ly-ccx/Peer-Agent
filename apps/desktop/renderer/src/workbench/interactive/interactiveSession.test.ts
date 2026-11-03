@@ -32,6 +32,25 @@ async function fixture(t: TestContext) {
   return { api, opened, session, states, results, receipt, service, adapt, evaluator };
 }
 
+test('protected pasted state stays in unsaved memory, cannot reach host or SDK, and can be corrected', async t => {
+  const f = await fixture(t), originalSave = f.api.save;
+  let saves = 0;
+  f.api.save = async request => { saves++; return originalSave(request); };
+  assert.equal(await f.session.acquire(), true);
+  for (const raw of ['sk-examplecredential012345678901234567890', JSON.stringify({ approvalId: 'example', capabilityId: 'local.file.write', argsDigest: 'example' })]) {
+    assert.equal(f.session.editText('$name', raw), true);
+    assert.equal(f.session.snapshot().inputDrafts.$name, raw);
+    assert.equal(f.session.snapshot().sdkValues.$name, 'Trial');
+    assert.equal(f.session.snapshot().calculationError, 'interactive_state_protected');
+    assert.equal(await f.session.flush(), false); assert.equal(saves, 0);
+    assert.equal(f.session.snapshot().confirmed.stateRevision, 0);
+    assert.equal(f.states.read(f.receipt.reference, () => true).values.$name, 'Trial');
+  }
+  assert.equal(f.session.editText('$name', 'Corrected'), true);
+  assert.equal(await f.session.flush(), true); assert.equal(saves, 1);
+  assert.equal(f.states.read(f.receipt.reference, () => true).values.$name, 'Corrected');
+});
+
 test('IME and incomplete numeric drafts stay local; legal division-by-zero parameters save without becoming SDK output', async t => {
   const f = await fixture(t);
   assert.equal(await f.session.flush(), true, 'an unchanged readonly view needs no writer');

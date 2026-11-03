@@ -7,6 +7,7 @@ import { validateDraft } from '@peer-agent/interactive-content';
 import { createInteractiveResultStore } from './store.mjs';
 import { createInteractiveStateStore } from './state-store.mjs';
 import { runInteractiveValidation } from './validation.mjs';
+import { jsonDigest } from './storage.mjs';
 
 const owner = { workspaceId: 'bot-a', conversationId: 'parent-a' };
 const now = () => '2026-11-03T00:00:00.000Z';
@@ -44,6 +45,36 @@ test('confirmed state revisions and raw numeric drafts survive reads; a retry re
   assert.throws(() => save(0, 'save-a', 200), { code: 'interactive_save_parameter_conflict' });
   assert.throws(() => save(0, 'save-b', 200), { code: 'interactive_state_conflict' });
   assert.equal(states.read(reference, current).values.$budget, 150);
+});
+
+test('direct host save refuses protected drafts before writing state or save receipts and permits correction', async t => {
+  const { states, resultStore, reference, save } = await fixture(t);
+  const confirmed = save(0, 'safe-a', 150, { $budget: '150.' });
+  const context = resultStore.storage.connect(owner.workspaceId);
+  const beforeSaves = context.db.prepare('SELECT COUNT(*) AS n FROM saves').get().n;
+  for (const raw of ['sk-examplecredential012345678901234567890', JSON.stringify({ grantId: 'example', toolCallId: 'call', granted: true })]) {
+    assert.throws(() => save(1, 'protected-a', 150, { $budget: raw }), error => error.code === 'interactive_state_protected'
+      && error.message === 'interactive_state_protected' && error.details === '');
+    assert.deepEqual(states.read(reference, current), confirmed);
+    assert.equal(context.db.prepare('SELECT COUNT(*) AS n FROM saves').get().n, beforeSaves);
+    assert.equal(context.db.prepare('SELECT COUNT(*) AS n FROM followups').get().n, 0);
+  }
+  assert.equal(save(1, 'protected-a', 160, { $budget: '160' }).stateRevision, 2);
+});
+
+test('an old protected checkpoint cannot be read, overwritten or frozen, and its original row remains intact', async t => {
+  const { states, resultStore, reference, writer, save } = await fixture(t);
+  const saved = save(0, 'safe-a', 150);
+  const old = { ...saved, inputDrafts: { $budget: 'Bearer synthetic-old-token' } };
+  old.stateDigest = jsonDigest({ values: old.values, inputDrafts: old.inputDrafts });
+  const context = resultStore.storage.connect(owner.workspaceId), original = JSON.stringify(old);
+  context.db.prepare('UPDATE states SET snapshot=? WHERE id=? AND version=?').run(original, reference.resultId, reference.contentVersion);
+  assert.throws(() => states.read(reference, current), { code: 'interactive_state_protected' });
+  assert.throws(() => save(1, 'next', 160), { code: 'interactive_state_protected' });
+  await assert.rejects(states.prepareFollowup({ reference, identity, writer, stateRevision: old.stateRevision, stateDigest: old.stateDigest,
+    fields: ['$budget'], requestId: 'protected-freeze' }, current), { code: 'interactive_state_protected' });
+  assert.equal(context.db.prepare('SELECT snapshot FROM states WHERE id=? AND version=?').get(reference.resultId, reference.contentVersion).snapshot, original);
+  assert.equal(context.db.prepare('SELECT COUNT(*) AS n FROM followups').get().n, 0);
 });
 
 test('two independent store instances share one writer; explicit takeover rejects the old token and late save', async t => {

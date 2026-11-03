@@ -1,7 +1,7 @@
 import type { InteractiveFollowup, InteractiveOpenView, InteractiveResultsApi, InteractiveStateSnapshot, InteractiveStateValue,
   InteractiveStateValues, InteractiveWriter } from '@peer-agent/protocol';
 import { canonicalJSON } from '@peer-agent/interactive-content/values';
-import { validateState } from '@peer-agent/interactive-content/state';
+import { validateEditingState, validateState } from '@peer-agent/interactive-content/state';
 import type { InteractiveEvaluator } from '@peer-agent/interactive-content';
 
 type Candidate = { readonly edit: number; readonly values: InteractiveStateValues; readonly inputDrafts: Readonly<Record<string, string>> };
@@ -47,6 +47,7 @@ export function createInteractiveSession({ api, opened, evaluator, createId = ()
     const incomplete = composing.size > 0 || Object.entries(state.inputDrafts).some(([key, raw]) => content.stateSchema[key]?.type === 'number'
       ? !numeric(raw) || Number(raw) !== state.values[key] : raw !== state.values[key]);
     try {
+      validateState(state.values, content.stateSchema, state.inputDrafts);
       if (incomplete) throw { code: 'input_incomplete' };
       evaluator.evaluate(state.values);
       changed({ sdkValues: clone(state.values), calculationError: null });
@@ -85,12 +86,14 @@ export function createInteractiveSession({ api, opened, evaluator, createId = ()
       }
     }
     if (!editable()) { changed({ saveError: state.phase === 'writer_lost' ? 'interactive_writer_stale' : 'interactive_writer_required' }); return null; }
+    try { validateState(selected.values, content.stateSchema, selected.inputDrafts); }
+    catch (error) { changed({ phase: 'save_failed', saveError: code(error) }); return null; }
     if (selected.edit === savedEdit && equal(selected.values, state.confirmed.values) && equal(selected.inputDrafts, state.confirmed.inputDrafts)) return state.confirmed;
     pending = { candidate: selected, writer: state.writer!, expectedRevision: state.confirmed.stateRevision, requestId: createId() };
     return saveCandidate(selected);
   }
   function setValues(values: InteractiveStateValues, inputDrafts: Readonly<Record<string, string>>) {
-    const normalized = validateState(values, content.stateSchema, inputDrafts);
+    const normalized = validateEditingState(values, content.stateSchema, inputDrafts);
     edit++;
     changed({ ...normalized, dirty: edit !== savedEdit, composing: composing.size > 0 }); calculate();
   }
