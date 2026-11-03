@@ -6,6 +6,8 @@ import os from 'node:os';
 import {createWorkCoordinationStore} from './work-coordination-store.mjs';
 import {registerWorkBudget,createWorkBudgetGuard} from './work-budget.mjs';
 import {controlProjectWork} from './work-control.mjs';
+import { runtimeWorkHeld } from './runtime-disposition.ts';
+import { createRunnerCoordination } from './runner-coordination.mjs';
 test('scope controls gate admission first, preserve unrelated and terminal work, retry only unfinished targets',async()=>{
  const root=mkdtempSync(path.join(os.tmpdir(),'r88-control-'));
  const store=createWorkCoordinationStore({rootDir:root,workspaceId:'w',holdsLease:()=>true,leaseEpoch:()=> 'test-owner'});
@@ -60,4 +62,25 @@ test('user cancellation repairs delivered or previously cancelled work and retri
   assert.equal(rows.find(row=>row.sessionId==='other').status,'result_ready');
  }finally{release();rmSync(root,{recursive:true,force:true});}
  }
+});
+
+test('explicit work resume clears current admission even when an earlier finish retained a user-stopped end marker', async () => {
+ const root=mkdtempSync(path.join(os.tmpdir(),'work-resume-marker-'));
+ const store=createWorkCoordinationStore({rootDir:root,workspaceId:'w',holdsLease:()=>true,leaseEpoch:()=> 'owner'});
+ store.saveWork({workId:'work',workspaceId:'w',parentConversationId:'c',state:'paused',stopScope:'work',end:'user_stopped',sessionIds:['child']});
+ const release=registerWorkBudget('w',store);
+ const child={sessionId:'child',status:'paused',origin:{workId:'work'}};
+ try{
+  assert.equal(runtimeWorkHeld(store.readWork('work')),true);
+  assert.equal((await controlProjectWork({session:child,action:'resume',anchorMessageId:'resume',context:{workspaceId:'w',parentConversationId:'c'},
+   sessions:()=>[child],resume:async()=>{child.status='running';return{ok:true};}})).ok,true);
+  const current=store.readWork('work');
+  assert.equal(current.state,'waiting_children'); assert.equal(current.lastControl.action,'resume');
+  assert.equal(current.end,'awaiting_children');
+  assert.equal(runtimeWorkHeld(current),false);
+  store.saveWork({...current,end:'user_stopped'}); // Already-resumed records from the earlier writer retain this historical end.
+  assert.equal(runtimeWorkHeld(store.readWork('work')),false);
+  const coordination=createRunnerCoordination({store,workspaceId:'w',conversationId:'c',inbox:{},resolveRoster:()=>[child],readMessages:()=>[]});
+  assert.equal(coordination.prepare({workId:'work',continuation:true}),true,'the explicit work control must reopen parent admission');
+ }finally{release();store.close();rmSync(root,{recursive:true,force:true});}
 });

@@ -31,6 +31,7 @@ export async function controlProjectWork({ session, action, anchorMessageId, con
   }
   const fresh = store.read().works[work.workId];
   store.saveWork({ ...fresh, state: action === 'resume' ? fresh.pendingControl.completedSessionIds.length ? 'waiting_children' : 'runnable' : state,
+    end: action === 'resume' ? fresh.pendingControl.completedSessionIds.length ? 'awaiting_children' : 'yielded' : 'user_stopped',
     pendingControl: null, lastControl: { receiptKey, action, anchorMessageId } }, { returnState: false });
   return { ok: true, workId: work.workId, state: store.read().works[work.workId].state };
 }

@@ -54,7 +54,7 @@ export function decideRuntimeDisposition({ previous = {}, sessions = [], outcome
     return result(state, 'user_stopped', previous.pendingControl ? 'host' : 'none',
       state === 'waiting_children' ? ownership.waitingSessionIds.map(id => ({ kind: 'session' as const, id })) : []);
   }
-  if (outcome.stopped || ['paused', 'waiting_children'].includes(previous.state || '') && previous.end === 'user_stopped') {
+  if (outcome.stopped || previous.stopScope !== 'work' && ['paused', 'waiting_children'].includes(previous.state || '') && previous.end === 'user_stopped') {
     const waiting = ownership.waitingSessionIds;
     return result(waiting.length ? 'waiting_children' : 'paused', 'user_stopped', 'none', waiting.map(id => ({ kind: 'session' as const, id })));
   }
@@ -89,5 +89,5 @@ export function decideRuntimeDisposition({ previous = {}, sessions = [], outcome
 /** Only this durable user-stop shape holds a reply; ordinary child waits remain autonomous. */
 export function runtimeWorkHeld(work: Work | null | undefined): boolean {
   return Boolean(work && (work.pendingControl || work.stopScope === 'work' && ['paused', 'cancelled'].includes(work.state || '')
-    || ['paused', 'waiting_children'].includes(work.state || '') && work.end === 'user_stopped'));
+    || work.stopScope !== 'work' && ['paused', 'waiting_children'].includes(work.state || '') && work.end === 'user_stopped'));
 }
