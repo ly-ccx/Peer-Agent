@@ -156,6 +156,7 @@ export function registerDesktopProjectAgent({
   executionScheduler.configure({ rootDir: runtimeRoot, getConcurrency: () => readRuntimePolicy()?.projectAgent?.concurrency, isWorkspaceReady: workspaceId => host?.isReady(workspaceId) === true,
     isPlanRecoveryHeld: plan => host?.sessionHeld(plan?.delegationOrigin?.workspaceId, plan?.delegationOrigin?.sessionId) === true });
   const readEvidenceBody = createEvidenceReader({
+    resolveScopedRecord: (ref, context) => interactive.publications.resolveEvidence(ref, context),
     readScopedExternal: createScopedExternalEvidenceReader({ findWatch: ref => objectiveWatches?.resolveEvidence(ref),
       readWatchBody: ref => objectiveWatches?.readEvidenceBody(ref) }),
     projectDeliveries: createEvidenceDeliveryProjection({ getConversationId: id => profileStore.read(id)?.agentConversationId,
@@ -182,7 +183,7 @@ export function registerDesktopProjectAgent({
   const interactiveEnabled = workspaceId => ownsProject(workspaceId) && readRuntimePolicy()?.projectAgent?.interactiveResults === true;
   const interactive = createInteractiveRuntime({ rootDir: runtimeRoot, goalPlanStore, conversationStore,
     getBotConversationId: id => profileStore.read(id)?.agentConversationId, holdsLease: ownsProject, enabled: interactiveEnabled,
-    classifyContext: () => 'D3_private' });
+    classifyContext: () => 'D3_private', getSession: id => supervisor.get({ sessionId: id, detail: 'report' }) });
   const uninstallInteractive = installDesktopInteractiveRuntime({ runtime: interactive, enabled: interactiveEnabled });
   const memoryStore = createMemoryStore({ rootDir: dataHome });
   configurePermissions?.(approvalStore);

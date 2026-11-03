@@ -11,3 +11,4 @@ export { canonicalInteractiveObservation, appendInteractiveMaterialNotice } from
 export { createInteractiveViewService } from './interactive-results/view-service.mjs';
 export { createInteractivePresentationStore, interactiveReadingSourceBinding } from './interactive-results/presentation-store.mjs';
 export { createInteractiveFeedbackAdmission } from './interactive-results/feedback-admission.mjs';
+export { createInteractivePublicationSource } from './interactive-results/publication-source.mjs';

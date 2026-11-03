@@ -21,7 +21,7 @@ async function renderer(output) {
       import React from 'react';import{createRoot}from'react-dom/client';
       import{WorkbenchProvider}from'./renderer/src/workbench/WorkbenchContext.tsx';
       import{BotResourceLayout}from'./renderer/src/workbench/ResourceWorkspaceContext.tsx';
-      import{EvidenceDeliveries}from'./renderer/src/project-agent/drawer/EvidenceDeliveries.tsx';
+      import{EvidenceView}from'./renderer/src/project-agent/drawer/EvidenceView.tsx';
       import{NativeResourceWindow}from'./renderer/src/workbench/NativeResourceWindow.tsx';
       import{ConfirmProvider}from'./renderer/src/app/components/ConfirmProvider.tsx';
       import{ResourceEditAppFrame}from'./renderer/src/workbench/editing/ResourceEditContinuity.tsx';
@@ -31,16 +31,35 @@ async function renderer(output) {
       import{createI18n}from'@peer-agent/i18n';
       import'./renderer/src/styles.css';
       import'./renderer/src/project-agent/styles/bot-conversation.css';
+      import'./renderer/src/project-agent/styles/bot-drawer.css';
       function Composer({owner}){useResourceFeedbackPreparations();const{session,state}=useInputRecovery(owner.workspaceId);return <BotComposer i18n={createI18n('en-US')} botName="Trial Bot" resourceRecipientConversationId={owner.conversationId} draft={state.draft} ready={state.ready} quote={state.draft.quote?.text??''} onQuoteRemove={()=>session.edit({quote:null})} onDraftChange={patch=>session.edit(patch)} onSend={()=>void session.send({quoteRefs:state.draft.quote?[state.draft.quote.messageId]:[]})}/>;}
       if(window.peerResource)createRoot(document.getElementById('root')).render(<NativeResourceWindow/>);
-      else{const{fixture}=await window.peerAgent.getBootstrap();const data=await window.peerAgent.projectAgentReadEvidence({context:{workspaceId:fixture.owner.workspaceId},evidenceRef:fixture.evidenceRef});
+      else{const{fixture}=await window.peerAgent.getBootstrap();
         createRoot(document.getElementById('root')).render(<ConfirmProvider><ResourceEditAppFrame><WorkbenchProvider conversationId={fixture.owner.conversationId} isPageActive resourceMode layoutHost="bot">
-          <BotResourceLayout owner={fixture.owner} active isZh={false}><div className="bot-main" style={{padding:24}}><h1>Trial delivery</h1><Composer owner={fixture.owner}/><EvidenceDeliveries deliveries={data.deliveries} isZh={false}/></div></BotResourceLayout>
+          <BotResourceLayout owner={fixture.owner} active isZh={false}><div className="bot-main" style={{padding:24}}><h1>Trial delivery</h1><Composer owner={fixture.owner}/><EvidenceView evidence={{evidenceRef:'tool-result://publication'}} workspaceId={fixture.owner.workspaceId} task={{planId:'plan',sessionId:'session'}} i18n={createI18n('en-US')}/></div></BotResourceLayout>
         </WorkbenchProvider></ResourceEditAppFrame></ConfirmProvider>);}
     `, 'interactive-workspace-fixture.tsx', { loader: 'tsx', jsx: 'automatic' }); } }], build: { outDir: output, emptyOutDir: true, target: 'esnext', cssCodeSplit: false,
       rollupOptions: { input: entry, output: { entryFileNames: 'fixture.js' } } } });
   const css = readdirSync(path.join(output, 'assets')).filter(name => name.endsWith('.css')).map(name => `<link rel="stylesheet" href="./assets/${name}">`).join('');
   writeFileSync(path.join(output, 'index.html'), `<!doctype html><html data-theme="light"><meta charset="utf-8">${css}<style>html,body,#root{height:100%;margin:0}.bot-resource-layout{height:100%}.bot-main{height:100%;overflow:auto;box-sizing:border-box}</style><body><div id="root"></div><script type="module" src="./fixture.js"></script></body></html>`);
+}
+
+async function reloadSavedWorkspace(electron, page) {
+  const saved = page.getByText('Conditions and layout are saved. You can close or reload again.', { exact: true });
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const keepWorking = page.getByRole('button', { name: 'Keep working', exact: true });
+    if (await keepWorking.isVisible()) await keepWorking.click();
+    const loaded = page.waitForEvent('domcontentloaded').then(() => 'loaded');
+    const settled = saved.waitFor().then(() => 'saved');
+    const protectedView = page.getByText('Conditions or layout are not confirmed saved. This window is preserved. Finish input or resolve saving before closing or reloading.', { exact: true }).waitFor().then(() => 'protected');
+    await electron.evaluate(() => globalThis.workspaceFixture.reloadSource());
+    const outcome = await Promise.race([loaded, settled, protectedView]);
+    if (outcome === 'loaded') return;
+    if (outcome === 'protected') {
+      await page.getByRole('button', { name: 'Retry saving', exact: true }).click(); await saved.waitFor();
+    }
+  }
+  throw Error('The saved workspace did not accept the explicit reload retry');
 }
 
 test('the main workspace opens canonical interactive deliveries, restores result tabs and hands off the exact fixed result', { timeout: 150_000 }, async () => {
@@ -50,7 +69,7 @@ test('the main workspace opens canonical interactive deliveries, restores result
   writeFileSync(mainFile, `
     import{app,BrowserWindow,ipcMain}from'electron';
     import{validateDraft}from${JSON.stringify(pathToFileURL(require.resolve('@peer-agent/interactive-content')).href)};
-    import{createInteractiveResultStore,createInteractiveStateStore,createInteractiveFeedbackAdmission}from${JSON.stringify(href('packages/runtime-node/dist/interactive-results-public.js'))};
+    import{createInteractiveResultStore,createInteractiveStateStore,createInteractiveFeedbackAdmission,createInteractivePublicationSource}from${JSON.stringify(href('packages/runtime-node/dist/interactive-results-public.js'))};
     import{createProjectInputDraftStore}from${JSON.stringify(href('packages/runtime-node/src/project-agent/input-draft-store.mjs'))};
     import{createInputQueue}from${JSON.stringify(href('packages/runtime-node/src/project-agent/input-queue.mjs'))};
     import{createConversationStore}from${JSON.stringify(href('packages/conversation-store/src/index.mjs'))};
@@ -59,6 +78,7 @@ test('the main workspace opens canonical interactive deliveries, restores result
     import{createDesktopInteractiveApplication}from${JSON.stringify(href('apps/desktop/electron/main/interactive-results/application-service.mjs'))};
     import{createEvidenceDeliveryProjection}from${JSON.stringify(href('apps/desktop/electron/main/project-agent/evidence-deliveries.mjs'))};
     import{createEvidenceReader}from${JSON.stringify(href('apps/desktop/electron/main/project-agent/evidence-reader.mjs'))};
+    import{createProjectAgentApplicationService}from${JSON.stringify(href('apps/desktop/electron/main/project-agent/project-agent-application-service.mjs'))};
     import{createResourceWindowController}from${JSON.stringify(href('apps/desktop/electron/main/resource-window-controller.mjs'))};
     import{createTrustedWindowRegistry}from${JSON.stringify(href('apps/desktop/electron/main/ipc/trusted-window-registry.mjs'))};
     import{createCatalogIpcMain}from${JSON.stringify(href('apps/desktop/electron/main/ipc/catalog-ipc-main.mjs'))};
@@ -90,13 +110,18 @@ test('the main workspace opens canonical interactive deliveries, restores result
     ipc.handle('project-agent:read-input-draft',(_event,request)=>drafts.read(request));ipc.handle('project-agent:write-input-draft',(_event,request)=>drafts.write(request));ipc.handle('project-agent:submit-input',(_event,request)=>({ok:true,input:queue.submitInput(request)}));
     ipc.on('settings:get-sync',event=>{event.returnValue=initial});ipc.handle('settings:get',()=>initial);ipc.handle('settings:update',(_event,partial)=>{settingsWrites.push(partial);return initial});
     ipc.handle('bootstrap:get',()=>({fixture:{owner:{...owner,path:'/isolated-project'},evidenceRef:receipt.indexEntry.evidenceRef}}));
-    const readEvidence=createEvidenceReader({findRecords:refs=>refs.includes(receipt.indexEntry.evidenceRef)?[receipt.indexEntry]:[],projectDeliveries:createEvidenceDeliveryProjection({getConversationId:()=>owner.conversationId,getPlan:()=>({planId:'plan',conversationId:'worker',delegationOrigin:{workspaceId:owner.workspaceId,sessionId:'session'}}),getSession:()=>({sessionId:'session',workspaceId:owner.workspaceId,report:{planId:'plan'}})}),readMessages:()=>[],readArtifact:()=>{throw Error('unexpected artifact body read')}});
-    ipc.handle('project-agent:read-evidence',(_event,request)=>({ok:true,evidenceRef:request.evidenceRef,...readEvidence(request.evidenceRef,{context:request.context})}));
+    const evidenceFacts={getConversationId:()=>owner.conversationId,getPlan:()=>({planId:'plan',conversationId:'worker',delegationOrigin:{workspaceId:owner.workspaceId,parentConversationId:owner.conversationId,sessionId:'session'}}),getSession:()=>({sessionId:'session',workspaceId:owner.workspaceId,report:{planId:'plan'}})};
+    const findRecords=refs=>refs.includes(receipt.indexEntry.evidenceRef)?[receipt.indexEntry]:[];
+    const publications=createInteractivePublicationSource({resultStore,goalPlanStore:{getPlan:evidenceFacts.getPlan,findEvidenceIndexRecords:findRecords},getBotConversationId:evidenceFacts.getConversationId,getSession:evidenceFacts.getSession});
+    const readEvidence=createEvidenceReader({resolveScopedRecord:publications.resolveEvidence,findRecords,projectDeliveries:createEvidenceDeliveryProjection(evidenceFacts),readMessages:()=>[],readArtifact:()=>{throw Error('unexpected artifact body read')}});
+    const projectApplication=createProjectAgentApplicationService({enabled:()=>true,readEvidenceBody:readEvidence});
+    ipc.handle('project-agent:read-evidence',(_event,request)=>projectApplication.readEvidence(request));
     ipc.handle('resource-edit:list',()=>({ok:true,drafts:[],operations:[],staleCount:0}));
     globalThis.workspaceFixture={snapshot:()=>stateStore.read(receipt.reference,()=>true),layout:()=>interactive.readLayout(source.webContents,{owner}),
       failSave:kind=>{if(!['committed','uncommitted'].includes(kind))throw Error('invalid fault');saveFault=kind},
       draft:()=>drafts.read(draftAddress),consume:()=>queue.consume(owner.workspaceId),inputs:()=>({queue:queue.diagnosticSnapshot(owner.workspaceId),messages:conversations.getPersistedConversationHistory(owner.conversationId).messages.map(row=>({...row,selected:feedback.restore(row,owner.workspaceId)}))}),
       closeSource:()=>{closeAttempts++;source.close()},
+      reloadSource:()=>source.webContents.reload(),
       facts:()=>({settingsWrites,fileReads,legacyHistoryWrites,blockedCloses,closeAttempts,navigations,sourceAlive:!source.isDestroyed(),versions:Number(resultStore.storage.connect(owner.workspaceId).db.prepare('SELECT COUNT(*) AS n FROM versions').get().n),operations:Number(resultStore.storage.connect(owner.workspaceId).db.prepare('SELECT COUNT(*) AS n FROM operations').get().n)}),
       remoteReading(top){const current=interactive.readLayout(source.webContents,{owner});if(!current.ok||!current.snapshot)throw Error('missing layout');const {order,recent,interactive:session,revision}=current.snapshot;return interactive.writeLayout(source.webContents,{owner,expectedRevision:revision,order,recent,interactive:{...session,tabs:session.tabs.map(tab=>({...tab,navigation:{top,left:0}}))}})},
     };
@@ -216,7 +241,7 @@ test('the main workspace opens canonical interactive deliveries, restores result
     assert.ok(surfaceChunk); const chunk = path.join(output, 'assets', surfaceChunk), missing = `${chunk}.unavailable`;
     renameSync(chunk, missing);
     try {
-      await page.reload(); await page.getByText('Deliveries', { exact: true }).click();
+      await reloadSavedWorkspace(electron, page); await page.getByText('Deliveries', { exact: true }).click();
       await page.getByRole('button', { name: 'Open interactive result', exact: true }).click();
       await page.getByText('The calculation view could not load. Your input and fixed result are preserved. Save drafts before reopening.', { exact: true }).waitFor();
       await page.getByText('Saved model summary, unverified', { exact: true }).waitFor();
