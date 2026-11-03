@@ -137,6 +137,7 @@ export function registerDesktopProjectAgent({
   onAppendedMessage = null,
   onViewing = null,
   configurePermissions = null,
+  acquireInteractiveRetentionCompatibility = null,
 } = {}) {
   const runtimeRoot = path.join(dataHome, 'project-runtime');
   const botHistory = conversationStore.createHistoryProjection?.(history => history.messages, { immutableInput: true, maxEntries: 8, maxBytes: 32 * 1024 * 1024 });
@@ -181,7 +182,18 @@ export function registerDesktopProjectAgent({
     legacyAccessLevel: getSettings()?.localAccessLevel });
   accessAuthority.initialize();
   const interactiveEnabled = workspaceId => ownsProject(workspaceId) && readRuntimePolicy()?.projectAgent?.interactiveResults === true;
+  const validateInteractiveFeedback = (row, workspaceId) => interactive.feedback.validate(row, workspaceId);
+  const inputDrafts = createProjectInputDraftStore({ rootDir: runtimeRoot, validateInteractiveFeedback });
+  const inputQueue = createInputQueue({
+    rootDir: runtimeRoot,
+    validateInteractiveFeedback,
+    holdsLease: ownsProject,
+    resolveConversationId,
+    hasMessage,
+    appendMessage,
+  });
   const interactive = createInteractiveRuntime({ rootDir: runtimeRoot, goalPlanStore, conversationStore,
+    retentionPorts: { inputQueue, drafts: inputDrafts, acquireCompatibility: acquireInteractiveRetentionCompatibility },
     getBotConversationId: id => profileStore.read(id)?.agentConversationId, holdsLease: ownsProject, enabled: interactiveEnabled,
     classifyContext: () => 'D3_private', getSession: (id, detail = 'report') => supervisor.get({ sessionId: id, ...(detail === 'report' ? { detail } : {}) }) });
   const uninstallInteractive = installDesktopInteractiveRuntime({ runtime: interactive, enabled: interactiveEnabled });
@@ -409,14 +421,6 @@ export function registerDesktopProjectAgent({
     return '';
   }
 
-  const inputQueue = createInputQueue({
-    rootDir: runtimeRoot,
-    validateInteractiveFeedback: interactive.feedback.validate,
-    holdsLease: ownsProject,
-    resolveConversationId,
-    hasMessage,
-    appendMessage,
-  });
   host = createProjectAgentHost({
     rootDir: runtimeRoot,
     readLeaseEpoch,
@@ -512,7 +516,7 @@ export function registerDesktopProjectAgent({
     readLeaseEpoch, supervisor, goalPlanStore, goalRunner, agentTurnExecutor, objectiveWatches, executionScheduler,
     changed: workspaceId => broadcast?.('project-agent:changed', { workspaceIds: [workspaceId] }) });
   const projectAgent = createProjectAgentApplicationService({
-    inputDrafts: createProjectInputDraftStore({ rootDir: runtimeRoot, validateInteractiveFeedback: interactive.feedback.validate }),
+    inputDrafts,
     recoveryControl,
     accessAuthority,
     diagnostics: diagnostics.execute,

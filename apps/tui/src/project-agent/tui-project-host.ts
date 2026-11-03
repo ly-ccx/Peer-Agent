@@ -24,6 +24,7 @@ import {
   createAgentEventPublisher,
   createProjectInbox,
   createInputQueue,
+  createProjectInputDraftStore,
   createProjectGoalRunnerHost,
   createGoalWorktreeAdapter,
   createGoalTaskBranchAdapter,
@@ -66,6 +67,7 @@ export function createTuiProjectHost(options: {
   appVersion?: string;
   getSettings?: () => any;
   executeTurn?: (request: any) => Promise<any>;
+  acquireInteractiveRetentionCompatibility?: (owner: { workspaceId: string; conversationId: string }) => { revision: string; assertCurrent(): boolean; release(): void };
   createRuntime?: Parameters<typeof createTuiTurnExecutor>[0]['createRuntime'];
   onChanged?: () => void;
   autoStart?: boolean;
@@ -105,7 +107,15 @@ export function createTuiProjectHost(options: {
   const leases = createHostLease({ rootDir: runtimeRoot, hostId: `tui-${randomUUID()}`, surface: 'tui', appVersion: options.appVersion ?? '',
     projectAgentEnabled: () => !closed, botWorkspaceIds: () => selectedId && profiles.read(selectedId)?.status === 'active' ? [selectedId] : [] } as never);
   const interactiveEnabled = (id: string) => holds(id) && getSettings().projectAgent?.interactiveResults === true;
+  const resolveConversationId = (id: string) => profiles.read(id)?.agentConversationId ?? '';
+  function validateInteractiveFeedback(row: unknown, workspaceId: string): boolean { return interactive.feedback.validate(row, workspaceId); }
+  const drafts = createProjectInputDraftStore({ rootDir: runtimeRoot, validateInteractiveFeedback });
+  const inputs = createInputQueue({rootDir:runtimeRoot, holdsLease:holds, resolveConversationId,
+    validateInteractiveFeedback,
+    hasMessage:(id: string, messageId: string) => readMessages(id).some(row=>row.id===messageId),
+    appendMessage:(id: string, message: any) => {conversations.appendMessage(id,message);changed();}} as never);
   const interactive = createInteractiveRuntime({ rootDir: runtimeRoot, goalPlanStore: plans, conversationStore: conversations,
+    retentionPorts: { inputQueue: inputs, drafts, acquireCompatibility: options.acquireInteractiveRetentionCompatibility },
     getBotConversationId: (id: string) => profiles.read(id)?.agentConversationId, holdsLease: holds, enabled: interactiveEnabled,
     classifyContext: () => 'D3_private', getSession: (id: string, detail = 'report') => supervisor.get({ sessionId: id, ...(detail === 'report' ? { detail } : {}) }) });
   const interactiveProvider = createInteractiveToolProvider(interactive);
@@ -161,7 +171,6 @@ export function createTuiProjectHost(options: {
     readPlanApproval: (id: string) => profiles.read(id)?.planApproval,
     emitEvent: (event: any) => {inbox.append(event.workspaceId, [{...event, eventId: event.eventId || supervisorEventId(event)}]); changed();},
   } as never);
-  const resolveConversationId = (id: string) => profiles.read(id)?.agentConversationId ?? '';
   objectives = createObjectiveService({store: objectivesStore, actions: objectiveActions, canManageWorkspace: holds, resolveConversationId,
     readSessions: (id: string) => supervisor.sessionsForProject(id), readConversation: readMessages,
     readSession: (id: string) => {const session=supervisor.get({sessionId:id,detail:'report'}) as any;return session ? {...session,evidenceRefs:session.report?.evidenceRefs ?? []} : null;},
@@ -196,10 +205,6 @@ export function createTuiProjectHost(options: {
     resolveEvidence:(ref: string)=>readEvidence(ref)?.text || '',
     contradicts:(id: string)=>readProjectInstructionLines(registry.get(id)?.path),
     resolveFileAnchors:fileAnchors.capture, onWrote:changed} as never);
-  const inputs = createInputQueue({rootDir:runtimeRoot, holdsLease:holds, resolveConversationId,
-    validateInteractiveFeedback:interactive.feedback.validate,
-    hasMessage:(id: string, messageId: string) => readMessages(id).some(row=>row.id===messageId),
-    appendMessage:(id: string, message: any) => {conversations.appendMessage(id,message);changed();}} as never);
   host = createProjectAgentHost({rootDir:runtimeRoot, holdsLease:holds, acquireLease:(id: string)=>leases.acquire(id),
     listWorkspaceIds:()=> selectedId ? [selectedId] : [], resolveConversationId,
     appendMessage:(id: string,message: any)=>{conversations.appendMessage(id,message);changed();}, readMessages,
@@ -257,7 +262,7 @@ export function createTuiProjectHost(options: {
       && profiles.read(owner.workspaceId)?.status === 'active' && resolveConversationId(owner.workspaceId) === owner.conversationId,
     readTask: sessionId => supervisor.get({ sessionId, detail: 'report' }),
   });
-  return { registry, profiles, directory, conversations, plans, approvals, memory, objectives, supervisor, host, leases, executor, inputs, lifecycle, readEvidence, interactive, readTaskResult,
+  return { registry, profiles, directory, conversations, plans, approvals, memory, objectives, supervisor, host, leases, executor, inputs, drafts, lifecycle, readEvidence, interactive, readTaskResult,
     workspaceId:()=>selectedId, holdsLease:holds, tick,
     async selectWorkspace(id: string) {if(id===selectedId)return;admissionClosed=true;const old=selectedId;if(old){await stopExecution(old);leases.release(old);}selectedId=id;admissionClosed=false;await host.restart(id);changed();},
     async takeover() {if(!selectedId)return {requested:false};const request=leases.requestTakeover(selectedId);if(request.reason==='free')leases.acquire(selectedId);await tick();return request;},

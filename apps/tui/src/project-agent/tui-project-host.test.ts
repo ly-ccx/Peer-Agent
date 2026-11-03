@@ -39,6 +39,29 @@ function start(f: ReturnType<typeof fixture>, executeTurn: (request: any) => Pro
   return host;
 }
 
+test('terminal retention shares the real draft writer and releases compatibility on a busy source', async () => {
+  const f = fixture();
+  let releases = 0;
+  const host = createTuiProjectHost({ ...f, autoStart: false,
+    getSettings: () => ({ projectAgent: { interactiveResults: true } }),
+    acquireInteractiveRetentionCompatibility: () => ({
+      revision: `sha256:${'a'.repeat(64)}`, assertCurrent: () => true, release() { releases++; },
+    }),
+  });
+  cleanups.push(() => host.close());
+  host.leases.acquire(f.workspaceId);
+  const reference = { owner: { workspaceId: f.workspaceId, conversationId: f.conversationId },
+    resultId: 'missing-result', contentVersion: `sha256:${'b'.repeat(64)}` };
+  const writer = host.drafts.acquireRetentionDrafts(f.workspaceId);
+  try {
+    expect(() => host.interactive.retention.preview(reference)).toThrow('DRAFT_BUSY');
+    expect(releases).toBe(1);
+  } finally { writer.release(); }
+  mkdirSync(path.join(f.dataHome, 'goal-plans'), { recursive: true });
+  expect(() => host.interactive.retention.preview(reference)).toThrow('interactive_result_unavailable');
+  expect(releases).toBe(2);
+});
+
 test('actual terminal project host returns fixed report references and attaches them to the canonical Bot reply', async () => {
   const f = fixture(), runtimeCleanup: TestCleanup[] = [];
   let host: ReturnType<typeof createTuiProjectHost>, fixed = '', rounds = 0;

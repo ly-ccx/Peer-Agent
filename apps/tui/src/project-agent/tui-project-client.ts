@@ -1,6 +1,4 @@
 import { createProjectInputRecovery, type ProjectInputRecovery } from '@peer-agent/runtime-core';
-import { createProjectInputDraftStore } from '@peer-agent/runtime-node';
-import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { createTuiProjectHost } from './tui-project-host.ts';
 import { projectConversationCards } from './conversation-cards.ts';
@@ -16,8 +14,8 @@ export function createTuiProjectClient(options: {
   onChanged?: (snapshot: ProjectSnapshot) => void;
   autoStart?: boolean;
 }) {
-  const { host, dataHome } = options;
-  const drafts = createProjectInputDraftStore({ rootDir: path.join(dataHome, 'project-runtime'), validateInteractiveFeedback: host.interactive?.feedback?.validate });
+  const { host } = options;
+  const { drafts } = host;
   const recoverySessions = new Map<string, ProjectInputRecovery>();
   function recovery(workspaceId = host.workspaceId()) {
     let session = recoverySessions.get(workspaceId);
