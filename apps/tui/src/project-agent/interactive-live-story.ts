@@ -16,7 +16,7 @@ import { createTurnTestRuntime, drainTestCleanup, type TestCleanup } from './tur
 
 export const INTERACTIVE_STORY_BUDGET = Object.freeze({
   requests: { bot: 16, worker: 10, verifier: 10 }, calls: { bot: 24, worker: 14, verifier: 18 },
-  totalRequests: 32, outputTokens: 1800, requestMs: 45_000, caseMs: 240_000,
+  totalRequests: 32, outputTokens: 1800, botOutputTokens: 3200, requestMs: 45_000, caseMs: 240_000,
 });
 const CAPABILITIES = [
   'local.delegation.spawn_session', 'local.delegation.list_sessions', 'local.delegation.get_session',
@@ -109,7 +109,9 @@ export async function runInteractiveLiveStory(options: {
           report.requests.push(observation);
           const start = Date.now();
           try {
-            const result = await options.provider.stream({ ...request, maxOutputTokens: INTERACTIVE_STORY_BUDGET.outputTokens,
+            // The coordinator must fit a complete assessment and its evidence references.
+            const maxOutputTokens = phase === 'bot' ? INTERACTIVE_STORY_BUDGET.botOutputTokens : INTERACTIVE_STORY_BUDGET.outputTokens;
+            const result = await options.provider.stream({ ...request, maxOutputTokens,
               signal: AbortSignal.any([signal, AbortSignal.timeout(INTERACTIVE_STORY_BUDGET.requestMs), ...(request.signal ? [request.signal] : [])]) });
             observation.usage = result.usage;
             observation.returnedTools = result.toolCalls.map(call => call.name);

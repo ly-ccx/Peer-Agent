@@ -165,7 +165,8 @@ test('the verify scenario performs an independent host review with real fixed in
 
 test('story diagnostics retain the role and resource when a model batch exceeds its limit', async () => {
   const limit = INTERACTIVE_STORY_BUDGET.calls.bot;
-  const provider: ModelProvider = { async stream() {
+  const provider: ModelProvider = { async stream(request) {
+    expect(request.maxOutputTokens).toBe(INTERACTIVE_STORY_BUDGET.botOutputTokens);
     return { content: '', toolCalls: Array.from({ length: limit + 1 }, (_, index) => ({
       id: `oversized-${index}`, name: 'spawn_session', arguments: '{}',
     })) };
