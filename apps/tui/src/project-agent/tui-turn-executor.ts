@@ -129,6 +129,8 @@ export function createTuiTurnExecutor(options: {
     const content = !saved && last?.role === 'user' && typeof last.content === 'string' ? last.content : '';
     const history = content ? messages.slice(0, -1) : messages;
     const useMemory = options.memoryEnabled(workspaceId);
+    const planReminder = profile.role === 'project_agent' ? input.plan?.reminder : null;
+    const runtimeReminders = planReminder ? [...(input.runtimeReminders ?? []), planReminder] : input.runtimeReminders;
     const toolContext: Record<string, any> = { workspaceId, workspacePath, conversationId: input.conversationId,
       permissionPolicy: input.permissionPolicy,
       mode, role: profile.role, turnRole: profile.role, planId: profile.planId, turnProfile: profile, surface: 'tui', turnId: streamId, messages: publicFacts ?? options.readMessages(input.conversationId ?? ''),
@@ -204,7 +206,7 @@ export function createTuiTurnExecutor(options: {
         } : {}), input: { content, omitCurrentUser: !content, history: [], modelMessages: history, turnId: streamId, turnIndex: 0,
           systemContextInput: { role: profile.role, workspaceId, workId: profile.workId, sessionId: profile.sessionId, planId: profile.planId,
             interactiveMaterials: options.userMaterialNotices?.(toolContext),
-            turnContext: {...profile.context, agentKind: profile.agentKind}, runtimeReminders: input.runtimeReminders, continuityContext: input.continuityContext,
+            turnContext: {...profile.context, agentKind: profile.agentKind}, runtimeReminders, continuityContext: input.continuityContext,
             ...(profile.role === 'project_agent' && useMemory ? { projectMemory: options.readMemory(workspaceId) } : {}),
             ...(profile.role === 'work_session' ? { workSessionExecution: { phase: input.plan?.delegationOrigin?.phase, goalRevision: input.plan?.delegationOrigin?.coordinationBinding?.goalRevision, takeover: input.plan?.delegationOrigin?.takeover?.text }, workSessionOrigin: { ...profile.context?.workSessionOrigin,
               readOnly: input.plan?.delegationOrigin?.readOnly === true,
