@@ -2,6 +2,22 @@
 
 All notable changes to Peer Agent are tracked here.
 
+## 0.1.0-rc.36 - 2026-11-03
+
+### 修复与改进
+
+- 统一父协调处置和执行所有权事实，接通真实资源等待的查询、准入、事件与冷恢复闭环；静默等待保留无进展保护。
+- 停止回复、工作控制、旧事件托管和技术修复分清责任；现有接管交叉状态通过原停稳回执恢复，不重放未知工具。
+- 任务列表和详情首层直接打开完整会话，其他资料由独立详情按钮展开；主 Bot 排查规则核对版本和搜索范围。
+- 同步双语用户文档、发布说明与站点更新日志。保持协调格式9和未知效果保护。
+
+### Fixes and improvements (English)
+
+- Unify parent disposition and execution facts; connect real resource waits through query, admission, events and cold recovery while preserving silent-wait progress guards.
+- Separate reply stops, work controls, durable event custody and technical repair. Recover retained takeover interleavings through the original stop proof without replaying unknown tools.
+- Keep complete conversations directly reachable in task lists and details; disclose secondary information separately and improve main-Bot version/search investigation rules.
+- Update bilingual documentation, release notes and the website changelog. Retain coordination format9 and unknown-effect protection.
+
 ## 0.1.0-rc.35 - 2026-11-02
 
 ### 修复与恢复
