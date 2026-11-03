@@ -116,6 +116,22 @@ test('failed preparation pins call parameters and permits only two content repai
   assert.equal(f.index.listEvidenceIndex().length, 0);
 });
 
+test('an unsettled preparation is unknown and cannot be executed again by replay', async t => {
+  const f = fixture(t), invalid = { ...draft, program: 'root=HtmlView("forbidden")' };
+  f.store.finishAttempt = () => { throw Error('preparation store offline'); };
+  const failed = (await f.publish(invalid, 'unsettled')).result.outputPreview;
+  assert.equal(failed.publicationStatus, 'unknown');
+  assert.equal(failed.recovery, 'reconcile_only');
+  assert.equal(failed.diagnostic.repair, undefined);
+  const replay = (await f.publish(invalid, 'unsettled')).result.outputPreview;
+  assert.equal(replay.reason, 'publication_unknown');
+  assert.equal(f.counts.permissions, 1);
+  const status = await f.execute(INSPECT, { target: { kind: 'publication', reference: failed.callRef }, view: 'metadata' }, 'inspect-unsettled');
+  assert.equal(status.result.outputPreview.preparationStatus, 'prepared');
+  assert.equal(status.result.outputPreview.publicationStatus, 'unknown');
+  assert.equal(f.index.listEvidenceIndex().length, 0);
+});
+
 test('a successful corrected candidate resets the content repair budget for a subsequent independent result', async t => {
   const f = fixture(t), invalid = { ...draft, program: 'root=HtmlView("forbidden")' };
   assert.equal((await f.publish(invalid, 'bad-a')).result.status, 'failed');

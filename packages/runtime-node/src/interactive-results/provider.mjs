@@ -97,6 +97,7 @@ export function createInteractiveResultProvider({ store, stateStore, materialSou
           const prepared = store.getAttempt(callRef);
           if (prepared && prepared.argsDigest !== jsonDigest(draft)) fail('publication_parameter_conflict');
           if (prepared?.phase === 'failed') fail(prepared.code, prepared.status);
+          if (prepared) fail('publication_unknown');
           if (draft.publication.kind === 'revise' && (!same(draft.publication.base.owner, authority.owner)
             || await authority.admitResult?.(draft.publication.base) !== true)) fail('interactive_scope_denied', 'denied');
           guard();
@@ -196,21 +197,25 @@ export function createInteractiveResultProvider({ store, stateStore, materialSou
         const committed = !!receipt;
         const status = error.status ?? (code === 'interactive_cancelled' ? 'cancelled' : code === 'interactive_validation_timeout' ? 'timeout' : 'failed');
         let remainingRepairs;
+        let preparationUnsettled = false;
         if (attemptStarted && !operationUnreadable) {
           const contentFailure = validationStarted && status === 'failed'
             && (typeof error.path === 'string' || code === 'interactive_resource_limit');
           try {
-            remainingRepairs = store.finishAttempt(callRef, committed ? undefined : { code, status, contentFailure })?.remainingRepairs;
-          } catch { /* Original failure/unknown remains visible; immutable call binding is retained. */ }
+            const finished = store.finishAttempt(callRef, committed ? undefined : { code, status, contentFailure });
+            preparationUnsettled = !committed && finished?.phase !== 'failed';
+            remainingRepairs = finished?.remainingRepairs;
+          } catch { preparationUnsettled = !committed; }
         }
-        const reason = operationUnreadable ? 'publication_unknown'
+        const publicationUnknown = operationUnreadable || preparationUnsettled || (!committed && code === 'publication_unknown');
+        const reason = publicationUnknown ? 'publication_unknown'
           : committed && receipt.publicationStatus === 'index_pending' && code !== 'publication_parameter_conflict'
             ? (code === 'publication_index_conflict' ? code : 'publication_index_pending') : code;
         const failed = createFailedClientToolResult({ call, locale, reason, status, dataLevel });
         failed.outputPreview = { ...failed.outputPreview,
-          ...(call.capabilityId === PUBLISH ? { publicationStatus: operationUnreadable || !callRef ? 'unknown' : committed ? receipt.publicationStatus : 'not_committed' } : {}),
+          ...(call.capabilityId === PUBLISH ? { publicationStatus: publicationUnknown || !callRef ? 'unknown' : committed ? receipt.publicationStatus : 'not_committed' } : {}),
           ...(committed ? { effectCommitted: true, callRef, reference: receipt.reference,
-            recovery: receipt.publicationStatus === 'published' ? 'inspect_only' : 'reconcile_only' } : operationUnreadable ? { callRef, recovery: 'reconcile_only' } : {}),
+            recovery: receipt.publicationStatus === 'published' ? 'inspect_only' : 'reconcile_only' } : publicationUnknown && callRef ? { callRef, recovery: 'reconcile_only' } : {}),
           diagnostic: { code: reason, path: String(error.path ?? '').slice(0, 240), details: String(error.details ?? '').slice(0, 240),
             retryable: call.capabilityId !== PUBLISH && ['interactive_validation_failed', 'invalid_program', 'invalid_component'].includes(reason),
             ...(Number.isSafeInteger(remainingRepairs) ? { repair: { kind: 'new_candidate', remaining: remainingRepairs } } : {}) } };

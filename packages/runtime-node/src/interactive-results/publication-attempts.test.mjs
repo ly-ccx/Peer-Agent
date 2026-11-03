@@ -17,6 +17,7 @@ test('fresh store instances retain preparation identity, active candidate and re
   const a = input('attempt-a');
   first.beginAttempt(a, () => true);
   assert.equal(second.getAttempt(a.callRef).phase, 'prepared');
+  assert.throws(() => second.beginAttempt(a, () => true), { code: 'publication_unknown' });
   assert.throws(() => second.beginAttempt(input('other-concurrent'), () => true), { code: 'publication_preparation_pending' });
   assert.throws(() => second.beginAttempt({ ...a, draft: { ...a.draft, title: 'changed' } }, () => true), { code: 'publication_parameter_conflict' });
   first.finishAttempt(a.callRef, { code: 'unsupported_node', contentFailure: true });

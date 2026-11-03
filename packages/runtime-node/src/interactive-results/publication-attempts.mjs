@@ -31,7 +31,8 @@ export function createPublicationAttempts(storage) {
       if (row) {
         const saved = savedAttempt(row.body, callRef);
         if (saved.argsDigest !== argsDigest || encode(saved.source) !== encode(source)) throw problem('publication_parameter_conflict');
-        return saved;
+        if (saved.phase === 'failed') throw Object.assign(problem(saved.code), { status: saved.status });
+        throw problem('publication_unknown');
       }
       const candidate = context.db.prepare('SELECT failures,active FROM publication_candidates WHERE id=?').get(candidateId);
       if (candidate && (!Number.isSafeInteger(candidate.failures) || candidate.failures < 0 || candidate.failures > L.contentRepairs + 1
