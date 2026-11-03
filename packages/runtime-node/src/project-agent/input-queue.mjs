@@ -346,11 +346,15 @@ export function createInputQueue({
       if (state.inputId !== undefined && delivered < 0 || state.executedInputId !== undefined && executed < 0 || executed > delivered
         || (state.completedInputIds ?? []).some(inputId => !positions.has(inputId) || positions.get(inputId) > delivered))
         throw Error('CORRUPT_INPUT_CURSOR');
-      const selections = [];
-      for (const input of inputs) for (const row of input.resourceFeedback ?? []) {
-        if (row.resource.kind === 'interactive') {
-          selections.push({ reference: row.resource.reference, followupId: row.version.followupId });
-          if (selections.length > 16_384) throw Error('INPUT_QUEUE_RETENTION_LIMIT');
+      const selections = [], attachmentIds = new Set();
+      for (const input of inputs) {
+        for (const attachment of input.attachments ?? []) attachmentIds.add(attachment.id);
+        if (attachmentIds.size > 16_384) throw Error('INPUT_QUEUE_RETENTION_LIMIT');
+        for (const row of input.resourceFeedback ?? []) {
+          if (row.resource.kind === 'interactive') {
+            selections.push({ reference: row.resource.reference, followupId: row.version.followupId });
+            if (selections.length > 16_384) throw Error('INPUT_QUEUE_RETENTION_LIMIT');
+          }
         }
       }
       const assertCurrent = () => {
@@ -359,7 +363,7 @@ export function createInputQueue({
       };
       if (!assertCurrent()) throw Error('INPUT_QUEUE_CHANGED');
       const revision = `sha256:${createHash('sha256').update(JSON.stringify(before)).digest('hex')}`;
-      return { revision, selections, assertCurrent, release };
+      return { revision, selections, attachmentIds: [...attachmentIds], assertCurrent, release };
     } catch (error) { release(); throw error; }
   }
   return { submitInput, consume, pendingExecution, completeExecution, cursor: readCursor, diagnosticSnapshot, acquireRetentionInputs,

@@ -127,6 +127,50 @@ test('runtime composition holds all six actual sources and retires only an unref
   assert.equal(f.runtime.resultStore.getVersion(f.reference).content.title, f.draft.title);
 });
 
+test('held canonical and delegated roots govern material retirement without relocking', async t => {
+  const f = await fixture(t, { retention: true });
+  const { resultStore, retention } = f.runtime;
+  const material = call => resultStore.recordMaterial({ owner: f.owner,
+    source: { kind: 'tool-result', conversationId: f.child.id, toolCallId: call },
+    value: { text: 'Stored observation' }, dataLevel: 'D3_private', observedAt: new Date().toISOString(),
+    truncated: false, redacted: false, evidenceRefs: [`tool-result://${call}`] }, () => true);
+  const linked = { owner: f.owner, source: material('recorded-call') };
+  const orphan = { owner: f.owner, source: material('orphan-call') };
+  f.conversations.appendMessage(f.child.id, { id: 'actual-tool-turn', role: 'assistant', content: 'Read the project',
+    segments: [{ type: 'tool-call', tool: 'read_file', toolCallId: 'recorded-call', status: 'success', result: 'actual receipt' }] });
+  assert.deepEqual(retention.previewMaterial(orphan).blockers, ['source']);
+  const file = path.join(f.root, 'plans', f.current().planId + '.json');
+  const plan = JSON.parse(readFileSync(file, 'utf8'));
+  plan.status = 'completed'; plan.runner = { status: 'idle' };
+  plan.resultAcceptance = { acceptedAt: new Date().toISOString(), acceptedBy: 'user' };
+  writeFileSync(file, JSON.stringify(plan));
+  assert.deepEqual(retention.previewMaterial(linked).blockers, ['source']);
+  for (const surface of ['draft', 'queue']) {
+    const attachment = { id: `material-${surface}`, kind: 'text', name: 'retained.txt', mimeType: 'text/plain',
+      size: 5, text: 'hello', sourceKind: 'user_upload' };
+    const source = resultStore.recordMaterial({ owner: f.owner,
+      source: { kind: 'user-material', messageId: `historical-${surface}`, attachmentId: attachment.id },
+      value: { text: 'hello' }, dataLevel: 'D3_private', observedAt: new Date().toISOString(), truncated: false,
+      redacted: false, evidenceRefs: [] }, () => true);
+    if (surface === 'draft') {
+      assert.equal(f.drafts.write({ workspaceId: f.owner.workspaceId, surface: 'desktop', revision: 0, uploads: [attachment], pending: [],
+        draft: { text: 'Keep upload', quote: null, attachmentIds: [attachment.id] } }).ok, true);
+    } else {
+      f.inputs.submitInput({ workspaceId: f.owner.workspaceId, inputId: 'material-queued', surface: 'desktop', text: 'Keep upload', attachments: [attachment] });
+    }
+    assert.deepEqual(retention.previewMaterial({ owner: f.owner, source }).blockers, ['source']);
+  }
+  const free = retention.previewMaterial(orphan);
+  assert.deepEqual(free.blockers, []);
+  f.conversations.appendMessage(f.child.id, { id: 'new-message', role: 'user', content: 'Keep original task record' });
+  assert.throws(() => retention.cleanupMaterial({ ...orphan, expectedDigest: free.cleanupDigest, requestId: 'retire-material' }),
+    { code: 'interactive_retention_stale' });
+  const latest = retention.previewMaterial(orphan);
+  const receipt = retention.cleanupMaterial({ ...orphan, expectedDigest: latest.cleanupDigest, requestId: 'retire-material' });
+  assert.deepEqual(receipt.source, orphan.source);
+  assert.deepEqual(resultStore.readMaterial(f.owner, linked.source).value, { text: 'Stored observation' });
+});
+
 test('durable delegated plans pin fixed and inspection evidence after reopen, even without an index entry', async t => {
   const f = await fixture(t), frozen = await f.freeze(), review = f.prepare();
   const { refs } = await f.read(review, 'evaluate', { followupId: frozen.followupId });

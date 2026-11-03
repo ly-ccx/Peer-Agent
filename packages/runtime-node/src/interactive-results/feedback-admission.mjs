@@ -36,8 +36,27 @@ export function createInteractiveFeedbackAdmission({ stateStore, conversationSto
           }
         }
       }
+      function hasMaterialSource(source) {
+        for (const [conversationId, messages] of guard.histories) {
+          if (source.kind === 'tool-result' && source.conversationId !== conversationId) continue;
+          for (const message of messages) {
+            if (source.kind === 'user-material') {
+              if (message.attachments?.some(attachment => attachment?.id === source.attachmentId)) return true;
+              continue;
+            }
+            if (message.segments != null && !Array.isArray(message.segments)
+              || message.rounds != null && !Array.isArray(message.rounds)) throw problem('interactive_retention_unavailable');
+            if (message.toolCallId === source.toolCallId || message.segments?.some(segment => segment?.toolCallId === source.toolCallId)) return true;
+            for (const round of message.rounds ?? []) {
+              if (round?.toolCalls != null && !Array.isArray(round.toolCalls)) throw problem('interactive_retention_unavailable');
+              if (round?.toolCalls?.some(call => (call?.toolCallId ?? call?.id) === source.toolCallId)) return true;
+            }
+          }
+        }
+        return false;
+      }
       if (!guard.assertCurrent()) throw problem('interactive_retention_stale');
-      return { revision: guard.revision, selections, conversationIds: [...guard.histories.keys()], delegatedSessions: guard.delegatedSessions, assertCurrent: guard.assertCurrent, release: guard.release };
+      return { revision: guard.revision, selections, conversationIds: [...guard.histories.keys()], delegatedSessions: guard.delegatedSessions, hasMaterialSource, assertCurrent: guard.assertCurrent, release: guard.release };
     } catch (error) { guard.release(); throw error; }
   }
   return { validate, restore, acquireMessageRoots };

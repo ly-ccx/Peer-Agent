@@ -19,9 +19,10 @@ export function createMaterialRetention({ resultStore, current, roots, acquireMa
     return { row, ...record };
   }
   function guarded(selection, work) {
-    return roots(selection.owner, (retention, assertRetention) => {
-      if (typeof acquireMaterialResponsibility !== 'function') throw problem('interactive_retention_unavailable');
-      const material = acquireMaterialResponsibility({ owner: structuredClone(selection.owner), source: structuredClone(selection.source) });
+    return roots(selection.owner, (retention, assertRetention, heldMaterialResponsibility) => {
+      const acquire = acquireMaterialResponsibility ?? heldMaterialResponsibility;
+      if (typeof acquire !== 'function') throw problem('interactive_retention_unavailable');
+      const material = acquire({ owner: structuredClone(selection.owner), source: structuredClone(selection.source) });
       try {
         if (!material || material.then || !interactiveDigest(material.digest) || typeof material.blocked !== 'boolean'
           || typeof material.assertCurrent !== 'function' || typeof material.release !== 'function') throw problem('interactive_retention_unavailable');

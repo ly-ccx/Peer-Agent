@@ -172,13 +172,14 @@ export function createProjectInputDraftStore({ rootDir = null, validateInteracti
         locks.push(lock);
       }
       const snapshot = () => {
-        const hash = createHash('sha256'), selections = [];
+        const hash = createHash('sha256'), selections = [], attachmentIds = new Set();
         for (const request of requests) {
           const result = read(request, true);
           if (!result.ok) throw Error(result.code);
           hash.update(JSON.stringify([request.surface, result.snapshot]));
           const { draft, pending } = result.snapshot;
           for (const item of [draft, ...pending]) {
+            for (const attachment of item.attachments) attachmentIds.add(attachment.id);
             for (const row of restoreResourceFeedbackTransport(item.resourceFeedback, item.attachments)) {
               if (row.resource.kind !== 'interactive') continue;
               if (row.recipient.workspaceId !== workspaceId || validateInteractiveFeedback?.(row, workspaceId) !== true)
@@ -187,7 +188,7 @@ export function createProjectInputDraftStore({ rootDir = null, validateInteracti
             }
           }
         }
-        return { revision: `sha256:${hash.digest('hex')}`, selections };
+        return { revision: `sha256:${hash.digest('hex')}`, selections, attachmentIds: [...attachmentIds] };
       };
       const initial = snapshot();
       const assertCurrent = () => {

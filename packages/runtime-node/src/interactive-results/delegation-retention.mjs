@@ -79,7 +79,7 @@ export function createDelegationRetention({ goalPlanStore, resultStore, stateSto
         if (references.size > MAX_REFS) throw problem('interactive_delegation_limit');
       }
     };
-    let bytes = 0, refCount = 0;
+    let bytes = 0, refCount = 0, unsettledPlans = 0;
     for (const name of names) {
       const file = path.join(dir, name), fact = fileRevision(file);
       bytes += fact.size;
@@ -98,6 +98,7 @@ export function createDelegationRetention({ goalPlanStore, resultStore, stateSto
         || messages.delegatedSessions.get(plan.conversationId) !== origin.sessionId) throw problem('interactive_delegation_corrupt');
       sessions.add(origin.sessionId);
       if (historicallySettled(plan)) continue;
+      unsettledPlans++;
       const refs = evidenceRefs(plan);
       refCount += refs.size;
       if (refCount > MAX_REFS) throw problem('interactive_delegation_limit');
@@ -143,6 +144,6 @@ export function createDelegationRetention({ goalPlanStore, resultStore, stateSto
     };
     if (!assertCurrent()) throw problem('interactive_retention_stale');
     return { revision: jsonDigest([messages.revision, [...versions], evidence?.version ?? null]), references: [...references.values()],
-      followupIds: [...followupIds].sort(), assertCurrent };
+      followupIds: [...followupIds].sort(), unsettledPlans, assertCurrent };
   };
 }

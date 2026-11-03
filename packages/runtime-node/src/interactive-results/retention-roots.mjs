@@ -73,15 +73,35 @@ export function createInteractiveRetentionRoots({ acquireCompatibility, inputQue
       const compatibility = register(acquireCompatibility(owner));
       // Active view pins are read and hashed inside the result transaction.
       sources.views = jsonDigest(['interactive-active-view', compatibility.revision]);
-      selections('drafts', register(drafts.acquireRetentionDrafts(owner.workspaceId)));
-      selections('inputs', register(inputQueue.acquireRetentionInputs(owner.workspaceId)));
+      const savedDrafts = register(drafts.acquireRetentionDrafts(owner.workspaceId));
+      const queuedInputs = register(inputQueue.acquireRetentionInputs(owner.workspaceId));
+      selections('drafts', savedDrafts);
+      selections('inputs', queuedInputs);
       const messages = register(feedback.acquireMessageRoots(owner));
       selections('messages', messages);
-      targets('delegation', register(acquireDelegationRoots(owner, messages), false));
-      targets('verification', register(verification.acquireRetentionVerification(owner)));
+      const delegation = register(acquireDelegationRoots(owner, messages), false);
+      targets('delegation', delegation);
+      const review = register(verification.acquireRetentionVerification(owner));
+      targets('verification', review);
       const assertCurrent = () => !released && checks.every(check => check() === true);
       if (!assertCurrent()) throw problem('interactive_retention_stale');
-      return { sources, pins: [...pins.values()], followupIds: [...followupIds], assertCurrent, release };
+      const materialResponsibility = ({ owner: expectedOwner, source }) => {
+        if (!assertCurrent() || encode(expectedOwner) !== encode(owner)) throw problem('interactive_retention_stale');
+        if (!sync(messages.hasMaterialSource) || !Number.isSafeInteger(delegation.unsettledPlans) || delegation.unsettledPlans < 0)
+          throw problem('interactive_retention_unavailable');
+        let pendingAttachment = false;
+        if (source.kind === 'user-material') {
+          const sources = [savedDrafts.attachmentIds, queuedInputs.attachmentIds];
+          if (sources.some(ids => !Array.isArray(ids) || ids.length > LIMIT || ids.some(id => !interactiveToken(id))))
+            throw problem('interactive_retention_unavailable');
+          pendingAttachment = sources.some(ids => ids.includes(source.attachmentId));
+        }
+        const blocked = pendingAttachment || delegation.unsettledPlans > 0
+          || review.references.length > 0 || review.followupIds.length > 0 || messages.hasMaterialSource(source);
+        const digest = jsonDigest([sources, source, blocked]);
+        return { digest, blocked, assertCurrent, release() {} };
+      };
+      return { sources, pins: [...pins.values()], followupIds: [...followupIds], materialResponsibility, assertCurrent, release };
     } catch (error) { release(); throw error; }
   };
 }

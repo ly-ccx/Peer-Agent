@@ -27,7 +27,7 @@ export function createInteractiveRetention({ resultStore, stateStore, assertOwne
     const guard = acquireRoots(copy(owner));
     try {
       if (guard?.then) Promise.resolve(guard).then(value => { try { value?.release?.(); } catch {} }, () => {});
-      if (!guard || guard.then || !known(guard, ['sources', 'pins', 'followupIds', 'assertCurrent', 'release'])
+      if (!guard || guard.then || !known(guard, ['sources', 'pins', 'followupIds', 'materialResponsibility', 'assertCurrent', 'release'])
         || !known(guard.sources, INTERACTIVE_RETENTION_SOURCES) || Object.keys(guard.sources).length !== INTERACTIVE_RETENTION_SOURCES.length
         || Object.values(guard.sources).some(value => !interactiveDigest(value)) || !synchronous(guard.assertCurrent) || !synchronous(guard.release)
         || !Array.isArray(guard.pins) || guard.pins.length > 16_384 || !Array.isArray(guard.followupIds) || guard.followupIds.length > 16_384)
@@ -44,7 +44,7 @@ export function createInteractiveRetention({ resultStore, stateStore, assertOwne
       const assertCurrent = () => { current(owner); if (guard.assertCurrent() !== true) throw problem('interactive_retention_stale'); return true; };
       assertCurrent();
       const normalized = { sources: guard.sources, pins: pins.sort((a, b) => encode(a).localeCompare(encode(b))), followupIds };
-      const result = work(normalized, assertCurrent);
+      const result = work(normalized, assertCurrent, guard.materialResponsibility);
       if (result?.then) throw problem('interactive_retention_unavailable');
       assertCurrent(); return result;
     } finally { if (typeof guard?.release === 'function') guard.release(); }
