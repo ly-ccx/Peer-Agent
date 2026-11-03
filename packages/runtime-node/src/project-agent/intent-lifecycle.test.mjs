@@ -124,6 +124,15 @@ test('a deferred goal reply stays unaccepted and active until its actual digest 
   f.sessions.get('s1').status = 'result_ready';
   const event = { eventId: 'ready', sessionId: 's1', kind: 'report_available' }; f.store.transfer([event]);
   const job = { workId: 'g', kind: 'wake', attemptId: 't2', userInputs: [], events: [event] }; f.coordinator.start(job);
+  for (const [sourceInputIds, error] of [[['i'], 'source_not_admitted'], [[], 'input_disposition_required']]) {
+    const rejected = await f.coordinate({ action: 'assess', assessment: { ...f.initial, expectedWorkRevision: 1,
+      sourceInputIds, sourceEventIds: [event.eventId], interpretation: undefined,
+      disposition: { kind: 'return', replyRef: 't2-reply-1' } } }, f.context('t2', { events: [event] }));
+    assert.equal(rejected.error, error);
+    assert.deepEqual(rejected.sourceInputIds, []);
+    assert.deepEqual(rejected.sourceEventIds, [event.eventId]);
+    assert.equal(f.store.readWork('g').intentCoordination.revision, 1);
+  }
   const result = await f.coordinate({ action: 'assess', assessment: { ...f.initial, expectedWorkRevision: 1, sourceInputIds: [], sourceEventIds: [event.eventId], inputs: [], interpretation: undefined,
     coverage: f.initial.coverage.map(row => ({ ...row, status: 'covered', sources: [{ sessionId: 's1', sourceRevision: 'source:s1', evidenceRefs: ['ev:s1'] }] })),
     disposition: { kind: 'return', replyRef: 't2-reply-1' } } }, f.context('t2', { events: [event] }));
