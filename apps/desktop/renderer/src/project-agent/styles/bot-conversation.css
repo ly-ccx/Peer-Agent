@@ -819,6 +819,10 @@
   opacity: 1;
 }
 
+.bot-question .bot-card-actions button:focus-visible {
+  outline-offset: -2px;
+}
+
 .bot-question .bot-card-actions button:hover {
   background: var(--control-fill-hover);
 }

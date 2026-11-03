@@ -211,6 +211,12 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
   await until(() => answer.evaluate(node => document.activeElement === node), Boolean);
   await until(() => page.locator(BOT_DETAIL_SURFACE).count(), count => count === 0);
   assert.equal(await answer.isVisible(), true);
+  const answerFocus = await answer.evaluate(node => {
+    const style = getComputedStyle(node);
+    return { visible: node.matches(':focus-visible'), width: style.outlineWidth, offset: style.outlineOffset };
+  });
+  assert.deepEqual(answerFocus, { visible: true, width: '2px', offset: '-2px' },
+    'keyboard focus remains inside the clipped question card');
   assert.equal(readTurns(), beforeNavigation, 'locating a decision does not answer, confirm or resume the task');
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'task-main-question.png') });
   conversationMessages = [note, { ...question, cards: question.cards.map(card => ({ ...card, resolvedState: 'resolved' })) }];
