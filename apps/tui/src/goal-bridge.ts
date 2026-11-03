@@ -512,10 +512,11 @@ export function createTuiGoalBridge(options?: {
         const planId = asString(options.args.planId);
         if (planId) {
           const plan = getPlan(planId);
-          return okExecution(call, plan ? `Loaded plan ${planId}` : `Plan not found: ${planId}`, {
-            ok: Boolean(plan),
-            plan,
-          });
+          if (!plan) return okExecution(call, `Plan not found: ${planId}`, { ok: false, plan: null });
+          // The provider may materialize long plans. Put task identities before
+          // long briefs so the bounded head still supports goal_update_task.
+          const { planId: id, tasks, ...details } = plan;
+          return okExecution(call, `Loaded plan ${planId}`, { ok: true, plan: { planId: id, tasks, ...details } });
         }
         const plans = listPlansByConversation(conversationId);
         return okExecution(call, `Listed ${plans.length} plan(s)`, {
