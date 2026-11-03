@@ -9,7 +9,7 @@ import {createProjectRelayFixture} from './testing/project-relay-fixture.mjs';
 const output=mkdtempSync(path.join(os.tmpdir(),'peer-mobile-browser-'));
 const executable=process.env.PEER_BROWSER_PATH??(process.platform==='darwin'?'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome':'/usr/bin/chromium');
 if(!existsSync(executable))throw Error('Set PEER_BROWSER_PATH to an installed Chromium browser.');
-const f=await createProjectRelayFixture({scriptedReply:true});let browser;
+const f=await createProjectRelayFixture({scriptedReply:true,interactiveResults:true});let browser;
 const proof={viewport:{width:390,height:844},scope:'desktop Chromium at phone width; loopback HTTP + real paired WebSocket; scripted reply, no model',steps:[],pageErrors:[]};
 try {
   browser=await chromium.launch({executablePath:executable,headless:true});
@@ -40,10 +40,17 @@ try {
   proof.steps.push('actual HTTP receipt intentionally lost once; keyboard submit / same-ID retry / one durable input / scripted reply');
   await page.screenshot({path:path.join(output,'conversation-390.png'),fullPage:true});
   await page.locator('.project-tasks button').first().click();await page.locator('#project-task-detail').waitFor({state:'visible'});
-  assert.match(await page.locator('#detail-summary').textContent(),/项目说明/);
+  await page.locator('#detail-summary').filter({hasText:'项目说明'}).waitFor();
+  await page.locator('#detail-results li').first().waitFor();
+  assert.equal(await page.locator('#detail-results li').count(),2);
+  const resultText=await page.locator('#detail-results').textContent();
+  assert.match(resultText,/内部摘要 <img id="result-injection"> \[local path\]/);
+  assert.doesNotMatch(resultText,/private-fixed-text|私有标题|stored program/);
+  assert.equal(await page.locator('#result-injection').count(),0);
+
   assert.equal(await page.locator('button').filter({hasText:'批准'}).count(),0);
   await page.screenshot({path:path.join(output,'task-390.png'),fullPage:true});proof.steps.push('safe task report; approval is desktop-only');
   await page.locator('#task-close').click();await page.locator('#project-logout').click();
-  await page.locator('#project-login').waitFor({state:'visible'});assert.equal(await page.locator('.project-message').count(),0);
+  await page.locator('#project-login').waitFor({state:'visible'});assert.equal(await page.locator('.project-message').count(),0);assert.equal(await page.locator('#detail-results li').count(),0);
   proof.steps.push('logout clears private content');assert.deepEqual(proof.pageErrors,[]);proof.ok=true;
 }finally{await browser?.close();await f.close();proof.finishedAt=new Date().toISOString();writeFileSync(path.join(output,'proof.json'),JSON.stringify(proof,null,2));console.log(JSON.stringify({output,ok:proof.ok,pageErrors:proof.pageErrors}));}

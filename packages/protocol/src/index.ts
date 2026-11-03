@@ -54,6 +54,7 @@ export { REMOTE_PROJECT_LIMITS, parseRemoteProjectRequest, admitRemoteProject, p
 export type {
   RemoteProjectGrant,
   RemoteProjectRequest,
+  RemoteProjectInteractiveResult,
   RemoteProjectContext,
   RemoteProjectRejection,
   RemoteProjectAdmission,

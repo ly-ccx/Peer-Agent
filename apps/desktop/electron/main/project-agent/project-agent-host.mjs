@@ -76,7 +76,7 @@ import { createDesktopProjectFacts } from './project-facts.mjs';
 import { createProjectLifecycleEffects } from './project-lifecycle-effects.mjs';
 import { createDiagnosticsExport } from './diagnostics-export.mjs';
 import { retryProjectAgentTurn } from './response-retry.mjs';
-import { createInteractiveRuntime } from '@peer-agent/runtime-node/interactive-results';
+import { createInteractiveRuntime, createInteractiveTextReader } from '@peer-agent/runtime-node/interactive-results';
 import { installDesktopInteractiveRuntime } from '../interactive-results/runtime-port.mjs';
 import { createDesktopRecoveryController } from './project-recovery-controller.mjs';
 
@@ -639,8 +639,12 @@ export function registerDesktopProjectAgent({
     },
   });
   if (typeof onReady === 'function') {
+    const readInteractiveResult = createInteractiveTextReader({ resultStore: interactive.resultStore, assertOwner: owner => {
+      const profile = profileStore.read(owner.workspaceId);
+      return profile?.status === 'active' && profile.agentConversationId === owner.conversationId;
+    } });
     onReady({
-      projectAccess: {directory,inputQueue,getSession:sessionId=>supervisor.get({sessionId,detail:'report'}),
+      projectAccess: {directory,inputQueue,readInteractiveResult,getSession:sessionId=>supervisor.get({sessionId,detail:'report'}),
         wake:workspaceId=>{void host.sync([workspaceId]).catch(()=>{});}},
       listItems: () => directory.list(),
       submitInput: (input) => {
