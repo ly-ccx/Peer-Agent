@@ -41,6 +41,10 @@ export async function checkBotLifecycleGates({page, until, report, captureDirect
       await until(()=>row.innerText(),text=>text.includes(expected));
       assert.equal(await row.locator('xpath=ancestor::section[1]').locator('h2').innerText(),'需要你');
       assert.doesNotMatch(await row.innerText(),/已完成|已读/);
+      const readableStatus = await row.evaluate(node =>
+        getComputedStyle(node.querySelector('.bot-task-row-meta')).color ===
+        getComputedStyle(node.querySelector('.bot-task-row-title')).color);
+      assert.ok(readableStatus, 'human gate status uses the primary text color');
       await page.screenshot({path:path.join(captureDirectory,`lifecycle-${key}-list-${width}-${appearance}.png`),animations:'disabled'});
       await row.focus();await page.keyboard.press('Enter');
       const detail = page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail');

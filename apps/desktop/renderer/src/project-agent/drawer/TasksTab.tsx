@@ -72,7 +72,7 @@ export function TasksTab({
       {resumeError && <p role="alert">{i18n.t('projectAgent.drawer.resumeFailed')}</p>}
       {(Object.keys(GROUP_KEY) as TaskGroup[]).map((group) => (
         groups[group].length === 0 ? null : (
-          <section className="bot-tasks-section" key={group}>
+          <section className="bot-tasks-section" data-task-group={group} key={group}>
             <div className="bot-tasks-heading">
               <h2>{i18n.t(GROUP_KEY[group])}</h2>
               <span>{groups[group].length}</span>

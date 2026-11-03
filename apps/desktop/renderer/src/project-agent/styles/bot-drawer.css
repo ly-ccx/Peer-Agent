@@ -672,6 +672,10 @@ html:not([data-vibrancy='true']) .bot-drawer-resizer {
   white-space: nowrap;
 }
 
+.bot-tasks-section[data-task-group="needsYou"] .bot-task-row-meta {
+  color: var(--graphite-base, var(--za-text));
+}
+
 .bot-drawer-tab .bot-task-row-arrow.peer-icon {
   flex: none;
   color: var(--graphite-fade, var(--za-text-muted));
