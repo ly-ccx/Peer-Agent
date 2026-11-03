@@ -4,14 +4,17 @@ import { validIntentAssessment, INTENT_FORMAT_VERSION, intentContentDigest } fro
 import { createDecisionFrame, publicEventPayload, publicDecisionText } from './decision-frame.mjs';
 import { hasUnsettledDispatch } from './recovery-policy.mjs';
 import { historyExecutionHeld } from './history-resumption.mjs';
+import { hasPendingRuntimeSessions } from '@peer-agent/protocol';
+import { requireResourceWaitPort, resourceWaitScope, readResourceWaitFacts } from './resource-wait.ts';
 
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const stopped = work => work?.stopScope === 'work' && ['paused', 'cancelled'].includes(work.state);
 const revisionOf = session => session.observationRevision || session.sourceRevision;
 
 /** Semantic responsibility and closure over existing work, task and verification ports. */
-export function createIntentLifecycle({ storeFor, readSession, readMessages, readGoalFacts = () => null, verifyGoal = null,
+export function createIntentLifecycle({ storeFor, readSession, readMessages, readGoalFacts = () => null, verifyGoal = null, resourceWaits,
   holdsLease, canExecute, now = () => new Date().toISOString() }) {
+  const waits = requireResourceWaitPort(resourceWaits);
   function scope(context, requestedId) {
     const workspaceId = context.workspaceId, parentConversationId = context.conversationId || context.parentConversationId;
     const store = storeFor(workspaceId), state = store?.readSnapshot?.() || store?.read();
@@ -56,6 +59,7 @@ export function createIntentLifecycle({ storeFor, readSession, readMessages, rea
     const frame = createDecisionFrame({ state: s.state, workspaceId: s.workspaceId, parentConversationId: s.parentConversationId,
       workId: s.workId, sessions: related, currentInputIds: s.current.map(row => row.inputId || row.id),
       originDecisionRef: context.sourceDecisionRef, turnId: context.turnId,
+      ...readResourceWaitFacts(waits, resourceWaitScope(s.work, s.state), (s.work.waitFor || []).filter(wait => wait.kind === 'resource')),
       eventIds: [...new Set([...(context.events || []).map(row => row.eventId), ...(s.work.pendingEventIds || [])])], afterSessionId: input.afterSessionId });
     const inputs = Object.entries(intent?.inputs || {}).sort(([a], [b]) => a.localeCompare(b));
     if (input.afterInputId && !Object.hasOwn(intent?.inputs || {}, input.afterInputId)) return { ok: false, error: 'frame_cursor_out_of_scope' };
@@ -94,7 +98,10 @@ export function createIntentLifecycle({ storeFor, readSession, readMessages, rea
             || !s.mandate?.sessionIds.includes(request.sessionId)) return 'human_wait_unproven';
         } else if (wait.kind === 'recovery') {
           if (!s.work.recovery || wait.id !== s.work.recovery.reservationId || String(s.work.revision) !== wait.revision) return 'recovery_wait_unproven';
-        } else return 'resource_adapter_unavailable'; // ADR116 is not integrated on this branch.
+        } else if (wait.kind === 'resource') {
+          const current = waits.inspect(resourceWaitScope(s.work, s.state), wait);
+          if (current.state !== 'waiting' || current.current.wait.revision !== wait.revision) return current.reason || 'resource_wait_stale';
+        } else return 'unsupported_wait_kind';
       }
     }
     if (d.kind === 'return' && d.replyRef !== `${context.turnId}-reply-1`
@@ -104,7 +111,8 @@ export function createIntentLifecycle({ storeFor, readSession, readMessages, rea
       const control = s.state.transitions?.[d.controlRef], source = s.state.decisions?.[d.controlRef];
       if (!s.current.length || control?.workId !== s.workId || control.action !== 'cancel' || control.phase !== 'completed'
         || !source?.sourceInputIds.some(id => s.current.some(row => (row.inputId || row.id) === id))) return 'withdrawal_unproven';
-      if (s.mandate?.sessionIds.some(id => !['accepted', 'cancelled'].includes(readSession({ sessionId: id })?.status))) return 'withdrawal_incomplete';
+      const expected = s.mandate?.sessionIds || [];
+      if (hasPendingRuntimeSessions(expected.map(id => readSession({ sessionId: id })), expected)) return 'withdrawal_incomplete';
     }
     if (d.kind === 'blocked_system') {
       if (d.recoveryRef === `work:${s.workId}`) {
@@ -206,21 +214,24 @@ export function createIntentLifecycle({ storeFor, readSession, readMessages, rea
 /** Closing is distinct from assessment and runs after delivery/settlement with fresh host facts. */
 export function intentWorkDisposition({ work, state, sessions, store, parentConversationId, sourcesCurrent }) {
   const intent = work.intentCoordination; if (!intent) return null;
-  if (intent.lifecycle !== 'active') return intent.lifecycle === 'cancelled' ? { state: 'cancelled', end: 'user_stopped' } : { state: 'delivered', end: 'delivered' };
+  if (intent.lifecycle !== 'active') return intent.lifecycle === 'cancelled' ? { state: 'cancelled', end: 'user_stopped' } : { state: 'delivered', end: 'reply_committed' };
   const disposition = intent.decision.disposition, mandate = state.mandates?.[work.workId];
+  const expected = mandate?.sessionIds || work.sessionIds || [];
   if (intent.goalRevision !== (mandate?.goalRevision || 0)) return { state: 'runnable', end: 'yielded' };
   if (disposition.kind === 'continue') return { state: 'runnable', end: 'yielded' };
-  if (disposition.kind === 'wait') return { state: disposition.waitFor.some(row => row.kind === 'human_request'
-    || row.kind === 'session' && sessions.some(session => session.sessionId === row.id && session.followUp?.owner === 'user')) ? 'waiting_user' : 'waiting_children', end: 'awaiting_children', waitFor: disposition.waitFor };
+  if (disposition.kind === 'wait') {
+    const user = disposition.waitFor.some(row => row.kind === 'human_request'
+      || row.kind === 'session' && sessions.some(session => session.sessionId === row.id && session.followUp?.owner === 'user'));
+    return { state: user ? 'waiting_user' : 'waiting_children', end: user ? 'awaiting_user' : 'awaiting_children', waitFor: disposition.waitFor };
+  }
   if (disposition.kind === 'blocked_system') return { state: 'blocked_system', end: 'no_progress', blockedCode: disposition.code };
   if (disposition.kind === 'withdraw') {
     const result = store.closeIntent({ operationId: `close:${intent.decision.operationId}`, workId: work.workId,
       expectedWorkRevision: intent.revision, expectedGoalRevision: intent.goalRevision, lifecycle: 'cancelled' },
-    { parentConversationId, appliedControlRef: disposition.controlRef, pendingManagedSessions: sessions.some(row => !['accepted', 'cancelled'].includes(row.status)) });
-    return result.ok ? { state: 'cancelled', end: 'user_stopped' } : { state: 'blocked_system', end: result.error };
+      { parentConversationId, appliedControlRef: disposition.controlRef, pendingManagedSessions: hasPendingRuntimeSessions(sessions, expected) });
+    return result.ok ? { state: 'cancelled', end: 'user_stopped' } : { state: 'blocked_system', end: 'fatal', blockedCode: result.error };
   }
-  const pending = hasUnsettledDispatch(work) || sessions.some(row => !['accepted', 'cancelled'].includes(row.status) || row.needsUser?.length
-      || row.executionOwnership?.active || row.completionReviewRequired)
+  const pending = hasUnsettledDispatch(work) || hasPendingRuntimeSessions(sessions, expected)
     || Object.values(state.transitions || {}).some(row => row.workId === work.workId && !['completed', 'blocked'].includes(row.phase))
     || Object.values(state.agentRequests || {}).some(row => mandate?.sessionIds.includes(row.sessionId) && row.status === 'open')
     || Object.values(state.agentCommands || {}).some(row => (row.workId === work.workId || mandate?.sessionIds.includes(row.sessionId)) && ['pending', 'unknown'].includes(row.effect));
@@ -228,7 +239,7 @@ export function intentWorkDisposition({ work, state, sessions, store, parentConv
   const closed = store.closeIntent({ operationId: `close:${intent.decision.operationId}`, workId: work.workId,
     expectedWorkRevision: intent.revision, expectedGoalRevision: intent.goalRevision, lifecycle: 'fulfilled' },
   { parentConversationId, pendingObligations: pending, verifiedGoalRevision: validReview ? intent.goalRevision : undefined, reviewRef: validReview ? intent.review.reviewRef : undefined });
-  return closed.ok ? { state: 'delivered', end: 'delivered' }
+  return closed.ok ? { state: 'delivered', end: 'reply_committed' }
     : { state: pending ? sessions.some(row => row.followUp?.owner === 'user') ? 'waiting_user' : 'waiting_children' : 'blocked_system',
-      end: closed.error, blockedCode: closed.error };
+      end: pending ? sessions.some(row => row.followUp?.owner === 'user') ? 'awaiting_user' : 'awaiting_children' : 'fatal', blockedCode: closed.error };
 }

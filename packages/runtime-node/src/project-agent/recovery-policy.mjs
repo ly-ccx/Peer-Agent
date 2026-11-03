@@ -49,6 +49,10 @@ export function recoveryCheckpointAvailable(work, checkpoint, readCheckpoint) {
   if (work.repairSessionIds?.length && checkpoint.outcome?.failed !== true
     && checkpoint.outcome?.yielded !== true && checkpoint.outcome?.stopped !== true
     && !hasUnsettledDispatch(work) && rounds.every(round => (round.toolCalls || []).every(call => call.result !== undefined))) return true;
+  // An admitted resource-ready wake starts a new reasoning step. Paired historical tools need no native replay tail.
+  if (work.state === 'runnable' && work.waitFor?.some(wait => wait.kind === 'resource') && checkpoint.outcome
+    && !checkpoint.outcome.failed && !checkpoint.outcome.yielded && !checkpoint.outcome.stopped
+    && !hasUnsettledDispatch(work) && rounds.every(round => (round.toolCalls || []).every(call => call.result !== undefined))) return true;
   const executed = rounds.some(round => round.toolCalls?.length);
   if (work.nativeCheckpointRef && readCheckpoint) {
     try { const native = readCheckpoint(work.nativeCheckpointRef); return Boolean(native && typeof native === 'object'); }

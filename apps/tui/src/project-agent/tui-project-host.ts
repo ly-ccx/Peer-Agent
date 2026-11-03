@@ -201,6 +201,7 @@ export function createTuiProjectHost(options: {
     reconcileVerification: (input: any) => verification.reconcileInterrupted(input),
     findEvidenceRecords: (refs: string[]) => plans.findEvidenceIndexRecords(refs),
     readResourceClaims: (workspaceId: string) => scheduler.resourceSnapshot().filter((row: any) => row.workspaceId === workspaceId),
+    resourceWaits: supervisor.resourceWaits,
     readSettings:getSettings, inputQueue:inputs, inbox, onStatus:changed,
     onCurator:(input: any)=>curator.consider(input), onMaintenance:(input: any)=>{if(holds(input.workspaceId)&&memoryEnabled(input.workspaceId))maintenance.runDue(input);},
     readFacts:(id: string)=>delegationFactsForWorkspace(plans.listPlans().map((row: any)=>plans.getPlan(row.planId)),id),

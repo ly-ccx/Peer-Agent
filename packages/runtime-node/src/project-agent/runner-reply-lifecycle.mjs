@@ -1,5 +1,6 @@
 import { createReplyDelivery } from './reply-delivery.mjs';
-import { repairOwnership, stateAfterReply } from './repair-ownership.mjs';
+import { ownedSessions } from './repair-ownership.mjs';
+import { decideRuntimeDisposition, runtimeWorkHeld } from './runtime-disposition.ts';
 import { intentWorkDisposition } from './intent-lifecycle.mjs';
 import { intentReplyBindings, retainedIntentReplyBindings, intentReplyScopes, intentReviewCurrent } from './intent-reply-bindings.mjs';
 import { historyExecutionHeld } from './history-resumption.mjs';
@@ -37,20 +38,15 @@ export function createRunnerReplyLifecycle({ store, workspaceId, conversationId,
           && row.intentRevision === work?.intentCoordination?.revision && row.decisionRef === work.intentCoordination?.decision.operationId);
         const returningSameGoal = work?.intentCoordination?.lifecycle === 'active' && work.intentCoordination.decision.disposition.kind === 'return'
           && message.meta?.intentScopes?.some(scope => scope.workId === workId && scope.goalRevision === work.intentCoordination.goalRevision);
-        if (!work || historyExecutionHeld(work) || ['paused', 'cancelled'].includes(work.state)
+        if (!work || historyExecutionHeld(work) || runtimeWorkHeld(work) || ['paused', 'cancelled'].includes(work.state)
           || !binding && !returningSameGoal && (!['runnable', 'retry_wait'].includes(work.state) || work.attemptId && work.attemptId !== message.turnId)) continue;
-        const mandate = readSnapshot().mandates?.[workId];
-        const reported = (message.sources || []).filter(id => {
-          const row = rows().find(row => row.sessionId === id);
-          return (!row?.origin?.workId || row.origin.workId === workId) && (!binding || mandate?.sessionIds.includes(id));
-        });
-        const sessionIds = [...new Set([...(work.sessionIds || []), ...reported])];
-        const related = rows().filter(row => sessionIds.includes(row.sessionId));
+        const related = ownedSessions(work, { events: [] }, rows());
+        const sessionIds = [...new Set([...(work.sessionIds || []), ...related.map(row => row.sessionId)])];
         const events = (work.pendingEventIds || []).map(id => readSnapshot().events[id]?.event).filter(Boolean);
         const unseen = events.filter(event => !eventObserved(event));
         const semantic = resolveIntent(work);
-        store.saveWork({ ...work, sessionIds, ...semantic, intentCoordination: readWork(work.workId).intentCoordination,
-          state: unseen.length ? 'runnable' : semantic?.state || stateAfterReply(related), repairSessionIds: repairOwnership(related).repairSessionIds }, { returnState: false });
+        const { handling, ...disposition } = decideRuntimeDisposition({ previous: work, sessions: related, semantic, unseenEvents: unseen.length > 0 });
+        store.saveWork({ ...work, sessionIds, ...semantic, ...disposition, intentCoordination: readWork(work.workId).intentCoordination }, { returnState: false });
         store.handled(events.filter(eventObserved).map(event => event.eventId));
       }
     },
@@ -62,7 +58,7 @@ export function createRunnerReplyLifecycle({ store, workspaceId, conversationId,
       const workIds = [...new Set([message.meta?.workId, ...(message.meta?.intentBindings || []).map(row => row.workId)].filter(Boolean))];
       for (const id of workIds) {
         const work = readWork(id);
-        if (!work || work.parentConversationId !== conversationId || ['paused', 'cancelled'].includes(work.state)) continue;
+        if (!work || work.parentConversationId !== conversationId || historyExecutionHeld(work) || runtimeWorkHeld(work) || ['paused', 'cancelled'].includes(work.state)) continue;
         const binding = message.meta?.intentBindings?.find(row => row.workId === id);
         if (binding && (binding.intentRevision !== work.intentCoordination?.revision || binding.decisionRef !== work.intentCoordination.decision.operationId)) continue;
         store.saveWork({ ...work, state: 'waiting_children' }, { returnState: false });

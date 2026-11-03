@@ -429,6 +429,7 @@ export function registerDesktopProjectAgent({
     reconcileVerification: input => verification.reconcileInterrupted(input),
     findEvidenceRecords: refs => goalPlanStore.findEvidenceIndexRecords(refs),
     readResourceClaims: workspaceId => executionScheduler.resourceSnapshot().filter(row => row.workspaceId === workspaceId),
+    resourceWaits: supervisor.resourceWaits,
     ...createProjectLifecycleEffects({ objectiveService,profileStore, lifecycle, supervisor, conversationStore, resolveConversationId, broadcast,
       memoryEnabled: workspaceId => memoryUseEnabled({ settings: readRuntimePolicy(), profile: profileStore.read(workspaceId) }),
       resolveEvidence: ref => readEvidenceBody(ref)?.text || '' }),

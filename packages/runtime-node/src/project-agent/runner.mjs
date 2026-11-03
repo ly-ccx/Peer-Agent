@@ -48,6 +48,7 @@ export function createProjectAgentRunner({
   onCurator = null,
   onReplied = null,
   coordinationStore = null,
+  resourceWaits = null,
   reconcileVerification = null,
   findEvidenceRecords = null,
   readResourceClaims,
@@ -124,7 +125,7 @@ export function createProjectAgentRunner({
       if (error) { setStatus('error'); return; }
       try { armRecoveryTimer(); } catch { setStatus('error'); return; }
       if (!pumping) void kick().catch(() => setStatus('error'));
-    }, resolveRoster, reconcileVerification, findEvidenceRecords, readResourceClaims, now: stamp }) : null;
+    }, resolveRoster, reconcileVerification, findEvidenceRecords, readResourceClaims, resourceWaits, now: stamp }) : null;
 
   function armRecoveryTimer() {
     const at = !disposed && holdsLease() === true ? coordination?.nextRetryAt() : null;
