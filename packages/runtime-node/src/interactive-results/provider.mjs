@@ -195,10 +195,13 @@ export function createInteractiveResultProvider({ store, stateStore, materialSou
         if (callRef) { try { receipt = store.getOperation(callRef); } catch { operationUnreadable = true; } }
         const committed = !!receipt;
         const status = error.status ?? (code === 'interactive_cancelled' ? 'cancelled' : code === 'interactive_validation_timeout' ? 'timeout' : 'failed');
+        let remainingRepairs;
         if (attemptStarted && !operationUnreadable) {
-          try { store.finishAttempt(callRef, committed ? undefined : { code,
-            status, contentFailure: validationStarted && !['interactive_cancelled', 'interactive_validation_timeout'].includes(code) && !code.startsWith('interactive_worker_') }); }
-          catch { /* Original failure/unknown remains visible; immutable call binding is retained. */ }
+          const contentFailure = validationStarted && status === 'failed'
+            && (typeof error.path === 'string' || code === 'interactive_resource_limit');
+          try {
+            remainingRepairs = store.finishAttempt(callRef, committed ? undefined : { code, status, contentFailure })?.remainingRepairs;
+          } catch { /* Original failure/unknown remains visible; immutable call binding is retained. */ }
         }
         const reason = operationUnreadable ? 'publication_unknown'
           : committed && receipt.publicationStatus === 'index_pending' && code !== 'publication_parameter_conflict'
@@ -208,7 +211,9 @@ export function createInteractiveResultProvider({ store, stateStore, materialSou
           ...(call.capabilityId === PUBLISH ? { publicationStatus: operationUnreadable || !callRef ? 'unknown' : committed ? receipt.publicationStatus : 'not_committed' } : {}),
           ...(committed ? { effectCommitted: true, callRef, reference: receipt.reference,
             recovery: receipt.publicationStatus === 'published' ? 'inspect_only' : 'reconcile_only' } : operationUnreadable ? { callRef, recovery: 'reconcile_only' } : {}),
-          diagnostic: { code: reason, path: String(error.path ?? '').slice(0, 240), details: String(error.details ?? '').slice(0, 240), retryable: !committed && ['interactive_validation_failed', 'invalid_program', 'invalid_component'].includes(reason) } };
+          diagnostic: { code: reason, path: String(error.path ?? '').slice(0, 240), details: String(error.details ?? '').slice(0, 240),
+            retryable: call.capabilityId !== PUBLISH && ['interactive_validation_failed', 'invalid_program', 'invalid_component'].includes(reason),
+            ...(Number.isSafeInteger(remainingRepairs) ? { repair: { kind: 'new_candidate', remaining: remainingRepairs } } : {}) } };
         return { call, grant: status === 'denied' ? { ...grant, granted: false, duration: 'denied' } : grant, result: failed };
       }
     } };

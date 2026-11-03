@@ -54,10 +54,11 @@ export function createPublicationAttempts(storage) {
       if (saved.phase !== 'prepared') return saved;
       const ended = { ...saved, phase: code ? 'failed' : 'committed', ...(code ? { code: String(code).slice(0, 100), status } : {}) };
       context.db.prepare('UPDATE attempts SET body=? WHERE id=?').run(encode(ended), id);
-      context.db.prepare('UPDATE publication_candidates SET active=NULL,failures=? WHERE id=? AND active=?')
-        .run(code ? Number(context.db.prepare('SELECT failures FROM publication_candidates WHERE id=?').get(saved.candidateId)?.failures ?? 0) + Number(contentFailure) : 0,
-          saved.candidateId, id);
-      return ended;
+      const failures = code ? Number(context.db.prepare('SELECT failures FROM publication_candidates WHERE id=?').get(saved.candidateId)?.failures ?? 0) + Number(contentFailure) : 0;
+      const update = context.db.prepare('UPDATE publication_candidates SET active=NULL,failures=? WHERE id=? AND active=?')
+        .run(failures, saved.candidateId, id);
+      return contentFailure && code && update.changes === 1
+        ? { ...ended, remainingRepairs: Math.max(0, L.contentRepairs + 1 - failures) } : ended;
     });
   }
   return { read, begin, finish };

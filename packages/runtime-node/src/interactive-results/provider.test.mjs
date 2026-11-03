@@ -82,6 +82,7 @@ test('committed pending publication reports actual effect, survives cancellation
   const failed = await f.publish(), preview = failed.result.outputPreview;
   assert.equal(failed.result.status, 'failed'); assert.equal(preview.reason, 'publication_index_pending');
   assert.equal(preview.effectCommitted, true); assert.equal(preview.recovery, 'reconcile_only');
+  assert.equal(preview.diagnostic.repair, undefined);
   assert.throws(() => f.store.getVersion(preview.reference), { code: 'publication_index_pending' });
   f.setActive(false); f.setIndex(true);
   const recovered = f.provider.recoverOwner(owner, candidate => candidate.workspaceId === owner.workspaceId);
@@ -100,7 +101,14 @@ test('failed preparation pins call parameters and permits only two content repai
   assert.equal(replay.result.outputPreview.reason, first.result.outputPreview.reason);
   assert.equal(f.counts.permissions, permissions);
   assert.equal((await f.publish(draft, 'bad-a')).result.outputPreview.reason, 'publication_parameter_conflict');
-  for (const id of ['bad-b', 'bad-c']) assert.notEqual((await f.publish(invalid, id)).result.outputPreview.reason, 'interactive_repair_limit');
+  assert.deepEqual(first.result.outputPreview.diagnostic.repair, { kind: 'new_candidate', remaining: 2 });
+  assert.equal(first.result.outputPreview.diagnostic.retryable, false);
+  assert.equal(replay.result.outputPreview.diagnostic.repair, undefined);
+  for (const [id, remaining] of [['bad-b', 1], ['bad-c', 0]]) {
+    const failed = await f.publish(invalid, id);
+    assert.equal(failed.result.outputPreview.reason, 'unsupported_node');
+    assert.deepEqual(failed.result.outputPreview.diagnostic.repair, { kind: 'new_candidate', remaining });
+  }
   assert.equal((await f.publish(draft, 'bad-d')).result.outputPreview.reason, 'interactive_repair_limit');
   const status = await f.execute(INSPECT, { target: { kind: 'publication', reference: { owner, conversationId: 'worker-a', toolCallId: 'bad-a' } }, view: 'metadata' }, 'read-bad');
   assert.equal(status.result.outputPreview.publicationStatus, 'not_committed');
