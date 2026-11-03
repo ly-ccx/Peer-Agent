@@ -35,11 +35,20 @@ const FROZEN_TASK = [
   `Delegate this new request via spawn_session now. Use anchorMessageIds ["input-${FROZEN_INPUT}"] to carry the attached frozen selection. Set kind "research", readOnly true, isolation "none", and requiredCapabilities ["local.interactive.inspect"].`,
   'The new worker should use goal_get_plan, then inspect the attached fixed result once with view evaluate and the attached followupId, then record that actual result and evidence on its leaf with goal_update_task.',
   'Include successCriteria as an array with one object of kind "model_review" and a description requiring an independent Verifier to make four inspect_interactive_result calls on the attached fixed reference: program, data binding facts, initial evaluate, and evaluate with the attached followupId. Run them together. Cite only the four canonical interactive-inspection references.',
-  'Do not republish or substitute direct Bot inspection for this delegation. After the independent review, use post_reply with both the original publication session and the follow-up session as sources. Explain the two remainders and distinguish synthetic inputs, verified arithmetic and human acceptance.',
+  'After the follow-up task reports result_ready, call verify_session with its sessionId even if its Goal plan already has a passed review. That call records the delegated session verdict. Use its returned detail; avoid repeating get_session or get_verification_detail when the status is unchanged.',
+  'Then use post_reply with both session IDs as sources and their current statuses. Explain the two remainders, describe the costs as synthetic, and state the actual verification and human acceptance status. Do not republish or substitute direct Bot inspection for delegation.',
 ].join('\n');
 
 type Phase = keyof typeof INTERACTIVE_STORY_BUDGET.requests;
-interface Observation { phase: Phase; tools: string[]; returnedTools?: string[]; durationMs?: number; usage?: ModelUsage; error?: string }
+interface Observation {
+  phase: Phase;
+  tools: string[];
+  returnedTools?: string[];
+  returnedArguments?: string[];
+  durationMs?: number;
+  usage?: ModelUsage;
+  error?: string;
+}
 
 export async function runInteractiveLiveStory(options: {
   directory: string; provider: ModelProvider; model: { providerId: string; credentialId: string; model: string };
@@ -96,6 +105,7 @@ export async function runInteractiveLiveStory(options: {
               signal: AbortSignal.any([signal, AbortSignal.timeout(INTERACTIVE_STORY_BUDGET.requestMs), ...(request.signal ? [request.signal] : [])]) });
             observation.usage = result.usage;
             observation.returnedTools = result.toolCalls.map(call => call.name);
+            observation.returnedArguments = result.toolCalls.slice(0, 12).map(call => sanitize(call.arguments));
             callCounts[phase] += result.toolCalls.length;
             if (callCounts[phase] > INTERACTIVE_STORY_BUDGET.calls[phase])
               exhausted('story_tool_limit', phase);
