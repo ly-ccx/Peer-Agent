@@ -255,7 +255,13 @@ export function validateDelegationInput(name, raw) {
       }
       const missing = intentAssessmentSchema.required.filter(key => !Object.hasOwn(assessment, key));
       if (missing.length) return invalid(`Missing assessment fields: ${missing.map(key => `assessment.${key}`).join(', ')}.`);
-      if (assessment.operationId !== undefined || !validIntentAssessment({ ...assessment, operationId: 'host' })) return invalid('A bounded intent assessment with both current revisions and source identities is required. The host assigns its operationId.');
+      if (assessment.operationId !== undefined || !validIntentAssessment({ ...assessment, operationId: 'host' })) {
+        const uncovered = Array.isArray(assessment.coverage) ? assessment.coverage.findIndex(row =>
+          row?.status === 'covered' && Array.isArray(row.sources)
+          && (!row.sources.length || row.sources.some(source => Array.isArray(source?.evidenceRefs) && !source.evidenceRefs.length))) : -1;
+        if (uncovered >= 0) return invalid(`assessment.coverage[${uncovered}] marks a requirement covered without persisted evidence. Each covered source needs a non-empty evidenceRefs list. Use return and the currentReplyRef for the reply you are about to deliver.`);
+        return invalid('A bounded intent assessment with both current revisions and source identities is required. The host assigns its operationId.');
+      }
       return { ok: true, value: { action: 'assess', reason: input.reason.trim(), assessment: structuredClone(assessment) } };
     }
     if (input.assessment !== undefined) return invalid('assessment is only valid for action assess.');

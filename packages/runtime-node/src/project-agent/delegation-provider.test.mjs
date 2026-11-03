@@ -895,4 +895,12 @@ test('assessment input errors identify the nested shape and missing fields witho
   assert.match(missing.message, /assessment\.reason/);
   assert.equal(validateDelegationInput('coordinate_work', { ...call,
     assessment: { ...assessment, reason: 'Session is still running' } }).ok, true);
+  const unsupported = validateDelegationInput('coordinate_work', { ...call, assessment: {
+    ...assessment, reason: 'Ready to return', disposition: { kind: 'return', replyRef: 'turn-reply-1' },
+    coverage: [{ requirementId: 'delivery', status: 'covered', explanation: 'Reply will be posted next',
+      sources: [{ sessionId: 's', sourceRevision: 'rev:s', evidenceRefs: [] }] }],
+  } });
+  assert.equal(unsupported.ok, false);
+  assert.match(unsupported.message, /assessment\.coverage\[0\].*without persisted evidence/);
+  assert.match(unsupported.message, /currentReplyRef/);
 });
