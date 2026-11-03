@@ -903,4 +903,9 @@ test('assessment input errors identify the nested shape and missing fields witho
   assert.equal(unsupported.ok, false);
   assert.match(unsupported.message, /assessment\.coverage\[0\].*without persisted evidence/);
   assert.match(unsupported.message, /currentReplyRef/);
+  const missingSources = validateDelegationInput('coordinate_work', { ...call, assessment: {
+    ...assessment, reason: 'Waiting', coverage: [{ requirementId: 'check', status: 'remaining', explanation: 'Worker is running' }],
+  } });
+  assert.equal(missingSources.ok, false);
+  assert.match(missingSources.message, /assessment\.coverage\[0\]\.sources must be an array/);
 });

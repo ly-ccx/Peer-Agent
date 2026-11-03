@@ -256,6 +256,8 @@ export function validateDelegationInput(name, raw) {
       const missing = intentAssessmentSchema.required.filter(key => !Object.hasOwn(assessment, key));
       if (missing.length) return invalid(`Missing assessment fields: ${missing.map(key => `assessment.${key}`).join(', ')}.`);
       if (assessment.operationId !== undefined || !validIntentAssessment({ ...assessment, operationId: 'host' })) {
+        const missingSources = Array.isArray(assessment.coverage) ? assessment.coverage.findIndex(row => row && !Array.isArray(row.sources)) : -1;
+        if (missingSources >= 0) return invalid(`assessment.coverage[${missingSources}].sources must be an array. Use [] for a remaining requirement without evidence. Put evidenceRefs inside each source, not on the coverage row.`);
         const uncovered = Array.isArray(assessment.coverage) ? assessment.coverage.findIndex(row =>
           row?.status === 'covered' && Array.isArray(row.sources)
           && (!row.sources.length || row.sources.some(source => Array.isArray(source?.evidenceRefs) && !source.evidenceRefs.length))) : -1;
