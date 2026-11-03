@@ -75,9 +75,13 @@ test('research acceptance retains the original goal, continues without user inpu
   f.sessions.get('s2').status = 'result_ready';
   const complete = { ...continuation, expectedWorkRevision: 2, sourceEventIds: [], sourceDecisionRef: next.sourceDecisionRef,
     coverage: [continuation.coverage[0], { ...continuation.coverage[1], status: 'covered', sources: [{ sessionId: 's2', sourceRevision: 'source:s2', evidenceRefs: ['ev:s2'] }] }],
-    disposition: { kind: 'return', replyRef: 't3-reply-1' } };
+    disposition: { kind: 'return', replyRef: 'current_turn_reply' } };
+  const stale = await f.coordinate({ action: 'assess', assessment: { ...complete,
+    disposition: { kind: 'return', replyRef: 't2-reply-1' } } }, ctx);
+  assert.equal(stale.error, 'reply_reference_out_of_scope');
   const result = await f.coordinate({ action: 'assess', assessment: complete }, { ...ctx, deliveryKey: 't3:assess' });
   assert.equal(result.review.passed, true); assert.equal(f.reviews(), 1);
+  assert.equal(f.store.readWork('g').intentCoordination.decision.disposition.replyRef, 't3-reply-1');
   assert.equal(f.store.readWork('g').intentCoordination.lifecycle, 'active');
   f.coordinator.finish(next, { rounds: [], turnId: 't3', yielded: true,
     providerCheckpoint: { provider: 'openai', providerId: 'p', model: 'm', messages: [] } }, [...f.sessions.values()]);

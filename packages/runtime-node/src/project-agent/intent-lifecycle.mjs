@@ -137,6 +137,10 @@ export function createIntentLifecycle({ storeFor, readSession, readMessages, rea
     const assessment = { ...input.assessment, workId: s.workId,
       operationId: context.deliveryKey || `intent-${hash([context.turnId, context.toolCallOrdinal, input])}` };
     if (!validIntentAssessment(assessment)) return { ok: false, error: 'invalid_intent_assessment' };
+    if (assessment.disposition.kind === 'return' && assessment.disposition.replyRef === 'current_turn_reply') {
+      if (typeof context.turnId !== 'string' || !context.turnId) return { ok: false, error: 'reply_reference_out_of_scope' };
+      assessment.disposition = { ...assessment.disposition, replyRef: `${context.turnId}-reply-1` };
+    }
     const failure = dispositionFailure(assessment, s, context); if (failure) return failure;
     const admitted = s.store.assessIntent(assessment, { parentConversationId: s.parentConversationId,
       currentInputIds: s.current.map(row => row.inputId || row.id), eventIds: (context.events || []).map(row => row.eventId), turnId: context.turnId,

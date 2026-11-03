@@ -28,7 +28,7 @@ const intentAssessmentSchema = { type: 'object', additionalProperties: false,
       { type: 'object', required: ['kind', 'operationRefs'], additionalProperties: false, properties: { kind: { const: 'continue' }, operationRefs: intentIdsSchema } },
       { type: 'object', required: ['kind', 'waitFor'], additionalProperties: false, properties: { kind: { const: 'wait' }, waitFor: { type: 'array', minItems: 1, maxItems: 32, items: {
         type: 'object', required: ['kind', 'id', 'revision'], additionalProperties: false, properties: { kind: { type: 'string', enum: ['session', 'human_request', 'resource', 'recovery'] }, id: { type: 'string' }, revision: { type: 'string' } } } } } },
-      { type: 'object', required: ['kind', 'replyRef'], additionalProperties: false, properties: { kind: { const: 'return' }, replyRef: { type: 'string' } } },
+      { type: 'object', required: ['kind', 'replyRef'], additionalProperties: false, properties: { kind: { const: 'return' }, replyRef: { type: 'string', description: 'Use current_turn_reply to bind the host reservation for this execution slice.' } } },
       { type: 'object', required: ['kind', 'code', 'recoveryRef'], additionalProperties: false, properties: { kind: { const: 'blocked_system' }, code: { type: 'string' }, recoveryRef: { type: 'string' } } },
       { type: 'object', required: ['kind', 'controlRef'], additionalProperties: false, properties: { kind: { const: 'withdraw' }, controlRef: { type: 'string' } } },
     ] }, reason: { type: 'string', maxLength: 1000 },
