@@ -19,6 +19,17 @@ export function createPublicationAttempts(storage) {
     const row = context?.db.prepare('SELECT body FROM attempts WHERE id=?').get(key(callRef));
     return row ? savedAttempt(row.body, callRef) : null;
   }
+  function listPrepared(owner, after = '') {
+    const context = storage.connect(owner.workspaceId);
+    if (!context) return [];
+    return context.db.prepare(`SELECT id,body FROM attempts WHERE id>? AND json_extract(body,'$.phase')='prepared'
+      AND json_extract(body,'$.callRef.owner.workspaceId')=? AND json_extract(body,'$.callRef.owner.conversationId')=?
+      ORDER BY id LIMIT 32`).all(after, owner.workspaceId, owner.conversationId).map(row => {
+      const ref = decode(row.body).callRef;
+      if (key(ref) !== row.id || encode(ref.owner) !== encode(owner)) throw problem('interactive_storage_corrupt');
+      return { ...savedAttempt(row.body, ref), cursor: row.id };
+    });
+  }
   function begin({ callRef, source, draft }, assertCurrent) {
     const argsDigest = jsonDigest(draft), id = key(callRef);
     const candidateId = jsonDigest([callRef.owner, source.conversationId, source.planId, source.sessionId,
@@ -67,5 +78,5 @@ export function createPublicationAttempts(storage) {
   function finish(callRef, outcome) {
     return storage.transaction(callRef.owner.workspaceId, context => finishInTransaction(context, callRef, outcome));
   }
-  return { read, begin, finish, finishInTransaction };
+  return { read, listPrepared, begin, finish, finishInTransaction };
 }

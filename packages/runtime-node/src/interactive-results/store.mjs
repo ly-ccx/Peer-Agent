@@ -261,6 +261,7 @@ export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'
       if (privacy.current(owner, dataLevel) !== dataLevel) return;
       return storage.transaction(owner.workspaceId, context => { requireCurrent(assertOwner); privacy.remember(context, owner, dataLevel); });
     },
+    listPrepared: (owner, after) => attempts.listPrepared(requireOwner(owner), after),
     reconcileStoppedPreparation,
     getAttempt: raw => attempts.read(requireCall(raw)),
     beginAttempt: (input, assertCurrent) => attempts.begin({ ...input, callRef: requireCall(input.callRef) }, assertCurrent),

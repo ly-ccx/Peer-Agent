@@ -12,6 +12,9 @@ import { createInteractivePublicationSource } from './publication-source.mjs';
 import { createDelegationRetention } from './delegation-retention.mjs';
 import { createInteractiveRetentionRoots } from './retention-roots.mjs';
 import { createInteractiveRetention } from './retention.mjs';
+import { executionIdentity, sameExecution } from '../project-agent/session-control-kernel.mjs';
+import { sessionFactsFromPlan } from '../project-agent/session-facts.mjs';
+import { workBudgetBinding } from '../project-agent/work-budget.mjs';
 
 /** One shared domain instance per host. Composition roots supply real local facts. */
 export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationStore, getBotConversationId,
@@ -50,6 +53,37 @@ export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationS
   });
   const provider = createInteractiveResultProvider({ store: resultStore, stateStore, materialSource, resolveAuthority: authority.resolve,
     index: goalPlanStore, ...(now ? { now } : {}), ...(validate ? { validate } : {}) });
+  const preparationCursors = new Map();
+  function recoverOwner(owner) {
+    const owns = () => holdsLease?.(owner.workspaceId) === true && getBotConversationId?.(owner.workspaceId) === owner.conversationId;
+    const items = provider.recoverOwner(owner, owns);
+    const journal = workBudgetBinding(owner.workspaceId)?.store;
+    if (!journal?.readSessionControl) return items;
+    function stopped({ source }) {
+      if (!owns()) return false;
+      const plan = goalPlanStore.getPlan(source.planId);
+      const origin = plan?.delegationOrigin;
+      if (origin?.workspaceId !== owner.workspaceId || origin.parentConversationId !== owner.conversationId
+        || plan.conversationId !== source.conversationId || !sameExecution(source, executionIdentity(plan))
+        || sessionFactsFromPlan(plan).executionOwnership === 'live') return false;
+      const control = journal.readSessionControl(source.sessionId), receipt = control?.stopReceipt;
+      return control?.workspaceId === owner.workspaceId && control.parentConversationId === owner.conversationId
+        && control.planId === source.planId && control.sessionId === source.sessionId && ['pause', 'cancel', 'takeover'].includes(control.kind)
+        && sameExecution(source, control.expectedExecution) && sameExecution(source, receipt?.execution)
+        && receipt.operationId === control.operationId && receipt.scope === 'managed_execution'
+        && receipt.admissionClosed === true && receipt.runnerIdle === true && receipt.schedulerIdle === true && owns();
+    }
+    const cursor = preparationCursors.get(owner.workspaceId);
+    const page = resultStore.listPrepared(owner, cursor?.conversationId === owner.conversationId ? cursor.after : '');
+    for (const row of page) {
+      if (!stopped(row)) continue;
+      const ended = resultStore.reconcileStoppedPreparation(row.callRef, stopped);
+      if (ended) items.push({ callRef: ended.callRef, publicationStatus: 'not_committed', code: ended.code });
+    }
+    if (page.length === 32) preparationCursors.set(owner.workspaceId, { conversationId: owner.conversationId, after: page.at(-1).cursor });
+    else preparationCursors.delete(owner.workspaceId);
+    return items;
+  }
   return { resultStore, stateStore, retention, acquireDelegationRoots, provider, authority, feedback, verification, publications, captureExecution: createInteractiveCapture({ resultStore, resolveAuthority: authority.resolve,
     resolveObservationAuthority: authority.resolveObservation, ...(now ? { now } : {}) }),
     userMaterialNotices(toolContext) {
@@ -68,13 +102,11 @@ export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationS
         return context.assertCurrent() === true ? classified : []; }
       catch { return []; }
     },
-    recoverOwner(owner) { return provider.recoverOwner(owner, candidate => holdsLease?.(candidate.workspaceId) === true
-      && getBotConversationId?.(candidate.workspaceId) === candidate.conversationId); },
+    recoverOwner,
     recoverWorkspace(workspaceId) {
       const owner = normalizeInteractiveOwner({ workspaceId, conversationId: getBotConversationId?.(workspaceId) });
       if (!owner || holdsLease?.(workspaceId) !== true) return { ok: false, code: 'interactive_scope_denied' };
-      try { return { ok: true, items: provider.recoverOwner(owner, () => holdsLease(workspaceId) === true
-        && getBotConversationId(workspaceId) === owner.conversationId) }; }
+      try { return { ok: true, items: recoverOwner(owner) }; }
       catch (error) { return { ok: false, code: error.code ?? 'publication_unknown' }; }
     },
     close() { verification.dispose(); stateStore.close(); resultStore.close(); } };

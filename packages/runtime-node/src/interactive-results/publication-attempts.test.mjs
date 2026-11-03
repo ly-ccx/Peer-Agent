@@ -4,6 +4,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { createInteractiveResultStore } from './store.mjs';
+import { createInteractiveRuntime } from './runtime.mjs';
+import { executionIdentity } from '../project-agent/session-control-kernel.mjs';
+import { registerWorkBudget } from '../project-agent/work-budget.mjs';
 
 test('fresh store instances retain preparation identity, active candidate and repair budget; corruption never resets them', t => {
   const root = mkdtempSync(path.join(tmpdir(), 'peer-interactive-attempts-'));
@@ -40,4 +43,36 @@ test('fresh store instances retain preparation identity, active candidate and re
   const saved = first.getAttempt(a.callRef);
   db.prepare('UPDATE attempts SET body=? WHERE id=(SELECT id FROM attempts LIMIT 1)').run(JSON.stringify({ ...saved, callRef: { ...saved.callRef, conversationId: 'foreign' } }));
   assert.throws(() => second.getAttempt(a.callRef), { code: 'interactive_storage_corrupt' });
+});
+
+test('shared host recovery consumes only a current, in-scope stop receipt for the prepared execution', t => {
+  const root = mkdtempSync(path.join(tmpdir(), 'peer-interactive-stopped-preparation-'));
+  const owner = { workspaceId: 'workspace', conversationId: 'parent' };
+  const plan = { planId: 'plan', conversationId: 'child', status: 'cancelled',
+    delegationOrigin: { workspaceId: 'workspace', parentConversationId: 'parent', sessionId: 'session',
+      phase: 'paused', executionGeneration: 'generation-one' } };
+  const execution = executionIdentity(plan);
+  const callRef = { owner, conversationId: plan.conversationId, toolCallId: 'prepared' };
+  let control, lease = true;
+  const release = registerWorkBudget(owner.workspaceId, { readSessionControl: id => id === 'session' ? control : undefined });
+  const runtime = createInteractiveRuntime({ rootDir: root, goalPlanStore: {
+    getPlan: id => id === plan.planId ? plan : null, assertInteractiveEvidenceCompatible: () => true,
+  }, getBotConversationId: () => owner.conversationId, holdsLease: () => lease });
+  t.after(() => { release(); runtime.close(); rmSync(root, { recursive: true, force: true }); });
+  runtime.resultStore.beginAttempt({ callRef, source: { ...execution, conversationId: 'child', toolCallId: 'prepared' },
+    draft: { publication: { kind: 'create' }, title: 'Candidate', textFallback: 'Assumption', program: 'root=Text("x")', inputs: [] } }, () => true);
+  const recover = () => runtime.recoverWorkspace(owner.workspaceId);
+  assert.deepEqual(recover(), { ok: true, items: [] }, 'a terminal plan alone proves nothing');
+  control = { workspaceId: 'workspace', parentConversationId: 'parent', sessionId: 'session', planId: 'plan',
+    kind: 'cancel', operationId: 'cancel-one', expectedExecution: execution,
+    stopReceipt: { operationId: 'cancel-one', execution: { ...execution, generation: 'foreign' }, scope: 'managed_execution',
+      admissionClosed: true, runnerIdle: true, schedulerIdle: true } };
+  assert.deepEqual(recover(), { ok: true, items: [] });
+  control.stopReceipt.execution = execution;
+  lease = false;
+  assert.equal(recover().ok, false);
+  lease = true;
+  assert.deepEqual(recover(), { ok: true, items: [{ callRef, publicationStatus: 'not_committed', code: 'publication_interrupted' }] });
+  assert.equal(runtime.resultStore.getAttempt(callRef).phase, 'failed');
+  assert.deepEqual(recover(), { ok: true, items: [] });
 });
