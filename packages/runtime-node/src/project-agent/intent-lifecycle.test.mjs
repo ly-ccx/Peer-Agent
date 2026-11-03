@@ -11,6 +11,9 @@ import { validateDelegationInput } from './tool-specs.mjs';
 import { buildVerifierMessage } from './goal-runner-host.mjs';
 import { verificationRequestRevision } from './verification-completion.mjs';
 import { createDigestQueue } from './digest.mjs';
+import { createDelegationProvider } from './delegation-provider.mjs';
+import { waitResult } from './wake-wait.mjs';
+import { progressFacts } from './continuation-policy.mjs';
 
 async function fixture(t) {
   const rootDir = mkdtempSync(path.join(os.tmpdir(), 'peer-intent-lifecycle-'));
@@ -46,6 +49,46 @@ async function fixture(t) {
   return { store, options, rootDir, lifecycle, coordinator, job, context, initial, sessions, messages, digests, digestFile, reviews: () => reviews,
     coordinate: (input, ctx) => lifecycle.coordinate({ reason: 'Test intention', ...input }, ctx) };
 }
+
+test('a paired session wait suspends active intent without exhausting or resetting the progress guard', async t => {
+  const f = await fixture(t);
+  await f.coordinate({ action: 'parallel', task: { anchorMessageIds: ['input-i'], brief: 'Research' } }, f.context('spawn', { currentInputAnchors: ['input-i'] }));
+  await f.coordinate({ action: 'assess', assessment: { ...f.initial,
+    disposition: { kind: 'continue', operationRefs: ['requirement:fix'] } } }, f.context('t1', { currentInputAnchors: ['input-i'] }));
+  const event = { eventId: 'observed', sessionId: 's1', kind: 'report_available' };
+  const job = { workId: 'g', kind: 'wake', attemptId: 'wait-turn', userInputs: [], events: [event] };
+  f.coordinator.start(job);
+  const roster = [...f.sessions.values()];
+  f.store.saveWork({ ...f.store.readWork('g'), repeats: 2, progressFacts: progressFacts([], roster) });
+  const provider = createDelegationProvider({ supervisor: { get: ({ sessionId }) => f.sessions.get(sessionId) } });
+  const receipt = await provider.executeCapability({ call: { toolCallId: 'wait-call', capabilityId: 'local.delegation.wait_for_sessions', arguments: { sessionIds: ['s1'] } } },
+    { mode: 'project_agent', workspaceId: 'w', conversationId: 'p', currentInputAnchors: [],
+      turnProfile: { workId: 'g', context: { turnKind: 'wake', events: [event] } } });
+  assert.equal(receipt.grant.granted, true);
+  const outcome = { rounds: [{ toolCalls: [{ name: 'wait_for_sessions', result: receipt.result }] }],
+    silentWait: { source: 'tool', sessionIds: waitResult(receipt.result).sessionIds } };
+  for (let i = 0; i < 3; i++) {
+    assert.equal(f.coordinator.stalls(job, outcome, roster), false);
+    assert.equal(f.coordinator.finish(job, outcome, roster).state, 'waiting_children');
+  }
+  const work = f.store.readWork('g');
+  assert.equal(work.repeats, 2);
+  assert.equal(work.end, 'awaiting_children');
+  assert.deepEqual(work.waitFor, [{ kind: 'session', id: 's1' }]);
+  assert.equal(work.intentCoordination.lifecycle, 'active');
+  assert.equal(work.recovery, undefined);
+  assert.equal(f.coordinator.recoverJob(), null, 'unchanged waiting does not poll the model');
+  assert.equal(f.messages.length, 1, 'waiting delivers no reply or failure card');
+  const reopened = createWorkCoordinationStore(f.options);
+  try {
+    await reopened.prepare();
+    assert.equal(reopened.readWork('g').state, 'waiting_children');
+    assert.deepEqual(reopened.readWork('g').waitFor, work.waitFor);
+  } finally { reopened.close(); }
+  f.sessions.get('s1').status = 'accepted';
+  f.store.transfer([{ ...event, eventId: 'actual-result', kind: 'result_ready' }]);
+  assert.ok(f.coordinator.pending().some(row => row.eventId === 'actual-result'), 'real results retain wake responsibility');
+});
 
 test('research acceptance retains the original goal, continues without user input, then closes once after actual delivery and root review', async t => {
   const f = await fixture(t);

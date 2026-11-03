@@ -23,3 +23,26 @@ test('only a fresh host reconciliation record can reopen an unknown transition',
  work.budget.uncertainDispatches=[{toolCallId:'unresolved'}];
  assert.equal(transitionReconciliation(transition,work,{planId:'p'}),null);
 });
+
+test('the original settled stop proof can recover a false unknown takeover, never a different execution or control', () => {
+  const execution = { planId: 'p', sessionId: 's', executionEpoch: 'old', goalRevision: 1 };
+  const transition = { operationId: 'takeover', expectedGoalRevision: 1, phase: 'awaiting_outcome', action: 'resume' };
+  const work = { workspaceId: 'w', parentConversationId: 'parent' };
+  const control = { kind: 'takeover', operationId: 'takeover', workspaceId: 'w', parentConversationId: 'parent',
+    phase: 'settled', outcome: 'applied', expectedExecution: execution,
+    stopReceipt: { operationId: 'takeover', receiptId: 'stop:takeover', execution, scope: 'managed_execution',
+      admissionClosed: true, runnerIdle: true, schedulerIdle: true, unknownCalls: [], completedAt: '2026-11-03T02:03:31Z' } };
+  const session = { planId: 'p', origin: { sessionId: 's', coordinationBinding: { executionEpoch: 'old', goalRevision: 1 },
+    takeover: { operationId: 'takeover', phase: 'stopping' }, executionControl: control } };
+  assert.deepEqual(transitionReconciliation(transition, work, session), { phase: 'stopping', error: undefined, reconciliationRef: 'stop:takeover' });
+  for (const patch of [{ operationId: 'new-control' }, { phase: 'reconciling' }, { outcome: 'rejected' },
+    { workspaceId: 'other' }, { parentConversationId: 'other' }, { expectedExecution: { ...execution, generation: 'new' } },
+    { stopReceipt: { ...control.stopReceipt, unknownCalls: ['real-shell'] } },
+    { stopReceipt: { ...control.stopReceipt, runnerIdle: false } },
+    { stopReceipt: { ...control.stopReceipt, execution: { ...execution, goalRevision: 2 } } }]) {
+    assert.equal(transitionReconciliation(transition, work, { ...session, origin: { ...session.origin, executionControl: { ...control, ...patch } } }), null);
+  }
+  assert.equal(transitionReconciliation(transition, { ...work, budget: { uncertainDispatches: [{ toolCallId: 'unknown' }] } }, session), null);
+  assert.equal(transitionReconciliation({ ...transition, expectedGoalRevision: 2 }, work, session), null);
+  assert.equal(transitionReconciliation(transition, work, { ...session, origin: { ...session.origin, executionGeneration: 'new-resume' } }), null);
+});

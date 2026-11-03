@@ -311,6 +311,9 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       if (!outcome.failed && !outcome.yielded && !outcome.stopped && decision.state !== 'blocked_system') state = stateAfterReply(sources);
       if (outcome.budgetLimited) state = 'budget_limited';
       if (outcome.deliveryPending) state = 'retry_wait';
+      const silentWait = outcome.silentWait && !outcome.failed && !outcome.stopped && !outcome.yielded
+        && !outcome.budgetLimited && !outcome.deliveryPending;
+      if (silentWait) state = 'waiting_children';
       const reportedWait = reportedWaitFor({ job, outcome, state: readSnapshot(), messages: readMessages(), sessions: Array.isArray(roster) ? roster : roster?.items || roster?.sessions || [] });
       if (reportedWait) state = reportedWait.waitingUser ? 'waiting_user' : 'waiting_children';
       const observedEvents = (job.events || []).filter(eventObserved);
@@ -318,7 +321,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       if (unseenEvents.length && !outcome.failed && !outcome.stopped && !outcome.budgetLimited && !outcome.deliveryPending
         && !['blocked_system', 'waiting_user'].includes(state)) state = 'runnable';
       let semantic;
-      if (previous.intentCoordination && decision.state !== 'blocked_system' && !outcome.failed && !outcome.stopped && !outcome.budgetLimited && !outcome.deliveryPending && !outcome.yielded) {
+      if (previous.intentCoordination && !silentWait && decision.state !== 'blocked_system' && !outcome.failed && !outcome.stopped && !outcome.budgetLimited && !outcome.deliveryPending && !outcome.yielded) {
         semantic = delivery.resolveIntent(previous, Array.isArray(roster) ? roster : roster?.items || roster?.sessions || []);
         if (semantic) state = semantic.state;
       }
@@ -331,7 +334,8 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
         : store.checkpoint(job.workId, { job: { ...durableJob, continuation: true }, outcome });
       store.saveWork({ ...previous, ...decision, ...semantic, state, end: semantic?.end || end, sessionIds, checkpointRef, recovery, reportedWait, repairSessionIds: ownership.repairSessionIds,
         intentCoordination: readWork(job.workId).intentCoordination,
-        waitFor: [...(reportedWait ? reportedWait.sessionStates : waiting).map(row => ({ kind: 'session', id: row.sessionId })),
+        waitFor: [...(reportedWait ? reportedWait.sessionStates : silentWait ? outcome.silentWait.sessionIds.map(sessionId => ({ sessionId })) : waiting)
+          .map(row => ({ kind: 'session', id: row.sessionId })),
           ...(state === 'retry_wait' && recovery?.reservationId ? [{ kind: 'retry_timer', id: recovery.reservationId }] : []), ...(semantic?.waitFor || [])],
         consumedEventIds: [...new Set([...previous.consumedEventIds, ...observedEvents.map(row => row.eventId)])].slice(-64) }, { returnState: false });
       if (!outcome.failed && !outcome.yielded && !outcome.deliveryPending) store.handled(observedEvents.map(row => row.eventId));

@@ -14,7 +14,7 @@ import { createGoalRunner } from '../goal-runner.mjs';
 import { createScriptedTurnExecutor } from '../testing/scripted-turn-executor.mjs';
 import { createSessionSupervisor, evaluateWorkSessionWrite } from './session-supervisor.mjs';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
-import { registerWorkBudget } from './work-budget.mjs';
+import { registerWorkBudget, createWorkBudgetGuard } from './work-budget.mjs';
 import { beginExecutionAttempt } from './session-facts.mjs';
 import { createDelegationProvider } from './delegation-provider.mjs';
 
@@ -2652,6 +2652,44 @@ test('actual Supervisor repairs a returned unaccepted task in place and delivers
     await actualRunner.start(planId,{awaitIdle:true});
     assert.equal(repairTurns,1,'completed old leaves must not bypass the actual repair turn');
   }finally{release();await env.cleanup();}
+});
+
+test('takeover consumes the child stop barrier while its parent coordination call is still pending', async t => {
+  for (const childUnknown of [false, true]) await t.test(childUnknown ? 'real child unknown stays fenced' : 'live parent metadata does not fence the child', async () => {
+    const env = await harness({ goalRunner: { async start() {}, pause() {}, async waitForIdle() {} } });
+    const store = createWorkCoordinationStore({ rootDir: env.root, workspaceId: 'ws-1', holdsLease: () => true,
+      leaseEpoch: () => 'test-owner', formatVersion: 2, fenceLegacyWrites: true });
+    await store.prepare();
+    store.saveWork({ workId: 'root', workspaceId: 'ws-1', parentConversationId: env.parent.id, state: 'runnable' });
+    const release = registerWorkBudget('ws-1', store);
+    let guard;
+    try {
+      const context = { ...contextOf(env), conversationId: env.parent.id, workId: 'root', currentInputAnchors: ['anchor-1'], deliveryKey: 'original' };
+      const opened = await env.supervisor.coordinateWork({ action: 'parallel', reason: 'inspect', task: spawnInput({ kind: 'research', readOnly: true }) }, context);
+      const planId = planIdOf(env, opened.sessionId);
+      guard = createWorkBudgetGuard({ workspaceId: 'ws-1', workId: 'root', role: 'project_agent' });
+      guard.beforeRequest();
+      guard.beforeTool({ toolCallId: 'parent-coordinate', capabilityId: 'local.delegation.coordinate_work' });
+      if (childUnknown) store.saveWork({ ...store.readWork('root'), budget: { ...store.readWork('root').budget,
+        uncertainDispatches: [{ toolCallId: 'child-shell', planId, role: 'work_session' }] } });
+      await env.supervisor.coordinateWork({ action: 'handoff', sessionId: opened.sessionId, expectedRevision: 1, reason: 'continue original work' },
+        { ...context, deliveryKey: 'takeover' });
+      await until(() => store.read().transitions.takeover.phase === (childUnknown ? 'awaiting_outcome' : 'completed'));
+      const control = store.readSessionControl(opened.sessionId);
+      assert.deepEqual(control.stopReceipt.unknownCalls, childUnknown ? ['child-shell'] : []);
+      assert.equal(control.phase, childUnknown ? 'reconciling' : 'settled');
+      assert.equal(env.goalPlanStore.getPlan(planId).delegationOrigin.takeover.phase, childUnknown ? 'stopping' : 'completed');
+      if (childUnknown) {
+        const resumed = await env.supervisor.resume({ sessionId: opened.sessionId, anchorMessageId: 'anchor-1' }, contextOf(env));
+        assert.equal(resumed.error, 'coordination_reconciliation_required');
+        assert.equal(store.readSessionControl(opened.sessionId).operationId, 'takeover');
+        assert.equal(env.goalPlanStore.getPlan(planId).delegationOrigin.executionGeneration, undefined);
+      }
+      assert.ok(Object.values(store.readWork('root').budget.attempts).some(row => row.pendingTools?.some(call => call.toolCallId === 'parent-coordinate')),
+        'the parent remains in its original Tool Call until takeover returns');
+      guard.checkpoint({}, [{ call: { toolCallId: 'parent-coordinate' }, result: { ok: true } }]);
+    } finally { guard?.finish(); release(); await env.cleanup(); }
+  });
 });
 
 test('actual executor takeover retains GoalPlan, changes epoch, and does not consume a human question',async()=>{

@@ -76,14 +76,13 @@ export function createSessionTakeover({ findBySession, goalPlanStore, goalRunner
             return;
           }
           const controlled = sessionControl.settle(plan, registration.control, stopReceipt);
-          const budget = work?.budget;
-          const unknown = budget?.uncertainDispatches?.some(row => !row.planId || row.planId === plan.planId)
-            || Object.values(budget?.attempts || {}).some(attempt => attempt.pendingTools?.some(row => !row.planId || row.planId === plan.planId));
-          if (unknown) {
+          // The barrier owns execution scoping. The parent may still be inside
+          // this very coordination Tool Call; its pending metadata is not a
+          // second source of truth about the child's execution outcome.
+          if (controlled.phase !== 'settled') {
             store.advanceTransition(input.operationId, 'stopping', { phase: 'awaiting_outcome', error: 'execution_outcome_unknown' });
             emit({kind:'interrupted',eventId:`coordination-outcome:${input.operationId}`,workspaceId:context.workspaceId,sessionId:input.sessionId,planId:plan.planId,reason:'execution_outcome_unknown'}); return;
           }
-          if (controlled.phase !== 'settled') return;
           const binding = { ...input.binding, sessionId: input.sessionId };
           store.bindSession(binding.workId, binding.goalRevision, input.sessionId, binding);
           // Persist feedback before publishing a queueable plan or ready transition.
