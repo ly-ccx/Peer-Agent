@@ -11,7 +11,8 @@ function request(value, allowed) {
     || Object.entries(Object.getOwnPropertyDescriptors(value)).some(([key, descriptor]) => !allowed.includes(key) || !('value' in descriptor))) throw problem('interactive_request_invalid');
   return value;
 }
-const failed = error => ({ ok: false, code: typeof error?.code === 'string' && /^[a-z][a-z0-9_]{0,79}$/.test(error.code) ? error.code : 'interactive_storage_unavailable' });
+const failed = error => ({ ok: false, code: typeof error?.code === 'string' && /^[a-z][a-z0-9_]{0,79}$/.test(error.code) ? error.code : 'interactive_storage_unavailable',
+  ...(['interactive_writer_stale', 'interactive_state_conflict'].includes(error?.code) && error.saveStatus === 'not_committed' ? { saveStatus: 'not_committed' } : {}) });
 
 /** Human presentation lifetime and state ordering. No permission, execution or model port. */
 export function createInteractiveViewService({ resultStore, stateStore, resolveSource, createId = randomUUID, maxViews = 32 }) {
@@ -126,9 +127,9 @@ export function createInteractiveViewService({ resultStore, stateStore, resolveS
     }),
     save: (sender, raw) => bound(sender, raw, ['writer', 'expectedRevision', 'requestId', 'values', 'inputDrafts'], (record, value, current) => {
       const writer = normalizeInteractiveWriter(value.writer);
-      if (!writer || !record.writer || !same(writer, record.writer) || !revision(value.expectedRevision) || !interactiveToken(value.requestId)) throw problem('interactive_writer_stale');
-      return { state: stateStore.save({ reference: record.reference, identity: record.handle, writer, expectedRevision: value.expectedRevision,
-        requestId: value.requestId, values: value.values, inputDrafts: value.inputDrafts }, current) };
+      if (!writer || writer.viewId !== record.handle.viewId || !revision(value.expectedRevision) || !interactiveToken(value.requestId)) throw problem('interactive_writer_stale');
+      return stateStore.saveOutcome({ reference: record.reference, identity: record.handle, writer, expectedRevision: value.expectedRevision,
+        requestId: value.requestId, values: value.values, inputDrafts: value.inputDrafts }, current);
     }),
     prepareFollowup: (sender, raw) => bound(sender, raw, ['stateRevision', 'stateDigest', 'fields', 'requestId'], (record, value, current) => {
       if (!record.writer) throw problem('interactive_writer_required');

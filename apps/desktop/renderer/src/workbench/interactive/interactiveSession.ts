@@ -4,8 +4,8 @@ import { canonicalJSON } from '@peer-agent/interactive-content/values';
 import { validateState } from '@peer-agent/interactive-content/state';
 import type { InteractiveEvaluator } from '@peer-agent/interactive-content';
 
-type Candidate = { readonly edit: number; readonly values: InteractiveStateValues; readonly inputDrafts: Readonly<Record<string, string>>; readonly requestId: string };
-type PendingSave = { readonly candidate: Candidate; readonly writer: InteractiveWriter; readonly expectedRevision: number };
+type Candidate = { readonly edit: number; readonly values: InteractiveStateValues; readonly inputDrafts: Readonly<Record<string, string>> };
+type PendingSave = { readonly candidate: Candidate; readonly writer: InteractiveWriter; readonly expectedRevision: number; readonly requestId: string };
 type FollowupCandidate = Candidate & { readonly fields: readonly string[]; readonly followupId: string; saved?: InteractiveStateSnapshot };
 export interface InteractiveSessionSnapshot {
   readonly values: InteractiveStateValues;
@@ -36,6 +36,7 @@ export function createInteractiveSession({ api, opened, evaluator, createId = ()
 }) {
   const content = opened.result.content, handle = clone(opened.handle), listeners = new Set<() => void>(), composing = new Set<string>();
   let edit = 0, savedEdit = 0, pending: PendingSave | null = null, tail: Promise<unknown> = Promise.resolve();
+  let retainOnAcquire = false;
   let candidate: FollowupCandidate | null = null;
   const initial = validateState(opened.state.values, content.stateSchema, opened.state.inputDrafts);
   let state: InteractiveSessionSnapshot = { ...initial, sdkValues: clone(content.initialValues), confirmed: clone(opened.state), writer: null,
@@ -53,34 +54,39 @@ export function createInteractiveSession({ api, opened, evaluator, createId = ()
   }
   calculate();
   const editable = () => !!state.writer && !['closing', 'closed', 'writer_lost'].includes(state.phase);
-  const capture = (): Candidate => ({ edit, values: clone(state.values), inputDrafts: clone(state.inputDrafts), requestId: createId() });
+  const capture = (): Candidate => ({ edit, values: clone(state.values), inputDrafts: clone(state.inputDrafts) });
   function enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const work = tail.then(operation, operation); tail = work.catch(() => {}); return work;
   }
   function acceptHostSnapshot(snapshot: InteractiveStateSnapshot, saving: PendingSave) {
     if (!equal(snapshot.result, opened.result.reference) || snapshot.specHash !== content.specHash || snapshot.stateSchemaHash !== content.stateSchemaHash
-      || snapshot.stateRevision !== saving.expectedRevision + 1 || snapshot.requestId !== saving.candidate.requestId
+      || snapshot.stateRevision !== saving.expectedRevision + 1 || snapshot.requestId !== saving.requestId
       || !equal(snapshot.values, saving.candidate.values) || !equal(snapshot.inputDrafts, saving.candidate.inputDrafts)) throw { code: 'interactive_state_receipt_invalid' };
     validateState(snapshot.values, content.stateSchema, snapshot.inputDrafts);
     savedEdit = saving.candidate.edit;
     changed({ confirmed: clone(snapshot), dirty: savedEdit !== edit, saveError: null });
   }
   async function saveCandidate(selected: Candidate): Promise<InteractiveStateSnapshot | null> {
-    if (!editable()) { changed({ saveError: state.phase === 'writer_lost' ? 'interactive_writer_stale' : 'interactive_writer_required' }); return null; }
+    if (['closing', 'closed'].includes(state.phase)) return null;
     if (pending) {
       const saving = pending;
-      changed({ phase: 'saving', saveError: null });
+      let notCommitted = false;
+      changed({ ...(state.phase !== 'writer_lost' ? { phase: 'saving' as const } : {}), saveError: null });
       try {
-        const reply = await api.save({ handle, writer: saving.writer, expectedRevision: saving.expectedRevision, requestId: saving.candidate.requestId,
+        const reply = await api.save({ handle, writer: saving.writer, expectedRevision: saving.expectedRevision, requestId: saving.requestId,
           values: saving.candidate.values, inputDrafts: saving.candidate.inputDrafts });
-        if (!reply.ok) throw { code: reply.code };
-        acceptHostSnapshot(reply.state, saving); pending = null; changed({ phase: 'ready' });
+        if (!reply.ok) { notCommitted = ['interactive_writer_stale', 'interactive_state_conflict'].includes(reply.code) && reply.saveStatus === 'not_committed'; throw { code: reply.code }; }
+        acceptHostSnapshot(reply.state, saving); pending = null;
+        if (reply.writerCurrent === false) { retainOnAcquire = true; changed({ phase: 'writer_lost', saveError: 'interactive_writer_stale' }); return null; }
+        changed({ phase: 'ready' });
       } catch (error) {
+        if (notCommitted) pending = null;
         const failure = code(error); changed({ phase: lost(failure) ? 'writer_lost' : 'save_failed', saveError: failure }); return null;
       }
     }
+    if (!editable()) { changed({ saveError: state.phase === 'writer_lost' ? 'interactive_writer_stale' : 'interactive_writer_required' }); return null; }
     if (selected.edit === savedEdit && equal(selected.values, state.confirmed.values) && equal(selected.inputDrafts, state.confirmed.inputDrafts)) return state.confirmed;
-    pending = { candidate: selected, writer: state.writer!, expectedRevision: state.confirmed.stateRevision };
+    pending = { candidate: selected, writer: state.writer!, expectedRevision: state.confirmed.stateRevision, requestId: createId() };
     return saveCandidate(selected);
   }
   function setValues(values: InteractiveStateValues, inputDrafts: Readonly<Record<string, string>>) {
@@ -150,16 +156,19 @@ export function createInteractiveSession({ api, opened, evaluator, createId = ()
       return enqueue(async () => {
         if (state.phase === 'closed' || state.phase === 'closing') return false;
         try {
-          if (pending && editable() && !await saveCandidate(capture())) return false;
+          const preserveLocal = state.dirty || !!pending || retainOnAcquire;
+          if (pending) { await saveCandidate(capture()); if (pending) return false; }
           // Explicit takeover retains local edits but starts against the actual current checkpoint.
           const fresh = await api.readState({ handle }); if (!fresh.ok) throw { code: fresh.code };
           if (!equal(fresh.state.result, opened.result.reference) || fresh.state.specHash !== content.specHash || fresh.state.stateSchemaHash !== content.stateSchemaHash) throw { code: 'interactive_state_receipt_invalid' };
           const normalized = validateState(fresh.state.values, content.stateSchema, fresh.state.inputDrafts);
           const reply = await api.acquire({ handle, expectedRevision: fresh.state.stateRevision, ...(takeover ? { takeover: true } : {}) });
           if (!reply.ok) throw { code: reply.code };
-          pending = null;
-          if (!state.dirty) changed(normalized);
-          changed({ writer: clone(reply.writer), confirmed: clone(fresh.state), phase: 'ready', saveError: null }); calculate(); return true;
+          if (!preserveLocal) changed(normalized);
+          const dirty = !equal(state.values, fresh.state.values) || !equal(state.inputDrafts, fresh.state.inputDrafts);
+          if (!dirty) savedEdit = edit;
+          retainOnAcquire = false;
+          changed({ writer: clone(reply.writer), confirmed: clone(fresh.state), dirty, phase: 'ready', saveError: null }); calculate(); return true;
         } catch (error) { changed({ saveError: code(error), phase: state.writer ? 'writer_lost' : 'readonly' }); return false; }
       });
     },

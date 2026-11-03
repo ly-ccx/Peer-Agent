@@ -116,6 +116,76 @@ test('lost save acknowledgment retries the original request before saving newer 
   assert.equal(f.states.read(f.receipt.reference, () => true).values.$x, 5);
 });
 
+for (const committed of [false, true]) for (const settleFirst of [false, true]) test(`takeover settles a lost save without replacing local input: committed=${committed}, settleFirst=${settleFirst}`, async t => {
+  const f = await fixture(t), save = f.api.save, calls: Parameters<InteractiveResultsApi['save']>[0][] = [];
+  let lose = true;
+  f.api.save = async request => {
+    calls.push(structuredClone(request));
+    if (lose) { lose = false; if (committed) await save(request); throw Error('ack lost'); }
+    return save(request);
+  };
+  await f.session.acquire(); f.session.editText('$x', '3'); assert.equal(await f.session.flush(), false);
+  const newerText = committed ? settleFirst ? '4.' : '4.00' : null;
+  const expectedValue = newerText === '4.00' ? 4 : 3;
+  if (newerText) f.session.editText('$x', newerText);
+  const otherApi = f.adapt(new EventEmitter()), opened = await otherApi.open({ reference: f.receipt.reference, requestId: 'open-b' });
+  if (!opened.ok) throw Error(opened.code);
+  const other = createInteractiveSession({ api: otherApi, opened, evaluator: f.evaluator });
+  assert.equal(await other.acquire(true), true); other.editText('$x', '7'); assert.equal(await other.flush(), true);
+  if (settleFirst) { assert.equal(await f.session.flush(), false); assert.equal(f.session.snapshot().phase, 'writer_lost'); }
+  assert.equal(await f.session.acquire(true), true);
+  assert.deepEqual(calls[1], calls[0], 'settlement keeps the original writer, CAS base, request ID and values');
+  assert.equal(f.session.snapshot().confirmed.values.$x, 7);
+  assert.equal(f.session.snapshot().values.$x, expectedValue);
+  assert.equal(f.session.snapshot().inputDrafts.$x, newerText ?? '3');
+  assert.equal(f.session.snapshot().dirty, true);
+  assert.equal(await f.session.flush(), true);
+  assert.notEqual(calls.at(-1)!.requestId, calls[0].requestId, 'a new writer/base requires a new save operation identity');
+  assert.equal(f.states.read(f.receipt.reference, () => true).values.$x, expectedValue);
+  assert.equal(f.states.read(f.receipt.reference, () => true).inputDrafts.$x, newerText ?? '3');
+});
+
+test('an unqualified old-host stale response keeps the unknown request and prevents takeover, close and freezing', async t => {
+  const f = await fixture(t), save = f.api.save, acquire = f.api.acquire;
+  let acquireCalls = 0;
+  f.api.acquire = async request => { acquireCalls++; return acquire(request); };
+  f.api.save = async () => { throw Error('unconfirmed dispatch'); };
+  await f.session.acquire(); f.session.editText('$x', '3'); assert.equal(await f.session.flush(), false);
+  f.api.save = async () => ({ ok: false, code: 'interactive_writer_stale' });
+  assert.equal(await f.session.acquire(true), false); assert.equal(acquireCalls, 1);
+  assert.equal(await f.session.close(), false);
+  assert.equal(await f.session.prepareSelection(['$x']), null);
+  assert.equal(f.session.snapshot().inputDrafts.$x, '3');
+  f.api.save = save;
+  assert.equal(await f.session.acquire(), true);
+  assert.equal(f.states.read(f.receipt.reference, () => true).values.$x, 3);
+});
+
+test('an absent save below the actual CAS checkpoint can settle without stealing another writer or reusing its operation ID', async t => {
+  const f = await fixture(t), save = f.api.save;
+  let lose = true;
+  f.api.save = async request => { if (lose) { lose = false; throw Error('dispatch unconfirmed'); } return save(request); };
+  await f.session.acquire(); f.session.editText('$x', '3'); assert.equal(await f.session.flush(), false);
+  f.states.save({ reference: f.receipt.reference, identity: f.opened.handle, writer: f.session.snapshot().writer!, expectedRevision: 0,
+    requestId: 'other-confirmed-save', values: { $x: 7, $name: 'Trial', $budget: 100 }, inputDrafts: {} }, () => true);
+  assert.equal(await f.session.acquire(), true);
+  assert.equal(f.session.snapshot().values.$x, 3); assert.equal(f.session.snapshot().confirmed.values.$x, 7);
+  assert.equal(await f.session.flush(), true);
+  assert.equal(f.session.snapshot().confirmed.stateRevision, 2);
+});
+
+test('a clean view without an unresolved save adopts the actual checkpoint when it explicitly takes over', async t => {
+  const f = await fixture(t); await f.session.acquire(); f.session.editText('$x', '3'); await f.session.flush();
+  const otherApi = f.adapt(new EventEmitter()), opened = await otherApi.open({ reference: f.receipt.reference, requestId: 'open-b' });
+  if (!opened.ok) throw Error(opened.code);
+  const other = createInteractiveSession({ api: otherApi, opened, evaluator: f.evaluator });
+  await other.acquire(true); other.editText('$x', '7'); await other.flush();
+  assert.equal(await f.session.acquire(), false);
+  assert.equal(await f.session.acquire(true), true);
+  assert.equal(f.session.snapshot().values.$x, 7);
+  assert.equal(f.session.snapshot().dirty, false);
+});
+
 test('explicit recovery of a lost composition surface saves raw text without promoting it to effective or frozen values', async t => {
   const f = await fixture(t); await f.session.acquire();
   f.session.editText('$name', '未完成的输入', true);

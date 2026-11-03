@@ -27,13 +27,17 @@ export function createInteractiveStateStore({ resultStore, now = () => new Date(
     const row = context?.db.prepare('SELECT snapshot,writer FROM states WHERE id=? AND version=?').get(ref.resultId, ref.contentVersion);
     if (!row) return { snapshot: defaults(ref, published), writer: null, present: false };
     const snapshot = decode(row.snapshot), writer = row.writer ? decode(row.writer) : null;
-    if (Object.keys(snapshot).length !== 9 || Object.keys(snapshot).some(key => !['result', 'specHash', 'stateSchemaHash', 'stateRevision', 'values', 'inputDrafts', 'stateDigest', 'updatedAt', 'requestId'].includes(key))
+    checkedSnapshot(snapshot, ref, published);
+    return { snapshot, writer, present: true };
+  }
+  function checkedSnapshot(snapshot, ref, published) {
+    if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot) || Object.keys(snapshot).length !== 9 || Object.keys(snapshot).some(key => !['result', 'specHash', 'stateSchemaHash', 'stateRevision', 'values', 'inputDrafts', 'stateDigest', 'updatedAt', 'requestId'].includes(key))
       || !interactiveToken(snapshot.requestId) || !Number.isFinite(Date.parse(snapshot.updatedAt))
       || !same(snapshot.result, ref) || snapshot.specHash !== published.content.specHash || snapshot.stateSchemaHash !== published.content.stateSchemaHash
       || !Number.isSafeInteger(snapshot.stateRevision) || snapshot.stateRevision < 0
       || jsonDigest({ values: snapshot.values, inputDrafts: snapshot.inputDrafts }) !== snapshot.stateDigest) throw problem('interactive_state_corrupt');
     validateState(snapshot.values, published.content.stateSchema, snapshot.inputDrafts);
-    return { snapshot, writer, present: true };
+    return snapshot;
   }
   function writeRow(context, ref, snapshot, writer) {
     context.db.prepare('INSERT INTO states VALUES(?,?,?,?) ON CONFLICT(id,version) DO UPDATE SET snapshot=excluded.snapshot,writer=excluded.writer')
@@ -67,27 +71,38 @@ export function createInteractiveStateStore({ resultStore, now = () => new Date(
       return { viewId: writer.viewId, generation: writer.generation, token: writer.token };
     });
   }
-  function save({ reference: rawReference, identity: rawIdentity, writer, expectedRevision, requestId, values, inputDrafts }, assertView) {
+  function saveOutcome({ reference: rawReference, identity: rawIdentity, writer, expectedRevision, requestId, values, inputDrafts }, assertView) {
     const ref = reference(rawReference), identity = view(rawIdentity); requireView(assertView);
     if (!interactiveToken(requestId) || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw problem('interactive_save_invalid');
     return storage.transaction(ref.owner.workspaceId, context => {
       requireView(assertView);
       const published = resultStore.getVersion(ref), state = load(context, ref, published);
-      requireWriter(state.writer, writer, identity);
       const normalized = validateState(values, published.content.stateSchema, inputDrafts);
       const argsDigest = jsonDigest({ identity, writer, expectedRevision, ...normalized });
       const previous = context.db.prepare('SELECT argsDigest,receipt FROM saves WHERE id=? AND version=? AND requestId=?').get(ref.resultId, ref.contentVersion, requestId);
       if (previous) {
         if (previous.argsDigest !== argsDigest) throw problem('interactive_save_parameter_conflict');
-        return clone(decode(previous.receipt));
+        const receipt = checkedSnapshot(decode(previous.receipt), ref, published);
+        if (receipt.requestId !== requestId || receipt.stateRevision !== expectedRevision + 1
+          || !same({ values: receipt.values, inputDrafts: receipt.inputDrafts }, normalized)) throw problem('interactive_save_receipt_corrupt');
+        let writerCurrent = true;
+        try { requireWriter(state.writer, writer, identity); } catch { writerCurrent = false; }
+        return { state: clone(receipt), writerCurrent };
       }
-      if (state.snapshot.stateRevision !== expectedRevision) throw problem('interactive_state_conflict');
+      try { requireWriter(state.writer, writer, identity); }
+      catch (error) { throw Object.assign(error, { saveStatus: 'not_committed' }); }
+      if (state.snapshot.stateRevision !== expectedRevision) throw Object.assign(problem('interactive_state_conflict'),
+        state.snapshot.stateRevision > expectedRevision ? { saveStatus: 'not_committed' } : {});
       const snapshot = { ...state.snapshot, ...normalized, stateRevision: expectedRevision + 1, stateDigest: jsonDigest(normalized), updatedAt: now(), requestId };
       writeRow(context, ref, snapshot, state.writer);
       context.db.prepare('INSERT INTO saves VALUES(?,?,?,?,?)').run(ref.resultId, ref.contentVersion, requestId, argsDigest, encode(snapshot));
-      return clone(snapshot);
+      return { state: clone(snapshot), writerCurrent: true };
     });
   }
+  /** Compatibility for domain callers that consume only the immutable snapshot.
+   * @param {Parameters<typeof saveOutcome>[0]} value
+   * @param {Parameters<typeof saveOutcome>[1]} assertView */
+  function save(value, assertView) { return saveOutcome(value, assertView).state; }
   function release({ reference: rawReference, identity: rawIdentity, writer }, assertView) {
     const ref = reference(rawReference), identity = view(rawIdentity); requireView(assertView);
     return storage.transaction(ref.owner.workspaceId, context => {
@@ -156,5 +171,5 @@ export function createInteractiveStateStore({ resultStore, now = () => new Date(
       } catch { /* An unconfirmed release is safe: only explicit takeover can replace a live writer. */ }
     }
   }
-  return { read, acquire, save, release, prepareFollowup, readFollowup, close };
+  return { read, acquire, save, saveOutcome, release, prepareFollowup, readFollowup, close };
 }

@@ -56,6 +56,35 @@ test('two independent store instances share one writer; explicit takeover reject
   assert.equal(states.read(reference, current).values.$budget, 200);
 });
 
+test('a lost save acknowledgment resolves its original immutable receipt after takeover without writing or reclaiming the writer', async t => {
+  const f = await fixture(t), saved = f.save(0, 'save-a', 150, { $budget: '150' });
+  const other = f.reopen(), next = { viewId: 'view-b', windowId: 'window-b', generation: 'generation-b' };
+  const writer = other.states.acquire({ reference: f.reference, identity: next, expectedRevision: 1, takeover: true }, current);
+  other.states.save({ reference: f.reference, identity: next, writer, expectedRevision: 1, requestId: 'save-b', values: { $budget: 200 }, inputDrafts: {} }, current);
+  const original = { reference: f.reference, identity, writer: f.writer, expectedRevision: 0, requestId: 'save-a', values: { $budget: 150 }, inputDrafts: { $budget: '150' } };
+  assert.deepEqual(f.states.saveOutcome(original, current), { state: saved, writerCurrent: false });
+  assert.deepEqual(f.states.save(original, current), saved);
+  assert.equal(f.states.read(f.reference, current).values.$budget, 200);
+  assert.throws(() => f.states.saveOutcome({ ...original, requestId: 'never-committed' }, current), { code: 'interactive_writer_stale', saveStatus: 'not_committed' });
+  assert.throws(() => f.states.saveOutcome({ ...original, values: { $budget: 300 } }, current), { code: 'interactive_save_parameter_conflict' });
+  assert.throws(() => f.states.saveOutcome(original, () => false), { code: 'interactive_view_stale' });
+  const count = f.resultStore.storage.connect(owner.workspaceId).db.prepare('SELECT COUNT(*) AS count FROM saves').get().count;
+  assert.equal(Number(count), 2);
+});
+
+test('only a past CAS base proves an absent save cannot commit; corrupt historical receipts remain unresolved', async t => {
+  const f = await fixture(t), saved = f.save(0, 'save-a', 150);
+  const original = { reference: f.reference, identity, writer: f.writer, expectedRevision: 0, requestId: 'save-a', values: { $budget: 150 }, inputDrafts: {} };
+  assert.throws(() => f.states.saveOutcome({ ...original, requestId: 'absent' }, current), { code: 'interactive_state_conflict', saveStatus: 'not_committed' });
+  assert.throws(() => f.states.saveOutcome({ ...original, requestId: 'future', expectedRevision: 5 }, current), error => error.code === 'interactive_state_conflict' && error.saveStatus === undefined);
+  const db = f.resultStore.storage.connect(owner.workspaceId).db;
+  db.prepare('UPDATE saves SET receipt=? WHERE requestId=?').run(JSON.stringify({ ...saved, requestId: 'wrong' }), 'save-a');
+  assert.throws(() => f.states.saveOutcome(original, current), { code: 'interactive_save_receipt_corrupt' });
+  db.prepare('UPDATE saves SET receipt=? WHERE requestId=?').run(JSON.stringify({ ...saved, values: { $budget: 999 } }), 'save-a');
+  assert.throws(() => f.states.saveOutcome(original, current), { code: 'interactive_state_corrupt' });
+  assert.equal(f.states.read(f.reference, current).values.$budget, 150);
+});
+
 test('normal shutdown releases only its own writer and restoration preserves values without creating publication facts', async t => {
   const { states, resultStore, reference, save, reopen } = await fixture(t);
   save(0, 'save-a', 175, { $budget: '-' });

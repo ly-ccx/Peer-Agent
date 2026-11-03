@@ -55,6 +55,22 @@ test('human view service binds the actual sender and immutable version, saves st
   assert.equal(Number(counts.versions), 1); assert.equal(Number(counts.operations), 1);
 });
 
+test('the actual sender can settle only its exact old save after takeover, including after acquiring a new writer', async t => {
+  const f = await fixture(t), a = await f.open(), b = await f.open(f.b, 'open-b');
+  const writerA = f.service.acquire(f.a, { handle: a.handle, expectedRevision: 0 }).writer;
+  const request = { handle: a.handle, writer: writerA, expectedRevision: 0, requestId: 'save-a', values: { $budget: 150 }, inputDrafts: {} };
+  const first = f.service.save(f.a, request);
+  assert.equal(first.writerCurrent, true);
+  const writerB = f.service.acquire(f.b, { handle: b.handle, expectedRevision: 1, takeover: true }).writer;
+  f.service.save(f.b, { handle: b.handle, writer: writerB, expectedRevision: 1, requestId: 'save-b', values: { $budget: 200 }, inputDrafts: {} });
+  assert.deepEqual(f.service.save(f.a, request), { ok: true, state: first.state, writerCurrent: false });
+  assert.equal(f.service.save(f.b, request).code, 'interactive_view_stale');
+  assert.deepEqual(f.service.save(f.a, { ...request, requestId: 'absent' }), { ok: false, code: 'interactive_writer_stale', saveStatus: 'not_committed' });
+  const next = f.service.acquire(f.a, { handle: a.handle, expectedRevision: 2, takeover: true }); assert.equal(next.ok, true);
+  assert.equal(f.service.save(f.a, request).writerCurrent, false);
+  assert.equal(f.service.readState(f.a, { handle: a.handle }).state.values.$budget, 200);
+});
+
 test('a second view needs explicit takeover; old saves and old releases cannot overwrite or release the successor', async t => {
   const f = await fixture(t), a = await f.open(), b = await f.open(f.b, 'open-b');
   const writer = f.service.acquire(f.a, { handle: a.handle, expectedRevision: 0 }).writer;

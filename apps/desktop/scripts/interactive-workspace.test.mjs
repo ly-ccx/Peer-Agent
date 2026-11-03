@@ -82,6 +82,8 @@ test('the main workspace opens canonical interactive deliveries, restores result
     const initial={locale:'en-US',workbench:{activeTab:{[owner.conversationId]:'launcher'},documentSessions:{},browserSessions:{}}};
     const preparation=createResourceFeedbackPreparation({isMainSender:sender=>windows.getRole(sender)==='main',getRecipient:()=>owner});
     const interactive=createDesktopInteractiveApplication({getRole:sender=>windows.getRole(sender),getOwner:workspaceId=>workspaceId===owner.workspaceId?owner:null,getNativeBinding:sender=>host.interactiveBinding(sender),getRuntime:()=>runtime,prepareFeedback:preparation.prepare,readDraft:drafts.read});
+    const originalSave=interactive.save;let saveFault=null;
+    interactive.save=(sender,request)=>{if(sender!==source.webContents||!saveFault)return originalSave(sender,request);const fault=saveFault;saveFault=null;if(fault==='uncommitted')return{ok:false,code:'fixture_save_unconfirmed'};const reply=originalSave(sender,request);return reply.ok?{ok:false,code:'fixture_save_unconfirmed'}:reply};
     const nativeWindows=[];function QuietWindow(options){const win=new BrowserWindow(options);win.show=()=>{};nativeWindows.push(win);return win}QuietWindow.fromWebContents=contents=>BrowserWindow.fromWebContents(contents);
     host=createResourceWindowController({BrowserWindow:QuietWindow,trustedWindows:windows,rendererLocation:${JSON.stringify(location)},preloadPath:${JSON.stringify(path.join(desktop, 'electron/preload/resource-window.cjs'))},interactiveResources:interactive,getOwner:()=>owner,getLocale:()=> 'en',readHistory:()=>undefined,writeHistory:()=>{legacyHistoryWrites++},resolveDocument:()=>{throw Error('unexpected file lookup')},fileAccess:{readFile:()=>{fileReads++;throw Error('unexpected file read')}}});
     const ipc=createCatalogIpcMain({ipcMain,authorize:windows.authorize});registerIpcOwners({ipc,registrations:[...createResourceWindowIpcRegistrations({resourceWindows:host}),...createInteractiveResultsIpcRegistrations({interactiveResults:interactive}),...createResourceFeedbackIpcRegistrations({preparation})]});
@@ -92,6 +94,7 @@ test('the main workspace opens canonical interactive deliveries, restores result
     ipc.handle('project-agent:read-evidence',(_event,request)=>({ok:true,evidenceRef:request.evidenceRef,...readEvidence(request.evidenceRef,{context:request.context})}));
     ipc.handle('resource-edit:list',()=>({ok:true,drafts:[],operations:[],staleCount:0}));
     globalThis.workspaceFixture={snapshot:()=>stateStore.read(receipt.reference,()=>true),layout:()=>interactive.readLayout(source.webContents,{owner}),
+      failSave:kind=>{if(!['committed','uncommitted'].includes(kind))throw Error('invalid fault');saveFault=kind},
       draft:()=>drafts.read(draftAddress),consume:()=>queue.consume(owner.workspaceId),inputs:()=>({queue:queue.diagnosticSnapshot(owner.workspaceId),messages:conversations.getPersistedConversationHistory(owner.conversationId).messages.map(row=>({...row,selected:feedback.restore(row,owner.workspaceId)}))}),
       closeSource:()=>{closeAttempts++;source.close()},
       facts:()=>({settingsWrites,fileReads,legacyHistoryWrites,blockedCloses,closeAttempts,navigations,sourceAlive:!source.isDestroyed(),versions:Number(resultStore.storage.connect(owner.workspaceId).db.prepare('SELECT COUNT(*) AS n FROM versions').get().n),operations:Number(resultStore.storage.connect(owner.workspaceId).db.prepare('SELECT COUNT(*) AS n FROM operations').get().n)}),
@@ -161,6 +164,22 @@ test('the main workspace opens canonical interactive deliveries, restores result
     await page.locator('.bot-composer textarea').fill('Keep this draft');
     await page.getByRole('button', { name: 'Continue calculation here', exact: true }).click();
     await page.waitForFunction(() => Array.from(document.querySelectorAll('label')).some(label => label.textContent === 'Divisor' && label.control?.value === '4'));
+    for (const [kind, local, remote] of [['committed', '6', '7'], ['uncommitted', '8', '9']]) {
+      await electron.evaluate((_electron, kind) => globalThis.workspaceFixture.failSave(kind), kind);
+      await page.getByLabel('Divisor', { exact: true }).fill(local);
+      await page.getByText('Saving is unconfirmed. Your input is preserved. Retry saving.', { exact: true }).waitFor();
+      await native.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await native.getByRole('button', { name: 'Continue calculation here', exact: true }).click();
+      await native.getByLabel('Divisor', { exact: true }).fill(remote);
+      await native.getByText('Conditions saved', { exact: true }).waitFor();
+      assert.equal((await electron.evaluate(() => globalThis.workspaceFixture.snapshot())).values.$x, Number(remote));
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await page.getByRole('button', { name: 'Continue calculation here', exact: true }).click();
+      assert.equal(await page.getByLabel('Divisor', { exact: true }).inputValue(), local);
+      await page.getByText('Conditions saved', { exact: true }).waitFor();
+      assert.equal((await electron.evaluate(() => globalThis.workspaceFixture.snapshot())).values.$x, Number(local));
+      await page.screenshot({ path: path.join(root, `workspace-save-${kind}-recovered.png`), animations: 'disabled' });
+    }
     await page.getByLabel('Divisor', { exact: true }).fill('3'); await page.getByText('Conditions saved', { exact: true }).waitFor();
     await electron.evaluate(() => globalThis.workspaceFixture.remoteReading(120));
     await page.locator('.resource-interactive-body').evaluate(node => { node.scrollTop = 700; node.dispatchEvent(new Event('scroll')); });
