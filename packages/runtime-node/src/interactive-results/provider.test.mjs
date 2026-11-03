@@ -202,6 +202,27 @@ test('a stricter actual context classification cannot be lost by an otherwise id
   assert.equal(revised.result.status, 'success'); assert.notEqual(revised.result.outputPreview.reference.contentVersion, ref.contentVersion);
   assert.equal(revised.result.evidence.dataLevel, 'D4_regulated');
 });
+test('a failed commit rolls back both the operation and the in-transaction preparation settlement', async t => {
+  let block = true;
+  const f = fixture(t, { onStep: stage => {
+    if (stage === 'before_commit' && block) throw Object.assign(Error('before commit'), { code: 'test_commit_interrupted' });
+  } });
+  const originalFinish = f.store.finishAttempt;
+  f.store.finishAttempt = (callRef, outcome) => {
+    assert.equal(f.store.getOperation(callRef), null);
+    assert.equal(f.store.getAttempt(callRef).phase, 'prepared');
+    return originalFinish(callRef, outcome);
+  };
+  const failed = await f.publish();
+  assert.equal(failed.result.outputPreview.publicationStatus, 'not_committed');
+  assert.equal(failed.result.outputPreview.diagnostic.repair, undefined);
+  assert.equal(f.store.getAttempt({ owner, conversationId: 'worker-a', toolCallId: 'publish-a' }).phase, 'failed');
+  assert.equal(f.index.listEvidenceIndex().length, 0);
+  f.store.finishAttempt = originalFinish;
+  block = false;
+  assert.equal((await f.publish(draft, 'new-call')).result.status, 'success');
+});
+
 test('a crash after durable commit is reported as pending and querying original operation confirms the real original fact', async t => {
   let phaseAtCommit;
   const f = fixture(t, { onStep: stage => {
