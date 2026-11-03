@@ -105,6 +105,7 @@ export interface InteractivePublicationPermissionScope {
   readonly owner: InteractiveOwner;
   readonly source: InteractivePublishedResult['source'];
   readonly parameterDigest: string;
+  readonly dataLevel: DataLevel;
 }
 export interface InteractiveUserArtifact {
   readonly kind: 'interactive';

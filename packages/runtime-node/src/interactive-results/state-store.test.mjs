@@ -93,6 +93,18 @@ test('old/unconfirmed revisions and incomplete numeric drafts cannot silently pr
   assert.equal(frozen.values.$budget, 300);
 });
 
+test('new frozen conditions inherit a later owner privacy floor while prior frozen conditions remain immutable', async t => {
+  const { states, resultStore, reference, writer, save } = await fixture(t);
+  const saved = save(0, 'save-a', 250);
+  const request = { reference, identity, writer, stateRevision: saved.stateRevision, stateDigest: saved.stateDigest, fields: ['$budget'], requestId: 'followup-before' };
+  const before = states.prepareFollowup(request, current);
+  resultStore.rememberObservationLevel(owner, 'D4_regulated', current);
+  const after = states.prepareFollowup({ ...request, requestId: 'followup-after' }, current);
+  assert.equal(before.dataLevel, 'D3_private');
+  assert.equal(after.dataLevel, 'D4_regulated');
+  assert.deepEqual(states.readFollowup(owner, before.followupId), before);
+});
+
 test('foreign views, values, versions and invalid range writes preserve the last confirmed state', async t => {
   const { states, reference, writer, save } = await fixture(t);
   save(0, 'save-a', 150);

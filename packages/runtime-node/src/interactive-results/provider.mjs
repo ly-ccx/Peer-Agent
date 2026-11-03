@@ -6,6 +6,7 @@ import { createFailedClientToolResult, createPermissionGrant } from '../tool-res
 import { selectInteractiveData } from './material-source.mjs';
 import { runInteractiveValidation } from './validation.mjs';
 import { encode, jsonDigest, problem } from './storage.mjs';
+import { maximumInteractiveDataLevel } from './owner-privacy.mjs';
 
 const same = (a, b) => encode(a) === encode(b);
 const fail = (code, status = 'failed') => { throw Object.assign(problem(code), { status }); };
@@ -52,6 +53,8 @@ export function createInteractiveResultProvider({ store, stateStore, materialSou
         if (signal?.aborted) fail('interactive_cancelled', 'cancelled');
         const denial = toolContext.checkAccessPolicy?.();
         if (denial || !authority || authority.assertCurrent?.() !== true || validations.some(check => check() !== true)) fail(denial || 'interactive_execution_stale', 'denied');
+        if (grant.granted && grant.scope?.kind === 'interactive-result'
+          && maximumInteractiveDataLevel(grant.scope.dataLevel, authority.currentDataLevel?.() ?? authority.dataLevel) !== grant.scope.dataLevel) fail('material_classification_changed', 'denied');
         return true;
       };
       function result(output, { evidenceId = randomUUID(), artifacts = [], summary = output.kind, status = 'success' } = {}) {
@@ -74,6 +77,8 @@ export function createInteractiveResultProvider({ store, stateStore, materialSou
         if (typeof resolveAuthority !== 'function') fail('interactive_authority_unavailable', 'denied');
         authority = await resolveAuthority({ call, toolContext });
         if (!authority || !normalizeInteractiveOwner(authority.owner) || !authority.capabilityIds?.includes(call.capabilityId)) fail('capability_not_projected', 'denied');
+        if (call.capabilityId === PUBLISH && authority.role === 'session_worker' && interactiveToken(authority.source?.conversationId)
+          && authority.source.toolCallId === call.toolCallId) callRef = { owner: authority.owner, conversationId: authority.source.conversationId, toolCallId: call.toolCallId };
         if (!['D0_public', 'D1_internal', 'D2_sensitive', 'D3_private', 'D4_regulated'].includes(authority.dataLevel)) fail('material_classification_unavailable');
         dataLevel = authority.dataLevel; guard();
         if (call.capabilityId === PUBLISH) {
@@ -95,7 +100,10 @@ export function createInteractiveResultProvider({ store, stateStore, materialSou
             || await authority.admitResult?.(draft.publication.base) !== true)) fail('interactive_scope_denied', 'denied');
           guard();
           if (typeof requestPermission !== 'function') fail('interactive_permission_required', 'denied');
-          const scope = { kind: 'interactive-result', capabilityId: PUBLISH, owner: authority.owner, source: authority.source, parameterDigest: jsonDigest(draft) };
+          dataLevel = await materialSource.classifyInputs(draft.inputs, authority, { signal, inheritedDataLevel: authority.currentDataLevel?.() ?? dataLevel });
+          dataLevel = maximumInteractiveDataLevel(dataLevel, authority.currentDataLevel?.() ?? authority.dataLevel);
+          guard();
+          const scope = { kind: 'interactive-result', capabilityId: PUBLISH, owner: authority.owner, source: authority.source, parameterDigest: jsonDigest(draft), dataLevel };
           const approval = await requestPermission({ capabilityId: PUBLISH, tool: 'publish_interactive_result', toolName: 'publish_interactive_result',
             args: { publication: draft.publication, title: draft.title, parameterDigest: jsonDigest(draft) },
             scope,
@@ -107,7 +115,8 @@ export function createInteractiveResultProvider({ store, stateStore, materialSou
           grant = { ...createPermissionGrant({ toolCallId: call.toolCallId, granted: true, scope }),
             ...(authority.policyRevision ? { policyRevision: authority.policyRevision } : {}) };
           store.beginAttempt({ callRef, source: authority.source, draft }, guard); attemptStarted = true;
-          const resolved = await materialSource.resolveInputs(draft.inputs, authority, { signal, inheritedDataLevel: dataLevel });
+          const resolved = await materialSource.resolveInputs(draft.inputs, { ...authority, approvedDataLevel: scope.dataLevel }, { signal, inheritedDataLevel: dataLevel });
+          if (resolved.dataLevel !== scope.dataLevel) fail('material_classification_changed');
           dataLevel = resolved.dataLevel; guard();
           validationStarted = true;
           const content = await validate({ operation: 'validate', draft, bindings: resolved.bindings }, { signal });
@@ -192,7 +201,7 @@ export function createInteractiveResultProvider({ store, stateStore, materialSou
             ? (code === 'publication_index_conflict' ? code : 'publication_index_pending') : code;
         const failed = createFailedClientToolResult({ call, locale, reason, status, dataLevel });
         failed.outputPreview = { ...failed.outputPreview,
-          ...(call.capabilityId === PUBLISH ? { publicationStatus: operationUnreadable ? 'unknown' : committed ? receipt.publicationStatus : 'not_committed' } : {}),
+          ...(call.capabilityId === PUBLISH ? { publicationStatus: operationUnreadable || !callRef ? 'unknown' : committed ? receipt.publicationStatus : 'not_committed' } : {}),
           ...(committed ? { effectCommitted: true, callRef, reference: receipt.reference,
             recovery: receipt.publicationStatus === 'published' ? 'inspect_only' : 'reconcile_only' } : operationUnreadable ? { callRef, recovery: 'reconcile_only' } : {}),
           diagnostic: { code: reason, path: String(error.path ?? '').slice(0, 240), details: String(error.details ?? '').slice(0, 240), retryable: !committed && ['interactive_validation_failed', 'invalid_program', 'invalid_component'].includes(reason) } };

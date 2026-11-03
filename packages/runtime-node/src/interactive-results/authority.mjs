@@ -41,6 +41,10 @@ export function createInteractiveAuthority({ goalPlanStore, conversationStore, r
     }
     requireTrue(current(), 'interactive_execution_stale');
     const dataLevel = classifyContext?.({ owner, plan, toolContext });
+    function currentDataLevel() {
+      const minimum = classifyContext?.({ owner, plan: profile.planId ? goalPlanStore.getPlan(profile.planId) : undefined, toolContext });
+      return resultStore.ownerDataLevel ? resultStore.ownerDataLevel(owner, minimum) : minimum;
+    }
     const admittedVersions = new Map();
     const history = () => conversationStore?.getPersistedConversationHistory?.(toolContext.conversationId)?.messages ?? [];
     function frozenFeedback() {
@@ -89,7 +93,7 @@ export function createInteractiveAuthority({ goalPlanStore, conversationStore, r
       return [...admittedVersions.values()].some(fixed => (fixed.provenance ?? []).some(record =>
         same(record.source, source) && same(record.selector ?? {}, selector ?? {})));
     }
-    return { owner, role, dataLevel, capabilityIds: interactiveCapabilitiesForProfile(profile), assertCurrent: current,
+    return { owner, role, dataLevel, currentDataLevel, capabilityIds: interactiveCapabilitiesForProfile(profile), assertCurrent: current,
       ...(policyRevision ? { policyRevision } : {}),
       ...(plan ? { source: { ...expectedExecution, conversationId: plan.conversationId,
         ...(interactiveToken(call?.toolCallId) ? { toolCallId: call.toolCallId } : {}),
@@ -98,5 +102,20 @@ export function createInteractiveAuthority({ goalPlanStore, conversationStore, r
       admitResult, admitPublication, admitMaterial,
       admitFollowup: id => frozenFeedback().some(feedback => feedback.version?.kind === 'interactive' && feedback.version.followupId === id) };
   }
-  return { resolve };
+  function resolveObservation({ toolContext = {} }) {
+    const profile = toolContext.turnProfile;
+    if (!profile || profile.role !== 'project_agent' && !(profile.role === 'work_session'
+      && ['worker', 'explorer', 'verifier', 'visual_verifier'].includes(profile.agentKind))) throw problem('interactive_scope_denied');
+    const plan = profile.planId ? goalPlanStore.getPlan(profile.planId) : null;
+    const workspaceId = profile.workspaceId;
+    const owner = normalizeInteractiveOwner({ workspaceId, conversationId: getBotConversationId?.(workspaceId) });
+    const currentOwner = () => !!owner && holdsLease?.(workspaceId) === true && getBotConversationId(workspaceId) === owner.conversationId;
+    if (!currentOwner() || toolContext.workspaceId && toolContext.workspaceId !== workspaceId) throw problem('interactive_scope_denied');
+    if (enabled?.(workspaceId) !== true && resultStore.hasOwnerPrivacy?.(owner) !== true) throw problem('interactive_scope_denied');
+    if (profile.role === 'project_agent' ? toolContext.conversationId !== owner.conversationId
+      : plan?.conversationId !== toolContext.conversationId || plan?.delegationOrigin?.workspaceId !== workspaceId
+        || plan.delegationOrigin.parentConversationId !== owner.conversationId || plan.delegationOrigin.sessionId !== profile.sessionId) throw problem('interactive_scope_denied');
+    return { owner, dataLevel: classifyContext?.({ owner, plan, toolContext }), assertCurrent: currentOwner };
+  }
+  return { resolve, resolveObservation };
 }

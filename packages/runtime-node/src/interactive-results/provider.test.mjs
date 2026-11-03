@@ -22,10 +22,10 @@ function fixture(t, storeOptions = {}) {
   const store = createInteractiveResultStore({ rootDir: path.join(root, 'runtime'), now: clock,
     assertCompatibility: () => index.assertInteractiveEvidenceCompatible(), ...storeOptions });
   const states = createInteractiveStateStore({ resultStore: store, now });
-  const counts = { permissions: 0, materialReads: 0, sourceAdmissions: 0 };
+  const counts = { permissions: 0, materialReads: 0, sourceAdmissions: 0, permissionDataLevels: [] };
   let active = true, indexAvailable = true, acknowledgeIndex = true, approve = true, role = 'session_worker', allowResult = true, allowFollowup = true, conversationId = 'worker-a', dataLevel = 'D2_sensitive';
   const authority = ({ call }) => ({ owner, role, source: { conversationId, planId: 'plan-a', sessionId: 'session-a', executionEpoch: 'epoch-a', toolCallId: call.toolCallId },
-    dataLevel, capabilityIds: [PUBLISH, INSPECT], assertCurrent: () => active,
+    dataLevel, currentDataLevel: () => store.ownerDataLevel(owner, dataLevel), capabilityIds: [PUBLISH, INSPECT], assertCurrent: () => active,
     admitResult: () => allowResult, admitPublication: () => allowResult, admitFollowup: () => allowFollowup });
   const materialSource = createInteractiveMaterialSource({ now: clock,
     admitSource: () => { counts.sourceAdmissions++; return true; },
@@ -37,7 +37,8 @@ function fixture(t, storeOptions = {}) {
     findEvidenceIndexRecords: refs => index.findEvidenceIndexRecords(refs),
   } });
   const execute = (capabilityId, args, id = 'publish-a', context = {}) => provider.executeCapability({ call: { toolCallId: id, capabilityId, arguments: args } }, {
-    requestPermission: async request => { counts.permissions++; assert.equal(request.scope.kind, 'interactive-result'); return { granted: approve }; }, ...context });
+    requestPermission: async request => { counts.permissions++; counts.permissionDataLevels.push(request.dataLevel);
+      assert.equal(request.scope.kind, 'interactive-result'); assert.equal(request.scope.dataLevel, request.dataLevel); return { granted: approve }; }, ...context });
   const publish = (args = draft, id) => execute(PUBLISH, args, id);
   const inspect = (reference, view, extras = {}, id = 'inspect-a') => execute(INSPECT, { target: { kind: 'result', reference }, view, ...extras }, id);
   t.after(() => { states.close(); store.close(); rmSync(root, { recursive: true, force: true }); });
@@ -239,7 +240,37 @@ test('canonical source snapshots carry actual privacy/classification and admitte
   const inspected = await f.inspect(result.result.outputPreview.reference, 'data', { bindingId: 'facts', selector: { start: 1, limit: 1, fields: ['cost'] } });
   assert.equal(inspected.result.outputPreview.text, '[{"cost":7}]');
   assert.equal(inspected.result.outputPreview.source.truncated, true); assert.equal(inspected.result.outputPreview.source.redacted, true);
-  assert.equal(inspected.result.evidence.dataLevel, 'D3_private'); assert.equal(f.counts.sourceAdmissions, 1); assert.equal(f.counts.materialReads, 1);
+  assert.equal(inspected.result.evidence.dataLevel, 'D3_private'); assert.equal(f.counts.sourceAdmissions, 2); assert.equal(f.counts.materialReads, 2);
+  assert.deepEqual(f.counts.permissionDataLevels, ['D3_private']);
+});
+
+test('classification is checked before approval and a stricter post-approval source cannot be committed under the earlier scope', async t => {
+  const f = fixture(t);
+  const source = f.store.recordMaterial({ owner, source: { kind: 'tool-result', conversationId: 'worker-a', toolCallId: 'read-a' },
+    value: [{ cost: 10 }], dataLevel: 'D3_private', observedAt: now(), truncated: false, redacted: false, evidenceRefs: ['tool-result://read-a'] }, () => true);
+  const read = f.store.readMaterial;
+  let level = 'D3_private';
+  f.store.readMaterial = (...args) => ({ ...read(...args), dataLevel: level });
+  const result = await f.execute(PUBLISH, { ...draft, program: 'root=Metric("Cost",@Total(@Data("rows"),"cost"))',
+    inputs: [{ bindingId: 'rows', source }] }, 'classification-drift', { requestPermission: async request => {
+    assert.equal(request.dataLevel, 'D3_private'); assert.equal(request.scope.dataLevel, 'D3_private'); level = 'D4_regulated'; return { granted: true };
+  } });
+  assert.equal(result.result.outputPreview.reason, 'material_classification_changed');
+  assert.equal(result.result.outputPreview.publicationStatus, 'not_committed');
+  assert.equal(f.index.listEvidenceIndex().length, 0);
+});
+
+test('a stricter owner observation while approval is pending invalidates that scope even without input references', async t => {
+  const f = fixture(t);
+  const result = await f.execute(PUBLISH, draft, 'owner-classification-drift', { requestPermission: async request => {
+    assert.equal(request.dataLevel, 'D2_sensitive');
+    f.store.rememberObservationLevel(owner, 'D4_regulated', () => true);
+    return { granted: true };
+  } });
+  assert.equal(result.result.outputPreview.reason, 'material_classification_changed');
+  assert.equal(result.result.outputPreview.publicationStatus, 'not_committed');
+  assert.equal(f.index.listEvidenceIndex().length, 0);
+  assert.equal(f.store.ownerDataLevel(owner, 'D2_sensitive'), 'D4_regulated');
 });
 test('legacy lossy appends, wrappers and already-open append descriptors preserve the original canonical publication and owner', async t => {
   const f = fixture(t), file = path.join(f.root, 'goals', 'evidence-index.jsonl');

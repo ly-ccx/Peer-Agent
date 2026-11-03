@@ -29,8 +29,30 @@ export function selectInteractiveData(data, rawSelector) {
 }
 
 /** Reads canonical admitted bytes through host ports, never project paths or new tool executions. */
-export function createInteractiveMaterialSource({ readToolResult, readUserMaterial, admitSource, now = () => new Date().toISOString() } = {}) {
+export function createInteractiveMaterialSource({ readToolResult, readUserMaterial, readMaterialMetadata, admitSource, now = () => new Date().toISOString() } = {}) {
   return {
+    /** Read-only admission/classification before approval; never stage a snapshot or run a data tool. */
+    async classifyInputs(inputs, execution, { signal, inheritedDataLevel } = {}) {
+      if (!DATA_LEVELS.includes(inheritedDataLevel)) fail('material_classification_unavailable');
+      if (!Array.isArray(inputs) || inputs.length > L.bindings) fail('invalid_binding');
+      let level = DATA_LEVELS.indexOf(inheritedDataLevel);
+      for (const input of inputs) {
+        if (signal?.aborted) fail('interactive_cancelled');
+        const source = input.source;
+        if (source.kind === 'model-data') continue;
+        if (typeof admitSource !== 'function' || await admitSource(source, execution, input.selector) !== true) fail('material_scope_denied');
+        if (signal?.aborted) fail('interactive_cancelled');
+        const reader = readMaterialMetadata ?? (source.kind === 'tool-result' ? readToolResult : null);
+        if (typeof reader !== 'function') fail('material_classification_unavailable');
+        const record = await reader(source, execution);
+        if (signal?.aborted) fail('interactive_cancelled');
+        if (!record || record.available === false || record.canonical !== true || !interactiveDigest(record.contentVersion)) fail('material_snapshot_unavailable');
+        if (record.contentVersion !== source.expectedContentVersion) fail('material_version_mismatch');
+        if (!DATA_LEVELS.includes(record.dataLevel)) fail('material_classification_unavailable');
+        level = Math.max(level, DATA_LEVELS.indexOf(record.dataLevel));
+      }
+      return DATA_LEVELS[level];
+    },
     async resolveInputs(inputs, executionBinding, { signal, inheritedDataLevel = 'D2_sensitive' } = {}) {
       if (!DATA_LEVELS.includes(inheritedDataLevel)) fail('material_classification_unavailable');
       if (!Array.isArray(inputs) || inputs.length > L.bindings) fail('invalid_binding');
@@ -58,6 +80,7 @@ export function createInteractiveMaterialSource({ readToolResult, readUserMateri
           if (!record || record.available === false || !interactiveDigest(record.contentVersion) || record.canonical !== true) fail('material_snapshot_unavailable');
           if (record.contentVersion !== source.expectedContentVersion) fail('material_version_mismatch');
           if (!DATA_LEVELS.includes(record.dataLevel)) fail('material_classification_unavailable');
+          if (executionBinding.approvedDataLevel && DATA_LEVELS.indexOf(record.dataLevel) > DATA_LEVELS.indexOf(executionBinding.approvedDataLevel)) fail('material_classification_changed');
           if (typeof record.observedAt !== 'string' || !Number.isFinite(Date.parse(record.observedAt)) || typeof record.truncated !== 'boolean' || typeof record.redacted !== 'boolean') fail('material_snapshot_unavailable');
           if (!Array.isArray(record.evidenceRefs) || record.evidenceRefs.some(ref => typeof ref !== 'string' || ref.length > 1024)) fail('material_snapshot_unavailable');
           if (source.kind === 'tool-result' && !record.evidenceRefs.length) fail('material_snapshot_unavailable');

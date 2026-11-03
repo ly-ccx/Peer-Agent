@@ -34,10 +34,15 @@ test('canonical inline uploads produce scoped version references and immutable p
   assert.deepEqual(notices[0].selectorRoots, ['text', 'json']);
   assert.equal(runtime.resultStore.storage.connect('bot-a'), null, 'context reference assembly has no publication store write');
   assert.deepEqual(runtime.userMaterialNotices({ ...context, turnProfile: resolveWorkSessionProfile({ plan, kind: 'verifier' }) }), []);
+  const approvals = [];
   const publish = (id, source = notices[0].source) => runtime.provider.executeCapability({ call: { toolCallId: id, capabilityId: 'local.interactive.publish', arguments: {
     publication: { kind: 'create' }, title: 'Uploaded estimates', textFallback: 'User-provided estimates, no business verification.',
     program: 'root=Metric("Total",@Total(@Data("facts"),"cost"))', inputs: [{ bindingId: 'facts', source, selector: { path: ['json', 'rows'] } }],
-  } } }, { toolContext: context, requestPermission: async () => ({ granted: true }) });
+  } } }, { toolContext: context, requestPermission: async request => {
+    approvals.push({ id, dataLevel: request.dataLevel }); assert.equal(request.scope.dataLevel, request.dataLevel);
+    if (id === 'publish-a') assert.equal(runtime.resultStore.storage.connect('bot-a'), null, 'classification is read-only before approval');
+    return { granted: true };
+  } });
   const result = await publish('publish-a');
   assert.equal(result.result.status, 'success', JSON.stringify(result.result.outputPreview));
   const original = runtime.resultStore.getVersion(result.result.outputPreview.reference);
@@ -54,6 +59,7 @@ test('canonical inline uploads produce scoped version references and immutable p
   assert.deepEqual(runtime.resultStore.getVersion(original.reference).content.bindings.facts, rows);
   assert.equal((await publish('new-version', changed.source)).result.status, 'success');
   assert.equal((await publish('retain-original')).result.status, 'success');
+  assert.deepEqual(approvals, [{ id: 'publish-a', dataLevel: 'D4_regulated' }, { id: 'new-version', dataLevel: 'D4_regulated' }, { id: 'retain-original', dataLevel: 'D4_regulated' }]);
   const denied = await publish('foreign-material', { ...notices[0].source, messageId: 'foreign-message' });
   assert.equal(denied.result.outputPreview.reason, 'material_scope_denied');
   conversations.updateMessageById(child.id, message.id, { attachments: [] });

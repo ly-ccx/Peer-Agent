@@ -2,11 +2,12 @@ import { INTERACTIVE_RESULT_LIMITS as L, interactiveDigest, interactiveToken } f
 import { boundedJSON } from '@peer-agent/interactive-content/values';
 import { redactInteractiveJSON, redactInteractiveJSONText } from './observation-redaction.mjs';
 import { problem } from './storage.mjs';
+import { maximumInteractiveDataLevel } from './owner-privacy.mjs';
 
 const levels = ['D0_public', 'D1_internal', 'D2_sensitive', 'D3_private', 'D4_regulated'];
 
 /** The exact returned observation, not EvidenceIndex bodyPreview or a re-read file. */
-export function canonicalInteractiveObservation(execution, { observedAt } = {}) {
+function executionFact(execution, observedAt) {
   const call = execution?.call, result = execution?.result;
   const grant = execution?.grant ?? result?.permissionGrant;
   const granted = grant?.granted === true || grant?.decision === 'allow';
@@ -15,9 +16,15 @@ export function canonicalInteractiveObservation(execution, { observedAt } = {}) 
   const boundGrant = grant?.toolCallId === call?.toolCallId || grant?.toolCallId === undefined
     && grant?.decision === 'allow' && grant?.capabilityId === call?.capabilityId;
   if (!interactiveToken(call?.toolCallId) || result?.toolCallId !== call.toolCallId || !['success', 'completed'].includes(result.status)
-    || !granted || !boundGrant || !interactiveToken(result.evidence?.evidenceId)
+    || !granted || !boundGrant || !interactiveToken(result.evidence?.evidenceId) || result.evidence.toolCallId !== call.toolCallId
     || !Number.isFinite(Date.parse(result.completedAt ?? observedAt))) throw problem('material_snapshot_unavailable');
   if (!levels.includes(result.evidence.dataLevel)) throw problem('material_classification_unavailable');
+  return { dataLevel: result.evidence.dataLevel, observedAt: result.completedAt ?? observedAt };
+}
+
+export function canonicalInteractiveObservation(execution, { observedAt } = {}) {
+  const fact = executionFact(execution, observedAt);
+  const call = execution.call, result = execution.result;
   let payload;
   const sideband = Object.getOwnPropertyDescriptor(result, 'materialObservation');
   if (sideband && sideband.enumerable === false && 'value' in sideband) {
@@ -47,13 +54,20 @@ export function canonicalInteractiveObservation(execution, { observedAt } = {}) 
     break;
   }
   return { value: boundedJSON(value, { maxBytes: L.inputBytes * 8, maxItems: 10_000, maxStringChars: L.inputBytes * 8 }),
-    dataLevel: result.evidence.dataLevel, observedAt: result.completedAt ?? observedAt, truncated, redacted,
+    ...fact, truncated, redacted,
     evidenceRefs: [`tool-result://${call.toolCallId}`, ...(result.evidence.artifactRefs ?? []).filter(ref => typeof ref === 'string').slice(0, 32)] };
 }
 
-export function createInteractiveCapture({ resultStore, resolveAuthority, now = () => new Date().toISOString() }) {
+export function createInteractiveCapture({ resultStore, resolveAuthority, resolveObservationAuthority, now = () => new Date().toISOString() }) {
   return function captureExecution(execution, toolContext) {
-    if (!execution?.call || execution.call.capabilityId?.startsWith('local.interactive.')) return execution;
+    if (!execution?.call) return execution;
+    if (resolveObservationAuthority) {
+      try {
+        const context = resolveObservationAuthority({ toolContext }), fact = executionFact(execution, now());
+        resultStore.rememberObservationLevel(context.owner, maximumInteractiveDataLevel(context.dataLevel, fact.dataLevel), context.assertCurrent);
+      } catch { /* Recording an actual privacy upper bound never reexecutes or restores an old work. */ }
+    }
+    if (execution.call.capabilityId?.startsWith('local.interactive.')) return execution;
     let authority;
     try { authority = resolveAuthority({ call: execution.call, toolContext }); }
     catch { return execution; } // Unadmitted or inactive rounds do not create material snapshots.

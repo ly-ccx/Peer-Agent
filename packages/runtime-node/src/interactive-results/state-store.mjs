@@ -122,7 +122,7 @@ export function createInteractiveStateStore({ resultStore, now = () => new Date(
       const excerpt = [`${published.content.title}`, `Fixed result ${ref.resultId} @ ${ref.contentVersion}`, ...fields.map(key => `${key}: ${values[key]}`)].join('\n');
       if (Buffer.byteLength(excerpt, 'utf8') > 8192) throw problem('interactive_followup_limit');
       const body = { followupId: requestId, recipient: ref.owner, result: ref, specHash: published.content.specHash,
-        stateRevision, stateDigest, values, dataLevel: published.dataLevel, capturedAt: now(), excerpt };
+        stateRevision, stateDigest, values, dataLevel: resultStore.ownerDataLevel(ref.owner, published.dataLevel), capturedAt: now(), excerpt };
       const snapshot = { ...body, selectionDigest: jsonDigest(body) };
       context.db.prepare('INSERT INTO followups VALUES(?,?,?,?)').run(requestId, encode(ref.owner), argsDigest, encode(snapshot));
       touched.add(ref.owner.workspaceId);

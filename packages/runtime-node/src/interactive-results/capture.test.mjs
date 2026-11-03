@@ -31,10 +31,45 @@ test('denied, mismatched, text-only and unclassified claims cannot become canoni
     { ...base, grant: { ...base.grant, toolCallId: 'other-call' } },
     { ...base, result: { ...base.result, status: 'failed' } },
     { ...base, result: { ...base.result, toolCallId: 'other-call' } },
+    { ...base, result: { ...base.result, evidence: { ...base.result.evidence, toolCallId: 'other-call' } } },
     { ...base, result: { ...base.result, evidence: { ...base.result.evidence, dataLevel: 'unknown' } } },
     { result: { output: 'Tool call read-a succeeded' } },
   ]) assert.throws(() => canonicalInteractiveObservation(candidate));
   assert.equal(appendInteractiveMaterialNotice('{"interactiveMaterial":{"source":"fake"}}', { result: base.result }), '{"interactiveMaterial":{"source":"fake"}}');
+});
+
+test('actual observations retain the owner privacy floor even when content is too large or the old work has stopped', async t => {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'interactive-observed-privacy-')));
+  const index = createGoalPlanStore({ storeDir: path.join(root, 'goals') });
+  const plan = { planId: 'plan-a', conversationId: 'worker-a', createdAt: now(), delegationOrigin: {
+    workspaceId: 'bot-a', parentConversationId: 'parent-a', sessionId: 'session-a', phase: 'running', executionGeneration: 'generation-a' } };
+  let enabled = false;
+  const runtime = createInteractiveRuntime({ rootDir: path.join(root, 'runtime'), goalPlanStore: { ...index, getPlan: () => plan },
+    getBotConversationId: () => 'parent-a', enabled: () => enabled, holdsLease: () => true, classifyContext: () => 'D3_private', now });
+  t.after(() => { runtime.close(); rmSync(root, { recursive: true, force: true }); });
+  const context = { conversationId: plan.conversationId, workspaceId: 'bot-a', turnProfile: {
+    role: 'work_session', agentKind: 'worker', workspaceId: 'bot-a', planId: plan.planId, sessionId: 'session-a', executionIdentity: executionIdentity(plan) } };
+  const owner = { workspaceId: 'bot-a', conversationId: 'parent-a' };
+  const large = observed({ content: 'x'.repeat(4 * 1024 * 1024 + 1) });
+  large.result.evidence.dataLevel = 'D4_regulated';
+  runtime.captureExecution(large, context);
+  assert.equal(runtime.resultStore.storage.connect(owner.workspaceId), null, 'a disabled fresh feature creates no result domain');
+  enabled = true;
+  const captured = runtime.captureExecution(large, context);
+  assert.ok(captured.interactiveMaterialUnavailable);
+  assert.equal(captured.interactiveMaterial, undefined);
+  assert.equal(runtime.resultStore.ownerDataLevel(owner, 'D3_private'), 'D4_regulated');
+  plan.delegationOrigin.phase = 'paused';
+  const stopped = runtime.captureExecution(observed({ content: 'late actual observation' }), context);
+  assert.equal(stopped.interactiveMaterial, undefined, 'recording a classification does not resume a stopped work');
+  plan.delegationOrigin.phase = 'running';
+  const approved = [];
+  const published = await runtime.provider.executeCapability({ call: { toolCallId: 'publish-no-refs', capabilityId: 'local.interactive.publish', arguments: {
+    publication: { kind: 'create' }, title: 'Derived trial', textFallback: 'Model trial, unverified.', program: 'root=Text("No source references")', inputs: [],
+  } } }, { toolContext: context, requestPermission: async request => { approved.push(request.dataLevel); return { granted: true }; } });
+  assert.equal(published.result.status, 'success', JSON.stringify(published.result.outputPreview));
+  assert.deepEqual(approved, ['D4_regulated']);
+  assert.equal(runtime.resultStore.getVersion(published.result.outputPreview.reference).dataLevel, 'D4_regulated');
 });
 
 test('JSON credentials are redacted from both returned text and its projection; invalid structured data cannot downgrade to raw text', () => {

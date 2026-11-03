@@ -24,6 +24,28 @@ function fixture(t, options = {}) {
 }
 const current = () => true;
 
+test('owner privacy is monotonic, isolated and durable; a missing or invalid floor cannot silently lower stored facts', async t => {
+  const { store, rootDir } = fixture(t);
+  assert.equal(store.ownerDataLevel(owner, 'D3_private'), 'D3_private');
+  assert.equal(store.storage.connect(owner.workspaceId), null);
+  store.rememberObservationLevel(owner, 'D4_regulated', current);
+  store.rememberObservationLevel(owner, 'D1_internal', current);
+  assert.equal(store.ownerDataLevel(owner, 'D0_public'), 'D4_regulated');
+  assert.equal(store.ownerDataLevel({ ...owner, conversationId: 'other-owner' }, 'D1_internal'), 'D1_internal');
+  assert.throws(() => store.rememberObservationLevel(owner, 'D4_regulated', () => false), { code: 'interactive_execution_stale' });
+  store.close();
+  const reopened = createInteractiveResultStore({ rootDir, now, assertCompatibility: () => true });
+  t.after(() => reopened.close());
+  assert.equal(reopened.ownerDataLevel(owner, 'D2_sensitive'), 'D4_regulated');
+  reopened.storage.connect(owner.workspaceId, true).db.prepare("UPDATE owner_privacy SET dataLevel='unknown'").run();
+  assert.throws(() => reopened.ownerDataLevel(owner, 'D3_private'), { code: 'material_classification_unavailable' });
+  reopened.storage.connect(owner.workspaceId, true).db.prepare('DELETE FROM owner_privacy').run();
+  reopened.recordMaterial({ owner, source: { kind: 'tool-result', conversationId: 'worker-a', toolCallId: 'read-a' }, value: { payload: [1] },
+    dataLevel: 'D4_regulated', observedAt: now(), truncated: false, redacted: false, evidenceRefs: ['tool-result://read-a'] }, current);
+  reopened.storage.connect(owner.workspaceId, true).db.prepare('DELETE FROM owner_privacy').run();
+  assert.throws(() => reopened.ownerDataLevel(owner, 'D3_private'), { code: 'material_classification_unavailable' });
+});
+
 test('publication persists one version/operation/outbox and is not formally available until real index confirmation', async t => {
   const { store } = fixture(t);
   const receipt = store.commitPublication(await candidate(), current);
@@ -120,7 +142,7 @@ test('unknown schema, removed database and tampered immutable bytes remain error
   const db = new DatabaseSync(file);
   db.exec('PRAGMA user_version=999');
   assert.throws(() => store.getVersion(first.reference), { code: 'interactive_storage_incompatible' });
-  db.exec('PRAGMA user_version=3');
+  db.exec('PRAGMA user_version=4');
   db.prepare("UPDATE objects SET body=replace(body,'Trial','False')").run();
   assert.throws(() => store.getVersion(first.reference), { code: 'interactive_content_corrupt' });
   db.close(); store.close(); rmSync(file);
