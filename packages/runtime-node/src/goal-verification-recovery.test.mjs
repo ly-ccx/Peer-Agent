@@ -51,6 +51,30 @@ for (const delegated of [false, true]) for (const completed of [false, true]) {
   });
 }
 
+test('unindexed verifier references fail closed and leave the worker a repair turn', async t => {
+  const { store, plan } = fixture(t, { completed: true, delegated: true });
+  let workers = 0, verifiers = 0;
+  const runner = createGoalRunner({ goalPlanStore: store, logger: { warn() {} },
+    chatRuntime: { async runGoalTurn({ plan: current }) {
+      workers++;
+      assert.equal(current.runner.phase, 'repair');
+      const failedRun = current.runner.verifierRuns.find(run => run.status === 'failed');
+      assert.deepEqual(failedRun.report.evidenceRefs, ['tool-result://read']);
+      assert.match(failedRun.report.missingEvidence[0]?.reason, /Evidence Index/);
+      assert.deepEqual(current.modelReviews.at(-1).evidenceRefs, ['tool-result://read']);
+      assert.equal(current.modelReviews.at(-1).passed, false);
+      store.recordTaskEvidence(plan.planId, 'read', { status: 'completed', result: 'Revised report', evidenceRefs: ['tool-result://read'] });
+      return { completed: true, toolCallCount: 1 };
+    } },
+    verifierRunner: { async runVerifier() {
+      return ++verifiers === 1 ? { ...pass, evidenceRefs: [...pass.evidenceRefs, 'tool-result://unregistered'] } : pass;
+    } } });
+  await runner.start(plan.planId, { awaitIdle: true });
+  assert.equal(workers, 1);
+  assert.equal(verifiers, 2);
+  assert.equal(store.getPlan(plan.planId).runner.status, 'completed');
+});
+
 test('mechanical gaps are repaired with real indexed results before completion', async t => {
   const { store, plan } = fixture(t, { mechanical: true });
   let workers = 0, verifiers = 0;
