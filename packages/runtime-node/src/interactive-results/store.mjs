@@ -2,16 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { INTERACTIVE_PUBLISH_CAPABILITY, INTERACTIVE_RESULT_LIMITS as L, interactiveArtifactRef, interactiveDigest, interactiveToken, normalizeInteractiveOwner, normalizeInteractiveReference, normalizeInteractivePublicationReference } from '@peer-agent/protocol';
 import { pathOf } from '../data-store.mjs';
 import { createInteractiveStorage, decode, encode, jsonDigest, problem } from './storage.mjs';
+import { materialKey, readMaterialRecord } from './material-record.mjs';
 import { createPublicationAttempts } from './publication-attempts.mjs';
 import { createOwnerPrivacy, maximumInteractiveDataLevel } from './owner-privacy.mjs';
 
 const clone = value => structuredClone(value);
 const same = (a, b) => encode(a) === encode(b);
 const operationKey = ref => jsonDigest([ref.owner, ref.conversationId, ref.toolCallId]);
-const materialKey = source => source?.kind === 'tool-result' && interactiveToken(source.conversationId) && interactiveToken(source.toolCallId)
-  ? jsonDigest([source.kind, source.conversationId, source.toolCallId])
-  : source?.kind === 'user-material' && interactiveToken(source.messageId) && interactiveToken(source.attachmentId)
-    ? jsonDigest([source.kind, source.messageId, source.attachmentId, source.expectedContentVersion ?? null]) : null;
 function requireOwner(raw) { const owner = normalizeInteractiveOwner(raw); if (!owner) throw problem('interactive_owner_invalid'); return owner; }
 function requireReference(raw) { const ref = normalizeInteractiveReference(raw); if (!ref) throw problem('interactive_reference_invalid'); return ref; }
 function requireCall(raw) { const ref = normalizeInteractivePublicationReference(raw); if (!ref) throw problem('interactive_call_invalid'); return ref; }
@@ -219,7 +216,12 @@ export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'
       privacy.remember(context, owner, dataLevel);
       const previous = context.db.prepare('SELECT owner,object,metadata FROM materials WHERE id=?').get(id);
       if (previous) {
-        const actual = decode(previous.metadata);
+        if (previous.owner !== encode(owner)) throw problem('material_identity_conflict');
+        const savedSource = decode(previous.metadata)?.source;
+        if (!same(savedSource, metadata.source)) throw problem('material_identity_conflict');
+        const record = readMaterialRecord(previous, owner, metadata.source);
+        if (record?.retired) throw problem('material_snapshot_cleaned');
+        const actual = record?.metadata;
         if (previous.owner !== encode(owner) || previous.object !== contentVersion || !same(actual, { ...metadata, observedAt: actual.observedAt })) throw problem('material_identity_conflict');
         return clone(actual.source);
       }
@@ -233,10 +235,10 @@ export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'
     const id = materialKey(source);
     if (!context || !id) return null;
     const row = context.db.prepare('SELECT owner,object,metadata FROM materials WHERE id=?').get(id);
-    if (!row || row.owner !== encode(owner)) return null;
-    const metadata = decode(row.metadata);
-    if (!same(metadata.source, source)) throw problem('material_version_mismatch');
-    return { ...metadata, value: storage.readObject(context, row.object), canonical: true, available: true };
+    const record = readMaterialRecord(row, owner, source);
+    if (!record) return null;
+    if (record.retired) throw problem('material_snapshot_cleaned');
+    return { ...record.metadata, value: storage.readObject(context, row.object), canonical: true, available: true };
   }
   return { commitPublication, getOperation, getVersion, getVersionMetadata, markIndexed, listPending, head, readVersions, recordMaterial, readMaterial,
     ownerDataLevel: (rawOwner, minimum) => privacy.current(requireOwner(rawOwner), minimum),

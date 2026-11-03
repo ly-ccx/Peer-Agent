@@ -49,13 +49,13 @@ async function fixture(t, storeOptions = {}) {
       pins, followupIds, assertCurrent: () => leased && revision === acquiredRevision, release: () => { releases++; } };
   };
   const retention = createInteractiveRetention({ resultStore: store, stateStore: states, assertOwner: candidate => leased && encode(candidate) === encode(owner), acquireRoots, now });
-  function publish({ base, program, indexed = true, target = store } = {}) {
+  function publish({ base, program, provenance = [], indexed = true, target = store } = {}) {
     const toolCallId = `publish-${++ordinal}`, source = { conversationId: 'worker-a', planId: 'plan-a', sessionId: 'session-a', executionEpoch: 'epoch-a', toolCallId };
     const candidate = base ? { ...draft, publication: { kind: 'revise', base } } : draft;
     const prepared = program ? { ...candidate, program } : candidate;
     const validated = program ? validateDraft(prepared) : Promise.resolve(content);
     return validated.then(value => {
-      const receipt = target.commitPublication({ owner, source, draft: prepared, content: value, provenance: [], dataLevel: 'D3_private',
+      const receipt = target.commitPublication({ owner, source, draft: prepared, content: value, provenance, dataLevel: 'D3_private',
         grant: { grantId: `grant-${ordinal}`, toolCallId, granted: true } }, current);
       if (indexed) target.markIndexed(receipt.callRef, receipt.indexEntry);
       return { ...receipt, source, draft: prepared };
@@ -118,6 +118,58 @@ test('an actual read-only view in another process blocks retirement until the vi
   await exit;
   assert.deepEqual(f.retention.preview(reference).blockers, []);
   assert.equal(f.clean().versions.length, 1);
+});
+
+test('material retirement requires its own guard, protects provenance and keeps shared bytes', async t => {
+  const f = await fixture(t);
+  const record = { owner, source: { kind: 'tool-result', conversationId: 'worker-a', toolCallId: 'read-mat-a' },
+    value: { text: 'canonical material' }, dataLevel: 'D3_private', observedAt: now(), truncated: false, redacted: false,
+    evidenceRefs: ['tool-result://read-mat-a'] };
+  const source = f.store.recordMaterial(record, current);
+  const otherRecord = { ...record, source: { ...record.source, toolCallId: 'read-mat-b' }, evidenceRefs: ['tool-result://read-mat-b'] };
+  const otherSource = f.store.recordMaterial(otherRecord, current);
+  const selection = { owner, source };
+  assert.throws(() => f.retention.previewMaterial(selection), { code: 'interactive_retention_unavailable' });
+  let blocked = true, changed = false;
+  const retention = createInteractiveRetention({ resultStore: f.store, stateStore: f.states, assertOwner: current,
+    acquireRoots: f.acquireRoots, now,
+    acquireMaterialResponsibility: () => ({ digest: jsonDigest({ blocked }), blocked, assertCurrent: () => !changed, release() {} }),
+    onStep(step) { if (step === 'material_cleanup_before_commit' && crash) throw Error('interrupted'); } });
+  let crash = false;
+  const live = retention.previewMaterial(selection);
+  assert.deepEqual(live.blockers, ['source']);
+  assert.throws(() => retention.cleanupMaterial({ ...selection, expectedDigest: live.cleanupDigest, requestId: 'retire-mat' }),
+    { code: 'interactive_cleanup_blocked' });
+  blocked = false;
+  const provenance = [{ bindingId: 'snapshot', source, contentVersion: source.expectedContentVersion, selectedDigest: source.expectedContentVersion,
+    observedAt: now(), capturedAt: now(), truncated: false, redacted: false, dataLevel: 'D3_private', evidenceRefs: record.evidenceRefs }];
+  const published = await f.publish({ provenance });
+  assert.deepEqual(retention.previewMaterial(selection).blockers, ['published-version']);
+  f.clean(published.reference, 'clean-material-result');
+  const old = f.legacy();
+  assert.deepEqual(old.readMaterial(owner, source).value, record.value);
+  const preview = retention.previewMaterial(selection);
+  const request = { ...selection, expectedDigest: preview.cleanupDigest, requestId: 'retire-mat' };
+  changed = true;
+  assert.throws(() => retention.cleanupMaterial(request), { code: 'interactive_retention_stale' });
+  changed = false; crash = true;
+  assert.throws(() => retention.cleanupMaterial(request), /interrupted/);
+  assert.deepEqual(f.store.readMaterial(owner, source).value, record.value);
+  crash = false;
+  const receipt = retention.cleanupMaterial(request);
+  assert.deepEqual(retention.readMaterialReceipt(selection), receipt);
+  assert.deepEqual(retention.cleanupMaterial(request), receipt);
+  assert.throws(() => retention.cleanupMaterial({ ...request, requestId: 'different' }), { code: 'interactive_cleanup_parameter_conflict' });
+  assert.throws(() => f.store.readMaterial(owner, source), { code: 'material_snapshot_cleaned' });
+  assert.throws(() => f.store.recordMaterial(record, current), { code: 'material_snapshot_cleaned' });
+  assert.throws(() => old.readMaterial(owner, source));
+  assert.throws(() => old.recordMaterial(record, current), { code: 'material_identity_conflict' });
+  assert.deepEqual(f.store.readMaterial(owner, otherSource).value, record.value);
+  const last = { owner, source: otherSource };
+  const final = retention.previewMaterial(last);
+  retention.cleanupMaterial({ ...last, expectedDigest: final.cleanupDigest, requestId: 'retire-other-mat' });
+  assert.equal(f.db.prepare('SELECT 1 FROM objects WHERE hash=?').get(otherSource.expectedContentVersion), undefined);
+  assert.equal(f.store.getVersion(f.first.reference).content.initialValues.$budget, 100);
 });
 
 test('isolated followup retirement keeps retry identity and requires fresh unreferenced roots', async t => {
