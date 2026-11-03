@@ -27,6 +27,7 @@ import { createPermissionGrant, nowIso } from './tool-result-factory.mjs';
 const MAX_TOOL_CONTEXT_CHARS = 4_000;
 /** Working-set file reads. Keep in sync with FILE_READ_INLINE_MAX_CHARS. */
 const FILE_READ_INLINE_MAX_CHARS = 32_000;
+const MATERIAL_OBSERVATION = Symbol('file-material-observation');
 const MAX_USER_CODE_PREVIEW_LINES = 40;
 const MAX_USER_CODE_PREVIEW_LINE_CHARS = 240;
 /** Hard cap for write_file content (UTF-8 bytes). Giant single payloads stall SSE tool-arg streams. */
@@ -330,11 +331,11 @@ function formatToolFailure(tool, status, reason, extra = {}) {
   };
 }
 
-function materializeFileRead({ filePath, content, readState, fullContent = null, range = null }) {
+function materializeFileRead({ filePath, content, readState, fullContent = null, range = null, captureMaterial = false }) {
   const source = fullContent ?? content;
   const snapshot = readState ?? getFileSnapshot(filePath, source);
   const preview = previewText(content, FILE_READ_INLINE_MAX_CHARS);
-  return {
+  const result = {
     success: true,
     output: formatContextResult({
       kind: 'local_file_ref',
@@ -359,6 +360,11 @@ function materializeFileRead({ filePath, content, readState, fullContent = null,
       ],
     }),
   };
+  if (captureMaterial && Buffer.byteLength(content, 'utf8') <= 4 * 1024 * 1024) Object.defineProperty(result, MATERIAL_OBSERVATION, {
+    value: { path: filePath, content, contentHash: hashContent(content),
+      ...(range ? { ...range, truncated: true } : { truncated: false }) }, enumerable: false,
+  });
+  return result;
 }
 
 function formatSearchSuccess({ query, cwd, searchRoot, matches, filesWithMatches, truncated }) {
@@ -657,6 +663,7 @@ async function runUnlockedFileTool({ name, args, cwd, toolContext, requestPermis
         content: slice.content,
         readState,
         fullContent,
+        captureMaterial: toolContext?.interactiveMaterialsEnabled === true,
         range: slice.ranged
           ? {
               start_line: slice.startLine,
@@ -931,7 +938,7 @@ function buildFileCapabilityResult({ call, name, locale, fileResult }) {
       ? 'D1_internal'
       : 'D2_sensitive';
   const userArtifacts = userArtifactsFromFileResult(name, fileResult);
-  return {
+  const result = {
     toolCallId: call.toolCallId,
     status,
     outputPreview: {
@@ -955,6 +962,11 @@ function buildFileCapabilityResult({ call, name, locale, fileResult }) {
     },
     completedAt: nowIso(),
   };
+  if (fileResult[MATERIAL_OBSERVATION]) Object.defineProperty(result, 'materialObservation', {
+    value: Object.freeze({ schemaVersion: 1, toolCallId: call.toolCallId, capabilityId: call.capabilityId,
+      evidenceId: result.evidence.evidenceId, payload: fileResult[MATERIAL_OBSERVATION] }), enumerable: false,
+  });
+  return result;
 }
 
 function readArgs(call) {

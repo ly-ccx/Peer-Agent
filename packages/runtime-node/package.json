@@ -37,7 +37,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "node ../../scripts/embed-storage-workers.mjs && node scripts/embed-project-tool-prompts.mjs && tsc -p tsconfig.build.json && node scripts/emit-declared-modules.mjs",
+    "build": "node ../../scripts/embed-storage-workers.mjs && node scripts/embed-project-tool-prompts.mjs && node scripts/embed-interactive-worker.mjs && tsc -p tsconfig.build.json && node scripts/emit-declared-modules.mjs",
     "test": "node --test src/*.test.ts src/*.test.mjs src/sqlite/*.test.mjs src/memory/*.test.mjs src/project-agent/*.test.mjs src/project-agent/probes/*.test.mjs src/testing/*.test.mjs src/interactive-results/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json"
   },
@@ -53,6 +53,7 @@
     "@peer-agent/interactive-content": "workspace:*"
   },
   "devDependencies": {
+    "esbuild": "0.27.7",
     "typescript": "^5.9.3"
   }
 }

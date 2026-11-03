@@ -15,6 +15,17 @@ function storedContent(content) {
   const { tree: _cache, ...body } = content;
   return clone(body);
 }
+function contentDigest(body) {
+  if (body.encoding !== 'peer-interactive-content-1' || !Array.isArray(body.provenance)) throw problem('interactive_content_corrupt');
+  // Capture time belongs to the original immutable storage object, not to content
+  // identity. An identical revision must not become new content just because it
+  // was validated later. Real source observation/version/classification stay pinned.
+  const provenance = body.provenance.map(({ capturedAt: _captured, ...record }) => {
+    if (record.source.kind === 'model-data') { const { observedAt: _constructed, ...stable } = record; return stable; }
+    return record;
+  });
+  return jsonDigest({ encoding: body.encoding, content: body.content, provenance, dataLevel: body.dataLevel });
+}
 
 /** Immutable publication identity and operation/outbox truth; no execution or UI permission authority. */
 export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'), now = () => new Date().toISOString(),
@@ -35,8 +46,8 @@ export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'
     const status = context.db.prepare('SELECT phase FROM operations WHERE id=?').get(metadata.operationId)?.phase;
     if (!allowPending && status !== 'published') throw problem(status === 'index_pending' ? 'publication_index_pending' : 'publication_unknown');
     const body = storage.readObject(context, row.object);
-    if (jsonDigest(body) !== ref.contentVersion) throw problem('interactive_content_corrupt');
-    return { ...metadata, ...body, publicationStatus: status };
+    if (contentDigest(body) !== ref.contentVersion || metadata.dataLevel !== body.dataLevel) throw problem('interactive_content_corrupt');
+    return { ...metadata, content: body.content, provenance: body.provenance, publicationStatus: status };
   }
   function getVersion(rawReference, options) {
     const ref = requireReference(rawReference), context = storage.connect(ref.owner.workspaceId);
@@ -55,8 +66,8 @@ export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'
       || grant?.granted !== true || grant.toolCallId !== source.toolCallId || !interactiveToken(grant.grantId)) throw problem('interactive_publication_authority_invalid');
     const callRef = requireCall({ owner, conversationId: source.conversationId, toolCallId: source.toolCallId });
     const argsDigest = jsonDigest(draft), id = operationKey(callRef);
-    const body = { content: storedContent(content), provenance: clone(provenance) };
-    const contentVersion = jsonDigest(body);
+    const body = { encoding: 'peer-interactive-content-1', content: storedContent(content), provenance: clone(provenance), dataLevel };
+    const contentVersion = contentDigest(body);
     requireCurrent(assertCurrent);
     const committed = storage.transaction(owner.workspaceId, context => {
       const previous = operation(context, callRef);
@@ -82,7 +93,10 @@ export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'
       const count = context.db.prepare('SELECT COUNT(*) AS count FROM results WHERE owner=?').get(encode(owner)).count;
       if (!predecessor && count >= L.resultsPerBot) throw problem('interactive_result_limit');
       const reference = { owner, resultId, contentVersion };
-      const artifactRef = interactiveArtifactRef(reference), evidenceRef = `tool-result://${source.toolCallId}`;
+      // Model wire call IDs are not globally unique across worker conversations.
+      // The existing opaque artifact ref is the canonical index key; bare tool-result
+      // aliases can still be registered by the generic host without rebinding it.
+      const artifactRef = interactiveArtifactRef(reference), evidenceRef = artifactRef;
       const createdAt = now();
       const metadata = { reference, source: clone(source), ...(predecessor ? { predecessor } : {}), evidenceRef, artifactRef, dataLevel, createdAt, operationId: id };
       const userArtifact = { kind: 'interactive', ref: artifactRef, label: content.title, reference, specHash: content.specHash };
@@ -147,8 +161,9 @@ export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'
       requireCurrent(assertCurrent);
       const previous = context.db.prepare('SELECT owner,object,metadata FROM materials WHERE id=?').get(id);
       if (previous) {
-        if (previous.owner !== encode(owner) || previous.object !== contentVersion || !same(decode(previous.metadata), metadata)) throw problem('material_identity_conflict');
-        return clone(metadata.source);
+        const actual = decode(previous.metadata);
+        if (previous.owner !== encode(owner) || previous.object !== contentVersion || !same(actual, { ...metadata, observedAt: actual.observedAt })) throw problem('material_identity_conflict');
+        return clone(actual.source);
       }
       const object = storage.putObject(context, value);
       context.db.prepare('INSERT INTO materials VALUES(?,?,?,?)').run(id, encode(owner), object, encode(metadata));

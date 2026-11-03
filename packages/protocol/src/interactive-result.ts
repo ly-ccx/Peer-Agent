@@ -18,6 +18,22 @@ export interface BoundedDataSelector {
   readonly limit?: number;
 }
 export interface InteractiveInputBinding { readonly bindingId: string; readonly source: AdmittedMaterialReference; readonly selector?: BoundedDataSelector }
+export interface InteractiveMaterialNotice {
+  readonly source: Exclude<AdmittedMaterialReference, { readonly kind: 'model-data' }>;
+  readonly format: 'peer-tool-observation-1';
+  readonly selectorRoots: readonly string[];
+  readonly dataLevel: DataLevel;
+  readonly truncated: boolean;
+  readonly redacted: boolean;
+}
+/** Host-only Provider observation, attached non-enumerably to its actual Tool Result. */
+export interface CanonicalToolMaterialObservation {
+  readonly schemaVersion: 1;
+  readonly toolCallId: string;
+  readonly capabilityId: string;
+  readonly evidenceId: string;
+  readonly payload: InteractiveJSON;
+}
 export interface InteractiveResultDraft {
   readonly publication: InteractivePublicationIntent;
   readonly title: string;
@@ -83,6 +99,20 @@ export interface InteractivePublishedResult {
   readonly dataLevel: InteractiveMaterialProvenance['dataLevel'];
   readonly createdAt: string;
 }
+export interface InteractivePublicationPermissionScope {
+  readonly kind: 'interactive-result';
+  readonly capabilityId: typeof INTERACTIVE_PUBLISH_CAPABILITY;
+  readonly owner: InteractiveOwner;
+  readonly source: InteractivePublishedResult['source'];
+  readonly parameterDigest: string;
+}
+export interface InteractiveUserArtifact {
+  readonly kind: 'interactive';
+  readonly ref: string;
+  readonly label: string;
+  readonly reference: InteractiveResultReference;
+  readonly specHash: string;
+}
 export type InteractivePublicationStatus = 'not_committed' | 'index_pending' | 'published' | 'unknown';
 export interface InteractiveInspectRequest {
   readonly target: { readonly kind: 'result'; readonly reference: InteractiveResultReference }
@@ -104,6 +134,7 @@ export interface InteractiveFollowup {
   readonly specHash: string;
   readonly stateRevision: number;
   readonly stateDigest: string;
+  readonly selectionDigest: string;
   readonly values: InteractiveStateValues;
   readonly dataLevel: DataLevel;
   readonly capturedAt: string;
@@ -239,4 +270,11 @@ export function parseInteractiveArtifactRef(raw: unknown): InteractiveResultRefe
   if (typeof raw !== 'string' || raw.length > 1024) return;
   const match = /^interactive-result:\/\/([^/]+)\/([^/]+)\/([^/]+)\/([a-f0-9]{64})$/.exec(raw);
   return match ? normalizeInteractiveReference({ owner: { workspaceId: match[1], conversationId: match[2] }, resultId: match[3], contentVersion: `sha256:${match[4]}` }) : undefined;
+}
+export function normalizeInteractiveUserArtifact(raw: unknown): InteractiveUserArtifact | undefined {
+  if (!object(raw) || !keys(raw, ['kind', 'ref', 'label', 'reference', 'specHash']) || raw.kind !== 'interactive'
+    || !text(raw.label, 640) || raw.label.length > 160 || !interactiveDigest(raw.specHash)) return;
+  const reference = normalizeInteractiveReference(raw.reference);
+  if (!reference || raw.ref !== interactiveArtifactRef(reference)) return;
+  return { kind: 'interactive', ref: raw.ref, label: raw.label, reference, specHash: raw.specHash };
 }

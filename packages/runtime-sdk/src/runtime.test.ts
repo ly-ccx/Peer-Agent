@@ -72,12 +72,18 @@ test('Hook Evidence keeps host-only visual context without serializing it into e
   const result = completedResult();
   const context = { visualObservations: [{ dataUrl: 'data:image/png;base64,PRIVATE_PIXELS' }] };
   Object.defineProperty(result, 'modelContext', { value: context, enumerable: false });
+  const material = { schemaVersion: 1, toolCallId: request.call.toolCallId, capabilityId: request.call.capabilityId,
+    evidenceId: 'material-evidence', payload: { text: 'PRIVATE_CANONICAL_MATERIAL' } };
+  Object.defineProperty(result, 'materialObservation', { value: material, enumerable: false });
   const sdk = createRuntimeSdk({ host: createHost({ executeProvider: async () => ({ result, grant: { granted: true } }) }) });
   const events: RuntimeSdkEvent[] = []; sdk.subscribe(event => events.push(event));
   const execution = await sdk.execute(request);
   assert.equal(execution.result.modelContext, context);
+  assert.equal(execution.result.materialObservation, material);
   assert.doesNotMatch(JSON.stringify(events), /PRIVATE_PIXELS|base64/);
+  assert.doesNotMatch(JSON.stringify(events), /PRIVATE_CANONICAL_MATERIAL/);
   assert.equal(structuredClone(execution.result).modelContext, undefined);
+  assert.equal(structuredClone(execution.result).materialObservation, undefined);
 });
 
 test('runs hooks, provider, evidence and events in the public execution order', async () => {

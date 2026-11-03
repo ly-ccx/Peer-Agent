@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { interactiveArtifactRef, normalizeInteractiveDraft, normalizeInteractiveInspect, normalizeInteractiveReference, normalizeInteractiveSelector, parseInteractiveArtifactRef } from './interactive-result.ts';
+import { interactiveArtifactRef, normalizeInteractiveDraft, normalizeInteractiveInspect, normalizeInteractiveReference, normalizeInteractiveSelector, normalizeInteractiveUserArtifact, parseInteractiveArtifactRef } from './interactive-result.ts';
 
 const digest = `sha256:${'a'.repeat(64)}`;
 const owner = { workspaceId: 'bot-a', conversationId: 'parent-a' };
@@ -24,6 +24,13 @@ test('publication create and revision have different exact contracts', () => {
   assert.equal(normalizeInteractiveDraft({ ...draft, publication: { kind: 'create', resultId: 'chosen' } }), undefined);
   assert.equal(normalizeInteractiveDraft({ ...draft, publication: { kind: 'revise' } }), undefined);
   for (const field of ['grant', 'workspaceId', 'owner', 'capabilityId', 'directory', 'specHash']) assert.equal(normalizeInteractiveDraft({ ...draft, [field]: 'injected' }), undefined);
+});
+
+test('interactive artifact metadata requires the same fixed locator and catalog, without permission or path fields', () => {
+  const artifact = { kind: 'interactive', ref: interactiveArtifactRef(reference), reference, label: 'Trial', specHash: digest };
+  assert.deepEqual(normalizeInteractiveUserArtifact(artifact), artifact);
+  for (const candidate of [{ ...artifact, ref: 'file:///private' }, { ...artifact, specHash: 'latest' }, { ...artifact, grant: true },
+    { ...artifact, reference: { ...reference, resultId: 'other' } }]) assert.equal(normalizeInteractiveUserArtifact(candidate), undefined);
 });
 
 test('canonical material references require specific immutable source identity', () => {

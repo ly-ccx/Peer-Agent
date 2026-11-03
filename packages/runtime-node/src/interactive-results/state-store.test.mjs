@@ -112,3 +112,11 @@ test('state tampering is detected rather than repaired into defaults', async t =
   db.prepare("UPDATE states SET snapshot=replace(snapshot,'150','900')").run();
   assert.throws(() => states.read(reference, current), { code: 'interactive_state_corrupt' });
 });
+
+test('frozen condition tampering cannot change the values delivered under the original followup identity', async t => {
+  const { states, reference, writer, resultStore, save } = await fixture(t);
+  const saved = save(0, 'save-a', 250);
+  states.prepareFollowup({ reference, identity, writer, stateRevision: 1, stateDigest: saved.stateDigest, fields: ['$budget'], requestId: 'followup-a' }, current);
+  resultStore.storage.connect(owner.workspaceId).db.prepare(`UPDATE followups SET snapshot=replace(snapshot,'"$budget":250','"$budget":999')`).run();
+  assert.throws(() => states.readFollowup(owner, 'followup-a'), { code: 'interactive_followup_corrupt' });
+});

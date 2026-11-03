@@ -3,7 +3,7 @@ import { closeSync, existsSync, lstatSync, mkdirSync, openSync, realpathSync } f
 import path from 'node:path';
 import { DatabaseSync } from '../sqlite/connection.mjs';
 import { INTERACTIVE_RESULT_LIMITS as L, interactiveToken } from '@peer-agent/protocol';
-import { canonicalJSON } from '@peer-agent/interactive-content';
+import { canonicalJSON } from '@peer-agent/interactive-content/values';
 
 export const problem = code => Object.assign(Error(code), { code });
 export const jsonDigest = value => `sha256:${createHash('sha256').update(canonicalJSON(value), 'utf8').digest('hex')}`;
@@ -55,7 +55,7 @@ export function createInteractiveStorage({ rootDir, assertCompatibility, maxByte
     try {
       db.exec('PRAGMA busy_timeout=0;');
       const version = Number(db.prepare('PRAGMA user_version').get()?.user_version);
-      if (![0, 1].includes(version) || !create && version !== 1 || db.prepare('PRAGMA quick_check').get()?.quick_check !== 'ok') throw problem('interactive_storage_incompatible');
+      if (![0, 2].includes(version) || !create && version !== 2 || db.prepare('PRAGMA quick_check').get()?.quick_check !== 'ok') throw problem('interactive_storage_incompatible');
       if (version === 0 && db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().length) throw problem('interactive_storage_corrupt');
       if (create) db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA journal_size_limit=8388608; PRAGMA wal_autocheckpoint=128;');
       if (version === 0) db.exec(`BEGIN IMMEDIATE;
@@ -67,11 +67,11 @@ export function createInteractiveStorage({ rootDir, assertCompatibility, maxByte
         CREATE TABLE saves(id TEXT NOT NULL, version TEXT NOT NULL, requestId TEXT NOT NULL, argsDigest TEXT NOT NULL, receipt TEXT NOT NULL, PRIMARY KEY(id,version,requestId));
         CREATE TABLE followups(id TEXT PRIMARY KEY, owner TEXT NOT NULL, argsDigest TEXT NOT NULL, snapshot TEXT NOT NULL);
         CREATE TABLE materials(id TEXT PRIMARY KEY, owner TEXT NOT NULL, object TEXT NOT NULL, metadata TEXT NOT NULL);
-        PRAGMA user_version=1; COMMIT;`);
+        PRAGMA user_version=2; COMMIT;`);
       const context = { db, file, readOnly: !create, hostEpoch, assertFile() {
         assertDirectory(path.dirname(folder)); assertDirectory(folder);
         if (identity !== fileIdentity(file)) throw problem('interactive_storage_replaced');
-        if (Number(db.prepare('PRAGMA user_version').get()?.user_version) !== 1) throw problem('interactive_storage_incompatible');
+        if (Number(db.prepare('PRAGMA user_version').get()?.user_version) !== 2) throw problem('interactive_storage_incompatible');
         for (const suffix of ['-wal', '-shm', '-journal']) if (existsSync(file + suffix)) fileIdentity(file + suffix);
       } };
       connections.set(workspaceId, context); return context;

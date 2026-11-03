@@ -6,6 +6,15 @@ const bindings = { rows: [{ name: 'A', cost: 25, group: 'one' }, { name: 'B', co
 const program = '$budget = 1000\nroot = Col([Title("Comparison"), NumberInput("budget", "Budget", $budget, 0, 10000, 1), Metric("Remaining", $budget - @Total(@Data("rows"), "cost"), "USD"), Table("Options", [{key:"name",label:"Name"},{key:"cost",label:"Cost"}], @Data("rows"), "name")])';
 const draft = (code = program) => ({ title: 'Comparison', textFallback: 'Model explanation; fixed inputs.', program: code });
 
+test('permissive SDK parsing cannot silently discard expression tails or excessive grouping', async () => {
+  for (const code of ['root=Metric("x",1) junk', '$x=1 2\nroot=Metric("x",$x)', 'root=Metric("x",1) null',
+    'root=Metric("x",1)()', 'root=Metric("x",1),', 'root=' + '('.repeat(25) + 'Metric("x",1)' + ')'.repeat(25)]) {
+    await assert.rejects(validateDraft(draft(code)), error => ['unconsumed_syntax', 'invalid_program', 'resource_limit'].includes(error.code));
+  }
+  const valid = await validateDraft(draft('root=(Metric(\'x\',((1e2)+(-2))))'));
+  assert.equal(valid.tree.props.value, 98);
+});
+
 test('public OpenUI parser/evaluator computes the actual fixed data and changed state without I/O', async () => {
   const originalFetch = globalThis.fetch;
   let requests = 0;
@@ -111,4 +120,12 @@ test('table text fallback marks its displayed range and never claims it is the f
   const content = await validateDraft(draft('root=Col([Table("Rows",[{key:"cost",label:"Cost"}],@Data("rows"),"cost")])'), { bindings: { rows: Array.from({ length: 120 }, (_, cost) => ({ cost })) } });
   assert.match(projectText(content.tree).text, /showing 100 of 120 rows/);
   assert.equal(projectText(content.tree, 20).truncated, true);
+});
+
+test('evaluation shares one work budget across pure functions and materialized rows, including changed-state branches', async () => {
+  const rows = Array.from({ length: 100 }, (_, id) => ({ id, text: 'x'.repeat(4096) }));
+  const table = 'Table("Rows",[{key:"id",label:"ID"}],@Data("rows"),"id")';
+  const content = await validateDraft(draft(`$large=false\nroot=Col([$large?Col([${table},${table},${table}]):Text("small")])`), { bindings: { rows } });
+  assert.equal(content.tree.props.children[0].typeName, 'Text');
+  await assert.rejects(evaluate(content, { $large: true }), error => error.code === 'resource_limit' && error.details === 'evaluation_steps');
 });

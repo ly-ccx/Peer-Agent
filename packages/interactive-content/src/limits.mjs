@@ -36,14 +36,17 @@ export function canonicalJSON(value) {
   }).join(',')}}`;
 }
 
-export function boundedJSON(value, { maxBytes = INTERACTIVE_LIMITS.inputBytes, maxItems = INTERACTIVE_LIMITS.collectionItems, maxDepth = 16 } = {}) {
+export function boundedJSON(value, { maxBytes = INTERACTIVE_LIMITS.inputBytes, maxItems = INTERACTIVE_LIMITS.collectionItems, maxDepth = 16, maxStringChars = INTERACTIVE_LIMITS.textChars, budget } = {}) {
   let visited = 0;
   const seen = new Set();
   function visit(current, depth) {
     if (++visited > INTERACTIVE_LIMITS.evaluationSteps || depth > maxDepth) reject('resource_limit');
+    // One evaluation shares this counter across all pure functions and row
+    // materialization. Long strings are work too, even when row counts are small.
+    if (budget && (budget.remaining -= 1 + (typeof current === 'string' ? Math.ceil(current.length / 64) : 0)) < 0) reject('resource_limit', '', 'evaluation_steps');
     if (current === null || typeof current === 'boolean') return;
     if (typeof current === 'number') { if (!Number.isFinite(current)) reject('non_finite_value'); return; }
-    if (typeof current === 'string') { if (current.length > INTERACTIVE_LIMITS.textChars) reject('resource_limit'); return; }
+    if (typeof current === 'string') { if (current.length > maxStringChars) reject('resource_limit'); return; }
     if (!current || typeof current !== 'object' || seen.has(current)) reject('invalid_json');
     if (!Array.isArray(current) && ![Object.prototype, null].includes(Object.getPrototypeOf(current))) reject('invalid_json');
     seen.add(current);

@@ -6,7 +6,7 @@ export const ENGINE_VERSION: string;
 export const CONTENT_SCHEMA_VERSION: 1;
 export class InteractiveContentError extends Error { readonly code: string; readonly path: string; readonly details: string }
 export function canonicalJSON(value: unknown): string;
-export function boundedJSON<T>(value: T, options?: { maxBytes?: number; maxItems?: number; maxDepth?: number }): T;
+export function boundedJSON<T>(value: T, options?: { maxBytes?: number; maxItems?: number; maxDepth?: number; maxStringChars?: number }): T;
 export function utf8Bytes(value: unknown): number;
 export function catalogSpec(): { version: string; schema: LibraryJSONSchema };
 export function createPeerLibrary(options?: { bindings?: Readonly<Record<string, InteractiveJSON>>; components?: Record<string, unknown> }): Required<Library>;
@@ -16,5 +16,5 @@ export function catalogIdentity(): Promise<string>;
 export function digestJSON(value: unknown): Promise<string>;
 export function validateState(values: InteractiveStateValues, schema: InteractiveStateSchema, drafts?: Readonly<Record<string, string>>): { values: InteractiveStateValues; inputDrafts: Readonly<Record<string, string>> };
 export function validateDraft(draft: { title: string; textFallback: string; program: string }, options?: { bindings?: Readonly<Record<string, InteractiveJSON>>; expectedSpecHash?: string }): Promise<InteractiveContent>;
-export function evaluate(content: InteractiveContent & { contentVersion?: string }, values?: InteractiveStateValues): Promise<{ tree: InteractiveElement; componentCount: number; values: InteractiveStateValues; stateDigest: string; contentVersion: string | null; specHash: string }>;
+export function evaluate(content: InteractiveContent & { contentVersion?: string }, values?: InteractiveStateValues): Promise<{ tree: InteractiveElement; componentCount: number; evaluationSteps: number; values: InteractiveStateValues; stateDigest: string; contentVersion: string | null; specHash: string }>;
 export function projectText(tree: InteractiveElement, maxChars?: number): { text: string; truncated: boolean };

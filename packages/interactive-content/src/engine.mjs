@@ -3,6 +3,8 @@ import { catalogSpec, COMPONENT_SCHEMAS, createPeerLibrary, runtimeFunctions } f
 import { boundedJSON, canonicalJSON, CONTENT_SCHEMA_VERSION, ENGINE_VERSION, INTERACTIVE_LIMITS as L, LIBRARY_VERSION, reject, utf8Bytes } from './limits.mjs';
 import { inspectProgram, rejectEngineData } from './policy.mjs';
 import { checkNumericExpressions } from './numeric-policy.mjs';
+import { validateValues } from './state.mjs';
+export { validateState } from './state.mjs';
 
 export async function digestJSON(value) {
   const hash = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonicalJSON(value)));
@@ -27,21 +29,12 @@ function compile(program, bindings) {
   return { program, bindings, policy, library, parsed };
 }
 
-function validateValues(values, schema) {
-  const normalized = boundedJSON(values, { maxBytes: L.stateBytes, maxItems: L.stateFields });
-  if (Array.isArray(normalized) || Object.keys(normalized).some(key => !Object.hasOwn(schema, key)) || Object.keys(schema).some(key => !Object.hasOwn(normalized, key))) reject('invalid_state');
-  for (const [key, rule] of Object.entries(schema)) {
-    const value = normalized[key];
-    if (typeof value !== rule.type || rule.type === 'number' && (!Number.isFinite(value) || value < (rule.min ?? -Infinity) || value > (rule.max ?? Infinity))
-      || rule.options && !rule.options.includes(value)) reject('invalid_state', key);
-  }
-  return normalized;
-}
-
 function render(compiled, values, refineSchema = false) {
   const schema = Object.fromEntries(Object.entries(compiled.policy.defaults).map(([key, value]) => [key, { type: typeof value }]));
-  const functions = runtimeFunctions(compiled.library);
-  checkNumericExpressions(compiled.policy.declarations, values, functions);
+  const budget = { remaining: L.evaluationSteps };
+  const functions = runtimeFunctions(compiled.library, budget);
+  try { checkNumericExpressions(compiled.policy.declarations, values, functions); }
+  catch (error) { if (budget.remaining < 0) reject('resource_limit', '', 'evaluation_steps'); throw error; }
   const store = createStore();
   store.initialize(compiled.policy.defaults, values);
   const errors = [];
@@ -53,7 +46,8 @@ function render(compiled, values, refineSchema = false) {
       functions,
       reportError: () => reject('evaluation_failed'),
     } });
-  } finally { store.dispose(); }
+  } catch (error) { if (budget.remaining < 0) reject('resource_limit', '', 'evaluation_steps'); throw error; }
+  finally { store.dispose(); }
   if (!tree || errors.length) reject('evaluation_failed');
   let count = 0;
   const ids = new Set();
@@ -90,7 +84,7 @@ function render(compiled, values, refineSchema = false) {
     }
     if (['Col', 'Row', 'Card'].includes(current.typeName)) props.children = props.children.map(child => node(child, depth + 1));
     if (current.typeName === 'Table' || current.typeName === 'Chart') {
-      const rows = boundedJSON(props.rows);
+      const rows = boundedJSON(props.rows, { budget });
       for (const row of rows) if (!row || typeof row !== 'object' || Array.isArray(row)) reject('invalid_component_props');
       if (current.typeName === 'Chart') {
         if (rows.length * props.series.length > L.chartPoints || new Set(props.series.map(series => series.key)).size !== props.series.length) reject('resource_limit');
@@ -110,17 +104,9 @@ function render(compiled, values, refineSchema = false) {
       ...(stateTarget ? { stateTarget } : {}) };
   }
   const normalizedTree = node(tree, 0);
+  if (utf8Bytes(normalizedTree) > L.inputBytes * 2) reject('resource_limit');
   validateValues(values, schema);
-  return { tree: normalizedTree, ...(refineSchema ? { stateSchema: schema } : {}), componentCount: count };
-}
-
-export function validateState(values, schema, drafts = {}) {
-  const normalized = validateValues(values, schema);
-  const inputDrafts = boundedJSON(drafts, { maxBytes: L.stateBytes, maxItems: L.stateFields });
-  if (!inputDrafts || Array.isArray(inputDrafts) || Object.entries(inputDrafts).some(([key, value]) => !Object.hasOwn(schema, key)
-    || !['string', 'number'].includes(schema[key].type) || typeof value !== 'string' || value.length > 8192)) reject('invalid_input_draft');
-  if (utf8Bytes({ values: normalized, inputDrafts }) > L.stateBytes) reject('resource_limit');
-  return { values: normalized, inputDrafts };
+  return { tree: normalizedTree, ...(refineSchema ? { stateSchema: schema } : {}), componentCount: count, evaluationSteps: L.evaluationSteps - budget.remaining };
 }
 
 export async function validateDraft(draft, { bindings = {}, expectedSpecHash } = {}) {

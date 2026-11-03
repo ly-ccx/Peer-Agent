@@ -35,7 +35,7 @@ test('publication persists one version/operation/outbox and is not formally avai
   assert.equal(indexed.publicationStatus, 'published');
   assert.equal(store.listPending(owner).length, 0);
   const published = store.getVersion(receipt.reference);
-  assert.equal(published.evidenceRef, 'tool-result://publish-a');
+  assert.equal(published.evidenceRef, receipt.metadata.artifactRef);
   assert.equal(published.content.tree, undefined, 'derived render cache is not stored as a second content truth');
 });
 
@@ -120,7 +120,7 @@ test('unknown schema, removed database and tampered immutable bytes remain error
   const db = new DatabaseSync(file);
   db.exec('PRAGMA user_version=999');
   assert.throws(() => store.getVersion(first.reference), { code: 'interactive_storage_incompatible' });
-  db.exec('PRAGMA user_version=1');
+  db.exec('PRAGMA user_version=2');
   db.prepare("UPDATE objects SET body=replace(body,'Trial','False')").run();
   assert.throws(() => store.getVersion(first.reference), { code: 'interactive_content_corrupt' });
   db.close(); store.close(); rmSync(file);

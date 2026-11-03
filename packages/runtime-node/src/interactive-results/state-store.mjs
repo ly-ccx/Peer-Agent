@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { interactiveToken, normalizeInteractiveOwner, normalizeInteractiveReference } from '@peer-agent/protocol';
-import { validateState } from '@peer-agent/interactive-content';
+import { validateState } from '@peer-agent/interactive-content/state';
 import { decode, encode, jsonDigest, problem } from './storage.mjs';
 
 const clone = value => structuredClone(value);
@@ -27,7 +27,9 @@ export function createInteractiveStateStore({ resultStore, now = () => new Date(
     const row = context?.db.prepare('SELECT snapshot,writer FROM states WHERE id=? AND version=?').get(ref.resultId, ref.contentVersion);
     if (!row) return { snapshot: defaults(ref, published), writer: null, present: false };
     const snapshot = decode(row.snapshot), writer = row.writer ? decode(row.writer) : null;
-    if (!same(snapshot.result, ref) || snapshot.specHash !== published.content.specHash || snapshot.stateSchemaHash !== published.content.stateSchemaHash
+    if (Object.keys(snapshot).length !== 9 || Object.keys(snapshot).some(key => !['result', 'specHash', 'stateSchemaHash', 'stateRevision', 'values', 'inputDrafts', 'stateDigest', 'updatedAt', 'requestId'].includes(key))
+      || !interactiveToken(snapshot.requestId) || !Number.isFinite(Date.parse(snapshot.updatedAt))
+      || !same(snapshot.result, ref) || snapshot.specHash !== published.content.specHash || snapshot.stateSchemaHash !== published.content.stateSchemaHash
       || !Number.isSafeInteger(snapshot.stateRevision) || snapshot.stateRevision < 0
       || jsonDigest({ values: snapshot.values, inputDrafts: snapshot.inputDrafts }) !== snapshot.stateDigest) throw problem('interactive_state_corrupt');
     validateState(snapshot.values, published.content.stateSchema, snapshot.inputDrafts);
@@ -108,7 +110,7 @@ export function createInteractiveStateStore({ resultStore, now = () => new Date(
       const previous = context.db.prepare('SELECT owner,argsDigest,snapshot FROM followups WHERE id=?').get(requestId);
       if (previous) {
         if (previous.owner !== encode(ref.owner) || previous.argsDigest !== argsDigest) throw problem('interactive_followup_parameter_conflict');
-        return clone(decode(previous.snapshot));
+        return checkedFollowup(decode(previous.snapshot));
       }
       if (state.snapshot.stateRevision !== stateRevision || state.snapshot.stateDigest !== stateDigest) throw problem('state_revision_unavailable');
       if (fields.some(key => !Object.hasOwn(published.content.stateSchema, key))) throw problem('interactive_followup_invalid');
@@ -118,13 +120,19 @@ export function createInteractiveStateStore({ resultStore, now = () => new Date(
       }
       const values = Object.fromEntries(fields.map(key => [key, state.snapshot.values[key]]));
       const excerpt = [`${published.content.title}`, `Fixed result ${ref.resultId} @ ${ref.contentVersion}`, ...fields.map(key => `${key}: ${values[key]}`)].join('\n');
-      if (excerpt.length > 8192) throw problem('interactive_followup_limit');
-      const snapshot = { followupId: requestId, recipient: ref.owner, result: ref, specHash: published.content.specHash,
+      if (Buffer.byteLength(excerpt, 'utf8') > 8192) throw problem('interactive_followup_limit');
+      const body = { followupId: requestId, recipient: ref.owner, result: ref, specHash: published.content.specHash,
         stateRevision, stateDigest, values, dataLevel: published.dataLevel, capturedAt: now(), excerpt };
+      const snapshot = { ...body, selectionDigest: jsonDigest(body) };
       context.db.prepare('INSERT INTO followups VALUES(?,?,?,?)').run(requestId, encode(ref.owner), argsDigest, encode(snapshot));
       touched.add(ref.owner.workspaceId);
       return clone(snapshot);
     });
+  }
+  function checkedFollowup(snapshot) {
+    const { selectionDigest, ...body } = snapshot;
+    if (jsonDigest(body) !== selectionDigest) throw problem('interactive_followup_corrupt');
+    return clone(snapshot);
   }
   function readFollowup(rawOwner, id) {
     const owner = normalizeInteractiveOwner(rawOwner);
@@ -132,7 +140,7 @@ export function createInteractiveStateStore({ resultStore, now = () => new Date(
     const context = storage.connect(owner.workspaceId);
     const row = context?.db.prepare('SELECT owner,snapshot FROM followups WHERE id=?').get(id);
     if (!row || row.owner !== encode(owner)) throw problem('interactive_followup_unavailable');
-    return clone(decode(row.snapshot));
+    return checkedFollowup(decode(row.snapshot));
   }
   function close() {
     if (disposed) return;

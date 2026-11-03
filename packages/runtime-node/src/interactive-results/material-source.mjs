@@ -35,7 +35,7 @@ export function createInteractiveMaterialSource({ readToolResult, readUserMateri
       if (!DATA_LEVELS.includes(inheritedDataLevel)) fail('material_classification_unavailable');
       if (!Array.isArray(inputs) || inputs.length > L.bindings) fail('invalid_binding');
       // Kept lazy: CLI help/version and inactive capabilities never load the language engine.
-      const { boundedJSON, canonicalJSON } = await import('@peer-agent/interactive-content');
+      const { boundedJSON, canonicalJSON } = await import('@peer-agent/interactive-content/values');
       const bindings = {}, provenance = [];
       let bytes = 0, level = DATA_LEVELS.indexOf(inheritedDataLevel);
       const check = () => { if (signal?.aborted) fail('interactive_cancelled'); };
@@ -61,7 +61,7 @@ export function createInteractiveMaterialSource({ readToolResult, readUserMateri
           if (typeof record.observedAt !== 'string' || !Number.isFinite(Date.parse(record.observedAt)) || typeof record.truncated !== 'boolean' || typeof record.redacted !== 'boolean') fail('material_snapshot_unavailable');
           if (!Array.isArray(record.evidenceRefs) || record.evidenceRefs.some(ref => typeof ref !== 'string' || ref.length > 1024)) fail('material_snapshot_unavailable');
           if (source.kind === 'tool-result' && !record.evidenceRefs.length) fail('material_snapshot_unavailable');
-          const original = boundedJSON(record.value, { maxBytes: L.inputBytes * 8, maxItems: 10_000 });
+          const original = boundedJSON(record.value, { maxBytes: L.inputBytes * 8, maxItems: 10_000, maxStringChars: L.inputBytes * 8 });
           if (digest(canonicalJSON(original)) !== record.contentVersion) fail('material_version_mismatch');
           record = { ...record, value: original };
         }

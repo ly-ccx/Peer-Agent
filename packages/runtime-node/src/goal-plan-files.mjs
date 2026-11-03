@@ -1,18 +1,21 @@
 import { normalizeEvidenceRefList, normalizeOptionalString } from "./goal-plan-domain.mjs";
 import {
-  appendFileSync,
+  constants,
   closeSync,
   existsSync,
   fstatSync,
+  fsyncSync,
   mkdirSync,
   openSync,
   readFileSync,
   readSync,
   statSync,
   writeFileSync,
+  writeSync,
   renameSync,
 } from 'node:fs';
 import { randomUUID } from "node:crypto";
+import { normalizeInteractiveUserArtifact, parseInteractiveArtifactRef } from '@peer-agent/protocol';
 import path from "node:path";
 
 export function readJsonl(filePath) {
@@ -102,7 +105,11 @@ export function readEvidenceRecordsFromTail(filePath, refs, maxScanBytes = EVIDE
       }
       if (!parsed || !wanted.has(parsed.evidenceRef)) continue;
       found.set(parsed.evidenceRef, mergeEvidenceIndexRecords(found.get(parsed.evidenceRef), parsed));
-      if (!EVIDENCE_WRAPPER_TOOL_NAMES.has(parsed.toolName)) {
+      // Older writers append a normalized row that may omit the new artifact kind.
+      // Keep scanning for its original canonical publication; append-only bytes survive.
+      const needsInteractiveOrigin = parsed.artifactRefs?.some(ref => parseInteractiveArtifactRef(ref))
+        && !found.get(parsed.evidenceRef).userArtifacts?.some(item => item.kind === 'interactive');
+      if (!EVIDENCE_WRAPPER_TOOL_NAMES.has(parsed.toolName) && !needsInteractiveOrigin) {
         resolvedOriginals.add(parsed.evidenceRef);
       }
     }
@@ -112,9 +119,38 @@ export function readEvidenceRecordsFromTail(filePath, refs, maxScanBytes = EVIDE
   }
 }
 
-export function appendJsonl(filePath, obj) {
-  mkdirSync(path.dirname(filePath), { recursive: true });
-  appendFileSync(filePath, JSON.stringify(obj) + '\n', 'utf8');
+export function appendJsonl(filePath, obj, { durable = false } = {}) {
+  const created = mkdirSync(path.dirname(filePath), { recursive: true });
+  const fd = openSync(filePath, constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND | constants.O_NOFOLLOW | constants.O_NONBLOCK, 0o600);
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.nlink !== 1) throw new Error('evidence_append_target_invalid');
+    const bytes = Buffer.from(JSON.stringify(obj) + '\n', 'utf8');
+    let written = 0;
+    while (written < bytes.length) written += writeSync(fd, bytes, written, bytes.length - written);
+    if (durable) fsyncSync(fd);
+  } finally { closeSync(fd); }
+  if (durable) {
+    let folder = path.dirname(filePath);
+    const stop = created ? path.dirname(created) : folder;
+    while (true) {
+      const directory = openSync(folder, 'r');
+      try { fsyncSync(directory); } finally { closeSync(directory); }
+      if (folder === stop || path.dirname(folder) === folder) break;
+      folder = path.dirname(folder);
+    }
+  }
+}
+
+export function syncJsonl(filePath) {
+  const fd = openSync(filePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.nlink !== 1) throw new Error('evidence_append_target_invalid');
+    fsyncSync(fd);
+  } finally { closeSync(fd); }
+  const directory = openSync(path.dirname(filePath), 'r');
+  try { fsyncSync(directory); } finally { closeSync(directory); }
 }
 
 export function writeGoalChangeEvent(storeDir, event) {
@@ -205,6 +241,7 @@ export function normalizeEvidenceIndexRecord(value) {
     ? value.userArtifacts
       .filter((artifact) => artifact && typeof artifact === 'object')
       .map((artifact) => {
+        if (artifact.kind === 'interactive') return normalizeInteractiveUserArtifact(artifact) ?? null;
         const kind = ['code-change', 'file', 'image'].includes(artifact.kind) ? artifact.kind : null;
         const ref = normalizeOptionalString(artifact.ref);
         const label = normalizeOptionalString(artifact.label);
@@ -267,6 +304,9 @@ const EVIDENCE_WRAPPER_TOOL_NAMES = new Set(['goal_update_task']);
 export function mergeEvidenceIndexRecords(current, incoming) {
   if (!current) return incoming;
   if (!incoming) return current;
+  // A delivery wrapper (including an old writer's lossy append) cannot rebind a
+  // canonical publication's source. These are immutable facts, not last-writer metadata.
+  const canonical = [current, incoming].find(record => record.userArtifacts?.some(item => item.kind === 'interactive'));
   const merged = { ...current };
   if (incoming.bodyPreview && !current.bodyPreview && !EVIDENCE_WRAPPER_TOOL_NAMES.has(incoming.toolName)) {
     merged.bodyPreview = incoming.bodyPreview;
@@ -286,17 +326,34 @@ export function mergeEvidenceIndexRecords(current, incoming) {
       if (!merged[field] && incoming[field]) merged[field] = incoming[field];
     }
   }
-  const artifactRefs = normalizeEvidenceRefList([
+  const artifactRefs = [...new Set(normalizeEvidenceRefList([
     ...(current.artifactRefs ?? []),
     ...(incoming.artifactRefs ?? []),
-  ]);
+  ]))];
   if (artifactRefs.length > 0) merged.artifactRefs = artifactRefs;
   const userArtifacts = new Map();
   for (const artifact of [...(current.userArtifacts ?? []), ...(incoming.userArtifacts ?? [])]) {
     if (artifact?.ref) userArtifacts.set(artifact.ref, artifact);
   }
   if (userArtifacts.size > 0) merged.userArtifacts = [...userArtifacts.values()];
+  if (canonical) for (const field of ['planId', 'conversationId', 'streamId', 'toolCallId', 'capabilityId', 'toolName', 'createdAt']) {
+    if (canonical[field] !== undefined) merged[field] = canonical[field]; else delete merged[field];
+  }
   return merged;
+}
+
+/** Fold only the new append-only publication facts; preserve legacy index semantics. */
+export function retainInteractiveEvidence(records) {
+  const output = [], positions = new Map();
+  for (const record of records) {
+    const interactive = record.userArtifacts?.some(item => item.kind === 'interactive')
+      || record.artifactRefs?.some(ref => parseInteractiveArtifactRef(ref));
+    if (!interactive) { output.push(record); continue; }
+    const position = positions.get(record.evidenceRef);
+    if (position === undefined) { positions.set(record.evidenceRef, output.length); output.push(record); }
+    else output[position] = mergeEvidenceIndexRecords(output[position], record);
+  }
+  return output;
 }
 
 export function goalFileVersion(file) {

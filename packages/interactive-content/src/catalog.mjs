@@ -85,10 +85,10 @@ export function createPeerLibrary({ bindings = {}, components = {} } = {}) {
   });
 }
 
-export function runtimeFunctions(library) {
+export function runtimeFunctions(library, budget = { remaining: L.evaluationSteps }) {
   const spec = library.toJSONSchema().functions;
   return Object.fromEntries(Object.entries(library.functions).map(([name, definition]) => [name, {
-    ...spec[name], fn: args => boundedJSON(definition.fn(args)),
+    ...spec[name], fn: args => boundedJSON(definition.fn(boundedJSON(args, { budget })), { budget }),
   }]));
 }
 

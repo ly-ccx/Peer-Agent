@@ -1,3 +1,4 @@
+import type { CanonicalToolMaterialObservation } from '@peer-agent/protocol';
 export type RuntimeCapabilityId = string;
 export type RuntimeProviderId = string;
 export type RuntimeRunId = string;
@@ -51,6 +52,8 @@ export interface RuntimeToolError {
 }
 
 export interface RuntimeToolResult {
+  /** Local canonical bytes; non-enumerable, never event/renderer/provider-message data. */
+  readonly materialObservation?: CanonicalToolMaterialObservation;
   readonly toolCallId: string;
   readonly capabilityId: RuntimeCapabilityId;
   readonly status: RuntimeToolStatus;

@@ -1,6 +1,7 @@
 import { autoClose, parseExpression, split, tokenize } from '@openuidev/lang-core';
 import { COMPONENT_SCHEMAS } from './catalog.mjs';
 import { INTERACTIVE_LIMITS as L, forbiddenKey, reject, stateKey, utf8Bytes } from './limits.mjs';
+import { assertExpressionCoverage } from './syntax-policy.mjs';
 
 export const FUNCTION_NAMES = Object.freeze(['Data', 'RowsWhere', 'Total', 'RowCount', 'GroupTotals', 'Decimal']);
 const FUNCTIONS = new Set(FUNCTION_NAMES);
@@ -23,11 +24,18 @@ export function inspectProgram(program, bindings) {
   if (autoClose(program).wasIncomplete) reject('incomplete_program');
   const tokens = tokenize(program);
   if (tokens.length > L.astNodes * 8) reject('resource_limit');
+  let nesting = 0;
   // Reject forbidden/unknown calls even when the permissive SDK would skip a line.
+  let previous;
   for (const token of tokens) {
+    if (token.t === 1 && previous && ![0, 1, 3, 5, 7, 8, 9, 17, 35].includes(previous.t)
+      && !(previous.t >= 20 && previous.t <= 34)) reject('invalid_program');
+    if ([1, 3, 5].includes(token.t) && ++nesting > L.astDepth) reject('resource_limit');
+    if ([2, 4, 6].includes(token.t) && --nesting < 0) reject('invalid_program');
     if ((token.t === 17 || token.t === 35) && !RESERVED.has(token.v)) reject('unsupported_node', '', String(token.v));
     if ((token.t === 16 || token.t === 17 || token.t === 18) && forbiddenKey(String(token.v).replace(/^\$/, ''))) reject('reserved_key');
     if (token.t === 15 && !Number.isFinite(token.v)) reject('non_finite_value');
+    previous = token;
   }
   const statements = split(tokens);
   if (!statements.length || statements.length > L.astNodes) reject('invalid_program');
@@ -100,6 +108,7 @@ export function inspectProgram(program, bindings) {
     }
   }
   for (const [id, ast] of declarations) visit(ast, 0, id);
+  for (const row of statements) assertExpressionCoverage(row.tokens, declarations.get(row.id));
   // SDK materialization inlines references. Bound their expanded size before it runs.
   const weights = new Map(), active = new Set();
   function weight(id) {

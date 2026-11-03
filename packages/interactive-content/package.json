@@ -8,7 +8,9 @@
     ".": {
       "types": "./src/index.d.ts",
       "default": "./src/index.mjs"
-    }
+    },
+    "./values": { "types": "./src/values.d.ts", "default": "./src/limits.mjs" },
+    "./state": { "types": "./src/state.d.ts", "default": "./src/state.mjs" }
   },
   "files": [
     "src",

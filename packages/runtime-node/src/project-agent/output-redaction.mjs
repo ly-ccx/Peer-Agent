@@ -7,8 +7,12 @@ export function truncatePreview(value, maxChars = MAX_PREVIEW_CHARS) {
 }
 
 export function redactShellOutput(value) {
-  const text = truncatePreview(value);
-  return text
+  return redactOutputSecrets(truncatePreview(value));
+}
+
+/** Redact an already bounded canonical source without replacing it with the 4k preview. */
+export function redactOutputSecrets(value) {
+  return String(value ?? '')
     .replace(/AKIA[0-9A-Z]{16}/g, '[REDACTED_AWS_KEY]')
     .replace(/sk-[A-Za-z0-9_-]{20,}/g, '[REDACTED_API_KEY]')
     .replace(/(Bearer\s+)[A-Za-z0-9._-]+/gi, '$1[REDACTED_TOKEN]')
