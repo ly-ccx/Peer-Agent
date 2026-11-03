@@ -91,7 +91,8 @@ export function createInteractiveAuthority({ goalPlanStore, conversationStore, r
     }
     return { owner, role, dataLevel, capabilityIds: interactiveCapabilitiesForProfile(profile), assertCurrent: current,
       ...(policyRevision ? { policyRevision } : {}),
-      ...(plan ? { source: { ...expectedExecution, conversationId: plan.conversationId, toolCallId: call.toolCallId,
+      ...(plan ? { source: { ...expectedExecution, conversationId: plan.conversationId,
+        ...(interactiveToken(call?.toolCallId) ? { toolCallId: call.toolCallId } : {}),
         ...(profile.workId ? { workId: profile.workId } : {}) } } : {}),
       ...(toolContext.streamId ? { streamId: toolContext.streamId } : {}),
       admitResult, admitPublication, admitMaterial,

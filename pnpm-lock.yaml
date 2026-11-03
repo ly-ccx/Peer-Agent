@@ -332,6 +332,9 @@ importers:
       '@peer-agent/interactive-content':
         specifier: workspace:*
         version: link:../interactive-content
+      '@peer-agent/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       '@peer-agent/runtime-core':
         specifier: workspace:*
         version: link:../runtime-core

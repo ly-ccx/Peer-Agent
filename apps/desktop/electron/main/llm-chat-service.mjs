@@ -66,6 +66,7 @@ import { createBotAccessPolicyAuthority, resolvePermissionPrincipal } from "@pee
 import { createProjectRegistry } from "@peer-agent/runtime-node/providers";
 import { resolveRoleRoute } from "@peer-agent/runtime-node/models";
 import { liveMemoryGate } from './project-agent/memory-gate-port.mjs';
+import { desktopInteractiveUserMaterials } from './interactive-results/runtime-port.mjs';
 
 const activeStreams = new Map();
 
@@ -1065,6 +1066,7 @@ export function createLlmChatService({
           .map(capability => capability.capabilityId);
         const systemContext = buildSystemContext(runWorkspacePath, {
           interactiveResultCapabilities,
+          interactiveMaterials: desktopInteractiveUserMaterials(toolContext),
           contextAttachments,
           ...(profile?.role === 'project_agent' ? { agentMessages: agentMessagesForContext((profile.context?.events || []).filter(event => event.kind === 'agent_message').map(event => ({ kind: 'agent_message', agentMessage: event.payload?.agentMessage })), conversationId, profile.workspaceId) } : {}),
           workingContext: readWorkingContext({ workspaceId: profile?.workspaceId, workId: profile?.workId, conversationId }),
@@ -1131,6 +1133,7 @@ export function createLlmChatService({
             : null;
           const rebuiltContext = buildSystemContext(runWorkspacePath, {
             interactiveResultCapabilities,
+            interactiveMaterials: desktopInteractiveUserMaterials(toolContext),
             contextAttachments,
             ...(profile?.role === 'project_agent' ? { agentMessages: agentMessagesForContext((profile.context?.events || []).filter(event => event.kind === 'agent_message').map(event => ({ kind: 'agent_message', agentMessage: event.payload?.agentMessage })), conversationId, profile.workspaceId) } : {}),
             workingContext: readWorkingContext({ workspaceId: profile?.workspaceId, workId: profile?.workId, conversationId }),

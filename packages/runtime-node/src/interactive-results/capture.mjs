@@ -1,10 +1,9 @@
 import { INTERACTIVE_RESULT_LIMITS as L, interactiveDigest, interactiveToken } from '@peer-agent/protocol';
 import { boundedJSON } from '@peer-agent/interactive-content/values';
-import { redactOutputSecrets } from '../project-agent/output-redaction.mjs';
+import { redactInteractiveJSON, redactInteractiveJSONText } from './observation-redaction.mjs';
 import { problem } from './storage.mjs';
 
 const levels = ['D0_public', 'D1_internal', 'D2_sensitive', 'D3_private', 'D4_regulated'];
-const secretField = /^(?:password|passwd|secret|token|access_token|refresh_token|api[_-]?key|authorization|credential)$/i;
 
 /** The exact returned observation, not EvidenceIndex bodyPreview or a re-read file. */
 export function canonicalInteractiveObservation(execution, { observedAt } = {}) {
@@ -33,18 +32,9 @@ export function canonicalInteractiveObservation(execution, { observedAt } = {}) 
   // This is the existing JSON Tool Result boundary. Functions, accessors and
   // prototype-bearing values cannot become a canonical source.
   payload = boundedJSON(payload, { maxBytes: L.inputBytes * 8, maxItems: 10_000, maxStringChars: L.inputBytes * 8 });
-  let redacted = result.evidence.redactions?.length > 0, truncated = false;
-  function sanitize(value) {
-    if (typeof value === 'string') { const clean = redactOutputSecrets(value); if (clean !== value) redacted = true; return clean; }
-    if (Array.isArray(value)) return value.map(sanitize);
-    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, child]) => {
-      if (/truncat/i.test(key) && child === true) truncated = true;
-      if (secretField.test(key)) { redacted = true; return [key, '[REDACTED]']; }
-      return [key, sanitize(child)];
-    }));
-    return value;
-  }
-  payload = sanitize(payload);
+  const sanitized = redactInteractiveJSON(payload, { observeTruncation: true });
+  let redacted = result.evidence.redactions?.length > 0 || sanitized.redacted, truncated = sanitized.truncated;
+  payload = sanitized.value;
   if (result.evidence.redactions?.some(value => /truncat/i.test(value))) truncated = true;
   const value = { format: 'peer-tool-observation-1', payload };
   // A deterministic JSON projection is explicitly tied to its returned text.
@@ -52,7 +42,8 @@ export function canonicalInteractiveObservation(execution, { observedAt } = {}) 
   for (const field of ['content', 'preview', 'stdout']) {
     const text = payload?.[field];
     if (typeof text !== 'string') continue;
-    try { value.json = boundedJSON(JSON.parse(text), { maxBytes: L.inputBytes * 8, maxItems: 10_000 }); value.jsonField = field; } catch {}
+    const decoded = redactInteractiveJSONText(text, { maxBytes: L.inputBytes * 8, maxItems: 10_000, maxStringChars: L.inputBytes * 8 });
+    if (decoded.parsed) { payload[field] = decoded.text; value.json = decoded.json; value.jsonField = field; redacted ||= decoded.redacted; }
     break;
   }
   return { value: boundedJSON(value, { maxBytes: L.inputBytes * 8, maxItems: 10_000, maxStringChars: L.inputBytes * 8 }),

@@ -549,6 +549,7 @@ export function createSessionSupervisor({
       const stored = conversationStore.appendMessage(child.id, {
         id: messageId,
         role: 'user',
+        createdAt: now(),
         content: delegationMessage({
           brief,
           successCriteria: input.successCriteria,

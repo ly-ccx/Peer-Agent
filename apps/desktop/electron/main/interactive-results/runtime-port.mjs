@@ -20,6 +20,9 @@ export function interactiveMaterialCaptureEnabled(toolContext) {
 export function captureDesktopInteractiveExecution(execution, toolContext) {
   return current?.runtime.captureExecution(execution, toolContext) ?? execution;
 }
+export function desktopInteractiveUserMaterials(toolContext) {
+  return interactiveMaterialCaptureEnabled(toolContext) ? current.runtime.userMaterialNotices(toolContext) : [];
+}
 export function createDesktopInteractiveProvider() {
   return { providerId: 'desktop-interactive-results', capabilityIds: INTERACTIVE_TOOL_DEFINITIONS.map(tool => tool.capabilityId),
     executeCapability(request, context) {

@@ -40,6 +40,7 @@ const DEFAULT_SOURCE_IDS = [
   'agent-communication',
   'working-context',
   'interactive-results',
+  'interactive-materials',
   'runtime.continuity',
 ];
 

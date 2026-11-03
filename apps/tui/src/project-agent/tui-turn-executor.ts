@@ -69,6 +69,7 @@ export function createTuiTurnExecutor(options: {
   memoryEnabled(workspaceId: string): boolean;
   getProviders(): readonly TuiCapabilityProvider[];
   captureExecution?: import('../tui-host.ts').CreateTuiHostOptions['captureExecution'];
+  userMaterialNotices?: (toolContext: Record<string, unknown>) => readonly unknown[];
   onApproval?(approval: PendingApproval | null, streamId: string): void;
   oneTimeApprovals?: { match(input: object): boolean };
   goalPlanStore?: ReturnType<typeof createGoalPlanStore>;
@@ -202,6 +203,7 @@ export function createTuiTurnExecutor(options: {
           yieldAtTurnLimit: true, shouldYield: input.shouldYield, maxToolBatchCalls: 32,
         } : {}), input: { content, omitCurrentUser: !content, history: [], modelMessages: history, turnId: streamId, turnIndex: 0,
           systemContextInput: { role: profile.role, workspaceId, workId: profile.workId, sessionId: profile.sessionId, planId: profile.planId,
+            interactiveMaterials: options.userMaterialNotices?.(toolContext),
             turnContext: {...profile.context, agentKind: profile.agentKind}, runtimeReminders: input.runtimeReminders, continuityContext: input.continuityContext,
             ...(profile.role === 'project_agent' && useMemory ? { projectMemory: options.readMemory(workspaceId) } : {}),
             ...(profile.role === 'work_session' ? { workSessionExecution: { phase: input.plan?.delegationOrigin?.phase, goalRevision: input.plan?.delegationOrigin?.coordinationBinding?.goalRevision, takeover: input.plan?.delegationOrigin?.takeover?.text }, workSessionOrigin: { ...profile.context?.workSessionOrigin,

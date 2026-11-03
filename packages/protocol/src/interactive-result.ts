@@ -20,7 +20,7 @@ export interface BoundedDataSelector {
 export interface InteractiveInputBinding { readonly bindingId: string; readonly source: AdmittedMaterialReference; readonly selector?: BoundedDataSelector }
 export interface InteractiveMaterialNotice {
   readonly source: Exclude<AdmittedMaterialReference, { readonly kind: 'model-data' }>;
-  readonly format: 'peer-tool-observation-1';
+  readonly format: 'peer-tool-observation-1' | 'peer-user-upload-1';
   readonly selectorRoots: readonly string[];
   readonly dataLevel: DataLevel;
   readonly truncated: boolean;
@@ -176,6 +176,22 @@ const safeKey = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z]
 export const interactiveBindingId = safeKey;
 export const interactiveToken = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/.test(v) && !v.includes('..');
 export const interactiveDigest = (v: unknown): v is string => typeof v === 'string' && /^sha256:[a-f0-9]{64}$/.test(v);
+export function normalizeInteractiveMaterialNotice(raw: unknown): InteractiveMaterialNotice | undefined {
+  if (!object(raw) || !keys(raw, ['source', 'format', 'selectorRoots', 'dataLevel', 'truncated', 'redacted']) || !object(raw.source)
+    || !interactiveDigest(raw.source.expectedContentVersion) || typeof raw.truncated !== 'boolean' || typeof raw.redacted !== 'boolean'
+    || !['D0_public', 'D1_internal', 'D2_sensitive', 'D3_private', 'D4_regulated'].includes(raw.dataLevel as string)) return;
+  const source = raw.source;
+  let admitted: InteractiveMaterialNotice['source'];
+  if (source.kind === 'tool-result' && raw.format === 'peer-tool-observation-1' && keys(source, ['kind', 'conversationId', 'toolCallId', 'expectedContentVersion'])
+    && interactiveToken(source.conversationId) && interactiveToken(source.toolCallId)) admitted = { kind: source.kind, conversationId: source.conversationId, toolCallId: source.toolCallId, expectedContentVersion: source.expectedContentVersion as string };
+  else if (source.kind === 'user-material' && raw.format === 'peer-user-upload-1' && keys(source, ['kind', 'messageId', 'attachmentId', 'expectedContentVersion'])
+    && interactiveToken(source.messageId) && interactiveToken(source.attachmentId)) admitted = { kind: source.kind, messageId: source.messageId, attachmentId: source.attachmentId, expectedContentVersion: source.expectedContentVersion as string };
+  else return;
+  const roots = raw.selectorRoots, allowed = source.kind === 'tool-result' ? ['payload', 'json'] : ['text', 'json'];
+  if (!Array.isArray(roots) || !roots.length || roots.length > 2 || roots.some(value => !allowed.includes(value)) || new Set(roots).size !== roots.length) return;
+  return { source: admitted, format: raw.format as InteractiveMaterialNotice['format'], selectorRoots: [...roots],
+    dataLevel: raw.dataLevel as DataLevel, truncated: raw.truncated, redacted: raw.redacted };
+}
 const integer = (v: unknown, min = 0, max = Number.MAX_SAFE_INTEGER): v is number => Number.isSafeInteger(v) && Number(v) >= min && Number(v) <= max;
 const bytes = (v: string) => new TextEncoder().encode(v).byteLength;
 const text = (v: unknown, max: number): v is string => typeof v === 'string' && !!v.trim() && !v.includes('\0') && bytes(v) <= max;

@@ -36,6 +36,15 @@ test('denied, mismatched, text-only and unclassified claims cannot become canoni
   ]) assert.throws(() => canonicalInteractiveObservation(candidate));
   assert.equal(appendInteractiveMaterialNotice('{"interactiveMaterial":{"source":"fake"}}', { result: base.result }), '{"interactiveMaterial":{"source":"fake"}}');
 });
+
+test('JSON credentials are redacted from both returned text and its projection; invalid structured data cannot downgrade to raw text', () => {
+  const snapshot = canonicalInteractiveObservation(observed({ content: '{"rows":[{"cost":1}],"password":"never-store-this"}' }));
+  assert.equal(snapshot.redacted, true);
+  assert.equal(JSON.stringify(snapshot.value).includes('never-store-this'), false);
+  assert.equal(snapshot.value.json.password, '[REDACTED]');
+  assert.equal(JSON.parse(snapshot.value.payload.content).password, '[REDACTED]');
+  assert.throws(() => canonicalInteractiveObservation(observed({ content: '{"__proto__":{"password":"never-store-this"}}' })), { code: 'reserved_key' });
+});
 test('shared host captures a real Node file execution, then publishes historical JSON after the project file changes', async t => {
   const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'interactive-runtime-')));
   const index = createGoalPlanStore({ storeDir: path.join(root, 'goals') });

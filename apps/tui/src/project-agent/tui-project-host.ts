@@ -113,7 +113,8 @@ export function createTuiProjectHost(options: {
     readMessages, readInteractionContext: async id => (await conversations.readInteractionContext(id))?.messages || [],
     readMemory: id => memory.list({workspaceId: id, status: 'active'}).filter(item => isEffectiveMemory(item)),
     memoryEnabled, getProviders: () => [...(toolProvider ? [toolProvider] : []), ...(interactiveEnabled(selectedId) ? [interactiveProvider] : [])],
-    captureExecution: interactive.captureExecution, scheduler, oneTimeApprovals, goalPlanStore: plans, createRuntime: options.createRuntime,
+    captureExecution: interactive.captureExecution, userMaterialNotices: interactive.userMaterialNotices,
+    scheduler, oneTimeApprovals, goalPlanStore: plans, createRuntime: options.createRuntime,
     onApproval(approval, streamId) { if (approval) liveApprovals.set(streamId, approval); else liveApprovals.delete(streamId); changed(); },
     persistTurn(input, output) {
       if (!input.conversationId || !input.assistantMessageId) return;

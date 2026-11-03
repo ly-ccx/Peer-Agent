@@ -30,6 +30,7 @@
   },
   "dependencies": {
     "@peer-agent/interactive-content": "workspace:*",
+    "@peer-agent/protocol": "workspace:*",
     "@peer-agent/runtime-core": "workspace:*"
   }
 }

@@ -7,6 +7,10 @@ import { createPublicationAttempts } from './publication-attempts.mjs';
 const clone = value => structuredClone(value);
 const same = (a, b) => encode(a) === encode(b);
 const operationKey = ref => jsonDigest([ref.owner, ref.conversationId, ref.toolCallId]);
+const materialKey = source => source?.kind === 'tool-result' && interactiveToken(source.conversationId) && interactiveToken(source.toolCallId)
+  ? jsonDigest([source.kind, source.conversationId, source.toolCallId])
+  : source?.kind === 'user-material' && interactiveToken(source.messageId) && interactiveToken(source.attachmentId)
+    ? jsonDigest([source.kind, source.messageId, source.attachmentId, source.expectedContentVersion ?? null]) : null;
 function requireOwner(raw) { const owner = normalizeInteractiveOwner(raw); if (!owner) throw problem('interactive_owner_invalid'); return owner; }
 function requireReference(raw) { const ref = normalizeInteractiveReference(raw); if (!ref) throw problem('interactive_reference_invalid'); return ref; }
 function requireCall(raw) { const ref = normalizeInteractivePublicationReference(raw); if (!ref) throw problem('interactive_call_invalid'); return ref; }
@@ -154,12 +158,12 @@ export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'
   }
   function recordMaterial({ owner: rawOwner, source, value, dataLevel, observedAt, truncated, redacted, evidenceRefs }, assertCurrent) {
     const owner = requireOwner(rawOwner);
-    if (source?.kind !== 'tool-result' || !interactiveToken(source.conversationId) || !interactiveToken(source.toolCallId)
+    if (!materialKey(source)
       || !['D0_public', 'D1_internal', 'D2_sensitive', 'D3_private', 'D4_regulated'].includes(dataLevel)
       || !Number.isFinite(Date.parse(observedAt)) || typeof truncated !== 'boolean' || typeof redacted !== 'boolean'
-      || !Array.isArray(evidenceRefs) || !evidenceRefs.length) throw problem('material_snapshot_unavailable');
+      || !Array.isArray(evidenceRefs) || source.kind === 'tool-result' && !evidenceRefs.length) throw problem('material_snapshot_unavailable');
     requireCurrent(assertCurrent);
-    const contentVersion = jsonDigest(value), id = jsonDigest([source.kind, source.conversationId, source.toolCallId]);
+    const contentVersion = jsonDigest(value), id = materialKey({ ...source, expectedContentVersion: contentVersion });
     const metadata = { owner, source: { ...source, expectedContentVersion: contentVersion }, contentVersion, dataLevel, observedAt, truncated, redacted, evidenceRefs };
     return storage.transaction(owner.workspaceId, context => {
       requireCurrent(assertCurrent);
@@ -176,8 +180,8 @@ export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'
   }
   function readMaterial(rawOwner, source) {
     const owner = requireOwner(rawOwner), context = storage.connect(owner.workspaceId);
-    if (!context || source?.kind !== 'tool-result' || !interactiveToken(source.conversationId) || !interactiveToken(source.toolCallId)) return null;
-    const id = jsonDigest([source.kind, source.conversationId, source.toolCallId]);
+    const id = materialKey(source);
+    if (!context || !id) return null;
     const row = context.db.prepare('SELECT owner,object,metadata FROM materials WHERE id=?').get(id);
     if (!row || row.owner !== encode(owner)) return null;
     const metadata = decode(row.metadata);

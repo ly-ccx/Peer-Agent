@@ -5,6 +5,7 @@ import { createInteractiveResultProvider } from './provider.mjs';
 import { createInteractiveStateStore } from './state-store.mjs';
 import { createInteractiveResultStore } from './store.mjs';
 import { normalizeInteractiveOwner } from '@peer-agent/protocol';
+import { createInteractiveUserMaterials } from './user-materials.mjs';
 
 /** One shared domain instance per host. Composition roots supply real local facts. */
 export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationStore, getBotConversationId,
@@ -13,14 +14,40 @@ export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationS
     assertCompatibility: () => goalPlanStore?.assertInteractiveEvidenceCompatible?.() === true });
   const stateStore = createInteractiveStateStore({ resultStore, ...(now ? { now } : {}) });
   const authority = createInteractiveAuthority({ goalPlanStore, conversationStore, resultStore, getBotConversationId, holdsLease, enabled, classifyContext });
+  const userMaterials = createInteractiveUserMaterials({ conversationStore });
   const materialSource = createInteractiveMaterialSource({
-    readToolResult: (source, execution) => resultStore.readMaterial(execution.owner, source), readUserMaterial,
+    readToolResult: (source, execution) => resultStore.readMaterial(execution.owner, source),
+    readUserMaterial: readUserMaterial ?? ((source, execution) => {
+      const saved = resultStore.readMaterial(execution.owner, source);
+      if (saved) return saved;
+      const record = userMaterials.read(source, execution);
+      if (!record) return null;
+      resultStore.recordMaterial({ ...record, owner: execution.owner,
+        source: { kind: 'user-material', messageId: source.messageId, attachmentId: source.attachmentId } }, execution.assertCurrent);
+      return resultStore.readMaterial(execution.owner, source);
+    }),
     admitSource: (source, execution, selector) => execution.assertCurrent() === true && execution.admitMaterial(source, selector) === true,
     ...(now ? { now } : {}),
   });
   const provider = createInteractiveResultProvider({ store: resultStore, stateStore, materialSource, resolveAuthority: authority.resolve,
     index: goalPlanStore, ...(now ? { now } : {}), ...(validate ? { validate } : {}) });
   return { resultStore, stateStore, provider, authority, captureExecution: createInteractiveCapture({ resultStore, resolveAuthority: authority.resolve, ...(now ? { now } : {}) }),
+    userMaterialNotices(toolContext) {
+      try { const context = authority.resolve({ toolContext });
+        const notices = context.role === 'session_worker' && context.assertCurrent() === true ? userMaterials.list(context) : [];
+        const levels = ['D0_public', 'D1_internal', 'D2_sensitive', 'D3_private', 'D4_regulated'];
+        const classified = notices.flatMap(notice => {
+          try {
+            const original = resultStore.readMaterial(context.owner, notice.source);
+            if (!original) return [notice];
+            if (!levels.includes(original.dataLevel) || typeof original.truncated !== 'boolean' || typeof original.redacted !== 'boolean') return [];
+            return [{ ...notice, dataLevel: levels[Math.max(levels.indexOf(notice.dataLevel), levels.indexOf(original.dataLevel))],
+              truncated: notice.truncated || original.truncated, redacted: notice.redacted || original.redacted }];
+          } catch { return []; }
+        });
+        return context.assertCurrent() === true ? classified : []; }
+      catch { return []; }
+    },
     recoverOwner(owner) { return provider.recoverOwner(owner, candidate => holdsLease?.(candidate.workspaceId) === true
       && getBotConversationId?.(candidate.workspaceId) === candidate.conversationId); },
     recoverWorkspace(workspaceId) {

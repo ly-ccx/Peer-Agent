@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { interactiveArtifactRef, normalizeInteractiveDraft, normalizeInteractiveInspect, normalizeInteractiveReference, normalizeInteractiveSelector, normalizeInteractiveUserArtifact, parseInteractiveArtifactRef } from './interactive-result.ts';
+import { interactiveArtifactRef, normalizeInteractiveDraft, normalizeInteractiveInspect, normalizeInteractiveReference, normalizeInteractiveSelector, normalizeInteractiveUserArtifact, normalizeInteractiveMaterialNotice, parseInteractiveArtifactRef } from './interactive-result.ts';
 
 const digest = `sha256:${'a'.repeat(64)}`;
 const owner = { workspaceId: 'bot-a', conversationId: 'parent-a' };
@@ -44,6 +44,17 @@ test('canonical material references require specific immutable source identity',
     assert.equal(normalizeInteractiveDraft({ ...draft, inputs: [{ bindingId: 'data', source: { ...source, expectedContentVersion: undefined } }] }), undefined);
   }
   assert.equal(normalizeInteractiveDraft({ ...draft, inputs: [...draft.inputs, ...draft.inputs] }), undefined);
+});
+
+test('material notices preserve fixed source classification and forbid cross-kind formats or extra authority', () => {
+  const notice = { source: { kind: 'user-material', messageId: 'user-a', attachmentId: 'upload-a', expectedContentVersion: digest },
+    format: 'peer-user-upload-1', selectorRoots: ['text', 'json'], dataLevel: 'D3_private', truncated: false, redacted: true };
+  assert.deepEqual(normalizeInteractiveMaterialNotice(notice), notice);
+  for (const value of [{ ...notice, format: 'peer-tool-observation-1' }, { ...notice, grant: true },
+    { ...notice, selectorRoots: ['payload'] }, { ...notice, selectorRoots: ['text', 'text'] }, { ...notice, dataLevel: 'unknown' },
+    { ...notice, source: { ...notice.source, owner } }, { ...notice, source: { ...notice.source, expectedContentVersion: 'latest' } }]) {
+    assert.equal(normalizeInteractiveMaterialNotice(value), undefined);
+  }
 });
 
 test('model data cannot contain nonfinite/executable/prototype data or exceed bounds', () => {
