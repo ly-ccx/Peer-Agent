@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { statSync } from 'node:fs';
+import { createTuiTaskResultReader } from './task-result-reader.ts';
 import { createTuiEvidenceReader } from './tui-evidence-reader.ts';
 import { randomUUID } from 'node:crypto';
 import { createConversationStore } from '@peer-agent/conversation-store';
@@ -250,7 +251,13 @@ export function createTuiProjectHost(options: {
   const timer = options.autoStart === false ? null : setInterval(()=>void tick().catch(()=>changed()),1000);
   timer?.unref();
   if(options.autoStart!==false){watches.start(()=>selectedId?[selectedId]:[]);void tick();}
-  return { registry, profiles, directory, conversations, plans, approvals, memory, objectives, supervisor, host, leases, executor, inputs, lifecycle, readEvidence, interactive,
+  const readTaskResult = createTuiTaskResultReader({
+    resultStore: interactive.resultStore,
+    assertOwner: owner => !closed && !admissionClosed && selectedId === owner.workspaceId
+      && profiles.read(owner.workspaceId)?.status === 'active' && resolveConversationId(owner.workspaceId) === owner.conversationId,
+    readTask: sessionId => supervisor.get({ sessionId, detail: 'report' }),
+  });
+  return { registry, profiles, directory, conversations, plans, approvals, memory, objectives, supervisor, host, leases, executor, inputs, lifecycle, readEvidence, interactive, readTaskResult,
     workspaceId:()=>selectedId, holdsLease:holds, tick,
     async selectWorkspace(id: string) {if(id===selectedId)return;admissionClosed=true;const old=selectedId;if(old){await stopExecution(old);leases.release(old);}selectedId=id;admissionClosed=false;await host.restart(id);changed();},
     async takeover() {if(!selectedId)return {requested:false};const request=leases.requestTakeover(selectedId);if(request.reason==='free')leases.acquire(selectedId);await tick();return request;},

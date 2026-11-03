@@ -2,6 +2,8 @@ import {expect,test} from 'bun:test';
 import {act} from 'react';
 import {testRender} from '@opentui/react/test-utils';
 import {mkdtempSync,mkdirSync,rmSync,writeFileSync} from 'node:fs';import os from 'node:os';import path from 'node:path';
+import {runInteractiveValidation} from '@peer-agent/runtime-node/interactive-results';
+import {interactiveArtifactRef} from '@peer-agent/protocol';
 import {createTuiThemeStore} from '../tui-theme.ts';
 import {createTuiProjectHost} from './tui-project-host.ts';import {createTuiProjectClient} from './tui-project-client.ts';import {ProjectApp} from './ProjectApp.tsx';
 async function harness(initialView:'bind'|'bots'|'conversation'='bind') {
@@ -42,5 +44,50 @@ test('binding, message submission, list navigation and cards work through the ac
     await f.type('/cards');await f.press('RETURN');expect(await f.frame()).toContain('Needs you');
     await f.press('ESCAPE');await f.frame();
     await f.type('/classic');await f.press('RETURN');await f.frame();expect(f.classic()).toBe(1);
+  }finally{await f.close();}
+});
+
+test('task report opens the stored fixed result and displays a bounded computed table',async()=>{
+  const f=await harness('conversation');
+  try {
+    const workspaceId=f.host.workspaceId(), conversationId=f.host.profiles.read(workspaceId)!.agentConversationId;
+    const owner={workspaceId,conversationId};
+    const child=f.host.conversations.createConversation({role:'work_session',workspaceId});
+    const sessionId='result-session';
+    const model={modelProviderId:'configured',providerId:'fixture',modelId:'fixture',family:'fixture'};
+    const plan=f.host.plans.createPlan({conversationId:child.id,title:'Table report',status:'executing',
+      tasks:[{taskId:'table',title:'Table',status:'pending'}],delegationOrigin:{workspaceId,parentConversationId:conversationId,
+        sessionId,phase:'running',anchorMessageId:'anchor',inputId:'input',
+        modelSelection:{worker:model,explorer:model,verifier:model,resolvedAt:new Date().toISOString()}}});
+    const draft={publication:{kind:'create' as const},title:'Fixed trial',textFallback:'Model summary only',inputs:[],
+      program:'root=Table("Options",[{key:"name",label:"Name"},{key:"cost",label:"Cost"}],@Data("rows"),"name")'};
+    const content=await runInteractiveValidation({operation:'validate',draft,bindings:{rows:[{name:'Trial row',cost:20},...Array.from({length:30},(_,i)=>({name:`Next option ${i+1}`,cost:i}))]}});
+    const source={conversationId:child.id,sessionId,planId:plan.planId,executionEpoch:'epoch',toolCallId:'publish-table'};
+    const store=f.host.interactive.resultStore;
+    const publication=store.commitPublication({owner,source,draft,content,provenance:[],dataLevel:'D3_private',
+      grant:{granted:true,toolCallId:source.toolCallId,grantId:'fixture'}},()=>true);
+    f.host.plans.recordEvidenceRefs(publication.indexEntry, {durable:true});
+    store.markIndexed(publication.callRef,publication.indexEntry);
+    const ref=interactiveArtifactRef(publication.reference);
+    f.host.plans.recordTaskEvidence(plan.planId,'table',{status:'completed',result:'Table published',evidenceRefs:[ref]});
+    await act(async()=>{await f.client.poll();await Bun.sleep(1100);});
+    await f.frame();await f.type('/task 1');await f.press('RETURN');
+    expect(await f.frame()).toContain('/result 1');
+    await f.type('/result 1');await f.press('RETURN');
+    let frame='';
+    for(let attempt=0;attempt<15&&!frame.includes('Trial row');attempt++) frame=await f.frame();
+    expect(frame).toContain('Computed from initial conditions');
+    expect(frame).toContain('Trial row | 20');
+    expect(frame).toContain('Saved model summary');
+    await f.press('\x1b[6~');
+    expect(await f.frame()).toContain('Next option 10');
+    await f.press('ESCAPE');
+    expect(await f.frame()).not.toContain('Trial row');
+    expect(f.host.plans.listEvidenceIndex().map(row=>row.evidenceRef)).toEqual([ref]);
+    await expect(f.host.readTaskResult('unknown-session',ref,new AbortController().signal)).rejects.toThrow('interactive_scope_denied');
+    const controller=new AbortController();
+    const pending=f.host.readTaskResult(sessionId,ref,controller.signal);
+    controller.abort();
+    await expect(pending).rejects.toThrow('interactive_scope_denied');
   }finally{await f.close();}
 });
