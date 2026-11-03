@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { interactiveToken, normalizeInteractiveOwner, normalizeInteractiveReference, normalizeInteractiveFollowup, interactiveFeedbackFromFollowup } from '@peer-agent/protocol';
-import { validateState, projectStateText } from '@peer-agent/interactive-content/state';
+import { interactiveToken, normalizeInteractiveOwner, normalizeInteractiveReference, normalizeInteractiveFollowup, normalizeInteractiveWriter, interactiveFeedbackFromFollowup } from '@peer-agent/protocol';
+import { validateState } from '@peer-agent/interactive-content/state';
+import { runInteractiveValidation } from './validation.mjs';
 import { decode, encode, jsonDigest, problem } from './storage.mjs';
 
 const clone = value => structuredClone(value);
@@ -14,7 +15,8 @@ function view(raw) {
 }
 
 /** Device-local user state. Canonical writer generations/CAS live in SQLite, never in Renderer state. */
-export function createInteractiveStateStore({ resultStore, now = () => new Date().toISOString() }) {
+export function createInteractiveStateStore({ resultStore, now = () => new Date().toISOString(),
+  describeConditions = (input, options) => runInteractiveValidation({ operation: 'describe-state', ...input }, options) }) {
   const storage = resultStore.storage, touched = new Set();
   let disposed = false;
   function requireView(check) { if (disposed || typeof check !== 'function' || check() !== true) throw problem('interactive_view_stale'); }
@@ -113,19 +115,21 @@ export function createInteractiveStateStore({ resultStore, now = () => new Date(
       writeRow(context, ref, state.snapshot, null); return true;
     });
   }
-  function prepareFollowup({ reference: rawReference, identity: rawIdentity, writer, stateRevision, stateDigest, fields, requestId }, assertView) {
-    const ref = reference(rawReference), identity = view(rawIdentity); requireView(assertView);
-    if (!interactiveToken(requestId) || !Array.isArray(fields) || !fields.length || fields.length > 64 || fields.some(key => typeof key !== 'string')
-      || new Set(fields).size !== fields.length) throw problem('interactive_followup_invalid');
-    return storage.transaction(ref.owner.workspaceId, context => {
+  async function prepareFollowup({ reference: rawReference, identity: rawIdentity, writer: rawWriter, stateRevision, stateDigest, fields: rawFields, requestId }, assertView, { signal } = {}) {
+    const ref = reference(rawReference), identity = view(rawIdentity), writer = normalizeInteractiveWriter(rawWriter); requireView(assertView);
+    if (!writer) throw problem('interactive_writer_stale');
+    if (!interactiveToken(requestId) || !Array.isArray(rawFields) || !rawFields.length || rawFields.length > 64 || rawFields.some(key => typeof key !== 'string')
+      || new Set(rawFields).size !== rawFields.length) throw problem('interactive_followup_invalid');
+    const fields = [...rawFields], argsDigest = jsonDigest({ reference: ref, stateRevision, stateDigest, fields: [...fields].sort() });
+    function resolve(context) {
       requireView(assertView);
+      if (signal?.aborted) throw problem('interactive_view_stale');
       const published = resultStore.getVersion(ref), state = load(context, ref, published);
       requireWriter(state.writer, writer, identity);
-      const argsDigest = jsonDigest({ reference: ref, stateRevision, stateDigest, fields: [...fields].sort() });
       const previous = context.db.prepare('SELECT owner,argsDigest,snapshot FROM followups WHERE id=?').get(requestId);
       if (previous) {
         if (previous.owner !== encode(ref.owner) || previous.argsDigest !== argsDigest) throw problem('interactive_followup_parameter_conflict');
-        return checkedFollowup(decode(previous.snapshot));
+        return { previous: checkedFollowup(decode(previous.snapshot)) };
       }
       if (state.snapshot.stateRevision !== stateRevision || state.snapshot.stateDigest !== stateDigest) throw problem('state_revision_unavailable');
       if (fields.some(key => !Object.hasOwn(published.content.stateSchema, key))) throw problem('interactive_followup_invalid');
@@ -134,7 +138,19 @@ export function createInteractiveStateStore({ resultStore, now = () => new Date(
         if (raw !== undefined && (typeof value === 'number' ? !numericDraft(raw) || Number(raw) !== value : raw !== value)) throw problem('followup_input_incomplete');
       }
       const values = Object.fromEntries(fields.map(key => [key, state.snapshot.values[key]]));
-      const excerpt = `${published.content.title}\n${projectStateText(published.content, { values }, { fields })}`;
+      return { published, state, values };
+    }
+    const prepared = storage.transaction(ref.owner.workspaceId, resolve);
+    if (prepared.previous) return prepared.previous;
+    // Never hold the writer transaction while evaluating an untrusted program.
+    const description = await describeConditions({ content: prepared.published.content, values: prepared.state.snapshot.values, fields }, { signal });
+    if (!description || typeof description.text !== 'string' || description.specHash !== prepared.published.content.specHash
+      || description.stateSchemaHash !== prepared.published.content.stateSchemaHash) throw problem('interactive_condition_labels_unavailable');
+    return storage.transaction(ref.owner.workspaceId, context => {
+      const actual = resolve(context);
+      if (actual.previous) return actual.previous;
+      const { published, values } = actual;
+      const excerpt = `${published.content.title}\n${description.text}`;
       if (Buffer.byteLength(excerpt, 'utf8') > 8192) throw problem('interactive_followup_limit');
       const body = { followupId: requestId, recipient: ref.owner, result: ref, specHash: published.content.specHash,
         stateRevision, stateDigest, values, dataLevel: resultStore.ownerDataLevel(ref.owner, published.dataLevel), capturedAt: now(), excerpt };

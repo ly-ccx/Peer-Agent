@@ -1,10 +1,22 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { boundedJSON, canonicalJSON, catalogIdentity, createPeerLibrary, evaluate, prepareEvaluator, projectText, validateDraft, validateState } from './index.mjs';
+import { boundedJSON, canonicalJSON, catalogIdentity, createPeerLibrary, evaluate, prepareEvaluator, describeState, projectText, validateDraft, validateState } from './index.mjs';
 
 const bindings = { rows: [{ name: 'A', cost: 25, group: 'one' }, { name: 'B', cost: 75, group: 'one' }] };
 const program = '$budget = 1000\nroot = Col([Title("Comparison"), NumberInput("budget", "Budget", $budget, 0, 10000, 1), Metric("Remaining", $budget - @Total(@Data("rows"), "cost"), "USD"), Table("Options", [{key:"name",label:"Name"},{key:"cost",label:"Cost"}], @Data("rows"), "name")])';
 const draft = (code = program) => ({ title: 'Comparison', textFallback: 'Model explanation; fixed inputs.', program: code });
+
+test('condition descriptions rebuild published labels without trusting a tree cache or evaluating broken current trial output', async () => {
+  const content = await validateDraft(draft('$x=2\n$name="Published divisor"\nroot=Col([Input("name","Trial name",$name),NumberInput("x",$name,$x,0,10,1),Metric("Ratio",10/$x)])'));
+  const values = { $x: 0, $name: 'A changed trial name' };
+  await assert.rejects(evaluate(content, values), { code: 'division_by_zero' });
+  const forged = { ...content, tree: { type: 'element', stateTarget: '$x', props: { label: 'Forged renderer label' } } };
+  const description = await describeState(forged, values, { fields: ['$x', '$name'] });
+  assert.equal(description.text, 'Published divisor: 0\nTrial name: A changed trial name');
+  assert.equal(description.specHash, content.specHash); assert.equal(description.stateSchemaHash, content.stateSchemaHash);
+  const unbound = await validateDraft(draft('$hidden=3\nroot=Text("No named control")'));
+  assert.equal((await describeState(unbound, { $hidden: 4 })).text, 'Condition 1: 4');
+});
 
 test('permissive SDK parsing cannot silently discard expression tails or excessive grouping', async () => {
   for (const code of ['root=Metric("x",1) junk', '$x=1 2\nroot=Metric("x",$x)', 'root=Metric("x",1) null',

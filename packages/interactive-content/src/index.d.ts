@@ -23,4 +23,5 @@ export interface InteractiveEvaluator {
   applyAction(plan: unknown, values: InteractiveStateValues): InteractiveEvaluation & { readonly changedFields: readonly string[] };
 }
 export function prepareEvaluator(content: InteractiveContent & { contentVersion?: string }): Promise<InteractiveEvaluator>;
+export function describeState(content: InteractiveContent, values: InteractiveStateValues, options?: { readonly fields?: readonly string[]; readonly isZh?: boolean }): Promise<{ readonly text: string; readonly specHash: string; readonly stateSchemaHash: string }>;
 export function projectText(tree: InteractiveElement, maxChars?: number): { text: string; truncated: boolean };

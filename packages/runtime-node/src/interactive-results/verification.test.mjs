@@ -64,11 +64,11 @@ async function fixture(t, { program, facts } = {}) {
     assert.ok(collectToolEvidenceRefs({ toolCallId: execution.call.toolCallId, execution }).includes(refs[0]));
     return { execution, refs, record };
   }
-  function freeze({ fields = ['$x'], requestId = 'selected', value = 4, submit = true } = {}) {
+  async function freeze({ fields = ['$x'], requestId = 'selected', value = 4, submit = true } = {}) {
     const identity = { viewId: 'human-view', windowId: 'human-window', generation: 'human-generation' };
     const before = runtime.stateStore.read(reference, () => true), writer = runtime.stateStore.acquire({ reference, identity, expectedRevision: before.stateRevision }, () => true);
     const saved = runtime.stateStore.save({ reference, identity, writer, expectedRevision: before.stateRevision, requestId: `save-${requestId}`, values: { $x: value }, inputDrafts: {} }, () => true);
-    const frozen = runtime.stateStore.prepareFollowup({ reference, identity, writer, stateRevision: saved.stateRevision, stateDigest: saved.stateDigest, fields, requestId }, () => true);
+    const frozen = await runtime.stateStore.prepareFollowup({ reference, identity, writer, stateRevision: saved.stateRevision, stateDigest: saved.stateDigest, fields, requestId }, () => true);
     if (submit) conversations.appendMessage(child.id, { id: `input-${requestId}`, role: 'user', content: 'Use these selected conditions', ...encodeResourceFeedbackTransport([interactiveFeedbackFromFollowup(frozen)]) });
     return frozen;
   }
@@ -77,11 +77,11 @@ async function fixture(t, { program, facts } = {}) {
 }
 
 test('actual normalized ephemeral Verifier reads only its fixed targets; complete real inspection coverage is required for a pass', async t => {
-  const f = await fixture(t), frozen = f.freeze(), review = f.prepare(); t.after(() => review.close());
+  const f = await fixture(t), frozen = await f.freeze(), review = f.prepare(); t.after(() => review.close());
   assert.equal((await f.inspect(null, 'program')).result.status, 'failed', 'role/plan alone cannot open result storage');
   const other = await f.publish({ ...f.draft, title: 'Unreferenced other result' }); assert.equal(other.result.status, 'success');
   assert.notEqual((await f.inspect(review, 'program', {}, other.result.outputPreview.reference)).result.status, 'success');
-  const unsubmitted = f.freeze({ requestId: 'not-submitted', value: 7, submit: false });
+  const unsubmitted = await f.freeze({ requestId: 'not-submitted', value: 7, submit: false });
   assert.notEqual((await f.inspect(review, 'evaluate', { followupId: unsubmitted.followupId })).result.status, 'success');
   assert.equal(review.validateReport(success([f.publicationRef]), new Set([f.publicationRef])).passed, false);
   const metadata = await f.read(review, 'metadata'), text = await f.read(review, 'text');
@@ -172,7 +172,7 @@ test('actual ephemeral inspection observations retain privacy without admitting 
 });
 
 for (const complete of [false, true]) test(`actual GoalHost → Desktop Executor → normalized ephemeral Provider enforces factual coverage: ${complete}`, async t => {
-  const f = await fixture(t), frozen = f.freeze(), events = [];
+  const f = await fixture(t), frozen = await f.freeze(), events = [];
   let calls = 0, issuedProfile;
   const originalFetch = globalThis.fetch, requests = [];
   const uninstall = installDesktopInteractiveRuntime({ runtime: f.runtime, enabled: () => true });
@@ -249,7 +249,7 @@ test('owner, feature withdrawal, execution generation and new admitted condition
     () => f.freeze()]) {
     f.setOwner(f.owner.conversationId); f.setLeased(true); f.setEnabled(true);
     f.plans.revisePlan(f.current().planId, { delegationOrigin: { ...f.current().delegationOrigin, executionGeneration: 'generation' } });
-    const review = f.prepare(); mutate();
+    const review = f.prepare(); await mutate();
     assert.throws(() => review.validateReport(success([f.publicationRef]), new Set([f.publicationRef])));
     assert.notEqual((await f.inspect(review, 'program')).result.status, 'success'); review.close();
   }

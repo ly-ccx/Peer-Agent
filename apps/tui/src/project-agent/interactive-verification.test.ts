@@ -48,7 +48,7 @@ test('actual TUI GoalHost → Executor → Pipeline → readonly Provider indexe
     const before = interactive.stateStore.read(reference, () => true);
     const writer = interactive.stateStore.acquire({ reference, identity, expectedRevision: before.stateRevision }, () => true);
     const saved = interactive.stateStore.save({ reference, identity, writer, expectedRevision: before.stateRevision, requestId: 'save', values: { $x: 4 }, inputDrafts: {} }, () => true);
-    frozen = interactive.stateStore.prepareFollowup({ reference, identity, writer, requestId: 'freeze', stateRevision: saved.stateRevision,
+    frozen = await interactive.stateStore.prepareFollowup({ reference, identity, writer, requestId: 'freeze', stateRevision: saved.stateRevision,
       stateDigest: saved.stateDigest, fields: ['$x'] }, () => true);
     conversations.appendMessage(child.id, { id: 'selected', role: 'user', content: 'Check these conditions',
       ...encodeResourceFeedbackTransport([interactiveFeedbackFromFollowup(frozen)!]) });

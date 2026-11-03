@@ -116,7 +116,12 @@ export function createInteractiveSession({ api, opened, evaluator, createId = ()
         || reply.followup.stateRevision !== saved.stateRevision || reply.followup.stateDigest !== saved.stateDigest
         || !equal(reply.followup.values, Object.fromEntries(selected.fields.map(key => [key, selected.values[key]])))) throw { code: 'interactive_followup_receipt_invalid' };
       changed({ preparation: 'frozen', preparationError: null, frozen: clone(reply.followup) }); return reply.followup;
-    } catch (error) { changed({ preparation: 'failed', preparationError: code(error) }); return null; }
+    } catch (error) {
+      // The exact old checkpoint was not frozen. A later explicit retry must
+      // save this same clicked candidate with a new operation identity.
+      if (code(error) === 'state_revision_unavailable') selected.saved = undefined;
+      changed({ preparation: 'failed', preparationError: code(error) }); return null;
+    }
   }
   function prepareSelection(fields: readonly string[]) {
     if (['saving', 'freezing'].includes(state.preparation)) return Promise.resolve(null);

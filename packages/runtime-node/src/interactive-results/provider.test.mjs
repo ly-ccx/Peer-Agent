@@ -218,7 +218,7 @@ test('Verifier reads actual fixed program/data and independently evaluates admit
   const identity = { viewId: 'view-a', windowId: 'window-a', generation: 'generation-a' }, current = () => true;
   const writer = f.states.acquire({ reference: ref, identity, expectedRevision: 0 }, current);
   const saved = f.states.save({ reference: ref, identity, writer, expectedRevision: 0, requestId: 'save-a', values: { $budget: 250 }, inputDrafts: {} }, current);
-  const frozen = f.states.prepareFollowup({ reference: ref, identity, writer, stateRevision: 1, stateDigest: saved.stateDigest, fields: ['$budget'], requestId: 'followup-a' }, current);
+  const frozen = await f.states.prepareFollowup({ reference: ref, identity, writer, stateRevision: 1, stateDigest: saved.stateDigest, fields: ['$budget'], requestId: 'followup-a' }, current);
   f.states.save({ reference: ref, identity, writer, expectedRevision: 1, requestId: 'save-b', values: { $budget: 900 }, inputDrafts: {} }, current);
   f.setRole('verifier');
   assert.equal((await f.inspect(ref, 'program')).result.outputPreview.text, draft.program);

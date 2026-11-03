@@ -18,6 +18,17 @@ test('real isolated worker validates and evaluates fixed content with telemetry 
 test('real worker rejects dangerous AST before evaluation and reports bounded diagnostics', async () => {
   await assert.rejects(runInteractiveValidation({ operation: 'validate', draft: { ...draft, program: 'root=Col([HtmlView("<script>fetch()</script>")])' }, bindings: {} }), { code: 'unsupported_node' });
 });
+test('the isolated worker reconstructs condition labels from the published program, including a currently invalid calculation', async () => {
+  const content = await runInteractiveValidation({ operation: 'validate', draft: { ...draft,
+    program: '$x=2\n$name="Original label"\nroot=Col([NumberInput("x",$name,$x,0,10,1),Input("name","Trial name",$name),Metric("Ratio",10/$x)])' }, bindings: {} });
+  const values = { $x: 0, $name: 'Changed label' };
+  await assert.rejects(runInteractiveValidation({ operation: 'evaluate', content, values }), { code: 'division_by_zero' });
+  delete content.tree;
+  const described = await runInteractiveValidation({ operation: 'describe-state', content, values, fields: ['$x', '$name'] });
+  assert.deepEqual(described, { text: 'Original label: 0\nTrial name: Changed label', specHash: content.specHash, stateSchemaHash: content.stateSchemaHash });
+  await assert.rejects(runInteractiveValidation({ operation: 'describe-state', content: { ...content, specHash: 'sha256:forged' }, values, fields: ['$x'] }),
+    { code: 'incompatible_catalog' });
+});
 test('timeout and cancellation terminate the exact worker instead of leaving background evaluation', async () => {
   const workers = [];
   let onStarted;

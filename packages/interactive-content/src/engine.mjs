@@ -3,7 +3,7 @@ import { catalogSpec, COMPONENT_SCHEMAS, createPeerLibrary, runtimeFunctions } f
 import { boundedJSON, canonicalJSON, CONTENT_SCHEMA_VERSION, ENGINE_VERSION, INTERACTIVE_LIMITS as L, LIBRARY_VERSION, reject, utf8Bytes } from './limits.mjs';
 import { inspectProgram, rejectEngineData } from './policy.mjs';
 import { checkNumericExpressions } from './numeric-policy.mjs';
-import { validateValues } from './state.mjs';
+import { validateValues, projectStateText } from './state.mjs';
 export { validateState } from './state.mjs';
 
 export async function digestJSON(value) {
@@ -175,6 +175,15 @@ export async function prepareEvaluator(rawContent) {
     return { ...evaluateValues(state), changedFields: [...changedFields] };
   }
   return { evaluate: evaluateValues, applyAction };
+}
+
+/** Published field names are stable; current trial errors do not rename them. */
+export async function describeState(content, values, { fields, isZh = false } = {}) {
+  const evaluator = await prepareEvaluator(content);
+  const normalized = validateValues(values, content.stateSchema);
+  const initial = evaluator.evaluate(content.initialValues);
+  return { text: projectStateText({ ...content, tree: initial.tree }, { values: normalized }, { fields, isZh }),
+    specHash: content.specHash, stateSchemaHash: content.stateSchemaHash };
 }
 
 export async function evaluate(content, values = content.initialValues) {

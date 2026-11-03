@@ -63,14 +63,17 @@ test('IME and incomplete numeric drafts stay local; legal division-by-zero param
 test('draft preparation awaits its own receipt, retries the same frozen values after edits/takeover and rejects a mismatched acknowledgment', async t => {
   const f = await fixture(t), followups: string[] = [];
   let acknowledge: (() => void) | undefined, attempt = 0;
+  let started!: () => void;
+  const entered = new Promise<void>(resolve => { started = resolve; });
   f.api.prepareDraft = async request => {
     followups.push(request.followupId);
+    started();
     if (++attempt === 1) { await new Promise<void>(resolve => { acknowledge = resolve; }); return { ok: false, code: 'draft_preparation_unconfirmed' }; }
     return { ok: true, followupId: attempt === 2 ? 'wrong-receipt' : request.followupId };
   };
   await f.session.acquire(); f.session.editText('$x', '3');
   const preparing = f.session.prepareDraft(['$x']);
-  await new Promise(resolve => setImmediate(resolve));
+  await Promise.race([entered, preparing.then(() => { throw Error('Preparation ended before entering the draft service'); })]);
   assert.equal(f.session.snapshot().preparation, 'frozen'); assert.equal(f.session.snapshot().draftPreparation, 'preparing');
   const frozen = f.session.snapshot().frozen!; assert.equal(frozen.values.$x, 3);
   f.session.editText('$x', '7'); assert.equal(await f.session.flush(), true);
@@ -217,6 +220,36 @@ test('preparation saves the clicked candidate before freezing; edits during the 
   f.api.save = save; await f.session.flush();
   assert.equal(f.states.readFollowup(f.receipt.reference.owner, frozen!.followupId).values.$x, 3);
   assert.equal(f.states.read(f.receipt.reference, () => true).values.$x, 5);
+});
+
+test('an explicit retry confirms the same clicked values with a new save identity when the old checkpoint could not freeze', async t => {
+  const f = await fixture(t), prepare = f.api.prepareFollowup, save = f.api.save;
+  const saves: Parameters<InteractiveResultsApi['save']>[0][] = [];
+  f.api.save = async request => { saves.push(structuredClone(request)); return save(request); };
+  let advance = true;
+  f.api.prepareFollowup = async request => {
+    if (advance) {
+      advance = false;
+      const snapshot = f.states.read(f.receipt.reference, () => true);
+      f.states.save({ reference: f.receipt.reference, identity: f.opened.handle, writer: f.session.snapshot().writer!,
+        expectedRevision: snapshot.stateRevision, requestId: 'intervening-checkpoint', values: { ...snapshot.values, $x: 7 }, inputDrafts: {} }, () => true);
+      f.session.editText('$x', '5');
+    }
+    return prepare(request);
+  };
+  await f.session.acquire(); f.session.editText('$x', '3');
+  assert.equal(await f.session.prepareSelection(['$x']), null);
+  assert.equal(f.session.snapshot().preparationError, 'state_revision_unavailable');
+  assert.equal(f.session.snapshot().values.$x, 5);
+  assert.equal(await f.session.acquire(), true);
+  const frozen = await f.session.retrySelection();
+  assert.equal(frozen?.values.$x, 3); assert.match(frozen!.excerpt, /Divisor: 3/);
+  assert.equal(saves.length, 2); assert.notEqual(saves[0].requestId, saves[1].requestId);
+  assert.equal(saves[1].expectedRevision, 2); assert.equal(saves[1].values.$x, 3);
+  assert.equal(f.session.snapshot().values.$x, 5); assert.equal(f.session.snapshot().dirty, true);
+  assert.equal(await f.session.flush(), true);
+  assert.equal(f.states.read(f.receipt.reference, () => true).values.$x, 5);
+  assert.equal(f.states.readFollowup(f.receipt.reference.owner, frozen!.followupId).values.$x, 3);
 });
 
 test('lost freeze acknowledgment uses the same confirmed revision even after a newer checkpoint', async t => {

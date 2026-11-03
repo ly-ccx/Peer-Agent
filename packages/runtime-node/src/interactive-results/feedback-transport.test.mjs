@@ -35,7 +35,7 @@ async function fixture(t) {
   const identity = { viewId: 'view', windowId: 'window', generation: 'generation' }, reference = receipt.reference;
   const writer = states.acquire({ reference, identity, expectedRevision: 0 }, () => true);
   const saved = states.save({ reference, identity, writer, expectedRevision: 0, requestId: 'save-1', values: { $x: 4, $name: '固定条件' }, inputDrafts: {} }, () => true);
-  const frozen = states.prepareFollowup({ reference, identity, writer, stateRevision: saved.stateRevision, stateDigest: saved.stateDigest, fields: ['$x', '$name'], requestId: 'followup-1' }, () => true);
+  const frozen = await states.prepareFollowup({ reference, identity, writer, stateRevision: saved.stateRevision, stateDigest: saved.stateDigest, fields: ['$x', '$name'], requestId: 'followup-1' }, () => true);
   const feedback = interactiveFeedbackFromFollowup(frozen); assert.ok(feedback);
   const admission = createInteractiveFeedbackAdmission({ stateStore: states }), options = { rootDir, resolveConversationId: () => owner.conversationId,
     holdsLease: () => true, hasMessage: (_conversation, id) => conversations.getConversation(parent.id).messages.some(message => message.id === id),

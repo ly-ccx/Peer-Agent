@@ -67,7 +67,7 @@ async function freeze(f, sender) {
   const writer = f.app.acquire(sender, { handle: opened.handle, expectedRevision: 0 }); assert.equal(writer.ok, true);
   const saved = f.app.save(sender, { handle: opened.handle, writer: writer.writer, expectedRevision: 0, requestId: 'save-for-draft', values: { $x: 4 }, inputDrafts: {} });
   assert.equal(saved.ok, true);
-  const frozen = f.app.prepareFollowup(sender, { handle: opened.handle, stateRevision: saved.state.stateRevision, stateDigest: saved.state.stateDigest, fields: ['$x'], requestId: 'frozen-for-draft' });
+  const frozen = await f.app.prepareFollowup(sender, { handle: opened.handle, stateRevision: saved.state.stateRevision, stateDigest: saved.state.stateDigest, fields: ['$x'], requestId: 'frozen-for-draft' });
   assert.equal(frozen.ok, true); return { opened, writer, saved, frozen };
 }
 function persistFeedback(f, row) {

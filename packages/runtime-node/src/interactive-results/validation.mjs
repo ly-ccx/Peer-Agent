@@ -6,7 +6,7 @@ const failure = code => Object.assign(Error(code), { code });
 /** Each hostile program has its own terminable, bounded evaluation lifetime. */
 export async function runInteractiveValidation(input, { signal, timeoutMs = L.workerTimeoutMs, WorkerImpl = Worker } = {}) {
   if (signal?.aborted) throw failure('interactive_cancelled');
-  if (!input || !['validate', 'evaluate'].includes(input.operation) || Buffer.byteLength(JSON.stringify(input)) > 2 * 1024 * 1024) throw failure('interactive_resource_limit');
+  if (!input || !['validate', 'evaluate', 'describe-state'].includes(input.operation) || Buffer.byteLength(JSON.stringify(input)) > 2 * 1024 * 1024) throw failure('interactive_resource_limit');
   const { INTERACTIVE_VALIDATION_WORKER_SOURCE } = await import('./validation-worker-source.generated.mjs');
   if (signal?.aborted) throw failure('interactive_cancelled');
   const worker = new WorkerImpl(INTERACTIVE_VALIDATION_WORKER_SOURCE, {

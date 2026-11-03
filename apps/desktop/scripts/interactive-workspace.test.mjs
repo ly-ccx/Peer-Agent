@@ -125,6 +125,8 @@ test('the main workspace opens canonical interactive deliveries, restores result
     assert.equal(preparedDraft.ok, true); assert.equal(preparedDraft.snapshot.draft.text, 'Keep this draft');
     assert.equal(preparedDraft.snapshot.draft.quote.text, 'Keep this quote'); assert.equal(preparedDraft.snapshot.draft.attachments[0].text, 'keep');
     assert.equal(preparedDraft.snapshot.draft.resourceFeedback[0].version.values.$x, 5);
+    assert.match(preparedDraft.snapshot.draft.resourceFeedback[0].excerpt, /Trial name: Workspace trial\nDivisor: 5/);
+    assert.doesNotMatch(preparedDraft.snapshot.draft.resourceFeedback[0].excerpt, /Condition \d/);
     assert.equal((await electron.evaluate(() => globalThis.workspaceFixture.inputs())).messages.length, 0, 'preparation cannot submit');
     await page.screenshot({ path: path.join(root, 'workspace-draft-prepared.png'), animations: 'disabled' });
     await page.locator('.resource-interactive-body').evaluate(node => { node.scrollTop = 440; node.dispatchEvent(new Event('scroll')); });
@@ -145,6 +147,8 @@ test('the main workspace opens canonical interactive deliveries, restores result
     await native.getByLabel('Divisor', { exact: true }).fill('4'); await native.getByText('Conditions saved', { exact: true }).waitFor();
     await native.getByRole('button', { name: 'Add current conditions to draft', exact: true }).click();
     await native.getByText('Added to the original Bot draft. Review and send from that conversation.', { exact: true }).waitFor();
+    const nativeDraft = await electron.evaluate(() => globalThis.workspaceFixture.draft());
+    assert.match(nativeDraft.snapshot.draft.resourceFeedback.at(-1).excerpt, /Trial name: Workspace trial\nDivisor: 4/);
     assert.equal(await page.locator('.bot-composer textarea').inputValue(), 'Keep this draft');
     assert.equal(await page.locator('.bot-composer textarea').evaluate(node => document.activeElement === node), false, 'native preparation does not steal Composer focus');
     assert.equal((await electron.evaluate(() => globalThis.workspaceFixture.inputs())).messages.length, 0);

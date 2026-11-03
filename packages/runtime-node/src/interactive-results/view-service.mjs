@@ -30,6 +30,7 @@ export function createInteractiveViewService({ resultStore, stateStore, resolveS
   }
   function retire(record) {
     if (views.get(record.handle.viewId) !== record) return;
+    record.controller.abort();
     if (record.writer) {
       try { stateStore.release({ reference: record.reference, identity: record.handle, writer: record.writer }, () => true); }
       catch { /* A taken-over token cannot release its successor. */ }
@@ -93,7 +94,7 @@ export function createInteractiveViewService({ resultStore, stateStore, resolveS
           || disposed || controller.signal.aborted || sender.isDestroyed?.() === true) throw problem('interactive_scope_denied');
         const handle = normalizeInteractiveViewHandle({ viewId: createId(), windowId: createId(), generation: createId() });
         if (!handle || views.has(handle.viewId) || retired.has(handle.viewId)) throw problem('interactive_view_unavailable');
-        const record = { sender, reference, handle, requestId, assertCurrent: source.assertCurrent, writer: null };
+        const record = { sender, reference, handle, requestId, controller, assertCurrent: source.assertCurrent, writer: null };
         record.onDestroyed = () => retire(record);
         views.set(handle.viewId, record); sender.once?.('destroyed', record.onDestroyed);
         try { const reply = openReply(record); if (!reply.ok) retire(record); return reply; } catch (error) { retire(record); throw error; }
@@ -131,11 +132,24 @@ export function createInteractiveViewService({ resultStore, stateStore, resolveS
       return stateStore.saveOutcome({ reference: record.reference, identity: record.handle, writer, expectedRevision: value.expectedRevision,
         requestId: value.requestId, values: value.values, inputDrafts: value.inputDrafts }, current);
     }),
-    prepareFollowup: (sender, raw) => bound(sender, raw, ['stateRevision', 'stateDigest', 'fields', 'requestId'], (record, value, current) => {
-      if (!record.writer) throw problem('interactive_writer_required');
-      return { followup: stateStore.prepareFollowup({ reference: record.reference, identity: record.handle, writer: record.writer,
-        stateRevision: value.stateRevision, stateDigest: value.stateDigest, fields: value.fields, requestId: value.requestId }, current) };
-    }),
+    async prepareFollowup(sender, raw) {
+      try {
+        const value = request(raw, ['handle', 'stateRevision', 'stateDigest', 'fields', 'requestId']), record = locate(sender, value.handle);
+        if (!record.writer) throw problem('interactive_writer_required');
+        const key = encode([value.requestId, value.stateRevision, value.stateDigest, value.fields]);
+        if (record.followupPending && record.followupPending.key !== key) throw problem('interactive_followup_busy');
+        if (!record.followupPending) {
+          const operation = { key };
+          operation.promise = stateStore.prepareFollowup({ reference: record.reference, identity: record.handle, writer: record.writer,
+            stateRevision: value.stateRevision, stateDigest: value.stateDigest, fields: value.fields, requestId: value.requestId },
+          () => requireCurrent(record), { signal: record.controller.signal }).then(followup => {
+            requireCurrent(record); return { ok: true, followup };
+          }, failed).finally(() => { if (record.followupPending === operation) record.followupPending = null; });
+          record.followupPending = operation;
+        }
+        return copy(await record.followupPending.promise);
+      } catch (error) { return failed(error); }
+    },
     // Host-only binding for the existing draft preparation service. The closure
     // and actual sender never cross an IPC result or become a model tool.
     resolveFollowup: (sender, raw) => bound(sender, raw, ['followupId'], (record, value, current) => {
