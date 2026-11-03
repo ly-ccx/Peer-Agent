@@ -30,8 +30,12 @@ export const INTERACTIVE_INSPECT_SCHEMA = { type: 'object', properties: {
     { type: 'object', properties: { kind: { const: 'result' }, reference }, required: ['kind', 'reference'], additionalProperties: false },
     { type: 'object', properties: { kind: { const: 'publication' }, reference: callReference }, required: ['kind', 'reference'], additionalProperties: false },
   ] },
-  view: { type: 'string', enum: ['metadata', 'text', 'program', 'data', 'evaluate'] }, bindingId: token, selector,
-  followupId: token, offset: { type: 'integer', minimum: 0, maximum: L.inputBytes }, limit: { type: 'integer', minimum: 1, maximum: 4000 },
+  view: { type: 'string', enum: ['metadata', 'text', 'program', 'data', 'evaluate'],
+    description: 'Use a result target for program, data or evaluate. Publication targets only support metadata.' },
+  bindingId: { ...token, description: 'Required for data. Omit for all other views.' },
+  selector: { ...selector, description: 'Optional for data only. Omit when inspecting a complete binding.' },
+  followupId: { ...token, description: 'For evaluate only. Omit for the initial state. For frozen conditions use the exact admitted followupId.' },
+  offset: { type: 'integer', minimum: 0, maximum: L.inputBytes }, limit: { type: 'integer', minimum: 1, maximum: 4000 },
 }, required: ['target', 'view'], additionalProperties: false };
 function definition(capabilityId, name, schema, modes, prompt, riskLevel) {
   return { name, capabilityId, availableInModes: modes,
