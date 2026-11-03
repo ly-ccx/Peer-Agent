@@ -1,0 +1,29 @@
+{
+  "name": "@peer-agent/interactive-content",
+  "version": "0.1.0-rc.35",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "scripts": {
+    "build": "node --check src/index.mjs",
+    "typecheck": "node --check src/index.mjs",
+    "test": "OPENUI_TELEMETRY_DISABLED=1 node --test src/*.test.mjs"
+  },
+  "dependencies": {
+    "@openuidev/lang-core": "1.0.0",
+    "@peer-agent/protocol": "workspace:*",
+    "zod": "4.4.3"
+  }
+}

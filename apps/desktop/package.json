@@ -56,7 +56,10 @@
     "react-dom": "^19.2.0",
     "thinking-orbs": "^0.3.1",
     "vite": "^7.2.4",
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.0",
+    "@openuidev/react-lang": "1.0.0",
+    "@peer-agent/interactive-content": "workspace:*",
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@electron/asar": "3.4.1",
