@@ -331,6 +331,31 @@ test('assessment query has no child requirement, forged typed waits fail, and si
   assert.equal(validateDelegationInput('coordinate_work', { action: 'assess', assessment: { ...f.initial, permissionGrant: 'fake' }, reason: 'Assign' }).ok, false);
 });
 
+test('stale session waits return only current in-scope facts and cannot park a ready result', async t => {
+  const f = await fixture(t);
+  await f.coordinate({ action: 'parallel', task: { anchorMessageIds: ['input-i'], brief: 'Original' } },
+    f.context('spawn', { currentInputAnchors: ['input-i'] }));
+  const session = f.sessions.get('s1');
+  const context = f.context('t1', { currentInputAnchors: ['input-i'] });
+  const assessWait = (id, revision, extra = {}) => f.coordinate({ action: 'assess', assessment: { ...f.initial,
+    disposition: { kind: 'wait', waitFor: [{ kind: 'session', id, revision }] } } }, { ...context, ...extra });
+  const state = () => [{ sessionId: 's1', status: session.status, sourceRevision: session.sourceRevision,
+    observationRevision: session.observationRevision }];
+
+  const stale = await assessWait('s1', session.sourceRevision);
+  assert.equal(stale.error, 'wait_source_stale');
+  assert.deepEqual(stale.sessionStates, state());
+  assert.match(stale.message, /current observationRevision/);
+  assert.deepEqual(await assessWait('foreign', 'obs:foreign'), { ok: false, error: 'wait_source_stale' });
+
+  session.status = 'result_ready';
+  const ready = await assessWait('s1', session.observationRevision);
+  assert.equal(ready.error, 'wait_source_stale');
+  assert.deepEqual(ready.sessionStates, state());
+  assert.match(ready.message, /Review the current result or exception/);
+  assert.equal(f.store.readWork('g').intentCoordination, undefined);
+});
+
 test('a model cannot invent physical failure truth or borrow another work failure; semantic unresolved responsibility remains active', async t => {
   const f = await fixture(t);
   await f.coordinate({ action: 'parallel', task: { anchorMessageIds: ['input-i'], brief: 'Original' } }, f.context('spawn', { currentInputAnchors: ['input-i'] }));

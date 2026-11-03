@@ -73,50 +73,60 @@ export function createIntentLifecycle({ storeFor, readSession, readMessages, rea
         .map(row => ({ operationId: row.operationId, phase: row.phase, error: row.error })),
       availableActions: frame?.availableActions || [] };
   }
-  function dispositionError(assessment, s, context) {
+  function dispositionFailure(assessment, s, context) {
+    const reject = error => ({ ok: false, error });
     const d = assessment.disposition, intent = assessment.interpretation || s.work.intentCoordination?.interpretation;
     if (d.kind === 'continue') {
       return d.operationRefs.some(ref => {
         if (ref.startsWith('requirement:')) return !intent?.requirements.some(row => `requirement:${row.requirementId}` === ref
           && assessment.coverage.some(coverage => coverage.requirementId === row.requirementId && coverage.status !== 'covered'));
         return s.state.transitions?.[ref]?.workId !== s.workId;
-      }) ? 'continuation_obligation_missing' : null;
+      }) ? reject('continuation_obligation_missing') : null;
     }
     if (d.kind === 'wait') {
       for (const wait of d.waitFor) {
         if (wait.kind === 'session') {
-          const session = readSession({ sessionId: wait.id });
-          if (!s.mandate?.sessionIds.includes(wait.id) || !session || wait.revision !== revisionOf(session)
-            || ['accepted', 'cancelled', 'failed', 'result_ready'].includes(session.status)) return 'wait_source_stale';
+          const session = s.mandate?.sessionIds.includes(wait.id) ? readSession({ sessionId: wait.id }) : null;
+          if (!session) return reject('wait_source_stale');
+          const settled = ['accepted', 'cancelled', 'failed', 'result_ready'].includes(session.status);
+          if (settled || wait.revision !== revisionOf(session)) {
+            const error = reject('wait_source_stale');
+            if (context.scopedSessionIds && !context.scopedSessionIds.includes(wait.id)) return error;
+            return { ...error, sessionStates: [{ sessionId: wait.id, status: session.status,
+              sourceRevision: session.sourceRevision, observationRevision: session.observationRevision }],
+            message: settled
+              ? 'The session has left this wait state. Review the current result or exception instead of retrying this wait.'
+              : 'The session changed. Use its current observationRevision for a wait, or sourceRevision only if observationRevision is absent.' };
+          }
         } else if (wait.kind === 'human_request') {
           const request = Object.values(s.state.agentRequests || {}).find(row => row.userRequestRef === wait.id);
           if (!request || request.status !== 'open' || request.responder !== 'user' || String(request.revision) !== wait.revision
-            || !s.mandate?.sessionIds.includes(request.sessionId)) return 'human_wait_unproven';
+            || !s.mandate?.sessionIds.includes(request.sessionId)) return reject('human_wait_unproven');
         } else if (wait.kind === 'recovery') {
-          if (!s.work.recovery || wait.id !== s.work.recovery.reservationId || String(s.work.revision) !== wait.revision) return 'recovery_wait_unproven';
-        } else return 'resource_adapter_unavailable'; // ADR116 is not integrated on this branch.
+          if (!s.work.recovery || wait.id !== s.work.recovery.reservationId || String(s.work.revision) !== wait.revision) return reject('recovery_wait_unproven');
+        } else return reject('resource_adapter_unavailable'); // ADR116 is not integrated on this branch.
       }
     }
     if (d.kind === 'return' && d.replyRef !== `${context.turnId}-reply-1`
       && !(s.work.intentCoordination?.decision.operationId === assessment.operationId
-        && s.work.intentCoordination.decision.disposition.replyRef === d.replyRef)) return 'reply_reference_out_of_scope';
+        && s.work.intentCoordination.decision.disposition.replyRef === d.replyRef)) return reject('reply_reference_out_of_scope');
     if (d.kind === 'withdraw') {
       const control = s.state.transitions?.[d.controlRef], source = s.state.decisions?.[d.controlRef];
       if (!s.current.length || control?.workId !== s.workId || control.action !== 'cancel' || control.phase !== 'completed'
-        || !source?.sourceInputIds.some(id => s.current.some(row => (row.inputId || row.id) === id))) return 'withdrawal_unproven';
-      if (s.mandate?.sessionIds.some(id => !['accepted', 'cancelled'].includes(readSession({ sessionId: id })?.status))) return 'withdrawal_incomplete';
+        || !source?.sourceInputIds.some(id => s.current.some(row => (row.inputId || row.id) === id))) return reject('withdrawal_unproven');
+      if (s.mandate?.sessionIds.some(id => !['accepted', 'cancelled'].includes(readSession({ sessionId: id })?.status))) return reject('withdrawal_incomplete');
     }
     if (d.kind === 'blocked_system') {
       if (d.recoveryRef === `work:${s.workId}`) {
         if (d.code === 'intent_decision_unresolved') {
           if (s.mandate?.sessionIds.some(id => { const session = readSession({ sessionId: id });
             return ['queued', 'starting', 'running', 'verifying', 'waiting_user'].includes(session?.status)
-              || session?.followUp?.owner === 'user' || session?.resultConfirmationRequired === true; })) return 'existing_work_requires_wait';
+              || session?.followUp?.owner === 'user' || session?.resultConfirmationRequired === true; })) return reject('existing_work_requires_wait');
         } else if (d.code !== s.work.recovery?.failureKind && d.code !== s.work.recovery?.blockedCode
-          && !(d.code === 'execution_outcome_unknown' && hasUnsettledDispatch(s.work))) return 'failure_reference_unproven';
+          && !(d.code === 'execution_outcome_unknown' && hasUnsettledDispatch(s.work))) return reject('failure_reference_unproven');
       } else {
         const failure = s.state.transitions?.[d.recoveryRef];
-        if (failure?.workId !== s.workId || !['blocked', 'awaiting_outcome'].includes(failure.phase) || failure.error !== d.code) return 'failure_reference_unproven';
+        if (failure?.workId !== s.workId || !['blocked', 'awaiting_outcome'].includes(failure.phase) || failure.error !== d.code) return reject('failure_reference_unproven');
       }
     }
     return null;
@@ -127,7 +137,7 @@ export function createIntentLifecycle({ storeFor, readSession, readMessages, rea
     const assessment = { ...input.assessment, workId: s.workId,
       operationId: context.deliveryKey || `intent-${hash([context.turnId, context.toolCallOrdinal, input])}` };
     if (!validIntentAssessment(assessment)) return { ok: false, error: 'invalid_intent_assessment' };
-    const error = dispositionError(assessment, s, context); if (error) return { ok: false, error };
+    const failure = dispositionFailure(assessment, s, context); if (failure) return failure;
     const admitted = s.store.assessIntent(assessment, { parentConversationId: s.parentConversationId,
       currentInputIds: s.current.map(row => row.inputId || row.id), eventIds: (context.events || []).map(row => row.eventId), turnId: context.turnId,
       originDecisionRef: context.sourceDecisionRef });
