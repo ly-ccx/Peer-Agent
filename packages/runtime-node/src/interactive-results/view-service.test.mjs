@@ -33,6 +33,54 @@ async function fixture(t, options = {}) {
   return { results, states, service, a, b, receipt, open, admissionCount: () => admissions, revoke: () => { allowed = false; } };
 }
 
+async function revision(f, { indexed = true } = {}) {
+  const draft = { publication: { kind: 'revise', base: f.receipt.reference }, title: 'New fixed trial', textFallback: 'New model trial, unverified.', inputs: [],
+    program: '$budget=150\nroot=NumberInput("budget","Budget",$budget,0,1000,1)' };
+  const receipt = f.results.commitPublication({ owner, source: { conversationId: 'worker-b', planId: 'plan-b', sessionId: 'session-b', toolCallId: 'publish-b', executionEpoch: 'epoch-b' },
+    draft, content: await validateDraft(draft), provenance: [], dataLevel: 'D3_private', grant: { toolCallId: 'publish-b', grantId: 'grant-b', granted: true } }, current);
+  if (indexed) f.results.markIndexed(receipt.callRef, receipt.indexEntry);
+  return receipt;
+}
+
+test('human version navigation reads only confirmed metadata and preserves each fixed version and state', async t => {
+  const f = await fixture(t), opened = await f.open(), writer = f.service.acquire(f.a, { handle: opened.handle, expectedRevision: 0 }).writer;
+  assert.equal(f.service.save(f.a, { handle: opened.handle, writer, expectedRevision: 0, requestId: 'old-state', values: { $budget: 321 }, inputDrafts: { $budget: '321' } }).ok, true);
+  assert.deepEqual(f.service.readVersions(f.a, { handle: opened.handle }).versions, { reference: f.receipt.reference, head: f.receipt.reference });
+  assert.equal(f.service.resolveVersion(f.a, { handle: opened.handle, relation: 'head', expectedReference: f.receipt.reference }).code, 'interactive_version_unchanged');
+  const next = await revision(f, { indexed: false });
+  assert.equal(f.service.readVersions(f.a, { handle: opened.handle }).code, 'publication_index_pending');
+  f.results.markIndexed(next.callRef, next.indexEntry);
+  const readObject = f.results.storage.readObject;
+  f.results.storage.readObject = () => { throw Error('navigation cannot load program/data'); };
+  assert.deepEqual(f.service.readVersions(f.a, { handle: opened.handle }).versions, { reference: f.receipt.reference, head: next.reference });
+  const selected = f.service.resolveVersion(f.a, { handle: opened.handle, relation: 'head', expectedReference: next.reference });
+  assert.equal(selected.ok, true); assert.deepEqual(selected.reference, next.reference); assert.equal(selected.assertCurrent(), true);
+  f.results.storage.readObject = readObject;
+  const newer = await f.open(f.b, 'open-newer', next.reference);
+  assert.equal(newer.ok, true); assert.equal(newer.state.values.$budget, 150);
+  assert.deepEqual(f.service.readVersions(f.b, { handle: newer.handle }).versions, { reference: next.reference, head: next.reference, predecessor: f.receipt.reference });
+  assert.equal(f.service.readState(f.a, { handle: opened.handle }).state.values.$budget, 321);
+});
+
+test('version relationships reject foreign senders, extra locators, stale expectations and revoked owners', async t => {
+  const f = await fixture(t), opened = await f.open(), next = await revision(f);
+  assert.equal(f.service.readVersions(f.b, { handle: opened.handle }).code, 'interactive_view_stale');
+  assert.equal(f.service.readVersions(f.a, { handle: opened.handle, reference: next.reference }).code, 'interactive_request_invalid');
+  assert.equal(f.service.resolveVersion(f.a, { handle: opened.handle, relation: 'head', expectedReference: f.receipt.reference }).code, 'version_conflict');
+  assert.equal(f.service.resolveVersion(f.a, { handle: opened.handle, relation: 'predecessor', expectedReference: next.reference }).code, 'version_conflict');
+  assert.equal(f.service.resolveVersion(f.a, { handle: opened.handle, relation: 'other', expectedReference: next.reference }).code, 'interactive_request_invalid');
+  f.revoke(); assert.equal(f.service.readVersions(f.a, { handle: opened.handle }).code, 'interactive_view_stale');
+});
+
+test('corrupt version metadata cannot advertise a relationship inconsistent with the original publication', async t => {
+  const f = await fixture(t), opened = await f.open(), next = await revision(f);
+  const db = f.results.storage.connect(owner.workspaceId).db;
+  const row = db.prepare('SELECT metadata FROM versions WHERE id=? AND version=?').get(next.reference.resultId, next.reference.contentVersion);
+  const metadata = JSON.parse(row.metadata); metadata.predecessor = { ...f.receipt.reference, owner: { ...owner, conversationId: 'other' } };
+  db.prepare('UPDATE versions SET metadata=? WHERE id=? AND version=?').run(JSON.stringify(metadata), next.reference.resultId, next.reference.contentVersion);
+  assert.equal(f.service.readVersions(f.a, { handle: opened.handle }).code, 'interactive_storage_corrupt');
+});
+
 test('human view service binds the actual sender and immutable version, saves state and freezes conditions without new publication facts', async t => {
   const f = await fixture(t), opened = await f.open();
   assert.equal(opened.ok, true);

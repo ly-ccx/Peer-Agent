@@ -8,6 +8,7 @@ import { useDocumentReadingPosition } from '../useDocumentReadingPosition';
 import { useNativeNavigation } from '../NativeNavigation';
 import { interactiveSessionKey, interactiveSessionRegistry } from './interactiveSessionRegistry';
 import type { InteractiveSession } from './interactiveSession';
+import { InteractiveVersions } from './InteractiveVersions';
 import './interactive-resource.css';
 
 function SavedSummary({ title, text, isZh }: { readonly title: string; readonly text: string; readonly isZh: boolean }) {
@@ -52,9 +53,10 @@ function failureText(code: string | null, isZh: boolean) {
   return isZh ? '此设备暂时无法打开结果。没有重新取数或执行工作，可以重试。' : 'This device cannot open the result. No data or work was rerun. Retry opening.';
 }
 
-export function InteractiveResource({ reference, api, active, isZh, onReady, onUnavailable, onRecoverView, onMetadata }: { readonly reference: InteractiveResultReference; readonly api?: InteractiveResultsApi;
+export function InteractiveResource({ reference, api, active, isZh, onReady, onUnavailable, onRecoverView, onMetadata, onOpenReference }: { readonly reference: InteractiveResultReference; readonly api?: InteractiveResultsApi;
   readonly active: boolean; readonly isZh: boolean; readonly onReady?: () => void; readonly onUnavailable?: () => void; readonly onRecoverView?: () => Promise<boolean>;
-  readonly onMetadata?: (reference: InteractiveResultReference, title: string) => void }) {
+  readonly onMetadata?: (reference: InteractiveResultReference, title: string) => void;
+  readonly onOpenReference?: (reference: InteractiveResultReference) => boolean | Promise<boolean> }) {
   const registry = useMemo(() => interactiveSessionRegistry(api), [api]);
   const key = interactiveSessionKey(reference);
   useSyncExternalStore(registry?.subscribe ?? (() => () => {}), registry?.snapshot ?? (() => 0), () => 0);
@@ -80,6 +82,7 @@ export function InteractiveResource({ reference, api, active, isZh, onReady, onU
     {(!entry || entry.phase === 'opening') && !failure ? <div role="status"><p>{isZh ? '正在打开固定版本…' : 'Opening the fixed version…'}</p>
       {registry && entry ? <button type="button" className="ui-button" onClick={() => { void registry.close(reference).then(ok => { if (ok) setOpeningError('interactive_open_cancelled'); }); }}>{isZh ? '取消打开' : 'Cancel opening'}</button> : null}</div> : null}
     {failure ? <div role="alert"><p>{failureText(failure, isZh)}</p><button type="button" className="ui-button" onClick={open}>{isZh ? '重试打开' : 'Retry opening'}</button></div> : null}
+    {entry?.phase === 'ready' && entry.opened && api ? <InteractiveVersions reference={reference} handle={entry.opened.handle} api={api} isZh={isZh} openReference={onOpenReference} /> : null}
     {entry?.phase === 'ready' && session && entry.opened ? <Surface session={session} provenance={entry.opened.result.provenance} isZh={isZh} onReady={onReady}
       onUnavailable={onUnavailable} recoverView={onRecoverView ?? (async () => !!(await window.peerAgent?.resourceWindowOpen?.({ resource: { kind: 'interactive', reference } }))?.ok)} />
       : entry?.summary ? <SavedSummary title={entry.summary.title} text={entry.summary.textFallback} isZh={isZh} /> : null}

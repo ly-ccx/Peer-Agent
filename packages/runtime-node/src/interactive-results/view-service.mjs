@@ -120,6 +120,15 @@ export function createInteractiveViewService({ resultStore, stateStore, resolveS
       return {};
     }),
     readState: (sender, raw) => bound(sender, raw, [], (record, _value, current) => ({ state: stateStore.read(record.reference, current) })),
+    readVersions: (sender, raw) => bound(sender, raw, [], (record, _value, current) => ({ versions: resultStore.readVersions(record.reference, current) })),
+    resolveVersion: (sender, raw) => bound(sender, raw, ['relation', 'expectedReference'], (record, value, current) => {
+      const expected = normalizeInteractiveReference(value.expectedReference);
+      if (!expected || !['head', 'predecessor'].includes(value.relation)) throw problem('interactive_request_invalid');
+      const target = resultStore.readVersions(record.reference, current)[value.relation];
+      if (!target || !same(target, expected)) throw problem('version_conflict');
+      if (same(target, record.reference)) throw problem('interactive_version_unchanged');
+      return { reference: target, assertCurrent: current };
+    }),
     acquire: (sender, raw) => bound(sender, raw, ['expectedRevision', 'takeover'], (record, value, current) => {
       if (!revision(value.expectedRevision) || value.takeover !== undefined && typeof value.takeover !== 'boolean') throw problem('interactive_request_invalid');
       record.writer = stateStore.acquire({ reference: record.reference, identity: record.handle, expectedRevision: value.expectedRevision,

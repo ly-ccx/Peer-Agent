@@ -9,7 +9,7 @@ const run = operation => { try { return operation(); } catch (error) { return fa
 const validRequest = (raw, fields) => raw && typeof raw === 'object' && !Array.isArray(raw) && Object.keys(raw).every(key => fields.includes(key));
 
 /** Actual app senders/owners bind the shared domain service. No tool or file-execution port. */
-export function createDesktopInteractiveApplication({ getRole, getOwner, getNativeBinding, prepareFeedback, readDraft, getRuntime = desktopInteractiveRuntime }) {
+export function createDesktopInteractiveApplication({ getRole, getOwner, getNativeBinding, prepareFeedback, readDraft, openWindow, getRuntime = desktopInteractiveRuntime }) {
   const instances = new Map(), lifetimes = new Map();
   let disposed = false;
   function ownerOf(workspaceId) {
@@ -64,6 +64,21 @@ export function createDesktopInteractiveApplication({ getRole, getOwner, getNati
     open: (sender, request) => view('open', sender, request),
     cancelOpen: (sender, request) => view('cancelOpen', sender, request),
     readState: (sender, request) => view('readState', sender, request),
+    readVersions: (sender, request) => view('readVersions', sender, request),
+    async openVersion(sender, request) {
+      try {
+        if (disposed || getRole(sender) !== 'resource' || typeof openWindow !== 'function') return fail('interactive_navigation_unavailable');
+        const selected = instance().views.resolveVersion(sender, request);
+        if (!selected.ok) return selected;
+        const native = getNativeBinding(sender), sourceSender = native?.sourceSender;
+        const current = () => selected.assertCurrent() === true && sourceSender && getRole(sourceSender) === 'main'
+          && sourceSender.isDestroyed?.() !== true && getNativeBinding(sender)?.sourceSender === sourceSender;
+        if (!current()) return fail('interactive_view_stale');
+        const opened = await openWindow(sourceSender, selected.reference);
+        if (!current()) return fail('interactive_view_stale');
+        return opened?.ok ? { ok: true, reference: selected.reference } : fail('interactive_version_open_failed');
+      } catch (error) { return fail(code(error)); }
+    },
     acquire: (sender, request) => view('acquire', sender, request),
     save: (sender, request) => view('save', sender, request),
     release: (sender, request) => view('release', sender, request),

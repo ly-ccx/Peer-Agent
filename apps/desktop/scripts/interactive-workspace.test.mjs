@@ -102,7 +102,7 @@ test('the main workspace opens canonical interactive deliveries, restores result
     source.webContents.on('did-start-navigation',(_event,_url,_sameDocument,mainFrame)=>{if(mainFrame)navigations++});
     const initial={locale:'en-US',workbench:{activeTab:{[owner.conversationId]:'launcher'},documentSessions:{},browserSessions:{}}};
     const preparation=createResourceFeedbackPreparation({isMainSender:sender=>windows.getRole(sender)==='main',getRecipient:()=>owner});
-    const interactive=createDesktopInteractiveApplication({getRole:sender=>windows.getRole(sender),getOwner:workspaceId=>workspaceId===owner.workspaceId?owner:null,getNativeBinding:sender=>host.interactiveBinding(sender),getRuntime:()=>runtime,prepareFeedback:preparation.prepare,readDraft:drafts.read});
+    const interactive=createDesktopInteractiveApplication({getRole:sender=>windows.getRole(sender),getOwner:workspaceId=>workspaceId===owner.workspaceId?owner:null,getNativeBinding:sender=>host.interactiveBinding(sender),getRuntime:()=>runtime,prepareFeedback:preparation.prepare,readDraft:drafts.read,openWindow:(sender,reference)=>host.open(sender,{resource:{kind:"interactive",reference}})});
     const originalSave=interactive.save;let saveFault=null;
     interactive.save=(sender,request)=>{if(sender!==source.webContents||!saveFault)return originalSave(sender,request);const fault=saveFault;saveFault=null;if(fault==='uncommitted')return{ok:false,code:'fixture_save_unconfirmed'};const reply=originalSave(sender,request);return reply.ok?{ok:false,code:'fixture_save_unconfirmed'}:reply};
     const nativeWindows=[];function QuietWindow(options){const win=new BrowserWindow(options);win.show=()=>{};nativeWindows.push(win);return win}QuietWindow.fromWebContents=contents=>BrowserWindow.fromWebContents(contents);
@@ -111,7 +111,7 @@ test('the main workspace opens canonical interactive deliveries, restores result
     ipc.handle('project-agent:read-input-draft',(_event,request)=>drafts.read(request));ipc.handle('project-agent:write-input-draft',(_event,request)=>drafts.write(request));ipc.handle('project-agent:submit-input',(_event,request)=>({ok:true,input:queue.submitInput(request)}));
     ipc.on('settings:get-sync',event=>{event.returnValue=initial});ipc.handle('settings:get',()=>initial);ipc.handle('settings:update',(_event,partial)=>{settingsWrites.push(partial);return initial});
     const evidenceFacts={getConversationId:()=>owner.conversationId,getPlan:()=>({planId:'plan',conversationId:'worker',tasks:[{taskId:'generated',status:'completed',result:'Saved unverified model trial.',evidenceRefs:['tool-result://publication']},{taskId:'remaining',status:'pending'}],delegationOrigin:{workspaceId:owner.workspaceId,parentConversationId:owner.conversationId,sessionId:'session'}}),getSession:()=>({sessionId:'session',workspaceId:owner.workspaceId,planId:'plan',status:'failed',report:{planId:'plan'}})};
-    const findRecords=refs=>refs.includes(receipt.indexEntry.evidenceRef)?[receipt.indexEntry]:[];
+    const evidenceEntries=[receipt.indexEntry],findRecords=refs=>evidenceEntries.filter(row=>refs.includes(row.evidenceRef));
     const publications=createInteractivePublicationSource({resultStore,goalPlanStore:{getPlan:evidenceFacts.getPlan,findEvidenceIndexRecords:findRecords},getBotConversationId:evidenceFacts.getConversationId,getSession:evidenceFacts.getSession});
     conversations.appendMessage(owner.conversationId,{id:'fixture-result-anchor',role:'user',kind:'user_input',content:'Show the saved trial and current task status'});
     const replyComposer=createDesktopReplyComposer({readResultReferences:publications.replyReferences,readDelivery:()=>({sessionIds:['session'],sessionStates:[{sessionId:'session',status:'failed'}],verdicts:[]})});
@@ -123,7 +123,8 @@ test('the main workspace opens canonical interactive deliveries, restores result
     const projectApplication=createProjectAgentApplicationService({enabled:()=>true,readEvidenceBody:readEvidence});
     ipc.handle('project-agent:read-evidence',(_event,request)=>projectApplication.readEvidence(request));
     ipc.handle('resource-edit:list',()=>({ok:true,drafts:[],operations:[],staleCount:0}));
-    globalThis.workspaceFixture={snapshot:()=>stateStore.read(receipt.reference,()=>true),layout:()=>interactive.readLayout(source.webContents,{owner}),
+    globalThis.workspaceFixture={snapshot:(reference=receipt.reference)=>stateStore.read(reference,()=>true),
+      publishNext:async()=>{const nextDraft={...draft,publication:{kind:"revise",base:receipt.reference},title:"Workspace trial updated",program:program.replace("$x=2","$x=9")};const next=resultStore.commitPublication({owner,source:{conversationId:"worker",sessionId:"session",planId:"plan",executionEpoch:"epoch",toolCallId:"publication-revision"},draft:nextDraft,content:await validateDraft(nextDraft),provenance:[],dataLevel:"D3_private",grant:{toolCallId:"publication-revision",grantId:"fixture-revision-grant",granted:true}},()=>true);evidenceEntries.push(next.indexEntry);resultStore.markIndexed(next.callRef,next.indexEntry);return next.reference;},layout:()=>interactive.readLayout(source.webContents,{owner}),
       failSave:kind=>{if(!['committed','uncommitted'].includes(kind))throw Error('invalid fault');saveFault=kind},
       draft:()=>drafts.read(draftAddress),consume:()=>queue.consume(owner.workspaceId),inputs:()=>({queue:queue.diagnosticSnapshot(owner.workspaceId),messages:conversations.getPersistedConversationHistory(owner.conversationId).messages.filter(row=>row.kind==='user_input'&&row.id!=='fixture-result-anchor').map(row=>({...row,selected:feedback.restore(row,owner.workspaceId)}))}),
       closeSource:()=>{closeAttempts++;source.close()},
@@ -142,7 +143,7 @@ test('the main workspace opens canonical interactive deliveries, restores result
     page.on('dialog', dialog => { void dialog.dismiss().catch(error => { if (!error.message.includes('No dialog is showing')) errors.push(error.message); }); }); };
   electron.context().on('page', observe); electron.windows().forEach(observe);
   await electron.context().route(/^https?:/, route => { external.push(route.request().url()); return route.abort(); });
-  let page;
+  let page, recoveredView;
   try {
     page = await electron.firstWindow(); await page.getByText('Trial delivery', { exact: true }).waitFor();
     await page.getByText('Deliveries', { exact: true }).click();
@@ -257,7 +258,7 @@ test('the main workspace opens canonical interactive deliveries, restores result
       const beforeRecovery = await electron.evaluate(() => globalThis.workspaceFixture.facts());
       const recoveredWindow = electron.waitForEvent('window');
       await page.getByRole('button', { name: 'Save drafts and open separate view', exact: true }).click();
-      const recovered = await recoveredWindow; await recovered.getByLabel('Divisor', { exact: true }).waitFor();
+      const recovered = await recoveredWindow; recoveredView = recovered; await recovered.getByLabel('Divisor', { exact: true }).waitFor();
       assert.equal(await recovered.getByLabel('Divisor', { exact: true }).inputValue(), '3');
       assert.equal(await recovered.getByLabel('Trial name', { exact: true }).inputValue(), '中断输入');
       assert.equal(await page.locator('.bot-composer textarea').inputValue(), 'Keep exact draft after fallback');
@@ -269,6 +270,42 @@ test('the main workspace opens canonical interactive deliveries, restores result
     assert.equal(facts.closeAttempts, 1); assert.equal(facts.sourceAlive, true);
     assert.equal(JSON.stringify(facts.settingsWrites).includes('interactive'), false);
     assert.equal(await page.evaluate(() => Object.values(localStorage).some(value => value.includes('interactive-result://') || value.includes('interactiveReference'))), false);
+    await reloadSavedWorkspace(electron, page);
+    await page.getByText('Deliveries', { exact: true }).click();
+    await page.getByRole('button', { name: 'Open interactive result', exact: true }).click();
+    await page.getByLabel('Divisor', { exact: true }).waitFor();
+    const next = await electron.evaluate(() => globalThis.workspaceFixture.publishNext());
+    const continueHere = page.getByRole('button', { name: 'Continue calculation here', exact: true });
+    if (await continueHere.isVisible()) await continueHere.click();
+    await page.getByLabel('Divisor', { exact: true }).fill('-');
+    await page.getByRole('button', { name: 'Check versions', exact: true }).click();
+    await page.getByRole('button', { name: 'Open newer version', exact: true }).click();
+    await page.getByRole('tab', { name: 'Workspace trial updated', exact: true }).waitFor();
+    assert.equal(await page.getByRole('tab', { name: 'Workspace trial updated', exact: true }).evaluate(node => node === document.activeElement), true, 'explicit navigation keeps focus on the selected resource tab');
+    await page.waitForFunction(() => Array.from(document.querySelectorAll('label')).some(label => label.textContent === 'Divisor' && label.control?.value === '9'));
+    assert.equal((await electron.evaluate((_electron, reference) => globalThis.workspaceFixture.snapshot(reference), next)).values.$x, 9);
+    await page.screenshot({ path: path.join(root, 'workspace-new-version.png'), animations: 'disabled' });
+    await page.getByRole('tab', { name: 'Workspace trial', exact: true }).click();
+    assert.equal(await page.getByLabel('Divisor', { exact: true }).inputValue(), '-', 'opening a version cannot overwrite the old raw draft');
+    assert.equal((await electron.evaluate(() => globalThis.workspaceFixture.snapshot())).values.$x, 3);
+    await recoveredView.getByRole('button', { name: 'Check versions', exact: true }).click();
+    const newerWindow = electron.waitForEvent('window');
+    await recoveredView.getByRole('button', { name: 'Open newer version', exact: true }).click();
+    const revised = await newerWindow; await revised.getByLabel('Divisor', { exact: true }).waitFor();
+    assert.equal(await revised.getByLabel('Divisor', { exact: true }).inputValue(), '9');
+    assert.equal(recoveredView.isClosed(), false);
+    await revised.getByRole('button', { name: 'Check versions', exact: true }).click();
+    await revised.getByRole('button', { name: 'Open previous version', exact: true }).waitFor();
+    await revised.screenshot({ path: path.join(root, 'native-new-version.png'), animations: 'disabled' });
+    const oldConfirmed = await electron.evaluate(() => globalThis.workspaceFixture.snapshot());
+    const previousWindow = electron.waitForEvent('window');
+    await revised.getByRole('button', { name: 'Open previous version', exact: true }).click();
+    const previous = await previousWindow; await previous.getByLabel('Divisor', { exact: true }).waitFor();
+    assert.equal(await previous.getByLabel('Divisor', { exact: true }).inputValue(), oldConfirmed.inputDrafts.$x ?? String(oldConfirmed.values.$x));
+    assert.equal(await page.getByLabel('Divisor', { exact: true }).inputValue(), '-');
+    assert.equal(revised.isClosed(), false);
+    assert.equal((await electron.evaluate(() => globalThis.workspaceFixture.facts())).versions, 2);
+    assert.equal((await electron.evaluate(() => globalThis.workspaceFixture.facts())).operations, 2);
     assert.deepEqual(external, []);
   } catch (error) {
     if (page && !page.isClosed()) { console.log('Workspace fixture diagnostics:', JSON.stringify({ text: (await page.locator('body').innerText()).slice(0, 2600), errors, root })); await page.screenshot({ path: path.join(root, 'workspace-failed.png'), animations: 'disabled' }); }

@@ -1,5 +1,8 @@
 .resource-interactive-body { height: 100%; overflow: auto; min-width: 0; min-height: 0; padding: var(--space-4); }
 .interactive-resource { min-width: 0; }
+.interactive-versions { margin-block-end: var(--space-3); font-size: var(--ui-font-caption); }
+.interactive-versions > div { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.interactive-versions p { margin-block: var(--space-2); }
 .interactive-resource-fallback { white-space: pre-wrap; overflow-wrap: anywhere; }
 .interactive-resource-fallback h2 { font-size: var(--ui-font-heading-md); }
 .interactive-resource-program { margin-block-start: var(--space-4); }

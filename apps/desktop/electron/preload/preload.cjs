@@ -94,6 +94,8 @@ contextBridge.exposeInMainWorld('peerAgent', {
     open: request => ipcRenderer.invoke('interactive-results:open', request),
     cancelOpen: request => ipcRenderer.invoke('interactive-results:cancel-open', request),
     readState: request => ipcRenderer.invoke('interactive-results:read-state', request),
+    readVersions: request => ipcRenderer.invoke('interactive-results:read-versions', request),
+    openVersion: request => ipcRenderer.invoke('interactive-results:open-version', request),
     acquire: request => ipcRenderer.invoke('interactive-results:acquire', request),
     save: request => ipcRenderer.invoke('interactive-results:save', request),
     release: request => ipcRenderer.invoke('interactive-results:release', request),

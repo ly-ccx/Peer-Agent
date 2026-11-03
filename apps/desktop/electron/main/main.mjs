@@ -1684,7 +1684,7 @@ const fileAccessApplicationService = createFileAccessApplicationService({
 
 const interactiveResultsApplication = createDesktopInteractiveApplication({ getRole: sender => trustedWindowRegistry.getRole(sender),
   getOwner: workspaceId => resourceEditOwner(workspaceId),
-  getNativeBinding: sender => resourceWindowController.interactiveBinding(sender),
+  getNativeBinding: sender => resourceWindowController.interactiveBinding(sender), openWindow: (sender, reference) => resourceWindowController.open(sender, { resource: { kind: 'interactive', reference } }),
   prepareFeedback: resourceFeedbackPreparation.prepare, readDraft: request => projectAgentDirectory.readInputDraft?.(request),
 });
 const resourceWindowController = createResourceWindowController({

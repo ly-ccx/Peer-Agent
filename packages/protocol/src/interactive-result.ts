@@ -155,12 +155,19 @@ export interface InteractiveOpenView {
   readonly result: InteractivePublishedResult;
   readonly state: InteractiveStateSnapshot;
 }
+export interface InteractiveVersionNavigation {
+  readonly reference: InteractiveResultReference;
+  readonly head: InteractiveResultReference;
+  readonly predecessor?: InteractiveResultReference;
+}
 export type InteractiveSaveResult = { readonly ok: true; readonly state: InteractiveStateSnapshot; readonly writerCurrent?: boolean }
   | { readonly ok: false; readonly code: string; readonly saveStatus?: 'not_committed' };
 export interface InteractiveResultsApi {
   open(request: { readonly reference: InteractiveResultReference; readonly requestId: string }): Promise<InteractiveResult<InteractiveOpenView>>;
   cancelOpen?(request: { readonly requestId: string }): Promise<InteractiveResult>;
   readState(request: { readonly handle: InteractiveViewHandle }): Promise<InteractiveResult<{ readonly state: InteractiveStateSnapshot }>>;
+  readVersions?(request: { readonly handle: InteractiveViewHandle }): Promise<InteractiveResult<{ readonly versions: InteractiveVersionNavigation }>>;
+  openVersion?(request: { readonly handle: InteractiveViewHandle; readonly relation: 'head' | 'predecessor'; readonly expectedReference: InteractiveResultReference }): Promise<InteractiveResult<{ readonly reference: InteractiveResultReference }>>;
   acquire(request: { readonly handle: InteractiveViewHandle; readonly expectedRevision: number; readonly takeover?: boolean }): Promise<InteractiveResult<{ readonly writer: InteractiveWriter }>>;
   save(request: { readonly handle: InteractiveViewHandle; readonly writer: InteractiveWriter; readonly expectedRevision: number; readonly requestId: string; readonly values: InteractiveStateValues; readonly inputDrafts: Readonly<Record<string, string>> }): Promise<InteractiveSaveResult>;
   release(request: { readonly handle: InteractiveViewHandle; readonly writer?: InteractiveWriter }): Promise<InteractiveResult>;

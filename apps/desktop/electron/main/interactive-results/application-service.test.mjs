@@ -44,7 +44,8 @@ async function fixture(t) {
   const preparation = createResourceFeedbackPreparation({ isMainSender: sender => trusted.getRole(sender) === 'main',
     getRecipient: () => ({ conversationId }), schedule: callback => { const timer = { callback, active: true }; timers.push(timer); return timer; }, cancel: timer => { timer.active = false; } });
   const app = createDesktopInteractiveApplication({ getRole: sender => trusted.getRole(sender), getOwner: workspaceId => workspaceId === owner.workspaceId && conversationId ? { conversationId } : null,
-    getRuntime: () => activeRuntime, getNativeBinding: sender => host.interactiveBinding(sender), prepareFeedback: preparation.prepare, readDraft: drafts.read });
+    getRuntime: () => activeRuntime, getNativeBinding: sender => host.interactiveBinding(sender), prepareFeedback: preparation.prepare, readDraft: drafts.read,
+    openWindow: (sender, reference) => host.open(sender, { resource: { kind: 'interactive', reference } }) });
   host = createResourceWindowController({ BrowserWindow: Window, trustedWindows: trusted, rendererLocation: location, preloadPath: '/app/resource-window.cjs', interactiveResources: app,
     getOwner: async () => ({ conversationId }), resolveDocument: async ref => ({ ok: true, root: '/repo', target: ref.path }),
     readHistory: () => legacyHistory, writeHistory: value => { legacyHistory = structuredClone(value); },
@@ -197,10 +198,36 @@ test('mixed recovery merges actual protected history with legacy Settings withou
   assert.equal(f.runtime.resultStore.getVersion(f.resource.reference).content.title, entry.title);
 });
 
+test('native version navigation opens only the checked related publication through its actual main source', async t => {
+  const f = await fixture(t), { window: original } = await f.openNative();
+  assert.equal(f.host.ready(original.webContents, f.host.bootstrap(original.webContents).context).ok, true);
+  const old = await f.app.open(original.webContents, { reference: f.resource.reference, requestId: 'old-version' });
+  const draft = { publication: { kind: 'revise', base: f.receipt.reference }, title: 'Revised trial', textFallback: 'Revised unverified trial.', inputs: [],
+    program: '$x=7\nroot=NumberInput("x","Divisor",$x,0,10,1)' };
+  const next = f.runtime.resultStore.commitPublication({ owner, source: { conversationId: 'worker-b', planId: 'plan-b', sessionId: 'session-b', toolCallId: 'publish-b', executionEpoch: 'epoch-b' },
+    draft, content: await validateDraft(draft), provenance: [], dataLevel: 'D3_private', grant: { toolCallId: 'publish-b', grantId: 'grant-b', granted: true } }, () => true);
+  f.runtime.resultStore.markIndexed(next.callRef, next.indexEntry);
+  assert.deepEqual(f.app.readVersions(original.webContents, { handle: old.handle }).versions, { reference: f.receipt.reference, head: next.reference });
+  const request = { handle: old.handle, relation: 'head', expectedReference: next.reference };
+  assert.equal((await f.app.openVersion(f.main, request)).code, 'interactive_navigation_unavailable');
+  assert.equal((await f.app.openVersion(original.webContents, { ...request, expectedReference: f.receipt.reference })).code, 'version_conflict');
+  assert.equal(f.windows.length, 1);
+  assert.deepEqual(await f.app.openVersion(original.webContents, request), { ok: true, reference: next.reference });
+  assert.equal(f.windows.length, 2); assert.equal(original.isDestroyed(), false);
+  const created = f.windows.at(-1), context = f.host.bootstrap(created.webContents).context;
+  assert.deepEqual(context.resource.reference, next.reference); assert.deepEqual(context.owner, owner); assert.equal(context.navigation?.top ?? 0, 0);
+  assert.equal(f.host.ready(created.webContents, context).ok, true);
+  const opened = await f.app.open(created.webContents, { reference: next.reference, requestId: 'new-version' });
+  assert.equal(opened.state.values.$x, 7); assert.equal(f.app.readState(original.webContents, { handle: old.handle }).state.values.$x, 2);
+  const previous = { handle: opened.handle, relation: 'predecessor', expectedReference: f.receipt.reference };
+  const pending = f.app.openVersion(created.webContents, previous); f.setOwner('replacement-bot');
+  assert.equal((await pending).code, 'interactive_view_stale'); assert.equal(created.isDestroyed(), false);
+});
+
 test('interactive IPC policy excludes guests, wrong origins and subframes, and layout is main-only', async t => {
   const f = await fixture(t), { window } = await f.openNative(), native = window.webContents;
   const event = { sender: native, senderFrame: native.mainFrame };
-  for (const channel of ['interactive-results:open', 'interactive-results:cancel-open', 'interactive-results:save', 'interactive-results:prepare-followup', 'interactive-results:prepare-draft']) {
+  for (const channel of ['interactive-results:open', 'interactive-results:cancel-open', 'interactive-results:read-versions', 'interactive-results:open-version', 'interactive-results:save', 'interactive-results:prepare-followup', 'interactive-results:prepare-draft']) {
     const entry = getDesktopIpcPolicy(channel);
     assert.doesNotThrow(() => f.trusted.authorize({ entry, event }));
     assert.throws(() => f.trusted.authorize({ entry, event: { ...event, senderFrame: { url: location, parent: native.mainFrame } } }), { code: 'ERR_PEER_DESKTOP_IPC_UNAUTHORIZED' });

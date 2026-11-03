@@ -147,8 +147,9 @@ export function BotResourceLayout({ owner, active, isZh, children }: {
       previous.focus({ preventScroll: true });
       if (document.activeElement === previous) return;
     }
-    const target = root.current?.querySelector<HTMLElement>(focusArea === 'resource'
-      ? '.resource-workspace [aria-selected="true"], .resource-workspace button' : '.bot-main textarea, .bot-main button');
+    const target = focusArea === 'resource'
+      ? root.current?.querySelector<HTMLElement>('.resource-workspace [aria-selected="true"]') ?? root.current?.querySelector<HTMLElement>('.resource-workspace button')
+      : root.current?.querySelector<HTMLElement>('.bot-main textarea, .bot-main button');
     target?.focus({ preventScroll: true });
   }, [focusRequest, focusArea, workbench.open, compact]);
   const reveal = () => {

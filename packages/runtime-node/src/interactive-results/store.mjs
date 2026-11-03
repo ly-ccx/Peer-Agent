@@ -181,6 +181,27 @@ export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'
     if (!row || row.owner !== encode(ref.owner)) throw problem('interactive_result_unavailable');
     return { ...ref, contentVersion: row.head };
   }
+  function readVersions(rawReference, assertCurrent) {
+    const reference = requireReference(rawReference);
+    requireCurrent(assertCurrent);
+    const checkedMetadata = target => {
+      const { publicationStatus: _status, ...metadata } = getVersionMetadata(target);
+      const original = getOperation({ owner: target.owner, conversationId: metadata.source?.conversationId, toolCallId: metadata.source?.toolCallId });
+      if (original?.publicationStatus !== 'published' || original.unchanged || !same(original.reference, target)
+        || !same(original.metadata, metadata)) throw problem('interactive_storage_corrupt');
+      return metadata;
+    };
+    const fixed = checkedMetadata(reference), latest = requireReference(head(reference));
+    checkedMetadata(latest);
+    const predecessor = fixed.predecessor && requireReference(fixed.predecessor);
+    if (predecessor) {
+      if (!same(predecessor.owner, reference.owner) || predecessor.resultId !== reference.resultId
+        || same(predecessor, reference)) throw problem('interactive_storage_corrupt');
+      checkedMetadata(predecessor);
+    }
+    requireCurrent(assertCurrent);
+    return clone({ reference, head: latest, ...(predecessor ? { predecessor } : {}) });
+  }
   function recordMaterial({ owner: rawOwner, source, value, dataLevel, observedAt, truncated, redacted, evidenceRefs }, assertCurrent) {
     const owner = requireOwner(rawOwner);
     if (!materialKey(source)
@@ -214,7 +235,7 @@ export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'
     if (!same(metadata.source, source)) throw problem('material_version_mismatch');
     return { ...metadata, value: storage.readObject(context, row.object), canonical: true, available: true };
   }
-  return { commitPublication, getOperation, getVersion, getVersionMetadata, markIndexed, listPending, head, recordMaterial, readMaterial,
+  return { commitPublication, getOperation, getVersion, getVersionMetadata, markIndexed, listPending, head, readVersions, recordMaterial, readMaterial,
     ownerDataLevel: (rawOwner, minimum) => privacy.current(requireOwner(rawOwner), minimum),
     hasOwnerPrivacy: rawOwner => privacy.has(requireOwner(rawOwner)),
     rememberObservationLevel(rawOwner, dataLevel, assertOwner) {

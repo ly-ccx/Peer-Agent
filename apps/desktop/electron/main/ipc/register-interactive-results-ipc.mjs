@@ -4,6 +4,8 @@ export function createInteractiveResultsIpcRegistrations({ interactiveResults })
     ipc.handle('interactive-results:open', (event, request) => interactiveResults.open(event.sender, request));
     ipc.handle('interactive-results:cancel-open', (event, request) => interactiveResults.cancelOpen(event.sender, request));
     ipc.handle('interactive-results:read-state', (event, request) => interactiveResults.readState(event.sender, request));
+    ipc.handle('interactive-results:read-versions', (event, request) => interactiveResults.readVersions(event.sender, request));
+    ipc.handle('interactive-results:open-version', (event, request) => interactiveResults.openVersion(event.sender, request));
     ipc.handle('interactive-results:acquire', (event, request) => interactiveResults.acquire(event.sender, request));
     ipc.handle('interactive-results:save', (event, request) => interactiveResults.save(event.sender, request));
     ipc.handle('interactive-results:release', (event, request) => interactiveResults.release(event.sender, request));

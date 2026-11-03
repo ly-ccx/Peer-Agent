@@ -24,7 +24,7 @@ function ReadingSurface({ tab, active, isZh }: { readonly tab: ResourceInteracti
         navigation: reading.capture() })} /></div>
     <div className="resource-interactive-body" ref={reading.ref} onScroll={reading.onScroll}>
       <InteractiveResource reference={tab.reference} api={window.peerAgent?.interactiveResults} active={active} isZh={isZh}
-        onReady={contentReady} onUnavailable={contentUnavailable} onMetadata={metadata} />
+        onReady={contentReady} onUnavailable={contentUnavailable} onMetadata={metadata} onOpenReference={workspace.openInteractive} />
     </div>
   </section>;
 }
