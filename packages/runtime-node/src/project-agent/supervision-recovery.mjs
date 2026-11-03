@@ -1,26 +1,19 @@
 import { hasUnsettledDispatch } from './recovery-policy.mjs';
 import { takeoverBlocker } from './session-repair.mjs';
-import { executionIdentity, sameExecution } from './session-control-kernel.mjs';
+import { takeoverStopReceipt } from './takeover-stop-recovery.mjs';
 
 /** A reconciled host dispatch can release a transition; a model assertion cannot. */
 export function transitionReconciliation(transition, work, session) {
   if (transition.phase !== 'awaiting_outcome' || !session || hasUnsettledDispatch(work)) return null;
-  const control = session.origin?.executionControl, receipt = control?.stopReceipt;
-  // Recover the original proposal from its current barrier, never from a
-  // newer resume/cancel receipt or a merely idle-looking task projection.
-  if (typeof transition.operationId === 'string' && transition.operationId.length > 0
+  const control = session.origin?.executionControl;
+  const receipt = takeoverStopReceipt({ planId: session.planId, delegationOrigin: session.origin }, control, transition.operationId);
+  // Recover the original proposal from its current barrier. A native resume
+  // alone or a merely idle-looking task projection is not a stop proof.
+  if (receipt && typeof transition.operationId === 'string' && transition.operationId.length > 0
     && ['handoff', 'revise', 'resume'].includes(transition.action)
     && session.origin?.takeover?.operationId === transition.operationId && session.origin?.takeover?.phase === 'stopping'
-    && control?.operationId === transition.operationId && control.kind === 'takeover'
-    && control.phase === 'settled' && control.outcome === 'applied'
     && control.expectedExecution?.goalRevision === transition.expectedGoalRevision
-    && control.workspaceId === work?.workspaceId && control.parentConversationId === work?.parentConversationId
-    && receipt?.operationId === transition.operationId && receipt.scope === 'managed_execution'
-    && receipt.admissionClosed === true && receipt.runnerIdle === true && receipt.schedulerIdle === true
-    && Array.isArray(receipt.unknownCalls) && receipt.unknownCalls.length === 0
-    && receipt.receiptId && Number.isFinite(Date.parse(receipt.completedAt))
-    && sameExecution(receipt.execution, control.expectedExecution)
-    && sameExecution(control.expectedExecution, executionIdentity({ planId: session.planId, delegationOrigin: session.origin }))) {
+    && control.workspaceId === work?.workspaceId && control.parentConversationId === work?.parentConversationId) {
     return { phase: 'stopping', error: undefined, reconciliationRef: receipt.receiptId };
   }
   const proof = work?.budget?.reconciledDispatches?.find(row => row.planId === session.planId
