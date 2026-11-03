@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { validateDraft } from '@peer-agent/interactive-content';
@@ -257,17 +257,49 @@ test('draft retention pins typed and legacy-carried selections while old writers
   assert.equal(old.write({ ...base, surface: 'quick_chat' }).ok, true, 'failed acquisition released every preceding surface');
 });
 
+test('current input queue retention pins a consumed carrier, protects the actual writer lock and rejects a truncated queue', async t => {
+  const f = await fixture(t), queue = createInputQueue({ ...f.options, validateInteractiveFeedback: f.admission.validate });
+  queue.submitInput(f.input('retained'));
+  queue.consume(f.owner.workspaceId);
+  const workspace = path.join(f.rootDir, f.owner.workspaceId), file = path.join(workspace, 'input-queue.jsonl');
+  const before = readFileSync(file, 'utf8'), cursor = readFileSync(path.join(workspace, 'input-cursor.json'), 'utf8');
+  const guard = queue.acquireRetentionInputs(f.owner.workspaceId);
+  try {
+    assert.deepEqual(guard.selections, [{ reference: f.reference, followupId: f.frozen.followupId }]);
+    assert.throws(() => queue.acquireRetentionInputs(f.owner.workspaceId), { code: 'EEXIST' });
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(file + '.lock', old, old);
+    const script = `import { createInputQueue } from ${JSON.stringify(new URL('../project-agent/input-queue.mjs', import.meta.url).href)};
+      const [rootDir, workspaceId] = JSON.parse(process.argv[1]);const now=Date.now;let offset=0;Date.now=()=>now()+(offset+=1000);
+      try { createInputQueue({rootDir}).submitInput({workspaceId,inputId:'concurrent',surface:'tui',text:'test'});console.log('wrote'); }
+      catch(error){console.log(error.code);}`;
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', script, JSON.stringify([f.rootDir, f.owner.workspaceId])], { encoding: 'utf8', timeout: 5000 });
+    assert.equal(child.status, 0, child.stderr);
+    assert.equal(child.stdout.trim(), 'EEXIST');
+    assert.equal(guard.assertCurrent(), true);
+    assert.equal(readFileSync(file, 'utf8'), before);
+    assert.equal(readFileSync(path.join(workspace, 'input-cursor.json'), 'utf8'), cursor);
+    writeFileSync(file, before.trimEnd());
+    assert.equal(guard.assertCurrent(), false);
+  } finally { guard.release(); }
+  assert.throws(() => queue.acquireRetentionInputs(f.owner.workspaceId), /CORRUPT_INPUT_QUEUE/);
+  writeFileSync(file, before);
+  assert.equal(queue.submitInput(f.input('after', { resourceFeedback: undefined })).inputId, 'after');
+});
+
 test('the pinned input queue writer can reclaim an aged lock despite a live PID', async t => {
   const f = await fixture(t), old = createLegacyQueue(f.options);
   old.submitInput(f.input('prior', { resourceFeedback: undefined }));
   const lock = path.join(f.rootDir, f.owner.workspaceId, 'input-queue.jsonl.lock');
-  mkdirSync(lock);
-  writeFileSync(path.join(lock, 'owner.json'), JSON.stringify({ pid: process.pid }));
-  const past = new Date(Date.now() - 60_000);
-  utimesSync(lock, past, past);
-  old.submitInput(f.input('after-reclaim', { resourceFeedback: undefined }));
-  assert.equal(existsSync(lock), false);
-  assert.equal(old.findSubmission(f.owner.workspaceId, 'after-reclaim').inputId, 'after-reclaim');
+  const guard = createInputQueue(f.options).acquireRetentionInputs(f.owner.workspaceId);
+  try {
+    const past = new Date(Date.now() - 60_000);
+    utimesSync(lock, past, past);
+    old.submitInput(f.input('after-reclaim', { resourceFeedback: undefined }));
+    assert.equal(existsSync(lock), false);
+    assert.equal(guard.assertCurrent(), false);
+    assert.equal(old.findSubmission(f.owner.workspaceId, 'after-reclaim').inputId, 'after-reclaim');
+  } finally { guard.release(); }
 });
 
 test('forgery, missing admission and corrupted transport cannot move the new consumer past the selection or clobber user attachments', async t => {

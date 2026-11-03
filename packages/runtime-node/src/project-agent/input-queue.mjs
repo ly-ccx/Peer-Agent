@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from 'node:crypto';
 import { normalizeResourceFeedbackList, restoreResourceFeedbackTransport, encodeResourceFeedbackTransport, isInteractiveFeedbackAttachment } from '@peer-agent/protocol';
 /**
  * 项目输入队列。所有入口把用户输入追加到 input-queue.jsonl。
@@ -8,6 +9,7 @@ import {
   appendFileSync,
   existsSync,
   mkdirSync,
+  lstatSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -21,6 +23,8 @@ import { pathOf } from '../data-store.mjs';
 const WORKSPACE_DIR = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 const INPUT_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 const SURFACES = new Set(['desktop', 'quick_chat', 'tui', 'remote']);
+const STORED_INPUT_FIELDS = new Set(['inputId', 'workspaceId', 'surface', 'text', 'anchorRefs', 'quoteRefs', 'attachmentRefs',
+  'attachments', 'resourceFeedback', 'createdAt', 'answerTo', 'historyRef', 'historySnapshotId', 'historyConfirmed']);
 const LOCK_STALE_MS = 10_000;
 
 export function inputMessageId(inputId) {
@@ -88,40 +92,56 @@ export function createInputQueue({
     return Number.isFinite(parsed) ? new Date(parsed).toISOString() : new Date().toISOString();
   }
 
-  function withLock(workspaceId, fn) {
-    const lockDir = `${queueFile(workspaceId)}.lock`;
-    mkdirSync(path.dirname(lockDir), { recursive: true });
-    const deadline = Date.now() + 5_000;
+  function acquireLock(workspaceId, waitMs) {
+    const lock = `${queueFile(workspaceId)}.lock`;
+    mkdirSync(path.dirname(lock), { recursive: true });
+    const deadline = Date.now() + waitMs;
+    const identity = () => {
+      const stat = statSync(lock, { bigint: true });
+      return `${stat.dev}:${stat.ino}`;
+    };
+    const reclaimable = () => {
+      let owner;
+      try { owner = JSON.parse(readFileSync(path.join(lock, 'owner.json'), 'utf8')); } catch {}
+      if (!Number.isSafeInteger(owner?.pid) || owner.pid <= 0) return Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS;
+      try { process.kill(owner.pid, 0); return false; }
+      catch (error) { return error?.code === 'ESRCH'; }
+    };
     while (true) {
-      try {
-        mkdirSync(lockDir);
-        writeFileSync(path.join(lockDir, 'owner.json'), JSON.stringify({ pid: process.pid }));
-        break;
-      } catch (error) {
+      try { mkdirSync(lock); }
+      catch (error) {
         if (error?.code !== 'EEXIST') throw error;
-        try {
-          let dead = false;
-          try {
-            const owner = JSON.parse(readFileSync(path.join(lockDir, 'owner.json'), 'utf8'));
-            if (Number.isInteger(owner.pid) && owner.pid > 0) {
-              try { process.kill(owner.pid, 0); } catch (error) { dead = error?.code === 'ESRCH'; }
-            }
-          } catch { /* A new owner may still be publishing its PID. */ }
-          if (dead || Date.now() - statSync(lockDir).mtimeMs > LOCK_STALE_MS) {
-            rmSync(lockDir, { recursive: true, force: true });
-            continue;
-          }
-        } catch {
-          // 锁刚被释放。
-        }
         if (Date.now() >= deadline) throw error;
+        try {
+          const observed = identity();
+          if (reclaimable()) {
+            const recovery = `${lock}.recovery`;
+            mkdirSync(recovery);
+            try { if (identity() === observed && reclaimable()) rmSync(lock, { recursive: true, force: true }); }
+            finally { rmSync(recovery, { recursive: true, force: true }); }
+          }
+        } catch { /* Another process may be releasing or recovering this lock. */ }
+        continue;
       }
+      const held = identity(), ownerFile = path.join(lock, 'owner.json');
+      const owner = JSON.stringify({ pid: process.pid, token: randomUUID() });
+      const current = () => {
+        try { return identity() === held && readFileSync(ownerFile, 'utf8') === owner; } catch { return false; }
+      };
+      const release = () => { if (current()) rmSync(lock, { recursive: true, force: true }); };
+      try { writeFileSync(ownerFile, owner); }
+      catch (error) {
+        try { if (identity() === held) rmSync(lock, { recursive: true, force: true }); } catch {}
+        throw error;
+      }
+      if (!current()) throw Error('INPUT_QUEUE_CHANGED');
+      return { current, release };
     }
-    try {
-      return fn();
-    } finally {
-      rmSync(lockDir, { recursive: true, force: true });
-    }
+  }
+
+  function withLock(workspaceId, fn) {
+    const lock = acquireLock(workspaceId, 5000);
+    try { return fn(); } finally { lock.release(); }
   }
 
   function readInputs(workspaceId, strict = false, attempt = 0) {
@@ -130,6 +150,7 @@ export function createInputQueue({
     let version;
     try { version = inputVersion(file); }
     catch (error) { dropCached(key); if (strict && error.code !== 'ENOENT') throw error; return []; }
+    if (strict === 'retention' && version.bytes > 64 * 1024 * 1024) throw Error('INPUT_QUEUE_RETENTION_LIMIT');
     const cached = inputCache.get(key);
     if (cached?.version === version.token) {
       inputCache.delete(key); inputCache.set(key, cached);
@@ -138,20 +159,27 @@ export function createInputQueue({
     dropCached(key);
     let text = '';
     try {
-      text = readFileSync(file, 'utf8');
+      text = strict === 'retention' ? new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(file)) : readFileSync(file, 'utf8');
     } catch (error) {
       if (strict) throw error;
       return [];
     }
     const inputs = [];
     const seen = new Set();
+    if (strict === 'retention' && text && !text.endsWith('\n')) throw Error('CORRUPT_INPUT_QUEUE');
     for (const line of text.split('\n')) {
       if (!line.trim()) continue;
       try {
-        const input = normalizeStored(JSON.parse(line), workspaceId);
+        const row = JSON.parse(line);
+        if (strict === 'retention' && (!row || row.workspaceId !== workspaceId || Object.keys(row).some(key => !STORED_INPUT_FIELDS.has(key))))
+          throw Error('CORRUPT_INPUT_QUEUE');
+        const input = normalizeStored(row, workspaceId);
         if (!input) { if (strict) throw new Error('CORRUPT_INPUT_QUEUE'); continue; }
         admit(input, workspaceId);
-        if (seen.has(input.inputId)) continue;
+        if (seen.has(input.inputId)) {
+          if (strict === 'retention') throw Error('CORRUPT_INPUT_QUEUE');
+          continue;
+        }
         seen.add(input.inputId);
         inputs.push(input);
       } catch (error) {
@@ -323,13 +351,18 @@ export function createInputQueue({
     return { consumed: outcome.consumed, skipped: outcome.skipped };
   }
 
-  function diagnosticSnapshot(workspaceId) {
-    const id = workspaceIdOf(workspaceId);
-    if (!id) throw new Error('INVALID_WORKSPACE');
-    const inputs = readInputs(id, true), state = readCursorState(id);
+  function checkedCursor(id) {
+    const state = readCursorState(id);
     if (!state || typeof state !== 'object' || Array.isArray(state)
       || ['inputId','executedInputId'].some(key => state[key] !== undefined && !INPUT_ID.test(state[key]))
       || state.completedInputIds !== undefined && (!Array.isArray(state.completedInputIds) || state.completedInputIds.some(value => typeof value !== 'string' || !INPUT_ID.test(value)))) throw new Error('CORRUPT_INPUT_CURSOR');
+    return state;
+  }
+
+  function diagnosticSnapshot(workspaceId) {
+    const id = workspaceIdOf(workspaceId);
+    if (!id) throw new Error('INVALID_WORKSPACE');
+    const inputs = readInputs(id, true), state = checkedCursor(id);
     const delivered = inputs.findIndex(input => input.inputId === state.inputId);
     const executed = inputs.findIndex(input => input.inputId === state.executedInputId);
     const completed = new Set(Array.isArray(state.completedInputIds) ? state.completedInputIds : []);
@@ -337,7 +370,47 @@ export function createInputQueue({
       executionDepth: inputs.slice(executed + 1, delivered + 1).filter(input => !completed.has(input.inputId)).length,
       cursor: state.inputId ?? null, executedCursor: state.executedInputId ?? null };
   }
-  return { submitInput, consume, pendingExecution, completeExecution, cursor: readCursor, diagnosticSnapshot,
+  function acquireRetentionInputs(workspaceId) {
+    const id = workspaceIdOf(workspaceId);
+    if (!id || id !== workspaceId) throw Error('INVALID_WORKSPACE');
+    const lock = acquireLock(id, 0);
+    let released = false;
+    const release = () => { if (!released) { released = true; lock.release(); } };
+    const version = (file, limit) => {
+      try {
+        const stat = lstatSync(file);
+        if (!stat.isFile() || stat.size > limit) throw Error('INPUT_QUEUE_RETENTION_LIMIT');
+        return inputVersion(file).token;
+      }
+      catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+    };
+    try {
+      const queue = queueFile(id), cursor = cursorFile(id);
+      const revisions = () => [version(queue, 32 * 1024 * 1024), version(cursor, 2 * 1024 * 1024)];
+      const before = revisions();
+      const inputs = readInputs(id, 'retention'), state = checkedCursor(id);
+      const positions = new Map(inputs.map((input, index) => [input.inputId, index]));
+      const delivered = positions.get(state.inputId) ?? -1, executed = positions.get(state.executedInputId) ?? -1;
+      if (state.inputId !== undefined && delivered < 0 || state.executedInputId !== undefined && executed < 0 || executed > delivered
+        || (state.completedInputIds ?? []).some(inputId => !positions.has(inputId) || positions.get(inputId) > delivered))
+        throw Error('CORRUPT_INPUT_CURSOR');
+      const selections = [];
+      for (const input of inputs) for (const row of input.resourceFeedback ?? []) {
+        if (row.resource.kind === 'interactive') {
+          selections.push({ reference: row.resource.reference, followupId: row.version.followupId });
+          if (selections.length > 16_384) throw Error('INPUT_QUEUE_RETENTION_LIMIT');
+        }
+      }
+      const assertCurrent = () => {
+        try { return !released && lock.current() && revisions().every((revision, index) => revision === before[index]); }
+        catch { return false; }
+      };
+      if (!assertCurrent()) throw Error('INPUT_QUEUE_CHANGED');
+      const revision = `sha256:${createHash('sha256').update(JSON.stringify(before)).digest('hex')}`;
+      return { revision, selections, assertCurrent, release };
+    } catch (error) { release(); throw error; }
+  }
+  return { submitInput, consume, pendingExecution, completeExecution, cursor: readCursor, diagnosticSnapshot, acquireRetentionInputs,
     findSubmission: (workspaceId, inputId) => readInputs(workspaceId).find(row => row.inputId === inputId) || null,
     findAnswer: (workspaceId, answerTo) => readInputs(workspaceId).find(row => row.answerTo === answerTo) || null,
   };
