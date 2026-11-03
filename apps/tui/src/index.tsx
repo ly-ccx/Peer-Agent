@@ -34,6 +34,10 @@ if (command.kind === 'exec') {
   const { runPeerExec } = await import('./cli-exec.ts');
   process.exit(await runPeerExec(command.options));
 }
+if (command.kind === 'result') {
+  const { runPeerResult } = await import('./cli-result.ts');
+  process.exit(runPeerResult(command));
+}
 if (shouldRefuseInteractiveTui(process.stdout.isTTY)) {
   console.error('peer: refusing to start the interactive TUI without a TTY. Use `peer exec`.');
   process.exit(CLI_EXIT.usage);

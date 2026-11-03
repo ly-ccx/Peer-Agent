@@ -4,7 +4,7 @@ import type { parsePeerArgv } from './cli-argv.ts';
 import type { createTuiProjectHost } from './project-agent/tui-project-host.ts';
 import type { createTuiProjectClient } from './project-agent/tui-project-client.ts';
 
-type InteractiveCommand = Exclude<ReturnType<typeof parsePeerArgv>, { kind: 'error' | 'exec' | 'version' | 'help' }>;
+type InteractiveCommand = Extract<ReturnType<typeof parsePeerArgv>, { kind: 'tui' }>;
 
 /** JSX and its runtime are loaded only after the lightweight command branches. */
 export async function runInteractiveTui(command: InteractiveCommand) {

@@ -13,3 +13,4 @@ export { createInteractiveViewService } from './interactive-results/view-service
 export { createInteractivePresentationStore, interactiveReadingSourceBinding } from './interactive-results/presentation-store.mjs';
 export { createInteractiveFeedbackAdmission } from './interactive-results/feedback-admission.mjs';
 export { createInteractivePublicationSource } from './interactive-results/publication-source.mjs';
+export { createInteractiveTextReader, readLocalInteractiveText } from './interactive-results/text-reader.mjs';

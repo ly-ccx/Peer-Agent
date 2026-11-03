@@ -21,9 +21,10 @@ export interface PeerExecOptions {
 
 export type PeerCliCommand =
   | { readonly kind: 'version' }
-  | { readonly kind: 'help'; readonly topic: 'root' | 'exec' }
+  | { readonly kind: 'help'; readonly topic: 'root' | 'exec' | 'result' }
   | { readonly kind: 'tui'; readonly classic?: boolean; readonly bots?: boolean }
   | { readonly kind: 'exec'; readonly options: PeerExecOptions }
+  | { readonly kind: 'result'; readonly reference: string; readonly json: boolean }
   | { readonly kind: 'error'; readonly message: string; readonly exitCode: typeof CLI_EXIT.usage };
 
 const ACCESS_VALUES = new Set<ExecAccess>(['ask', 'session', 'full']);
@@ -225,12 +226,25 @@ export function parsePeerArgv(argv: readonly string[]): PeerCliCommand {
   if (head === 'bots' && rest.length === 0) return { kind: 'tui', bots: true };
   if (isHelpFlag(head) && rest.length === 0) return { kind: 'help', topic: 'root' };
   if (head === 'exec') return parseExecArgs(rest);
+  if (head === 'result') {
+    if (rest.length === 1 && isHelpFlag(rest[0]!)) return { kind: 'help', topic: 'result' };
+    const [reference, flag] = rest;
+    if (!reference || !reference.startsWith('interactive-result://') || rest.length > 2 || flag !== undefined && flag !== '--json')
+      return { kind: 'error', message: 'Usage: peer result <interactive-result://…> [--json]', exitCode: CLI_EXIT.usage };
+    return { kind: 'result', reference, json: flag === '--json' };
+  }
   if (isHelpFlag(head)) return { kind: 'help', topic: 'root' };
   if (argv.some(isHelpFlag) && !argv.includes('exec')) return { kind: 'help', topic: 'root' };
   return { kind: 'tui' };
 }
 
-export function formatPeerHelp(topic: 'root' | 'exec', version = formatPeerVersionLine()): string {
+export function formatPeerHelp(topic: 'root' | 'exec' | 'result', version = formatPeerVersionLine()): string {
+  if (topic === 'result') return [
+    version,
+    '',
+    'Usage: peer result <interactive-result://…> [--json]',
+    'Read a fixed result summary from the local Bot.',
+  ].join('\n');
   if (topic === 'exec') {
     return [
       version,
@@ -271,6 +285,7 @@ export function formatPeerHelp(topic: 'root' | 'exec', version = formatPeerVersi
     '  peer --version       Print version',
     '  peer --help          Show this help',
     '  peer exec [options] [prompt]',
+    '  peer result <interactive-result://…> [--json]',
     '',
     'Use `peer exec --help` for headless flags.',
     'Inside bot mode, press F2 or type /classic to switch to task mode.',
