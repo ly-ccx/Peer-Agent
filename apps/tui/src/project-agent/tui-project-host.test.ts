@@ -11,7 +11,7 @@ import { createProviderChatModel } from '../provider-chat-model.ts';
 import { createTuiModelSelectionControl } from '../tui-model-selection.ts';
 import { buildTuiSystemPrompt } from '../tui-language.ts';
 import { createTurnTestRuntime, drainTestCleanup, waitForTestStart, type TestCleanup } from './turn-test-support.ts';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { resolveWorkSessionProfile } from '@peer-agent/runtime-node/project-agent';
 import { createInterface } from 'node:readline';
 
@@ -61,6 +61,69 @@ test('terminal retention shares the real draft writer and releases compatibility
   expect(() => host.interactive.retention.preview(reference)).toThrow('interactive_result_unavailable');
   expect(releases).toBe(2);
 });
+
+test('a new TUI process recovers an uncommitted preparation from its prior host stop', async () => {
+  const f = fixture();
+  const host = createTuiProjectHost({ ...f, autoStart: false,
+    getSettings: () => ({ projectAgent: { interactiveResults: true }, memory: { enabled: false } }),
+    executeTurn: async () => { throw Error('recovery must not run cognition'); },
+  });
+  let closed = false;
+  try {
+    await host.tick();
+    expect(host.holdsLease(f.workspaceId)).toBe(true);
+    host.conversations.appendMessage(f.conversationId, { id: 'stop-anchor', role: 'user', kind: 'user_input', content: 'Stop this task' } as never);
+    const history = host.conversations.getPersistedConversationHistory!(f.conversationId)!;
+    const child = host.conversations.createChildConversation!({ parentConversationId: f.conversationId, role: 'work_session',
+      anchorMessageId: 'stop-anchor', delegation: { sessionId: 'stopped-session', anchorMessageId: 'stop-anchor', inputId: 'stop-input' },
+      capturedAt: new Date().toISOString(), runtimeState: { conversationId: f.conversationId, contentRevision: history.contentRevision, status: 'idle' },
+      backgroundMessageIds: ['stop-anchor'], confirmMissing: true, title: 'Stopped worker', workspaceId: f.workspaceId } as never);
+    const model = { modelProviderId: provider.id, providerId: provider.provider, modelId: provider.model, family: 'fixture' };
+    const plan = host.plans.createPlan({ title: 'Stopped worker', conversationId: child.id, status: 'completed', tasks: [],
+      delegationOrigin: { workspaceId: f.workspaceId, parentConversationId: f.conversationId, sessionId: 'stopped-session',
+        phase: 'paused', readOnly: true, anchorMessageId: 'stop-anchor', inputId: 'stop-input',
+        modelSelection: { worker: model, explorer: model, verifier: model, resolvedAt: new Date().toISOString() } } } as never);
+    const control = host.supervisor.sessionControl;
+    const operation = control.begin(plan, { kind: 'pause', operationId: 'pause-test', authorityRef: 'stop-input', priorStopReceiptId: undefined });
+    const callRef = { owner: { workspaceId: f.workspaceId, conversationId: f.conversationId },
+      conversationId: child.id, toolCallId: 'prepared-call' };
+    host.interactive.resultStore.beginAttempt({ callRef, source: { ...operation.expectedExecution,
+      conversationId: child.id, toolCallId: callRef.toolCallId },
+      draft: { publication: { kind: 'create' }, title: 'Candidate', textFallback: 'Unverified', program: 'root=Text("test")', inputs: [] } }, () => true);
+    const receipt = await control.drain(host.plans.getPlan(plan.planId), operation);
+    control.settle(host.plans.getPlan(plan.planId), operation, receipt);
+    expect(host.interactive.resultStore.getAttempt(callRef)?.phase).toBe('prepared');
+
+    const helper = path.join(f.dataHome, 'recovery-child.ts');
+    writeFileSync(helper, `
+      import { createTuiProjectHost } from ${JSON.stringify(new URL('./tui-project-host.ts', import.meta.url).href)};
+      const { f, callRef } = JSON.parse(process.argv[2]);
+      let turns = 0;
+      const host = createTuiProjectHost({ ...f, autoStart: false,
+        getSettings: () => ({ projectAgent: { interactiveResults: true }, memory: { enabled: false } }),
+        executeTurn: async () => { turns++; throw Error('recovery must not run cognition'); },
+      });
+      try {
+        await host.tick();
+        console.log('recovery-result ' + JSON.stringify({
+          turns, held: host.holdsLease(f.workspaceId), attempt: host.interactive.resultStore.getAttempt(callRef),
+          operation: host.interactive.resultStore.getOperation(callRef),
+        }));
+      } finally { await host.close(); }
+    `);
+    await host.close();
+    closed = true;
+    const processResult = spawnSync(process.execPath, [helper, JSON.stringify({ f, callRef })], { encoding: 'utf8', timeout: 12_000 });
+    expect(processResult.status, processResult.error?.message || processResult.stderr).toBe(0);
+    const line = processResult.stdout.split('\n').find(row => row.startsWith('recovery-result '));
+    expect(line).toBeDefined();
+    expect(JSON.parse(line!.slice('recovery-result '.length))).toMatchObject({
+      turns: 0, held: true, attempt: { phase: 'failed', code: 'publication_interrupted' }, operation: null,
+    });
+  } finally {
+    if (!closed) await host.close();
+  }
+}, 18_000);
 
 test('actual terminal project host returns fixed report references and attaches them to the canonical Bot reply', async () => {
   const f = fixture(), runtimeCleanup: TestCleanup[] = [];
