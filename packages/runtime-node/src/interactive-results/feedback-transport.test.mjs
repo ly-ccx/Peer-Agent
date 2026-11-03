@@ -10,6 +10,7 @@ import { interactiveFeedbackFromFollowup, followupFromInteractiveFeedback, inter
   normalizeResourceFeedback, encodeResourceFeedbackTransport, restoreResourceFeedbackTransport, isInteractiveFeedbackAttachment } from '@peer-agent/protocol';
 import { createConversationStore } from '../../../conversation-store/src/index.mjs';
 import { createInteractiveResultStore } from './store.mjs';
+import { createInteractiveRetention, INTERACTIVE_RETENTION_SOURCES } from './retention.mjs';
 import { createInteractiveStateStore } from './state-store.mjs';
 import { createInteractiveFeedbackAdmission } from './feedback-admission.mjs';
 import { createInputQueue } from '../project-agent/input-queue.mjs';
@@ -301,6 +302,33 @@ test('the pinned input queue writer can reclaim an aged lock despite a live PID'
     assert.throws(() => createInputQueue(f.options).acquireRetentionInputs(f.owner.workspaceId), { code: 'EEXIST' });
     assert.equal(old.findSubmission(f.owner.workspaceId, 'after-reclaim').inputId, 'after-reclaim');
   } finally { guard.release(); }
+});
+
+test('an old queue writer reclaiming a live guard before commit rolls back result retirement', async t => {
+  const f = await fixture(t);
+  const queue = createInputQueue(f.options), legacy = createLegacyQueue(f.options);
+  const lock = path.join(f.rootDir, f.owner.workspaceId, 'input-queue.jsonl.lock');
+  f.states.release({ reference: f.reference, identity: f.identity, writer: f.writer }, () => true);
+  const retention = createInteractiveRetention({ resultStore: f.results, stateStore: f.states, assertOwner: () => true,
+    acquireRoots() {
+      const guard = queue.acquireRetentionInputs(f.owner.workspaceId);
+      const sources = Object.fromEntries(INTERACTIVE_RETENTION_SOURCES.map(source => [source, guard.revision]));
+      return { sources, pins: [], followupIds: [], assertCurrent: guard.assertCurrent, release: guard.release };
+    },
+    onStep(step) {
+      if (step !== 'cleanup_before_commit') return;
+      const past = new Date(Date.now() - 60_000);
+      utimesSync(lock, past, past);
+      legacy.submitInput(f.input('concurrent-old-input', { resourceFeedback: undefined }));
+    } });
+  const preview = retention.preview(f.reference);
+  assert.deepEqual(preview.blockers, []);
+  assert.throws(() => retention.cleanup({ reference: f.reference, requestId: 'cleanup-race',
+    expectedDigest: preview.cleanupDigest }), { code: 'interactive_retention_stale' });
+  assert.equal(legacy.findSubmission(f.owner.workspaceId, 'concurrent-old-input').inputId, 'concurrent-old-input');
+  assert.equal(retention.readReceipt(f.reference), null);
+  assert.equal(f.results.getVersion(f.reference).content.title, 'Trial');
+  assert.equal(f.states.read(f.reference, () => true).values.$x, 4);
 });
 
 test('forgery, missing admission and corrupted transport cannot move the new consumer past the selection or clobber user attachments', async t => {
