@@ -10,11 +10,11 @@ const hash = value => createHash('sha256').update(JSON.stringify(value)).digest(
 const ended = new Set(['accepted', 'result_ready', 'cancelled']);
 
 /** Recoverable coordination effects over the existing task ports, never a second task engine. */
-export function createCoordinationLifecycle({ readSession, readSessionSummary = readSession, readMessages, readGoalFacts, verifyGoal, now, checkTakeover, admitTask = () => ({ ok: true }), spawn, requestCancel, send, takeover, holdsLease, canExecute = () => true, isEnabled = () => true }) {
+export function createCoordinationLifecycle({ readSession, readSessionSummary = readSession, readMessages, readGoalFacts, verifyGoal, resourceWaits, now, checkTakeover, admitTask = () => ({ ok: true }), spawn, requestCancel, send, takeover, holdsLease, canExecute = () => true, isEnabled = () => true }) {
   const drains = new Map();
   const queued = new Set();
   const storeFor = workspaceId => workBudgetBinding(workspaceId)?.store;
-  const intents = createIntentLifecycle({ storeFor, readSession, readMessages, readGoalFacts, verifyGoal, holdsLease, canExecute, now });
+  const intents = createIntentLifecycle({ storeFor, readSession, readMessages, readGoalFacts, verifyGoal, resourceWaits, holdsLease, canExecute, now });
   const lifecycleFacts = store => typeof store?.readLifecycleFacts === 'function' ? store.readLifecycleFacts() : store?.read();
   function lifecycleOf(state, mandate, summary = false) {
     const work=(state.workStates || state.works)[mandate.workId];

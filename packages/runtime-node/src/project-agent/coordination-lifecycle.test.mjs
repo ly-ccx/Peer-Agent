@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createCoordinationLifecycle } from './coordination-lifecycle.mjs';
+import { createEmptyResourceWaitPort } from './resource-wait.ts';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
 import { registerWorkBudget, createWorkBudgetGuard } from './work-budget.mjs';
 import { createDelegationProvider } from './delegation-provider.mjs';
@@ -19,7 +20,7 @@ async function fixture(t) {
   const sessions = new Map(), spawns = [], cancellations = [], messages = [];
   const users = ['u1','u2','u3'].map(id => ({ id, inputId: id, role: 'user', kind: 'user_input' }));
   let unknown = false, enabled = true;
-  const ports = { readMessages: () => users, readSession: ({ sessionId }) => sessions.get(sessionId), holdsLease: () => true,
+  const ports = { resourceWaits: createEmptyResourceWaitPort(), readMessages: () => users, readSession: ({ sessionId }) => sessions.get(sessionId), holdsLease: () => true,
     isEnabled: () => enabled,
     spawn: async (task, context) => {
       const existing = spawns.find(row => row.operationId === context.coordinationOperationId);

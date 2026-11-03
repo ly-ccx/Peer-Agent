@@ -2,7 +2,7 @@ import { createVerificationDispatchRecovery } from './verification-dispatch-reco
 import { createDelegationDispatchRecovery } from './delegation-dispatch-recovery.mjs';
 import { createRunnerReplyLifecycle } from './runner-reply-lifecycle.mjs';
 import { coordinationWorkId } from './work-coordination.mjs';
-import { repairOwnership, stateAfterReply, ownedSessions, repairProgressDecision } from './repair-ownership.mjs';
+import { repairOwnership, ownedSessions, repairProgressDecision } from './repair-ownership.mjs';
 import { workBudgetBinding } from './work-budget.mjs';
 import { hasUnsettledDispatch, manualRecovery, recoveryCheckpointAvailable, recoveryForFailure, recoveryReservationDue, replyCheckpointForModel } from './recovery-policy.mjs';
 import { hostWakeWait } from './wake-wait.mjs';
@@ -13,9 +13,13 @@ import { historyExecutionHeld } from './history-resumption.mjs';
 import { reconcileRepairCustody } from './repair-custody.mjs';
 import { createDecisionFrame } from './decision-frame.mjs';
 import { intentDecisionAdmittedForTurn } from './intent-reply-bindings.mjs';
+import { decideRuntimeDisposition, runtimeWorkHeld } from './runtime-disposition.ts';
+import { createEmptyResourceWaitPort, resourceWaitScope, readResourceWaitFacts } from './resource-wait.ts';
+import { reconcileResourceWait } from './resource-wait-recovery.mjs';
 
 const ROUTINE = new Set(['session_started', 'progress', 'session_spawned', 'session_progress']);
-export function createRunnerCoordination({ store, inbox, workspaceId, conversationId, readMessages, remember, onReplied, onDeferred, onDeliveryChanged, resolveRoster, reconcileVerification = null, findEvidenceRecords = null, readResourceClaims, now = () => new Date().toISOString() }) {
+export function createRunnerCoordination({ store, inbox, workspaceId, conversationId, readMessages, remember, onReplied, onDeferred, onDeliveryChanged, resolveRoster, reconcileVerification = null, findEvidenceRecords = null, readResourceClaims, resourceWaits = null, now = () => new Date().toISOString() }) {
+  const resourceWaitPort = resourceWaits || createEmptyResourceWaitPort();
   const delegationRecovery = createDelegationDispatchRecovery({ store, readMessages, findEvidenceRecords, readResourceClaims, now,
     activeAttempts: () => workBudgetBinding(workspaceId)?.activeAttempts });
   const dispatchRecovery = createVerificationDispatchRecovery({ store, readMessages, reconcileVerification, now,
@@ -107,7 +111,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     return pending.filter(event => !foreign.has(event.sessionId)
       && !history?.quarantinedSessionIds?.includes(event.sessionId) && !history?.quarantinedEventIds?.includes(event.eventId)
       && !works.some(work => historyExecutionHeld(work) && work.sessionIds?.includes(event.sessionId))
-      && !works.some(work => work.sessionIds?.includes(event.sessionId) && work.stopScope === 'work' && ['paused', 'cancelled'].includes(work.state)));
+      && !works.some(work => work.sessionIds?.includes(event.sessionId) && runtimeWorkHeld(work)));
   }
   // A synchronous selection shares preparation only until control returns to its
   // caller. All writes invalidate the decision; no snapshot crosses an await.
@@ -131,6 +135,10 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     if (store.coalesceWorks) reconcileContinuationCustody({ store, conversationId, sessions: roster });
     for (const work of Object.values(decision().works)) {
       if (historyExecutionHeld(work)) continue;
+      if (runtimeWorkHeld(work) || work.parentConversationId !== conversationId) continue;
+      if (reconcileResourceWait({ work, state: decision(), sessions: roster(), port: resourceWaitPort, store, now })) {
+        decisionSnapshot = undefined; continue;
+      }
       if (!work.reportedWait || !['waiting_children', 'waiting_user'].includes(work.state)) continue;
       if (!reportedWaitCurrent(work.reportedWait, roster())) update({ ...work, reportedWait: undefined, state: 'runnable', end: 'yielded' });
     }
@@ -138,7 +146,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     decisionSnapshot = undefined;
     return {
       choose(userOnly) {
-        const candidates = Object.values(decision().works).filter(work => work.parentConversationId === conversationId && !historyExecutionHeld(work) && (!userOnly || work.anchorInputIds?.length)
+        const candidates = Object.values(decision().works).filter(work => work.parentConversationId === conversationId && !historyExecutionHeld(work) && !runtimeWorkHeld(work) && (!userOnly || work.anchorInputIds?.length)
           && !delivery.pending(decision(), work.workId)
           && (work.state === 'runnable' && work.checkpointRef
             || work.checkpointRef && recoveryReservationDue(work, now())
@@ -162,8 +170,11 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
         }
         if (work.state === 'blocked_system') update({ ...work, state: 'runnable' });
         const semanticNext = work.intentCoordination?.lifecycle === 'active' && !checkpoint.outcome?.yielded && !work.recovery;
+        const resourceEvents = (work.pendingEventIds || []).filter(id => !work.consumedEventIds?.includes(id) && !decision().events?.[id]?.handled)
+          .map(id => decision().events?.[id]?.event).filter(event => event?.payload?.reason === 'resource_available');
         return { ...checkpoint.job, ...(semanticNext ? { kind: 'wake', userInputs: [], events: [],
           sourceDecisionRef: work.intentCoordination.decision.operationId } : {}), workId: work.workId, continuation: true,
+          ...(resourceEvents.length ? { kind: 'wake', userInputs: [], events: resourceEvents, sourceDecisionRef: undefined } : {}),
           ...(work.state === 'retry_wait' ? { recoveryReservationId: work.recovery.reservationId, recoveryRevision: work.revision } : {}) };
       },
       pending: () => pendingFrom(decision()),
@@ -198,6 +209,8 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       const state = readSnapshot();
       return createDecisionFrame({ state, workspaceId, parentConversationId: conversationId, workId: job.workId, sessions: rows(),
         originDecisionRef: job.sourceDecisionRef, turnId: job.attemptId,
+        ...(state.works[job.workId] ? readResourceWaitFacts(resourceWaitPort, resourceWaitScope(state.works[job.workId], state),
+          (state.works[job.workId].waitFor || []).filter(wait => wait.kind === 'resource')) : {}),
         eventIds: (job.events || []).map(row => row.eventId), currentInputIds: (job.userInputs || []).map(row => row.inputId) });
     },
     dispositionMissing(job) {
@@ -280,6 +293,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       const existing = readWork(job.workId);
       if (!existing || existing.parentConversationId !== conversationId) return false;
       if (historyExecutionHeld(existing)) return false;
+      if (existing.pendingControl || existing.stopScope === 'work' && ['paused', 'cancelled'].includes(existing.state)) return false;
       if (job.recoveryRevision !== undefined && existing.revision !== job.recoveryRevision) return false;
       if (job.recoveryReservationId && (existing.recovery?.reservationId !== job.recoveryReservationId || !recoveryReservationDue(existing, now()))) return false;
       if (existing.state === 'coalesced' || !job.manualRecovery && ['paused', 'cancelled', 'budget_limited', 'blocked_system'].includes(existing.state)) return false;
@@ -287,6 +301,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     },
     start,
     stalls(job, outcome, roster) {
+      if (outcome.silentWait) return false;
       if (reportedWaitFor({ job, outcome, state: readSnapshot(), messages: readMessages(), sessions: Array.isArray(roster) ? roster : roster?.items || roster?.sessions || [] })) return false;
       const previous = readWork(job.workId);
       const sources = ownedSessions(previous, job, roster);
@@ -295,44 +310,29 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     },
     finish(job, outcome, roster) {
       const previous = readWork(job.workId);
-      const sources = ownedSessions(previous, job, roster, outcome.reportedSessionIds);
+      const sources = ownedSessions(previous, job, roster);
       const sessionIds = [...new Set([...previous.sessionIds, ...sources.map(row => row.sessionId)])];
-      const ownership = repairOwnership(sources);
-      const decision = repairProgressDecision(previous, outcome, roster, sources);
-      const waiting = ownership.waiting;
-      let state = decision.state;
-      if (!outcome.yielded && waiting.length && decision.state !== 'blocked_system') state = 'waiting_children';
+      const decision = outcome.silentWait ? { fingerprint: previous.fingerprint, repeats: previous.repeats || 0,
+        progressFacts: previous.progressFacts, progressObservation: previous.progressObservation, state: 'waiting_children', end: 'awaiting_children' }
+        : repairProgressDecision(previous, outcome, roster, sources);
       const recovery = outcome.failed ? outcome.recovery || recoveryForFailure(previous, outcome, now()) : undefined;
-      if (outcome.failed) state = recovery?.reservationId ? 'retry_wait' : 'blocked_system';
-      if (outcome.stopped) state = waiting.length ? 'waiting_children' : 'paused';
-      // A child question does not finish the parent reply that still needs to
-      // bring that question into the main conversation. Keep a yielded parent
-      // runnable until its public reply is committed.
-      if (!outcome.failed && !outcome.yielded && !outcome.stopped && decision.state !== 'blocked_system') state = stateAfterReply(sources);
-      if (outcome.budgetLimited) state = 'budget_limited';
-      if (outcome.deliveryPending) state = 'retry_wait';
       const reportedWait = reportedWaitFor({ job, outcome, state: readSnapshot(), messages: readMessages(), sessions: Array.isArray(roster) ? roster : roster?.items || roster?.sessions || [] });
-      if (reportedWait) state = reportedWait.waitingUser ? 'waiting_user' : 'waiting_children';
       const observedEvents = (job.events || []).filter(eventObserved);
       const unseenEvents = (job.events || []).filter(event => !eventObserved(event));
-      if (unseenEvents.length && !outcome.failed && !outcome.stopped && !outcome.budgetLimited && !outcome.deliveryPending
-        && !['blocked_system', 'waiting_user'].includes(state)) state = 'runnable';
       let semantic;
-      if (previous.intentCoordination && decision.state !== 'blocked_system' && !outcome.failed && !outcome.stopped && !outcome.budgetLimited && !outcome.deliveryPending && !outcome.yielded) {
+      if (previous.intentCoordination && !runtimeWorkHeld(previous) && !outcome.silentWait && decision.state !== 'blocked_system' && !outcome.failed && !outcome.stopped && !outcome.budgetLimited && !outcome.deliveryPending && !outcome.yielded) {
         semantic = delivery.resolveIntent(previous, Array.isArray(roster) ? roster : roster?.items || roster?.sessions || []);
-        if (semantic) state = semantic.state;
       }
-      const end = state === 'runnable' ? 'yielded' : state === 'waiting_children' ? 'awaiting_children' : state === 'waiting_user' ? 'awaiting_user'
-        : state === 'budget_limited' ? 'budget_limited' : outcome.reason === 'agent_no_progress' ? 'no_progress'
-        : outcome.stopped ? 'user_stopped' : outcome.failed ? recovery?.retryable ? 'provider_retryable' : 'fatal'
-        : state === 'retry_wait' ? 'provider_retryable' : decision.end;
+      const disposition = decideRuntimeDisposition({ previous, sessions: sources, outcome, continuation: decision, semantic,
+        reportedWait, recovery, unseenEvents: unseenEvents.length > 0, held: historyExecutionHeld(previous) });
+      const { handling, ...patch } = disposition;
+      const { state, end } = disposition;
       const { recoveryRevision, recoveryReservationId, manualRecovery: _manual, ...durableJob } = job;
       const checkpointRef = outcome.preserveCheckpoint ? previous.checkpointRef
         : store.checkpoint(job.workId, { job: { ...durableJob, continuation: true }, outcome });
-      store.saveWork({ ...previous, ...decision, ...semantic, state, end: semantic?.end || end, sessionIds, checkpointRef, recovery, reportedWait, repairSessionIds: ownership.repairSessionIds,
+      store.saveWork({ ...previous, ...decision, ...semantic, ...patch, state, end, sessionIds, checkpointRef, recovery, reportedWait,
         intentCoordination: readWork(job.workId).intentCoordination,
-        waitFor: [...(reportedWait ? reportedWait.sessionStates : waiting).map(row => ({ kind: 'session', id: row.sessionId })),
-          ...(state === 'retry_wait' && recovery?.reservationId ? [{ kind: 'retry_timer', id: recovery.reservationId }] : []), ...(semantic?.waitFor || [])],
+        waitFor: disposition.waitFor,
         consumedEventIds: [...new Set([...previous.consumedEventIds, ...observedEvents.map(row => row.eventId)])].slice(-64) }, { returnState: false });
       if (!outcome.failed && !outcome.yielded && !outcome.deliveryPending) store.handled(observedEvents.map(row => row.eventId));
       return { ...decision, state };
@@ -345,7 +345,8 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       const checkpoint = readProtectedWork(work);
       if (!recoveryCheckpointAvailable(work, checkpoint, store.readCheckpoint)) throw new Error('continuity_checkpoint_missing');
       const outcome = checkpoint?.outcome;
-      if (job.sourceDecisionRef && !outcome?.yielded) return outcome ? { ...outcome, providerCheckpoint: undefined } : null;
+      const resourceWake = job.events?.some(event => event.payload?.reason === 'resource_available' && work.pendingEventIds?.includes(event.eventId));
+      if ((job.sourceDecisionRef || resourceWake) && !outcome?.yielded) return outcome ? { ...outcome, providerCheckpoint: undefined } : null;
       // A finished public update starts the next reasoning step with current
       // roster facts. Only an actual yield resumes a native Provider slice.
       const resumed = outcome && work.nativeCheckpointRef && (!work.repairSessionIds?.length || outcome.yielded)

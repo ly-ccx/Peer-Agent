@@ -102,7 +102,7 @@ export interface ProjectWorkReceipt {
   readonly end?: ProjectTurnEnd;
   readonly attemptId?: string;
   readonly pendingEventIds?: readonly string[];
-  readonly waitFor: readonly { readonly kind: 'session' | 'approval' | 'question' | 'retry_timer'; readonly id: string }[];
+  readonly waitFor: readonly { readonly kind: 'session' | 'approval' | 'question' | 'retry_timer' | 'human_request' | 'resource' | 'recovery'; readonly id: string; readonly revision?: string }[];
   readonly consumedEventIds: readonly string[];
   readonly pendingResultRefs: readonly string[];
   readonly lastDeliveredFactKey?: string;

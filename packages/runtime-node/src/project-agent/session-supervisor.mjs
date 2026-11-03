@@ -2,6 +2,7 @@ import { CONTINUITY_CAPABILITY_IDS } from './working-context-specs.mjs';
 import { controlProjectWork } from './work-control.mjs';
 import { executionAdmissionDenial } from './execution-admission.mjs';
 import { createSessionControl } from './session-control.mjs';
+import { createResourceWaitPort } from './resource-wait.ts';
 import { createSessionResourceContention } from './session-resource-contention.mjs';
 import { executionIdentity, sameExecution } from './session-control-kernel.mjs';
 import { createSessionCancellation } from './session-cancellation.mjs';
@@ -192,7 +193,9 @@ export function createSessionSupervisor({
     readMessages: id => conversationStore.getPersistedConversationHistory?.(id)?.messages || [], now });
   const takeover = createSessionTakeover({ sessionControl, findBySession, goalPlanStore, goalRunner, executionScheduler, exclusive, canManageWorkspace,
     abortStream, promote, emit, now, humanGateOf });
-  coordination = createCoordinationLifecycle({ readSession: input => get(input),
+  const resourceWaits = createResourceWaitPort({ readPlan: findBySession, inspectPlan: plan => executionScheduler.inspect(plan, delegatedPlans()),
+    executionOf: executionIdentity, readClaims: () => executionScheduler.resourceSnapshot(), ownsWorkspace: canManageWorkspace });
+  coordination = createCoordinationLifecycle({ readSession: input => get(input), resourceWaits,
     readGoalFacts: sessionId => { const plan = findBySession(sessionId); return plan ? hostFacts(plan).hostAuthority : null; },
     verifyGoal: input => goalRunner?.verifyDelegatedSession?.(input),
     admitTask: (input, context) => checkDelegationCapabilities(input, context),
@@ -1163,6 +1166,7 @@ export function createSessionSupervisor({
   return {
     executionScheduler,
     sessionControl,
+    resourceWaits,
     async readWorkHistory(input, context) {
       const work = workBudgetBinding(context.workspaceId)?.store.readWork(input.workId);
       if (!work) return { error: 'work_not_found' };

@@ -2,6 +2,7 @@ import { repairOwnership } from './repair-ownership.mjs';
 import { hasUnsettledDispatch, recoveryCheckpointAvailable } from './recovery-policy.mjs';
 import { historyExecutionHeld } from './history-resumption.mjs';
 import { workBudgetBinding } from './work-budget.mjs';
+import { decideRuntimeDisposition, runtimeWorkHeld } from './runtime-disposition.ts';
 
 /** Reclaim an existing obligation, never create another observer or replay completed tools. */
 export function reconcileRepairCustody({ store, conversationId, sessions }) {
@@ -12,7 +13,7 @@ export function reconcileRepairCustody({ store, conversationId, sessions }) {
   const candidates = works.filter(work => work.parentConversationId === conversationId
     && ['delivered','waiting_user'].includes(work.state) && work.checkpointRef
     && (!work.intentCoordination || work.intentCoordination.lifecycle === 'active')
-    && work.stopScope !== 'work' && !historyExecutionHeld(work) && !work.pendingControl
+    && work.stopScope !== 'work' && !historyExecutionHeld(work) && !runtimeWorkHeld(work)
     && !work.reportedWait && !work.recovery?.blockedCode && !hasUnsettledDispatch(work)
     && !Object.keys(work.budget?.attempts || {}).some(id => workBudgetBinding(work.workspaceId)?.activeAttempts?.has(id)))
     .sort((a,b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')) || a.workId.localeCompare(b.workId));
@@ -29,7 +30,9 @@ export function reconcileRepairCustody({ store, conversationId, sessions }) {
     if (!checkpoint?.outcome || checkpoint.outcome.failed || checkpoint.outcome.stopped || checkpoint.outcome.yielded) continue;
     const next = {...work,repairSessionIds:ownership.repairSessionIds};
     if (!recoveryCheckpointAvailable(next,checkpoint,store.readCheckpoint)) continue;
-    store.saveWork({...next,state:'runnable',end:'yielded'}, {returnState:false});
+    const { handling, ...disposition } = decideRuntimeDisposition({ previous: next, sessions: related });
+    if (disposition.state !== 'runnable') continue;
+    store.saveWork({...next,...disposition}, {returnState:false});
     ownership.repairSessionIds.forEach(id => claimed.add(id));
   }
 }

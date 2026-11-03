@@ -94,6 +94,8 @@ export type IntentCoordinationRequest =
   | { readonly action: 'assess'; readonly assessment: Omit<IntentAssessment, 'operationId'> };
 /** Bounded host projection. Available actions are a snapshot, not grants. */
 export interface CoordinationDecisionFrame {
+  readonly resourceWaits?: readonly import('./runtime-session-facts.ts').ResourceWaitFact[];
+  readonly resourceWaitError?: string;
   readonly workId: string;
   readonly workRevision: number;
   readonly goalRevision: number;
