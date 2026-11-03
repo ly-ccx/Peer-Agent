@@ -48,11 +48,12 @@ export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'
     if (row.owner !== encode(call.owner) || row.conversation !== call.conversationId || row.toolCallId !== call.toolCallId) throw problem('interactive_operation_conflict');
     return { ...decode(row.receipt), publicationStatus: row.phase, argsDigest: row.argsDigest };
   }
-  function versionRecord(context, ref, { allowPending = false } = {}) {
+  function versionRecord(context, ref, { allowPending = false } = {}, allowCleaned = false) {
     const row = context.db.prepare('SELECT * FROM versions WHERE id=? AND version=?').get(ref.resultId, ref.contentVersion);
     if (!row || row.owner !== encode(ref.owner)) throw problem('interactive_result_unavailable');
     const metadata = decode(row.metadata);
-    if (row.availability === 'cleaned') throw problem('interactive_content_cleaned');
+    if (row.availability === 'cleaned' && !allowCleaned) throw problem('interactive_content_cleaned');
+    if (!['available', 'cleaned'].includes(row.availability)) throw problem('interactive_storage_corrupt');
     if (!same(metadata.reference, ref)) throw problem('interactive_storage_corrupt');
     const status = context.db.prepare('SELECT phase FROM operations WHERE id=?').get(metadata.operationId)?.phase;
     if (!allowPending && status !== 'published') throw problem(status === 'index_pending' ? 'publication_index_pending' : 'publication_unknown');
@@ -69,10 +70,10 @@ export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'
     if (!context) throw problem('interactive_result_unavailable');
     return clone(version(context, ref, options));
   }
-  function getVersionMetadata(rawReference) {
+  function getVersionMetadata(rawReference, { allowCleaned = false } = {}) {
     const ref = requireReference(rawReference), context = storage.connect(ref.owner.workspaceId);
     if (!context) throw problem('interactive_result_unavailable');
-    const { metadata, status } = versionRecord(context, ref);
+    const { metadata, status } = versionRecord(context, ref, undefined, allowCleaned);
     return clone({ ...metadata, publicationStatus: status });
   }
   function getOperation(rawCall) {

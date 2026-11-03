@@ -141,14 +141,13 @@ export interface InteractiveFollowup {
   readonly capturedAt: string;
   readonly excerpt: string;
 }
-export interface InteractiveResultSummary {
+export type InteractiveResultSummary = {
   readonly reference: InteractiveResultReference;
   readonly title: string;
   readonly textFallback: string;
-  readonly specHash: string;
-  readonly libraryVersion: string;
   readonly dataLevel: DataLevel;
-}
+} & ({ readonly availability?: 'available'; readonly specHash: string; readonly libraryVersion: string }
+  | { readonly availability: 'cleaned'; readonly cleanedAt: string; readonly truncated: boolean });
 export type InteractiveResult<T extends object = Record<never, never>> = ({ readonly ok: true } & T) | { readonly ok: false; readonly code: string; readonly summary?: InteractiveResultSummary };
 export interface InteractiveOpenView {
   readonly handle: InteractiveViewHandle;

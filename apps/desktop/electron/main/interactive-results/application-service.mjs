@@ -1,4 +1,4 @@
-import { createInteractivePresentationStore, createInteractiveViewService } from '@peer-agent/runtime-node/interactive-results';
+import { createInteractivePresentationStore, createInteractiveTextReader, createInteractiveViewService } from '@peer-agent/runtime-node/interactive-results';
 import { interactiveFeedbackFromFollowup, normalizeResourceFeedbackList, normalizeInteractiveOwner, normalizeResourceWindowRequest } from '@peer-agent/protocol';
 import { desktopInteractiveRuntime } from './runtime-port.mjs';
 
@@ -52,7 +52,8 @@ export function createDesktopInteractiveApplication({ getRole, getOwner, getNati
         return { owner: reference.owner, assertCurrent: isCurrent };
       } });
     const presentation = createInteractivePresentationStore({ resultStore: runtime.resultStore, assertOwner: currentOwner });
-    const value = { runtime, views, presentation }; instances.set(runtime, value); return value;
+    const readText = createInteractiveTextReader({ resultStore: runtime.resultStore, assertOwner: currentOwner });
+    const value = { runtime, views, presentation, readText }; instances.set(runtime, value); return value;
   }
   function view(method, sender, request) {
     return run(() => {
@@ -120,8 +121,8 @@ export function createDesktopInteractiveApplication({ getRole, getOwner, getNati
       try {
         const request = normalizeResourceWindowRequest({ resource: raw });
         if (!request || request.resource.kind !== 'interactive' || !same(ownerOf(request.resource.reference.owner.workspaceId), request.resource.reference.owner)) return { ok: false, status: 'scope_denied' };
-        const fixed = instance().runtime.resultStore.getVersion(request.resource.reference);
-        return { ok: true, owner: fixed.reference.owner, resource: request.resource, title: fixed.content.title };
+        const fixed = instance().readText(request.resource.reference);
+        return { ok: true, owner: fixed.reference.owner, resource: request.resource, title: fixed.title };
       } catch (error) {
         const status = ({ interactive_content_cleaned: 'content_cleaned', interactive_storage_incompatible: 'incompatible_result',
           interactive_result_unavailable: 'result_unavailable', interactive_scope_denied: 'scope_denied' })[error?.code] ?? 'storage_unavailable';

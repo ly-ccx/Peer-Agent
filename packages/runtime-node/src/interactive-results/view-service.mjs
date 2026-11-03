@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { interactiveToken, normalizeInteractiveOwner, normalizeInteractiveReference, normalizeInteractiveViewHandle,
   normalizeInteractiveWriter } from '@peer-agent/protocol';
 import { encode, problem } from './storage.mjs';
+import { createInteractiveTextReader } from './text-reader.mjs';
 import { registerInteractiveViewPin } from './view-pins.mjs';
 
 const same = (a, b) => encode(a) === encode(b);
@@ -113,7 +114,15 @@ export function createInteractiveViewService({ resultStore, stateStore, resolveS
           const reply = openReply(record);
           if (!reply.ok) retire(record);
           return reply;
-        } catch (error) { retire(record); throw error; }
+        } catch (error) {
+          try {
+            if (error.code !== 'interactive_content_cleaned') throw error;
+            const saved = createInteractiveTextReader({ resultStore, assertOwner: () => requireCurrent(record) })(reference);
+            if (saved.availability !== 'cleaned') throw problem('interactive_cleanup_corrupt');
+            const { title, textFallback, dataLevel, cleanedAt, truncated } = saved;
+            return { ...failed(error), summary: { reference, title, textFallback, dataLevel, availability: 'cleaned', cleanedAt, truncated } };
+          } finally { retire(record); }
+        }
       })().catch(failed).finally(() => { pending.delete(operation); sender.removeListener?.('destroyed', cancel); });
       senderRequests.set(requestId, { reference, promise });
       const reply = await promise;

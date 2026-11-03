@@ -69,7 +69,7 @@ test('the main workspace opens canonical interactive deliveries, restores result
   writeFileSync(mainFile, `
     import{app,BrowserWindow,ipcMain}from'electron';
     import{validateDraft}from${JSON.stringify(pathToFileURL(require.resolve('@peer-agent/interactive-content')).href)};
-    import{createInteractiveResultStore,createInteractiveStateStore,createInteractiveFeedbackAdmission,createInteractivePublicationSource}from${JSON.stringify(href('packages/runtime-node/dist/interactive-results-public.js'))};
+    import{createInteractiveResultStore,createInteractiveStateStore,createInteractiveFeedbackAdmission,createInteractivePublicationSource,createInteractiveRetention,INTERACTIVE_RETENTION_SOURCES}from${JSON.stringify(href('packages/runtime-node/dist/interactive-results-public.js'))};
     import{createProjectInputDraftStore}from${JSON.stringify(href('packages/runtime-node/src/project-agent/input-draft-store.mjs'))};
     import{createInputQueue}from${JSON.stringify(href('packages/runtime-node/src/project-agent/input-queue.mjs'))};
     import{createConversationStore}from${JSON.stringify(href('packages/conversation-store/src/index.mjs'))};
@@ -125,6 +125,12 @@ test('the main workspace opens canonical interactive deliveries, restores result
     ipc.handle('resource-edit:list',()=>({ok:true,drafts:[],operations:[],staleCount:0}));
     globalThis.workspaceFixture={snapshot:(reference=receipt.reference)=>stateStore.read(reference,()=>true),
       publishNext:async()=>{const nextDraft={...draft,publication:{kind:"revise",base:receipt.reference},title:"Workspace trial updated",program:program.replace("$x=2","$x=9")};const next=resultStore.commitPublication({owner,source:{conversationId:"worker",sessionId:"session",planId:"plan",executionEpoch:"epoch",toolCallId:"publication-revision"},draft:nextDraft,content:await validateDraft(nextDraft),provenance:[],dataLevel:"D3_private",grant:{toolCallId:"publication-revision",grantId:"fixture-revision-grant",granted:true}},()=>true);evidenceEntries.push(next.indexEntry);resultStore.markIndexed(next.callRef,next.indexEntry);return next.reference;},layout:()=>interactive.readLayout(source.webContents,{owner}),
+      async createRetired(){const candidate={...draft,title:'Retired trial',textFallback:'Fixed historical summary.'};
+        const source={conversationId:'worker',sessionId:'session',planId:'plan',executionEpoch:'epoch',toolCallId:'publication-retired'};
+        const saved=resultStore.commitPublication({owner,source,draft:candidate,content:await validateDraft(candidate),provenance:[],dataLevel:'D3_private',grant:{toolCallId:source.toolCallId,grantId:'retired-grant',granted:true}},()=>true);
+        evidenceEntries.push(saved.indexEntry);resultStore.markIndexed(saved.callRef,saved.indexEntry);
+        const retire=createInteractiveRetention({resultStore,stateStore,assertOwner:()=>true,acquireRoots:()=>({sources:Object.fromEntries(INTERACTIVE_RETENTION_SOURCES.map(source=>[source,'sha256:'+'0'.repeat(64)])),pins:[],followupIds:[],assertCurrent:()=>true,release(){}})});
+        const preview=retire.preview(saved.reference);retire.cleanup({reference:saved.reference,requestId:'retire-fixture',expectedDigest:preview.cleanupDigest});return saved.reference;},
       failSave:kind=>{if(!['committed','uncommitted'].includes(kind))throw Error('invalid fault');saveFault=kind},
       draft:()=>drafts.read(draftAddress),consume:()=>queue.consume(owner.workspaceId),inputs:()=>({queue:queue.diagnosticSnapshot(owner.workspaceId),messages:conversations.getPersistedConversationHistory(owner.conversationId).messages.filter(row=>row.kind==='user_input'&&row.id!=='fixture-result-anchor').map(row=>({...row,selected:feedback.restore(row,owner.workspaceId)}))}),
       closeSource:()=>{closeAttempts++;source.close()},
@@ -316,6 +322,17 @@ test('the main workspace opens canonical interactive deliveries, restores result
     assert.equal(revised.isClosed(), false);
     assert.equal((await electron.evaluate(() => globalThis.workspaceFixture.facts())).versions, 2);
     assert.equal((await electron.evaluate(() => globalThis.workspaceFixture.facts())).operations, 2);
+    const cleanedReference = await electron.evaluate(() => globalThis.workspaceFixture.createRetired());
+    const cleanedWindow = electron.waitForEvent('window');
+    assert.equal((await page.evaluate(reference => window.peerAgent.resourceWindowOpen({ resource: { kind: 'interactive', reference } }), cleanedReference)).ok, true);
+    const cleaned = await cleanedWindow;
+    await cleaned.getByText('Fixed historical summary.', { exact: true }).waitFor();
+    assert.equal(await cleaned.getByText(/result content was cleaned/i).count(), 1);
+    assert.equal(await cleaned.getByRole('button', { name: 'Retry opening' }).count(), 0);
+    assert.equal(await cleaned.getByLabel('Divisor', { exact: true }).count(), 0);
+    assert.equal(await cleaned.getByText('View saved program', { exact: true }).count(), 0);
+    assert.equal(await cleaned.getByText(/Reading position was not saved/i).count(), 0);
+    await cleaned.screenshot({ path: path.join(root, 'native-cleaned-summary.png'), animations: 'disabled' });
     assert.deepEqual(external, []);
   } catch (error) {
     if (page && !page.isClosed()) { console.log('Workspace fixture diagnostics:', JSON.stringify({ text: (await page.locator('body').innerText()).slice(0, 2600), errors, root })); await page.screenshot({ path: path.join(root, 'workspace-failed.png'), animations: 'disabled' }); }

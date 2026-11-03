@@ -1,5 +1,6 @@
 import { INTERACTIVE_PUBLISH_CAPABILITY, INTERACTIVE_PUBLISH_TOOL, interactiveToken, normalizeInteractiveOwner,
   normalizeInteractiveUserArtifact, parseInteractiveArtifactRef } from '@peer-agent/protocol';
+import { createInteractiveTextReader } from './text-reader.mjs';
 import { encode, problem } from './storage.mjs';
 import { sessionReportEvidenceRefs } from '../project-agent/session-report.mjs';
 
@@ -29,7 +30,7 @@ export function createInteractivePublicationSource({ resultStore, goalPlanStore,
   }
   function publicationProof(target, owner, requestPlan, operation, alias) {
     if (!target || !same(target.owner, owner)) throw problem('interactive_scope_denied');
-    const descriptor = resultStore.getVersionMetadata(target), source = descriptor.source;
+    const descriptor = resultStore.getVersionMetadata(target, { allowCleaned: true }), source = descriptor.source;
     const sourcePlan = planFor(owner, { planId: source.planId, sessionId: source.sessionId });
     if (sourcePlan.conversationId !== source.conversationId || !interactiveToken(source.toolCallId)
       || requestPlan && (requestPlan.planId !== source.planId || alias && source.toolCallId !== alias) && !operation?.unchanged) throw problem('interactive_scope_denied');
@@ -117,7 +118,16 @@ export function createInteractivePublicationSource({ resultStore, goalPlanStore,
       const { descriptor, sourcePlan, record, artifact } = publicationProof(target, owner, requestPlan, operation, alias);
       requireSession(owner, sourcePlan);
       const task = { planId: sourcePlan.planId, sessionId: sourcePlan.delegationOrigin.sessionId };
-      const fixed = resultStore.getVersion(target);
+      let fixed;
+      try { fixed = resultStore.getVersion(target); }
+      catch (error) {
+        if (error.code !== 'interactive_content_cleaned') throw error;
+        const saved = createInteractiveTextReader({ resultStore, assertOwner: candidate => same(ownerFor(candidate.workspaceId), candidate) })(target);
+        if (saved.availability !== 'cleaned') throw problem('interactive_cleanup_corrupt');
+        return { record, context: { workspaceId: owner.workspaceId, task },
+          body: { text: `Result content cleaned. Saved model summary, unverified
+${saved.textFallback}`, truncated: saved.truncated } };
+      }
       const { content: _content, provenance: _provenance, ...actualDescriptor } = fixed;
       if (!same(descriptor, actualDescriptor) || artifact.specHash !== fixed.content.specHash || artifact.label !== fixed.content.title) throw problem('interactive_publication_unavailable');
       if (!same(ownerFor(context.workspaceId), owner)) throw problem('interactive_scope_denied');

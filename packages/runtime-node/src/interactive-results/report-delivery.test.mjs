@@ -9,6 +9,7 @@ import { createSessionSupervisor } from '../project-agent/session-supervisor.mjs
 import { createDesktopProjectFacts } from '../project-agent/project-facts.mjs';
 import { resolveWorkSessionProfile } from '../project-agent/work-session-profile.mjs';
 import { createInteractiveRuntime } from './runtime.mjs';
+import { createInteractiveRetention, INTERACTIVE_RETENTION_SOURCES } from './retention.mjs';
 import { createLocalToolHost } from '../../../../apps/desktop/electron/main/runtime-gateway/local-tool-host.mjs';
 import { normalizeTurnProfile } from '../../../../apps/desktop/electron/main/chat-runtime/turn-context.mjs';
 import { createEvidenceReader } from '../../../../apps/desktop/electron/main/project-agent/evidence-reader.mjs';
@@ -84,4 +85,21 @@ test('actual ToolHost publication → Supervisor report → post_reply → persi
   const opened = read(restored.meta.evidenceRefs[0], { context: { workspaceId: 'bot' } });
   assert.equal(opened.availability, 'available'); assert.equal(opened.deliveries[0].artifactRef, fixed);
   assert.match(opened.text, /Original model trial, unverified/); assert.equal(permissions, 1, 'reads and replies never request another publication grant');
+  const reference = published.result.outputPreview.reference;
+  const retire = createInteractiveRetention({ resultStore: runtime.resultStore, stateStore: runtime.stateStore, assertOwner: () => true,
+    acquireRoots: () => ({ sources: Object.fromEntries(INTERACTIVE_RETENTION_SOURCES.map(source => [source, 'sha256:' + '0'.repeat(64)])),
+      pins: [], followupIds: [], assertCurrent: () => true, release() {} }) });
+  const preview = retire.preview(reference);
+  retire.cleanup({ reference, requestId: 'retire-delivery', expectedDigest: preview.cleanupDigest });
+  const historical = read(fixed, { context: { workspaceId: 'bot' } });
+  assert.equal(historical.availability, 'available', 'the verified text receipt is readable');
+  assert.equal(historical.deliveries[0].artifactRef, fixed);
+  assert.match(historical.text, /Result content cleaned/);
+  assert.match(historical.text, /Original model trial, unverified/);
+  assert.doesNotMatch(historical.text, /root=Metric/);
+  const scopedAlias = read(alias, { context: { workspaceId: 'bot', task: { planId: initial.planId, sessionId: 'session' } } });
+  assert.equal(scopedAlias.text, historical.text);
+  assert.equal(read(fixed, { context: { workspaceId: 'foreign' } }).availability, 'unavailable');
+  assert.equal(permissions, 1);
+
 });

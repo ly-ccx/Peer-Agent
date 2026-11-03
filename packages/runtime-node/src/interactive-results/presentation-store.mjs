@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { interactiveToken, normalizeInteractiveOwner, normalizeInteractiveReference, normalizeResourceLayout, normalizeResourceLayoutSnapshot,
   normalizeResourceWindowOwner, normalizeResourceWindowRequest } from '@peer-agent/protocol';
+import { createInteractiveTextReader } from './text-reader.mjs';
 import { decode, encode, jsonDigest, problem } from './storage.mjs';
 
 const same = (a, b) => encode(a) === encode(b);
@@ -17,6 +18,7 @@ export function interactiveReadingSourceBinding(rawOwner, rawReference) {
 /** Versioned presentation metadata. Old Settings writers never receive or rewrite these rows. */
 export function createInteractivePresentationStore({ resultStore, assertOwner, now = () => new Date().toISOString() }) {
   const storage = resultStore.storage;
+  const readText = createInteractiveTextReader({ resultStore, assertOwner });
   function current(raw) {
     const owner = normalizeInteractiveOwner(raw);
     if (!owner || typeof assertOwner !== 'function' || assertOwner(owner) !== true) throw problem('interactive_scope_denied');
@@ -70,12 +72,12 @@ export function createInteractivePresentationStore({ resultStore, assertOwner, n
           ...(context.sourceTabId ? { sourceTabId: context.sourceTabId } : {}), ...(context.navigation ? { navigation: context.navigation } : {}) });
         if (!request || request.resource.kind !== 'interactive' || !same(owner, request.resource.reference.owner) || !same(owner, scope?.owner)
           || !same(scope.resource, context.resource)) throw problem('interactive_scope_denied');
-        const fixed = resultStore.getVersion(request.resource.reference);
-        const entry = historyEntry({ id: recoveryId ?? `interactive-${randomUUID()}`, owner, request, savedAt: now(),
-          title: fixed.content.title,
-          sourceBinding: interactiveReadingSourceBinding(owner, request.resource.reference) });
+        if (!storage.connect(owner.workspaceId)) throw problem('interactive_presentation_unavailable');
         return storage.transaction(owner.workspaceId, db => {
           current(owner);
+          const fixed = readText(request.resource.reference);
+          const entry = historyEntry({ id: recoveryId ?? `interactive-${randomUUID()}`, owner, request, savedAt: now(),
+            title: fixed.title, sourceBinding: interactiveReadingSourceBinding(owner, request.resource.reference) });
           const previous = historyRows(owner, db), old = previous.find(row => row.id === entry.id);
           if (old && !same(old.request.resource, entry.request.resource)) throw problem('interactive_presentation_conflict');
           db.db.prepare('INSERT INTO presentation VALUES(?,?,?,?) ON CONFLICT(category,id,owner) DO UPDATE SET body=excluded.body')
@@ -100,11 +102,13 @@ export function createInteractivePresentationStore({ resultStore, assertOwner, n
       assertLayoutOwner(owner, layout);
       // A dormant feature must not create a private domain during ordinary file navigation.
       const existing = storage.connect(owner.workspaceId);
-      const published = existing?.db.prepare("SELECT v.metadata FROM versions v JOIN operations o ON o.id=json_extract(v.metadata,'$.operationId') WHERE v.owner=? AND v.availability='available' AND o.phase='published' LIMIT 1").get(encode(owner));
-      if (!published) throw problem('interactive_presentation_unavailable');
-      resultStore.getVersion(decode(published.metadata).reference);
+      if (!existing) throw problem('interactive_presentation_unavailable');
       return storage.transaction(owner.workspaceId, context => {
         current(owner);
+        const published = context.db.prepare(`SELECT v.metadata FROM versions v JOIN operations o ON o.id=json_extract(v.metadata,'$.operationId')
+          WHERE v.owner=? AND v.availability IN ('available','cleaned') AND o.phase='published' ORDER BY v.availability LIMIT 1`).get(encode(owner));
+        if (!published) throw problem('interactive_presentation_unavailable');
+        readText(decode(published.metadata).reference);
         const before = readLayout(owner);
         if ((before?.revision ?? 0) !== expectedRevision) throw problem('interactive_layout_conflict');
         const next = checkedLayout({ formatVersion: 2, ...layout, revision: expectedRevision + 1, updatedAt: now() });

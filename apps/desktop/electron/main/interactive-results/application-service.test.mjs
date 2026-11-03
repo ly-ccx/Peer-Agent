@@ -5,7 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import test from 'node:test';
 import { validateDraft } from '@peer-agent/interactive-content';
-import { createInteractiveResultStore, createInteractiveStateStore } from '@peer-agent/runtime-node/interactive-results';
+import { createInteractiveResultStore, createInteractiveStateStore, createInteractiveRetention, INTERACTIVE_RETENTION_SOURCES } from '@peer-agent/runtime-node/interactive-results';
 import { createDesktopInteractiveApplication } from './application-service.mjs';
 import { createResourceWindowController } from '../resource-window-controller.mjs';
 import { createTrustedWindowRegistry } from '../ipc/trusted-window-registry.mjs';
@@ -125,6 +125,34 @@ test('draft handoff rejects stale views, forged fields and a changed recipient w
   assert.equal((await pending).code, 'resource_feedback_recipient_changed');
   assert.equal((await f.app.prepareDraft(f.main, request)).code, 'interactive_view_stale');
   assert.equal(f.drafts.read({ workspaceId: owner.workspaceId, surface: 'desktop' }).snapshot.draft.resourceFeedback, undefined);
+});
+
+test('a retired resource window recovers the real static summary without a handle or view pin', async t => {
+  const f = await fixture(t), { resultStore, stateStore } = f.runtime, reference = f.resource.reference;
+  const retirement = createInteractiveRetention({ resultStore, stateStore, assertOwner: () => true,
+    acquireRoots: () => ({ sources: Object.fromEntries(INTERACTIVE_RETENTION_SOURCES.map(source => [source, 'sha256:' + '0'.repeat(64)])),
+      pins: [], followupIds: [], assertCurrent: () => true, release() {} }) });
+  const preview = retirement.preview(reference);
+  retirement.cleanup({ reference, requestId: 'clean-native', expectedDigest: preview.cleanupDigest });
+  const { result, window } = await f.openNative();
+  assert.equal(result.context.title, 'Trial from actual publication');
+  assert.equal(f.host.ready(window.webContents, result.context).ok, true);
+  const opened = await f.app.open(window.webContents, { reference, requestId: 'open-cleaned' });
+  assert.equal(opened.ok, false);
+  assert.equal(opened.code, 'interactive_content_cleaned');
+  assert.deepEqual(opened.summary.reference, reference);
+  assert.equal(opened.summary.textFallback, 'Unverified model trial.');
+  assert.equal(opened.summary.availability, 'cleaned');
+  assert.equal(opened.handle, undefined);
+  assert.equal(opened.result, undefined);
+  const db = resultStore.storage.connect(owner.workspaceId).db;
+  assert.equal(Number(db.prepare("SELECT COUNT(*) AS n FROM presentation WHERE category='interactive-active-view'").get().n), 0);
+  assert.equal(f.fileReads(), 0);
+  assert.equal(f.app.listWindows(owner).entries[0].request.resource.reference.contentVersion, reference.contentVersion);
+  assert.equal(f.app.writeLayout(f.main, { owner, expectedRevision: 0, order: [], recent: [], interactive: { tabs: [], activeTabId: null } }).ok, true);
+  db.prepare("UPDATE presentation SET body='{}' WHERE category='interactive-cleanup'").run();
+  assert.equal((await f.app.open(window.webContents, { reference, requestId: 'open-corrupt' })).code, 'interactive_cleanup_corrupt');
+  assert.equal(f.app.prepareResource(f.resource).ok, false);
 });
 
 test('native view uses the real window binding, enforces one writer and cannot reach file APIs', async t => {
