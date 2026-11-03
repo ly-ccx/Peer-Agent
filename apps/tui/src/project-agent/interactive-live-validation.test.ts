@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync
 import os from 'node:os';
 import path from 'node:path';
 import type { ModelProvider } from '@peer-agent/runtime-node/models';
+import { INTERACTIVE_STORY_BUDGET, runInteractiveLiveStory } from './interactive-live-story.ts';
 import { INTERACTIVE_LIVE_DRAFT, classifyInteractiveFallback, runInteractiveLiveCase, type InteractiveLiveScenario } from './interactive-live-validation.ts';
 import { interactiveLiveOutputBase, parseInteractiveLiveArgs, runInteractiveLiveCommand, sanitizeInteractiveLiveDiagnostic } from './interactive-live-command.ts';
 
@@ -158,4 +159,21 @@ test('the verify scenario performs an independent host review with real fixed in
   expect(report.requests.map(row => row.phase)).toEqual(['worker', 'worker', 'verifier', 'verifier']);
   expect(report.verification?.receipts).toHaveLength(4);
   expect(report.verification?.passed).toBe(true);
+});
+
+test('story diagnostics retain the role and resource when a model batch exceeds its limit', async () => {
+  const limit = INTERACTIVE_STORY_BUDGET.calls.bot;
+  const provider: ModelProvider = { async stream() {
+    return { content: '', toolCalls: Array.from({ length: limit + 1 }, (_, index) => ({
+      id: `oversized-${index}`, name: 'spawn_session', arguments: '{}',
+    })) };
+  } };
+  const directory = path.join(fixture(), 'story');
+  const report = await runInteractiveLiveStory({ directory, provider, model, sanitize: String });
+  expect(report.ok).toBe(false);
+  expect(report.error).toContain('story_tool_limit:bot');
+  expect(report.budgetExhausted).toEqual({ scope: 'role', resource: 'toolCalls', phase: 'bot', used: limit + 1, limit });
+  expect(report.requests).toHaveLength(1);
+  expect(report.sessions).toEqual([]);
+  expect(JSON.parse(readFileSync(path.join(directory, 'report.json'), 'utf8')).budgetExhausted).toEqual(report.budgetExhausted);
 });

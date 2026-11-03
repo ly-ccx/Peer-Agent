@@ -120,7 +120,8 @@ export async function runInteractiveLiveCommand(args: readonly string[], log: (l
         // Disable transport recovery here so the physical HTTP budget is independently bounded.
         const transport = createTuiProviderFetch({ connectionRecovery: false });
         const countedFetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
-          if (++sample.httpRequests > (scenario === 'story' ? INTERACTIVE_STORY_BUDGET.totalRequests : 8)) throw new Error('live_http_limit');
+          if (sample.httpRequests >= (scenario === 'story' ? INTERACTIVE_STORY_BUDGET.totalRequests : 8)) throw new Error('live_http_limit');
+          sample.httpRequests++;
           return transport(input, init);
         }) as typeof fetch;
         const wire = supportedWire(metadata)!;
@@ -136,6 +137,7 @@ export async function runInteractiveLiveCommand(args: readonly string[], log: (l
             requests: report.requests.length, approvals: report.approvals, finished: Boolean(report.finishedAt) })); } };
         const report = scenario === 'story' ? await runInteractiveLiveStory(common) : await runInteractiveLiveCase({ ...common, scenario, realModel: true });
         sample.ok = report.ok;
+        if ('error' in report && typeof report.error === 'string') sample.error = report.error;
       } catch (error) { sample.error = sanitizeInteractiveLiveDiagnostic(error, [secret]); }
       finally { secret = ''; persist(); }
     }

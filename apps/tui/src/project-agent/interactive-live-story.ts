@@ -58,7 +58,9 @@ export async function runInteractiveLiveStory(options: {
   const { directory, model, sanitize } = options;
   mkdirSync(directory, { mode: 0o700 });
   const report: { ok: boolean; scenario: 'story'; startedAt: string; finishedAt?: string; stage: string; error?: string;
-    requests: Observation[]; publication?: unknown; frozen?: unknown; sessions?: unknown; receipts?: unknown; replies?: unknown; delivery?: unknown } = {
+    requests: Observation[];
+    budgetExhausted?: { scope: 'story' | 'role'; resource: 'requests' | 'toolCalls'; phase: Phase; used: number; limit: number };
+    publication?: unknown; frozen?: unknown; sessions?: unknown; receipts?: unknown; replies?: unknown; delivery?: unknown } = {
     ok: false, scenario: 'story', startedAt: new Date().toISOString(), stage: 'setup', requests: [],
   };
   const persist = () => {
@@ -82,7 +84,9 @@ export async function runInteractiveLiveStory(options: {
     const conversationId: string = created.profile.agentConversationId;
     const callCounts = { bot: 0, worker: 0, verifier: 0 };
     let budgetError: Error | undefined;
-    function exhausted(code: string, phase: Phase): never {
+    function exhausted(scope: 'story' | 'role', resource: 'requests' | 'toolCalls', phase: Phase, used: number, limit: number): never {
+      report.budgetExhausted ??= { scope, resource, phase, used, limit };
+      const code = resource === 'toolCalls' ? 'story_tool_limit' : scope === 'story' ? 'story_total_request_limit' : 'story_request_limit';
       budgetError ??= new Error(`${code}:${phase}`);
       throw budgetError;
     }
@@ -96,8 +100,10 @@ export async function runInteractiveLiveStory(options: {
           const phase: Phase = names.includes('spawn_session') ? 'bot'
             : request.messages.some(row => typeof row.content === 'string' && row.content.includes('Verifier mission for plan')) ? 'verifier' : 'worker';
           const prior = report.requests.filter(row => row.phase === phase);
-          if (prior.length >= INTERACTIVE_STORY_BUDGET.requests[phase]
-            || report.requests.length >= INTERACTIVE_STORY_BUDGET.totalRequests) exhausted('story_request_limit', phase);
+          if (report.requests.length >= INTERACTIVE_STORY_BUDGET.totalRequests)
+            exhausted('story', 'requests', phase, report.requests.length, INTERACTIVE_STORY_BUDGET.totalRequests);
+          if (prior.length >= INTERACTIVE_STORY_BUDGET.requests[phase])
+            exhausted('role', 'requests', phase, prior.length, INTERACTIVE_STORY_BUDGET.requests[phase]);
           const observation: Observation = { phase, tools: names };
           report.requests.push(observation);
           const start = Date.now();
@@ -109,7 +115,7 @@ export async function runInteractiveLiveStory(options: {
             observation.returnedArguments = result.toolCalls.slice(0, 12).map(call => sanitize(call.arguments));
             callCounts[phase] += result.toolCalls.length;
             if (callCounts[phase] > INTERACTIVE_STORY_BUDGET.calls[phase])
-              exhausted('story_tool_limit', phase);
+              exhausted('role', 'toolCalls', phase, callCounts[phase], INTERACTIVE_STORY_BUDGET.calls[phase]);
             return result;
           } catch (error) { observation.error = sanitize(error); throw error; }
           finally { observation.durationMs = Date.now() - start; persist(); }
