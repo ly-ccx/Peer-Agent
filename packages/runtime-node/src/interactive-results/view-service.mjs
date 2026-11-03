@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { interactiveToken, normalizeInteractiveOwner, normalizeInteractiveReference, normalizeInteractiveViewHandle,
   normalizeInteractiveWriter } from '@peer-agent/protocol';
 import { encode, problem } from './storage.mjs';
+import { registerInteractiveViewPin } from './view-pins.mjs';
 
 const same = (a, b) => encode(a) === encode(b);
 const copy = value => structuredClone(value);
@@ -18,7 +19,14 @@ const failed = error => ({ ok: false, code: typeof error?.code === 'string' && /
 export function createInteractiveViewService({ resultStore, stateStore, resolveSource, createId = randomUUID, maxViews = 32 }) {
   if (typeof resolveSource !== 'function' || !Number.isSafeInteger(maxViews) || maxViews < 1 || maxViews > 64) throw TypeError('Invalid interactive view ports');
   const views = new Map(), requests = new Map(), pending = new Set(), retired = new Map();
+  const pendingPinReleases = new Set();
   let disposed = false;
+  function releasePins() {
+    for (const release of pendingPinReleases) {
+      try { release(); pendingPinReleases.delete(release); }
+      catch { /* A failed release conservatively keeps the pin until a later close/open or process exit. */ }
+    }
+  }
   const requireCurrent = record => {
     if (disposed || views.get(record.handle.viewId) !== record || record.sender.isDestroyed?.() === true || record.assertCurrent() !== true) throw problem('interactive_view_stale');
     return true;
@@ -36,6 +44,8 @@ export function createInteractiveViewService({ resultStore, stateStore, resolveS
       catch { /* A taken-over token cannot release its successor. */ }
     }
     views.delete(record.handle.viewId);
+    if (record.releasePin) pendingPinReleases.add(record.releasePin);
+    releasePins();
     retired.set(record.handle.viewId, { sender: record.sender, handle: record.handle, writer: record.writer });
     if (retired.size > maxViews * 2) retired.delete(retired.keys().next().value);
     const senderRequests = requests.get(record.sender);
@@ -97,7 +107,13 @@ export function createInteractiveViewService({ resultStore, stateStore, resolveS
         const record = { sender, reference, handle, requestId, controller, assertCurrent: source.assertCurrent, writer: null };
         record.onDestroyed = () => retire(record);
         views.set(handle.viewId, record); sender.once?.('destroyed', record.onDestroyed);
-        try { const reply = openReply(record); if (!reply.ok) retire(record); return reply; } catch (error) { retire(record); throw error; }
+        try {
+          releasePins();
+          record.releasePin = registerInteractiveViewPin(resultStore, reference, handle, () => requireCurrent(record));
+          const reply = openReply(record);
+          if (!reply.ok) retire(record);
+          return reply;
+        } catch (error) { retire(record); throw error; }
       })().catch(failed).finally(() => { pending.delete(operation); sender.removeListener?.('destroyed', cancel); });
       senderRequests.set(requestId, { reference, promise });
       const reply = await promise;
@@ -179,6 +195,6 @@ export function createInteractiveViewService({ resultStore, stateStore, resolveS
       return {};
     }),
     closeSender,
-    dispose() { if (disposed) return; disposed = true; [...pending].forEach(operation => operation.cancel()); [...views.values()].forEach(retire); requests.clear(); retired.clear(); },
+    dispose() { if (disposed) return; disposed = true; [...pending].forEach(operation => operation.cancel()); [...views.values()].forEach(retire); requests.clear(); retired.clear(); releasePins(); pendingPinReleases.clear(); },
   };
 }

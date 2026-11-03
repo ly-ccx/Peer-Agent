@@ -1,6 +1,7 @@
 import { interactiveDigest, interactiveToken, normalizeInteractiveOwner, normalizeInteractiveReference } from '@peer-agent/protocol';
 import { decode, encode, jsonDigest, problem } from './storage.mjs';
 import { checkedInteractiveSnapshot } from './state-record.mjs';
+import { interactiveProcessAlive, readLiveInteractiveViewPins } from './view-pins.mjs';
 
 export const INTERACTIVE_RETENTION_SOURCES = Object.freeze(['views', 'drafts', 'inputs', 'messages', 'delegation', 'verification']);
 const CATEGORY = 'interactive-cleanup', TOMBSTONE_LIMIT = 256;
@@ -11,7 +12,6 @@ const known = (value, fields) => value && typeof value === 'object' && !Array.is
 const count = value => Number.isSafeInteger(value) && value >= 0;
 const synchronous = fn => typeof fn === 'function' && fn.constructor?.name !== 'AsyncFunction';
 function reference(raw) { const result = normalizeInteractiveReference(raw); if (!result) throw problem('interactive_reference_invalid'); return result; }
-function live(pid) { try { process.kill(pid, 0); return true; } catch (error) { return error.code !== 'ESRCH'; } }
 
 /** Internal maintenance only. No public delete port exists until every root store is guarded. */
 export function createInteractiveRetention({ resultStore, stateStore, assertOwner, acquireRoots, now = () => new Date().toISOString(), onStep = () => {} }) {
@@ -123,7 +123,7 @@ export function createInteractiveRetention({ resultStore, stateStore, assertOwne
         const writer = decode(row.writer);
         if (!Number.isSafeInteger(writer.pid) || writer.pid <= 0 || !['token', 'hostEpoch', 'viewId', 'windowId', 'viewGeneration', 'generation'].every(key => interactiveToken(writer[key])))
           throw problem('interactive_storage_corrupt');
-        if (live(writer.pid)) block('writer');
+        if (interactiveProcessAlive(writer.pid)) block('writer');
       }
     }
     const attempts = context.db.prepare('SELECT id,body FROM attempts ORDER BY id').all();
@@ -138,6 +138,8 @@ export function createInteractiveRetention({ resultStore, stateStore, assertOwne
       if (!target || !same(target.owner, ref.owner) || !['published', 'index_pending'].includes(row.phase)) throw problem('interactive_storage_corrupt');
       if (row.phase === 'index_pending') block('publication');
     }
+    const activeViews = readLiveInteractiveViewPins(context, ref.owner);
+    for (const pin of activeViews) if (pin.reference.resultId === ref.resultId) block('views');
     for (const pin of snapshot.pins) if (pin.reference.resultId === ref.resultId) block(pin.source);
     for (const id of snapshot.followupIds) {
       if (!stateStore) throw problem('interactive_retention_unavailable');
@@ -151,7 +153,7 @@ export function createInteractiveRetention({ resultStore, stateStore, assertOwne
       if (!object || !count(Number(object.bytes))) throw problem('interactive_storage_corrupt');
       return sum + Number(object.bytes);
     }, 0);
-    const digest = jsonDigest({ reference: ref, rows, states, saves, attempts, operations, removable, roots: snapshot });
+    const digest = jsonDigest({ reference: ref, rows, states, saves, attempts, operations, activeViews, removable, roots: snapshot });
     assertCurrent();
     return { preview: { reference: ref, cleanupDigest: digest, versionCount: rows.length, stateCount: states.length, saveCount: saves.length,
       objectBytes, blockers: [...reasons].sort(([a], [b]) => a.localeCompare(b)).map(([source, count]) => ({ source, count })) }, summaries, removable };

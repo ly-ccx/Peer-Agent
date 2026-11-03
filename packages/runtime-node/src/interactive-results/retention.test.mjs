@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { once } from 'node:events';
+import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -73,6 +74,51 @@ async function fixture(t, storeOptions = {}) {
   return { rootDir, store, states, retention, first, publish, legacy, db, counts, clean, acquireRoots,
     setPins(value) { pins = value; revision++; }, setFollowups(value) { followupIds = value; revision++; }, bump() { revision++; }, revoke() { leased = false; }, releases: () => releases };
 }
+
+test('an actual read-only view in another process blocks retirement until the view closes or the process exits', { timeout: 10_000 }, async t => {
+  const f = await fixture(t), reference = f.first.reference;
+  const before = f.retention.preview(reference);
+  const url = name => JSON.stringify(new URL(name, import.meta.url).href);
+  const script = `import { EventEmitter } from 'node:events';
+    import { createInteractiveResultStore } from ${url('./store.mjs')};
+    import { createInteractiveStateStore } from ${url('./state-store.mjs')};
+    import { createInteractiveViewService } from ${url('./view-service.mjs')};
+    const [rootDir, reference] = JSON.parse(process.argv[1]);
+    const resultStore = createInteractiveResultStore({ rootDir, assertCompatibility: () => true });
+    const stateStore = createInteractiveStateStore({ resultStore });
+    const service = createInteractiveViewService({ resultStore, stateStore, resolveSource: () => ({ owner: reference.owner, assertCurrent: () => true }) });
+    const sender = new EventEmitter();
+    process.on('message', async action => {
+      if (action === 'close') { sender.emit('destroyed'); process.send('closed'); return; }
+      const reply = await service.open(sender, { requestId: 'open-a', reference });
+      process.send(reply.ok ? 'open' : reply.code);
+    });`;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', script, JSON.stringify([f.rootDir, reference])], { stdio: ['ignore', 'ignore', 'inherit', 'ipc'] });
+  t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); });
+  const send = async action => {
+    const response = once(child, 'message', { signal: AbortSignal.timeout(3000) });
+    child.send(action);
+    return (await response)[0];
+  };
+  assert.equal(await send('open'), 'open');
+  const old = createLegacyPresentation({ resultStore: f.legacy(), assertOwner: current, now });
+  old.writeLayout(owner, { expectedRevision: 0, order: [], recent: [], interactive: { tabs: [], activeTabId: null } });
+  assert.deepEqual(f.retention.preview(reference).blockers, [{ source: 'views', count: 1 }]);
+  const row = f.db.prepare("SELECT id,body FROM presentation WHERE category='interactive-active-view'").get();
+  const replace = f.db.prepare("UPDATE presentation SET body=? WHERE category='interactive-active-view' AND id=?");
+  replace.run('{}', row.id);
+  assert.throws(() => f.retention.preview(reference), { code: 'interactive_storage_corrupt' });
+  replace.run(row.body, row.id);
+  assert.throws(() => f.retention.cleanup({ reference, requestId: 'cleanup-a', expectedDigest: before.cleanupDigest }), { code: 'interactive_retention_stale' });
+  assert.equal(await send('close'), 'closed');
+  assert.deepEqual(f.retention.preview(reference).blockers, []);
+  assert.equal(await send('open'), 'open');
+  const exit = once(child, 'exit');
+  child.kill('SIGKILL');
+  await exit;
+  assert.deepEqual(f.retention.preview(reference).blockers, []);
+  assert.equal(f.clean().versions.length, 1);
+});
 
 test('retirement atomically clears every fixed version and confirmed state while retaining operations and frozen values', async t => {
   const f = await fixture(t);
