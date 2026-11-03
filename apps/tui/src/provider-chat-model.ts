@@ -21,6 +21,7 @@ import type {
   ModelToolCall,
   ModelToolDefinition,
 } from '@peer-agent/runtime-node';
+import { modelAssistantMessage } from './provider-continuation.ts';
 import { encodeProviderToolResult, readOnlyWorkCapabilityAllowed, agentCommunicationExcludedPrefixes, admitInteractiveToolSet } from '@peer-agent/runtime-node';
 import type { RuntimeSdkProviderExecution, RuntimeSdkStreamDiscardEvent } from '@peer-agent/runtime-sdk';
 
@@ -660,7 +661,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
             pinnedProviderPrefix: pinnedPrefix,
             modelMessages: [
               ...workingMessages,
-              { role: 'assistant', content: result.content || null, toolCalls: result.toolCalls },
+              modelAssistantMessage(result),
             ],
             pendingToolCalls: result.toolCalls,
             usageAccounting,
@@ -676,7 +677,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
 
       const completedModelMessages: readonly ModelMessage[] = [
         ...workingMessages,
-        { role: 'assistant', content: result.content },
+        modelAssistantMessage(result),
       ];
       return {
         kind: 'completed',

@@ -19,6 +19,7 @@ import {
 } from '@peer-agent/runtime-core';
 import type { RuntimeSdkProviderExecution } from '@peer-agent/runtime-sdk';
 
+import { createAnthropicMessagesProvider } from './anthropic-messages-provider.ts';
 import { createChatController } from './chat-controller.ts';
 import {
   createProviderChatModel,
@@ -344,6 +345,31 @@ describe('OpenAI-compatible TUI chat adapter', () => {
         required: ['path'],
       },
     }]);
+  });
+
+  test('replays authentic Anthropic thinking through the live tool loop only', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const provider = createAnthropicMessagesProvider({
+      providerId: 'fixture-anthropic', getApiKey: async () => 'fixture-key',
+      async sendStream(args) {
+        calls.push(args);
+        return calls.length === 1
+          ? { ok: true, thinkingContent: 'provider-native', thinkingSignature: 'provider-signature',
+            toolUseBlocks: [{ id: 'native-call', name: 'read_file', inputJson: '{"path":"note.txt"}' }] }
+          : { ok: true, textContent: 'done' };
+      },
+    });
+    const controller = createChatController({
+      host: host(),
+      model: createProviderChatModel({ provider, model: 'deepseek-flash', toolDefinitions }),
+    });
+    await controller.send('read note');
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.messages).toContainEqual({
+      role: 'assistant',
+      content: [{ type: 'thinking', thinking: 'provider-native', signature: 'provider-signature' }],
+      tool_calls: [{ id: 'native-call', type: 'function', function: { name: 'read_file', arguments: '{"path":"note.txt"}' } }],
+    });
   });
 
   test('materializes oversized tool results in the configured host data root', async () => {
