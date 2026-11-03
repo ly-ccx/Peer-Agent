@@ -8,6 +8,7 @@ import { createInteractiveResultStore } from './store.mjs';
 import { createInteractivePresentationStore } from './presentation-store.mjs';
 import { encode } from './storage.mjs';
 import { createInteractivePresentationStore as createV1PresentationStore } from './test-fixtures/presentation-v1-writer.mjs';
+import { normalizeResourceLayout as normalizeV1Layout } from './test-fixtures/presentation-v1-layout.mjs';
 
 const owner = { workspaceId: 'bot-a', conversationId: 'parent-a' };
 const current = () => true;
@@ -102,8 +103,10 @@ test('known v1 layout upgrades without losing hints; a real already-open v1 writ
   const loaded = f.presentation.readLayout(owner); assert.equal(loaded.revision, 1); assert.deepEqual(loaded.order, before.order);
   assert.deepEqual(loaded.recent, before.recent); assert.deepEqual(loaded.interactive, emptySession);
   const interactive = { tabs: [{ id: 'result-tab', reference: f.resource.reference, title: 'Saved trial', navigation: { top: 240, left: 0 } }], activeTabId: 'result-tab' };
-  const next = f.presentation.writeLayout(owner, { expectedRevision: 1, order: [...before.order, 'comparison:workspace', 'interactive:result-tab'], recent: before.recent, interactive });
+  const next = f.presentation.writeLayout(owner, { expectedRevision: 1, order: [...before.order, 'interactive:result-tab'], recent: before.recent, interactive });
   assert.equal(next.formatVersion, 2); assert.equal(next.revision, 2); assert.deepEqual(next.interactive, interactive);
+  assert.deepEqual(normalizeV1Layout({ order: next.order, recent: next.recent }), { order: next.order, recent: next.recent },
+    'the old order/recent projection remains valid, so rejection specifically protects the unknown row fields');
   assert.throws(() => legacy.readLayout(owner), { code: 'interactive_presentation_corrupt' });
   assert.throws(() => legacy.writeLayout(owner, { expectedRevision: 2, order: ['document:replacement'], recent: [] }), { code: 'interactive_presentation_corrupt' });
   assert.deepEqual(f.presentation.readLayout(owner), next);
