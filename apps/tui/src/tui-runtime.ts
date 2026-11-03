@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { contextAccountingModelKey, type LocalAccessLevel } from '@peer-agent/protocol';
 import {
@@ -343,6 +344,7 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
   const model = provider
     ? createProviderChatModel({
         provider,
+        toolArtifactBaseDir: path.join(userDataPath, 'artifacts'),
         getProvider: () => sharedMetadata
           ? sharedProvider(modelSelection.getSelection().providerId)
           : provider,

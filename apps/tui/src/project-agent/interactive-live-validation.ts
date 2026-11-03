@@ -121,7 +121,7 @@ export async function runInteractiveLiveCase(options: {
         project: { workspaceId, planId: plan.planId, sessionId: 'live-session', readOnly: true, holdsLease: () => true },
         toolContext: { workspacePath, turnProfile: profile } });
       const output = execution.result.output as any;
-      const encoded = encodeProviderToolResult({ result: execution.result, execution, conversationId: child.id, toolCallId: 'fault-seed' }).content;
+      const encoded = encodeProviderToolResult({ result: execution.result, execution, conversationId: child.id, toolCallId: 'fault-seed', baseDir: path.join(directory, 'artifacts') }).content;
       const seed = { driverGenerated: true as const, delivery: 'user-factual-context' as const,
         status: execution.result.status ?? 'unknown', grantGranted: (execution.grant as any)?.granted === true,
         diagnostic: output?.diagnostic, encodedResult: encoded };
@@ -157,7 +157,8 @@ export async function runInteractiveLiveCase(options: {
           finally { row.durationMs = Date.now() - started; persist(); }
         } };
         return createTurnTestRuntime({ host, modelSelection: createTuiModelSelectionControl({ providerId: model.credentialId, modelId: model.model, displayName: model.model }),
-          model: createProviderChatModel({ model: model.model, provider: observed, streamRetryDelaysMs: [], toolDefinitionsForMode: mode => host.toolDefinitionsForMode!(mode),
+          model: createProviderChatModel({ model: model.model, provider: observed, streamRetryDelaysMs: [],
+            toolArtifactBaseDir: path.join(directory, 'artifacts'), toolDefinitionsForMode: mode => host.toolDefinitionsForMode!(mode),
             getSystemPrompt: context => buildTuiSystemPrompt({}, { ...context.systemContextInput, mode: context.mode }) }) }, cleanups);
       } });
     const result = await executor.runTurn({ workspaceId, workspacePath, conversationId: child.id, mode: 'goal', turnProfile: profile,

@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, test } from 'bun:test';
 import {
   COMPACTION_SUMMARY_PROMPT,
@@ -341,6 +344,29 @@ describe('OpenAI-compatible TUI chat adapter', () => {
         required: ['path'],
       },
     }]);
+  });
+
+  test('materializes oversized tool results in the configured host data root', async () => {
+    const toolArtifactBaseDir = mkdtempSync(path.join(os.tmpdir(), 'peer-tui-tool-output-'));
+    try {
+      const requests: ModelProviderRequest[] = [];
+      const provider: ModelProvider = { async stream(request) {
+        requests.push(request);
+        return requests.length === 1
+          ? { content: '', toolCalls: [{ id: 'isolated-call', name: 'read_file', arguments: '{"path":"note.txt"}' }] }
+          : completed('done');
+      } };
+      const output = 'bounded fixture output '.repeat(800);
+      const controller = createChatController({
+        host: host(() => execution(output)),
+        model: createProviderChatModel({ provider, model: 'model-test', toolDefinitions, toolArtifactBaseDir }),
+      });
+      await controller.send('read note');
+      const reference = JSON.parse(String(requests[1]?.messages.find(message => message.role === 'tool')?.content));
+      expect(reference.kind).toBe('local_tool_result_ref');
+      expect(path.relative(toolArtifactBaseDir, reference.artifactRef)).not.toMatch(/^\.\./);
+      expect(JSON.parse(readFileSync(reference.artifactRef, 'utf8')).output.content).toBe(output);
+    } finally { rmSync(toolArtifactBaseDir, { recursive: true, force: true }); }
   });
 
   test('executes model tool calls through Runtime and resumes with assistant/tool history', async () => {

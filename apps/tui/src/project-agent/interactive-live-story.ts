@@ -90,6 +90,7 @@ export async function runInteractiveLiveStory(options: {
         return createTurnTestRuntime({ host: tools,
           modelSelection: createTuiModelSelectionControl({ providerId: model.credentialId, modelId: model.model, displayName: model.model }),
           model: createProviderChatModel({ model: model.model, provider: observed, streamRetryDelaysMs: [],
+            toolArtifactBaseDir: path.join(directory, 'artifacts'),
             toolDefinitionsForMode: mode => tools.toolDefinitionsForMode!(mode),
             getSystemPrompt: context => buildTuiSystemPrompt({}, { ...context.systemContextInput, mode: context.mode }) }) }, cleanups);
       },

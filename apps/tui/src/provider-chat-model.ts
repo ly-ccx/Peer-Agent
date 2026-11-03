@@ -64,6 +64,7 @@ export interface CreateProviderChatModelOptions {
   readonly provider: ModelProvider;
   readonly getProvider?: () => ModelProvider;
   readonly model: string;
+  readonly toolArtifactBaseDir?: string;
   readonly toolDefinitions?: readonly RuntimeToolDefinition[];
   readonly toolDefinitionsForMode?: (mode: TuiRuntimeMode) => readonly RuntimeToolDefinition[];
   readonly systemPrompt?: string;
@@ -134,7 +135,7 @@ function parseArguments(call: ModelToolCall): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
-function executionContent(execution: RuntimeSdkProviderExecution, conversationId?: string): string {
+function executionContent(execution: RuntimeSdkProviderExecution, conversationId?: string, baseDir?: string): string {
   const result = execution.result;
   const evidenceRefs = collectToolEvidenceRefs({
     toolCallId: result.toolCallId,
@@ -148,6 +149,7 @@ function executionContent(execution: RuntimeSdkProviderExecution, conversationId
       result,
       execution,
       conversationId,
+      baseDir,
       toolCallId: result.toolCallId,
       evidenceRefs,
     }).content;
@@ -700,7 +702,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
           ...executions.map((execution) => ({
             role: 'tool' as const,
             toolCallId: execution.call.toolCallId,
-            content: executionContent(execution.result, state.conversationId),
+            content: executionContent(execution.result, state.conversationId, options.toolArtifactBaseDir),
           })),
         ],
         toolExecutions: [

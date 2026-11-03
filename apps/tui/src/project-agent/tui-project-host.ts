@@ -123,7 +123,7 @@ export function createTuiProjectHost(options: {
         content: output.text, interrupted: output.interrupted,
         segments: [...output.calls.map(call => ({type: 'tool-call', tool: call.name, toolCallId: call.toolCallId,
           args: call.input, status: call.execution.result.status, result: encodeProviderToolResult({result: call.execution.result,
-            execution: call.execution, conversationId: input.conversationId, toolCallId: call.toolCallId}).content})),
+            execution: call.execution, conversationId: input.conversationId, toolCallId: call.toolCallId, baseDir: path.join(dataHome, 'artifacts')}).content})),
           ...(output.text ? [{type: 'text', content: output.text}] : [])],
       } as never);
       if (output.usage && !output.interrupted) conversations.recordRuntimeTurnUsage?.(input.conversationId, {usage: output.usage,
