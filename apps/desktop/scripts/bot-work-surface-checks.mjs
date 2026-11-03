@@ -103,6 +103,15 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
     await page.setViewportSize({ width, height: 860 });
     await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
     await work.scrollIntoViewIfNeeded();
+    const statusUsesPrimaryText = await work.locator('.bot-work-status').evaluate(node => {
+      const color = getComputedStyle(node).color;
+      const reference = document.createElement('span');
+      reference.style.color = 'var(--graphite-base)';
+      node.parentElement.append(reference);
+      try { return color === getComputedStyle(reference).color; }
+      finally { reference.remove(); }
+    });
+    assert.ok(statusUsesPrimaryText, 'Bot-owned repair status uses readable primary text in both themes');
     await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `work-repair-${width}-${theme}.png`) });
   }
   await page.setViewportSize(repairViewport);

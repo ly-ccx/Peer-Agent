@@ -46,7 +46,9 @@
 .bot-work-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bot-work-status { font-size: 11px; margin-left: 3px; white-space: nowrap; flex-shrink: 0; color: var(--graphite-mute); }
 .bot-work-status.is-running { color: var(--graphite-base); }
-.bot-work-row[data-status='waiting_user'] .bot-work-status, .bot-work-row[data-status='result_ready'] .bot-work-status { color: var(--graphite-base); font-weight: 500; }
+.bot-work-row[data-status='waiting_user'] .bot-work-status,
+.bot-work-row[data-status='waiting_agent'] .bot-work-status,
+.bot-work-row[data-status='result_ready'] .bot-work-status { color: var(--graphite-base); font-weight: 500; }
 .bot-work-detail { margin: 4px 0 8px 22px; padding: 10px 12px; background: var(--control-fill); border-radius: var(--ui-radius-control); }
 .bot-work-detail p { margin: 0 0 7px; overflow-wrap: anywhere; }
 .bot-work-detail .bot-work-hint { color: var(--graphite-soft); font-size: 11px; font-weight: 400; }
