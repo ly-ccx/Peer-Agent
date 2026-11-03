@@ -358,9 +358,8 @@ export function createDelegationProvider({
     if (!verificationAvailable() || typeof verification?.run !== 'function') {
       return { ok: false, output: { ok: false, error: 'verifier_unavailable', message: 'verifier_unavailable' } };
     }
-    if (typeof verification.markVerifying === 'function') {
-      await verification.markVerifying(input.sessionId);
-    }
+    const admission = await verification.markVerifying?.(input.sessionId);
+    if (admission?.ok === false) return { ok: false, output: admission };
     try {
       const reviewed = await verification.run({
         sessionId: input.sessionId,

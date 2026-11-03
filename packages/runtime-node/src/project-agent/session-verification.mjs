@@ -122,8 +122,10 @@ export function createSessionVerification({
       return factsFor(plan);
     },
     async markVerifying(sessionId) {
-      if (active.has(sessionId)) throw Object.assign(new Error('This session already has an active independent review'), { code: 'verifier_in_progress' });
       const plan = findPlan(sessionId);
+      if (active.has(sessionId) || sessionFactsFromPlan(plan).verificationActive) {
+        return verificationFailure({ code: 'verifier_in_progress', message: 'This session already has an active independent review' });
+      }
       if (!plan?.delegationOrigin || typeof goalPlanStore?.revisePlan !== 'function') return null;
       active.set(sessionId, beginVerificationAttempt(plan.planId, `session:${sessionId}`));
       try {

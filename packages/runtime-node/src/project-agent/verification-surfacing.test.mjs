@@ -8,6 +8,7 @@ import { createGoalPlanStore } from '../goal-plan-store.mjs';
 import { createSessionVerification } from './session-verification.mjs';
 import { createSessionSupervisor } from './session-supervisor.mjs';
 import { createDelegationProvider } from './delegation-provider.mjs';
+import { beginVerificationAttempt } from './session-facts.mjs';
 import { composeReply } from './reply-composer.mjs';
 
 for (const passed of [true, false]) test(`task verification and main-bot reporting share host facts after restart: ${passed}`, async t => {
@@ -34,7 +35,20 @@ for (const passed of [true, false]) test(`task verification and main-bot reporti
   const context = { mode: 'project_agent', role: 'project_agent', workspaceId: 'ws', parentConversationId: parent.id,
     messages: [{ id: 'input', role: 'user', kind: 'user_input' }] };
   const call = (name, args) => ({ call: { toolCallId: name, capabilityId: `local.delegation.${name}`, arguments: args } });
-  const reviewed = await provider.executeCapability(call('verify_session', { sessionId: 'session' }), context);
+  const endAutomaticReview = beginVerificationAttempt(plan.planId, 'automatic-review');
+  try {
+    const busy = await provider.executeCapability(call('verify_session', { sessionId: 'session' }), context);
+    assert.equal(busy.result.status, 'failed');
+    assert.equal(busy.result.output.error, 'verifier_in_progress');
+    assert.equal(busy.result.output.nextAction, 'wait_for_verification');
+    assert.equal(supervisor.get({ sessionId: 'session' }).status, 'verifying');
+    assert.equal(plans.getPlan(plan.planId).hostVerification, undefined);
+  } finally {
+    endAutomaticReview();
+  }
+  const request = call('verify_session', { sessionId: 'session' });
+  request.call.toolCallId = 'verify-session-after-automatic-review';
+  const reviewed = await provider.executeCapability(request, context);
   assert.equal(reviewed.result.status, 'success', JSON.stringify(reviewed.result.output));
   assert.ok(reviewed.grant.granted);
   assert.ok(reviewed.result.evidence);
