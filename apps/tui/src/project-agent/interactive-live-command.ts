@@ -22,7 +22,8 @@ Usage: pnpm --filter @peer-agent/tui qa:interactive:live --list [--user-data DIR
 Only OpenAI Chat / Anthropic Messages API-key wires are included in this validation command.
 Per model/scenario: at most 4 model requests, 1800 output tokens/request, 45s/request, 150s/case,
 4 tool calls. Native permission requests are denied. No user configuration, workspace or app is changed.
-Repair uses an actual failed Tool Result from an explicit test-driver seed, not a natural model failure.
+Repair supplies an actual failed Tool Result as explicit user factual context from a test-driver seed.
+It does not fabricate assistant/thinking history or count the seed as a natural model failure.
 Runtime token usage is recorded; billing receipts and independent semantic acceptance are not supplied.
 Set PEER_CREDENTIAL_HELPER_PATH if the repository helper has not been built here.\n`;
 

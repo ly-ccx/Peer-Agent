@@ -22,12 +22,12 @@ for (const scenario of ['publish', 'repair', 'denied'] as const) {
       expect(request.tools?.map(tool => tool.name).sort()).toEqual(['inspect_interactive_result', 'publish_interactive_result']);
       expect(request.messages.some(message => message.role === 'system' && String(message.content).includes('peer-basic-1'))).toBe(true);
       if (requests === 1 && scenario === 'repair') {
-        const seed = request.messages.find(message => message.role === 'tool' && message.toolCallId === 'fault-seed');
+        const seed = request.messages.find(message => message.role === 'user' && String(message.content).includes('TEST_DRIVER_VALIDATION_FAILURE'));
         expect(seed).toBeDefined();
-        const encoded = JSON.parse(String(seed!.content));
+        const encoded = JSON.parse(String(seed!.content).split('TEST_DRIVER_VALIDATION_FAILURE\n')[1]).toolResult;
         expect(encoded.output.diagnostic.code).toBe('unsupported_node');
         expect(encoded.output.publicationStatus).toBe('not_committed');
-        expect(request.messages.some(message => message.role === 'assistant' && message.toolCalls?.[0]?.id === 'fault-seed')).toBe(true);
+        expect(request.messages.some(message => message.role === 'assistant' || message.role === 'tool')).toBe(false);
       }
       if (requests === 1) return { content: '', toolCalls: [{ id: `${scenario}-publication`, name: 'publish_interactive_result', arguments: JSON.stringify(INTERACTIVE_LIVE_DRAFT) }],
         usage: { inputTokens: 100, outputTokens: 50 } };
@@ -54,6 +54,7 @@ for (const scenario of ['publish', 'repair', 'denied'] as const) {
       expect(report.persistedCounts).toEqual({ versions: 1, publishedOperations: 1 });
       expect(report.computation).toEqual({ initialRemaining: [45], changedRemaining: [25], tableRows: [2], projectionTruncated: false });
       expect(report.seed?.driverGenerated).toBe(scenario === 'repair' ? true : undefined);
+      expect(report.seed?.delivery).toBe(scenario === 'repair' ? 'user-factual-context' : undefined);
       expect(report.firstPublicationSucceeded).toBe(scenario === 'publish' ? true : undefined);
     }
   });

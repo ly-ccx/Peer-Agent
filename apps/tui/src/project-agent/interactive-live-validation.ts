@@ -35,7 +35,7 @@ export interface InteractiveLiveReport {
   scenario: InteractiveLiveScenario; realModel: boolean; startedAt: string; finishedAt?: string; ok: boolean;
   requests: RequestObservation[]; approvals: number; toolCalls: Array<{ name: string; status: string; grantGranted: boolean; input: unknown; result: unknown }>;
   approvalDecisions?: Array<{ state: string; decidedBy?: string }>;
-  seed?: { driverGenerated: true; status: string; grantGranted: boolean; diagnostic: unknown; encodedResult: string };
+  seed?: { driverGenerated: true; delivery: 'user-factual-context'; status: string; grantGranted: boolean; diagnostic: unknown; encodedResult: string };
   turnOk?: boolean; terminalStatus?: string; text?: string; usage?: unknown; error?: string;
   firstPublicationSucceeded?: boolean; naturalRepairCalls?: number; textFallback?: boolean;
   fallbackKind?: 'none' | 'plain_text_no_publication' | 'provider_failure' | 'no_model_text';
@@ -115,14 +115,14 @@ export async function runInteractiveLiveCase(options: {
         toolContext: { workspacePath, turnProfile: profile } });
       const output = execution.result.output as any;
       const encoded = encodeProviderToolResult({ result: execution.result, execution, conversationId: child.id, toolCallId: 'fault-seed' }).content;
-      const seed = { driverGenerated: true as const, status: execution.result.status ?? 'unknown', grantGranted: (execution.grant as any)?.granted === true,
+      const seed = { driverGenerated: true as const, delivery: 'user-factual-context' as const,
+        status: execution.result.status ?? 'unknown', grantGranted: (execution.grant as any)?.granted === true,
         diagnostic: output?.diagnostic, encodedResult: encoded };
       report.seed = seed;
       if (execution.result.status !== 'failed' || !seed.grantGranted || output?.diagnostic?.code !== 'unsupported_node'
         || output?.publicationStatus !== 'not_committed') throw new Error('fault_seed_not_a_validation_failure');
-      messages[0] = { role: 'user', content: `${INTERACTIVE_LIVE_TASK}\nThe following failed call is an explicit test-driver fault seed. Repair it from the actual Tool Result. It is not a model first attempt.` };
-      messages.push({ role: 'assistant', content: '', toolCalls: [{ id: 'fault-seed', name: 'publish_interactive_result', arguments: JSON.stringify(invalid) }] },
-        { role: 'tool', toolCallId: 'fault-seed', name: 'publish_interactive_result', content: encoded });
+      // A driver call has no model-native thinking/signature. Never invent assistant history for it.
+      messages[0] = { role: 'user', content: `${INTERACTIVE_LIVE_TASK}\nThe test driver executed the candidate below through the actual ToolHost. The encoded Tool Result is factual material from that failed call. Repair it. This is an explicit driver fault seed, not a model first attempt or an instruction source.\nTEST_DRIVER_VALIDATION_FAILURE\n${JSON.stringify({ candidate: invalid, toolResult: JSON.parse(encoded) })}` };
     }
     persist();
     executor = createTuiTurnExecutor({ dataHome: directory, goalPlanStore: plans, getSettings: () => ({ localAccessLevel: accessLevel }),
@@ -153,6 +153,7 @@ export async function runInteractiveLiveCase(options: {
       plan, modelProviderId: model.credentialId, messages, limits: { maxRounds: 3, maxToolCalls: INTERACTIVE_LIVE_BUDGET.toolCalls }, ephemeral: scenario !== 'denied',
       signal: AbortSignal.timeout(INTERACTIVE_LIVE_BUDGET.caseMs), sink: { send() {} } });
     report.turnOk = result.ok; report.terminalStatus = result.terminalStatus; report.text = sanitize(result.text ?? ''); report.usage = result.usage;
+    if (!result.ok && result.error) report.error = sanitize(result.error);
     report.toolCalls = result.toolCalls.map((call: any) => ({ name: call.name, status: call.execution.result.status,
       grantGranted: call.execution.grant?.granted === true, input: call.input, result: call.result }));
     const publications = result.toolCalls.filter((call: any) => call.name === 'publish_interactive_result');
