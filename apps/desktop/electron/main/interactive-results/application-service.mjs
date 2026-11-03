@@ -1,5 +1,5 @@
 import { createInteractivePresentationStore, createInteractiveViewService } from '@peer-agent/runtime-node/interactive-results';
-import { interactiveToken, normalizeInteractiveOwner, normalizeResourceWindowRequest } from '@peer-agent/protocol';
+import { normalizeInteractiveOwner, normalizeResourceWindowRequest } from '@peer-agent/protocol';
 import { desktopInteractiveRuntime } from './runtime-port.mjs';
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -85,12 +85,14 @@ export function createDesktopInteractiveApplication({ getRole, getOwner, getNati
     saveWindow: (context, scope, id) => { try { return instance().presentation.history.save(context, scope, id); } catch { return null; } },
     removeWindow: (id, owner) => { try { return instance().presentation.history.remove(id, owner); } catch { return false; } },
     readLayout: (sender, request) => run(() => {
-      if (getRole(sender) !== 'main' || !validRequest(request, ['workspaceId']) || !interactiveToken(request.workspaceId)) return fail('interactive_scope_denied');
-      return { ok: true, snapshot: instance().presentation.readLayout(ownerOf(request.workspaceId)) };
+      const owner = normalizeInteractiveOwner(request?.owner);
+      if (getRole(sender) !== 'main' || !validRequest(request, ['owner']) || !owner || !same(ownerOf(owner.workspaceId), owner)) return fail('interactive_scope_denied');
+      return { ok: true, snapshot: instance().presentation.readLayout(owner) };
     }),
     writeLayout: (sender, request) => run(() => {
-      if (getRole(sender) !== 'main' || !validRequest(request, ['workspaceId', 'expectedRevision', 'order', 'recent', 'interactive']) || !interactiveToken(request.workspaceId)) return fail('interactive_scope_denied');
-      return { ok: true, snapshot: instance().presentation.writeLayout(ownerOf(request.workspaceId), request) };
+      const owner = normalizeInteractiveOwner(request?.owner);
+      if (getRole(sender) !== 'main' || !validRequest(request, ['owner', 'expectedRevision', 'order', 'recent', 'interactive']) || !owner || !same(ownerOf(owner.workspaceId), owner)) return fail('interactive_scope_denied');
+      return { ok: true, snapshot: instance().presentation.writeLayout(owner, request) };
     }),
     dispose() {
       if (disposed) return; disposed = true;

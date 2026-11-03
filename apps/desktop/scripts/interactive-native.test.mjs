@@ -134,6 +134,9 @@ test('native resource window uses actual preload, authorized IPC, domain state a
     assert.equal(await page.getByLabel('Divisor', { exact: true }).count(), 0);
     const preserved = await electron.evaluate(() => globalThis.nativeFixture.history());
     assert.ok(preserved.entries[0].request.navigation.top >= 400, 'unavailable content must not replace the prior reading point with the loading/fallback geometry');
+    await page.getByText('Saved model summary, unverified', { exact: true }).waitFor();
+    await page.getByText('Unverified saved model trial.', { exact: true }).waitFor();
+    assert.equal(await page.getByLabel('Divisor', { exact: true }).count(), 0);
     await page.screenshot({ path: path.join(root, 'native-state-corrupt.png'), animations: 'disabled' });
     assert.deepEqual(await electron.evaluate(() => globalThis.nativeFixture.facts()), { legacyWrites: 0, fileReads: 0, versions: 1, operations: 1 });
     assert.deepEqual(external, []); assert.deepEqual(errors, []);

@@ -5,3 +5,9 @@
 .interactive-resource-program { margin-block-start: var(--space-4); }
 .interactive-resource-program > summary { display: flex; align-items: center; gap: var(--space-1); font-size: var(--ui-font-control); cursor: pointer; }
 .interactive-resource-program > summary:focus-visible { outline: var(--ui-focus-width) solid var(--ui-focus-color); outline-offset: var(--ui-focus-offset); }
+.resource-interactive-session { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.resource-interactive-session > .resource-interactive-body { flex: 1; height: auto; }
+.resource-interactive-actions { padding: var(--space-2); flex: none; }
+.resource-layout-notice { flex: none; padding: var(--space-2); color: var(--graphite-secondary); font-size: var(--ui-font-caption); }
+.resource-layout-notice p { margin: 0; }
+.resource-layout-notice > div { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-block-start: var(--space-1); }

@@ -56,7 +56,7 @@ test('interactive windows use fixed domain identity and bounded reading hints wi
   assert.equal(normalizeResourceWindowNavigation({ top: 0, left: 0, mode: 'source' }, 'interactive'), undefined);
   assert.equal(normalizeResourceWindowNavigation({ top: 0, left: 0, positions: [] }, 'interactive'), undefined);
   const interactive = { tabs: [], activeTabId: null };
-  assert.deepEqual(normalizeResourceLayout({ order: ['document:a', 'interactive:b'], recent: ['interactive:b'], interactive }), { order: ['document:a', 'interactive:b'], recent: ['interactive:b'], interactive });
+  assert.equal(normalizeResourceLayout({ order: ['document:a', 'interactive:b'], recent: ['interactive:b'], interactive }), undefined, 'open result ids require the fixed-reference map');
   assert.equal(normalizeResourceLayout({ order: ['interactive:a', 'interactive:a'], recent: [], interactive }), undefined);
   assert.equal(normalizeResourceLayout({ order: ['permission:full'], recent: [], interactive }), undefined);
   assert.equal(normalizeResourceLayout({ order: ['interactive:a'], recent: [], interactive, revision: 0 }), undefined);
@@ -70,6 +70,8 @@ test('mixed layout retains bounded domain references, document/Diff/browser rece
     { kind: 'browser', url: 'https://example.com/facts' }, { kind: 'interactive', reference, title: 'Trial' }];
   const layout = { order: ['document:a', 'comparison:workspace', 'browser:b', 'interactive:tab-a'], recent: recents.map(value => JSON.stringify(value)), interactive };
   assert.deepEqual(normalizeResourceLayout(layout), layout);
+  assert.equal(normalizeResourceLayout({ ...layout, order: ['document:a'] }), undefined, 'the active result must remain open');
+  assert.deepEqual(normalizeResourceLayout({ ...layout, order: ['document:a'], interactive: { tabs: [tab], activeTabId: null } })?.interactive.tabs, [tab], 'closed readings retain only presentation hints');
   const snapshot = { ...layout, formatVersion: 2, revision: 1, updatedAt: '2026-11-03T00:00:00.000Z' };
   assert.deepEqual(normalizeResourceLayoutSnapshot(snapshot), snapshot);
   assert.equal(normalizeResourceLayoutSnapshot({ ...snapshot, formatVersion: 3 }), undefined);

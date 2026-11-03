@@ -24,7 +24,7 @@ function useField(props: Field) {
   const ctx = useInteractiveRender(), field = useStateField<unknown>(props.id, props.value), id = useId();
   if (!isReactiveAssign(props.value) || !Object.hasOwn(ctx.session.content.stateSchema, props.value.target)) throw Error('invalid_state_binding');
   const key = props.value.target;
-  const disabled = !ctx.state.writer || ['readonly', 'writer_lost', 'closed'].includes(ctx.state.phase);
+  const disabled = !ctx.state.writer || ['readonly', 'writer_lost', 'closing', 'closed'].includes(ctx.state.phase);
   const sync = () => { const state = ctx.session.snapshot(); if (!state.calculationError) field.setValue(state.sdkValues[key]); };
   return { ...ctx, id, key, disabled, sync };
 }
@@ -58,7 +58,7 @@ function Slider({ props }: P<Field & { min: number; max: number; step: number }>
   return <div className="interactive-field"><label htmlFor={f.id}>{props.label}: {String(f.state.values[f.key])}</label><input id={f.id} type="range" min={props.min} max={props.max} step={props.step}
     disabled={f.disabled} value={Number(f.state.values[f.key])} onChange={event => { f.session.editValue(f.key, Number(event.currentTarget.value)); f.sync(); }} onBlur={() => { void f.session.flush(); }} /></div>;
 }
-function Button({ props }: P<{ label: string; action: unknown }>) { const ctx = useInteractiveRender(); return <button type="button" className="ui-button" disabled={!ctx.state.writer || ctx.state.composing || ['writer_lost', 'closed'].includes(ctx.state.phase)} onClick={() => ctx.session.applyAction(props.action)}>{props.label}</button>; }
+function Button({ props }: P<{ label: string; action: unknown }>) { const ctx = useInteractiveRender(); return <button type="button" className="ui-button" disabled={!ctx.state.writer || ctx.state.composing || ['writer_lost', 'closing', 'closed'].includes(ctx.state.phase)} onClick={() => ctx.session.applyAction(props.action)}>{props.label}</button>; }
 
 type DataRow = Record<string, unknown>;
 type TableProps = { label: string; columns: { key: string; label: string }[]; rows: DataRow[]; rowKey: string };

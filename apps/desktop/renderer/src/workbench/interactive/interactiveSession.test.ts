@@ -159,8 +159,32 @@ test('failed close keeps the editor; retrying an already-applied release is safe
   f.api.release = async request => { const reply = await release(request); if (lose) { lose = false; throw Error('ack lost'); } return reply; };
   await f.session.acquire(); f.session.editText('$x', '3');
   assert.equal(await f.session.close(), false);
-  assert.equal(f.session.snapshot().phase, 'ready');
+  assert.equal(f.session.snapshot().phase, 'closing');
   assert.equal(f.session.snapshot().values.$x, 3);
+  assert.equal(f.session.editText('$x', '9'), false, 'an unconfirmed release cannot advertise a live editor');
   assert.equal(await f.session.close(), true);
   assert.equal(f.session.snapshot().phase, 'closed');
+});
+
+test('new edits while close waits for a save keep the tab and must be saved by a later close', async t => {
+  const f = await fixture(t), save = f.api.save, release = f.api.release;
+  let acknowledge!: () => void, saving!: () => void, releases = 0;
+  const started = new Promise<void>(resolve => { saving = resolve; });
+  f.api.save = async request => { const reply = await save(request); await new Promise<void>(resolve => { acknowledge = resolve; saving(); }); return reply; };
+  f.api.release = async request => { releases++; return release(request); };
+  await f.session.acquire(); f.session.editText('$x', '3'); const closing = f.session.close(); await started;
+  f.session.editText('$x', '5'); acknowledge(); assert.equal(await closing, false);
+  assert.equal(releases, 0); assert.equal(f.session.snapshot().values.$x, 5); assert.equal(f.session.snapshot().confirmed.values.$x, 3);
+  f.api.save = save; assert.equal(await f.session.close(), true);
+  assert.equal(f.states.read(f.receipt.reference, () => true).values.$x, 5);
+});
+
+test('reacquiring an existing writer resolves its original lost save acknowledgement before accepting a new checkpoint', async t => {
+  const f = await fixture(t), save = f.api.save, calls: Parameters<InteractiveResultsApi['save']>[0][] = [];
+  let lose = true;
+  f.api.save = async request => { calls.push(structuredClone(request)); const reply = await save(request); if (lose) { lose = false; throw Error('ack lost'); } return reply; };
+  await f.session.acquire(); f.session.editText('$x', '3'); assert.equal(await f.session.flush(), false);
+  f.session.editText('$x', '5'); assert.equal(await f.session.acquire(), true);
+  assert.deepEqual(calls[0], calls[1]); assert.equal(calls[2].values.$x, 5);
+  assert.equal(f.session.snapshot().confirmed.stateRevision, 2); assert.equal(f.session.snapshot().dirty, false);
 });

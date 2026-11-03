@@ -13,7 +13,7 @@ export interface InteractiveSessionSnapshot {
   readonly sdkValues: InteractiveStateValues;
   readonly confirmed: InteractiveStateSnapshot;
   readonly writer: InteractiveWriter | null;
-  readonly phase: 'readonly' | 'ready' | 'saving' | 'save_failed' | 'writer_lost' | 'closed';
+  readonly phase: 'readonly' | 'ready' | 'saving' | 'save_failed' | 'writer_lost' | 'closing' | 'closed';
   readonly dirty: boolean;
   readonly composing: boolean;
   readonly calculationError: string | null;
@@ -49,7 +49,7 @@ export function createInteractiveSession({ api, opened, evaluator, createId = ()
     } catch (error) { changed({ calculationError: code(error) }); }
   }
   calculate();
-  const editable = () => !!state.writer && !['closed', 'writer_lost'].includes(state.phase);
+  const editable = () => !!state.writer && !['closing', 'closed', 'writer_lost'].includes(state.phase);
   const capture = (): Candidate => ({ edit, values: clone(state.values), inputDrafts: clone(state.inputDrafts), requestId: createId() });
   function enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const work = tail.then(operation, operation); tail = work.catch(() => {}); return work;
@@ -115,8 +115,9 @@ export function createInteractiveSession({ api, opened, evaluator, createId = ()
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     async acquire(takeover = false) {
       return enqueue(async () => {
-        if (state.phase === 'closed') return false;
+        if (state.phase === 'closed' || state.phase === 'closing') return false;
         try {
+          if (pending && editable() && !await saveCandidate(capture())) return false;
           // Explicit takeover retains local edits but starts against the actual current checkpoint.
           const fresh = await api.readState({ handle }); if (!fresh.ok) throw { code: fresh.code };
           if (!equal(fresh.state.result, opened.result.reference) || fresh.state.specHash !== content.specHash || fresh.state.stateSchemaHash !== content.stateSchemaHash) throw { code: 'interactive_state_receipt_invalid' };
@@ -183,6 +184,8 @@ export function createInteractiveSession({ api, opened, evaluator, createId = ()
       if (state.phase === 'closed') return true;
       if (state.dirty || pending) { if (!await flush()) return false; }
       return enqueue(async () => {
+        if (state.dirty || pending || composing.size) return false;
+        changed({ phase: 'closing', saveError: null });
         try { const reply = await api.release({ handle, ...(state.writer ? { writer: state.writer } : {}) }); if (!reply.ok) throw { code: reply.code };
           changed({ phase: 'closed', writer: null }); return true;
         } catch (error) { changed({ saveError: code(error) }); return false; }

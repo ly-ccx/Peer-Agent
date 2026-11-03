@@ -214,6 +214,8 @@ export function WorkbenchProvider({
   const [activeTabMap, setActiveTabMap] = useState<Record<string, WorkbenchTabId>>(
     normalizeWorkbenchTabMap(initial.activeTab),
   );
+  // Result references live in the protected domain; this runtime selection never enters Settings.
+  const [interactiveTabOwner, setInteractiveTabOwner] = useState<string | null>(null);
   const [browserSessionMap, setBrowserSessionMap] = useState<BrowserSessionMap>(
     normalizeBrowserSessionMap(initial.browserSessions),
   );
@@ -267,6 +269,7 @@ export function WorkbenchProvider({
 
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestRef = useRef({
+    interactiveTabOwner,
     openByConversation,
     width,
     activeTabMap,
@@ -277,6 +280,7 @@ export function WorkbenchProvider({
     sidebarWidth,
   });
   latestRef.current = {
+    interactiveTabOwner,
     openByConversation,
     width,
     activeTabMap,
@@ -348,12 +352,14 @@ export function WorkbenchProvider({
 
   const setActiveTab = useCallback((tab: WorkbenchTabId) => {
     const key = workbenchSessionKey(conversationId);
+    if (tab === 'interactive') { if (resourceMode) setInteractiveTabOwner(key); return; }
+    setInteractiveTabOwner(null);
     setActiveTabMap((prev) => {
       if (prev[key] === tab) return prev;
       return { ...prev, [key]: tab };
     });
     schedulePersist();
-  }, [conversationId, schedulePersist]);
+  }, [conversationId, schedulePersist, resourceMode]);
 
   const resolveBrowserSession = useCallback((targetConversationId: string | null) => {
     const key = workbenchSessionKey(targetConversationId);
@@ -401,10 +407,10 @@ export function WorkbenchProvider({
       layoutHost,
       focus: request.focus,
       hostOpen: openRef.current,
-      hostBrowserActive: latestRef.current.activeTabMap[currentSessionKey] === 'browser',
+      hostBrowserActive: latestRef.current.interactiveTabOwner !== currentSessionKey && latestRef.current.activeTabMap[currentSessionKey] === 'browser',
       requestSessionExists: existing != null,
       preserveAttention: resourceMode && (!isPageActive || (openRef.current
-        && ['documents', 'files', 'changes', 'details'].includes(latestRef.current.activeTabMap[currentSessionKey] ?? ''))),
+        && (latestRef.current.interactiveTabOwner === currentSessionKey || ['documents', 'files', 'changes', 'details', 'conversations'].includes(latestRef.current.activeTabMap[currentSessionKey] ?? '')))),
     });
     if (!decision.accept) {
       if (decision.error === 'attention_preserved') void clientApi.acknowledgeBrowserPanelReveal({
@@ -479,6 +485,7 @@ export function WorkbenchProvider({
       replaceMode: preferredMode != null,
     }));
     const key = workbenchSessionKey(conversationId);
+    setInteractiveTabOwner(null);
     setActiveTabMap((prev) => (
       prev[key] === 'documents' ? prev : { ...prev, [key]: 'documents' }
     ));
@@ -499,6 +506,7 @@ export function WorkbenchProvider({
     filesNonceRef.current += 1;
     setFilesTarget({ absPath, workspaceRoot, relPath, nonce: filesNonceRef.current });
     const key = workbenchSessionKey(conversationId);
+    setInteractiveTabOwner(null);
     setActiveTabMap((prev) => (prev[key] === 'files' ? prev : { ...prev, [key]: 'files' }));
     setOpenByConversation((prev) => updateWorkbenchOpen(prev, conversationId, true));
     schedulePersist();
@@ -621,6 +629,7 @@ export function WorkbenchProvider({
 
   const activeTab: WorkbenchTabId = useMemo(() => {
     const key = workbenchSessionKey(conversationId);
+    if (resourceMode && interactiveTabOwner === key) return 'interactive';
     const stored = normalizeWorkbenchTab(activeTabMap[key]);
     if (stored === 'browser') {
       const session = browserSessionMap[key] ?? defaultBrowserSessionsRef.current[key];
@@ -631,7 +640,7 @@ export function WorkbenchProvider({
     if (stored) return stored;
     // 兜底默认 Plan：从未手动切过 tab 的会话停在 Plan 视图。
     return resourceMode ? 'launcher' : 'plan';
-  }, [conversationId, activeTabMap, browserSessionMap, resourceMode]);
+  }, [conversationId, activeTabMap, browserSessionMap, resourceMode, interactiveTabOwner]);
 
   const browserSession = useMemo(() => {
     const stored = browserSessionMap[currentSessionKey];

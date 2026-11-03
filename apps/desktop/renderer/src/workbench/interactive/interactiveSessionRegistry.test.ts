@@ -30,6 +30,7 @@ test('opening a fixed result coalesces pending requests, preserves domain state 
   const f = await fixture(t), a = f.registry.open(f.reference), b = f.registry.open(f.reference);
   assert.equal(a, b); const entry = await a; assert.equal(entry.phase, 'ready'); assert.ok(entry.session);
   assert.equal(entry.session.snapshot().writer, null);
+  assert.equal(entry.session.content.tree?.typeName, 'Col');
   assert.equal(f.registry.hasUnsafe(), false); assert.equal(await f.registry.flushAll(), true);
   await entry.session.acquire(); entry.session.editText('$x', '4');
   assert.equal(f.registry.hasUnsafe(), true); assert.equal(await f.registry.flushAll(), true);
@@ -87,4 +88,17 @@ test('a newer catalog falls back to the fixed saved summary/program and releases
   assert.equal(fallback.summary?.textFallback, 'Unverified saved summary.'); assert.ok(fallback.opened?.result.content.program);
   f.api.open = open;
   const compatible = await f.registry.open(f.reference); assert.equal(compatible.phase, 'ready');
+});
+
+test('an unknown release receipt keeps controls closed until explicit reopen confirms release and creates a fresh view', async t => {
+  const f = await fixture(t), entry = await f.registry.open(f.reference); assert.ok(entry.session);
+  await entry.session.acquire(); entry.session.editText('$x', '6');
+  const release = f.api.release; let lost = true;
+  f.api.release = async request => { const reply = await release(request); if (lost) { lost = false; throw Error('release acknowledgement lost'); } return reply; };
+  assert.equal(await f.registry.close(f.reference), false);
+  assert.equal(entry.session.snapshot().phase, 'closing');
+  assert.equal(entry.session.editText('$x', '9'), false);
+  const reopened = await f.registry.open(f.reference);
+  assert.notEqual(reopened, entry); assert.equal(reopened.phase, 'ready');
+  assert.equal(reopened.session?.snapshot().confirmed.values.$x, 6);
 });

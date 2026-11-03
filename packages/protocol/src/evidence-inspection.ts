@@ -1,4 +1,5 @@
 import type { BotDocumentReference } from './document-reference.ts';
+import type { InteractiveResultReference } from './interactive-result.ts';
 
 /** Read-only display facts. A saved operation is not proof that its task completed. */
 export interface EvidenceSourceDescription {
@@ -33,7 +34,7 @@ export interface EvidenceDeliveryBinding {
   readonly evidenceRef: string;
   readonly artifactRef: string;
 }
-export interface EvidenceDelivery extends EvidenceDeliveryBinding {
+export interface EvidenceFileDelivery extends EvidenceDeliveryBinding {
   readonly kind: 'file' | 'code-change' | 'image';
   readonly label: string;
   /** A locator, never a grant or proof of historical bytes. Read through the existing scoped service. */
@@ -42,3 +43,14 @@ export interface EvidenceDelivery extends EvidenceDeliveryBinding {
     | { readonly kind: 'image'; readonly dataUrl: string; readonly width: number; readonly height: number };
   readonly previewUnavailable?: boolean;
 }
+/** A published domain reference. Never a filesystem locator or execution/verification receipt. */
+export interface EvidenceInteractiveDelivery extends EvidenceDeliveryBinding {
+  readonly kind: 'interactive';
+  readonly label: string;
+  readonly interactiveReference: InteractiveResultReference;
+  readonly specHash: string;
+  readonly reference?: never;
+  readonly savedPreview?: never;
+  readonly previewUnavailable?: never;
+}
+export type EvidenceDelivery = EvidenceFileDelivery | EvidenceInteractiveDelivery;

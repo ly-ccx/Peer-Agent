@@ -1,6 +1,6 @@
 import type { BotDocumentReference, LocalDocumentReadResult } from './document-reference.ts';
 import type { EvidenceDeliveryBinding } from './evidence-inspection.ts';
-import { interactiveToken, normalizeInteractiveReference, type InteractiveResultReference } from './interactive-result.ts';
+import { interactiveToken, normalizeInteractiveReference, type InteractiveOwner, type InteractiveResultReference } from './interactive-result.ts';
 
 /** Read-only presentation. None of these fields grant access or identify a browser guest/writer. */
 export type ResourceWindowResource =
@@ -74,8 +74,8 @@ export type ResourceRecentReference =
   | { readonly kind: 'browser'; readonly url: string }
   | { readonly kind: 'interactive'; readonly reference: InteractiveResultReference; readonly title?: string };
 export interface ResourcePresentationApi {
-  readLayout(request: { readonly workspaceId: string }): Promise<{ readonly ok: true; readonly snapshot: ResourceLayoutSnapshot | null } | { readonly ok: false; readonly code: string }>;
-  writeLayout(request: { readonly workspaceId: string; readonly expectedRevision: number } & Pick<ResourceLayoutSnapshot, 'order' | 'recent' | 'interactive'>): Promise<{ readonly ok: true; readonly snapshot: ResourceLayoutSnapshot } | { readonly ok: false; readonly code: string }>;
+  readLayout(request: { readonly owner: InteractiveOwner }): Promise<{ readonly ok: true; readonly snapshot: ResourceLayoutSnapshot | null } | { readonly ok: false; readonly code: string }>;
+  writeLayout(request: { readonly owner: InteractiveOwner; readonly expectedRevision: number } & Pick<ResourceLayoutSnapshot, 'order' | 'recent' | 'interactive'>): Promise<{ readonly ok: true; readonly snapshot: ResourceLayoutSnapshot } | { readonly ok: false; readonly code: string }>;
 }
 
 /** The host supplies owner, task, revision and allowed root from its lease, never from this request. */
@@ -253,6 +253,9 @@ export function normalizeResourceLayout(raw: unknown): Pick<ResourceLayoutSnapsh
     && value.every(key => typeof key === 'string' && key.length <= 8192 && !/[\u0000-\u001f]/.test(key)
       && (key === 'launcher' || /^(?:document|browser|conversation|interactive):.+$/.test(key) || key === 'comparison:workspace')) && new Set(value).size === value.length;
   if (!list(raw.order, 200) || !Array.isArray(raw.recent) || raw.recent.length > 16 || new TextEncoder().encode(JSON.stringify(raw)).byteLength > 256 * 1024) return;
+  const mapped = new Set(interactive.tabs.map(tab => `interactive:${tab.id}`));
+  if (raw.order.some(key => key.startsWith('interactive:') && !mapped.has(key))
+    || interactive.activeTabId !== null && !raw.order.includes(`interactive:${interactive.activeTabId}`)) return;
   const recent: string[] = [];
   for (const item of raw.recent) {
     if (typeof item !== 'string' || item.length > 8192) return;

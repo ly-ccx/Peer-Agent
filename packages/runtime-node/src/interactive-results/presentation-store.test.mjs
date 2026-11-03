@@ -69,7 +69,7 @@ test('history rejects forged owner/source and corrupt metadata without replacing
 });
 
 test('mixed layout has independent durable CAS and refuses corruption, over-budget keys and owner changes', async t => {
-  const f = await fixture(t), input = { expectedRevision: 0, order: ['document:a', 'interactive:fixed-a'], recent: ['interactive:fixed-a'], interactive: emptySession };
+  const f = await fixture(t), input = { expectedRevision: 0, order: ['document:a', 'interactive:fixed-a'], recent: ['interactive:fixed-a'], interactive: { tabs: [{ id: 'fixed-a', reference: f.resource.reference }], activeTabId: 'fixed-a' } };
   const first = f.presentation.writeLayout(owner, input);
   assert.equal(first.revision, 1); assert.deepEqual(f.presentation.readLayout(owner), first);
   assert.throws(() => f.presentation.writeLayout(owner, input), { code: 'interactive_layout_conflict' });
@@ -90,7 +90,7 @@ test('mixed layout has independent durable CAS and refuses corruption, over-budg
 test('a cached writer checks the subdomain version again before presentation writes', async t => {
   const f = await fixture(t), db = f.results.storage.connect(owner.workspaceId, true).db;
   db.exec('PRAGMA user_version=4');
-  assert.throws(() => f.presentation.writeLayout(owner, { expectedRevision: 0, order: ['interactive:a'], recent: [], interactive: emptySession }), { code: 'interactive_storage_incompatible' });
+  assert.throws(() => f.presentation.writeLayout(owner, { expectedRevision: 0, order: [], recent: [], interactive: emptySession }), { code: 'interactive_storage_incompatible' });
   assert.equal(f.presentation.history.list(owner).ok, false);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM presentation').get().n, 0);
   db.exec('PRAGMA user_version=5');
@@ -118,11 +118,11 @@ test('new layout checks owner for tabs and recent refs, refuses future/corrupt f
   const f = await fixture(t), foreign = { ...f.resource.reference, owner: { ...owner, conversationId: 'other-parent' } };
   const input = { expectedRevision: 0, order: ['interactive:a'], recent: [], interactive: { tabs: [{ id: 'a', reference: foreign }], activeTabId: 'a' } };
   assert.throws(() => f.presentation.writeLayout(owner, input), { code: 'interactive_scope_denied' });
-  assert.throws(() => f.presentation.writeLayout(owner, { ...input, interactive: emptySession, recent: [JSON.stringify({ kind: 'interactive', reference: foreign })] }), { code: 'interactive_scope_denied' });
-  const saved = f.presentation.writeLayout(owner, { ...input, interactive: emptySession });
+  assert.throws(() => f.presentation.writeLayout(owner, { ...input, order: [], interactive: emptySession, recent: [JSON.stringify({ kind: 'interactive', reference: foreign })] }), { code: 'interactive_scope_denied' });
+  const saved = f.presentation.writeLayout(owner, { ...input, order: [], interactive: emptySession });
   const db = f.results.storage.connect(owner.workspaceId, true).db;
   db.prepare("UPDATE presentation SET body=? WHERE category='mixed-resource-layout'").run(encode({ ...saved, formatVersion: 3 }));
   assert.throws(() => f.presentation.readLayout(owner), { code: 'interactive_presentation_corrupt' });
-  assert.throws(() => f.presentation.writeLayout(owner, { ...input, expectedRevision: 1, interactive: emptySession }), { code: 'interactive_presentation_corrupt' });
+  assert.throws(() => f.presentation.writeLayout(owner, { ...input, order: [], expectedRevision: 1, interactive: emptySession }), { code: 'interactive_presentation_corrupt' });
   assert.equal(JSON.parse(db.prepare("SELECT body FROM presentation WHERE category='mixed-resource-layout'").get().body).formatVersion, 3);
 });

@@ -52,8 +52,9 @@ function failureText(code: string | null, isZh: boolean) {
   return isZh ? '此设备暂时无法打开结果。没有重新取数或执行工作，可以重试。' : 'This device cannot open the result. No data or work was rerun. Retry opening.';
 }
 
-export function InteractiveResource({ reference, api, active, isZh, onReady, onUnavailable, onRecoverView }: { readonly reference: InteractiveResultReference; readonly api?: InteractiveResultsApi;
-  readonly active: boolean; readonly isZh: boolean; readonly onReady?: () => void; readonly onUnavailable?: () => void; readonly onRecoverView?: () => Promise<boolean> }) {
+export function InteractiveResource({ reference, api, active, isZh, onReady, onUnavailable, onRecoverView, onMetadata }: { readonly reference: InteractiveResultReference; readonly api?: InteractiveResultsApi;
+  readonly active: boolean; readonly isZh: boolean; readonly onReady?: () => void; readonly onUnavailable?: () => void; readonly onRecoverView?: () => Promise<boolean>;
+  readonly onMetadata?: (reference: InteractiveResultReference, title: string) => void }) {
   const registry = useMemo(() => interactiveSessionRegistry(api), [api]);
   const key = interactiveSessionKey(reference);
   useSyncExternalStore(registry?.subscribe ?? (() => () => {}), registry?.snapshot ?? (() => 0), () => 0);
@@ -65,11 +66,14 @@ export function InteractiveResource({ reference, api, active, isZh, onReady, onU
     void registry.open(reference).catch(() => setOpeningError('interactive_source_unavailable'));
   }, [registry, key]);
   useEffect(() => { if (active) open(); }, [open, active]);
+  useEffect(() => active && entry ? registry?.attach(reference) : undefined, [registry, entry, active, key]);
   useEffect(() => {
     if (!session || !active) return;
-    if (!session.snapshot().writer) void session.acquire();
-    return () => { void session.flush(); };
+    const revalidate = () => { void session.acquire(); };
+    revalidate(); window.addEventListener('focus', revalidate);
+    return () => { window.removeEventListener('focus', revalidate); void session.flush(); };
   }, [session, active]);
+  useEffect(() => { if (entry?.opened) onMetadata?.(reference, entry.opened.result.content.title); }, [key, entry?.opened, onMetadata]);
   if (!active) return null;
   const failure = openingError ?? entry?.error;
   return <div className="interactive-resource">
@@ -80,7 +84,7 @@ export function InteractiveResource({ reference, api, active, isZh, onReady, onU
       onUnavailable={onUnavailable} recoverView={onRecoverView ?? (async () => !!(await window.peerAgent?.resourceWindowOpen?.({ resource: { kind: 'interactive', reference } }))?.ok)} />
       : entry?.summary ? <SavedSummary title={entry.summary.title} text={entry.summary.textFallback} isZh={isZh} /> : null}
     {entry?.opened ? <MotionDetails className="interactive-resource-program"><summary><PeerIcon name="chevronRight" size={12} />{isZh ? '查看保存的程序' : 'View saved program'}</summary>
-      <SourceViewer content={entry.opened.result.content.program} language="text" isZh={isZh} emptyLabel={isZh ? '程序为空。' : 'Empty program.'} />
+      <SourceViewer content={entry.opened.result.content.program} isZh={isZh} emptyLabel={isZh ? '程序为空。' : 'Empty program.'} />
     </MotionDetails> : null}
   </div>;
 }
