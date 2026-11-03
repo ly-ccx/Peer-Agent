@@ -195,19 +195,27 @@ export async function runInteractiveLiveStory(options: {
           host.plans.getPlan(session.planId)?.delegationOrigin?.anchorMessageId === `input-${FROZEN_INPUT}`);
         if (followups.length > 1) throw Error('story_duplicate_followup');
         const verification = followups[0];
-        const verdict = verification && host.plans.getPlan(verification.planId)?.hostVerification;
+        const plan = verification && host.plans.getPlan(verification.planId);
+        const verdict = plan?.hostVerification;
         if (!verification || verdict?.verdictRef !== verdictRefFor(verification.sessionId, 'passed')
           || verdict.independentVerifier !== 'passed') return;
+        const review = plan?.runner?.verifierRuns?.findLast((run: { verifierRunId: string }) =>
+          run.verifierRunId.startsWith('delegated-semantic:'));
+        if (review?.status !== 'passed' || !review.completedAt || !review.evidenceRefs?.length) return;
         const history = host.conversations.getPersistedConversationHistory!(conversationId)?.messages ?? [];
         if (!history.some(message => message.id === `input-${FROZEN_INPUT}`)) return;
-        const reply = history.filter((message: any) => message.kind === 'agent_reply' && message.meta?.evidenceRefs?.includes(fixed.artifactRef)
+        const reply = history.filter((message: any) => message.kind === 'agent_reply' && message.fallback !== true
+          && Date.parse(message.createdAt) >= Date.parse(review.completedAt)
+          && message.meta?.replyTo?.includes(`input-${FROZEN_INPUT}`) && message.meta?.evidenceRefs?.includes(fixed.artifactRef)
           && message.meta?.sources?.includes(fixed.source.sessionId) && message.meta?.sources?.includes(verification.sessionId)
           && /\b45\b/.test(message.content) && /\b25\b/.test(message.content)).at(-1);
-        return reply ? { sessions, verification, reply } : undefined;
+        return reply ? { sessions, verification, reply, review } : undefined;
       });
       report.sessions = delivered.sessions;
       report.replies = [delivered.reply];
-      const receipts = host.plans.listEvidenceIndex().filter((row: any) => row.planId === delivered.verification.planId && row.interactiveInspection);
+      const reviewRefs = new Set(delivered.review.evidenceRefs);
+      const receipts = host.plans.listEvidenceIndex().filter((row: any) =>
+        row.planId === delivered.verification.planId && reviewRefs.has(row.evidenceRef) && row.interactiveInspection);
       report.receipts = receipts;
       const covered = new Set(receipts.flatMap((row: any) => {
         const receipt = row.interactiveInspection, { request, range, stateSource } = receipt;
