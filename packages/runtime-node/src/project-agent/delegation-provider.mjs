@@ -395,7 +395,8 @@ export function createDelegationProvider({
     let sessionState;
     try {
       const current = await supervisor?.get?.({ sessionId: input.sessionId });
-      if (current?.sessionId === input.sessionId && typeof current.status === 'string') {
+      if (current?.sessionId === input.sessionId && typeof current.status === 'string'
+        && (!view.workspaceId || current.workspaceId === view.workspaceId)) {
         const { sessionId, status, sourceRevision, observationRevision } = current;
         sessionState = { sessionId, status, sourceRevision, observationRevision };
       }

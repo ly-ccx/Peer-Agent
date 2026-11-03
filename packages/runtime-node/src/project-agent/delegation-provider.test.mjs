@@ -567,6 +567,31 @@ test('复核返回结构化事件与详情，期间任务是 verifying，不生�
   assert.notEqual(verdicts[0].verdictRef, verdicts[1].verdictRef);
 });
 
+test('a missing post-review task state leaves the recorded verdict available', async () => {
+  for (const failRead of [true, false]) {
+    let settled = false;
+    const provider = createDelegationProvider({
+      supervisor: { get() {
+        if (!settled) return { sessionId: 's-keep', workspaceId: 'workspace' };
+        if (failRead) throw Error('task state temporarily unavailable');
+        return { sessionId: 's-keep', workspaceId: 'other', status: 'result_ready' };
+      } },
+      verification: {
+        async run() { return { ok: true, facts: { plan: hostPlan('ev-real'),
+          evidenceIndex: ['ev-real'], independentVerifier: 'passed' } }; },
+        async record() { return { ok: true }; },
+        async finish() { settled = true; },
+      },
+    });
+    const result = await provider.executeCapability(
+      call('local.delegation.verify_session', { sessionId: 's-keep' }), agentContext({ workspaceId: 'workspace' }));
+    assert.equal(result.result.status, 'success');
+    const output = outputOf(result);
+    assert.equal(output.event.outcome, 'passed');
+    assert.equal(Object.hasOwn(output, 'sessionState'), false);
+  }
+});
+
 test('引用限定范围内，verify_session 越界被拒绝，读取细节不受限', async () => {
   let runs = 0;
   const provider = createDelegationProvider({
