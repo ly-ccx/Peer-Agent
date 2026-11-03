@@ -233,6 +233,7 @@ export function registerDesktopProjectAgent({
     readDelegationCapabilities: input => agentTurnExecutor.readDelegationCapabilities?.(input),
     readResourceFeedback: interactive.feedback.restore,
     projectReportEvidence: interactive.publications.projectReportEvidence,
+    recoverStoppedPublications: interactive.recoverWorkspace,
     approvalStore,
     memoryStore,
     resolveModel: (input) => agentTurnExecutor.resolveGoalRole({

@@ -205,6 +205,7 @@ async function harness({
   resolveAcceptancePolicy = null,
   readSessionFacts = null,
   projectReportEvidence = null,
+  recoverStoppedPublications = null,
   approvalStore = null,
   readPlanApproval = null,
   objectives = null,
@@ -269,6 +270,7 @@ async function harness({
     resolveAcceptancePolicy,
     readSessionFacts,
     projectReportEvidence,
+    recoverStoppedPublications,
     approvalStore,
     readPlanApproval,
     ...(isolationPlanner ? { isolationPlanner } : {}),
@@ -2068,11 +2070,15 @@ test('manual delegated pause closes admission until an anchored restore', async 
 });
 
 test('new host resumes only a handoff suspension and preserves its verification intent', async () => {
-  const resumed = [];
+  const resumed = [], recoveryOrder = [];
   let env;
-  env = await harness({goalRunner:{async start(){}, async resume(planId, options){
-    resumed.push({planId,...options}); env.goalPlanStore.resumeRunner(planId,{intent:options.intent});
-  }}});
+  env = await harness({
+    recoverStoppedPublications: workspaceId => recoveryOrder.push(['recover-publications', workspaceId]),
+    goalRunner:{async start(){}, async resume(planId, options){
+      recoveryOrder.push(['resume', planId]);
+      resumed.push({planId,...options}); env.goalPlanStore.resumeRunner(planId,{intent:options.intent});
+    }},
+  });
   try {
     const handoff = await env.supervisor.spawn(spawnInput({kind:'research',readOnly:true}),contextOf(env));
     const manual = await env.supervisor.spawn(spawnInput({kind:'research',readOnly:true,successCriteria:[{id:'c1',kind:'manual',description:'other outcome'}]}),contextOf(env));
@@ -2086,6 +2092,7 @@ test('new host resumes only a handoff suspension and preserves its verification 
     await env.supervisor.resumeRecovered('ws-1');
     const planId = env.supervisor.get({sessionId:handoff.sessionId}).planId;
     assert.deepEqual(resumed,[{planId,awaitIdle:false,intent:'verify'}]);
+    assert.deepEqual(recoveryOrder, [['recover-publications', 'ws-1'], ['resume', planId]]);
     assert.equal(env.goalPlanStore.getPlan(planId).delegationOrigin.phase,'running');
     assert.equal(env.supervisor.get({sessionId:manual.sessionId}).status,'paused');
   } finally {await env.cleanup();}

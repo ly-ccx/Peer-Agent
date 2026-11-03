@@ -146,6 +146,7 @@ export function createSessionSupervisor({
   readDelegationCapabilities = null,
   readResourceFeedback = null,
   projectReportEvidence = null,
+  recoverStoppedPublications = null,
   autonomousCoordinationEnabled = () => process.env.PEER_AUTONOMOUS_COORDINATION !== '0',
   now = () => new Date().toISOString(),
 } = {}) {
@@ -1175,7 +1176,15 @@ export function createSessionSupervisor({
         reason: 'supersession_expired', promote: false });
     }
   }
-  const reconcileControls = workspaceId => sessionControl.reconcile(delegatedPlans().filter(plan => !workspaceId || plan.delegationOrigin.workspaceId === workspaceId));
+  async function reconcileControls(workspaceId) {
+    const plans = delegatedPlans().filter(plan => !workspaceId || plan.delegationOrigin.workspaceId === workspaceId);
+    const failures = await sessionControl.reconcile(plans);
+    if (typeof recoverStoppedPublications === 'function') {
+      const workspaces = new Set(plans.map(plan => plan.delegationOrigin.workspaceId));
+      for (const id of workspaces) if (canManageWorkspace(id)) await recoverStoppedPublications(id);
+    }
+    return failures;
+  }
   async function recoverStops() {
     const workspaces = new Set(delegatedPlans().map(plan => plan.delegationOrigin.workspaceId));
     for (const workspaceId of workspaces) if (canManageWorkspace(workspaceId)) {
