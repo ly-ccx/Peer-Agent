@@ -43,7 +43,7 @@ export interface InteractiveLiveReport {
   canonicalIndexConfirmed?: boolean; reference?: unknown; contentFile?: string;
   persistedCounts?: { versions: number; publishedOperations: number };
   computation?: { initialRemaining: number[]; changedRemaining: number[]; tableRows: number[]; projectionTruncated: boolean };
-  verification?: { passed: boolean; followupId: string; receipts: unknown[]; verdict: unknown };
+  verification?: { passed: boolean; followupId: string; receipts: unknown[]; verdict: unknown; turns: Array<{ text: string; calls: unknown[] }> };
   invoiceCost: null; invoiceCostReason: string;
 }
 
@@ -223,19 +223,34 @@ export async function runInteractiveLiveCase(options: {
         interactive.stateStore.release({ reference: fixed.reference, identity, writer }, () => true);
         conversations.appendMessage(child.id, { id: 'synthetic-user-selection', role: 'user', content: 'Also review the selected budget.',
           ...encodeResourceFeedbackTransport([interactiveFeedbackFromFollowup(frozen)!]) });
+        const turnExecutor = executor;
+        const turns: NonNullable<InteractiveLiveReport['verification']>['turns'] = [];
         const host = createProjectGoalRunnerHost({ goalPlanStore: plans, conversationStore: conversations,
-          agentTurnExecutor: executor, llmChatService: {}, hostLeases: { holds: () => true }, broadcast() {}, workspaceRoot: workspacePath,
+          agentTurnExecutor: { ...turnExecutor, async runTurn(input: Parameters<typeof turnExecutor.runTurn>[0]) {
+            const outcome = await turnExecutor.runTurn(input);
+            turns.push({ text: sanitize(outcome.text ?? ''), calls: outcome.toolCalls.map((call: any) => ({
+              name: call.name, status: call.execution?.result?.status, input: call.input, diagnostic: call.result?.diagnostic,
+            })) });
+            return outcome;
+          } }, llmChatService: {}, hostLeases: { holds: () => true }, broadcast() {}, workspaceRoot: workspacePath,
           resolveConversationModelProviderId: () => model.credentialId, getInteractiveVerification: () => interactive!.verification });
         phase = 'verifier';
+        const exact = [{ view: 'program' }, { view: 'data', bindingId: 'facts' }, { view: 'evaluate' },
+          { view: 'evaluate', followupId: frozen.followupId }].map(view => ({ target: { kind: 'result', reference: fixed.reference }, ...view }));
+        const focus = 'Use inspect_interactive_result with each of these four exact JSON argument objects, preferably in parallel: '
+          + JSON.stringify(exact)
+          + '. Inspect each returned result and retry only a call that actually failed. Return a compact JSON verifier report. '
+          + 'In evidenceRefs copy only the four actual interactive-inspection:// references from the successful calls. '
+          + 'Exclude publication references and tool-result aliases. Explain the two calculations briefly in summary.';
         const verification = createSessionVerification({ goalPlanStore: plans,
           verifySession: (current: any) => host.verifierRunner.runVerifier({ plan: current, verifierRunId: 'live-review', stage: 'delegated', signal,
-            focus: 'Read the fixed program, the whole facts binding, the initial evaluation, and the frozen evaluation using the exact admitted target and followup ID. You can issue these four read calls in parallel. Cite the returned inspection Evidence refs in your verifier report. Explain how both computed results follow from the actual program and data.',
+            focus,
             workId: undefined, goalReview: undefined }) } as never);
         const verdict = await verification.run({ sessionId: 'live-session' });
         const receipts = plans.listEvidenceIndex().filter((row: any) => row.planId === plan.planId && row.interactiveInspection)
           .map((row: any) => ({ evidenceRef: row.evidenceRef, inspection: row.interactiveInspection }));
         const passed = verdict.ok && 'facts' in verdict && verdict.facts?.independentVerifier === 'passed';
-        report.verification = { passed, followupId: frozen.followupId, receipts, verdict };
+        report.verification = { passed, followupId: frozen.followupId, receipts, verdict, turns };
         report.ok = passed;
       }
 
