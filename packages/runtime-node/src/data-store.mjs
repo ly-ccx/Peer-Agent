@@ -79,6 +79,8 @@ export const DATA_STORE_ENTRIES = {
   // It is not portable configuration, permission truth, or an execution queue; recovery never starts writes.
   // execution-resources.sqlite (+ WAL/SHM) is device-local claim/hold authority; never export it.
   // Missing/corrupt state requires reconciliation, never deletion to unlock. Back up through SQLite.
+  // interactive-results/store.sqlite (+ WAL/SHM) retains device-local immutable result/material objects,
+  // publication receipts/outbox, version heads, UI state/writers and frozen followups. Never portable authority.
   projectRuntime:    { rel: 'project-runtime',         kind: 'dir',  scope: 'device'   },
   executionResources: { rel: 'project-runtime/execution-resources.sqlite', kind: 'file', scope: 'device' },
 };

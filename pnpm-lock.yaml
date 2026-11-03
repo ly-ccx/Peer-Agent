@@ -282,6 +282,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@4.4.3)
+      '@peer-agent/interactive-content':
+        specifier: workspace:*
+        version: link:../interactive-content
       '@peer-agent/protocol':
         specifier: workspace:*
         version: link:../protocol

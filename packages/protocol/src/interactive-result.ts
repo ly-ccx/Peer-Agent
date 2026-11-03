@@ -1,4 +1,5 @@
 import type { DataLevel } from './index.ts';
+import type { SessionExecutionIdentity } from './session-control.ts';
 
 /** Host-neutral content and presentation contracts. References never grant access. */
 export type InteractiveJSON = null | boolean | number | string | readonly InteractiveJSON[] | { readonly [key: string]: InteractiveJSON };
@@ -26,7 +27,7 @@ export interface InteractiveResultDraft {
 }
 export interface InteractiveMaterialProvenance {
   readonly bindingId: string;
-  readonly source: AdmittedMaterialReference;
+  readonly source: Exclude<AdmittedMaterialReference, { readonly kind: 'model-data' }> | { readonly kind: 'model-data'; readonly contentDigest: string };
   readonly contentVersion: string;
   readonly selectedDigest: string;
   readonly selector?: BoundedDataSelector;
@@ -69,12 +70,12 @@ export interface InteractiveContent {
   readonly stateSchema: InteractiveStateSchema;
   readonly stateSchemaHash: string;
   readonly numberPolicy: string;
-  readonly tree: InteractiveElement;
+  readonly tree?: InteractiveElement;
 }
 export interface InteractivePublishedResult {
   readonly reference: InteractiveResultReference;
   readonly content: InteractiveContent;
-  readonly source: { readonly conversationId: string; readonly planId: string; readonly sessionId: string; readonly workId?: string; readonly executionEpoch: number; readonly toolCallId: string };
+  readonly source: SessionExecutionIdentity & { readonly conversationId: string; readonly workId?: string; readonly toolCallId: string };
   readonly provenance: readonly InteractiveMaterialProvenance[];
   readonly predecessor?: InteractiveResultReference;
   readonly evidenceRef: string;
@@ -104,6 +105,7 @@ export interface InteractiveFollowup {
   readonly stateRevision: number;
   readonly stateDigest: string;
   readonly values: InteractiveStateValues;
+  readonly dataLevel: DataLevel;
   readonly capturedAt: string;
   readonly excerpt: string;
 }
@@ -140,6 +142,7 @@ const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v ===
   && Object.values(Object.getOwnPropertyDescriptors(v)).every(d => 'value' in d);
 const keys = (v: Record<string, unknown>, allowed: readonly string[]) => Object.keys(v).every(key => allowed.includes(key));
 const safeKey = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(v) && !['constructor', 'prototype', '__proto__'].includes(v);
+export const interactiveBindingId = safeKey;
 export const interactiveToken = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/.test(v) && !v.includes('..');
 export const interactiveDigest = (v: unknown): v is string => typeof v === 'string' && /^sha256:[a-f0-9]{64}$/.test(v);
 const integer = (v: unknown, min = 0, max = Number.MAX_SAFE_INTEGER): v is number => Number.isSafeInteger(v) && Number(v) >= min && Number(v) <= max;

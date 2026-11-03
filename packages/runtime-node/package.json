@@ -26,6 +26,10 @@
     "./project-agent": {
       "types": "./dist/project-agent-public.d.ts",
       "default": "./dist/project-agent-public.js"
+    },
+    "./interactive-results": {
+      "types": "./dist/interactive-results-public.d.ts",
+      "default": "./dist/interactive-results-public.js"
     }
   },
   "files": [
@@ -34,7 +38,7 @@
   ],
   "scripts": {
     "build": "node ../../scripts/embed-storage-workers.mjs && node scripts/embed-project-tool-prompts.mjs && tsc -p tsconfig.build.json && node scripts/emit-declared-modules.mjs",
-    "test": "node --test src/*.test.ts src/*.test.mjs src/sqlite/*.test.mjs src/memory/*.test.mjs src/project-agent/*.test.mjs src/project-agent/probes/*.test.mjs src/testing/*.test.mjs",
+    "test": "node --test src/*.test.ts src/*.test.mjs src/sqlite/*.test.mjs src/memory/*.test.mjs src/project-agent/*.test.mjs src/project-agent/probes/*.test.mjs src/testing/*.test.mjs src/interactive-results/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
@@ -45,7 +49,8 @@
     "@qoder-ai/qoder-agent-sdk": "^1.0.15",
     "adm-zip": "^0.5.17",
     "ws": "^8.21.0",
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.0",
+    "@peer-agent/interactive-content": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.9.3"
