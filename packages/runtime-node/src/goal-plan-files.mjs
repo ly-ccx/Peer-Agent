@@ -15,7 +15,8 @@ import {
   renameSync,
 } from 'node:fs';
 import { randomUUID } from "node:crypto";
-import { normalizeInteractiveUserArtifact, parseInteractiveArtifactRef } from '@peer-agent/protocol';
+import { normalizeInteractiveUserArtifact, parseInteractiveArtifactRef, normalizeInteractiveInspectionReceipt,
+  isInteractiveInspectionEvidenceRef, interactiveInspectionEvidenceRef } from '@peer-agent/protocol';
 import path from "node:path";
 
 export function readJsonl(filePath) {
@@ -108,7 +109,8 @@ export function readEvidenceRecordsFromTail(filePath, refs, maxScanBytes = EVIDE
       // Older writers append a normalized row that may omit the new artifact kind.
       // Keep scanning for its original canonical publication; append-only bytes survive.
       const needsInteractiveOrigin = parsed.artifactRefs?.some(ref => parseInteractiveArtifactRef(ref))
-        && !found.get(parsed.evidenceRef).userArtifacts?.some(item => item.kind === 'interactive');
+        && !found.get(parsed.evidenceRef).userArtifacts?.some(item => item.kind === 'interactive')
+        || isInteractiveInspectionEvidenceRef(parsed.evidenceRef) && !found.get(parsed.evidenceRef).interactiveInspection;
       if (!EVIDENCE_WRAPPER_TOOL_NAMES.has(parsed.toolName) && !needsInteractiveOrigin) {
         resolvedOriginals.add(parsed.evidenceRef);
       }
@@ -235,6 +237,11 @@ export function normalizeEvidenceIndexRecord(value) {
     const normalized = normalizeOptionalString(value[field]);
     if (normalized) record[field] = normalized;
   }
+  const inspection = normalizeInteractiveInspectionReceipt(value.interactiveInspection);
+  if (inspection && interactiveInspectionEvidenceRef(inspection.evidenceId) === evidenceRef
+    && record.planId === inspection.execution.planId && record.conversationId === inspection.conversationId
+    && record.toolCallId === inspection.toolCallId && record.capabilityId === 'local.interactive.inspect'
+    && record.toolName === 'inspect_interactive_result' && record.createdAt === inspection.observedAt) record.interactiveInspection = inspection;
   const artifactRefs = normalizeEvidenceRefList(value.artifactRefs);
   if (artifactRefs.length > 0) record.artifactRefs = artifactRefs;
   const userArtifacts = Array.isArray(value.userArtifacts)
@@ -306,8 +313,11 @@ export function mergeEvidenceIndexRecords(current, incoming) {
   if (!incoming) return current;
   // A delivery wrapper (including an old writer's lossy append) cannot rebind a
   // canonical publication's source. These are immutable facts, not last-writer metadata.
-  const canonical = [current, incoming].find(record => record.userArtifacts?.some(item => item.kind === 'interactive'));
+  if (current.interactiveInspection && incoming.interactiveInspection
+    && JSON.stringify(current.interactiveInspection) !== JSON.stringify(incoming.interactiveInspection)) throw Object.assign(Error('interactive_inspection_conflict'), { code: 'interactive_inspection_conflict' });
+  const canonical = [current, incoming].find(record => record.interactiveInspection || record.userArtifacts?.some(item => item.kind === 'interactive'));
   const merged = { ...current };
+  if (canonical?.interactiveInspection) merged.interactiveInspection = canonical.interactiveInspection;
   if (incoming.bodyPreview && !current.bodyPreview && !EVIDENCE_WRAPPER_TOOL_NAMES.has(incoming.toolName)) {
     merged.bodyPreview = incoming.bodyPreview;
   }
@@ -347,7 +357,7 @@ export function retainInteractiveEvidence(records) {
   const output = [], positions = new Map();
   for (const record of records) {
     const interactive = record.userArtifacts?.some(item => item.kind === 'interactive')
-      || record.artifactRefs?.some(ref => parseInteractiveArtifactRef(ref));
+      || record.artifactRefs?.some(ref => parseInteractiveArtifactRef(ref)) || isInteractiveInspectionEvidenceRef(record.evidenceRef);
     if (!interactive) { output.push(record); continue; }
     const position = positions.get(record.evidenceRef);
     if (position === undefined) { positions.set(record.evidenceRef, output.length); output.push(record); }

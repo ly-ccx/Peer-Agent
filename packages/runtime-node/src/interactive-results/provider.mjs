@@ -7,6 +7,7 @@ import { selectInteractiveData } from './material-source.mjs';
 import { runInteractiveValidation } from './validation.mjs';
 import { encode, jsonDigest, problem } from './storage.mjs';
 import { maximumInteractiveDataLevel } from './owner-privacy.mjs';
+import { recordInteractiveInspection } from './inspection-evidence.mjs';
 
 const same = (a, b) => encode(a) === encode(b);
 const fail = (code, status = 'failed') => { throw Object.assign(problem(code), { status }); };
@@ -57,10 +58,10 @@ export function createInteractiveResultProvider({ store, stateStore, materialSou
           && maximumInteractiveDataLevel(grant.scope.dataLevel, authority.currentDataLevel?.() ?? authority.dataLevel) !== grant.scope.dataLevel) fail('material_classification_changed', 'denied');
         return true;
       };
-      function result(output, { evidenceId = randomUUID(), artifacts = [], summary = output.kind, status = 'success' } = {}) {
+      function result(output, { evidenceId = randomUUID(), artifacts = [], evidenceRefs = [], summary = output.kind, status = 'success' } = {}) {
         return { call, grant, result: { toolCallId: call.toolCallId, status, outputPreview: output, completedAt: now(),
           evidence: { ...createEvidenceBundle({ evidenceId, toolCallId: call.toolCallId, locale, dataLevel,
-            returnedToCloud: true, summary, artifactRefs: artifacts.map(item => item.ref), metadata: { capabilityId: call.capabilityId,
+            returnedToCloud: true, summary, artifactRefs: artifacts.map(item => item.ref), refs: evidenceRefs, metadata: { capabilityId: call.capabilityId,
               ...(output.reference ? { reference: output.reference } : {}), ...(output.stateSource ? { stateSource: output.stateSource } : {}) } }),
             ...(artifacts.length ? { userArtifacts: artifacts } : {}) } } };
       }
@@ -154,7 +155,7 @@ export function createInteractiveResultProvider({ store, stateStore, materialSou
             reference: receipt.reference, effectCommitted: true, ...(receipt.publicationStatus !== 'published' ? { recovery: 'reconcile_only' } : {}) });
         }
         const fixed = store.getVersion(target.reference), content = fixed.content;
-        dataLevel = fixed.dataLevel;
+        dataLevel = maximumInteractiveDataLevel(fixed.dataLevel, authority.currentDataLevel?.() ?? authority.dataLevel);
         const base = { kind: 'interactive_inspection', reference: fixed.reference, specHash: content.specHash, view: request.view,
           dataLevel, source: fixed.source, evidenceRef: fixed.evidenceRef };
         const sources = fixed.provenance.map(({ bindingId, source, contentVersion, selectedDigest, selector, observedAt, truncated, redacted, dataLevel }) =>
@@ -178,13 +179,16 @@ export function createInteractiveResultProvider({ store, stateStore, materialSou
             // Selected-only conditions are useful discussion material but cannot prove a full-view evaluation.
             if (Object.keys(content.stateSchema).some(key => !Object.hasOwn(followup.values, key))) fail('followup_state_incomplete');
             values = followup.values; stateSource = { kind: 'frozen-followup', followupId: followup.followupId,
-              stateRevision: followup.stateRevision, stateDigest: followup.stateDigest, values };
+              stateRevision: followup.stateRevision, stateDigest: followup.stateDigest, selectionDigest: followup.selectionDigest, values };
           }
           const evaluated = await validate({ operation: 'evaluate', content, values }, { signal });
           output = { ...base, classification: 'host-derived', stateSource, ...page(evaluated.projection.text, request),
             computationTruncated: evaluated.projection.truncated, notice: 'Pure computation is not verification of source business facts or task acceptance.' };
         }
-        guard(); return result(output, { summary: `Read fixed interactive result: ${request.view}; ${fixed.reference.contentVersion}` });
+        guard();
+        const evidenceId = randomUUID(), evidenceRefs = authority.inspectionReview ? [recordInteractiveInspection({ call, authority, request,
+          output, index, guard, evidenceId, observedAt: now() })] : [];
+        return result(output, { evidenceId, evidenceRefs, summary: `Read fixed interactive result: ${request.view}; ${fixed.reference.contentVersion}` });
       } catch (error) {
         const code = error.code ?? 'interactive_provider_failed';
         let receipt, operationUnreadable = false;

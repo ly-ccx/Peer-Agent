@@ -27,7 +27,7 @@ test('Desktop projects only enabled role capabilities and returns real file obse
   const uninstall = installDesktopInteractiveRuntime({ runtime, enabled: () => enabled });
   t.after(() => { uninstall(); runtime.close(); rmSync(root, { recursive: true, force: true }); });
   const profile = resolveWorkSessionProfile({ plan, kind: 'worker' });
-  const capabilities = turnProfile => createRuntimeToolProjection({ projectionOptions: { mode: turnProfile.role === 'project_agent' ? 'project_agent' : 'goal',
+  const capabilities = turnProfile => createRuntimeToolProjection({ projectionOptions: { mode: turnProfile.role === 'project_agent' ? 'project_agent' : ['explorer', 'verifier'].includes(turnProfile.agentKind) ? 'explorer' : 'goal',
     turnProfile, readOnlyWorkSession: true } }).projection.capabilities.map(tool => tool.capabilityId).filter(id => id.startsWith('local.interactive.'));
   assert.deepEqual(capabilities(profile), ['local.interactive.publish', 'local.interactive.inspect']);
   assert.deepEqual(capabilities({ role: 'project_agent', workspaceId: 'bot-a' }), ['local.interactive.inspect']);

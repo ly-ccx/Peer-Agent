@@ -305,7 +305,7 @@ export function normalizeInteractiveInspect(raw: unknown): InteractiveInspectReq
   else return;
   if (raw.bindingId !== undefined && (!safeKey(raw.bindingId) || raw.view !== 'data') || raw.view === 'data' && !safeKey(raw.bindingId)
     || raw.followupId !== undefined && (!interactiveToken(raw.followupId) || raw.view !== 'evaluate')
-    || raw.offset !== undefined && !integer(raw.offset, 0, INTERACTIVE_RESULT_LIMITS.programBytes)
+    || raw.offset !== undefined && !integer(raw.offset, 0, INTERACTIVE_RESULT_LIMITS.inputBytes)
     || raw.limit !== undefined && !integer(raw.limit, 1, 4000)) return;
   const selector = raw.selector === undefined ? undefined : normalizeInteractiveSelector(raw.selector);
   if (raw.selector !== undefined && (!selector || raw.view !== 'data')) return;

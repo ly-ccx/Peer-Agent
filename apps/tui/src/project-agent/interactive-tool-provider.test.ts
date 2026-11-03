@@ -15,7 +15,7 @@ test('TUI executes readOnly publication through real host authorization and reta
   writeFileSync(path.join(root, 'projects/bot-a/profile.json'), JSON.stringify({ workspaceId: 'bot-a', agentConversationId: 'parent-a', status: 'active', displayName: 'Test', avatar: { kind: 'generated' } }));
   const plans = createGoalPlanStore({ storeDir: path.join(root, 'goal-plans') });
   const model = { providerId: 'test', modelId: 'test', modelProviderId: 'test', family: 'test' };
-  const plan = plans.createPlan({ planId: 'plan-a', conversationId: 'child-a', title: 'Compare costs', tasks: [], delegationOrigin: {
+  const plan = plans.createPlan({ planId: 'plan-a', conversationId: 'child-a', title: 'Compare costs', status: 'executing', tasks: [{ taskId: 'publish', title: 'Publish', status: 'pending' }], delegationOrigin: {
     workspaceId: 'bot-a', parentConversationId: 'parent-a', sessionId: 'session-a', readOnly: true, phase: 'running',
     anchorMessageId: 'anchor-a', inputId: 'input-a', modelSelection: { worker: model, explorer: model, verifier: model,
       source: { worker: 'global' }, resolvedAt: '2026-11-03T00:00:00Z' } } });
@@ -52,11 +52,16 @@ test('TUI executes readOnly publication through real host authorization and reta
     expect(plans.findEvidenceIndexRecords([(published.result.output as any).artifactRef])[0]?.userArtifacts?.[0]?.kind).toBe('interactive');
     const encoded = JSON.parse(encodeProviderToolResult({ result: published.result, execution: published, conversationId: 'child-a', toolCallId: 'publish-a' }).content);
     expect(encoded.output.reference).toEqual(ref);
-    const verifier = { ...context, toolContext: { ...context.toolContext, turnProfile: resolveWorkSessionProfile({ plan, kind: 'verifier' }) } };
+    plans.recordTaskEvidence(plan.planId, 'publish', { status: 'completed', evidenceRefs: [(published.result.output as any).artifactRef] });
+    const review = interactive.verification.prepare({ plan: plans.getPlan(plan.planId), verifierRunId: 'tui-read', readSourceRevision: () => 'fixed' })!;
+    const verifier = { ...context, toolContext: { ...context.toolContext,
+      turnProfile: { ...resolveWorkSessionProfile({ plan: plans.getPlan(plan.planId), kind: 'verifier' }), interactiveReview: review.binding } } };
     expect((await host.execute('local.interactive.publish', {}, { ...verifier, toolCallId: 'forbidden-publish' })).result.status).toBe('denied');
     const inspected = await host.execute('local.interactive.inspect', { target: { kind: 'result', reference: ref }, view: 'evaluate' }, { ...verifier, toolCallId: 'inspect-a' });
     expect(inspected.result.status).toBe('completed');
     expect((inspected.result.output as any).text).toContain('20100');
+    expect((inspected.result.evidence as any)?.refs?.some((ref: string) => ref.startsWith('interactive-inspection://'))).toBe(true);
+    review.close();
     expect((await host.execute('local.file.write', { path: 'forbidden.txt', content: 'no' }, { ...context, toolCallId: 'forbidden-write' })).result.status).toBe('denied');
     leased = false;
     expect((await host.execute('local.interactive.inspect', { target: { kind: 'result', reference: ref }, view: 'metadata' }, { ...context, toolCallId: 'stale-read' })).result.status).toBe('denied');

@@ -136,6 +136,7 @@ export function createTuiProjectHost(options: {
     worktreeAdapter: createAutomationWorktreeAdapter({rootDir: path.join(dataHome, 'goal-plans/worktrees'), artifactDir: path.join(dataHome, 'goal-plans/artifacts')})} as never);
   const taskBranch = createGoalTaskBranchAdapter({goalPlanStore: plans, resolvePrefix: () => resolveGitBranchPrefix({gitBranchPrefix: getSettings().gitBranchPrefix})} as never);
   const goalHost = createProjectGoalRunnerHost({goalPlanStore: plans, conversationStore: conversations,
+    getInteractiveVerification: () => interactive.verification,
     agentTurnExecutor: turns, llmChatService: turns, broadcast: changed, hostLeases: {holds},
     goalWorktreeAdapter: worktree, goalTaskBranchAdapter: taskBranch, workspaceRoot: options.workspacePath,
     createSink: () => createCallbackSink(), resolveConversationModelProviderId: ({conversationId}: any) => conversations.getConversation(conversationId)?.modelProviderId,

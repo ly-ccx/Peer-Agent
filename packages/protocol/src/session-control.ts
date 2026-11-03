@@ -7,6 +7,18 @@ export interface SessionExecutionIdentity {
   readonly goalRevision?: number;
   readonly generation?: string;
 }
+/** Shape only; a host must still compare it with the current canonical plan. */
+export function normalizeSessionExecutionIdentity(raw: unknown): SessionExecutionIdentity | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw) || ![Object.prototype, null].includes(Object.getPrototypeOf(raw))) return;
+  const value = raw as Record<string, unknown>;
+  const token = (item: unknown): item is string => typeof item === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/.test(item) && !item.includes('..');
+  if (Object.entries(Object.getOwnPropertyDescriptors(value)).some(([key, descriptor]) => !['planId', 'sessionId', 'executionEpoch', 'goalRevision', 'generation'].includes(key) || !('value' in descriptor))
+    || !token(value.planId) || !token(value.sessionId) || typeof value.executionEpoch !== 'string' || !value.executionEpoch.length || value.executionEpoch.length > 512
+    || /[\u0000-\u001f]/.test(value.executionEpoch) || value.generation !== undefined && !token(value.generation)
+    || value.goalRevision !== undefined && (!Number.isSafeInteger(value.goalRevision) || Number(value.goalRevision) < 0)) return;
+  return { planId: value.planId, sessionId: value.sessionId, executionEpoch: value.executionEpoch,
+    ...(value.generation !== undefined ? { generation: value.generation } : {}), ...(value.goalRevision !== undefined ? { goalRevision: Number(value.goalRevision) } : {}) };
+}
 export interface StopBarrierReceipt {
   readonly receiptId: string;
   readonly operationId: string;

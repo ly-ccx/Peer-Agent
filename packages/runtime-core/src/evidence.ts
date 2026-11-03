@@ -50,6 +50,7 @@ export function collectToolEvidenceRefs(
   const execution = asEvidenceObject(options.execution);
   const result = asEvidenceObject(execution?.result);
   const evidence = asEvidenceObject(result?.evidence);
+  addEvidenceRefStrings(refs, evidence?.refs);
   addEvidenceRefStrings(refs, evidence?.artifactRefs);
 
   const outputPreview = asEvidenceObject(result?.outputPreview);

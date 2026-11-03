@@ -145,6 +145,7 @@ export function createGoalPlanEvidence({ storeDir, getActivePlanByConversation }
     const createdAt = normalizeOptionalString(entry.createdAt) || new Date().toISOString();
     const base = { createdAt };
     if (entry.bodyPreview) base.bodyPreview = entry.bodyPreview;
+    if (entry.interactiveInspection) base.interactiveInspection = entry.interactiveInspection;
     if (planId) base.planId = planId;
     if (conversationId) base.conversationId = conversationId;
     for (const field of ['streamId', 'toolCallId', 'capabilityId', 'toolName']) {
@@ -162,7 +163,7 @@ export function createGoalPlanEvidence({ storeDir, getActivePlanByConversation }
     for (const record of records) {
       const previous = findEvidenceIndexRecords([record.evidenceRef])[0];
       const merged = mergeEvidenceIndexRecords(previous, record);
-      if (previous && merged.userArtifacts?.some(item => item.kind === 'interactive') && JSON.stringify(previous) === JSON.stringify(merged)) {
+      if (previous && (merged.interactiveInspection || merged.userArtifacts?.some(item => item.kind === 'interactive')) && JSON.stringify(previous) === JSON.stringify(merged)) {
         if (durable) syncJsonl(evidenceIndexFile);
         mergedRecords.push(merged);
         continue;

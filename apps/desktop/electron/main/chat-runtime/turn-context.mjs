@@ -1,4 +1,5 @@
 import { createMemoryStore, readSnapshots } from "@peer-agent/runtime-node/project-agent";
+import { normalizeSessionExecutionIdentity, normalizeInteractiveReviewBinding } from '@peer-agent/protocol';
 
 const TURN_ROLES = new Set([
   'user_chat',
@@ -61,12 +62,17 @@ export function normalizeTurnProfile(value) {
     && (!binding.sessionId || binding.sessionId === sessionId)
     ? { workId, goalRevision: binding.goalRevision, executionEpoch: binding.executionEpoch, ...(binding.sessionId ? { sessionId } : {}) } : null;
   const context = sanitizeTurnContext(value.context);
+  const identity = normalizeSessionExecutionIdentity(value.executionIdentity);
+  const execution = identity?.planId === planId && identity.sessionId === sessionId ? identity : null;
+  const interactiveReview = normalizeInteractiveReviewBinding(value.interactiveReview);
   return {
     role,
     ...(typeof value.agentKind === 'string' ? { agentKind: value.agentKind } : {}),
     ...(workspaceId ? { workspaceId } : {}),
     ...(sessionId ? { sessionId } : {}),
     ...(planId ? { planId } : {}),
+    ...(execution ? { executionIdentity: execution } : {}),
+    ...(interactiveReview ? { interactiveReview } : {}),
     ...(workId ? { workId } : {}),
     ...(coordinationBinding ? { coordinationBinding } : {}),
     ...(memorySnapshotId ? { memorySnapshotId } : {}),

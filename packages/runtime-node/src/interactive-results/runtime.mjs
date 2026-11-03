@@ -7,6 +7,7 @@ import { createInteractiveResultStore } from './store.mjs';
 import { normalizeInteractiveOwner } from '@peer-agent/protocol';
 import { createInteractiveUserMaterials } from './user-materials.mjs';
 import { createInteractiveFeedbackAdmission } from './feedback-admission.mjs';
+import { createInteractiveVerification } from './verification.mjs';
 
 /** One shared domain instance per host. Composition roots supply real local facts. */
 export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationStore, getBotConversationId,
@@ -15,8 +16,9 @@ export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationS
     assertCompatibility: () => goalPlanStore?.assertInteractiveEvidenceCompatible?.() === true });
   const stateStore = createInteractiveStateStore({ resultStore, ...(now ? { now } : {}) });
   const feedback = createInteractiveFeedbackAdmission({ stateStore });
+  const verification = createInteractiveVerification({ resultStore, feedback, goalPlanStore, conversationStore, getBotConversationId, holdsLease, enabled });
   const authority = createInteractiveAuthority({ goalPlanStore, conversationStore, resultStore, getBotConversationId, holdsLease, enabled, classifyContext,
-    readResourceFeedback: feedback.restore });
+    readResourceFeedback: feedback.restore, resolveVerification: verification.resolve });
   const userMaterials = createInteractiveUserMaterials({ conversationStore });
   const materialSource = createInteractiveMaterialSource({
     readToolResult: (source, execution) => resultStore.readMaterial(execution.owner, source),
@@ -38,7 +40,7 @@ export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationS
   });
   const provider = createInteractiveResultProvider({ store: resultStore, stateStore, materialSource, resolveAuthority: authority.resolve,
     index: goalPlanStore, ...(now ? { now } : {}), ...(validate ? { validate } : {}) });
-  return { resultStore, stateStore, provider, authority, feedback, captureExecution: createInteractiveCapture({ resultStore, resolveAuthority: authority.resolve,
+  return { resultStore, stateStore, provider, authority, feedback, verification, captureExecution: createInteractiveCapture({ resultStore, resolveAuthority: authority.resolve,
     resolveObservationAuthority: authority.resolveObservation, ...(now ? { now } : {}) }),
     userMaterialNotices(toolContext) {
       try { const context = authority.resolve({ toolContext });
@@ -65,5 +67,5 @@ export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationS
         && getBotConversationId(workspaceId) === owner.conversationId) }; }
       catch (error) { return { ok: false, code: error.code ?? 'publication_unknown' }; }
     },
-    close() { stateStore.close(); resultStore.close(); } };
+    close() { verification.dispose(); stateStore.close(); resultStore.close(); } };
 }

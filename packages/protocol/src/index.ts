@@ -1180,6 +1180,7 @@ export * from './resource-edit-execution.ts';
 export { decideFollowUp, type FollowUpOwner, type FollowUpReason, type FollowUpProjection } from './task-overview.ts';
 
 export type { SessionExecutionIdentity, StopBarrierReceipt, SessionControlOperation, ExecutionResourceBlocker, ExecutionResourceClaim, ExecutionResourceScope } from './session-control.ts';
-export { controlPhasesForOrigin } from './session-control.ts';
+export { controlPhasesForOrigin, normalizeSessionExecutionIdentity } from './session-control.ts';
 export * from './input-prediction.ts';
 export * from './interactive-result.ts';
+export * from './interactive-verification.ts';

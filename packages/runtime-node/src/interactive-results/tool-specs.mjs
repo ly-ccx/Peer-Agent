@@ -1,4 +1,4 @@
-import { INTERACTIVE_INSPECT_CAPABILITY as INSPECT, INTERACTIVE_INSPECT_TOOL, INTERACTIVE_PUBLISH_CAPABILITY as PUBLISH, INTERACTIVE_PUBLISH_TOOL } from '@peer-agent/protocol';
+import { INTERACTIVE_INSPECT_CAPABILITY as INSPECT, INTERACTIVE_INSPECT_TOOL, INTERACTIVE_PUBLISH_CAPABILITY as PUBLISH, INTERACTIVE_PUBLISH_TOOL, INTERACTIVE_RESULT_LIMITS as L } from '@peer-agent/protocol';
 
 const token = { type: 'string', minLength: 1, maxLength: 256 };
 const digest = { type: 'string', pattern: '^sha256:[a-f0-9]{64}$' };
@@ -31,7 +31,7 @@ export const INTERACTIVE_INSPECT_SCHEMA = { type: 'object', properties: {
     { type: 'object', properties: { kind: { const: 'publication' }, reference: callReference }, required: ['kind', 'reference'], additionalProperties: false },
   ] },
   view: { type: 'string', enum: ['metadata', 'text', 'program', 'data', 'evaluate'] }, bindingId: token, selector,
-  followupId: token, offset: { type: 'integer', minimum: 0, maximum: 65536 }, limit: { type: 'integer', minimum: 1, maximum: 4000 },
+  followupId: token, offset: { type: 'integer', minimum: 0, maximum: L.inputBytes }, limit: { type: 'integer', minimum: 1, maximum: 4000 },
 }, required: ['target', 'view'], additionalProperties: false };
 function definition(capabilityId, name, schema, modes, prompt, riskLevel) {
   return { name, capabilityId, availableInModes: modes,
@@ -44,6 +44,6 @@ function definition(capabilityId, name, schema, modes, prompt, riskLevel) {
 export const INTERACTIVE_TOOL_DEFINITIONS = Object.freeze([
   definition(PUBLISH, INTERACTIVE_PUBLISH_TOOL, INTERACTIVE_PUBLISH_SCHEMA, ['goal'],
     'Publish a bounded Peer interactive result as an internal user artifact of this admitted worker. Use only the current admitted catalog, fixed materials, and an explicit create or revise base. This does not write project files, refresh data, approve actions or complete a task. ReadOnly workers may publish internally with the same scoped authorization. A pending/unknown receipt requires inspect by the original publication target; never change call ID to replay it. Model data stays labelled as assumptions.', 'L2_local_write'),
-  definition(INSPECT, INTERACTIVE_INSPECT_TOOL, INTERACTIVE_INSPECT_SCHEMA, ['goal', 'project_agent'],
+  definition(INSPECT, INTERACTIVE_INSPECT_TOOL, INTERACTIVE_INSPECT_SCHEMA, ['goal', 'project_agent', 'explorer'],
     'Read an admitted fixed result or original publication receipt. Main Bot can read metadata/text only. Workers and Verifiers can inspect actual program/data and bounded pure evaluation, with new read Evidence. User conditions require an explicitly admitted frozen followup; latest UI state is never read. No publishing, state saving, source refresh, network or tool execution.', 'L1_local_read'),
 ]);
