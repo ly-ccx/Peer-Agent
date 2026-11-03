@@ -31,7 +31,7 @@ import path from 'node:path';
 import { createExecutionScheduler } from './execution-scheduler.mjs';
 import { randomUUID } from 'node:crypto';
 
-import { normalizeResourceFeedbackList, projectWorkSession, resolveRoleModel } from '@peer-agent/protocol';
+import { encodeResourceFeedbackTransport, normalizeResourceFeedbackList, restoreResourceFeedbackTransport, projectWorkSession, resolveRoleModel } from '@peer-agent/protocol';
 
 import { canConsumeRequestedUserInput } from '../goal-plan-store.mjs';
 import { normalizeInputAttachments } from './input-queue.mjs';
@@ -144,6 +144,7 @@ export function createSessionSupervisor({
   readManualCriterionAuthorities = null,
   readLegacyCriterionProvenance = () => null,
   readDelegationCapabilities = null,
+  readResourceFeedback = null,
   autonomousCoordinationEnabled = () => process.env.PEER_AUTONOMOUS_COORDINATION !== '0',
   now = () => new Date().toISOString(),
 } = {}) {
@@ -520,7 +521,9 @@ export function createSessionSupervisor({
       // A delegation admits its explicit anchors, not an implicit fork of all
       // prior chat. Missing admitted material and explicit snapshots still ask.
       const attachments = attachmentsFromMessages(history.messages, anchorMessageIds);
-      const resourceFeedback = resourceFeedbackFromMessages(history.messages, anchorMessageIds);
+      const resourceFeedback = resourceFeedbackFromMessages(history.messages, anchorMessageIds,
+        { recipient: { workspaceId, conversationId: parentConversationId }, readResourceFeedback });
+      const feedbackTransport = encodeResourceFeedbackTransport(resourceFeedback, attachments);
       const carried = attachmentRefsFromMessages(history.messages, anchorMessageIds);
       const completeInlineAttachments = !presetSnapshotId
         && inlineAttachmentsCoverOmissions(history.messages, anchorMessageIds);
@@ -557,8 +560,7 @@ export function createSessionSupervisor({
           readOnly: input.readOnly === true,
         }),
         ...(carried.length > 0 ? { attachmentRefs: carried } : {}),
-        ...(attachments.length > 0 ? { attachments } : {}),
-        ...(resourceFeedback.length ? { resourceFeedback } : {}),
+        ...feedbackTransport,
       });
       if (!stored) throw new Error('delegation message was not stored');
 
@@ -1491,13 +1493,21 @@ function stringList(value) {
 
 
 /** Explicit delegation anchors only. Resource materials remain user context, not authority. */
-export function resourceFeedbackFromMessages(messages, anchorMessageIds) {
+export function resourceFeedbackFromMessages(messages, anchorMessageIds, { recipient, readResourceFeedback } = {}) {
   const anchors = new Set(anchorMessageIds), rows = new Map();
   for (const message of messages) {
     if (!anchors.has(message?.id)) continue;
-    const refs = normalizeResourceFeedbackList(message.resourceFeedback);
-    if (!refs) throw new TypeError('INVALID_RESOURCE_FEEDBACK');
+    // Only canonical user material can admit a prior fixed result. Assistant
+    // fields and prose cannot manufacture a frozen user selection.
+    if (message.role !== 'user') continue;
+    const refs = restoreResourceFeedbackTransport(message.resourceFeedback, message.attachments);
+    if (refs.some(ref => ref.resource.kind === 'interactive')) {
+      if (!recipient || typeof readResourceFeedback !== 'function') throw Object.assign(new TypeError('INTERACTIVE_FEEDBACK_UNAVAILABLE'), { code: 'INTERACTIVE_FEEDBACK_UNAVAILABLE' });
+      const actual = readResourceFeedback(message, recipient.workspaceId);
+      if (JSON.stringify(actual) !== JSON.stringify(refs)) throw Object.assign(new TypeError('INTERACTIVE_FEEDBACK_MISMATCH'), { code: 'INTERACTIVE_FEEDBACK_MISMATCH' });
+    }
     for (const ref of refs) {
+      if (recipient && (ref.recipient.workspaceId !== recipient.workspaceId || ref.recipient.conversationId !== recipient.conversationId)) throw new TypeError('RESOURCE_FEEDBACK_RECIPIENT_CHANGED');
       if (rows.has(ref.id) && JSON.stringify(rows.get(ref.id)) !== JSON.stringify(ref)) throw new TypeError('RESOURCE_FEEDBACK_ID_CONFLICT');
       rows.set(ref.id, ref);
     }

@@ -98,6 +98,7 @@ contextBridge.exposeInMainWorld('peerAgent', {
     save: request => ipcRenderer.invoke('interactive-results:save', request),
     release: request => ipcRenderer.invoke('interactive-results:release', request),
     prepareFollowup: request => ipcRenderer.invoke('interactive-results:prepare-followup', request),
+    prepareDraft: request => ipcRenderer.invoke('interactive-results:prepare-draft', request),
   }),
   resourcePresentation: Object.freeze({
     readLayout: request => ipcRenderer.invoke('resource-presentation:read-layout', request),

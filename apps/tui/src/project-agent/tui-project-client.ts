@@ -17,7 +17,7 @@ export function createTuiProjectClient(options: {
   autoStart?: boolean;
 }) {
   const { host, dataHome } = options;
-  const drafts = createProjectInputDraftStore({ rootDir: path.join(dataHome, 'project-runtime') });
+  const drafts = createProjectInputDraftStore({ rootDir: path.join(dataHome, 'project-runtime'), validateInteractiveFeedback: host.interactive?.feedback?.validate });
   const recoverySessions = new Map<string, ProjectInputRecovery>();
   function recovery(workspaceId = host.workspaceId()) {
     let session = recoverySessions.get(workspaceId);

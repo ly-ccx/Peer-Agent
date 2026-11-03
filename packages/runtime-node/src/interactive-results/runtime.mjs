@@ -6,6 +6,7 @@ import { createInteractiveStateStore } from './state-store.mjs';
 import { createInteractiveResultStore } from './store.mjs';
 import { normalizeInteractiveOwner } from '@peer-agent/protocol';
 import { createInteractiveUserMaterials } from './user-materials.mjs';
+import { createInteractiveFeedbackAdmission } from './feedback-admission.mjs';
 
 /** One shared domain instance per host. Composition roots supply real local facts. */
 export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationStore, getBotConversationId,
@@ -13,7 +14,9 @@ export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationS
   const resultStore = createInteractiveResultStore({ ...(rootDir ? { rootDir } : {}), ...(now ? { now } : {}),
     assertCompatibility: () => goalPlanStore?.assertInteractiveEvidenceCompatible?.() === true });
   const stateStore = createInteractiveStateStore({ resultStore, ...(now ? { now } : {}) });
-  const authority = createInteractiveAuthority({ goalPlanStore, conversationStore, resultStore, getBotConversationId, holdsLease, enabled, classifyContext });
+  const feedback = createInteractiveFeedbackAdmission({ stateStore });
+  const authority = createInteractiveAuthority({ goalPlanStore, conversationStore, resultStore, getBotConversationId, holdsLease, enabled, classifyContext,
+    readResourceFeedback: feedback.restore });
   const userMaterials = createInteractiveUserMaterials({ conversationStore });
   const materialSource = createInteractiveMaterialSource({
     readToolResult: (source, execution) => resultStore.readMaterial(execution.owner, source),
@@ -35,7 +38,7 @@ export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationS
   });
   const provider = createInteractiveResultProvider({ store: resultStore, stateStore, materialSource, resolveAuthority: authority.resolve,
     index: goalPlanStore, ...(now ? { now } : {}), ...(validate ? { validate } : {}) });
-  return { resultStore, stateStore, provider, authority, captureExecution: createInteractiveCapture({ resultStore, resolveAuthority: authority.resolve,
+  return { resultStore, stateStore, provider, authority, feedback, captureExecution: createInteractiveCapture({ resultStore, resolveAuthority: authority.resolve,
     resolveObservationAuthority: authority.resolveObservation, ...(now ? { now } : {}) }),
     userMaterialNotices(toolContext) {
       try { const context = authority.resolve({ toolContext });

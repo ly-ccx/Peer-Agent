@@ -121,7 +121,10 @@ export function createResourceWindowController({ BrowserWindow, trustedWindows, 
     open,
     interactiveBinding(sender) {
       const found = registry.bootstrap(sender);
-      return found.ok && found.context.resource.kind === 'interactive' ? registry.readBinding(sender, found.context) : fail('scope_denied');
+      if (!found.ok || found.context.resource.kind !== 'interactive') return fail('scope_denied');
+      const binding = registry.readBinding(sender, found.context), target = registry.returnTarget(sender, found.context);
+      // Private host binding only. bootstrap/IPC never serialize this sender.
+      return { ...binding, ...(binding.ok && target.ok ? { sourceSender: target.sourceSender } : {}) };
     },
     prepareFeedback: feedback,
     isEditingSourceCurrent: editSource.isCurrent,

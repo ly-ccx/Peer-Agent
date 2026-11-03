@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('peerResource', Object.freeze({
     save: request => ipcRenderer.invoke('interactive-results:save', request),
     release: request => ipcRenderer.invoke('interactive-results:release', request),
     prepareFollowup: request => ipcRenderer.invoke('interactive-results:prepare-followup', request),
+    prepareDraft: request => ipcRenderer.invoke('interactive-results:prepare-draft', request),
   }),
   resourceEdits: Object.freeze({
     onChanged: listener => {

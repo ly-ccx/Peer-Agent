@@ -3,6 +3,7 @@ import test from 'node:test';
 import { emptyInputDraft, type ProjectAgentSubmitInputResult, type ProjectInputDraftSnapshot,
   type ProjectInputRecoveryPort, type ProjectInputAttachment, type UnconfirmedProjectInput } from '@peer-agent/protocol';
 import { createProjectInputRecovery } from './project-input-recovery.ts';
+import { interactiveFeedbackFromFollowup } from '@peer-agent/protocol';
 
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
 function fixture() {
@@ -30,6 +31,22 @@ function fixture() {
   return { make, calls, port, stored: () => stored, failWrite: () => { failWrite = true; }, lose: () => { loseReceipt = true; },
     defer() { release = deferred<ProjectAgentSubmitInputResult>(); return release; }, received };
 }
+
+test('explicit condition-only sends use the original queue and combined quota failure preserves the whole draft before allocating input', async () => {
+  const hash = `sha256:${'a'.repeat(64)}`, owner = { workspaceId: 'ws', conversationId: 'parent' };
+  const feedback = interactiveFeedbackFromFollowup({ followupId: 'selection', recipient: owner,
+    result: { owner, resultId: 'result', contentVersion: hash }, specHash: hash, stateRevision: 1, stateDigest: hash, selectionDigest: hash,
+    values: { $x: 4 }, dataLevel: 'D3_private', capturedAt: '2026-11-03T00:00:00.000Z', excerpt: 'Conditions' })!;
+  const f = fixture(), session = f.make(); await session.load();
+  const uploads: ProjectInputAttachment[] = Array.from({ length: 8 }, (_, i) => ({ id: `upload-${i}`, name: 'a.txt', kind: 'text', sourceKind: 'user_upload', mimeType: 'text/plain', text: 'a', size: 1 }));
+  session.edit({ text: 'Original draft', quote: { messageId: 'quoted', text: 'Original quote' }, attachments: uploads, resourceFeedback: [feedback] });
+  const before = structuredClone(session.getSnapshot().draft);
+  assert.equal((await session.send()).code, 'RESOURCE_FEEDBACK_ATTACHMENT_LIMIT');
+  assert.deepEqual(session.getSnapshot().draft, before); assert.equal(session.getSnapshot().pending.length, 0); assert.equal(f.calls.length, 0);
+  session.edit({ text: '', attachments: [] }); await session.flush(); assert.equal(f.calls.length, 0);
+  assert.equal((await session.send()).ok, true); assert.equal(f.calls.length, 1);
+  assert.deepEqual(f.calls[0]!.resourceFeedback, [feedback]); assert.equal(f.calls[0]!.text, '');
+});
 test('reopening restores the whole draft and pending intent, never automatically sends', async () => {
   const f = fixture(), first = f.make(); await first.load();
   const upload: ProjectInputAttachment = { id: 'file', kind: 'text', name: 'a.txt', mimeType: 'text/plain', size: 4, text: 'data', sourceKind: 'user_upload' };

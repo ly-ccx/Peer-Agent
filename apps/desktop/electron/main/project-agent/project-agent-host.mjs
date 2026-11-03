@@ -26,6 +26,7 @@ import {
   createBotProfileStore,
   createBotAccessPolicyAuthority,
   createInputQueue,
+  createProjectInputDraftStore,
   createMemoryStore,
   createEpisodeLog,
   createMemoryCurator,
@@ -217,6 +218,7 @@ export function registerDesktopProjectAgent({
     canManageWorkspace: ownsProject,
     deferRecovery: true,
     readDelegationCapabilities: input => agentTurnExecutor.readDelegationCapabilities?.(input),
+    readResourceFeedback: interactive.feedback.restore,
     approvalStore,
     memoryStore,
     resolveModel: (input) => agentTurnExecutor.resolveGoalRole({
@@ -406,6 +408,7 @@ export function registerDesktopProjectAgent({
 
   const inputQueue = createInputQueue({
     rootDir: runtimeRoot,
+    validateInteractiveFeedback: interactive.feedback.validate,
     holdsLease: ownsProject,
     resolveConversationId,
     hasMessage,
@@ -506,6 +509,7 @@ export function registerDesktopProjectAgent({
     readLeaseEpoch, supervisor, goalPlanStore, goalRunner, agentTurnExecutor, objectiveWatches, executionScheduler,
     changed: workspaceId => broadcast?.('project-agent:changed', { workspaceIds: [workspaceId] }) });
   const projectAgent = createProjectAgentApplicationService({
+    inputDrafts: createProjectInputDraftStore({ rootDir: runtimeRoot, validateInteractiveFeedback: interactive.feedback.validate }),
     recoveryControl,
     accessAuthority,
     diagnostics: diagnostics.execute,
@@ -655,6 +659,7 @@ export function registerDesktopProjectAgent({
       objectives,
       objectiveWatches,
       interactive,
+      readInputDraft: projectAgent.readInputDraft,
       dispose: () => { uninstallInteractive(); interactive.close(); accessAuthority.close(); projectAgent.dispose(); uninstallYield?.(); host.dispose();void objectiveWatches.dispose(); uninstallDelegation(); uninstallVerification(); uninstallDelivery(); uninstallProactivity(); uninstallMemory(); },
     });
   }

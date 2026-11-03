@@ -1,4 +1,4 @@
-import { interactiveToken, normalizeInteractiveOwner, normalizeInteractiveReference } from '@peer-agent/protocol';
+import { interactiveToken, normalizeInteractiveOwner, normalizeInteractiveReference, restoreResourceFeedbackTransport } from '@peer-agent/protocol';
 import { interactiveExecutionRole, interactiveCapabilitiesForProfile } from './role-policy.mjs';
 export { interactiveExecutionRole, interactiveCapabilitiesForProfile } from './role-policy.mjs';
 import { executionIdentity, sameExecution } from '../project-agent/session-control-kernel.mjs';
@@ -10,7 +10,7 @@ function requireTrue(value, code = 'interactive_scope_denied') { if (value !== t
 
 /** Reconstruct authority from current canonical host facts, never tool arguments or assistant prose. */
 export function createInteractiveAuthority({ goalPlanStore, conversationStore, resultStore, getBotConversationId,
-  holdsLease, enabled, classifyContext }) {
+  holdsLease, enabled, classifyContext, readResourceFeedback }) {
   function resolve({ call, toolContext = {} }) {
     const profile = toolContext.turnProfile, role = interactiveExecutionRole(profile);
     if (!role || !interactiveToken(toolContext.conversationId) || typeof holdsLease !== 'function' || typeof enabled !== 'function') throw problem('interactive_authority_unavailable');
@@ -48,9 +48,14 @@ export function createInteractiveAuthority({ goalPlanStore, conversationStore, r
     const admittedVersions = new Map();
     const history = () => conversationStore?.getPersistedConversationHistory?.(toolContext.conversationId)?.messages ?? [];
     function frozenFeedback() {
-      return history().filter(message => message.role === 'user').flatMap(message => message.resourceFeedback ?? [])
-        .filter(feedback => normalizeInteractiveOwner(feedback?.recipient) && same(feedback.recipient, owner) && feedback.resource?.kind === 'interactive'
-          && normalizeInteractiveReference(feedback.resource.reference));
+      return history().filter(message => message.role === 'user').flatMap(message => {
+        const rows = restoreResourceFeedbackTransport(message.resourceFeedback, message.attachments);
+        if (!rows.some(row => row.resource.kind === 'interactive')) return [];
+        if (typeof readResourceFeedback !== 'function') throw problem('INTERACTIVE_FEEDBACK_UNAVAILABLE');
+        const actual = readResourceFeedback(message, owner.workspaceId);
+        if (!same(rows, actual)) throw problem('INTERACTIVE_FEEDBACK_MISMATCH');
+        return actual.filter(feedback => same(feedback.recipient, owner) && feedback.resource.kind === 'interactive');
+      });
     }
     function fixedOrigin(reference, { allowPending = false } = {}) {
       try {

@@ -79,7 +79,8 @@ test('followup values are immutable and self-contained after later edits; same r
   assert.equal(states.readFollowup(owner, frozen.followupId).values.$budget, 250);
   assert.deepEqual(states.prepareFollowup(request, current), frozen);
   assert.equal(frozen.dataLevel, 'D3_private');
-  assert.throws(() => states.prepareFollowup({ ...request, fields: [] }, current), { code: 'interactive_followup_parameter_conflict' });
+  assert.throws(() => states.prepareFollowup({ ...request, fields: ['$different'] }, current), { code: 'interactive_followup_parameter_conflict' });
+  assert.throws(() => states.prepareFollowup({ ...request, fields: [] }, current), { code: 'interactive_followup_invalid' });
 });
 
 test('old/unconfirmed revisions and incomplete numeric drafts cannot silently prepare earlier values', async t => {

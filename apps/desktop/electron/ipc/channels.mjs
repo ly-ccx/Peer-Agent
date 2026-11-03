@@ -69,6 +69,7 @@ const INVOKE_CHANNELS = Object.freeze([
   'interactive-results:save',
   'interactive-results:release',
   'interactive-results:prepare-followup',
+  'interactive-results:prepare-draft',
   'resource-presentation:read-layout',
   'resource-presentation:write-layout',
   'input-prediction:request',

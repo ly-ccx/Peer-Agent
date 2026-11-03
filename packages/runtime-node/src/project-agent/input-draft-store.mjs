@@ -9,9 +9,10 @@ const ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 const SURFACES = new Set(['desktop', 'quick_chat', 'tui']);
 const MAX_PENDING = 32;
 const empty = () => ({ schemaVersion: 1, revision: 0, draft: { text: '', quote: null, attachmentIds: [] }, pending: [], uploads: {} });
-function feedback(value, workspaceId) {
+function feedback(value, workspaceId, validateInteractiveFeedback) {
   const rows = normalizeResourceFeedbackList(value);
   if (!rows || workspaceId && rows.some(row => row.recipient.workspaceId !== workspaceId)) throw Error('INVALID_DRAFT');
+  for (const row of rows) if (row.resource.kind === 'interactive' && validateInteractiveFeedback?.(row, workspaceId) !== true) throw Error('INVALID_DRAFT');
   return rows.length ? { resourceFeedback: rows } : {};
 }
 const record = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -27,9 +28,9 @@ function atomic(file, value) {
 }
 
 /** Device-local recoverable intent. This store never submits to, or wakes, a runner.
- * @param {{ rootDir?: string | null }} [options]
+ * @param {{ rootDir?: string | null, validateInteractiveFeedback?: (row: import('@peer-agent/protocol').ResourceFeedback, workspaceId: string) => boolean }} [options]
  */
-export function createProjectInputDraftStore({ rootDir = null } = {}) {
+export function createProjectInputDraftStore({ rootDir = null, validateInteractiveFeedback } = {}) {
   function location(request) {
     if (!ID.test(request?.workspaceId || '') || !SURFACES.has(request?.surface)) throw Error('INVALID_DRAFT');
     const root = path.join(rootDir || pathOf('projectRuntime'), request.workspaceId);
@@ -37,9 +38,15 @@ export function createProjectInputDraftStore({ rootDir = null } = {}) {
   }
   function load(file) {
     if (!existsSync(file)) return empty();
+    if (statSync(file).size > 16 * 1024 * 1024) throw Error('DRAFT_UNAVAILABLE');
     const saved = JSON.parse(readFileSync(file, 'utf8'));
-    if (![1, 2].includes(saved?.schemaVersion) || !Number.isSafeInteger(saved.revision) || saved.revision < 0
-      || !record(saved.draft) || !Array.isArray(saved.pending) || !record(saved.uploads)) throw Error('DRAFT_UNAVAILABLE');
+    if (![1, 2, 3].includes(saved?.schemaVersion) || !Number.isSafeInteger(saved.revision) || saved.revision < 0
+      || !record(saved.draft) || !Array.isArray(saved.pending) || saved.pending.length > MAX_PENDING || !record(saved.uploads)
+      || Object.values(saved.uploads).some(value => !/^[a-f0-9]{64}$/.test(value))) throw Error('DRAFT_UNAVAILABLE');
+    const known = (value, fields) => record(value) && Object.keys(value).every(key => fields.includes(key));
+    if (!known(saved, ['schemaVersion', 'revision', 'draft', 'pending', 'uploads']) || !known(saved.draft, ['text', 'quote', 'resourceFeedback', 'attachmentIds'])
+      || saved.pending.some(item => !known(item, ['inputId', 'text', 'createdAt', 'resourceFeedback', 'quoteRefs', 'answerTo', 'attachmentIds']))) throw Error('DRAFT_UNAVAILABLE');
+    if (saved.schemaVersion < 3 && [saved.draft, ...saved.pending].some(item => item.resourceFeedback?.some?.(row => row?.resource?.kind === 'interactive'))) throw Error('DRAFT_UNAVAILABLE');
     return saved;
   }
   /** @param {import('@peer-agent/protocol').ProjectInputDraftReadRequest} request
@@ -60,9 +67,9 @@ export function createProjectInputDraftStore({ rootDir = null } = {}) {
           return item;
         });
       };
-      const draft = { text: text(saved.draft.text), quote: quote(saved.draft.quote), ...feedback(saved.draft.resourceFeedback, request.workspaceId), attachments: hydrate(saved.draft.attachmentIds) };
+      const draft = { text: text(saved.draft.text), quote: quote(saved.draft.quote), ...feedback(saved.draft.resourceFeedback, request.workspaceId, validateInteractiveFeedback), attachments: hydrate(saved.draft.attachmentIds) };
       if (saved.pending.length > MAX_PENDING) throw Error('DRAFT_UNAVAILABLE');
-      const pending = saved.pending.map(item => ({ ...envelope(item, request.workspaceId), attachments: hydrate(item.attachmentIds) }));
+      const pending = saved.pending.map(item => ({ ...envelope(item, request.workspaceId, validateInteractiveFeedback), attachments: hydrate(item.attachmentIds) }));
       if (Buffer.byteLength(JSON.stringify([draft.resourceFeedback ?? [], ...pending.map(item => item.resourceFeedback ?? [])])) > 1024 * 1024) throw Error('DRAFT_UNAVAILABLE');
       return { ok: true, snapshot: { revision: saved.revision, draft, pending } };
     } catch (error) { return { ok: false, code: error?.message === 'INVALID_DRAFT' ? 'INVALID_DRAFT' : 'DRAFT_UNAVAILABLE' }; }
@@ -92,6 +99,7 @@ export function createProjectInputDraftStore({ rootDir = null } = {}) {
       writeFileSync(path.join(lock, 'owner.json'), JSON.stringify({ pid: process.pid }));
       const before = load(file);
       if (before.revision !== request.revision) return { ok: false, code: 'DRAFT_CONFLICT' };
+      for (const item of [before.draft, ...before.pending]) feedback(item.resourceFeedback, request.workspaceId, validateInteractiveFeedback);
       const uploads = Object.assign(Object.create(null), before.uploads);
       if (!Array.isArray(request.uploads) || request.uploads.length > INPUT_ATTACHMENT_LIMIT * (MAX_PENDING + 1)) throw Error('INVALID_DRAFT');
       for (const raw of request.uploads) {
@@ -108,15 +116,16 @@ export function createProjectInputDraftStore({ rootDir = null } = {}) {
           || values.some(id => typeof id !== 'string' || !uploads[id])) throw Error('INVALID_DRAFT');
         return [...values];
       };
-      const draft = { text: text(request.draft?.text), quote: quote(request.draft?.quote), ...feedback(request.draft?.resourceFeedback, request.workspaceId), attachmentIds: refs(request.draft?.attachmentIds) };
+      const draft = { text: text(request.draft?.text), quote: quote(request.draft?.quote), ...feedback(request.draft?.resourceFeedback, request.workspaceId, validateInteractiveFeedback), attachmentIds: refs(request.draft?.attachmentIds) };
       if (!Array.isArray(request.pending) || request.pending.length > MAX_PENDING) throw Error('DRAFT_LIMIT');
-      const pending = request.pending.map(item => ({ ...envelope(item, request.workspaceId), attachmentIds: refs(item.attachmentIds) }));
+      const pending = request.pending.map(item => ({ ...envelope(item, request.workspaceId, validateInteractiveFeedback), attachmentIds: refs(item.attachmentIds) }));
       if (new Set(pending.map(item => item.inputId)).size !== pending.length) throw Error('INVALID_DRAFT');
       const used = new Set([...draft.attachmentIds, ...pending.flatMap(item => item.attachmentIds)]);
       if ([...used].reduce((bytes, id) => bytes + statSync(path.join(root, 'input-draft-blobs', `${uploads[id]}.json`)).size, 0) > 96 * 1024 * 1024) throw Error('DRAFT_LIMIT');
       const feedbackBytes = Buffer.byteLength(JSON.stringify([draft.resourceFeedback ?? [], ...pending.map(item => item.resourceFeedback ?? [])]));
       if (feedbackBytes > 1024 * 1024) throw Error('DRAFT_LIMIT');
-      const schemaVersion = before.schemaVersion === 2 || draft.resourceFeedback?.length || pending.some(item => item.resourceFeedback?.length) ? 2 : 1;
+      const selections = [draft, ...pending].some(item => item.resourceFeedback?.some(row => row.resource.kind === 'interactive'));
+      const schemaVersion = before.schemaVersion === 3 || selections ? 3 : before.schemaVersion === 2 || draft.resourceFeedback?.length || pending.some(item => item.resourceFeedback?.length) ? 2 : 1;
       atomic(file, { schemaVersion, revision: before.revision + 1, draft, pending,
         uploads: Object.fromEntries([...used].map(id => [id, uploads[id]])) });
       return { ok: true, revision: before.revision + 1 };
@@ -129,9 +138,9 @@ function quote(value) {
   if (value == null) return null;
   return { messageId: text(value.messageId, 512), text: text(value.text) };
 }
-function envelope(item, workspaceId) {
+function envelope(item, workspaceId, validateInteractiveFeedback) {
   if (!ID.test(item?.inputId || '') || !Number.isFinite(Date.parse(item?.createdAt))) throw Error('INVALID_DRAFT');
   if (!Array.isArray(item.quoteRefs) || item.quoteRefs.length > 64) throw Error('INVALID_DRAFT');
-  return { inputId: item.inputId, text: text(item.text), createdAt: item.createdAt, ...feedback(item.resourceFeedback, workspaceId),
+  return { inputId: item.inputId, text: text(item.text), createdAt: item.createdAt, ...feedback(item.resourceFeedback, workspaceId, validateInteractiveFeedback),
     quoteRefs: item.quoteRefs.map(ref => text(ref)), ...(item.answerTo ? { answerTo: text(item.answerTo, 512) } : {}) };
 }

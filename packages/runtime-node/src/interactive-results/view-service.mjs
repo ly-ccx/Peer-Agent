@@ -135,6 +135,14 @@ export function createInteractiveViewService({ resultStore, stateStore, resolveS
       return { followup: stateStore.prepareFollowup({ reference: record.reference, identity: record.handle, writer: record.writer,
         stateRevision: value.stateRevision, stateDigest: value.stateDigest, fields: value.fields, requestId: value.requestId }, current) };
     }),
+    // Host-only binding for the existing draft preparation service. The closure
+    // and actual sender never cross an IPC result or become a model tool.
+    resolveFollowup: (sender, raw) => bound(sender, raw, ['followupId'], (record, value, current) => {
+      if (!interactiveToken(value.followupId)) throw problem('interactive_request_invalid');
+      const followup = stateStore.readFollowup(record.reference.owner, value.followupId);
+      if (!same(followup.result, record.reference)) throw problem('interactive_scope_denied');
+      current(); return { followup, identity: copy(record.handle), assertCurrent: current };
+    }),
     release: (sender, raw) => run(() => {
       const value = request(raw, ['handle', 'writer']), handle = normalizeInteractiveViewHandle(value.handle);
       const record = handle && (views.get(handle.viewId) ?? retired.get(handle.viewId));

@@ -2,20 +2,29 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createInteractiveAuthority, interactiveCapabilitiesForProfile, interactiveExecutionRole } from './authority.mjs';
 import { executionIdentity } from '../project-agent/session-control-kernel.mjs';
+import { interactiveFeedbackFromFollowup, interactiveFeedbackAttachment } from '@peer-agent/protocol';
+import { createInteractiveFeedbackAdmission } from './feedback-admission.mjs';
 
 const PUBLISH = 'local.interactive.publish', INSPECT = 'local.interactive.inspect';
 const owner = { workspaceId: 'bot-a', conversationId: 'parent-a' }, fixed = { owner, resultId: 'result-a', contentVersion: `sha256:${'a'.repeat(64)}` };
-function fixture() {
+const frozen = { recipient: owner, result: fixed, followupId: 'followup-a', specHash: `sha256:${'b'.repeat(64)}`, stateRevision: 2,
+  stateDigest: `sha256:${'c'.repeat(64)}`, selectionDigest: `sha256:${'d'.repeat(64)}`, values: { $x: 4 }, dataLevel: 'D3_private',
+  capturedAt: '2026-11-03T00:00:00.000Z', excerpt: 'Selected divisor: 4' };
+const feedback = interactiveFeedbackFromFollowup(frozen);
+assert.ok(feedback);
+function fixture({ feedbackPort = true } = {}) {
   let leased = true, enabled = true, parent = 'parent-a';
   const plan = { planId: 'plan-a', conversationId: 'worker-a', createdAt: '2026-11-03T00:00:00Z', delegationOrigin: {
     workspaceId: 'bot-a', sessionId: 'session-a', parentConversationId: 'parent-a', phase: 'running', readOnly: true, executionGeneration: 'generation-a' } };
   const other = { ...structuredClone(plan), planId: 'plan-b', conversationId: 'worker-b', delegationOrigin: { ...structuredClone(plan.delegationOrigin), sessionId: 'session-b' } };
   const plans = new Map([[plan.planId, plan], [other.planId, other]]), messages = [];
   const fixedResult = { reference: fixed, source: { ...executionIdentity(plan), conversationId: plan.conversationId, toolCallId: 'publish-a' } };
+  const admission = createInteractiveFeedbackAdmission({ stateStore: { readFollowup: (_owner, id) => id === frozen.followupId ? frozen : null } });
   const service = createInteractiveAuthority({ goalPlanStore: { getPlan: id => plans.get(id) },
     conversationStore: { getPersistedConversationHistory: () => ({ messages }) },
     resultStore: { getVersion: () => fixedResult, getOperation: () => ({ reference: fixed }) },
-    getBotConversationId: () => parent, holdsLease: () => leased, enabled: () => enabled, classifyContext: () => 'D3_private' });
+    getBotConversationId: () => parent, holdsLease: () => leased, enabled: () => enabled, classifyContext: () => 'D3_private',
+    ...(feedbackPort ? { readResourceFeedback: admission.restore } : {}) });
   const profile = { role: 'work_session', agentKind: 'worker', planId: plan.planId, sessionId: plan.delegationOrigin.sessionId,
     workspaceId: owner.workspaceId, executionIdentity: executionIdentity(plan) };
   const context = { conversationId: plan.conversationId, workspaceId: owner.workspaceId, turnProfile: profile };
@@ -53,10 +62,9 @@ test('actual same-work fixed results are admitted; another work requires canonic
   assert.equal(authority.admitResult(fixed), true);
   f.fixedResult.source = { ...executionIdentity(f.other), conversationId: 'worker-b', toolCallId: 'other-publish' };
   assert.equal(authority.admitResult(fixed), false);
-  const feedback = { recipient: owner, resource: { kind: 'interactive', reference: fixed }, version: { kind: 'interactive', followupId: 'followup-a' } };
   f.messages.push({ role: 'assistant', content: JSON.stringify(fixed), resourceFeedback: [feedback] });
   assert.equal(authority.admitResult(fixed), false); assert.equal(authority.admitFollowup('followup-a'), false);
-  f.messages.push({ role: 'user', resourceFeedback: [feedback] });
+  f.messages.push({ role: 'user', attachments: [interactiveFeedbackAttachment(feedback)] });
   assert.equal(authority.admitResult(fixed), true); assert.equal(authority.admitFollowup('followup-a'), true);
   assert.equal(authority.admitFollowup('guessed-id'), false);
   assert.equal(authority.admitResult({ ...fixed, owner: { ...owner, workspaceId: 'foreign' } }), false);
@@ -85,7 +93,6 @@ test('an admitted prior result permits exactly its fixed material and selected r
   f.fixedResult.provenance = [{ bindingId: 'old-data', source, selector }];
   const authority = f.resolve();
   assert.equal(authority.admitMaterial(source, selector), false);
-  const feedback = { recipient: owner, resource: { kind: 'interactive', reference: fixed } };
   f.messages.push({ role: 'assistant', resourceFeedback: [feedback] });
   assert.equal(authority.admitMaterial(source, selector), false);
   f.messages.push({ role: 'user', resourceFeedback: [feedback] });
@@ -94,6 +101,21 @@ test('an admitted prior result permits exactly its fixed material and selected r
   assert.equal(authority.admitMaterial(source, { ...selector, limit: 4 }), false);
   assert.equal(authority.admitMaterial({ ...source, expectedContentVersion: `sha256:${'c'.repeat(64)}` }, selector), false);
   assert.equal(authority.admitMaterial({ ...source, toolCallId: 'another-call' }, selector), false);
+});
+
+test('a user JSON carrier or typed row cannot grant access without the identical actual frozen record', () => {
+  for (const feedbackPort of [true, false]) {
+    const f = fixture({ feedbackPort }), authority = f.resolve();
+    f.fixedResult.source = { ...executionIdentity(f.other), conversationId: 'worker-b', toolCallId: 'other-publish' };
+    const forged = { ...feedback, version: { ...feedback.version, values: { $x: 9 } } };
+    f.messages.push({ role: 'user', attachments: [interactiveFeedbackAttachment(forged)] });
+    assert.throws(() => authority.admitResult(fixed), { code: feedbackPort ? 'INTERACTIVE_FEEDBACK_MISMATCH' : 'INTERACTIVE_FEEDBACK_UNAVAILABLE' });
+    assert.throws(() => authority.admitFollowup(frozen.followupId));
+    f.messages.length = 0;
+    f.messages.push({ role: 'user', resourceFeedback: [feedback] });
+    if (feedbackPort) assert.equal(authority.admitResult(fixed), true);
+    else assert.throws(() => authority.admitResult(fixed), { code: 'INTERACTIVE_FEEDBACK_UNAVAILABLE' });
+  }
 });
 
 test('dynamic Bot policy revision is pinned for grant audit and rechecked after every asynchronous step', () => {

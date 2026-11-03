@@ -148,6 +148,7 @@ export function createTuiProjectHost(options: {
     completeRecheck: (input: any) => goalRunner.completeRecheck(input)} as never);
   const supervisor = createSessionSupervisor({conversationStore: conversations, goalPlanStore: plans, goalRunner,
     readDelegationCapabilities: (input: { readOnly: boolean; workspaceId: string }) => executor.readDelegationCapabilities(input),
+    readResourceFeedback: interactive.feedback.restore,
     executionScheduler: scheduler, deferRecovery: true, approvalStore: approvals, memoryStore: memory, canManageWorkspace: holds,
     objectives: {prepareSpawn: (...args: any[]) => (objectives.prepareSpawn as any)(...args), linkSession: (...args: any[]) => (objectives.linkSession as any)(...args)},
     resolveModel: (input: any) => turns.resolveGoalRole({...input, workerModelProviderId: input.workerModel?.modelProviderId, projectPolicy: profiles.read(input.workspaceId)?.modelPolicy}),
@@ -193,6 +194,7 @@ export function createTuiProjectHost(options: {
     contradicts:(id: string)=>readProjectInstructionLines(registry.get(id)?.path),
     resolveFileAnchors:fileAnchors.capture, onWrote:changed} as never);
   const inputs = createInputQueue({rootDir:runtimeRoot, holdsLease:holds, resolveConversationId,
+    validateInteractiveFeedback:interactive.feedback.validate,
     hasMessage:(id: string, messageId: string) => readMessages(id).some(row=>row.id===messageId),
     appendMessage:(id: string, message: any) => {conversations.appendMessage(id,message);changed();}} as never);
   host = createProjectAgentHost({rootDir:runtimeRoot, holdsLease:holds, acquireLease:(id: string)=>leases.acquire(id),

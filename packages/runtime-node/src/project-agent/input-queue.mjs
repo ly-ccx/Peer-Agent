@@ -1,4 +1,4 @@
-import { normalizeResourceFeedbackList } from '@peer-agent/protocol';
+import { normalizeResourceFeedbackList, restoreResourceFeedbackTransport, encodeResourceFeedbackTransport, isInteractiveFeedbackAttachment } from '@peer-agent/protocol';
 /**
  * 项目输入队列。所有入口把用户输入追加到 input-queue.jsonl。
  * 只有宿主按游标消费：写入机器人对话（消息 id 由 inputId 派生），再推进游标，然后通知唤醒。
@@ -37,7 +37,16 @@ export function createInputQueue({
   hasMessage = null,
   appendMessage = null,
   onCommitted = null,
+  validateInteractiveFeedback = null,
 } = {}) {
+  function admit(input, workspaceId) {
+    for (const row of input.resourceFeedback ?? []) if (row.resource.kind === 'interactive') {
+      try { if (validateInteractiveFeedback?.(row, workspaceId) !== true) throw Error('not admitted'); }
+      catch (error) { if (/INTERACTIVE_FEEDBACK/.test(error?.code ?? '')) throw error;
+        throw Object.assign(Error('INTERACTIVE_FEEDBACK_UNAVAILABLE'), { code: 'INTERACTIVE_FEEDBACK_UNAVAILABLE', cause: error }); }
+    }
+    return input;
+  }
   const inputCache = new Map();
   let cachedBytes = 0;
   const dropCached = key => { const row = inputCache.get(key); if (row) cachedBytes -= row.bytes; inputCache.delete(key); };
@@ -124,7 +133,7 @@ export function createInputQueue({
     const cached = inputCache.get(key);
     if (cached?.version === version.token) {
       inputCache.delete(key); inputCache.set(key, cached);
-      return copyInputs(cached.inputs);
+      return copyInputs(cached.inputs).map(input => admit(input, workspaceId));
     }
     dropCached(key);
     let text = '';
@@ -141,12 +150,13 @@ export function createInputQueue({
       try {
         const input = normalizeStored(JSON.parse(line), workspaceId);
         if (!input) { if (strict) throw new Error('CORRUPT_INPUT_QUEUE'); continue; }
+        admit(input, workspaceId);
         if (seen.has(input.inputId)) continue;
         seen.add(input.inputId);
         inputs.push(input);
       } catch (error) {
-        if (strict) throw error;
-        // 坏行跳过，不挡住后面的输入。
+        if (strict || line.includes('peer-interactive-selection-') || /INTERACTIVE_FEEDBACK|INTERACTIVE_INPUT/.test(error.code ?? error.message ?? '')) throw error;
+        // Legacy malformed rows keep their old behavior. Recognized selections never skip ahead.
       }
     }
     let current;
@@ -228,12 +238,14 @@ export function createInputQueue({
     return withLock(workspaceId, () => {
       const existing = readInputs(workspaceId).find((item) => item.inputId === normalized.inputId);
       if (existing) return existing;
+      admit(normalized, workspaceId);
       if (normalized.resourceFeedback?.length) {
         const conversationId = typeof resolveConversationId === 'function' ? resolveConversationId(workspaceId) : null;
         if (!conversationId || normalized.resourceFeedback.some(row => row.recipient.conversationId !== conversationId)) throw Object.assign(new TypeError('RESOURCE_FEEDBACK_RECIPIENT_CHANGED'), { code: 'RESOURCE_FEEDBACK_RECIPIENT_CHANGED' });
       }
       mkdirSync(dirFor(workspaceId), { recursive: true });
-      appendFileSync(queueFile(workspaceId), `${JSON.stringify(normalized)}\n`);
+      const { resourceFeedback: _feedback, attachments: _attachments, ...base } = normalized;
+      appendFileSync(queueFile(workspaceId), `${JSON.stringify({ ...base, ...encodeResourceFeedbackTransport(normalized.resourceFeedback, normalized.attachments) })}\n`);
       return normalized;
     });
   }
@@ -274,6 +286,7 @@ export function createInputQueue({
         const messageId = inputMessageId(input.inputId);
         const duplicateMessage = hasMessage(targetId, messageId) === true;
         if (!duplicateMessage) {
+          const transport = encodeResourceFeedbackTransport(input.resourceFeedback, input.attachments);
           appendMessage(targetId, {
             id: messageId,
             role: 'user',
@@ -284,10 +297,10 @@ export function createInputQueue({
             surface: input.surface,
             anchorRefs: input.anchorRefs,
             quoteRefs: input.quoteRefs,
-            ...(input.resourceFeedback ? { resourceFeedback: normalizeResourceFeedbackList(input.resourceFeedback) } : {}),
+            ...(transport.resourceFeedback ? { resourceFeedback: transport.resourceFeedback } : {}),
             attachmentRefs: input.attachmentRefs,
-            ...(Array.isArray(input.attachments) && input.attachments.length > 0
-              ? { attachments: input.attachments }
+            ...(Array.isArray(transport.attachments) && transport.attachments.length > 0
+              ? { attachments: transport.attachments }
               : {}),
             ...(input.answerTo ? { answerTo: input.answerTo } : {}),
             ...(input.historyRef ? { historyRef: input.historyRef } : {}),
@@ -335,10 +348,12 @@ function normalizeSubmission(input, workspaceId, createdAt) {
   if (!INPUT_ID.test(inputId)) throw new TypeError('inputId is invalid');
   if (!SURFACES.has(input?.surface)) throw new TypeError('surface is invalid');
   const text = typeof input?.text === 'string' ? input.text.trim() : '';
-  const attachments = normalizeInputAttachments(input?.attachments);
-  const resourceFeedback = normalizeResourceFeedbackList(input?.resourceFeedback);
+  const uploaded = normalizeInputAttachments(input?.attachments);
+  const resourceFeedback = restoreResourceFeedbackTransport(input?.resourceFeedback, uploaded);
+  encodeResourceFeedbackTransport(resourceFeedback, uploaded);
+  const attachments = uploaded.filter(item => !isInteractiveFeedbackAttachment(item));
   if (!resourceFeedback || resourceFeedback.some(row => row.recipient.workspaceId !== workspaceId)) throw Object.assign(new TypeError('INVALID_RESOURCE_FEEDBACK'), { code: 'INVALID_RESOURCE_FEEDBACK' });
-  if (!text && attachments.length === 0) throw new TypeError('text or attachments are required');
+  if (!text && attachments.length === 0 && !resourceFeedback.some(row => row.resource.kind === 'interactive')) throw new TypeError('text or attachments are required');
   if (text.length > 100_000) throw new TypeError('text is too long');
   const suppliedAt = Date.parse(input?.createdAt);
   const normalized = {
@@ -368,7 +383,10 @@ function normalizeStored(value, workspaceId) {
   if (!WORKSPACE_DIR.test(workspaceId)) return null;
   try {
     return normalizeSubmission(value, workspaceId, value.createdAt || new Date().toISOString());
-  } catch {
+  } catch (error) {
+    if (value.resourceFeedback?.some?.(row => row?.resource?.kind === 'interactive') || value.attachments?.some?.(isInteractiveFeedbackAttachment)) {
+      throw Object.assign(Error('INTERACTIVE_INPUT_UNAVAILABLE'), { code: 'INTERACTIVE_INPUT_UNAVAILABLE', cause: error });
+    }
     return null;
   }
 }

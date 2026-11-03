@@ -4,6 +4,7 @@ import { createPeerLibrary, validateState } from '@peer-agent/interactive-conten
 import type { InteractiveMaterialProvenance, InteractiveStateValue } from '@peer-agent/protocol';
 import { InteractiveRenderContext, peerInteractiveComponents } from './InteractiveComponents';
 import type { InteractiveSession } from './interactiveSession';
+import { InteractiveDraftPreparation } from './InteractiveDraftPreparation';
 import './interactive-results.css';
 
 function StateBridge({ name, value, seen }: { name: string; value: InteractiveStateValue; seen: (key: string, value: unknown) => void }) {
@@ -56,6 +57,7 @@ export function InteractiveSurface({ session, provenance, isZh, onReady }: { rea
         <Renderer.Content />
       </Renderer.Root>
     </InteractiveRenderContext.Provider>
+    <InteractiveDraftPreparation session={session} isZh={isZh} />
     <p className="interactive-caption">{isZh ? '基于固定材料的本机试算；调整条件不会刷新来源或启动任务。' : 'Local calculation using fixed material. Changing conditions does not refresh sources or start work.'}</p>
   </section>;
 }

@@ -1,5 +1,5 @@
 import { createInteractivePresentationStore, createInteractiveViewService } from '@peer-agent/runtime-node/interactive-results';
-import { normalizeInteractiveOwner, normalizeResourceWindowRequest } from '@peer-agent/protocol';
+import { interactiveFeedbackFromFollowup, normalizeResourceFeedbackList, normalizeInteractiveOwner, normalizeResourceWindowRequest } from '@peer-agent/protocol';
 import { desktopInteractiveRuntime } from './runtime-port.mjs';
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -9,7 +9,7 @@ const run = operation => { try { return operation(); } catch (error) { return fa
 const validRequest = (raw, fields) => raw && typeof raw === 'object' && !Array.isArray(raw) && Object.keys(raw).every(key => fields.includes(key));
 
 /** Actual app senders/owners bind the shared domain service. No tool or file-execution port. */
-export function createDesktopInteractiveApplication({ getRole, getOwner, getNativeBinding, getRuntime = desktopInteractiveRuntime }) {
+export function createDesktopInteractiveApplication({ getRole, getOwner, getNativeBinding, prepareFeedback, readDraft, getRuntime = desktopInteractiveRuntime }) {
   const instances = new Map(), lifetimes = new Map();
   let disposed = false;
   function ownerOf(workspaceId) {
@@ -68,6 +68,39 @@ export function createDesktopInteractiveApplication({ getRole, getOwner, getNati
     save: (sender, request) => view('save', sender, request),
     release: (sender, request) => view('release', sender, request),
     prepareFollowup: (sender, request) => view('prepareFollowup', sender, request),
+    async prepareDraft(sender, request) {
+      try {
+        if (disposed || !['main', 'resource'].includes(getRole(sender))) return fail('interactive_scope_denied');
+        if (typeof prepareFeedback !== 'function' || typeof readDraft !== 'function') return fail('interactive_draft_unavailable');
+        const selected = instance().views.resolveFollowup(sender, request);
+        if (!selected.ok) return selected;
+        const feedback = interactiveFeedbackFromFollowup(selected.followup);
+        if (!feedback) return fail('interactive_followup_corrupt');
+        const role = getRole(sender), native = role === 'resource' ? getNativeBinding(sender) : null;
+        const sourceSender = role === 'main' ? sender : native?.sourceSender;
+        if (!sourceSender || getRole(sourceSender) !== 'main' || sourceSender.isDestroyed?.() === true) return fail('interactive_draft_source_unavailable');
+        const current = () => {
+          if (selected.assertCurrent() !== true || getRole(sourceSender) !== 'main' || sourceSender.isDestroyed?.() === true) return false;
+          if (role === 'main') return sourceSender === sender;
+          const fresh = getNativeBinding(sender);
+          return fresh?.ok && fresh.sourceSender === sourceSender && fresh.context.viewId === native.context.viewId
+            && fresh.context.windowId === native.context.windowId && fresh.context.generation === native.context.generation;
+        };
+        const prepared = await prepareFeedback({ sourceSender, identity: selected.identity, feedback, isCurrent: current });
+        if (!prepared?.ok) return fail(typeof prepared?.code === 'string' && /^[A-Z0-9_]{1,100}$/.test(prepared.code) ? prepared.code.toLowerCase() : 'interactive_draft_unconfirmed');
+        if (prepared.id !== feedback.id || !current()) return fail('interactive_draft_unconfirmed');
+        // A renderer ack is insufficient: read the actual host-owned draft store.
+        const saved = await readDraft({ workspaceId: feedback.recipient.workspaceId, surface: 'desktop' });
+        if (!current() || !saved?.ok || !saved.snapshot || !Array.isArray(saved.snapshot.pending)) return fail('interactive_draft_unconfirmed');
+        const rows = [saved.snapshot.draft, ...saved.snapshot.pending].flatMap(item => {
+          const values = normalizeResourceFeedbackList(item?.resourceFeedback);
+          if (!values) throw { code: 'interactive_draft_unconfirmed' };
+          return values;
+        });
+        if (!rows.some(row => row.id === feedback.id && same(row, feedback))) return fail('interactive_draft_unconfirmed');
+        return { ok: true, followupId: feedback.id };
+      } catch (error) { return fail(code(error)); }
+    },
     prepareResource(raw) {
       try {
         const request = normalizeResourceWindowRequest({ resource: raw });

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { interactiveToken, normalizeInteractiveOwner, normalizeInteractiveReference } from '@peer-agent/protocol';
-import { validateState } from '@peer-agent/interactive-content/state';
+import { interactiveToken, normalizeInteractiveOwner, normalizeInteractiveReference, normalizeInteractiveFollowup, interactiveFeedbackFromFollowup } from '@peer-agent/protocol';
+import { validateState, projectStateText } from '@peer-agent/interactive-content/state';
 import { decode, encode, jsonDigest, problem } from './storage.mjs';
 
 const clone = value => structuredClone(value);
@@ -100,7 +100,7 @@ export function createInteractiveStateStore({ resultStore, now = () => new Date(
   }
   function prepareFollowup({ reference: rawReference, identity: rawIdentity, writer, stateRevision, stateDigest, fields, requestId }, assertView) {
     const ref = reference(rawReference), identity = view(rawIdentity); requireView(assertView);
-    if (!interactiveToken(requestId) || !Array.isArray(fields) || fields.length > 64 || fields.some(key => typeof key !== 'string')
+    if (!interactiveToken(requestId) || !Array.isArray(fields) || !fields.length || fields.length > 64 || fields.some(key => typeof key !== 'string')
       || new Set(fields).size !== fields.length) throw problem('interactive_followup_invalid');
     return storage.transaction(ref.owner.workspaceId, context => {
       requireView(assertView);
@@ -119,11 +119,12 @@ export function createInteractiveStateStore({ resultStore, now = () => new Date(
         if (raw !== undefined && (typeof value === 'number' ? !numericDraft(raw) || Number(raw) !== value : raw !== value)) throw problem('followup_input_incomplete');
       }
       const values = Object.fromEntries(fields.map(key => [key, state.snapshot.values[key]]));
-      const excerpt = [`${published.content.title}`, `Fixed result ${ref.resultId} @ ${ref.contentVersion}`, ...fields.map(key => `${key}: ${values[key]}`)].join('\n');
+      const excerpt = `${published.content.title}\n${projectStateText(published.content, { values }, { fields })}`;
       if (Buffer.byteLength(excerpt, 'utf8') > 8192) throw problem('interactive_followup_limit');
       const body = { followupId: requestId, recipient: ref.owner, result: ref, specHash: published.content.specHash,
         stateRevision, stateDigest, values, dataLevel: resultStore.ownerDataLevel(ref.owner, published.dataLevel), capturedAt: now(), excerpt };
       const snapshot = { ...body, selectionDigest: jsonDigest(body) };
+      if (!interactiveFeedbackFromFollowup(snapshot)) throw problem('interactive_followup_limit');
       context.db.prepare('INSERT INTO followups VALUES(?,?,?,?)').run(requestId, encode(ref.owner), argsDigest, encode(snapshot));
       touched.add(ref.owner.workspaceId);
       return clone(snapshot);
@@ -131,7 +132,7 @@ export function createInteractiveStateStore({ resultStore, now = () => new Date(
   }
   function checkedFollowup(snapshot) {
     const { selectionDigest, ...body } = snapshot;
-    if (jsonDigest(body) !== selectionDigest) throw problem('interactive_followup_corrupt');
+    if (!normalizeInteractiveFollowup(snapshot) || jsonDigest(body) !== selectionDigest) throw problem('interactive_followup_corrupt');
     return clone(snapshot);
   }
   function readFollowup(rawOwner, id) {

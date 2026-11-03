@@ -1171,6 +1171,7 @@ export { normalizeResourceWindowRequest, normalizeResourceWindowOwner, normalize
 export type { ResourceLayoutSnapshot, ResourcePresentationApi, ResourceInteractiveTab, ResourceInteractiveSession, ResourceRecentReference } from './resource-window.ts';
 export * from './browser-window.js';
 export * from './resource-feedback.js';
+export * from './resource-feedback-transport.js';
 
 export * from './resource-edit.ts';
 export * from './resource-file-replace.ts';

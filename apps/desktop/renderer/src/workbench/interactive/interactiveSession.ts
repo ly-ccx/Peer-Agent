@@ -21,6 +21,8 @@ export interface InteractiveSessionSnapshot {
   readonly preparation: 'idle' | 'saving' | 'freezing' | 'frozen' | 'failed';
   readonly preparationError: string | null;
   readonly frozen: InteractiveFollowup | null;
+  readonly draftPreparation: 'idle' | 'preparing' | 'prepared' | 'failed';
+  readonly draftError: string | null;
 }
 const clone = <T,>(value: T): T => structuredClone(value);
 const equal = (a: unknown, b: unknown) => canonicalJSON(a) === canonicalJSON(b);
@@ -37,7 +39,8 @@ export function createInteractiveSession({ api, opened, evaluator, createId = ()
   let candidate: FollowupCandidate | null = null;
   const initial = validateState(opened.state.values, content.stateSchema, opened.state.inputDrafts);
   let state: InteractiveSessionSnapshot = { ...initial, sdkValues: clone(content.initialValues), confirmed: clone(opened.state), writer: null,
-    phase: 'readonly', dirty: false, composing: false, calculationError: null, saveError: null, preparation: 'idle', preparationError: null, frozen: null };
+    phase: 'readonly', dirty: false, composing: false, calculationError: null, saveError: null, preparation: 'idle', preparationError: null, frozen: null,
+    draftPreparation: 'idle', draftError: null };
   function changed(patch: Partial<InteractiveSessionSnapshot> = {}) { state = { ...state, ...patch }; for (const listener of listeners) listener(); }
   function calculate() {
     const incomplete = composing.size > 0 || Object.entries(state.inputDrafts).some(([key, raw]) => content.stateSchema[key]?.type === 'number'
@@ -109,8 +112,38 @@ export function createInteractiveSession({ api, opened, evaluator, createId = ()
       changed({ preparation: 'frozen', preparationError: null, frozen: clone(reply.followup) }); return reply.followup;
     } catch (error) { changed({ preparation: 'failed', preparationError: code(error) }); return null; }
   }
+  function prepareSelection(fields: readonly string[]) {
+    if (['saving', 'freezing'].includes(state.preparation)) return Promise.resolve(null);
+    if (!editable() || composing.size || !fields.length || fields.length > 64 || new Set(fields).size !== fields.length || fields.some(key => !Object.hasOwn(content.stateSchema, key)
+      || state.inputDrafts[key] !== undefined && (content.stateSchema[key].type === 'number'
+        ? !numeric(state.inputDrafts[key]) || Number(state.inputDrafts[key]) !== state.values[key] : state.inputDrafts[key] !== state.values[key]))) {
+      candidate = null; changed({ frozen: null, preparation: 'failed', preparationError: 'followup_input_incomplete' }); return Promise.resolve(null);
+    }
+    candidate = { ...capture(), fields: [...fields], followupId: createId() };
+    changed({ frozen: null, preparation: 'saving', preparationError: null }); return enqueue(freezeSelection);
+  }
+  function retrySelection() {
+    if (['saving', 'freezing'].includes(state.preparation)) return Promise.resolve(null);
+    if (!candidate) { changed({ preparation: 'failed', preparationError: 'followup_input_incomplete' }); return Promise.resolve(null); }
+    changed({ preparation: 'saving', preparationError: null }); return enqueue(freezeSelection);
+  }
+  async function prepareDraft(fields?: readonly string[]) {
+    if (state.draftPreparation === 'preparing' || ['closing', 'closed'].includes(state.phase)) return false;
+    if (!api.prepareDraft) { changed({ draftPreparation: 'failed', draftError: 'interactive_draft_unavailable' }); return false; }
+    changed({ draftPreparation: 'preparing', draftError: null });
+    const frozen = fields ? await prepareSelection(fields) : state.frozen ?? await retrySelection();
+    if (!frozen) { changed({ draftPreparation: 'failed', draftError: state.preparationError ?? 'interactive_followup_unavailable' }); return false; }
+    try {
+      const reply = await api.prepareDraft({ handle, followupId: frozen.followupId });
+      if (!reply.ok) throw { code: reply.code };
+      if (reply.followupId !== frozen.followupId) throw { code: 'interactive_draft_receipt_invalid' };
+      changed({ draftPreparation: 'prepared', draftError: null }); return true;
+    } catch (error) { changed({ draftPreparation: 'failed', draftError: code(error) }); return false; }
+  }
   return {
     handle, content,
+    canPrepareDraft: () => typeof api.prepareDraft === 'function',
+    prepareDraft,
     snapshot: () => state,
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     async acquire(takeover = false) {
@@ -166,20 +199,8 @@ export function createInteractiveSession({ api, opened, evaluator, createId = ()
       composing.clear(); changed({ composing: false }); calculate();
     },
     flush,
-    prepareSelection(fields: readonly string[]) {
-      if (!editable() || composing.size || fields.length > 64 || new Set(fields).size !== fields.length || fields.some(key => !Object.hasOwn(content.stateSchema, key)
-        || state.inputDrafts[key] !== undefined && (content.stateSchema[key].type === 'number'
-          ? !numeric(state.inputDrafts[key]) || Number(state.inputDrafts[key]) !== state.values[key] : state.inputDrafts[key] !== state.values[key]))) {
-        changed({ preparation: 'failed', preparationError: 'followup_input_incomplete' }); return Promise.resolve(null);
-      }
-      if (['saving', 'freezing'].includes(state.preparation)) return Promise.resolve(null);
-      candidate = { ...capture(), fields: [...fields], followupId: createId() };
-      changed({ frozen: null, preparation: 'saving', preparationError: null }); return enqueue(freezeSelection);
-    },
-    retrySelection() {
-      if (['saving', 'freezing'].includes(state.preparation)) return Promise.resolve(null);
-      changed({ preparation: 'saving', preparationError: null }); return enqueue(freezeSelection);
-    },
+    prepareSelection,
+    retrySelection,
     async close() {
       if (state.phase === 'closed') return true;
       if (state.dirty || pending) { if (!await flush()) return false; }

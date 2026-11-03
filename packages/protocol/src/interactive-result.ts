@@ -163,6 +163,7 @@ export interface InteractiveResultsApi {
   save(request: { readonly handle: InteractiveViewHandle; readonly writer: InteractiveWriter; readonly expectedRevision: number; readonly requestId: string; readonly values: InteractiveStateValues; readonly inputDrafts: Readonly<Record<string, string>> }): Promise<InteractiveResult<{ readonly state: InteractiveStateSnapshot }>>;
   release(request: { readonly handle: InteractiveViewHandle; readonly writer?: InteractiveWriter }): Promise<InteractiveResult>;
   prepareFollowup(request: { readonly handle: InteractiveViewHandle; readonly stateRevision: number; readonly stateDigest: string; readonly fields: readonly string[]; readonly requestId: string }): Promise<InteractiveResult<{ readonly followup: InteractiveFollowup }>>;
+  prepareDraft?(request: { readonly handle: InteractiveViewHandle; readonly followupId: string }): Promise<InteractiveResult<{ readonly followupId: string }>>;
 }
 
 export const INTERACTIVE_PUBLISH_CAPABILITY = 'local.interactive.publish';
@@ -213,6 +214,22 @@ export function normalizeInteractiveReference(raw: unknown): InteractiveResultRe
   if (!object(raw) || !keys(raw, ['owner', 'resultId', 'contentVersion']) || !interactiveToken(raw.resultId) || !interactiveDigest(raw.contentVersion)) return;
   const owner = normalizeInteractiveOwner(raw.owner);
   return owner ? { owner, resultId: raw.resultId, contentVersion: raw.contentVersion } : undefined;
+}
+/** Syntax and budget only. The host must match the actual immutable freeze receipt. */
+export function normalizeInteractiveFollowup(raw: unknown): InteractiveFollowup | undefined {
+  if (!object(raw) || !keys(raw, ['followupId', 'recipient', 'result', 'specHash', 'stateRevision', 'stateDigest', 'selectionDigest', 'values', 'dataLevel', 'capturedAt', 'excerpt'])
+    || !interactiveToken(raw.followupId) || !interactiveDigest(raw.specHash) || !interactiveDigest(raw.stateDigest) || !interactiveDigest(raw.selectionDigest)
+    || !integer(raw.stateRevision) || !object(raw.values) || !Object.keys(raw.values).length || Object.keys(raw.values).length > INTERACTIVE_RESULT_LIMITS.stateFields
+    || Object.entries(raw.values).some(([key, value]) => !/^\$[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(key)
+      || !(typeof value === 'string' && value.length <= INTERACTIVE_RESULT_LIMITS.textChars && !value.includes('\0') || typeof value === 'boolean' || typeof value === 'number' && Number.isFinite(value)))
+    || !['D0_public', 'D1_internal', 'D2_sensitive', 'D3_private', 'D4_regulated'].includes(raw.dataLevel as string)
+    || typeof raw.capturedAt !== 'string' || raw.capturedAt.length > 40 || !Number.isFinite(Date.parse(raw.capturedAt)) || !text(raw.excerpt, 8192)) return;
+  const recipient = normalizeInteractiveOwner(raw.recipient), result = normalizeInteractiveReference(raw.result);
+  if (!recipient || !result || recipient.workspaceId !== result.owner.workspaceId || recipient.conversationId !== result.owner.conversationId) return;
+  const value: InteractiveFollowup = { followupId: raw.followupId, recipient, result, specHash: raw.specHash, stateRevision: raw.stateRevision,
+    stateDigest: raw.stateDigest, selectionDigest: raw.selectionDigest, values: Object.fromEntries(Object.entries(raw.values).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) as InteractiveStateValues,
+    dataLevel: raw.dataLevel as DataLevel, capturedAt: new Date(raw.capturedAt).toISOString(), excerpt: raw.excerpt };
+  return bytes(JSON.stringify(value)) <= 32 * 1024 ? value : undefined;
 }
 export function normalizeInteractiveViewHandle(raw: unknown): InteractiveViewHandle | undefined {
   if (!object(raw) || !keys(raw, ['viewId', 'windowId', 'generation']) || !interactiveToken(raw.viewId)

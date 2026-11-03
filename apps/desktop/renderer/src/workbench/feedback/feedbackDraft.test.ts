@@ -37,3 +37,19 @@ test('unconfirmed save retains the same excerpt; retry does not append duplicate
   h.recover(); assert.equal((await h.prepare(feedback)).ok, true); assert.equal(h.edits.length, 1);
   assert.equal((await h.prepare({ ...feedback, excerpt: 'another' })).code, 'RESOURCE_FEEDBACK_ID_CONFLICT');
 });
+
+test('frozen conditions reserve a legacy attachment slot before editing the existing Composer draft', async () => {
+  const row = protocol.interactiveFeedbackFromFollowup({ followupId: 'frozen', recipient: feedback.recipient,
+    result: { owner: feedback.recipient, resultId: 'result', contentVersion: hash }, specHash: hash, stateRevision: 1,
+    stateDigest: hash, selectionDigest: hash, values: { $x: 4 }, dataLevel: 'D3_private', capturedAt: feedback.capturedAt, excerpt: 'Conditions' })!;
+  const h = harness(), session = h.session('bot-a');
+  session.edit({ attachments: Array.from({ length: 8 }, (_, i) => ({ id: `upload-${i}` })) });
+  const original = JSON.stringify(session.getSnapshot().draft), edits = h.edits.length;
+  assert.equal((await h.prepare(row)).code, 'RESOURCE_FEEDBACK_ATTACHMENT_LIMIT');
+  assert.equal(h.edits.length, edits); assert.equal(JSON.stringify(session.getSnapshot().draft), original);
+  session.edit({ attachments: [{ id: 'upload' }] });
+  assert.equal((await h.prepare(row)).ok, true);
+  assert.equal(session.getSnapshot().draft.text, 'keep draft'); assert.equal(session.getSnapshot().draft.quote.text, 'keep quote');
+  assert.deepEqual(session.getSnapshot().draft.attachments, [{ id: 'upload' }]);
+  assert.equal(session.getSnapshot().draft.resourceFeedback[0].version.values.$x, 4);
+});

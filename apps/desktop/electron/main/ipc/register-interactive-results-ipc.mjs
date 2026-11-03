@@ -8,6 +8,7 @@ export function createInteractiveResultsIpcRegistrations({ interactiveResults })
     ipc.handle('interactive-results:save', (event, request) => interactiveResults.save(event.sender, request));
     ipc.handle('interactive-results:release', (event, request) => interactiveResults.release(event.sender, request));
     ipc.handle('interactive-results:prepare-followup', (event, request) => interactiveResults.prepareFollowup(event.sender, request));
+    ipc.handle('interactive-results:prepare-draft', (event, request) => interactiveResults.prepareDraft(event.sender, request));
     return () => interactiveResults.dispose();
   }), owner('resource-presentation-ipc', (ipc) => {
     ipc.handle('resource-presentation:read-layout', (event, request) => interactiveResults.readLayout(event.sender, request));

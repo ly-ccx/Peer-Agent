@@ -60,6 +60,44 @@ test('IME and incomplete numeric drafts stay local; legal division-by-zero param
   assert.equal(f.session.snapshot().sdkValues.$x, 5);
 });
 
+test('draft preparation awaits its own receipt, retries the same frozen values after edits/takeover and rejects a mismatched acknowledgment', async t => {
+  const f = await fixture(t), followups: string[] = [];
+  let acknowledge: (() => void) | undefined, attempt = 0;
+  f.api.prepareDraft = async request => {
+    followups.push(request.followupId);
+    if (++attempt === 1) { await new Promise<void>(resolve => { acknowledge = resolve; }); return { ok: false, code: 'draft_preparation_unconfirmed' }; }
+    return { ok: true, followupId: attempt === 2 ? 'wrong-receipt' : request.followupId };
+  };
+  await f.session.acquire(); f.session.editText('$x', '3');
+  const preparing = f.session.prepareDraft(['$x']);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.session.snapshot().preparation, 'frozen'); assert.equal(f.session.snapshot().draftPreparation, 'preparing');
+  const frozen = f.session.snapshot().frozen!; assert.equal(frozen.values.$x, 3);
+  f.session.editText('$x', '7'); assert.equal(await f.session.flush(), true);
+  acknowledge!(); assert.equal(await preparing, false); assert.equal(f.session.snapshot().draftPreparation, 'failed');
+  const otherApi = f.adapt(new EventEmitter()), other = await otherApi.open({ reference: f.receipt.reference, requestId: 'takeover-view' });
+  if (!other.ok) throw Error(other.code);
+  await otherApi.acquire({ handle: other.handle, expectedRevision: 2, takeover: true });
+  assert.equal(await f.session.acquire(), false);
+  assert.equal(await f.session.prepareDraft(), false); assert.equal(f.session.snapshot().draftError, 'interactive_draft_receipt_invalid');
+  assert.equal(await f.session.prepareDraft(), true); assert.equal(f.session.snapshot().draftPreparation, 'prepared');
+  assert.deepEqual(followups, Array(3).fill(frozen.followupId));
+  assert.equal(f.states.readFollowup(frozen.recipient, frozen.followupId).values.$x, 3);
+  assert.equal(f.session.snapshot().values.$x, 7); assert.equal(f.session.snapshot().phase, 'writer_lost');
+});
+
+test('an unfinished new selection never falls back to the last frozen values, and an older bridge cannot claim preparation', async t => {
+  const f = await fixture(t); await f.session.acquire();
+  assert.equal(f.session.canPrepareDraft(), false); assert.equal(await f.session.prepareDraft(['$x']), false);
+  assert.equal(f.session.snapshot().confirmed.stateRevision, 0);
+  let calls = 0; f.api.prepareDraft = async request => { calls++; return { ok: true, followupId: request.followupId }; };
+  assert.equal(await f.session.prepareDraft(['$x']), true); assert.equal(calls, 1);
+  f.session.editText('$x', '-'); assert.equal(await f.session.prepareDraft(['$x']), false);
+  assert.equal(f.session.snapshot().frozen, null); assert.equal(await f.session.prepareDraft(), false); assert.equal(calls, 1);
+  assert.equal(f.session.snapshot().inputDrafts.$x, '-'); assert.equal(f.session.snapshot().draftPreparation, 'failed');
+  assert.equal(await f.session.prepareSelection([]), null);
+});
+
 test('lost save acknowledgment retries the original request before saving newer edits', async t => {
   const f = await fixture(t), save = f.api.save, calls: Parameters<InteractiveResultsApi['save']>[0][] = [];
   let lose = true;

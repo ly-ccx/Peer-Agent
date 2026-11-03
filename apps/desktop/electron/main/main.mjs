@@ -1682,10 +1682,10 @@ const fileAccessApplicationService = createFileAccessApplicationService({
     execFileAsync('git', ['-C', cwd, ...args], options),
 });
 
-const interactiveResultsApplication = createDesktopInteractiveApplication({
-  getRole: sender => trustedWindowRegistry.getRole(sender),
+const interactiveResultsApplication = createDesktopInteractiveApplication({ getRole: sender => trustedWindowRegistry.getRole(sender),
   getOwner: workspaceId => resourceEditOwner(workspaceId),
   getNativeBinding: sender => resourceWindowController.interactiveBinding(sender),
+  prepareFeedback: resourceFeedbackPreparation.prepare, readDraft: request => projectAgentDirectory.readInputDraft?.(request),
 });
 const resourceWindowController = createResourceWindowController({
   BrowserWindow, trustedWindows: trustedWindowRegistry, rendererLocation: getTrustedRendererLocation(),

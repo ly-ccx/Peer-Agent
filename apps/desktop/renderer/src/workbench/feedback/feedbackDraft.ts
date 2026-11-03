@@ -1,4 +1,4 @@
-import { normalizeResourceFeedback, normalizeResourceFeedbackList, type ResourceFeedback } from '@peer-agent/protocol';
+import { encodeResourceFeedbackTransport, normalizeResourceFeedback, normalizeResourceFeedbackList, type ResourceFeedback } from '@peer-agent/protocol';
 import { inputRecoveryFor } from '../../project-agent/state/useInputRecovery';
 
 /** Adds recoverable user intent to the captured Bot. Never sends, switches Bot, or invokes a runner. */
@@ -14,6 +14,8 @@ export async function prepareResourceFeedbackDraft(raw: ResourceFeedback): Promi
   const next = existing ? rows : normalizeResourceFeedbackList([...rows, feedback]);
   if (!next) return { ok: false, code: 'RESOURCE_FEEDBACK_LIMIT' };
   if (next.some(row => row.recipient.workspaceId !== feedback.recipient.workspaceId)) return { ok: false, code: 'INVALID_RESOURCE_FEEDBACK' };
+  try { encodeResourceFeedbackTransport(next, current.attachments); }
+  catch (error) { return { ok: false, code: (error as { code?: string }).code ?? 'RESOURCE_FEEDBACK_ATTACHMENT_LIMIT' }; }
   if (!existing) session.edit({ resourceFeedback: next });
   return await session.flush() ? { ok: true } : { ok: false, code: session.getSnapshot().error ?? 'DRAFT_SAVE_FAILED' };
 }

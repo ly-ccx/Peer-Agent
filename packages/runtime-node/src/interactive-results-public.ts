@@ -10,3 +10,4 @@ export { admitInteractiveToolSet } from './interactive-results/role-policy.mjs';
 export { canonicalInteractiveObservation, appendInteractiveMaterialNotice } from './interactive-results/capture.mjs';
 export { createInteractiveViewService } from './interactive-results/view-service.mjs';
 export { createInteractivePresentationStore, interactiveReadingSourceBinding } from './interactive-results/presentation-store.mjs';
+export { createInteractiveFeedbackAdmission } from './interactive-results/feedback-admission.mjs';

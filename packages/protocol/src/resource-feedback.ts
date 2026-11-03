@@ -1,13 +1,15 @@
 import { normalizeResourceWindowRequest, type ResourceWindowResource } from './resource-window.ts';
+import { normalizeInteractiveFollowup, type InteractiveFollowup } from './interactive-result.ts';
 
 /** User-selected factual material. Never access authority, a replacement patch, or execution Evidence. */
 export interface ResourceFeedbackRecipient { readonly workspaceId: string; readonly conversationId: string }
-export type ResourceFeedbackResource = Exclude<ResourceWindowResource, { readonly kind: 'interactive' }> | { readonly kind: 'web'; readonly url: string; readonly pageUrl?: string; readonly conversationId: string; readonly browserTabId: string };
+export type ResourceFeedbackResource = ResourceWindowResource | { readonly kind: 'web'; readonly url: string; readonly pageUrl?: string; readonly conversationId: string; readonly browserTabId: string };
 export type ResourceFeedbackVersion =
   | { readonly kind: 'content'; readonly resourceId: string; readonly contentVersion: string }
   | { readonly kind: 'git'; readonly commit: string }
   | { readonly kind: 'comparison' | 'directory-list'; readonly digest: string }
-  | { readonly kind: 'web-document'; readonly documentId: string };
+  | { readonly kind: 'web-document'; readonly documentId: string }
+  | ({ readonly kind: 'interactive' } & Omit<InteractiveFollowup, 'recipient' | 'result' | 'capturedAt' | 'excerpt'>);
 export interface ResourceFeedbackSourceRange {
   readonly start: number; readonly end: number;
   readonly startLine: number; readonly startColumn: number; readonly endLine: number; readonly endColumn: number;
@@ -19,7 +21,7 @@ export interface ResourceFeedback {
   readonly resource: ResourceFeedbackResource;
   readonly version: ResourceFeedbackVersion;
   readonly excerpt: string;
-  readonly selection: { readonly kind: 'discussion'; readonly path?: string } | { readonly kind: 'source'; readonly range: ResourceFeedbackSourceRange };
+  readonly selection: { readonly kind: 'discussion'; readonly path?: string } | { readonly kind: 'source'; readonly range: ResourceFeedbackSourceRange } | { readonly kind: 'conditions' };
 }
 export const RESOURCE_FEEDBACK_LIMIT = 8;
 export const RESOURCE_FEEDBACK_EXCERPT_LIMIT = 8192;
@@ -46,11 +48,18 @@ export function normalizeResourceFeedback(raw: unknown): ResourceFeedback | unde
       resource = { kind: 'web', url: u.href, ...(pageUrl ? { pageUrl } : {}), conversationId: r.conversationId, browserTabId: r.browserTabId };
     } catch { return; }
   } else {
-    const normalized = normalizeResourceWindowRequest({ resource: raw.resource }); if (!normalized || normalized.resource.kind === 'interactive') return;
+    const normalized = normalizeResourceWindowRequest({ resource: raw.resource }); if (!normalized) return;
     resource = normalized.resource;
   }
   const v = raw.version; let version: ResourceFeedbackVersion;
-  if (resource.kind === 'web') {
+  if (resource.kind === 'interactive') {
+    if (v.kind !== 'interactive' || !keys(v, ['kind', 'followupId', 'specHash', 'stateRevision', 'stateDigest', 'selectionDigest', 'values', 'dataLevel'])) return;
+    const { kind: _kind, ...fields } = v;
+    const followup = normalizeInteractiveFollowup({ ...fields, recipient: raw.recipient, result: resource.reference, capturedAt: raw.capturedAt, excerpt: raw.excerpt });
+    if (!followup || followup.followupId !== raw.id) return;
+    const { recipient: _recipient, result: _result, capturedAt: _at, excerpt: _excerpt, ...frozen } = followup;
+    version = { kind: 'interactive', ...frozen };
+  } else if (resource.kind === 'web') {
     if (!keys(v, ['kind', 'documentId']) || v.kind !== 'web-document' || !token(v.documentId)) return;
     version = { kind: 'web-document', documentId: v.documentId };
   } else if (resource.kind === 'directory' || resource.kind === 'comparison' || resource.kind === 'document' && resource.mode === 'diff') {
@@ -67,7 +76,10 @@ export function normalizeResourceFeedback(raw: unknown): ResourceFeedback | unde
     version = { kind: 'content', resourceId: v.resourceId, contentVersion: v.contentVersion };
   }
   let selection: ResourceFeedback['selection']; const s = raw.selection;
-  if (s.kind === 'source') {
+  if (resource.kind === 'interactive') {
+    if (s.kind !== 'conditions' || !keys(s, ['kind'])) return;
+    selection = { kind: 'conditions' };
+  } else if (s.kind === 'source') {
     if (!keys(s, ['kind', 'range']) || resource.kind !== 'document' || resource.mode !== 'source' || !object(s.range)
       || !keys(s.range, ['start', 'end', 'startLine', 'startColumn', 'endLine', 'endColumn'])
       || !Object.values(s.range).every(position) || !['start', 'end', 'startLine', 'startColumn', 'endLine', 'endColumn'].every(k => position((s.range as Record<string, unknown>)[k]))
@@ -82,6 +94,17 @@ export function normalizeResourceFeedback(raw: unknown): ResourceFeedback | unde
   const result: ResourceFeedback = { id: raw.id, recipient: { workspaceId: raw.recipient.workspaceId, conversationId: raw.recipient.conversationId },
     capturedAt: new Date(raw.capturedAt).toISOString(), resource, version, excerpt: raw.excerpt, selection };
   return bytes(result) <= 32 * 1024 ? result : undefined;
+}
+export function interactiveFeedbackFromFollowup(raw: unknown): ResourceFeedback | undefined {
+  const followup = normalizeInteractiveFollowup(raw); if (!followup) return;
+  const { recipient, result, capturedAt, excerpt, ...version } = followup;
+  return normalizeResourceFeedback({ id: followup.followupId, recipient, capturedAt, excerpt, resource: { kind: 'interactive', reference: result },
+    version: { kind: 'interactive', ...version }, selection: { kind: 'conditions' } });
+}
+export function followupFromInteractiveFeedback(raw: unknown): InteractiveFollowup | undefined {
+  const row = normalizeResourceFeedback(raw); if (!row || row.resource.kind !== 'interactive' || row.version.kind !== 'interactive') return;
+  const { kind: _kind, ...version } = row.version;
+  return normalizeInteractiveFollowup({ ...version, recipient: row.recipient, result: row.resource.reference, capturedAt: row.capturedAt, excerpt: row.excerpt });
 }
 /** Missing is legacy empty; malformed/over-budget lists are never silently truncated or discarded. */
 export function normalizeResourceFeedbackList(raw: unknown): readonly ResourceFeedback[] | undefined {
