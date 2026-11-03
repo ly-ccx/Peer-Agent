@@ -33,10 +33,10 @@ const INITIAL_TASK = [
 ].join('\n');
 const FROZEN_TASK = [
   'The selected budget has already been supplied in the attached frozen selection. Do not ask me to supply it again or restate an earlier progress reply.',
-  `Delegate this new request via spawn_session now. Use anchorMessageIds ["input-${FROZEN_INPUT}"] to carry the attached frozen selection. Set kind "research", readOnly true, isolation "none", and requiredCapabilities ["local.interactive.inspect"].`,
-  'The new worker should use goal_get_plan, then inspect the attached fixed result once with view evaluate and the attached followupId, then record that actual result and evidence on its leaf with goal_update_task.',
+  `Delegate this new request via spawn_session exactly once. Reuse its returned session ID on subsequent turns, including during repair. Use anchorMessageIds ["input-${FROZEN_INPUT}"] to carry the attached frozen selection. Set kind "research", readOnly true, isolation "none", and requiredCapabilities ["local.interactive.inspect"].`,
+  'The new worker should use goal_get_plan, then inspect the attached fixed result once with view evaluate and the attached followupId, then record that actual result and evidence on its leaf with goal_update_task. Keep the worker brief limited to that one inspection. Put the four independent checks only in successCriteria.',
   'Set successCriteria to [{"kind":"model_review","description":"Independently inspect the attached fixed result in four calls together: program, data binding facts, initial evaluate, and evaluate with the attached followupId. Cite only the four canonical interactive-inspection references."}].',
-  'After the follow-up task reports result_ready, call verify_session with its sessionId even if its Goal plan already has a passed review. That call records the delegated session verdict. Use its returned detail; avoid repeating get_session or get_verification_detail when the status is unchanged.',
+  'While the follow-up task is running or verifying, wait for a status change using the current session revision from the roster. After it reports result_ready, call verify_session with its sessionId even if its Goal plan already has a passed review. That call records the delegated session verdict. Use its returned detail; avoid repeating get_session or get_verification_detail when the status is unchanged.',
   'Then use post_reply with both session IDs as sources and their current statuses. Explain the two remainders, describe the costs as synthetic, and state the actual verification and human acceptance status. Do not republish or substitute direct Bot inspection for delegation.',
 ].join('\n');
 
@@ -185,16 +185,19 @@ export async function runInteractiveLiveStory(options: {
       report.stage = 'verification-and-reply';
       const delivered = await waitFor(() => {
         const sessions = host.supervisor.sessionsForProject(workspaceId);
-        const verification = sessions.find((session: any) => session.sessionId !== fixed.source.sessionId
-          && host.plans.getPlan(session.planId)?.delegationOrigin?.anchorMessageId === `input-${FROZEN_INPUT}`
-          && host.plans.getPlan(session.planId)?.hostVerification?.verdictRef === verdictRefFor(session.sessionId, 'passed')
-          && host.plans.getPlan(session.planId)?.hostVerification?.independentVerifier === 'passed');
+        const followups = sessions.filter((session: any) =>
+          host.plans.getPlan(session.planId)?.delegationOrigin?.anchorMessageId === `input-${FROZEN_INPUT}`);
+        if (followups.length > 1) throw Error('story_duplicate_followup');
+        const verification = followups[0];
+        const verdict = verification && host.plans.getPlan(verification.planId)?.hostVerification;
+        if (!verification || verdict?.verdictRef !== verdictRefFor(verification.sessionId, 'passed')
+          || verdict.independentVerifier !== 'passed') return;
         const history = host.conversations.getPersistedConversationHistory!(conversationId)?.messages ?? [];
-        if (!verification || !history.some(message => message.id === `input-${FROZEN_INPUT}`)) return;
+        if (!history.some(message => message.id === `input-${FROZEN_INPUT}`)) return;
         const reply = history.filter((message: any) => message.kind === 'agent_reply' && message.meta?.evidenceRefs?.includes(fixed.artifactRef)
           && message.meta?.sources?.includes(fixed.source.sessionId) && message.meta?.sources?.includes(verification.sessionId)
           && /\b45\b/.test(message.content) && /\b25\b/.test(message.content)).at(-1);
-        return verification && reply ? { sessions, verification, reply } : undefined;
+        return reply ? { sessions, verification, reply } : undefined;
       });
       report.sessions = delivered.sessions;
       report.replies = [delivered.reply];
