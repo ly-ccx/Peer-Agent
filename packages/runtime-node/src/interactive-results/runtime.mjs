@@ -64,9 +64,11 @@ export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationS
       const plan = goalPlanStore.getPlan(source.planId);
       const origin = plan?.delegationOrigin;
       if (origin?.workspaceId !== owner.workspaceId || origin.parentConversationId !== owner.conversationId
-        || plan.conversationId !== source.conversationId || !sameExecution(source, executionIdentity(plan))
-        || sessionFactsFromPlan(plan).executionOwnership === 'live') return false;
-      const control = journal.readSessionControl(source.sessionId), receipt = control?.stopReceipt;
+        || plan.conversationId !== source.conversationId || origin.sessionId !== source.sessionId) return false;
+      const currentExecution = sameExecution(source, executionIdentity(plan));
+      if (currentExecution && sessionFactsFromPlan(plan).executionOwnership === 'live') return false;
+      const control = currentExecution ? journal.readSessionControl(source.sessionId) : journal.readStoppedExecution?.(source);
+      const receipt = control?.stopReceipt;
       return control?.workspaceId === owner.workspaceId && control.parentConversationId === owner.conversationId
         && control.planId === source.planId && control.sessionId === source.sessionId && ['pause', 'cancel', 'takeover'].includes(control.kind)
         && sameExecution(source, control.expectedExecution) && sameExecution(source, receipt?.execution)

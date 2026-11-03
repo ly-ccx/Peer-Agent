@@ -65,12 +65,15 @@ test('shared host recovery consumes only a current, in-scope stop receipt after 
   let release = registerWorkBudget(owner.workspaceId, journal);
   t.after(() => { release(); runtime.close(); journal.close(); rmSync(root, { recursive: true, force: true }); });
   await journal.prepare();
-  runtime.resultStore.beginAttempt({ callRef, source: { ...execution, conversationId: 'child', toolCallId: 'prepared' },
-    draft: { publication: { kind: 'create' }, title: 'Candidate', textFallback: 'Assumption', program: 'root=Text("x")', inputs: [] } }, () => true);
+  const prepare = (ref, source = execution) => runtime.resultStore.beginAttempt({
+    callRef: ref, source: { ...source, conversationId: 'child', toolCallId: ref.toolCallId },
+    draft: { publication: { kind: 'create' }, title: 'Candidate', textFallback: 'Assumption', program: 'root=Text("x")', inputs: [] },
+  }, () => true);
+  prepare(callRef);
   const recover = () => runtime.recoverWorkspace(owner.workspaceId);
   assert.deepEqual(recover(), { ok: true, items: [] }, 'a terminal plan alone proves nothing');
   const operation = { workspaceId: 'workspace', parentConversationId: 'parent', sessionId: 'session', planId: 'plan',
-    kind: 'cancel', operationId: 'cancel-one', authorityRef: 'user-input', expectedExecution: execution,
+    kind: 'pause', operationId: 'pause-one', authorityRef: 'user-input', expectedExecution: execution,
     revision: 1, phase: 'recorded', updatedAt: '2026-11-01T00:00:00.000Z' };
   operation.requestDigest = controlDigest({ kind: operation.kind, operationId: operation.operationId,
     authorityRef: operation.authorityRef, execution });
@@ -85,13 +88,23 @@ test('shared host recovery consumes only a current, in-scope stop receipt after 
   await journal.prepare();
   runtime = createInteractiveRuntime(runtimeOptions);
   release = registerWorkBudget(owner.workspaceId, journal);
-  plan.delegationOrigin.executionGeneration = 'foreign';
-  assert.deepEqual(recover(), { ok: true, items: [] });
-  plan.delegationOrigin.executionGeneration = execution.generation;
+  const unmatched = { ...callRef, toolCallId: 'unmatched' };
+  prepare(unmatched, { ...execution, generation: 'foreign' });
   lease = false;
   assert.equal(recover().ok, false);
   lease = true;
   assert.deepEqual(recover(), { ok: true, items: [{ callRef, publicationStatus: 'not_committed', code: 'publication_interrupted' }] });
   assert.equal(runtime.resultStore.getAttempt(callRef).phase, 'failed');
+  const superseded = { ...callRef, toolCallId: 'superseded' };
+  prepare(superseded);
+  const resume = { ...operation, kind: 'resume', operationId: 'resume-one', priorStopReceiptId: stopReceipt.receiptId };
+  resume.requestDigest = controlDigest({ kind: resume.kind, operationId: resume.operationId,
+    authorityRef: resume.authorityRef, execution });
+  journal.writeSessionControl(resume, 0, operation.operationId);
+  journal.writeSessionControl({ ...resume, revision: 2, phase: 'settled', outcome: 'applied' }, 1, resume.operationId);
+  plan.delegationOrigin.executionGeneration = resume.operationId;
+  assert.equal(journal.readSessionControl('session').stopReceipt, undefined);
+  assert.deepEqual(recover(), { ok: true, items: [{ callRef: superseded, publicationStatus: 'not_committed', code: 'publication_interrupted' }] });
+  assert.equal(runtime.resultStore.getAttempt(unmatched).phase, 'prepared');
   assert.deepEqual(recover(), { ok: true, items: [] });
 });
