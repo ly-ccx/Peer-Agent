@@ -9,7 +9,8 @@ import { _electron } from 'playwright-core';
 import { build } from 'vite';
 
 const desktop = fileURLToPath(new URL('..', import.meta.url)), require = createRequire(new URL('../package.json', import.meta.url));
-const program = '$divisor=2\n$label="Trial"\n$mode="all"\n$include=true\n$budget=100\nrows=$mode=="all" ? @Data("facts") : @RowsWhere(@Data("facts"),"cost","gt",100)\nroot=Col([Title($label),Input("label","Trial name",$label),NumberInput("divisor","Divisor",$divisor,0,10,1),Select("mode","Rows",$mode,[{value:"all",label:"All"},{value:"expensive",label:"Above 100"}]),Checkbox("include","Include calculation",$include),Slider("budget","Budget",$budget,0,1000,1),Metric("Trial total",$include ? $budget/$divisor : 0),Table("Observations",[{key:"id",label:"ID"},{key:"cost",label:"Cost"}],rows,"id"),Chart("Costs","bar","id",[{key:"cost",label:"Cost"}],rows),Button("Reset budget",@Reset($budget)),SourceReference("facts","Fixed observations"),Divider(),Card("Chart detail",[Row([Text("Synthetic planning values"),Caption("Use the data tables for exact values")]),Chart("Cost trend","line","id",[{key:"cost",label:"Cost"}],rows)])])';
+const rowCount = 500;
+const program = '$divisor=2\n$label="Trial"\n$mode="all"\n$include=true\n$budget=100\nrows=$mode=="all" ? @Data("facts") : @RowsWhere(@Data("facts"),"cost","gt",480)\nroot=Col([Title($label),Input("label","Trial name",$label),NumberInput("divisor","Divisor",$divisor,0,10,1),Select("mode","Rows",$mode,[{value:"all",label:"All"},{value:"expensive",label:"Above 480"}]),Checkbox("include","Include calculation",$include),Slider("budget","Budget",$budget,0,1000,1),Metric("Trial total",$include ? $budget/$divisor : 0),Table("Observations",[{key:"id",label:"ID"},{key:"cost",label:"Cost"}],rows,"id"),Chart("Costs","bar","id",[{key:"cost",label:"Cost"}],rows),Button("Reset budget",@Reset($budget)),SourceReference("facts","Fixed observations"),Divider(),Card("Chart detail",[Row([Text("Synthetic planning values"),Caption("Use the data tables for exact values")]),Chart("Cost trend","line","id",[{key:"cost",label:"Cost"}],rows)])])';
 
 async function buildFixture(output, mode) {
   const entryId = '\0peer-interactive-fixture.tsx';
@@ -21,7 +22,7 @@ async function buildFixture(output, mode) {
     import './renderer/src/styles.css';
     (async()=>{
       const content=await validateDraft({title:'Fixed observations',textFallback:'Model trial, unverified.',program:${JSON.stringify(program)}},
-        {bindings:{facts:Array.from({length:120},(_,id)=>({id,cost:id+1}))}});
+        {bindings:{facts:Array.from({length:${rowCount}},(_,id)=>({id,cost:id+1}))}});
       const owner={workspaceId:'fixture-bot',conversationId:'fixture-parent'};
       const reference={owner,resultId:'fixture-result',contentVersion:'sha256:'+'a'.repeat(64)};
       let state={result:reference,specHash:content.specHash,stateSchemaHash:content.stateSchemaHash,stateRevision:0,values:content.initialValues,inputDrafts:{},stateDigest:await digestJSON({values:content.initialValues,inputDrafts:{}}),updatedAt:new Date().toISOString(),requestId:'initial'};
@@ -92,13 +93,17 @@ test('the real SDK mounts Peer controls without tools or telemetry and recovers 
       await page.getByLabel('Rows', { exact: true }).selectOption('all');
       await page.waitForFunction(() => document.querySelector('.interactive-table tbody')?.children.length === 100);
       await page.getByRole('button', { name: 'Next', exact: true }).first().click();
-      assert.equal(await page.locator('.interactive-table tbody').first().locator('tr').count(), 20);
+      const firstDataRow = page.getByRole('table', { name: 'Observations', exact: true }).locator('tbody tr').first();
+      assert.equal(await firstDataRow.locator('td').first().innerText(), '100');
+      assert.equal(await page.getByRole('img', { name: 'Costs', exact: true }).locator('rect').count(), rowCount);
+      const points = await page.getByRole('img', { name: 'Cost trend', exact: true }).locator('polyline').getAttribute('points');
+      assert.equal(points.trim().split(/\s+/).length, rowCount);
       await page.getByLabel('Include calculation', { exact: true }).focus();
       await page.getByLabel('Include calculation', { exact: true }).press('Space');
       await page.waitForFunction(() => document.querySelector('.interactive-metric dd')?.textContent === '0');
       await page.locator('label.interactive-check').click();
       assert.equal(await page.getByLabel('Include calculation', { exact: true }).isChecked(), true);
-      assert.equal(await page.locator('.interactive-table tbody').first().locator('tr').count(), 20, 'unrelated parameter changes retain the table page');
+      assert.equal(await firstDataRow.locator('td').first().innerText(), '100', 'unrelated parameter changes retain the table page');
       const label = page.getByLabel('Trial name', { exact: true }); await label.focus();
       await label.evaluate(node => {
         node.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
@@ -171,6 +176,10 @@ test('the real SDK mounts Peer controls without tools or telemetry and recovers 
       assert.deepEqual(errors, []);
       assert.equal(await page.locator('[data-openui-devtools-auto-mount]').count(), 0);
       if (mode === 'production') {
+        const readProcesses = () => app.evaluate(({ app }) => app.getAppMetrics().map(({ pid, type, cpu, memory }) => ({
+          pid, type, cpuSeconds: cpu.cumulativeCPUUsage ?? null, workingSetKiB: memory.workingSetSize,
+        })));
+        const before = await readProcesses();
         const performanceSample = await page.evaluate(async () => {
           const longTasks = [];
           const observer = new PerformanceObserver(list => longTasks.push(...list.getEntries().map(entry => entry.duration)));
@@ -180,7 +189,8 @@ test('the real SDK mounts Peer controls without tools or telemetry and recovers 
           if (!(field instanceof HTMLInputElement)) throw Error('Missing trial input for timing');
           const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
           const timings = [];
-          for (const value of [0, 5, 4, 5, 4, 5, 4, 5]) {
+          const startedAt = performance.now();
+          for (const value of [0, 5, ...Array.from({ length: 60 }, (_, index) => index % 2 ? 5 : 4)]) {
             const start = performance.now();
             setValue.call(field, String(value));
             field.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: String(value) }));
@@ -195,13 +205,15 @@ test('the real SDK mounts Peer controls without tools or telemetry and recovers 
           }
           longTasks.push(...observer.takeRecords().map(entry => entry.duration));
           observer.disconnect();
-          return { timings, longTaskMs: longTasks };
+          return { durationMs: performance.now() - startedAt, timings, longTaskMs: longTasks };
         });
-        const processSamples = await app.evaluate(({ app }) => app.getAppMetrics().map(({ type, cpu, memory }) => ({
-          type, cpuPercent: cpu.percentCPUUsage, workingSetKiB: memory.workingSetSize,
-        })));
+        const processSamples = (await readProcesses()).map(({ pid, type, cpuSeconds, workingSetKiB }) => {
+          const prior = before.find(row => row.pid === pid);
+          return { type, workingSetBeforeKiB: prior?.workingSetKiB ?? null, workingSetAfterKiB: workingSetKiB,
+            cpuSeconds: prior?.cpuSeconds != null && cpuSeconds != null ? cpuSeconds - prior.cpuSeconds : null };
+        });
         writeFileSync(path.join(root, 'production-interaction-sample.json'), JSON.stringify({
-          rows: 120, ...performanceSample, processSamples,
+          rows: rowCount, ...performanceSample, processSamples,
         }, null, 2) + '\n');
         await page.evaluate(() => interactiveFixture.fail());
         const fallback = page.getByRole('alert').filter({ hasText: 'The calculation view could not load.' });
