@@ -61,13 +61,14 @@ test('unindexed verifier references fail closed and leave the worker a repair tu
       const failedRun = current.runner.verifierRuns.find(run => run.status === 'failed');
       assert.deepEqual(failedRun.report.evidenceRefs, ['tool-result://read']);
       assert.match(failedRun.report.missingEvidence[0]?.reason, /Evidence Index/);
+      assert.match(failedRun.summary, /Evidence Index/);
       assert.deepEqual(current.modelReviews.at(-1).evidenceRefs, ['tool-result://read']);
       assert.equal(current.modelReviews.at(-1).passed, false);
       store.recordTaskEvidence(plan.planId, 'read', { status: 'completed', result: 'Revised report', evidenceRefs: ['tool-result://read'] });
       return { completed: true, toolCallCount: 1 };
     } },
     verifierRunner: { async runVerifier() {
-      return ++verifiers === 1 ? { ...pass, evidenceRefs: [...pass.evidenceRefs, 'tool-result://unregistered'] } : pass;
+      return ++verifiers === 1 ? { ...pass, summary: 'Verifier passed.', evidenceRefs: [...pass.evidenceRefs, 'tool-result://unregistered'] } : pass;
     } } });
   await runner.start(plan.planId, { awaitIdle: true });
   assert.equal(workers, 1);
