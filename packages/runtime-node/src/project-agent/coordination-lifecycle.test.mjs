@@ -193,6 +193,39 @@ test('unknown external outcome preserves the old task and does not dispatch a re
   await f.lifecycle.recover('w'); assert.equal(f.spawns.length,1);
 });
 
+test('retained takeover recovers from its current stop proof regardless of completed-history enumeration order', async t => {
+  const f = await fixture(t);
+  f.store.saveWork({ ...f.store.readWork('goal'), workspaceId: 'w' });
+  const opened = await f.lifecycle.coordinate({ action: 'parallel', reason: 'original', task: f.task('u1') }, f.context('u1', 'original'));
+  await f.lifecycle.coordinate({ action: 'augment', sessionId: opened.sessionId, expectedRevision: 1,
+    reason: 'historical context', text: 'retained facts' }, f.context('u2', 'historical'));
+  let calls = 0;
+  const lifecycle = createCoordinationLifecycle({ ...f.ports, takeover: async ({ operationId }) => {
+    calls++;
+    if (calls > 1) return { ok: true };
+    const session = f.sessions.get(opened.sessionId), execution = { planId: 'plan', sessionId: opened.sessionId,
+      executionEpoch: session.origin.coordinationBinding.executionEpoch, goalRevision: 1 };
+    Object.assign(session, { planId: 'plan', origin: { ...session.origin, workspaceId: 'w', sessionId: opened.sessionId,
+      takeover: { operationId, phase: 'stopping' }, executionControl: { kind: 'takeover', operationId,
+        workspaceId: 'w', parentConversationId: 'parent', phase: 'settled', outcome: 'applied', expectedExecution: execution,
+        stopReceipt: { operationId, receiptId: 'stop:retained', execution, scope: 'managed_execution',
+          admissionClosed: true, runnerIdle: true, schedulerIdle: true, unknownCalls: [], completedAt: '2026-11-03T02:03:00Z' } } } });
+    return { error: 'execution_outcome_unknown' };
+  } });
+  const result = await lifecycle.coordinate({ action: 'resume', sessionId: opened.sessionId, expectedRevision: 1,
+    reason: 'continue retained task' }, f.context('u3', 'retained'));
+  assert.equal(result.phase, 'awaiting_outcome');
+  const read = f.store.read.bind(f.store);
+  f.store.read = () => {
+    const state = read(), { historical, ...others } = state.transitions;
+    return { ...state, transitions: { ...others, historical } };
+  };
+  await lifecycle.recover('w');
+  assert.equal(f.store.read().transitions.retained.phase, 'completed');
+  assert.equal(calls, 2);
+  assert.equal(f.spawns.length, 1, 'recovery preserves the original task');
+});
+
 test('session projection keeps replacement lineage after an update and a progress query',async t=>{
   const f=await fixture(t), a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
   const b=await f.lifecycle.coordinate({action:'replace',reason:'correct A',sessionId:a.sessionId,expectedRevision:1,task:f.task('u2')},f.context('u2','replace'));

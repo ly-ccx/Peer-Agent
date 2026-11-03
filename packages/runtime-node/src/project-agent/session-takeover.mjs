@@ -2,6 +2,7 @@ import { createSessionControl } from './session-control.mjs';
 import { workBudgetBinding } from './work-budget.mjs';
 import { agentDelivery } from './agent-delivery.mjs';
 import { takeoverBlocker, takeoverHumanBlocker } from './session-repair.mjs';
+import { takeoverStopReceipt } from './takeover-stop-recovery.mjs';
 export { takeoverHumanBlocker } from './session-repair.mjs';
 
 /** Change executor at idle while retaining the task and artifacts. Human approval is not consumed. */
@@ -28,7 +29,8 @@ export function createSessionTakeover({ findBySession, goalPlanStore, goalRunner
       if (plan.runner?.interruption?.origin === 'user' && !userRevision) return { error: 'user_resume_required' };
       if (plan.runner?.interruption && (!plan.runner.interruption.origin || plan.runner.interruption.origin === 'unknown') && !userRevision) return { error: 'interruption_origin_unknown' };
       if (plan.delegationOrigin.takeover?.phase === 'completed' && plan.delegationOrigin.takeover.operationId === input.operationId) return { replayed: true };
-      const control = sessionControl.begin(plan, { kind: 'takeover', operationId: input.operationId,
+      const retained = sessionControl.read(plan);
+      const control = takeoverStopReceipt(plan, retained, input.operationId) ? retained : sessionControl.begin(plan, { kind: 'takeover', operationId: input.operationId,
         authorityRef: `coordination:${input.operationId}`, reason: 'executor takeover' });
       executionScheduler.cancelPlan(plan.planId);
       const fresh = goalPlanStore.getPlan(plan.planId);
@@ -76,14 +78,13 @@ export function createSessionTakeover({ findBySession, goalPlanStore, goalRunner
             return;
           }
           const controlled = sessionControl.settle(plan, registration.control, stopReceipt);
-          const budget = work?.budget;
-          const unknown = budget?.uncertainDispatches?.some(row => !row.planId || row.planId === plan.planId)
-            || Object.values(budget?.attempts || {}).some(attempt => attempt.pendingTools?.some(row => !row.planId || row.planId === plan.planId));
-          if (unknown) {
+          // The barrier owns execution scoping. The parent may still be inside
+          // this very coordination Tool Call; its pending metadata is not a
+          // second source of truth about the child's execution outcome.
+          if (controlled.phase !== 'settled') {
             store.advanceTransition(input.operationId, 'stopping', { phase: 'awaiting_outcome', error: 'execution_outcome_unknown' });
             emit({kind:'interrupted',eventId:`coordination-outcome:${input.operationId}`,workspaceId:context.workspaceId,sessionId:input.sessionId,planId:plan.planId,reason:'execution_outcome_unknown'}); return;
           }
-          if (controlled.phase !== 'settled') return;
           const binding = { ...input.binding, sessionId: input.sessionId };
           store.bindSession(binding.workId, binding.goalRevision, input.sessionId, binding);
           // Persist feedback before publishing a queueable plan or ready transition.
@@ -115,9 +116,9 @@ export function createSessionTakeover({ findBySession, goalPlanStore, goalRunner
         const plan = goalPlanStore.getPlan(registration.planId), control = sessionControl.read(plan);
         // A pending barrier is recoverable, not a rejected executor proposal. The
         // durable control deduplicates unchanged facts; a real result wakes recovery.
-        if (control?.operationId === input.operationId && control.phase === 'reconciling'
+        if (control?.operationId === registration.control.operationId && control.phase === 'reconciling'
           && !control.stopReceipt) return;
-        if (control?.operationId === input.operationId && control.stopReceipt && !plan.delegationOrigin.cancellation) {
+        if (control?.operationId === registration.control.operationId && control.stopReceipt && !plan.delegationOrigin.cancellation) {
           if (control.phase !== 'settled') sessionControl.settle(plan, control, control.stopReceipt, { outcome: 'rejected' });
           const fresh = goalPlanStore.getPlan(plan.planId);
           goalPlanStore.revisePlan(plan.planId, { delegationOrigin: { ...fresh.delegationOrigin, phase: 'paused',

@@ -25,6 +25,12 @@ export function ownedSessions(work, job, roster) {
 }
 
 export function repairProgressDecision(previous, outcome, roster, sources) {
+  // A paired host wait ends observation; it is neither another repair attempt
+  // nor evidence of progress. Preserve the guard for the next actual attempt.
+  if (outcome.silentWait && !outcome.failed && !outcome.stopped && !outcome.yielded) return {
+    end: 'awaiting_children', state: 'waiting_children', fingerprint: previous.fingerprint,
+    repeats: previous.repeats || 0, progressFacts: previous.progressFacts || [], progressObservation: previous.progressObservation,
+  };
   // Rephrasing the same public update is not progress on a technical blocker.
   const materialRounds = repairOwnership(sources).repairSessionIds.length ? (outcome.rounds || []).map(round => ({ ...round,
     toolCalls: (round.toolCalls || []).filter(call => !['post_reply', 'local.delegation.post_reply'].includes(call.name)) })) : outcome.rounds;

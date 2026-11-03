@@ -14,7 +14,7 @@ import { createGoalRunner } from '../goal-runner.mjs';
 import { createScriptedTurnExecutor } from '../testing/scripted-turn-executor.mjs';
 import { createSessionSupervisor, evaluateWorkSessionWrite } from './session-supervisor.mjs';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
-import { registerWorkBudget } from './work-budget.mjs';
+import { registerWorkBudget, createWorkBudgetGuard } from './work-budget.mjs';
 import { beginExecutionAttempt } from './session-facts.mjs';
 import { createDelegationProvider } from './delegation-provider.mjs';
 
@@ -2652,6 +2652,151 @@ test('actual Supervisor repairs a returned unaccepted task in place and delivers
     await actualRunner.start(planId,{awaitIdle:true});
     assert.equal(repairTurns,1,'completed old leaves must not bypass the actual repair turn');
   }finally{release();await env.cleanup();}
+});
+
+test('takeover consumes the child stop barrier while its parent coordination call is still pending', async t => {
+  for (const childUnknown of [false, true]) await t.test(childUnknown ? 'real child unknown stays fenced' : 'live parent metadata does not fence the child', async () => {
+    const env = await harness({ goalRunner: { async start() {}, pause() {}, async waitForIdle() {} } });
+    const store = createWorkCoordinationStore({ rootDir: env.root, workspaceId: 'ws-1', holdsLease: () => true,
+      leaseEpoch: () => 'test-owner', formatVersion: 2, fenceLegacyWrites: true });
+    await store.prepare();
+    store.saveWork({ workId: 'root', workspaceId: 'ws-1', parentConversationId: env.parent.id, state: 'runnable' });
+    const release = registerWorkBudget('ws-1', store);
+    let guard;
+    try {
+      const context = { ...contextOf(env), conversationId: env.parent.id, workId: 'root', currentInputAnchors: ['anchor-1'], deliveryKey: 'original' };
+      const opened = await env.supervisor.coordinateWork({ action: 'parallel', reason: 'inspect', task: spawnInput({ kind: 'research', readOnly: true }) }, context);
+      const planId = planIdOf(env, opened.sessionId);
+      guard = createWorkBudgetGuard({ workspaceId: 'ws-1', workId: 'root', role: 'project_agent' });
+      guard.beforeRequest();
+      guard.beforeTool({ toolCallId: 'parent-coordinate', capabilityId: 'local.delegation.coordinate_work' });
+      if (childUnknown) store.saveWork({ ...store.readWork('root'), budget: { ...store.readWork('root').budget,
+        uncertainDispatches: [{ toolCallId: 'child-shell', planId, role: 'work_session' }] } });
+      await env.supervisor.coordinateWork({ action: 'handoff', sessionId: opened.sessionId, expectedRevision: 1, reason: 'continue original work' },
+        { ...context, deliveryKey: 'takeover' });
+      await until(() => store.read().transitions.takeover.phase === (childUnknown ? 'awaiting_outcome' : 'completed'));
+      const control = store.readSessionControl(opened.sessionId);
+      assert.deepEqual(control.stopReceipt.unknownCalls, childUnknown ? ['child-shell'] : []);
+      assert.equal(control.phase, childUnknown ? 'reconciling' : 'settled');
+      assert.equal(env.goalPlanStore.getPlan(planId).delegationOrigin.takeover.phase, childUnknown ? 'stopping' : 'completed');
+      if (childUnknown) {
+        const resumed = await env.supervisor.resume({ sessionId: opened.sessionId, anchorMessageId: 'anchor-1' }, contextOf(env));
+        assert.equal(resumed.error, 'coordination_reconciliation_required');
+        assert.equal(store.readSessionControl(opened.sessionId).operationId, 'takeover');
+        assert.equal(env.goalPlanStore.getPlan(planId).delegationOrigin.executionGeneration, undefined);
+      }
+      assert.ok(Object.values(store.readWork('root').budget.attempts).some(row => row.pendingTools?.some(call => call.toolCallId === 'parent-coordinate')),
+        'the parent remains in its original Tool Call until takeover returns');
+      guard.checkpoint({}, [{ call: { toolCallId: 'parent-coordinate' }, result: { ok: true } }]);
+    } finally { guard?.finish(); release(); await env.cleanup(); }
+  });
+});
+
+test('cold recovery finishes an already-interleaved native resume and takeover without creating a replacement task', async t => {
+  for (const scenario of ['cold', 'crash-before-stop-receipt', 'foreign-unknown']) await t.test(scenario, async () => {
+  const starts = [];
+  const runner = { async start(planId) { starts.push(planId); }, async resume(planId) { starts.push(planId); }, pause() {}, async waitForIdle() {} };
+  const env = await harness({ goalRunner: runner });
+  const runtimeRoot = path.join(env.root, 'project-runtime');
+  const options = { rootDir: runtimeRoot, workspaceId: 'ws-1', holdsLease: () => true,
+    leaseEpoch: () => 'old-host', formatVersion: 2, fenceLegacyWrites: true };
+  let store = createWorkCoordinationStore(options);
+  await store.prepare();
+  store.saveWork({ workId: 'root', workspaceId: 'ws-1', parentConversationId: env.parent.id, state: 'waiting_children', stopScope: 'reply' });
+  let release = registerWorkBudget('ws-1', store);
+  let recovered;
+  try {
+    const blocker = await env.supervisor.spawn(spawnInput({ isolation: 'none' }), contextOf(env));
+    assert.ok(blocker.sessionId);
+    starts.length = 0;
+    const context = { ...contextOf(env), conversationId: env.parent.id, workId: 'root', currentInputAnchors: ['anchor-1'], deliveryKey: 'original' };
+    const opened = await env.supervisor.coordinateWork({ action: 'parallel', reason: 'original task', task: spawnInput({ isolation: 'none' }) }, context);
+    assert.equal(opened.ok, true, JSON.stringify(opened));
+    const planId = planIdOf(env, opened.sessionId);
+    assert.equal(starts.length, 0);
+    // Build the persisted RC35 failure using real journal and stop-control ports.
+    // The old host allowed native resume after a settled stop but before rebind.
+    assert.equal(store.decide({ operationId: 'takeover', workId: 'root', expectedRevision: 1, action: 'resume',
+      sourceInputIds: ['anchor-1'], sourceEventIds: [], sessionId: opened.sessionId, reason: 'continue original task',
+      payload: { context: { workspaceId: 'ws-1', parentConversationId: env.parent.id, workspacePath: env.root,
+        anchorMessageIds: ['anchor-1'], currentInputAnchors: ['anchor-1'] } } },
+    { parentConversationId: env.parent.id, currentInputIds: ['anchor-1'], eventIds: [] }).ok, true);
+    store.advanceTransition('takeover', 'recorded', { phase: 'stopping' });
+    const transition = store.read().transitions.takeover;
+    const plan = env.goalPlanStore.getPlan(planId);
+    const control = env.supervisor.sessionControl.begin(plan, { kind: 'takeover', operationId: 'takeover', authorityRef: 'coordination:takeover' });
+    env.goalPlanStore.revisePlan(planId, { status: 'paused', runner: { status: 'paused', turnCount: 0, roundCount: 0, toolCallCount: 0 },
+      delegationOrigin: { ...env.goalPlanStore.getPlan(planId).delegationOrigin, takeover: { operationId: 'takeover', phase: 'stopping',
+        text: 'continue original task', binding: { workId: 'root', goalRevision: 1, executionEpoch: transition.executionEpoch } } } });
+    const receipt = await env.supervisor.sessionControl.drain(env.goalPlanStore.getPlan(planId), control);
+    env.supervisor.sessionControl.settle(env.goalPlanStore.getPlan(planId), control, receipt);
+    store.advanceTransition('takeover', 'stopping', { phase: 'awaiting_outcome', error: 'execution_outcome_unknown' });
+    env.supervisor.sessionControl.resume(env.goalPlanStore.getPlan(planId), 'anchor-1');
+    const resumed = env.goalPlanStore.getPlan(planId);
+    env.goalPlanStore.revisePlan(planId, { delegationOrigin: { ...resumed.delegationOrigin, phase: 'queued', lastResumeAnchorMessageId: 'anchor-1' } });
+    env.supervisor.executionScheduler.reconcile([env.goalPlanStore.getPlan(planId)]);
+    assert.ok(store.read().mandates.root.revokedSessionIds.includes(opened.sessionId));
+    await env.supervisor.cancel({ sessionId: blocker.sessionId, reason: 'fixture blocker stopped' });
+    if (scenario === 'foreign-unknown') {
+      const foreign = { ...env.goalPlanStore.getPlan(planId), planId: 'foreign-plan', conversationId: 'foreign-conversation',
+        delegationOrigin: { workspaceId: 'ws-1', sessionId: 'foreign-session', workId: 'foreign-work', phase: 'running' } };
+      env.supervisor.executionScheduler.protectResources(foreign, { state: 'reconciling', evidenceCalls: ['historical-shell'] });
+    }
+    const children = env.conversationStore.listChildren(env.parent.id, { role: 'work_session' }).length;
+    env.supervisor.executionScheduler.close(); release(); store.close();
+    store = createWorkCoordinationStore({ ...options, leaseEpoch: () => 'new-host' });
+    await store.prepare(); release = registerWorkBudget('ws-1', store);
+    if (scenario === 'crash-before-stop-receipt') {
+      const write = store.writeSessionControl.bind(store);
+      store.writeSessionControl = (operation, ...args) => {
+        const result = write(operation, ...args);
+        if (operation.phase === 'recorded' && operation.authorityRef.startsWith('coordination-recovery:')) throw new Error('simulated crash after durable recovery intent');
+        return result;
+      };
+    }
+    recovered = createSessionSupervisor({ conversationStore: env.conversationStore, goalPlanStore: env.goalPlanStore,
+      goalRunner: runner, catalog: visionCatalog(), routing: routing() });
+    await recovered.reconciled;
+    if (scenario === 'crash-before-stop-receipt') {
+      assert.equal(store.readSessionControl(opened.sessionId).phase, 'recorded');
+      recovered.executionScheduler.close(); release(); store.close();
+      store = createWorkCoordinationStore({ ...options, leaseEpoch: () => 'third-host' });
+      await store.prepare(); release = registerWorkBudget('ws-1', store);
+      recovered = createSessionSupervisor({ conversationStore: env.conversationStore, goalPlanStore: env.goalPlanStore,
+        goalRunner: runner, catalog: visionCatalog(), routing: routing() });
+      await recovered.reconciled;
+    }
+    await recovered.resumeRecovered('ws-1');
+    await recovered.recoverCoordination('ws-1');
+    await until(() => store.read().transitions.takeover.phase === 'completed').catch(error => {
+      const current = env.goalPlanStore.getPlan(planId);
+      throw new Error(JSON.stringify({ starts, transition: store.read().transitions.takeover,
+        control: store.readSessionControl(opened.sessionId), origin: current.delegationOrigin, runner: current.runner,
+        claims: recovered.executionScheduler.resourceSnapshot() }), { cause: error });
+    });
+    const fresh = env.goalPlanStore.getPlan(planId);
+    assert.equal(store.read().transitions.takeover.phase, 'completed');
+    assert.equal(fresh.delegationOrigin.takeover.phase, 'completed');
+    assert.equal(env.conversationStore.listChildren(env.parent.id, { role: 'work_session' }).length, children);
+    await recovered.resumeRecovered('ws-1'); await recovered.reconcile();
+    if (scenario === 'foreign-unknown') {
+      assert.equal(starts.length, 0, 'recovering task custody cannot release a foreign unknown shell');
+      const held = recovered.executionScheduler.resourceSnapshot().find(row => row.execution.planId === 'foreign-plan');
+      assert.equal(held.state, 'reconciling');
+      assert.deepEqual(held.evidenceCalls, ['historical-shell']);
+      assert.equal(env.goalPlanStore.getPlan(planId).delegationOrigin.phase, 'queued');
+      assert.equal(recovered.executionScheduler.inspectResources(env.goalPlanStore.getPlan(planId)).blocker.code, 'execution_outcome_unknown');
+      assert.equal(store.read().transitions.takeover.executionEffect, 'pending', 'queued admission is not actual execution');
+    } else {
+      assert.deepEqual(starts, [planId], 'recovery never repeats the existing executor admission');
+      assert.equal(evaluateWorkSessionWrite(fresh, { capabilityId: 'local.file.write' }).allowed, true);
+      await recovered.cancel({ sessionId: opened.sessionId, reason: 'controlled execution finished for fixture' });
+      const next = await recovered.spawn(spawnInput({ title: 'Following task', brief: 'Verify subsequent directory admission', isolation: 'none' }), contextOf(env));
+      assert.ok(next.sessionId);
+      assert.equal(starts.length, 2, 'a later task can enter the same directory after the recovered execution stops');
+    }
+  } finally { recovered?.executionScheduler.close(); release(); store.close(); await env.cleanup(); }
+  });
 });
 
 test('actual executor takeover retains GoalPlan, changes epoch, and does not consume a human question',async()=>{

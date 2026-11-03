@@ -86,10 +86,12 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
     await page.locator('.bot-task-row').filter({ hasText: task.title }).click();
     await until(() => detail.locator('.bot-task-instructions').textContent(), text => text.includes(instructions));
     const full = detail.locator('.bot-task-full');
-    assert.equal(await full.getAttribute('open'), null, 'task selection starts with compact progress');
+    assert.equal(await full.isVisible(), false, 'task selection starts with compact progress');
+    assert.equal(await detail.locator('.bot-task-full-toggle').getAttribute('aria-expanded'), 'false');
+    assert.equal(await detail.locator('.bot-task-scene').isVisible(), true, 'full conversation is available before expanding details');
     const compact = await detail.innerText();
     assert.doesNotMatch(compact, /取消任务|核验结果|下一步由|继续追问|任务信息|创建于|internal-/);
-    assert.match(compact, /打开完整任务/);
+    assert.match(compact, /打开完整会话/);
     assert.equal(await detail.locator('.bot-task-cancel button').isVisible(), false);
     if (['running', 'waiting_user', 'accepted', 'failed'].includes(status)) await detail.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `task-detail-${status}.png`) });
     await openFullTask(page);

@@ -313,9 +313,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       const previous = readWork(job.workId);
       const sources = ownedSessions(previous, job, roster);
       const sessionIds = [...new Set([...previous.sessionIds, ...sources.map(row => row.sessionId)])];
-      const decision = outcome.silentWait ? { fingerprint: previous.fingerprint, repeats: previous.repeats || 0,
-        progressFacts: previous.progressFacts, progressObservation: previous.progressObservation, state: 'waiting_children', end: 'awaiting_children' }
-        : repairProgressDecision(previous, outcome, roster, sources);
+      const decision = repairProgressDecision(previous, outcome, roster, sources);
       const recovery = outcome.failed ? outcome.recovery || recoveryForFailure(previous, outcome, now()) : undefined;
       const reportedWait = reportedWaitFor({ job, outcome, state: readSnapshot(), messages: readMessages(), sessions: Array.isArray(roster) ? roster : roster?.items || roster?.sessions || [] });
       const observedEvents = (job.events || []).filter(eventObserved);
