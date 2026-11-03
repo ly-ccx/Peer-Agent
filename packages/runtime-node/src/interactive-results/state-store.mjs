@@ -3,6 +3,7 @@ import { interactiveToken, normalizeInteractiveOwner, normalizeInteractiveRefere
 import { validateState } from '@peer-agent/interactive-content/state';
 import { runInteractiveValidation } from './validation.mjs';
 import { decode, encode, jsonDigest, problem } from './storage.mjs';
+import { checkedInteractiveSnapshot as checkedSnapshot } from './state-record.mjs';
 
 const clone = value => structuredClone(value);
 const same = (a, b) => encode(a) === encode(b);
@@ -31,15 +32,6 @@ export function createInteractiveStateStore({ resultStore, now = () => new Date(
     const snapshot = decode(row.snapshot), writer = row.writer ? decode(row.writer) : null;
     checkedSnapshot(snapshot, ref, published);
     return { snapshot, writer, present: true };
-  }
-  function checkedSnapshot(snapshot, ref, published) {
-    if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot) || Object.keys(snapshot).length !== 9 || Object.keys(snapshot).some(key => !['result', 'specHash', 'stateSchemaHash', 'stateRevision', 'values', 'inputDrafts', 'stateDigest', 'updatedAt', 'requestId'].includes(key))
-      || !interactiveToken(snapshot.requestId) || !Number.isFinite(Date.parse(snapshot.updatedAt))
-      || !same(snapshot.result, ref) || snapshot.specHash !== published.content.specHash || snapshot.stateSchemaHash !== published.content.stateSchemaHash
-      || !Number.isSafeInteger(snapshot.stateRevision) || snapshot.stateRevision < 0
-      || jsonDigest({ values: snapshot.values, inputDrafts: snapshot.inputDrafts }) !== snapshot.stateDigest) throw problem('interactive_state_corrupt');
-    validateState(snapshot.values, published.content.stateSchema, snapshot.inputDrafts);
-    return snapshot;
   }
   function writeRow(context, ref, snapshot, writer) {
     context.db.prepare('INSERT INTO states VALUES(?,?,?,?) ON CONFLICT(id,version) DO UPDATE SET snapshot=excluded.snapshot,writer=excluded.writer')

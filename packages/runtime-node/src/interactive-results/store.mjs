@@ -121,7 +121,9 @@ export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'
           return { ...unchanged, publicationStatus: 'published' };
         }
       } else if (draft.publication.kind !== 'create') throw problem('invalid_publication_intent');
-      const count = context.db.prepare('SELECT COUNT(*) AS count FROM results WHERE owner=?').get(encode(owner)).count;
+      const count = context.db.prepare(`SELECT COUNT(*) AS count FROM results r WHERE r.owner=? AND (
+        NOT EXISTS (SELECT 1 FROM versions v WHERE v.id=r.id AND v.version=r.head AND v.owner=r.owner AND v.availability='cleaned')
+        OR EXISTS (SELECT 1 FROM versions v WHERE v.id=r.id AND v.availability<>'cleaned'))`).get(encode(owner)).count;
       if (!predecessor && count >= L.resultsPerBot) throw problem('interactive_result_limit');
       const reference = { owner, resultId, contentVersion };
       // Model wire call IDs are not globally unique across worker conversations.
