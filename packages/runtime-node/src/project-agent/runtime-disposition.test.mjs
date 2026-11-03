@@ -19,7 +19,7 @@ test('user control dominates semantic continue, unseen events and delivery recov
     assert.equal(result.state, state);
     assert.equal(result.handling, 'none');
   }
-  assert.equal(decideRuntimeDisposition({ outcome: { stopped: true }, sessions: [{ sessionId: 'child', status: 'running' }] }).state, 'paused');
+  assert.equal(decideRuntimeDisposition({ outcome: { stopped: true }, sessions: [{ sessionId: 'child', status: 'running' }] }).state, 'waiting_children');
   assert.equal(replyRecoveryAdmission({ state: 'paused', stopScope: 'work' }, {}).code, 'STALE_TURN');
   assert.equal(replyRecoveryAdmission({ state: 'runnable', pendingControl: { action: 'cancel' } }, {}).code, 'STALE_TURN');
 });
@@ -39,6 +39,7 @@ test('mere sources do not grant a fresh cancellation work custody of a legacy se
   const work = { workId: 'cancel', sessionIds: [], anchorInputIds: ['cancel-input'] };
   assert.deepEqual(ownedSessions(work, { events: [] }, [stopped], ['old']), []);
   assert.deepEqual(ownedSessions(work, { events: [{ sessionId: 'old' }] }, [stopped]), []);
+  assert.deepEqual(ownedSessions({ ...work, pendingEventIds: ['event'] }, { events: [{ eventId: 'event', sessionId: 'old' }] }, [stopped]), [stopped]);
   const bound = { ...stopped, origin: { workId: 'cancel' } };
   assert.deepEqual(ownedSessions(work, { events: [] }, [bound], ['old']), [bound]);
 });

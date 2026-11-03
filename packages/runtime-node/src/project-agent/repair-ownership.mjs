@@ -19,8 +19,8 @@ export function ownedSessions(work, job, roster) {
     && (!row.origin?.parentConversationId || !work.parentConversationId || row.origin.parentConversationId === work.parentConversationId)
     && (!row.origin?.workId || row.origin.workId === work.workId) && (
     work.sessionIds?.includes(row.sessionId) || row.origin?.workId === work.workId
-    || row.origin?.parentConversationId === work.parentConversationId && work.parentConversationId
-      && (job.events || []).some(event => event.sessionId === row.sessionId && work.pendingEventIds?.includes(event.eventId))
+    || (job.events || []).some(event => event.sessionId === row.sessionId && work.pendingEventIds?.includes(event.eventId)
+      && (!event.workspaceId || !work.workspaceId || event.workspaceId === work.workspaceId))
     || row.origin?.anchorMessageId && work.anchorInputIds?.some(id => `input-${id}` === row.origin.anchorMessageId)));
 }
 

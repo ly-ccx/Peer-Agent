@@ -12,7 +12,7 @@ export function reconcileResourceWait({ work, state, sessions, port, store, now 
   if (runtimeWorkHeld(work) || hasUnsettledDispatch(work) || work.recovery
     || work.state === 'blocked_system' && work.end !== 'awaiting_children') return true;
   const scope = resourceWaitScope(work, state);
-  const related = sessions.filter(row => scope.sessionIds.includes(row.sessionId));
+  const related = (typeof sessions === 'function' ? sessions() : sessions).filter(row => scope.sessionIds.includes(row.sessionId));
   const observations = refs.map(wait => port.inspect(scope, wait));
   if (observations.some(row => row.state === 'stale' || row.state === 'unavailable')) {
     if (work.state !== 'blocked_system') store.saveWork({ ...work, state: 'blocked_system', end: 'awaiting_children' }, { returnState: false });

@@ -50,10 +50,14 @@ export function decideRuntimeDisposition({ previous = {}, sessions = [], outcome
     state, end, handling, waitFor, repairSessionIds: ownership.repairSessionIds, ...(blockedCode ? { blockedCode } : {}),
   });
   if (held || previous.pendingControl || previous.stopScope === 'work' && ['paused', 'cancelled'].includes(previous.state || '')) {
-    const state = previous.state === 'cancelled' ? 'cancelled' : 'paused';
-    return result(state, 'user_stopped', previous.pendingControl ? 'host' : 'none');
+    const state = previous.state === 'cancelled' ? 'cancelled' : previous.state === 'waiting_children' ? 'waiting_children' : 'paused';
+    return result(state, 'user_stopped', previous.pendingControl ? 'host' : 'none',
+      state === 'waiting_children' ? ownership.waitingSessionIds.map(id => ({ kind: 'session' as const, id })) : []);
   }
-  if (outcome.stopped || previous.state === 'paused' && previous.end === 'user_stopped') return result('paused', 'user_stopped', 'none');
+  if (outcome.stopped || ['paused', 'waiting_children'].includes(previous.state || '') && previous.end === 'user_stopped') {
+    const waiting = ownership.waitingSessionIds;
+    return result(waiting.length ? 'waiting_children' : 'paused', 'user_stopped', 'none', waiting.map(id => ({ kind: 'session' as const, id })));
+  }
   if (outcome.budgetLimited) return result('budget_limited', 'budget_limited', 'host');
   if (outcome.failed) return recovery?.reservationId
     ? result('retry_wait', 'provider_retryable', 'host', [{ kind: 'retry_timer', id: recovery.reservationId }])
@@ -85,5 +89,5 @@ export function decideRuntimeDisposition({ previous = {}, sessions = [], outcome
 /** Only this durable user-stop shape holds a reply; ordinary child waits remain autonomous. */
 export function runtimeWorkHeld(work: Work | null | undefined): boolean {
   return Boolean(work && (work.pendingControl || work.stopScope === 'work' && ['paused', 'cancelled'].includes(work.state || '')
-    || work.state === 'paused' && work.end === 'user_stopped'));
+    || ['paused', 'waiting_children'].includes(work.state || '') && work.end === 'user_stopped'));
 }

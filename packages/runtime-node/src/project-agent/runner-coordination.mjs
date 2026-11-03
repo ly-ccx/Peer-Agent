@@ -136,7 +136,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     for (const work of Object.values(decision().works)) {
       if (historyExecutionHeld(work)) continue;
       if (runtimeWorkHeld(work) || work.parentConversationId !== conversationId) continue;
-      if (reconcileResourceWait({ work, state: decision(), sessions: roster(), port: resourceWaitPort, store, now })) {
+      if (reconcileResourceWait({ work, state: decision(), sessions: roster, port: resourceWaitPort, store, now })) {
         decisionSnapshot = undefined; continue;
       }
       if (!work.reportedWait || !['waiting_children', 'waiting_user'].includes(work.state)) continue;
@@ -294,6 +294,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       if (!existing || existing.parentConversationId !== conversationId) return false;
       if (historyExecutionHeld(existing)) return false;
       if (existing.pendingControl || existing.stopScope === 'work' && ['paused', 'cancelled'].includes(existing.state)) return false;
+      if (runtimeWorkHeld(existing) && !job.manualRecovery) return false;
       if (job.recoveryRevision !== undefined && existing.revision !== job.recoveryRevision) return false;
       if (job.recoveryReservationId && (existing.recovery?.reservationId !== job.recoveryReservationId || !recoveryReservationDue(existing, now()))) return false;
       if (existing.state === 'coalesced' || !job.manualRecovery && ['paused', 'cancelled', 'budget_limited', 'blocked_system'].includes(existing.state)) return false;
