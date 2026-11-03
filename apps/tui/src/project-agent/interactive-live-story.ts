@@ -3,7 +3,7 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createConversationStore } from '@peer-agent/conversation-store';
 import { interactiveFeedbackFromFollowup } from '@peer-agent/protocol';
-import { createBotLifecycle, createProjectRegistry } from '@peer-agent/runtime-node';
+import { createBotLifecycle, createProjectRegistry, verdictRefFor } from '@peer-agent/runtime-node';
 import type { ModelProvider, ModelUsage } from '@peer-agent/runtime-node/models';
 import { restrictTuiHostTools } from '../cli-host-filter.ts';
 import { createProviderChatModel } from '../provider-chat-model.ts';
@@ -26,7 +26,7 @@ const CAPABILITIES = [
 const INITIAL_INPUT = 'live-story-publish', FROZEN_INPUT = 'live-story-verify';
 const INITIAL_TASK = [
   `Delegate one task with spawn_session. Use anchorMessageIds ["input-${INITIAL_INPUT}"], kind "research", readOnly true, isolation "none", and requiredCapabilities ["local.interactive.publish"].`,
-  'Include successCriteria as an array with one object of kind "model_review". Its description must require independent inspection of the program, complete facts binding and initial evaluation, checking both costs and the remainder.',
+  'Set successCriteria to [{"kind":"model_review","description":"Independently inspect the program, full facts binding and initial evaluation. Check both costs and the remainder."}]. Keep the longer instructions in brief.',
   'The worker must read its exact plan and task IDs with goal_get_plan, publish once, then use goal_update_task with the returned fixed artifact Evidence. Stop after recording it. Leave inspection to the Verifier.',
   'I will send the selected budget when the publication task is ready. One acknowledgment is enough for now. Keep the original result and do not claim human acceptance.',
   'Worker brief: ' + INTERACTIVE_LIVE_TASK,
@@ -35,7 +35,7 @@ const FROZEN_TASK = [
   'The selected budget has already been supplied in the attached frozen selection. Do not ask me to supply it again or restate an earlier progress reply.',
   `Delegate this new request via spawn_session now. Use anchorMessageIds ["input-${FROZEN_INPUT}"] to carry the attached frozen selection. Set kind "research", readOnly true, isolation "none", and requiredCapabilities ["local.interactive.inspect"].`,
   'The new worker should use goal_get_plan, then inspect the attached fixed result once with view evaluate and the attached followupId, then record that actual result and evidence on its leaf with goal_update_task.',
-  'Include successCriteria as an array with one object of kind "model_review" and a description requiring an independent Verifier to make four inspect_interactive_result calls on the attached fixed reference: program, data binding facts, initial evaluate, and evaluate with the attached followupId. Run them together. Cite only the four canonical interactive-inspection references.',
+  'Set successCriteria to [{"kind":"model_review","description":"Independently inspect the attached fixed result in four calls together: program, data binding facts, initial evaluate, and evaluate with the attached followupId. Cite only the four canonical interactive-inspection references."}].',
   'After the follow-up task reports result_ready, call verify_session with its sessionId even if its Goal plan already has a passed review. That call records the delegated session verdict. Use its returned detail; avoid repeating get_session or get_verification_detail when the status is unchanged.',
   'Then use post_reply with both session IDs as sources and their current statuses. Explain the two remainders, describe the costs as synthetic, and state the actual verification and human acceptance status. Do not republish or substitute direct Bot inspection for delegation.',
 ].join('\n');
@@ -187,6 +187,7 @@ export async function runInteractiveLiveStory(options: {
         const sessions = host.supervisor.sessionsForProject(workspaceId);
         const verification = sessions.find((session: any) => session.sessionId !== fixed.source.sessionId
           && host.plans.getPlan(session.planId)?.delegationOrigin?.anchorMessageId === `input-${FROZEN_INPUT}`
+          && host.plans.getPlan(session.planId)?.hostVerification?.verdictRef === verdictRefFor(session.sessionId, 'passed')
           && host.plans.getPlan(session.planId)?.hostVerification?.independentVerifier === 'passed');
         const history = host.conversations.getPersistedConversationHistory!(conversationId)?.messages ?? [];
         if (!verification || !history.some(message => message.id === `input-${FROZEN_INPUT}`)) return;
@@ -209,7 +210,10 @@ export async function runInteractiveLiveStory(options: {
         return request.view === 'evaluate' && stateSource?.followupId === followupId ? ['frozen'] : [];
       }));
       if (covered.size !== 4) throw Error('story_verifier_evidence_incomplete');
-      report.delivery = await host.readTaskResult(fixed.source.sessionId, fixed.artifactRef, signal);
+      const delivery = await host.readTaskResult(fixed.source.sessionId, fixed.artifactRef, signal);
+      if (delivery.summary.availability !== 'available' || !delivery.computation
+        || delivery.computation.truncated || !/\b45\b/.test(delivery.computation.text)) throw Error('story_text_delivery_incomplete');
+      report.delivery = delivery;
       report.stage = 'delivered';
       report.ok = true;
     } finally {
