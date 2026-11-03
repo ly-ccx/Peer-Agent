@@ -300,9 +300,16 @@ test('the main workspace opens canonical interactive deliveries, restores result
     assert.equal(await page.getByRole('tab', { name: 'Workspace trial updated', exact: true }).evaluate(node => node === document.activeElement), true, 'explicit navigation keeps focus on the selected resource tab');
     await page.waitForFunction(() => Array.from(document.querySelectorAll('label')).some(label => label.textContent === 'Divisor' && label.control?.value === '9'));
     assert.equal((await electron.evaluate((_electron, reference) => globalThis.workspaceFixture.snapshot(reference), next)).values.$x, 9);
+    const shownSurface = page.locator('.resource-interactive-view[data-active="true"] .interactive-surface');
+    const hiddenView = page.locator('.resource-interactive-view[data-active="false"]');
+    assert.equal(await shownSurface.count(), 1);
+    assert.equal(await hiddenView.count(), 1);
+    assert.equal(await hiddenView.locator('.interactive-surface').count(), 0, 'the hidden fixed result keeps its tab without mounting the SDK');
     await page.screenshot({ path: path.join(root, 'workspace-new-version.png'), animations: 'disabled' });
     await page.getByRole('tab', { name: 'Workspace trial', exact: true }).click();
     assert.equal(await page.getByLabel('Divisor', { exact: true }).inputValue(), '-', 'opening a version cannot overwrite the old raw draft');
+    assert.equal(await shownSurface.count(), 1);
+    assert.equal(await hiddenView.locator('.interactive-surface').count(), 0, 'switching unmounts the previously visible SDK tree');
     assert.equal((await electron.evaluate(() => globalThis.workspaceFixture.snapshot())).values.$x, 3);
     await recoveredView.getByRole('button', { name: 'Check versions', exact: true }).click();
     const newerWindow = electron.waitForEvent('window');

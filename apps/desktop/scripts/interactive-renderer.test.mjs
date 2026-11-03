@@ -171,6 +171,38 @@ test('the real SDK mounts Peer controls without tools or telemetry and recovers 
       assert.deepEqual(errors, []);
       assert.equal(await page.locator('[data-openui-devtools-auto-mount]').count(), 0);
       if (mode === 'production') {
+        const performanceSample = await page.evaluate(async () => {
+          const longTasks = [];
+          const observer = new PerformanceObserver(list => longTasks.push(...list.getEntries().map(entry => entry.duration)));
+          observer.observe({ type: 'longtask' });
+          const field = document.querySelector('.interactive-surface input[aria-label="Divisor"]')
+            ?? [...document.querySelectorAll('label')].find(label => label.textContent === 'Divisor')?.control;
+          if (!(field instanceof HTMLInputElement)) throw Error('Missing trial input for timing');
+          const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+          const timings = [];
+          for (const value of [0, 5, 4, 5, 4, 5, 4, 5]) {
+            const start = performance.now();
+            setValue.call(field, String(value));
+            field.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: String(value) }));
+            let expected;
+            do {
+              await new Promise(requestAnimationFrame);
+              const metric = document.querySelector('.interactive-metric:not([hidden])');
+              expected = value === 0 ? !metric : metric?.querySelector('dd')?.textContent === String(100 / value);
+            } while (!expected && performance.now() - start < 2000);
+            if (!expected) throw Error('Trial input did not produce the expected visible state for ' + value);
+            timings.push({ value, inputToFrameMs: performance.now() - start });
+          }
+          longTasks.push(...observer.takeRecords().map(entry => entry.duration));
+          observer.disconnect();
+          return { timings, longTaskMs: longTasks };
+        });
+        const processSamples = await app.evaluate(({ app }) => app.getAppMetrics().map(({ type, cpu, memory }) => ({
+          type, cpuPercent: cpu.percentCPUUsage, workingSetKiB: memory.workingSetSize,
+        })));
+        writeFileSync(path.join(root, 'production-interaction-sample.json'), JSON.stringify({
+          rows: 120, ...performanceSample, processSamples,
+        }, null, 2) + '\n');
         await page.evaluate(() => interactiveFixture.fail());
         const fallback = page.getByRole('alert').filter({ hasText: 'The calculation view could not load.' });
         await fallback.getByText('Saved model summary, unverified').waitFor();
