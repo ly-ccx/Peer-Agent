@@ -43,10 +43,27 @@ function readRows(file, maxBytes, missingAllowed) {
   } finally { closeSync(fd); }
 }
 
+function selectBotConversations(index, owner) {
+  const parent = index.get(owner.conversationId);
+  if (parent?.role !== 'project_agent' || parent.workspaceId !== owner.workspaceId)
+    throw fail('CONVERSATION_RETENTION_SCOPE_INVALID');
+  const ids = [owner.conversationId], sessions = new Set();
+  for (const row of index.values()) {
+    if (row.role !== 'work_session' || row.parentConversationId !== parent.id) continue;
+    const sessionId = row.delegation?.sessionId;
+    if (row.workspaceId !== owner.workspaceId || typeof sessionId !== 'string' || !ID.test(sessionId) || sessions.has(sessionId))
+      throw fail('CONVERSATION_RETENTION_SCOPE_INVALID');
+    sessions.add(sessionId);
+    ids.push(row.id);
+  }
+  return ids;
+}
+
 /** Internal raw history for a caller-owned conversation set. The caller holds the guard until commit. */
-export function acquireMessageRetentionGuard(indexFile, convFile, ids) {
-  if (!Array.isArray(ids) || !ids.length || ids.length > 256 || new Set(ids).size !== ids.length
-    || ids.some(id => typeof id !== 'string' || !ID.test(id))) throw fail('CONVERSATION_RETENTION_SCOPE_INVALID');
+export function acquireMessageRetentionGuard(indexFile, convFile, scope) {
+  const explicit = Array.isArray(scope);
+  if (!explicit && (!scope || typeof scope.conversationId !== 'string' || !ID.test(scope.conversationId)
+    || typeof scope.workspaceId !== 'string' || !scope.workspaceId)) throw fail('CONVERSATION_RETENTION_SCOPE_INVALID');
   const lock = `${indexFile}.lock`;
   try { mkdirSync(lock); }
   catch (error) { if (error.code === 'EEXIST') throw fail('CONVERSATION_RETENTION_BUSY'); throw error; }
@@ -61,12 +78,14 @@ export function acquireMessageRetentionGuard(indexFile, convFile, ids) {
     const versions = new Map([[indexFile, identity(indexFile)]]);
     const index = readRows(indexFile, LIMIT, false);
     let remaining = LIMIT - index.bytes;
-    const wanted = new Set(ids), metadata = new Map();
+    const metadata = new Map();
     for (const row of index.rows) {
-      if (!wanted.has(row.id)) continue;
-      if (metadata.has(row.id)) throw fail('CONVERSATION_RETENTION_CORRUPT');
+      if (typeof row.id !== 'string' || !ID.test(row.id) || metadata.has(row.id)) throw fail('CONVERSATION_RETENTION_CORRUPT');
       metadata.set(row.id, row);
     }
+    const ids = explicit ? scope : selectBotConversations(metadata, scope);
+    if (!ids.length || ids.length > 256 || new Set(ids).size !== ids.length
+      || ids.some(id => typeof id !== 'string' || !ID.test(id))) throw fail('CONVERSATION_RETENTION_SCOPE_INVALID');
     const histories = new Map();
     for (const id of [...ids].sort()) {
       const meta = metadata.get(id);

@@ -25,7 +25,7 @@ import { normalizeResourceFeedbackList as normalizeLegacyFeedback } from './test
 const upload = { id: 'user-file', name: 'brief.txt', mimeType: 'text/plain', size: 4, sourceKind: 'user_upload', kind: 'text', text: 'keep' };
 async function fixture(t) {
   const rootDir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'peer-interactive-feedback-'))), conversations = createConversationStore({ storeDir: path.join(rootDir, 'conversations') });
-  const parent = conversations.createConversation({ title: 'Original Bot' }), owner = { workspaceId: 'bot-a', conversationId: parent.id };
+  const parent = conversations.createConversation({ title: 'Original Bot', role: 'project_agent', workspaceId: 'bot-a' }), owner = { workspaceId: 'bot-a', conversationId: parent.id };
   const results = createInteractiveResultStore({ rootDir, assertCompatibility: () => true }), states = createInteractiveStateStore({ resultStore: results });
   t.after(() => { states.close(); results.close(); rmSync(rootDir, { recursive: true, force: true }); });
   const draft = { publication: { kind: 'create' }, title: 'Trial', textFallback: 'Unverified trial.', inputs: [],
@@ -83,7 +83,7 @@ test('known attachments carry the complete selection through a real already-open
   assert.deepEqual(queue.submitInput(f.input('selected')).resourceFeedback, [f.feedback]);
   const code = readFileSync(new URL('../../../conversation-store/src/index.mjs', import.meta.url), 'utf8')
     .replace("import { acquireMessageRetentionGuard } from './message-retention-guard.mjs';\n", '')
-    .replace('    acquireMessageRetentionGuard: ids => acquireMessageRetentionGuard(indexFile, convFile, ids),\n', '');
+    .replace('    acquireMessageRetentionGuard: scope => acquireMessageRetentionGuard(indexFile, convFile, scope),\n', '');
   assert.equal(createHash('sha256').update(code).digest('hex'), 'a5f25527c02bdda6917680538ae480cd57f9d80bc55f259f290c4daf630d9e5e',
     'the shared Conversation writer must match the pinned source after removing only the independent guard entry');
 });
@@ -117,6 +117,27 @@ test('actual delegation preserves wire bytes and admits the prior result only fr
   assert.equal(child.resourceFeedback, undefined, 'unknown union never leaks back into shared child records');
   assert.equal(child.attachments[1].text, anchor.attachments[1].text); assert.deepEqual(child.attachments[0], upload);
   assert.deepEqual(f.admission.restore(child, f.owner.workspaceId), [f.feedback]);
+  // After the parent history is rewritten and the stores reopen, the actual child
+  // still retains its own canonical copy. No caller-provided child list is used.
+  f.conversations.replaceMessages(f.owner.conversationId, [{ ...anchor, attachments: [upload] }]);
+  const reopened = createConversationStore({ storeDir: path.join(f.rootDir, 'conversations') });
+  const admission = createInteractiveFeedbackAdmission({ stateStore: f.states, conversationStore: reopened });
+  const guarded = admission.acquireMessageRoots(f.owner);
+  try {
+    assert.deepEqual(new Set(guarded.conversationIds), new Set([f.owner.conversationId, plan.conversationId]));
+    assert.deepEqual(guarded.selections, [{ reference: f.reference, followupId: f.frozen.followupId }]);
+    assert.equal(guarded.assertCurrent(), true);
+  } finally { guarded.release(); }
+  f.conversations.replaceMessages(f.owner.conversationId, [anchor]);
+  const staged = reopened.createChildConversation({ parentConversationId: f.owner.conversationId, role: 'work_session',
+    workspaceId: f.owner.workspaceId, anchorMessageId: anchor.id, delegation: { sessionId: 'staged', anchorMessageId: anchor.id, inputId: 'staged-input' },
+    runtimeState: { conversationId: f.owner.conversationId, contentRevision: reopened.getPersistedConversationHistory(f.owner.conversationId).contentRevision, status: 'idle' },
+    capturedAt: '2026-11-04T00:00:00Z', backgroundMessageIds: [anchor.id], confirmMissing: true });
+  const stagedGuard = admission.acquireMessageRoots(f.owner);
+  try { assert.ok(stagedGuard.conversationIds.includes(staged.id), 'a child without a plan must still be in scope'); }
+  finally { stagedGuard.release(); }
+  assert.throws(() => admission.acquireMessageRoots({ ...f.owner, workspaceId: 'different-bot' }), { code: 'CONVERSATION_RETENTION_SCOPE_INVALID' });
+
   const origin = { planId: 'plan', conversationId: 'worker', delegationOrigin: { workspaceId: f.owner.workspaceId, parentConversationId: f.owner.conversationId, sessionId: 'session' } };
   const authority = createInteractiveAuthority({ goalPlanStore: { getPlan: id => id === 'plan' ? origin : plans.getPlan(id) },
     conversationStore: f.conversations, resultStore: f.results, getBotConversationId: () => f.owner.conversationId,

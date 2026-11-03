@@ -1881,7 +1881,7 @@ export function createConversationStore(options = {}) {
     readInteractionProcess: interactions.readProcess,
     createHistoryProjection,
     getPersistedConversationHistories,
-    acquireMessageRetentionGuard: ids => acquireMessageRetentionGuard(indexFile, convFile, ids),
+    acquireMessageRetentionGuard: scope => acquireMessageRetentionGuard(indexFile, convFile, scope),
     resolveSelectionReference,
     createSelectionChild: changed(createSelectionChild, 'created'),
     createChildConversation: changed(createChildConversation, 'created'),

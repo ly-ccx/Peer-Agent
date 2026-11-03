@@ -21,9 +21,9 @@ export function createInteractiveFeedbackAdmission({ stateStore, conversationSto
     return rows;
   }
   function acquireMessageRoots(owner, conversationIds) {
-    if (!conversationIds?.includes(owner.conversationId) || !conversationStore?.acquireMessageRetentionGuard)
+    if ((conversationIds !== undefined && !conversationIds.includes(owner.conversationId)) || !conversationStore?.acquireMessageRetentionGuard)
       throw problem('interactive_retention_unavailable');
-    const guard = conversationStore.acquireMessageRetentionGuard(conversationIds);
+    const guard = conversationStore.acquireMessageRetentionGuard(conversationIds ?? owner);
     try {
       const selections = [];
       for (const messages of guard.histories.values()) {
@@ -37,7 +37,7 @@ export function createInteractiveFeedbackAdmission({ stateStore, conversationSto
         }
       }
       if (!guard.assertCurrent()) throw problem('interactive_retention_stale');
-      return { revision: guard.revision, selections, assertCurrent: guard.assertCurrent, release: guard.release };
+      return { revision: guard.revision, selections, conversationIds: [...guard.histories.keys()], assertCurrent: guard.assertCurrent, release: guard.release };
     } catch (error) { guard.release(); throw error; }
   }
   return { validate, restore, acquireMessageRoots };

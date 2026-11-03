@@ -191,8 +191,8 @@ export interface ConversationStore {
     options?: { maxEntries?: number; maxBytes?: number; immutableInput?: boolean; immutableOutput?: false }): (id: string) => T | null;
   /** Current index batch; no cross-file transaction or permission/liveness attestation. */
   getPersistedConversationHistories?(ids: readonly string[]): Map<string, PersistedConversationHistory | null>;
-  /** Internal canonical message guard. The host owns scope completeness and releases after commit. */
-  acquireMessageRetentionGuard?(ids: readonly string[]): {
+  /** Internal canonical message guard. The host attests Bot ownership and releases after commit. */
+  acquireMessageRetentionGuard?(scope: readonly string[] | { conversationId: string; workspaceId: string }): {
     histories: ReadonlyMap<string, readonly Record<string, unknown>[]>;
     revision: string;
     assertCurrent(): boolean;
