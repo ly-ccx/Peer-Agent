@@ -116,6 +116,7 @@ export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'
         if (contentVersion === predecessor.contentVersion) {
           const unchanged = { reference: predecessor, callRef, argsDigest, unchanged: true, evidenceRef: base.evidenceRef, artifactRef: base.artifactRef };
           context.db.prepare('INSERT INTO operations VALUES(?,?,?,?,?,?,?)').run(id, encode(owner), source.conversationId, source.toolCallId, argsDigest, 'published', encode(unchanged));
+          attempts.finishInTransaction(context, callRef);
           return { ...unchanged, publicationStatus: 'published' };
         }
       } else if (draft.publication.kind !== 'create') throw problem('invalid_publication_intent');
@@ -144,6 +145,7 @@ export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'
       } else context.db.prepare('INSERT INTO results VALUES(?,?,?)').run(resultId, encode(owner), contentVersion);
       context.db.prepare('INSERT INTO versions(id,version,owner,object,metadata) VALUES(?,?,?,?,?)').run(resultId, contentVersion, encode(owner), object, encode(metadata));
       context.db.prepare('INSERT INTO operations VALUES(?,?,?,?,?,?,?)').run(id, encode(owner), source.conversationId, source.toolCallId, argsDigest, 'index_pending', encode(receipt));
+      attempts.finishInTransaction(context, callRef);
       onStep('before_commit'); requireCurrent(assertCurrent);
       return { ...receipt, publicationStatus: 'index_pending' };
     });

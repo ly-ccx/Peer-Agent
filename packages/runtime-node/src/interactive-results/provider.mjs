@@ -126,7 +126,6 @@ export function createInteractiveResultProvider({ store, stateStore, materialSou
           guard();
           const receipt = store.commitPublication({ owner: authority.owner, source: authority.source, draft, content,
             provenance: resolved.provenance, dataLevel, grant, ...(authority.streamId ? { streamId: authority.streamId } : {}) }, guard);
-          store.finishAttempt(callRef);
           return published(receipt.publicationStatus === 'published' ? receipt : reconcile(callRef, guard));
         }
         const request = normalizeInteractiveInspect(call.arguments);

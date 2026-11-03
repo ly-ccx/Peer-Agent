@@ -203,8 +203,14 @@ test('a stricter actual context classification cannot be lost by an otherwise id
   assert.equal(revised.result.evidence.dataLevel, 'D4_regulated');
 });
 test('a crash after durable commit is reported as pending and querying original operation confirms the real original fact', async t => {
-  const f = fixture(t, { onStep: stage => { if (stage === 'committed') throw Error('lost response'); } });
+  let phaseAtCommit;
+  const f = fixture(t, { onStep: stage => {
+    if (stage !== 'committed') return;
+    phaseAtCommit = f.store.getAttempt({ owner, conversationId: 'worker-a', toolCallId: 'publish-a' })?.phase;
+    throw Error('lost response');
+  } });
   const failed = await f.publish();
+  assert.equal(phaseAtCommit, 'committed');
   assert.equal(failed.result.outputPreview.effectCommitted, true);
   f.setRole('project_agent');
   const checked = await f.execute(INSPECT, { target: { kind: 'publication', reference: failed.result.outputPreview.callRef }, view: 'metadata' }, 'status-a');

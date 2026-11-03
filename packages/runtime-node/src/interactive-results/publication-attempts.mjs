@@ -46,21 +46,27 @@ export function createPublicationAttempts(storage) {
       return saved;
     });
   }
-  function finish(callRef, { code, status = 'failed', contentFailure = false } = {}) {
+  function finishInTransaction(context, callRef, { code, status = 'failed', contentFailure = false } = {}) {
     const id = key(callRef);
-    return storage.transaction(callRef.owner.workspaceId, context => {
-      const row = context.db.prepare('SELECT body FROM attempts WHERE id=?').get(id);
-      if (!row) return null;
-      const saved = savedAttempt(row.body, callRef);
-      if (saved.phase !== 'prepared') return saved;
-      const ended = { ...saved, phase: code ? 'failed' : 'committed', ...(code ? { code: String(code).slice(0, 100), status } : {}) };
-      context.db.prepare('UPDATE attempts SET body=? WHERE id=?').run(encode(ended), id);
-      const failures = code ? Number(context.db.prepare('SELECT failures FROM publication_candidates WHERE id=?').get(saved.candidateId)?.failures ?? 0) + Number(contentFailure) : 0;
-      const update = context.db.prepare('UPDATE publication_candidates SET active=NULL,failures=? WHERE id=? AND active=?')
-        .run(failures, saved.candidateId, id);
-      return contentFailure && code && update.changes === 1
-        ? { ...ended, remainingRepairs: Math.max(0, L.contentRepairs + 1 - failures) } : ended;
-    });
+    const row = context.db.prepare('SELECT body FROM attempts WHERE id=?').get(id);
+    if (!row) return null;
+    const saved = savedAttempt(row.body, callRef);
+    if (saved.phase !== 'prepared') return saved;
+    const ended = { ...saved, phase: code ? 'failed' : 'committed', ...(code ? { code: String(code).slice(0, 100), status } : {}) };
+    context.db.prepare('UPDATE attempts SET body=? WHERE id=?').run(encode(ended), id);
+    const candidate = context.db.prepare('SELECT failures FROM publication_candidates WHERE id=?').get(saved.candidateId);
+    if (!Number.isSafeInteger(candidate?.failures) || candidate.failures < 0 || candidate.failures > L.contentRepairs) {
+      throw problem('interactive_storage_corrupt');
+    }
+    const failures = code ? candidate.failures + Number(contentFailure) : 0;
+    const update = context.db.prepare('UPDATE publication_candidates SET active=NULL,failures=? WHERE id=? AND active=?')
+      .run(failures, saved.candidateId, id);
+    if (Number(update.changes) !== 1) throw problem('interactive_storage_corrupt');
+    return contentFailure && code
+      ? { ...ended, remainingRepairs: Math.max(0, L.contentRepairs + 1 - failures) } : ended;
   }
-  return { read, begin, finish };
+  function finish(callRef, outcome) {
+    return storage.transaction(callRef.owner.workspaceId, context => finishInTransaction(context, callRef, outcome));
+  }
+  return { read, begin, finish, finishInTransaction };
 }
