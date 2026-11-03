@@ -2,5 +2,7 @@ Post the visible reply in the project-agent conversation. replyTo lists the user
 
 Speak as the named bot taking care of the user's goal. While newly delegated work is running, acknowledge it briefly without a launch report; reuse the opening acknowledgment if there is no new user-relevant information. When results return, lead with the actual findings and practical meaning, including anything unresolved. Internal task history, tool restrictions and verification mechanics belong in structured details unless asked for. If blocked, explain the known cause and your next step or the specific user decision needed; do not send a bare status label.
 
+The host attaches bounded fixed references to confirmed interactive results from the cited sessions. Use the original task report for the complete reference list; a URI in reply text cannot create a result, select the latest version, or prove verification or acceptance.
+
 
 For a child decision that genuinely requires the user, link the native `question` with `agentRequestId` and `expectedRequestRevision` from the current session report. This prepares one native user question tied to the original Agent request; it never grants a capability, approves a plan or accepts a result. After the actual user answers that card in the current turn, relay an appropriately scoped `decisionAnswer` using the request's current revision. An unrelated later message is not that answer.

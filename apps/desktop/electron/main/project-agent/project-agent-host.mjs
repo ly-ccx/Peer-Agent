@@ -183,7 +183,7 @@ export function registerDesktopProjectAgent({
   const interactiveEnabled = workspaceId => ownsProject(workspaceId) && readRuntimePolicy()?.projectAgent?.interactiveResults === true;
   const interactive = createInteractiveRuntime({ rootDir: runtimeRoot, goalPlanStore, conversationStore,
     getBotConversationId: id => profileStore.read(id)?.agentConversationId, holdsLease: ownsProject, enabled: interactiveEnabled,
-    classifyContext: () => 'D3_private', getSession: id => supervisor.get({ sessionId: id, detail: 'report' }) });
+    classifyContext: () => 'D3_private', getSession: (id, detail = 'report') => supervisor.get({ sessionId: id, ...(detail === 'report' ? { detail } : {}) }) });
   const uninstallInteractive = installDesktopInteractiveRuntime({ runtime: interactive, enabled: interactiveEnabled });
   const memoryStore = createMemoryStore({ rootDir: dataHome });
   configurePermissions?.(approvalStore);
@@ -220,6 +220,7 @@ export function registerDesktopProjectAgent({
     deferRecovery: true,
     readDelegationCapabilities: input => agentTurnExecutor.readDelegationCapabilities?.(input),
     readResourceFeedback: interactive.feedback.restore,
+    projectReportEvidence: interactive.publications.projectReportEvidence,
     approvalStore,
     memoryStore,
     resolveModel: (input) => agentTurnExecutor.resolveGoalRole({
@@ -256,6 +257,7 @@ export function registerDesktopProjectAgent({
   const uninstallVerification = installSessionVerification(verification);
   const projectFacts = createDesktopProjectFacts({ requirePreparedCoordination: true, supervisor, approvalStore, profileStore, conversationStore, runtimeRoot, memoryStore,objectiveProposals:workspaceId=>objectiveActions.pending(workspaceId).filter(row=>{const item=objectiveStore.get(workspaceId,row.objectiveId);return item?.status==='active'&&!item.pendingConfirmation&&item.autonomy!=='report_only'&&item.version===row.version;}) });
   const uninstallDelivery = installDeliveryFacts({
+    readResultReferences: interactive.publications.replyReferences,
     read(view) {
       const settings = normalizeProjectAgentSettings(readRuntimePolicy()?.projectAgent);
       const level = profileStore.read(view?.workspaceId)?.proactivity;

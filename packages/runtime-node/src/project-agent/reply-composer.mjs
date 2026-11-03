@@ -4,7 +4,7 @@
  * 模型附在工具参数上的结论、标记和卡片不会进入结果。
  */
 import { planDelivery } from './digest.mjs';
-import { WORK_SESSION_STATUSES } from '@peer-agent/protocol';
+import { WORK_SESSION_STATUSES, parseInteractiveArtifactRef } from '@peer-agent/protocol';
 
 const TEXT_MAX = 2000;
 const ID_MAX = 200;
@@ -272,8 +272,8 @@ function pilesOf(value, depth = 0) {
 
 function readEvidenceRefs(value) {
   if (value == null) return { ids: [] };
-  const ids = stringList(value, { min: 0, max: LIST_MAX, itemMax: 500 });
-  if (!ids) return fail('invalid_input', 'evidenceRefs must be a list of evidence refs.');
+  const ids = stringList(value, { min: 0, max: LIST_MAX, itemMax: 1024 });
+  if (!ids || ids.some(id => id.length > 500 && !parseInteractiveArtifactRef(id))) return fail('invalid_input', 'evidenceRefs must be a list of evidence refs.');
   const allowed = ids.filter((id) => !id.includes('..') && !/[\s\\]/.test(id));
   return { ids: allowed };
 }

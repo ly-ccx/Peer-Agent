@@ -36,7 +36,7 @@ async function renderer(output) {
       if(window.peerResource)createRoot(document.getElementById('root')).render(<NativeResourceWindow/>);
       else{const{fixture}=await window.peerAgent.getBootstrap();
         createRoot(document.getElementById('root')).render(<ConfirmProvider><ResourceEditAppFrame><WorkbenchProvider conversationId={fixture.owner.conversationId} isPageActive resourceMode layoutHost="bot">
-          <BotResourceLayout owner={fixture.owner} active isZh={false}><div className="bot-main" style={{padding:24}}><h1>Trial delivery</h1><Composer owner={fixture.owner}/><EvidenceView evidence={{evidenceRef:'tool-result://publication'}} workspaceId={fixture.owner.workspaceId} task={{planId:'plan',sessionId:'session'}} i18n={createI18n('en-US')}/></div></BotResourceLayout>
+          <BotResourceLayout owner={fixture.owner} active isZh={false}><div className="bot-main" style={{padding:24}}><h1>Trial delivery</h1><Composer owner={fixture.owner}/><EvidenceView evidence={{evidenceRef:fixture.evidenceRef}} workspaceId={fixture.owner.workspaceId} i18n={createI18n('en-US')}/></div></BotResourceLayout>
         </WorkbenchProvider></ResourceEditAppFrame></ConfirmProvider>);}
     `, 'interactive-workspace-fixture.tsx', { loader: 'tsx', jsx: 'automatic' }); } }], build: { outDir: output, emptyOutDir: true, target: 'esnext', cssCodeSplit: false,
       rollupOptions: { input: entry, output: { entryFileNames: 'fixture.js' } } } });
@@ -79,6 +79,7 @@ test('the main workspace opens canonical interactive deliveries, restores result
     import{createEvidenceDeliveryProjection}from${JSON.stringify(href('apps/desktop/electron/main/project-agent/evidence-deliveries.mjs'))};
     import{createEvidenceReader}from${JSON.stringify(href('apps/desktop/electron/main/project-agent/evidence-reader.mjs'))};
     import{createProjectAgentApplicationService}from${JSON.stringify(href('apps/desktop/electron/main/project-agent/project-agent-application-service.mjs'))};
+    import{createDesktopReplyComposer}from${JSON.stringify(href('apps/desktop/electron/main/project-agent/reply-composer-port.mjs'))};
     import{createResourceWindowController}from${JSON.stringify(href('apps/desktop/electron/main/resource-window-controller.mjs'))};
     import{createTrustedWindowRegistry}from${JSON.stringify(href('apps/desktop/electron/main/ipc/trusted-window-registry.mjs'))};
     import{createCatalogIpcMain}from${JSON.stringify(href('apps/desktop/electron/main/ipc/catalog-ipc-main.mjs'))};
@@ -109,17 +110,22 @@ test('the main workspace opens canonical interactive deliveries, restores result
     const ipc=createCatalogIpcMain({ipcMain,authorize:windows.authorize});registerIpcOwners({ipc,registrations:[...createResourceWindowIpcRegistrations({resourceWindows:host}),...createInteractiveResultsIpcRegistrations({interactiveResults:interactive}),...createResourceFeedbackIpcRegistrations({preparation})]});
     ipc.handle('project-agent:read-input-draft',(_event,request)=>drafts.read(request));ipc.handle('project-agent:write-input-draft',(_event,request)=>drafts.write(request));ipc.handle('project-agent:submit-input',(_event,request)=>({ok:true,input:queue.submitInput(request)}));
     ipc.on('settings:get-sync',event=>{event.returnValue=initial});ipc.handle('settings:get',()=>initial);ipc.handle('settings:update',(_event,partial)=>{settingsWrites.push(partial);return initial});
-    ipc.handle('bootstrap:get',()=>({fixture:{owner:{...owner,path:'/isolated-project'},evidenceRef:receipt.indexEntry.evidenceRef}}));
-    const evidenceFacts={getConversationId:()=>owner.conversationId,getPlan:()=>({planId:'plan',conversationId:'worker',delegationOrigin:{workspaceId:owner.workspaceId,parentConversationId:owner.conversationId,sessionId:'session'}}),getSession:()=>({sessionId:'session',workspaceId:owner.workspaceId,report:{planId:'plan'}})};
+    const evidenceFacts={getConversationId:()=>owner.conversationId,getPlan:()=>({planId:'plan',conversationId:'worker',tasks:[{taskId:'generated',status:'completed',result:'Saved unverified model trial.',evidenceRefs:['tool-result://publication']},{taskId:'remaining',status:'pending'}],delegationOrigin:{workspaceId:owner.workspaceId,parentConversationId:owner.conversationId,sessionId:'session'}}),getSession:()=>({sessionId:'session',workspaceId:owner.workspaceId,planId:'plan',status:'failed',report:{planId:'plan'}})};
     const findRecords=refs=>refs.includes(receipt.indexEntry.evidenceRef)?[receipt.indexEntry]:[];
     const publications=createInteractivePublicationSource({resultStore,goalPlanStore:{getPlan:evidenceFacts.getPlan,findEvidenceIndexRecords:findRecords},getBotConversationId:evidenceFacts.getConversationId,getSession:evidenceFacts.getSession});
+    conversations.appendMessage(owner.conversationId,{id:'fixture-result-anchor',role:'user',kind:'user_input',content:'Show the saved trial and current task status'});
+    const replyComposer=createDesktopReplyComposer({readResultReferences:publications.replyReferences,readDelivery:()=>({sessionIds:['session'],sessionStates:[{sessionId:'session',status:'failed'}],verdicts:[]})});
+    const composed=replyComposer.postReply({text:'The saved trial is available; remaining analysis is incomplete and unverified.',replyTo:['fixture-result-anchor'],sources:['session'],statusClaims:[{sessionId:'session',status:'failed'}]},{...owner,turnId:'fixture-reply',toolCallOrdinal:1,messages:conversations.getPersistedConversationHistory(owner.conversationId).messages});
+    if(composed.error||composed.message?.meta.evidenceRefs?.[0]!==receipt.indexEntry.evidenceRef)throw Error('The actual reply composer did not confirm the fixed publication reference: '+(composed.error??'missing fixed reference'));
+    conversations.appendMessage(owner.conversationId,composed.message);
+    ipc.handle('bootstrap:get',()=>({fixture:{owner:{...owner,path:'/isolated-project'},evidenceRef:conversations.getPersistedConversationHistory(owner.conversationId).messages.find(row=>row.id===composed.message.id).meta.evidenceRefs[0]}}));
     const readEvidence=createEvidenceReader({resolveScopedRecord:publications.resolveEvidence,findRecords,projectDeliveries:createEvidenceDeliveryProjection(evidenceFacts),readMessages:()=>[],readArtifact:()=>{throw Error('unexpected artifact body read')}});
     const projectApplication=createProjectAgentApplicationService({enabled:()=>true,readEvidenceBody:readEvidence});
     ipc.handle('project-agent:read-evidence',(_event,request)=>projectApplication.readEvidence(request));
     ipc.handle('resource-edit:list',()=>({ok:true,drafts:[],operations:[],staleCount:0}));
     globalThis.workspaceFixture={snapshot:()=>stateStore.read(receipt.reference,()=>true),layout:()=>interactive.readLayout(source.webContents,{owner}),
       failSave:kind=>{if(!['committed','uncommitted'].includes(kind))throw Error('invalid fault');saveFault=kind},
-      draft:()=>drafts.read(draftAddress),consume:()=>queue.consume(owner.workspaceId),inputs:()=>({queue:queue.diagnosticSnapshot(owner.workspaceId),messages:conversations.getPersistedConversationHistory(owner.conversationId).messages.map(row=>({...row,selected:feedback.restore(row,owner.workspaceId)}))}),
+      draft:()=>drafts.read(draftAddress),consume:()=>queue.consume(owner.workspaceId),inputs:()=>({queue:queue.diagnosticSnapshot(owner.workspaceId),messages:conversations.getPersistedConversationHistory(owner.conversationId).messages.filter(row=>row.kind==='user_input'&&row.id!=='fixture-result-anchor').map(row=>({...row,selected:feedback.restore(row,owner.workspaceId)}))}),
       closeSource:()=>{closeAttempts++;source.close()},
       reloadSource:()=>source.webContents.reload(),
       facts:()=>({settingsWrites,fileReads,legacyHistoryWrites,blockedCloses,closeAttempts,navigations,sourceAlive:!source.isDestroyed(),versions:Number(resultStore.storage.connect(owner.workspaceId).db.prepare('SELECT COUNT(*) AS n FROM versions').get().n),operations:Number(resultStore.storage.connect(owner.workspaceId).db.prepare('SELECT COUNT(*) AS n FROM operations').get().n)}),

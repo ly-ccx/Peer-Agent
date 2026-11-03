@@ -16,8 +16,8 @@ async function fixture(t) {
   const store = createInteractiveResultStore({ rootDir: path.join(root, 'runtime'), assertCompatibility: () => plans.assertInteractiveEvidenceCompatible() });
   const sessions = new Map(); let parent = owner.conversationId;
   const model = { modelProviderId: 'fixture', providerId: 'fixture', modelId: 'fixture', family: 'fixture' };
-  function plan(name, actualOwner = owner) {
-    const value = plans.createPlan({ title: name, goal: name, conversationId: `worker-${name}`, status: 'executing', tasks: [],
+  function plan(name, actualOwner = owner, evidenceRefs = []) {
+    const value = plans.createPlan({ title: name, goal: name, conversationId: `worker-${name}`, status: 'executing', tasks: [], evidenceRefs,
       delegationOrigin: { workspaceId: actualOwner.workspaceId, parentConversationId: actualOwner.conversationId, sessionId: `session-${name}`,
         anchorMessageId: 'anchor', inputId: 'input', phase: 'running',
         modelSelection: { worker: model, explorer: model, verifier: model, resolvedAt: new Date().toISOString() } } });
@@ -114,6 +114,7 @@ test('legacy non-interactive task evidence keeps its existing resource projectio
   const reply = f.reader(evidenceRef, { context: f.context(legacy) });
   assert.equal(reply.deliveryStatus, 'available'); assert.equal(reply.deliveries[0].kind, 'file');
   assert.equal(reply.deliveries[0].reference.path, '/project/legacy.txt');
+  assert.deepEqual(f.source.replyReferences({ ...f.owner, sessionIds: [legacy.delegationOrigin.sessionId] }), [], 'legacy status replies gain no result card and remain available');
 });
 
 test('a genuine unchanged revision resolves the original source task without creating or rebinding a publication', async t => {
@@ -139,4 +140,52 @@ test('missing or mismatched canonical publication metadata cannot be replaced by
       findEvidenceIndexRecords: () => patch ? [{ ...canonical, ...patch }] : [] } });
     assert.throws(() => source.resolveEvidence('tool-result://same-call', f.context(work)), { code: 'interactive_publication_unavailable' });
   }
+});
+
+test('outward reports resolve only actual task references and reply references use metadata without reading program/data or recursing into reports', async t => {
+  const f = await fixture(t), alias = 'tool-result://same-call', work = f.plan('a', f.owner, [alias, 'ordinary-evidence']), receipt = await f.publish(work);
+  const forbidden = () => { throw Error('metadata projection cannot load content or a full session report'); };
+  f.store.storage.readObject = forbidden;
+  const source = createInteractivePublicationSource({ ...f.ports, getSession: (id, detail) => {
+    assert.equal(detail, 'summary'); return f.sessions.get(id);
+  } });
+  assert.deepEqual(source.projectReportEvidence(work, [alias, 'ordinary-evidence']), [receipt.evidenceRef, 'ordinary-evidence']);
+  assert.deepEqual(source.projectReportEvidence(work, ['tool-result://unrecorded']), ['tool-result://unrecorded']);
+  assert.deepEqual(source.replyReferences({ ...f.owner, sessionIds: [work.delegationOrigin.sessionId] }), [receipt.evidenceRef]);
+  assert.deepEqual(f.plans.getPlan(work.planId).evidenceRefs, [alias, 'ordinary-evidence'], 'the original task facts and sourceRevision inputs remain unchanged');
+});
+
+test('unknown or pending publication references retain original report traces and create no reply result card', async t => {
+  const f = await fixture(t), alias = 'tool-result://same-call', work = f.plan('a', f.owner, [alias, 'tool-result://missing']);
+  await f.publish(work, { index: false });
+  assert.deepEqual(f.source.projectReportEvidence(work, work.evidenceRefs), work.evidenceRefs);
+  assert.deepEqual(f.source.replyReferences({ ...f.owner, sessionIds: [work.delegationOrigin.sessionId] }), []);
+  f.changeOwner();
+  assert.deepEqual(f.source.projectReportEvidence(work, work.evidenceRefs), work.evidenceRefs);
+  assert.throws(() => f.source.replyReferences({ ...f.owner, sessionIds: [work.delegationOrigin.sessionId] }), { code: 'interactive_scope_denied' });
+});
+
+test('report and reply references remain pinned to their actual versions after head advances and an unchanged call retains original identity', async t => {
+  const f = await fixture(t), work = f.plan('a', f.owner, ['tool-result://same-call', 'tool-result://revision']);
+  const first = await f.publish(work);
+  const revision = await f.publish(work, { call: 'revision', candidate: { ...f.draft, title: 'New fixed trial',
+    publication: { kind: 'revise', base: first.reference } } });
+  assert.notEqual(revision.reference.contentVersion, first.reference.contentVersion);
+  assert.deepEqual(f.source.projectReportEvidence(work, work.evidenceRefs), [first.evidenceRef, revision.evidenceRef]);
+  assert.deepEqual(f.source.replyReferences({ ...f.owner, sessionIds: [work.delegationOrigin.sessionId] }), [first.evidenceRef, revision.evidenceRef]);
+  const nextWork = f.plan('b', f.owner, ['tool-result://same-call']);
+  const unchanged = await f.publish(nextWork, { candidate: { ...f.draft, title: 'New fixed trial', publication: { kind: 'revise', base: revision.reference } } });
+  assert.equal(unchanged.unchanged, true);
+  assert.deepEqual(f.source.projectReportEvidence(nextWork, nextWork.evidenceRefs), [revision.evidenceRef]);
+  assert.deepEqual(f.source.replyReferences({ ...f.owner, sessionIds: [nextWork.delegationOrigin.sessionId] }), [revision.evidenceRef]);
+});
+
+test('reply references are bounded without shortening the complete report or skipping ownership checks of later cited sessions', async t => {
+  const f = await fixture(t), aliases = Array.from({ length: 21 }, (_, i) => `tool-result://call-${i}`), work = f.plan('a', f.owner, aliases), receipts = [];
+  for (let i = 0; i < aliases.length; i++) receipts.push(await f.publish(work, { call: `call-${i}` }));
+  const all = receipts.map(row => row.evidenceRef);
+  assert.deepEqual(f.source.projectReportEvidence(work, aliases), all);
+  assert.deepEqual(f.source.replyReferences({ ...f.owner, sessionIds: [work.delegationOrigin.sessionId] }), all.slice(0, 20));
+  const foreign = f.plan('foreign', { workspaceId: 'other-bot', conversationId: 'other-parent' });
+  assert.throws(() => f.source.replyReferences({ ...f.owner, sessionIds: [work.delegationOrigin.sessionId, foreign.delegationOrigin.sessionId] }), { code: 'interactive_scope_denied' });
 });

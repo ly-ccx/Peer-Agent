@@ -81,6 +81,24 @@ test('verification reads canonical report content without reentering acceptance 
   } finally {await env.cleanup();}
 });
 
+test('outward evidence projection never changes internal source revisions, report summaries or task facts', async () => {
+  let reads = 0, projected = 'fixed-result-1';
+  const env = await harness({ projectReportEvidence: (_plan, refs) => { reads++; return [...refs, projected]; } });
+  try {
+    const opened = await env.supervisor.spawn(spawnInput(), contextOf(env));
+    const before = env.supervisor.get({ sessionId: opened.sessionId });
+    assert.equal(reads, 0, 'list/status/sourceRevision must not invoke a result display projection');
+    const summary = env.supervisor.readReportSummary(opened.sessionId), first = env.supervisor.get({ sessionId: opened.sessionId, detail: 'report' });
+    assert.ok(first.report.evidenceRefs.includes('fixed-result-1')); assert.equal(reads, 1);
+    projected = 'fixed-result-2';
+    const second = env.supervisor.get({ sessionId: opened.sessionId, detail: 'report' });
+    assert.ok(second.report.evidenceRefs.includes('fixed-result-2')); assert.equal(reads, 2);
+    assert.equal(first.sourceRevision, before.sourceRevision); assert.equal(second.sourceRevision, before.sourceRevision);
+    assert.equal(env.supervisor.readReportSummary(opened.sessionId), summary);
+    assert.equal(env.goalPlanStore.getPlan(second.planId).evidenceRefs.includes('fixed-result-2'), false);
+  } finally { await env.cleanup(); }
+});
+
 test('local plan approval is frozen before execution and survives store reload', async () => {
   let latest;
   const env = await harness({ readPlanApproval: () => 'always', approvalStore: {
@@ -186,6 +204,7 @@ async function harness({
   goalRunner: injectedRunner = null,
   resolveAcceptancePolicy = null,
   readSessionFacts = null,
+  projectReportEvidence = null,
   approvalStore = null,
   readPlanApproval = null,
   objectives = null,
@@ -249,6 +268,7 @@ async function harness({
     emitEvent: (event) => { events.push(event); },
     resolveAcceptancePolicy,
     readSessionFacts,
+    projectReportEvidence,
     approvalStore,
     readPlanApproval,
     ...(isolationPlanner ? { isolationPlanner } : {}),

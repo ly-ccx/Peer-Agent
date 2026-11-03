@@ -145,6 +145,7 @@ export function createSessionSupervisor({
   readLegacyCriterionProvenance = () => null,
   readDelegationCapabilities = null,
   readResourceFeedback = null,
+  projectReportEvidence = null,
   autonomousCoordinationEnabled = () => process.env.PEER_AUTONOMOUS_COORDINATION !== '0',
   now = () => new Date().toISOString(),
 } = {}) {
@@ -344,6 +345,11 @@ export function createSessionSupervisor({
   function buildReport(plan, session) {
     const history = readConversationFacts(plan.conversationId);
     return buildSessionReport(plan, session, history);
+  }
+  function publicReport(plan, session) {
+    const report = buildReport(plan, session);
+    return typeof projectReportEvidence === 'function'
+      ? { ...report, evidenceRefs: projectReportEvidence(plan, report.evidenceRefs) } : report;
   }
 
   function freezeModels(input, workspaceId) {
@@ -801,7 +807,7 @@ export function createSessionSupervisor({
           relatedWorks:Object.values(journal.readSnapshot().works).filter(row => row.parentConversationId === plan.delegationOrigin.parentConversationId
             && row.sessionIds?.includes(session.sessionId) && row.state === 'blocked_system').slice(-8)});
       }
-      return { ...session, report: { ...buildReport(plan, session), ...(agentSupervision ? { agentSupervision } : {}), ...(reviewed ? {
+      return { ...session, report: { ...publicReport(plan, session), ...(agentSupervision ? { agentSupervision } : {}), ...(reviewed ? {
         verification: buildVerificationDetail({ ...authority, plan, sessionId: session.sessionId, evidenceIndex: indexedRefs(plan) }),
       } : {}) } };
     }

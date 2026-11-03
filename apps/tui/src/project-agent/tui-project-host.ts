@@ -106,7 +106,7 @@ export function createTuiProjectHost(options: {
   const interactiveEnabled = (id: string) => holds(id) && getSettings().projectAgent?.interactiveResults === true;
   const interactive = createInteractiveRuntime({ rootDir: runtimeRoot, goalPlanStore: plans, conversationStore: conversations,
     getBotConversationId: (id: string) => profiles.read(id)?.agentConversationId, holdsLease: holds, enabled: interactiveEnabled,
-    classifyContext: () => 'D3_private' });
+    classifyContext: () => 'D3_private', getSession: (id: string, detail = 'report') => supervisor.get({ sessionId: id, ...(detail === 'report' ? { detail } : {}) }) });
   const interactiveProvider = createInteractiveToolProvider(interactive);
   const executor = createTuiTurnExecutor({ dataHome, getSettings, holdsLease: holds,
     resolveWorkspacePath: id => registry.get(id)?.path ?? options.workspacePath,
@@ -150,6 +150,7 @@ export function createTuiProjectHost(options: {
   const supervisor = createSessionSupervisor({conversationStore: conversations, goalPlanStore: plans, goalRunner,
     readDelegationCapabilities: (input: { readOnly: boolean; workspaceId: string }) => executor.readDelegationCapabilities(input),
     readResourceFeedback: interactive.feedback.restore,
+    projectReportEvidence: interactive.publications.projectReportEvidence,
     executionScheduler: scheduler, deferRecovery: true, approvalStore: approvals, memoryStore: memory, canManageWorkspace: holds,
     objectives: {prepareSpawn: (...args: any[]) => (objectives.prepareSpawn as any)(...args), linkSession: (...args: any[]) => (objectives.linkSession as any)(...args)},
     resolveModel: (input: any) => turns.resolveGoalRole({...input, workerModelProviderId: input.workerModel?.modelProviderId, projectPolicy: profiles.read(input.workspaceId)?.modelPolicy}),
@@ -181,7 +182,7 @@ export function createTuiProjectHost(options: {
       return supervisor.spawn({...input.task,anchorMessageIds:[anchor]},{workspaceId:input.workspaceId,parentConversationId:input.conversationId,workspacePath:input.workspacePath});
     }} as never);
   toolProvider = createProjectToolProvider({rootDir: dataHome, supervisor, objectives, verification,
-    replyComposer: createDesktopReplyComposer({readDelivery: (view: any) => ({...facts.delivery(view.workspaceId), ...watches.deliveryFacts(view),
+    replyComposer: createDesktopReplyComposer({readResultReferences: interactive.publications.replyReferences, readDelivery: (view: any) => ({...facts.delivery(view.workspaceId), ...watches.deliveryFacts(view),
       proactivity: getSettings().projectAgent?.proactivity, botLevel: profiles.read(view.workspaceId)?.proactivity,
       quietHours: inQuietHours(new Date(), getSettings().projectAgent?.quietHours)})} as never),
     proactivity: {set: ({workspaceId, level}: any) => profiles.save({...profiles.read(workspaceId),proactivity:level})},

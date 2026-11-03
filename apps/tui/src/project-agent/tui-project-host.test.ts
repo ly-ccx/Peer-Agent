@@ -12,6 +12,7 @@ import { createTuiModelSelectionControl } from '../tui-model-selection.ts';
 import { buildTuiSystemPrompt } from '../tui-language.ts';
 import { createTurnTestRuntime, drainTestCleanup, waitForTestStart, type TestCleanup } from './turn-test-support.ts';
 import { spawn } from 'node:child_process';
+import { resolveWorkSessionProfile } from '@peer-agent/runtime-node/project-agent';
 import { createInterface } from 'node:readline';
 
 const cleanups: TestCleanup[] = [];
@@ -37,6 +38,69 @@ function start(f: ReturnType<typeof fixture>, executeTurn: (request: any) => Pro
   cleanups.push(() => host.close());
   return host;
 }
+
+test('actual terminal project host returns fixed report references and attaches them to the canonical Bot reply', async () => {
+  const f = fixture(), runtimeCleanup: TestCleanup[] = [];
+  let host: ReturnType<typeof createTuiProjectHost>, fixed = '', rounds = 0;
+  host = createTuiProjectHost({ ...f, autoStart: false,
+    getSettings: () => ({ providers: [provider], projectAgent: { concurrency: 1, interactiveResults: true }, memory: { enabled: false } }),
+    createRuntime(options) {
+      const toolHost = createTuiHost(options);
+      const model = createProviderChatModel({ model: 'test-model', toolDefinitionsForMode: mode => toolHost.toolDefinitionsForMode!(mode),
+        getSystemPrompt: context => buildTuiSystemPrompt({}, { ...context.systemContextInput, mode: context.mode }),
+        provider: { async stream(request) {
+          rounds++;
+          expect(request.tools?.some(tool => tool.name === 'publish_interactive_result')).toBe(false);
+          const call = (name: string, args: object) => ({ content: '', toolCalls: [{ id: `fixed-main-${rounds}`, name, arguments: JSON.stringify(args) }] });
+          if (rounds === 1) return call('get_session', { sessionId: 'fixed-session', detail: 'report' });
+          const encoded = JSON.parse(String(request.messages.filter(row => row.role === 'tool').at(-1)?.content));
+          const body = encoded.output ?? encoded;
+          if (rounds === 3) {
+            expect(body.ok).toBe(true); expect(body.meta.evidenceRefs).toEqual([fixed]);
+            return { content: '', toolCalls: [] };
+          }
+          expect(rounds).toBe(2);
+          expect(body.ok).toBe(true); expect(body.report.evidenceRefs).toContain(fixed);
+          expect(body.report.evidenceRefs).not.toContain('tool-result://fixed-publication');
+          return call('post_reply', { text: 'The fixed trial is saved; the task remains incomplete and unverified.', replyTo: ['input-show-fixed-result'],
+            sources: ['fixed-session'], statusClaims: [{ sessionId: 'fixed-session', status: body.status }] });
+        } } });
+      return createTurnTestRuntime({ host: toolHost, model, modelSelection: createTuiModelSelectionControl({ providerId: 'configured', modelId: 'test-model', displayName: 'test' }) }, runtimeCleanup);
+    } });
+  cleanups.push(() => drainTestCleanup(runtimeCleanup)); cleanups.push(() => host.close());
+  host.leases.acquire(f.workspaceId);
+  expect(host.holdsLease(f.workspaceId)).toBe(true);
+  host.conversations.appendMessage(f.conversationId, { id: 'fixed-anchor', role: 'user', kind: 'user_input', content: 'Compare the fixed trial' } as never);
+  const history = host.conversations.getPersistedConversationHistory!(f.conversationId);
+  const child = host.conversations.createChildConversation!({ parentConversationId: f.conversationId, role: 'work_session', anchorMessageId: 'fixed-anchor',
+    delegation: { sessionId: 'fixed-session', anchorMessageId: 'fixed-anchor', inputId: 'fixed-input' }, capturedAt: new Date().toISOString(),
+    runtimeState: { conversationId: f.conversationId, contentRevision: history!.contentRevision, status: 'idle' }, backgroundMessageIds: ['fixed-anchor'], confirmMissing: true,
+    title: 'Fixed worker', workspaceId: f.workspaceId } as never);
+  const selection = { modelProviderId: 'configured', providerId: 'openai', modelId: 'test-model', family: 'fixture' };
+  const plan = host.plans.createPlan({ title: 'Fixed trial', conversationId: child.id, status: 'executing',
+    tasks: [{ taskId: 'trial', title: 'Fixed trial', status: 'pending' }, { taskId: 'remaining', title: 'Remaining analysis', status: 'pending' }],
+    delegationOrigin: { workspaceId: f.workspaceId, parentConversationId: f.conversationId, sessionId: 'fixed-session', phase: 'running',
+      anchorMessageId: 'fixed-anchor', inputId: 'fixed-input', modelSelection: { worker: selection, explorer: selection, verifier: selection, resolvedAt: new Date().toISOString() } } } as never);
+  const published = await host.interactive.provider.executeCapability({ call: { toolCallId: 'fixed-publication', capabilityId: 'local.interactive.publish', arguments: {
+    publication: { kind: 'create' }, title: 'Fixed terminal trial', textFallback: 'Unverified saved model trial.', program: 'root=Metric("Value",2)', inputs: [],
+  } } }, { toolContext: { workspaceId: f.workspaceId, conversationId: child.id, turnProfile: resolveWorkSessionProfile({ plan, kind: 'worker' }) }, requestPermission: async () => ({ granted: true }) });
+  expect(published!.result.status).toBe('success'); fixed = (published!.result.outputPreview as any).artifactRef;
+  host.plans.recordEvidenceRefs({ evidenceRefs: ['tool-result://fixed-publication'], artifactRefs: [fixed], planId: plan.planId, conversationId: child.id,
+    toolCallId: 'fixed-publication', capabilityId: 'local.interactive.publish', toolName: 'publish_interactive_result' } as never);
+  host.plans.recordTaskEvidence(plan.planId, 'trial', { status: 'completed', result: 'Saved unverified trial.', evidenceRefs: ['tool-result://fixed-publication'] });
+  host.plans.revisePlan(plan.planId, { status: 'failed', runner: { status: 'failed', error: 'Fixture task incomplete' },
+    delegationOrigin: { ...host.plans.getPlan(plan.planId).delegationOrigin, phase: 'paused' } } as never);
+  host.inputs.submitInput({ workspaceId: f.workspaceId, inputId: 'show-fixed-result', surface: 'tui', text: 'Show the saved fixed trial and its current task status' });
+  await host.tick();
+  const messages = host.conversations.getPersistedConversationHistory!(f.conversationId)!.messages;
+  const post = messages.flatMap((row: any) => row.rounds ?? []).flatMap((round: any) => round.toolCalls ?? []).find((call: any) => call.name === 'post_reply');
+  expect((post as any)?.result?.ok, JSON.stringify((post as any)?.result)).toBe(true);
+  const reply = messages.filter((row: any) => row.kind === 'agent_reply').at(-1);
+  expect(reply).toBeDefined();
+  expect(rounds).toBe(3); expect((reply as any).meta.evidenceRefs).toEqual([fixed]);
+  expect((host.supervisor.get({ sessionId: 'fixed-session', detail: 'report' }) as any).report.evidenceRefs).toEqual([fixed]);
+  expect((reply as any).marks.some((mark: any) => mark.outcome === 'passed')).toBe(false);
+});
 
 test('terminal plan approval is durable before admission and replays only an awaiting plan', async () => {
   const f = fixture(), host = start(f, async () => ({ ok: true, text: 'ready' }));

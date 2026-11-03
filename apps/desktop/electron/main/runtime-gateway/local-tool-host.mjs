@@ -79,6 +79,7 @@ export function createLocalToolHost({
     proactivity: liveProjectProactivity(),
     replyComposer: createDesktopReplyComposer({
       readDelivery: (view) => liveDeliveryFacts().read(view),
+      readResultReferences: input => liveDeliveryFacts().readResultReferences(input),
     }),
   });
   const activeHookRunner = hookRunner ?? createConfiguredHookRunner({ userDataPath, workspaceRoot });
