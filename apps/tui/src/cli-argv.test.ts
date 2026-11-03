@@ -150,3 +150,10 @@ test('bots and classic are explicit interactive entry routes',()=>{
   expect(formatPeerHelp('root')).toContain('even when a bot is bound');
   expect(formatPeerHelp('root')).toContain('F2 or type /classic');
 });
+
+test('bot exec keeps the bound model and accepts only a bounded input wait', () => {
+  const parsed = parsePeerArgv(['exec', '--bot', '--input-id', 'retry-1', '--wait-ms', '100', 'hello']);
+  expect(parsed).toMatchObject({ kind: 'exec', options: { bot: { inputId: 'retry-1', waitMs: 100 }, promptParts: ['hello'] } });
+  for (const args of [['--bot', '--access', 'full'], ['--bot', '--model', 'other'], ['--bot', '--wait-ms', '1800001'], ['--input-id', 'retry-1']])
+    expect(parsePeerArgv(['exec', ...args, 'hello']).kind).toBe('error');
+});

@@ -293,6 +293,6 @@ export function createTuiProjectHost(options: {
       else if(planApproval)await supervisor.cancel({sessionId:record.sessionId,reason:'plan_approval_denied'});
       if(!saved){saved=approvals.append({...record,state:decision==='approve'?'approved':decision==='cancel'?'cancelled':'denied',decidedAt:new Date().toISOString(),decidedBy:'local_ui',...(decision==='cancel'?{decisionReason:'permission_cancelled'}:{})});if(!saved)return {ok:false,error:'approval_store_failed'};}changed();return {ok:true,approval:approvals.list({workspaceId:selectedId}).find(row=>row.approvalId===approvalId)};
     },
-    async close() {admissionClosed=true;if(timer)clearInterval(timer);if(selectedId)await stopExecution(selectedId);closed=true;interactive.close();host.dispose();watches.dispose();toolProvider.dispose();leases.close();},
+    async close() {const wasHost=holds(selectedId);admissionClosed=true;if(timer)clearInterval(timer);if(selectedId)await stopExecution(selectedId,wasHost?'handoff':'lost');closed=true;interactive.close();host.dispose();watches.dispose();toolProvider.dispose();leases.close();},
   };
 }

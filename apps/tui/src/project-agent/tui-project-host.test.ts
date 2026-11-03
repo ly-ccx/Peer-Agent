@@ -90,8 +90,34 @@ test('actual terminal project host returns fixed report references and attaches 
   host.plans.recordTaskEvidence(plan.planId, 'trial', { status: 'completed', result: 'Saved unverified trial.', evidenceRefs: ['tool-result://fixed-publication'] });
   host.plans.revisePlan(plan.planId, { status: 'failed', runner: { status: 'failed', error: 'Fixture task incomplete' },
     delegationOrigin: { ...host.plans.getPlan(plan.planId).delegationOrigin, phase: 'paused' } } as never);
-  host.inputs.submitInput({ workspaceId: f.workspaceId, inputId: 'show-fixed-result', surface: 'tui', text: 'Show the saved fixed trial and its current task status' });
+  const executable = process.env.PEER_TEST_STANDALONE_BINARY;
+  const command = executable ? [executable] : [process.execPath, path.join(import.meta.dir, '../index.tsx')];
+  const prompt = 'Show the saved fixed trial and its current task status';
+  const run = (id: string, text: string, waitMs = 5000) => {
+    const child = Bun.spawn([...command, 'exec', '--bot', '--input-id', id, '--wait-ms', String(waitMs), '--output-format', 'json', text],
+      { cwd: f.workspacePath, env: { ...process.env, PEER_AGENT_HOME: f.dataHome }, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
+    cleanups.push(() => { if (child.exitCode === null) child.kill(); });
+    return Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  };
+  const cli = run('show-fixed-result', prompt);
+  for (let attempt = 0; attempt < 80 && !host.inputs.findSubmission(f.workspaceId, 'show-fixed-result'); attempt++) await Bun.sleep(25);
+  expect(host.inputs.findSubmission(f.workspaceId, 'show-fixed-result')?.text).toBe(prompt);
   await host.tick();
+  const [exit, stdout, stderr] = await cli;
+  expect(exit, stderr + stdout).toBe(0);
+  const delivered = JSON.parse(stdout);
+  expect(delivered).toMatchObject({ ok: true, botInput: { inputId: 'show-fixed-result', status: 'replied' },
+    interactiveResults: [{ ref: fixed, availability: 'available', textFallback: 'Unverified saved model trial.' }] });
+  expect(host.holdsLease(f.workspaceId)).toBe(true);
+  const [retryExit, retryOut] = await run('show-fixed-result', prompt);
+  expect(retryExit).toBe(0);
+  expect(JSON.parse(retryOut).botInput).toEqual(delivered.botInput);
+  const [conflictExit, conflictOut] = await run('show-fixed-result', 'A different prompt');
+  expect(conflictExit).toBe(1);
+  expect(JSON.parse(conflictOut).error).toBe('bot_input_conflict');
+  const [pendingExit, pendingOut] = await run('later', 'Another queued request', 30);
+  expect(pendingExit).toBe(8);
+  expect(JSON.parse(pendingOut)).toMatchObject({ ok: false, error: 'bot_reply_pending', botInput: { inputId: 'later', status: 'received' } });
   const messages = host.conversations.getPersistedConversationHistory!(f.conversationId)!.messages;
   const post = messages.flatMap((row: any) => row.rounds ?? []).flatMap((round: any) => round.toolCalls ?? []).find((call: any) => call.name === 'post_reply');
   expect((post as any)?.result?.ok, JSON.stringify((post as any)?.result)).toBe(true);
