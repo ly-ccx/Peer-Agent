@@ -133,11 +133,11 @@ export async function runInteractiveLiveStory(options: {
       },
     });
     let tickError: unknown;
-    let ticking = false;
-    function tick() {
-      if (ticking) return;
-      ticking = true;
-      void host.tick().catch(error => { tickError = error; }).finally(() => { ticking = false; });
+    let activeTicks = 0;
+    function tick(foregroundInput = false) {
+      if (activeTicks && !foregroundInput) return;
+      activeTicks += 1;
+      void host.tick().catch(error => { tickError = error; }).finally(() => { activeTicks -= 1; });
     }
     async function waitFor<T>(read: () => T | undefined): Promise<T> {
       while (!signal.aborted) {
@@ -199,6 +199,8 @@ export async function runInteractiveLiveStory(options: {
         const feedback = interactiveFeedbackFromFollowup(frozen);
         if (!feedback) throw Error('story_feedback_invalid');
         host.inputs.submitInput({ workspaceId, inputId: FROZEN_INPUT, text: FROZEN_TASK, resourceFeedback: [feedback], surface: 'tui' });
+        // The TUI submission path notifies the host even while a wake is active.
+        tick(true);
         followupId = feedback.id;
         report.frozen = feedback;
       } finally { stateStore.release({ reference: fixed.reference, identity, writer }, current); }
