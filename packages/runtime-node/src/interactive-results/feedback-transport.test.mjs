@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { validateDraft } from '@peer-agent/interactive-content';
@@ -151,6 +152,56 @@ test('format 3 fences the actual old draft writer, stays sticky after removal an
     assert.equal(drafts.read(address).ok, false); assert.equal(drafts.write({ ...base, revision: saved.revision, uploads: [] }).ok, false); assert.equal(readFileSync(file, 'utf8'), before);
   }
 });
+test('draft retention pins typed and legacy-carried selections while old writers respect every surface lock', async t => {
+  const f = await fixture(t);
+  const drafts = createProjectInputDraftStore({ rootDir: f.rootDir, validateInteractiveFeedback: f.admission.validate });
+  const old = createLegacyDrafts({ rootDir: f.rootDir });
+  const carrier = interactiveFeedbackAttachment(f.feedback);
+  const base = { workspaceId: f.owner.workspaceId, revision: 0, draft: { text: '', quote: null, attachmentIds: [] }, pending: [], uploads: [] };
+  const legacy = { ...base, surface: 'tui', uploads: [carrier], draft: { ...base.draft, attachmentIds: [carrier.id] } };
+  const typed = { ...base, surface: 'desktop', pending: [{ inputId: 'queued', text: '', createdAt: '2026-11-04T00:00:00Z',
+    resourceFeedback: [f.feedback], quoteRefs: [], attachmentIds: [] }] };
+  assert.equal(old.write(legacy).ok, true);
+  assert.equal(drafts.write(typed).ok, true);
+  const folder = path.join(f.rootDir, f.owner.workspaceId, 'input-drafts');
+  const guard = drafts.acquireRetentionDrafts(f.owner.workspaceId);
+  try {
+    assert.deepEqual(guard.selections, Array.from({ length: 2 }, () => ({ reference: f.reference, followupId: f.frozen.followupId })));
+    assert.match(guard.revision, /^sha256:[a-f0-9]{64}$/);
+    assert.throws(() => drafts.acquireRetentionDrafts(f.owner.workspaceId), /DRAFT_BUSY/);
+    const script = `import { createProjectInputDraftStore } from ${JSON.stringify(new URL('./test-fixtures/legacy-input-draft-store.mjs', import.meta.url).href)};
+      const [rootDir, base] = JSON.parse(process.argv[1]);
+      const drafts = createProjectInputDraftStore({ rootDir });
+      console.log(JSON.stringify(['desktop', 'quick_chat', 'tui'].map(surface => drafts.write({ ...base, surface }))));`;
+    // The pinned draft writer does not steal a live PID lock after its stale interval.
+    const past = new Date(Date.now() - 60_000);
+    for (const surface of ['desktop', 'quick_chat', 'tui']) utimesSync(path.join(folder, surface + '.json.lock'), past, past);
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', script, JSON.stringify([f.rootDir, base])], { encoding: 'utf8', timeout: 5000 });
+    assert.equal(child.status, 0, child.stderr);
+    assert.deepEqual(JSON.parse(child.stdout), Array.from({ length: 3 }, () => ({ ok: false, code: 'DRAFT_BUSY' })));
+    assert.equal(guard.assertCurrent(), true);
+    assert.deepEqual(drafts.write({ ...base, surface: 'quick_chat' }), { ok: false, code: 'DRAFT_BUSY' });
+    writeFileSync(path.join(folder, 'tui.json'), '{');
+    assert.equal(guard.assertCurrent(), false);
+  } finally { guard.release(); }
+  assert.equal(guard.assertCurrent(), false);
+  assert.throws(() => drafts.acquireRetentionDrafts(f.owner.workspaceId), /DRAFT_UNAVAILABLE/);
+  assert.equal(old.write({ ...base, surface: 'quick_chat' }).ok, true, 'failed acquisition released every preceding surface');
+});
+
+test('the pinned input queue writer can reclaim an aged lock despite a live PID', async t => {
+  const f = await fixture(t), old = createLegacyQueue(f.options);
+  old.submitInput(f.input('prior', { resourceFeedback: undefined }));
+  const lock = path.join(f.rootDir, f.owner.workspaceId, 'input-queue.jsonl.lock');
+  mkdirSync(lock);
+  writeFileSync(path.join(lock, 'owner.json'), JSON.stringify({ pid: process.pid }));
+  const past = new Date(Date.now() - 60_000);
+  utimesSync(lock, past, past);
+  old.submitInput(f.input('after-reclaim', { resourceFeedback: undefined }));
+  assert.equal(existsSync(lock), false);
+  assert.equal(old.findSubmission(f.owner.workspaceId, 'after-reclaim').inputId, 'after-reclaim');
+});
+
 test('forgery, missing admission and corrupted transport cannot move the new consumer past the selection or clobber user attachments', async t => {
   const f = await fixture(t), queue = createInputQueue({ ...f.options, validateInteractiveFeedback: f.admission.validate });
   const missing = createInputQueue(f.options);

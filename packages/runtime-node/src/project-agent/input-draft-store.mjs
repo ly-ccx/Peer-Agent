@@ -1,4 +1,4 @@
-import { normalizeResourceFeedbackList } from '@peer-agent/protocol';
+import { normalizeResourceFeedbackList, restoreResourceFeedbackTransport } from '@peer-agent/protocol';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -37,8 +37,10 @@ export function createProjectInputDraftStore({ rootDir = null, validateInteracti
     return { root, file: path.join(root, 'input-drafts', `${request.surface}.json`) };
   }
   function load(file) {
-    if (!existsSync(file)) return empty();
-    if (statSync(file).size > 16 * 1024 * 1024) throw Error('DRAFT_UNAVAILABLE');
+    let info;
+    try { info = statSync(file); }
+    catch (error) { if (error?.code === 'ENOENT') return empty(); throw error; }
+    if (!info.isFile() || info.size > 16 * 1024 * 1024) throw Error('DRAFT_UNAVAILABLE');
     const saved = JSON.parse(readFileSync(file, 'utf8'));
     if (![1, 2, 3].includes(saved?.schemaVersion) || !Number.isSafeInteger(saved.revision) || saved.revision < 0
       || !record(saved.draft) || !Array.isArray(saved.pending) || saved.pending.length > MAX_PENDING || !record(saved.uploads)
@@ -51,7 +53,7 @@ export function createProjectInputDraftStore({ rootDir = null, validateInteracti
   }
   /** @param {import('@peer-agent/protocol').ProjectInputDraftReadRequest} request
    * @returns {import('@peer-agent/protocol').ProjectInputDraftReadResult} */
-  function read(request) {
+  function read(request, verifyBlobs = false) {
     try {
       const { root, file } = location(request), saved = load(file);
       const hydrated = new Map();
@@ -61,7 +63,11 @@ export function createProjectInputDraftStore({ rootDir = null, validateInteracti
           const digest = saved.uploads[id];
           if (!/^[a-f0-9]{64}$/.test(digest || '')) throw Error('DRAFT_UNAVAILABLE');
           if (hydrated.has(id)) return hydrated.get(id);
-          const item = normalizeUserUpload(JSON.parse(readFileSync(path.join(root, 'input-draft-blobs', `${digest}.json`), 'utf8')));
+          const blob = path.join(root, 'input-draft-blobs', `${digest}.json`);
+          if (verifyBlobs && statSync(blob).size > 16 * 1024 * 1024) throw Error('DRAFT_UNAVAILABLE');
+          const body = readFileSync(blob, 'utf8');
+          if (verifyBlobs && createHash('sha256').update(body).digest('hex') !== digest) throw Error('DRAFT_UNAVAILABLE');
+          const item = normalizeUserUpload(JSON.parse(body));
           if (item.id !== id) throw Error('DRAFT_UNAVAILABLE');
           hydrated.set(id, item);
           return item;
@@ -74,6 +80,37 @@ export function createProjectInputDraftStore({ rootDir = null, validateInteracti
       return { ok: true, snapshot: { revision: saved.revision, draft, pending } };
     } catch (error) { return { ok: false, code: error?.message === 'INVALID_DRAFT' ? 'INVALID_DRAFT' : 'DRAFT_UNAVAILABLE' }; }
   }
+  function acquireLock(file, recover) {
+    mkdirSync(path.dirname(file), { recursive: true });
+    const lock = `${file}.lock`;
+    try { mkdirSync(lock); }
+    catch (error) {
+      if (error?.code !== 'EEXIST') throw error;
+      if (!recover) return null;
+      let dead = false;
+      try {
+        const owner = JSON.parse(readFileSync(path.join(lock, 'owner.json'), 'utf8'));
+        if (Number.isInteger(owner.pid) && owner.pid > 0) {
+          try { process.kill(owner.pid, 0); } catch (error) { dead = error?.code === 'ESRCH'; }
+        }
+      } catch { try { dead = Date.now() - statSync(lock).mtimeMs > 10_000; } catch {} }
+      if (!dead) return null;
+      rmSync(lock, { recursive: true, force: true });
+      try { mkdirSync(lock); } catch (error) { if (error?.code === 'EEXIST') return null; throw error; }
+    }
+    const release = () => rmSync(lock, { recursive: true, force: true });
+    try {
+      writeFileSync(path.join(lock, 'owner.json'), JSON.stringify({ pid: process.pid }));
+      const { dev, ino } = statSync(lock, { bigint: true });
+      const current = () => {
+        try {
+          const actual = statSync(lock, { bigint: true });
+          return actual.dev === dev && actual.ino === ino;
+        } catch { return false; }
+      };
+      return { current, release: () => { if (current()) release(); } };
+    } catch (error) { release(); throw error; }
+  }
   /** @param {import('@peer-agent/protocol').ProjectInputDraftWriteRequest} request
    * @returns {import('@peer-agent/protocol').ProjectInputDraftWriteResult} */
   function write(request) {
@@ -81,22 +118,8 @@ export function createProjectInputDraftStore({ rootDir = null, validateInteracti
     try {
       const { root, file } = location(request);
       if (!Number.isSafeInteger(request.revision) || request.revision < 0) throw Error('INVALID_DRAFT');
-      mkdirSync(path.dirname(file), { recursive: true });
-      lock = `${file}.lock`;
-      try { mkdirSync(lock); }
-      catch {
-        let dead = false;
-        try {
-          const owner = JSON.parse(readFileSync(path.join(lock, 'owner.json'), 'utf8'));
-          if (Number.isInteger(owner.pid) && owner.pid > 0) {
-            try { process.kill(owner.pid, 0); } catch (error) { dead = error?.code === 'ESRCH'; }
-          }
-        } catch { try { dead = Date.now() - statSync(lock).mtimeMs > 10_000; } catch {} }
-        if (!dead) { lock = null; return { ok: false, code: 'DRAFT_BUSY' }; }
-        rmSync(lock, { recursive: true, force: true });
-        try { mkdirSync(lock); } catch { lock = null; return { ok: false, code: 'DRAFT_BUSY' }; }
-      }
-      writeFileSync(path.join(lock, 'owner.json'), JSON.stringify({ pid: process.pid }));
+      lock = acquireLock(file, true);
+      if (!lock) return { ok: false, code: 'DRAFT_BUSY' };
       const before = load(file);
       if (before.revision !== request.revision) return { ok: false, code: 'DRAFT_CONFLICT' };
       for (const item of [before.draft, ...before.pending]) feedback(item.resourceFeedback, request.workspaceId, validateInteractiveFeedback);
@@ -130,9 +153,51 @@ export function createProjectInputDraftStore({ rootDir = null, validateInteracti
         uploads: Object.fromEntries([...used].map(id => [id, uploads[id]])) });
       return { ok: true, revision: before.revision + 1 };
     } catch (error) { return { ok: false, code: ['INVALID_DRAFT', 'DRAFT_LIMIT', 'DRAFT_ATTACHMENT_CONFLICT'].includes(error?.message) ? error.message : 'DRAFT_SAVE_FAILED' }; }
-    finally { if (lock) rmSync(lock, { recursive: true, force: true }); }
+    finally { lock?.release(); }
   }
-  return { read, write };
+  // Hold all surfaces, including those that have never written a draft.
+  function acquireRetentionDrafts(workspaceId) {
+    const locks = [];
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      for (const lock of locks.reverse()) lock.release();
+    };
+    const requests = [...SURFACES].map(surface => ({ workspaceId, surface }));
+    try {
+      for (const request of requests) {
+        const lock = acquireLock(location(request).file, false);
+        if (!lock) throw Error('DRAFT_BUSY');
+        locks.push(lock);
+      }
+      const snapshot = () => {
+        const hash = createHash('sha256'), selections = [];
+        for (const request of requests) {
+          const result = read(request, true);
+          if (!result.ok) throw Error(result.code);
+          hash.update(JSON.stringify([request.surface, result.snapshot]));
+          const { draft, pending } = result.snapshot;
+          for (const item of [draft, ...pending]) {
+            for (const row of restoreResourceFeedbackTransport(item.resourceFeedback, item.attachments)) {
+              if (row.resource.kind !== 'interactive') continue;
+              if (row.recipient.workspaceId !== workspaceId || validateInteractiveFeedback?.(row, workspaceId) !== true)
+                throw Error('DRAFT_UNAVAILABLE');
+              selections.push({ reference: row.resource.reference, followupId: row.version.followupId });
+            }
+          }
+        }
+        return { revision: `sha256:${hash.digest('hex')}`, selections };
+      };
+      const initial = snapshot();
+      const assertCurrent = () => {
+        try { return !released && locks.every(lock => lock.current()) && snapshot().revision === initial.revision; }
+        catch { return false; }
+      };
+      return { ...initial, assertCurrent, release };
+    } catch (error) { release(); throw error; }
+  }
+  return { read, write, acquireRetentionDrafts };
 }
 function quote(value) {
   if (value == null) return null;
