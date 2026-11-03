@@ -55,6 +55,10 @@ for (const passed of [true, false]) test(`task verification and main-bot reporti
   const result = reviewed.result.output;
   assert.equal(result.card, undefined);
   assert.equal(result.status, passed ? 'passed' : 'failed');
+  const current = supervisor.get({ sessionId: 'session' });
+  assert.notEqual(current.status, 'verifying');
+  assert.deepEqual(result.sessionState, { sessionId: 'session', status: current.status,
+    sourceRevision: current.sourceRevision, observationRevision: current.observationRevision });
   assert.deepEqual(readFileSync(parentFile), before, 'verification does not append or rewrite public messages');
   const reopened = createGoalPlanStore({ storeDir: plans.getStoreDir() });
   verification = createSessionVerification({ goalPlanStore: reopened, readReport: plan => supervisor.readReportSummary(plan.delegationOrigin.sessionId) });

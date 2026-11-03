@@ -360,6 +360,7 @@ export function createDelegationProvider({
     }
     const admission = await verification.markVerifying?.(input.sessionId);
     if (admission?.ok === false) return { ok: false, output: admission };
+    let verdict;
     try {
       const reviewed = await verification.run({
         sessionId: input.sessionId,
@@ -387,10 +388,21 @@ export function createDelegationProvider({
         if (recorded?.ok === false) return { ok: false,
           output: { ok: false, error: recorded.error || 'verification_persistence_failed' } };
       }
-      return { ok: true, output: { ok: true, status: detail.outcome, event, detail } };
+      verdict = { status: detail.outcome, event, detail };
     } finally {
       await verification.finish?.(input.sessionId);
     }
+    let sessionState;
+    try {
+      const current = await supervisor?.get?.({ sessionId: input.sessionId });
+      if (current?.sessionId === input.sessionId && typeof current.status === 'string') {
+        const { sessionId, status, sourceRevision, observationRevision } = current;
+        sessionState = { sessionId, status, sourceRevision, observationRevision };
+      }
+    } catch {
+      // A status read can fail after the verdict is durably recorded.
+    }
+    return { ok: true, output: { ok: true, status: verdict.status, ...(sessionState ? { sessionState } : {}), event: verdict.event, detail: verdict.detail } };
   }
 
   async function setProactivity(input, view) {
