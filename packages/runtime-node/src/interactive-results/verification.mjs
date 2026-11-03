@@ -1,6 +1,6 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { INTERACTIVE_PUBLISH_CAPABILITY as PUBLISH, INTERACTIVE_INSPECT_CAPABILITY as INSPECT, normalizeInteractiveUserArtifact,
-  normalizeInteractiveReference, normalizeInteractiveReviewBinding, normalizeInteractiveInspectionReceipt,
+  normalizeInteractiveOwner, normalizeInteractiveReference, normalizeInteractiveReviewBinding, normalizeInteractiveInspectionReceipt,
   interactiveInspectionEvidenceRef, isInteractiveInspectionEvidenceRef, parseInteractiveArtifactRef, isInteractiveFeedbackAttachment } from '@peer-agent/protocol';
 import { validateState } from '@peer-agent/interactive-content/state';
 import { executionIdentity, sameExecution } from '../project-agent/session-control-kernel.mjs';
@@ -43,7 +43,10 @@ function fullRange(receipts, predicate) {
 /** Host-owned target admission and factual coverage, never a semantic verdict or an execution port. */
 export function createInteractiveVerification({ resultStore, feedback, goalPlanStore, conversationStore,
   getBotConversationId, holdsLease, enabled }) {
-  const active = new Map(); let disposed = false;
+  const active = new Map(), retentionOwners = new Set();
+  let disposed = false;
+  const currentOwner = owner => !disposed && enabled?.(owner.workspaceId) === true && holdsLease?.(owner.workspaceId) === true
+    && getBotConversationId?.(owner.workspaceId) === owner.conversationId;
   const messagesFor = plan => conversationStore?.getPersistedConversationHistory?.(plan.conversationId)?.messages ?? [];
   const recordsFor = refs => goalPlanStore.findEvidenceIndexRecords(refs);
   function targetsFor(plan) {
@@ -58,8 +61,7 @@ export function createInteractiveVerification({ resultStore, feedback, goalPlanS
       catch { return []; }
     });
     if (!required && !ownOperations.length) return { targets: [], digest: null, owner };
-    if (disposed || !origin || enabled?.(owner.workspaceId) !== true || holdsLease?.(owner.workspaceId) !== true
-      || getBotConversationId(owner.workspaceId) !== owner.conversationId) throw problem('interactive_verification_unavailable');
+    if (!origin || !currentOwner(owner)) throw problem('interactive_verification_unavailable');
     const selected = messages.filter(hasFeedback).flatMap(message => feedback.restore(message, owner.workspaceId))
       .filter(row => row.resource.kind === 'interactive');
     if (selected.some(row => !same(row.recipient, owner))) throw problem('interactive_scope_denied');
@@ -103,6 +105,7 @@ export function createInteractiveVerification({ resultStore, feedback, goalPlanS
   function prepare({ plan, verifierRunId, readSourceRevision }) {
     const admitted = targetsFor(plan);
     if (!admitted.targets.length) return null;
+    if (retentionOwners.has(encode(admitted.owner))) throw problem('interactive_retention_busy');
     if (active.size >= 32) throw problem('interactive_verification_limit');
     const expected = executionIdentity(plan), token = randomUUID();
     const revisionFor = current => hash([readSourceRevision(current), targetsFor(current).digest]);
@@ -115,7 +118,9 @@ export function createInteractiveVerification({ resultStore, feedback, goalPlanS
         || revisionFor(current) !== sourceRevision) throw problem('interactive_verification_stale');
       return true;
     }
-    record.assertCurrent = assertCurrent; active.set(token, record);
+    record.assertCurrent = assertCurrent;
+    if (!currentOwner(admitted.owner) || retentionOwners.has(encode(admitted.owner))) throw problem('interactive_verification_stale');
+    active.set(token, record);
     return { binding: { token }, sourceRevision, readSourceRevision: revisionFor,
       facts: { targetsDigest: admitted.digest, targets: structuredClone(admitted.targets) },
       validateReport(report, allowed) {
@@ -155,5 +160,39 @@ export function createInteractiveVerification({ resultStore, feedback, goalPlanS
       admitResult: ref => record.targets.some(target => same(target.reference, ref)),
       admitFollowup: id => record.targets.some(target => target.state.kind === 'frozen-followup' && target.state.followupId === id) };
   }
-  return { prepare, resolve, dispose() { disposed = true; active.clear(); } };
+  // Shared by the leased host's review and maintenance paths. Durable task roots are separate.
+  function acquireRetentionVerification(rawOwner) {
+    const owner = normalizeInteractiveOwner(rawOwner);
+    if (!owner || !currentOwner(owner)) throw problem('interactive_retention_unavailable');
+    const key = encode(owner);
+    if (retentionOwners.has(key)) throw problem('interactive_retention_busy');
+    retentionOwners.add(key);
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      retentionOwners.delete(key);
+    };
+    try {
+      const snapshot = () => [...active].filter(([, record]) => same(record.owner, owner));
+      const initial = snapshot();
+      const references = new Map(), followupIds = new Set();
+      for (const [, record] of initial) {
+        // Retain the fixed target until its actual lifecycle ends, even if its turn has become stale.
+        for (const target of record.targets) {
+          references.set(encode(target.reference), target.reference);
+          if (target.state.kind === 'frozen-followup') followupIds.add(target.state.followupId);
+        }
+      }
+      const assertCurrent = () => {
+        if (released || !currentOwner(owner)) return false;
+        const fresh = snapshot();
+        return fresh.length === initial.length && fresh.every(([token, record], index) =>
+          initial[index][0] === token && initial[index][1] === record);
+      };
+      return { revision: jsonDigest(initial.map(([token, record]) => [token, record.review])), references: structuredClone([...references.values()]),
+        followupIds: [...followupIds].sort(), assertCurrent, release };
+    } catch (error) { release(); throw error; }
+  }
+  return { prepare, resolve, acquireRetentionVerification, dispose() { disposed = true; active.clear(); } };
 }

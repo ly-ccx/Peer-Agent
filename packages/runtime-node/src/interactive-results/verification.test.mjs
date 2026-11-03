@@ -10,6 +10,8 @@ import { createGoalPlanStore } from '../goal-plan-store.mjs';
 import { resolveWorkSessionProfile } from '../project-agent/work-session-profile.mjs';
 import { verificationContentHash } from '../project-agent/verification-completion.mjs';
 import { createInteractiveRuntime } from './runtime.mjs';
+import { createInteractiveRetention, INTERACTIVE_RETENTION_SOURCES } from './retention.mjs';
+import { jsonDigest } from './storage.mjs';
 import { normalizeTurnProfile } from '../../../../apps/desktop/electron/main/chat-runtime/turn-context.mjs';
 import { normalizeEvidenceIndexRecord as legacyNormalize } from './test-fixtures/rc35-evidence-normalizer.mjs';
 import { createProjectGoalRunnerHost } from '../project-agent/goal-runner-host.mjs';
@@ -75,6 +77,45 @@ async function fixture(t, { program, facts } = {}) {
   return { root, plans, conversations, current, profile, runtime, owner, child, draft, published, reference, publicationRef, publish, prepare, inspect, read, freeze,
     setEnabled: v => { enabled = v; }, setLeased: v => { leased = v; }, setOwner: v => { parentId = v; }, setContextLevel: v => { contextLevel = v; } };
 }
+
+test('the leased verifier guard pins real review targets and invalidates a cleanup preview when the review ends', async t => {
+  const f = await fixture(t), frozen = await f.freeze(), review = f.prepare(), verification = f.runtime.verification;
+  const guard = verification.acquireRetentionVerification(f.owner);
+  try {
+    assert.deepEqual(guard.references, [f.reference]);
+    assert.deepEqual(guard.followupIds, [frozen.followupId]);
+    assert.equal(guard.assertCurrent(), true);
+    assert.throws(f.prepare, { code: 'interactive_retention_busy' });
+    assert.throws(() => verification.acquireRetentionVerification(f.owner), { code: 'interactive_retention_busy' });
+    f.setLeased(false);
+    assert.equal(guard.assertCurrent(), false);
+    assert.throws(() => verification.acquireRetentionVerification(f.owner), { code: 'interactive_retention_unavailable' });
+    f.setLeased(true);
+  } finally { guard.release(); }
+  assert.equal(guard.assertCurrent(), false);
+  const retention = createInteractiveRetention({ resultStore: f.runtime.resultStore, stateStore: f.runtime.stateStore,
+    assertOwner: () => true,
+    acquireRoots(owner) {
+      const reviewRoots = verification.acquireRetentionVerification(owner);
+      return { sources: Object.fromEntries(INTERACTIVE_RETENTION_SOURCES.map(source =>
+        [source, source === 'verification' ? reviewRoots.revision : jsonDigest(source)])),
+      pins: reviewRoots.references.map(reference => ({ source: 'verification', reference })),
+      followupIds: reviewRoots.followupIds, assertCurrent: reviewRoots.assertCurrent, release: reviewRoots.release };
+    },
+  });
+  const preview = retention.preview(f.reference);
+  assert.ok(preview.blockers.some(row => row.source === 'verification'));
+  assert.ok(preview.blockers.some(row => row.source === 'followup'));
+  const closing = verification.acquireRetentionVerification(f.owner);
+  try {
+    review.close();
+    assert.equal(closing.assertCurrent(), false);
+  } finally { closing.release(); }
+  assert.throws(() => retention.cleanup({ reference: f.reference, requestId: 'cleanup-after-review', expectedDigest: preview.cleanupDigest }),
+    { code: 'interactive_retention_stale' });
+  assert.equal(retention.preview(f.reference).blockers.some(row => row.source === 'verification'), false);
+  assert.ok(f.prepare(), 'the next review can start after guard release');
+});
 
 test('actual normalized ephemeral Verifier reads only its fixed targets; complete real inspection coverage is required for a pass', async t => {
   const f = await fixture(t), frozen = await f.freeze(), review = f.prepare(); t.after(() => review.close());
