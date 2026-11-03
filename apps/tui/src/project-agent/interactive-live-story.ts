@@ -21,14 +21,14 @@ export const INTERACTIVE_STORY_BUDGET = Object.freeze({
 const CAPABILITIES = [
   'local.delegation.spawn_session', 'local.delegation.list_sessions', 'local.delegation.get_session',
   'local.delegation.verify_session', 'local.delegation.get_verification_detail', 'local.delegation.coordinate_work', 'local.delegation.post_reply',
-  'local.goal.get_plan', 'local.goal.update_task', 'local.interactive.publish', 'local.interactive.inspect',
+  'local.delegation.wait_for_sessions', 'local.goal.get_plan', 'local.goal.update_task', 'local.interactive.publish', 'local.interactive.inspect',
 ];
 const INITIAL_INPUT = 'live-story-publish', FROZEN_INPUT = 'live-story-verify';
 const INITIAL_TASK = [
   `Delegate one task with spawn_session. Use anchorMessageIds ["input-${INITIAL_INPUT}"], kind "research", readOnly true, isolation "none", and requiredCapabilities ["local.interactive.publish"].`,
   'Set successCriteria to [{"kind":"model_review","description":"Independently inspect the program, full facts binding and initial evaluation. Check both costs and the remainder."}]. Keep the longer instructions in brief.',
   'The worker must read its exact plan and task IDs with goal_get_plan, publish once, then use goal_update_task with the returned fixed artifact Evidence. Stop after recording it. Leave inspection to the Verifier.',
-  'I will send the selected budget when the publication task is ready. One acknowledgment is enough for now. Keep the original result and do not claim human acceptance.',
+  'I will send the selected budget when the publication task is ready. Acknowledge once with post_reply. If a background wake arrives while the worker is still advancing, end it with wait_for_sessions using its session ID. Keep the original result and do not claim human acceptance.',
   'Worker brief: ' + INTERACTIVE_LIVE_TASK,
 ].join('\n');
 const FROZEN_TASK = [
@@ -36,7 +36,7 @@ const FROZEN_TASK = [
   `Delegate this new request via spawn_session exactly once. Reuse its returned session ID on subsequent turns, including during repair. Use anchorMessageIds ["input-${FROZEN_INPUT}"] to carry the attached frozen selection. Set kind "research", readOnly true, isolation "none", and requiredCapabilities ["local.interactive.inspect"].`,
   'The new worker should use goal_get_plan, then inspect the attached fixed result once with view evaluate and the attached followupId, then record that actual result and evidence on its leaf with goal_update_task. Keep the worker brief limited to that one inspection. Put the four independent checks only in successCriteria.',
   'Set successCriteria to [{"kind":"model_review","description":"Independently inspect the attached fixed result in four calls together: program, data binding facts, initial evaluate, and evaluate with the attached followupId. Cite only the four canonical interactive-inspection references."}].',
-  'While the follow-up task is running or verifying, wait for a status change using the current session revision from the roster. After it reports result_ready, call verify_session with its sessionId even if its Goal plan already has a passed review. That call records the delegated session verdict. Use its returned detail. The original publication already has plan-level review; only recheck it if post_reply explicitly requires it. Avoid repeating get_session or get_verification_detail when the status is unchanged.',
+  'Acknowledge the new user input once. While the follow-up task is running or verifying, use wait_for_sessions on background wakes with its session ID. Read the current host status on the next wake. After it reports result_ready, call verify_session with its sessionId even if its Goal plan already has a passed review. That call records the delegated session verdict. Use its returned detail. The original publication already has plan-level review; only recheck it if post_reply explicitly requires it. Avoid repeating get_session or get_verification_detail when the status is unchanged.',
   'Then use post_reply with both session IDs as sources and their current statuses. Explain the two remainders, describe the costs as synthetic, and state the actual verification and human acceptance status. Do not republish or substitute direct Bot inspection for delegation.',
 ].join('\n');
 
