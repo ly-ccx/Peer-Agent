@@ -1251,3 +1251,14 @@ html[data-vibrancy='true'] .bot-drawer-dock.is-open {
 .bot-drawer-dock-frame > .bot-drawer-dock:not(.is-open) {
   border-inline-width: 0;
 }
+
+/* Task summaries and their direct conversation action remain separate keyboard targets. */
+.bot-tasks-tab .bot-task-with-action { flex-direction: column; align-items: stretch; gap: 0; }
+.bot-tasks-tab .bot-task-with-action .bot-task-row { padding-block: var(--space-3); }
+.bot-tasks-tab .bot-task-with-action .bot-task-row-copy { flex-direction: column; align-items: flex-start; gap: 6px; }
+.bot-tasks-tab .bot-task-with-action .bot-task-row-title { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.bot-tasks-tab .bot-task-with-action .bot-task-row-meta { white-space: normal; overflow-wrap: anywhere; color: var(--graphite-secondary); font-size: var(--ui-font-meta); }
+.bot-task-row-progress { font-size: var(--ui-font-control); line-height: var(--ui-line-body); color: var(--graphite-secondary); overflow-wrap: anywhere; }
+.bot-task-row-actions { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: var(--space-2); padding: 0 11px var(--space-3); }
+.bot-task-row-actions > .bot-task-list-conversation { display: inline-flex; align-items: center; gap: 6px; font-size: var(--ui-font-control); }
+.bot-task-row-actions > .bot-task-resume { margin-right: 0; }

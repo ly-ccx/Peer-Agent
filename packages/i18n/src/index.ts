@@ -630,6 +630,8 @@ export type TranslationKey =
   | 'projectAgent.drawer.task.instructions'
   | 'projectAgent.drawer.task.description'
   | 'projectAgent.drawer.task.descriptionMissing'
+  | 'projectAgent.drawer.task.openConversation'
+  | 'projectAgent.drawer.task.conversationUnavailable'
   | 'projectAgent.drawer.task.openFull'
   | 'projectAgent.drawer.task.closeFull'
   | 'projectAgent.drawer.task.progressNote'
@@ -2353,8 +2355,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.task.instructions': "内部任务指令",
     'projectAgent.drawer.task.description': '任务说明',
     'projectAgent.drawer.task.descriptionMissing': '暂未读取到任务说明，可回到对话查看原始要求。',
-    'projectAgent.drawer.task.openFull': '打开完整任务',
-    'projectAgent.drawer.task.closeFull': '收起完整任务',
+    'projectAgent.drawer.task.openConversation': '打开完整会话',
+    'projectAgent.drawer.task.conversationUnavailable': '完整会话暂不可用',
+    'projectAgent.drawer.task.openFull': '任务详情',
+    'projectAgent.drawer.task.closeFull': '收起详情',
     'projectAgent.drawer.task.progressNote': '最近说明：{content}',
     'projectAgent.drawer.task.progressPending': '暂无新的进度说明。',
     'projectAgent.drawer.task.information': '任务信息',
@@ -3816,8 +3820,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.task.instructions': "Internal task instructions",
     'projectAgent.drawer.task.description': 'Task description',
     'projectAgent.drawer.task.descriptionMissing': 'The task description is unavailable. Return to the conversation to see the original request.',
-    'projectAgent.drawer.task.openFull': 'Open full task',
-    'projectAgent.drawer.task.closeFull': 'Collapse full task',
+    'projectAgent.drawer.task.openConversation': 'Open full conversation',
+    'projectAgent.drawer.task.conversationUnavailable': 'Full conversation is currently unavailable',
+    'projectAgent.drawer.task.openFull': 'Task details',
+    'projectAgent.drawer.task.closeFull': 'Hide details',
     'projectAgent.drawer.task.progressNote': 'Latest note: {content}',
     'projectAgent.drawer.task.progressPending': 'No further progress update yet.',
     'projectAgent.drawer.task.information': 'Task information',
