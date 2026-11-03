@@ -2,7 +2,7 @@ import { normalizeResourceWindowRequest, type ResourceWindowResource } from './r
 
 /** User-selected factual material. Never access authority, a replacement patch, or execution Evidence. */
 export interface ResourceFeedbackRecipient { readonly workspaceId: string; readonly conversationId: string }
-export type ResourceFeedbackResource = ResourceWindowResource | { readonly kind: 'web'; readonly url: string; readonly pageUrl?: string; readonly conversationId: string; readonly browserTabId: string };
+export type ResourceFeedbackResource = Exclude<ResourceWindowResource, { readonly kind: 'interactive' }> | { readonly kind: 'web'; readonly url: string; readonly pageUrl?: string; readonly conversationId: string; readonly browserTabId: string };
 export type ResourceFeedbackVersion =
   | { readonly kind: 'content'; readonly resourceId: string; readonly contentVersion: string }
   | { readonly kind: 'git'; readonly commit: string }
@@ -46,7 +46,7 @@ export function normalizeResourceFeedback(raw: unknown): ResourceFeedback | unde
       resource = { kind: 'web', url: u.href, ...(pageUrl ? { pageUrl } : {}), conversationId: r.conversationId, browserTabId: r.browserTabId };
     } catch { return; }
   } else {
-    const normalized = normalizeResourceWindowRequest({ resource: raw.resource }); if (!normalized) return;
+    const normalized = normalizeResourceWindowRequest({ resource: raw.resource }); if (!normalized || normalized.resource.kind === 'interactive') return;
     resource = normalized.resource;
   }
   const v = raw.version; let version: ResourceFeedbackVersion;

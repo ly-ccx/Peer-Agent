@@ -1,6 +1,8 @@
 import type { InteractiveFollowup, InteractiveOpenView, InteractiveResultsApi, InteractiveStateSnapshot, InteractiveStateValue,
   InteractiveStateValues, InteractiveWriter } from '@peer-agent/protocol';
-import { canonicalJSON, validateState, type InteractiveEvaluator } from '@peer-agent/interactive-content';
+import { canonicalJSON } from '@peer-agent/interactive-content/values';
+import { validateState } from '@peer-agent/interactive-content/state';
+import type { InteractiveEvaluator } from '@peer-agent/interactive-content';
 
 type Candidate = { readonly edit: number; readonly values: InteractiveStateValues; readonly inputDrafts: Readonly<Record<string, string>>; readonly requestId: string };
 type PendingSave = { readonly candidate: Candidate; readonly writer: InteractiveWriter; readonly expectedRevision: number };

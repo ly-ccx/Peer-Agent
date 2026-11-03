@@ -50,11 +50,18 @@ export function createInteractiveViewService({ resultStore, stateStore, resolveS
   }
   function openReply(record) {
     requireCurrent(record);
-    const fixed = resultStore.getVersion(record.reference), state = stateStore.read(record.reference, () => requireCurrent(record));
+    const fixed = resultStore.getVersion(record.reference);
     const result = { reference: fixed.reference, content: fixed.content, source: fixed.source, provenance: fixed.provenance,
       evidenceRef: fixed.evidenceRef, artifactRef: fixed.artifactRef, dataLevel: fixed.dataLevel, createdAt: fixed.createdAt,
       ...(fixed.predecessor ? { predecessor: fixed.predecessor } : {}) };
     requireCurrent(record);
+    let state;
+    try { state = stateStore.read(record.reference, () => requireCurrent(record)); }
+    catch (error) {
+      requireCurrent(record);
+      return { ...failed(error), summary: { reference: fixed.reference, title: fixed.content.title, textFallback: fixed.content.textFallback,
+        specHash: fixed.content.specHash, libraryVersion: fixed.content.libraryVersion, dataLevel: fixed.dataLevel } };
+    }
     return { ok: true, handle: copy(record.handle), result, state };
   }
   async function open(sender, raw) {
@@ -66,14 +73,17 @@ export function createInteractiveViewService({ resultStore, stateStore, resolveS
       if (prior) {
         if (!same(prior.reference, reference)) throw problem('interactive_open_parameter_conflict');
         const reply = await prior.promise;
-        return reply.ok ? openReply(locate(sender, reply.handle)) : reply;
+        if (!reply.ok) return reply;
+        const record = locate(sender, reply.handle), refreshed = openReply(record);
+        if (!refreshed.ok) retire(record);
+        return refreshed;
       }
       if (views.size + pending.size >= maxViews) throw problem('interactive_view_limit');
       if (!senderRequests) { senderRequests = new Map(); requests.set(sender, senderRequests); }
       const controller = new AbortController();
       let cancel;
       const cancelled = new Promise((_, reject) => { cancel = () => { controller.abort(); reject(problem('interactive_view_stale')); }; });
-      const operation = { sender, cancel }; pending.add(operation); sender.once?.('destroyed', cancel);
+      const operation = { sender, requestId, cancel }; pending.add(operation); sender.once?.('destroyed', cancel);
       const promise = (async () => {
         // Resolve from host canonical owner/source facts; never trust the locator alone.
         const source = await Promise.race([Promise.resolve().then(() => resolveSource(sender, copy(reference), { signal: controller.signal })), cancelled]);
@@ -85,7 +95,7 @@ export function createInteractiveViewService({ resultStore, stateStore, resolveS
         const record = { sender, reference, handle, requestId, assertCurrent: source.assertCurrent, writer: null };
         record.onDestroyed = () => retire(record);
         views.set(handle.viewId, record); sender.once?.('destroyed', record.onDestroyed);
-        try { return openReply(record); } catch (error) { retire(record); throw error; }
+        try { const reply = openReply(record); if (!reply.ok) retire(record); return reply; } catch (error) { retire(record); throw error; }
       })().catch(failed).finally(() => { pending.delete(operation); sender.removeListener?.('destroyed', cancel); });
       senderRequests.set(requestId, { reference, promise });
       const reply = await promise;
@@ -100,6 +110,13 @@ export function createInteractiveViewService({ resultStore, stateStore, resolveS
   }
   return {
     open,
+    cancelOpen: (sender, raw) => run(() => {
+      const value = request(raw, ['requestId']);
+      if (!interactiveToken(value.requestId)) throw problem('interactive_request_invalid');
+      [...pending].filter(operation => operation.sender === sender && operation.requestId === value.requestId).forEach(operation => operation.cancel());
+      [...views.values()].filter(record => record.sender === sender && record.requestId === value.requestId).forEach(retire);
+      return {};
+    }),
     readState: (sender, raw) => bound(sender, raw, [], (record, _value, current) => ({ state: stateStore.read(record.reference, current) })),
     acquire: (sender, raw) => bound(sender, raw, ['expectedRevision', 'takeover'], (record, value, current) => {
       if (!revision(value.expectedRevision) || value.takeover !== undefined && typeof value.takeover !== 'boolean') throw problem('interactive_request_invalid');

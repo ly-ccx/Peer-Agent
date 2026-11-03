@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { normalizeResourceWindowNavigation, normalizeResourceWindowOwner, normalizeResourceWindowRequest } from './resource-window.ts';
+import { normalizeResourceLayout, normalizeResourceWindowNavigation, normalizeResourceWindowOwner, normalizeResourceWindowRequest, resourceWindowWorkspaceId, resourceWindowTask } from './resource-window.ts';
 const reference = { workspaceId: 'bot', path: '/project/a.md', task: { sessionId: 'session', planId: 'plan' } };
 const request = { resource: { kind: 'document', reference, mode: 'preview' }, sourceTabId: 'tab', navigation: { top: 250, left: 0 } };
 test('only read-only resource references and bounded presentation values cross the window seam', () => {
   const value = normalizeResourceWindowRequest(request)!;
-  assert.equal(value.resource.kind, 'document'); assert.deepEqual(value.resource.reference.task, reference.task);
+  assert.ok(value.resource.kind === 'document'); assert.deepEqual(value.resource.reference.task, reference.task);
   assert.equal(value.navigation?.top, 250); assert.notEqual(value.resource.reference, reference);
   for (const raw of [{ ...request, owner: { workspaceId: 'foreign' } }, { ...request, windowId: 'fake' }, { ...request, resource: { ...request.resource, body: 'not admitted' } },
     { resource: { kind: 'browser', reference, guestId: 5 } }, { ...request, navigation: { top: 0, left: 0, draft: 'not admitted' } },
@@ -13,7 +13,8 @@ test('only read-only resource references and bounded presentation values cross t
 });
 test('invalid history, task and comparison data cannot be erased into a current/default resource', () => {
   const history = { ...reference, revision: { kind: 'git', commit: 'a'.repeat(40), repositoryId: 'repository' } };
-  assert.equal(normalizeResourceWindowRequest({ resource: { ...request.resource, reference: history } })?.resource.reference.revision?.commit, 'a'.repeat(40));
+  const fixed = normalizeResourceWindowRequest({ resource: { ...request.resource, reference: history } });
+  assert.ok(fixed?.resource.kind === 'document'); assert.equal(fixed.resource.reference.revision?.commit, 'a'.repeat(40));
   assert.equal(normalizeResourceWindowRequest({ resource: { ...request.resource, reference: history, mode: 'diff' } }), undefined);
   assert.equal(normalizeResourceWindowRequest({ resource: { ...request.resource, reference: { ...history, revision: { kind: 'git', commit: 'HEAD' } } } }), undefined);
   assert.equal(normalizeResourceWindowRequest({ resource: { ...request.resource, reference: { ...reference, task: { sessionId: '../session', planId: 'plan' } } } }), undefined);
@@ -36,10 +37,28 @@ test('observation and delivery references survive as hints without accepting a s
   const value = normalizeResourceWindowRequest({ ...request, resource: { ...request.resource,
     reference: { ...reference, expectedObservation: { resourceId: 'sha256:' + 'b'.repeat(64), contentVersion: 'sha256:' + 'a'.repeat(64) } },
     delivery: { evidenceRef: 'tool-result://delivery', artifactRef: 'file:///project/a.md' } } })!;
-  assert.equal(value.resource.reference.expectedObservation?.contentVersion, 'sha256:' + 'a'.repeat(64));
+  assert.ok(value.resource.kind === 'document'); assert.equal(value.resource.reference.expectedObservation?.contentVersion, 'sha256:' + 'a'.repeat(64));
   assert.equal(normalizeResourceWindowRequest({ ...request, resource: { ...request.resource, reference: { ...reference, expected: { sourceId: 'legacy', resourceId: 'legacy' } } } }), undefined);
   assert.equal(value.resource.kind === 'document' && value.resource.delivery?.evidenceRef, 'tool-result://delivery');
   assert.equal(normalizeResourceWindowRequest({ ...request, resource: { ...request.resource, mode: 1 } }), undefined);
+});
+
+test('interactive windows use fixed domain identity and bounded reading hints without file or permission fields', () => {
+  const reference = { owner: { workspaceId: 'bot-a', conversationId: 'parent-a' }, resultId: 'result-a', contentVersion: 'sha256:' + 'a'.repeat(64) };
+  const resource = { kind: 'interactive' as const, reference };
+  const value = normalizeResourceWindowRequest({ resource, sourceTabId: 'result-tab', navigation: { top: 300, left: 0 } });
+  assert.ok(value?.resource.kind === 'interactive'); assert.deepEqual(value.resource.reference, reference);
+  assert.equal(resourceWindowWorkspaceId(value.resource), 'bot-a'); assert.equal(resourceWindowTask(value.resource), undefined);
+  for (const patch of [{ path: '/fake' }, { root: '/' }, { task: { planId: 'p', sessionId: 's' } }, { content: 'body' }, { permission: 'full' }]) {
+    assert.equal(normalizeResourceWindowRequest({ resource: { ...resource, ...patch } }), undefined);
+  }
+  assert.equal(normalizeResourceWindowRequest({ resource: { ...resource, reference: { ...reference, contentVersion: 'latest' } } }), undefined);
+  assert.equal(normalizeResourceWindowNavigation({ top: 0, left: 0, mode: 'source' }, 'interactive'), undefined);
+  assert.equal(normalizeResourceWindowNavigation({ top: 0, left: 0, positions: [] }, 'interactive'), undefined);
+  assert.deepEqual(normalizeResourceLayout({ order: ['document:a', 'interactive:b'], recent: ['interactive:b'] }), { order: ['document:a', 'interactive:b'], recent: ['interactive:b'] });
+  assert.equal(normalizeResourceLayout({ order: ['interactive:a', 'interactive:a'], recent: [] }), undefined);
+  assert.equal(normalizeResourceLayout({ order: ['permission:full'], recent: [] }), undefined);
+  assert.equal(normalizeResourceLayout({ order: ['interactive:a'], recent: [], revision: 0 }), undefined);
 });
 
 test('a single-file Diff must carry its actual index/worktree base rather than choosing one implicitly', () => {

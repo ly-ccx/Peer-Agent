@@ -1,6 +1,7 @@
 import type { ResourceWindowIdentity, ResourceWindowNavigation, ResourceWindowReadRequest, ResourceWindowReadResult, ResourceWindowResult } from '@peer-agent/protocol';
 /** Dedicated native surface. Intentionally does not extend the main-window API. */
 export interface ResourceWindowApi {
+  readonly interactiveResults?: import('@peer-agent/protocol').InteractiveResultsApi;
   readonly resourceEdits?: import('@peer-agent/protocol').ResourceEditsApi;
   readonly initialAppearance: unknown;
   readonly initialLocale: string;

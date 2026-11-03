@@ -111,3 +111,38 @@ test('unsupported fields, forged owner and an arbitrary sender cannot open conte
   assert.equal(f.service.acquire(f.a, { handle: opened.handle, expectedRevision: 4 }).code, 'interactive_state_conflict');
   assert.equal(f.service.readState(f.a, { handle: opened.handle }).state.stateRevision, 0);
 });
+
+test('cancel-open retires only the actual sender/request and a cancelled late reply cannot reopen it', async t => {
+  let complete;
+  const f = await fixture(t, { resolveSource: actual => new Promise(resolve => { complete = () => resolve({ owner, assertCurrent: () => !actual.isDestroyed() }); }) });
+  const pending = f.open(); await Promise.resolve(); await Promise.resolve();
+  assert.equal(f.service.cancelOpen(f.b, { requestId: 'open-a' }).ok, true);
+  assert.equal(f.service.cancelOpen(f.a, { requestId: 'open-a' }).ok, true);
+  assert.equal((await pending).code, 'interactive_view_stale');
+  complete(); await Promise.resolve();
+  const next = f.open(f.a, 'new-open'); await Promise.resolve(); await Promise.resolve(); complete();
+  const reply = await next; assert.equal(reply.ok, true);
+  f.service.acquire(f.a, { handle: reply.handle, expectedRevision: 0 });
+  assert.equal(f.service.cancelOpen(f.b, { requestId: 'new-open' }).ok, true);
+  assert.equal(f.service.readState(f.a, { handle: reply.handle }).ok, true);
+  assert.equal(f.service.cancelOpen(f.a, { requestId: 'new-open' }).ok, true);
+  assert.equal(f.service.readState(f.a, { handle: reply.handle }).code, 'interactive_view_stale');
+});
+
+test('corrupt state exposes only the verified saved summary, preserves the checkpoint and releases the failed view', async t => {
+  const f = await fixture(t, { maxViews: 1 }), opened = await f.open();
+  f.service.acquire(f.a, { handle: opened.handle, expectedRevision: 0 });
+  f.service.release(f.a, { handle: opened.handle });
+  const db = f.results.storage.connect(owner.workspaceId, true).db;
+  const row = db.prepare('SELECT snapshot FROM states').get(), snapshot = JSON.parse(row.snapshot);
+  snapshot.values.$budget = 999;
+  const corrupt = JSON.stringify(snapshot); db.prepare('UPDATE states SET snapshot=?').run(corrupt);
+  const failed = await f.open(f.a, 'corrupt');
+  assert.equal(failed.ok, false); assert.equal(failed.code, 'interactive_state_corrupt');
+  assert.equal(failed.handle, undefined); assert.equal(failed.result, undefined);
+  assert.equal(failed.summary.title, 'Trial'); assert.deepEqual(failed.summary.reference, f.receipt.reference);
+  assert.equal(failed.summary.source, undefined); assert.equal(failed.summary.operationId, undefined);
+  const next = await f.open(f.b, 'retry-corrupt');
+  assert.equal(next.code, 'interactive_state_corrupt', 'a failed open does not consume the view limit');
+  assert.equal(db.prepare('SELECT snapshot FROM states').get().snapshot, corrupt);
+});

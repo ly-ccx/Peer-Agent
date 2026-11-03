@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Renderer, useStateField, type Library, type OpenUIError } from '@openuidev/react-lang';
 import { createPeerLibrary, validateState } from '@peer-agent/interactive-content';
 import type { InteractiveMaterialProvenance, InteractiveStateValue } from '@peer-agent/protocol';
@@ -18,7 +18,7 @@ function calculationMessage(code: string, isZh: boolean) {
   return isZh ? '当前条件无法计算。请调整条件或恢复初始条件。' : 'These conditions cannot be calculated. Adjust or reset the inputs.';
 }
 /** Public SDK Renderer with Peer components, governed state requests and static error recovery. */
-export function InteractiveSurface({ session, provenance, isZh }: { readonly session: InteractiveSession; readonly provenance: readonly InteractiveMaterialProvenance[]; readonly isZh: boolean }) {
+export function InteractiveSurface({ session, provenance, isZh, onReady }: { readonly session: InteractiveSession; readonly provenance: readonly InteractiveMaterialProvenance[]; readonly isZh: boolean; readonly onReady?: () => void }) {
   const state = useSyncExternalStore(session.subscribe, session.snapshot, session.snapshot);
   const [seenValues, setSeen] = useState<Record<string, unknown>>({}), [sdkErrors, setSdkErrors] = useState<readonly OpenUIError[]>([]);
   const [mirrorError, setMirrorError] = useState(false);
@@ -39,6 +39,8 @@ export function InteractiveSurface({ session, provenance, isZh }: { readonly ses
     return () => clearTimeout(timer);
   }, [session, state.values, state.inputDrafts, state.writer, state.composing]);
   const sdkReady = Object.entries(state.sdkValues).every(([key, value]) => Object.is(seenValues[key], value));
+  const announced = useRef(false);
+  useLayoutEffect(() => { if (sdkReady && !announced.current) { announced.current = true; onReady?.(); } }, [sdkReady, onReady]);
   const error = state.calculationError ?? (mirrorError || sdkReady && sdkErrors.some(error => error.severity !== 'warning') ? 'evaluation_unavailable' : null);
   const readonly = !state.writer || ['writer_lost', 'closed'].includes(state.phase);
   return <section className="interactive-surface" aria-label={session.content.title}>

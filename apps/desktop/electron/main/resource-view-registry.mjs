@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { normalizeResourceWindowRequest, normalizeResourceWindowOwner, normalizeResourceWindowNavigation } from '@peer-agent/protocol';
+import { normalizeResourceWindowRequest, normalizeResourceWindowOwner, normalizeResourceWindowNavigation, resourceWindowWorkspaceId, resourceWindowTask } from '@peer-agent/protocol';
 const failure = status => ({ ok: false, status });
 const alive = sender => !!sender && typeof sender === 'object' && sender.isDestroyed?.() !== true;
 const sameTask = (a, b) => (a?.sessionId ?? '') === (b?.sessionId ?? '') && (a?.planId ?? '') === (b?.planId ?? '');
@@ -74,21 +74,24 @@ export function createResourceViewRegistry({ isMainSender, isResourceSender, res
       const resolved = result.value;
       if (disposed) return failure('disposed');
       if (!alive(sender) || !isMainSender(sender) || startingEpoch !== epoch(sender)) return failure('source_unavailable');
-      if (!resolved?.ok) return failure(['scope_denied', 'permission_denied', 'not_found', 'workspace_unavailable', 'revision_unavailable'].includes(resolved?.status) ? resolved.status : 'source_unavailable');
+      if (!resolved?.ok) return failure(['scope_denied', 'permission_denied', 'not_found', 'workspace_unavailable', 'revision_unavailable', 'storage_unavailable', 'content_cleaned', 'incompatible_result', 'result_unavailable'].includes(resolved?.status) ? resolved.status : 'source_unavailable');
       const owner = normalizeResourceWindowOwner(resolved.owner);
       const canonical = normalizeResourceWindowRequest({ resource: resolved.resource });
-      if (!owner || !canonical || canonical.resource.kind !== request.resource.kind || owner.workspaceId !== request.resource.reference.workspaceId
-        || canonical.resource.reference.workspaceId !== owner.workspaceId || !sameTask(owner.task, canonical.resource.reference.task)
-        || !sameTask(owner.task, request.resource.reference.task)) return failure('scope_denied');
+      if (!owner || !canonical || canonical.resource.kind !== request.resource.kind || owner.workspaceId !== resourceWindowWorkspaceId(request.resource)
+        || resourceWindowWorkspaceId(canonical.resource) !== owner.workspaceId || !sameTask(owner.task, resourceWindowTask(canonical.resource))
+        || !sameTask(owner.task, resourceWindowTask(request.resource))
+        || request.resource.kind === 'interactive' && owner.conversationId !== request.resource.reference.owner.conversationId) return failure('scope_denied');
       // The resolver may canonicalize the locator only. It cannot substitute a mode, commit,
       // comparison endpoint, observation or delivery record to make a request succeed.
-      const requested = { ...request.resource, reference: { ...request.resource.reference, path: canonical.resource.reference.path } };
+      const requested = request.resource.kind === 'interactive' ? request.resource : { ...request.resource, reference: { ...request.resource.reference, path: canonical.resource.reference.path } };
       if (!isDeepStrictEqual(requested, canonical.resource)) return failure('source_unavailable');
+      if (resolved.title !== undefined && (typeof resolved.title !== 'string' || resolved.title.length > 160 || resolved.title.includes('\0'))) return failure('source_unavailable');
       const viewId = createId(), windowId = createId();
       if (typeof viewId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/.test(viewId) || typeof windowId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/.test(windowId) || viewId === windowId || views.has(viewId)
         || [...views.values()].some(value => value.context.windowId === windowId)) return failure('source_unavailable');
       if (disposed || !alive(sender) || !isMainSender(sender) || startingEpoch !== epoch(sender)) return failure(disposed ? 'disposed' : 'source_unavailable');
       const initial = freeze({ viewId, windowId, generation: ++generation, owner, resource: canonical.resource, phase: 'prepared', navigationVersion: 0,
+        ...(resolved.title ? { title: resolved.title } : {}),
         ...(request.sourceTabId ? { sourceTabId: request.sourceTabId } : {}), ...(request.navigation ? { navigation: request.navigation, sourceNavigation: request.navigation } : {}) });
       const record = { context: initial, source: sender, sender: null, onDestroyed: null, onSourceDestroyed: null };
       record.onSourceDestroyed = () => remove(record); sender.once?.('destroyed', record.onSourceDestroyed);

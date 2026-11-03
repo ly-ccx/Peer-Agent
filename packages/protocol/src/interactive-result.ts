@@ -141,7 +141,15 @@ export interface InteractiveFollowup {
   readonly capturedAt: string;
   readonly excerpt: string;
 }
-export type InteractiveResult<T extends object = Record<never, never>> = ({ readonly ok: true } & T) | { readonly ok: false; readonly code: string };
+export interface InteractiveResultSummary {
+  readonly reference: InteractiveResultReference;
+  readonly title: string;
+  readonly textFallback: string;
+  readonly specHash: string;
+  readonly libraryVersion: string;
+  readonly dataLevel: DataLevel;
+}
+export type InteractiveResult<T extends object = Record<never, never>> = ({ readonly ok: true } & T) | { readonly ok: false; readonly code: string; readonly summary?: InteractiveResultSummary };
 export interface InteractiveOpenView {
   readonly handle: InteractiveViewHandle;
   readonly result: InteractivePublishedResult;
@@ -149,6 +157,7 @@ export interface InteractiveOpenView {
 }
 export interface InteractiveResultsApi {
   open(request: { readonly reference: InteractiveResultReference; readonly requestId: string }): Promise<InteractiveResult<InteractiveOpenView>>;
+  cancelOpen?(request: { readonly requestId: string }): Promise<InteractiveResult>;
   readState(request: { readonly handle: InteractiveViewHandle }): Promise<InteractiveResult<{ readonly state: InteractiveStateSnapshot }>>;
   acquire(request: { readonly handle: InteractiveViewHandle; readonly expectedRevision: number; readonly takeover?: boolean }): Promise<InteractiveResult<{ readonly writer: InteractiveWriter }>>;
   save(request: { readonly handle: InteractiveViewHandle; readonly writer: InteractiveWriter; readonly expectedRevision: number; readonly requestId: string; readonly values: InteractiveStateValues; readonly inputDrafts: Readonly<Record<string, string>> }): Promise<InteractiveResult<{ readonly state: InteractiveStateSnapshot }>>;

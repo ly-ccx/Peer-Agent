@@ -1,12 +1,14 @@
 import type { BotDocumentReference, LocalDocumentReadResult } from './document-reference.ts';
 import type { EvidenceDeliveryBinding } from './evidence-inspection.ts';
+import { normalizeInteractiveReference, type InteractiveResultReference } from './interactive-result.ts';
 
 /** Read-only presentation. None of these fields grant access or identify a browser guest/writer. */
 export type ResourceWindowResource =
   | ({ readonly kind: 'document'; readonly reference: BotDocumentReference; readonly line?: number; readonly delivery?: EvidenceDeliveryBinding }
     & ({ readonly mode: 'preview' | 'source' } | { readonly mode: 'diff'; readonly comparison: 'working' | 'staged' }))
   | { readonly kind: 'directory'; readonly reference: BotDocumentReference }
-  | { readonly kind: 'comparison'; readonly reference: BotDocumentReference; readonly fromRef: string; readonly toRef?: string; readonly comparison?: 'working' | 'staged' };
+  | { readonly kind: 'comparison'; readonly reference: BotDocumentReference; readonly fromRef: string; readonly toRef?: string; readonly comparison?: 'working' | 'staged' }
+  | { readonly kind: 'interactive'; readonly reference: InteractiveResultReference };
 export interface ResourceWindowNavigation {
   readonly top: number;
   readonly left: number;
@@ -30,21 +32,33 @@ export interface ResourceWindowIdentity { readonly viewId: string; readonly wind
 export interface ResourceWindowContext extends ResourceWindowIdentity {
   readonly owner: ResourceWindowOwner;
   readonly resource: ResourceWindowResource;
+  /** Factual presentation title resolved by the host; never an access grant. */
+  readonly title?: string;
   readonly sourceTabId?: string;
   readonly navigation?: ResourceWindowNavigation;
   readonly sourceNavigation?: ResourceWindowNavigation;
   readonly navigationVersion?: number;
   readonly phase: 'prepared' | 'attached' | 'ready';
 }
-export type ResourceWindowStatus = 'invalid_request' | 'scope_denied' | 'permission_denied' | 'not_found' | 'workspace_unavailable' | 'revision_unavailable' | 'source_unavailable' | 'source_changed' | 'storage_unavailable' | 'limit_reached' | 'stale_view' | 'not_ready' | 'cancelled' | 'disposed';
+export type ResourceWindowStatus = 'invalid_request' | 'scope_denied' | 'permission_denied' | 'not_found' | 'workspace_unavailable' | 'revision_unavailable' | 'source_unavailable' | 'source_changed' | 'storage_unavailable' | 'limit_reached' | 'stale_view' | 'not_ready' | 'cancelled' | 'disposed' | 'content_cleaned' | 'incompatible_result' | 'result_unavailable';
 export type ResourceWindowResult = { readonly ok: true; readonly context: ResourceWindowContext; readonly persisted?: boolean; readonly returnStatus?: 'returned' | 'source_tab_closed' } | { readonly ok: false; readonly status: ResourceWindowStatus };
 export interface ResourceWindowReturnRequest { readonly requestId: string; readonly context: ResourceWindowContext; readonly expiresAt: number }
 export interface ResourceWindowReturnAck { readonly requestId: string; readonly identity: ResourceWindowIdentity; readonly status: 'returned' | 'source_tab_closed' | 'cancelled' }
 export interface ResourceWindowCheckpointRequest { readonly requestId: string; readonly identity: ResourceWindowIdentity }
 export interface ResourceWindowCheckpointAck extends ResourceWindowCheckpointRequest { readonly status: 'confirmed' | 'blocked' }
 export interface ResourceWindowCloseBlocked { readonly identity: ResourceWindowIdentity; readonly reason: 'save_failed' | 'unconfirmed' }
-export interface ResourceWindowHistoryEntry { readonly id: string; readonly owner: ResourceWindowOwner; readonly request: ResourceWindowOpenRequest; readonly savedAt: string }
+export interface ResourceWindowHistoryEntry { readonly id: string; readonly owner: ResourceWindowOwner; readonly request: ResourceWindowOpenRequest; readonly savedAt: string; readonly title?: string }
 export interface ResourceWindowHistoryResult { readonly ok: boolean; readonly status: 'ok' | 'scope_denied' | 'storage_unavailable'; readonly entries: readonly ResourceWindowHistoryEntry[] }
+export interface ResourceLayoutSnapshot {
+  readonly revision: number;
+  readonly order: readonly string[];
+  readonly recent: readonly string[];
+  readonly updatedAt: string;
+}
+export interface ResourcePresentationApi {
+  readLayout(request: { readonly workspaceId: string }): Promise<{ readonly ok: true; readonly snapshot: ResourceLayoutSnapshot | null } | { readonly ok: false; readonly code: string }>;
+  writeLayout(request: { readonly workspaceId: string; readonly expectedRevision: number; readonly order: readonly string[]; readonly recent: readonly string[] }): Promise<{ readonly ok: true; readonly snapshot: ResourceLayoutSnapshot } | { readonly ok: false; readonly code: string }>;
+}
 
 /** The host supplies owner, task, revision and allowed root from its lease, never from this request. */
 export interface ResourceWindowReadRequest {
@@ -93,6 +107,11 @@ function reference(raw: unknown): BotDocumentReference | undefined {
 }
 function resource(raw: unknown): ResourceWindowResource | undefined {
   if (!object(raw)) return;
+  if (raw.kind === 'interactive') {
+    if (!keys(raw, ['kind', 'reference'])) return;
+    const fixed = normalizeInteractiveReference(raw.reference);
+    return fixed ? { kind: 'interactive', reference: fixed } : undefined;
+  }
   const ref = reference(raw.reference); if (!ref) return;
   if (raw.kind === 'directory') {
     if (!keys(raw, ['kind', 'reference']) || ref.revision || ref.expectedObservation) return;
@@ -126,7 +145,7 @@ function resource(raw: unknown): ResourceWindowResource | undefined {
 }
 /** Only bounded hints for this kind of view; never accept a body, permission, browser instance or draft. */
 export function normalizeResourceWindowNavigation(raw: unknown, kind: ResourceWindowResource['kind']): ResourceWindowNavigation | undefined {
-  if (!object(raw) || !keys(raw, kind === 'directory' ? ['top', 'left', 'selected', 'expanded', 'filter'] : kind === 'comparison' ? ['top', 'left', 'selected', 'positions'] : ['top', 'left', 'mode', 'positions']) || !point(raw.top) || !point(raw.left)) return;
+  if (!object(raw) || !keys(raw, kind === 'interactive' ? ['top', 'left'] : kind === 'directory' ? ['top', 'left', 'selected', 'expanded', 'filter'] : kind === 'comparison' ? ['top', 'left', 'selected', 'positions'] : ['top', 'left', 'mode', 'positions']) || !point(raw.top) || !point(raw.left)) return;
   if (raw.selected !== undefined && !text(raw.selected, 8192) || raw.filter !== undefined && (typeof raw.filter !== 'string' || raw.filter.length > 256 || /[\u0000-\u001f]/.test(raw.filter))
     || raw.expanded !== undefined && (!Array.isArray(raw.expanded) || raw.expanded.length > 64 || !raw.expanded.every(value => text(value, 8192)))) return;
   if (raw.mode !== undefined && raw.mode !== 'preview' && raw.mode !== 'source') return;
@@ -152,4 +171,18 @@ export function normalizeResourceWindowOwner(raw: unknown): ResourceWindowOwner 
   if (raw.task !== undefined && (!object(raw.task) || !keys(raw.task, ['sessionId', 'planId']) || !token(raw.task.sessionId) || !token(raw.task.planId))) return;
   return { workspaceId: raw.workspaceId, conversationId: raw.conversationId,
     ...(object(raw.task) ? { task: { sessionId: raw.task.sessionId as string, planId: raw.task.planId as string } } : {}) };
+}
+export function resourceWindowWorkspaceId(resource: ResourceWindowResource): string {
+  return resource.kind === 'interactive' ? resource.reference.owner.workspaceId : resource.reference.workspaceId;
+}
+export function resourceWindowTask(resource: ResourceWindowResource): BotDocumentReference['task'] | undefined {
+  return resource.kind === 'interactive' ? undefined : resource.reference.task;
+}
+export function normalizeResourceLayout(raw: unknown): Pick<ResourceLayoutSnapshot, 'order' | 'recent'> | undefined {
+  if (!object(raw) || !keys(raw, ['order', 'recent'])) return;
+  const list = (value: unknown, limit: number): value is string[] => Array.isArray(value) && value.length <= limit
+    && value.every(key => typeof key === 'string' && key.length <= 8192 && !/[\u0000-\u001f]/.test(key)
+      && (key === 'launcher' || /^(?:document|browser|conversation|interactive):.+$/.test(key))) && new Set(value).size === value.length;
+  if (!list(raw.order, 200) || !list(raw.recent, 16) || new TextEncoder().encode(JSON.stringify(raw)).byteLength > 256 * 1024) return;
+  return { order: [...raw.order], recent: [...raw.recent] };
 }

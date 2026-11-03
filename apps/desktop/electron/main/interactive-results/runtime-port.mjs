@@ -8,6 +8,8 @@ export function installDesktopInteractiveRuntime(port) {
   current = port;
   return () => { if (current === port) current = null; };
 }
+/** Composition-root access only. This object never crosses preload or a model projection. */
+export function desktopInteractiveRuntime() { return current?.runtime ?? null; }
 export function desktopInteractiveToolDefinitions(profile) {
   if (!profile?.workspaceId || current?.enabled(profile.workspaceId) !== true) return [];
   const allowed = interactiveCapabilitiesForProfile(profile);

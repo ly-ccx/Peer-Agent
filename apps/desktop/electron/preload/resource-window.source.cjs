@@ -15,6 +15,15 @@ const presentation = (() => {
 })();
 // No main-window API, filesystem transport, settings snapshot, task control or browser guest.
 contextBridge.exposeInMainWorld('peerResource', Object.freeze({
+  interactiveResults: Object.freeze({
+    open: request => ipcRenderer.invoke('interactive-results:open', request),
+    cancelOpen: request => ipcRenderer.invoke('interactive-results:cancel-open', request),
+    readState: request => ipcRenderer.invoke('interactive-results:read-state', request),
+    acquire: request => ipcRenderer.invoke('interactive-results:acquire', request),
+    save: request => ipcRenderer.invoke('interactive-results:save', request),
+    release: request => ipcRenderer.invoke('interactive-results:release', request),
+    prepareFollowup: request => ipcRenderer.invoke('interactive-results:prepare-followup', request),
+  }),
   resourceEdits: Object.freeze({
     onChanged: listener => {
       const handler = (_event, notice) => listener(notice);
