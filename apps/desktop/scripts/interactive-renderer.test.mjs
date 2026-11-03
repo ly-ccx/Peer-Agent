@@ -15,9 +15,9 @@ async function buildFixture(output, mode) {
   const entryId = '\0peer-interactive-fixture.tsx';
   const contents = `
     import React from 'react'; import {createRoot} from 'react-dom/client';
-    import {validateDraft,prepareEvaluator,digestJSON,validateState} from '@peer-agent/interactive-content';
-    import {InteractiveSurface} from './renderer/src/workbench/interactive/InteractiveSurface.tsx';
-    import {createInteractiveSession} from './renderer/src/workbench/interactive/interactiveSession.ts';
+    import {validateDraft,digestJSON,validateState} from '@peer-agent/interactive-content';
+    import {InteractiveResource} from './renderer/src/workbench/interactive/InteractiveResource.tsx';
+    import {interactiveSessionRegistry} from './renderer/src/workbench/interactive/interactiveSessionRegistry.ts';
     import './renderer/src/styles.css';
     (async()=>{
       const content=await validateDraft({title:'Fixed observations',textFallback:'Model trial, unverified.',program:${JSON.stringify(program)}},
@@ -29,27 +29,41 @@ async function buildFixture(output, mode) {
       const writer={viewId:handle.viewId,generation:'fixture-writer',token:'fixture-token'};
       const provenance=[{bindingId:'facts',source:{kind:'model-data',contentDigest:'sha256:'+'b'.repeat(64)},truncated:false,redacted:false,dataLevel:'D3_private'}];
       const opened={handle,result:{reference,content,provenance},state};
-      const api={readState:async()=>({ok:true,state}),acquire:async()=>({ok:true,writer}),
-        save:async request=>{if(request.expectedRevision!==state.stateRevision)return{ok:false,code:'interactive_state_conflict'};
+      let rejectSave=false;
+      const api={open:async()=>({ok:true,...opened}),readState:async()=>({ok:true,state}),acquire:async()=>({ok:true,writer}),
+        save:async request=>{
+          if(rejectSave){rejectSave=false;return{ok:false,code:'interactive_save_unavailable'};}
+          if(request.expectedRevision!==state.stateRevision)return{ok:false,code:'interactive_state_conflict'};
           const values=validateState(request.values,content.stateSchema,request.inputDrafts);
           state={...state,...values,stateRevision:state.stateRevision+1,stateDigest:await digestJSON(values),requestId:request.requestId,updatedAt:new Date().toISOString()};return{ok:true,state};},release:async()=>({ok:true})};
-      const session=createInteractiveSession({api,opened,evaluator:await prepareEvaluator(content)}); await session.acquire();
-      globalThis.interactiveFixture={snapshot:()=>session.snapshot(),setBudget:value=>session.editValue('$budget',value)};
-      createRoot(document.getElementById('root')).render(React.createElement('main',{style:{padding:24,maxWidth:1000,margin:'0 auto'}},React.createElement(InteractiveSurface,{session,provenance,isZh:false})));
+      const registry=interactiveSessionRegistry(api);
+      const session=()=>registry.get(reference).session;
+      const recovery=[];
+      globalThis.interactiveFixture={snapshot:()=>session().snapshot(),setBudget:value=>session().editValue('$budget',value),recovery,
+        fail:()=>{globalThis.fixtureSdkFault=true;rejectSave=true;session().editValue('$budget',321);}};
+      const onRecoverView=async()=>{recovery.push({budget:state.values.$budget,revision:state.stateRevision});return true;};
+      createRoot(document.getElementById('root')).render(React.createElement('main',{style:{padding:24,maxWidth:1000,margin:'0 auto'}},
+        React.createElement(InteractiveResource,{reference,api,active:true,isZh:false,onRecoverView})));
     })().catch(error=>{document.getElementById('root').textContent='Fixture failed: '+error.stack;throw error;});`;
   await build({ root: desktop, configFile: path.join(desktop, 'vite.config.ts'), base: './', mode, logLevel: 'error',
     define: { 'process.env.NODE_ENV': JSON.stringify(mode) },
-    plugins: [{ name: 'peer-interactive-isolated-component', resolveId(id, importer) {
+    plugins: [{ name: 'peer-interactive-isolated-component', enforce: 'pre', resolveId(id, importer) {
       if (id === entryId) return entryId;
       if (importer === entryId && id.startsWith('./')) return path.resolve(desktop, id);
-    }, load(id) { if (id === entryId) return contents; } }],
+    }, load(id) { if (id === entryId) return contents; }, transform(code, id) {
+      if (id.endsWith('/interactive/InteractiveSurface.tsx')) {
+        assert.ok(code.includes('<Renderer.Content />'), 'fault injection must wrap the real SDK content');
+        return code.replace('<Renderer.Content />', '<FixtureSdkMount />')
+          + '\nfunction FixtureSdkMount() { if (globalThis.fixtureSdkFault) throw Error("fixture SDK mount failure"); return <Renderer.Content />; }\n';
+      }
+    } }],
     build: { outDir: output, emptyOutDir: true, target: 'esnext', cssCodeSplit: false, rollupOptions: { input: entryId,
       output: { entryFileNames: 'fixture.js', format: 'iife', inlineDynamicImports: true } } } });
   const css = readdirSync(path.join(output, 'assets')).filter(name => name.endsWith('.css')).map(name => `<link rel="stylesheet" href="./assets/${name}">`).join('');
   writeFileSync(path.join(output, 'index.html'), `<!doctype html><html data-theme="light"><meta charset="utf-8">${css}<style>html,body,#root{min-width:0;min-height:100%;height:auto;overflow:auto}body{margin:0;background:var(--paper-sheet)}</style><body><div id="root"></div><script src="./fixture.js"></script></body></html>`);
 }
 
-test('the real SDK mounts Peer controls in production and development without tools, telemetry or devtools', async () => {
+test('the real SDK mounts Peer controls without tools or telemetry and recovers a production render fault', async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'peer-interactive-renderer-'));
   for (const mode of ['production', 'development']) {
     const output = path.join(root, mode); await buildFixture(output, mode);
@@ -156,6 +170,27 @@ test('the real SDK mounts Peer controls in production and development without to
       assert.deepEqual(external, []);
       assert.deepEqual(errors, []);
       assert.equal(await page.locator('[data-openui-devtools-auto-mount]').count(), 0);
+      if (mode === 'production') {
+        await page.evaluate(() => interactiveFixture.fail());
+        const fallback = page.getByRole('alert').filter({ hasText: 'The calculation view could not load.' });
+        await fallback.getByText('Saved model summary, unverified').waitFor();
+        await fallback.getByText('Model trial, unverified.', { exact: true }).waitFor();
+        assert.equal(await page.getByText('View saved program').isVisible(), true);
+        assert.equal(await page.locator('.interactive-metric').count(), 0);
+        assert.equal(await page.evaluate(() => interactiveFixture.snapshot().dirty), true);
+        const reopen = fallback.getByRole('button', { name: 'Save drafts and open separate view' });
+        await reopen.click();
+        await fallback.getByText('Saving or opening is unconfirmed. Your input is preserved; retry.').waitFor();
+        assert.deepEqual(await page.evaluate(() => interactiveFixture.recovery), []);
+        assert.equal(await page.evaluate(() => interactiveFixture.snapshot().values.$budget), 321);
+        await reopen.click();
+        await fallback.getByText('The view was opened. Your original calculation is preserved.').waitFor();
+        const [receipt] = await page.evaluate(() => interactiveFixture.recovery);
+        assert.equal(receipt.budget, 321);
+        assert.ok(receipt.revision > 0);
+        assert.equal(await page.evaluate(() => interactiveFixture.snapshot().dirty), false);
+        assert.deepEqual(external, []);
+      }
     } finally { await app.close(); }
   }
   console.log(`Interactive SDK component screenshots: ${root}`);
