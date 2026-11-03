@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, readdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { createInputQueue, inputMessageId } from './input-queue.mjs';
@@ -44,6 +46,45 @@ function harness(root, { holdsLease = () => true } = {}) {
   });
   return { queue, messages, committed, writes: () => writes };
 }
+
+test('a killed queue owner releases the SQLite mutex and concurrent writers recover its directory once', { timeout: 10_000 }, async t => {
+  const root = tempRoot(), workspaceId = 'ws-1', queue = createInputQueue({ rootDir: root });
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  queue.submitInput(input('before', 'before'));
+  const module = JSON.stringify(new URL('./input-queue.mjs', import.meta.url).href);
+  const script = `import { createInputQueue } from ${module};
+    const [rootDir, workspaceId, id] = JSON.parse(process.argv[1]);
+    const queue = createInputQueue({ rootDir });
+    if (id === 'holder') {
+      const guard = queue.acquireRetentionInputs(workspaceId);
+      process.send(guard.assertCurrent());
+      setInterval(() => {}, 1000);
+    } else {
+      queue.submitInput({ workspaceId, inputId: id, surface: 'tui', text: id });
+    }`;
+  const start = id => {
+    const child = spawn(process.execPath, ['--input-type=module', '-e', script, JSON.stringify([root, workspaceId, id])],
+      { stdio: ['ignore', 'ignore', 'inherit', 'ipc'] });
+    t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); });
+    return child;
+  };
+  const holder = start('holder');
+  assert.equal((await once(holder, 'message', { signal: AbortSignal.timeout(3000) }))[0], true);
+  assert.throws(() => queue.acquireRetentionInputs(workspaceId), { code: 'EEXIST' });
+  const file = path.join(root, workspaceId, 'input-queue.jsonl'), lock = file + '.lock';
+  assert.equal(JSON.parse(readFileSync(path.join(lock, 'owner.json'), 'utf8')).pid, holder.pid);
+  // A leftover recovery directory from the previous lock scheme must not block restart.
+  mkdirSync(lock + '.recovery');
+  const exited = once(holder, 'exit');
+  holder.kill('SIGKILL');
+  assert.deepEqual(await exited, [null, 'SIGKILL']);
+  assert.equal(existsSync(lock), true);
+  const outcomes = await Promise.all(['retry-a', 'retry-b'].map(id => once(start(id), 'exit')));
+  assert.deepEqual(outcomes, [[0, null], [0, null]]);
+  assert.equal(existsSync(lock), false);
+  assert.deepEqual(readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line).inputId).sort(), ['before', 'retry-a', 'retry-b']);
+  queue.acquireRetentionInputs(workspaceId).release();
+});
 
 test('an empty queue stays read-only and the next consume delivers newly submitted input exactly once', () => {
   const root = tempRoot();

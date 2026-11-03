@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { normalizeResourceFeedbackList, restoreResourceFeedbackTransport, encodeResourceFeedbackTransport, isInteractiveFeedbackAttachment } from '@peer-agent/protocol';
 /**
  * 项目输入队列。所有入口把用户输入追加到 input-queue.jsonl。
@@ -12,20 +12,19 @@ import {
   lstatSync,
   readFileSync,
   renameSync,
-  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
 import { INPUT_ATTACHMENT_LIMIT, normalizeUserUpload } from './input-attachments.mjs';
 import { pathOf } from '../data-store.mjs';
+import { acquireInputQueueLock } from './input-queue-lock.mjs';
 
 const WORKSPACE_DIR = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 const INPUT_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 const SURFACES = new Set(['desktop', 'quick_chat', 'tui', 'remote']);
 const STORED_INPUT_FIELDS = new Set(['inputId', 'workspaceId', 'surface', 'text', 'anchorRefs', 'quoteRefs', 'attachmentRefs',
   'attachments', 'resourceFeedback', 'createdAt', 'answerTo', 'historyRef', 'historySnapshotId', 'historyConfirmed']);
-const LOCK_STALE_MS = 10_000;
 
 export function inputMessageId(inputId) {
   const text = typeof inputId === 'string' ? inputId.trim() : '';
@@ -92,55 +91,8 @@ export function createInputQueue({
     return Number.isFinite(parsed) ? new Date(parsed).toISOString() : new Date().toISOString();
   }
 
-  function acquireLock(workspaceId, waitMs) {
-    const lock = `${queueFile(workspaceId)}.lock`;
-    mkdirSync(path.dirname(lock), { recursive: true });
-    const deadline = Date.now() + waitMs;
-    const identity = () => {
-      const stat = statSync(lock, { bigint: true });
-      return `${stat.dev}:${stat.ino}`;
-    };
-    const reclaimable = () => {
-      let owner;
-      try { owner = JSON.parse(readFileSync(path.join(lock, 'owner.json'), 'utf8')); } catch {}
-      if (!Number.isSafeInteger(owner?.pid) || owner.pid <= 0) return Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS;
-      try { process.kill(owner.pid, 0); return false; }
-      catch (error) { return error?.code === 'ESRCH'; }
-    };
-    while (true) {
-      try { mkdirSync(lock); }
-      catch (error) {
-        if (error?.code !== 'EEXIST') throw error;
-        if (Date.now() >= deadline) throw error;
-        try {
-          const observed = identity();
-          if (reclaimable()) {
-            const recovery = `${lock}.recovery`;
-            mkdirSync(recovery);
-            try { if (identity() === observed && reclaimable()) rmSync(lock, { recursive: true, force: true }); }
-            finally { rmSync(recovery, { recursive: true, force: true }); }
-          }
-        } catch { /* Another process may be releasing or recovering this lock. */ }
-        continue;
-      }
-      const held = identity(), ownerFile = path.join(lock, 'owner.json');
-      const owner = JSON.stringify({ pid: process.pid, token: randomUUID() });
-      const current = () => {
-        try { return identity() === held && readFileSync(ownerFile, 'utf8') === owner; } catch { return false; }
-      };
-      const release = () => { if (current()) rmSync(lock, { recursive: true, force: true }); };
-      try { writeFileSync(ownerFile, owner); }
-      catch (error) {
-        try { if (identity() === held) rmSync(lock, { recursive: true, force: true }); } catch {}
-        throw error;
-      }
-      if (!current()) throw Error('INPUT_QUEUE_CHANGED');
-      return { current, release };
-    }
-  }
-
   function withLock(workspaceId, fn) {
-    const lock = acquireLock(workspaceId, 5000);
+    const lock = acquireInputQueueLock(queueFile(workspaceId), 5000);
     try { return fn(); } finally { lock.release(); }
   }
 
@@ -373,7 +325,7 @@ export function createInputQueue({
   function acquireRetentionInputs(workspaceId) {
     const id = workspaceIdOf(workspaceId);
     if (!id || id !== workspaceId) throw Error('INVALID_WORKSPACE');
-    const lock = acquireLock(id, 0);
+    const lock = acquireInputQueueLock(queueFile(id), 0);
     let released = false;
     const release = () => { if (!released) { released = true; lock.release(); } };
     const version = (file, limit) => {

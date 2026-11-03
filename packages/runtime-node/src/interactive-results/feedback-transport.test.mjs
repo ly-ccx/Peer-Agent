@@ -298,6 +298,7 @@ test('the pinned input queue writer can reclaim an aged lock despite a live PID'
     old.submitInput(f.input('after-reclaim', { resourceFeedback: undefined }));
     assert.equal(existsSync(lock), false);
     assert.equal(guard.assertCurrent(), false);
+    assert.throws(() => createInputQueue(f.options).acquireRetentionInputs(f.owner.workspaceId), { code: 'EEXIST' });
     assert.equal(old.findSubmission(f.owner.workspaceId, 'after-reclaim').inputId, 'after-reclaim');
   } finally { guard.release(); }
 });
