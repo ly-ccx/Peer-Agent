@@ -165,15 +165,20 @@ export function createSessionVerification({
       if ((plan.successCriteria || []).some(row => row.kind === 'model_review')) {
         const fresh = goalPlanStore.getPlan(plan.planId);
         if (criterionSourceRevision(fresh) !== sourceRevision) return { ok: false, error: 'verification_source_changed' };
-        const refs = report.evidenceRefs || [];
+        const cited = Array.isArray(report.evidenceRefs) ? report.evidenceRefs : [];
         const allowed = new Set(evidenceRecords(fresh).map(row => row.evidenceRef));
-        const passed = report.passed === true && !report.failedCriteria?.length && !report.missingEvidence?.length
-          && refs.length > 0 && refs.every(ref => allowed.has(ref));
+        const refs = cited.filter(ref => allowed.has(ref));
+        const missingEvidence = Array.isArray(report.missingEvidence) ? [...report.missingEvidence] : [];
+        const unindexed = refs.length !== cited.length;
+        const reason = 'Verifier cited references outside the current task Evidence Index.';
+        if (unindexed) missingEvidence.push({ reason, evidenceRefs: [] });
+        const passed = report.passed === true && !report.failedCriteria?.length && !missingEvidence.length && refs.length > 0;
+        const summary = unindexed ? reason : report.passed && !passed ? 'The host could not confirm the verifier report.' : report.summary;
+        report = { ...report, passed, evidenceRefs: refs, missingEvidence, summary };
         const verifierRunId = `delegated-semantic:${plan.planId}:${sourceRevision}:${randomUUID()}`;
         goalPlanStore.recordVerifierRun(plan.planId, { verifierRunId, target: { kind: 'plan' }, status: passed ? 'passed' : 'failed',
-          report: { ...report, passed }, evidenceRefs: refs });
-        goalPlanStore.recordModelReviews(plan.planId, { sourceRevision, verifierRunId, passed, evidenceRefs: refs.filter(ref => allowed.has(ref)) });
-        report = { ...report, passed };
+          report, evidenceRefs: refs, summary, ...(!passed && summary ? { failureReason: summary } : {}) });
+        goalPlanStore.recordModelReviews(plan.planId, { sourceRevision, verifierRunId, passed, evidenceRefs: refs });
       }
       return {
         ok: true,

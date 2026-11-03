@@ -9,7 +9,7 @@ import { createSessionVerification } from './session-verification.mjs';
 import { createDelegationProvider } from './delegation-provider.mjs';
 import { createSessionSupervisor } from './session-supervisor.mjs';
 
-function fixture(t, { policy = 'auto', changeDuringReview = false } = {}) {
+function fixture(t, { policy = 'auto', changeDuringReview = false, verifierReport = { passed: true } } = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'verify-completion-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const store = createGoalPlanStore({ storeDir: path.join(root, 'plans') });
@@ -30,7 +30,7 @@ function fixture(t, { policy = 'auto', changeDuringReview = false } = {}) {
   let report = '实际四项报告', runs = 0;
   const verification = createSessionVerification({ goalPlanStore: store, readReport: () => report,
     completeRecheck: input => runner.completeRecheck(input),
-    verifySession: async () => { runs++; if (changeDuringReview) report += ' changed'; return { passed: true }; } });
+    verifySession: async () => { runs++; if (changeDuringReview) report += ' changed'; return verifierReport; } });
   const provider = createDelegationProvider({ verification });
   const supervisor = createSessionSupervisor({ goalPlanStore: store, goalRunner: runner, deferRecovery: true,
     resolveAcceptancePolicy: () => policy, readSessionFacts: () => ({ hostAuthority: verification.facts('s') }),
@@ -64,6 +64,23 @@ test('a real recheck resolves the old readonly failure and policy accepts the re
   await f.verify();
   assert.equal(f.events.filter(e => e.type === 'goalRunner:completed').length, 1);
   assert.equal(f.runs(), 1, 'an idempotent repeat neither restarts the worker nor loops the verifier');
+});
+
+test('a delegated verifier cannot record an unindexed reference or a successful summary', async t => {
+  const f = fixture(t, { policy: 'confirm', verifierReport: { passed: true, summary: 'Verifier passed',
+    evidenceRefs: ['tool-result://read', 'tool-result://unindexed'] } });
+  f.store.revisePlan(f.plan().planId, { successCriteria: [{ id: 'c', kind: 'model_review', description: '核对报告' }] });
+  const verified = await f.verify();
+  assert.notEqual(verified.status, 'passed');
+  const plan = f.plan();
+  const attempt = plan.runner.verifierRuns.at(-1);
+  assert.equal(attempt.status, 'failed');
+  assert.deepEqual(attempt.evidenceRefs, ['tool-result://read']);
+  assert.deepEqual(attempt.report.evidenceRefs, ['tool-result://read']);
+  assert.match(attempt.report.missingEvidence[0]?.reason, /Evidence Index/);
+  assert.match(attempt.summary, /Evidence Index/);
+  assert.equal(plan.hostVerification.independentVerifier, 'failed');
+  assert.equal(plan.resultAcceptance, undefined);
 });
 
 test('confirm policy still requires the existing main-conversation host confirmation', async t => {
