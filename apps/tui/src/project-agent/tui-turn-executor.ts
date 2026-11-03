@@ -214,8 +214,9 @@ export function createTuiTurnExecutor(options: {
           },
         } }, { signal: controller.signal });
       const requestedUserInput = result.reason === 'requested_user_input';
-      const replied = result.status === 'stopped' && result.reason === 'project_agent_reply';
-      const ok = result.status === 'completed' || result.status === 'yielded' || requestedUserInput || replied;
+      const projectTurnCompleted = result.status === 'stopped'
+        && (result.reason === 'project_agent_reply' || result.reason === 'project_agent_wait');
+      const ok = result.status === 'completed' || result.status === 'yielded' || requestedUserInput || projectTurnCompleted;
       const text = !ok && streamedText ? streamedText : result.output ?? '';
       input.sink.send(ok ? 'chat:stream:done' : 'chat:stream:error', { streamId, error: result.reason });
       if (!input.ephemeral) options.persistTurn?.(input, { text, calls, usage: result.state?.usage,
