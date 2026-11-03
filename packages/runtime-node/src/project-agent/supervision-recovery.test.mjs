@@ -45,4 +45,8 @@ test('the original settled stop proof can recover a false unknown takeover, neve
   assert.equal(transitionReconciliation(transition, { ...work, budget: { uncertainDispatches: [{ toolCallId: 'unknown' }] } }, session), null);
   assert.equal(transitionReconciliation({ ...transition, expectedGoalRevision: 2 }, work, session), null);
   assert.equal(transitionReconciliation(transition, work, { ...session, origin: { ...session.origin, executionGeneration: 'new-resume' } }), null);
+  for (const origin of [undefined, {}, { takeover: {} }, { takeover: { phase: 'stopping' } }]) {
+    assert.equal(transitionReconciliation({ ...transition, operationId: undefined }, work, { ...session, origin }), null,
+      'missing legacy identities must not compare equal and enter current stop-proof recovery');
+  }
 });

@@ -8,8 +8,9 @@ export function transitionReconciliation(transition, work, session) {
   const control = session.origin?.executionControl, receipt = control?.stopReceipt;
   // Recover the original proposal from its current barrier, never from a
   // newer resume/cancel receipt or a merely idle-looking task projection.
-  if (['handoff', 'revise', 'resume'].includes(transition.action)
-    && session.origin?.takeover?.operationId === transition.operationId && session.origin.takeover.phase === 'stopping'
+  if (typeof transition.operationId === 'string' && transition.operationId.length > 0
+    && ['handoff', 'revise', 'resume'].includes(transition.action)
+    && session.origin?.takeover?.operationId === transition.operationId && session.origin?.takeover?.phase === 'stopping'
     && control?.operationId === transition.operationId && control.kind === 'takeover'
     && control.phase === 'settled' && control.outcome === 'applied'
     && control.expectedExecution?.goalRevision === transition.expectedGoalRevision
