@@ -28,10 +28,11 @@ const INITIAL_TASK = [
   `Delegate one task with spawn_session. Use anchorMessageIds ["input-${INITIAL_INPUT}"], kind "research", readOnly true, isolation "none", and requiredCapabilities ["local.interactive.publish"].`,
   'Include successCriteria as an array with one object of kind "model_review". Its description must require independent inspection of the program, complete facts binding and initial evaluation, checking both costs and the remainder.',
   'The worker must read its exact plan and task IDs with goal_get_plan, publish once, then use goal_update_task with the returned fixed artifact Evidence. Stop after recording it. Leave inspection to the Verifier.',
-  'I will send the selected budget after publication. Keep the original result and do not claim human acceptance.',
+  'I will send the selected budget when the publication task is ready. One acknowledgment is enough for now. Keep the original result and do not claim human acceptance.',
   'Worker brief: ' + INTERACTIVE_LIVE_TASK,
 ].join('\n');
 const FROZEN_TASK = [
+  'The selected budget has already been supplied in the attached frozen selection. Do not ask me to supply it again or restate an earlier progress reply.',
   `Delegate this new request via spawn_session now. Use anchorMessageIds ["input-${FROZEN_INPUT}"] to carry the attached frozen selection. Set kind "research", readOnly true, isolation "none", and requiredCapabilities ["local.interactive.inspect"].`,
   'The new worker should use goal_get_plan, then inspect the attached fixed result once with view evaluate and the attached followupId, then record that actual result and evidence on its leaf with goal_update_task.',
   'Include successCriteria as an array with one object of kind "model_review" and a description requiring an independent Verifier to make four inspect_interactive_result calls on the attached fixed reference: program, data binding facts, initial evaluate, and evaluate with the attached followupId. Run them together. Cite only the four canonical interactive-inspection references.',
@@ -149,6 +150,9 @@ export async function runInteractiveLiveStory(options: {
         const row = rows[0], artifact = row?.userArtifacts?.[0];
         if (!artifact) return;
         const plan = host.plans.getPlan(row.planId);
+        const session = plan?.delegationOrigin?.sessionId
+          ? host.supervisor.get({ sessionId: plan.delegationOrigin.sessionId, detail: 'summary' }) : undefined;
+        if (session?.status !== 'result_ready' && session?.status !== 'accepted') return;
         if (!plan?.tasks.some((task: any) => task.status === 'completed'
           && task.evidenceRefs?.some((ref: string) => ref === row.evidenceRef || ref === `tool-result://${row.toolCallId}`))) return;
         return { row, fixed: host.interactive.resultStore.getVersion(artifact.reference) };
