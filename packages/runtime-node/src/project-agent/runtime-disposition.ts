@@ -8,6 +8,7 @@ interface Work {
   readonly stopScope?: 'reply' | 'work';
   readonly end?: ProjectTurnEnd;
   readonly pendingControl?: unknown;
+  readonly lastControl?: { readonly action?: 'pause' | 'cancel' | 'resume' };
   readonly sessionIds?: readonly string[];
 }
 interface Outcome {
@@ -49,12 +50,12 @@ export function decideRuntimeDisposition({ previous = {}, sessions = [], outcome
   const result = (state: ProjectWorkState, end: ProjectTurnEnd, handling: RuntimeHandling, waitFor: readonly Wait[] = [], blockedCode?: string): RuntimeDisposition => ({
     state, end, handling, waitFor, repairSessionIds: ownership.repairSessionIds, ...(blockedCode ? { blockedCode } : {}),
   });
-  if (held || previous.pendingControl || previous.stopScope === 'work' && ['paused', 'cancelled'].includes(previous.state || '')) {
+  if (held || runtimeWorkHeld(previous)) {
     const state = previous.state === 'cancelled' ? 'cancelled' : previous.state === 'waiting_children' ? 'waiting_children' : 'paused';
     return result(state, 'user_stopped', previous.pendingControl ? 'host' : 'none',
       state === 'waiting_children' ? ownership.waitingSessionIds.map(id => ({ kind: 'session' as const, id })) : []);
   }
-  if (outcome.stopped || previous.stopScope !== 'work' && ['paused', 'waiting_children'].includes(previous.state || '') && previous.end === 'user_stopped') {
+  if (outcome.stopped) {
     const waiting = ownership.waitingSessionIds;
     return result(waiting.length ? 'waiting_children' : 'paused', 'user_stopped', 'none', waiting.map(id => ({ kind: 'session' as const, id })));
   }
@@ -88,6 +89,10 @@ export function decideRuntimeDisposition({ previous = {}, sessions = [], outcome
 
 /** Only this durable user-stop shape holds a reply; ordinary child waits remain autonomous. */
 export function runtimeWorkHeld(work: Work | null | undefined): boolean {
-  return Boolean(work && (work.pendingControl || work.stopScope === 'work' && ['paused', 'cancelled'].includes(work.state || '')
-    || work.stopScope !== 'work' && ['paused', 'waiting_children'].includes(work.state || '') && work.end === 'user_stopped'));
+  if (!work) return false;
+  if (work.pendingControl) return true;
+  const stoppedReply = ['paused', 'waiting_children'].includes(work.state || '') && work.end === 'user_stopped';
+  if (work.stopScope === 'work') return ['paused', 'cancelled'].includes(work.state || '')
+    || stoppedReply && work.lastControl?.action !== 'resume';
+  return stoppedReply;
 }

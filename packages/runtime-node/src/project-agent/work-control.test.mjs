@@ -82,5 +82,10 @@ test('explicit work resume clears current admission even when an earlier finish 
   assert.equal(runtimeWorkHeld(store.readWork('work')),false);
   const coordination=createRunnerCoordination({store,workspaceId:'w',conversationId:'c',inbox:{},resolveRoster:()=>[child],readMessages:()=>[]});
   assert.equal(coordination.prepare({workId:'work',continuation:true}),true,'the explicit work control must reopen parent admission');
+  for(const lastControl of [undefined,{action:'cancel'}]){
+   store.saveWork({...current,end:'user_stopped',lastControl});
+   assert.equal(runtimeWorkHeld(store.readWork('work')),true,'a stale state without completed resume proof cannot reopen stopped work');
+   assert.equal(coordination.prepare({workId:'work',continuation:true}),false);
+  }
  }finally{release();store.close();rmSync(root,{recursive:true,force:true});}
 });
