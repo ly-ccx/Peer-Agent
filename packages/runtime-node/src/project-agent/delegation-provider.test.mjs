@@ -734,6 +734,10 @@ test('spawn preserves structured Goal criteria and rejects incomplete or forged 
     const failed = await provider.executeCapability(call('local.delegation.spawn_session', spawnInput({ successCriteria: criteria })), agentContext());
     assert.equal(outputOf(failed).error, 'invalid_input');
   }
+  const tooLong = await provider.executeCapability(call('local.delegation.spawn_session',
+    spawnInput({ successCriteria: [{ kind: 'model_review', description: 'x'.repeat(501) }] })), agentContext());
+  assert.equal(outputOf(tooLong).error, 'invalid_input');
+  assert.match(outputOf(tooLong).message, /description of at most 500 characters/);
   assert.equal(seen.length, 1);
 });
 

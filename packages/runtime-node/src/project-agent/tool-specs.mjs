@@ -32,6 +32,7 @@ const intentAssessmentSchema = { type: 'object', additionalProperties: false,
       { type: 'object', required: ['kind', 'controlRef'], additionalProperties: false, properties: { kind: { const: 'withdraw' }, controlRef: { type: 'string' } } },
     ] }, reason: { type: 'string', maxLength: 1000 },
   } };
+const CRITERION_DESCRIPTION_LIMIT = 500;
 const SPAWN_INPUT_SCHEMA = {
     type: 'object',
     properties: {
@@ -51,7 +52,7 @@ const SPAWN_INPUT_SCHEMA = {
         items: { type: 'object', properties: {
             id: { type: 'string', maxLength: 200 },
             kind: { type: 'string', enum: ['command', 'test', 'file-contains', 'file-exists', 'model_review', 'manual'] },
-            description: { type: 'string', maxLength: 500 },
+            description: { type: 'string', maxLength: CRITERION_DESCRIPTION_LIMIT },
             command: { type: 'string', maxLength: 2000 },
             path: { type: 'string', maxLength: 1000 },
             expect: { type: 'string', maxLength: 2000 },
@@ -347,7 +348,9 @@ function validateSpawn(input) {
   if (!anchorMessageIds) return invalid('anchorMessageIds must contain 1 to 8 message ids.');
   if (!title) return invalid('title is required and must be at most 60 characters.');
   if (!brief) return invalid('brief is required and must be at most 4000 characters.');
-  if (!successCriteria) return invalid('successCriteria must contain 1 to 8 items.');
+  if (!successCriteria) return invalid(
+    `successCriteria must contain 1 to 8 valid structured items with a non-empty description of at most ${CRITERION_DESCRIPTION_LIMIT} characters each.`,
+  );
   if (!kinds.has(input.kind)) return invalid('kind must be code, research, docs, ui, ops, or other.');
   if (typeof input.readOnly !== 'boolean') return invalid('readOnly must be a boolean.');
   if (input.requiredCapabilities !== undefined && !validCapabilityRequirements(input.requiredCapabilities)) return invalid('requiredCapabilities must contain distinct capability IDs.');
@@ -415,7 +418,7 @@ function validatedCriteria(items) {
     if (Object.keys(item).some(key => !['id', 'kind', 'description', 'command', 'path', 'expect', 'requiredCapabilities'].includes(key))) return null;
     if (item.requiredCapabilities !== undefined && !validCapabilityRequirements(item.requiredCapabilities)) return null;
     if (!['command', 'test', 'file-contains', 'file-exists', 'model_review', 'manual'].includes(item.kind)) return null;
-    const description = text(item.description, 500);
+    const description = text(item.description, CRITERION_DESCRIPTION_LIMIT);
     if (!description) return null;
     const criterion = { kind: item.kind, description };
     if (item.requiredCapabilities !== undefined) criterion.requiredCapabilities = item.requiredCapabilities;
