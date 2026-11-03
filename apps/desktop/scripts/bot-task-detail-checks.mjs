@@ -181,6 +181,9 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
   assert.equal(await noteRow.isVisible(), true);
   assert.equal(await noteRow.locator('.markdown-content').getAttribute('data-selection-source'), note.content, 'the full related reply remains available in the main conversation');
   assert.equal(readTurns(), beforeNavigation, 'reading the related bot note does not execute anything');
+  const workRows = page.locator('.bot-work-panel-session');
+  assert.ok(await workRows.count(), 'default work rows are visible beside the main note');
+  assert.doesNotMatch((await workRows.allTextContents()).join(' '), /waiting_user|internal-execution-model-id/);
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'task-main-note.png') });
   await open();
   const composer = page.locator('.bot-composer textarea');
