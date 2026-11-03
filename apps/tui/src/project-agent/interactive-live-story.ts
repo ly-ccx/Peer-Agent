@@ -116,15 +116,21 @@ export async function runInteractiveLiveStory(options: {
       persist();
       host.inputs.submitInput({ workspaceId, inputId: INITIAL_INPUT, text: INITIAL_TASK, surface: 'tui' });
       const publication = await waitFor(() => {
-        const rows = host.plans.listEvidenceIndex().filter((row: any) => row.capabilityId === 'local.interactive.publish' && row.userArtifacts?.[0]?.kind === 'interactive');
+        const rows = host.plans.listEvidenceIndex().filter((row: any) => row.capabilityId === 'local.interactive.publish' && row.userArtifacts?.[0]?.kind === 'interactive' && row.evidenceRef === row.userArtifacts[0].ref);
         if (rows.length > 1) throw Error('story_duplicate_publication');
         const row = rows[0], artifact = row?.userArtifacts?.[0];
-        return artifact ? { row, artifact, fixed: host.interactive.resultStore.getVersion(artifact.reference) } : undefined;
+        if (!artifact) return;
+        const plan = host.plans.getPlan(row.planId);
+        if (!plan?.tasks.some((task: any) => task.status === 'completed'
+          && task.evidenceRefs?.some((ref: string) => ref === row.evidenceRef || ref === `tool-result://${row.toolCallId}`))) return;
+        return { row, fixed: host.interactive.resultStore.getVersion(artifact.reference) };
       });
       const { fixed } = publication;
       const origin = host.plans.getPlan(fixed.source.planId)?.delegationOrigin;
+      const facts = fixed.content.bindings.facts;
       if (origin?.anchorMessageId !== `input-${INITIAL_INPUT}` || origin.readOnly !== true
-        || fixed.content.initialValues.$budget !== 100 || JSON.stringify(fixed.content.bindings.facts) !== '[{"name":"A","cost":20},{"name":"B","cost":35}]')
+        || fixed.content.initialValues.$budget !== 100 || !Array.isArray(facts) || facts.length !== 2
+        || facts[0]?.name !== 'A' || facts[0]?.cost !== 20 || facts[1]?.name !== 'B' || facts[1]?.cost !== 35)
         throw Error('story_publication_mismatch');
       report.publication = { evidenceRef: publication.row.evidenceRef, reference: fixed.reference, source: fixed.source };
       report.stage = 'frozen-input';
