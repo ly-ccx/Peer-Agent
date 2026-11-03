@@ -1,5 +1,6 @@
 import { interactiveDigest, interactiveToken, normalizeInteractiveOwner, normalizeInteractiveReference } from '@peer-agent/protocol';
 import { decode, encode, jsonDigest, problem } from './storage.mjs';
+import { createFollowupRetention } from './followup-retention.mjs';
 import { checkedInteractiveSnapshot } from './state-record.mjs';
 import { interactiveProcessAlive, readLiveInteractiveViewPins } from './view-pins.mjs';
 
@@ -204,5 +205,5 @@ export function createInteractiveRetention({ resultStore, stateStore, assertOwne
     }));
     onStep('cleanup_committed'); return receipt;
   }
-  return { preview, cleanup, readReceipt };
+  return { preview, cleanup, readReceipt, ...createFollowupRetention({ resultStore, current, roots, now, onStep }) };
 }

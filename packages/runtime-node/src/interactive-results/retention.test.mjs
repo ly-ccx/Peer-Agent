@@ -120,6 +120,48 @@ test('an actual read-only view in another process blocks retirement until the vi
   assert.equal(f.clean().versions.length, 1);
 });
 
+test('isolated followup retirement keeps retry identity and requires fresh unreferenced roots', async t => {
+  const f = await fixture(t), { reference } = f.first;
+  const writer = f.states.acquire({ reference, identity, expectedRevision: 0 }, current);
+  const state = f.states.read(reference, current);
+  const input = { reference, identity, writer, stateRevision: 0, stateDigest: state.stateDigest, fields: ['$budget'], requestId: 'freeze-retire' };
+  const snapshot = await f.states.prepareFollowup(input, current);
+  const selection = { owner, followupId: snapshot.followupId };
+  const withWriter = f.retention.previewFollowup(selection);
+  assert.deepEqual(withWriter.blockers, ['writer']);
+  assert.throws(() => f.retention.cleanupFollowup({ ...selection, requestId: 'clean-frozen', expectedDigest: withWriter.cleanupDigest }),
+    { code: 'interactive_cleanup_blocked' });
+  f.states.release({ reference, identity, writer }, current);
+  f.setFollowups([snapshot.followupId]);
+  const referenced = f.retention.previewFollowup(selection);
+  assert.deepEqual(referenced.blockers, ['followup']);
+  assert.throws(() => f.retention.cleanupFollowup({ ...selection, requestId: 'clean-frozen', expectedDigest: referenced.cleanupDigest }),
+    { code: 'interactive_cleanup_blocked' });
+  f.setFollowups([]);
+  const eligible = f.retention.previewFollowup(selection);
+  assert.deepEqual(eligible.blockers, []);
+  assert.throws(() => f.retention.cleanupFollowup({ ...selection, requestId: 'clean-frozen', expectedDigest: withWriter.cleanupDigest }),
+    { code: 'interactive_retention_stale' });
+  const before = f.counts();
+  const request = { ...selection, requestId: 'clean-frozen', expectedDigest: eligible.cleanupDigest };
+  const interrupted = createInteractiveRetention({ resultStore: f.store, stateStore: f.states, assertOwner: current,
+    acquireRoots: f.acquireRoots, now, onStep(step) { if (step === 'followup_cleanup_before_commit') throw Error('injected interruption'); } });
+  assert.throws(() => interrupted.cleanupFollowup(request), /injected interruption/);
+  assert.deepEqual(f.states.readFollowup(owner, snapshot.followupId), snapshot);
+  const retired = f.retention.cleanupFollowup(request);
+  assert.equal(retired.followupId, snapshot.followupId);
+  assert.equal(Object.hasOwn(retired, 'values'), false);
+  assert.deepEqual(f.retention.readFollowupReceipt(selection), retired);
+  assert.deepEqual(f.retention.cleanupFollowup(request), retired);
+  assert.throws(() => f.retention.cleanupFollowup({ ...request, requestId: 'different-clean' }),
+    { code: 'interactive_cleanup_parameter_conflict' });
+  assert.throws(() => f.states.readFollowup(owner, snapshot.followupId), { code: 'interactive_followup_cleaned' });
+  assert.deepEqual(f.counts(), before);
+  assert.equal(f.store.getVersion(reference).content.initialValues.$budget, 100);
+  const nextWriter = f.states.acquire({ reference, identity, expectedRevision: 0 }, current);
+  await assert.rejects(f.states.prepareFollowup({ ...input, writer: nextWriter }, current), { code: 'interactive_followup_cleaned' });
+});
+
 test('retirement atomically clears every fixed version and confirmed state while retaining operations and frozen values', async t => {
   const f = await fixture(t);
   const old = f.legacy(); assert.equal(old.getVersion(f.first.reference).content.initialValues.$budget, 100);

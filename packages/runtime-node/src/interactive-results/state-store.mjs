@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { interactiveToken, normalizeInteractiveOwner, normalizeInteractiveReference, normalizeInteractiveFollowup, normalizeInteractiveWriter, interactiveFeedbackFromFollowup } from '@peer-agent/protocol';
+import { interactiveToken, normalizeInteractiveOwner, normalizeInteractiveReference, normalizeInteractiveWriter, interactiveFeedbackFromFollowup } from '@peer-agent/protocol';
 import { validateState } from '@peer-agent/interactive-content/state';
 import { runInteractiveValidation } from './validation.mjs';
 import { decode, encode, jsonDigest, problem } from './storage.mjs';
 import { checkedInteractiveSnapshot as checkedSnapshot } from './state-record.mjs';
+import { readAvailableFollowup } from './followup-record.mjs';
 
 const clone = value => structuredClone(value);
 const same = (a, b) => encode(a) === encode(b);
@@ -121,7 +122,7 @@ export function createInteractiveStateStore({ resultStore, now = () => new Date(
       const previous = context.db.prepare('SELECT owner,argsDigest,snapshot FROM followups WHERE id=?').get(requestId);
       if (previous) {
         if (previous.owner !== encode(ref.owner) || previous.argsDigest !== argsDigest) throw problem('interactive_followup_parameter_conflict');
-        return { previous: checkedFollowup(decode(previous.snapshot)) };
+        return { previous: readAvailableFollowup(previous, ref.owner, requestId) };
       }
       if (state.snapshot.stateRevision !== stateRevision || state.snapshot.stateDigest !== stateDigest) throw problem('state_revision_unavailable');
       if (fields.some(key => !Object.hasOwn(published.content.stateSchema, key))) throw problem('interactive_followup_invalid');
@@ -153,18 +154,12 @@ export function createInteractiveStateStore({ resultStore, now = () => new Date(
       return clone(snapshot);
     });
   }
-  function checkedFollowup(snapshot) {
-    const { selectionDigest, ...body } = snapshot;
-    if (!normalizeInteractiveFollowup(snapshot) || jsonDigest(body) !== selectionDigest) throw problem('interactive_followup_corrupt');
-    return clone(snapshot);
-  }
   function readFollowup(rawOwner, id) {
     const owner = normalizeInteractiveOwner(rawOwner);
     if (!owner || !interactiveToken(id)) throw problem('interactive_followup_invalid');
     const context = storage.connect(owner.workspaceId);
-    const row = context?.db.prepare('SELECT owner,snapshot FROM followups WHERE id=?').get(id);
-    if (!row || row.owner !== encode(owner)) throw problem('interactive_followup_unavailable');
-    return checkedFollowup(decode(row.snapshot));
+    const row = context?.db.prepare('SELECT owner,argsDigest,snapshot FROM followups WHERE id=?').get(id);
+    return readAvailableFollowup(row, owner, id);
   }
   function close() {
     if (disposed) return;
