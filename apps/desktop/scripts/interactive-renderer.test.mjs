@@ -9,7 +9,7 @@ import { _electron } from 'playwright-core';
 import { build } from 'vite';
 
 const desktop = fileURLToPath(new URL('..', import.meta.url)), require = createRequire(new URL('../package.json', import.meta.url));
-const program = '$divisor=2\n$label="Trial"\n$mode="all"\n$include=true\n$budget=100\nrows=$mode=="all" ? @Data("facts") : @RowsWhere(@Data("facts"),"cost","gt",100)\nroot=Col([Title($label),Input("label","Trial name",$label),NumberInput("divisor","Divisor",$divisor,0,10,1),Select("mode","Rows",$mode,[{value:"all",label:"All"},{value:"expensive",label:"Above 100"}]),Checkbox("include","Include calculation",$include),Slider("budget","Budget",$budget,0,1000,1),Metric("Trial total",$include ? $budget/$divisor : 0),Table("Observations",[{key:"id",label:"ID"},{key:"cost",label:"Cost"}],rows,"id"),Chart("Costs","bar","id",[{key:"cost",label:"Cost"}],rows),Button("Reset budget",@Reset($budget)),SourceReference("facts","Fixed observations")])';
+const program = '$divisor=2\n$label="Trial"\n$mode="all"\n$include=true\n$budget=100\nrows=$mode=="all" ? @Data("facts") : @RowsWhere(@Data("facts"),"cost","gt",100)\nroot=Col([Title($label),Input("label","Trial name",$label),NumberInput("divisor","Divisor",$divisor,0,10,1),Select("mode","Rows",$mode,[{value:"all",label:"All"},{value:"expensive",label:"Above 100"}]),Checkbox("include","Include calculation",$include),Slider("budget","Budget",$budget,0,1000,1),Metric("Trial total",$include ? $budget/$divisor : 0),Table("Observations",[{key:"id",label:"ID"},{key:"cost",label:"Cost"}],rows,"id"),Chart("Costs","bar","id",[{key:"cost",label:"Cost"}],rows),Button("Reset budget",@Reset($budget)),SourceReference("facts","Fixed observations"),Divider(),Card("Chart detail",[Row([Text("Synthetic planning values"),Caption("Use the data tables for exact values")]),Chart("Cost trend","line","id",[{key:"cost",label:"Cost"}],rows)])])';
 
 async function buildFixture(output, mode) {
   const entryId = '\0peer-interactive-fixture.tsx';
@@ -101,6 +101,51 @@ test('the real SDK mounts Peer controls in production and development without to
       await page.waitForFunction(() => document.querySelector('.interactive-metric dd')?.textContent === '60');
       await page.getByRole('button', { name: 'Reset budget', exact: true }).click();
       await page.waitForFunction(() => document.querySelector('.interactive-metric dd')?.textContent === '20');
+      if (mode === 'production') {
+        await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+        await page.emulateMedia({ reducedMotion: 'reduce' });
+        const factor = await app.evaluate(({ BrowserWindow }) => {
+          const win = BrowserWindow.getAllWindows()[0];
+          win.setContentSize(560, 900);
+          win.webContents.setZoomFactor(1.5);
+          return win.webContents.getZoomFactor();
+        });
+        assert.ok(Math.abs(factor - 1.5) < 0.01);
+        await page.waitForFunction(() => matchMedia('(prefers-reduced-motion: reduce)').matches);
+        await page.waitForFunction(() => innerWidth >= 350 && innerWidth <= 390, undefined, { timeout: 4000 });
+        const zoomed = await page.evaluate(() => ({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth }));
+        assert.ok(zoomed.scrollWidth <= zoomed.width + 1, JSON.stringify(zoomed));
+        const chart = page.getByRole('img', { name: 'Cost trend', exact: true });
+        assert.equal(await chart.count(), 1);
+        const table = page.getByRole('table', { name: 'Cost trend', exact: true });
+        assert.equal(await table.getByRole('columnheader', { name: 'Cost' }).count(), 1);
+        assert.ok((await table.ariaSnapshot()).includes('row "0 1"'), 'the chart table exposes exact values in the accessibility tree');
+        assert.equal(await page.getByRole('heading', { name: 'Chart detail' }).count(), 1);
+        assert.equal(await page.getByText('Synthetic planning values', { exact: true }).count(), 1);
+        assert.equal(await page.getByText('Use the data tables for exact values', { exact: true }).count(), 1);
+        assert.equal(await page.getByRole('separator').count(), 1);
+        async function capture(name) {
+          await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+          const bytes = await app.evaluate(async ({ BrowserWindow }) =>
+            (await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString('base64'));
+          writeFileSync(path.join(root, name), Buffer.from(bytes, 'base64'));
+        }
+        await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+        await page.getByLabel('Trial name', { exact: true }).evaluate(node => node.focus({ preventScroll: true }));
+        await capture('production-zoom-reduced-controls.png');
+        const dataRegion = page.getByRole('region', { name: 'Cost trend', exact: true });
+        await chart.evaluate(node => node.closest('section').scrollIntoView({ block: 'start', behavior: 'instant' }));
+        await dataRegion.evaluate(node => node.focus({ preventScroll: true }));
+        assert.equal(await table.evaluate(node => node.getBoundingClientRect().top < innerHeight), true);
+        assert.equal(await dataRegion.evaluate(node => node === document.activeElement), true);
+        await capture('production-zoom-reduced-chart-table.png');
+        await app.evaluate(({ BrowserWindow }) => {
+          const win = BrowserWindow.getAllWindows()[0];
+          win.webContents.setZoomFactor(1);
+          win.setContentSize(1100, 900);
+        });
+        await page.emulateMedia({ reducedMotion: 'no-preference' });
+      }
       for (const [width, theme] of [[1100, 'light'], [420, 'dark']]) {
         await page.setViewportSize({ width, height: 900 });
         await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
