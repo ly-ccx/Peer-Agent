@@ -159,6 +159,8 @@ test('the verify scenario performs an independent host review with real fixed in
   expect(report.requests.map(row => row.phase)).toEqual(['worker', 'worker', 'verifier', 'verifier']);
   expect(report.verification?.receipts).toHaveLength(4);
   expect(report.verification?.passed).toBe(true);
+  expect(report.verification?.verdict).toMatchObject({ status: 'passed',
+    event: { verdictRef: 'verdict:live-session:passed' }, sessionState: { sessionId: 'live-session' } });
 });
 
 test('story diagnostics retain the role and resource when a model batch exceeds its limit', async () => {

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { createConversationStore } from '@peer-agent/conversation-store';
 import { createApprovalStore, createGoalPlanStore } from '@peer-agent/runtime-node/storage';
 import { createProjectRegistry, encodeProviderToolResult } from '@peer-agent/runtime-node/providers';
-import { createBotLifecycle, createProjectGoalRunnerHost, createSessionVerification, resolveWorkSessionProfile } from '@peer-agent/runtime-node/project-agent';
+import { createBotLifecycle, createProjectGoalRunnerHost, createSessionSupervisor, createSessionVerification, resolveWorkSessionProfile } from '@peer-agent/runtime-node/project-agent';
 import { createInteractiveRuntime, runInteractiveValidation } from '@peer-agent/runtime-node/interactive-results';
 import { encodeResourceFeedbackTransport, interactiveFeedbackFromFollowup } from '@peer-agent/protocol';
 import type { ModelMessage, ModelProvider, ModelUsage } from '@peer-agent/runtime-node/models';
@@ -12,6 +12,7 @@ import { restrictTuiHostTools } from '../cli-host-filter.ts';
 import { createProviderChatModel } from '../provider-chat-model.ts';
 import { buildTuiSystemPrompt } from '../tui-language.ts';
 import { createTuiModelSelectionControl } from '../tui-model-selection.ts';
+import { createProjectToolProvider } from './project-tool-provider.ts';
 import { createInteractiveToolProvider } from './interactive-tool-provider.ts';
 import { createTuiTurnExecutor } from './tui-turn-executor.ts';
 import { createTurnTestRuntime, drainTestCleanup, type TestCleanup } from './turn-test-support.ts';
@@ -247,10 +248,30 @@ export async function runInteractiveLiveCase(options: {
           verifySession: (current: any) => host.verifierRunner.runVerifier({ plan: current, verifierRunId: 'live-review', stage: 'delegated', signal,
             focus,
             workId: undefined, goalReview: undefined }) } as never);
-        const verdict = await verification.run({ sessionId: 'live-session' });
+        const supervisor = createSessionSupervisor({ goalPlanStore: plans, conversationStore: conversations, deferRecovery: true,
+          readSessionFacts: () => ({ hostAuthority: verification.facts('live-session') }) } as never);
+        const delegation = createProjectToolProvider({ rootDir: directory, supervisor, verification } as never);
+        const verifyCapability = 'local.delegation.verify_session';
+        const verifyHost = restrictTuiHostTools(createTuiHost({ workspaceRoot: workspacePath, userDataPath: directory,
+          accessLevel, providers: [delegation], goalPlanStore: plans }), [verifyCapability]);
+        cleanups.push(() => verifyHost.dispose());
+        const review = await verifyHost.execute(verifyCapability, { sessionId: 'live-session' }, {
+          sessionId: parentId, conversationId: parentId, toolCallId: 'fixture-verify-session', turnId: 'fixture-review',
+          turnIndex: 0, mode: 'project_agent', project: { workspaceId, holdsLease: () => true, approver: true }, toolContext: { workspaceId, workspacePath, role: 'project_agent',
+            turnProfile: { role: 'project_agent', workspaceId }, messages: history.messages, currentInputAnchors: ['anchor'] },
+        });
+        if (review.result.status !== 'success') throw Error(sanitize(JSON.stringify(review.result.outputPreview)));
+
+        const verdict = review.result.output as { status?: string; event?: { verdictRef?: string };
+          sessionState?: { sessionId?: string; status?: string } } | undefined;
         const receipts = plans.listEvidenceIndex().filter((row: any) => row.planId === plan.planId && row.interactiveInspection)
           .map((row: any) => ({ evidenceRef: row.evidenceRef, inspection: row.interactiveInspection }));
-        const passed = verdict.ok && 'facts' in verdict && verdict.facts?.independentVerifier === 'passed';
+        const stored = (plans.getPlan(plan.planId) as any)?.hostVerification;
+        const current = supervisor.get({ sessionId: 'live-session' });
+        const passed = review.result.status === 'success' && (review.grant as { granted?: boolean } | undefined)?.granted === true && verdict?.status === 'passed'
+          && verdict.event?.verdictRef === stored?.verdictRef && stored?.independentVerifier === 'passed'
+          && verdict.sessionState?.sessionId === 'live-session' && verdict.sessionState.status === current?.status
+          && current?.status !== 'verifying';
         report.verification = { passed, followupId: frozen.followupId, receipts, verdict, turns };
         report.ok = passed;
       }
