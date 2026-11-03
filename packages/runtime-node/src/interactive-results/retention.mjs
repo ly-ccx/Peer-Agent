@@ -16,7 +16,7 @@ const synchronous = fn => typeof fn === 'function' && fn.constructor?.name !== '
 function reference(raw) { const result = normalizeInteractiveReference(raw); if (!result) throw problem('interactive_reference_invalid'); return result; }
 
 /** Internal maintenance only. No public delete port exists until every root store is guarded. */
-export function createInteractiveRetention({ resultStore, stateStore, assertOwner, acquireRoots, acquireMaterialResponsibility = undefined, now = () => new Date().toISOString(), onStep = () => {} }) {
+export function createInteractiveRetention({ resultStore, stateStore, assertOwner, acquireRoots, now = () => new Date().toISOString(), onStep = () => {} }) {
   const storage = resultStore.storage;
   function current(owner) {
     if (typeof assertOwner !== 'function' || assertOwner(owner) !== true) throw problem('interactive_scope_denied');
@@ -207,5 +207,5 @@ export function createInteractiveRetention({ resultStore, stateStore, assertOwne
     onStep('cleanup_committed'); return receipt;
   }
   return { preview, cleanup, readReceipt, ...createFollowupRetention({ resultStore, current, roots, now, onStep }),
-    ...createMaterialRetention({ resultStore, current, roots, acquireMaterialResponsibility, now, onStep }) };
+    ...createMaterialRetention({ resultStore, current, roots, now, onStep }) };
 }

@@ -132,8 +132,9 @@ test('material retirement requires its own guard, protects provenance and keeps 
   assert.throws(() => f.retention.previewMaterial(selection), { code: 'interactive_retention_unavailable' });
   let blocked = true, changed = false;
   const retention = createInteractiveRetention({ resultStore: f.store, stateStore: f.states, assertOwner: current,
-    acquireRoots: f.acquireRoots, now,
-    acquireMaterialResponsibility: () => ({ digest: jsonDigest({ blocked }), blocked, assertCurrent: () => !changed, release() {} }),
+    acquireRoots: () => ({ ...f.acquireRoots(), materialResponsibility: () => ({
+      digest: jsonDigest({ blocked }), blocked, assertCurrent: () => !changed, release() {},
+    }) }), now,
     onStep(step) { if (step === 'material_cleanup_before_commit' && crash) throw Error('interrupted'); } });
   let crash = false;
   const live = retention.previewMaterial(selection);

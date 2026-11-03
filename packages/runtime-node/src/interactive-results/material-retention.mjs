@@ -10,7 +10,7 @@ function target(raw) {
   return { owner, source: structuredClone(source), id };
 }
 
-export function createMaterialRetention({ resultStore, current, roots, acquireMaterialResponsibility, now, onStep }) {
+export function createMaterialRetention({ resultStore, current, roots, now, onStep }) {
   const { storage } = resultStore;
   function read(context, selection) {
     const row = context?.db.prepare('SELECT owner,object,metadata FROM materials WHERE id=?').get(selection.id);
@@ -20,9 +20,8 @@ export function createMaterialRetention({ resultStore, current, roots, acquireMa
   }
   function guarded(selection, work) {
     return roots(selection.owner, (retention, assertRetention, heldMaterialResponsibility) => {
-      const acquire = acquireMaterialResponsibility ?? heldMaterialResponsibility;
-      if (typeof acquire !== 'function') throw problem('interactive_retention_unavailable');
-      const material = acquire({ owner: structuredClone(selection.owner), source: structuredClone(selection.source) });
+      if (typeof heldMaterialResponsibility !== 'function') throw problem('interactive_retention_unavailable');
+      const material = heldMaterialResponsibility({ owner: structuredClone(selection.owner), source: structuredClone(selection.source) });
       try {
         if (!material || material.then || !interactiveDigest(material.digest) || typeof material.blocked !== 'boolean'
           || typeof material.assertCurrent !== 'function' || typeof material.release !== 'function') throw problem('interactive_retention_unavailable');
