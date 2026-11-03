@@ -10,7 +10,8 @@ export function sessionExecutionCurrent(plan) {
   if (control && (control.phase !== 'settled' || control.kind === 'cancel')) return false;
   const binding = origin?.coordinationBinding;
   if (!binding) return true; // Legacy plans retain their existing enforcement, never obtain a mandate.
-  const state = workBudgetBinding(origin.workspaceId)?.store.read();
+  const store = workBudgetBinding(origin.workspaceId)?.store;
+  const state = store?.readLifecycleFacts?.() ?? store?.read();
   const mandate = state?.mandates?.[binding.workId];
   const transition = Object.values(state?.transitions || {}).find(row => row.executionEpoch === binding.executionEpoch);
   return executionBindingCurrent(mandate, transition, binding);

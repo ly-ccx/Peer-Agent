@@ -59,14 +59,23 @@ export function createSessionContinuity({ goalPlanStore, conversationStore, goal
     const history = conversationStore.getPersistedConversationHistory?.(plan.delegationOrigin.parentConversationId);
     return history?.messages?.some(message => message.id === anchorMessageId && isCanonicalUserInput(message)) === true;
   }
-  async function resume(input, context) {
+  function resumeAdmission(input, context) {
     const plan = findBySession(input.sessionId);
     const checked = check(plan, context);
     if (!checked.ok) return checked;
+    // The original takeover still owns stopping, outcome reconciliation and
+    // rebinding. A native resume must not supersede half of that transaction.
+    if (plan.delegationOrigin.takeover?.phase === 'stopping') return error('coordination_reconciliation_required');
     if (executionScheduler.inspect(plan).reason === 'coordination_reconciliation_required') return error('coordination_reconciliation_required');
     if (!anchor(plan, input.anchorMessageId)) return error('invalid_anchor');
     if (plan.delegationOrigin.lastResumeAnchorMessageId === input.anchorMessageId) return { ok: true, replayed: true, plan };
     if (!SUSPENDED.has(plan.delegationOrigin.phase)) return error('session_not_paused');
+    return { ok: true, plan };
+  }
+  async function resume(input, context) {
+    const admitted = resumeAdmission(input, context);
+    if (!admitted.ok || admitted.replayed) return admitted;
+    const { plan } = admitted;
     const seen = new Set([input.sessionId]);
     let nextId = plan.delegationOrigin.supersededBy;
     const chain = [];
@@ -114,14 +123,7 @@ export function createSessionContinuity({ goalPlanStore, conversationStore, goal
       && Date.parse(now()) - at >= SUPERSESSION_RETENTION_MS;
   }
   async function prepareResume(input, context, exclusive) {
-    const checked = await exclusive(() => {
-      const plan = findBySession(input.sessionId), result = check(plan, context);
-      if (!result.ok) return result;
-      if (!anchor(plan, input.anchorMessageId)) return error('invalid_anchor');
-      if (plan.delegationOrigin.lastResumeAnchorMessageId === input.anchorMessageId) return { ok: true, replayed: true };
-      if (!SUSPENDED.has(plan.delegationOrigin.phase)) return error('session_not_paused');
-      return { ok: true, plan };
-    });
+    const checked = await exclusive(() => resumeAdmission(input, context));
     if (!checked.ok || checked.replayed) return checked;
     try { await sessionControl.prepareResume(checked.plan, input.anchorMessageId, exclusive); return { ok: true }; }
     catch (failure) { return error(failure.message); }

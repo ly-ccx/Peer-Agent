@@ -157,6 +157,9 @@ export function createExecutionScheduler({ rootDir = null, getConcurrency = () =
   function inspect(plan, plans = [...plansById.values()]) {
     if (isPlanRecoveryHeld(plan)) return { allowed: false, reason: 'coordination_reconciliation_required', queuedBehind: [] };
     const origin = plan.delegationOrigin || {};
+    if (origin.phase === 'queued' && origin.coordinationBinding && !sessionExecutionCurrent(plan)) {
+      return { allowed: false, reason: 'coordination_reconciliation_required', queuedBehind: [] };
+    }
     const sameProject = plans.filter(item => item.delegationOrigin?.workspaceId === origin.workspaceId);
     const bySession = new Map(sameProject.map(item => [item.delegationOrigin.sessionId, item]));
     const dependencies = (origin.dependsOn || []).map(id => bySession.get(id));

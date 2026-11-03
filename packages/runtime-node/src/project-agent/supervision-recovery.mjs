@@ -1,9 +1,21 @@
 import { hasUnsettledDispatch } from './recovery-policy.mjs';
 import { takeoverBlocker } from './session-repair.mjs';
+import { takeoverStopReceipt } from './takeover-stop-recovery.mjs';
 
 /** A reconciled host dispatch can release a transition; a model assertion cannot. */
 export function transitionReconciliation(transition, work, session) {
   if (transition.phase !== 'awaiting_outcome' || !session || hasUnsettledDispatch(work)) return null;
+  const control = session.origin?.executionControl;
+  const receipt = takeoverStopReceipt({ planId: session.planId, delegationOrigin: session.origin }, control, transition.operationId);
+  // Recover the original proposal from its current barrier. A native resume
+  // alone or a merely idle-looking task projection is not a stop proof.
+  if (receipt && typeof transition.operationId === 'string' && transition.operationId.length > 0
+    && ['handoff', 'revise', 'resume'].includes(transition.action)
+    && session.origin?.takeover?.operationId === transition.operationId && session.origin?.takeover?.phase === 'stopping'
+    && control.expectedExecution?.goalRevision === transition.expectedGoalRevision
+    && control.workspaceId === work?.workspaceId && control.parentConversationId === work?.parentConversationId) {
+    return { phase: 'stopping', error: undefined, reconciliationRef: receipt.receiptId };
+  }
   const proof = work?.budget?.reconciledDispatches?.find(row => row.planId === session.planId
     && row.toolCallId && row.attemptId && row.outcome === 'verification_interrupted' && Number.isFinite(Date.parse(row.at))
     && Date.parse(row.at) >= Date.parse(transition.updatedAt));

@@ -223,10 +223,13 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
       for (let transition of Object.values(store.read().transitions || {})) {
         try {
           if (transition.phase === 'awaiting_outcome') {
-            const newer = Object.values(store.read().transitions || {}).findLast(row => row.oldSessionId === transition.oldSessionId);
-            if (newer?.operationId !== transition.operationId) continue;
+            const related = Object.values(store.read().transitions || {}).filter(row => row.oldSessionId === transition.oldSessionId);
+            const session = readSession({ sessionId: transition.oldSessionId });
+            const retainedTakeover = session?.origin?.takeover?.operationId === transition.operationId;
+            if (retainedTakeover ? related.some(row => row.operationId !== transition.operationId && !['completed', 'blocked'].includes(row.phase))
+              : related.at(-1)?.operationId !== transition.operationId) continue;
             const work = store.readWork(transition.workId);
-            const patch = transitionReconciliation(transition,work,readSession({sessionId:transition.oldSessionId}));
+            const patch = transitionReconciliation(transition,work,session);
             if (patch) {
               store.enableSupervision(6);
               store.advanceTransition(transition.operationId,transition.phase,patch);
