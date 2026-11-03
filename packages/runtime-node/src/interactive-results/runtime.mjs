@@ -10,21 +10,23 @@ import { createInteractiveFeedbackAdmission } from './feedback-admission.mjs';
 import { createInteractiveVerification } from './verification.mjs';
 import { createInteractivePublicationSource } from './publication-source.mjs';
 import { createDelegationRetention } from './delegation-retention.mjs';
+import { createInteractiveRetentionRoots } from './retention-roots.mjs';
 import { createInteractiveRetention } from './retention.mjs';
 
 /** One shared domain instance per host. Composition roots supply real local facts. */
 export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationStore, getBotConversationId,
-  holdsLease, enabled, classifyContext, readUserMaterial, readMaterialMetadata, getSession, now, validate, acquireRetentionRoots } = {}) {
+  holdsLease, enabled, classifyContext, readUserMaterial, readMaterialMetadata, getSession, now, validate, retentionPorts } = {}) {
   const resultStore = createInteractiveResultStore({ ...(rootDir ? { rootDir } : {}), ...(now ? { now } : {}),
     assertCompatibility: () => goalPlanStore?.assertInteractiveEvidenceCompatible?.() === true });
   const stateStore = createInteractiveStateStore({ resultStore, ...(now ? { now } : {}) });
   const assertOwner = owner => enabled?.(owner.workspaceId) === true && holdsLease?.(owner.workspaceId) === true
     && getBotConversationId?.(owner.workspaceId) === owner.conversationId;
-  const retention = createInteractiveRetention({ resultStore, stateStore, acquireRoots: acquireRetentionRoots, assertOwner, ...(now ? { now } : {}) });
   const acquireDelegationRoots = createDelegationRetention({ goalPlanStore, resultStore, stateStore, assertOwner });
   const feedback = createInteractiveFeedbackAdmission({ stateStore, conversationStore });
   const publications = createInteractivePublicationSource({ resultStore, goalPlanStore, getBotConversationId, getSession });
   const verification = createInteractiveVerification({ resultStore, feedback, goalPlanStore, conversationStore, getBotConversationId, holdsLease, enabled });
+  const acquireRoots = createInteractiveRetentionRoots({ ...retentionPorts, feedback, acquireDelegationRoots, verification });
+  const retention = createInteractiveRetention({ resultStore, stateStore, acquireRoots, assertOwner, ...(now ? { now } : {}) });
   const authority = createInteractiveAuthority({ goalPlanStore, conversationStore, resultStore, getBotConversationId, holdsLease, enabled, classifyContext,
     readResourceFeedback: feedback.restore, resolveVerification: verification.resolve });
   const userMaterials = createInteractiveUserMaterials({ conversationStore });

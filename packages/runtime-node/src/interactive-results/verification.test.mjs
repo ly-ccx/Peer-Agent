@@ -10,6 +10,9 @@ import { createGoalPlanStore } from '../goal-plan-store.mjs';
 import { resolveWorkSessionProfile } from '../project-agent/work-session-profile.mjs';
 import { verificationContentHash } from '../project-agent/verification-completion.mjs';
 import { createInteractiveRuntime } from './runtime.mjs';
+import { createInteractiveViewService } from './view-service.mjs';
+import { createProjectInputDraftStore } from '../project-agent/input-draft-store.mjs';
+import { createInputQueue } from '../project-agent/input-queue.mjs';
 import { createInteractiveRetention, INTERACTIVE_RETENTION_SOURCES } from './retention.mjs';
 import { jsonDigest } from './storage.mjs';
 import { normalizeTurnProfile } from '../../../../apps/desktop/electron/main/chat-runtime/turn-context.mjs';
@@ -23,7 +26,7 @@ import { installDesktopInteractiveRuntime } from '../../../../apps/desktop/elect
 
 const PUBLISH = 'local.interactive.publish', INSPECT = 'local.interactive.inspect';
 const success = evidenceRefs => ({ passed: true, evidenceRefs, failedCriteria: [], missingEvidence: [], risks: [], summary: 'Reviewed the fixed result.' });
-async function fixture(t, { program, facts } = {}) {
+async function fixture(t, { program, facts, retention = false } = {}) {
   const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'peer-interactive-review-'))), plans = createGoalPlanStore({ storeDir: path.join(root, 'plans') });
   const conversations = createConversationStore({ storeDir: path.join(root, 'conversations') });
   const parent = conversations.createConversation({ title: 'Bot', role: 'project_agent', workspaceId: 'bot' });
@@ -41,7 +44,19 @@ async function fixture(t, { program, facts } = {}) {
       modelSelection: { worker: model, explorer: model, verifier: model, resolvedAt: new Date().toISOString() },
       capabilityAdmission: { required: [PUBLISH] } } });
   let enabled = true, leased = true, parentId = parent.id, count = 0, contextLevel = 'D3_private';
-  const runtime = createInteractiveRuntime({ rootDir: path.join(root, 'runtime'), goalPlanStore: plans, conversationStore: conversations,
+  const runtimeRoot = path.join(root, 'runtime');
+  const validateInteractiveFeedback = (row, workspaceId) => runtime.feedback.validate(row, workspaceId);
+  const drafts = createProjectInputDraftStore({ rootDir: runtimeRoot, validateInteractiveFeedback });
+  const inputs = createInputQueue({ rootDir: runtimeRoot, validateInteractiveFeedback, resolveConversationId: () => parent.id });
+  // This isolated fixture owns its data directory and starts no legacy process.
+  let compatible = true, held = false;
+  const retentionPorts = retention ? { drafts, inputQueue: inputs, acquireCompatibility() {
+    assert.equal(held, false);
+    held = true;
+    return { revision: jsonDigest('isolated-retention-fixture'), assertCurrent: () => held && compatible,
+      release: () => { held = false; } };
+  } } : undefined;
+  const runtime = createInteractiveRuntime({ rootDir: runtimeRoot, retentionPorts, goalPlanStore: plans, conversationStore: conversations,
     getBotConversationId: () => parentId, holdsLease: () => leased, enabled: () => enabled, classifyContext: () => contextLevel });
   t.after(() => { runtime.close(); rmSync(root, { recursive: true, force: true }); });
   const current = () => plans.getPlan(initial.planId);
@@ -74,9 +89,43 @@ async function fixture(t, { program, facts } = {}) {
     if (submit) conversations.appendMessage(child.id, { id: `input-${requestId}`, role: 'user', content: 'Use these selected conditions', ...encodeResourceFeedbackTransport([interactiveFeedbackFromFollowup(frozen)]) });
     return frozen;
   }
-  return { root, plans, conversations, current, profile, runtime, owner, child, draft, published, reference, publicationRef, publish, prepare, inspect, read, freeze,
+  return { root, plans, conversations, drafts, inputs, compatibility: value => { compatible = value; }, current, profile, runtime, owner, child, draft, published, reference, publicationRef, publish, prepare, inspect, read, freeze,
     setEnabled: v => { enabled = v; }, setLeased: v => { leased = v; }, setOwner: v => { parentId = v; }, setContextLevel: v => { contextLevel = v; } };
 }
+
+test('runtime composition holds all six actual sources and retires only an unreferenced result', async t => {
+  const f = await fixture(t, { retention: true });
+  const frozen = await f.freeze(), row = interactiveFeedbackFromFollowup(frozen), review = f.prepare();
+  t.after(() => review.close());
+  assert.equal(f.drafts.write({ workspaceId: f.owner.workspaceId, surface: 'desktop', revision: 0, uploads: [], pending: [],
+    draft: { text: 'Keep conditions', quote: null, attachmentIds: [], resourceFeedback: [row] } }).ok, true);
+  f.inputs.submitInput({ workspaceId: f.owner.workspaceId, inputId: 'protected-input', surface: 'desktop', text: 'Keep queued', resourceFeedback: [row] });
+  const service = createInteractiveViewService({ resultStore: f.runtime.resultStore, stateStore: f.runtime.stateStore,
+    resolveSource: () => ({ owner: f.owner, assertCurrent: () => true }) });
+  t.after(() => service.dispose());
+  assert.equal((await service.open({}, { reference: f.reference, requestId: 'read-only-view' })).ok, true);
+  const preview = f.runtime.retention.preview(f.reference);
+  for (const source of [...INTERACTIVE_RETENTION_SOURCES, 'followup']) assert.ok(preview.blockers.some(row => row.source === source), source);
+  assert.throws(() => f.runtime.retention.cleanup({ reference: f.reference, expectedDigest: preview.cleanupDigest, requestId: 'blocked' }),
+    { code: 'interactive_cleanup_blocked' });
+  const busy = f.runtime.feedback.acquireMessageRoots(f.owner);
+  try { assert.throws(() => f.runtime.retention.preview(f.reference), { code: 'CONVERSATION_RETENTION_BUSY' }); }
+  finally { busy.release(); }
+  f.drafts.acquireRetentionDrafts(f.owner.workspaceId).release();
+  f.inputs.acquireRetentionInputs(f.owner.workspaceId).release();
+  const orphan = await f.publish({ ...f.draft, title: 'Unreferenced result' }, 'unreferenced-publication');
+  assert.equal(orphan.result.status, 'success');
+  const reference = orphan.result.outputPreview.reference, free = f.runtime.retention.preview(reference);
+  assert.deepEqual(free.blockers, []);
+  f.compatibility(false);
+  assert.throws(() => f.runtime.retention.cleanup({ reference, expectedDigest: free.cleanupDigest, requestId: 'cleanup-orphan' }),
+    { code: 'interactive_retention_stale' });
+  assert.equal(f.runtime.retention.readReceipt(reference), null);
+  f.compatibility(true);
+  const cleaned = f.runtime.retention.cleanup({ reference, expectedDigest: free.cleanupDigest, requestId: 'cleanup-orphan' });
+  assert.deepEqual(cleaned.reference, reference);
+  assert.equal(f.runtime.resultStore.getVersion(f.reference).content.title, f.draft.title);
+});
 
 test('durable delegated plans pin fixed and inspection evidence after reopen, even without an index entry', async t => {
   const f = await fixture(t), frozen = await f.freeze(), review = f.prepare();
