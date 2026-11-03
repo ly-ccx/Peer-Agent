@@ -232,6 +232,7 @@ test('project agent settings keep the standard level and merge quiet hours', () 
     proactivity: 'high',
     quietHours: { enabled: false, start: '22:00', end: '08:00' },
     digestTime: '18:30',
+    interactiveResults: false,
     shell: 'bots',
     shellIntroPending: false,
     shellIntroDismissed: false,
