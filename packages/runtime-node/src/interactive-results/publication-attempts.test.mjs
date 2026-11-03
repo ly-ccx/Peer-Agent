@@ -5,7 +5,8 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { createInteractiveResultStore } from './store.mjs';
 import { createInteractiveRuntime } from './runtime.mjs';
-import { executionIdentity } from '../project-agent/session-control-kernel.mjs';
+import { controlDigest, executionIdentity } from '../project-agent/session-control-kernel.mjs';
+import { createWorkCoordinationStore } from '../project-agent/work-coordination-store.mjs';
 import { registerWorkBudget } from '../project-agent/work-budget.mjs';
 
 test('fresh store instances retain preparation identity, active candidate and repair budget; corruption never resets them', t => {
@@ -45,7 +46,7 @@ test('fresh store instances retain preparation identity, active candidate and re
   assert.throws(() => second.getAttempt(a.callRef), { code: 'interactive_storage_corrupt' });
 });
 
-test('shared host recovery consumes only a current, in-scope stop receipt for the prepared execution', t => {
+test('shared host recovery consumes only a current, in-scope stop receipt after reopening both stores', async t => {
   const root = mkdtempSync(path.join(tmpdir(), 'peer-interactive-stopped-preparation-'));
   const owner = { workspaceId: 'workspace', conversationId: 'parent' };
   const plan = { planId: 'plan', conversationId: 'child', status: 'cancelled',
@@ -53,22 +54,40 @@ test('shared host recovery consumes only a current, in-scope stop receipt for th
       phase: 'paused', executionGeneration: 'generation-one' } };
   const execution = executionIdentity(plan);
   const callRef = { owner, conversationId: plan.conversationId, toolCallId: 'prepared' };
-  let control, lease = true;
-  const release = registerWorkBudget(owner.workspaceId, { readSessionControl: id => id === 'session' ? control : undefined });
-  const runtime = createInteractiveRuntime({ rootDir: root, goalPlanStore: {
+  let lease = true;
+  const journalOptions = { rootDir: path.join(root, 'coordination'), workspaceId: owner.workspaceId,
+    holdsLease: () => lease, leaseEpoch: () => 'host', formatVersion: 2, fenceLegacyWrites: true };
+  const runtimeOptions = { rootDir: root, goalPlanStore: {
     getPlan: id => id === plan.planId ? plan : null, assertInteractiveEvidenceCompatible: () => true,
-  }, getBotConversationId: () => owner.conversationId, holdsLease: () => lease });
-  t.after(() => { release(); runtime.close(); rmSync(root, { recursive: true, force: true }); });
+  }, getBotConversationId: () => owner.conversationId, holdsLease: () => lease };
+  let journal = createWorkCoordinationStore(journalOptions);
+  let runtime = createInteractiveRuntime(runtimeOptions);
+  let release = registerWorkBudget(owner.workspaceId, journal);
+  t.after(() => { release(); runtime.close(); journal.close(); rmSync(root, { recursive: true, force: true }); });
+  await journal.prepare();
   runtime.resultStore.beginAttempt({ callRef, source: { ...execution, conversationId: 'child', toolCallId: 'prepared' },
     draft: { publication: { kind: 'create' }, title: 'Candidate', textFallback: 'Assumption', program: 'root=Text("x")', inputs: [] } }, () => true);
   const recover = () => runtime.recoverWorkspace(owner.workspaceId);
   assert.deepEqual(recover(), { ok: true, items: [] }, 'a terminal plan alone proves nothing');
-  control = { workspaceId: 'workspace', parentConversationId: 'parent', sessionId: 'session', planId: 'plan',
-    kind: 'cancel', operationId: 'cancel-one', expectedExecution: execution,
-    stopReceipt: { operationId: 'cancel-one', execution: { ...execution, generation: 'foreign' }, scope: 'managed_execution',
-      admissionClosed: true, runnerIdle: true, schedulerIdle: true } };
+  const operation = { workspaceId: 'workspace', parentConversationId: 'parent', sessionId: 'session', planId: 'plan',
+    kind: 'cancel', operationId: 'cancel-one', authorityRef: 'user-input', expectedExecution: execution,
+    revision: 1, phase: 'recorded', updatedAt: '2026-11-01T00:00:00.000Z' };
+  operation.requestDigest = controlDigest({ kind: operation.kind, operationId: operation.operationId,
+    authorityRef: operation.authorityRef, execution });
+  journal.writeSessionControl(operation, 0, null);
+  journal.writeSessionControl({ ...operation, revision: 2, phase: 'draining' }, 1, operation.operationId);
+  const stopReceipt = { receiptId: 'stop-receipt', operationId: operation.operationId, execution, scope: 'managed_execution',
+    admissionClosed: true, runnerIdle: true, schedulerIdle: true, resourceClaims: [], unknownCalls: [callRef.toolCallId],
+    completedAt: operation.updatedAt };
+  journal.writeSessionControl({ ...operation, revision: 3, phase: 'settled', outcome: 'applied', stopReceipt }, 2, operation.operationId);
+  release(); runtime.close(); journal.close();
+  journal = createWorkCoordinationStore(journalOptions);
+  await journal.prepare();
+  runtime = createInteractiveRuntime(runtimeOptions);
+  release = registerWorkBudget(owner.workspaceId, journal);
+  plan.delegationOrigin.executionGeneration = 'foreign';
   assert.deepEqual(recover(), { ok: true, items: [] });
-  control.stopReceipt.execution = execution;
+  plan.delegationOrigin.executionGeneration = execution.generation;
   lease = false;
   assert.equal(recover().ok, false);
   lease = true;
