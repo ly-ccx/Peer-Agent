@@ -394,6 +394,7 @@ export function createProjectAgentRunner({
         failed: outcome.failed === true,
         reason: outcome.reason,
         memoryUsed: outcome.memoryIds,
+        silentWait: outcome.silentWait,
         publicUpdates: activity.snapshot()?.segments.filter(segment => segment.kind === 'text') ?? [],
       });
       const exhausted = (outcome.failed || finished.failed) && classifyProjectAgentFailure(outcome.reason, outcome.failure).kind === 'budget_exhausted';

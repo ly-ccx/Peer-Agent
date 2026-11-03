@@ -61,6 +61,7 @@ export function finishAgentTurn({
   reason = '',
   memoryUsed = [],
   publicUpdates = [],
+  silentWait = null,
 } = {}) {
   const storedRounds = normalizeRounds(rounds);
   const messages = [agentTurnMessage({ turnId, plan, rounds: storedRounds, publicUpdates })];
@@ -77,6 +78,8 @@ export function finishAgentTurn({
     });
     return { messages, replied: true };
   }
+  // A later admitted wait settles the wake while retaining rejected attempts.
+  if (plan?.kind === 'wake' && silentWait) return { messages, replied: false };
   if (toolCallsOf(storedRounds).some(call => call.name === 'post_reply')) {
     const calls = toolCallsOf(storedRounds).filter(call => call.name === 'post_reply');
     if (calls.every(call => successfulSuppression(call.result))) return { messages, replied: false };

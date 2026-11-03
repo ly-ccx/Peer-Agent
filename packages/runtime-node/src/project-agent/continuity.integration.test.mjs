@@ -70,24 +70,32 @@ test('main reply failure, continuing child, quiet restart and successful deliver
   } finally { env.close(); }
 });
 
-test('a model can end observation with a real waiting Tool Result and the result event wakes it later', async () => {
+test('a governed wait after a rejected progress reply remains quiet and a result wakes it later', async () => {
   let requests = 0;
   const roster = [{ sessionId: 's', workspaceId: 'w', status: 'running', origin: { parentConversationId: 'c' } }];
-  const provider = createDelegationProvider({ supervisor: { get: () => roster[0] } });
+  const provider = createDelegationProvider({ supervisor: { get: () => roster[0] },
+    replyComposer: { postReply: () => ({ ok: false, error: 'status_claim_mismatch' }) } });
   const env = world(async ({ turnProfile }) => {
     requests++;
     if (requests === 1) {
       roster[0].origin.workId = turnProfile.workId;
-      const receipt = await provider.executeCapability({ call: { toolCallId: 'real-wait', capabilityId: 'local.delegation.wait_for_sessions', arguments: { sessionIds: ['s'] } } },
-        { mode: 'project_agent', workspaceId: 'w', conversationId: 'c', currentInputAnchors: [], turnProfile });
+      const context = { mode: 'project_agent', workspaceId: 'w', conversationId: 'c', currentInputAnchors: [], turnProfile };
+      const reply = { text: '任务已有结果。', sources: ['s'], proactive: true };
+      const rejected = await provider.executeCapability({ call: { toolCallId: 'stale-reply', capabilityId: 'local.delegation.post_reply', arguments: reply } }, context);
+      assert.equal(rejected.result.output.error, 'status_claim_mismatch');
+      const wait = { sessionIds: ['s'] };
+      const receipt = await provider.executeCapability({ call: { toolCallId: 'real-wait', capabilityId: 'local.delegation.wait_for_sessions', arguments: wait } }, context);
       assert.equal(receipt.grant.granted, true);
-      return { continued: true, toolCalls: [{ name: 'wait_for_sessions', input: { sessionIds: ['s'] }, result: receipt.result }] };
+      return { continued: true, toolCalls: [
+        { name: 'post_reply', input: reply, result: rejected.result },
+        { name: 'wait_for_sessions', input: wait, result: receipt.result },
+      ] };
     }
     return { toolCalls: [{ name: 'post_reply', input: { text: '结果已核对。', replyTo: [] }, result: { ok: true } }] };
   }, { resolveRoster: () => roster });
   try {
     env.inbox.append('w', [event('observation', 'report_available')]); await env.runner.kick();
-    assert.equal(requests, 1); assert.equal(env.messages.at(-1).meta.silentWait.source, 'tool');
+    assert.equal(requests, 1); assert.equal(env.messages.at(-1).meta?.silentWait?.source, 'tool', JSON.stringify(env.messages));
     assert.equal(env.messages.some(row => row.card === 'agent_unavailable' || row.kind === 'agent_reply'), false);
     env.restart(); await env.runner.kick(); assert.equal(requests, 1);
     roster[0].status = 'accepted'; env.inbox.append('w', [event('done', 'result_ready')]); await env.runner.kick();
