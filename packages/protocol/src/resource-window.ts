@@ -41,7 +41,8 @@ export interface ResourceWindowContext extends ResourceWindowIdentity {
   readonly phase: 'prepared' | 'attached' | 'ready';
 }
 export type ResourceWindowStatus = 'invalid_request' | 'scope_denied' | 'permission_denied' | 'not_found' | 'workspace_unavailable' | 'revision_unavailable' | 'source_unavailable' | 'source_changed' | 'storage_unavailable' | 'limit_reached' | 'stale_view' | 'not_ready' | 'cancelled' | 'disposed' | 'content_cleaned' | 'incompatible_result' | 'result_unavailable';
-export type ResourceWindowResult = { readonly ok: true; readonly context: ResourceWindowContext; readonly persisted?: boolean; readonly returnStatus?: 'returned' | 'source_tab_closed' } | { readonly ok: false; readonly status: ResourceWindowStatus };
+export type ResourceWindowResult = { readonly ok: true; readonly context: ResourceWindowContext; readonly persisted?: boolean;
+  readonly checkpointStatus?: 'owner_replaced'; readonly returnStatus?: 'returned' | 'source_tab_closed' } | { readonly ok: false; readonly status: ResourceWindowStatus };
 export interface ResourceWindowReturnRequest { readonly requestId: string; readonly context: ResourceWindowContext; readonly expiresAt: number }
 export interface ResourceWindowReturnAck { readonly requestId: string; readonly identity: ResourceWindowIdentity; readonly status: 'returned' | 'source_tab_closed' | 'cancelled' }
 export interface ResourceWindowCheckpointRequest { readonly requestId: string; readonly identity: ResourceWindowIdentity }

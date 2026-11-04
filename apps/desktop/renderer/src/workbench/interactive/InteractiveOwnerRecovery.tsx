@@ -4,12 +4,12 @@ import { interactiveRecoveryText } from './interactiveRecoveryText';
 import type { InteractiveSession } from './interactiveSession';
 
 export function InteractiveOwnerRecovery({ session, isZh, onAbandoned }: {
-  readonly session: InteractiveSession; readonly isZh: boolean; readonly onAbandoned: () => void;
+  readonly session: InteractiveSession; readonly isZh: boolean; readonly onAbandoned: () => void | Promise<void>;
 }) {
   const state = useSyncExternalStore(session.subscribe, session.snapshot, session.snapshot);
   const confirm = useConfirm();
   const [busy, setBusy] = useState(false);
-  if (state.phase === 'closed') return <p role="status">{isZh ? '已放弃此视图的本地变更，可以关闭视图。' : 'Local changes were discarded. You can close this view.'}</p>;
+  if (state.phase === 'closed') return <p role="status">{isZh ? '已放弃此视图的本地输入。' : 'Local input in this view was discarded.'}</p>;
   const fields = session.recoveryFields();
   const abandon = async () => {
     if (busy || state.savePending) return;
@@ -20,7 +20,7 @@ export function InteractiveOwnerRecovery({ session, isZh, onAbandoned }: {
           ? (isZh ? '这会放弃此视图里剩余的输入和阅读位置。你可以先复制输入。' : 'This discards this view’s remaining input and reading position. You can copy the input first.')
           : (isZh ? '这会放弃此视图里剩余的输入和旧 Bot 的本机布局改动。你可以先复制输入。' : 'This discards this view’s remaining input and local layout changes for the previous Bot. You can copy the input first.'),
         confirmText: isZh ? '放弃本地变更' : 'Discard local changes', cancelText: isZh ? '保留' : 'Keep', tone: 'danger' })
-        && await session.abandonReplacedOwner()) onAbandoned();
+        && await session.abandonReplacedOwner()) await onAbandoned();
     } finally { setBusy(false); }
   };
   const retry = async () => {

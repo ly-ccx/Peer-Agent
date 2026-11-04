@@ -110,6 +110,9 @@ test('the main workspace opens canonical interactive deliveries, restores result
       holdLayoutRead=false;
       return new Promise(resolve=>{releaseLayoutRead=()=>{releaseLayoutRead=null;resolve(receipt);};});
     };
+    const originalWriteLayout=interactive.writeLayout;let rejectLayoutWrite=false;
+    interactive.writeLayout=(sender,request)=>rejectLayoutWrite&&sender===source.webContents
+      ?{ok:false,code:'fixture_layout_unconfirmed'}:originalWriteLayout(sender,request);
     const originalSave=interactive.save;let saveFault=null, faultRole='main', withholdOwnerOutcome=false;
     interactive.save=(sender,request)=>{
       if(windows.getRole(sender)===faultRole&&saveFault){
@@ -142,7 +145,7 @@ test('the main workspace opens canonical interactive deliveries, restores result
       holdLayoutRead(){holdLayoutRead=true;},
       releaseLayoutRead(){if(!releaseLayoutRead)throw Error('no held layout read');releaseLayoutRead();},
       publishNext:async()=>{const nextDraft={...draft,publication:{kind:"revise",base:receipt.reference},title:"Workspace trial updated",program:program.replace("$x=2","$x=9")};const next=resultStore.commitPublication({owner,source:{conversationId:"worker",sessionId:"session",planId:"plan",executionEpoch:"epoch",toolCallId:"publication-revision"},draft:nextDraft,content:await validateDraft(nextDraft),provenance:[],dataLevel:"D3_private",grant:{toolCallId:"publication-revision",grantId:"fixture-revision-grant",granted:true}},()=>true);evidenceEntries.push(next.indexEntry);resultStore.markIndexed(next.callRef,next.indexEntry);return next.reference;},layout:()=>interactive.readLayout(source.webContents,{owner}),
-      async createRetired(){const candidate={...draft,title:'Retired trial',textFallback:'Fixed historical summary.'};
+      async createRetired(){const candidate={...draft,title:'Retired trial',textFallback:'Fixed historical summary.\\n'+Array.from({length:76},(_,i)=>String(i+1)).join('\\n')};
         const source={conversationId:'worker',sessionId:'session',planId:'plan',executionEpoch:'epoch',toolCallId:'publication-retired'};
         const saved=resultStore.commitPublication({owner,source,draft:candidate,content:await validateDraft(candidate),provenance:[],dataLevel:'D3_private',grant:{toolCallId:source.toolCallId,grantId:'retired-grant',granted:true}},()=>true);
         evidenceEntries.push(saved.indexEntry);resultStore.markIndexed(saved.callRef,saved.indexEntry);
@@ -150,6 +153,8 @@ test('the main workspace opens canonical interactive deliveries, restores result
         const preview=retire.preview(saved.reference);retire.cleanup({reference:saved.reference,requestId:'retire-fixture',expectedDigest:preview.cleanupDigest});return saved.reference;},
       failSave:(kind,role='main')=>{if(!['committed','uncommitted'].includes(kind))throw Error('invalid fault');saveFault=kind;faultRole=role},
       replaceOwner(){activeOwner={...owner,conversationId:'replacement-conversation'};withholdOwnerOutcome=true},
+      restoreOwner(){activeOwner=owner;withholdOwnerOutcome=false},
+      rejectLayoutWrites(){rejectLayoutWrite=true},
       allowOutcome(){withholdOwnerOutcome=false},
       replacementLayout:()=>interactive.readLayout(source.webContents,{owner:activeOwner}),
       draft:()=>drafts.read(draftAddress),consume:()=>queue.consume(owner.workspaceId),inputs:()=>({queue:queue.diagnosticSnapshot(owner.workspaceId),messages:conversations.getPersistedConversationHistory(owner.conversationId).messages.filter(row=>row.kind==='user_input'&&row.id!=='fixture-result-anchor').map(row=>({...row,selected:feedback.restore(row,owner.workspaceId)}))}),
@@ -389,7 +394,7 @@ test('the main workspace opens canonical interactive deliveries, restores result
     const cleanedWindow = electron.waitForEvent('window');
     assert.equal((await page.evaluate(reference => window.peerAgent.resourceWindowOpen({ resource: { kind: 'interactive', reference } }), cleanedReference)).ok, true);
     const cleaned = await cleanedWindow;
-    await cleaned.getByText('Fixed historical summary.', { exact: true }).waitFor();
+    await cleaned.getByText(/^Fixed historical summary\./).waitFor();
     assert.equal(await cleaned.getByText(/result content was cleaned/i).count(), 1);
     assert.equal(await cleaned.getByRole('button', { name: 'Retry opening' }).count(), 0);
     assert.equal(await cleaned.getByLabel('Divisor', { exact: true }).count(), 0);
@@ -435,7 +440,7 @@ test('the main workspace opens canonical interactive deliveries, restores result
       await dialog.getByRole('button', { name: 'Discard local changes', exact: true }).click();
     };
     await discard(revised, nativeRecovery);
-    await revised.getByText('Local changes were discarded. You can close this view.', { exact: true }).waitFor();
+    await revised.getByText('Local input in this view was discarded.', { exact: true }).waitFor();
     assert.equal(revised.isClosed(), false, 'confirming discard does not close a window');
     const closedReplacement = revised.waitForEvent('close');
     await revised.getByRole('button', { name: 'Close this window', exact: true }).click();
@@ -451,9 +456,9 @@ test('the main workspace opens canonical interactive deliveries, restores result
     await previous.getByRole('button', { name: 'Close this window', exact: true }).click();
     const readingRecovery = previous.getByRole('region', { name: 'Previous view input recovery' });
     await readingRecovery.getByRole('button', { name: 'Discard local changes', exact: true }).waitFor();
-    await previous.getByRole('button', { name: 'Retry save', exact: true }).waitFor();
+    await previous.getByRole('button', { name: 'Discard local reading position', exact: true }).waitFor();
     await discard(previous, readingRecovery, 0);
-    await previous.getByText('Local changes were discarded. You can close this view.', { exact: true }).waitFor();
+    await previous.getByText('Local input in this view was discarded.', { exact: true }).waitFor();
     const closedReading = previous.waitForEvent('close');
     await previous.getByRole('button', { name: 'Close this window', exact: true }).click();
     await closedReading;
@@ -469,6 +474,58 @@ test('the main workspace opens canonical interactive deliveries, restores result
     assert.deepEqual(await electron.evaluate(() => globalThis.workspaceFixture.replacementLayout()), { ok: true, snapshot: null });
     assert.equal((await electron.evaluate(() => globalThis.workspaceFixture.snapshot())).values.$name, 'Workspace trial');
     assert.equal(page.isClosed(), false);
+
+    const cleanedTop = await cleaned.locator('.resource-interactive-body').evaluate(node => {
+      node.scrollTop = 200; node.dispatchEvent(new Event('scroll')); return node.scrollTop;
+    });
+    assert.ok(cleanedTop > 0, 'the static tombstone has a real reading position without a condition session');
+    await cleaned.getByRole('button', { name: 'Close this window', exact: true }).click();
+    const discardReading = cleaned.getByRole('button', { name: 'Discard local reading position', exact: true });
+    await discardReading.waitFor();
+    assert.equal(await cleaned.getByRole('region', { name: 'Previous view input recovery' }).count(), 0);
+    await discardReading.click();
+    const readingDialog = cleaned.getByRole('dialog', { name: 'Discard the local reading position?' });
+    await readingDialog.getByRole('button', { name: 'Discard reading position', exact: true }).click();
+    await discardReading.waitFor({ state: 'detached' });
+    assert.equal(cleaned.isClosed(), false);
+    assert.equal(await cleaned.getByRole('button', { name: 'Close this window', exact: true }).evaluate(node => document.activeElement === node), true);
+    const closedTombstone = cleaned.waitForEvent('close');
+    await cleaned.getByRole('button', { name: 'Close this window', exact: true }).click();
+    await closedTombstone;
+
+    await electron.evaluate(() => globalThis.workspaceFixture.restoreOwner());
+    await reloadSavedWorkspace(electron, page);
+    await page.getByText('Deliveries', { exact: true }).click();
+    await page.getByRole('button', { name: 'Open interactive result', exact: true }).click();
+    await page.getByLabel('Divisor', { exact: true }).waitFor();
+    const savedLayout = await electron.evaluate(() => globalThis.workspaceFixture.layout());
+    await electron.evaluate(() => globalThis.workspaceFixture.rejectLayoutWrites());
+    for (const title of ['Workspace trial updated', 'Workspace trial']) {
+      const tab = page.getByRole('tab', { name: title, exact: true });
+      if (await tab.count()) await tab.locator('..').getByRole('button', { name: /Close tab/ }).click();
+      await tab.waitFor({ state: 'detached' });
+    }
+    await electron.evaluate(() => { globalThis.workspaceFixture.replaceOwner(); globalThis.workspaceFixture.closeSource(); });
+    const discardLayout = page.getByRole('button', { name: 'Discard old layout changes', exact: true });
+    await discardLayout.waitFor();
+    assert.equal(await page.getByRole('region', { name: 'Previous view input recovery' }).count(), 0);
+    assert.equal(page.isClosed(), false);
+    await discardLayout.click();
+    const layoutDialog = page.getByRole('dialog', { name: 'Discard old layout changes?' });
+    await electron.evaluate(() => globalThis.workspaceFixture.restoreOwner());
+    await layoutDialog.getByRole('button', { name: 'Discard layout changes', exact: true }).click();
+    await layoutDialog.waitFor({ state: 'detached' });
+    await page.getByText('Layout changes for the previous Bot cannot be saved.', { exact: false }).waitFor({ state: 'detached' });
+    assert.equal(await page.getByText('You can close or reload again.', { exact: true }).count(), 0);
+    await electron.evaluate(() => { globalThis.workspaceFixture.replaceOwner(); globalThis.workspaceFixture.closeSource(); });
+    await discardLayout.click();
+    await page.screenshot({ path: path.join(root, 'workspace-layout-only-recovery.png'), animations: 'disabled' });
+    await layoutDialog.getByRole('button', { name: 'Discard layout changes', exact: true }).click();
+    await page.getByText('You can close or reload again.', { exact: true }).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Keep working', exact: true }).evaluate(node => document.activeElement === node), true);
+    assert.deepEqual(await electron.evaluate(() => globalThis.workspaceFixture.replacementLayout()), { ok: true, snapshot: null });
+    await electron.evaluate(() => globalThis.workspaceFixture.restoreOwner());
+    assert.deepEqual(await electron.evaluate(() => globalThis.workspaceFixture.layout()), savedLayout);
     const closedMain = page.waitForEvent('close'); await electron.evaluate(() => globalThis.workspaceFixture.closeSource()); await closedMain;
     assert.deepEqual(external, []);
   } catch (error) {

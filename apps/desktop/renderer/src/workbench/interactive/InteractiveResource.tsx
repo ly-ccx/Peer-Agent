@@ -86,7 +86,7 @@ export function InteractiveResource({ reference, api, active, isZh, onReady, onU
   useLayoutEffect(() => { if (active && ownerReplaced) onUnavailable?.(); }, [active, ownerReplaced, onUnavailable]);
   if (!active) return null;
   if (session && ownerReplaced) return <InteractiveOwnerRecovery session={session} isZh={isZh}
-    onAbandoned={onOwnerAbandoned ?? (() => { abandonInteractiveLayout(reference.owner); void registry?.close(reference); })} />;
+    onAbandoned={onOwnerAbandoned ?? (async () => { await abandonInteractiveLayout(reference.owner); await registry?.close(reference); })} />;
   const failure = openingError ?? entry?.error;
   return <div className="interactive-resource">
     {(!entry || entry.phase === 'opening') && !failure ? <div role="status"><p>{isZh ? '正在打开固定版本…' : 'Opening the fixed version…'}</p>
@@ -121,6 +121,6 @@ export function NativeInteractiveResource({ context, isZh }: { readonly context:
   useLayoutEffect(() => navigation?.registerCapture(() => ready ? reading.capture() : undefined), [navigation, reading.capture, ready]);
   return <div className="resource-interactive-body" ref={reading.ref} onScroll={reading.onScroll}>
     <InteractiveResource reference={context.resource.reference} api={window.peerResource?.interactiveResults} active isZh={isZh}
-      onReady={contentReady} onUnavailable={contentUnavailable} onRecoverView={recoverView} onOwnerAbandoned={() => navigation?.abandon()} />
+      onReady={contentReady} onUnavailable={contentUnavailable} onRecoverView={recoverView} onOwnerAbandoned={async () => { await navigation?.abandonAfterReplacement(); }} />
   </div>;
 }

@@ -30,3 +30,36 @@ test('failed persistence remains visible and a synchronous transport failure can
     assert.equal(await store.retry(), true); assert.equal(sequence, 2); assert.equal(store.snapshot().persisted, true);
   } finally { store.stop(); }
 });
+
+test('a native reading position requires a fresh same-view replacement response before discard', async () => {
+  const interactive: ResourceWindowContext = { ...context, resource: { kind: 'interactive',
+    reference: { owner: context.owner, resultId: 'result', contentVersion: 'v1' } } };
+  let mode: 'replaced' | 'restored' | 'unavailable' = 'replaced', requests = 0;
+  const api: Pick<ResourceWindowApi, 'bootstrap' | 'navigation'> = {
+    bootstrap: async () => ({ ok: true, context: { ...interactive, navigationVersion: requests } }),
+    navigation: async () => {
+      requests++;
+      if (mode === 'unavailable') return { ok: false, status: 'storage_unavailable' };
+      return { ok: true, context: { ...interactive, navigationVersion: requests }, persisted: mode === 'restored',
+        ...(mode === 'replaced' ? { checkpointStatus: 'owner_replaced' } : {}) };
+    },
+  };
+  const store = createNativeNavigation(interactive, api);
+  try {
+    store.update({ top: 250, left: 0 });
+    assert.equal(await store.flush(), false);
+    assert.equal(store.snapshot().error, 'owner_replaced');
+    mode = 'unavailable';
+    assert.equal(await store.abandonAfterReplacement(), false);
+    assert.equal(store.current().top, 250);
+    mode = 'restored';
+    assert.equal(await store.abandonAfterReplacement(), false);
+    assert.equal(store.snapshot().persisted, true);
+    mode = 'replaced';
+    assert.equal(await store.abandonAfterReplacement(), true);
+    assert.equal(store.snapshot().persisted, false);
+    assert.equal(store.snapshot().abandoned, true);
+    assert.equal(await store.flush(), true);
+    assert.equal(requests, 4);
+  } finally { store.stop(); }
+});

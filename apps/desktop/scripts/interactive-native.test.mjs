@@ -18,7 +18,7 @@ async function buildNative(output) {
     plugins: [{ name: 'peer-interactive-native-fixture', resolveId(id, importer) {
       if (id === entry) return entry;
       if (importer === entry && id.startsWith('./')) return path.resolve(desktop, id);
-    }, load(id) { if (id === entry) return `import React from 'react';import{createRoot}from'react-dom/client';import{NativeResourceWindow}from'./renderer/src/workbench/NativeResourceWindow.tsx';import'./renderer/src/styles.css';createRoot(document.getElementById('root')).render(React.createElement(NativeResourceWindow));`; } }],
+    }, load(id) { if (id === entry) return `import React from 'react';import{createRoot}from'react-dom/client';import{NativeResourceWindow}from'./renderer/src/workbench/NativeResourceWindow.tsx';import{ConfirmProvider}from'./renderer/src/app/components/ConfirmProvider.tsx';import'./renderer/src/styles.css';createRoot(document.getElementById('root')).render(React.createElement(ConfirmProvider,null,React.createElement(NativeResourceWindow)));`; } }],
     build: { outDir: output, emptyOutDir: true, target: 'esnext', cssCodeSplit: false, rollupOptions: { input: entry, output: { entryFileNames: 'fixture.js' } } } });
   const css = readdirSync(path.join(output, 'assets')).filter(name => name.endsWith('.css')).map(name => `<link rel="stylesheet" href="./assets/${name}">`).join('');
   writeFileSync(path.join(output, 'index.html'), `<!doctype html><html data-theme="light"><meta charset="utf-8">${css}<body><div id="root"></div><script type="module" src="./fixture.js"></script></body></html>`);

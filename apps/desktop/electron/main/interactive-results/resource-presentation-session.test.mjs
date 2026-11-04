@@ -59,6 +59,31 @@ test('ordinary file layout stays dormant; a result opens once and persists only 
     assert.equal(JSON.stringify(stored.snapshot).includes('inputDrafts'), false);
     assert.deepEqual(stored.snapshot.order.slice(0, 1), legacy.order);
 });
+test('the last tab can be closed locally and the layout can only be discarded after rechecking the exact owner', async t => {
+    const f = await fixture(t), session = f.create();
+    assert.equal(await session.load(), true);
+    assert.equal(session.open(f.references[0]), true);
+    assert.equal(await session.flush(), true);
+    const saved = await f.api.readLayout({ owner });
+    assert.equal(session.close(f.references[0]), true);
+    f.setOwner('replacement');
+    assert.equal(await session.flush(), false);
+    assert.equal(session.snapshot().error, 'interactive_owner_replaced');
+    const local = session.snapshot().layout;
+    f.setOwner(owner.conversationId);
+    assert.equal(await session.abandonReplacedOwner(), false);
+    assert.deepEqual(session.snapshot().layout, local);
+    assert.equal(session.snapshot().dirty, true);
+    f.setOwner('');
+    assert.equal(await session.abandonReplacedOwner(), false);
+    assert.deepEqual(session.snapshot().layout, local);
+    f.setOwner('replacement');
+    assert.equal(await session.abandonReplacedOwner(), true);
+    assert.equal(session.snapshot().phase, 'closed');
+    assert.deepEqual(await f.api.readLayout({ owner: { ...owner, conversationId: 'replacement' } }), { ok: true, snapshot: null });
+    f.setOwner(owner.conversationId);
+    assert.deepEqual(await f.api.readLayout({ owner }), saved);
+});
 test('a late initial read rebases opens and reading by fixed reference without losing existing tabs or stealing the current intent', async (t) => {
     const f = await fixture(t);
     const seeded = await f.api.writeLayout({ owner, expectedRevision: 0, order: ['document:old', 'interactive:old-a', 'interactive:old-b'], recent: legacy.recent,
@@ -134,7 +159,7 @@ test('owner changes and corrupt/future rows cannot be saved as a new empty layou
     stale.open(f.references[1]);
     assert.equal(await stale.load(), false);
     assert.equal(await stale.keepLocal(), false);
-    assert.equal(stale.snapshot().error, 'interactive_scope_denied');
+    assert.equal(stale.snapshot().error, 'interactive_owner_replaced');
     f.setOwner(owner.conversationId);
     const db = f.results.storage.connect(owner.workspaceId, true).db;
     db.prepare("UPDATE presentation SET body=? WHERE category='mixed-resource-layout'").run('{"formatVersion":999}');

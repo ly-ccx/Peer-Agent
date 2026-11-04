@@ -99,7 +99,10 @@ export function createResourceWindowController({ BrowserWindow, trustedWindows, 
               win.webContents.send('resource-window:close-blocked', { identity: context, reason: status === 'blocked' ? 'save_failed' : 'unconfirmed' });
               return;
             }
-            persist(latest.context); authorizedClose = true; win.close();
+            // A rejected old reading position can only become durable through a new
+            // authenticated navigation receipt, even if its Bot returns before close.
+            if (!scopes.get(context.viewId)?.checkpointNeedsFreshWrite) persist(latest.context);
+            authorizedClose = true; win.close();
           });
       });
       win.once('closed', cleanup);
@@ -141,7 +144,15 @@ export function createResourceWindowController({ BrowserWindow, trustedWindows, 
     navigation(sender, payload) {
       if (!Number.isSafeInteger(payload?.sequence) || payload.sequence < 1) return fail('invalid_request');
       const result = registry.updateNavigation(sender, payload?.identity, payload?.navigation, payload.sequence);
-      return result.ok ? { ...result, persisted: persist(result.context) } : result;
+      if (result.ok && result.context.resource.kind === 'interactive' && interactiveResources?.hasOwnerReplacement?.(result.context.owner)) {
+        const scope = scopes.get(result.context.viewId);
+        if (scope) { scope.persisted = false; scope.checkpointNeedsFreshWrite = true; }
+        return { ...result, persisted: false, checkpointStatus: 'owner_replaced' };
+      }
+      if (!result.ok) return result;
+      const persisted = persist(result.context), scope = scopes.get(result.context.viewId);
+      if (persisted && scope?.checkpointNeedsFreshWrite) scope.checkpointNeedsFreshWrite = false;
+      return { ...result, persisted };
     },
     acknowledgeCheckpoint: (sender, payload) => ({ ok: handoffs.acknowledge(sender, payload, 'checkpoint') }),
     acknowledgeReturn: (sender, payload) => ({ ok: handoffs.acknowledge(sender, payload, 'return') }),

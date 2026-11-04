@@ -16,10 +16,14 @@ export function createDesktopInteractiveApplication({ getRole, getOwner, getNati
     const profile = getOwner(workspaceId);
     return normalizeInteractiveOwner({ workspaceId, conversationId: profile?.conversationId });
   }
+  function hasOwnerReplacement(owner) {
+    const current = ownerOf(owner.workspaceId);
+    return !!current && !same(current, owner);
+  }
   function attach(sender) {
     if (lifetimes.has(sender)) return lifetimes.get(sender);
-    const record = { epoch: 0 };
-    const invalidate = () => { record.epoch++; for (const item of instances.values()) item.views.closeSender(sender); };
+    const record = { epoch: 0, layoutOwners: new Set() };
+    const invalidate = () => { record.epoch++; record.layoutOwners.clear(); for (const item of instances.values()) item.views.closeSender(sender); };
     const navigation = (_event, _url, inPlace, mainFrame) => { if (!inPlace && mainFrame === true) invalidate(); };
     const destroyed = () => { invalidate(); detach(); };
     const detach = () => {
@@ -29,6 +33,10 @@ export function createDesktopInteractiveApplication({ getRole, getOwner, getNati
     Object.assign(record, { detach }); lifetimes.set(sender, record);
     sender.on?.('did-start-navigation', navigation); sender.on?.('render-process-gone', invalidate); sender.once?.('destroyed', destroyed);
     return record;
+  }
+  function rememberLayoutOwner(layoutOwners, key) {
+    if (!layoutOwners.has(key) && layoutOwners.size >= 256) layoutOwners.delete(layoutOwners.values().next().value);
+    layoutOwners.add(key);
   }
   function instance() {
     const runtime = getRuntime();
@@ -43,6 +51,7 @@ export function createDesktopInteractiveApplication({ getRole, getOwner, getNati
         const lifetime = attach(sender), epoch = lifetime.epoch;
         const native = role === 'resource' ? getNativeBinding(sender) : null;
         if (role === 'resource' && (!native?.ok || native.context.resource.kind !== 'interactive' || !same(native.context.resource.reference, reference))) return null;
+        if (role === 'main') rememberLayoutOwner(lifetime.layoutOwners, JSON.stringify(reference.owner));
         const assertIdentity = () => !disposed && getRuntime() === runtime && !signal.aborted && lifetime.epoch === epoch && getRole(sender) === role
           && sender.isDestroyed?.() !== true && (role !== 'resource' || (() => {
             const fresh = getNativeBinding(sender);
@@ -50,10 +59,7 @@ export function createDesktopInteractiveApplication({ getRole, getOwner, getNati
               && fresh.context.generation === native.context.generation && fresh.context.resource.kind === 'interactive' && same(fresh.context.resource.reference, reference);
           })());
         return { owner: reference.owner, assertIdentity, assertCurrent: () => assertIdentity() && currentOwner(reference.owner),
-          hasReplacement: () => {
-            const current = ownerOf(reference.owner.workspaceId);
-            return !!current && !same(current, reference.owner);
-          } };
+          hasReplacement: () => hasOwnerReplacement(reference.owner) };
       } });
     const presentation = createInteractivePresentationStore({ resultStore: runtime.resultStore, assertOwner: currentOwner });
     const readText = createInteractiveTextReader({ resultStore: runtime.resultStore, assertOwner: currentOwner });
@@ -63,6 +69,16 @@ export function createDesktopInteractiveApplication({ getRole, getOwner, getNati
     return run(() => {
       if (disposed || !['main', 'resource'].includes(getRole(sender))) return fail('interactive_scope_denied');
       attach(sender); return instance().views[method](sender, request);
+    });
+  }
+  function layout(sender, request, fields, operation) {
+    return run(() => {
+      const owner = normalizeInteractiveOwner(request?.owner);
+      if (disposed || getRole(sender) !== 'main' || sender.isDestroyed?.() === true || !validRequest(request, fields) || !owner) return fail('interactive_scope_denied');
+      const current = ownerOf(owner.workspaceId), { layoutOwners } = attach(sender), key = JSON.stringify(owner);
+      if (!same(current, owner)) return fail(current && layoutOwners.has(key) ? 'interactive_owner_replaced' : 'interactive_scope_denied');
+      rememberLayoutOwner(layoutOwners, key);
+      return { ok: true, snapshot: operation(instance().presentation, owner) };
     });
   }
   return {
@@ -137,16 +153,10 @@ export function createDesktopInteractiveApplication({ getRole, getOwner, getNati
     findWindow: (id, owner) => { try { return instance().presentation.history.find(id, owner); } catch { return null; } },
     saveWindow: (context, scope, id) => { try { return instance().presentation.history.save(context, scope, id); } catch { return null; } },
     removeWindow: (id, owner) => { try { return instance().presentation.history.remove(id, owner); } catch { return false; } },
-    readLayout: (sender, request) => run(() => {
-      const owner = normalizeInteractiveOwner(request?.owner);
-      if (getRole(sender) !== 'main' || !validRequest(request, ['owner']) || !owner || !same(ownerOf(owner.workspaceId), owner)) return fail('interactive_scope_denied');
-      return { ok: true, snapshot: instance().presentation.readLayout(owner) };
-    }),
-    writeLayout: (sender, request) => run(() => {
-      const owner = normalizeInteractiveOwner(request?.owner);
-      if (getRole(sender) !== 'main' || !validRequest(request, ['owner', 'expectedRevision', 'order', 'recent', 'interactive']) || !owner || !same(ownerOf(owner.workspaceId), owner)) return fail('interactive_scope_denied');
-      return { ok: true, snapshot: instance().presentation.writeLayout(owner, request) };
-    }),
+    hasOwnerReplacement: owner => !disposed && run(() => hasOwnerReplacement(owner)) === true,
+    readLayout: (sender, request) => layout(sender, request, ['owner'], (presentation, owner) => presentation.readLayout(owner)),
+    writeLayout: (sender, request) => layout(sender, request, ['owner', 'expectedRevision', 'order', 'recent', 'interactive'],
+      (presentation, owner) => presentation.writeLayout(owner, request)),
     dispose() {
       if (disposed) return; disposed = true;
       for (const item of instances.values()) item.views.dispose(); instances.clear();

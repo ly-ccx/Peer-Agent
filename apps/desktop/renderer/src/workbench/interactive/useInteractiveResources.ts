@@ -11,12 +11,19 @@ export const interactivePresentationSessions = (api: ResourcePresentationApi | u
 export const hasUnsafeInteractiveLayouts = () => interactivePresentationSessions().some(session => {
   const state = session.snapshot(); return state.protected && (state.dirty || state.phase === 'saving');
 });
-export const flushInteractiveLayouts = async () => (await Promise.all(interactivePresentationSessions().map(session => session.flush()))).every(Boolean);
-export function abandonInteractiveLayout(owner: InteractiveOwner) {
+export const flushInteractiveLayouts = async () => (await Promise.all(interactivePresentationSessions().map(async session => {
+  const saved = await session.flush();
+  if (!saved && session.snapshot().dirty) await session.recheckOwnerReplacement();
+  return saved;
+}))).every(Boolean);
+export async function abandonInteractiveLayout(owner: InteractiveOwner) {
   const api = window.peerAgent?.resourcePresentation;
   const cache = api && caches.get(api), key = JSON.stringify([owner.workspaceId, owner.conversationId]);
-  cache?.get(key)?.session.dispose();
-  cache?.delete(key);
+  const entry = cache?.get(key);
+  if (!entry) return true;
+  if (!await entry.session.abandonReplacedOwner()) return false;
+  if (cache?.get(key) === entry) cache.delete(key);
+  return true;
 }
 const noState: ResourcePresentationSnapshot = { layout: { order: [], recent: [], interactive: { tabs: [], activeTabId: null } }, confirmed: null, remote: null, loaded: false, protected: false, dirty: false, phase: 'ready', error: null };
 const noSubscribe = () => () => {}, noSnapshot = () => noState;

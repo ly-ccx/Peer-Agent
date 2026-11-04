@@ -189,6 +189,7 @@ export function createResourcePresentationSession({ owner: rawOwner, api, legacy
   }
   const selected = (): Candidate => ({ layout: clone(state.layout), expectedRevision: state.confirmed?.revision ?? 0 });
   const ownedReference = (raw: InteractiveResultReference) => { const reference = normalizeInteractiveReference(raw); return reference && own(reference) ? reference : undefined; };
+  function dispose() { if (lifetime.signal.aborted) return; lifetime.abort(); changed({ phase: 'closed' }); listeners.clear(); }
   return {
     owner,
     snapshot: () => state,
@@ -211,6 +212,34 @@ export function createResourcePresentationSession({ owner: rawOwner, api, legacy
     async flush() {
       if (!await load() || !state.protected) return !state.protected && !lifetime.signal.aborted;
       const candidate = selected(); return enqueue(() => save(candidate));
+    },
+    recheckOwnerReplacement() {
+      return enqueue(async () => {
+        if (lifetime.signal.aborted || state.error === 'interactive_owner_replaced') return;
+        try { await readRemote(); }
+        catch (error) {
+          if (!lifetime.signal.aborted && failure(error) === 'interactive_owner_replaced')
+            changed({ phase: 'save_failed', error: 'interactive_owner_replaced' });
+        }
+      });
+    },
+    abandonReplacedOwner() {
+      return enqueue(async () => {
+        if (lifetime.signal.aborted) return false;
+        try {
+          await readRemote();
+          changed({ error: null, phase: state.loaded ? 'ready' : state.phase });
+          return false;
+        } catch (error) {
+          const code = failure(error);
+          if (code !== 'interactive_owner_replaced') {
+            if (!lifetime.signal.aborted) changed({ phase: 'save_failed', error: code });
+            return false;
+          }
+          dispose();
+          return true;
+        }
+      });
     },
     keepLocal() {
       return enqueue(async () => {
@@ -238,7 +267,7 @@ export function createResourcePresentationSession({ owner: rawOwner, api, legacy
         } catch (error) { if (!lifetime.signal.aborted) changed({ phase: 'save_failed', error: failure(error) }); return false; }
       });
     },
-    dispose() { if (lifetime.signal.aborted) return; lifetime.abort(); changed({ phase: 'closed' }); listeners.clear(); },
+    dispose,
   };
 }
 export type ResourcePresentationSession = ReturnType<typeof createResourcePresentationSession>;

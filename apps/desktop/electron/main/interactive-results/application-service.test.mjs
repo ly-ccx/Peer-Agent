@@ -175,8 +175,16 @@ test('native view uses the real window binding, enforces one writer and cannot r
   assert.equal(f.app.readLayout(native, { owner }).code, 'interactive_scope_denied');
   assert.equal(f.app.writeLayout(f.main, { owner, expectedRevision: 0, order: ['interactive:fixed'], recent: [], interactive: { tabs: [{ id: 'fixed', reference: f.resource.reference }], activeTabId: 'fixed' } }).ok, true);
   f.setOwner('new-conversation');
-  assert.equal(f.app.readLayout(f.main, { owner }).code, 'interactive_scope_denied');
-  assert.equal(f.app.writeLayout(f.main, { owner, expectedRevision: 1, order: [], recent: [], interactive: { tabs: [], activeTabId: null } }).code, 'interactive_scope_denied');
+  assert.deepEqual(f.app.readLayout(f.main, { owner }), { ok: false, code: 'interactive_owner_replaced' });
+  assert.deepEqual(f.app.writeLayout(f.main, { owner, expectedRevision: 1, order: [], recent: [], interactive: { tabs: [], activeTabId: null } }),
+    { ok: false, code: 'interactive_owner_replaced' });
+  assert.equal(f.app.readLayout(f.main, { owner: { ...owner, conversationId: 'unseen-owner' } }).code, 'interactive_scope_denied');
+  const navigation = { identity: result.context, sequence: 1, navigation: { top: 240, left: 0 } };
+  assert.equal(f.host.navigation(f.main, navigation).ok, false);
+  const checkpoint = f.host.navigation(native, navigation);
+  assert.equal(checkpoint.ok, true);
+  assert.equal(checkpoint.checkpointStatus, 'owner_replaced');
+  assert.equal(checkpoint.persisted, false);
   assert.deepEqual(f.app.readState(native, { handle: opened.handle }), { ok: false, code: 'interactive_owner_replaced' });
   const oldSave = { handle: opened.handle, writer: successor.writer, expectedRevision: 0, requestId: 'native-save', values: { $x: 5 }, inputDrafts: {} };
   assert.deepEqual(f.app.save(native, oldSave), { ok: false, code: 'interactive_owner_replaced', saveStatus: 'committed' });
@@ -188,6 +196,11 @@ test('native view uses the real window binding, enforces one writer and cannot r
   assert.deepEqual(f.app.release(native, { handle: opened.handle, writer: successor.writer }), { ok: true });
   const reopened = await f.app.open(native, { reference: f.resource.reference, requestId: 'new-native-view' });
   assert.equal(reopened.state.values.$x, 5); assert.notDeepEqual(reopened.handle, opened.handle);
+  assert.equal(f.host.close(native, result.context).ok, true);
+  await tick();
+  assert.equal(window.isDestroyed(), true);
+  const history = await f.host.history(f.main, { workspaceId: owner.workspaceId });
+  assert.equal(history.entries[0].request.navigation.top, 180, 'closing after restoration must not persist the rejected reading position');
 });
 
 test('empty owner, lost pin and page navigation cannot prove a sealed save outcome', async t => {
@@ -204,6 +217,17 @@ test('empty owner, lost pin and page navigation cannot prove a sealed save outco
   assert.deepEqual(f.app.save(f.main, request), { ok: false, code: 'interactive_owner_replaced' });
   f.main.emit('did-start-navigation', {}, location, false, true);
   assert.deepEqual(f.app.save(f.main, request), { ok: false, code: 'interactive_view_stale' });
+});
+
+test('only the admitted layout owner in the same main-page lifetime receives the replacement reason', async t => {
+  const f = await fixture(t);
+  assert.equal(f.app.readLayout(f.main, { owner }).ok, true);
+  f.setOwner(null);
+  assert.equal(f.app.readLayout(f.main, { owner }).code, 'interactive_scope_denied');
+  f.setOwner('replacement-owner');
+  assert.equal(f.app.readLayout(f.main, { owner }).code, 'interactive_owner_replaced');
+  f.main.emit('did-start-navigation', {}, location, false, true);
+  assert.equal(f.app.readLayout(f.main, { owner }).code, 'interactive_scope_denied');
 });
 
 test('reload, crash and runtime replacement retire only the affected sender lifetime and preserve confirmed state', async t => {
