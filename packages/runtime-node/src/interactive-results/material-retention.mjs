@@ -1,7 +1,7 @@
-import { interactiveDigest, interactiveToken, normalizeInteractiveOwner } from '@peer-agent/protocol';
+import { interactiveDigest, normalizeInteractiveOwner } from '@peer-agent/protocol';
 import { decode, encode, jsonDigest, problem } from './storage.mjs';
 import { materialKey, readMaterialRecord, RETIRED_MATERIAL } from './material-record.mjs';
-import { withCleanupOutcome } from './cleanup-outcome.mjs';
+import { cleanupRequest, matchCleanupReceipt, withCleanupOutcome } from './cleanup-outcome.mjs';
 
 const LIMIT = 256;
 function target(raw) {
@@ -83,25 +83,24 @@ export function createMaterialRetention({ resultStore, current, roots, now, onSt
       } catch (error) { try { context.db.exec('ROLLBACK'); } catch {} throw error; }
     });
   }
-  function readMaterialReceipt(raw) {
-    const selection = target(raw);
+  function loadReceipt(selection, request) {
     current(selection.owner);
     const record = read(storage.connect(selection.owner.workspaceId), selection);
     current(selection.owner);
-    return record.retired ?? null;
+    return matchCleanupReceipt(record.retired ?? null, request);
+  }
+  function readMaterialReceipt(raw) {
+    return loadReceipt(target(raw), cleanupRequest(raw));
   }
   function cleanupMaterial(raw) {
-    const selection = target(raw), { owner, source, id } = selection, { expectedDigest, requestId } = raw;
-    if (!interactiveDigest(expectedDigest) || !interactiveToken(requestId)) throw problem('interactive_cleanup_invalid');
-    const sameRequest = receipt => {
-      if (receipt.requestId !== requestId || receipt.expectedDigest !== expectedDigest) throw problem('interactive_cleanup_parameter_conflict');
-      return receipt;
-    };
-    const previous = readMaterialReceipt(selection);
-    if (previous) return sameRequest(previous);
+    const selection = target(raw), { owner, source, id } = selection;
+    const request = cleanupRequest(raw);
+    const { expectedDigest, requestId } = request;
+    const previous = loadReceipt(selection, request);
+    if (previous) return previous;
     return withCleanupOutcome(storage, owner.workspaceId, commit => guarded(selection, (guards, assertCurrent) => commit(context => {
       const record = read(context, selection);
-      if (record.retired) return sameRequest(record.retired);
+      if (record.retired) return matchCleanupReceipt(record.retired, request);
       const preview = inspect(context, selection, record, guards, assertCurrent);
       if (preview.cleanupDigest !== expectedDigest) throw problem('interactive_retention_stale');
       if (preview.blockers.length) throw problem('interactive_cleanup_blocked');

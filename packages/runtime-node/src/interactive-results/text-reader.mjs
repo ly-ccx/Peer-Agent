@@ -19,11 +19,10 @@ export function createInteractiveTextReader({ resultStore, assertOwner }) {
     try { fixed = resultStore.getVersion(reference); }
     catch (error) {
       if (error.code !== 'interactive_content_cleaned') throw error;
-      const receipt = retirement.readReceipt(reference);
-      const version = receipt?.versions.find(row => row.reference.contentVersion === reference.contentVersion);
+      const version = retirement.readTombstone(reference);
       if (!version) throw problem('interactive_cleanup_corrupt');
       assertCurrent();
-      return { schemaVersion: 1, availability: 'cleaned', summaryKind: 'saved-model-summary', ref, ...version, cleanedAt: receipt.cleanedAt };
+      return { schemaVersion: 1, availability: 'cleaned', summaryKind: 'saved-model-summary', ref, ...version };
     }
     const { content, provenance: _provenance, publicationStatus, ...metadata } = fixed;
     const operation = resultStore.getOperation({ owner, conversationId: metadata.source.conversationId, toolCallId: metadata.source.toolCallId });

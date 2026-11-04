@@ -120,7 +120,7 @@ test('runtime composition holds all six actual sources and retires only an unref
   f.compatibility(false);
   assert.throws(() => f.runtime.retention.cleanup({ reference, expectedDigest: free.cleanupDigest, requestId: 'cleanup-orphan' }),
     { code: 'interactive_retention_stale' });
-  assert.equal(f.runtime.retention.readReceipt(reference), null);
+  assert.equal(f.runtime.retention.readTombstone(reference), null);
   f.compatibility(true);
   const cleaned = f.runtime.retention.cleanup({ reference, expectedDigest: free.cleanupDigest, requestId: 'cleanup-orphan' });
   assert.deepEqual(cleaned.reference, reference);

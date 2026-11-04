@@ -4,7 +4,7 @@ import { createMaterialRetention } from './material-retention.mjs';
 import { createFollowupRetention } from './followup-retention.mjs';
 import { checkedInteractiveSnapshot } from './state-record.mjs';
 import { interactiveProcessAlive, readLiveInteractiveViewPins } from './view-pins.mjs';
-import { withCleanupOutcome } from './cleanup-outcome.mjs';
+import { cleanupRequest, matchCleanupReceipt, withCleanupOutcome } from './cleanup-outcome.mjs';
 
 export const INTERACTIVE_RETENTION_SOURCES = Object.freeze(['views', 'drafts', 'inputs', 'messages', 'delegation', 'verification']);
 const CATEGORY = 'interactive-cleanup', TOMBSTONE_LIMIT = 256;
@@ -88,10 +88,27 @@ export function createInteractiveRetention({ resultStore, stateStore, assertOwne
       || !head || head.owner !== encode(ref.owner) || head.head !== headRef.contentVersion) throw problem('interactive_cleanup_corrupt');
     return copy(value);
   }
-  function readReceipt(raw) {
-    const ref = reference(raw); current(ref.owner);
+  function loadReceipt(ref) {
+    current(ref.owner);
     const context = storage.connect(ref.owner.workspaceId);
     const value = savedReceipt(context, ref); current(ref.owner); return value;
+  }
+  function matchingReceipt(receipt, ref, request) {
+    if (receipt && !same(receipt.reference, ref)) throw problem('interactive_cleanup_parameter_conflict');
+    return matchCleanupReceipt(receipt, request);
+  }
+  function readReceipt(raw) {
+    const ref = reference(raw?.reference);
+    const request = cleanupRequest(raw);
+    return matchingReceipt(loadReceipt(ref), ref, request);
+  }
+  function readTombstone(raw) {
+    const ref = reference(raw);
+    const receipt = loadReceipt(ref);
+    if (!receipt) return null;
+    const summary = receipt.versions.find(version => same(version.reference, ref));
+    if (!summary) throw problem('interactive_cleanup_corrupt');
+    return { ...summary, cleanedAt: receipt.cleanedAt };
   }
   function inspect(context, ref, snapshot, assertCurrent) {
     assertCurrent();
@@ -171,23 +188,19 @@ export function createInteractiveRetention({ resultStore, stateStore, assertOwne
       catch (error) { try { context.db.exec('ROLLBACK'); } catch {} throw error; }
     });
   }
-  function cleanup({ reference: raw, expectedDigest, requestId }) {
-    const ref = reference(raw); current(ref.owner);
-    if (!interactiveToken(requestId) || !interactiveDigest(expectedDigest)) throw problem('interactive_cleanup_invalid');
-    const existing = readReceipt(ref);
-    if (existing) {
-      if (!same(existing.reference, ref) || existing.requestId !== requestId || existing.expectedDigest !== expectedDigest) throw problem('interactive_cleanup_parameter_conflict');
-      return existing;
-    }
+  function cleanup(raw) {
+    const ref = reference(raw?.reference);
+    current(ref.owner);
+    const request = cleanupRequest(raw);
+    const { expectedDigest, requestId } = request;
+    const existing = matchingReceipt(loadReceipt(ref), ref, request);
+    if (existing) return existing;
     if (!storage.connect(ref.owner.workspaceId)) throw problem('interactive_result_unavailable');
     return withCleanupOutcome(storage, ref.owner.workspaceId, commit => {
       const receipt = roots(ref.owner, (snapshot, assertCurrent) => commit(context => {
         assertCurrent();
         const previous = savedReceipt(context, ref);
-        if (previous) {
-          if (!same(previous.reference, ref) || previous.requestId !== requestId || previous.expectedDigest !== expectedDigest) throw problem('interactive_cleanup_parameter_conflict');
-          return previous;
-        }
+        if (previous) return matchingReceipt(previous, ref, request);
         const { preview, summaries, removable } = inspect(context, ref, snapshot, assertCurrent);
         if (preview.cleanupDigest !== expectedDigest) throw problem('interactive_retention_stale');
         if (preview.blockers.length) throw problem('interactive_cleanup_blocked');
@@ -210,6 +223,6 @@ export function createInteractiveRetention({ resultStore, stateStore, assertOwne
       return receipt;
     });
   }
-  return { preview, cleanup, readReceipt, ...createFollowupRetention({ resultStore, current, roots, now, onStep }),
+  return { preview, cleanup, readReceipt, readTombstone, ...createFollowupRetention({ resultStore, current, roots, now, onStep }),
     ...createMaterialRetention({ resultStore, current, roots, now, onStep }) };
 }

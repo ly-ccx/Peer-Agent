@@ -326,7 +326,7 @@ test('an old queue writer reclaiming a live guard before commit rolls back resul
   assert.throws(() => retention.cleanup({ reference: f.reference, requestId: 'cleanup-race',
     expectedDigest: preview.cleanupDigest }), { code: 'interactive_retention_stale' });
   assert.equal(legacy.findSubmission(f.owner.workspaceId, 'concurrent-old-input').inputId, 'concurrent-old-input');
-  assert.equal(retention.readReceipt(f.reference), null);
+  assert.equal(retention.readTombstone(f.reference), null);
   assert.equal(f.results.getVersion(f.reference).content.title, 'Trial');
   assert.equal(f.states.read(f.reference, () => true).values.$x, 4);
 });

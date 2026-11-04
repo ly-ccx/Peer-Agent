@@ -152,6 +152,7 @@ test('material retirement requires its own guard, protects provenance and keeps 
   assert.deepEqual(old.readMaterial(owner, source).value, record.value);
   const preview = retention.previewMaterial(selection);
   const request = { ...selection, expectedDigest: preview.cleanupDigest, requestId: 'retire-mat' };
+  assert.equal(retention.readMaterialReceipt(request), null);
   changed = true;
   assert.throws(() => retention.cleanupMaterial(request), { code: 'interactive_retention_stale' });
   changed = false; crash = true;
@@ -159,10 +160,12 @@ test('material retirement requires its own guard, protects provenance and keeps 
   assert.deepEqual(f.store.readMaterial(owner, source).value, record.value);
   crash = false; releaseFailure = true;
   assert.throws(() => retention.cleanupMaterial(request), { code: 'interactive_cleanup_outcome_unknown' });
-  const receipt = retention.readMaterialReceipt(selection);
+  const receipt = retention.readMaterialReceipt(request);
   assert.equal(receipt.requestId, request.requestId);
   releaseFailure = false;
-  assert.deepEqual(retention.readMaterialReceipt(selection), receipt);
+  assert.deepEqual(retention.readMaterialReceipt(request), receipt);
+  assert.throws(() => retention.readMaterialReceipt({ ...request, expectedDigest: jsonDigest('other') }),
+    { code: 'interactive_cleanup_parameter_conflict' });
   assert.deepEqual(retention.cleanupMaterial(request), receipt);
   assert.throws(() => retention.cleanupMaterial({ ...request, requestId: 'different' }), { code: 'interactive_cleanup_parameter_conflict' });
   assert.throws(() => f.store.readMaterial(owner, source), { code: 'material_snapshot_cleaned' });
@@ -201,6 +204,7 @@ test('isolated followup retirement keeps retry identity and requires fresh unref
     { code: 'interactive_retention_stale' });
   const before = f.counts();
   const request = { ...selection, requestId: 'clean-frozen', expectedDigest: eligible.cleanupDigest };
+  assert.equal(f.retention.readFollowupReceipt(request), null);
   const interrupted = createInteractiveRetention({ resultStore: f.store, stateStore: f.states, assertOwner: current,
     acquireRoots: f.acquireRoots, now, onStep(step) { if (step === 'followup_cleanup_before_commit') throw Error('injected interruption'); } });
   assert.throws(() => interrupted.cleanupFollowup(request), /injected interruption/);
@@ -211,11 +215,13 @@ test('isolated followup retirement keeps retry identity and requires fresh unref
       return { ...held, release() { held.release(); throw Error('roots release failed'); } };
     }, now });
   assert.throws(() => lost.cleanupFollowup(request), { code: 'interactive_cleanup_outcome_unknown' });
-  const retired = lost.readFollowupReceipt(selection);
+  const retired = lost.readFollowupReceipt(request);
   assert.equal(retired.requestId, request.requestId);
   assert.equal(retired.followupId, snapshot.followupId);
   assert.equal(Object.hasOwn(retired, 'values'), false);
-  assert.deepEqual(f.retention.readFollowupReceipt(selection), retired);
+  assert.deepEqual(f.retention.readFollowupReceipt(request), retired);
+  assert.throws(() => f.retention.readFollowupReceipt({ ...request, requestId: 'different-clean' }),
+    { code: 'interactive_cleanup_parameter_conflict' });
   assert.deepEqual(f.retention.cleanupFollowup(request), retired);
   assert.throws(() => f.retention.cleanupFollowup({ ...request, requestId: 'different-clean' }),
     { code: 'interactive_cleanup_parameter_conflict' });
@@ -249,9 +255,12 @@ test('retirement atomically clears every fixed version and confirmed state while
   assert.throws(() => old.getVersion(f.first.reference), { code: 'interactive_content_cleaned' });
   assert.throws(() => f.states.save({ reference: f.first.reference, identity, writer, expectedRevision: 1, requestId: 'late-save', values: { $budget: 160 } }, current),
     { code: 'interactive_content_cleaned' });
-  assert.deepEqual(f.retention.readReceipt(next.reference), receipt);
-  assert.deepEqual(f.retention.readReceipt(f.first.reference), receipt, 'an older fixed version resolves the actual shared tombstone');
-  assert.deepEqual(f.retention.cleanup({ reference: next.reference, requestId: 'cleanup-a', expectedDigest: receipt.expectedDigest }), receipt);
+  const request = { reference: next.reference, requestId: 'cleanup-a', expectedDigest: receipt.expectedDigest };
+  assert.deepEqual(f.retention.readReceipt(request), receipt);
+  assert.throws(() => f.retention.readReceipt({ ...request, reference: f.first.reference }), { code: 'interactive_cleanup_parameter_conflict' });
+  assert.deepEqual(f.retention.readTombstone(f.first.reference),
+    { ...receipt.versions.find(version => version.reference.contentVersion === f.first.reference.contentVersion), cleanedAt: receipt.cleanedAt });
+  assert.deepEqual(f.retention.cleanup(request), receipt);
   assert.throws(() => f.retention.cleanup({ reference: next.reference, requestId: 'another', expectedDigest: receipt.expectedDigest }), { code: 'interactive_cleanup_parameter_conflict' });
   assert.equal(Number(f.db.prepare('PRAGMA user_version').get().user_version), 5);
 });
@@ -271,7 +280,7 @@ test('a complete set of private roots is required and every current reference so
     assert.throws(() => retention.preview(f.first.reference), { code: 'interactive_retention_unavailable' });
     assert.throws(() => retention.cleanup({ reference: f.first.reference, requestId: 'missing', expectedDigest: jsonDigest('unknown') }), { code: 'interactive_retention_unavailable' });
   }
-  assert.deepEqual(f.counts(), before); assert.equal(f.retention.readReceipt(f.first.reference), null);
+  assert.deepEqual(f.counts(), before); assert.equal(f.retention.readTombstone(f.first.reference), null);
 });
 
 test('a referenced followup protects its actual result, and an unknown frozen ID does not become an empty root', async t => {
@@ -334,17 +343,22 @@ test('failure before commit rolls everything back, and lost confirmation reads t
     const retention = createInteractiveRetention({ resultStore: f.store, stateStore: f.states, assertOwner: current, acquireRoots: f.acquireRoots, now,
       onStep(step) { if (step === fault) throw Error('injected fault'); } });
     const preview = retention.preview(f.first.reference);
-    assert.throws(() => retention.cleanup({ reference: f.first.reference, requestId: fault, expectedDigest: preview.cleanupDigest }), /injected fault/);
-    assert.deepEqual(f.counts(), before); assert.equal(retention.readReceipt(f.first.reference), null);
+    const request = { reference: f.first.reference, requestId: fault, expectedDigest: preview.cleanupDigest };
+    assert.throws(() => retention.cleanup(request), /injected fault/);
+    const releases = f.releases();
+    assert.deepEqual(f.counts(), before); assert.equal(retention.readReceipt(request), null);
+    assert.equal(f.releases(), releases, 'reading a missing receipt does not acquire roots or start cleanup');
   }
   const lost = createInteractiveRetention({ resultStore: f.store, stateStore: f.states, assertOwner: current, acquireRoots: f.acquireRoots, now,
     onStep(step) { if (step === 'cleanup_committed') throw Error('confirmation lost'); } });
   const preview = lost.preview(f.first.reference);
-  assert.throws(() => lost.cleanup({ reference: f.first.reference, requestId: 'lost', expectedDigest: preview.cleanupDigest }),
+  const request = { reference: f.first.reference, requestId: 'lost', expectedDigest: preview.cleanupDigest };
+  assert.throws(() => lost.cleanup(request),
     error => error.code === 'interactive_cleanup_outcome_unknown' && error.cause?.message === 'confirmation lost');
-  const receipt = lost.readReceipt(f.first.reference), releases = f.releases();
+  const releases = f.releases(), receipt = lost.readReceipt(request);
   assert.ok(receipt.objectBytesRemoved > 0);
-  assert.deepEqual(lost.cleanup({ reference: f.first.reference, requestId: 'lost', expectedDigest: preview.cleanupDigest }), receipt);
+  assert.throws(() => lost.readReceipt({ ...request, expectedDigest: jsonDigest('wrong') }), { code: 'interactive_cleanup_parameter_conflict' });
+  assert.deepEqual(lost.cleanup(request), receipt);
   assert.equal(f.releases(), releases, 'reconciliation reads the original receipt without repeating collection');
 });
 
@@ -354,13 +368,13 @@ test('a changed source under the held guard and quota failure both roll back the
     onStep(step) { if (step === 'cleanup_before_commit') f.bump(); } });
   const preview = changing.preview(f.first.reference);
   assert.throws(() => changing.cleanup({ reference: f.first.reference, requestId: 'changed-root', expectedDigest: preview.cleanupDigest }), { code: 'interactive_retention_stale' });
-  assert.deepEqual(f.counts(), before); assert.equal(f.retention.readReceipt(f.first.reference), null);
+  assert.deepEqual(f.counts(), before); assert.equal(f.retention.readTombstone(f.first.reference), null);
   const limited = createInteractiveResultStore({ rootDir: f.rootDir, assertCompatibility: current, maxBytes: 1 });
   try {
     const retention = createInteractiveRetention({ resultStore: limited, stateStore: f.states, assertOwner: current, acquireRoots: f.acquireRoots, now });
     const candidate = retention.preview(f.first.reference);
     assert.throws(() => retention.cleanup({ reference: f.first.reference, requestId: 'quota', expectedDigest: candidate.cleanupDigest }), { code: 'interactive_store_limit' });
-    assert.deepEqual(f.counts(), before); assert.equal(retention.readReceipt(f.first.reference), null);
+    assert.deepEqual(f.counts(), before); assert.equal(retention.readTombstone(f.first.reference), null);
     assert.equal(f.store.getVersion(f.first.reference).content.initialValues.$budget, 100);
   } finally { limited.close(); }
 });
@@ -374,7 +388,7 @@ test('corrupt checkpoints, receipts and tombstones fail closed without deleting 
   const before = f.counts(); assert.throws(() => f.clean(), { code: 'interactive_state_corrupt' }); assert.deepEqual(f.counts(), before);
   f.db.prepare('UPDATE saves SET receipt=?').run(original); f.clean();
   f.db.prepare("UPDATE presentation SET body=replace(body,'Unverified','Verified') WHERE category='interactive-cleanup'").run();
-  assert.throws(() => f.retention.readReceipt(f.first.reference), { code: 'interactive_cleanup_corrupt' });
+  assert.throws(() => f.retention.readTombstone(f.first.reference), { code: 'interactive_cleanup_corrupt' });
 });
 
 test('the normal result quota is restored without forgetting old publication identities or resurrecting cleaned references', async t => {
@@ -429,7 +443,8 @@ test('an actual old process cannot write inside the retirement transaction or re
   presentation.history.save({ owner, resource, navigation: { top: 0, left: 0 } }, { owner, resource }, 'old-history');
   presentation.writeLayout(owner, { expectedRevision: 0, order: [], recent: [], interactive: { tabs: [], activeTabId: null } });
   assert.equal(presentation.history.remove('old-history', owner), true);
-  assert.deepEqual(retention.readReceipt(f.first.reference), receipt, 'old history/layout writes never rewrite the cleanup category');
+  assert.deepEqual(retention.readReceipt({ reference: f.first.reference, requestId: receipt.requestId, expectedDigest: receipt.expectedDigest }),
+    receipt, 'old history/layout writes never rewrite the cleanup category');
 });
 
 test('the tombstone bound is explicit and normal runtime composition never opens cleanup without real roots', async t => {

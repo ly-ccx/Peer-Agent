@@ -1,3 +1,18 @@
+import { interactiveDigest, interactiveToken } from '@peer-agent/protocol';
+import { problem } from './storage.mjs';
+
+export function cleanupRequest(raw) {
+  const { requestId, expectedDigest } = raw ?? {};
+  if (!interactiveToken(requestId) || !interactiveDigest(expectedDigest)) throw problem('interactive_cleanup_invalid');
+  return { requestId, expectedDigest };
+}
+
+export function matchCleanupReceipt(receipt, { requestId, expectedDigest }) {
+  if (receipt && (receipt.requestId !== requestId || receipt.expectedDigest !== expectedDigest))
+    throw problem('interactive_cleanup_parameter_conflict');
+  return receipt;
+}
+
 /** Separate a transaction failure from a lost confirmation after the transaction returned. */
 export function withCleanupOutcome(storage, workspaceId, work) {
   let committed = false;
