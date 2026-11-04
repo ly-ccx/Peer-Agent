@@ -14,6 +14,7 @@ test('verifier sees actual visible report as unverified material beside executio
   assert.match(content, /tool-result:\/\/read/);
   assert.match(content, /unless a declared criterion explicitly requires a file artifact/);
   assert.doesNotMatch(content, /private reasoning/);
+  assert.doesNotMatch(content, /reply reserved by this return decision/);
 });
 
 test('delegated verification retains the current focus without treating it as permission or evidence', () => {
