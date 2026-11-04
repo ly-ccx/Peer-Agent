@@ -146,7 +146,11 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
       if(key.name==='down'||key.name==='up'){setCardIndex(Math.max(0,Math.min(cards.length-1,cardIndex+(key.name==='down'?1:-1))));setOption(0);}
       if(key.name==='left'||key.name==='right')setOption(Math.max(0,Math.min((cards[cardIndex]?.card.actions?.length??1)-1,option+(key.name==='right'?1:-1))));
       if(isEnterKeyName(key.name))selectedCardAction();
+      return;
     }
+    // 点到对话或空白会把焦点从输入框拿走。可输入的页面上，打字仍然进输入框。
+    const typing=key.name?.length===1&&!key.ctrl&&!key.meta;
+    if(typing&&!editor.current?.focused)editor.current?.focus();
   });
   const recordReader=useMemo(()=>createProjectReadState(),[snapshot.workspaceId]);
   const records=view==='objectives'?recordReader.read<any>('objectives',()=>host.objectives.list({}, {workspaceId:snapshot.workspaceId,conversationId:host.profiles.read(snapshot.workspaceId)?.agentConversationId} as never) as any)

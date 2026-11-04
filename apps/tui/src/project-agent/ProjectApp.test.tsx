@@ -31,6 +31,15 @@ test('the bind screen keeps the question, choices, and keys in one block',async(
     expect(frame.split('\\n').filter(line=>line.includes('Yes, create a bot')&&line.includes('No, open task mode'))).toHaveLength(1);
   }finally{await f.close();}
 });
+test('typing reaches the composer after a click away from it',async()=>{
+  const f=await harness('conversation');
+  try{
+    await f.frame();
+    await act(async()=>{await f.setup.mockMouse.click(4,4);});
+    await f.type('hello');
+    expect(await f.frame()).toContain('hello');
+  }finally{await f.close();}
+});
 test('binding refusal enters classic without creating any bot',async()=>{
   const f=await harness();try{expect(await f.frame()).toContain('Bind this directory');await f.press('n');await f.frame();
     expect(f.classic()).toBe(1);expect(f.host.directory.list()).toHaveLength(0);
