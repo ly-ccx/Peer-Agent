@@ -2,7 +2,7 @@ import {useEffect,useRef,useState} from 'react';
 import {useKeyboard,useTerminalDimensions} from '@opentui/react';
 import type {TextareaRenderable} from '@opentui/core';
 import {ThemedText,ThemedTextarea} from '../themed-primitives.tsx';
-import {COLOR,type TuiThemeStore} from '../tui-theme.ts';
+import {COLOR,PICKER_CHROME,type TuiThemeStore} from '../tui-theme.ts';
 import type {TuiLocale} from '../tui-language.ts';
 import type {createTuiProjectHost} from './tui-project-host.ts';
 import type {createTuiProjectClient} from './tui-project-client.ts';
@@ -108,15 +108,28 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
     :view==='objectives'?(objectiveResult?.items??[]).map((row:any)=>`${terminalText(row.title)} · ${projectStatus(locale,row.status)}\n${terminalText(row.description??row.brief??'')}`)
     :view==='task'?[terminalText(detail?.title),projectStatus(locale,detail?.status??''),terminalText(detail?.report?.summary),...(detail?.report?.changedFiles??[]).map((row:any)=>terminalText(row.path)),...(detail?.report?.evidenceRefs??[]).map(terminalText)]:[];
   const currentCard=cards[Math.min(cardIndex,cards.length-1)];
+  const messageDegraded=snapshot.messageState==='unavailable',cardsDegraded=snapshot.cardsUnavailable;
   return <box flexDirection="column" height={terminal.height} width={terminal.width} backgroundColor={COLOR.background} padding={1}>
-    <box flexDirection="row" justifyContent="space-between" marginBottom={1}>
+    {view==='bind'?null:<box flexDirection="row" justifyContent="space-between" marginBottom={1}>
       <ThemedText fg={COLOR.accent}>Peer · {terminalText(bot?.profile.displayName??copy('bots'))} · {copy('botMode')}</ThemedText>
       <ThemedText fg={COLOR.link} onMouseDown={openClassic}>{copy('switchClassic')}</ThemedText>
       <ThemedText fg={COLOR.muted}>{snapshot.workspaceId?snapshot.isHost?copy('host'):copy('client'):''}</ThemedText>
+    </box>}
+    {view!=='bind'&&snapshot.messageState==='unavailable'?<ThemedText fg={COLOR.info}>{copy('messageUnavailable')}</ThemedText>:null}
+    {view!=='bind'&&snapshot.cardsUnavailable?<ThemedText fg={COLOR.muted}>{copy('cardsUnavailable')}</ThemedText>:null}
+    {view==='bind'?<box flexGrow={1} flexDirection="column" justifyContent="center" alignItems="center" paddingX={2}>
+      <box flexDirection="column" gap={1}>
+        <ThemedText fg={COLOR.accent}>{copy('botMode')}</ThemedText>
+        <ThemedText fg={COLOR.text}>{copy('bind')}</ThemedText>
+        <ThemedText fg={COLOR.muted}>{terminalText(workspacePath)}</ThemedText>
+        <box flexDirection="row" gap={3} marginTop={1}>
+          <ThemedText fg={bindYes?COLOR.accent:COLOR.muted}>{bindYes?PICKER_CHROME.caretSelected:PICKER_CHROME.caretIdle}{copy('yes')}  Y</ThemedText>
+          <ThemedText fg={!bindYes?COLOR.accent:COLOR.muted}>{!bindYes?PICKER_CHROME.caretSelected:PICKER_CHROME.caretIdle}{copy('no')}  N</ThemedText>
+        </box>
+        {(messageDegraded||cardsDegraded)?<ThemedText fg={COLOR.warning}>{[messageDegraded?copy('messageUnavailable'):'',cardsDegraded?copy('cardsUnavailable'):''].filter(Boolean).join('  ')}</ThemedText>:null}
+        <ThemedText fg={COLOR.muted}>{copy('bindKeys')}</ThemedText>
+      </box>
     </box>
-    {snapshot.messageState==='unavailable'?<ThemedText fg={COLOR.info}>{copy('messageUnavailable')}</ThemedText>:null}
-    {snapshot.cardsUnavailable?<ThemedText fg={COLOR.muted}>{copy('cardsUnavailable')}</ThemedText>:null}
-    {view==='bind'?<box flexGrow={1} flexDirection="column" justifyContent="center"><ThemedText fg={COLOR.text}>{copy('bind')}</ThemedText><ThemedText fg={COLOR.muted}>{terminalText(workspacePath)}</ThemedText><ThemedText fg={bindYes?COLOR.accent:COLOR.muted}>{copy('yes')} [Y]</ThemedText><ThemedText fg={!bindYes?COLOR.accent:COLOR.muted}>{copy('no')} [N]</ThemedText></box>
       :view==='bots'?<BotListView bots={snapshot.bots} selected={selected} locale={locale} height={terminal.height}/>
       :view==='conversation'?<BotConversationView messages={displayedMessages} cards={cards} locale={locale} isHost={snapshot.isHost} selectedCard={cardIndex} option={option} cardFocus={false}/>
       :view==='cards'?<box flexDirection="column" flexGrow={1}><ThemedText fg={COLOR.textSoft}>{copy('cards')} · {cards.length}</ThemedText>{currentCard?<CardLine row={currentCard} locale={locale} isHost={snapshot.isHost} selected option={option}/>:<ThemedText fg={COLOR.muted}>{copy('empty')}</ThemedText>}<ThemedText fg={COLOR.muted}>{copy('cardKeys')}</ThemedText></box>

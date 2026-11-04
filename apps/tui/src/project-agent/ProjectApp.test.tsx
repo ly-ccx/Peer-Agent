@@ -18,6 +18,19 @@ async function harness(initialView:'bind'|'bots'|'conversation'='bind') {
   async function frame(){await act(async()=>{await Bun.sleep(25);});await setup.flush();await setup.renderOnce();return setup.captureCharFrame();}
   return {host,client,setup,frame,press:async(key:Parameters<typeof setup.mockInput.pressKey>[0])=>{await act(async()=>{setup.mockInput.pressKey(key);await Bun.sleep(20);});},type:async(text:string)=>{await act(async()=>{await setup.mockInput.typeText(text);});},classic:()=>classic,async close(){await act(async()=>{setup.renderer.destroy();});client.close();await host.close();rmSync(root,{recursive:true,force:true});}};
 }
+test('the bind screen keeps the question, choices, and keys in one block',async()=>{
+  const f=await harness();
+  try{
+    const frame=await f.frame();
+    const question=frame.indexOf('Bind this directory to a bot?');
+    expect(question).toBeGreaterThan(-1);
+    expect(frame.indexOf('Yes, create a bot')).toBeGreaterThan(question);
+    expect(frame.indexOf('No, open task mode')).toBeGreaterThan(question);
+    expect(frame).toContain('←/→ to choose · Enter to confirm · Esc for task mode');
+    expect(frame).not.toContain('F2 · Task mode');
+    expect(frame.split('\\n').filter(line=>line.includes('Yes, create a bot')&&line.includes('No, open task mode'))).toHaveLength(1);
+  }finally{await f.close();}
+});
 test('binding refusal enters classic without creating any bot',async()=>{
   const f=await harness();try{expect(await f.frame()).toContain('Bind this directory');await f.press('n');await f.frame();
     expect(f.classic()).toBe(1);expect(f.host.directory.list()).toHaveLength(0);
