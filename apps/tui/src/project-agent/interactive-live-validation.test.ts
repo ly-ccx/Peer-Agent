@@ -180,3 +180,24 @@ test('story diagnostics retain the role and resource when a model batch exceeds 
   expect(report.sessions).toEqual([]);
   expect(JSON.parse(readFileSync(path.join(directory, 'report.json'), 'utf8')).budgetExhausted).toEqual(report.budgetExhausted);
 });
+
+test('story rejects two actual delegations for the initial input', async () => {
+  let spawned = 0;
+  const provider: ModelProvider = { async stream(request) {
+    if (!request.tools?.some(tool => tool.name === 'spawn_session') || spawned >= 2) return { content: '', toolCalls: [] };
+    const index = ++spawned;
+    return { content: '', toolCalls: [{
+      id: `initial-delegation-${index}`, name: 'spawn_session', arguments: JSON.stringify({
+        anchorMessageIds: ['input-live-story-publish'], title: `Planning example ${index}`,
+        brief: `Read the synthetic planning example ${index}.`, kind: 'research', readOnly: true, isolation: 'none',
+        requiredCapabilities: ['local.interactive.publish'],
+        successCriteria: [{ kind: 'model_review', description: 'Inspect the example independently.' }],
+      }),
+    }] };
+  } };
+  const directory = path.join(fixture(), 'story');
+  const report = await runInteractiveLiveStory({ directory, provider, model, sanitize: String });
+  expect(report.ok).toBe(false);
+  expect(report.error).toContain('story_duplicate_initial_delegation');
+  expect(report.sessions).toHaveLength(2);
+}, 10_000);
