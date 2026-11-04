@@ -65,7 +65,7 @@ export async function runInteractiveLiveStory(options: {
   const report: { ok: boolean; scenario: 'story'; startedAt: string; finishedAt?: string; stage: string; error?: string;
     requests: Observation[];
     budgetExhausted?: { scope: 'story' | 'role'; resource: 'requests' | 'toolCalls'; phase: Phase; used: number; limit: number };
-    publication?: unknown; initialReply?: unknown; frozen?: unknown; frozenInput?: unknown; sessions?: unknown; receipts?: unknown; replies?: unknown; delivery?: unknown } = {
+    publication?: unknown; initialReply?: unknown; frozen?: unknown; frozenInput?: unknown; sessions?: unknown; verification?: unknown; receipts?: unknown; replies?: unknown; delivery?: unknown } = {
     ok: false, scenario: 'story', startedAt: new Date().toISOString(), stage: 'setup', requests: [],
   };
   const persist = () => {
@@ -235,6 +235,8 @@ export async function runInteractiveLiveStory(options: {
       } finally { stateStore.release({ reference: fixed.reference, identity, writer }, current); }
       report.stage = 'verification-and-reply';
       persist();
+      let lastReview: string | undefined;
+      let covered = new Set<string>();
       const delivered = await waitFor(({ sessions, followups }) => {
         if (!report.frozenInput) {
           report.frozenInput = readFrozenInput();
@@ -249,30 +251,37 @@ export async function runInteractiveLiveStory(options: {
         const review = plan?.runner?.verifierRuns?.findLast((run: { verifierRunId: string }) =>
           run.verifierRunId.startsWith('delegated-semantic:'));
         if (review?.status !== 'passed' || !review.completedAt || !review.evidenceRefs?.length) return;
+        const reviewKey = JSON.stringify([review.verifierRunId, review.completedAt, review.evidenceRefs]);
+        if (reviewKey !== lastReview) {
+          const reviewRefs = new Set(review.evidenceRefs);
+          const receipts = host.plans.listEvidenceIndex().filter((row: any) =>
+            row.planId === verification.planId && reviewRefs.has(row.evidenceRef) && row.interactiveInspection);
+          covered = new Set(receipts.flatMap((row: any) => {
+            const receipt = row.interactiveInspection, { request, range, stateSource } = receipt;
+            if (request.target.kind !== 'result' || JSON.stringify(request.target.reference) !== JSON.stringify(fixed.reference)
+              || range?.truncated || range?.offset !== 0 || receipt.computationTruncated) return [];
+            if (request.view === 'program') return ['program'];
+            if (request.view === 'data' && request.bindingId === 'facts') return ['facts'];
+            if (request.view === 'evaluate' && stateSource?.kind === 'initial') return ['initial'];
+            return request.view === 'evaluate' && stateSource?.followupId === followupId ? ['frozen'] : [];
+          }));
+          report.receipts = receipts;
+          report.verification = { sessionId: verification.sessionId, planId: verification.planId,
+            verdictRef: verdict.verdictRef, verifierRunId: review.verifierRunId, completedAt: review.completedAt, covered: [...covered] };
+          lastReview = reviewKey;
+          persist();
+        }
         const history = host.conversations.getPersistedConversationHistory!(conversationId)?.messages ?? [];
         const reply = history.filter((message: any) => message.kind === 'agent_reply' && message.fallback !== true
           && Date.parse(message.createdAt) >= Date.parse(review.completedAt)
           && message.meta?.replyTo?.includes(`input-${FROZEN_INPUT}`) && message.meta?.evidenceRefs?.includes(fixed.artifactRef)
           && message.meta?.sources?.includes(fixed.source.sessionId) && message.meta?.sources?.includes(verification.sessionId)
           && /\b45\b/.test(message.content) && /\b25\b/.test(message.content)).at(-1);
-        return reply ? { sessions, verification, reply, review } : undefined;
+        return reply ? { sessions, reply, covered } : undefined;
       });
       report.sessions = delivered.sessions;
       report.replies = [delivered.reply];
-      const reviewRefs = new Set(delivered.review.evidenceRefs);
-      const receipts = host.plans.listEvidenceIndex().filter((row: any) =>
-        row.planId === delivered.verification.planId && reviewRefs.has(row.evidenceRef) && row.interactiveInspection);
-      report.receipts = receipts;
-      const covered = new Set(receipts.flatMap((row: any) => {
-        const receipt = row.interactiveInspection, { request, range, stateSource } = receipt;
-        if (request.target.kind !== 'result' || JSON.stringify(request.target.reference) !== JSON.stringify(fixed.reference)
-          || range?.truncated || range?.offset !== 0 || receipt.computationTruncated) return [];
-        if (request.view === 'program') return ['program'];
-        if (request.view === 'data' && request.bindingId === 'facts') return ['facts'];
-        if (request.view === 'evaluate' && stateSource?.kind === 'initial') return ['initial'];
-        return request.view === 'evaluate' && stateSource?.followupId === followupId ? ['frozen'] : [];
-      }));
-      if (covered.size !== 4) throw Error('story_verifier_evidence_incomplete');
+      if (delivered.covered.size !== 4) throw Error('story_verifier_evidence_incomplete');
       const delivery = await host.readTaskResult(fixed.source.sessionId, fixed.artifactRef, signal);
       if (delivery.summary.availability !== 'available' || !delivery.computation
         || delivery.computation.truncated || !/\b45\b/.test(delivery.computation.text)) throw Error('story_text_delivery_incomplete');
