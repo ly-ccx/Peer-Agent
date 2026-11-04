@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { isDeepStrictEqual } from 'node:util';
 import { createConversationStore } from '@peer-agent/conversation-store';
 import { interactiveFeedbackFromFollowup, restoreResourceFeedbackTransport } from '@peer-agent/protocol';
 import { createBotLifecycle, createProjectRegistry, verdictRefFor } from '@peer-agent/runtime-node';
@@ -190,7 +191,7 @@ export async function runInteractiveLiveStory(options: {
       if (!message) return;
       const [feedback, extra] = restoreResourceFeedbackTransport(message.resourceFeedback,
         Array.isArray(message.attachments) ? message.attachments : undefined);
-      if (!feedback || extra || JSON.stringify(feedback) !== JSON.stringify(submittedFeedback))
+      if (!feedback || extra || !isDeepStrictEqual(feedback, submittedFeedback))
         throw Error('story_canonical_frozen_input_mismatch');
       return { messageId: message.id, feedback };
     }
@@ -274,7 +275,7 @@ export async function runInteractiveLiveStory(options: {
             row.planId === verification.planId && reviewRefs.has(row.evidenceRef) && row.interactiveInspection);
           covered = new Set(receipts.flatMap((row: any) => {
             const receipt = row.interactiveInspection, { request, range, stateSource } = receipt;
-            if (request.target.kind !== 'result' || JSON.stringify(request.target.reference) !== JSON.stringify(fixed.reference)
+            if (request.target.kind !== 'result' || !isDeepStrictEqual(request.target.reference, fixed.reference)
               || range?.truncated !== false || range.offset !== 0 || range.returned !== range.total || receipt.computationTruncated) return [];
             if (request.view === 'program') return ['program'];
             if (request.view === 'data' && request.bindingId === 'facts') return ['facts'];
