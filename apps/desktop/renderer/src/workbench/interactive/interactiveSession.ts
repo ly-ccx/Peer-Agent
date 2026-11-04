@@ -16,6 +16,8 @@ export interface InteractiveSessionSnapshot {
   readonly phase: 'readonly' | 'ready' | 'saving' | 'save_failed' | 'writer_lost' | 'closing' | 'closed';
   readonly dirty: boolean;
   readonly composing: boolean;
+  readonly ownerReplaced: boolean;
+  readonly savePending: boolean;
   readonly calculationError: string | null;
   readonly saveError: string | null;
   readonly preparation: 'idle' | 'saving' | 'freezing' | 'frozen' | 'failed';
@@ -36,13 +38,16 @@ export function createInteractiveSession({ api, opened, evaluator, createId = ()
 }) {
   const content = opened.result.content, handle = clone(opened.handle), listeners = new Set<() => void>(), composing = new Set<string>();
   let edit = 0, savedEdit = 0, pending: PendingSave | null = null, tail: Promise<unknown> = Promise.resolve();
+  let settledCandidate: Candidate | null = null;
   let retainOnAcquire = false;
   let candidate: FollowupCandidate | null = null;
   const initial = validateState(opened.state.values, content.stateSchema, opened.state.inputDrafts);
   let state: InteractiveSessionSnapshot = { ...initial, sdkValues: clone(content.initialValues), confirmed: clone(opened.state), writer: null,
-    phase: 'readonly', dirty: false, composing: false, calculationError: null, saveError: null, preparation: 'idle', preparationError: null, frozen: null,
+    phase: 'readonly', dirty: false, composing: false, ownerReplaced: false, savePending: false,
+    calculationError: null, saveError: null, preparation: 'idle', preparationError: null, frozen: null,
     draftPreparation: 'idle', draftError: null };
   function changed(patch: Partial<InteractiveSessionSnapshot> = {}) { state = { ...state, ...patch }; for (const listener of listeners) listener(); }
+  function replaced() { changed({ ownerReplaced: true, phase: 'writer_lost', saveError: 'interactive_owner_replaced', savePending: !!pending }); }
   function calculate() {
     const incomplete = composing.size > 0 || Object.entries(state.inputDrafts).some(([key, raw]) => content.stateSchema[key]?.type === 'number'
       ? !numeric(raw) || Number(raw) !== state.values[key] : raw !== state.values[key]);
@@ -76,13 +81,24 @@ export function createInteractiveSession({ api, opened, evaluator, createId = ()
       try {
         const reply = await api.save({ handle, writer: saving.writer, expectedRevision: saving.expectedRevision, requestId: saving.requestId,
           values: saving.candidate.values, inputDrafts: saving.candidate.inputDrafts });
-        if (!reply.ok) { notCommitted = ['interactive_writer_stale', 'interactive_state_conflict'].includes(reply.code) && reply.saveStatus === 'not_committed'; throw { code: reply.code }; }
+        if (!reply.ok) {
+          if (reply.code === 'interactive_owner_replaced') {
+            if (reply.saveStatus === 'committed') {
+              settledCandidate = saving.candidate; savedEdit = saving.candidate.edit;
+              changed({ dirty: savedEdit !== edit });
+            }
+            if (reply.saveStatus === 'committed' || reply.saveStatus === 'not_committed') pending = null;
+            replaced(); return null;
+          }
+          notCommitted = ['interactive_writer_stale', 'interactive_state_conflict'].includes(reply.code) && reply.saveStatus === 'not_committed';
+          throw { code: reply.code };
+        }
         acceptHostSnapshot(reply.state, saving); pending = null;
-        if (reply.writerCurrent === false) { retainOnAcquire = true; changed({ phase: 'writer_lost', saveError: 'interactive_writer_stale' }); return null; }
-        changed({ phase: 'ready' });
+        if (reply.writerCurrent === false) { retainOnAcquire = true; changed({ phase: 'writer_lost', saveError: 'interactive_writer_stale', savePending: false }); return null; }
+        changed({ phase: 'ready', savePending: false });
       } catch (error) {
         if (notCommitted) pending = null;
-        const failure = code(error); changed({ phase: lost(failure) ? 'writer_lost' : 'save_failed', saveError: failure }); return null;
+        const failure = code(error); changed({ phase: state.ownerReplaced || lost(failure) ? 'writer_lost' : 'save_failed', saveError: failure, savePending: !!pending }); return null;
       }
     }
     if (!editable()) { changed({ saveError: state.phase === 'writer_lost' ? 'interactive_writer_stale' : 'interactive_writer_required' }); return null; }
@@ -90,6 +106,7 @@ export function createInteractiveSession({ api, opened, evaluator, createId = ()
     catch (error) { changed({ phase: 'save_failed', saveError: code(error) }); return null; }
     if (selected.edit === savedEdit && equal(selected.values, state.confirmed.values) && equal(selected.inputDrafts, state.confirmed.inputDrafts)) return state.confirmed;
     pending = { candidate: selected, writer: state.writer!, expectedRevision: state.confirmed.stateRevision, requestId: createId() };
+    changed({ savePending: true });
     return saveCandidate(selected);
   }
   function setValues(values: InteractiveStateValues, inputDrafts: Readonly<Record<string, string>>) {
@@ -99,8 +116,18 @@ export function createInteractiveSession({ api, opened, evaluator, createId = ()
   }
   function flush() {
     if (composing.size) return Promise.resolve(false);
+    if (state.ownerReplaced && !pending) return Promise.resolve(state.phase === 'closed');
     if (!state.dirty && !pending) return Promise.resolve(true);
     const selected = capture(); return enqueue(async () => !!await saveCandidate(selected));
+  }
+  function recheckOwner() {
+    return enqueue(async () => {
+      if (state.ownerReplaced || state.phase === 'closing' || state.phase === 'closed') return;
+      try {
+        const reply = await api.readState({ handle });
+        if (!reply.ok && reply.code === 'interactive_owner_replaced') replaced();
+      } catch { /* Transport failure cannot prove that the Bot was replaced. */ }
+    });
   }
   async function freezeSelection() {
     if (!candidate || !editable()) return null;
@@ -162,10 +189,10 @@ export function createInteractiveSession({ api, opened, evaluator, createId = ()
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     async acquire(takeover = false) {
       return enqueue(async () => {
-        if (state.phase === 'closed' || state.phase === 'closing') return false;
+        if (state.phase === 'closed' || state.phase === 'closing' || state.ownerReplaced) return false;
         try {
           const preserveLocal = state.dirty || !!pending || retainOnAcquire;
-          if (pending) { await saveCandidate(capture()); if (pending) return false; }
+          if (pending) { await saveCandidate(capture()); if (pending || state.ownerReplaced) return false; }
           // Explicit takeover retains local edits but starts against the actual current checkpoint.
           const fresh = await api.readState({ handle }); if (!fresh.ok) throw { code: fresh.code };
           if (!equal(fresh.state.result, opened.result.reference) || fresh.state.specHash !== content.specHash || fresh.state.stateSchemaHash !== content.stateSchemaHash) throw { code: 'interactive_state_receipt_invalid' };
@@ -177,7 +204,11 @@ export function createInteractiveSession({ api, opened, evaluator, createId = ()
           if (!dirty) savedEdit = edit;
           retainOnAcquire = false;
           changed({ writer: clone(reply.writer), confirmed: clone(fresh.state), dirty, phase: 'ready', saveError: null }); calculate(); return true;
-        } catch (error) { changed({ saveError: code(error), phase: state.writer ? 'writer_lost' : 'readonly' }); return false; }
+        } catch (error) {
+          if (code(error) === 'interactive_owner_replaced') replaced();
+          else changed({ saveError: code(error), phase: state.writer ? 'writer_lost' : 'readonly' });
+          return false;
+        }
       });
     },
     editText(key: string, raw: string, isComposing = false) {
@@ -213,14 +244,35 @@ export function createInteractiveSession({ api, opened, evaluator, createId = ()
       // Explicit recovery after a control surface is lost. Preserve raw text as
       // a draft; it must not become an effective value or frozen condition.
       if (!composing.size) return;
-      composing.clear(); changed({ composing: false }); calculate();
+      composing.clear(); changed({ composing: false });
+      if (!state.ownerReplaced) calculate();
     },
     flush,
+    recheckOwner,
     prepareSelection,
     retrySelection,
+    recoveryFields() {
+      const baseline = settledCandidate ?? state.confirmed;
+      return Object.keys(content.stateSchema).filter(key => !Object.is(state.values[key], baseline.values[key])
+        || !Object.is(state.inputDrafts[key], baseline.inputDrafts[key]));
+    },
+    abandonReplacedOwner() {
+      return enqueue(async () => {
+        if (!state.ownerReplaced || pending || state.phase === 'closed') return false;
+        try {
+          const reply = await api.release({ handle, ...(state.writer ? { writer: state.writer } : {}) });
+          if (!reply.ok) throw { code: reply.code };
+          composing.clear(); candidate = null; settledCandidate = null;
+          changed({ phase: 'closed', writer: null, dirty: false, composing: false, saveError: null, values: {}, inputDrafts: {},
+            sdkValues: {}, frozen: null, preparation: 'idle', draftPreparation: 'idle' });
+          return true;
+        } catch (error) { changed({ saveError: code(error) }); return false; }
+      });
+    },
     async close() {
       if (state.phase === 'closed') return true;
-      if (state.dirty || pending) { if (!await flush()) return false; }
+      if (state.ownerReplaced) return false;
+      if (state.dirty || pending || composing.size) { if (!await flush()) { await recheckOwner(); return false; } }
       return enqueue(async () => {
         if (state.dirty || pending || composing.size) return false;
         changed({ phase: 'closing', saveError: null });

@@ -43,13 +43,17 @@ export function createDesktopInteractiveApplication({ getRole, getOwner, getNati
         const lifetime = attach(sender), epoch = lifetime.epoch;
         const native = role === 'resource' ? getNativeBinding(sender) : null;
         if (role === 'resource' && (!native?.ok || native.context.resource.kind !== 'interactive' || !same(native.context.resource.reference, reference))) return null;
-        const isCurrent = () => !signal.aborted && lifetime.epoch === epoch && currentOwner(reference.owner) && getRole(sender) === role
+        const assertIdentity = () => !disposed && getRuntime() === runtime && !signal.aborted && lifetime.epoch === epoch && getRole(sender) === role
           && sender.isDestroyed?.() !== true && (role !== 'resource' || (() => {
             const fresh = getNativeBinding(sender);
             return fresh?.ok && fresh.context.viewId === native.context.viewId && fresh.context.windowId === native.context.windowId
               && fresh.context.generation === native.context.generation && fresh.context.resource.kind === 'interactive' && same(fresh.context.resource.reference, reference);
           })());
-        return { owner: reference.owner, assertCurrent: isCurrent };
+        return { owner: reference.owner, assertIdentity, assertCurrent: () => assertIdentity() && currentOwner(reference.owner),
+          hasReplacement: () => {
+            const current = ownerOf(reference.owner.workspaceId);
+            return !!current && !same(current, reference.owner);
+          } };
       } });
     const presentation = createInteractivePresentationStore({ resultStore: runtime.resultStore, assertOwner: currentOwner });
     const readText = createInteractiveTextReader({ resultStore: runtime.resultStore, assertOwner: currentOwner });

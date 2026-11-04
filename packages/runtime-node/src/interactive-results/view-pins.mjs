@@ -31,7 +31,7 @@ export function registerInteractiveViewPin(resultStore, reference, handle, asser
   const { storage } = resultStore, { owner } = reference;
   const body = encode({ schemaVersion: 1, reference, handle, hostEpoch: storage.hostEpoch, pid: process.pid });
   const args = [CATEGORY, handle.viewId, encode(owner)];
-  storage.transaction(owner.workspaceId, context => {
+  const registered = storage.transaction(owner.workspaceId, context => {
     assertCurrent();
     resultStore.getVersionMetadata(reference);
     const pins = readPins(context, owner);
@@ -45,8 +45,17 @@ export function registerInteractiveViewPin(resultStore, reference, handle, asser
       throw problem('interactive_view_unavailable');
     context.db.prepare('INSERT INTO presentation VALUES(?,?,?,?)').run(...args, body);
     assertCurrent();
+    return context;
   });
-  return () => storage.transaction(owner.workspaceId, context => {
-    context.db.prepare('DELETE FROM presentation WHERE category=? AND id=? AND owner=? AND body=?').run(...args, body);
-  });
+  return {
+    assertPresent(context) {
+      if (registered !== context) throw problem('interactive_storage_replaced');
+      context.assertFile();
+      if (context.db.prepare('SELECT body FROM presentation WHERE category=? AND id=? AND owner=?').get(...args)?.body !== body)
+        throw problem('interactive_view_stale');
+    },
+    release: () => storage.transaction(owner.workspaceId, context => {
+      context.db.prepare('DELETE FROM presentation WHERE category=? AND id=? AND owner=? AND body=?').run(...args, body);
+    }),
+  };
 }

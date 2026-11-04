@@ -9,6 +9,8 @@ import { useNativeNavigation } from '../NativeNavigation';
 import { interactiveSessionKey, interactiveSessionRegistry } from './interactiveSessionRegistry';
 import type { InteractiveSession } from './interactiveSession';
 import { InteractiveVersions } from './InteractiveVersions';
+import { InteractiveOwnerRecovery } from './InteractiveOwnerRecovery';
+import { abandonInteractiveLayout } from './useInteractiveResources';
 import './interactive-resource.css';
 
 function SavedSummary({ title, text, isZh }: { readonly title: string; readonly text: string; readonly isZh: boolean }) {
@@ -53,8 +55,9 @@ function failureText(code: string | null, isZh: boolean) {
   return isZh ? '此设备暂时无法打开结果。没有重新取数或执行工作，可以重试。' : 'This device cannot open the result. No data or work was rerun. Retry opening.';
 }
 
-export function InteractiveResource({ reference, api, active, isZh, onReady, onUnavailable, onRecoverView, onMetadata, onOpenReference }: { readonly reference: InteractiveResultReference; readonly api?: InteractiveResultsApi;
+export function InteractiveResource({ reference, api, active, isZh, onReady, onUnavailable, onRecoverView, onMetadata, onOpenReference, onOwnerAbandoned }: { readonly reference: InteractiveResultReference; readonly api?: InteractiveResultsApi;
   readonly active: boolean; readonly isZh: boolean; readonly onReady?: () => void; readonly onUnavailable?: () => void; readonly onRecoverView?: () => Promise<boolean>;
+  readonly onOwnerAbandoned?: () => void;
   readonly onMetadata?: (reference: InteractiveResultReference, title: string) => void;
   readonly onOpenReference?: (reference: InteractiveResultReference) => boolean | Promise<boolean> }) {
   const registry = useMemo(() => interactiveSessionRegistry(api), [api]);
@@ -62,6 +65,7 @@ export function InteractiveResource({ reference, api, active, isZh, onReady, onU
   useSyncExternalStore(registry?.subscribe ?? (() => () => {}), registry?.snapshot ?? (() => 0), () => 0);
   const [openingError, setOpeningError] = useState<string | null>(null);
   const entry = registry?.get(reference), session = entry?.session;
+  const ownerReplaced = useSyncExternalStore(session?.subscribe ?? (() => () => {}), () => session?.snapshot().ownerReplaced ?? false, () => false);
   const open = useCallback(() => {
     setOpeningError(null);
     if (!registry) { setOpeningError('interactive_bridge_unavailable'); return; }
@@ -79,7 +83,10 @@ export function InteractiveResource({ reference, api, active, isZh, onReady, onU
   useEffect(() => { if (title) onMetadata?.(reference, title); }, [key, title, onMetadata]);
   const cleaned = entry?.summary?.availability === 'cleaned' ? entry.summary : null;
   useLayoutEffect(() => { if (active && cleaned) onReady?.(); }, [active, cleaned, onReady]);
+  useLayoutEffect(() => { if (active && ownerReplaced) onUnavailable?.(); }, [active, ownerReplaced, onUnavailable]);
   if (!active) return null;
+  if (session && ownerReplaced) return <InteractiveOwnerRecovery session={session} isZh={isZh}
+    onAbandoned={onOwnerAbandoned ?? (() => { abandonInteractiveLayout(reference.owner); void registry?.close(reference); })} />;
   const failure = openingError ?? entry?.error;
   return <div className="interactive-resource">
     {(!entry || entry.phase === 'opening') && !failure ? <div role="status"><p>{isZh ? '正在打开固定版本…' : 'Opening the fixed version…'}</p>
@@ -114,6 +121,6 @@ export function NativeInteractiveResource({ context, isZh }: { readonly context:
   useLayoutEffect(() => navigation?.registerCapture(() => ready ? reading.capture() : undefined), [navigation, reading.capture, ready]);
   return <div className="resource-interactive-body" ref={reading.ref} onScroll={reading.onScroll}>
     <InteractiveResource reference={context.resource.reference} api={window.peerResource?.interactiveResults} active isZh={isZh}
-      onReady={contentReady} onUnavailable={contentUnavailable} onRecoverView={recoverView} />
+      onReady={contentReady} onUnavailable={contentUnavailable} onRecoverView={recoverView} onOwnerAbandoned={() => navigation?.abandon()} />
   </div>;
 }

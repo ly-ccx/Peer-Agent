@@ -66,6 +66,31 @@ export function createInteractiveStateStore({ resultStore, now = () => new Date(
       return { viewId: writer.viewId, generation: writer.generation, token: writer.token };
     });
   }
+  function readSaveReceipt(context, ref, published, requestId, expectedRevision, normalized, argsDigest) {
+    const previous = context.db.prepare('SELECT argsDigest,receipt FROM saves WHERE id=? AND version=? AND requestId=?').get(ref.resultId, ref.contentVersion, requestId);
+    if (!previous) return null;
+    if (previous.argsDigest !== argsDigest) throw problem('interactive_save_parameter_conflict');
+    const receipt = checkedSnapshot(decode(previous.receipt), ref, published);
+    if (receipt.requestId !== requestId || receipt.stateRevision !== expectedRevision + 1
+      || !same({ values: receipt.values, inputDrafts: receipt.inputDrafts }, normalized)) throw problem('interactive_save_receipt_corrupt');
+    return receipt;
+  }
+  function reconcileSealedSave({ reference: rawReference, identity: rawIdentity, writer, expectedRevision, requestId, values, inputDrafts }, assertSealed, assertPin) {
+    const ref = reference(rawReference), identity = view(rawIdentity); requireView(assertSealed);
+    const context = storage.connect(ref.owner.workspaceId);
+    if (!context) throw problem('interactive_result_unavailable');
+    context.db.exec('BEGIN');
+    try {
+      assertPin(context);
+      const published = resultStore.getVersion(ref);
+      const normalized = validateState(values, published.content.stateSchema, inputDrafts);
+      const argsDigest = jsonDigest({ identity, writer, expectedRevision, ...normalized });
+      const receipt = readSaveReceipt(context, ref, published, requestId, expectedRevision, normalized, argsDigest);
+      requireView(assertSealed);
+      context.assertFile(); context.db.exec('COMMIT');
+      return receipt ? 'committed' : 'not_committed';
+    } catch (error) { try { context.db.exec('ROLLBACK'); } catch {} throw error; }
+  }
   function saveOutcome({ reference: rawReference, identity: rawIdentity, writer, expectedRevision, requestId, values, inputDrafts }, assertView) {
     const ref = reference(rawReference), identity = view(rawIdentity); requireView(assertView);
     if (!interactiveToken(requestId) || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw problem('interactive_save_invalid');
@@ -74,12 +99,8 @@ export function createInteractiveStateStore({ resultStore, now = () => new Date(
       const published = resultStore.getVersion(ref), state = load(context, ref, published);
       const normalized = validateState(values, published.content.stateSchema, inputDrafts);
       const argsDigest = jsonDigest({ identity, writer, expectedRevision, ...normalized });
-      const previous = context.db.prepare('SELECT argsDigest,receipt FROM saves WHERE id=? AND version=? AND requestId=?').get(ref.resultId, ref.contentVersion, requestId);
-      if (previous) {
-        if (previous.argsDigest !== argsDigest) throw problem('interactive_save_parameter_conflict');
-        const receipt = checkedSnapshot(decode(previous.receipt), ref, published);
-        if (receipt.requestId !== requestId || receipt.stateRevision !== expectedRevision + 1
-          || !same({ values: receipt.values, inputDrafts: receipt.inputDrafts }, normalized)) throw problem('interactive_save_receipt_corrupt');
+      const receipt = readSaveReceipt(context, ref, published, requestId, expectedRevision, normalized, argsDigest);
+      if (receipt) {
         let writerCurrent = true;
         try { requireWriter(state.writer, writer, identity); } catch { writerCurrent = false; }
         return { state: clone(receipt), writerCurrent };
@@ -174,5 +195,5 @@ export function createInteractiveStateStore({ resultStore, now = () => new Date(
       } catch { /* An unconfirmed release is safe: only explicit takeover can replace a live writer. */ }
     }
   }
-  return { read, acquire, save, saveOutcome, release, prepareFollowup, readFollowup, close };
+  return { read, acquire, save, saveOutcome, reconcileSealedSave, release, prepareFollowup, readFollowup, close };
 }

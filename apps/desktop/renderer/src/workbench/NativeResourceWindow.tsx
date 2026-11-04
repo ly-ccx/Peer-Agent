@@ -43,6 +43,7 @@ function NativeResourceSurface({ context, isZh }: { readonly context: ResourceWi
   const flush = async () => {
     const editors = resourceEditRegistry(), interactive = interactiveSessionRegistry();
     const saved = await Promise.all([editors?.flushAll() ?? true, interactive?.flushAll() ?? true, navigation.flush()]);
+    if (!saved[2]) await interactive?.recheckOwners();
     return saved.every(Boolean) && !editors?.hasUnsafe() && !interactive?.hasUnsafe();
   };
   useEffect(() => window.peerResource?.onCloseBlocked?.(notice => {
@@ -70,7 +71,7 @@ function NativeResourceSurface({ context, isZh }: { readonly context: ResourceWi
       <button type="button" className="ui-button resource-native-icon" aria-label={isZh ? '关闭此窗口' : 'Close this window'} onClick={() => { void flush().then(saved => { if (saved) return window.peerResource!.close(identity); setFailure(isZh ? '输入或阅读位置尚未保存，当前窗口保留。' : 'Input or reading position is not saved. This window is preserved.'); }).catch(() => setFailure(isZh ? '暂时无法关闭，请使用窗口关闭按钮重试。' : 'Unable to close. Retry with the native window close button.')); }}><PeerIcon name="close" size={16} /></button>
     </header>
     {failure ? <p className="resource-native-notice" role="alert">{failure}</p> : null}
-    {!saving.persisted ? <p className="resource-native-notice" role="status">{isZh ? '阅读位置暂未保存；当前阅读保留。' : 'Reading position was not saved. Your current reading is preserved.'}<button type="button" className="ui-button is-compact" onClick={() => void navigation.retry()}>{isZh ? '重试保存' : 'Retry save'}</button></p> : null}
+    {!saving.persisted && !saving.abandoned ? <p className="resource-native-notice" role="status">{isZh ? '阅读位置暂未保存；当前阅读保留。' : 'Reading position was not saved. Your current reading is preserved.'}<button type="button" className="ui-button is-compact" onClick={() => void navigation.retry()}>{isZh ? '重试保存' : 'Retry save'}</button></p> : null}
     {path ? <p className="resource-native-path">{path}</p> : null}<div className="resource-native-content">{context.resource.kind === 'interactive' ? <NativeInteractiveResource context={context} isZh={isZh} /> : context.resource.kind === 'directory' ? <NativeResourceDirectory context={context} isZh={isZh} /> : context.resource.kind === 'comparison' ? <NativeResourceComparison context={context} isZh={isZh} /> : <NativeResourceDocument context={context} isZh={isZh} />}</div>
   </main>;
 }

@@ -28,13 +28,22 @@ export function createInteractiveViewService({ resultStore, stateStore, resolveS
       catch { /* A failed release conservatively keeps the pin until a later close/open or process exit. */ }
     }
   }
+  const active = record => !disposed && views.get(record.handle.viewId) === record && record.sender.isDestroyed?.() !== true;
+  const sealed = record => active(record) && record.ownerReplaced === true && record.assertIdentity?.() === true;
   const requireCurrent = record => {
-    if (disposed || views.get(record.handle.viewId) !== record || record.sender.isDestroyed?.() === true || record.assertCurrent() !== true) throw problem('interactive_view_stale');
+    if (!active(record)) throw problem('interactive_view_stale');
+    if (!record.ownerReplaced && record.assertIdentity?.() === true && record.hasReplacement?.() === true) record.ownerReplaced = true;
+    if (sealed(record)) throw problem('interactive_owner_replaced');
+    if (record.ownerReplaced || record.assertCurrent() !== true) throw problem('interactive_view_stale');
     return true;
   };
-  function locate(sender, raw) {
+  function locateRecord(sender, raw) {
     const handle = normalizeInteractiveViewHandle(raw), record = handle && views.get(handle.viewId);
-    if (!record || record.sender !== sender || !same(record.handle, handle)) throw problem('interactive_view_stale');
+    if (!record || !active(record) || record.sender !== sender || !same(record.handle, handle)) throw problem('interactive_view_stale');
+    return record;
+  }
+  function locate(sender, raw) {
+    const record = locateRecord(sender, raw);
     requireCurrent(record); return record;
   }
   function retire(record) {
@@ -45,7 +54,7 @@ export function createInteractiveViewService({ resultStore, stateStore, resolveS
       catch { /* A taken-over token cannot release its successor. */ }
     }
     views.delete(record.handle.viewId);
-    if (record.releasePin) pendingPinReleases.add(record.releasePin);
+    if (record.pin) pendingPinReleases.add(record.pin.release);
     releasePins();
     retired.set(record.handle.viewId, { sender: record.sender, handle: record.handle, writer: record.writer });
     if (retired.size > maxViews * 2) retired.delete(retired.keys().next().value);
@@ -105,12 +114,13 @@ export function createInteractiveViewService({ resultStore, stateStore, resolveS
           || disposed || controller.signal.aborted || sender.isDestroyed?.() === true) throw problem('interactive_scope_denied');
         const handle = normalizeInteractiveViewHandle({ viewId: createId(), windowId: createId(), generation: createId() });
         if (!handle || views.has(handle.viewId) || retired.has(handle.viewId)) throw problem('interactive_view_unavailable');
-        const record = { sender, reference, handle, requestId, controller, assertCurrent: source.assertCurrent, writer: null };
+        const record = { sender, reference, handle, requestId, controller, assertCurrent: source.assertCurrent,
+          assertIdentity: source.assertIdentity, hasReplacement: source.hasReplacement, writer: null };
         record.onDestroyed = () => retire(record);
         views.set(handle.viewId, record); sender.once?.('destroyed', record.onDestroyed);
         try {
           releasePins();
-          record.releasePin = registerInteractiveViewPin(resultStore, reference, handle, () => requireCurrent(record));
+          record.pin = registerInteractiveViewPin(resultStore, reference, handle, () => requireCurrent(record));
           const reply = openReply(record);
           if (!reply.ok) retire(record);
           return reply;
@@ -160,12 +170,23 @@ export function createInteractiveViewService({ resultStore, stateStore, resolveS
         ...(value.takeover === true ? { takeover: true } : {}) }, current);
       return { writer: copy(record.writer) };
     }),
-    save: (sender, raw) => bound(sender, raw, ['writer', 'expectedRevision', 'requestId', 'values', 'inputDrafts'], (record, value, current) => {
-      const writer = normalizeInteractiveWriter(value.writer);
-      if (!writer || writer.viewId !== record.handle.viewId || !revision(value.expectedRevision) || !interactiveToken(value.requestId)) throw problem('interactive_writer_stale');
-      return stateStore.saveOutcome({ reference: record.reference, identity: record.handle, writer, expectedRevision: value.expectedRevision,
-        requestId: value.requestId, values: value.values, inputDrafts: value.inputDrafts }, current);
-    }),
+    save(sender, raw) {
+      try {
+        const value = request(raw, ['handle', 'writer', 'expectedRevision', 'requestId', 'values', 'inputDrafts']);
+        const record = locateRecord(sender, value.handle), writer = normalizeInteractiveWriter(value.writer);
+        if (!writer || writer.viewId !== record.handle.viewId || !revision(value.expectedRevision) || !interactiveToken(value.requestId)) throw problem('interactive_writer_stale');
+        const input = { reference: record.reference, identity: record.handle, writer, expectedRevision: value.expectedRevision,
+          requestId: value.requestId, values: value.values, inputDrafts: value.inputDrafts };
+        try { return { ok: true, ...stateStore.saveOutcome(input, () => requireCurrent(record)) }; }
+        catch (error) {
+          if (error.code !== 'interactive_owner_replaced' || !same(record.writer, writer)) throw error;
+          try {
+            const saveStatus = stateStore.reconcileSealedSave(input, () => sealed(record), record.pin.assertPresent);
+            return { ...failed(error), saveStatus };
+          } catch { return failed(error); }
+        }
+      } catch (error) { return failed(error); }
+    },
     async prepareFollowup(sender, raw) {
       try {
         const value = request(raw, ['handle', 'stateRevision', 'stateDigest', 'fields', 'requestId']), record = locate(sender, value.handle);

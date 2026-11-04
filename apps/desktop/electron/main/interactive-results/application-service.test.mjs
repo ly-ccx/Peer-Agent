@@ -123,7 +123,7 @@ test('draft handoff rejects stale views, forged fields and a changed recipient w
   f.setOwner('new-parent');
   assert.equal((await f.preparation.claim(f.main, keyFor(packet))).code, 'RESOURCE_FEEDBACK_RECIPIENT_CHANGED');
   assert.equal((await pending).code, 'resource_feedback_recipient_changed');
-  assert.equal((await f.app.prepareDraft(f.main, request)).code, 'interactive_view_stale');
+  assert.equal((await f.app.prepareDraft(f.main, request)).code, 'interactive_owner_replaced');
   assert.equal(f.drafts.read({ workspaceId: owner.workspaceId, surface: 'desktop' }).snapshot.draft.resourceFeedback, undefined);
 });
 
@@ -177,9 +177,33 @@ test('native view uses the real window binding, enforces one writer and cannot r
   f.setOwner('new-conversation');
   assert.equal(f.app.readLayout(f.main, { owner }).code, 'interactive_scope_denied');
   assert.equal(f.app.writeLayout(f.main, { owner, expectedRevision: 1, order: [], recent: [], interactive: { tabs: [], activeTabId: null } }).code, 'interactive_scope_denied');
-  assert.equal(f.app.readState(native, { handle: opened.handle }).code, 'interactive_view_stale');
-  assert.equal(f.app.save(native, { handle: opened.handle, writer: successor.writer, expectedRevision: 1, requestId: 'wrong-owner', values: { $x: 8 }, inputDrafts: {} }).code, 'interactive_view_stale');
+  assert.deepEqual(f.app.readState(native, { handle: opened.handle }), { ok: false, code: 'interactive_owner_replaced' });
+  const oldSave = { handle: opened.handle, writer: successor.writer, expectedRevision: 0, requestId: 'native-save', values: { $x: 5 }, inputDrafts: {} };
+  assert.deepEqual(f.app.save(native, oldSave), { ok: false, code: 'interactive_owner_replaced', saveStatus: 'committed' });
+  assert.deepEqual(f.app.save(native, { ...oldSave, values: { $x: 8 } }), { ok: false, code: 'interactive_owner_replaced' });
+  assert.deepEqual(f.app.save(native, { ...oldSave, expectedRevision: 1, requestId: 'wrong-owner' }), { ok: false, code: 'interactive_owner_replaced', saveStatus: 'not_committed' });
+  assert.deepEqual(f.app.save(f.main, oldSave), { ok: false, code: 'interactive_view_stale' });
   f.setOwner(owner.conversationId); assert.equal(f.runtime.stateStore.read(f.resource.reference, () => true).values.$x, 5);
+  assert.equal(f.app.acquire(native, { handle: opened.handle, expectedRevision: 1 }).code, 'interactive_owner_replaced');
+  assert.deepEqual(f.app.release(native, { handle: opened.handle, writer: successor.writer }), { ok: true });
+  const reopened = await f.app.open(native, { reference: f.resource.reference, requestId: 'new-native-view' });
+  assert.equal(reopened.state.values.$x, 5); assert.notDeepEqual(reopened.handle, opened.handle);
+});
+
+test('empty owner, lost pin and page navigation cannot prove a sealed save outcome', async t => {
+  const f = await fixture(t), opened = await f.app.open(f.main, { reference: f.resource.reference, requestId: 'old-view' });
+  const writer = f.app.acquire(f.main, { handle: opened.handle, expectedRevision: 0 }).writer;
+  const request = { handle: opened.handle, writer, expectedRevision: 0, requestId: 'uncommitted', values: { $x: 4 }, inputDrafts: {} };
+  f.setOwner(null);
+  assert.deepEqual(f.app.save(f.main, request), { ok: false, code: 'interactive_view_stale' });
+  f.setOwner(owner.conversationId);
+  assert.equal(f.app.readState(f.main, { handle: opened.handle }).ok, true);
+  f.setOwner('replacement-owner');
+  const db = f.runtime.resultStore.storage.connect(owner.workspaceId).db;
+  db.prepare('DELETE FROM presentation WHERE category=? AND id=?').run('interactive-active-view', opened.handle.viewId);
+  assert.deepEqual(f.app.save(f.main, request), { ok: false, code: 'interactive_owner_replaced' });
+  f.main.emit('did-start-navigation', {}, location, false, true);
+  assert.deepEqual(f.app.save(f.main, request), { ok: false, code: 'interactive_view_stale' });
 });
 
 test('reload, crash and runtime replacement retire only the affected sender lifetime and preserve confirmed state', async t => {
@@ -249,7 +273,7 @@ test('native version navigation opens only the checked related publication throu
   assert.equal(opened.state.values.$x, 7); assert.equal(f.app.readState(original.webContents, { handle: old.handle }).state.values.$x, 2);
   const previous = { handle: opened.handle, relation: 'predecessor', expectedReference: f.receipt.reference };
   const pending = f.app.openVersion(created.webContents, previous); f.setOwner('replacement-bot');
-  assert.equal((await pending).code, 'interactive_view_stale'); assert.equal(created.isDestroyed(), false);
+  assert.equal((await pending).code, 'interactive_owner_replaced'); assert.equal(created.isDestroyed(), false);
 });
 
 test('interactive IPC policy excludes guests, wrong origins and subframes, and layout is main-only', async t => {

@@ -12,6 +12,12 @@ export const hasUnsafeInteractiveLayouts = () => interactivePresentationSessions
   const state = session.snapshot(); return state.protected && (state.dirty || state.phase === 'saving');
 });
 export const flushInteractiveLayouts = async () => (await Promise.all(interactivePresentationSessions().map(session => session.flush()))).every(Boolean);
+export function abandonInteractiveLayout(owner: InteractiveOwner) {
+  const api = window.peerAgent?.resourcePresentation;
+  const cache = api && caches.get(api), key = JSON.stringify([owner.workspaceId, owner.conversationId]);
+  cache?.get(key)?.session.dispose();
+  cache?.delete(key);
+}
 const noState: ResourcePresentationSnapshot = { layout: { order: [], recent: [], interactive: { tabs: [], activeTabId: null } }, confirmed: null, remote: null, loaded: false, protected: false, dirty: false, phase: 'ready', error: null };
 const noSubscribe = () => () => {}, noSnapshot = () => noState;
 function entryFor(owner: InteractiveOwner, api: ResourcePresentationApi) {
@@ -95,7 +101,7 @@ export function useInteractiveResources(ports: {
       return ok;
     } finally { setAdopting(false); }
   }, [session, key, adopting]);
-  return { interactiveTabs: state.layout.interactive.tabs.filter(tab => state.layout.order.includes(`interactive:${tab.id}`)), activeInteractiveId: state.layout.interactive.activeTabId,
+  return { interactiveTabs: state.phase === 'closed' ? [] : state.layout.interactive.tabs.filter(tab => state.layout.order.includes(`interactive:${tab.id}`)), activeInteractiveId: state.layout.interactive.activeTabId,
     interactiveLayout: session, interactiveLayoutState: state, interactiveNotice: notice?.key === key ? notice.code : state.error,
     interactiveLayoutTransitioning: adopting,
     interactiveReadingGeneration: readingGeneration,

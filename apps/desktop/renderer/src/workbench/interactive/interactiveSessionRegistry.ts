@@ -25,6 +25,7 @@ export function createInteractiveSessionRegistry(api: InteractiveResultsApi) {
     const key = interactiveSessionKey(reference), pending = opening.get(key);
     if (pending) return pending;
     let entry = entries.get(key);
+    if (entry?.session?.snapshot().phase === 'closed') { entries.delete(key); entry = undefined; }
     if (entry?.phase === 'ready' && entry.session?.snapshot().phase === 'closing') {
       const closing = entry;
       return closing.session!.close().then(ok => {
@@ -88,12 +89,20 @@ export function createInteractiveSessionRegistry(api: InteractiveResultsApi) {
     },
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     snapshot: () => version,
+    async recheckOwners() {
+      await Promise.all([...entries.values()].flatMap(({ session }) => session ? [session.recheckOwner()] : []));
+    },
     async flushAll() {
       if ([...entries.values()].some(entry => entry.phase === 'opening' && !entry.cancelled)) return false;
-      return (await Promise.all([...entries.values()].flatMap(entry => entry.session ? [entry.session.flush()] : []))).every(Boolean);
+      return (await Promise.all([...entries.values()].flatMap(({ session }) => session ? [(async () => {
+        const saved = await session.flush();
+        if (!saved) await session.recheckOwner();
+        return saved;
+      })()] : []))).every(Boolean);
     },
     hasUnsafe: () => [...entries.values()].some(entry => !entry.cancelled && (entry.phase === 'opening' || entry.session && (() => {
-      const state = entry.session.snapshot(); return state.dirty || state.composing || state.phase === 'saving';
+      const state = entry.session.snapshot();
+      return state.phase !== 'closed' && (state.ownerReplaced || state.dirty || state.composing || state.savePending || state.phase === 'saving');
     })())),
     async close(reference: InteractiveResultReference) {
       const key = interactiveSessionKey(reference), entry = entries.get(key); if (!entry) return true;

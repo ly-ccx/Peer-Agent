@@ -51,6 +51,51 @@ test('protected pasted state stays in unsaved memory, cannot reach host or SDK, 
   assert.equal(f.states.read(f.receipt.reference, () => true).values.$name, 'Corrected');
 });
 
+test('a replaced owner settles the exact pending request and preserves only later local edits until explicit discard', async t => {
+  const f = await fixture(t), originalSave = f.api.save;
+  const attempts: Parameters<InteractiveResultsApi['save']>[0][] = [];
+  f.api.save = async request => {
+    attempts.push(request);
+    if (attempts.length === 1) { assert.equal((await originalSave(request)).ok, true); throw Error('lost save confirmation'); }
+    return attempts.length === 2 ? { ok: false, code: 'interactive_owner_replaced' }
+      : { ok: false, code: 'interactive_owner_replaced', saveStatus: 'committed' };
+  };
+  assert.equal(await f.session.acquire(), true);
+  f.session.editText('$budget', '80');
+  assert.equal(await f.session.flush(), false);
+  f.session.editText('$name', 'Local later input');
+  assert.equal(await f.session.flush(), false);
+  assert.equal(f.session.snapshot().ownerReplaced, true);
+  assert.equal(await f.session.abandonReplacedOwner(), false);
+  assert.equal(await f.session.close(), false);
+  assert.equal(await f.session.acquire(true), false);
+  assert.equal(f.session.editText('$name', 'Late input'), false);
+  assert.equal(await f.session.prepareSelection(['$name']), null);
+  assert.equal(await f.session.flush(), false);
+  assert.deepEqual(attempts, [attempts[0], attempts[0], attempts[0]]);
+  assert.deepEqual(f.session.recoveryFields(), ['$name']);
+  assert.equal(f.session.snapshot().savePending, false);
+  assert.equal(f.session.snapshot().inputDrafts.$name, 'Local later input');
+  assert.equal(await f.session.abandonReplacedOwner(), true);
+  assert.equal(await f.session.close(), true);
+  assert.deepEqual(f.session.snapshot().inputDrafts, {});
+  assert.equal(f.states.read(f.receipt.reference, () => true).values.$budget, 80);
+  assert.equal(f.states.read(f.receipt.reference, () => true).values.$name, 'Trial');
+});
+
+test('rechecking a protected local edit after owner replacement never submits its raw value', async t => {
+  const f = await fixture(t);
+  assert.equal(await f.session.acquire(), true);
+  f.session.editText('$name', 'sk-examplecredential012345678901234567890');
+  f.api.readState = async () => ({ ok: false, code: 'interactive_owner_replaced' });
+  f.api.save = async () => { throw Error('protected edit reached the save API'); };
+  assert.equal(await f.session.close(), false);
+  assert.equal(f.session.snapshot().ownerReplaced, true);
+  assert.deepEqual(f.session.recoveryFields(), ['$name']);
+  assert.equal(await f.session.abandonReplacedOwner(), true);
+  assert.equal(f.states.read(f.receipt.reference, () => true).stateRevision, 0);
+});
+
 test('IME and incomplete numeric drafts stay local; legal division-by-zero parameters save without becoming SDK output', async t => {
   const f = await fixture(t);
   assert.equal(await f.session.flush(), true, 'an unchanged readonly view needs no writer');

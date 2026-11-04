@@ -160,6 +160,7 @@ export interface InteractiveVersionNavigation {
   readonly predecessor?: InteractiveResultReference;
 }
 export type InteractiveSaveResult = { readonly ok: true; readonly state: InteractiveStateSnapshot; readonly writerCurrent?: boolean }
+  | { readonly ok: false; readonly code: 'interactive_owner_replaced'; readonly saveStatus?: 'committed' | 'not_committed' }
   | { readonly ok: false; readonly code: string; readonly saveStatus?: 'not_committed' };
 export interface InteractiveResultsApi {
   open(request: { readonly reference: InteractiveResultReference; readonly requestId: string }): Promise<InteractiveResult<InteractiveOpenView>>;

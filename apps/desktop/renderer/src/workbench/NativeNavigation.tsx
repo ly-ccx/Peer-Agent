@@ -16,7 +16,10 @@ export function NativeNavigationProvider({ context, children }: { readonly conte
       const registry = resourceEditRegistry();
       const interactive = interactiveSessionRegistry();
       void Promise.all([store.flush(), registry?.flushAll() ?? Promise.resolve(true), interactive?.flushAll() ?? Promise.resolve(true)])
-        .then(([navigation, drafts, conditions]) => api.acknowledgeCheckpoint({ ...request, status: navigation && drafts && conditions && !registry?.hasUnsafe() && !interactive?.hasUnsafe() ? 'confirmed' : 'blocked' }))
+        .then(async ([navigation, drafts, conditions]) => {
+          if (!navigation) await interactive?.recheckOwners();
+          return api.acknowledgeCheckpoint({ ...request, status: navigation && drafts && conditions && !registry?.hasUnsafe() && !interactive?.hasUnsafe() ? 'confirmed' : 'blocked' });
+        })
         .catch(() => { void api.acknowledgeCheckpoint({ ...request, status: 'blocked' }).catch(() => {}); });
     });
     const pagehide = () => { void store.flush(); void interactiveSessionRegistry()?.flushAll(); };

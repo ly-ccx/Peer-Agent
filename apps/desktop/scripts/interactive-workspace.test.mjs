@@ -33,7 +33,7 @@ async function renderer(output) {
       import'./renderer/src/project-agent/styles/bot-conversation.css';
       import'./renderer/src/project-agent/styles/bot-drawer.css';
       function Composer({owner}){useResourceFeedbackPreparations();const{session,state}=useInputRecovery(owner.workspaceId);return <BotComposer i18n={createI18n('en-US')} botName="Trial Bot" resourceRecipientConversationId={owner.conversationId} draft={state.draft} ready={state.ready} quote={state.draft.quote?.text??''} onQuoteRemove={()=>session.edit({quote:null})} onDraftChange={patch=>session.edit(patch)} onSend={()=>void session.send({quoteRefs:state.draft.quote?[state.draft.quote.messageId]:[]})}/>;}
-      if(window.peerResource)createRoot(document.getElementById('root')).render(<NativeResourceWindow/>);
+      if(window.peerResource)createRoot(document.getElementById('root')).render(<ConfirmProvider><NativeResourceWindow/></ConfirmProvider>);
       else{const{fixture}=await window.peerAgent.getBootstrap();
         createRoot(document.getElementById('root')).render(<ConfirmProvider><ResourceEditAppFrame><WorkbenchProvider conversationId={fixture.owner.conversationId} isPageActive resourceMode layoutHost="bot">
           <BotResourceLayout owner={fixture.owner} active isZh={false}><div className="bot-main" style={{padding:24}}><h1>Trial delivery</h1><Composer owner={fixture.owner}/><EvidenceView evidence={{evidenceRef:fixture.evidenceRef}} workspaceId={fixture.owner.workspaceId} i18n={createI18n('en-US')}/></div></BotResourceLayout>
@@ -45,7 +45,7 @@ async function renderer(output) {
 }
 
 async function reloadSavedWorkspace(electron, page) {
-  const saved = page.getByText('Conditions and layout are saved. You can close or reload again.', { exact: true });
+  const saved = page.getByText('You can close or reload again.', { exact: true });
   for (let attempt = 0; attempt < 3; attempt++) {
     const keepWorking = page.getByRole('button', { name: 'Keep working', exact: true });
     if (await keepWorking.isVisible()) await keepWorking.click();
@@ -97,12 +97,12 @@ test('the main workspace opens canonical interactive deliveries, restores result
     const receipt=resultStore.commitPublication({owner,source:{conversationId:'worker',sessionId:'session',planId:'plan',executionEpoch:'epoch',toolCallId:'publication'},draft,content:await validateDraft(draft),provenance:[],dataLevel:'D3_private',grant:{toolCallId:'publication',grantId:'fixture-grant',granted:true}},()=>true);resultStore.markIndexed(receipt.callRef,receipt.indexEntry);
     const windows=createTrustedWindowRegistry(),source=new BrowserWindow({show:false,width:1180,height:820,webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false,preload:${JSON.stringify(path.join(desktop, 'electron/preload/preload.cjs'))}}});
     source.show=()=>{};windows.registerWindow({window:source,role:'main',allowedLocations:[${JSON.stringify(location)}]});
-    let host,settingsWrites=[],fileReads=0,legacyHistoryWrites=0,blockedCloses=0,closeAttempts=0,navigations=0;
+    let host,activeOwner=owner,settingsWrites=[],fileReads=0,legacyHistoryWrites=0,blockedCloses=0,closeAttempts=0,navigations=0;
     source.on('will-prevent-unload',()=>{blockedCloses++});
     source.webContents.on('did-start-navigation',(_event,_url,_sameDocument,mainFrame)=>{if(mainFrame)navigations++});
     const initial={locale:'en-US',workbench:{activeTab:{[owner.conversationId]:'launcher'},documentSessions:{},browserSessions:{}}};
     const preparation=createResourceFeedbackPreparation({isMainSender:sender=>windows.getRole(sender)==='main',getRecipient:()=>owner});
-    const interactive=createDesktopInteractiveApplication({getRole:sender=>windows.getRole(sender),getOwner:workspaceId=>workspaceId===owner.workspaceId?owner:null,getNativeBinding:sender=>host.interactiveBinding(sender),getRuntime:()=>runtime,prepareFeedback:preparation.prepare,readDraft:drafts.read,openWindow:(sender,reference)=>host.open(sender,{resource:{kind:"interactive",reference}})});
+    const interactive=createDesktopInteractiveApplication({getRole:sender=>windows.getRole(sender),getOwner:workspaceId=>workspaceId===owner.workspaceId?activeOwner:null,getNativeBinding:sender=>host.interactiveBinding(sender),getRuntime:()=>runtime,prepareFeedback:preparation.prepare,readDraft:drafts.read,openWindow:(sender,reference)=>host.open(sender,{resource:{kind:"interactive",reference}})});
     const originalReadLayout=interactive.readLayout;let holdLayoutRead=false,releaseLayoutRead=null;
     interactive.readLayout=(sender,request)=>{
       const receipt=originalReadLayout(sender,request);
@@ -110,10 +110,18 @@ test('the main workspace opens canonical interactive deliveries, restores result
       holdLayoutRead=false;
       return new Promise(resolve=>{releaseLayoutRead=()=>{releaseLayoutRead=null;resolve(receipt);};});
     };
-    const originalSave=interactive.save;let saveFault=null;
-    interactive.save=(sender,request)=>{if(sender!==source.webContents||!saveFault)return originalSave(sender,request);const fault=saveFault;saveFault=null;if(fault==='uncommitted')return{ok:false,code:'fixture_save_unconfirmed'};const reply=originalSave(sender,request);return reply.ok?{ok:false,code:'fixture_save_unconfirmed'}:reply};
+    const originalSave=interactive.save;let saveFault=null, faultRole='main', withholdOwnerOutcome=false;
+    interactive.save=(sender,request)=>{
+      if(windows.getRole(sender)===faultRole&&saveFault){
+        const fault=saveFault;saveFault=null;
+        if(fault==='uncommitted')return{ok:false,code:'fixture_save_unconfirmed'};
+        const reply=originalSave(sender,request);return reply.ok?{ok:false,code:'fixture_save_unconfirmed'}:reply;
+      }
+      const reply=originalSave(sender,request);
+      return withholdOwnerOutcome&&reply.code==='interactive_owner_replaced'?{ok:false,code:reply.code}:reply;
+    };
     const nativeWindows=[];function QuietWindow(options){const win=new BrowserWindow(options);win.show=()=>{};nativeWindows.push(win);return win}QuietWindow.fromWebContents=contents=>BrowserWindow.fromWebContents(contents);
-    host=createResourceWindowController({BrowserWindow:QuietWindow,trustedWindows:windows,rendererLocation:${JSON.stringify(location)},preloadPath:${JSON.stringify(path.join(desktop, 'electron/preload/resource-window.cjs'))},interactiveResources:interactive,getOwner:()=>owner,getLocale:()=> 'en',readHistory:()=>undefined,writeHistory:()=>{legacyHistoryWrites++},resolveDocument:()=>{throw Error('unexpected file lookup')},fileAccess:{readFile:()=>{fileReads++;throw Error('unexpected file read')}}});
+    host=createResourceWindowController({BrowserWindow:QuietWindow,trustedWindows:windows,rendererLocation:${JSON.stringify(location)},preloadPath:${JSON.stringify(path.join(desktop, 'electron/preload/resource-window.cjs'))},interactiveResources:interactive,getOwner:()=>activeOwner,getLocale:()=> 'en',readHistory:()=>undefined,writeHistory:()=>{legacyHistoryWrites++},resolveDocument:()=>{throw Error('unexpected file lookup')},fileAccess:{readFile:()=>{fileReads++;throw Error('unexpected file read')}}});
     const ipc=createCatalogIpcMain({ipcMain,authorize:windows.authorize});registerIpcOwners({ipc,registrations:[...createResourceWindowIpcRegistrations({resourceWindows:host}),...createInteractiveResultsIpcRegistrations({interactiveResults:interactive}),...createResourceFeedbackIpcRegistrations({preparation})]});
     ipc.handle('project-agent:read-input-draft',(_event,request)=>drafts.read(request));ipc.handle('project-agent:write-input-draft',(_event,request)=>drafts.write(request));ipc.handle('project-agent:submit-input',(_event,request)=>({ok:true,input:queue.submitInput(request)}));
     ipc.on('settings:get-sync',event=>{event.returnValue=initial});ipc.handle('settings:get',()=>initial);ipc.handle('settings:update',(_event,partial)=>{settingsWrites.push(partial);return initial});
@@ -140,7 +148,10 @@ test('the main workspace opens canonical interactive deliveries, restores result
         evidenceEntries.push(saved.indexEntry);resultStore.markIndexed(saved.callRef,saved.indexEntry);
         const retire=createInteractiveRetention({resultStore,stateStore,assertOwner:()=>true,acquireRoots:()=>({sources:Object.fromEntries(INTERACTIVE_RETENTION_SOURCES.map(source=>[source,'sha256:'+'0'.repeat(64)])),pins:[],followupIds:[],assertCurrent:()=>true,release(){}})});
         const preview=retire.preview(saved.reference);retire.cleanup({reference:saved.reference,requestId:'retire-fixture',expectedDigest:preview.cleanupDigest});return saved.reference;},
-      failSave:kind=>{if(!['committed','uncommitted'].includes(kind))throw Error('invalid fault');saveFault=kind},
+      failSave:(kind,role='main')=>{if(!['committed','uncommitted'].includes(kind))throw Error('invalid fault');saveFault=kind;faultRole=role},
+      replaceOwner(){activeOwner={...owner,conversationId:'replacement-conversation'};withholdOwnerOutcome=true},
+      allowOutcome(){withholdOwnerOutcome=false},
+      replacementLayout:()=>interactive.readLayout(source.webContents,{owner:activeOwner}),
       draft:()=>drafts.read(draftAddress),consume:()=>queue.consume(owner.workspaceId),inputs:()=>({queue:queue.diagnosticSnapshot(owner.workspaceId),messages:conversations.getPersistedConversationHistory(owner.conversationId).messages.filter(row=>row.kind==='user_input'&&row.id!=='fixture-result-anchor').map(row=>({...row,selected:feedback.restore(row,owner.workspaceId)}))}),
       closeSource:()=>{closeAttempts++;source.close()},
       reloadSource:()=>source.webContents.reload(),
@@ -385,6 +396,77 @@ test('the main workspace opens canonical interactive deliveries, restores result
     assert.equal(await cleaned.getByText('View saved program', { exact: true }).count(), 0);
     assert.equal(await cleaned.getByText(/Reading position was not saved/i).count(), 0);
     await cleaned.screenshot({ path: path.join(root, 'native-cleaned-summary.png'), animations: 'disabled' });
+
+    const takeOver = revised.getByRole('button', { name: 'Continue calculation here', exact: true });
+    if (await takeOver.isVisible()) await takeOver.click();
+    await electron.evaluate(() => globalThis.workspaceFixture.failSave('committed', 'resource'));
+    await revised.getByLabel('Divisor', { exact: true }).fill('7');
+    await revised.getByRole('button', { name: 'Save conditions', exact: true }).click();
+    await revised.getByText('Saving is unconfirmed. Your input is preserved. Retry saving.', { exact: true }).waitFor();
+    const compose = (locator, raw) => locator.evaluate((node, value) => {
+      node.focus();
+      node.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(node, value);
+      node.dispatchEvent(new InputEvent('input', { bubbles: true, isComposing: true }));
+    }, raw);
+    await compose(revised.getByLabel('Trial name', { exact: true }), 'Native local recovery');
+    await compose(page.getByLabel('Trial name', { exact: true }), 'Main local recovery');
+    await electron.evaluate(() => globalThis.workspaceFixture.replaceOwner());
+    await revised.getByRole('button', { name: 'Close this window', exact: true }).click();
+    const nativeRecovery = revised.getByRole('region', { name: 'Previous view input recovery' });
+    await nativeRecovery.getByRole('button', { name: 'Check previous save', exact: true }).waitFor();
+    assert.equal(await nativeRecovery.getByRole('button', { name: 'Discard local changes', exact: true }).count(), 0);
+    assert.equal(revised.isClosed(), false);
+    await nativeRecovery.getByRole('button', { name: 'Check previous save', exact: true }).click();
+    assert.equal(await nativeRecovery.getByRole('button', { name: 'Discard local changes', exact: true }).count(), 0);
+    await electron.evaluate(() => globalThis.workspaceFixture.allowOutcome());
+    await nativeRecovery.getByRole('button', { name: 'Check previous save', exact: true }).click();
+    await nativeRecovery.getByRole('button', { name: 'Discard local changes', exact: true }).waitFor();
+    assert.equal(await nativeRecovery.getByLabel('Preserved local input', { exact: true }).inputValue(), 'Trial name: Native local recovery');
+    assert.equal(await revised.getByLabel('Divisor', { exact: true }).count(), 0);
+    await revised.screenshot({ path: path.join(root, 'native-owner-replacement.png'), animations: 'disabled' });
+    const discard = async (target, recovery, retainedFields = 1) => {
+      await recovery.getByRole('button', { name: 'Discard local changes', exact: true }).click();
+      const dialog = target.getByRole('dialog', { name: 'Discard local changes in the previous view?' });
+      await dialog.getByRole('button', { name: 'Keep', exact: true }).click();
+      await dialog.waitFor({ state: 'detached' });
+      assert.equal(await recovery.getByLabel('Preserved local input', { exact: true }).count(), retainedFields);
+      await recovery.getByRole('button', { name: 'Discard local changes', exact: true }).click();
+      await dialog.getByRole('button', { name: 'Discard local changes', exact: true }).click();
+    };
+    await discard(revised, nativeRecovery);
+    await revised.getByText('Local changes were discarded. You can close this view.', { exact: true }).waitFor();
+    assert.equal(revised.isClosed(), false, 'confirming discard does not close a window');
+    const closedReplacement = revised.waitForEvent('close');
+    await revised.getByRole('button', { name: 'Close this window', exact: true }).click();
+    await closedReplacement;
+    const nativeConfirmed = await electron.evaluate((_electron, reference) => globalThis.workspaceFixture.snapshot(reference), next);
+    assert.equal(nativeConfirmed.values.$x, 7);
+    assert.equal(nativeConfirmed.values.$name, 'Workspace trial');
+
+    await previous.locator('.resource-interactive-body').evaluate(node => { node.scrollTop = 370; node.dispatchEvent(new Event('scroll')); });
+    await previous.getByText('Reading position was not saved. Your current reading is preserved.', { exact: true }).waitFor();
+    await previous.getByRole('button', { name: 'Close this window', exact: true }).click();
+    const readingRecovery = previous.getByRole('region', { name: 'Previous view input recovery' });
+    await readingRecovery.getByRole('button', { name: 'Discard local changes', exact: true }).waitFor();
+    await discard(previous, readingRecovery, 0);
+    await previous.getByText('Local changes were discarded. You can close this view.', { exact: true }).waitFor();
+    const closedReading = previous.waitForEvent('close');
+    await previous.getByRole('button', { name: 'Close this window', exact: true }).click();
+    await closedReading;
+
+    await electron.evaluate(() => globalThis.workspaceFixture.closeSource());
+    const mainRecovery = page.getByRole('region', { name: 'Previous view input recovery' });
+    await mainRecovery.getByLabel('Preserved local input', { exact: true }).waitFor();
+    assert.ok((await mainRecovery.getByLabel('Preserved local input', { exact: true }).inputValue()).includes('Trial name: Main local recovery'));
+    assert.equal(page.isClosed(), false);
+    await page.screenshot({ path: path.join(root, 'workspace-owner-replacement.png'), animations: 'disabled' });
+    await discard(page, mainRecovery);
+    await page.getByText('You can close or reload again.', { exact: true }).waitFor();
+    assert.deepEqual(await electron.evaluate(() => globalThis.workspaceFixture.replacementLayout()), { ok: true, snapshot: null });
+    assert.equal((await electron.evaluate(() => globalThis.workspaceFixture.snapshot())).values.$name, 'Workspace trial');
+    assert.equal(page.isClosed(), false);
+    const closedMain = page.waitForEvent('close'); await electron.evaluate(() => globalThis.workspaceFixture.closeSource()); await closedMain;
     assert.deepEqual(external, []);
   } catch (error) {
     if (page && !page.isClosed()) { console.log('Workspace fixture diagnostics:', JSON.stringify({ text: (await page.locator('body').innerText()).slice(0, 2600), errors, root })); await page.screenshot({ path: path.join(root, 'workspace-failed.png'), animations: 'disabled' }); }
