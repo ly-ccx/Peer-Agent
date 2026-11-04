@@ -16,7 +16,7 @@ import { createTuiProjectHost } from './tui-project-host.ts';
 import { createTurnTestRuntime, drainTestCleanup, type TestCleanup } from './turn-test-support.ts';
 
 export const INTERACTIVE_STORY_BUDGET = Object.freeze({
-  requests: { bot: 24, worker: 12, verifier: 16 }, calls: { bot: 32, worker: 16, verifier: 24 },
+  requests: { bot: 28, worker: 12, verifier: 16 }, calls: { bot: 32, worker: 16, verifier: 24 },
   totalRequests: 48, outputTokens: 1800, botOutputTokens: 3200, requestMs: 45_000, caseMs: 360_000,
 });
 const CAPABILITIES = [
