@@ -611,7 +611,9 @@ export function createConversationStore(options = {}) {
     messageCountMigrationTimer = setTimeout(() => {
       messageCountMigrationTimer = null;
       messageCountMigrationScheduled = false;
+      if (!existsSync(indexFile)) return;
       void withFileLocksAsync([indexFile], () => fillMissingMessageCounts(wanted)).catch((err) => {
+        if (err.code === 'ENOENT' && !existsSync(storeDir)) return;
         // 后台迁移失败不影响 list；下次 list 会再次调度。
         console.warn('[conversation-store] messageCount migration failed:', err);
       });
