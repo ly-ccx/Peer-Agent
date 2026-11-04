@@ -118,7 +118,10 @@ export function createTuiProjectHost(options: {
   const interactive = createInteractiveRuntime({ rootDir: runtimeRoot, goalPlanStore: plans, conversationStore: conversations,
     readPortableWorkHistory: (scope: Parameters<typeof readStoredWorkHistory>[1]) => readStoredWorkHistory(path.join(dataHome, 'conversations'), scope),
     retentionPorts: { inputQueue: inputs, drafts, acquireCompatibility: options.acquireInteractiveRetentionCompatibility },
-    getBotConversationId: (id: string) => profiles.read(id)?.agentConversationId, holdsLease: holds, enabled: interactiveEnabled,
+    getBotConversationId(id: string) {
+      const profile = profiles.read(id);
+      return profile?.status === 'active' ? profile.agentConversationId : undefined;
+    }, holdsLease: holds, enabled: interactiveEnabled,
     classifyContext: () => 'D3_private', getSession: (id: string, detail = 'report') => supervisor.get({ sessionId: id, ...(detail === 'report' ? { detail } : {}) }) });
   const interactiveProvider = createInteractiveToolProvider(interactive);
   const executor = createTuiTurnExecutor({ dataHome, getSettings, holdsLease: holds,

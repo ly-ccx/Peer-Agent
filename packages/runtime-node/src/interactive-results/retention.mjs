@@ -16,14 +16,19 @@ const count = value => Number.isSafeInteger(value) && value >= 0;
 const synchronous = fn => typeof fn === 'function' && fn.constructor?.name !== 'AsyncFunction';
 function reference(raw) { const result = normalizeInteractiveReference(raw); if (!result) throw problem('interactive_reference_invalid'); return result; }
 
-/** Internal maintenance only. No public delete port exists until every root store is guarded. */
-export function createInteractiveRetention({ resultStore, stateStore, assertOwner, acquireRoots, now = () => new Date().toISOString(), onStep = () => {} }) {
+/** Internal maintenance. Readback checks owner identity; mutation also checks execution authority and guarded roots. */
+export function createInteractiveRetention({ resultStore, stateStore, assertOwner, assertCleanupAuthority = assertOwner, acquireRoots, now = () => new Date().toISOString(), onStep = () => {} }) {
   const storage = resultStore.storage;
   function current(owner) {
     if (typeof assertOwner !== 'function' || assertOwner(owner) !== true) throw problem('interactive_scope_denied');
   }
-  function roots(owner, work) {
+  function currentForCleanup(owner) {
     current(owner);
+    if (assertCleanupAuthority !== assertOwner && (typeof assertCleanupAuthority !== 'function' || assertCleanupAuthority(owner) !== true))
+      throw problem('interactive_scope_denied');
+  }
+  function roots(owner, work) {
+    currentForCleanup(owner);
     if (!synchronous(acquireRoots)) throw problem('interactive_retention_unavailable');
     const guard = acquireRoots(copy(owner));
     try {
@@ -42,7 +47,7 @@ export function createInteractiveRetention({ resultStore, stateStore, assertOwne
       if (guard.followupIds.some(id => !interactiveToken(id)) || new Set(guard.followupIds).size !== guard.followupIds.length)
         throw problem('interactive_retention_unavailable');
       const followupIds = [...guard.followupIds].sort();
-      const assertCurrent = () => { current(owner); if (guard.assertCurrent() !== true) throw problem('interactive_retention_stale'); return true; };
+      const assertCurrent = () => { currentForCleanup(owner); if (guard.assertCurrent() !== true) throw problem('interactive_retention_stale'); return true; };
       assertCurrent();
       const normalized = { sources: guard.sources, pins: pins.sort((a, b) => encode(a).localeCompare(encode(b))), followupIds };
       const result = work(normalized, assertCurrent, guard.materialResponsibility);
@@ -88,10 +93,10 @@ export function createInteractiveRetention({ resultStore, stateStore, assertOwne
       || !head || head.owner !== encode(ref.owner) || head.head !== headRef.contentVersion) throw problem('interactive_cleanup_corrupt');
     return copy(value);
   }
-  function loadReceipt(ref) {
-    current(ref.owner);
+  function loadReceipt(ref, checkOwner = current) {
+    checkOwner(ref.owner);
     const context = storage.connect(ref.owner.workspaceId);
-    const value = savedReceipt(context, ref); current(ref.owner); return value;
+    const value = savedReceipt(context, ref); checkOwner(ref.owner); return value;
   }
   function matchingReceipt(receipt, ref, request) {
     if (receipt && !same(receipt.reference, ref)) throw problem('interactive_cleanup_parameter_conflict');
@@ -190,10 +195,10 @@ export function createInteractiveRetention({ resultStore, stateStore, assertOwne
   }
   function cleanup(raw) {
     const ref = reference(raw?.reference);
-    current(ref.owner);
+    currentForCleanup(ref.owner);
     const request = cleanupRequest(raw);
     const { expectedDigest, requestId } = request;
-    const existing = matchingReceipt(loadReceipt(ref), ref, request);
+    const existing = matchingReceipt(loadReceipt(ref, currentForCleanup), ref, request);
     if (existing) return existing;
     if (!storage.connect(ref.owner.workspaceId)) throw problem('interactive_result_unavailable');
     return withCleanupOutcome(storage, ref.owner.workspaceId, commit => {
@@ -223,6 +228,6 @@ export function createInteractiveRetention({ resultStore, stateStore, assertOwne
       return receipt;
     });
   }
-  return { preview, cleanup, readReceipt, readTombstone, ...createFollowupRetention({ resultStore, current, roots, now, onStep }),
-    ...createMaterialRetention({ resultStore, current, roots, now, onStep }) };
+  const ports = { resultStore, current, currentForCleanup, roots, now, onStep };
+  return { preview, cleanup, readReceipt, readTombstone, ...createFollowupRetention(ports), ...createMaterialRetention(ports) };
 }

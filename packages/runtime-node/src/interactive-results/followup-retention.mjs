@@ -12,7 +12,7 @@ function target(raw) {
 }
 
 /** Separate retirement of user-confirmed snapshots, under the same six roots. */
-export function createFollowupRetention({ resultStore, current, roots, now, onStep }) {
+export function createFollowupRetention({ resultStore, current, currentForCleanup, roots, now, onStep }) {
   const { storage } = resultStore;
   function read(context, { owner, followupId }) {
     const row = context?.db.prepare('SELECT owner,argsDigest,snapshot FROM followups WHERE id=?').get(followupId);
@@ -54,10 +54,10 @@ export function createFollowupRetention({ resultStore, current, roots, now, onSt
     });
   }
 
-  function loadReceipt(selection, request) {
-    current(selection.owner);
+  function loadReceipt(selection, request, checkOwner = current) {
+    checkOwner(selection.owner);
     const record = read(storage.connect(selection.owner.workspaceId), selection);
-    current(selection.owner);
+    checkOwner(selection.owner);
     return matchCleanupReceipt(record.retired ?? null, request);
   }
   function readFollowupReceipt(raw) {
@@ -68,7 +68,7 @@ export function createFollowupRetention({ resultStore, current, roots, now, onSt
     const selection = target(raw), { owner, followupId } = selection;
     const request = cleanupRequest(raw);
     const { expectedDigest, requestId } = request;
-    const existing = loadReceipt(selection, request);
+    const existing = loadReceipt(selection, request, currentForCleanup);
     if (existing) return existing;
     return withCleanupOutcome(storage, owner.workspaceId, commit => roots(owner, (guarded, assertCurrent) => commit(context => {
       const record = read(context, selection);

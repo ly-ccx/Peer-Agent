@@ -11,7 +11,7 @@ function target(raw) {
   return { owner, source: structuredClone(source), id };
 }
 
-export function createMaterialRetention({ resultStore, current, roots, now, onStep }) {
+export function createMaterialRetention({ resultStore, current, currentForCleanup, roots, now, onStep }) {
   const { storage } = resultStore;
   function read(context, selection) {
     const row = context?.db.prepare('SELECT owner,object,metadata FROM materials WHERE id=?').get(selection.id);
@@ -83,10 +83,10 @@ export function createMaterialRetention({ resultStore, current, roots, now, onSt
       } catch (error) { try { context.db.exec('ROLLBACK'); } catch {} throw error; }
     });
   }
-  function loadReceipt(selection, request) {
-    current(selection.owner);
+  function loadReceipt(selection, request, checkOwner = current) {
+    checkOwner(selection.owner);
     const record = read(storage.connect(selection.owner.workspaceId), selection);
-    current(selection.owner);
+    checkOwner(selection.owner);
     return matchCleanupReceipt(record.retired ?? null, request);
   }
   function readMaterialReceipt(raw) {
@@ -96,7 +96,7 @@ export function createMaterialRetention({ resultStore, current, roots, now, onSt
     const selection = target(raw), { owner, source, id } = selection;
     const request = cleanupRequest(raw);
     const { expectedDigest, requestId } = request;
-    const previous = loadReceipt(selection, request);
+    const previous = loadReceipt(selection, request, currentForCleanup);
     if (previous) return previous;
     return withCleanupOutcome(storage, owner.workspaceId, commit => guarded(selection, (guards, assertCurrent) => commit(context => {
       const record = read(context, selection);

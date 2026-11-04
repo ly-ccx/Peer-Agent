@@ -196,7 +196,10 @@ export function registerDesktopProjectAgent({
   const interactive = createInteractiveRuntime({ rootDir: runtimeRoot, goalPlanStore, conversationStore,
     readPortableWorkHistory: scope => readStoredWorkHistory(path.join(dataHome, 'conversations'), scope),
     retentionPorts: { inputQueue, drafts: inputDrafts, acquireCompatibility: acquireInteractiveRetentionCompatibility },
-    getBotConversationId: id => profileStore.read(id)?.agentConversationId, holdsLease: ownsProject, enabled: interactiveEnabled,
+    getBotConversationId(id) {
+      const profile = profileStore.read(id);
+      return profile?.status === 'active' ? profile.agentConversationId : undefined;
+    }, holdsLease: ownsProject, enabled: interactiveEnabled,
     classifyContext: () => 'D3_private', getSession: (id, detail = 'report') => supervisor.get({ sessionId: id, ...(detail === 'report' ? { detail } : {}) }) });
   const uninstallInteractive = installDesktopInteractiveRuntime({ runtime: interactive, enabled: interactiveEnabled });
   const memoryStore = createMemoryStore({ rootDir: dataHome });

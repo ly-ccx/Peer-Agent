@@ -456,3 +456,50 @@ test('the tombstone bound is explicit and normal runtime composition never opens
   assert.throws(() => runtime.retention.preview(f.first.reference), { code: 'interactive_retention_unavailable' });
   assert.equal(f.store.getVersion(f.first.reference).content.initialValues.$budget, 100);
 });
+
+test('the active Bot can reconcile all cleanup receipts after handoff or disablement without execution authority', async t => {
+  const f = await fixture(t), { reference } = f.first;
+  const writer = f.states.acquire({ reference, identity, expectedRevision: 0 }, current);
+  const { stateDigest } = f.states.read(reference, current);
+  const frozen = await f.states.prepareFollowup({ reference, identity, writer, stateRevision: 0, stateDigest,
+    fields: ['$budget'], requestId: 'freeze-reconcile' }, current);
+  f.states.release({ reference, identity, writer }, current);
+  const source = f.store.recordMaterial({ owner, source: { kind: 'tool-result', conversationId: 'worker-a', toolCallId: 'material-reconcile' },
+    value: { text: 'synthetic material' }, dataLevel: 'D3_private', observedAt: now(), truncated: false, redacted: false,
+    evidenceRefs: ['tool-result://material-reconcile'] }, current);
+  const cleanup = createInteractiveRetention({ resultStore: f.store, stateStore: f.states, assertOwner: current,
+    acquireRoots: () => ({ ...f.acquireRoots(), materialResponsibility: () => ({ digest: jsonDigest('unreferenced'), blocked: false,
+      assertCurrent: current, release() {} }) }), now });
+  const followup = { owner, followupId: frozen.followupId };
+  const material = { owner, source };
+  const cases = [
+    ['previewFollowup', 'cleanupFollowup', 'readFollowupReceipt', followup, followup],
+    ['previewMaterial', 'cleanupMaterial', 'readMaterialReceipt', material, material],
+    ['preview', 'cleanup', 'readReceipt', reference, { reference }],
+  ].map(([preview, mutate, read, target, scope], index) => {
+    const request = { ...scope, requestId: `cleanup-reconcile-${index}`, expectedDigest: cleanup[preview](target).cleanupDigest };
+    return { preview, mutate, read, target, request, receipt: cleanup[mutate](request) };
+  });
+  let activeId = owner.conversationId, enabled = false, lease = false, executionChecks = 0;
+  const runtime = createInteractiveRuntime({ rootDir: f.rootDir,
+    getBotConversationId: id => id === owner.workspaceId ? activeId : undefined,
+    enabled: () => { executionChecks++; return enabled; }, holdsLease: () => { executionChecks++; return lease; } });
+  t.after(() => runtime.close());
+  const readback = runtime.retention;
+  for (const [feature, hasLease] of [[true, false], [false, true], [false, false]]) {
+    enabled = feature; lease = hasLease;
+    const before = executionChecks;
+    for (const { read, request, receipt } of cases) assert.deepEqual(readback[read](request), receipt);
+    assert.equal(readback.readTombstone(reference).cleanedAt, cases[2].receipt.cleanedAt);
+    assert.equal(executionChecks, before, 'receipt and tombstone reads never consult execution authority');
+    for (const { preview, mutate, target, request } of cases) {
+      assert.throws(() => readback[preview](target), { code: 'interactive_scope_denied' });
+      assert.throws(() => readback[mutate](request), { code: 'interactive_scope_denied' });
+    }
+  }
+  for (const currentId of ['replacement-bot', undefined]) {
+    activeId = currentId;
+    for (const { read, request } of cases) assert.throws(() => readback[read](request), { code: 'interactive_scope_denied' });
+    assert.throws(() => readback.readTombstone(reference), { code: 'interactive_scope_denied' });
+  }
+});
