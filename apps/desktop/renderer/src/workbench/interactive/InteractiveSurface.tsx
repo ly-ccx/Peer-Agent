@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Renderer, useStateField, type Library, type OpenUIError } from '@openuidev/react-lang';
 import { createPeerLibrary, validateState } from '@peer-agent/interactive-content';
-import type { InteractiveMaterialProvenance, InteractiveStateValue } from '@peer-agent/protocol';
+import type { InteractiveMaterialProvenance, InteractiveSourceIssue, InteractiveStateValue } from '@peer-agent/protocol';
 import { InteractiveRenderContext, peerInteractiveComponents } from './InteractiveComponents';
 import type { InteractiveSession } from './interactiveSession';
 import { InteractiveDraftPreparation } from './InteractiveDraftPreparation';
+import { InteractiveSources } from './InteractiveSources';
 import './interactive-results.css';
 
 function StateBridge({ name, value, seen }: { name: string; value: InteractiveStateValue; seen: (key: string, value: unknown) => void }) {
@@ -20,7 +21,8 @@ function calculationMessage(code: string, isZh: boolean) {
   return isZh ? '当前条件无法计算。请调整条件或恢复初始条件。' : 'These conditions cannot be calculated. Adjust or reset the inputs.';
 }
 /** Public SDK Renderer with Peer components, governed state requests and static error recovery. */
-export function InteractiveSurface({ session, provenance, isZh, onReady }: { readonly session: InteractiveSession; readonly provenance: readonly InteractiveMaterialProvenance[]; readonly isZh: boolean; readonly onReady?: () => void }) {
+export function InteractiveSurface({ session, provenance, sourceIssues, isZh, onReady }: { readonly session: InteractiveSession; readonly provenance: readonly InteractiveMaterialProvenance[];
+  readonly sourceIssues?: readonly InteractiveSourceIssue[]; readonly isZh: boolean; readonly onReady?: () => void }) {
   const descriptionId = useId();
   const state = useSyncExternalStore(session.subscribe, session.snapshot, session.snapshot);
   const [seenValues, setSeen] = useState<Record<string, unknown>>({}), [sdkErrors, setSdkErrors] = useState<readonly OpenUIError[]>([]);
@@ -54,6 +56,7 @@ export function InteractiveSurface({ session, provenance, isZh, onReady }: { rea
       : state.saveError ? <p className="interactive-notice" role="alert">{state.saveError === 'interactive_state_protected' ? calculationMessage(state.saveError, isZh) : state.saveError === 'interactive_writer_busy' ? (isZh ? '另一个视图正在修改条件；这里保持只读。接管会使原视图停止保存。' : 'Another view is editing. This view is read-only. Taking over stops saves from the other view.') : state.phase === 'writer_lost' ? (isZh ? '保存身份已失效，当前输入保留。接管后可重试保存。' : 'The writer is no longer current. Your input is preserved. Take over to retry.') : (isZh ? '条件尚未确认保存，当前输入保留。可以重试。' : 'Saving is unconfirmed. Your input is preserved. Retry saving.')}</p> : null}
     {error && error !== state.saveError ? <p className="interactive-notice" role="status">{calculationMessage(error, isZh)}</p> : null}
     <p id={descriptionId} className="interactive-caption">{isZh ? '模型生成的试算，使用固定材料。下方生成控件仅调整本机试算条件。' : 'Model-generated trial using fixed material. The generated controls below only change local trial conditions.'}</p>
+    <InteractiveSources provenance={provenance} issues={sourceIssues} isZh={isZh} />
     <InteractiveRenderContext.Provider value={{ session, state, showResults: sdkReady && !error, provenance, isZh }}>
       <Renderer.Root response={session.content.program} library={library} initialState={initial} toolProvider={null} publishObservability={false} onError={onError} onStateUpdate={onStateUpdate}>
         {Object.entries(state.sdkValues).map(([key, value]) => <StateBridge key={key} name={key} value={value} seen={seen} />)}

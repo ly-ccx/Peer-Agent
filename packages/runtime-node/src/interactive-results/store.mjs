@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { INTERACTIVE_PUBLISH_CAPABILITY, INTERACTIVE_RESULT_LIMITS as L, interactiveArtifactRef, interactiveDigest, interactiveToken, normalizeInteractiveOwner, normalizeInteractiveReference, normalizeInteractivePublicationReference } from '@peer-agent/protocol';
 import { pathOf } from '../data-store.mjs';
 import { createInteractiveStorage, decode, encode, jsonDigest, problem } from './storage.mjs';
-import { materialKey, readMaterialRecord } from './material-record.mjs';
+import { materialKey, readMaterialRecord, validMaterialOrigin } from './material-record.mjs';
 import { createPublicationAttempts } from './publication-attempts.mjs';
 import { createOwnerPrivacy, maximumInteractiveDataLevel } from './owner-privacy.mjs';
 
@@ -214,12 +214,13 @@ export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'
     requireCurrent(assertCurrent);
     return clone({ reference, head: latest, ...(predecessor ? { predecessor } : {}) });
   }
-  function recordMaterial({ owner: rawOwner, source, value, dataLevel, observedAt, truncated, redacted, evidenceRefs }, assertCurrent) {
+  function recordMaterial({ owner: rawOwner, source, value, dataLevel, observedAt, truncated, redacted, evidenceRefs, origin = undefined }, assertCurrent) {
     const owner = requireOwner(rawOwner);
     if (!materialKey(source)
       || !['D0_public', 'D1_internal', 'D2_sensitive', 'D3_private', 'D4_regulated'].includes(dataLevel)
       || !Number.isFinite(Date.parse(observedAt)) || typeof truncated !== 'boolean' || typeof redacted !== 'boolean'
-      || !Array.isArray(evidenceRefs) || source.kind === 'tool-result' && !evidenceRefs.length) throw problem('material_snapshot_unavailable');
+      || !Array.isArray(evidenceRefs) || source.kind === 'tool-result' && !evidenceRefs.length
+      || (origin !== undefined && !validMaterialOrigin(source, origin))) throw problem('material_snapshot_unavailable');
     requireCurrent(assertCurrent);
     const contentVersion = jsonDigest(value), id = materialKey({ ...source, expectedContentVersion: contentVersion });
     const metadata = { owner, source: { ...source, expectedContentVersion: contentVersion }, contentVersion, dataLevel, observedAt, truncated, redacted, evidenceRefs };
@@ -233,16 +234,16 @@ export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'
         if (!same(savedSource, metadata.source)) throw problem('material_identity_conflict');
         const record = readMaterialRecord(previous, owner, metadata.source);
         if (record?.retired) throw problem('material_snapshot_cleaned');
-        const actual = record?.metadata;
+        const { origin: _originalOrigin, ...actual } = record.metadata;
         if (previous.owner !== encode(owner) || previous.object !== contentVersion || !same(actual, { ...metadata, observedAt: actual.observedAt })) throw problem('material_identity_conflict');
         return clone(actual.source);
       }
       const object = storage.putObject(context, value);
-      context.db.prepare('INSERT INTO materials VALUES(?,?,?,?)').run(id, encode(owner), object, encode(metadata));
+      context.db.prepare('INSERT INTO materials VALUES(?,?,?,?)').run(id, encode(owner), object, encode(origin ? { ...metadata, origin } : metadata));
       return clone(metadata.source);
     });
   }
-  function readMaterial(rawOwner, source) {
+  function materialRecord(rawOwner, source) {
     const owner = requireOwner(rawOwner), context = storage.connect(owner.workspaceId);
     const id = materialKey(source);
     if (!context || !id) return null;
@@ -250,9 +251,14 @@ export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'
     const record = readMaterialRecord(row, owner, source);
     if (!record) return null;
     if (record.retired) throw problem('material_snapshot_cleaned');
-    return { ...record.metadata, value: storage.readObject(context, row.object), canonical: true, available: true };
+    return { metadata: record.metadata, context, object: row.object };
   }
-  return { commitPublication, getOperation, getVersion, getVersionMetadata, markIndexed, listPending, head, readVersions, recordMaterial, readMaterial,
+  return { commitPublication, getOperation, getVersion, getVersionMetadata, markIndexed, listPending, head, readVersions, recordMaterial,
+    readMaterialInfo: (owner, source) => materialRecord(owner, source)?.metadata ?? null,
+    readMaterial(owner, source) {
+      const record = materialRecord(owner, source);
+      return record && { ...record.metadata, value: storage.readObject(record.context, record.object), canonical: true, available: true };
+    },
     ownerDataLevel: (rawOwner, minimum) => privacy.current(requireOwner(rawOwner), minimum),
     hasOwnerPrivacy: rawOwner => privacy.has(requireOwner(rawOwner)),
     rememberObservationLevel(rawOwner, dataLevel, assertOwner) {

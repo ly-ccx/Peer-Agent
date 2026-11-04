@@ -44,5 +44,15 @@ export function createInteractiveUserMaterials({ conversationStore }) {
       if (record.contentVersion !== source.expectedContentVersion) throw problem('material_version_mismatch');
       return record;
     },
+    sourceIssue(source, history, dataLevel) {
+      const messages = history?.messages?.filter(message => message.id === source.messageId);
+      if (messages?.length !== 1 || messages[0].role !== 'user') return 'source_unavailable';
+      const message = messages[0];
+      if (message.attachments !== undefined && !Array.isArray(message.attachments)) return 'source_unavailable';
+      const attachments = (message.attachments ?? []).filter(attachment => attachment?.id === source.attachmentId);
+      if (!attachments.length) return 'attachment_removed';
+      if (attachments.length !== 1) return 'source_unavailable';
+      return observation(message, attachments[0], { dataLevel }).contentVersion === source.expectedContentVersion ? null : 'source_changed';
+    },
   };
 }

@@ -3,6 +3,7 @@ import { isReactiveAssign, useStateField, type ComponentRenderProps } from '@ope
 import { INTERACTIVE_RESULT_LIMITS as L, type InteractiveMaterialProvenance } from '@peer-agent/protocol';
 import { PeerIcon } from '../../ui/icons';
 import { Checkbox } from '../../ui/boolean-controls/Checkbox';
+import { interactiveSourceKind } from './InteractiveSources';
 import type { InteractiveSession, InteractiveSessionSnapshot } from './interactiveSession';
 
 export const InteractiveRenderContext = createContext<{ session: InteractiveSession; state: InteractiveSessionSnapshot;
@@ -91,7 +92,6 @@ function Chart({ props: p }: P<ChartProps>) {
 function SourceReference({ props }: P<{ bindingId: string; label: string }>) {
   const ctx = useInteractiveRender(), source = ctx.provenance.find(item => item.bindingId === props.bindingId);
   if (!ctx.showResults || !source) return null;
-  const kind = source.source.kind === 'model-data' ? (ctx.isZh ? '模型构造的数据' : 'Model-provided data') : source.source.kind === 'user-material' ? (ctx.isZh ? '用户提供的材料' : 'User-provided material') : (ctx.isZh ? '工具实际返回的观测' : 'Observed tool result');
-  return <aside className="interactive-source"><strong>{props.label}</strong><span>{kind}</span>{source.truncated ? <span>{ctx.isZh ? '来源已截断' : 'Source truncated'}</span> : null}{source.redacted ? <span>{ctx.isZh ? '来源已脱敏' : 'Source redacted'}</span> : null}</aside>;
+  return <aside className="interactive-source"><strong>{props.label}</strong><span>{interactiveSourceKind(source.source, ctx.isZh)}</span>{source.truncated ? <span>{ctx.isZh ? '来源已截断' : 'Source truncated'}</span> : null}{source.redacted ? <span>{ctx.isZh ? '来源已脱敏' : 'Source redacted'}</span> : null}</aside>;
 }
 export const peerInteractiveComponents = { Col, Row, Card, Title, Text, Caption, Divider, Metric, Input, NumberInput, Select, Checkbox: BooleanInput, Slider, Button, Table, Chart, SourceReference };

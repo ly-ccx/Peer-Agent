@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { EventEmitter } from 'node:events';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
@@ -7,6 +8,8 @@ import { createConversationStore } from '../../../conversation-store/src/index.m
 import { createGoalPlanStore } from '../goal-plan-store.mjs';
 import { resolveWorkSessionProfile } from '../project-agent/work-session-profile.mjs';
 import { createInteractiveRuntime } from './runtime.mjs';
+import { createInteractiveViewService } from './view-service.mjs';
+import { createInteractiveResultStore as createLegacyStore } from './test-fixtures/retention-legacy-store.mjs';
 
 test('canonical inline uploads produce scoped version references and immutable published bytes without tool Evidence or file reads', async t => {
   const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'peer-interactive-upload-')));
@@ -21,7 +24,18 @@ test('canonical inline uploads produce scoped version references and immutable p
   let dataLevel = 'D4_regulated';
   const runtime = createInteractiveRuntime({ rootDir: path.join(root, 'runtime'), goalPlanStore: plans, conversationStore: conversations,
     getBotConversationId: () => parent.id, enabled: () => true, holdsLease: () => true, classifyContext: () => dataLevel });
-  t.after(() => { runtime.close(); rmSync(root, { recursive: true, force: true }); });
+  const owner = { workspaceId: 'bot-a', conversationId: parent.id };
+  const views = createInteractiveViewService({ resultStore: runtime.resultStore, stateStore: runtime.stateStore,
+    readSourceIssues: runtime.readSourceIssues, resolveSource: () => ({ owner, assertCurrent: () => true }) });
+  t.after(() => { views.dispose(); runtime.close(); rmSync(root, { recursive: true, force: true }); });
+  async function readView(reference) {
+    const sender = new EventEmitter();
+    try {
+      const view = await views.open(sender, { reference, requestId: 'material-view' });
+      assert.equal(view.ok, true, JSON.stringify(view));
+      return view;
+    } finally { sender.emit('destroyed'); }
+  }
   const rows = Array.from({ length: 200 }, (_, id) => ({ id, label: `row-${id}`, cost: id + 1 }));
   const text = JSON.stringify({ rows, password: 'must-not-be-stored' });
   const upload = { id: 'upload-a', sourceKind: 'user_upload', kind: 'text', mimeType: 'application/json', name: 'estimates.json', size: Buffer.byteLength(text), text };
@@ -50,6 +64,12 @@ test('canonical inline uploads produce scoped version references and immutable p
   assert.equal(original.dataLevel, 'D4_regulated');
   assert.deepEqual(original.provenance[0].evidenceRefs, []);
   assert.equal(original.provenance[0].observedAt, message.createdAt);
+  const material = runtime.resultStore.readMaterialInfo(owner, notices[0].source);
+  assert.deepEqual(material.origin, { conversationId: child.id, planId: 'plan-a', sessionId: 'session-a' });
+  const legacyStore = createLegacyStore({ rootDir: path.join(root, 'runtime'), assertCompatibility: () => true });
+  try { assert.deepEqual(legacyStore.readMaterial(owner, notices[0].source).value.json.rows, rows); }
+  finally { legacyStore.close(); }
+  assert.equal((await readView(original.reference)).sourceIssues, undefined);
   assert.equal(JSON.stringify(runtime.resultStore.readMaterial(original.reference.owner, notices[0].source)).includes('must-not-be-stored'), false);
   dataLevel = 'D3_private';
   assert.equal(runtime.userMaterialNotices(context)[0].dataLevel, 'D4_regulated', 'a saved source cannot be downgraded by a less strict later context');
@@ -57,6 +77,9 @@ test('canonical inline uploads produce scoped version references and immutable p
   const changed = runtime.userMaterialNotices(context)[0];
   assert.notEqual(changed.source.expectedContentVersion, notices[0].source.expectedContentVersion);
   assert.deepEqual(runtime.resultStore.getVersion(original.reference).content.bindings.facts, rows);
+  const stale = await readView(original.reference);
+  assert.deepEqual(stale.sourceIssues, [{ bindingId: 'facts', status: 'source_changed' }]);
+  assert.deepEqual(stale.result.content.bindings.facts, rows);
   assert.equal((await publish('new-version', changed.source)).result.status, 'success');
   assert.equal((await publish('retain-original')).result.status, 'success');
   assert.deepEqual(approvals, [{ id: 'publish-a', dataLevel: 'D4_regulated' }, { id: 'new-version', dataLevel: 'D4_regulated' }, { id: 'retain-original', dataLevel: 'D4_regulated' }]);
@@ -65,6 +88,23 @@ test('canonical inline uploads produce scoped version references and immutable p
   conversations.updateMessageById(child.id, message.id, { attachments: [] });
   assert.deepEqual(runtime.userMaterialNotices(context), []);
   assert.equal((await publish('withdrawn-material')).result.outputPreview.reason, 'material_scope_denied');
+  const removed = await readView(original.reference);
+  assert.deepEqual(removed.sourceIssues, [{ bindingId: 'facts', status: 'attachment_removed' }]);
+  assert.deepEqual(removed.result.content.bindings.facts, rows);
+
+  const laterOrigin = { conversationId: 'later-worker', planId: 'later-plan', sessionId: 'later-session' };
+  const inherited = { ...original, source: { ...original.source, ...laterOrigin } };
+  assert.deepEqual(runtime.readSourceIssues(inherited), removed.sourceIssues, 'a later publication cannot replace the material origin');
+  const { value, ...saved } = runtime.resultStore.readMaterial(owner, notices[0].source);
+  runtime.resultStore.recordMaterial({ ...saved, value, origin: laterOrigin }, () => true);
+  assert.deepEqual(runtime.resultStore.readMaterialInfo(owner, notices[0].source), material, 'a retry cannot rebind the original location');
+
+  const db = runtime.resultStore.storage.connect(owner.workspaceId).db;
+  db.prepare("UPDATE materials SET metadata=json_remove(metadata,'$.origin') WHERE json_extract(metadata,'$.contentVersion')=?").run(material.contentVersion);
+  const legacy = await readView(original.reference);
+  assert.deepEqual(legacy.sourceIssues, [{ bindingId: 'facts', status: 'source_unavailable' }]);
+  assert.deepEqual(legacy.result.content.bindings.facts, rows);
+  assert.deepEqual(runtime.resultStore.getVersion(original.reference), original, 'source status never rewrites fixed content');
 });
 
 test('missing observation time, unsupported upload types and forged source kinds are not advertised as canonical materials', () => {

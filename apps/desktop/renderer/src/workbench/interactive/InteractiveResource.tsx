@@ -94,7 +94,7 @@ export function InteractiveResource({ reference, api, active, isZh, onReady, onU
     {failure && cleaned ? <p role="status">{failureText(failure, isZh)}</p> : null}
     {failure && !cleaned ? <div role="alert"><p>{failureText(failure, isZh)}</p><button type="button" className="ui-button" onClick={open}>{isZh ? '重试打开' : 'Retry opening'}</button></div> : null}
     {entry?.phase === 'ready' && entry.opened && api ? <InteractiveVersions reference={reference} handle={entry.opened.handle} api={api} isZh={isZh} openReference={onOpenReference} /> : null}
-    {entry?.phase === 'ready' && session && entry.opened ? <Surface session={session} provenance={entry.opened.result.provenance} isZh={isZh} onReady={onReady}
+    {entry?.phase === 'ready' && session && entry.opened ? <Surface session={session} provenance={entry.opened.result.provenance} sourceIssues={entry.opened.sourceIssues} isZh={isZh} onReady={onReady}
       onUnavailable={onUnavailable} recoverView={onRecoverView ?? (async () => !!(await window.peerAgent?.resourceWindowOpen?.({ resource: { kind: 'interactive', reference } }))?.ok)} />
       : entry?.summary ? <SavedSummary title={entry.summary.title} text={entry.summary.textFallback} isZh={isZh} /> : null}
     {cleaned?.truncated ? <p className="resource-source-label">{isZh ? '摘要已截断。' : 'Summary truncated.'}</p> : null}

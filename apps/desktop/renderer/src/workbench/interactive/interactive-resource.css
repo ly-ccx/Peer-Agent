@@ -8,8 +8,9 @@
 .interactive-owner-recovery textarea { display: block; width: 100%; max-width: 100%; margin-block: var(--space-2); padding: var(--space-2); resize: vertical;
   border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-control); background: var(--paper-sunken); color: var(--graphite-base); }
 .interactive-resource-program { margin-block-start: var(--space-4); }
-.interactive-resource-program > summary { display: flex; align-items: center; gap: var(--space-1); font-size: var(--ui-font-control); cursor: pointer; }
-.interactive-resource-program > summary:focus-visible { outline: var(--ui-focus-width) solid var(--ui-focus-color); outline-offset: var(--ui-focus-offset); }
+.interactive-source-details { margin-block-end: var(--space-4); overflow-wrap: anywhere; }
+.interactive-resource-program > summary, .interactive-source-details > summary { display: flex; align-items: center; gap: var(--space-1); font-size: var(--ui-font-control); cursor: pointer; }
+.interactive-resource-program > summary:focus-visible, .interactive-source-details > summary:focus-visible { outline: var(--ui-focus-width) solid var(--ui-focus-color); outline-offset: var(--ui-focus-offset); }
 .resource-interactive-session { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .resource-interactive-session > .resource-interactive-body { flex: 1; height: auto; }
 .resource-interactive-actions { padding: var(--space-2); flex: none; }

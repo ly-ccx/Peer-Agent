@@ -44,7 +44,7 @@ export function createDesktopInteractiveApplication({ getRole, getOwner, getNati
     if (instances.has(runtime)) return instances.get(runtime);
     for (const [previous, item] of instances) { item.views.dispose(); instances.delete(previous); }
     const currentOwner = owner => !disposed && getRuntime() === runtime && same(ownerOf(owner.workspaceId), owner);
-    const views = createInteractiveViewService({ resultStore: runtime.resultStore, stateStore: runtime.stateStore,
+    const views = createInteractiveViewService({ resultStore: runtime.resultStore, stateStore: runtime.stateStore, readSourceIssues: runtime.readSourceIssues,
       resolveSource(sender, reference, { signal }) {
         const role = getRole(sender);
         if (!['main', 'resource'].includes(role) || !currentOwner(reference.owner) || signal.aborted || sender.isDestroyed?.() === true) return null;

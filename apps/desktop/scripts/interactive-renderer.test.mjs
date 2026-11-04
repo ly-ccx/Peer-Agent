@@ -28,8 +28,9 @@ async function buildFixture(output, mode) {
       let state={result:reference,specHash:content.specHash,stateSchemaHash:content.stateSchemaHash,stateRevision:0,values:content.initialValues,inputDrafts:{},stateDigest:await digestJSON({values:content.initialValues,inputDrafts:{}}),updatedAt:new Date().toISOString(),requestId:'initial'};
       const handle={viewId:'fixture-view',windowId:'fixture-window',generation:'fixture-generation'};
       const writer={viewId:handle.viewId,generation:'fixture-writer',token:'fixture-token'};
-      const provenance=[{bindingId:'facts',source:{kind:'model-data',contentDigest:'sha256:'+'b'.repeat(64)},truncated:false,redacted:false,dataLevel:'D3_private'}];
-      const opened={handle,result:{reference,content,provenance},state};
+      const provenance=[{bindingId:'facts',source:{kind:'user-material',messageId:'fixture-message',attachmentId:'fixture-upload',expectedContentVersion:'sha256:'+'b'.repeat(64)},observedAt:'2026-11-03T00:01:00.000Z',selector:{path:['rows'],fields:['id','cost'],start:0,limit:500},truncated:true,redacted:false,dataLevel:'D3_private'}];
+      const sourceIssues=[{bindingId:'facts',status:'attachment_removed'}];
+      const opened={handle,result:{reference,content,provenance},state,sourceIssues};
       let rejectSave=false;
       const api={open:async()=>({ok:true,...opened}),readState:async()=>({ok:true,state}),acquire:async()=>({ok:true,writer}),
         save:async request=>{
@@ -79,6 +80,19 @@ test('the real SDK mounts Peer controls without tools or telemetry and recovers 
       await page.goto(pathToFileURL(path.join(output, 'index.html')).href);
       await page.getByLabel('Divisor', { exact: true }).waitFor();
       await page.waitForFunction(() => document.querySelector('.interactive-metric dd')?.textContent === '50');
+      await page.getByText('Source status at opening. This result still uses the saved snapshot.', { exact: true }).waitFor();
+      await page.getByRole('listitem').filter({ hasText: 'facts The attachment was removed from its source message.' }).waitFor();
+      await page.getByRole('complementary').getByText('Source truncated', { exact: true }).waitFor();
+      const sources = page.locator('.interactive-source-details');
+      await sources.getByText('View saved sources', { exact: true }).click();
+      assert.equal(await sources.locator('time').getAttribute('datetime'), '2026-11-03T00:01:00.000Z');
+      await sources.getByText('Row limit 500', { exact: true }).waitFor();
+      await sources.getByText('Source truncated', { exact: true }).waitFor();
+      if (mode === 'production') {
+        await page.locator('.interactive-source-details[data-motion-settled="true"]').waitFor();
+        await page.screenshot({ path: path.join(root, 'production-saved-sources.png'), animations: 'disabled' });
+      }
+      await sources.getByText('View saved sources', { exact: true }).click();
       const divisor = page.getByLabel('Divisor', { exact: true }), element = await divisor.elementHandle();
       await divisor.fill('0');
       await page.getByText('These conditions divide by zero. Adjust the inputs.', { exact: true }).waitFor();

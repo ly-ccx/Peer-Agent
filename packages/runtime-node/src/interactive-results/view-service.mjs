@@ -17,7 +17,7 @@ const failed = error => ({ ok: false, code: typeof error?.code === 'string' && /
   ...(['interactive_writer_stale', 'interactive_state_conflict'].includes(error?.code) && error.saveStatus === 'not_committed' ? { saveStatus: 'not_committed' } : {}) });
 
 /** Human presentation lifetime and state ordering. No permission, execution or model port. */
-export function createInteractiveViewService({ resultStore, stateStore, resolveSource, createId = randomUUID, maxViews = 32 }) {
+export function createInteractiveViewService({ resultStore, stateStore, resolveSource, readSourceIssues = undefined, createId = randomUUID, maxViews = 32 }) {
   if (typeof resolveSource !== 'function' || !Number.isSafeInteger(maxViews) || maxViews < 1 || maxViews > 64) throw TypeError('Invalid interactive view ports');
   const views = new Map(), requests = new Map(), pending = new Set(), retired = new Map();
   const pendingPinReleases = new Set();
@@ -84,7 +84,9 @@ export function createInteractiveViewService({ resultStore, stateStore, resolveS
       return { ...failed(error), summary: { reference: fixed.reference, title: fixed.content.title, textFallback: fixed.content.textFallback,
         specHash: fixed.content.specHash, libraryVersion: fixed.content.libraryVersion, dataLevel: fixed.dataLevel } };
     }
-    return { ok: true, handle: copy(record.handle), result, state };
+    const sourceIssues = readSourceIssues?.(fixed);
+    requireCurrent(record);
+    return { ok: true, handle: copy(record.handle), result, state, ...(sourceIssues?.length ? { sourceIssues } : {}) };
   }
   async function open(sender, raw) {
     try {

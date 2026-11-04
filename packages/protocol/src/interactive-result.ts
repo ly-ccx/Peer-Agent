@@ -149,10 +149,15 @@ export type InteractiveResultSummary = {
 } & ({ readonly availability?: 'available'; readonly specHash: string; readonly libraryVersion: string }
   | { readonly availability: 'cleaned'; readonly cleanedAt: string; readonly truncated: boolean });
 export type InteractiveResult<T extends object = Record<never, never>> = ({ readonly ok: true } & T) | { readonly ok: false; readonly code: string; readonly summary?: InteractiveResultSummary };
+export interface InteractiveSourceIssue {
+  readonly bindingId: string;
+  readonly status: 'attachment_removed' | 'source_changed' | 'source_unavailable';
+}
 export interface InteractiveOpenView {
   readonly handle: InteractiveViewHandle;
   readonly result: InteractivePublishedResult;
   readonly state: InteractiveStateSnapshot;
+  readonly sourceIssues?: readonly InteractiveSourceIssue[];
 }
 export interface InteractiveVersionNavigation {
   readonly reference: InteractiveResultReference;

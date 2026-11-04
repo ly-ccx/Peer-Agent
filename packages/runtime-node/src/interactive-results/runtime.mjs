@@ -4,7 +4,7 @@ import { createInteractiveMaterialSource } from './material-source.mjs';
 import { createInteractiveResultProvider } from './provider.mjs';
 import { createInteractiveStateStore } from './state-store.mjs';
 import { createInteractiveResultStore } from './store.mjs';
-import { normalizeInteractiveOwner } from '@peer-agent/protocol';
+import { INTERACTIVE_RESULT_LIMITS, interactiveBindingId, normalizeInteractiveOwner } from '@peer-agent/protocol';
 import { createInteractiveUserMaterials } from './user-materials.mjs';
 import { createInteractiveFeedbackAdmission } from './feedback-admission.mjs';
 import { createInteractiveVerification } from './verification.mjs';
@@ -47,7 +47,9 @@ export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationS
       if (!record) return null;
       const levels = ['D0_public', 'D1_internal', 'D2_sensitive', 'D3_private', 'D4_regulated'];
       if (execution.approvedDataLevel && levels.indexOf(record.dataLevel) > levels.indexOf(execution.approvedDataLevel)) throw Object.assign(Error('material_classification_changed'), { code: 'material_classification_changed' });
+      const { conversationId, planId, sessionId } = execution.source;
       resultStore.recordMaterial({ ...record, owner: execution.owner,
+        origin: { conversationId, planId, sessionId },
         source: { kind: 'user-material', messageId: source.messageId, attachmentId: source.attachmentId } }, execution.assertCurrent);
       return resultStore.readMaterial(execution.owner, source);
     }),
@@ -57,6 +59,32 @@ export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationS
   const provider = createInteractiveResultProvider({ store: resultStore, stateStore, materialSource, resolveAuthority: authority.resolve,
     index: goalPlanStore, ...(now ? { now } : {}), ...(validate ? { validate } : {}) });
   const preparationCursors = new Map();
+  function readSourceIssues(fixed) {
+    const owner = fixed.reference.owner;
+    if (!assertOwner(owner)) return [];
+    const histories = new Map();
+    function sourceIssue(source) {
+      try {
+        const material = resultStore.readMaterialInfo(owner, source);
+        if (!material) return 'source_unavailable';
+        if (source.kind === 'tool-result') return null;
+        const origin = material.origin, plan = origin && goalPlanStore?.getPlan?.(origin.planId);
+        if (!plan || plan.conversationId !== origin.conversationId || plan.delegationOrigin?.sessionId !== origin.sessionId
+          || plan.delegationOrigin.workspaceId !== owner.workspaceId || plan.delegationOrigin.parentConversationId !== owner.conversationId) return 'source_unavailable';
+        if (!histories.has(origin.conversationId)) {
+          // Cache a failed read for this open as well. Only strict persisted history is admissible.
+          histories.set(origin.conversationId, null);
+          histories.set(origin.conversationId, conversationStore?.getPersistedConversationHistory?.(origin.conversationId));
+        }
+        return userMaterials.sourceIssue(source, histories.get(origin.conversationId), material.dataLevel);
+      } catch { return 'source_unavailable'; }
+    }
+    return fixed.provenance.slice(0, INTERACTIVE_RESULT_LIMITS.bindings).flatMap(({ bindingId, source }) => {
+      if (!interactiveBindingId(bindingId) || source.kind === 'model-data') return [];
+      const status = sourceIssue(source);
+      return status ? [{ bindingId, status }] : [];
+    });
+  }
   function recoverOwner(owner) {
     const owns = () => holdsLease?.(owner.workspaceId) === true && getBotConversationId?.(owner.workspaceId) === owner.conversationId;
     const items = provider.recoverOwner(owner, owns);
@@ -89,7 +117,7 @@ export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationS
     else preparationCursors.delete(owner.workspaceId);
     return items;
   }
-  return { resultStore, stateStore, retention, acquireDelegationRoots, provider, authority, feedback, verification, publications, readPortableSummary, captureExecution: createInteractiveCapture({ resultStore, resolveAuthority: authority.resolve,
+  return { resultStore, stateStore, retention, acquireDelegationRoots, provider, authority, feedback, verification, publications, readPortableSummary, readSourceIssues, captureExecution: createInteractiveCapture({ resultStore, resolveAuthority: authority.resolve,
     resolveObservationAuthority: authority.resolveObservation, ...(now ? { now } : {}) }),
     userMaterialNotices(toolContext) {
       try { const context = authority.resolve({ toolContext });
