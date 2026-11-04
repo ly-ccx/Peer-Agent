@@ -24,7 +24,7 @@ Usage: pnpm --filter @peer-agent/tui qa:interactive:live --list [--user-data DIR
 Only OpenAI Chat / Anthropic Messages API-key wires are included in this validation command.
 Per model/scenario: at most 4 model requests, 1800 output tokens/request, 45s/request, 150s/case,
 4 worker tool calls. Verify permits 4 additional Verifier requests and up to 8 readonly calls within the same case deadline.
-Story permits up to 32 model requests across Bot, workers and Verifiers in 240s.
+Story permits up to ${INTERACTIVE_STORY_BUDGET.totalRequests} model requests across Bot, workers and Verifiers in ${INTERACTIVE_STORY_BUDGET.caseMs / 1000}s.
 Native permission requests are denied. User configuration and the daily app are left alone.
 Repair supplies an actual failed Tool Result as explicit user factual context from a test-driver seed.
 It does not fabricate assistant/thinking history or count the seed as a natural model failure.

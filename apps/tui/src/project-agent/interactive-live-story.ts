@@ -15,8 +15,8 @@ import { createTuiProjectHost } from './tui-project-host.ts';
 import { createTurnTestRuntime, drainTestCleanup, type TestCleanup } from './turn-test-support.ts';
 
 export const INTERACTIVE_STORY_BUDGET = Object.freeze({
-  requests: { bot: 16, worker: 10, verifier: 10 }, calls: { bot: 24, worker: 14, verifier: 18 },
-  totalRequests: 32, outputTokens: 1800, botOutputTokens: 3200, requestMs: 45_000, caseMs: 240_000,
+  requests: { bot: 24, worker: 12, verifier: 16 }, calls: { bot: 32, worker: 16, verifier: 24 },
+  totalRequests: 48, outputTokens: 1800, botOutputTokens: 3200, requestMs: 45_000, caseMs: 360_000,
 });
 const CAPABILITIES = [
   'local.delegation.spawn_session', 'local.delegation.list_sessions', 'local.delegation.get_session',
@@ -24,7 +24,7 @@ const CAPABILITIES = [
   'local.delegation.wait_for_sessions', 'local.goal.get_plan', 'local.goal.update_task', 'local.interactive.publish', 'local.interactive.inspect',
 ];
 const INITIAL_INPUT = 'live-story-publish', FROZEN_INPUT = 'live-story-verify';
-const ASSESSMENT_FORMAT = 'For coordinate_work assess, put workId, expectedWorkRevision, expectedGoalRevision and reason inside assessment. Each coverage row contains requirementId, status, explanation and sources. Put evidenceRefs only inside each source, alongside sessionId and sourceRevision. Use sources: [] for a remaining requirement with no evidence.';
+const ASSESSMENT_FORMAT = 'For coordinate_work assess, put workId, expectedWorkRevision, expectedGoalRevision and reason inside assessment. Each coverage row contains requirementId, status, explanation and sources. Put evidenceRefs only inside each source, alongside sessionId and sourceRevision. Use sources: [] for a remaining requirement with no evidence. Use disposition.kind "wait" with a waitFor list for an active session. On an event-only wake, use sourceInputIds: [] and inputs: [].';
 const INITIAL_TASK = [
   `Delegate one task with spawn_session. Use anchorMessageIds ["input-${INITIAL_INPUT}"], kind "research", readOnly true, isolation "none", and requiredCapabilities ["local.interactive.publish"].`,
   'Set successCriteria to [{"kind":"model_review","description":"Independently inspect the program, full facts binding and initial evaluation. Check both costs and the remainder."}]. Keep the longer instructions in brief.',
