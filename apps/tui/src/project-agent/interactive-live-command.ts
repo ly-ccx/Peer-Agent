@@ -3,7 +3,7 @@ import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createOpenAICompatibleProvider, loadSharedModelMetadataList, loadSharedModelSelection,
+import { createChatGptResponsesProvider, createOpenAICompatibleProvider, loadSharedModelMetadataList, loadSharedModelSelection,
   resolveOpenCodeGoBaseUrl, sendAnthropicMessagesStream, type SharedModelMetadata, type ModelProvider } from '@peer-agent/runtime-node/models';
 import { redactShellOutput } from '@peer-agent/runtime-node/project-agent';
 import { createTuiSharedModelCredentialStore } from '../model-credential-store.ts';
@@ -15,13 +15,13 @@ import { INTERACTIVE_LIVE_BUDGET, INTERACTIVE_LIVE_SCENARIOS, runInteractiveLive
 import { INTERACTIVE_STORY_BUDGET, runInteractiveLiveStory } from './interactive-live-story.ts';
 
 const repositoryRoot = fileURLToPath(new URL('../../../../', import.meta.url));
-export const INTERACTIVE_LIVE_HELP = `Opt-in interactive-result validation; uses configured API keys and synthetic data only.
+export const INTERACTIVE_LIVE_HELP = `Opt-in interactive-result validation; uses configured model credentials and synthetic data only.
 Usage: pnpm --filter @peer-agent/tui qa:interactive:live --list [--user-data DIRECTORY]
        pnpm --filter @peer-agent/tui qa:interactive:live --run --model ENTRY_ID [--model ENTRY_ID]
          [--scenario publish|repair|denied|verify|story] [--output EXISTING_DIRECTORY] [--user-data DIRECTORY]
 --list and --help make no model requests and do not read credentials.
 --run requires explicit configured model entry IDs. Defaults: publish, repair and denied; verify and story are explicit.
-Only OpenAI Chat / Anthropic Messages API-key wires are included in this validation command.
+Supports API-key OpenAI Chat, Anthropic Messages and OpenAI Responses, plus an existing valid ChatGPT OAuth access token. OAuth refresh is disabled.
 Per model/scenario: at most 4 model requests, 1800 output tokens/request, 45s/request, 150s/case,
 4 worker tool calls. Verify permits 4 additional Verifier requests and up to 8 readonly calls within the same case deadline.
 Story permits up to ${INTERACTIVE_STORY_BUDGET.totalRequests} model requests across Bot, workers and Verifiers in ${INTERACTIVE_STORY_BUDGET.caseMs / 1000}s.
@@ -59,8 +59,10 @@ export function parseInteractiveLiveArgs(args: readonly string[]) {
 
 function supportedWire(metadata: SharedModelMetadata) {
   const decision = resolveTuiWire(metadata);
-  return metadata.authMethod === 'api_key' && decision.kind === 'supported'
-    && (decision.wire === 'openai-chat' || decision.wire === 'anthropic-messages') ? decision.wire : undefined;
+  if (decision.kind !== 'supported') return;
+  if (metadata.authMethod === 'oauth_chatgpt') return decision.wire === 'openai-responses' ? decision.wire : undefined;
+  if (metadata.authMethod === 'api_key' && ['openai-chat', 'anthropic-messages', 'openai-responses'].includes(decision.wire))
+    return decision.wire;
 }
 
 export function sanitizeInteractiveLiveDiagnostic(value: unknown, secrets: readonly string[] = []): string {
@@ -113,10 +115,12 @@ export async function runInteractiveLiveCommand(args: readonly string[], log: (l
       let secret = '';
       try {
         const selection = loadSharedModelSelection({ userDataPath: options.userData, credentialId: metadata.credentialId,
-          credentialStore: { getApiKey: id => credentials.getApiKey(id), getOAuthTokens: () => null,
+          credentialStore: { getApiKey: id => credentials.getApiKey(id), getOAuthTokens: id => credentials.getOAuthTokens(id),
             setOAuthTokens() { throw new Error('live_credential_write_forbidden'); } } });
-        if (!selection?.apiKey) throw new Error('live_credential_unavailable');
-        secret = selection.apiKey;
+        const oauth = metadata.authMethod === 'oauth_chatgpt' ? selection?.oauthTokens : undefined;
+        if (oauth?.expires && oauth.expires <= Date.now() + 60_000) throw new Error('live_oauth_credential_expired');
+        secret = oauth?.access || selection?.apiKey || '';
+        if (!secret) throw new Error('live_credential_unavailable');
         // Disable transport recovery here so the physical HTTP budget is independently bounded.
         const transport = createTuiProviderFetch({ connectionRecovery: false });
         const countedFetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
@@ -127,10 +131,16 @@ export async function runInteractiveLiveCommand(args: readonly string[], log: (l
         const wire = supportedWire(metadata)!;
         const baseUrl = metadata.channelId?.startsWith('opencode-go') ? resolveOpenCodeGoBaseUrl(wire, metadata.baseUrl) : metadata.baseUrl;
         const extraHeaders = metadata.channelId?.startsWith('opencode-go') ? { 'x-opencode-session': `peer-interactive-validation-${modelIndex}-${scenario}` } : undefined;
-        const provider: ModelProvider = wire === 'openai-chat'
-          ? createOpenAICompatibleProvider({ config: { providerId: metadata.credentialId, apiKey: secret, baseUrl, headers: extraHeaders }, fetch: countedFetch })
-          : createAnthropicMessagesProvider({ providerId: metadata.credentialId, baseUrl, extraHeaders, getApiKey: async () => secret,
+        let provider: ModelProvider;
+        if (wire === 'openai-responses') {
+          provider = createChatGptResponsesProvider({ baseUrl, tokens: { access: secret, accountId: oauth?.accountId },
+            extraHeaders, fetch: countedFetch });
+        } else if (wire === 'openai-chat') {
+          provider = createOpenAICompatibleProvider({ config: { providerId: metadata.credentialId, apiKey: secret, baseUrl, headers: extraHeaders }, fetch: countedFetch });
+        } else {
+          provider = createAnthropicMessagesProvider({ providerId: metadata.credentialId, baseUrl, extraHeaders, getApiKey: async () => secret,
             sendStream: streamArgs => sendAnthropicMessagesStream({ ...streamArgs, fetchImpl: countedFetch }) });
+        }
         const common = { directory, model: metadata, provider,
           sanitize: (value: unknown) => sanitizeInteractiveLiveDiagnostic(value, [secret]),
           onProgress(report: { requests: unknown[]; approvals?: number; finishedAt?: string }) { log(JSON.stringify({ provider: metadata.providerId, model: metadata.model, scenario,
