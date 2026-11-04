@@ -195,15 +195,18 @@ export function createIntentLifecycle({ storeFor, readSession, readMessages, rea
     const sessions = [...new Set(sourceRows.map(row => row.sessionId))].map(sessionId => readSession({ sessionId }));
     if (!sessions.length || sessions.some(row => !row || !mandate?.sessionIds.includes(row.sessionId))) return { passed: false, error: 'goal_evidence_missing' };
     const facts = sessions.map(session => readGoalFacts(session.sessionId));
-    const sourceIssues = intent.coverage.flatMap(row => row.sources.flatMap(source => {
+    const sourceIssues = intent.coverage.flatMap(row => row.sources.flatMap((source, sourceIndex) => {
       const i = sessions.findIndex(session => session.sessionId === source.sessionId);
-      const session = sessions[i], allowed = new Set(facts[i]?.evidenceIndex || []);
-      const reason = source.sourceRevision !== session.sourceRevision ? 'source_revision_changed'
-        : !source.evidenceRefs.length || source.evidenceRefs.some(ref => !allowed.has(ref)) ? 'reference_not_indexed' : null;
-      return reason ? [{ requirementId: row.requirementId, sessionId: source.sessionId, sourceRevision: session.sourceRevision, reason }] : [];
+      const session = sessions[i];
+      const binding = { requirementId: row.requirementId, sessionId: source.sessionId, sourceRevision: session.sourceRevision };
+      if (source.sourceRevision !== session.sourceRevision) return [{ ...binding, reason: 'source_revision_changed' }];
+      const allowed = new Set(facts[i]?.evidenceIndex || []);
+      const unindexedEvidenceRefIndexes = source.evidenceRefs.flatMap((ref, index) => allowed.has(ref) ? [] : [index]);
+      if (source.evidenceRefs.length && !unindexedEvidenceRefIndexes.length) return [];
+      return [{ ...binding, reason: 'reference_not_indexed', sourceIndex, unindexedEvidenceRefIndexes }];
     }));
     if (sourceIssues.length) return { passed: false, error: 'goal_evidence_stale', sourceIssues: sourceIssues.slice(0, 16),
-      message: 'Use the current session sourceRevision and evidence cited by its task report. A Bot query or tool receipt is not task evidence unless that reference is indexed for the cited session.' };
+      message: 'Use the current session sourceRevision and indexed references from its task report. For reference_not_indexed, sourceIndex and unindexedEvidenceRefIndexes identify the rejected entries in your submitted sources and evidenceRefs arrays, counting from zero. Keep valid task references and correct the flagged entries before resubmitting.' };
     const sources = sessions.map(row => ({ sessionId: row.sessionId, sourceRevision: row.sourceRevision, observationRevision: revisionOf(row) }));
     const requirements = intent.interpretation.requirements;
     const inputIds = new Set([...(mandate.rootInputIds || []), ...(mandate.revisionInputIds || [])]);

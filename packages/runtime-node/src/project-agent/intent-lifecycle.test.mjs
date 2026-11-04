@@ -392,20 +392,33 @@ test('root review identifies stale versions and unindexed references without exp
   const f = await fixture(t);
   const context = f.context('t1', { currentInputAnchors: ['input-i'] });
   await f.coordinate({ action: 'parallel', task: { anchorMessageIds: ['input-i'], brief: 'Original' } }, context);
-  const result = await f.coordinate({ action: 'assess', assessment: { ...f.initial,
-    coverage: f.initial.coverage.map((row, index) => ({ ...row, status: 'covered', sources: [{
-      sessionId: 's1', sourceRevision: index === 0 ? 'stale' : 'source:s1', evidenceRefs: ['tool-result://bot-query'],
-    }] })),
+  const current = { sessionId: 's1', sourceRevision: 'source:s1', evidenceRefs: ['ev:s1'] };
+  const assessment = { ...f.initial,
+    coverage: [
+      { ...f.initial.coverage[0], status: 'covered', sources: [{ ...current, sourceRevision: 'stale' }] },
+      { ...f.initial.coverage[1], status: 'covered', sources: [current,
+        { ...current, evidenceRefs: ['tool-result://bot-query', 'ev:s1', 'tool-result://bot-verdict'] }] },
+    ],
     disposition: { kind: 'return', replyRef: 'current_turn_reply' },
-  } }, { ...context, deliveryKey: 'review' });
+  };
+  const result = await f.coordinate({ action: 'assess', assessment }, { ...context, deliveryKey: 'review' });
   assert.equal(result.ok, true);
   assert.deepEqual(result.review.sourceIssues, [
     { requirementId: 'research', sessionId: 's1', sourceRevision: 'source:s1', reason: 'source_revision_changed' },
-    { requirementId: 'fix', sessionId: 's1', sourceRevision: 'source:s1', reason: 'reference_not_indexed' },
+    { requirementId: 'fix', sessionId: 's1', sourceRevision: 'source:s1', reason: 'reference_not_indexed',
+      sourceIndex: 1, unindexedEvidenceRefIndexes: [0, 2] },
   ]);
   assert.equal(result.review.error, 'goal_evidence_stale');
-  assert.doesNotMatch(JSON.stringify(result.review), /ev:s1|bot-query/);
+  assert.doesNotMatch(JSON.stringify(result.review), /ev:s1|bot-query|bot-verdict/);
   assert.equal(f.reviews(), 0);
+
+  const repaired = await f.coordinate({ action: 'assess', assessment: { ...assessment, interpretation: undefined,
+    expectedWorkRevision: result.receipt.workRevision,
+    coverage: assessment.coverage.map(row => ({ ...row, sources: [current] })),
+  } }, { ...context, deliveryKey: 'repair-review' });
+  assert.equal(repaired.review?.passed, true, JSON.stringify(repaired));
+  assert.deepEqual(repaired.review.evidenceRefs, ['ev:s1']);
+  assert.equal(f.reviews(), 1);
 });
 
 test('a model cannot invent physical failure truth or borrow another work failure; semantic unresolved responsibility remains active', async t => {
