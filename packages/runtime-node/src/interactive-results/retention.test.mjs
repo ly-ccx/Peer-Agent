@@ -130,10 +130,11 @@ test('material retirement requires its own guard, protects provenance and keeps 
   const otherSource = f.store.recordMaterial(otherRecord, current);
   const selection = { owner, source };
   assert.throws(() => f.retention.previewMaterial(selection), { code: 'interactive_retention_unavailable' });
-  let blocked = true, changed = false;
+  let blocked = true, changed = false, releaseFailure = false;
   const retention = createInteractiveRetention({ resultStore: f.store, stateStore: f.states, assertOwner: current,
     acquireRoots: () => ({ ...f.acquireRoots(), materialResponsibility: () => ({
-      digest: jsonDigest({ blocked }), blocked, assertCurrent: () => !changed, release() {},
+      digest: jsonDigest({ blocked }), blocked, assertCurrent: () => !changed,
+      release() { if (releaseFailure) throw Error('material release failed'); },
     }) }), now,
     onStep(step) { if (step === 'material_cleanup_before_commit' && crash) throw Error('interrupted'); } });
   let crash = false;
@@ -156,8 +157,11 @@ test('material retirement requires its own guard, protects provenance and keeps 
   changed = false; crash = true;
   assert.throws(() => retention.cleanupMaterial(request), /interrupted/);
   assert.deepEqual(f.store.readMaterial(owner, source).value, record.value);
-  crash = false;
-  const receipt = retention.cleanupMaterial(request);
+  crash = false; releaseFailure = true;
+  assert.throws(() => retention.cleanupMaterial(request), { code: 'interactive_cleanup_outcome_unknown' });
+  const receipt = retention.readMaterialReceipt(selection);
+  assert.equal(receipt.requestId, request.requestId);
+  releaseFailure = false;
   assert.deepEqual(retention.readMaterialReceipt(selection), receipt);
   assert.deepEqual(retention.cleanupMaterial(request), receipt);
   assert.throws(() => retention.cleanupMaterial({ ...request, requestId: 'different' }), { code: 'interactive_cleanup_parameter_conflict' });
@@ -201,7 +205,14 @@ test('isolated followup retirement keeps retry identity and requires fresh unref
     acquireRoots: f.acquireRoots, now, onStep(step) { if (step === 'followup_cleanup_before_commit') throw Error('injected interruption'); } });
   assert.throws(() => interrupted.cleanupFollowup(request), /injected interruption/);
   assert.deepEqual(f.states.readFollowup(owner, snapshot.followupId), snapshot);
-  const retired = f.retention.cleanupFollowup(request);
+  const lost = createInteractiveRetention({ resultStore: f.store, stateStore: f.states, assertOwner: current,
+    acquireRoots() {
+      const held = f.acquireRoots();
+      return { ...held, release() { held.release(); throw Error('roots release failed'); } };
+    }, now });
+  assert.throws(() => lost.cleanupFollowup(request), { code: 'interactive_cleanup_outcome_unknown' });
+  const retired = lost.readFollowupReceipt(selection);
+  assert.equal(retired.requestId, request.requestId);
   assert.equal(retired.followupId, snapshot.followupId);
   assert.equal(Object.hasOwn(retired, 'values'), false);
   assert.deepEqual(f.retention.readFollowupReceipt(selection), retired);
@@ -329,7 +340,8 @@ test('failure before commit rolls everything back, and lost confirmation reads t
   const lost = createInteractiveRetention({ resultStore: f.store, stateStore: f.states, assertOwner: current, acquireRoots: f.acquireRoots, now,
     onStep(step) { if (step === 'cleanup_committed') throw Error('confirmation lost'); } });
   const preview = lost.preview(f.first.reference);
-  assert.throws(() => lost.cleanup({ reference: f.first.reference, requestId: 'lost', expectedDigest: preview.cleanupDigest }), /confirmation lost/);
+  assert.throws(() => lost.cleanup({ reference: f.first.reference, requestId: 'lost', expectedDigest: preview.cleanupDigest }),
+    error => error.code === 'interactive_cleanup_outcome_unknown' && error.cause?.message === 'confirmation lost');
   const receipt = lost.readReceipt(f.first.reference), releases = f.releases();
   assert.ok(receipt.objectBytesRemoved > 0);
   assert.deepEqual(lost.cleanup({ reference: f.first.reference, requestId: 'lost', expectedDigest: preview.cleanupDigest }), receipt);

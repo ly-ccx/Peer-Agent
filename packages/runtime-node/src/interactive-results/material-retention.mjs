@@ -1,6 +1,7 @@
 import { interactiveDigest, interactiveToken, normalizeInteractiveOwner } from '@peer-agent/protocol';
 import { decode, encode, jsonDigest, problem } from './storage.mjs';
 import { materialKey, readMaterialRecord, RETIRED_MATERIAL } from './material-record.mjs';
+import { withCleanupOutcome } from './cleanup-outcome.mjs';
 
 const LIMIT = 256;
 function target(raw) {
@@ -98,7 +99,7 @@ export function createMaterialRetention({ resultStore, current, roots, now, onSt
     };
     const previous = readMaterialReceipt(selection);
     if (previous) return sameRequest(previous);
-    return guarded(selection, (guards, assertCurrent) => storage.transaction(owner.workspaceId, context => {
+    return withCleanupOutcome(storage, owner.workspaceId, commit => guarded(selection, (guards, assertCurrent) => commit(context => {
       const record = read(context, selection);
       if (record.retired) return sameRequest(record.retired);
       const preview = inspect(context, selection, record, guards, assertCurrent);
@@ -116,7 +117,7 @@ export function createMaterialRetention({ resultStore, current, roots, now, onSt
         context.db.prepare('DELETE FROM objects WHERE hash=?').run(hash);
       onStep('material_cleanup_before_commit'); assertCurrent();
       return receipt;
-    }));
+    })));
   }
   return { previewMaterial, cleanupMaterial, readMaterialReceipt };
 }

@@ -4,6 +4,7 @@ import { createMaterialRetention } from './material-retention.mjs';
 import { createFollowupRetention } from './followup-retention.mjs';
 import { checkedInteractiveSnapshot } from './state-record.mjs';
 import { interactiveProcessAlive, readLiveInteractiveViewPins } from './view-pins.mjs';
+import { withCleanupOutcome } from './cleanup-outcome.mjs';
 
 export const INTERACTIVE_RETENTION_SOURCES = Object.freeze(['views', 'drafts', 'inputs', 'messages', 'delegation', 'verification']);
 const CATEGORY = 'interactive-cleanup', TOMBSTONE_LIMIT = 256;
@@ -179,32 +180,35 @@ export function createInteractiveRetention({ resultStore, stateStore, assertOwne
       return existing;
     }
     if (!storage.connect(ref.owner.workspaceId)) throw problem('interactive_result_unavailable');
-    const receipt = roots(ref.owner, (snapshot, assertCurrent) => storage.transaction(ref.owner.workspaceId, context => {
-      assertCurrent();
-      const previous = savedReceipt(context, ref);
-      if (previous) {
-        if (!same(previous.reference, ref) || previous.requestId !== requestId || previous.expectedDigest !== expectedDigest) throw problem('interactive_cleanup_parameter_conflict');
-        return previous;
-      }
-      const { preview, summaries, removable } = inspect(context, ref, snapshot, assertCurrent);
-      if (preview.cleanupDigest !== expectedDigest) throw problem('interactive_retention_stale');
-      if (preview.blockers.length) throw problem('interactive_cleanup_blocked');
-      if (Number(context.db.prepare('SELECT COUNT(*) AS n FROM presentation WHERE category=? AND owner=?').get(CATEGORY, encode(ref.owner)).n) >= TOMBSTONE_LIMIT)
-        throw problem('interactive_cleanup_limit');
-      const body = { schemaVersion: 1, reference: ref, requestId, expectedDigest, cleanedAt: now(), versions: summaries,
-        stateRowsRemoved: preview.stateCount, saveRowsRemoved: preview.saveCount, objectBytesRemoved: preview.objectBytes };
-      if (!Number.isFinite(Date.parse(body.cleanedAt))) throw problem('interactive_cleanup_invalid');
-      const value = { ...body, receiptDigest: jsonDigest(body) };
-      context.db.prepare("UPDATE versions SET availability='cleaned' WHERE id=? AND owner=?").run(ref.resultId, encode(ref.owner));
-      context.db.prepare('INSERT INTO presentation VALUES(?,?,?,?)').run(CATEGORY, ref.resultId, encode(ref.owner), encode(value));
-      context.db.prepare('DELETE FROM states WHERE id=?').run(ref.resultId);
-      context.db.prepare('DELETE FROM saves WHERE id=?').run(ref.resultId);
-      onStep('cleanup_retired'); assertCurrent();
-      for (const hash of removable) context.db.prepare('DELETE FROM objects WHERE hash=?').run(hash);
-      onStep('cleanup_before_commit'); assertCurrent();
-      return copy(value);
-    }));
-    onStep('cleanup_committed'); return receipt;
+    return withCleanupOutcome(storage, ref.owner.workspaceId, commit => {
+      const receipt = roots(ref.owner, (snapshot, assertCurrent) => commit(context => {
+        assertCurrent();
+        const previous = savedReceipt(context, ref);
+        if (previous) {
+          if (!same(previous.reference, ref) || previous.requestId !== requestId || previous.expectedDigest !== expectedDigest) throw problem('interactive_cleanup_parameter_conflict');
+          return previous;
+        }
+        const { preview, summaries, removable } = inspect(context, ref, snapshot, assertCurrent);
+        if (preview.cleanupDigest !== expectedDigest) throw problem('interactive_retention_stale');
+        if (preview.blockers.length) throw problem('interactive_cleanup_blocked');
+        if (Number(context.db.prepare('SELECT COUNT(*) AS n FROM presentation WHERE category=? AND owner=?').get(CATEGORY, encode(ref.owner)).n) >= TOMBSTONE_LIMIT)
+          throw problem('interactive_cleanup_limit');
+        const body = { schemaVersion: 1, reference: ref, requestId, expectedDigest, cleanedAt: now(), versions: summaries,
+          stateRowsRemoved: preview.stateCount, saveRowsRemoved: preview.saveCount, objectBytesRemoved: preview.objectBytes };
+        if (!Number.isFinite(Date.parse(body.cleanedAt))) throw problem('interactive_cleanup_invalid');
+        const value = { ...body, receiptDigest: jsonDigest(body) };
+        context.db.prepare("UPDATE versions SET availability='cleaned' WHERE id=? AND owner=?").run(ref.resultId, encode(ref.owner));
+        context.db.prepare('INSERT INTO presentation VALUES(?,?,?,?)').run(CATEGORY, ref.resultId, encode(ref.owner), encode(value));
+        context.db.prepare('DELETE FROM states WHERE id=?').run(ref.resultId);
+        context.db.prepare('DELETE FROM saves WHERE id=?').run(ref.resultId);
+        onStep('cleanup_retired'); assertCurrent();
+        for (const hash of removable) context.db.prepare('DELETE FROM objects WHERE hash=?').run(hash);
+        onStep('cleanup_before_commit'); assertCurrent();
+        return copy(value);
+      }));
+      onStep('cleanup_committed');
+      return receipt;
+    });
   }
   return { preview, cleanup, readReceipt, ...createFollowupRetention({ resultStore, current, roots, now, onStep }),
     ...createMaterialRetention({ resultStore, current, roots, now, onStep }) };

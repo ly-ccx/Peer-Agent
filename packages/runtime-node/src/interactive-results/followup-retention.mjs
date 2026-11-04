@@ -2,6 +2,7 @@ import { interactiveDigest, interactiveToken, normalizeInteractiveOwner } from '
 import { decode, encode, jsonDigest, problem } from './storage.mjs';
 import { RETIRED_FOLLOWUP, readFollowupRecord } from './followup-record.mjs';
 import { interactiveProcessAlive, readLiveInteractiveViewPins } from './view-pins.mjs';
+import { withCleanupOutcome } from './cleanup-outcome.mjs';
 
 const RETIRED_LIMIT = 256;
 function target(raw) {
@@ -70,7 +71,7 @@ export function createFollowupRetention({ resultStore, current, roots, now, onSt
     };
     const existing = readFollowupReceipt(selection);
     if (existing) return sameRequest(existing);
-    return roots(owner, (guarded, assertCurrent) => storage.transaction(owner.workspaceId, context => {
+    return withCleanupOutcome(storage, owner.workspaceId, commit => roots(owner, (guarded, assertCurrent) => commit(context => {
       const record = read(context, selection);
       if (record.retired) return sameRequest(record.retired);
       const preview = inspect(context, selection, record, guarded, assertCurrent);
@@ -86,7 +87,7 @@ export function createFollowupRetention({ resultStore, current, roots, now, onSt
       context.db.prepare('UPDATE followups SET snapshot=? WHERE id=? AND owner=?').run(encode(receipt), followupId, encode(owner));
       onStep('followup_cleanup_before_commit'); assertCurrent();
       return receipt;
-    }));
+    })));
   }
   return { previewFollowup, cleanupFollowup, readFollowupReceipt };
 }
