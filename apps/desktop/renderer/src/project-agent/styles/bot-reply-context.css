@@ -44,7 +44,7 @@
 .bot-work-row > summary { display: flex; align-items: center; gap: 8px; min-height: 32px; width: fit-content; max-width: 100%; }
 .bot-work-row > summary > svg { flex-shrink: 0; }
 .bot-work-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bot-work-status { font-size: 11px; margin-left: 3px; white-space: nowrap; flex-shrink: 0; color: var(--graphite-mute); }
+.bot-work-status { font-size: 11px; margin-left: 3px; white-space: nowrap; flex-shrink: 0; color: var(--graphite-soft); }
 .bot-work-status.is-running { color: var(--graphite-base); }
 .bot-work-row[data-status='waiting_user'] .bot-work-status,
 .bot-work-row[data-status='waiting_agent'] .bot-work-status,
