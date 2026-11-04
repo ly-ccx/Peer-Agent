@@ -24,14 +24,19 @@ const CAPABILITIES = [
   'local.delegation.wait_for_sessions', 'local.goal.get_plan', 'local.goal.update_task', 'local.interactive.publish', 'local.interactive.inspect',
 ];
 const INITIAL_INPUT = 'live-story-publish', FROZEN_INPUT = 'live-story-verify';
-const ASSESSMENT_FORMAT = 'For coordinate_work assess, put workId, expectedWorkRevision, expectedGoalRevision and reason inside assessment. Each coverage row contains requirementId, status, explanation and sources. Put evidenceRefs only inside each source, alongside sessionId and sourceRevision. Use sources: [] for a remaining requirement with no evidence. Use disposition.kind "wait" with a waitFor list for an active session. On an event-only wake, use sourceInputIds: [] and inputs: [].';
+const ASSESSMENT_FORMAT = [
+  'For coordinate_work assess, provide reason both at the top level and inside assessment. Copy the exact full IDs and both current revisions from query.',
+  'When no prior interpretation is saved, include interpretation with outcome, constraints, nonGoals, openQuestions and requirements. On updates to the same interpretation, preserve requirement IDs.',
+  'Each coverage row contains requirementId, status, explanation and sources. Put evidenceRefs only inside each source, alongside its exact sessionId and sourceRevision. Use sources: [] for a remaining requirement with no evidence.',
+  'On an event-only wake, use sourceInputIds: [] and inputs: []. Use a wait disposition only while the session is advancing, with the latest observationRevision.',
+].join(' ');
 const INITIAL_TASK = [
   `Delegate one task with spawn_session exactly once. Reuse the returned session ID after every wake or repair, including after tool errors elsewhere. Use anchorMessageIds ["input-${INITIAL_INPUT}"], kind "research", readOnly true, isolation "none", and requiredCapabilities ["local.interactive.publish"].`,
   'Set successCriteria to [{"kind":"model_review","description":"Independently inspect the program, full facts binding and initial evaluation. Check both costs and the remainder."}]. Keep the longer instructions in brief.',
   'The worker must read its exact plan and task IDs with goal_get_plan, publish once, then use goal_update_task with the returned fixed artifact Evidence. Stop after recording it. Leave inspection to the Verifier.',
   'After spawning, use coordinate_work query with the current workId. Before post_reply, persist an assess decision with the exact current work and goal revisions, source IDs, input disposition, and evidence coverage. If the session is still running, wait on its current observation revision. Otherwise handle the current result. The reply alone does not record a disposition.',
   ASSESSMENT_FORMAT,
-  'The assessment has two substantive requirements: publish and record the fixed example, and independently verify the example. An acknowledgment, post_reply, or later user interaction is not an evidence requirement. Do not add it to coverage or openQuestions. When returning the verified example, record the return disposition with replyRef "current_turn_reply" and send the real post_reply with its session and current status.',
+  'The assessment has two substantive requirements: publish and record the fixed example, and independently verify the example. An acknowledgment, post_reply, or later user interaction is not an evidence requirement. Do not add it to coverage or openQuestions. When returning the verified example, record the return disposition with replyRef "current_turn_reply" and send post_reply with replyTo ["input-live-story-publish"], the complete session ID in sources, and its current status in statusClaims.',
   'No further user input or human acceptance is needed for this request. While the worker is still advancing, wait on the current session instead of posting a progress-only reply. When it finishes, read the current host verification and cite its indexed evidence for the checks it covers. Keep the original result and do not claim human acceptance.',
   'Worker brief: ' + INTERACTIVE_LIVE_TASK,
 ].join('\n');
@@ -43,7 +48,7 @@ const FROZEN_TASK = [
   'After spawning, acknowledge this input once through post_reply with replyTo ["input-live-story-verify"]. Report only that the delegated check is underway. On background wakes, if the follow-up session is running or verifying, end the wake with wait_for_sessions using its sessionIds list. Do not assess a wait for a session that has left its waitable state. If a wait is stale, use the current returned status before deciding what to do.',
   'For this new frozen selection I request a fresh, formal independent review. Once the follow-up session reaches result_ready or accepted and automatic review is idle, call verify_session with focus on the four checks in its success criteria. A read-only get_verification_detail summary may show passed from the automatic review. If verify_session reports verifier_in_progress, end the background wake with wait_for_sessions while the review is active. Reuse the original publication review.',
   ASSESSMENT_FORMAT,
-  'Use the actual fixed inspection and verification evidence as the substantive coverage. Deliver via the return disposition with replyRef "current_turn_reply". Then use post_reply with replyTo ["input-live-story-verify"], both session IDs as sources and their current statuses. Explain the two remainders, describe the costs as synthetic, and state the actual verification and human acceptance status. Do not republish or substitute direct Bot inspection for delegation.',
+  'Use the new session’s indexed inspection evidence for this work’s coverage. Cite the earlier publication separately in the final reply. Deliver via the return disposition with replyRef "current_turn_reply". Then use post_reply with replyTo ["input-live-story-verify"], both session IDs as sources and their current statuses. Explain the two remainders, describe the costs as synthetic, and state the actual verification and human acceptance status. Do not republish or substitute direct Bot inspection for delegation.',
 ].join('\n');
 
 type Phase = keyof typeof INTERACTIVE_STORY_BUDGET.requests;
