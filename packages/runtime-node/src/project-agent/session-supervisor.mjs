@@ -333,7 +333,7 @@ export function createSessionSupervisor({
     if (session.status === 'result_ready') {
       session.resultConfirmationRequired = humanGate;
     }
-    session.sourceRevision = verificationContentHash(plan, (({ status, ...body }) => body)(report));
+    session.sourceRevision = reportSourceRevision(plan, report);
     session.observationRevision = sessionObservationRevision(plan, session.sourceRevision);
     const interventions = interventionsOf(plan.conversationId);
     return interventions.length > 0 ? { ...session, interventions } : session;
@@ -346,6 +346,9 @@ export function createSessionSupervisor({
   function buildReport(plan, session) {
     const history = readConversationFacts(plan.conversationId);
     return buildSessionReport(plan, session, history);
+  }
+  function reportSourceRevision(plan, { status, ...body }) {
+    return verificationContentHash(plan, body);
   }
   function publicReport(plan, session) {
     const report = buildReport(plan, session);
@@ -885,11 +888,24 @@ export function createSessionSupervisor({
     const anchor = messages.find((message) => message?.id === origin.anchorMessageId);
     const extra = hostFacts(plan);
     const hostAuthority = extra.hostAuthority && typeof extra.hostAuthority === 'object' ? extra.hostAuthority : {};
+    let sourceRevision, observationRevision;
+    const reported = messages.some(message => {
+      if (!replyCites(message, origin.sessionId)) return false;
+      const states = message.meta?.sessionStates;
+      // Preserve the historical citation contract for replies written before state receipts.
+      if (states === undefined) return true;
+      return states.some(state => {
+        if (state.sessionId !== origin.sessionId || !['result_ready', 'accepted'].includes(state.status)) return false;
+        sourceRevision ??= reportSourceRevision(plan, buildReport(plan, { sessionId: origin.sessionId }));
+        observationRevision ??= sessionObservationRevision(plan, sourceRevision);
+        return state.sourceRevision === sourceRevision && state.observationRevision === observationRevision;
+      });
+    });
     return {
       plan,
       sessionId: origin.sessionId,
       policy: policyFor(origin.workspaceId, plan),
-      reported: messages.some((message) => replyCites(message, origin.sessionId)),
+      reported,
       readOnly: origin.readOnly === true,
       changedFiles: Array.isArray(extra.changedFiles) ? extra.changedFiles : filesOf(plan),
       irreversible: extra.irreversible === true,

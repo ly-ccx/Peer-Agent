@@ -920,8 +920,8 @@ function hostPassPatch() {
   };
 }
 
-async function completedSession(env) {
-  const opened = await env.supervisor.spawn(spawnInput(), contextOf(env));
+async function completedSession(env, input = spawnInput()) {
+  const opened = await env.supervisor.spawn(input, contextOf(env));
   const planId = env.supervisor.get({ sessionId: opened.sessionId }).planId;
   env.goalPlanStore.revisePlan(planId, hostPassPatch(), { reason: 'host evidence', changedBy: 'test' });
   env.goalPlanStore.recordEvidenceRefs({
@@ -984,7 +984,8 @@ test('missing independent verification cannot mint policy acceptance', async () 
 test('回复引用任务之后才代签，字段含 acceptedBy、acceptedAt 和 verdictRef', { timeout: 20_000 }, async () => {
   const env = await harness({ readSessionFacts: () => ({ hostAuthority: { independentVerifier: 'passed' } }) });
   try {
-    const opened = await completedSession(env);
+    const opened = await completedSession(env, spawnInput({ kind: 'research', readOnly: true,
+      successCriteria: [{ id: 'c1', kind: 'model_review', description: '核对执行结果' }] }));
     const early = await env.supervisor.settle(opened.sessionId, { userAgreed: true, acceptedBy: 'user' });
     assert.equal(early.accepted, false);
     assert.equal(early.acceptedBy, undefined);
@@ -1000,13 +1001,23 @@ test('回复引用任务之后才代签，字段含 acceptedBy、acceptedAt 和 
     assert.equal(unlabeled.accepted, false);
     assert.equal(env.goalPlanStore.getPlan(opened.planId).resultAcceptance, undefined);
 
-    env.conversationStore.appendMessage(env.parent.id, {
-      id: 'reply-1',
-      role: 'assistant',
-      kind: 'agent_reply',
-      content: '登录已经修好',
-      sources: [opened.sessionId],
+    env.goalPlanStore.setRunnerState(opened.planId, { waitingOnUser: false });
+    const { sessionId, status, sourceRevision, observationRevision } = env.supervisor.get({ sessionId: opened.sessionId });
+    assert.equal(status, 'result_ready');
+    const state = { sessionId, status, sourceRevision, observationRevision };
+    const report = (id, content, sessionState) => env.conversationStore.appendMessage(env.parent.id, {
+      id, role: 'assistant', kind: 'agent_reply', content,
+      meta: { sources: [sessionId], sessionStates: [sessionState] },
     });
+    report('progress-1', '正在独立核验', { ...state, status: 'verifying' });
+    assert.equal((await env.supervisor.settle(sessionId)).accepted, false);
+    assert.equal(env.goalPlanStore.getPlan(opened.planId).resultAcceptance, undefined);
+    report('old-result', '早先版本已核验', { ...state, sourceRevision: 'older-result' });
+    assert.equal((await env.supervisor.settle(sessionId)).accepted, false);
+    report('old-review', '早先观察已核验', { ...state, observationRevision: 'older-observation' });
+    assert.equal((await env.supervisor.settle(sessionId)).accepted, false);
+
+    report('reply-1', '登录已经修好', state);
     const settled = await env.supervisor.settle(opened.sessionId);
     assert.equal(settled.accepted, true);
     assert.equal(settled.acceptedBy, 'policy');
