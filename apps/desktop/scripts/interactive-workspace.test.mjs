@@ -444,11 +444,14 @@ test('the main workspace opens canonical interactive deliveries, restores result
     assert.equal(nativeConfirmed.values.$x, 7);
     assert.equal(nativeConfirmed.values.$name, 'Workspace trial');
 
-    await previous.locator('.resource-interactive-body').evaluate(node => { node.scrollTop = 370; node.dispatchEvent(new Event('scroll')); });
-    await previous.getByText('Reading position was not saved. Your current reading is preserved.', { exact: true }).waitFor();
+    const previousTop = await previous.locator('.resource-interactive-body').evaluate(node => {
+      node.scrollTop = 370; node.dispatchEvent(new Event('scroll')); return node.scrollTop;
+    });
+    assert.ok(previousTop > 0, 'the old view has a real unsaved reading position');
     await previous.getByRole('button', { name: 'Close this window', exact: true }).click();
     const readingRecovery = previous.getByRole('region', { name: 'Previous view input recovery' });
     await readingRecovery.getByRole('button', { name: 'Discard local changes', exact: true }).waitFor();
+    await previous.getByRole('button', { name: 'Retry save', exact: true }).waitFor();
     await discard(previous, readingRecovery, 0);
     await previous.getByText('Local changes were discarded. You can close this view.', { exact: true }).waitFor();
     const closedReading = previous.waitForEvent('close');
