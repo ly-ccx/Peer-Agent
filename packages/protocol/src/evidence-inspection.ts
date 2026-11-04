@@ -16,6 +16,7 @@ export interface ProjectAgentEvidenceReadRequest {
 }
 
 export interface ProjectAgentEvidenceReadResult {
+  readonly interactiveAvailability?: 'origin_only';
   readonly deliveryStatus?: 'available' | 'scope_denied' | 'unavailable';
   readonly deliveries?: readonly EvidenceDelivery[];
   readonly ok: boolean;

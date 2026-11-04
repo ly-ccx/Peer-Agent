@@ -14,3 +14,4 @@ export { createInteractivePresentationStore, interactiveReadingSourceBinding } f
 export { createInteractiveFeedbackAdmission } from './interactive-results/feedback-admission.mjs';
 export { createInteractivePublicationSource } from './interactive-results/publication-source.mjs';
 export { createInteractiveTextReader, readLocalInteractiveText } from './interactive-results/text-reader.mjs';
+export { createPortableInteractiveSummaryReader } from './interactive-results/portable-summary.mjs';

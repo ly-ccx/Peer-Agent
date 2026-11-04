@@ -47,7 +47,8 @@ export function createInteractiveResultStore({ rootDir = pathOf('projectRuntime'
   }
   function versionRecord(context, ref, { allowPending = false } = {}, allowCleaned = false) {
     const row = context.db.prepare('SELECT * FROM versions WHERE id=? AND version=?').get(ref.resultId, ref.contentVersion);
-    if (!row || row.owner !== encode(ref.owner)) throw problem('interactive_result_unavailable');
+    if (!row) throw problem('interactive_result_unavailable');
+    if (row.owner !== encode(ref.owner)) throw problem('interactive_scope_denied');
     const metadata = decode(row.metadata);
     if (row.availability === 'cleaned' && !allowCleaned) throw problem('interactive_content_cleaned');
     if (!['available', 'cleaned'].includes(row.availability)) throw problem('interactive_storage_corrupt');

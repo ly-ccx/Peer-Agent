@@ -1,7 +1,9 @@
 import os from 'node:os';
 import path from 'node:path';
+import { readStoredWorkHistory } from '@peer-agent/conversation-store/persisted-history';
 import { parseInteractiveArtifactRef } from '@peer-agent/protocol';
-import { readLocalInteractiveText } from '@peer-agent/runtime-node/interactive-results';
+import { createGoalPlanStore } from '@peer-agent/runtime-node/storage';
+import { createPortableInteractiveSummaryReader, readLocalInteractiveText } from '@peer-agent/runtime-node/interactive-results';
 import { CLI_EXIT } from './cli-exit.ts';
 
 function terminalText(value: string): string {
@@ -17,13 +19,16 @@ export function runPeerResult(options: { reference: string; json: boolean }): nu
   }
   const dataHome = process.env.PEER_AGENT_HOME ?? process.env.PEER_USER_DATA_PATH ?? path.join(os.homedir(), '.peer-agent');
   try {
-    const result = readLocalInteractiveText(dataHome, reference);
+    const readPortableSummary = createPortableInteractiveSummaryReader({ goalPlanStore: createGoalPlanStore({ storeDir: path.join(dataHome, 'goal-plans') }),
+      readWorkHistory: (scope: Parameters<typeof readStoredWorkHistory>[1]) => readStoredWorkHistory(path.join(dataHome, 'conversations'), scope) });
+    const result = readLocalInteractiveText(dataHome, reference, readPortableSummary);
     const title = terminalText(result.title), textFallback = terminalText(result.textFallback);
     if (options.json) console.log(JSON.stringify({ ...result, title, textFallback }));
     else console.log([
       title,
       result.ref,
       `Availability: ${result.availability}`,
+      ...(result.availability === 'origin_only' ? ['The result is stored on the original device.'] : []),
       `Source: ${result.source.conversationId} / ${result.source.toolCallId}`,
       `Saved model summary, unverified${result.truncated ? ' (truncated)' : ''}`,
       textFallback,

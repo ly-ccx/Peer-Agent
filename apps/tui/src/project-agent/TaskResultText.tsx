@@ -28,6 +28,7 @@ export function TaskResultText({ host, sessionId, reference, locale }: {
   return <box flexDirection="column" marginTop={1}>
     <ThemedText fg={COLOR.textSoft}>{terminalText(summary.title)}</ThemedText>
     {summary.availability === 'cleaned' ? <ThemedText fg={COLOR.info}>{copy('resultCleaned')}</ThemedText> : null}
+    {summary.availability === 'origin_only' ? <ThemedText fg={COLOR.info}>{copy('resultOriginOnly')}</ThemedText> : null}
     <ThemedText fg={COLOR.muted}>{copy('resultSummary')}</ThemedText>
     <ThemedText fg={COLOR.text} selectable>{terminalText(summary.textFallback)}</ThemedText>
     {summary.truncated ? <ThemedText fg={COLOR.muted}>{copy('resultTruncated')}</ThemedText> : null}

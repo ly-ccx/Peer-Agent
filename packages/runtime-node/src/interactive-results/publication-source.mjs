@@ -7,7 +7,7 @@ import { sessionReportEvidenceRefs } from '../project-agent/session-report.mjs';
 const same = (a, b) => encode(a) === encode(b);
 
 /** Published identity projection. Model program/data reads still require the inspect Provider. */
-export function createInteractivePublicationSource({ resultStore, goalPlanStore, getBotConversationId, getSession }) {
+export function createInteractivePublicationSource({ resultStore, goalPlanStore, getBotConversationId, getSession, readPortableSummary }) {
   function ownerFor(workspaceId) {
     const owner = normalizeInteractiveOwner({ workspaceId, conversationId: getBotConversationId?.(workspaceId) });
     if (!owner) throw problem('interactive_scope_denied');
@@ -115,7 +115,17 @@ export function createInteractivePublicationSource({ resultStore, goalPlanStore,
         if (operation.publicationStatus !== 'published' || !same(operation.callRef, call)) throw problem('interactive_publication_unavailable');
         target = operation.reference;
       }
-      const { descriptor, sourcePlan, record, artifact } = publicationProof(target, owner, requestPlan, operation, alias);
+      let proof;
+      try { proof = publicationProof(target, owner, requestPlan, operation, alias); }
+      catch (error) {
+        if (!reference || error.code !== 'interactive_result_unavailable') throw error;
+        const portable = readPortableSummary?.(reference);
+        if (!portable) throw error;
+        const { record, summary } = portable;
+        if ((requestPlan && requestPlan.planId !== record.planId) || !same(ownerFor(context.workspaceId), owner)) throw problem('interactive_scope_denied');
+        return { record, body: { kind: 'observation', interactiveAvailability: 'origin_only', text: summary.textFallback, truncated: summary.truncated } };
+      }
+      const { descriptor, sourcePlan, record, artifact } = proof;
       requireSession(owner, sourcePlan);
       const task = { planId: sourcePlan.planId, sessionId: sourcePlan.delegationOrigin.sessionId };
       let fixed;

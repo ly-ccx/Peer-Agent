@@ -9,6 +9,7 @@ export function taskResultReferences(refs: unknown): string[] {
 type ReaderOptions = Parameters<typeof createInteractiveTextReader>[0];
 export function createTuiTaskResultReader(options: {
   resultStore: ReaderOptions['resultStore'];
+  readPortableSummary?: ReaderOptions['readPortableSummary'];
   assertOwner: (owner: { workspaceId: string; conversationId: string }) => boolean;
   readTask: (sessionId: string) => { workspaceId?: string; report?: { evidenceRefs?: readonly string[] } } | null | undefined;
 }) {
@@ -23,7 +24,10 @@ export function createTuiTaskResultReader(options: {
     };
     current();
     const summary = readText(reference);
-    if (summary.availability !== 'available') return { summary, computation: null, computationUnavailable: false };
+    if (summary.availability !== 'available') {
+      current();
+      return { summary, computation: null, computationUnavailable: false };
+    }
     let computation: { text: string; truncated: boolean } | null = null;
     try {
       const fixed = options.resultStore.getVersion(reference);

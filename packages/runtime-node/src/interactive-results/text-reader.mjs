@@ -5,8 +5,11 @@ import { createInteractiveRetention } from './retention.mjs';
 import { createInteractiveResultStore } from './store.mjs';
 import { encode, problem } from './storage.mjs';
 
-/** Human-facing static projection. No tool invocation, evaluation or writable view state. */
-export function createInteractiveTextReader({ resultStore, assertOwner }) {
+/** @typedef {ReturnType<import('./portable-summary.mjs').createPortableInteractiveSummaryReader>} ReadPortableSummary */
+
+/** Human-facing static projection. No tool invocation, evaluation or writable view state.
+ * @param {{resultStore: ReturnType<typeof createInteractiveResultStore>, assertOwner: (owner: import('@peer-agent/protocol').InteractiveOwner) => boolean, readPortableSummary?: ReadPortableSummary}} options */
+export function createInteractiveTextReader({ resultStore, assertOwner, readPortableSummary = undefined }) {
   const retirement = createInteractiveRetention({ resultStore, assertOwner });
   return function readText(rawReference) {
     const reference = normalizeInteractiveReference(rawReference);
@@ -18,6 +21,10 @@ export function createInteractiveTextReader({ resultStore, assertOwner }) {
     let fixed;
     try { fixed = resultStore.getVersion(reference); }
     catch (error) {
+      if (error.code === 'interactive_result_unavailable') {
+        const saved = readPortableSummary?.(reference)?.summary;
+        if (saved) { assertCurrent(); return saved; }
+      }
       if (error.code !== 'interactive_content_cleaned') throw error;
       const version = retirement.readTombstone(reference);
       if (!version) throw problem('interactive_cleanup_corrupt');
@@ -40,11 +47,12 @@ export function createInteractiveTextReader({ resultStore, assertOwner }) {
 }
 
 /** Read-only local CLI composition. The local data root is supplied by the host. */
-export function readLocalInteractiveText(dataHome, reference) {
+/** @param {string} dataHome @param {import('@peer-agent/protocol').InteractiveResultReference} reference @param {ReadPortableSummary} [readPortableSummary] */
+export function readLocalInteractiveText(dataHome, reference, readPortableSummary = undefined) {
   const profiles = createBotProfileStore({ rootDir: dataHome });
   const resultStore = createInteractiveResultStore({ rootDir: path.join(dataHome, 'project-runtime') });
   try {
-    return createInteractiveTextReader({ resultStore, assertOwner: owner => {
+    return createInteractiveTextReader({ resultStore, readPortableSummary, assertOwner: owner => {
       const profile = profiles.read(owner.workspaceId);
       return profile?.status === 'active' && profile.agentConversationId === owner.conversationId;
     } })(reference);

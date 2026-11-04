@@ -15,6 +15,7 @@ const runtimeFiles = [
   'sqlite-runtime.generated.mjs',
   'selection-reference.mjs',
   'persisted-history.mjs',
+  'persisted-history.d.mts',
   'history-projection-reader.mjs',
   'history-source-reader.mjs',
   'inherited-background.mjs',

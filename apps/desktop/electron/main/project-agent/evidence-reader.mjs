@@ -14,6 +14,7 @@ export function createEvidenceReader({ findRecords, readMessages, readArtifact, 
       if (!record) return context !== undefined ? readScopedExternal?.(evidenceRef, context, { metadataOnly })
         ?? { availability: 'not_found', deliveryStatus: 'unavailable' } : metadataOnly ? null : readExternal(evidenceRef);
     } catch { return { availability: 'unavailable' }; }
+    if (resolved?.body?.interactiveAvailability === 'origin_only') return { ...resolved.body, source: evidenceSourceDescription(record), availability: 'available', deliveryStatus: 'unavailable' };
     let delivery = {};
     if (context !== undefined) {
       try { delivery = projectDeliveries?.(record, resolved?.context ?? context) ?? { deliveryStatus: 'unavailable' }; }

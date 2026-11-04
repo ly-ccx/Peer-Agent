@@ -9,6 +9,7 @@ import { createInteractiveUserMaterials } from './user-materials.mjs';
 import { createInteractiveFeedbackAdmission } from './feedback-admission.mjs';
 import { createInteractiveVerification } from './verification.mjs';
 import { createInteractivePublicationSource } from './publication-source.mjs';
+import { createPortableInteractiveSummaryReader } from './portable-summary.mjs';
 import { createDelegationRetention } from './delegation-retention.mjs';
 import { createInteractiveRetentionRoots } from './retention-roots.mjs';
 import { createInteractiveRetention } from './retention.mjs';
@@ -18,7 +19,7 @@ import { workBudgetBinding } from '../project-agent/work-budget.mjs';
 
 /** One shared domain instance per host. Composition roots supply real local facts. */
 export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationStore, getBotConversationId,
-  holdsLease, enabled, classifyContext, readUserMaterial, readMaterialMetadata, getSession, now, validate, retentionPorts } = {}) {
+  holdsLease, enabled, classifyContext, readUserMaterial, readMaterialMetadata, readPortableWorkHistory, getSession, now, validate, retentionPorts } = {}) {
   const resultStore = createInteractiveResultStore({ ...(rootDir ? { rootDir } : {}), ...(now ? { now } : {}),
     assertCompatibility: () => goalPlanStore?.assertInteractiveEvidenceCompatible?.() === true });
   const stateStore = createInteractiveStateStore({ resultStore, ...(now ? { now } : {}) });
@@ -26,7 +27,8 @@ export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationS
     && getBotConversationId?.(owner.workspaceId) === owner.conversationId;
   const acquireDelegationRoots = createDelegationRetention({ goalPlanStore, resultStore, stateStore, assertOwner });
   const feedback = createInteractiveFeedbackAdmission({ stateStore, conversationStore });
-  const publications = createInteractivePublicationSource({ resultStore, goalPlanStore, getBotConversationId, getSession });
+  const readPortableSummary = createPortableInteractiveSummaryReader({ goalPlanStore, readWorkHistory: readPortableWorkHistory });
+  const publications = createInteractivePublicationSource({ resultStore, goalPlanStore, getBotConversationId, getSession, readPortableSummary });
   const verification = createInteractiveVerification({ resultStore, feedback, goalPlanStore, conversationStore, getBotConversationId, holdsLease, enabled });
   const acquireRoots = createInteractiveRetentionRoots({ ...retentionPorts, feedback, acquireDelegationRoots, verification });
   const retention = createInteractiveRetention({ resultStore, stateStore, acquireRoots, assertOwner, ...(now ? { now } : {}) });
@@ -86,7 +88,7 @@ export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationS
     else preparationCursors.delete(owner.workspaceId);
     return items;
   }
-  return { resultStore, stateStore, retention, acquireDelegationRoots, provider, authority, feedback, verification, publications, captureExecution: createInteractiveCapture({ resultStore, resolveAuthority: authority.resolve,
+  return { resultStore, stateStore, retention, acquireDelegationRoots, provider, authority, feedback, verification, publications, readPortableSummary, captureExecution: createInteractiveCapture({ resultStore, resolveAuthority: authority.resolve,
     resolveObservationAuthority: authority.resolveObservation, ...(now ? { now } : {}) }),
     userMaterialNotices(toolContext) {
       try { const context = authority.resolve({ toolContext });

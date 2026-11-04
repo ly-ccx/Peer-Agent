@@ -77,6 +77,7 @@ import { createProjectLifecycleEffects } from './project-lifecycle-effects.mjs';
 import { createDiagnosticsExport } from './diagnostics-export.mjs';
 import { retryProjectAgentTurn } from './response-retry.mjs';
 import { createInteractiveRuntime, createInteractiveTextReader } from '@peer-agent/runtime-node/interactive-results';
+import { readStoredWorkHistory } from '@peer-agent/conversation-store/persisted-history';
 import { installDesktopInteractiveRuntime } from '../interactive-results/runtime-port.mjs';
 import { createDesktopRecoveryController } from './project-recovery-controller.mjs';
 
@@ -193,6 +194,7 @@ export function registerDesktopProjectAgent({
     appendMessage,
   });
   const interactive = createInteractiveRuntime({ rootDir: runtimeRoot, goalPlanStore, conversationStore,
+    readPortableWorkHistory: scope => readStoredWorkHistory(path.join(dataHome, 'conversations'), scope),
     retentionPorts: { inputQueue, drafts: inputDrafts, acquireCompatibility: acquireInteractiveRetentionCompatibility },
     getBotConversationId: id => profileStore.read(id)?.agentConversationId, holdsLease: ownsProject, enabled: interactiveEnabled,
     classifyContext: () => 'D3_private', getSession: (id, detail = 'report') => supervisor.get({ sessionId: id, ...(detail === 'report' ? { detail } : {}) }) });

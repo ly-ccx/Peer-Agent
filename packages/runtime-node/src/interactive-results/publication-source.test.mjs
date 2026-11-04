@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { validateDraft } from '@peer-agent/interactive-content';
 import { createGoalPlanStore } from '../goal-plan-store.mjs';
 import { createInteractiveResultStore } from './store.mjs';
 import { createInteractivePublicationSource } from './publication-source.mjs';
+import { createPortableInteractiveSummaryReader } from './portable-summary.mjs';
+import { createInteractiveTextReader } from './text-reader.mjs';
+import { readStoredWorkHistory } from '../../../conversation-store/src/persisted-history.mjs';
 import { createEvidenceReader } from '../../../../apps/desktop/electron/main/project-agent/evidence-reader.mjs';
 import { createEvidenceDeliveryProjection } from '../../../../apps/desktop/electron/main/project-agent/evidence-deliveries.mjs';
 
@@ -46,9 +49,62 @@ async function fixture(t) {
     readArtifact: () => { bodyReads++; throw Error('Interactive summaries are not file paths'); }, readMessages: () => { bodyReads++; return []; } });
   const context = work => ({ workspaceId: owner.workspaceId, task: { planId: work.planId, sessionId: work.delegationOrigin.sessionId } });
   t.after(() => { store.close(); rmSync(root, { recursive: true, force: true }); });
-  return { plans, store, owner, plan, publish, ports, source, reader, context, draft, sessions,
+  return { root, plans, store, owner, plan, publish, ports, source, reader, context, draft, sessions,
     changeOwner: () => { parent = 'new-parent'; }, reads: () => ({ legacyReads, bodyReads }) };
 }
+
+test('portable history displays the saved fixed summary without creating a local publication or delivery', async t => {
+  const f = await fixture(t), work = f.plan('portable'), published = await f.publish(work);
+  const reference = published.reference, ref = published.evidenceRef, sessionId = work.delegationOrigin.sessionId;
+  const folder = path.join(f.root, 'portable-conversations'), runtime = path.join(f.root, 'portable-runtime');
+  mkdirSync(folder);
+  const file = path.join(folder, `${work.conversationId}.jsonl`);
+  const index = [
+    { id: f.owner.conversationId, role: 'project_agent', workspaceId: f.owner.workspaceId },
+    { id: work.conversationId, role: 'work_session', workspaceId: f.owner.workspaceId, parentConversationId: f.owner.conversationId,
+      delegation: { sessionId }, contentRevision: 1 },
+  ];
+  const jsonLines = rows => rows.map(row => JSON.stringify(row)).join('\n') + '\n';
+  writeFileSync(path.join(folder, 'index.jsonl'), jsonLines(index));
+  const output = { kind: 'interactive_publication', publicationStatus: 'published', reference, callRef: published.callRef,
+    artifactRef: ref, title: f.draft.title, textFallback: f.draft.textFallback };
+  const message = { id: 'committed-worker-message', role: 'assistant', interrupted: false, segments: [{ type: 'tool-call',
+    tool: 'publish_interactive_result', status: 'completed', toolCallId: published.callRef.toolCallId,
+    result: JSON.stringify({ status: 'completed', output, evidenceRefs: [ref] }) }] };
+  writeFileSync(file, jsonLines([message]));
+  const resultStore = createInteractiveResultStore({ rootDir: runtime });
+  t.after(() => resultStore.close());
+  const readPortableSummary = createPortableInteractiveSummaryReader({ goalPlanStore: f.plans,
+    readWorkHistory: scope => readStoredWorkHistory(folder, scope) });
+  const readText = createInteractiveTextReader({ resultStore, readPortableSummary, assertOwner: owner => f.ports.getBotConversationId(owner.workspaceId) === owner.conversationId });
+  const source = createInteractivePublicationSource({ ...f.ports, resultStore, readPortableSummary });
+  const readEvidence = createEvidenceReader({ resolveScopedRecord: source.resolveEvidence,
+    findRecords: () => { throw Error('Portable evidence must use the canonical scoped result'); },
+    projectDeliveries: () => { throw Error('Portable text grants no local delivery'); } });
+  const summary = readText(reference);
+  assert.equal(summary.availability, 'origin_only');
+  assert.equal(summary.textFallback, f.draft.textFallback);
+  assert.deepEqual(summary.source, { conversationId: work.conversationId, toolCallId: published.callRef.toolCallId, planId: work.planId, sessionId });
+  assert.equal(summary.dataLevel, undefined);
+  const shown = readEvidence(ref, { context: f.context(work) });
+  assert.equal(shown.interactiveAvailability, 'origin_only');
+  assert.equal(shown.text, f.draft.textFallback);
+  assert.equal(shown.deliveries, undefined);
+  assert.equal(readEvidence(ref, { context: f.context(f.plan('different-task')) }).deliveryStatus, 'scope_denied');
+  assert.throws(() => createInteractiveTextReader({ resultStore, assertOwner: () => true })(reference), { code: 'interactive_result_unavailable' });
+  assert.equal(existsSync(runtime), false);
+
+  writeFileSync(file, jsonLines([message, { ...message, id: 'duplicate' }]));
+  assert.throws(() => readText(reference), { code: 'interactive_result_unavailable' });
+  writeFileSync(file, jsonLines([{ ...message, interrupted: true }]));
+  assert.throws(() => readText(reference), { code: 'interactive_result_unavailable' });
+  writeFileSync(file, jsonLines([message]));
+  writeFileSync(path.join(folder, `${work.conversationId}.stream.json`), JSON.stringify({ version: 1,
+    conversationId: work.conversationId, messageId: message.id, patch: {} }));
+  assert.throws(() => readText(reference), { code: 'interactive_result_unavailable' });
+  f.changeOwner();
+  assert.throws(() => readText(reference), { code: 'interactive_scope_denied' });
+});
 
 test('task evidence aliases resolve their actual worker operation despite identical wire IDs in other tasks and Bots', async t => {
   const f = await fixture(t), a = f.plan('a'), b = f.plan('b');

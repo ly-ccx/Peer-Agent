@@ -4,6 +4,7 @@ import { createTuiTaskResultReader } from './task-result-reader.ts';
 import { createTuiEvidenceReader } from './tui-evidence-reader.ts';
 import { randomUUID } from 'node:crypto';
 import { createConversationStore } from '@peer-agent/conversation-store';
+import { readStoredWorkHistory } from '@peer-agent/conversation-store/persisted-history';
 import {
   createHostLease,
   createApprovalStore,
@@ -115,6 +116,7 @@ export function createTuiProjectHost(options: {
     hasMessage:(id: string, messageId: string) => readMessages(id).some(row=>row.id===messageId),
     appendMessage:(id: string, message: any) => {conversations.appendMessage(id,message);changed();}} as never);
   const interactive = createInteractiveRuntime({ rootDir: runtimeRoot, goalPlanStore: plans, conversationStore: conversations,
+    readPortableWorkHistory: (scope: Parameters<typeof readStoredWorkHistory>[1]) => readStoredWorkHistory(path.join(dataHome, 'conversations'), scope),
     retentionPorts: { inputQueue: inputs, drafts, acquireCompatibility: options.acquireInteractiveRetentionCompatibility },
     getBotConversationId: (id: string) => profiles.read(id)?.agentConversationId, holdsLease: holds, enabled: interactiveEnabled,
     classifyContext: () => 'D3_private', getSession: (id: string, detail = 'report') => supervisor.get({ sessionId: id, ...(detail === 'report' ? { detail } : {}) }) });
@@ -259,6 +261,7 @@ export function createTuiProjectHost(options: {
   if(options.autoStart!==false){watches.start(()=>selectedId?[selectedId]:[]);void tick();}
   const readTaskResult = createTuiTaskResultReader({
     resultStore: interactive.resultStore,
+    readPortableSummary: interactive.readPortableSummary,
     assertOwner: owner => !closed && !admissionClosed && selectedId === owner.workspaceId
       && profiles.read(owner.workspaceId)?.status === 'active' && resolveConversationId(owner.workspaceId) === owner.conversationId,
     readTask: sessionId => supervisor.get({ sessionId, detail: 'report' }),
