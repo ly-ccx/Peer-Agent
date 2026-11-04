@@ -527,7 +527,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         buildRequest(pipelineState) {
           return {
             model,
-            messages: microcompactMessagesForContext(pipelineState.messages).messages,
+            messages: microcompactMessagesForContext(pipelineState.messages, { preserveLatestUserTurn: true }).messages,
             tools,
             ...(!reasoningEffort || reasoningEffort === 'default' ? {} : { reasoningEffort }),
             ...(options.getFastMode?.() === true ? { fastMode: true } : {}),
