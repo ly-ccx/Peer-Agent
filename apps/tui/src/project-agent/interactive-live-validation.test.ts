@@ -201,3 +201,35 @@ test('story rejects two actual delegations for the initial input', async () => {
   expect(report.error).toContain('story_duplicate_initial_delegation');
   expect(report.sessions).toHaveLength(2);
 }, 10_000);
+
+test('story records a token-limit response without treating it as a tool or text result', async () => {
+  const observed = Promise.withResolvers<void>();
+  let botRequests = 0;
+  const provider: ModelProvider = { async stream(request) {
+    if (request.tools?.some(tool => tool.name === 'spawn_session')) {
+      if (++botRequests === 1) return { content: '', toolCalls: [{
+        id: 'diagnostic-delegation', name: 'spawn_session', arguments: JSON.stringify({
+          anchorMessageIds: ['input-live-story-publish'], title: 'Planning example',
+          brief: 'Read the synthetic planning example.', kind: 'research', readOnly: true, isolation: 'none',
+          requiredCapabilities: ['local.interactive.publish'],
+          successCriteria: [{ kind: 'model_review', description: 'Inspect the example independently.' }],
+        }),
+      }] };
+      return { content: '', toolCalls: [], usage: { inputTokens: 10, outputTokens: INTERACTIVE_STORY_BUDGET.botOutputTokens } };
+    }
+    await observed.promise;
+    return { content: '', toolCalls: Array.from({ length: INTERACTIVE_STORY_BUDGET.calls.worker + 1 }, (_, index) => ({
+      id: `stop-${index}`, name: 'publish_interactive_result', arguments: '{}',
+    })) };
+  } };
+  const report = await runInteractiveLiveStory({ directory: path.join(fixture(), 'story'), provider, model, sanitize: String,
+    onProgress: state => {
+      if (state.requests.some(row => row.diagnostic === 'no_usable_output_at_token_limit')) observed.resolve();
+    },
+  });
+  expect(report.ok).toBe(false);
+  expect(report.requests).toContainEqual(expect.objectContaining({
+    phase: 'bot', diagnostic: 'no_usable_output_at_token_limit', returnedTools: [],
+  }));
+  expect(report.budgetExhausted).toMatchObject({ resource: 'toolCalls', phase: 'worker' });
+}, 10_000);
