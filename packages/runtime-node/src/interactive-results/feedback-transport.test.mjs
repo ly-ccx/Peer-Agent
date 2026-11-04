@@ -82,11 +82,23 @@ test('known attachments carry the complete selection through a real already-open
   f.states.save({ reference: f.reference, identity: f.identity, writer: f.writer, expectedRevision: 1, requestId: 'save-2', values: { $x: 6, $name: 'Later edit' }, inputDrafts: {} }, () => true);
   assert.equal(queue.findSubmission(f.owner.workspaceId, 'selected').resourceFeedback[0].version.values.$x, 4);
   assert.deepEqual(queue.submitInput(f.input('selected')).resourceFeedback, [f.feedback]);
-  const code = readFileSync(new URL('../../../conversation-store/src/index.mjs', import.meta.url), 'utf8')
-    .replace("import { acquireMessageRetentionGuard } from './message-retention-guard.mjs';\n", '')
-    .replace('    acquireMessageRetentionGuard: scope => acquireMessageRetentionGuard(indexFile, convFile, scope),\n', '');
-  assert.equal(createHash('sha256').update(code).digest('hex'), 'a5f25527c02bdda6917680538ae480cd57f9d80bc55f259f290c4daf630d9e5e',
-    'the shared Conversation writer must match the pinned source after removing only the independent guard entry');
+  // These blocks are from 8b3ffbcf, whose complete Conversation source was pinned
+  // before the independent metadata and asynchronous terminal lock changes.
+  const code = readFileSync(new URL('../../../conversation-store/src/index.mjs', import.meta.url), 'utf8');
+  const pinnedWriterBlocks = [
+    ['function readJsonl(', '\nfunction readJson(', 'f943550e04e210417ac7615ceb2facfcbe46757d58b6fe4b5743e8dd70cb65c0'],
+    ['function normalizeMeta(', '\n// 一次性数据迁移', 'f6517a5371f61f887e3b58dc22292a5edfc33a27484e87adcea9f9024c955060'],
+    ['  function isEmptyUserMessage(', '\n  const terminalCommitter', 'e6b1748a647a34a37e94092f5a4db8b97bc39a92c818fab3f4d7cf065b5103d4'],
+    ['  const messageWrite =', '\n\n  // 会话级累计用量账本', '627b6d84b4d011357a67384253575c7a8b431870939ec233765c53f3ca9af693'],
+    ['    appendMessage: changed(', '\n    commitStreamingMessage:', 'a9b2e4fe91f3d89e7eb0ec8755502ac46e9b17cf90c9feb595b90e06050a5c98'],
+    ['    replaceMessages: changed(', '\n', 'af3abf6e886b6f8f9b449f80273d4a26554123f662087c934933ad279cb8ecb9'],
+  ];
+  for (const [begin, end, digest] of pinnedWriterBlocks) {
+    const first = code.indexOf(begin);
+    const last = code.indexOf(end, first);
+    assert.ok(first >= 0 && last > first, `missing pinned Conversation writer block ${begin}`);
+    assert.equal(createHash('sha256').update(code.slice(first, last)).digest('hex'), digest, begin);
+  }
 });
 test('the pinned old queue demonstrably skips an unknown direct union, so the test cannot pass by merely adding a version marker', async t => {
   const f = await fixture(t), legacy = createLegacyQueue(f.options);

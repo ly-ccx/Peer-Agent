@@ -11,7 +11,7 @@ import { createBackgroundSnapshotStore } from './background-snapshot-store.mjs';
 import path from 'node:path';
 import { contextAccountingModelKey, normalizeContextUsageBreakdown } from '@peer-agent/protocol';
 import { acquireMessageRetentionGuard } from './message-retention-guard.mjs';
-import { withFileLock, withFileLockAsync } from './conversation-file-lock.mjs';
+import { withFileLock, withFileLocksAsync } from './conversation-file-lock.mjs';
 import { createTerminalMessageCommitter, conversationFileVersion } from './terminal-message-committer.mjs';
 
 function defaultStoreDir() {
@@ -408,16 +408,19 @@ function migrateLegacyGoalMode(storeDir, indexFile) {
   try {
     const markerFile = path.join(storeDir, '.goal-to-plan-migrated');
     if (existsSync(markerFile)) return;
-    if (existsSync(indexFile)) {
-      const rows = readJsonl(indexFile);
-      let changed = false;
-      for (const row of rows) {
-        if (row && row.mode === 'goal') { row.mode = 'plan'; changed = true; }
+    mkdirSync(storeDir, { recursive: true });
+    withFileLock(indexFile, () => {
+      if (existsSync(markerFile)) return;
+      if (existsSync(indexFile)) {
+        const rows = readJsonl(indexFile);
+        let changed = false;
+        for (const row of rows) {
+          if (row && row.mode === 'goal') { row.mode = 'plan'; changed = true; }
+        }
+        if (changed) writeJsonl(indexFile, rows);
       }
-      if (changed) writeJsonl(indexFile, rows);
-    }
-    if (!existsSync(storeDir)) mkdirSync(storeDir, { recursive: true });
-    writeFileSync(markerFile, new Date().toISOString(), 'utf8');
+      writeFileSync(markerFile, new Date().toISOString(), 'utf8');
+    });
   } catch {
     // 迁移失败不应阻断 store 初始化;下次启动 marker 不存在会重试。
   }
@@ -568,30 +571,33 @@ export function createConversationStore(options = {}) {
    * 为缺 messageCount 的 index 行批量回填并一次写回。
    * 仅用于后台迁移 / 显式 backfill，不在 list 热路径调用。
    */
-  function ensureMessageCounts(metas) {
+  function fillMissingMessageCounts(wanted) {
+    const index = readIndex();
     let dirty = false;
-    const byId = new Map();
-    const next = metas.map((meta) => {
-      if (Number.isFinite(Number(meta.messageCount))) {
-        const normalized = { ...meta, messageCount: Number(meta.messageCount) };
-        byId.set(meta.id, normalized);
-        return normalized;
+    const counts = new Map();
+    for (const row of index) {
+      if (wanted && !wanted.has(row.id)) continue;
+      if (!Number.isFinite(Number(row.messageCount))) {
+        row.messageCount = computeMessageCount(row.id);
+        dirty = true;
       }
-      dirty = true;
-      const filled = { ...meta, messageCount: computeMessageCount(meta.id) };
-      byId.set(meta.id, filled);
-      return filled;
-    });
-    if (dirty) {
-      const index = readIndex().map((row) => {
-        if (!Number.isFinite(Number(row.messageCount)) && byId.has(row.id)) {
-          return byId.get(row.id);
-        }
-        return row;
-      });
-      writeJsonl(indexFile, index);
+      counts.set(row.id, Number(row.messageCount));
     }
-    return next;
+    if (dirty) writeJsonl(indexFile, index);
+    return counts;
+  }
+
+  function ensureMessageCounts(metas) {
+    const missingIds = metas.filter(meta => !Number.isFinite(Number(meta.messageCount))).map(meta => meta.id);
+    if (!missingIds.length) return metas.map(projectListMeta);
+    return withFileLock(indexFile, () => {
+      const counts = fillMissingMessageCounts(new Set(missingIds));
+      return metas.map(meta => ({
+        ...meta,
+        messageCount: counts.get(meta.id) ?? (Number.isFinite(Number(meta.messageCount))
+          ? Number(meta.messageCount) : computeMessageCount(meta.id)),
+      }));
+    });
   }
 
   let messageCountMigrationScheduled = false;
@@ -605,22 +611,10 @@ export function createConversationStore(options = {}) {
     messageCountMigrationTimer = setTimeout(() => {
       messageCountMigrationTimer = null;
       messageCountMigrationScheduled = false;
-      try {
-        const index = readIndex();
-        let dirty = false;
-        const next = index.map((row) => {
-          if (Number.isFinite(Number(row.messageCount))) {
-            return { ...row, messageCount: Number(row.messageCount) };
-          }
-          if (wanted && !wanted.has(row.id)) return row;
-          dirty = true;
-          return { ...row, messageCount: computeMessageCount(row.id) };
-        });
-        if (dirty) writeJsonl(indexFile, next);
-      } catch (err) {
+      void withFileLocksAsync([indexFile], () => fillMissingMessageCounts(wanted)).catch((err) => {
         // 后台迁移失败不影响 list；下次 list 会再次调度。
         console.warn('[conversation-store] messageCount migration failed:', err);
-      }
+      });
     }, 0);
   }
 
@@ -1454,17 +1448,17 @@ export function createConversationStore(options = {}) {
 
   const terminalCommitter = createTerminalMessageCommitter({ storeDir,
     commitPrepared: async prepared => {
-      const result = await withFileLockAsync(indexFile, () => withFileLockAsync(prepared.historyFile, () => {
-      const index = readIndex(), meta = index.find(row => row.id === prepared.id);
-      if (!meta) throw Object.assign(new Error('Conversation was deleted'), { code: 'CONVERSATION_COMMIT_DELETED' });
-      if (conversationFileVersion(prepared.historyFile) !== prepared.sourceVersion) return false;
-      renameSync(prepared.temporaryFile, prepared.historyFile);
-      meta.contentRevision = (Number.isSafeInteger(Number(meta.contentRevision)) ? Number(meta.contentRevision) : 0) + 1;
-      meta.messageCount = prepared.messageCount; meta.contextSnapshot = null; meta.updatedAt = new Date().toISOString();
-      writeJsonl(indexFile, index);
-      if (readJson(streamPatchFile(prepared.id))?.messageId === prepared.messageId) clearStreamPatch(prepared.id);
-      return { meta, receipt: { id: prepared.id, messageId: prepared.messageId, contentRevision: meta.contentRevision } };
-      }));
+      const result = await withFileLocksAsync([indexFile, prepared.historyFile], () => {
+        const index = readIndex(), meta = index.find(row => row.id === prepared.id);
+        if (!meta) throw Object.assign(new Error('Conversation was deleted'), { code: 'CONVERSATION_COMMIT_DELETED' });
+        if (conversationFileVersion(prepared.historyFile) !== prepared.sourceVersion) return false;
+        renameSync(prepared.temporaryFile, prepared.historyFile);
+        meta.contentRevision = (Number.isSafeInteger(Number(meta.contentRevision)) ? Number(meta.contentRevision) : 0) + 1;
+        meta.messageCount = prepared.messageCount; meta.contextSnapshot = null; meta.updatedAt = new Date().toISOString();
+        writeJsonl(indexFile, index);
+        if (readJson(streamPatchFile(prepared.id))?.messageId === prepared.messageId) clearStreamPatch(prepared.id);
+        return { meta, receipt: { id: prepared.id, messageId: prepared.messageId, contentRevision: meta.contentRevision } };
+      });
       if (result === false) return false;
       // Subscribers may write again. Notify only after both locks have been released.
       publishChange(result.meta, 'messages-updated');
@@ -1813,16 +1807,18 @@ export function createConversationStore(options = {}) {
   const legacyFile = path.join(path.dirname(storeDir), 'conversations.json');
   if (existsSync(legacyFile) && !existsSync(indexFile)) {
     try {
-      const legacy = JSON.parse(readFileSync(legacyFile, 'utf8'));
-      if (Array.isArray(legacy)) {
-        mkdirSync(storeDir, { recursive: true });
+      mkdirSync(storeDir, { recursive: true });
+      withFileLock(indexFile, () => {
+        if (existsSync(indexFile)) return;
+        const legacy = JSON.parse(readFileSync(legacyFile, 'utf8'));
+        if (!Array.isArray(legacy)) return;
         for (const conv of legacy) {
           const { messages, ...meta } = conv;
           appendJsonl(indexFile, normalizeMeta(meta));
           if (messages?.length) writeJsonl(convFile(meta.id), messages);
         }
         console.log(`[conversation-store] migrated ${legacy.length} conversations from JSON to JSONL`);
-      }
+      });
     } catch (err) {
       console.warn('[conversation-store] migration failed:', err?.message);
     }
@@ -1837,6 +1833,9 @@ export function createConversationStore(options = {}) {
       return result;
     };
   }
+
+  const indexWrite = operation => (...args) => withFileLock(indexFile, () => operation(...args));
+  const metadataWrite = operation => changed(indexWrite(operation), 'metadata-updated');
 
   function readChangeEvent(changeFile) {
     try {
@@ -1891,14 +1890,14 @@ export function createConversationStore(options = {}) {
     captureInheritedBackground,
     readInheritedBackground,
     getLatestContextObservation,
-    updateTitle: changed(updateTitle, 'metadata-updated'),
-    markRead: changed(markRead, 'metadata-updated'),
-    updateMode: changed(updateMode, 'metadata-updated'),
-    updateFastMode: changed(updateFastMode, 'metadata-updated'),
-    updatePreferredExecutionIsolation: changed(updatePreferredExecutionIsolation, 'metadata-updated'),
-    updateAutomationCreateContext: changed(updateAutomationCreateContext, 'metadata-updated'),
-    updateModelEffort: changed(updateModelEffort, 'metadata-updated'),
-    updateContextSnapshot: changed(updateContextSnapshot, 'metadata-updated'),
+    updateTitle: metadataWrite(updateTitle),
+    markRead: metadataWrite(markRead),
+    updateMode: metadataWrite(updateMode),
+    updateFastMode: metadataWrite(updateFastMode),
+    updatePreferredExecutionIsolation: metadataWrite(updatePreferredExecutionIsolation),
+    updateAutomationCreateContext: metadataWrite(updateAutomationCreateContext),
+    updateModelEffort: metadataWrite(updateModelEffort),
+    updateContextSnapshot: metadataWrite(updateContextSnapshot),
     appendMessage: changed(appendMessage, 'messages-updated'),
     updateLastMessage: changed(messageWrite(updateLastMessage), 'messages-updated'),
     updateMessageById: changed(messageWrite(updateMessageById), 'messages-updated'),
@@ -1908,14 +1907,14 @@ export function createConversationStore(options = {}) {
     patchStreamingMessage,
     clearStreamPatch,
     replaceMessages: changed(messageWrite(replaceMessages), 'messages-updated'),
-    addUsage: changed(addUsage, 'metadata-updated'),
-    recordRuntimeTurnUsage: changed(recordRuntimeTurnUsage, 'metadata-updated'),
-    archiveConversation: changed(archiveConversation, 'metadata-updated'),
-    restoreConversation: changed(restoreConversation, 'metadata-updated'),
-    pinConversation: changed(pinConversation, 'metadata-updated'),
-    unpinConversation: changed(unpinConversation, 'metadata-updated'),
-    reorderPinnedConversations,
-    autoArchiveConversations,
+    addUsage: metadataWrite(addUsage),
+    recordRuntimeTurnUsage: metadataWrite(recordRuntimeTurnUsage),
+    archiveConversation: metadataWrite(archiveConversation),
+    restoreConversation: metadataWrite(restoreConversation),
+    pinConversation: metadataWrite(pinConversation),
+    unpinConversation: metadataWrite(unpinConversation),
+    reorderPinnedConversations: indexWrite(reorderPinnedConversations),
+    autoArchiveConversations: indexWrite(autoArchiveConversations),
     deleteConversation: changed(messageWrite(deleteConversation), 'deleted'),
     deleteConversationsByWorkspace: (...args) => withFileLock(indexFile, () => deleteConversationsByWorkspace(...args)),
     subscribeChanges,
