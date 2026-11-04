@@ -229,19 +229,19 @@ export async function runInteractiveLiveStory(options: {
       const identity = { viewId: 'story-view', windowId: 'story-window', generation: 'story-generation' };
       const state = stateStore.read(fixed.reference, current);
       const writer = stateStore.acquire({ reference: fixed.reference, identity, expectedRevision: state.stateRevision }, current);
-      let followupId: string;
+      let frozenVersion: Extract<NonNullable<typeof submittedFeedback>['version'], { kind: 'interactive' }>;
       try {
         const saved = stateStore.save({ reference: fixed.reference, identity, writer, expectedRevision: state.stateRevision,
           requestId: 'story-save', values: { ...fixed.content.initialValues, $budget: 80 }, inputDrafts: {} }, current);
         const frozen = await stateStore.prepareFollowup({ reference: fixed.reference, identity, writer,
           requestId: 'story-freeze', stateRevision: saved.stateRevision, stateDigest: saved.stateDigest, fields: ['$budget'] }, current);
         const feedback = interactiveFeedbackFromFollowup(frozen);
-        if (!feedback) throw Error('story_feedback_invalid');
+        if (!feedback || feedback.version.kind !== 'interactive') throw Error('story_feedback_invalid');
         host.inputs.submitInput({ workspaceId, inputId: FROZEN_INPUT, text: FROZEN_TASK, resourceFeedback: [feedback], surface: 'tui' });
         // The TUI submission path notifies the host even while a wake is active.
         tick(true);
         submittedFeedback = feedback;
-        followupId = feedback.id;
+        frozenVersion = feedback.version;
         report.frozen = feedback;
       } finally { stateStore.release({ reference: fixed.reference, identity, writer }, current); }
       report.stage = 'verification-and-reply';
@@ -270,11 +270,14 @@ export async function runInteractiveLiveStory(options: {
           covered = new Set(receipts.flatMap((row: any) => {
             const receipt = row.interactiveInspection, { request, range, stateSource } = receipt;
             if (request.target.kind !== 'result' || JSON.stringify(request.target.reference) !== JSON.stringify(fixed.reference)
-              || range?.truncated || range?.offset !== 0 || receipt.computationTruncated) return [];
+              || range?.truncated !== false || range.offset !== 0 || range.returned !== range.total || receipt.computationTruncated) return [];
             if (request.view === 'program') return ['program'];
             if (request.view === 'data' && request.bindingId === 'facts') return ['facts'];
             if (request.view === 'evaluate' && stateSource?.kind === 'initial') return ['initial'];
-            return request.view === 'evaluate' && stateSource?.followupId === followupId ? ['frozen'] : [];
+            return request.view === 'evaluate' && stateSource?.kind === 'frozen-followup'
+              && stateSource.followupId === frozenVersion.followupId && stateSource.stateRevision === frozenVersion.stateRevision
+              && stateSource.stateDigest === frozenVersion.stateDigest && stateSource.selectionDigest === frozenVersion.selectionDigest
+              ? ['frozen'] : [];
           }));
           report.receipts = receipts;
           report.verification = { sessionId: verification.sessionId, planId: verification.planId,
