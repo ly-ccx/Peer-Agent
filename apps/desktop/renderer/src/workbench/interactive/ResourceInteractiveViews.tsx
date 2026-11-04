@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import type { ResourceInteractiveTab } from '@peer-agent/protocol';
 import { useResourceWorkspace } from '../ResourceWorkspaceContext';
 import { useDocumentReadingPosition } from '../useDocumentReadingPosition';
@@ -13,10 +13,17 @@ function ReadingSurface({ tab, active, isZh }: { readonly tab: ResourceInteracti
   const contentReady = useCallback(() => setReady(true), []), contentUnavailable = useCallback(() => setReady(false), []);
   const remember = workspace.rememberInteractive, metadata = workspace.rememberInteractiveTitle;
   const generation = workspace.interactiveReadingGeneration;
+  const loaded = workspace.interactiveLayoutState.loaded;
+  const restoredLayout = useRef(loaded);
   const referenceKey = interactiveSessionKey(tab.reference);
   const onRemember = useCallback((_key: string, point: { top: number; left: number }) => remember(tab.reference, point, generation), [remember, referenceKey, generation]);
   const reading = useDocumentReadingPosition(interactiveSessionKey(tab.reference), 'interactive', active, ready, undefined,
     { key: 'interactive', initial: { interactive: tab.navigation ?? { top: 0, left: 0 } }, onRemember });
+  useLayoutEffect(() => {
+    if (!loaded || restoredLayout.current) return;
+    restoredLayout.current = true;
+    if (tab.navigation) reading.restoreUnvisited(tab.navigation);
+  }, [loaded, tab.navigation, reading.restoreUnvisited]);
   useLayoutEffect(() => { if (!active) setReady(false); }, [active]);
   return <section className="resource-interactive-session">
     <div className="resource-interactive-actions"><OpenResourceWindowButton isZh={isZh} disabled={!active || !ready}

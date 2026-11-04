@@ -103,6 +103,13 @@ test('the main workspace opens canonical interactive deliveries, restores result
     const initial={locale:'en-US',workbench:{activeTab:{[owner.conversationId]:'launcher'},documentSessions:{},browserSessions:{}}};
     const preparation=createResourceFeedbackPreparation({isMainSender:sender=>windows.getRole(sender)==='main',getRecipient:()=>owner});
     const interactive=createDesktopInteractiveApplication({getRole:sender=>windows.getRole(sender),getOwner:workspaceId=>workspaceId===owner.workspaceId?owner:null,getNativeBinding:sender=>host.interactiveBinding(sender),getRuntime:()=>runtime,prepareFeedback:preparation.prepare,readDraft:drafts.read,openWindow:(sender,reference)=>host.open(sender,{resource:{kind:"interactive",reference}})});
+    const originalReadLayout=interactive.readLayout;let holdLayoutRead=false,releaseLayoutRead=null;
+    interactive.readLayout=(sender,request)=>{
+      const receipt=originalReadLayout(sender,request);
+      if(sender!==source.webContents||!holdLayoutRead)return receipt;
+      holdLayoutRead=false;
+      return new Promise(resolve=>{releaseLayoutRead=()=>{releaseLayoutRead=null;resolve(receipt);};});
+    };
     const originalSave=interactive.save;let saveFault=null;
     interactive.save=(sender,request)=>{if(sender!==source.webContents||!saveFault)return originalSave(sender,request);const fault=saveFault;saveFault=null;if(fault==='uncommitted')return{ok:false,code:'fixture_save_unconfirmed'};const reply=originalSave(sender,request);return reply.ok?{ok:false,code:'fixture_save_unconfirmed'}:reply};
     const nativeWindows=[];function QuietWindow(options){const win=new BrowserWindow(options);win.show=()=>{};nativeWindows.push(win);return win}QuietWindow.fromWebContents=contents=>BrowserWindow.fromWebContents(contents);
@@ -124,6 +131,8 @@ test('the main workspace opens canonical interactive deliveries, restores result
     ipc.handle('project-agent:read-evidence',(_event,request)=>projectApplication.readEvidence(request));
     ipc.handle('resource-edit:list',()=>({ok:true,drafts:[],operations:[],staleCount:0}));
     globalThis.workspaceFixture={snapshot:(reference=receipt.reference)=>stateStore.read(reference,()=>true),
+      holdLayoutRead(){holdLayoutRead=true;},
+      releaseLayoutRead(){if(!releaseLayoutRead)throw Error('no held layout read');releaseLayoutRead();},
       publishNext:async()=>{const nextDraft={...draft,publication:{kind:"revise",base:receipt.reference},title:"Workspace trial updated",program:program.replace("$x=2","$x=9")};const next=resultStore.commitPublication({owner,source:{conversationId:"worker",sessionId:"session",planId:"plan",executionEpoch:"epoch",toolCallId:"publication-revision"},draft:nextDraft,content:await validateDraft(nextDraft),provenance:[],dataLevel:"D3_private",grant:{toolCallId:"publication-revision",grantId:"fixture-revision-grant",granted:true}},()=>true);evidenceEntries.push(next.indexEntry);resultStore.markIndexed(next.callRef,next.indexEntry);return next.reference;},layout:()=>interactive.readLayout(source.webContents,{owner}),
       async createRetired(){const candidate={...draft,title:'Retired trial',textFallback:'Fixed historical summary.'};
         const source={conversationId:'worker',sessionId:'session',planId:'plan',executionEpoch:'epoch',toolCallId:'publication-retired'};
@@ -187,6 +196,42 @@ test('the main workspace opens canonical interactive deliveries, restores result
     await page.getByLabel('Divisor', { exact: true }).waitFor();
     assert.equal(await page.getByLabel('Divisor', { exact: true }).inputValue(), '5');
     await page.waitForFunction(() => document.querySelector('.resource-interactive-body').scrollTop >= 400);
+    const position = page.locator('.resource-interactive-body');
+    const retryLoading = page.getByRole('button', { name: 'Retry loading layout', exact: true });
+    const reopenAfterTimeout = async () => {
+      await electron.evaluate(() => globalThis.workspaceFixture.holdLayoutRead());
+      await reloadSavedWorkspace(electron, page);
+      await page.getByText('Deliveries', { exact: true }).click();
+      await page.getByRole('button', { name: 'Open interactive result', exact: true }).click();
+      await retryLoading.waitFor({ timeout: 10000 });
+      await page.getByLabel('Divisor', { exact: true }).waitFor();
+      assert.equal(await position.evaluate(node => node.scrollTop), 0);
+    };
+    await reopenAfterTimeout();
+    const content = await position.elementHandle();
+    await retryLoading.click();
+    await page.waitForFunction(() => document.querySelector('.resource-interactive-body').scrollTop >= 400);
+    await electron.evaluate(() => globalThis.workspaceFixture.releaseLayoutRead());
+    assert.equal(await position.evaluate((node, original) => node === original, content), true, 'layout recovery restores reading without remounting the result');
+    await content.dispose();
+
+    await reopenAfterTimeout();
+    const localReading = await position.evaluate(node => {
+      node.scrollTop = 650;
+      node.dispatchEvent(new Event('scroll'));
+      return node.scrollTop;
+    });
+    assert.ok(localReading >= 600);
+    await retryLoading.click();
+    await page.waitForFunction(async top => {
+      const { fixture } = await window.peerAgent.getBootstrap();
+      const { workspaceId, conversationId } = fixture.owner;
+      const reply = await window.peerAgent.resourcePresentation.readLayout({ owner: { workspaceId, conversationId } });
+      return reply.ok && reply.snapshot?.interactive.tabs[0]?.navigation?.top === top;
+    }, localReading);
+    await electron.evaluate(() => globalThis.workspaceFixture.releaseLayoutRead());
+    assert.equal(await position.evaluate(node => node.scrollTop), localReading, 'late layout receipts cannot overwrite active reading');
+    await page.screenshot({ path: path.join(root, 'workspace-layout-reading-recovered.png'), animations: 'disabled' });
     const nativeOpening = electron.waitForEvent('window'); await page.getByRole('button', { name: 'Open separate view', exact: true }).click();
     const native = await nativeOpening; await native.waitForURL(url => url.href.startsWith(location)); await native.getByLabel('Divisor', { exact: true }).waitFor();
     assert.equal(await native.getByLabel('Divisor', { exact: true }).inputValue(), '5');
