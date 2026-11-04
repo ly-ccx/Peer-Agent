@@ -11,7 +11,7 @@
 .interactive-title { font-size: var(--ui-font-heading-md); }
 .interactive-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .interactive-caption, .interactive-source, .interactive-pagination { color: var(--graphite-soft); font-size: var(--ui-font-meta); }
-.interactive-surface > .interactive-caption { margin-block-start: var(--space-4); }
+.interactive-surface > .interactive-caption { color: inherit; margin-block-end: var(--space-3); }
 .interactive-divider { border: 0; border-block-start: 1px solid var(--ui-border-subtle); margin: var(--space-2) 0; }
 .interactive-metric { margin: 0; }
 .interactive-metric dt { font-size: var(--ui-font-control); color: var(--graphite-soft); }

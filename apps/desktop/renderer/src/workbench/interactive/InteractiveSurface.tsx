@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Renderer, useStateField, type Library, type OpenUIError } from '@openuidev/react-lang';
 import { createPeerLibrary, validateState } from '@peer-agent/interactive-content';
 import type { InteractiveMaterialProvenance, InteractiveStateValue } from '@peer-agent/protocol';
@@ -21,6 +21,7 @@ function calculationMessage(code: string, isZh: boolean) {
 }
 /** Public SDK Renderer with Peer components, governed state requests and static error recovery. */
 export function InteractiveSurface({ session, provenance, isZh, onReady }: { readonly session: InteractiveSession; readonly provenance: readonly InteractiveMaterialProvenance[]; readonly isZh: boolean; readonly onReady?: () => void }) {
+  const descriptionId = useId();
   const state = useSyncExternalStore(session.subscribe, session.snapshot, session.snapshot);
   const [seenValues, setSeen] = useState<Record<string, unknown>>({}), [sdkErrors, setSdkErrors] = useState<readonly OpenUIError[]>([]);
   const [mirrorError, setMirrorError] = useState(false);
@@ -45,13 +46,14 @@ export function InteractiveSurface({ session, provenance, isZh, onReady }: { rea
   useLayoutEffect(() => { if (sdkReady && !announced.current) { announced.current = true; onReady?.(); } }, [sdkReady, onReady]);
   const error = state.calculationError ?? (mirrorError || sdkReady && sdkErrors.some(error => error.severity !== 'warning') ? 'evaluation_unavailable' : null);
   const readonly = !state.writer || ['writer_lost', 'closing', 'closed'].includes(state.phase);
-  return <section className="interactive-surface" aria-label={session.content.title}>
+  return <section className="interactive-surface" aria-label={session.content.title} aria-describedby={descriptionId}>
     <div className="interactive-toolbar"><p role="status">{state.phase === 'saving' ? (isZh ? '正在保存条件…' : 'Saving conditions…') : state.dirty ? (isZh ? '条件尚未保存' : 'Unsaved conditions') : state.confirmed.stateRevision ? (isZh ? '条件已保存' : 'Conditions saved') : (isZh ? '初始条件' : 'Initial conditions')}</p>
       <div>{readonly ? <button type="button" className="ui-button" disabled={state.phase === 'closed' || state.phase === 'closing'} onClick={() => { void session.acquire(state.saveError === 'interactive_writer_busy' || state.phase === 'writer_lost'); }}>{state.saveError === 'interactive_writer_busy' || state.phase === 'writer_lost' ? (isZh ? '在此接管试算' : 'Continue calculation here') : (isZh ? '开始试算' : 'Start calculation')}</button> : <button type="button" className="ui-button" disabled={state.composing} onClick={() => session.reset()}>{isZh ? '恢复初始条件' : 'Reset conditions'}</button>}
       {state.saveError || state.dirty ? <button type="button" className="ui-button" disabled={readonly || state.composing || state.phase === 'saving'} onClick={() => { void session.flush(); }}>{isZh ? '保存条件' : 'Save conditions'}</button> : null}</div></div>
     {state.phase === 'closing' ? <p className="interactive-notice" role="status">{isZh ? '关闭确认尚未返回，已保存的输入保留。可以再次关闭此标签核对回执。' : 'Close confirmation is pending. Saved input is preserved. Close this tab again to check the receipt.'}</p>
       : state.saveError ? <p className="interactive-notice" role="alert">{state.saveError === 'interactive_state_protected' ? calculationMessage(state.saveError, isZh) : state.saveError === 'interactive_writer_busy' ? (isZh ? '另一个视图正在修改条件；这里保持只读。接管会使原视图停止保存。' : 'Another view is editing. This view is read-only. Taking over stops saves from the other view.') : state.phase === 'writer_lost' ? (isZh ? '保存身份已失效，当前输入保留。接管后可重试保存。' : 'The writer is no longer current. Your input is preserved. Take over to retry.') : (isZh ? '条件尚未确认保存，当前输入保留。可以重试。' : 'Saving is unconfirmed. Your input is preserved. Retry saving.')}</p> : null}
     {error && error !== state.saveError ? <p className="interactive-notice" role="status">{calculationMessage(error, isZh)}</p> : null}
+    <p id={descriptionId} className="interactive-caption">{isZh ? '模型生成的试算，使用固定材料。下方生成控件仅调整本机试算条件。' : 'Model-generated trial using fixed material. The generated controls below only change local trial conditions.'}</p>
     <InteractiveRenderContext.Provider value={{ session, state, showResults: sdkReady && !error, provenance, isZh }}>
       <Renderer.Root response={session.content.program} library={library} initialState={initial} toolProvider={null} publishObservability={false} onError={onError} onStateUpdate={onStateUpdate}>
         {Object.entries(state.sdkValues).map(([key, value]) => <StateBridge key={key} name={key} value={value} seen={seen} />)}
@@ -59,6 +61,5 @@ export function InteractiveSurface({ session, provenance, isZh, onReady }: { rea
       </Renderer.Root>
     </InteractiveRenderContext.Provider>
     <InteractiveDraftPreparation session={session} isZh={isZh} />
-    <p className="interactive-caption">{isZh ? '基于固定材料的本机试算；调整条件不会刷新来源或启动任务。' : 'Local calculation using fixed material. Changing conditions does not refresh sources or start work.'}</p>
   </section>;
 }

@@ -26,6 +26,10 @@ async function renderer(output) {
       import{ConfirmProvider}from'./renderer/src/app/components/ConfirmProvider.tsx';
       import{ResourceEditAppFrame}from'./renderer/src/workbench/editing/ResourceEditContinuity.tsx';
       import{BotComposer}from'./renderer/src/project-agent/conversation/BotComposer.tsx';
+      import{CardView}from'./renderer/src/project-agent/conversation/CardView.tsx';
+      import{ReplyBubble}from'./renderer/src/project-agent/conversation/ReplyBubble.tsx';
+      import{normalizeBotMessage}from'./renderer/src/project-agent/state/botConversationState.ts';
+      import{indexBotWork}from'./renderer/src/project-agent/state/botWorkState.ts';
       import{useInputRecovery}from'./renderer/src/project-agent/state/useInputRecovery.ts';
       import{useResourceFeedbackPreparations}from'./renderer/src/workbench/feedback/useResourceFeedbackPreparations.ts';
       import{createI18n}from'@peer-agent/i18n';
@@ -33,10 +37,17 @@ async function renderer(output) {
       import'./renderer/src/project-agent/styles/bot-conversation.css';
       import'./renderer/src/project-agent/styles/bot-drawer.css';
       function Composer({owner}){useResourceFeedbackPreparations();const{session,state}=useInputRecovery(owner.workspaceId);return <BotComposer i18n={createI18n('en-US')} botName="Trial Bot" resourceRecipientConversationId={owner.conversationId} draft={state.draft} ready={state.ready} quote={state.draft.quote?.text??''} onQuoteRemove={()=>session.edit({quote:null})} onDraftChange={patch=>session.edit(patch)} onSend={()=>void session.send({quoteRefs:state.draft.quote?[state.draft.quote.messageId]:[]})}/>;}
+      function BoundaryCases({fixture}) {
+        const i18n = createI18n('en-US');
+        const message = normalizeBotMessage(fixture.textReply);
+        return <><ReplyBubble workspaceId={fixture.owner.workspaceId} message={message} referenceIds={[]} anchors={new Map()} highlighted={false} i18n={i18n}
+          onJump={()=>{}} onQuote={()=>{}} workIndex={indexBotWork([],true)} onOpenWork={()=>{}}/>
+          <CardView workspaceId={fixture.owner.workspaceId} cards={fixture.governanceCards} i18n={i18n}/></>;
+      }
       if(window.peerResource)createRoot(document.getElementById('root')).render(<ConfirmProvider><NativeResourceWindow/></ConfirmProvider>);
       else{const{fixture}=await window.peerAgent.getBootstrap();
         createRoot(document.getElementById('root')).render(<ConfirmProvider><ResourceEditAppFrame><WorkbenchProvider conversationId={fixture.owner.conversationId} isPageActive resourceMode layoutHost="bot">
-          <BotResourceLayout owner={fixture.owner} active isZh={false}><div className="bot-main" style={{padding:24}}><h1>Trial delivery</h1><Composer owner={fixture.owner}/><EvidenceView evidence={{evidenceRef:fixture.evidenceRef}} workspaceId={fixture.owner.workspaceId} i18n={createI18n('en-US')}/></div></BotResourceLayout>
+          <BotResourceLayout owner={fixture.owner} active isZh={false}><div className="bot-main" style={{padding:24}}><h1>Trial delivery</h1><Composer owner={fixture.owner}/><EvidenceView evidence={{evidenceRef:fixture.evidenceRef}} workspaceId={fixture.owner.workspaceId} i18n={createI18n('en-US')}/><BoundaryCases fixture={fixture}/></div></BotResourceLayout>
         </WorkbenchProvider></ResourceEditAppFrame></ConfirmProvider>);}
     `, 'interactive-workspace-fixture.tsx', { loader: 'tsx', jsx: 'automatic' }); } }], build: { outDir: output, emptyOutDir: true, target: 'esnext', cssCodeSplit: false,
       rollupOptions: { input: entry, output: { entryFileNames: 'fixture.js' } } } });
@@ -92,7 +103,9 @@ test('the main workspace opens canonical interactive deliveries, restores result
     const feedback=createInteractiveFeedbackAdmission({stateStore}),drafts=createProjectInputDraftStore({rootDir:${JSON.stringify(path.join(root, 'runtime'))},validateInteractiveFeedback:feedback.validate});
     const draftAddress={workspaceId:owner.workspaceId,surface:'desktop'};drafts.write({...draftAddress,revision:0,draft:{text:'Keep this draft',quote:{messageId:'quoted-message',text:'Keep this quote'},attachmentIds:['original-file']},pending:[],uploads:[{id:'original-file',name:'original.txt',sourceKind:'user_upload',kind:'text',mimeType:'text/plain',size:4,text:'keep'}]});
     const queue=createInputQueue({rootDir:${JSON.stringify(path.join(root, 'runtime'))},validateInteractiveFeedback:feedback.validate,holdsLease:()=>true,resolveConversationId:()=>owner.conversationId,hasMessage:(id,message)=>conversations.getConversation(id).messages.some(row=>row.id===message),appendMessage:(id,row)=>conversations.appendMessage(id,row)});
-    const program='$x=2\\n$name="Workspace trial"\\nroot=Col([Title($name),Input("name","Trial name",$name),NumberInput("x","Divisor",$x,0,10,1),Metric("Ratio",10/$x),'+Array.from({length:32},(_,i)=>'Text("Saved model observation '+i+'. Fixed content preserves the reading position while changing local conditions.")').join(',')+'])';
+    const program='$x=2\\n$name="Workspace trial"\\nroot=Col([Title($name),Input("name","Trial name",$name),NumberInput("x","Divisor",$x,0,10,1),Metric("Ratio",10/$x),'
+      +'Button("Allow once",@Set($x,3)),Button("Use existing observations",@Set($x,4)),Button("Confirm result",@Set($x,5)),'
+      +Array.from({length:32},(_,i)=>'Text("Saved model observation '+i+'. Fixed content preserves the reading position while changing local conditions.")').join(',')+'])';
     const draft={publication:{kind:'create'},title:'Workspace trial',textFallback:'Unverified saved model trial.',program,inputs:[]};
     const receipt=resultStore.commitPublication({owner,source:{conversationId:'worker',sessionId:'session',planId:'plan',executionEpoch:'epoch',toolCallId:'publication'},draft,content:await validateDraft(draft),provenance:[],dataLevel:'D3_private',grant:{toolCallId:'publication',grantId:'fixture-grant',granted:true}},()=>true);resultStore.markIndexed(receipt.callRef,receipt.indexEntry);
     const windows=createTrustedWindowRegistry(),source=new BrowserWindow({show:false,width:1180,height:820,webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false,preload:${JSON.stringify(path.join(desktop, 'electron/preload/preload.cjs'))}}});
@@ -126,7 +139,10 @@ test('the main workspace opens canonical interactive deliveries, restores result
     const nativeWindows=[];function QuietWindow(options){const win=new BrowserWindow(options);win.show=()=>{};nativeWindows.push(win);return win}QuietWindow.fromWebContents=contents=>BrowserWindow.fromWebContents(contents);
     host=createResourceWindowController({BrowserWindow:QuietWindow,trustedWindows:windows,rendererLocation:${JSON.stringify(location)},preloadPath:${JSON.stringify(path.join(desktop, 'electron/preload/resource-window.cjs'))},interactiveResources:interactive,getOwner:()=>activeOwner,getLocale:()=> 'en',readHistory:()=>undefined,writeHistory:()=>{legacyHistoryWrites++},resolveDocument:()=>{throw Error('unexpected file lookup')},fileAccess:{readFile:()=>{fileReads++;throw Error('unexpected file read')}}});
     const ipc=createCatalogIpcMain({ipcMain,authorize:windows.authorize});registerIpcOwners({ipc,registrations:[...createResourceWindowIpcRegistrations({resourceWindows:host}),...createInteractiveResultsIpcRegistrations({interactiveResults:interactive}),...createResourceFeedbackIpcRegistrations({preparation})]});
-    ipc.handle('project-agent:read-input-draft',(_event,request)=>drafts.read(request));ipc.handle('project-agent:write-input-draft',(_event,request)=>drafts.write(request));ipc.handle('project-agent:submit-input',(_event,request)=>({ok:true,input:queue.submitInput(request)}));
+    const governanceCalls=[];
+    ipc.handle('project-agent:decide-approval',()=>{governanceCalls.push('approval');return {ok:false,code:'FIXTURE_APPROVAL'};});
+    ipc.handle('project-agent:confirm-result',()=>{governanceCalls.push('confirm');return {ok:false,code:'FIXTURE_CONFIRM'};});
+    ipc.handle('project-agent:read-input-draft',(_event,request)=>drafts.read(request));ipc.handle('project-agent:write-input-draft',(_event,request)=>drafts.write(request));ipc.handle('project-agent:submit-input',(_event,request)=>{governanceCalls.push('input');return {ok:true,input:queue.submitInput(request)};});
     ipc.on('settings:get-sync',event=>{event.returnValue=initial});ipc.handle('settings:get',()=>initial);ipc.handle('settings:update',(_event,partial)=>{settingsWrites.push(partial);return initial});
     const evidenceFacts={getConversationId:()=>owner.conversationId,getPlan:()=>({planId:'plan',conversationId:'worker',tasks:[{taskId:'generated',status:'completed',result:'Saved unverified model trial.',evidenceRefs:['tool-result://publication']},{taskId:'remaining',status:'pending'}],delegationOrigin:{workspaceId:owner.workspaceId,parentConversationId:owner.conversationId,sessionId:'session'}}),getSession:()=>({sessionId:'session',workspaceId:owner.workspaceId,planId:'plan',status:'failed',report:{planId:'plan'}})};
     const evidenceEntries=[receipt.indexEntry],findRecords=refs=>evidenceEntries.filter(row=>refs.includes(row.evidenceRef));
@@ -136,7 +152,21 @@ test('the main workspace opens canonical interactive deliveries, restores result
     const composed=replyComposer.postReply({text:'The saved trial is available; remaining analysis is incomplete and unverified.',replyTo:['fixture-result-anchor'],sources:['session'],statusClaims:[{sessionId:'session',status:'failed'}]},{...owner,turnId:'fixture-reply',toolCallOrdinal:1,messages:conversations.getPersistedConversationHistory(owner.conversationId).messages});
     if(composed.error||composed.message?.meta.evidenceRefs?.[0]!==receipt.indexEntry.evidenceRef)throw Error('The actual reply composer did not confirm the fixed publication reference: '+(composed.error??'missing fixed reference'));
     conversations.appendMessage(owner.conversationId,composed.message);
-    ipc.handle('bootstrap:get',()=>({fixture:{owner:{...owner,path:'/isolated-project'},evidenceRef:conversations.getPersistedConversationHistory(owner.conversationId).messages.find(row=>row.id===composed.message.id).meta.evidenceRefs[0]}}));
+    conversations.appendMessage(owner.conversationId,{id:'fixture-text-anchor',role:'user',kind:'user_input',content:'Show a program as text only'});
+    const fence=String.fromCharCode(96).repeat(3);
+    const uncitedProgram='root=Col([Title("Uncited trial"),Metric("Uncited metric",7)])';
+    const textOnly=replyComposer.postReply({text:'Uncited program:\\n\\n'+uncitedProgram+'\\n\\n'+fence+'openui\\n'+uncitedProgram+'\\n'+fence+'\\n\\n'+receipt.indexEntry.evidenceRef,replyTo:['fixture-text-anchor'],sources:[]},
+      {...owner,turnId:'fixture-text',toolCallOrdinal:1,messages:conversations.getPersistedConversationHistory(owner.conversationId).messages});
+    if(!textOnly.message||textOnly.meta.evidenceRefs?.length)throw Error('Ordinary reply acquired publication evidence');
+    conversations.appendMessage(owner.conversationId,textOnly.message);
+    const governanceCards=[
+      {cardId:'fixture-approval',kind:'approval',content:'Host permission request',actions:[{id:'allow',channel:'project-agent:decide-approval',payload:{approvalId:'fixture-approval',decision:'approve',duration:'once'}}]},
+      {cardId:'fixture-question',kind:'question',content:'Host question about the observation range',actions:[{id:'answer',channel:'project-agent:submit-input',payload:{answerTo:'fixture-question',text:'Use existing observations'}}]},
+      {cardId:'fixture-acceptance',kind:'completion',content:'Host result awaiting confirmation',actions:[{id:'confirm',channel:'project-agent:confirm-result',payload:{sessionId:'session'}}]},
+    ];
+    ipc.handle('bootstrap:get',()=>{const rows=conversations.getPersistedConversationHistory(owner.conversationId).messages;return {fixture:{
+      owner:{...owner,path:'/isolated-project'},evidenceRef:rows.find(row=>row.id===composed.message.id).meta.evidenceRefs[0],
+      textReply:rows.find(row=>row.id===textOnly.message.id),governanceCards}};});
     const readEvidence=createEvidenceReader({resolveScopedRecord:publications.resolveEvidence,findRecords,projectDeliveries:createEvidenceDeliveryProjection(evidenceFacts),readMessages:()=>[],readArtifact:()=>{throw Error('unexpected artifact body read')}});
     const projectApplication=createProjectAgentApplicationService({enabled:()=>true,readEvidenceBody:readEvidence});
     ipc.handle('project-agent:read-evidence',(_event,request)=>projectApplication.readEvidence(request));
@@ -157,7 +187,9 @@ test('the main workspace opens canonical interactive deliveries, restores result
       rejectLayoutWrites(){rejectLayoutWrite=true},
       allowOutcome(){withholdOwnerOutcome=false},
       replacementLayout:()=>interactive.readLayout(source.webContents,{owner:activeOwner}),
-      draft:()=>drafts.read(draftAddress),consume:()=>queue.consume(owner.workspaceId),inputs:()=>({queue:queue.diagnosticSnapshot(owner.workspaceId),messages:conversations.getPersistedConversationHistory(owner.conversationId).messages.filter(row=>row.kind==='user_input'&&row.id!=='fixture-result-anchor').map(row=>({...row,selected:feedback.restore(row,owner.workspaceId)}))}),
+      draft:()=>drafts.read(draftAddress),consume:()=>queue.consume(owner.workspaceId),inputs:()=>({queue:queue.diagnosticSnapshot(owner.workspaceId),messages:conversations.getPersistedConversationHistory(owner.conversationId).messages.filter(row=>row.kind==='user_input'&&!['fixture-result-anchor','fixture-text-anchor'].includes(row.id)).map(row=>({...row,selected:feedback.restore(row,owner.workspaceId)}))}),
+      boundaryFacts:()=>({governanceCalls,queue:queue.diagnosticSnapshot(owner.workspaceId),pending:resultStore.listPending(owner).length,
+        versions:resultStore.storage.connect(owner.workspaceId).db.prepare('SELECT COUNT(*) AS n FROM versions').get().n,evidenceEntries:evidenceEntries.length}),
       closeSource:()=>{closeAttempts++;source.close()},
       reloadSource:()=>source.webContents.reload(),
       facts:()=>({settingsWrites,fileReads,legacyHistoryWrites,blockedCloses,closeAttempts,navigations,sourceAlive:!source.isDestroyed(),versions:Number(resultStore.storage.connect(owner.workspaceId).db.prepare('SELECT COUNT(*) AS n FROM versions').get().n),operations:Number(resultStore.storage.connect(owner.workspaceId).db.prepare('SELECT COUNT(*) AS n FROM operations').get().n)}),
@@ -177,9 +209,40 @@ test('the main workspace opens canonical interactive deliveries, restores result
   let page, recoveredView;
   try {
     page = await electron.firstWindow(); await page.getByText('Trial delivery', { exact: true }).waitFor();
+    const uncitedReply = page.locator('article[data-kind="agent_reply"]');
+    const literalProgram = 'root=Col([Title("Uncited trial"),Metric("Uncited metric",7)])';
+    await uncitedReply.locator('pre code').getByText(literalProgram, { exact: true }).waitFor();
+    assert.ok((await uncitedReply.locator('.bot-reply-text p').allTextContents()).includes(literalProgram));
+    assert.equal(await uncitedReply.getByRole('heading', { name: 'Uncited trial' }).count(), 0);
+    assert.equal(await uncitedReply.getByRole('link').count(), 0, 'a pasted result URI is not a scoped result entry');
+    assert.equal(await page.locator('.interactive-surface').count(), 0);
+    const beforeBoundary = await electron.evaluate(() => globalThis.workspaceFixture.boundaryFacts());
+    assert.deepEqual(beforeBoundary.governanceCalls, []);
+    assert.equal(beforeBoundary.pending, 0);
+    assert.equal(beforeBoundary.versions, 1);
+    assert.equal(beforeBoundary.evidenceEntries, 1);
     await page.getByText('Deliveries', { exact: true }).click();
     await page.getByRole('button', { name: 'Open interactive result', exact: true }).click();
     await page.getByLabel('Divisor', { exact: true }).waitFor();
+    const trial = page.getByRole('region', { name: 'Workspace trial', exact: true });
+    const trialDescription = 'Model-generated trial using fixed material. The generated controls below only change local trial conditions.';
+    const description = trial.getByText(trialDescription, { exact: true });
+    await description.waitFor();
+    assert.equal(await trial.getAttribute('aria-describedby'), await description.getAttribute('id'));
+    assert.ok((await description.boundingBox()).y < (await trial.getByRole('button', { name: 'Allow once', exact: true }).boundingBox()).y);
+    const simulatedActions = [['fixture-approval', 'Allow once'], ['fixture-question', 'Use existing observations'], ['fixture-acceptance', 'Confirm result']];
+    for (const [index, [cardId, label]] of simulatedActions.entries()) {
+      const nativeButton = page.locator('[data-card-id="' + cardId + '"]').getByRole('button', { name: label, exact: true });
+      assert.equal(await nativeButton.isEnabled(), true);
+      await trial.getByRole('button', { name: label, exact: true }).click();
+      assert.equal(await trial.getByLabel('Divisor', { exact: true }).inputValue(), String(index + 3));
+      assert.equal(await nativeButton.isEnabled(), true);
+    }
+    await trial.getByText('Conditions saved', { exact: true }).waitFor();
+    assert.deepEqual(await electron.evaluate(() => globalThis.workspaceFixture.boundaryFacts()), beforeBoundary);
+    await trial.screenshot({ path: path.join(root, 'workspace-generated-governance-lookalikes.png'), animations: 'disabled' });
+    await trial.getByRole('button', { name: 'Reset conditions', exact: true }).click();
+    await trial.getByText('Conditions saved', { exact: true }).waitFor();
     const beforeProtected = await electron.evaluate(() => globalThis.workspaceFixture.snapshot());
     const protectedName = page.getByLabel('Trial name', { exact: true });
     await protectedName.fill('sk-examplecredential012345678901234567890');
