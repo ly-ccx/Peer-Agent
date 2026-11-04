@@ -911,6 +911,10 @@ html:not([data-vibrancy='true']) .bot-drawer-resizer {
   background: var(--chrome-canvas);
 }
 
+.bot-memory-list li > p {
+  color: var(--graphite-base);
+}
+
 .bot-memory-item-meta,
 .bot-memory-item-actions,
 .bot-memory-export-actions {
