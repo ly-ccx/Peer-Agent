@@ -54,6 +54,7 @@ interface Observation {
   returnedArguments?: string[];
   durationMs?: number;
   usage?: ModelUsage;
+  diagnostic?: 'no_usable_output_at_token_limit' | 'request_deadline';
   error?: string;
 }
 
@@ -113,19 +114,27 @@ export async function runInteractiveLiveStory(options: {
           const observation: Observation = { phase, tools: names };
           report.requests.push(observation);
           const start = Date.now();
+          const requestDeadline = AbortSignal.timeout(INTERACTIVE_STORY_BUDGET.requestMs);
           try {
             // The coordinator must fit a complete assessment and its evidence references.
             const maxOutputTokens = phase === 'bot' ? INTERACTIVE_STORY_BUDGET.botOutputTokens : INTERACTIVE_STORY_BUDGET.outputTokens;
             const result = await options.provider.stream({ ...request, maxOutputTokens,
-              signal: AbortSignal.any([signal, AbortSignal.timeout(INTERACTIVE_STORY_BUDGET.requestMs), ...(request.signal ? [request.signal] : [])]) });
+              signal: AbortSignal.any([signal, requestDeadline, ...(request.signal ? [request.signal] : [])]) });
             observation.usage = result.usage;
+            if (!result.content.trim() && !result.toolCalls.length && (result.usage?.outputTokens ?? 0) >= maxOutputTokens)
+              observation.diagnostic = 'no_usable_output_at_token_limit';
             observation.returnedTools = result.toolCalls.map(call => call.name);
             observation.returnedArguments = result.toolCalls.slice(0, 12).map(call => sanitize(call.arguments));
             callCounts[phase] += result.toolCalls.length;
             if (callCounts[phase] > INTERACTIVE_STORY_BUDGET.calls[phase])
               exhausted('role', 'toolCalls', phase, callCounts[phase], INTERACTIVE_STORY_BUDGET.calls[phase]);
             return result;
-          } catch (error) { observation.error = sanitize(error); throw error; }
+          } catch (error) {
+            if (requestDeadline.aborted && !signal.aborted && !request.signal?.aborted)
+              observation.diagnostic = 'request_deadline';
+            observation.error = sanitize(error);
+            throw error;
+          }
           finally { observation.durationMs = Date.now() - start; persist(); }
         } };
         return createTurnTestRuntime({ host: tools,
@@ -163,7 +172,8 @@ export async function runInteractiveLiveStory(options: {
         const value = read(storySources());
         if (value !== undefined) return value;
         if (budgetError) throw budgetError;
-        await delay(100, undefined, { signal });
+        try { await delay(100, undefined, { signal }); }
+        catch (error) { if (!signal.aborted) throw error; }
       }
       throw Error('story_deadline');
     }
