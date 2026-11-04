@@ -194,7 +194,7 @@ export function registerDesktopProjectAgent({
     appendMessage,
   });
   const interactive = createInteractiveRuntime({ rootDir: runtimeRoot, goalPlanStore, conversationStore,
-    readPortableWorkHistory: scope => readStoredWorkHistory(path.join(dataHome, 'conversations'), scope),
+    readPortableWorkHistory: (scope, readBudget) => readStoredWorkHistory(path.join(dataHome, 'conversations'), scope, readBudget),
     retentionPorts: { inputQueue, drafts: inputDrafts, acquireCompatibility: acquireInteractiveRetentionCompatibility },
     getBotConversationId(id) {
       const profile = profileStore.read(id);

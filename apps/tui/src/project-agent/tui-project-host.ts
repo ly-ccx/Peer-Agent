@@ -116,7 +116,8 @@ export function createTuiProjectHost(options: {
     hasMessage:(id: string, messageId: string) => readMessages(id).some(row=>row.id===messageId),
     appendMessage:(id: string, message: any) => {conversations.appendMessage(id,message);changed();}} as never);
   const interactive = createInteractiveRuntime({ rootDir: runtimeRoot, goalPlanStore: plans, conversationStore: conversations,
-    readPortableWorkHistory: (scope: Parameters<typeof readStoredWorkHistory>[1]) => readStoredWorkHistory(path.join(dataHome, 'conversations'), scope),
+    readPortableWorkHistory: (scope: Parameters<typeof readStoredWorkHistory>[1], readBudget?: Parameters<typeof readStoredWorkHistory>[2]) =>
+      readStoredWorkHistory(path.join(dataHome, 'conversations'), scope, readBudget),
     retentionPorts: { inputQueue: inputs, drafts, acquireCompatibility: options.acquireInteractiveRetentionCompatibility },
     getBotConversationId(id: string) {
       const profile = profiles.read(id);

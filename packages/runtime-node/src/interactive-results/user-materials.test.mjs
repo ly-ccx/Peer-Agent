@@ -5,6 +5,7 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { createConversationStore } from '../../../conversation-store/src/index.mjs';
+import { readStoredWorkHistory } from '../../../conversation-store/src/persisted-history.mjs';
 import { createGoalPlanStore } from '../goal-plan-store.mjs';
 import { resolveWorkSessionProfile } from '../project-agent/work-session-profile.mjs';
 import { createInteractiveRuntime } from './runtime.mjs';
@@ -13,9 +14,14 @@ import { createInteractiveResultStore as createLegacyStore } from './test-fixtur
 
 test('canonical inline uploads produce scoped version references and immutable published bytes without tool Evidence or file reads', async t => {
   const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'peer-interactive-upload-')));
-  const conversations = createConversationStore({ storeDir: path.join(root, 'conversations') });
+  const conversationDir = path.join(root, 'conversations');
+  const conversations = createConversationStore({ storeDir: conversationDir });
   const parent = conversations.createConversation({ role: 'project_agent', workspaceId: 'bot-a' });
-  const child = conversations.createConversation({ role: 'work_session', workspaceId: 'bot-a' });
+  conversations.appendMessage(parent.id, { id: 'anchor-a', role: 'user', kind: 'user_input', content: 'Compare the captured estimates' });
+  const child = conversations.createChildConversation({ parentConversationId: parent.id, role: 'work_session', workspaceId: 'bot-a', anchorMessageId: 'anchor-a',
+    delegation: { sessionId: 'session-a', anchorMessageId: 'anchor-a', inputId: 'input-a' }, backgroundMessageIds: ['anchor-a'],
+    runtimeState: { conversationId: parent.id, contentRevision: conversations.getPersistedConversationHistory(parent.id).contentRevision, status: 'idle' },
+    capturedAt: '2026-11-03T00:00:00Z' });
   const plans = createGoalPlanStore({ storeDir: path.join(root, 'goals') });
   const model = { providerId: 'test', modelId: 'test', modelProviderId: 'test', family: 'test' };
   const plan = plans.createPlan({ planId: 'plan-a', conversationId: child.id, title: 'Compare uploaded estimates', tasks: [], delegationOrigin: {
@@ -23,6 +29,7 @@ test('canonical inline uploads produce scoped version references and immutable p
     modelSelection: { worker: model, explorer: model, verifier: model, source: { worker: 'global' }, resolvedAt: '2026-11-03T00:00:00Z' } } });
   let dataLevel = 'D4_regulated';
   const runtime = createInteractiveRuntime({ rootDir: path.join(root, 'runtime'), goalPlanStore: plans, conversationStore: conversations,
+    readPortableWorkHistory: (scope, budget) => readStoredWorkHistory(conversationDir, scope, budget),
     getBotConversationId: () => parent.id, enabled: () => true, holdsLease: () => true, classifyContext: () => dataLevel });
   const owner = { workspaceId: 'bot-a', conversationId: parent.id };
   const views = createInteractiveViewService({ resultStore: runtime.resultStore, stateStore: runtime.stateStore,
@@ -98,6 +105,13 @@ test('canonical inline uploads produce scoped version references and immutable p
   const { value, ...saved } = runtime.resultStore.readMaterial(owner, notices[0].source);
   runtime.resultStore.recordMaterial({ ...saved, value, origin: laterOrigin }, () => true);
   assert.deepEqual(runtime.resultStore.readMaterialInfo(owner, notices[0].source), material, 'a retry cannot rebind the original location');
+
+  conversations.appendMessage(child.id, { id: 'long-history', role: 'assistant', content: 'x'.repeat(8 * 1024 * 1024) });
+  const limited = await readView(original.reference);
+  assert.deepEqual(limited.sourceIssues, [{ bindingId: 'facts', status: 'source_unavailable' }]);
+  assert.deepEqual(limited.result.content.bindings.facts, rows, 'a history over the source budget must not make the saved result unavailable');
+  conversations.updateMessageById(child.id, 'long-history', { content: 'short again' });
+  assert.deepEqual((await readView(original.reference)).sourceIssues, removed.sourceIssues);
 
   const db = runtime.resultStore.storage.connect(owner.workspaceId).db;
   db.prepare("UPDATE materials SET metadata=json_remove(metadata,'$.origin') WHERE json_extract(metadata,'$.contentVersion')=?").run(material.contentVersion);

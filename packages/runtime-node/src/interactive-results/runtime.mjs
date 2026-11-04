@@ -63,6 +63,7 @@ export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationS
     const owner = fixed.reference.owner;
     if (!assertOwner(owner)) return [];
     const histories = new Map();
+    const readBudget = { remainingBytes: 8 * 1024 * 1024 };
     function sourceIssue(source) {
       try {
         const material = resultStore.readMaterialInfo(owner, source);
@@ -74,7 +75,8 @@ export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationS
         if (!histories.has(origin.conversationId)) {
           // Cache a failed read for this open as well. Only strict persisted history is admissible.
           histories.set(origin.conversationId, null);
-          histories.set(origin.conversationId, conversationStore?.getPersistedConversationHistory?.(origin.conversationId));
+          histories.set(origin.conversationId, readPortableWorkHistory?.({ workspaceId: owner.workspaceId, parentConversationId: owner.conversationId,
+            conversationId: origin.conversationId, sessionId: origin.sessionId }, readBudget));
         }
         return userMaterials.sourceIssue(source, histories.get(origin.conversationId), material.dataLevel);
       } catch { return 'source_unavailable'; }

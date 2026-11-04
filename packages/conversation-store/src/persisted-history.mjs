@@ -9,15 +9,20 @@ function fail(code, cause) {
   throw Object.assign(new Error(code, { cause }), { code });
 }
 
-function readText(file, missingAllowed, maxBytes) {
+function readText(file, missingAllowed, maxBytes, readBudget) {
   try {
     if (maxBytes === undefined) return readFileSync(file, 'utf8');
     const revision = lstatSync(file, { bigint: true });
     if (!revision.isFile() || revision.size > BigInt(maxBytes)) fail('BACKGROUND_HISTORY_LIMIT');
+    const bufferSize = Number(revision.size) + 1;
+    if (readBudget) {
+      if (!Number.isSafeInteger(readBudget.remainingBytes) || readBudget.remainingBytes < bufferSize) fail('BACKGROUND_HISTORY_LIMIT');
+      readBudget.remainingBytes -= bufferSize;
+    }
     const fd = openSync(file, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
     try {
       if (fileRevision(fstatSync(fd, { bigint: true })) !== fileRevision(revision)) fail('BACKGROUND_VERSION_CHANGED');
-      const body = Buffer.alloc(Number(revision.size) + 1);
+      const body = Buffer.alloc(bufferSize);
       let bytes = 0;
       while (bytes < body.length) {
         const count = readSync(fd, body, bytes, body.length - bytes, null);
@@ -35,9 +40,9 @@ function readText(file, missingAllowed, maxBytes) {
 }
 
 /** Strict snapshot input, separate from tolerant UI history recovery. */
-export function readPersistedHistoryFiles({ historyFile, sidecarFile, conversationId, contentRevision, maxBytes }) {
+export function readPersistedHistoryFiles({ historyFile, sidecarFile, conversationId, contentRevision, maxBytes, readBudget }) {
   // New conversations legitimately have no JSONL until their first message.
-  const text = readText(historyFile, contentRevision === 0, maxBytes);
+  const text = readText(historyFile, contentRevision === 0, maxBytes, readBudget);
   let messages;
   try {
     messages = (text ?? '').split('\n').filter((line) => line.trim()).map((line) => {
@@ -47,7 +52,7 @@ export function readPersistedHistoryFiles({ historyFile, sidecarFile, conversati
     });
     if (contentRevision > 0 && messages.length === 0) throw new Error('Empty history with nonzero revision');
   } catch (error) { fail('BACKGROUND_HISTORY_CORRUPT', error); }
-  const sidecarText = readText(sidecarFile, true, maxBytes);
+  const sidecarText = readText(sidecarFile, true, maxBytes, readBudget);
   let activeMessageId = null;
   if (sidecarText !== null) {
     try {
@@ -73,7 +78,7 @@ export function readPersistedHistoryFiles({ historyFile, sidecarFile, conversati
 }
 
 /** Read an already-imported work conversation without constructing a migrating store. */
-export function readStoredWorkHistory(storeDir, { workspaceId, parentConversationId, conversationId, sessionId }) {
+export function readStoredWorkHistory(storeDir, { workspaceId, parentConversationId, conversationId, sessionId }, readBudget) {
   if (![parentConversationId, conversationId].every(conversationIdAllowed) || parentConversationId === conversationId) return null;
   const indexFile = path.join(storeDir, 'index.jsonl');
   const historyFile = path.join(storeDir, `${conversationId}.jsonl`), sidecarFile = path.join(storeDir, `${conversationId}.stream.json`);
@@ -83,7 +88,7 @@ export function readStoredWorkHistory(storeDir, { workspaceId, parentConversatio
   };
   const files = [indexFile, historyFile, sidecarFile];
   const before = files.map(revision);
-  const index = readText(indexFile, true, PORTABLE_HISTORY_BYTES);
+  const index = readText(indexFile, true, PORTABLE_HISTORY_BYTES, readBudget);
   if (!index) return null;
   const rows = index.split('\n').filter(line => line.trim()).map(line => JSON.parse(line));
   const parent = rows.filter(row => row?.id === parentConversationId), work = rows.filter(row => row?.id === conversationId);
@@ -93,7 +98,7 @@ export function readStoredWorkHistory(storeDir, { workspaceId, parentConversatio
     || meta.delegation?.sessionId !== sessionId) return null;
   const contentRevision = meta.contentRevision ?? 0;
   if (!Number.isSafeInteger(contentRevision) || contentRevision < 0) fail('BACKGROUND_HISTORY_CORRUPT');
-  const history = readPersistedHistoryFiles({ historyFile, sidecarFile, conversationId, contentRevision, maxBytes: PORTABLE_HISTORY_BYTES });
+  const history = readPersistedHistoryFiles({ historyFile, sidecarFile, conversationId, contentRevision, maxBytes: PORTABLE_HISTORY_BYTES, readBudget });
   if (files.some((file, offset) => revision(file) !== before[offset])) fail('BACKGROUND_VERSION_CHANGED');
   return history;
 }

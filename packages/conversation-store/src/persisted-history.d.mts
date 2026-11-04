@@ -5,4 +5,4 @@ export function readStoredWorkHistory(storeDir: string, scope: {
   parentConversationId: string;
   conversationId: string;
   sessionId: string;
-}): PersistedConversationHistory | null;
+}, readBudget?: { remainingBytes: number }): PersistedConversationHistory | null;
