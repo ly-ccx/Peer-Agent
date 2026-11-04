@@ -28,10 +28,17 @@ export function createPortableInteractiveSummaryReader({ goalPlanStore, readWork
         if (message.role !== 'assistant' || message.interrupted === true) continue;
         for (const call of message.segments ?? []) {
           if (call?.type !== 'tool-call' || call.toolCallId !== record.toolCallId) continue;
-          if (published || call.tool !== INTERACTIVE_PUBLISH_TOOL || call.status !== 'completed' || typeof call.result !== 'string'
+          if (published || call.tool !== INTERACTIVE_PUBLISH_TOOL || typeof call.result !== 'string'
             || Buffer.byteLength(call.result, 'utf8') > 128 * 1024) return null;
-          published = JSON.parse(call.result);
-          if (published?.status !== 'completed') return null;
+          const saved = JSON.parse(call.result);
+          if (saved?.kind === 'local_capability_result_ref') {
+            if (saved.tool !== INTERACTIVE_PUBLISH_TOOL || saved.capabilityId !== INTERACTIVE_PUBLISH_CAPABILITY
+              || saved.status !== 'success' || !Number.isFinite(call.endedAtMs)) return null;
+            published = { output: saved.outputPreview, evidenceRefs: saved.evidenceRefs };
+          } else {
+            if (call.status !== 'completed' || saved?.status !== 'completed') return null;
+            published = saved;
+          }
         }
       }
       const output = published?.output, originalCall = normalizeInteractivePublicationReference(output?.callRef);

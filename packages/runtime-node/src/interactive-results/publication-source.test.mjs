@@ -94,6 +94,14 @@ test('portable history displays the saved fixed summary without creating a local
   assert.throws(() => createInteractiveTextReader({ resultStore, assertOwner: () => true })(reference), { code: 'interactive_result_unavailable' });
   assert.equal(existsSync(runtime), false);
 
+  const desktopCall = { type: 'tool-call', tool: 'publish_interactive_result', toolCallId: published.callRef.toolCallId,
+    startedAtMs: 10, endedAtMs: 20, result: JSON.stringify({ kind: 'local_capability_result_ref', tool: 'publish_interactive_result',
+      capabilityId: 'local.interactive.publish', status: 'success', outputPreview: output, evidenceRefs: [ref] }) };
+  writeFileSync(file, jsonLines([{ ...message, segments: [desktopCall] }]));
+  assert.deepEqual(readText(reference), summary);
+  writeFileSync(file, jsonLines([{ ...message, segments: [{ ...desktopCall, endedAtMs: undefined }] }]));
+  assert.throws(() => readText(reference), { code: 'interactive_result_unavailable' });
+
   writeFileSync(file, jsonLines([message, { ...message, id: 'duplicate' }]));
   assert.throws(() => readText(reference), { code: 'interactive_result_unavailable' });
   writeFileSync(file, jsonLines([{ ...message, interrupted: true }]));
