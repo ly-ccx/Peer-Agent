@@ -47,9 +47,27 @@ export async function checkBotTaskCancellation({ page, until, report, captureDir
   const cancel = historical.locator('.bot-task-cancel button');
   await until(() => cancel.isDisabled(), Boolean);
   await release(1);
-  await until(() => historical.locator('[role=alert]').innerText(), text => text.includes('取消未完成'));
+  const failure = historical.getByRole('alert');
+  await until(() => failure.innerText(), text => text.includes('取消未完成'));
   assert.equal(await historical.getAttribute('data-status'), 'waiting_user');
   assert.equal(await cancel.isEnabled(), true);
+  // The alert can arrive mid-reveal. DOM visibility alone does not detect CSS clipping.
+  await until(() => historical.evaluate(row => {
+    const supportsMotion = CSS.supports('interpolate-size: allow-keywords') && CSS.supports('selector(details::details-content)');
+    return !supportsMotion || getComputedStyle(row, '::details-content').overflowY === 'visible';
+  }), Boolean, 3000);
+  await until(() => failure.evaluate(node => {
+    const row = node.closest('details');
+    const detail = node.closest('.bot-work-detail');
+    if (row.getBoundingClientRect().bottom < detail.getBoundingClientRect().bottom) return false;
+    const text = document.createRange();
+    text.selectNodeContents(node);
+    const lines = [...text.getClientRects()];
+    return lines.length > 0 && lines.every(line => {
+      const x = (line.left + line.right) / 2;
+      return [line.top + 1, line.bottom - 1].every(y => node.contains(document.elementFromPoint(x, y)));
+    });
+  }), Boolean, 3000);
   await page.screenshot({ path: path.join(captureDirectory, 'task-cancel-failed-dark.png'), animations: 'disabled' });
   update({ cancelMode: 'success' });
   await cancel.click();
@@ -110,6 +128,6 @@ export async function checkBotTaskCancellation({ page, until, report, captureDir
   update({ ...initial, cancelMode: undefined, cancelCalls: undefined, cancelHandshake: undefined, cancelRelease: undefined, cancelFinalize: undefined });
   await until(() => panelTasks.count(), count => count === 1);
   report.taskCancellation = { panelTaskAction: true, keyboard: true, detailAction: true, sharedPending: true,
-    failureRetry: true, latestReceipt: true, noDuplicate: true, unrelatedPreserved: true, narrowFits: true,
+    failureRetry: true, failureVisible: true, latestReceipt: true, noDuplicate: true, unrelatedPreserved: true, narrowFits: true,
     deferredStopReceipt: true, focusReturned: true, focusPreserved: true };
 }
