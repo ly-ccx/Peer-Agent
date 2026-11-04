@@ -73,6 +73,12 @@ test('research acceptance retains the original goal, continues without user inpu
     coverage: [{ ...f.initial.coverage[0], status: 'covered', sources: [{ sessionId: 's1', sourceRevision: 'source:s1', evidenceRefs: ['ev:s1'] }] }, f.initial.coverage[1]],
     disposition: { kind: 'continue', operationRefs: ['requirement:fix'] } };
   assert.equal((await f.coordinate({ action: 'assess', assessment: continuation }, f.context('t2', { events: [event] }))).ok, true);
+  const progress = { id: 'progress:t2', turnId: 't2', role: 'assistant', kind: 'agent_reply', content: 'Research is ready. The fix still needs verification.',
+    sources: [], meta: { workId: 'g' } };
+  f.coordinator.prepareReplies([progress], wake);
+  await f.coordinator.deliver(progress);
+  assert.equal(f.store.read().deliveries[progress.id]?.state, 'delivered');
+  assert.deepEqual(progress.meta.intentScopes, [{ workId: 'g', goalRevision: 1 }]);
   f.coordinator.finish(wake, { rounds: [] }, [...f.sessions.values()]);
   assert.equal(f.store.readWork('g').state, 'runnable');
   const next = f.coordinator.recoverJob(); assert.equal(next.kind, 'wake'); assert.deepEqual(next.userInputs, []);
@@ -95,7 +101,13 @@ test('research acceptance retains the original goal, continues without user inpu
   assert.equal(f.store.readWork('g').intentCoordination.lifecycle, 'active');
   f.coordinator.finish(next, { rounds: [], turnId: 't3', yielded: true,
     providerCheckpoint: { provider: 'openai', providerId: 'p', model: 'm', messages: [] } }, [...f.sessions.values()]);
-  const nativeNext = f.coordinator.recoverJob(); nativeNext.attemptId = 't4'; f.coordinator.start(nativeNext);
+  const reviewedCheckpoint = f.store.readWork('g').checkpointRef;
+  f.store.transfer([{ eventId: 'new-verdict-event', sessionId: 's2', kind: 'session_verified' }]);
+  await f.coordinator.recover();
+  assert.equal(f.store.readWork('g').state, 'runnable', 'recovering old progress leaves the reviewed return checkpoint runnable');
+  assert.equal(f.store.readWork('g').checkpointRef, reviewedCheckpoint);
+  assert.equal(f.store.read().events['new-verdict-event'].handled, false);
+  const nativeNext = f.coordinator.selectNext().job; nativeNext.attemptId = 't4'; f.coordinator.start(nativeNext);
   assert.ok(f.coordinator.resume(nativeNext, { modelProviderId: 'p', modelId: 'm', family: 'openai' }).providerCheckpoint);
   assert.equal(nativeNext.resumedIntentDecisionRef, 't3:assess');
   assert.equal(f.coordinator.dispositionMissing(nativeNext), false, 'a real native slice carries the current judgment');
@@ -191,7 +203,9 @@ test('a quiet final disposition reuses delivered current-goal results but never 
     coverage: f.initial.coverage.map(row => ({ ...row, status: 'covered', sources: [{ sessionId: 's1', sourceRevision: 'source:s1', evidenceRefs: ['ev:s1'] }] })),
     disposition: { kind: 'return', replyRef: 't2-reply-1' } } }, f.context('t2', { events: [event] }));
   assert.equal(result.review.passed, true);
-  f.coordinator.finish(job, { rounds: [] }, [...f.sessions.values()]);
+  f.coordinator.finish(job, { rounds: [], turnId: 't2', yielded: true,
+    providerCheckpoint: { provider: 'openai', providerId: 'p', model: 'm', messages: [] } }, [...f.sessions.values()]);
+  await f.coordinator.recover();
   assert.equal(f.store.readWork('g').intentCoordination.lifecycle, 'fulfilled');
   assert.equal(f.store.readWork('g').intentCoordination.closure.replyRef, progress.id);
   assert.equal(f.messages.filter(row => row.kind === 'agent_reply').length, 1);
