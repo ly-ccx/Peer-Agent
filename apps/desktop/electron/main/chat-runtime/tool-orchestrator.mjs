@@ -552,6 +552,7 @@ export async function executeModelToolCall({
       tool: name,
       content: output,
       isError: !result.success,
+      execution: result.execution,
     }).content;
   } catch (err) {
     console.warn('[tool-orchestrator] tool result materialization failed, falling back to inline output:', err?.message || err);

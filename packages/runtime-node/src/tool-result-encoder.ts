@@ -196,6 +196,7 @@ export function encodeProviderToolResult(
     content: appendInteractiveMaterialNotice(content, input.execution),
     isError: result.status === 'failed',
     baseDir: input.baseDir,
+    execution: input.execution,
     ...(inlineMaxChars ? { inlineMaxChars } : {}),
   });
 
