@@ -9,6 +9,23 @@ const hash = value => createHash('sha256').update(JSON.stringify(value)).digest(
 const stopped = work => work?.stopScope === 'work' && ['paused', 'cancelled'].includes(work.state);
 const revisionOf = session => session.observationRevision || session.sourceRevision;
 
+function rootReviewFailure(report, receipt, requirements) {
+  const failed = report?.failedCriteria || [], missing = report?.missingEvidence || [];
+  const requirementIds = new Set(requirements.map(row => row.requirementId));
+  const issue = kind => row => ({ kind,
+    ...(requirementIds.has(row.criterionId) ? { requirementId: row.criterionId } : {}),
+    reason: publicDecisionText(row.reason, 160),
+  });
+  const issues = [...failed.slice(0, 3).map(issue('requirement_unmet')), ...missing.slice(0, 3).map(issue('missing_evidence'))];
+  let kind = 'not_passed';
+  if (report?.error === 'verifier_report_invalid') kind = 'invalid_report';
+  else if (failed.length) kind = 'requirements_unmet';
+  else if (missing.length || report?.passed === true && !report.evidenceRefs?.length) kind = 'missing_evidence';
+  const { operationId, workRevision, goalRevision } = receipt;
+  return { passed: false, error: 'goal_review_failed',
+    diagnostic: { operationId, workRevision, goalRevision, kind, issues, omittedIssues: failed.length + missing.length - issues.length } };
+}
+
 /** Semantic responsibility and closure over existing work, task and verification ports. */
 export function createIntentLifecycle({ storeFor, readSession, readMessages, readGoalFacts = () => null, verifyGoal = null,
   holdsLease, canExecute, now = () => new Date().toISOString() }) {
@@ -175,7 +192,7 @@ export function createIntentLifecycle({ storeFor, readSession, readMessages, rea
         ...(!hasUnsettledDispatch(s.work) ? { recovery: undefined, reportedWait: undefined } : {}) }, { returnState: false });
     }
     if (assessment.disposition.kind === 'return') {
-      const reviewed = await review(s.store, s.workId);
+      const reviewed = await review(s.store, admitted.receipt);
       return { ...admitted, entry: undefined, review: reviewed, nextAction: reviewed.passed ? 'deliver_referenced_reply' : 'resolve_remaining_goal_obligations' };
     }
     return { ...admitted, entry: undefined };
@@ -187,9 +204,11 @@ export function createIntentLifecycle({ storeFor, readSession, readMessages, rea
         return session?.sourceRevision === source.sourceRevision;
       });
   }
-  async function review(store, workId) {
+  async function review(store, assessmentReceipt) {
+    const { workId, workRevision, goalRevision } = assessmentReceipt;
     const state = store.read(), intent = state.works[workId]?.intentCoordination, mandate = state.mandates?.[workId];
-    if (!intent || intent.coverage.some(row => row.status !== 'covered') || intent.interpretation.openQuestions.length) return { passed: false, error: 'goal_coverage_incomplete' };
+    if (intent?.revision !== workRevision || mandate?.goalRevision !== goalRevision) return { passed: false, error: 'goal_review_stale' };
+    if (intent.coverage.some(row => row.status !== 'covered') || intent.interpretation.openQuestions.length) return { passed: false, error: 'goal_coverage_incomplete' };
     if (intent.review?.intentRevision === intent.revision && sourcesCurrent(intent.review, state, workId)) return intent.review;
     const sourceRows = intent.coverage.flatMap(row => row.sources);
     const sessions = [...new Set(sourceRows.map(row => row.sessionId))].map(sessionId => readSession({ sessionId }));
@@ -218,6 +237,7 @@ export function createIntentLifecycle({ storeFor, readSession, readMessages, rea
         && fact.plan?.successCriteria?.some(criterion => criterion.description === requirement.text);
     }));
     let result = { passed: reusable, evidenceRefs: [...new Set(sourceRows.flatMap(row => row.evidenceRefs))] };
+    let verifierError;
     if (!reusable) {
       if (!verifyGoal || !facts[0]?.plan) return { passed: false, error: 'goal_verifier_unavailable' };
       const explicitVerifications = sources.flatMap(({ sessionId, sourceRevision }, i) => {
@@ -228,13 +248,15 @@ export function createIntentLifecycle({ storeFor, readSession, readMessages, rea
         interpretation: intent.interpretation, canonicalInputs: messages.map(row => ({ inputId: row.inputId || row.id, text: row.content || row.text || '' })),
         sources, explicitVerifications, evidenceRefs: result.evidenceRefs };
       try { result = await verifyGoal({ plan: facts[0].plan, workId, goalReview }); }
-      catch (error) { return { passed: false, error: error.code || 'goal_verifier_failed' }; }
-      if (!result || result.passed !== true || result.failedCriteria?.length || result.missingEvidence?.length
-        || !result.evidenceRefs?.length) return { passed: false, error: 'goal_review_failed' };
+      catch (error) { verifierError = error?.code || 'goal_verifier_failed'; }
     }
+    if (!holdsLease(state.works[workId].workspaceId)) return { passed: false, error: 'goal_review_stale' };
     const current = store.read();
     if (current.works[workId]?.intentCoordination?.revision !== intent.revision || current.mandates?.[workId]?.goalRevision !== intent.goalRevision
       || !sourcesCurrent({ passed: true, goalRevision: intent.goalRevision, sources }, current, workId)) return { passed: false, error: 'goal_review_stale' };
+    if (verifierError) return { passed: false, error: verifierError };
+    if (!result || result.passed !== true || result.failedCriteria?.length || result.missingEvidence?.length
+      || !result.evidenceRefs?.length) return rootReviewFailure(result, assessmentReceipt, requirements);
     const receipt = { reviewRef: `intent-review:${hash([workId, intent.revision, sources])}`, passed: true,
       goalRevision: intent.goalRevision, intentRevision: intent.revision, coverageDigest: intentContentDigest(intent.coverage),
       sources, evidenceRefs: [...new Set(result.evidenceRefs)].slice(0, 200), at: now() };

@@ -12,7 +12,7 @@ import { buildVerifierMessage } from './goal-runner-host.mjs';
 import { verificationRequestRevision } from './verification-completion.mjs';
 import { createDigestQueue } from './digest.mjs';
 
-async function fixture(t, { explicitVerification } = {}) {
+async function fixture(t, { explicitVerification, reviewResult } = {}) {
   const rootDir = mkdtempSync(path.join(os.tmpdir(), 'peer-intent-lifecycle-'));
   const options = { rootDir, workspaceId: 'w', holdsLease: () => true, leaseEpoch: () => 'owner', formatVersion: 2, fenceLegacyWrites: true };
   const store = createWorkCoordinationStore(options);
@@ -28,7 +28,7 @@ async function fixture(t, { explicitVerification } = {}) {
       assert.equal(goalReview.requirements.length, 2);
       assert.deepEqual(goalReview.explicitVerifications, explicitVerification
         ? [{ sessionId: 's2', sourceRevision: 'source:s2', ...explicitVerification }] : []);
-      return { passed: true, evidenceRefs: goalReview.evidenceRefs }; },
+      return reviewResult ? reviewResult(goalReview) : { passed: true, evidenceRefs: goalReview.evidenceRefs }; },
     spawn: async (_task, context) => { const id = `s${sessions.size + 1}`;
       store.bindSession(context.coordinationBinding.workId, context.coordinationBinding.goalRevision, id, { ...context.coordinationBinding, sessionId: id });
       const row = { sessionId: id, workspaceId: 'w', status: 'running', sourceRevision: `source:${id}`, observationRevision: `obs:${id}`,
@@ -130,6 +130,51 @@ test('research acceptance retains the original goal, continues without user inpu
   const rebuilt = createWorkCoordinationStore(f.options); await rebuilt.prepare();
   try { assert.equal(rebuilt.readWork('g').intentCoordination.lifecycle, 'fulfilled'); assert.equal(rebuilt.read().deliveries['reply:t3:5'].settlement.status, 'applied'); }
   finally { rebuilt.close(); }
+});
+
+test('root review failures retain scoped diagnostics without admitting a return, and a corrected assessment can pass', async t => {
+  let response, sourceChanged;
+  const f = await fixture(t, { reviewResult: goalReview => {
+    if (sourceChanged) sourceChanged();
+    return response ?? { passed: true, evidenceRefs: goalReview.evidenceRefs };
+  } });
+  const userContext = f.context('t1', { currentInputAnchors: ['input-i'] });
+  await f.coordinate({ action: 'parallel', task: { anchorMessageIds: ['input-i'], brief: 'Full work' } }, { ...userContext, deliveryKey: 'spawn' });
+  const session = f.sessions.get('s1'); session.status = 'result_ready';
+  const assessment = { ...f.initial,
+    coverage: f.initial.coverage.map(row => ({ ...row, status: 'covered', sources: [{ sessionId: 's1', sourceRevision: 'source:s1', evidenceRefs: ['ev:s1'] }] })),
+    disposition: { kind: 'return', replyRef: 'current_turn_reply' } };
+  const assess = (revision, current = assessment) => f.coordinate({ action: 'assess', assessment: { ...current, expectedWorkRevision: revision,
+    ...(revision ? { interpretation: undefined } : {}) } }, { ...userContext, deliveryKey: `assess:${revision}` });
+
+  response = { passed: false, failedCriteria: [{ criterionId: 'fix', reason: 'The result lacks the requested comparison.', evidenceRefs: ['internal-ref'] },
+    { criterionId: 'unrelated-id', reason: 'a'.repeat(1000) }], missingEvidence: Array.from({ length: 4 }, () => ({ reason: 'Bearer secret0123456789', taskId: 'other-plan' })) };
+  const failed = await assess(0);
+  assert.equal(failed.ok, true);
+  assert.equal(failed.nextAction, 'resolve_remaining_goal_obligations');
+  assert.equal(failed.review.error, 'goal_review_failed');
+  const { diagnostic } = failed.review;
+  assert.deepEqual({ ...diagnostic, issues: undefined }, { operationId: 'assess:0', workRevision: 1, goalRevision: 1,
+    kind: 'requirements_unmet', issues: undefined, omittedIssues: 1 });
+  assert.deepEqual(diagnostic.issues[0], { kind: 'requirement_unmet', requirementId: 'fix', reason: 'The result lacks the requested comparison.' });
+  assert.deepEqual(diagnostic.issues[1], { kind: 'requirement_unmet', reason: 'a'.repeat(160) });
+  assert.deepEqual(diagnostic.issues.slice(2), Array.from({ length: 3 }, () => ({ kind: 'missing_evidence', reason: '[sensitive content omitted]' })));
+  assert.equal(f.store.readWork('g').intentCoordination.review, undefined);
+
+  response = { passed: false, error: 'verifier_report_invalid' };
+  assert.equal((await assess(1)).review.diagnostic.kind, 'invalid_report');
+  const staleReplay = await assess(0);
+  assert.deepEqual(staleReplay.review, { passed: false, error: 'goal_review_stale' });
+  assert.equal(f.reviews(), 2);
+
+  sourceChanged = () => { session.sourceRevision = 'new-source'; };
+  assert.deepEqual((await assess(2)).review, { passed: false, error: 'goal_review_stale' });
+  sourceChanged = undefined; response = undefined;
+  const repaired = await assess(3, { ...assessment, coverage: assessment.coverage.map(row => ({ ...row,
+    sources: row.sources.map(source => ({ ...source, sourceRevision: 'new-source' })) })) });
+  assert.equal(repaired.review.passed, true);
+  assert.equal(repaired.nextAction, 'deliver_referenced_reply');
+  assert.equal(f.store.readWork('g').intentCoordination.review.reviewRef, repaired.review.reviewRef);
 });
 
 test('a deferred goal reply stays unaccepted and active until its actual digest is committed and settled', async t => {
