@@ -26,7 +26,7 @@ const CAPABILITIES = [
 const INITIAL_INPUT = 'live-story-publish', FROZEN_INPUT = 'live-story-verify';
 const ASSESSMENT_FORMAT = 'For coordinate_work assess, put workId, expectedWorkRevision, expectedGoalRevision and reason inside assessment. Each coverage row contains requirementId, status, explanation and sources. Put evidenceRefs only inside each source, alongside sessionId and sourceRevision. Use sources: [] for a remaining requirement with no evidence. Use disposition.kind "wait" with a waitFor list for an active session. On an event-only wake, use sourceInputIds: [] and inputs: [].';
 const INITIAL_TASK = [
-  `Delegate one task with spawn_session. Use anchorMessageIds ["input-${INITIAL_INPUT}"], kind "research", readOnly true, isolation "none", and requiredCapabilities ["local.interactive.publish"].`,
+  `Delegate one task with spawn_session exactly once. Reuse the returned session ID after every wake or repair, including after tool errors elsewhere. Use anchorMessageIds ["input-${INITIAL_INPUT}"], kind "research", readOnly true, isolation "none", and requiredCapabilities ["local.interactive.publish"].`,
   'Set successCriteria to [{"kind":"model_review","description":"Independently inspect the program, full facts binding and initial evaluation. Check both costs and the remainder."}]. Keep the longer instructions in brief.',
   'The worker must read its exact plan and task IDs with goal_get_plan, publish once, then use goal_update_task with the returned fixed artifact Evidence. Stop after recording it. Leave inspection to the Verifier.',
   'After spawning, use coordinate_work query with the current workId. Before post_reply, persist an assess decision with the exact current work and goal revisions, source IDs, input disposition, and evidence coverage. If the session is still running, wait on its current observation revision. Otherwise handle the current result. The reply alone does not record a disposition.',
@@ -142,11 +142,24 @@ export async function runInteractiveLiveStory(options: {
       activeTicks += 1;
       void host.tick().catch(error => { tickError = error; }).finally(() => { activeTicks -= 1; });
     }
-    async function waitFor<T>(read: () => T | undefined): Promise<T> {
+    function storySources() {
+      const sessions = host.supervisor.sessionsForProject(workspaceId);
+      const byInput = (id: string) => sessions.filter(session =>
+        host.plans.getPlan(session.planId)?.delegationOrigin?.anchorMessageId === `input-${id}`);
+      if (byInput(INITIAL_INPUT).length > 1) throw Error('story_duplicate_initial_delegation');
+      const followups = byInput(FROZEN_INPUT);
+      if (followups.length > 1) throw Error('story_duplicate_followup');
+      const publications = host.plans.listEvidenceIndex().filter((row: any) =>
+        row.capabilityId === 'local.interactive.publish' && row.userArtifacts?.[0]?.kind === 'interactive'
+        && row.evidenceRef === row.userArtifacts[0].ref);
+      if (publications.length > 1) throw Error('story_duplicate_publication');
+      return { sessions, followups, publication: publications[0] };
+    }
+    async function waitFor<T>(read: (sources: ReturnType<typeof storySources>) => T | undefined): Promise<T> {
       while (!signal.aborted) {
         if (tickError) throw tickError;
         tick();
-        const value = read();
+        const value = read(storySources());
         if (value !== undefined) return value;
         if (budgetError) throw budgetError;
         await delay(100, undefined, { signal });
@@ -169,10 +182,8 @@ export async function runInteractiveLiveStory(options: {
       report.stage = 'delegation-and-publication';
       persist();
       host.inputs.submitInput({ workspaceId, inputId: INITIAL_INPUT, text: INITIAL_TASK, surface: 'tui' });
-      const publication = await waitFor(() => {
-        const rows = host.plans.listEvidenceIndex().filter((row: any) => row.capabilityId === 'local.interactive.publish' && row.userArtifacts?.[0]?.kind === 'interactive' && row.evidenceRef === row.userArtifacts[0].ref);
-        if (rows.length > 1) throw Error('story_duplicate_publication');
-        const row = rows[0], artifact = row?.userArtifacts?.[0];
+      const publication = await waitFor(({ publication: row }) => {
+        const artifact = row?.userArtifacts?.[0];
         if (!artifact) return;
         const plan = host.plans.getPlan(row.planId);
         const session = plan?.delegationOrigin?.sessionId
@@ -224,16 +235,12 @@ export async function runInteractiveLiveStory(options: {
       } finally { stateStore.release({ reference: fixed.reference, identity, writer }, current); }
       report.stage = 'verification-and-reply';
       persist();
-      const delivered = await waitFor(() => {
+      const delivered = await waitFor(({ sessions, followups }) => {
         if (!report.frozenInput) {
           report.frozenInput = readFrozenInput();
           if (report.frozenInput) persist();
         }
         if (!report.frozenInput) return;
-        const sessions = host.supervisor.sessionsForProject(workspaceId);
-        const followups = sessions.filter((session: any) =>
-          host.plans.getPlan(session.planId)?.delegationOrigin?.anchorMessageId === `input-${FROZEN_INPUT}`);
-        if (followups.length > 1) throw Error('story_duplicate_followup');
         const verification = followups[0];
         const plan = verification && host.plans.getPlan(verification.planId);
         const verdict = plan?.hostVerification;
@@ -269,6 +276,7 @@ export async function runInteractiveLiveStory(options: {
       const delivery = await host.readTaskResult(fixed.source.sessionId, fixed.artifactRef, signal);
       if (delivery.summary.availability !== 'available' || !delivery.computation
         || delivery.computation.truncated || !/\b45\b/.test(delivery.computation.text)) throw Error('story_text_delivery_incomplete');
+      storySources();
       report.delivery = delivery;
       report.stage = 'delivered';
       report.ok = true;
