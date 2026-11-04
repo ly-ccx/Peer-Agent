@@ -148,6 +148,12 @@ export function createIntentLifecycle({ storeFor, readSession, readMessages, rea
       currentInputIds: sourceInputIds, eventIds: sourceEventIds, turnId: context.turnId,
       originDecisionRef: context.sourceDecisionRef });
     if (!admitted.ok) {
+      if (['work_revision_conflict', 'goal_revision_conflict'].includes(admitted.error)) {
+        const current = scope(context, s.workId);
+        if (current) return { ...admitted, workRevision: current.work.intentCoordination?.revision || 0,
+          goalRevision: current.mandate?.goalRevision || 0,
+          message: 'The work or goal revision changed. Reuse these revisions only after confirming the saved interpretation and current sources still support your assessment.' };
+      }
       if (['source_not_admitted', 'input_disposition_required'].includes(admitted.error)) return { ...admitted,
         sourceInputIds, sourceEventIds,
         message: 'Use sources admitted in this turn. Supply one inputs entry for each selected sourceInputIds entry. On an event-only turn, use empty sourceInputIds and inputs arrays. Keep earlier inputs as goal context without repeating their dispositions.' };

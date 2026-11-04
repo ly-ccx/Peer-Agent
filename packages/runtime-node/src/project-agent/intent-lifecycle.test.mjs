@@ -363,6 +363,13 @@ test('stale session waits return only current in-scope facts and cannot park a r
   const state = () => [{ sessionId: 's1', status: session.status, sourceRevision: session.sourceRevision,
     observationRevision: session.observationRevision }];
 
+  for (const [patch, error] of [[{ expectedWorkRevision: 2 }, 'work_revision_conflict'], [{ expectedGoalRevision: 2 }, 'goal_revision_conflict']]) {
+    const conflict = await f.coordinate({ action: 'assess', assessment: { ...f.initial, ...patch } }, context);
+    assert.equal(conflict.error, error);
+    assert.equal(conflict.workRevision, 0);
+    assert.equal(conflict.goalRevision, 1);
+    assert.equal(f.store.readWork('g').intentCoordination, undefined);
+  }
   const stale = await assessWait('s1', session.sourceRevision);
   assert.equal(stale.error, 'wait_source_stale');
   assert.deepEqual(stale.sessionStates, state());
