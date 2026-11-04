@@ -24,11 +24,13 @@ const CAPABILITIES = [
   'local.delegation.wait_for_sessions', 'local.goal.get_plan', 'local.goal.update_task', 'local.interactive.publish', 'local.interactive.inspect',
 ];
 const INITIAL_INPUT = 'live-story-publish', FROZEN_INPUT = 'live-story-verify';
+const ASSESSMENT_FORMAT = 'For coordinate_work assess, put workId, expectedWorkRevision, expectedGoalRevision and reason inside assessment. Each coverage row contains requirementId, status, explanation and sources. Put evidenceRefs only inside each source, alongside sessionId and sourceRevision. Use sources: [] for a remaining requirement with no evidence.';
 const INITIAL_TASK = [
   `Delegate one task with spawn_session. Use anchorMessageIds ["input-${INITIAL_INPUT}"], kind "research", readOnly true, isolation "none", and requiredCapabilities ["local.interactive.publish"].`,
   'Set successCriteria to [{"kind":"model_review","description":"Independently inspect the program, full facts binding and initial evaluation. Check both costs and the remainder."}]. Keep the longer instructions in brief.',
   'The worker must read its exact plan and task IDs with goal_get_plan, publish once, then use goal_update_task with the returned fixed artifact Evidence. Stop after recording it. Leave inspection to the Verifier.',
   'After spawning, use coordinate_work query with the current workId. Before post_reply, persist an assess decision with the exact current work and goal revisions, source IDs, input disposition, and evidence coverage. If the session is still running, wait on its current observation revision. Otherwise handle the current result. The reply alone does not record a disposition.',
+  ASSESSMENT_FORMAT,
   'The assessment has two substantive requirements: publish and record the fixed example, and independently verify the example. An acknowledgment, post_reply, or later user interaction is not an evidence requirement. Do not add it to coverage or openQuestions. When returning the verified example, record the return disposition with replyRef "current_turn_reply" and send the real post_reply with its session and current status.',
   'No further user input or human acceptance is needed for this request. While the worker is still advancing, wait on the current session instead of posting a progress-only reply. When it finishes, read the current host verification and cite its indexed evidence for the checks it covers. Keep the original result and do not claim human acceptance.',
   'Worker brief: ' + INTERACTIVE_LIVE_TASK,
@@ -39,6 +41,7 @@ const FROZEN_TASK = [
   'The new worker should use goal_get_plan, then inspect the attached fixed result once with view evaluate and the attached followupId, then record that actual result and evidence on its leaf with goal_update_task. Keep the worker brief limited to that one inspection. Put the four independent checks only in successCriteria.',
   'Set successCriteria to [{"kind":"model_review","description":"Independently inspect the attached fixed result in four calls together: program, data binding facts, initial evaluate, and evaluate with the attached followupId. Cite only the four canonical interactive-inspection references."}].',
   'Acknowledge the new user input once. While the follow-up task is running or verifying, use wait_for_sessions on background wakes with its session ID. Read the current host status on the next wake. After it reports result_ready or accepted, read the current host verification. Use its indexed checks if they cover this frozen selection. Request verify_session only if the host conclusion is missing or the current checks do not cover the selection. Reuse the original publication review if it still covers the initial conditions. Avoid repeating get_session or get_verification_detail when the status is unchanged.',
+  ASSESSMENT_FORMAT,
   'Use the actual fixed inspection and verification evidence as the substantive coverage. Deliver via the return disposition with replyRef "current_turn_reply". Then use post_reply with both session IDs as sources and their current statuses. Explain the two remainders, describe the costs as synthetic, and state the actual verification and human acceptance status. Do not republish or substitute direct Bot inspection for delegation.',
 ].join('\n');
 
