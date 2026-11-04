@@ -21,3 +21,23 @@ test('legacy 229 and Process are IME signals; normal typing and unmount reset ha
   guard.start(target); guard.reset(); assert.equal(isImeKey({ key: 'Escape', target }), false);
   assert.equal(isImeKey({ key: 'Process' }), true);
 });
+
+test('confirming a candidate with the native IME Space sequence leaves the next Enter available', () => {
+  const guard = createCompositionGuard(), target = new EventTarget();
+  guard.start(target);
+  assert.equal(guard.keyDown({ key: ' ', keyCode: 229, isComposing: true, target }), true);
+  guard.end(target);
+  guard.keyUp({ key: ' ', keyCode: 32, target });
+  assert.equal(guard.keyDown({ key: 'Enter', keyCode: 13, target }), false);
+});
+
+test('the physical Enter code keeps an IME Process key held until its own release', () => {
+  const guard = createCompositionGuard(), target = new EventTarget();
+  guard.start(target);
+  assert.equal(guard.keyDown({ key: 'Process', code: 'NumpadEnter', keyCode: 229, target }), true);
+  guard.end(target);
+  guard.keyUp({ key: 'Process', code: 'Space', keyCode: 229, target });
+  assert.equal(guard.keyDown({ key: 'Enter', code: 'NumpadEnter', target }), true);
+  guard.keyUp({ key: 'Enter', code: 'NumpadEnter', target });
+  assert.equal(guard.keyDown({ key: 'Enter', code: 'NumpadEnter', target }), false);
+});
