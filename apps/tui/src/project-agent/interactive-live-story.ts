@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createConversationStore } from '@peer-agent/conversation-store';
-import { interactiveFeedbackFromFollowup } from '@peer-agent/protocol';
+import { interactiveFeedbackFromFollowup, restoreResourceFeedbackTransport } from '@peer-agent/protocol';
 import { createBotLifecycle, createProjectRegistry, verdictRefFor } from '@peer-agent/runtime-node';
 import type { ModelProvider, ModelUsage } from '@peer-agent/runtime-node/models';
 import { restrictTuiHostTools } from '../cli-host-filter.ts';
@@ -62,7 +62,7 @@ export async function runInteractiveLiveStory(options: {
   const report: { ok: boolean; scenario: 'story'; startedAt: string; finishedAt?: string; stage: string; error?: string;
     requests: Observation[];
     budgetExhausted?: { scope: 'story' | 'role'; resource: 'requests' | 'toolCalls'; phase: Phase; used: number; limit: number };
-    publication?: unknown; frozen?: unknown; sessions?: unknown; receipts?: unknown; replies?: unknown; delivery?: unknown } = {
+    publication?: unknown; initialReply?: unknown; frozen?: unknown; frozenInput?: unknown; sessions?: unknown; receipts?: unknown; replies?: unknown; delivery?: unknown } = {
     ok: false, scenario: 'story', startedAt: new Date().toISOString(), stage: 'setup', requests: [],
   };
   const persist = () => {
@@ -150,6 +150,18 @@ export async function runInteractiveLiveStory(options: {
       }
       throw Error('story_deadline');
     }
+    let submittedFeedback: ReturnType<typeof interactiveFeedbackFromFollowup>;
+    function readFrozenInput() {
+      if (!submittedFeedback) return;
+      const message = host.conversations.getPersistedConversationHistory!(conversationId)?.messages
+        .find(row => row.id === `input-${FROZEN_INPUT}`);
+      if (!message) return;
+      const [feedback, extra] = restoreResourceFeedbackTransport(message.resourceFeedback,
+        Array.isArray(message.attachments) ? message.attachments : undefined);
+      if (!feedback || extra || JSON.stringify(feedback) !== JSON.stringify(submittedFeedback))
+        throw Error('story_canonical_frozen_input_mismatch');
+      return { messageId: message.id, feedback };
+    }
     try {
       report.stage = 'delegation-and-publication';
       persist();
@@ -177,7 +189,7 @@ export async function runInteractiveLiveStory(options: {
       report.publication = { evidenceRef: publication.row.evidenceRef, reference: fixed.reference, source: fixed.source };
       report.stage = 'initial-delivery';
       persist();
-      await waitFor(() => {
+      const initialReply = await waitFor(() => {
         const history = host.conversations.getPersistedConversationHistory!(conversationId)?.messages ?? [];
         return history.find((message: any) => message.kind === 'agent_reply' && message.fallback !== true
           && message.meta?.replyTo?.includes(`input-${INITIAL_INPUT}`)
@@ -185,7 +197,9 @@ export async function runInteractiveLiveStory(options: {
             source.sessionId === fixed.source.sessionId && (source.status === 'result_ready' || source.status === 'accepted'))
           && message.meta?.evidenceRefs?.includes(fixed.artifactRef));
       });
+      report.initialReply = { messageId: initialReply.id, createdAt: initialReply.createdAt, meta: initialReply.meta };
       report.stage = 'frozen-input';
+      persist();
       const { stateStore } = host.interactive, current = () => host.holdsLease(workspaceId);
       const identity = { viewId: 'story-view', windowId: 'story-window', generation: 'story-generation' };
       const state = stateStore.read(fixed.reference, current);
@@ -201,11 +215,18 @@ export async function runInteractiveLiveStory(options: {
         host.inputs.submitInput({ workspaceId, inputId: FROZEN_INPUT, text: FROZEN_TASK, resourceFeedback: [feedback], surface: 'tui' });
         // The TUI submission path notifies the host even while a wake is active.
         tick(true);
+        submittedFeedback = feedback;
         followupId = feedback.id;
         report.frozen = feedback;
       } finally { stateStore.release({ reference: fixed.reference, identity, writer }, current); }
       report.stage = 'verification-and-reply';
+      persist();
       const delivered = await waitFor(() => {
+        if (!report.frozenInput) {
+          report.frozenInput = readFrozenInput();
+          if (report.frozenInput) persist();
+        }
+        if (!report.frozenInput) return;
         const sessions = host.supervisor.sessionsForProject(workspaceId);
         const followups = sessions.filter((session: any) =>
           host.plans.getPlan(session.planId)?.delegationOrigin?.anchorMessageId === `input-${FROZEN_INPUT}`);
@@ -219,7 +240,6 @@ export async function runInteractiveLiveStory(options: {
           run.verifierRunId.startsWith('delegated-semantic:'));
         if (review?.status !== 'passed' || !review.completedAt || !review.evidenceRefs?.length) return;
         const history = host.conversations.getPersistedConversationHistory!(conversationId)?.messages ?? [];
-        if (!history.some(message => message.id === `input-${FROZEN_INPUT}`)) return;
         const reply = history.filter((message: any) => message.kind === 'agent_reply' && message.fallback !== true
           && Date.parse(message.createdAt) >= Date.parse(review.completedAt)
           && message.meta?.replyTo?.includes(`input-${FROZEN_INPUT}`) && message.meta?.evidenceRefs?.includes(fixed.artifactRef)
