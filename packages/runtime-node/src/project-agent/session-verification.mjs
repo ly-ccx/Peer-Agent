@@ -9,6 +9,7 @@ import { readdirSync } from 'node:fs';
 import { verificationContentHash } from './verification-completion.mjs';
 import { verificationFailure } from './verification-failure.mjs';
 import { verificationHistory } from './verification-history.mjs';
+import { verdictRefFor } from './acceptance.mjs';
 
 export function createSessionVerification({
   goalPlanStore,
@@ -79,9 +80,13 @@ export function createSessionVerification({
       : (typeof stored.sameFamilyAsWorker === 'boolean'
         ? stored.sameFamilyAsWorker
         : selection?.verifier?.sameFamilyAsWorker === true);
+    const matchesStoredContent = stored.contentHash && stored.contentHash === verificationContentHash(plan, readReport(plan));
     const independentVerifier = authority.independentVerifier
       || (semantic.length > 0 ? semanticAuthority
-        : stored.contentHash && stored.contentHash !== verificationContentHash(plan, readReport(plan)) ? 'missing' : stored.independentVerifier || 'missing');
+        : stored.contentHash && !matchesStoredContent ? 'missing' : stored.independentVerifier || 'missing');
+    const sessionId = plan.delegationOrigin?.sessionId;
+    const explicitOutcome = matchesStoredContent && sessionId && ['passed', 'failed', 'partial', 'unverifiable']
+      .find(outcome => stored.verdictRef === verdictRefFor(sessionId, outcome));
     const allowed = new Set(evidenceIndex);
     const outputs = [];
     for (const record of records) {
@@ -99,6 +104,7 @@ export function createSessionVerification({
       plan,
       evidenceIndex,
       independentVerifier,
+      ...(explicitOutcome ? { explicitVerification: { verdictRef: stored.verdictRef, outcome: explicitOutcome } } : {}),
       ...(workerModel ? { workerModel } : {}),
       ...(verifierModel ? { verifierModel } : {}),
       sameFamilyAsWorker: sameFamily,

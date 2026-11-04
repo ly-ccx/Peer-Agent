@@ -12,7 +12,7 @@ import { buildVerifierMessage } from './goal-runner-host.mjs';
 import { verificationRequestRevision } from './verification-completion.mjs';
 import { createDigestQueue } from './digest.mjs';
 
-async function fixture(t) {
+async function fixture(t, { explicitVerification } = {}) {
   const rootDir = mkdtempSync(path.join(os.tmpdir(), 'peer-intent-lifecycle-'));
   const options = { rootDir, workspaceId: 'w', holdsLease: () => true, leaseEpoch: () => 'owner', formatVersion: 2, fenceLegacyWrites: true };
   const store = createWorkCoordinationStore(options);
@@ -22,9 +22,13 @@ async function fixture(t) {
   const sessions = new Map(); let reviews = 0;
   const digestFile = path.join(rootDir, 'digest.json'), digests = createDigestQueue({ file: digestFile });
   const lifecycle = createCoordinationLifecycle({ holdsLease: () => true, readMessages: () => messages,
-    readSession: ({ sessionId }) => sessions.get(sessionId), readGoalFacts: id => ({ plan: { planId: id, goal: 'Stage', successCriteria: [] }, evidenceIndex: [`ev:${id}`], independentVerifier: 'passed' }),
+    readSession: ({ sessionId }) => sessions.get(sessionId), readGoalFacts: id => ({ plan: { planId: id, goal: 'Stage', successCriteria: [] }, evidenceIndex: [`ev:${id}`], independentVerifier: 'passed',
+      ...(id === 's2' && explicitVerification ? { explicitVerification } : {}) }),
     verifyGoal: async ({ goalReview }) => { reviews++; assert.equal(goalReview.canonicalInputs[0].text, messages[0].content);
-      assert.equal(goalReview.requirements.length, 2); return { passed: true, evidenceRefs: goalReview.evidenceRefs }; },
+      assert.equal(goalReview.requirements.length, 2);
+      assert.deepEqual(goalReview.explicitVerifications, explicitVerification
+        ? [{ sessionId: 's2', sourceRevision: 'source:s2', ...explicitVerification }] : []);
+      return { passed: true, evidenceRefs: goalReview.evidenceRefs }; },
     spawn: async (_task, context) => { const id = `s${sessions.size + 1}`;
       store.bindSession(context.coordinationBinding.workId, context.coordinationBinding.goalRevision, id, { ...context.coordinationBinding, sessionId: id });
       const row = { sessionId: id, workspaceId: 'w', status: 'running', sourceRevision: `source:${id}`, observationRevision: `obs:${id}`,
@@ -48,7 +52,7 @@ async function fixture(t) {
 }
 
 test('research acceptance retains the original goal, continues without user input, then closes once after actual delivery and root review', async t => {
-  const f = await fixture(t);
+  const f = await fixture(t, { explicitVerification: { verdictRef: 'verdict:s2:passed', outcome: 'passed' } });
   await f.coordinate({ action: 'parallel', task: { anchorMessageIds: ['input-i'], brief: 'Research' } }, f.context('spawn', { currentInputAnchors: ['input-i'] }));
   const initial = await f.coordinate({ action: 'assess', assessment: f.initial }, f.context('t1', { currentInputAnchors: ['input-i'] }));
   assert.equal(initial.ok, true, JSON.stringify(initial));

@@ -217,9 +217,13 @@ export function createIntentLifecycle({ storeFor, readSession, readMessages, rea
     let result = { passed: reusable, evidenceRefs: [...new Set(sourceRows.flatMap(row => row.evidenceRefs))] };
     if (!reusable) {
       if (!verifyGoal || !facts[0]?.plan) return { passed: false, error: 'goal_verifier_unavailable' };
+      const explicitVerifications = sources.flatMap(({ sessionId, sourceRevision }, i) => {
+        const fact = facts[i]?.explicitVerification;
+        return fact ? [{ sessionId, sourceRevision, verdictRef: fact.verdictRef, outcome: fact.outcome }] : [];
+      });
       const goalReview = { workId, goalRevision: intent.goalRevision, requirements,
         interpretation: intent.interpretation, canonicalInputs: messages.map(row => ({ inputId: row.inputId || row.id, text: row.content || row.text || '' })),
-        sources, evidenceRefs: result.evidenceRefs };
+        sources, explicitVerifications, evidenceRefs: result.evidenceRefs };
       try { result = await verifyGoal({ plan: facts[0].plan, workId, goalReview }); }
       catch (error) { return { passed: false, error: error.code || 'goal_verifier_failed' }; }
       if (!result || result.passed !== true || result.failedCriteria?.length || result.missingEvidence?.length

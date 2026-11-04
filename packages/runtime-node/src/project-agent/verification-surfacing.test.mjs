@@ -36,6 +36,7 @@ for (const passed of [true, false]) test(`task verification and main-bot reporti
     messages: [{ id: 'input', role: 'user', kind: 'user_input' }] };
   const call = (name, args) => ({ call: { toolCallId: name, capabilityId: `local.delegation.${name}`, arguments: args } });
   const baseline = await provider.executeCapability(call('get_verification_detail', { sessionId: 'session' }), context);
+  assert.equal(verification.facts('session').explicitVerification, undefined);
   const endAutomaticReview = beginVerificationAttempt(plan.planId, 'automatic-review');
   try {
     const pending = await provider.executeCapability(call('get_verification_detail', { sessionId: 'session' }), context);
@@ -66,6 +67,9 @@ for (const passed of [true, false]) test(`task verification and main-bot reporti
   assert.deepEqual(readFileSync(parentFile), before, 'verification does not append or rewrite public messages');
   const reopened = createGoalPlanStore({ storeDir: plans.getStoreDir() });
   verification = createSessionVerification({ goalPlanStore: reopened, readReport: plan => supervisor.readReportSummary(plan.delegationOrigin.sessionId) });
+  assert.deepEqual(verification.facts('session').explicitVerification, { verdictRef: result.event.verdictRef, outcome: result.status });
+  const stale = createSessionVerification({ goalPlanStore: reopened, readReport: () => 'Changed worker report' });
+  assert.equal(stale.facts('session').explicitVerification, undefined);
   const detail = supervisor.get({ sessionId: 'session', detail: 'report' }).report.verification;
   const toolDetail = (await createDelegationProvider({ verification }).executeCapability(call('get_verification_detail', { sessionId: 'session' }), context)).result.output;
   const { ok, ...body } = toolDetail;
