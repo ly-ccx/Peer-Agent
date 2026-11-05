@@ -141,6 +141,16 @@ export function createProjectRosterPromptSource() {
         inputAnchors: inputAnchorsOf(input),
         decisionFrame: minimalDecisionFrame(turnBag(input).decisionFrame, turnBag(input).dispositionRequired),
         retryContinuity: retryContinuityOf(input),
+        delegationFollowUp: turnBag(input).delegationFollowUp ? {
+          owner: 'bot', authorization: 'unchanged',
+          blockerCount: (turnBag(input).delegationFollowUp.blockers || []).length,
+          blockers: (turnBag(input).delegationFollowUp.blockers || []).slice(-8).map(row => ({
+            workId: clipText(row.workId, 200), workState: clipText(row.workState, 40),
+            ...(row.sessionId ? { sessionId: clipText(row.sessionId, 200) } : {}),
+            sourceTurnId: clipText(row.sourceTurnId, 200), toolCallId: clipText(row.toolCallId, 200),
+            error: clipText(row.error, 160), retryable: row.retryable === true,
+          })),
+        } : null,
         dispatchRecovery: (firstArray(turnBag(input).dispatchRecovery) || []).slice(-8)
           .filter(row => row && ['verification_interrupted','query_interrupted'].includes(row.outcome) && row.verdict === 'unconfirmed')
           .map(row => ({ toolCallId: clipText(row.toolCallId, 200), sessionId: clipText(row.sessionId, 200),
@@ -163,13 +173,14 @@ export function createProjectRosterPromptSource() {
       const retryContinuity = observation?.retryContinuity ?? null;
       const coordination = observation?.coordination || [];
       const dispatchRecovery = observation?.dispatchRecovery || [];
-      if (!sessions.length && !events.length && !inputAnchors.length && !objectives.length && !proposals.length && !retryContinuity && !coordination.length && !dispatchRecovery.length && !observation?.decisionFrame) return [];
+      if (!sessions.length && !events.length && !inputAnchors.length && !objectives.length && !proposals.length && !retryContinuity && !coordination.length && !dispatchRecovery.length && !observation?.decisionFrame && !observation?.delegationFollowUp) return [];
       return [{
         id: 'project-roster',
         layer: 'L7_CONTINUITY',
         priority: 20,
         title: 'Project roster',
-        content: formatRoster(sessions, events, inputAnchors, objectives, proposals, retryContinuity, coordination, dispatchRecovery, observation?.decisionFrame),
+        content: formatRoster(sessions, events, inputAnchors, objectives, proposals, retryContinuity, coordination, dispatchRecovery, observation?.decisionFrame)
+          + (observation.delegationFollowUp ? `\nUnresolved delegation receipts (identity facts only; action admission still applies): ${JSON.stringify(observation.delegationFollowUp)}` : ''),
         source: {
           id: 'project-roster',
           kind: 'project-roster',

@@ -944,6 +944,8 @@ export interface RuntimeToolCall {
   readonly [key: string]: unknown;
 }
 
+export type { UserAnchorResolution, UserAnchorCandidate, UserAnchorDiagnostic } from './user-anchor.ts';
+
 export interface RuntimeToolResult {
   readonly toolCallId?: string;
   readonly status?: string;

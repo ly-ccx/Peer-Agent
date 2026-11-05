@@ -12,6 +12,32 @@ import { replyRecoveryAdmission } from './reply-recovery-admission.mjs';
 
 const stopped = { sessionId: 'old', status: 'cancelled', followUp: { owner: 'bot', reason: 'stop_unconfirmed' } };
 
+test('delegation custody agrees across finish and delivered-reply recovery without overriding a human or stop gate', async () => {
+  for (const retryable of [true, false]) {
+    for (const route of ['finish', 'reply']) {
+      let work = { workId: 'work', workspaceId: 'w', parentConversationId: 'p', state: 'runnable',
+        attemptId: 'attempt', sessionIds: [], anchorInputIds: [], consumedEventIds: [], pendingEventIds: [], checkpointRef: 'cp',
+        delegationFollowUp: { blockers: [{ taskKey: 'task', sourceTurnId: 'attempt', toolCallId: 'dispatch', action: 'parallel',
+          error: retryable ? 'anchor_not_found' : 'current_user_required', retryable }] } };
+      const message = { id: 'reply', turnId: 'attempt', kind: 'agent_reply', content: '仍在处理', meta: { workId: 'work' } };
+      const store = { read: () => ({ works: { work }, events: {}, deliveries: { reply: { state: 'delivered', message } } }),
+        readWork: () => work, saveWork: next => { work = next; }, handled() {}, checkpoint: () => 'cp',
+        readCheckpoint: () => ({ outcome: { rounds: [] } }) };
+      if (route === 'finish') {
+        createRunnerCoordination({ store, workspaceId: 'w', conversationId: 'p', readMessages: () => [], resolveRoster: () => [] })
+          .finish({ workId: 'work', events: [] }, { rounds: [] }, []);
+      } else {
+        await createRunnerReplyLifecycle({ store, workspaceId: 'w', conversationId: 'p', readMessages: () => [message],
+          resolveRoster: () => [], eventObserved: () => true }).recover();
+      }
+      assert.equal(work.state, retryable ? 'runnable' : 'blocked_system', route);
+      assert.equal(work.delegationFollowUp.blockers.length, 1);
+      assert.equal(decideRuntimeDisposition({ previous: { ...work, state: 'cancelled', stopScope: 'work' } }).state, 'cancelled');
+      assert.equal(decideRuntimeDisposition({ previous: work, reportedWait: { waitingUser: true, sessionStates: [] } }).state, 'waiting_user');
+    }
+  }
+});
+
 test('user control dominates semantic continue, unseen events and delivery recovery', () => {
   for (const state of ['paused', 'cancelled']) {
     const result = decideRuntimeDisposition({ previous: { state, stopScope: 'work' }, sessions: [stopped],

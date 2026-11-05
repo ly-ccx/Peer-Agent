@@ -11,6 +11,7 @@ export function replyRecoveryAdmission(work, checkpoint, { limits, readCheckpoin
   if (runtimeWorkControlHeld(work)) return fail('STALE_TURN');
   if (work.state === 'waiting_children' && !(work.stopScope === 'reply' && checkpoint?.outcome?.stopped === true)) return fail('STALE_TURN');
   if (hasUnsettledDispatch(work) || work.recovery?.failureKind === 'execution_outcome_unknown') return fail('EXECUTION_OUTCOME_UNKNOWN');
+  if (work.delegationFollowUp?.blockers.some(row => row.error === 'execution_outcome_unknown')) return fail('EXECUTION_OUTCOME_UNKNOWN');
   const effective = effectiveWorkLimits(work.budget, limits || work.budget?.limits);
   const boundary = budgetBoundary(work.budget, effective);
   if (boundary) return fail('WORK_BUDGET_EXHAUSTED', boundary);

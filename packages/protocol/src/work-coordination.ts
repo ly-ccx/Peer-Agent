@@ -89,6 +89,17 @@ export interface ProjectWorkReceipt {
   readonly sessionIds: readonly string[];
   /** Current owned technical blockers; a public progress update does not discharge them. */
   readonly repairSessionIds?: readonly string[];
+  /** Unresolved dispatch receipts, not execution grants or permission truth. */
+  readonly delegationFollowUp?: { readonly blockers: readonly {
+    readonly taskKey: string;
+    readonly sourceTurnId: string;
+    readonly toolCallId: string;
+    readonly action: 'parallel' | 'replace';
+    readonly error: string;
+    readonly retryable: boolean;
+    readonly operationId?: string;
+    readonly sessionId?: string;
+  }[] };
   readonly progressFacts?: readonly string[];
   readonly state: ProjectWorkState;
   readonly revision: number;

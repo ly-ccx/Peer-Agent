@@ -421,6 +421,7 @@ export function createProjectAgentRunner({
       let deliveryPending = false;
       const reportedSessionIds = new Set();
       if (coordination) {
+        coordination.captureDelegation(job, outcome);
         const replies = finished.messages.filter(message => message.kind === 'agent_reply');
         for (const message of replies) message.meta = { ...message.meta, workId: job.workId };
         coordination.bindReplies(replies, job);
@@ -544,6 +545,8 @@ export function createProjectAgentRunner({
       retryContinuity: readRetryContinuity([{ id: checkpoint.turnId, kind: 'agent_turn', rounds: checkpoint.rounds }], checkpoint.turnId) };
     const dispatchRecovery = job.workId ? coordination?.dispatchRecoveryFacts(job.workId) : [];
     if (dispatchRecovery?.length) plan.turnProfile.context = { ...plan.turnProfile.context, dispatchRecovery };
+    const delegationFollowUp = job.workId ? coordination?.delegationFacts(job.workId) : null;
+    if (delegationFollowUp) plan.turnProfile.context = { ...plan.turnProfile.context, delegationFollowUp };
     const rounds = [];
     let toolCallsUsed = 0;
     let memoryIds = [];

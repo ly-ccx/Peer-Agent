@@ -3,9 +3,16 @@ import { createHash } from 'node:crypto';
 const key = parts => createHash('sha256').update(JSON.stringify(parts)).digest('hex');
 
 /** Only validated host states and observation Evidence identify a report; prose never does. */
-export function prepareReplyReport({ workspaceId, message, currentInputAnchors = [], reportedMessages = [], toolCalls = [] }) {
+export function prepareReplyReport({ workspaceId, workId, message, currentInputAnchors = [], reportedMessages = [], toolCalls = [] }) {
   const keys = factKeys(workspaceId, message);
-  if (!keys.length) return { suppressed: false, keys };
+  if (!keys.length) {
+    // A canonical reply for this work/input already exists. This only avoids
+    // duplicate delivery; it says nothing about execution or task completion.
+    const prior = workId && reportedMessages.find(reply => reply.kind === 'agent_reply' && reply.meta?.workId === workId
+      && reply.content === message.content && JSON.stringify(reply.replyTo || reply.meta?.replyTo || []) === JSON.stringify(message.replyTo || [])
+      && JSON.stringify(reply.question || null) === JSON.stringify(message.question || null));
+    return { suppressed: Boolean(prior), keys, reportedReplyIds: prior ? [prior.id] : [] };
+  }
   const seen = new Set();
   const reportedReplyIds = [];
   if (!currentInputAnchors.length) {

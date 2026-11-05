@@ -721,10 +721,10 @@ test('fresh input preempts an automatically resumed user request and preserves i
     assert.equal(env.work().state, 'retry_wait');
     background = env.advance(2000); await started;
     foreground = env.runner.enqueueUserInputs([input('new')]);
-    // Await the actual pump (including the carried request), not a 150ms
-    // wall-clock race that can return before its persisted result under load.
-    await Promise.all([background, foreground]);
+    // Admission must signal preemption synchronously; resume ordering is checked
+    // after the actual pump receipt, within this test's existing 5s deadline.
     assert.equal(oldSignal.aborted, true);
+    await foreground;
     assert.deepEqual(seen.slice(0, 4), ['old', 'old', 'new', 'old']);
     assert.equal(env.messages.filter(row => row.card === 'agent_unavailable').length, 1, 'only the initial authentic timeout is an error');
     assert.ok(Object.values(env.store.read().works).every(work => work.state === 'delivered'));

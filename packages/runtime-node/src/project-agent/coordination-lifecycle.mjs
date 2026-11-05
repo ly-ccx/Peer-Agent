@@ -6,6 +6,7 @@ import { transitionReconciliation } from './supervision-recovery.mjs';
 import { sessionNeedsCancellation } from './session-cancellation.mjs';
 import { createIntentLifecycle } from './intent-lifecycle.mjs';
 import { stableOperationFailureKey } from './progress-policy.mjs';
+import { resolveDelegationAnchors, userAnchorCandidates } from './user-anchor.mjs';
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const ended = new Set(['accepted', 'result_ready', 'cancelled']);
 
@@ -40,7 +41,6 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
     const workspaceId = context.workspaceId, parentConversationId = context.conversationId || context.parentConversationId;
     const store = storeFor(workspaceId);
     if (!store || !holdsLease(workspaceId)) return { ok: false, error: 'coordination_host_unavailable' };
-    const operationId = context.deliveryKey || `coordination-${hash([context.turnId, context.toolCallOrdinal, input])}`;
     const state = store.read();
     if (input.action === 'assess') return intents.assess(input, context);
     if (input.action === 'query' && !input.sessionId) return intents.query(input, context);
@@ -56,6 +56,10 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
     if (!canExecute(workspaceId)) return { ok: false, error: 'recovery_pending' };
     if (state.lastRecovery?.quarantinedSessionIds?.includes(input.sessionId)) return { ok: false, error: 'coordination_reconciliation_required' };
     const messages = readMessages(parentConversationId);
+    const resolved = resolveDelegationAnchors('coordinate_work', input, messages);
+    if (!resolved.ok) return { ...resolved, availableAnchors: userAnchorCandidates(messages, isCanonicalUserInput, context.currentInputAnchors || []) };
+    input = resolved.input;
+    const operationId = context.deliveryKey || `coordination-${hash([context.turnId, context.toolCallOrdinal, input])}`;
     const current = messages.filter(row => context.currentInputAnchors?.includes(row.id) && isCanonicalUserInput(row));
     const sourceInputIds = current.map(row => row.inputId || row.id);
     const events = context.events || [];
@@ -67,7 +71,7 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
         || !previous.sourceInputIds.some(id => sourceInputIds.includes(id)) && !previous.sourceEventIds.some(id => events.some(row => row.eventId === id))
           && !(previous.sourceDecisionRef && previous.sourceDecisionRef === context.sourceDecisionRef && previous.workId === context.workId)) return { ok: false, error: 'out_of_scope' };
       await recover(workspaceId);
-      return receipt(store, operationId, true);
+      return { ...receipt(store, operationId, true), anchorResolutions: resolved.anchorResolutions };
     }
     let target = input.sessionId ? readSession({ sessionId: input.sessionId, detail: 'report' }) : null;
     if (input.sessionId && (!target || target.workspaceId !== workspaceId || target.origin?.parentConversationId !== parentConversationId)) return { ok: false, error: 'out_of_scope' };
@@ -101,7 +105,9 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
     const anchors = [...new Set([...current.map(row => row.id), ...messages
       .filter(row => [...(mandate?.rootInputIds || []), ...(mandate?.revisionInputIds || [])].includes(row.inputId || row.id) && isCanonicalUserInput(row)).map(row => row.id)])];
     if (!anchors.length) return { ok: false, error: 'current_user_required' };
-    if (input.task && input.task.anchorMessageIds.some(id => !anchors.includes(id))) return { ok: false, error: 'material_out_of_scope' };
+    if (input.task && input.task.anchorMessageIds.some(id => !anchors.includes(id))) return { ok: false, error: 'anchor_out_of_scope',
+      message: 'Anchor is outside this action scope; identity resolution does not authorize work.',
+      anchorResolutions: resolved.anchorResolutions, availableAnchors: userAnchorCandidates(messages, isCanonicalUserInput, anchors) };
     if (input.task && ['parallel', 'replace'].includes(input.action)) {
       const admission = await admitTask(input.task, { workspaceId, parentConversationId });
       if (!admission.ok) return admission;
@@ -131,7 +137,7 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
       ...(scopedSessionIds ? { scopedSessionIds } : {}) });
     if (!admitted.ok) return admitted;
     await recover(workspaceId);
-    return receipt(store, operationId, admitted.replayed === true);
+    return { ...receipt(store, operationId, admitted.replayed === true), anchorResolutions: resolved.anchorResolutions };
   }
   function receipt(store, operationId, replayed) {
     const state = store.read(), transition = state.transitions[operationId], decision = state.decisions[operationId];

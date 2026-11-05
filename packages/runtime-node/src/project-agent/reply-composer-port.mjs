@@ -7,10 +7,15 @@ import { workBudgetBinding } from './work-budget.mjs';
 import { composeReply } from './reply-composer.mjs';
 import { prepareReplyReport } from './reply-report-facts.mjs';
 import { parseInteractiveArtifactRef } from '@peer-agent/protocol';
+import { resolveDelegationAnchors, userAnchorCandidates } from './user-anchor.mjs';
 
 export function createDesktopReplyComposer({ readDelivery = null, readResultReferences = null } = {}) {
   return {
     postReply(input, view) {
+      const anchors = resolveDelegationAnchors('post_reply', input, view.messages);
+      if (!anchors.ok) return { ...anchors, availableReplyAnchors: userAnchorCandidates(view.messages,
+        row => row.kind === 'user_input' || !row.kind && row.role === 'user') };
+      input = anchors.input;
       const delivery = typeof readDelivery === 'function' ? (readDelivery(view) || {}) : {};
       let previousUserRequestRef;
       if (input?.question?.agentRequestId) {
@@ -75,13 +80,14 @@ export function createDesktopReplyComposer({ readDelivery = null, readResultRefe
         if (refs.length) composed.meta.evidenceRefs = [...new Set([...(composed.meta.evidenceRefs ?? []), ...refs])].slice(0, 20);
       }
       if (previousUserRequestRef && composed.message.question) composed.message.question.previousUserRequestRef = previousUserRequestRef;
-      const report = prepareReplyReport({ workspaceId: view?.workspaceId, message: composed.message,
+      const report = prepareReplyReport({ workspaceId: view?.workspaceId, workId: view?.workId, message: composed.message,
         currentInputAnchors: view?.currentInputAnchors || [],
         reportedMessages: delivery.reportedMessages || view?.messages || [], toolCalls: view?.turnToolCalls || [] });
       if (report.suppressed) return { ok: true, suppressed: true, reason: 'facts_already_reported',
         reportedReplyIds: report.reportedReplyIds, sessionStates: composed.meta.sessionStates, question: composed.message.question };
       if (report.keys.length) composed.meta.reportFactKeys = report.keys;
       return {
+        anchorResolutions: anchors.anchorResolutions,
         messageId: composed.message.id,
         message: composed.message,
         meta: composed.meta,
