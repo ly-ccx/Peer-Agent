@@ -1,4 +1,4 @@
-import {cardFocusIntent} from './cardFocus.ts';
+import {cardFocusIntent,printableKeyText} from './cardFocus.ts';
 import {createProjectReadState} from './projectReadState.ts';
 import { useProjectInputDraft } from './useProjectInputDraft.ts';
 import { InputRecoveryStatus } from './InputRecoveryStatus.tsx';
@@ -124,6 +124,12 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
       if(key.name==='down'||key.name==='up'){key.preventDefault();setSelected(Math.max(0,Math.min(snapshot.bots.length-1,selected+(key.name==='down'?1:-1))));}
       if(isEnterKeyName(key.name)){key.preventDefault();void openBot(selected);}return;
     }
+    const composer=editor.current;
+    const text=printableKeyText(key);
+    if(view!=='cards'&&!cardFocus&&inputDraft.state.ready&&composer&&!composer.focused&&text!==undefined){
+      key.preventDefault();key.stopPropagation();
+      composer.focus();composer.insertText(text);inputDraft.changed();return;
+    }
     if(view==='conversation') {
       const intent=cardFocusIntent(key,cardFocus,cards.length>0);
       if(intent==='enter'||intent==='leave'){key.preventDefault();key.stopPropagation();if(intent==='enter'){selectFocusedCard(Math.min(cardIndex,cards.length-1));editor.current?.blur();}setCardFocus(intent==='enter');return;}
@@ -148,9 +154,6 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
       if(isEnterKeyName(key.name))selectedCardAction();
       return;
     }
-    // 点到对话或空白会把焦点从输入框拿走。可输入的页面上，打字仍然进输入框。
-    const typing=key.name?.length===1&&!key.ctrl&&!key.meta;
-    if(typing&&!editor.current?.focused)editor.current?.focus();
   });
   const recordReader=useMemo(()=>createProjectReadState(),[snapshot.workspaceId]);
   const records=view==='objectives'?recordReader.read<any>('objectives',()=>host.objectives.list({}, {workspaceId:snapshot.workspaceId,conversationId:host.profiles.read(snapshot.workspaceId)?.agentConversationId} as never) as any)
