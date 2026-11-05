@@ -14,6 +14,8 @@ import { useResourceWorkspace } from './ResourceWorkspaceContext';
 import { ResourceWorkspaceHeader } from './ResourceWorkspaceHeader';
 import { ResourceLauncher } from './ResourceLauncher';
 import { ResourceConversationViews } from './ResourceConversationViews';
+import { ResourceInteractiveViews } from './interactive/ResourceInteractiveViews';
+import { ResourceLayoutNotice } from './interactive/ResourceLayoutNotice';
 import { ScopedResourceNavigator } from './ScopedResourceNavigator';
 import { useResourcePresentation } from './useResourcePresentation';
 import { resourceTabIds } from './ResourceTabStrip';
@@ -154,9 +156,10 @@ export function WorkbenchPanel({ isZh, workspacePath, resourceMode = false, reso
   const open = (requestedOpen || resourceExiting) && resourceVisible;
   const presentation = useResourcePresentation(resourceMode, isZh, resourceMode ? workspace : null);
   useEffect(() => {
-    if (!resourceMode && (activeTab === 'launcher' || activeTab === 'changes' || activeTab === 'details' || activeTab === 'conversations')) setActiveTab('documents');
+    if (!resourceMode && (activeTab === 'launcher' || activeTab === 'changes' || activeTab === 'details' || activeTab === 'conversations' || activeTab === 'interactive')) setActiveTab('documents');
     if (resourceMode && activeTab === 'conversations' && !workspace?.conversations.length) setActiveTab('launcher');
-  }, [resourceMode, activeTab, setActiveTab, workspace?.conversations.length]);
+    if (resourceMode && activeTab === 'interactive' && !workspace?.interactiveTabs.length && workspace?.interactiveLayoutState.phase !== 'loading') setActiveTab('launcher');
+  }, [resourceMode, activeTab, setActiveTab, workspace?.conversations.length, workspace?.interactiveTabs.length, workspace?.interactiveLayoutState.phase]);
 
   const goalSlotRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
@@ -314,6 +317,7 @@ export function WorkbenchPanel({ isZh, workspacePath, resourceMode = false, reso
         </button>
       </div>}
 
+      {resourceMode ? <ResourceLayoutNotice isZh={isZh} /> : null}
       <div className="workbench-view-slot" data-resource-auxiliary={resourceMode ? navigation.mode ?? undefined : undefined} id={resourceMode ? `${tabsId}-content` : undefined}
         role={resourceMode ? (!showingDetails && presentation.active ? 'tabpanel' : 'region') : undefined}
         aria-labelledby={resourceMode && !showingDetails && presentation.active ? resourceTabIds(tabsId, presentation.active).tab : undefined}>
@@ -321,6 +325,7 @@ export function WorkbenchPanel({ isZh, workspacePath, resourceMode = false, reso
           data-active={showingDetails} inert={!showingDetails} aria-hidden={!showingDetails}
           role="region" aria-label={workspace?.detail?.title || (isZh ? '详情' : 'Details')} /> : null}
         {resourceMode ? <ResourceConversationViews isZh={isZh} visible={activeTab === 'conversations'} active={interactiveOpen} /> : null}
+        {resourceMode ? <ResourceInteractiveViews isZh={isZh} visible={activeTab === 'interactive'} active={interactiveOpen} /> : null}
         {resourceMode ? <div className="workbench-view" data-active={activeTab === 'launcher'} inert={activeTab !== 'launcher'} aria-hidden={activeTab !== 'launcher'}>
           <ResourceLauncher key={botWorkspaceId} isZh={isZh} active={interactiveOpen && activeTab === 'launcher'} recent={presentation.recent} onChanges={() => setActiveTab('changes')} />
         </div> : null}

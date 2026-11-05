@@ -121,7 +121,8 @@ export async function executeDesktopProviderRequest({
     countRequest: request?.countRequest,
     onSnapshot: request?.onContextAccounting,
     buildRequest(state) {
-      const projectedMessages = applyMicrocompaction(state.messages, { log: () => {} }).messages;
+      const projectedMessages = applyMicrocompaction(state.messages, { log: () => {},
+        preserveLatestUserTurn: request?.preserveLatestUserTurn ?? true }).messages;
       return buildCanonicalRequest({
         messages: projectSelectionRequestMessages(projectedMessages, request?.conversationId),
         systemPrompt: state.systemPrompt,

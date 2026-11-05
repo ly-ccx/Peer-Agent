@@ -1,9 +1,10 @@
-type Key = { readonly key: string; readonly keyCode?: number; readonly isComposing?: boolean; readonly target?: EventTarget | null };
+type Key = { readonly key: string; readonly code?: string; readonly keyCode?: number; readonly isComposing?: boolean; readonly target?: EventTarget | null };
 const composing = new WeakSet<EventTarget>();
 const held = new WeakSet<EventTarget>();
+const isEnter = (event: Key) => event.key === 'Enter' || event.code === 'Enter' || event.code === 'NumpadEnter';
 export function isImeKey(event: Key): boolean {
   return event.isComposing === true || event.keyCode === 229 || event.key === 'Process'
-    || Boolean(event.target && (composing.has(event.target) || (event.key === 'Enter' && held.has(event.target))));
+    || Boolean(event.target && (composing.has(event.target) || (isEnter(event) && held.has(event.target))));
 }
 /** A physical composition Enter stays consumed until keyup; there is no timed swallow window. */
 export function createCompositionGuard() {
@@ -14,13 +15,13 @@ export function createCompositionGuard() {
     keyDown(event: Key) {
       if (event.target && isImeKey(event)) {
         target = event.target;
-        if (event.key === 'Enter' || event.keyCode === 229) held.add(event.target);
+        if (isEnter(event)) held.add(event.target);
         return true;
       }
-      if (event.target && event.key !== 'Enter') held.delete(event.target);
+      if (event.target && !isEnter(event)) held.delete(event.target);
       return false;
     },
-    keyUp(event: Key) { if (event.target && (event.key === 'Enter' || event.keyCode === 229)) held.delete(event.target); },
+    keyUp(event: Key) { if (event.target && isEnter(event)) held.delete(event.target); },
     reset() { if (target) { composing.delete(target); held.delete(target); } target = null; },
     active() { return Boolean(target && composing.has(target)); },
   };

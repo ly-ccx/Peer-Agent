@@ -7,8 +7,9 @@ import ts from 'typescript';
 const identity = { viewId: 'view', windowId: 'window', generation: 1 };
 const tick = async () => { for (let i = 0; i < 24; i++) await Promise.resolve(); };
 function fixture() {
-  let receive: any, cleanup: any, unsafe = false;
+  let receive: any, cleanup: any, unsafe = false, interactiveUnsafe = false;
   let flushDrafts: () => Promise<boolean> = async () => true, flushNavigation: () => Promise<boolean> = async () => true;
+  let flushConditions: () => Promise<boolean> = async () => true;
   const acknowledgements: any[] = [];
   const store = { start() {}, stop() {}, flush: () => flushNavigation() };
   const registry = { flushAll: () => flushDrafts(), hasUnsafe: () => unsafe };
@@ -23,15 +24,18 @@ function fixture() {
       if (id === 'react/jsx-runtime') return { jsx: () => null };
       if (id === './nativeNavigationState') return { createNativeNavigation: () => store };
       if (id === './editing/resourceEditRegistry') return { resourceEditRegistry: () => registry };
+      if (id === './interactive/interactiveSessionRegistry') return { interactiveSessionRegistry: () => ({ flushAll: () => flushConditions(), hasUnsafe: () => interactiveUnsafe }) };
       throw Error(id);
     },
   });
   exports.NativeNavigationProvider({ context: identity, children: null });
   return { receive: (value: any = identity) => receive({ requestId: 'checkpoint', identity: value }), acknowledgements,
     dirty: () => { unsafe = true; }, drafts: (next: () => Promise<boolean>) => { flushDrafts = next; },
+    conditions: (next: () => Promise<boolean>) => { flushConditions = next; },
+    dirtyConditions: () => { interactiveUnsafe = true; },
     navigation: (next: () => Promise<boolean>) => { flushNavigation = next; }, cleanup: () => cleanup() };
 }
-test('native close confirms only both saved streams and the same actual view', async () => {
+test('native close confirms only after all three streams save and the same actual view', async () => {
   const f = fixture();
   try {
     f.receive({ ...identity, generation: 2 }); await tick(); assert.equal(f.acknowledgements.length, 0);
@@ -40,7 +44,7 @@ test('native close confirms only both saved streams and the same actual view', a
   } finally { f.cleanup(); }
 });
 test('save failure or rejected navigation blocks closing instead of withholding a reply until forced close', async () => {
-  for (const source of ['drafts', 'navigation'] as const) {
+  for (const source of ['drafts', 'navigation', 'conditions'] as const) {
     const f = fixture();
     try {
       f[source](async () => { if (source === 'navigation') throw Error('offline'); return false; });
@@ -53,5 +57,15 @@ test('input arriving while another stream is flushing invalidates a successful e
   try {
     f.navigation(() => new Promise(resolve => { finish = resolve; })); f.receive(); await tick(); f.dirty(); finish(true); await tick();
     assert.equal(f.acknowledgements.length, 1); assert.equal(f.acknowledgements[0].status, 'blocked');
+  } finally { f.cleanup(); }
+});
+
+test('conditions edited during a navigation flush block native close', async () => {
+  const f = fixture(); let finish!: (saved: boolean) => void;
+  try {
+    f.navigation(() => new Promise(resolve => { finish = resolve; }));
+    f.receive(); await tick(); f.dirtyConditions(); finish(true); await tick();
+    assert.equal(f.acknowledgements.length, 1);
+    assert.equal(f.acknowledgements[0].status, 'blocked');
   } finally { f.cleanup(); }
 });

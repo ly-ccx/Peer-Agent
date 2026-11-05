@@ -1,4 +1,5 @@
 import { CONTINUITY_CAPABILITY_IDS } from './working-context-specs.mjs';
+import { INTERACTIVE_INSPECT_CAPABILITY } from '@peer-agent/protocol';
 import { DELEGATION_CAPABILITY_IDS, MEMORY_CAPABILITY_IDS } from './tool-specs.mjs';
 
 /**
@@ -10,6 +11,7 @@ export const PROJECT_AGENT_ALLOWED_CAPABILITIES = Object.freeze([
   'local.file.list',
   'local.file.read',
   'local.git.query',
+  INTERACTIVE_INSPECT_CAPABILITY,
   'local.image.read',
   'local.file.search',
   'local.search.aggregate',

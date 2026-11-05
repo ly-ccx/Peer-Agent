@@ -17,6 +17,7 @@
 .resource-editor-comparison h2 { font-size: var(--ui-font-body); margin: var(--space-2) 0; }
 .resource-edit-recovery { padding: var(--space-2) var(--space-3); background: var(--paper-sheet); color: var(--graphite-base); border-bottom: 1px solid var(--chrome-hairline); font-size: var(--ui-font-control); flex: none; }
 .resource-edit-recovery details { max-height: 12rem; overflow: auto; }
+.interactive-input-recovery:empty { display: none; }
 .resource-edit-recovery textarea { width: 100%; font-family: var(--font-mono); }
 
 .resource-edit-app-root { height: 100%; min-height: 0; display: flex; flex-direction: column; }

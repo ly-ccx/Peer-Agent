@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, test } from 'bun:test';
 import {
   COMPACTION_SUMMARY_PROMPT,
@@ -16,6 +19,7 @@ import {
 } from '@peer-agent/runtime-core';
 import type { RuntimeSdkProviderExecution } from '@peer-agent/runtime-sdk';
 
+import { createAnthropicMessagesProvider } from './anthropic-messages-provider.ts';
 import { createChatController } from './chat-controller.ts';
 import {
   createProviderChatModel,
@@ -341,6 +345,54 @@ describe('OpenAI-compatible TUI chat adapter', () => {
         required: ['path'],
       },
     }]);
+  });
+
+  test('replays authentic Anthropic thinking through the live tool loop only', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const provider = createAnthropicMessagesProvider({
+      providerId: 'fixture-anthropic', getApiKey: async () => 'fixture-key',
+      async sendStream(args) {
+        calls.push(args);
+        return calls.length === 1
+          ? { ok: true, thinkingContent: 'provider-native', thinkingSignature: 'provider-signature',
+            toolUseBlocks: [{ id: 'native-call', name: 'read_file', inputJson: '{"path":"note.txt"}' }] }
+          : { ok: true, textContent: 'done' };
+      },
+    });
+    const controller = createChatController({
+      host: host(),
+      model: createProviderChatModel({ provider, model: 'deepseek-flash', toolDefinitions }),
+    });
+    await controller.send('read note');
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.messages).toContainEqual({
+      role: 'assistant',
+      content: [{ type: 'thinking', thinking: 'provider-native', signature: 'provider-signature' }],
+      tool_calls: [{ id: 'native-call', type: 'function', function: { name: 'read_file', arguments: '{"path":"note.txt"}' } }],
+    });
+  });
+
+  test('materializes oversized tool results in the configured host data root', async () => {
+    const toolArtifactBaseDir = mkdtempSync(path.join(os.tmpdir(), 'peer-tui-tool-output-'));
+    try {
+      const requests: ModelProviderRequest[] = [];
+      const provider: ModelProvider = { async stream(request) {
+        requests.push(request);
+        return requests.length === 1
+          ? { content: '', toolCalls: [{ id: 'isolated-call', name: 'read_file', arguments: '{"path":"note.txt"}' }] }
+          : completed('done');
+      } };
+      const output = 'bounded fixture output '.repeat(800);
+      const controller = createChatController({
+        host: host(() => execution(output)),
+        model: createProviderChatModel({ provider, model: 'model-test', toolDefinitions, toolArtifactBaseDir }),
+      });
+      await controller.send('read note');
+      const reference = JSON.parse(String(requests[1]?.messages.find(message => message.role === 'tool')?.content));
+      expect(reference.kind).toBe('local_tool_result_ref');
+      expect(path.relative(toolArtifactBaseDir, reference.artifactRef)).not.toMatch(/^\.\./);
+      expect(JSON.parse(readFileSync(reference.artifactRef, 'utf8')).output.content).toBe(output);
+    } finally { rmSync(toolArtifactBaseDir, { recursive: true, force: true }); }
   });
 
   test('executes model tool calls through Runtime and resumes with assistant/tool history', async () => {
@@ -1170,4 +1222,46 @@ test('Agent communication tools are projected only to the main Bot and its worke
     await model.runTurn(state, context);
     expect(requests[0]?.tools?.some(tool => tool.name === 'send_agent_message') ?? false).toBe(allowed);
   }
+});
+
+test('interactive language enters actual model System Context only with the corresponding role projection', async () => {
+  for (const [role, agentKind, inspectorAvailable, publish, inspect] of [
+    ['work_session', 'worker', true, true, true], ['project_agent', undefined, true, false, true],
+    ['work_session', 'verifier', true, false, true], ['work_session', 'explorer', true, false, false],
+    ['work_session', 'worker', false, false, false],
+  ] as const) {
+    const requests: ModelProviderRequest[] = [];
+    const model = createProviderChatModel({ model: 'test-model', provider: { async stream(request) { requests.push(request); return completed('done'); } },
+      toolDefinitions: [{ name: 'publish_interactive_result', capabilityId: 'local.interactive.publish', description: 'Internal publication', inputSchema: { type: 'object' } },
+        ...(inspectorAvailable ? [{ name: 'inspect_interactive_result', capabilityId: 'local.interactive.inspect', description: 'Read fixed result', inputSchema: { type: 'object' } }] : [])],
+      getSystemPrompt: context => buildTuiSystemPrompt({}, context.systemContextInput),
+    });
+    const input = { content: 'Compare', history: [], modelMessages: [], turnId: 'test', turnIndex: 0,
+      systemContextInput: { role, turnContext: { agentKind }, interactiveResultCapabilities: ['local.interactive.publish', 'local.interactive.inspect'] } };
+    const context = { run: { mode: 'goal', streamId: 'test', conversationId: 'test', input }, signal: new AbortController().signal, emit() { return null; } } as any;
+    const state = await model.initialize({ input } as any, context);
+    await model.runTurn(state, context);
+    expect(requests[0]?.tools?.some(tool => tool.name === 'publish_interactive_result') ?? false).toBe(publish);
+    expect(requests[0]?.tools?.some(tool => tool.name === 'inspect_interactive_result') ?? false).toBe(inspect);
+    const system = requests[0]?.messages.filter(message => message.role === 'system').map(message => message.content).join('\n') ?? '';
+    expect(system.includes('Components:\nCol(')).toBe(publish);
+    expect(system.includes('Peer interactive result')).toBe(inspect);
+  }
+});
+
+test('the provider receives session wait only on a bound background wake', async () => {
+  const requests: ModelProviderRequest[] = [];
+  const model = createProviderChatModel({ model: 'test-model', provider: {
+    async stream(request) { requests.push(request); return completed('done'); },
+  }, toolDefinitions: [{ name: 'wait_for_sessions', capabilityId: 'local.delegation.wait_for_sessions',
+    description: 'Background wait', inputSchema: { type: 'object' } }] });
+  for (const turnKind of ['user', 'wake'] as const) {
+    const input = { content: 'Continue', history: [], modelMessages: [], turnId: turnKind, turnIndex: 0,
+      systemContextInput: { role: 'project_agent', workId: 'work', turnContext: { turnKind, events: [{ sessionId: 's' }] } } };
+    const context = { run: { mode: 'project_agent', streamId: turnKind, conversationId: 'test', input },
+      signal: new AbortController().signal, emit() { return null; } } as any;
+    const state = await model.initialize({ input } as any, context);
+    await model.runTurn(state, context);
+  }
+  expect(requests.map(request => request.tools?.some(tool => tool.name === 'wait_for_sessions') ?? false)).toEqual([false, true]);
 });

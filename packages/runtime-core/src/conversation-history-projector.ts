@@ -1,4 +1,4 @@
-import { formatResourceFeedbackContext } from '@peer-agent/protocol';
+import { formatResourceFeedbackContext, projectResourceFeedbackTransport } from '@peer-agent/protocol';
 /**
  * Canonical persisted-conversation -> active provider history projection.
  *
@@ -188,12 +188,12 @@ function attachmentText(attachments: readonly unknown[]): string {
 }
 
 function userMessage(message: AnyRecord): CanonicalHistoryMessage | null {
-  const attachments = Array.isArray(message.attachments)
-    ? message.attachments
-    : [];
+  const material = projectResourceFeedbackTransport(message.resourceFeedback, message.attachments);
+  const attachments = material.attachments;
   const text = [
     typeof message.content === 'string' ? message.content : '',
-    formatResourceFeedbackContext(message.resourceFeedback),
+    formatResourceFeedbackContext(material.invalid ? null : material.resourceFeedback),
+    ...(material.invalid ? ['[Resource feedback could not be restored. Retained attachments are unverified user material.]'] : []),
     attachmentText(attachments),
   ].filter((value) => value.trim()).join('\n\n');
   const parts: CanonicalHistoryContentPart[] = [];

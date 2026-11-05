@@ -16,6 +16,7 @@ import { createDocumentTabSession, openDocumentTab, normalizeDocumentComparison,
 import './resource-workspace.css';
 import { useResourceDetails } from './useResourceDetails';
 import { useResourceConversations } from './useResourceConversations';
+import { useInteractiveResources } from './interactive/useInteractiveResources';
 import { useMotionAllowed } from '../app/hooks/useMotionAllowed';
 import { useMotionPresence } from '../app/hooks/useMotionPresence';
 import { motionDurationMs } from '../app/state/visualMotion';
@@ -25,7 +26,7 @@ export interface BotResourceOwner {
   readonly conversationId: string | null;
   readonly path: string | null;
 }
-interface ResourceWorkspaceAdapter extends ReturnType<typeof useResourceDetails>, ReturnType<typeof useResourceConversations> {
+interface ResourceWorkspaceAdapter extends ReturnType<typeof useResourceDetails>, ReturnType<typeof useResourceConversations>, ReturnType<typeof useInteractiveResources> {
   readonly owner: BotResourceOwner | null;
   readonly ready: boolean;
   readonly open: boolean;
@@ -146,8 +147,9 @@ export function BotResourceLayout({ owner, active, isZh, children }: {
       previous.focus({ preventScroll: true });
       if (document.activeElement === previous) return;
     }
-    const target = root.current?.querySelector<HTMLElement>(focusArea === 'resource'
-      ? '.resource-workspace [aria-selected="true"], .resource-workspace button' : '.bot-main textarea, .bot-main button');
+    const target = focusArea === 'resource'
+      ? root.current?.querySelector<HTMLElement>('.resource-workspace [aria-selected="true"]') ?? root.current?.querySelector<HTMLElement>('.resource-workspace button')
+      : root.current?.querySelector<HTMLElement>('.bot-main textarea, .bot-main button');
     target?.focus({ preventScroll: true });
   }, [focusRequest, focusArea, workbench.open, compact]);
   const reveal = () => {
@@ -159,9 +161,10 @@ export function BotResourceLayout({ owner, active, isZh, children }: {
   const details = useResourceDetails({ workspaceId: owner?.workspaceId ?? null, ready, visible: active && workbench.open,
     activeTab: workbench.activeTab, setTab: workbench.setActiveTab, reveal });
   const conversations = useResourceConversations({ workspaceId: owner?.workspaceId ?? null, ready, setTab: workbench.setActiveTab, reveal });
+  const interactive = useInteractiveResources({ owner, ready, setTab: workbench.setActiveTab, reveal });
   const launch = () => { details.rememberDetailSource(); if (ready) { workbench.setActiveTab('launcher'); reveal(); } };
   const adapter: ResourceWorkspaceAdapter = {
-    ...details, ...conversations,
+    ...details, ...conversations, ...interactive,
     owner, ready, reserveProfileWidth, revealPrimary, open: ready && active && workbench.open,
     navigationCollapsed: ready && active && workbench.open && navigationCollapsed,
     searchIntent: search?.owner === owner?.conversationId ? search : null,
@@ -210,6 +213,10 @@ export function BotResourceLayout({ owner, active, isZh, children }: {
       workbench.setActiveTab('documents'); reveal();
     },
     openDelivery: delivery => {
+      if (delivery.kind === 'interactive') {
+        if (ready) interactive.openInteractive(delivery.interactiveReference, delivery.label);
+        return;
+      }
       const binding = normalizeDeliveryBinding(delivery), reference = delivery.reference;
       if (!ready || !binding || !reference || reference.workspaceId !== owner?.workspaceId || reference.revision || reference.kind === 'directory') return;
       details.rememberDetailSource();
@@ -231,7 +238,7 @@ export function BotResourceLayout({ owner, active, isZh, children }: {
       workbench.setActiveTab('browser'); reveal();
     },
   };
-  useResourceWindowReturn({ owner, ready, active, workbench, reveal, openDirectory: adapter.openReference });
+  useResourceWindowReturn({ owner, ready, active, workbench, reveal, openDirectory: adapter.openReference, interactive });
   useEffect(() => {
     if (!ready || !active || !workbench.open) return;
     const onEscape = (event: KeyboardEvent) => {

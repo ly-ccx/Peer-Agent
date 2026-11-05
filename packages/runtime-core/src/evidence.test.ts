@@ -123,6 +123,12 @@ test('collectToolEvidenceRefs ignores arbitrary output and malformed result fiel
     },
   }), []);
 });
+test('formal EvidenceBundle refs propagate inspection facts without turning arbitrary output or labels into Evidence', () => {
+  assert.deepEqual(collectToolEvidenceRefs({ toolCallId: 'inspect', execution: { result: {
+    evidence: { refs: ['interactive-inspection://host-id', 'interactive-inspection://host-id'] },
+    outputPreview: { text: 'interactive-inspection://invented', evidenceRefs: ['interactive-inspection://invented'] },
+  } } }), ['tool-result://inspect', 'interactive-inspection://host-id']);
+});
 
 test('applyEvidenceRedactors applies redactors in order without side effects', () => {
   const redacted = applyEvidenceRedactors(baseRecord, [

@@ -110,6 +110,12 @@ export async function runPeerExec(
     return CLI_EXIT.usage;
   }
 
+  if (options.bot) {
+    const { runPeerBotExec } = await import('./cli-exec-bot.ts');
+    const dataHome = env.PEER_AGENT_HOME ?? env.PEER_USER_DATA_PATH ?? path.join(os.homedir(), '.peer-agent');
+    return runPeerBotExec({ dataHome, workspaceRoot, prompt, ...options.bot, outputFormat: options.outputFormat, startedAt }, io);
+  }
+
   const userDataPath = env.PEER_USER_DATA_PATH ?? path.join(os.homedir(), '.peer-agent');
   const runtime = createTuiRuntime({
     workspaceRoot,

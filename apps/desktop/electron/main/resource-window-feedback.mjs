@@ -9,7 +9,8 @@ export function createResourceWindowFeedback({ registry, reader, getScope, prepa
   return async (sender, payload) => {
     const found = registry.readBinding(sender, payload?.identity); if (!found.ok) return fail('SOURCE_UNAVAILABLE');
     const feedback = normalizeResourceFeedback(payload?.feedback), context = found.context;
-    if (!feedback || feedback.resource.kind === 'web' || feedback.recipient.workspaceId !== context.owner.workspaceId || feedback.recipient.conversationId !== context.owner.conversationId) return fail('INVALID_RESOURCE_FEEDBACK');
+    if (context.resource.kind === 'interactive') return fail('INVALID_RESOURCE_FEEDBACK');
+    if (!feedback || ['web', 'interactive'].includes(feedback.resource.kind) || feedback.recipient.workspaceId !== context.owner.workspaceId || feedback.recipient.conversationId !== context.owner.conversationId) return fail('INVALID_RESOURCE_FEEDBACK');
     const resource = feedback.resource, original = context.resource;
     if (resource.reference.workspaceId !== context.owner.workspaceId || !sameTask(resource.reference.task, original.reference.task) || !sameRevision(resource.reference.revision, original.reference.revision)) return fail('SOURCE_CHANGED');
     if (original.kind === 'comparison' && (resource.kind !== 'comparison' || resource.fromRef !== original.fromRef || resource.toRef !== original.toRef || resource.comparison !== original.comparison)) return fail('SOURCE_CHANGED');

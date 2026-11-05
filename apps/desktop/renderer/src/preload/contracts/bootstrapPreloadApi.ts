@@ -471,6 +471,8 @@ export interface DeveloperDiagnosticsView {
 }
 
 export interface BootstrapPreloadApi {
+  readonly interactiveResults?: import('@peer-agent/protocol').InteractiveResultsApi;
+  readonly resourcePresentation?: import('@peer-agent/protocol').ResourcePresentationApi;
   readonly resourceEdits?: import('@peer-agent/protocol').ResourceEditsApi;
   readonly browserWindowCopy?: (request: import('@peer-agent/protocol').BrowserWindowCopyRequest) => Promise<import('@peer-agent/protocol').BrowserWindowResult>;
   readonly onBrowserWindowReturn?: (listener: (request: import('@peer-agent/protocol').BrowserWindowReturnRequest) => void) => () => void;

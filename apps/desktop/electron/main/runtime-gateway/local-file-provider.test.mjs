@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import { createLocalFileProvider, MAX_WRITE_FILE_BYTES } from './local-file-provider.mjs';
+import { canonicalInteractiveObservation } from '@peer-agent/runtime-node/interactive-results';
 
 let tmpDir;
 
@@ -46,6 +47,26 @@ describe('local file provider', () => {
     assert.equal(output.kind, 'local_file_ref');
     assert.equal(output.path, filePath);
     assert.equal(toolContext.readFiles.get(filePath)?.fullRead, true);
+  });
+
+  it('retains an enabled canonical read outside serialized previews and never re-reads changed files to fill it', async () => {
+    const filePath = path.join(tmpDir, 'facts.json');
+    const rows = Array.from({ length: 400 }, (_, id) => ({ id, cost: id, label: id === 200 ? 'PRIVATE_OBSERVATION_MIDDLE' : `row-${id}-${'x'.repeat(180)}` }));
+    writeFileSync(filePath, JSON.stringify(rows));
+    const provider = createLocalFileProvider({ workspaceRoot: tmpDir });
+    const request = { call: createCall('local.file.read', { path: filePath }) };
+    const ordinary = await provider.executeCapability(request, { toolContext: {} });
+    assert.equal(ordinary.result.materialObservation, undefined);
+    const execution = await provider.executeCapability(request, { toolContext: { interactiveMaterialsEnabled: true } });
+    assert.equal(JSON.parse(execution.result.outputPreview.fileResult.output).contextPreviewTruncated, true);
+    assert.equal(Object.getOwnPropertyDescriptor(execution.result, 'materialObservation').enumerable, false);
+    assert.doesNotMatch(JSON.stringify(execution), /PRIVATE_OBSERVATION_MIDDLE/);
+    assert.equal(structuredClone(execution.result).materialObservation, undefined);
+    writeFileSync(filePath, '[{"id":999,"cost":999999}]');
+    const captured = canonicalInteractiveObservation(execution);
+    assert.deepEqual(captured.value.json, rows);
+    assert.equal(captured.truncated, false, 'the canonical read is complete even though the separate model preview is clipped');
+    assert.equal(captured.value.payload.content, JSON.stringify(rows));
   });
 
   it('write_file and edit_file emit structured user artifacts while read_file does not', async () => {

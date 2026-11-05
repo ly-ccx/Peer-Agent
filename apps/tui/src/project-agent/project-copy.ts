@@ -1,5 +1,11 @@
 import type {TuiLocale} from '../tui-language.ts';
 const english = {
+  resultOpen:'Fixed result', resultScroll:'Page Up / Page Down to scroll',
+  resultLoading:'Reading fixed result…', resultReadFailed:'Result unavailable. Use /result N to retry.',
+  resultSummary:'Saved model summary · unverified', resultInitial:'Computed from initial conditions',
+  resultProjectionFailed:'Initial-condition calculation unavailable', resultCleaned:'Interactive content cleaned',
+  resultOriginOnly:'The result is stored on the original device.',
+  resultTruncated:'Output truncated',
   recordsUnavailable:'Could not read these records. The previous snapshot is preserved; reopen /memory or /objectives to retry.',
   draftLoading:'Restoring draft…',sending:'Sending',unconfirmed:'Delivery unconfirmed; retry the same message ID',draftFailed:'Draft not saved. Its contents remain here; retry before leaving.',draftConflict:'Draft changed in another window. Preserve this text before reopening.',approved:'Approved',denied:'Denied',expired:'Expired',stale:'Needs a fresh decision',
   messageUnavailable:'Messages unavailable; /latest retries. Existing messages are preserved.', cardsUnavailable:'Task status unavailable; conversation remains readable.',
@@ -14,7 +20,7 @@ const english = {
   host:'Running here', client:'Client · messages are queued to the host', desktop:'Handle this action on the desktop',
   composer:'Message this bot, or /help', received:'Received', replied:'Reply to', marks:'Result', you:'You', bot:'Bot',
   select:'Up/down to select · Enter to open · Esc to return', cardKeys:'Tab to select cards · arrows to choose · Enter to act',cardKeysFocused:'Left/right option · up/down card · Enter to act · Esc back to typing',
-  help:'F2 /classic · /diagnostics\n /bots /tasks /task N /memory /objectives /cards /takeover /classic /older /latest\n /approve N /deny N /answer N text /action N option /retry-input ID /save-draft',
+  help:'F2 /classic · /diagnostics\n /bots /tasks /task N /result N /memory /objectives /cards /takeover /classic /older /latest\n /approve N /deny N /answer N text /action N option /retry-input ID /save-draft',
   invalid:'Invalid command or expired card. Use /help.', error:'Action failed', done:'Request submitted; see the current task state', takeover:'Takeover requested',
   leaving:'Stopping the host. Tasks can continue on the next host.', earlier:'Earlier messages', latest:'Latest messages',
   allow:'Allow once',allow_task:'Allow this task',approve:'Approve',reject:'Deny',continue:'Continue',answer:'Answer',confirm:'Confirm result',
@@ -24,6 +30,12 @@ const english = {
   active:'Active',forgotten:'Forgotten',conflicted:'Conflicted',stated:'Stated',verified:'Verified',inferred:'Inferred',
 };
 const chinese: Record<keyof typeof english,string> = {
+  resultOpen:'固定结果', resultScroll:'Page Up / Page Down 翻页',
+  resultLoading:'正在读取固定结果…', resultReadFailed:'结果暂不可用，输入 /result N 重试。',
+  resultSummary:'已保存的模型摘要 · 未验证', resultInitial:'按初始条件计算',
+  resultProjectionFailed:'初始条件计算暂不可用', resultCleaned:'交互正文已清理',
+  resultOriginOnly:'结果保存在原设备。',
+  resultTruncated:'输出已截断',
   recordsUnavailable:'记录读取失败，保留上次快照；重新输入 /memory 或 /objectives 可重试。',
   draftLoading:'正在恢复草稿…',sending:'正在发送',unconfirmed:'发送结果未确认，重试保留同一消息 ID',draftFailed:'草稿暂未保存，内容仍在此终端，请在离开前重试。',draftConflict:'另一窗口修改了草稿，请先复制保留当前内容再重新打开。',approved:'已批准',denied:'已拒绝',expired:'已失效',stale:'需要重新决定',
   messageUnavailable:'消息暂不可用，已保留当前对话；输入 /latest 重试。',cardsUnavailable:'任务状态暂不可用，对话仍可阅读。',
@@ -38,7 +50,7 @@ const chinese: Record<keyof typeof english,string> = {
   host:'由本终端运行',client:'客户端 · 消息将交由宿主处理',desktop:'请在桌面处理这个操作',
   composer:'跟机器人说话，或输入 /help',received:'已收到',replied:'回复',marks:'结果',you:'你',bot:'机器人',
   select:'上下键选择 · 回车打开 · Esc 返回',cardKeys:'Tab 选择卡片 · 方向键切换选项 · 回车执行',cardKeysFocused:'左右键切选项 · 上下键切卡片 · 回车执行 · Esc 回到输入',
-  help:'F2 /classic · /diagnostics\n /bots /tasks /task N /memory /objectives /cards /takeover /classic /older /latest\n /approve N /deny N /answer N 内容 /action N 选项 /retry-input ID /save-draft',
+  help:'F2 /classic · /diagnostics\n /bots /tasks /task N /result N /memory /objectives /cards /takeover /classic /older /latest\n /approve N /deny N /answer N 内容 /action N 选项 /retry-input ID /save-draft',
   invalid:'命令无效或卡片已过期。输入 /help 查看用法。',error:'操作失败',done:'操作已提交，请以最新任务状态为准',takeover:'已请求接管',
   leaving:'正在停止宿主。任务会在下一个宿主上继续。',earlier:'较早的消息',latest:'最新消息',
   allow:'允许一次',allow_task:'允许此任务',approve:'批准',reject:'拒绝',continue:'继续',answer:'回答',confirm:'确认结果',

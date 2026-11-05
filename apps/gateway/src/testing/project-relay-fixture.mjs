@@ -12,14 +12,34 @@ import {createDeviceStore} from '../device-store.mjs';
 import {createAccountHttp} from '../account-http.mjs';
 import {createGatewayHttpServer} from '../http-server.mjs';
 
+import {createInteractiveResultStore,createInteractiveTextReader,runInteractiveValidation} from '../../../../packages/runtime-node/dist/interactive-results-public.js';
+
 /** Test-only loopback transport seam. Real identity proof, HTTP, stores and queue. */
-export async function createProjectRelayFixture({scriptedReply=false}={}) {
+export async function createProjectRelayFixture({scriptedReply=false,interactiveResults=false}={}) {
   const root=mkdtempSync(path.join(os.tmpdir(),'peer-project-relay-')),folder=path.join(root,'project');mkdirSync(folder);
   const origin='https://peer.example',ownerId='a'.repeat(64),sessions=createAccountSessions(':memory:'),devices=createDeviceStore(':memory:');
   const token=sessions.issue({ownerId}).token,registry=createProjectRegistry({filePath:path.join(root,'projects','registry.json')});
   const conversations=createConversationStore({storeDir:path.join(root,'conversations')}),lifecycle=createBotLifecycle({rootDir:root,registry,conversationStore:conversations});
   const workspaceId=registry.ensureForPath(folder).workspaceId,profile=lifecycle.ensureBot(workspaceId,{displayName:'项目伙伴'}).profile;
   const task={sessionId:'task-1',workspaceId,title:'核对项目文件',status:'running',updatedAt:new Date().toISOString(),report:{summary:'已读取项目说明，正在核对测试结果。',evidenceRefs:['private-evidence']}};
+  let resultStore,readInteractiveResult;
+  if(interactiveResults){
+    const owner={workspaceId,conversationId:profile.agentConversationId};
+    resultStore=createInteractiveResultStore({rootDir:path.join(root,'project-runtime'),assertCompatibility:()=>true});
+    readInteractiveResult=createInteractiveTextReader({resultStore,assertOwner:value=>value.workspaceId===workspaceId&&value.conversationId===profile.agentConversationId});
+    for(const [dataLevel,title,textFallback] of [
+      ['D1_internal','固定公开示例','内部摘要 <img id="result-injection"> '+folder],
+      ['D3_private','私有标题','private-fixed-text'],
+    ]){
+      const draft={publication:{kind:'create'},title,textFallback,inputs:[],program:'root=Text("stored program")'};
+      const content=await runInteractiveValidation({operation:'validate',draft});
+      const source={conversationId:'worker',planId:'plan',sessionId:'task-1',toolCallId:dataLevel,executionEpoch:'epoch'};
+      const published=resultStore.commitPublication({owner,source,draft,content,provenance:[],dataLevel,
+        grant:{toolCallId:source.toolCallId,grantId:'fixture',granted:true}},()=>true);
+      resultStore.markIndexed(published.callRef,published.indexEntry);
+      task.report.evidenceRefs.push(published.indexEntry.evidenceRef);
+    }
+  }
   const directory=createBotDirectory({rootDir:root,registry,readMessages:id=>conversations.getPersistedConversationHistory(id)?.messages??[],listSessions:()=>[task],getSession:()=>task,
     listApprovals:()=>[{state:'open',summary:'写入项目文件',arguments:{apiKey:'do-not-export'}}]});
   const inputQueue=createInputQueue({rootDir:path.join(root,'project-runtime'),holdsLease:()=>true,resolveConversationId:()=>profile.agentConversationId,
@@ -29,14 +49,14 @@ export async function createProjectRelayFixture({scriptedReply=false}={}) {
   const handle=createAccountHttp({origin,login:{},sessions,devices}),server=createGatewayHttpServer({origin,handle,deviceStore:devices}),address=await server.listen();
   let secret=null;const sockets=[];
   const remote=setupRemoteAccess({userDataPath:root,gatewayOrigin:origin,deviceName:'验收电脑',workspaceId,projectGrants:policy.projectGrants,
-    getRemoteSettings:()=>policy,getProjectAccess:()=>({directory,inputQueue,getSession:id=>id===task.sessionId?task:null,wake:id=>inputQueue.consume(id)}),
+    getRemoteSettings:()=>policy,getProjectAccess:()=>({directory,inputQueue,readInteractiveResult,getSession:id=>id===task.sessionId?task:null,wake:id=>inputQueue.consume(id)}),
     goalPlanStore:{listPlans:()=>[]},sessionStore:{getSession:()=>({sessionId:'unused'})},buildProjection:()=>({capabilities:[]}),host:{execute(){throw Error('Not a project execution port');}},
     identityStore:{loadSecret:async()=>secret,saveSecret:async value=>{secret=value;},deleteSecret:async()=>{secret=null;}},registryFile:null,
     connectorFactory(options){return startRemoteDeviceConnector({...options,socketFactory:()=>{const socket=new WebSocket('ws://127.0.0.1:'+address.port+'/api/device/ws',{headers:{host:'peer.example'}});sockets.push(socket);return socket;},
       onState(event){if(event.status==='pairing')devices.claimPairing(ownerId,event.pairing.challengeId,event.pairing.pairingKey);options.onState(event);}});},
   });
   async function until(check){const deadline=Date.now()+8000;while(Date.now()<deadline){if(check())return;await new Promise(resolve=>setTimeout(resolve,10));}throw Error('Fixture pairing timeout');}
-  async function close(){remote.stop();for(const socket of sockets)socket.terminate();await server.close();remote.bindingStore.close();sessions.close();devices.close();rmSync(root,{recursive:true,force:true});}
+  async function close(){resultStore?.close();remote.stop();for(const socket of sockets)socket.terminate();await server.close();remote.bindingStore.close();sessions.close();devices.close();rmSync(root,{recursive:true,force:true});}
   try{await remote.start();await until(()=>remote.status().online&&server.deviceTransport.connections.route(ownerId,remote.status().deviceId).delegation);}
   catch(error){await close();throw error;}
   const deviceId=remote.status().deviceId;

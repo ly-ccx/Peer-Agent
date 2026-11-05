@@ -3,6 +3,7 @@ import { RasterImageView } from './file-preview/RasterImageView';
 
 /** Only the saved projection is shown here. Never read today's file to fill missing history. */
 export function DeliveryHistory({ delivery, isZh }: { readonly delivery: EvidenceDelivery; readonly isZh: boolean }) {
+  if (delivery.kind === 'interactive') return <p className="resource-source-label">{isZh ? '已保存的模型交互结果，未验证。打开时保留这份固定版本。' : 'Saved model interactive result, unverified. Opening preserves this fixed version.'}</p>;
   const preview = delivery.savedPreview;
   return <div className="resource-delivery-history">
     <p className="resource-source-label">{preview?.kind === 'image'

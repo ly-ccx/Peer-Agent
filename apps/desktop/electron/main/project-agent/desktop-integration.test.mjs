@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import os from 'node:os';
@@ -62,6 +64,58 @@ function harness({ blank = false, send = null, folder = null, dataHome = null, c
       await api.host.sync([bot.workspaceId]);
     }, dispose: () => api.dispose() };
 }
+
+test('desktop startup recovers a stopped publication from a prior process', async () => {
+  const childFixture = process.env.PEER_TEST_STOPPED_PUBLICATION;
+  const settings = { projectAgent: { interactiveResults: true }, memory: { enabled: false } };
+  if (childFixture) {
+    const { dataHome, callRef } = JSON.parse(childFixture);
+    const env = harness({ dataHome, settings });
+    try {
+      await env.api.host.sync([callRef.owner.workspaceId]);
+      const store = env.api.interactive.resultStore;
+      assert.equal(store.getAttempt(callRef)?.phase, 'failed');
+      assert.equal(store.getAttempt(callRef)?.code, 'publication_interrupted');
+      assert.equal(store.getOperation(callRef), null);
+      assert.equal(env.calls.length, 0);
+    } finally { env.dispose(); }
+    return;
+  }
+
+  const env = harness({ settings });
+  let callRef;
+  try {
+    const { workspaceId, profile: { agentConversationId } } = env.bot;
+    await env.api.host.sync([workspaceId]);
+    const child = env.conversations.createConversation({ role: 'work_session', parentConversationId: agentConversationId,
+      workspaceId, workspacePath: env.project, title: 'Stopped worker' });
+    const model = { modelProviderId: provider.id, providerId: provider.provider, modelId: provider.model, family: 'fixture' };
+    const plan = env.plans.createPlan({ title: 'Stopped worker', conversationId: child.id, status: 'completed', tasks: [],
+      delegationOrigin: { workspaceId, parentConversationId: agentConversationId, sessionId: 'stopped-session',
+        phase: 'paused', readOnly: true, anchorMessageId: 'stop-anchor', inputId: 'stop-input',
+        modelSelection: { worker: model, explorer: model, verifier: model, resolvedAt: new Date().toISOString() } } });
+    const control = env.api.supervisor.sessionControl;
+    const operation = control.begin(plan, { kind: 'pause', operationId: 'pause-test', authorityRef: 'stop-input' });
+    callRef = { owner: { workspaceId, conversationId: agentConversationId }, conversationId: child.id, toolCallId: 'prepared-call' };
+    const store = env.api.interactive.resultStore;
+    store.beginAttempt({ callRef, source: { ...operation.expectedExecution, conversationId: child.id, toolCallId: callRef.toolCallId },
+      draft: { publication: { kind: 'create' }, title: 'Candidate', textFallback: 'Unverified', program: 'root=Text("test")', inputs: [] },
+    }, () => true);
+    const receipt = await control.drain(env.plans.getPlan(plan.planId), operation);
+    control.settle(env.plans.getPlan(plan.planId), operation, receipt);
+    assert.equal(store.getAttempt(callRef)?.phase, 'prepared');
+  } finally { env.dispose(); }
+
+  const childEnv = { ...process.env, PEER_TEST_STOPPED_PUBLICATION: JSON.stringify({ dataHome: env.home, callRef }) };
+  delete childEnv.NODE_TEST_CONTEXT;
+  const child = spawnSync(process.execPath, ['--test', '--test-reporter=tap',
+    '--test-name-pattern=desktop startup recovers a stopped publication', fileURLToPath(import.meta.url)], {
+    env: childEnv,
+    encoding: 'utf8', timeout: 15_000,
+  });
+  assert.equal(child.status, 0, child.error?.message || child.stderr || child.stdout);
+  assert.match(child.stdout, /pass 1/);
+});
 
 test('desktop diagnostic assembly reads actual input and turn stores without running cognition or accepting renderer paths', async () => {
   const env=harness();

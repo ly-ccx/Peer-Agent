@@ -9,6 +9,8 @@ export const CLI_EXIT = {
   waitingUser: 6,
   /** Goal plan reached terminal status "failed". */
   goalFailed: 7,
+  /** Bot input is durable, but no linked reply arrived before the wait expired. */
+  botReplyPending: 8,
 } as const;
 
 export type CliExitCode = (typeof CLI_EXIT)[keyof typeof CLI_EXIT];

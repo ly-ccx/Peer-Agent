@@ -2,8 +2,9 @@ import { PeerIcon } from '../../ui/icons';
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { resourceEditRegistry, type ResourceEditRegistry } from './resourceEditRegistry';
 import './resource-editing.css';
+import { InteractiveContinuity } from '../interactive/InteractiveContinuity';
 export function ResourceEditAppFrame({ children }: { readonly children: ReactNode }) {
-  return <div className="resource-edit-app-root"><ResourceEditContinuity /><div className="resource-edit-app-content">{children}</div></div>;
+  return <div className="resource-edit-app-root"><ResourceEditContinuity /><InteractiveContinuity /><div className="resource-edit-app-content">{children}</div></div>;
 }
 export function ResourceEditContinuity() {
   const registry = resourceEditRegistry();

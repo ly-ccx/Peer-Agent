@@ -1,0 +1,157 @@
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createChatGptResponsesProvider, createOpenAICompatibleProvider, loadSharedModelMetadataList, loadSharedModelSelection,
+  resolveOpenCodeGoBaseUrl, sendAnthropicMessagesStream, type SharedModelMetadata, type ModelProvider } from '@peer-agent/runtime-node/models';
+import { redactShellOutput } from '@peer-agent/runtime-node/project-agent';
+import { createTuiSharedModelCredentialStore } from '../model-credential-store.ts';
+import { createAnthropicMessagesProvider } from '../anthropic-messages-provider.ts';
+import { createTuiProviderFetch } from '../provider-transport.ts';
+import { resolveTuiWire } from '../provider-wire-matrix.ts';
+import { INTERACTIVE_LIVE_BUDGET, INTERACTIVE_LIVE_SCENARIOS, runInteractiveLiveCase, type InteractiveLiveScenario } from './interactive-live-validation.ts';
+
+import { INTERACTIVE_STORY_BUDGET, runInteractiveLiveStory } from './interactive-live-story.ts';
+
+const repositoryRoot = fileURLToPath(new URL('../../../../', import.meta.url));
+export const INTERACTIVE_LIVE_HELP = `Opt-in interactive-result validation; uses configured model credentials and synthetic data only.
+Usage: pnpm --filter @peer-agent/tui qa:interactive:live --list [--user-data DIRECTORY]
+       pnpm --filter @peer-agent/tui qa:interactive:live --run --model ENTRY_ID [--model ENTRY_ID]
+         [--scenario publish|repair|denied|verify|story] [--output EXISTING_DIRECTORY] [--user-data DIRECTORY]
+--list and --help make no model requests and do not read credentials.
+--run requires explicit configured model entry IDs. Defaults: publish, repair and denied; verify and story are explicit.
+Supports API-key OpenAI Chat, Anthropic Messages and OpenAI Responses, plus an existing valid ChatGPT OAuth access token. OAuth refresh is disabled.
+Per model/scenario: at most 4 model requests, 1800 output tokens/request, 45s/request, 150s/case,
+4 worker tool calls. Verify permits 4 additional Verifier requests and up to 8 readonly calls within the same case deadline.
+Story permits up to ${INTERACTIVE_STORY_BUDGET.totalRequests} model requests across Bot, workers and Verifiers in ${INTERACTIVE_STORY_BUDGET.caseMs / 1000}s.
+Native permission requests are denied. User configuration and the daily app are left alone.
+Repair supplies an actual failed Tool Result as explicit user factual context from a test-driver seed.
+It does not fabricate assistant/thinking history or count the seed as a natural model failure.
+Runtime token usage is recorded. Verify records the separate semantic review; billing receipts and task acceptance remain separate.
+Set PEER_CREDENTIAL_HELPER_PATH if the repository helper has not been built here.\n`;
+
+export function parseInteractiveLiveArgs(args: readonly string[]) {
+  const options = { run: false, list: false, help: false, models: [] as string[], scenarios: [] as Array<InteractiveLiveScenario | 'story'>,
+    userData: path.join(os.homedir(), '.peer-agent'), output: os.tmpdir() };
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === '--run') options.run = true;
+    else if (arg === '--list') options.list = true;
+    else if (arg === '--help' || arg === '-h') options.help = true;
+    else if (['--model', '--scenario', '--user-data', '--output'].includes(arg)) {
+      const value = args[++index];
+      if (!value || value.startsWith('--')) throw new Error('live_option_value_missing');
+      if (arg === '--model') options.models.push(value);
+      else if (arg === '--scenario') {
+        if (value !== 'story' && !INTERACTIVE_LIVE_SCENARIOS.includes(value as InteractiveLiveScenario)) throw new Error('live_scenario_invalid');
+        options.scenarios.push(value as InteractiveLiveScenario | 'story');
+      } else if (arg === '--user-data') options.userData = path.resolve(value);
+      else options.output = path.resolve(value);
+    } else throw new Error('live_option_unknown');
+  }
+  if (!options.help && (options.run === options.list || (options.run && !options.models.length))) throw new Error('live_explicit_selection_required');
+  options.models = [...new Set(options.models)];
+  options.scenarios = options.scenarios.length ? [...new Set(options.scenarios)] : ['publish', 'repair', 'denied'];
+  if (options.models.length > 4) throw new Error('live_model_limit');
+  return options;
+}
+
+function supportedWire(metadata: SharedModelMetadata) {
+  const decision = resolveTuiWire(metadata);
+  if (decision.kind !== 'supported') return;
+  if (metadata.authMethod === 'oauth_chatgpt') return decision.wire === 'openai-responses' ? decision.wire : undefined;
+  if (metadata.authMethod === 'api_key' && ['openai-chat', 'anthropic-messages', 'openai-responses'].includes(decision.wire))
+    return decision.wire;
+}
+
+export function sanitizeInteractiveLiveDiagnostic(value: unknown, secrets: readonly string[] = []): string {
+  const detail = value instanceof Error ? `${value.name}: ${value.message}` : String(value ?? '');
+  const replaced = secrets.filter(Boolean).reduce((text, secret) => text.split(secret).join('[credential]'), detail);
+  return redactShellOutput(replaced).replace(/https?:\/\/\S+/g, '[endpoint]').slice(0, 1000);
+}
+
+function isInside(parent: string, target: string) {
+  const relative = path.relative(parent, target);
+  return !relative || relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+export function interactiveLiveOutputBase(base: string, userData: string, repository: string): string {
+  const canonical = realpathSync(base);
+  if ([realpathSync(userData), realpathSync(repository)].some(root => isInside(root, canonical))) throw new Error('live_output_must_be_external');
+  return canonical;
+}
+
+/** No network, credentials or writes occur until --run and exact model selection are validated. */
+export async function runInteractiveLiveCommand(args: readonly string[], log: (line: string) => void = console.log): Promise<boolean> {
+  const options = parseInteractiveLiveArgs(args);
+  if (options.help) { log(INTERACTIVE_LIVE_HELP); return true; }
+  const configured = loadSharedModelMetadataList({ userDataPath: options.userData });
+  if (options.list) {
+    log(JSON.stringify(configured.map(metadata => ({ entryId: metadata.entryId, provider: metadata.providerId, model: metadata.model,
+      wire: supportedWire(metadata) ?? 'outside_this_validation', credentialStored: metadata.credentialStored })), null, 2));
+    return true;
+  }
+  const selected = options.models.map(id => {
+    const matches = configured.filter(metadata => metadata.entryId === id);
+    if (matches.length !== 1 || !supportedWire(matches[0]) || !matches[0].credentialStored) throw new Error('live_selected_model_unavailable');
+    return matches[0];
+  });
+  const output = mkdtempSync(path.join(interactiveLiveOutputBase(options.output, options.userData, repositoryRoot), 'peer-interactive-live-'));
+  const source = { commit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot, encoding: 'utf8' }).trim(),
+    dirty: Boolean(execFileSync('git', ['status', '--porcelain'], { cwd: repositoryRoot, encoding: 'utf8' }).trim()) };
+  const summary = { schemaVersion: 1, source, startedAt: new Date().toISOString(), finishedAt: '', realModel: true,
+    syntheticInput: true, installedBuild: false, independentReview: false, budget: INTERACTIVE_LIVE_BUDGET, storyBudget: INTERACTIVE_STORY_BUDGET,
+    scope: 'Actual TUI turn, tool, permission and encoder ports; isolated Bot/Plan and checked headless runtime fixture. Not full goal acceptance.',
+    samples: [] as Array<{ entryId?: string; provider: string; model: string; scenario: InteractiveLiveScenario | 'story'; report: string; ok: boolean; httpRequests: number; error?: string }>, ok: false };
+  const persist = () => writeFileSync(path.join(output, 'report.json'), `${JSON.stringify(summary, null, 2)}\n`, { mode: 0o600 });
+  persist(); log(JSON.stringify({ output, source, cases: selected.length * options.scenarios.length }));
+  const credentials = createTuiSharedModelCredentialStore({ dataHome: options.userData });
+  for (const [modelIndex, metadata] of selected.entries()) {
+    for (const scenario of options.scenarios) {
+      const directory = path.join(output, `${modelIndex + 1}-${scenario}`);
+      const sample = { entryId: metadata.entryId, provider: metadata.providerId, model: metadata.model, scenario,
+        report: path.join(directory, 'report.json'), ok: false, httpRequests: 0, error: undefined as string | undefined };
+      summary.samples.push(sample); persist();
+      let secret = '';
+      try {
+        const selection = loadSharedModelSelection({ userDataPath: options.userData, credentialId: metadata.credentialId,
+          credentialStore: { getApiKey: id => credentials.getApiKey(id), getOAuthTokens: id => credentials.getOAuthTokens(id),
+            setOAuthTokens() { throw new Error('live_credential_write_forbidden'); } } });
+        const oauth = metadata.authMethod === 'oauth_chatgpt' ? selection?.oauthTokens : undefined;
+        if (oauth?.expires && oauth.expires <= Date.now() + 60_000) throw new Error('live_oauth_credential_expired');
+        secret = oauth?.access || selection?.apiKey || '';
+        if (!secret) throw new Error('live_credential_unavailable');
+        // Disable transport recovery here so the physical HTTP budget is independently bounded.
+        const transport = createTuiProviderFetch({ connectionRecovery: false });
+        const countedFetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+          if (sample.httpRequests >= (scenario === 'story' ? INTERACTIVE_STORY_BUDGET.totalRequests : 8)) throw new Error('live_http_limit');
+          sample.httpRequests++;
+          return transport(input, init);
+        }) as typeof fetch;
+        const wire = supportedWire(metadata)!;
+        const baseUrl = metadata.channelId?.startsWith('opencode-go') ? resolveOpenCodeGoBaseUrl(wire, metadata.baseUrl) : metadata.baseUrl;
+        const extraHeaders = metadata.channelId?.startsWith('opencode-go') ? { 'x-opencode-session': `peer-interactive-validation-${modelIndex}-${scenario}` } : undefined;
+        let provider: ModelProvider;
+        if (wire === 'openai-responses') {
+          provider = createChatGptResponsesProvider({ baseUrl, tokens: { access: secret, accountId: oauth?.accountId },
+            extraHeaders, fetch: countedFetch });
+        } else if (wire === 'openai-chat') {
+          provider = createOpenAICompatibleProvider({ config: { providerId: metadata.credentialId, apiKey: secret, baseUrl, headers: extraHeaders }, fetch: countedFetch });
+        } else {
+          provider = createAnthropicMessagesProvider({ providerId: metadata.credentialId, baseUrl, extraHeaders, getApiKey: async () => secret,
+            sendStream: streamArgs => sendAnthropicMessagesStream({ ...streamArgs, fetchImpl: countedFetch }) });
+        }
+        const common = { directory, model: metadata, provider,
+          sanitize: (value: unknown) => sanitizeInteractiveLiveDiagnostic(value, [secret]),
+          onProgress(report: { requests: unknown[]; approvals?: number; finishedAt?: string }) { log(JSON.stringify({ provider: metadata.providerId, model: metadata.model, scenario,
+            requests: report.requests.length, approvals: report.approvals, finished: Boolean(report.finishedAt) })); } };
+        const report = scenario === 'story' ? await runInteractiveLiveStory(common) : await runInteractiveLiveCase({ ...common, scenario, realModel: true });
+        sample.ok = report.ok;
+        if ('error' in report && typeof report.error === 'string') sample.error = report.error;
+      } catch (error) { sample.error = sanitizeInteractiveLiveDiagnostic(error, [secret]); }
+      finally { secret = ''; persist(); }
+    }
+  }
+  summary.finishedAt = new Date().toISOString(); summary.ok = summary.samples.every(sample => sample.ok); persist();
+  log(JSON.stringify({ output, ok: summary.ok })); return summary.ok;
+}

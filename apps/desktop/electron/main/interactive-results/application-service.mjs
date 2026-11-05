@@ -1,0 +1,166 @@
+import { createInteractivePresentationStore, createInteractiveTextReader, createInteractiveViewService } from '@peer-agent/runtime-node/interactive-results';
+import { interactiveFeedbackFromFollowup, normalizeResourceFeedbackList, normalizeInteractiveOwner, normalizeResourceWindowRequest } from '@peer-agent/protocol';
+import { desktopInteractiveRuntime } from './runtime-port.mjs';
+
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const fail = code => ({ ok: false, code });
+const code = error => typeof error?.code === 'string' && /^[a-z][a-z0-9_]{0,79}$/.test(error.code) ? error.code : 'interactive_storage_unavailable';
+const run = operation => { try { return operation(); } catch (error) { return fail(code(error)); } };
+const validRequest = (raw, fields) => raw && typeof raw === 'object' && !Array.isArray(raw) && Object.keys(raw).every(key => fields.includes(key));
+
+/** Actual app senders/owners bind the shared domain service. No tool or file-execution port. */
+export function createDesktopInteractiveApplication({ getRole, getOwner, getNativeBinding, prepareFeedback, readDraft, openWindow, getRuntime = desktopInteractiveRuntime }) {
+  const instances = new Map(), lifetimes = new Map();
+  let disposed = false;
+  function ownerOf(workspaceId) {
+    const profile = getOwner(workspaceId);
+    return normalizeInteractiveOwner({ workspaceId, conversationId: profile?.conversationId });
+  }
+  function hasOwnerReplacement(owner) {
+    const current = ownerOf(owner.workspaceId);
+    return !!current && !same(current, owner);
+  }
+  function attach(sender) {
+    if (lifetimes.has(sender)) return lifetimes.get(sender);
+    const record = { epoch: 0, layoutOwners: new Set() };
+    const invalidate = () => { record.epoch++; record.layoutOwners.clear(); for (const item of instances.values()) item.views.closeSender(sender); };
+    const navigation = (_event, _url, inPlace, mainFrame) => { if (!inPlace && mainFrame === true) invalidate(); };
+    const destroyed = () => { invalidate(); detach(); };
+    const detach = () => {
+      sender.removeListener?.('did-start-navigation', navigation); sender.removeListener?.('render-process-gone', invalidate);
+      sender.removeListener?.('destroyed', destroyed); lifetimes.delete(sender);
+    };
+    Object.assign(record, { detach }); lifetimes.set(sender, record);
+    sender.on?.('did-start-navigation', navigation); sender.on?.('render-process-gone', invalidate); sender.once?.('destroyed', destroyed);
+    return record;
+  }
+  function rememberLayoutOwner(layoutOwners, key) {
+    if (!layoutOwners.has(key) && layoutOwners.size >= 256) layoutOwners.delete(layoutOwners.values().next().value);
+    layoutOwners.add(key);
+  }
+  function instance() {
+    const runtime = getRuntime();
+    if (disposed || !runtime) throw { code: 'interactive_authority_unavailable' };
+    if (instances.has(runtime)) return instances.get(runtime);
+    for (const [previous, item] of instances) { item.views.dispose(); instances.delete(previous); }
+    const currentOwner = owner => !disposed && getRuntime() === runtime && same(ownerOf(owner.workspaceId), owner);
+    const views = createInteractiveViewService({ resultStore: runtime.resultStore, stateStore: runtime.stateStore, readSourceIssues: runtime.readSourceIssues,
+      resolveSource(sender, reference, { signal }) {
+        const role = getRole(sender);
+        if (!['main', 'resource'].includes(role) || !currentOwner(reference.owner) || signal.aborted || sender.isDestroyed?.() === true) return null;
+        const lifetime = attach(sender), epoch = lifetime.epoch;
+        const native = role === 'resource' ? getNativeBinding(sender) : null;
+        if (role === 'resource' && (!native?.ok || native.context.resource.kind !== 'interactive' || !same(native.context.resource.reference, reference))) return null;
+        if (role === 'main') rememberLayoutOwner(lifetime.layoutOwners, JSON.stringify(reference.owner));
+        const assertIdentity = () => !disposed && getRuntime() === runtime && !signal.aborted && lifetime.epoch === epoch && getRole(sender) === role
+          && sender.isDestroyed?.() !== true && (role !== 'resource' || (() => {
+            const fresh = getNativeBinding(sender);
+            return fresh?.ok && fresh.context.viewId === native.context.viewId && fresh.context.windowId === native.context.windowId
+              && fresh.context.generation === native.context.generation && fresh.context.resource.kind === 'interactive' && same(fresh.context.resource.reference, reference);
+          })());
+        return { owner: reference.owner, assertIdentity, assertCurrent: () => assertIdentity() && currentOwner(reference.owner),
+          hasReplacement: () => hasOwnerReplacement(reference.owner) };
+      } });
+    const presentation = createInteractivePresentationStore({ resultStore: runtime.resultStore, assertOwner: currentOwner });
+    const readText = createInteractiveTextReader({ resultStore: runtime.resultStore, assertOwner: currentOwner });
+    const value = { runtime, views, presentation, readText }; instances.set(runtime, value); return value;
+  }
+  function view(method, sender, request) {
+    return run(() => {
+      if (disposed || !['main', 'resource'].includes(getRole(sender))) return fail('interactive_scope_denied');
+      attach(sender); return instance().views[method](sender, request);
+    });
+  }
+  function layout(sender, request, fields, operation) {
+    return run(() => {
+      const owner = normalizeInteractiveOwner(request?.owner);
+      if (disposed || getRole(sender) !== 'main' || sender.isDestroyed?.() === true || !validRequest(request, fields) || !owner) return fail('interactive_scope_denied');
+      const current = ownerOf(owner.workspaceId), { layoutOwners } = attach(sender), key = JSON.stringify(owner);
+      if (!same(current, owner)) return fail(current && layoutOwners.has(key) ? 'interactive_owner_replaced' : 'interactive_scope_denied');
+      rememberLayoutOwner(layoutOwners, key);
+      return { ok: true, snapshot: operation(instance().presentation, owner) };
+    });
+  }
+  return {
+    open: (sender, request) => view('open', sender, request),
+    cancelOpen: (sender, request) => view('cancelOpen', sender, request),
+    readState: (sender, request) => view('readState', sender, request),
+    readVersions: (sender, request) => view('readVersions', sender, request),
+    async openVersion(sender, request) {
+      try {
+        if (disposed || getRole(sender) !== 'resource' || typeof openWindow !== 'function') return fail('interactive_navigation_unavailable');
+        const selected = instance().views.resolveVersion(sender, request);
+        if (!selected.ok) return selected;
+        const native = getNativeBinding(sender), sourceSender = native?.sourceSender;
+        const current = () => selected.assertCurrent() === true && sourceSender && getRole(sourceSender) === 'main'
+          && sourceSender.isDestroyed?.() !== true && getNativeBinding(sender)?.sourceSender === sourceSender;
+        if (!current()) return fail('interactive_view_stale');
+        const opened = await openWindow(sourceSender, selected.reference);
+        if (!current()) return fail('interactive_view_stale');
+        return opened?.ok ? { ok: true, reference: selected.reference } : fail('interactive_version_open_failed');
+      } catch (error) { return fail(code(error)); }
+    },
+    acquire: (sender, request) => view('acquire', sender, request),
+    save: (sender, request) => view('save', sender, request),
+    release: (sender, request) => view('release', sender, request),
+    prepareFollowup: (sender, request) => view('prepareFollowup', sender, request),
+    async prepareDraft(sender, request) {
+      try {
+        if (disposed || !['main', 'resource'].includes(getRole(sender))) return fail('interactive_scope_denied');
+        if (typeof prepareFeedback !== 'function' || typeof readDraft !== 'function') return fail('interactive_draft_unavailable');
+        const selected = instance().views.resolveFollowup(sender, request);
+        if (!selected.ok) return selected;
+        const feedback = interactiveFeedbackFromFollowup(selected.followup);
+        if (!feedback) return fail('interactive_followup_corrupt');
+        const role = getRole(sender), native = role === 'resource' ? getNativeBinding(sender) : null;
+        const sourceSender = role === 'main' ? sender : native?.sourceSender;
+        if (!sourceSender || getRole(sourceSender) !== 'main' || sourceSender.isDestroyed?.() === true) return fail('interactive_draft_source_unavailable');
+        const current = () => {
+          if (selected.assertCurrent() !== true || getRole(sourceSender) !== 'main' || sourceSender.isDestroyed?.() === true) return false;
+          if (role === 'main') return sourceSender === sender;
+          const fresh = getNativeBinding(sender);
+          return fresh?.ok && fresh.sourceSender === sourceSender && fresh.context.viewId === native.context.viewId
+            && fresh.context.windowId === native.context.windowId && fresh.context.generation === native.context.generation;
+        };
+        const prepared = await prepareFeedback({ sourceSender, identity: selected.identity, feedback, isCurrent: current });
+        if (!prepared?.ok) return fail(typeof prepared?.code === 'string' && /^[A-Z0-9_]{1,100}$/.test(prepared.code) ? prepared.code.toLowerCase() : 'interactive_draft_unconfirmed');
+        if (prepared.id !== feedback.id || !current()) return fail('interactive_draft_unconfirmed');
+        // A renderer ack is insufficient: read the actual host-owned draft store.
+        const saved = await readDraft({ workspaceId: feedback.recipient.workspaceId, surface: 'desktop' });
+        if (!current() || !saved?.ok || !saved.snapshot || !Array.isArray(saved.snapshot.pending)) return fail('interactive_draft_unconfirmed');
+        const rows = [saved.snapshot.draft, ...saved.snapshot.pending].flatMap(item => {
+          const values = normalizeResourceFeedbackList(item?.resourceFeedback);
+          if (!values) throw { code: 'interactive_draft_unconfirmed' };
+          return values;
+        });
+        if (!rows.some(row => row.id === feedback.id && same(row, feedback))) return fail('interactive_draft_unconfirmed');
+        return { ok: true, followupId: feedback.id };
+      } catch (error) { return fail(code(error)); }
+    },
+    prepareResource(raw) {
+      try {
+        const request = normalizeResourceWindowRequest({ resource: raw });
+        if (!request || request.resource.kind !== 'interactive' || !same(ownerOf(request.resource.reference.owner.workspaceId), request.resource.reference.owner)) return { ok: false, status: 'scope_denied' };
+        const fixed = instance().readText(request.resource.reference);
+        return { ok: true, owner: fixed.reference.owner, resource: request.resource, title: fixed.title };
+      } catch (error) {
+        const status = ({ interactive_content_cleaned: 'content_cleaned', interactive_storage_incompatible: 'incompatible_result',
+          interactive_result_unavailable: 'result_unavailable', interactive_scope_denied: 'scope_denied' })[error?.code] ?? 'storage_unavailable';
+        return { ok: false, status };
+      }
+    },
+    listWindows: owner => { try { return instance().presentation.history.list(owner); } catch { return { ok: false, status: 'storage_unavailable', entries: [] }; } },
+    findWindow: (id, owner) => { try { return instance().presentation.history.find(id, owner); } catch { return null; } },
+    saveWindow: (context, scope, id) => { try { return instance().presentation.history.save(context, scope, id); } catch { return null; } },
+    removeWindow: (id, owner) => { try { return instance().presentation.history.remove(id, owner); } catch { return false; } },
+    hasOwnerReplacement: owner => !disposed && run(() => hasOwnerReplacement(owner)) === true,
+    readLayout: (sender, request) => layout(sender, request, ['owner'], (presentation, owner) => presentation.readLayout(owner)),
+    writeLayout: (sender, request) => layout(sender, request, ['owner', 'expectedRevision', 'order', 'recent', 'interactive'],
+      (presentation, owner) => presentation.writeLayout(owner, request)),
+    dispose() {
+      if (disposed) return; disposed = true;
+      for (const item of instances.values()) item.views.dispose(); instances.clear();
+      for (const lifetime of [...lifetimes.values()]) lifetime.detach();
+    },
+  };
+}

@@ -241,6 +241,7 @@ export { createDelegationProvider } from './project-agent/delegation-provider.mj
 export {
   createSessionSupervisor,
   evaluateWorkSessionWrite,
+  readOnlyWorkCapabilityAllowed,
 } from './project-agent/session-supervisor.mjs';
 export {
   PROGRESS_THROTTLE_MS,
@@ -660,6 +661,7 @@ export { agentDelivery, recordAgentContextAdmission } from './project-agent/agen
 export { createAgentEventPublisher } from './project-agent/agent-activity.mjs';
 
 export { agentCommunicationExcludedPrefixes } from './project-agent/work-session-profile.mjs';
+export { sessionWaitProjected } from './project-agent/wake-wait.mjs';
 export { createLocalImageProvider, detectLocalImageMediaType, isLocalImageObservation } from './local-image-provider.mjs';
 export { LOCAL_IMAGE_TOOL_DEFINITIONS } from './local-image-tools.mjs';
 export {
@@ -705,3 +707,4 @@ export { CONTINUITY_TOOL_SPECS, CONTINUITY_CAPABILITY_IDS, WORKING_CONTEXT_DESCR
 
 export { trackExecutionHandle } from './project-agent/execution-handles.mjs';
 export { providerExecutionScopes, providerFileScopes } from './project-agent/execution-scopes.mjs';
+export { admitInteractiveToolSet } from './interactive-results/role-policy.mjs';

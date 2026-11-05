@@ -8,6 +8,7 @@ import type {
   RuntimeSdkToolCall,
   RuntimeSdkToolResult,
 } from '@peer-agent/runtime-sdk';
+import type { InteractivePublicationPermissionScope } from '@peer-agent/protocol';
 
 export interface NodeRuntimeSession {
   readonly locale?: string;
@@ -65,7 +66,25 @@ export interface NodeRuntimeCapabilityPermissionPrompt {
 
 export type NodeRuntimePermissionPrompt =
   | NodeRuntimeHookPermissionPrompt
-  | NodeRuntimeCapabilityPermissionPrompt;
+  | NodeRuntimeCapabilityPermissionPrompt
+  | NodeRuntimeInteractivePermissionPrompt;
+
+export interface NodeRuntimeInteractivePermissionPrompt {
+  readonly tool: string;
+  readonly toolName: string;
+  readonly capabilityId: 'local.interactive.publish';
+  readonly args: unknown;
+  readonly workspacePath: string;
+  readonly reason: string;
+  readonly confirmation: {
+    readonly kind: 'capability-approval';
+    readonly approvalKind: 'interactive-result';
+    readonly reason: string;
+  };
+  readonly scope: InteractivePublicationPermissionScope;
+  readonly riskLevel: 'L2_low_write';
+  readonly dataLevel: string;
+}
 
 export interface NodeRuntimeExecutionContext extends RuntimeSdkExecutionContext {
   readonly requestPermission?: (

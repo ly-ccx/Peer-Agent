@@ -23,7 +23,11 @@ export function ResourceWindowHistory({ workspaceId, isZh, active }: { readonly 
     setBusy(id); setFailure('');
     try {
       const result = await api.resourceWindowRestore!({ workspaceId, id });
-      if (live.current && !result.ok) setFailure(result.status === 'source_changed'
+      if (live.current && !result.ok) setFailure(result.status === 'content_cleaned'
+        ? (isZh ? '结果正文已清理，无法恢复历史计算。阅读记录仍保留。' : 'The result content was cleaned. Historical calculations cannot be restored; the reading record is retained.')
+        : result.status === 'incompatible_result' ? (isZh ? '当前版本无法安全读取结果格式，原记录未改动。' : 'This version cannot safely read the result format. The original record is unchanged.')
+        : result.status === 'result_unavailable' ? (isZh ? '此设备没有这份固定版本的结果，原阅读记录仍保留。' : 'This device does not have the fixed result version. The original reading record is retained.')
+        : result.status === 'source_changed'
         ? (isZh ? '原来源已变化。记录已保留，请从原会话重新确认位置。' : 'The original source changed. The record is retained. Confirm its location in the source conversation.')
         : result.status === 'permission_denied' || result.status === 'scope_denied' ? (isZh ? '当前没有读取原位置的权限。记录已保留，未扩大访问范围。' : 'Reading the original location is not permitted. The record is retained; access was not expanded.')
           : result.status === 'not_found' ? (isZh ? '原文件或目录不存在，记录已保留，未打开同名替代项。' : 'The original file or directory is missing. The record is retained; no same-name replacement was opened.')
@@ -43,13 +47,16 @@ export function ResourceWindowHistory({ workspaceId, isZh, active }: { readonly 
   return <section className="resource-window-history" aria-label={isZh ? '独立窗口阅读记录' : 'Saved window readings'}>
     <h2>{isZh ? '独立窗口阅读记录' : 'Saved window readings'}</h2>
     {failure ? <p role="alert">{failure}<button className="ui-button is-compact" type="button" onClick={() => setRetry(value => value + 1)}>{isZh ? '重新读取' : 'Read again'}</button></p> : null}
-    {entries.map(entry => <div className="resource-window-history-row" key={entry.id}>
-      <button className="resource-recent" type="button" disabled={busy !== null} title={entry.request.resource.reference.path} onClick={() => void restore(entry.id)}>
+    {entries.map(entry => {
+      const resource = entry.request.resource;
+      const label = resource.kind === 'interactive' ? entry.title || (isZh ? '交互结果' : 'Interactive result') : resource.reference.path.split(/[\\/]/).pop() || resource.reference.path;
+      return <div className="resource-window-history-row" key={entry.id}>
+      <button className="resource-recent" type="button" disabled={busy !== null} title={resource.kind === 'interactive' ? label : resource.reference.path} onClick={() => void restore(entry.id)}>
         <PeerIcon name={entry.request.resource.kind === 'directory' ? 'folder' : 'fileText'} size={16} />
-        <span>{entry.request.resource.reference.path.split(/[\\/]/).pop() || entry.request.resource.reference.path}</span>
+        <span>{label}</span>
         <small>{isZh ? '继续只读查看' : 'Continue reading'}</small>
       </button>
-      <button className="ui-button resource-search-submit" type="button" disabled={busy !== null} aria-label={isZh ? '移除阅读记录' : 'Remove reading record'} title={isZh ? '仅移除记录，保留原文件' : 'Remove the record and keep the file'} onClick={() => void forget(entry.id)}><PeerIcon name="close" size={14} /></button>
-    </div>)}
+      <button className="ui-button resource-search-submit" type="button" disabled={busy !== null} aria-label={isZh ? '移除阅读记录' : 'Remove reading record'} title={resource.kind === 'interactive' ? (isZh ? '仅移除阅读记录，保留结果' : 'Remove the reading record and keep the result') : (isZh ? '仅移除记录，保留原文件' : 'Remove the record and keep the file')} onClick={() => void forget(entry.id)}><PeerIcon name="close" size={14} /></button>
+    </div>; })}
   </section>;
 }

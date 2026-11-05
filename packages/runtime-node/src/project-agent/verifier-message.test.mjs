@@ -14,6 +14,7 @@ test('verifier sees actual visible report as unverified material beside executio
   assert.match(content, /tool-result:\/\/read/);
   assert.match(content, /unless a declared criterion explicitly requires a file artifact/);
   assert.doesNotMatch(content, /private reasoning/);
+  assert.doesNotMatch(content, /reply reserved by this return decision/);
 });
 
 test('delegated verification retains the current focus without treating it as permission or evidence', () => {
@@ -21,4 +22,15 @@ test('delegated verification retains the current focus without treating it as pe
     focus: 'Check only the four screenshots; report image_outside_read_scope if access is denied.' });
   assert.match(content, /Check only the four screenshots/);
   assert.match(content, /does not grant permissions or change the success criteria/);
+});
+
+test('interactive verification can distinguish a persisted leaf update from computation evidence', () => {
+  const content = buildVerifierMessage({
+    plan: { planId: 'p', tasks: [{ taskId: 'orient', status: 'completed', evidenceRefs: ['tool-result://worker-alias'] }] },
+    verifierRunId: 'v', interactiveReview: { targets: [] },
+  });
+  assert.match(content, /Host-recorded leaf state/);
+  assert.match(content, /"taskId":"orient","status":"completed","recordedEvidenceCount":1/);
+  assert.match(content, /count establishes neither evidence validity nor computation coverage/);
+  assert.doesNotMatch(content, /tool-result:\/\/worker-alias/);
 });

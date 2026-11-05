@@ -1,4 +1,4 @@
-import { normalizeResourceFeedbackList, emptyInputDraft, projectInputWasReceived, type InputDraftValue, type LocalInputSurface,
+import { encodeResourceFeedbackTransport, normalizeResourceFeedbackList, emptyInputDraft, projectInputWasReceived, type InputDraftValue, type LocalInputSurface,
   type ProjectAgentSubmitInputResult, type ProjectInputDraftSnapshot, type ProjectInputRecoveryPort,
   type UnconfirmedProjectInput } from '@peer-agent/protocol';
 
@@ -102,15 +102,17 @@ export function createProjectInputRecovery({ workspaceId, surface, port, createI
     const useDraft = options.useDraft !== false, draft = view.draft;
     const text = (options.text ?? draft.text).trim(), attachments = useDraft ? draft.attachments : [];
     if (useDraft && options.text !== undefined && text !== draft.text.trim()) return { ok: false, code: 'INPUT_CHANGED' };
-    if (!text && !attachments.length) return { ok: false, code: 'INVALID_INPUT' };
+    const resourceFeedback = useDraft ? normalizeResourceFeedbackList(draft.resourceFeedback) : [];
+    if (!resourceFeedback) return { ok: false, code: 'INVALID_RESOURCE_FEEDBACK' };
+    if (!text && !attachments.length && !resourceFeedback.some(row => row.resource.kind === 'interactive')) return { ok: false, code: 'INVALID_INPUT' };
     if (!useDraft && options.answerTo) {
       const existing = view.pending.find(item => item.answerTo === options.answerTo);
       if (existing) return existing.text === text ? dispatch(existing) : { ok: false, code: 'INPUT_PENDING_ANSWER' };
     }
     if (view.pending.length >= 32) return { ok: false, code: 'DRAFT_LIMIT' };
-    const resourceFeedback = useDraft ? normalizeResourceFeedbackList(draft.resourceFeedback) : [];
-    if (!resourceFeedback) return { ok: false, code: 'INVALID_RESOURCE_FEEDBACK' };
     if (resourceFeedback.some(item => item.recipient.workspaceId !== workspaceId)) return { ok: false, code: 'RESOURCE_FEEDBACK_RECIPIENT_CHANGED' };
+    try { encodeResourceFeedbackTransport(resourceFeedback, attachments); }
+    catch (error) { return { ok: false, code: (error as { code?: string }).code ?? 'INVALID_RESOURCE_FEEDBACK' }; }
     const input = { inputId: createId(), text, attachments, ...(resourceFeedback.length ? { resourceFeedback } : {}), createdAt: now(), quoteRefs: options.quoteRefs ?? [],
       ...(options.answerTo ? { answerTo: options.answerTo } : {}) };
     changed++; publish({ pending: [...view.pending, input], ...(useDraft ? { draft: emptyInputDraft() } : {}) });

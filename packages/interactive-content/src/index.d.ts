@@ -1,0 +1,27 @@
+import type { InteractiveContent, InteractiveElement, InteractiveJSON, InteractiveStateSchema, InteractiveStateValues } from '@peer-agent/protocol';
+import type { Library, LibraryJSONSchema } from '@openuidev/lang-core';
+export { INTERACTIVE_RESULT_LIMITS as INTERACTIVE_LIMITS } from '@peer-agent/protocol';
+export const LIBRARY_VERSION: string;
+export const ENGINE_VERSION: string;
+export const CONTENT_SCHEMA_VERSION: 1;
+export class InteractiveContentError extends Error { readonly code: string; readonly path: string; readonly details: string }
+export function canonicalJSON(value: unknown): string;
+export function boundedJSON<T>(value: T, options?: { maxBytes?: number; maxItems?: number; maxDepth?: number; maxStringChars?: number }): T;
+export function utf8Bytes(value: unknown): number;
+export function catalogSpec(): { version: string; schema: LibraryJSONSchema };
+export function createPeerLibrary(options?: { bindings?: Readonly<Record<string, InteractiveJSON>>; components?: Record<string, unknown> }): Required<Library>;
+export const COMPONENT_SCHEMAS: Readonly<Record<string, import('zod/v4').ZodObject>>;
+export const COMPONENT_DESCRIPTIONS: Readonly<Record<string, string>>;
+export function catalogIdentity(): Promise<string>;
+export function digestJSON(value: unknown): Promise<string>;
+export function validateState(values: InteractiveStateValues, schema: InteractiveStateSchema, drafts?: Readonly<Record<string, string>>): { values: InteractiveStateValues; inputDrafts: Readonly<Record<string, string>> };
+export function validateDraft(draft: { title: string; textFallback: string; program: string }, options?: { bindings?: Readonly<Record<string, InteractiveJSON>>; expectedSpecHash?: string }): Promise<InteractiveContent>;
+export function evaluate(content: InteractiveContent & { contentVersion?: string }, values?: InteractiveStateValues): Promise<{ tree: InteractiveElement; componentCount: number; evaluationSteps: number; values: InteractiveStateValues; stateDigest: string; contentVersion: string | null; specHash: string }>;
+export interface InteractiveEvaluation { readonly tree: InteractiveElement; readonly componentCount: number; readonly evaluationSteps: number; readonly values: InteractiveStateValues; readonly contentVersion: string | null; readonly specHash: string }
+export interface InteractiveEvaluator {
+  evaluate(values?: InteractiveStateValues): InteractiveEvaluation;
+  applyAction(plan: unknown, values: InteractiveStateValues): InteractiveEvaluation & { readonly changedFields: readonly string[] };
+}
+export function prepareEvaluator(content: InteractiveContent & { contentVersion?: string }): Promise<InteractiveEvaluator>;
+export function describeState(content: InteractiveContent, values: InteractiveStateValues, options?: { readonly fields?: readonly string[]; readonly isZh?: boolean }): Promise<{ readonly text: string; readonly specHash: string; readonly stateSchemaHash: string }>;
+export function projectText(tree: InteractiveElement, maxChars?: number): { text: string; truncated: boolean };

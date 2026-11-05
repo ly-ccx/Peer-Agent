@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import type { BotDocumentReference, ResourceWindowReturnRequest, ResourceWindowReturnAck } from '@peer-agent/protocol';
+import { interactiveReferenceKey, type BotDocumentReference, type ResourceWindowReturnRequest, type ResourceWindowReturnAck } from '@peer-agent/protocol';
 import type { useWorkbench } from './WorkbenchContext';
 import { returnDocumentSession, seedSourceDirectory } from './resourceWindowReturnState';
+import type { useInteractiveResources } from './interactive/useInteractiveResources';
 
 /** Two-way presentation handoff; only the captured main window may acknowledge the request. */
-export function useResourceWindowReturn({ owner, ready, active, workbench, reveal, openDirectory }: {
+export function useResourceWindowReturn({ owner, ready, active, workbench, reveal, openDirectory, interactive }: {
   readonly owner: { readonly workspaceId: string; readonly conversationId: string | null } | null; readonly ready: boolean; readonly active: boolean;
   readonly workbench: ReturnType<typeof useWorkbench>; readonly reveal: () => void; readonly openDirectory: (reference: BotDocumentReference) => void;
+  readonly interactive?: ReturnType<typeof useInteractiveResources>;
 }) {
   const [request, setRequest] = useState<ResourceWindowReturnRequest | null>(null);
   const [receipt, setReceipt] = useState<(ResourceWindowReturnAck & { targetId?: string | null }) | null>(null);
@@ -32,6 +34,7 @@ export function useResourceWindowReturn({ owner, ready, active, workbench, revea
   useEffect(() => {
     if (!request || applied.current === request.requestId || request.expiresAt <= Date.now() || !ready || !active || !owner
       || request.context.owner.workspaceId !== owner?.workspaceId || request.context.owner.conversationId !== owner?.conversationId) return;
+    if (request.context.resource.kind === 'interactive' && interactive?.interactiveLayoutState.phase === 'loading' && !interactive.interactiveLayoutState.loaded) return;
     applied.current = request.requestId;
     const context = request.context, resource = context.resource;
     workbench.setMaximized(false);
@@ -39,19 +42,24 @@ export function useResourceWindowReturn({ owner, ready, active, workbench, revea
     if (resource.kind === 'directory') {
       workbench.setDirectorySession(owner.workspaceId, current => seedSourceDirectory(current, context));
       openDirectory(resource.reference);
+    } else if (resource.kind === 'interactive') {
+      const tab = interactive?.interactiveTabs.find(tab => interactiveReferenceKey(tab.reference) === interactiveReferenceKey(resource.reference));
+      if (!tab || !interactive?.activateInteractive(tab.id)) { status = 'source_tab_closed'; workbench.setOpen(false); }
+      else { targetId = tab.id; reveal(); }
     } else {
       const target = returnDocumentSession(workbench.documentSession, context); status = target.status; targetId = target.session.activeTabId;
       if (target.status === 'source_tab_closed') workbench.setOpen(false);
       else { workbench.setDocumentSession(target.session); workbench.setActiveTab('documents'); reveal(); }
     }
     setReceipt({ requestId: request.requestId, identity: context, status, targetId });
-  }, [request, ready, active, owner?.workspaceId, owner?.conversationId]);
+  }, [request, ready, active, owner?.workspaceId, owner?.conversationId, interactive?.interactiveLayoutState.phase, interactive?.interactiveTabs]);
   useEffect(() => {
     if (!receipt || !request || pending.current?.requestId !== receipt.requestId || request.expiresAt <= Date.now()) return;
     const applied = receipt.status === 'source_tab_closed' ? !workbench.open : workbench.open
       && (request.context.resource.kind === 'directory' ? workbench.activeTab === 'files' && workbench.directorySessions[request.context.owner.workspaceId]?.source === request.context.resource.reference.path
-        : workbench.activeTab === 'documents' && workbench.documentSession.activeTabId === receipt.targetId);
+        : request.context.resource.kind === 'interactive' ? workbench.activeTab === 'interactive' && interactive?.activeInteractiveId === receipt.targetId
+          : workbench.activeTab === 'documents' && workbench.documentSession.activeTabId === receipt.targetId);
     if (!applied) return;
     acknowledge(request, receipt.status); pending.current = null; setRequest(null); setReceipt(null);
-  }, [receipt, request, workbench.open, workbench.activeTab, workbench.documentSession.activeTabId, workbench.directorySessions]);
+  }, [receipt, request, workbench.open, workbench.activeTab, workbench.documentSession.activeTabId, workbench.directorySessions, interactive?.activeInteractiveId]);
 }

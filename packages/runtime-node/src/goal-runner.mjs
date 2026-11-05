@@ -941,25 +941,30 @@ export function createGoalRunner({
       return { passed: false, reason: message, report: null };
     } finally { endVerification(); }
     const failedCriteria = Array.isArray(report?.failedCriteria) ? report.failedCriteria : [];
-    const missingEvidence = Array.isArray(report?.missingEvidence) ? report.missingEvidence : [];
+    const missingEvidence = Array.isArray(report?.missingEvidence) ? [...report.missingEvidence] : [];
     const risks = Array.isArray(report?.risks) ? report.risks : [];
-    const evidenceRefs = Array.isArray(report?.evidenceRefs)
+    const reportedEvidenceRefs = Array.isArray(report?.evidenceRefs)
       ? report.evidenceRefs.filter((ref) => typeof ref === 'string' && ref.trim()).map((ref) => ref.trim())
       : [];
     const currentPlan = goalPlanStore.getPlan(plan.planId);
     const indexedVerifierEvidence = collectIndexedEvidenceRefsForPlan(currentPlan);
+    const evidenceRefs = indexedVerifierEvidence === null ? reportedEvidenceRefs
+      : reportedEvidenceRefs.filter(ref => indexedVerifierEvidence.includes(ref));
+    const unindexedEvidence = evidenceRefs.length !== reportedEvidenceRefs.length;
+    const unindexedReason = 'Verifier cited references outside the current task Evidence Index.';
+    if (unindexedEvidence) missingEvidence.push({ reason: unindexedReason, evidenceRefs: [] });
     const passed = report?.passed === true
       && failedCriteria.length === 0
       && missingEvidence.length === 0
       && evidenceRefs.length > 0
-      && (!indexedVerifierEvidence || evidenceRefs.every(ref => indexedVerifierEvidence.includes(ref)))
       && !!currentPlan && criterionSourceRevision(currentPlan) === sourceRevision
       && semanticGateCanRun(evaluatePlanVerificationGate(currentPlan));
-    const summary = typeof report?.summary === 'string' && report.summary.trim()
-      ? report.summary.trim()
-      : passed
-        ? 'Verifier passed'
-        : 'Verifier failed';
+    const modelSummary = typeof report?.summary === 'string' ? report.summary.trim() : '';
+    let summary = modelSummary || (passed ? 'Verifier passed' : 'Verifier failed');
+    if (unindexedEvidence) summary = unindexedReason;
+    else if (!passed && report?.passed === true) summary = 'The host could not confirm the verifier report.';
+    const recordedReport = { passed, failedCriteria, missingEvidence, risks, evidenceRefs,
+      recommendedNextAction: report?.recommendedNextAction };
     goalPlanStore.recordVerifierRun?.(plan.planId, {
       verifierRunId,
       target: { kind: 'plan' },
@@ -967,14 +972,7 @@ export function createGoalRunner({
       evidenceRefs,
       summary,
       failureReason: passed ? undefined : summary,
-      report: {
-        passed,
-        failedCriteria,
-        missingEvidence,
-        risks,
-        evidenceRefs,
-        recommendedNextAction: report?.recommendedNextAction,
-      },
+      report: recordedReport,
     });
     if ((plan.successCriteria || []).some(item => item.kind === 'model_review') && currentPlan
       && criterionSourceRevision(currentPlan) === sourceRevision) {
@@ -985,7 +983,7 @@ export function createGoalRunner({
       verifierRunId,
       ...(passed ? {} : { reason: summary }),
     });
-    return { passed, reason: summary, report };
+    return { passed, reason: summary, report: { ...report, ...recordedReport, summary } };
   }
 
   function getState(planId) {

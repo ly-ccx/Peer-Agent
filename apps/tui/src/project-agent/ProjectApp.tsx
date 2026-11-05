@@ -5,12 +5,14 @@ import { InputRecoveryStatus } from './InputRecoveryStatus.tsx';
 import { composerEnterAction } from '../runtime-controls.ts';
 import {useEffect,useMemo,useRef,useState} from 'react';
 import {useKeyboard,useTerminalDimensions} from '@opentui/react';
-import type {TextareaRenderable} from '@opentui/core';
+import type {ScrollBoxRenderable,TextareaRenderable} from '@opentui/core';
 import {ThemedText,ThemedTextarea} from '../themed-primitives.tsx';
 import {COLOR,PICKER_CHROME,type TuiThemeStore} from '../tui-theme.ts';
 import type {TuiLocale} from '../tui-language.ts';
 import type {createTuiProjectHost} from './tui-project-host.ts';
 import type {createTuiProjectClient} from './tui-project-client.ts';
+import {TaskResultText} from './TaskResultText.tsx';
+import {taskResultReferences} from './task-result-reader.ts';
 import {BotListView} from './BotListView.tsx';
 import {BotConversationView} from './BotConversationView.tsx';
 import {CardLine} from './CardLine.tsx';
@@ -27,6 +29,11 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
   const terminal=useTerminalDimensions(), editor=useRef<TextareaRenderable|null>(null),numbers=useRef(createCardNumbers());
   const [snapshot,setSnapshot]=useState(()=>client.current()),[view,setView]=useState<View>(initialView),[selected,setSelected]=useState(0);
   const [cardIndex,setCardIndex]=useState(0),[option,setOption]=useState(0),[bindYes,setBindYes]=useState(true),[detail,setDetail]=useState<any>(null);
+  const taskScroll=useRef<ScrollBoxRenderable|null>(null);
+  const [openedResult,setOpenedResult]=useState<{workspaceId:string;ownerConversationId:string;sessionId:string;ref:string;attempt:number}|null>(null);
+  const ownerConversationId=snapshot.bots.find(row=>row.workspaceId===snapshot.workspaceId)?.profile.agentConversationId;
+  const resultRefs=useMemo(()=>taskResultReferences(detail?.report?.evidenceRefs),[detail]);
+  useEffect(()=>{setOpenedResult(null);},[view,snapshot.workspaceId,ownerConversationId,detail]);
   const [notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[earlier,setEarlier]=useState(false),[,setTheme]=useState(themeStore.getState());
   const inputDraft=useProjectInputDraft(client,snapshot.workspaceId,editor,view);
   const operationPending=useRef(false);
@@ -86,6 +93,12 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
       const session=snapshot.sessions[command.number-1];if(!session){setNotice(copy('invalid'));return;}
       inputDraft.session.edit({text:''});setDetail(host.supervisor.get({sessionId:session.sessionId,detail:'report'}));setView('task');return;
     }
+    if(command.kind==='result'){
+      const ref=resultRefs[command.number-1];
+      if(view!=='task'||!ref||!ownerConversationId||detail?.workspaceId!==snapshot.workspaceId){setNotice(copy('invalid'));return;}
+      inputDraft.session.edit({text:''});setNotice('');
+      setOpenedResult(previous=>({workspaceId:snapshot.workspaceId,ownerConversationId,sessionId:detail.sessionId,ref,attempt:(previous?.attempt??0)+1}));return;
+    }
     if(command.kind!=='card')return;
     const action=cardAction(command,cards);
     if(!action){setNotice(copy('invalid'));return;}
@@ -110,6 +123,9 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
     if(key.name==='f2'){key.preventDefault();key.stopPropagation();openClassic();return;}
     if(view==='conversation'&&cardFocus&&key.name==='escape'){key.preventDefault();key.stopPropagation();setCardFocus(false);return;}
     if(key.name==='escape'){key.preventDefault();if(view==='bind')void perform(onClassic);else setView('conversation');return;}
+    if(view==='task'&&(key.name==='pageup'||key.name==='pagedown')){
+      key.preventDefault();key.stopPropagation();taskScroll.current?.scrollBy(key.name==='pageup'?-1:1,'viewport');return;
+    }
     if(view==='bind'){
       if(['left','right','up','down','tab'].includes(key.name)){key.preventDefault();setBindYes(!bindYes);}
       if(key.name==='y'||key.name==='n'||isEnterKeyName(key.name)){
@@ -162,7 +178,7 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
     :view==='diagnostics'?snapshot.messages.flatMap(message=>(message.cards??[]).filter(isRecoveryCard).map((card:any)=>`${terminalText(card.cardId)}\n${terminalText(card.content)}`))
     :view==='memory'?(records?.rows??[]).map((row:any)=>`${projectStatus(locale,row.kind)} · ${projectStatus(locale,row.trust)} · ${projectStatus(locale,row.status)}\n${terminalText(row.text)}`)
     :view==='objectives'?(records?.rows??[]).map((row:any)=>`${terminalText(row.title)} · ${projectStatus(locale,row.status)}\n${terminalText(row.outcome??row.description??row.brief??'')}`)
-    :view==='task'?[terminalText(detail?.title),projectSessionStatus(locale,detail || {}),terminalText(detail?.report?.summary),...(detail?.report?.changedFiles??[]).map((row:any)=>terminalText(row.path)),...(detail?.report?.evidenceRefs??[]).map(terminalText)]:[];
+    :view==='task'?[terminalText(detail?.title),projectSessionStatus(locale,detail || {}),terminalText(detail?.report?.summary),...(detail?.report?.changedFiles??[]).map((row:any)=>terminalText(row.path)),...(detail?.report?.evidenceRefs??[]).filter((ref:string)=>!resultRefs.includes(ref)).map(terminalText)]:[];
   const currentCard=cards[Math.min(cardIndex,cards.length-1)];
   const messageDegraded=snapshot.messageState==='unavailable',cardsDegraded=snapshot.cardsUnavailable;
   return <box flexDirection="column" height={terminal.height} width={terminal.width} backgroundColor={COLOR.background} padding={1}>
@@ -189,7 +205,11 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
       :view==='bots'?<BotListView bots={snapshot.bots} selected={selected} locale={locale} height={terminal.height}/>
       :view==='conversation'?<BotConversationView messages={displayedMessages} cards={cards} locale={locale} isHost={snapshot.isHost} selectedCard={cardIndex} option={option} cardFocus={cardFocus}/>
       :view==='cards'?<box flexDirection="column" flexGrow={1}><ThemedText fg={COLOR.textSoft}>{copy('cards')} · {cards.length}</ThemedText>{currentCard?<CardLine row={currentCard} locale={locale} isHost={snapshot.isHost} selected option={option}/>:<ThemedText fg={COLOR.muted}>{copy('empty')}</ThemedText>}<ThemedText fg={COLOR.muted}>{copy('cardKeys')}</ThemedText></box>
-      :<scrollbox flexGrow={1}><ThemedText fg={COLOR.textSoft}>{view==='help'?copy('help'):projectStatus(locale,view)}</ThemedText>{records?.error?<ThemedText fg={COLOR.info}>{copy('recordsUnavailable')}</ThemedText>:null}{rows.length?rows.map((row,index)=><ThemedText key={index} selectable fg={COLOR.text} marginBottom={1}>{row}</ThemedText>):view!=='help'&&!records?.error?<ThemedText fg={COLOR.muted}>{copy('empty')}</ThemedText>:null}</scrollbox>}
+      :<scrollbox ref={view==='task'?taskScroll:undefined} flexGrow={1} flexBasis={view==='task'?0:undefined} minHeight={0}><ThemedText fg={COLOR.textSoft}>{view==='help'?copy('help'):projectStatus(locale,view)}</ThemedText>{records?.error?<ThemedText fg={COLOR.info}>{copy('recordsUnavailable')}</ThemedText>:null}{rows.length?rows.map((row,index)=><ThemedText key={index} selectable fg={COLOR.text} marginBottom={1}>{row}</ThemedText>):view!=='help'&&!records?.error?<ThemedText fg={COLOR.muted}>{copy('empty')}</ThemedText>:null}
+        {view==='task'&&detail?.workspaceId===snapshot.workspaceId?resultRefs.map((ref,index)=><ThemedText key={ref} fg={COLOR.link} selectable>{`/result ${index+1} · ${copy('resultOpen')} ${ref.slice(-12)}`}</ThemedText>):null}
+        {view==='task'&&openedResult?.workspaceId===snapshot.workspaceId&&openedResult.ownerConversationId===ownerConversationId&&openedResult.sessionId===detail?.sessionId
+          ?<TaskResultText key={`${openedResult.ref}:${openedResult.attempt}`} host={host} sessionId={openedResult.sessionId} reference={openedResult.ref} locale={locale}/>:null}
+      </scrollbox>}
     <ThemedText fg={COLOR.info}>{notice}</ThemedText>
     {snapshot.workspaceId?<InputRecoveryStatus state={inputDraft.state} locale={locale}/>:null}
     {!['bind','bots','cards'].includes(view)?<>
@@ -203,7 +223,7 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
           submit(text);
         }
       }}/></box>
-      <ThemedText fg={COLOR.muted}>/help · {copy('switchHint')} · {earlier?copy('earlier'):copy('latest')}</ThemedText>
+      <ThemedText fg={COLOR.muted}>/help · {copy('switchHint')} · {view==='task'&&resultRefs.length?copy('resultScroll'):earlier?copy('earlier'):copy('latest')}</ThemedText>
       {cards.length?<ThemedText fg={COLOR.muted}>/cards · {cardFocus?copy('cardKeysFocused'):copy('cardKeys')}</ThemedText>:null}
     </>:null}
   </box>;

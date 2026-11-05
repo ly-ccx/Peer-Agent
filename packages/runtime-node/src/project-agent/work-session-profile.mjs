@@ -1,4 +1,5 @@
 import { executionIdentity } from './session-control-kernel.mjs';
+import { interactiveExcludedCapabilityPrefixes } from '../interactive-results/role-policy.mjs';
 /**
  * 带 delegationOrigin 的 GoalPlan 是任务。
  * 任务回合使用开任务时冻结的模型；没有快照时由调用方传入 B1-09 的解析结果。
@@ -88,6 +89,7 @@ export function resolveDelegatedWorkTurn(plan, kind, {
   };
 }
 
+/** @param {{plan?: import('@peer-agent/protocol').GoalPlan, kind?: string, fallback?: Record<string, any> | null}} [options] */
 export function resolveWorkSessionProfile({ plan, kind = 'worker', fallback = null } = {}) {
   if (!isDelegatedWorkSession(plan)) return null;
   const origin = plan.delegationOrigin;
@@ -121,6 +123,6 @@ export function resolveWorkSessionProfile({ plan, kind = 'worker', fallback = nu
 
 /** The same role policy gates model projections and the local Provider. */
 export function agentCommunicationExcludedPrefixes(profile) {
-  return profile?.role === 'project_agent' || profile?.role === 'work_session' && (profile?.agentKind ?? profile?.turnContext?.agentKind) === 'worker'
-    ? [] : ['local.delegation.send_agent_message', 'local.continuity.'];
+  return [...(profile?.role === 'project_agent' || profile?.role === 'work_session' && (profile?.agentKind ?? profile?.turnContext?.agentKind) === 'worker'
+    ? [] : ['local.delegation.send_agent_message', 'local.continuity.']), ...interactiveExcludedCapabilityPrefixes(profile)];
 }

@@ -38,6 +38,7 @@ export function ReadingNotice({ read, isZh, children }: { readonly read: ReturnT
 }
 export function NativeResourceDocument({ context, isZh, path, initialPositions, onPositions }: { readonly context: ResourceWindowContext; readonly isZh: boolean; readonly path?: string;
   readonly initialPositions?: Readonly<Record<string, { top: number; left: number }>>; readonly onPositions?: (positions: Readonly<Record<string, { top: number; left: number }>>) => void }) {
+  if (context.resource.kind === 'interactive') throw Error('invalid_document_resource');
   const navigation = useNativeNavigation();
   const [draft, setDraft] = useState<ResourceEditSession | null>(null);
   const diff = context.resource.kind === 'comparison' || context.resource.kind === 'document' && context.resource.mode === 'diff';
@@ -97,6 +98,7 @@ export function NativeResourceDocument({ context, isZh, path, initialPositions, 
 }
 
 export function NativeResourceDirectory({ context, isZh }: { readonly context: ResourceWindowContext; readonly isZh: boolean }) {
+  if (context.resource.kind !== 'directory') throw Error('invalid_directory_resource');
   const root = context.resource.reference.path, navigation = useNativeNavigation()!;
   const [selected, setSelected] = useState<string | null>(null);
   const positions = useRef(new Map<string, Readonly<Record<string, { top: number; left: number }>>>());

@@ -25,10 +25,11 @@ export function BotWorkSessionRow({ session, overview, parent, question, variant
   const progress = overview?.planProgress;
   const knownProgress = progress && Number.isFinite(progress.total) && progress.total > 0
     && Number.isFinite(progress.completed) && progress.completed >= 0 && progress.completed <= progress.total ? progress : undefined;
+  const statusDetail = formatDrawerSessionStatus(session, i18n);
   const detail = question || overview?.issueDetail || (session.status === 'verifying'
     ? session.verificationProgress ? i18n.t('projectAgent.chat.agent.verificationProgress', { count: session.verificationProgress.observationCount })
       : i18n.t('projectAgent.chat.work.verifyingHint')
-    : overview?.currentGoalTitle || formatDrawerSessionStatus(session, i18n) || status);
+    : overview?.currentGoalTitle || (statusDetail === session.status ? status : statusDetail || status));
   const identity = agentIdentity(session.sessionId);
   const progressLabel = knownProgress ? i18n.t('projectAgent.workPanel.progress', {
     completed: knownProgress.completed, total: knownProgress.total,
@@ -48,7 +49,6 @@ export function BotWorkSessionRow({ session, overview, parent, question, variant
       <span className="bot-work-panel-session-detail">{detail}</span>
       <span className="bot-work-panel-session-meta">
         {knownProgress ? <span>{progressLabel}</span> : null}
-        {variant === 'agent' && session.modelLabel ? <span>{session.modelLabel}</span> : null}
         {variant === 'agent' && parent ? <span>{i18n.t('projectAgent.workPanel.source', { name: parent.title })}</span> : null}
       </span>
     </span>

@@ -18,7 +18,7 @@ export async function runContinuedVerification(options) {
 }
 
 async function runReview({ run, signal, timeoutMs = VERIFICATION_TIMEOUT_MS,
-  allowedEvidenceRefs = [], identity, port = null, now = () => Date.now(), limits = VERIFIER_TOTAL_LIMITS }) {
+  allowedEvidenceRefs = [], identity, port = null, validateReport = null, now = () => Date.now(), limits = VERIFIER_TOTAL_LIMITS }) {
   let state = port?.load?.() || null;
   if (state?.phase === 'tools') throw failure('execution_outcome_unknown', 'Verifier tool results require host reconciliation before recovery');
   if (state && state.sourceRevision !== identity.sourceRevision) state = null;
@@ -149,5 +149,5 @@ async function runReview({ run, signal, timeoutMs = VERIFICATION_TIMEOUT_MS,
     } });
   // Refs read in earlier slices remain available to the final report decoder.
   if (result.passed && result.evidenceRefs.some(ref => !allowed.has(ref))) throw failure('verifier_failed', 'Verifier cited unindexed evidence');
-  return result;
+  return validateReport ? validateReport(result, allowed) : result;
 }

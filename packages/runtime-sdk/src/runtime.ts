@@ -172,9 +172,13 @@ export function createRuntimeSdk(options: RuntimeSdkOptions): RuntimeSdk {
       : execution.result;
     // Host-only sideband must survive a Hook Evidence clone without becoming
     // enumerable event/storage data. Model-supplied fields cannot create it.
-    const sideband = Object.getOwnPropertyDescriptor(execution.result, 'modelContext');
-    if (result !== execution.result && sideband && sideband.enumerable === false) {
-      result = Object.defineProperty({ ...result }, 'modelContext', sideband);
+    if (result !== execution.result) {
+      const sidebands: PropertyDescriptorMap = {};
+      for (const key of ['modelContext', 'materialObservation'] as const) {
+        const descriptor = Object.getOwnPropertyDescriptor(execution.result, key);
+        if (descriptor?.enumerable === false) sidebands[key] = descriptor;
+      }
+      if (Object.keys(sidebands).length) result = Object.defineProperties({ ...result }, sidebands);
     }
     const resolvedExecution = { ...execution, result };
     emit({ type: 'tool.completed', ...eventBase, decision: preDecision, result });

@@ -61,6 +61,7 @@ export function finishAgentTurn({
   reason = '',
   memoryUsed = [],
   publicUpdates = [],
+  silentWait = null,
 } = {}) {
   const storedRounds = normalizeRounds(rounds);
   const messages = [agentTurnMessage({ turnId, plan, rounds: storedRounds, publicUpdates })];
@@ -77,6 +78,8 @@ export function finishAgentTurn({
     });
     return { messages, replied: true };
   }
+  // A later admitted wait settles the wake while retaining rejected attempts.
+  if (plan?.kind === 'wake' && silentWait) return { messages, replied: false };
   if (toolCallsOf(storedRounds).some(call => call.name === 'post_reply')) {
     const calls = toolCallsOf(storedRounds).filter(call => call.name === 'post_reply');
     if (calls.every(call => successfulSuppression(call.result))) return { messages, replied: false };
@@ -153,7 +156,7 @@ function wakeReminder(events, roster) {
   const lines = [
     'Wake turn. These inbox events are facts, not a new user message.',
     'Speak only by calling post_reply. When owned sessions are still advancing and nothing needs to be said, call wait_for_sessions to end this wake with a structured wait. Never return an empty response to signal waiting.',
-    'Routine start or progress facts that only confirm acknowledged work need no tool queries or status reply. Review a new result or exception for the affected session; do not reopen unrelated past work or poll a running session.',
+    'Routine progress needs no status query or repeated reply. Review a new result or exception for the affected session, use its current revisions, and resolve the current disposition before posting. Do not reopen the historical request or spawn the same work again, and do not reopen unrelated past work or poll a running session.',
   ];
 
   return {

@@ -24,18 +24,22 @@ export function useDocumentReadingPosition(identity: string, mode: string, activ
   const ref = useRef<HTMLDivElement>(null);
   const memory = useMemo(() => createDocumentReadingMemory(persistence?.initial), [identity]);
   const key = persistence?.key ?? mode;
+  const reading = useMemo(() => ({ moved: false }), [memory, key]);
   const pending = useRef<ReturnType<typeof setTimeout> | null>(null);
   const applied = useRef('');
   const [lineResult, setLineResult] = useState<{ key: string; missing: boolean } | null>(null);
   const remember = useCallback(() => {
     if (active && ready && ref.current) {
-      memory.remember(key, ref.current.scrollTop, ref.current.scrollLeft);
+      const { scrollTop, scrollLeft } = ref.current;
+      const point = memory.read(key);
+      if (scrollTop !== point.top || scrollLeft !== point.left) reading.moved = true;
+      memory.remember(key, scrollTop, scrollLeft);
       if (persistence?.onRemember) {
         if (pending.current) clearTimeout(pending.current);
         pending.current = setTimeout(() => { pending.current = null; persistence.onRemember?.(key, memory.read(key)); }, 250);
       }
     }
-  }, [active, ready, memory, key, persistence?.onRemember]);
+  }, [active, ready, memory, key, reading, persistence?.onRemember]);
   useLayoutEffect(() => () => {
     if (pending.current) {
       clearTimeout(pending.current); pending.current = null;
@@ -62,7 +66,15 @@ export function useDocumentReadingPosition(identity: string, mode: string, activ
     node.scrollTop = point.top; node.scrollLeft = point.left;
   }, [active, ready, identity, memory, mode, key, navigation?.line, navigation?.requestId, persistence?.onRemember]);
   useLayoutEffect(restore, [restore]);
-  return { ref, onScroll: remember, restore, snapshot: memory.snapshot,
+  const restoreUnvisited = useCallback((point: DocumentReadPosition) => {
+    if (reading.moved) return;
+    const node = ref.current, current = memory.read(key);
+    // The browser may have scrolled before it dispatches the scroll event.
+    if (active && ready && node && (node.scrollTop !== current.top || node.scrollLeft !== current.left)) return;
+    memory.remember(key, point.top, point.left);
+    restore();
+  }, [active, ready, key, memory, reading, restore]);
+  return { ref, onScroll: remember, restore, restoreUnvisited, snapshot: memory.snapshot,
     capture: () => { remember(); return memory.read(key); },
     missingLine: !!navigation && lineResult?.key === `${identity}:${navigation.requestId}` && lineResult.missing };
 }

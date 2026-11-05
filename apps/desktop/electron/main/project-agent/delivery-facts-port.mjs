@@ -13,5 +13,6 @@ export function installDeliveryFacts(port) {
 export function liveDeliveryFacts() {
   return {
     read: (view) => (current ? current.read(view) : null),
+    readResultReferences: input => current?.readResultReferences?.(input) ?? [],
   };
 }

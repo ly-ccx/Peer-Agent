@@ -117,6 +117,9 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
       const state = reader.readSnapshot(), head = state.sessionControlHeads?.[sessionId];
       return head ? structuredClone(state.sessionControls?.[head.operationId]) : undefined;
     },
+    readStoppedExecution(execution) {
+      return useV2() ? storage.readStoppedExecution(execution) : undefined;
+    },
     writeSessionControl(operation, expectedRevision, expectedCurrentOperationId) {
       assertOwner();
       if (!useV2()) throw new Error('coordination_writer_upgrade_required');

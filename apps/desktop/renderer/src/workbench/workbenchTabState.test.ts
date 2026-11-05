@@ -34,3 +34,8 @@ test('details is a runtime presentation destination, never a restored open Bot/t
   assert.equal(normalizeWorkbenchTab('conversations'), 'conversations');
   assert.deepEqual(normalizeWorkbenchTabMap({ A: 'conversations', B: 'browser' }), { A: 'launcher', B: 'browser' });
 });
+
+test('interactive selection never enters the old Settings tab map', () => {
+  assert.equal(normalizeWorkbenchTab('interactive'), null);
+  assert.deepEqual(normalizeWorkbenchTabMap({ A: 'interactive', B: 'documents' }), { B: 'documents' });
+});

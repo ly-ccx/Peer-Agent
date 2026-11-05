@@ -93,8 +93,8 @@ export function buildPromptTooLongRecoveryError({ text = '', providerTracePath =
     .join(' ');
 }
 
-export function applyMicrocompaction(messages, { log = console.log } = {}) {
-  const result = microcompactMessagesForContext(messages);
+export function applyMicrocompaction(messages, { log = console.log, preserveLatestUserTurn = false } = {}) {
+  const result = microcompactMessagesForContext(messages, { preserveLatestUserTurn });
   if (result.stats.compactedCount > 0) {
     // 微压缩(Layer 1)是静默的、不发横幅;这里打印它实际改动的消息数与节省字符,
     // 用于区分"5k→5k 横幅"到底是微压缩在动手,还是 Layer 2 语义压缩在动手。
@@ -362,7 +362,7 @@ export async function runCompactionCheck({
 }) {
   // ADR 52：preflight 与 UI 对同一下一请求投影计数。Layer 2 语义压缩仍接收
   // 原始 messages，以便在需要时总结完整历史；预算判断只看 Layer 1 后的发送切片。
-  const projectedMessages = applyMicrocompaction(messages, { log: () => {} }).messages;
+  const projectedMessages = applyMicrocompaction(messages, { log: () => {}, preserveLatestUserTurn }).messages;
   const budget = computeContextBudget({
     messages: projectedMessages,
     contextWindow,

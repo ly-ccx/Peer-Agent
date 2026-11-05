@@ -10,7 +10,7 @@ const observation = value => value && typeof value === 'object' && !Array.isArra
   && (value.contentVersion === undefined || /^sha256:[a-f0-9]{64}$/.test(value.contentVersion));
 
 /** A narrower adapter over the existing scoped reader, never another filesystem authority. */
-export function createResourceWindowReader({ resolveDocument, fileAccess, getOwner }) {
+export function createResourceWindowReader({ resolveDocument, fileAccess, getOwner, interactiveResources }) {
   async function resolve(resource, captured) {
     const owner = await getOwner(resource.reference.workspaceId);
     if (!owner?.conversationId || captured && owner.conversationId !== captured.owner.conversationId) return fail('source_unavailable');
@@ -24,6 +24,7 @@ export function createResourceWindowReader({ resolveDocument, fileAccess, getOwn
   }
   return {
     async prepare(resource) {
+      if (resource.kind === 'interactive') return interactiveResources?.prepareResource(resource) ?? fail('source_unavailable');
       if (resource.kind === 'comparison' && !resource.comparison && (!sha(resource.fromRef) || resource.toRef !== undefined && !sha(resource.toRef))) return fail('invalid_ref');
       const found = await resolve(resource);
       if (!found.ok) return found;
@@ -41,6 +42,7 @@ export function createResourceWindowReader({ resolveDocument, fileAccess, getOwn
         || request.loadCurrent !== undefined && typeof request.loadCurrent !== 'boolean'
         || request.expectedObservation !== undefined && !observation(request.expectedObservation)) return fail('invalid_request');
       const resource = captured.resource;
+      if (resource.kind === 'interactive') return fail('scope_denied');
       const isDirectory = resource.kind === 'directory';
       if (request.path !== undefined && (typeof request.path !== 'string' || request.path.length > 8192 || /[\u0000-\u001f]/.test(request.path)
         || !path.isAbsolute(request.path) || !isDirectory && request.path !== resource.reference.path)) return fail('scope_denied');

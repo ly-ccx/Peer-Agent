@@ -11,7 +11,7 @@ import {
 import { normalizeTurnProfile, projectTurnSystemContext, textField } from "./chat-runtime/turn-context.mjs";
 import { agentMessagesForContext, readWorkingContext, recordAgentContextAdmission } from '@peer-agent/runtime-node/project-agent';
 export { projectTurnSystemContext } from "./chat-runtime/turn-context.mjs";
-import { agentCommunicationExcludedPrefixes } from "@peer-agent/runtime-node/project-agent";
+import { agentCommunicationExcludedPrefixes, sessionWaitProjected } from "@peer-agent/runtime-node/project-agent";
 import {
   buildAnthropicTools,
   buildAnthropicToolsFromModelProjection,
@@ -66,6 +66,7 @@ import { createBotAccessPolicyAuthority, resolvePermissionPrincipal } from "@pee
 import { createProjectRegistry } from "@peer-agent/runtime-node/providers";
 import { resolveRoleRoute } from "@peer-agent/runtime-node/models";
 import { liveMemoryGate } from './project-agent/memory-gate-port.mjs';
+import { desktopInteractiveUserMaterials } from './interactive-results/runtime-port.mjs';
 
 const activeStreams = new Map();
 
@@ -115,11 +116,13 @@ function buildRuntimeTools({
   mode,
   excludeCapabilityPrefixes = null,
   readOnlyWorkSession = false,
+  turnProfile = null,
 }) {
   // mode 作为运行时事实下传到 Runtime Projection，模式隔离工具暴露（ADR 35）。
   // project_agent 回合把投影上的 accessLevel 标成 restricted_local。共享 permission-gate 不在这里改。
   const projectionOptions = {
     readOnlyWorkSession,
+    turnProfile,
     mode,
     ...(mode === 'project_agent' ? { accessLevel: 'restricted_local' } : {}),
     ...(Array.isArray(excludeCapabilityPrefixes) && excludeCapabilityPrefixes.length
@@ -1053,7 +1056,18 @@ export function createLlmChatService({
           provider.contextWindow,
         );
 
+        const runtimeTools = buildRuntimeTools({
+          mcpRegistry, skillStore, providerType: resolvedChannel.legacyProvider, mode: runtimeMode,
+          excludeCapabilityPrefixes: [...(profile?.excludeCapabilityPrefixes ?? []), ...agentCommunicationExcludedPrefixes(profile),
+            ...(sessionWaitProjected(profile) ? [] : ['local.delegation.wait_for_sessions'])],
+          readOnlyWorkSession: goalPlanStore?.getPlan?.(profile?.planId)?.delegationOrigin?.readOnly === true, turnProfile: profile,
+        });
+        const interactiveResultCapabilities = runtimeTools.runtimeProjection.capabilities
+          .filter(capability => capability.capabilityId.startsWith('local.interactive.') && ['available', 'needs_permission'].includes(capability.health))
+          .map(capability => capability.capabilityId);
         const systemContext = buildSystemContext(runWorkspacePath, {
+          interactiveResultCapabilities,
+          interactiveMaterials: desktopInteractiveUserMaterials(toolContext),
           contextAttachments,
           ...(profile?.role === 'project_agent' ? { agentMessages: agentMessagesForContext((profile.context?.events || []).filter(event => event.kind === 'agent_message').map(event => ({ kind: 'agent_message', agentMessage: event.payload?.agentMessage })), conversationId, profile.workspaceId) } : {}),
           workingContext: readWorkingContext({ workspaceId: profile?.workspaceId, workId: profile?.workId, conversationId }),
@@ -1119,6 +1133,8 @@ export function createLlmChatService({
             ? conversationStore?.getConversation?.(conversationId)?.automationCreateContext ?? null
             : null;
           const rebuiltContext = buildSystemContext(runWorkspacePath, {
+            interactiveResultCapabilities,
+            interactiveMaterials: desktopInteractiveUserMaterials(toolContext),
             contextAttachments,
             ...(profile?.role === 'project_agent' ? { agentMessages: agentMessagesForContext((profile.context?.events || []).filter(event => event.kind === 'agent_message').map(event => ({ kind: 'agent_message', agentMessage: event.payload?.agentMessage })), conversationId, profile.workspaceId) } : {}),
             workingContext: readWorkingContext({ workspaceId: profile?.workspaceId, workId: profile?.workId, conversationId }),
@@ -1192,15 +1208,6 @@ export function createLlmChatService({
         const contextWindow = qoderOptionProjection?.inputTokenLimit || provider.contextWindow || 0;
         const maxOutputTokens = provider.maxOutputTokens || 0;
         const onNativeReasoningFallback = (details) => noteNativeReasoningFallback(provider, details);
-        const runtimeTools = buildRuntimeTools({
-          mcpRegistry,
-          skillStore,
-          providerType: resolvedChannel.legacyProvider,
-          mode: runtimeMode,
-          excludeCapabilityPrefixes: [...(profile?.excludeCapabilityPrefixes ?? []), ...agentCommunicationExcludedPrefixes(profile)],
-          readOnlyWorkSession: goalPlanStore?.getPlan?.(profile?.planId)?.delegationOrigin?.readOnly === true,
-        });
-
         try {
           if (resolvedChannel.wire === 'qoder-private') {
             await agentLoopQoder({
@@ -1719,9 +1726,10 @@ export function createLlmChatService({
     listActiveStreams,
     getSelectionRuntimeState,
     resolveGoalRole,
-    readDelegationCapabilities({ readOnly = false } = {}) {
+    readDelegationCapabilities({ readOnly = false, workspaceId, agentKind = 'worker' } = {}) {
       const { runtimeProjection } = buildRuntimeTools({ mcpRegistry, skillStore, providerType: 'openai', mode: 'goal',
-        readOnlyWorkSession: readOnly, excludeCapabilityPrefixes: ['local.web.control.'] });
+        readOnlyWorkSession: readOnly, turnProfile: { role: 'work_session', agentKind, workspaceId },
+        excludeCapabilityPrefixes: ['local.web.control.', ...agentCommunicationExcludedPrefixes({ role: 'work_session', agentKind })] });
       return runtimeProjection.capabilities.filter(capability => ['available', 'needs_permission'].includes(capability.health))
         .map(capability => capability.capabilityId);
     },

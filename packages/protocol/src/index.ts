@@ -57,6 +57,7 @@ export { REMOTE_PROJECT_LIMITS, parseRemoteProjectRequest, admitRemoteProject, p
 export type {
   RemoteProjectGrant,
   RemoteProjectRequest,
+  RemoteProjectInteractiveResult,
   RemoteProjectContext,
   RemoteProjectRejection,
   RemoteProjectAdmission,
@@ -1170,9 +1171,11 @@ export * from './project-input-recovery.ts';
 export { botResourceReferences } from './resource-reference-hints.ts';
 
 export type { ResourceWindowCheckpointRequest, ResourceWindowCheckpointAck, ResourceWindowCloseBlocked, ResourceWindowReturnRequest, ResourceWindowReturnAck, ResourceWindowHistoryEntry, ResourceWindowHistoryResult, ResourceWindowReadRequest, ResourceWindowReadResult, ResourceWindowResource, ResourceWindowNavigation, ResourceWindowOpenRequest, ResourceWindowOwner, ResourceWindowIdentity, ResourceWindowContext, ResourceWindowStatus, ResourceWindowResult } from './resource-window.ts';
-export { normalizeResourceWindowRequest, normalizeResourceWindowOwner, normalizeResourceWindowNavigation } from './resource-window.ts';
+export { normalizeResourceWindowRequest, normalizeResourceWindowOwner, normalizeResourceWindowNavigation, resourceWindowWorkspaceId, resourceWindowTask, normalizeResourceLayout, normalizeResourceLayoutSnapshot, normalizeResourceInteractiveSession, normalizeResourceRecentReference, interactiveReferenceKey } from './resource-window.ts';
+export type { ResourceLayoutSnapshot, ResourcePresentationApi, ResourceInteractiveTab, ResourceInteractiveSession, ResourceRecentReference } from './resource-window.ts';
 export * from './browser-window.js';
 export * from './resource-feedback.js';
+export * from './resource-feedback-transport.js';
 
 export * from './resource-edit.ts';
 export * from './resource-file-replace.ts';
@@ -1181,5 +1184,7 @@ export * from './resource-edit-execution.ts';
 export { decideFollowUp, type FollowUpOwner, type FollowUpReason, type FollowUpProjection } from './task-overview.ts';
 
 export type { SessionExecutionIdentity, StopBarrierReceipt, SessionControlOperation, ExecutionResourceBlocker, ExecutionResourceClaim, ExecutionResourceScope } from './session-control.ts';
-export { controlPhasesForOrigin } from './session-control.ts';
+export { controlPhasesForOrigin, normalizeSessionExecutionIdentity } from './session-control.ts';
 export * from './input-prediction.ts';
+export * from './interactive-result.ts';
+export * from './interactive-verification.ts';

@@ -90,6 +90,22 @@ contextBridge.exposeInMainWorld('peerAgent', {
     return () => ipcRenderer.removeListener('resource-feedback:prepare', handler);
   },
   resourceWindowOpen: request => ipcRenderer.invoke('resource-window:open', request),
+  interactiveResults: Object.freeze({
+    open: request => ipcRenderer.invoke('interactive-results:open', request),
+    cancelOpen: request => ipcRenderer.invoke('interactive-results:cancel-open', request),
+    readState: request => ipcRenderer.invoke('interactive-results:read-state', request),
+    readVersions: request => ipcRenderer.invoke('interactive-results:read-versions', request),
+    openVersion: request => ipcRenderer.invoke('interactive-results:open-version', request),
+    acquire: request => ipcRenderer.invoke('interactive-results:acquire', request),
+    save: request => ipcRenderer.invoke('interactive-results:save', request),
+    release: request => ipcRenderer.invoke('interactive-results:release', request),
+    prepareFollowup: request => ipcRenderer.invoke('interactive-results:prepare-followup', request),
+    prepareDraft: request => ipcRenderer.invoke('interactive-results:prepare-draft', request),
+  }),
+  resourcePresentation: Object.freeze({
+    readLayout: request => ipcRenderer.invoke('resource-presentation:read-layout', request),
+    writeLayout: request => ipcRenderer.invoke('resource-presentation:write-layout', request),
+  }),
   resourceWindowHistory: request => ipcRenderer.invoke('resource-window:history', request),
   resourceWindowRestore: request => ipcRenderer.invoke('resource-window:restore', request),
   resourceWindowForget: request => ipcRenderer.invoke('resource-window:forget', request),

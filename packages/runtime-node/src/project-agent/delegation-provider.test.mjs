@@ -11,7 +11,7 @@ import {
   PROJECT_AGENT_ALLOWED_CAPABILITIES,
   evaluateProjectAgentTurn,
 } from './mode-policy.mjs';
-import { DELEGATION_CAPABILITY_IDS } from './tool-specs.mjs';
+import { DELEGATION_CAPABILITY_IDS, validateDelegationInput } from './tool-specs.mjs';
 
 const USER = { id: 'u1', role: 'user', kind: 'user_input' };
 const ASSISTANT = { id: 'a1', role: 'assistant' };
@@ -567,6 +567,31 @@ test('复核返回结构化事件与详情，期间任务是 verifying，不生�
   assert.notEqual(verdicts[0].verdictRef, verdicts[1].verdictRef);
 });
 
+test('a missing post-review task state leaves the recorded verdict available', async () => {
+  for (const failRead of [true, false]) {
+    let settled = false;
+    const provider = createDelegationProvider({
+      supervisor: { get() {
+        if (!settled) return { sessionId: 's-keep', workspaceId: 'workspace' };
+        if (failRead) throw Error('task state temporarily unavailable');
+        return { sessionId: 's-keep', workspaceId: 'other', status: 'result_ready' };
+      } },
+      verification: {
+        async run() { return { ok: true, facts: { plan: hostPlan('ev-real'),
+          evidenceIndex: ['ev-real'], independentVerifier: 'passed' } }; },
+        async record() { return { ok: true }; },
+        async finish() { settled = true; },
+      },
+    });
+    const result = await provider.executeCapability(
+      call('local.delegation.verify_session', { sessionId: 's-keep' }), agentContext({ workspaceId: 'workspace' }));
+    assert.equal(result.result.status, 'success');
+    const output = outputOf(result);
+    assert.equal(output.event.outcome, 'passed');
+    assert.equal(Object.hasOwn(output, 'sessionState'), false);
+  }
+});
+
 test('引用限定范围内，verify_session 越界被拒绝，读取细节不受限', async () => {
   let runs = 0;
   const provider = createDelegationProvider({
@@ -734,6 +759,10 @@ test('spawn preserves structured Goal criteria and rejects incomplete or forged 
     const failed = await provider.executeCapability(call('local.delegation.spawn_session', spawnInput({ successCriteria: criteria })), agentContext());
     assert.equal(outputOf(failed).error, 'invalid_input');
   }
+  const tooLong = await provider.executeCapability(call('local.delegation.spawn_session',
+    spawnInput({ successCriteria: [{ kind: 'model_review', description: 'x'.repeat(501) }] })), agentContext());
+  assert.equal(outputOf(tooLong).error, 'invalid_input');
+  assert.match(outputOf(tooLong).message, /description of at most 500 characters/);
   assert.equal(seen.length, 1);
 });
 
@@ -850,4 +879,33 @@ test('pure task queries read fresh facts without opening or rewriting the effect
   assert.equal(outputOf(first).sessions[0].sourceRevision, '1');
   assert.equal(outputOf(second).sessions[0].sourceRevision, '2');
   assert.ok(first.result.evidence);
+});
+
+
+test('assessment input errors identify the nested shape and missing fields without accepting them', () => {
+  const assessment = { workId: 'w', expectedWorkRevision: 0, expectedGoalRevision: 1,
+    sourceInputIds: [], sourceEventIds: [], inputs: [], coverage: [],
+    disposition: { kind: 'wait', waitFor: [{ kind: 'session', id: 's', revision: 'obs:s' }] } };
+  const call = { action: 'assess', reason: 'Record current responsibility' };
+  const flattened = validateDelegationInput('coordinate_work', { ...call, ...assessment });
+  assert.equal(flattened.ok, false);
+  assert.match(flattened.message, /nested assessment object/);
+  const missing = validateDelegationInput('coordinate_work', { ...call, assessment });
+  assert.equal(missing.ok, false);
+  assert.match(missing.message, /assessment\.reason/);
+  assert.equal(validateDelegationInput('coordinate_work', { ...call,
+    assessment: { ...assessment, reason: 'Session is still running' } }).ok, true);
+  const unsupported = validateDelegationInput('coordinate_work', { ...call, assessment: {
+    ...assessment, reason: 'Ready to return', disposition: { kind: 'return', replyRef: 'turn-reply-1' },
+    coverage: [{ requirementId: 'delivery', status: 'covered', explanation: 'Reply will be posted next',
+      sources: [{ sessionId: 's', sourceRevision: 'rev:s', evidenceRefs: [] }] }],
+  } });
+  assert.equal(unsupported.ok, false);
+  assert.match(unsupported.message, /assessment\.coverage\[0\].*without persisted evidence/);
+  assert.match(unsupported.message, /currentReplyRef/);
+  const missingSources = validateDelegationInput('coordinate_work', { ...call, assessment: {
+    ...assessment, reason: 'Waiting', coverage: [{ requirementId: 'check', status: 'remaining', explanation: 'Worker is running' }],
+  } });
+  assert.equal(missingSources.ok, false);
+  assert.match(missingSources.message, /assessment\.coverage\[0\]\.sources must be an array/);
 });

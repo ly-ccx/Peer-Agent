@@ -210,6 +210,8 @@ import { createMcpIpcRegistrations } from './ipc/register-mcp-ipc.mjs';
 import { createFileAccessIpcRegistrations } from './ipc/register-file-access-ipc.mjs';
 import { createResourceWindowIpcRegistrations } from './ipc/register-resource-window-ipc.mjs';
 import { createResourceWindowController } from './resource-window-controller.mjs';
+import { createDesktopInteractiveApplication } from './interactive-results/application-service.mjs';
+import { createInteractiveResultsIpcRegistrations } from './ipc/register-interactive-results-ipc.mjs';
 import { createPendingTaskIpcRegistrations } from './ipc/register-pending-task-ipc.mjs';
 import { createPasswordVaultIpcRegistrations } from './ipc/register-password-vault-ipc.mjs';
 import { createProviderConfigurationIpcRegistrations } from './ipc/register-provider-configuration-ipc.mjs';
@@ -1680,10 +1682,16 @@ const fileAccessApplicationService = createFileAccessApplicationService({
     execFileAsync('git', ['-C', cwd, ...args], options),
 });
 
+const interactiveResultsApplication = createDesktopInteractiveApplication({ getRole: sender => trustedWindowRegistry.getRole(sender),
+  getOwner: workspaceId => resourceEditOwner(workspaceId),
+  getNativeBinding: sender => resourceWindowController.interactiveBinding(sender), openWindow: (sender, reference) => resourceWindowController.open(sender, { resource: { kind: 'interactive', reference } }),
+  prepareFeedback: resourceFeedbackPreparation.prepare, readDraft: request => projectAgentDirectory.readInputDraft?.(request),
+});
 const resourceWindowController = createResourceWindowController({
   BrowserWindow, trustedWindows: trustedWindowRegistry, rendererLocation: getTrustedRendererLocation(),
   preloadPath: path.join(__dirname, '../preload/resource-window.cjs'),
   resolveDocument: resolveBotDocumentReference, fileAccess: fileAccessApplicationService,
+  interactiveResources: interactiveResultsApplication,
   prepareFeedback: request => resourceFeedbackPreparation.prepare(request),
   getAppearance: () => settingsStore.getAll().appearance,
   getLocale: () => sessionStore.getSession().locale,
@@ -2218,6 +2226,7 @@ function registerDesktopIpcHost() {
     ...createWorkspaceIpcRegistrations({ workspace: workspaceApplicationService, searchFiles: fileAccessApplicationService.searchWorkspaceFiles }),
     ...createFileAccessIpcRegistrations({ fileAccess: fileAccessApplicationService }),
     ...createResourceWindowIpcRegistrations({ resourceWindows: resourceWindowController }),
+    ...createInteractiveResultsIpcRegistrations({ interactiveResults: interactiveResultsApplication }),
     ...createResourceEditIpcRegistrations({ edits: resourceEdits, submissions: resourceEditSubmissionHost.submissions }),
     ...createResourceFeedbackIpcRegistrations({ preparation: resourceFeedbackPreparation }),
     ...createBrowserWindowIpcRegistrations({ browserWindows: browserWindowController }),
@@ -3825,6 +3834,7 @@ const desktopCompositionRoot = hasSingleInstanceLock ? createDesktopCompositionR
     { name: 'browser-windows', dispose: () => browserWindowController?.dispose() },
     { name: 'resource-feedback-preparation', dispose: () => resourceFeedbackPreparation.dispose() },
     { name: 'resource-windows', dispose: () => resourceWindowController.dispose() },
+    { name: 'interactive-result-views', dispose: () => interactiveResultsApplication.dispose() },
     { name: 'resource-edit-host', dispose: async () => { resourceEdits.dispose(); await resourceEditSubmissionHost.dispose(); resourceEditStorage.close(); resourceEditAuthority.close(); } },
     { name: 'catalog-ipc-main', dispose: () => ipcMain.dispose() },
     { name: 'project-agent', dispose: () => projectAgentDirectory?.dispose() },

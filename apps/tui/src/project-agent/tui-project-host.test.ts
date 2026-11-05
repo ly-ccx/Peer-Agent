@@ -11,7 +11,8 @@ import { createProviderChatModel } from '../provider-chat-model.ts';
 import { createTuiModelSelectionControl } from '../tui-model-selection.ts';
 import { buildTuiSystemPrompt } from '../tui-language.ts';
 import { createTurnTestRuntime, drainTestCleanup, waitForTestStart, type TestCleanup } from './turn-test-support.ts';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { resolveWorkSessionProfile } from '@peer-agent/runtime-node/project-agent';
 import { createInterface } from 'node:readline';
 
 const cleanups: TestCleanup[] = [];
@@ -37,6 +38,180 @@ function start(f: ReturnType<typeof fixture>, executeTurn: (request: any) => Pro
   cleanups.push(() => host.close());
   return host;
 }
+
+test('terminal retention shares the real draft writer and releases compatibility on a busy source', async () => {
+  const f = fixture();
+  let releases = 0;
+  const host = createTuiProjectHost({ ...f, autoStart: false,
+    getSettings: () => ({ projectAgent: { interactiveResults: true } }),
+    acquireInteractiveRetentionCompatibility: () => ({
+      revision: `sha256:${'a'.repeat(64)}`, assertCurrent: () => true, release() { releases++; },
+    }),
+  });
+  cleanups.push(() => host.close());
+  host.leases.acquire(f.workspaceId);
+  const reference = { owner: { workspaceId: f.workspaceId, conversationId: f.conversationId },
+    resultId: 'missing-result', contentVersion: `sha256:${'b'.repeat(64)}` };
+  const writer = host.drafts.acquireRetentionDrafts(f.workspaceId);
+  try {
+    expect(() => host.interactive.retention.preview(reference)).toThrow('DRAFT_BUSY');
+    expect(releases).toBe(1);
+  } finally { writer.release(); }
+  mkdirSync(path.join(f.dataHome, 'goal-plans'), { recursive: true });
+  expect(() => host.interactive.retention.preview(reference)).toThrow('interactive_result_unavailable');
+  expect(releases).toBe(2);
+});
+
+test('a new TUI process recovers an uncommitted preparation from its prior host stop', async () => {
+  const f = fixture();
+  const host = createTuiProjectHost({ ...f, autoStart: false,
+    getSettings: () => ({ projectAgent: { interactiveResults: true }, memory: { enabled: false } }),
+    executeTurn: async () => { throw Error('recovery must not run cognition'); },
+  });
+  let closed = false;
+  try {
+    await host.tick();
+    expect(host.holdsLease(f.workspaceId)).toBe(true);
+    host.conversations.appendMessage(f.conversationId, { id: 'stop-anchor', role: 'user', kind: 'user_input', content: 'Stop this task' } as never);
+    const history = host.conversations.getPersistedConversationHistory!(f.conversationId)!;
+    const child = host.conversations.createChildConversation!({ parentConversationId: f.conversationId, role: 'work_session',
+      anchorMessageId: 'stop-anchor', delegation: { sessionId: 'stopped-session', anchorMessageId: 'stop-anchor', inputId: 'stop-input' },
+      capturedAt: new Date().toISOString(), runtimeState: { conversationId: f.conversationId, contentRevision: history.contentRevision, status: 'idle' },
+      backgroundMessageIds: ['stop-anchor'], confirmMissing: true, title: 'Stopped worker', workspaceId: f.workspaceId } as never);
+    const model = { modelProviderId: provider.id, providerId: provider.provider, modelId: provider.model, family: 'fixture' };
+    const plan = host.plans.createPlan({ title: 'Stopped worker', conversationId: child.id, status: 'completed', tasks: [],
+      delegationOrigin: { workspaceId: f.workspaceId, parentConversationId: f.conversationId, sessionId: 'stopped-session',
+        phase: 'paused', readOnly: true, anchorMessageId: 'stop-anchor', inputId: 'stop-input',
+        modelSelection: { worker: model, explorer: model, verifier: model, resolvedAt: new Date().toISOString() } } } as never);
+    const control = host.supervisor.sessionControl;
+    const operation = control.begin(plan, { kind: 'pause', operationId: 'pause-test', authorityRef: 'stop-input', priorStopReceiptId: undefined });
+    const callRef = { owner: { workspaceId: f.workspaceId, conversationId: f.conversationId },
+      conversationId: child.id, toolCallId: 'prepared-call' };
+    host.interactive.resultStore.beginAttempt({ callRef, source: { ...operation.expectedExecution,
+      conversationId: child.id, toolCallId: callRef.toolCallId },
+      draft: { publication: { kind: 'create' }, title: 'Candidate', textFallback: 'Unverified', program: 'root=Text("test")', inputs: [] } }, () => true);
+    const receipt = await control.drain(host.plans.getPlan(plan.planId), operation);
+    control.settle(host.plans.getPlan(plan.planId), operation, receipt);
+    expect(host.interactive.resultStore.getAttempt(callRef)?.phase).toBe('prepared');
+
+    const helper = path.join(f.dataHome, 'recovery-child.ts');
+    writeFileSync(helper, `
+      import { createTuiProjectHost } from ${JSON.stringify(new URL('./tui-project-host.ts', import.meta.url).href)};
+      const { f, callRef } = JSON.parse(process.argv[2]);
+      let turns = 0;
+      const host = createTuiProjectHost({ ...f, autoStart: false,
+        getSettings: () => ({ projectAgent: { interactiveResults: true }, memory: { enabled: false } }),
+        executeTurn: async () => { turns++; throw Error('recovery must not run cognition'); },
+      });
+      try {
+        await host.tick();
+        console.log('recovery-result ' + JSON.stringify({
+          turns, held: host.holdsLease(f.workspaceId), attempt: host.interactive.resultStore.getAttempt(callRef),
+          operation: host.interactive.resultStore.getOperation(callRef),
+        }));
+      } finally { await host.close(); }
+    `);
+    await host.close();
+    closed = true;
+    const processResult = spawnSync(process.execPath, [helper, JSON.stringify({ f, callRef })], { encoding: 'utf8', timeout: 12_000 });
+    expect(processResult.status, processResult.error?.message || processResult.stderr).toBe(0);
+    const line = processResult.stdout.split('\n').find(row => row.startsWith('recovery-result '));
+    expect(line).toBeDefined();
+    expect(JSON.parse(line!.slice('recovery-result '.length))).toMatchObject({
+      turns: 0, held: true, attempt: { phase: 'failed', code: 'publication_interrupted' }, operation: null,
+    });
+  } finally {
+    if (!closed) await host.close();
+  }
+}, 18_000);
+
+test('actual terminal project host returns fixed report references and attaches them to the canonical Bot reply', async () => {
+  const f = fixture(), runtimeCleanup: TestCleanup[] = [];
+  let host: ReturnType<typeof createTuiProjectHost>, fixed = '', rounds = 0;
+  host = createTuiProjectHost({ ...f, autoStart: false,
+    getSettings: () => ({ providers: [provider], projectAgent: { concurrency: 1, interactiveResults: true }, memory: { enabled: false } }),
+    createRuntime(options) {
+      const toolHost = createTuiHost(options);
+      const model = createProviderChatModel({ model: 'test-model', toolDefinitionsForMode: mode => toolHost.toolDefinitionsForMode!(mode),
+        getSystemPrompt: context => buildTuiSystemPrompt({}, { ...context.systemContextInput, mode: context.mode }),
+        provider: { async stream(request) {
+          rounds++;
+          expect(request.tools?.some(tool => tool.name === 'publish_interactive_result')).toBe(false);
+          const call = (name: string, args: object) => ({ content: '', toolCalls: [{ id: `fixed-main-${rounds}`, name, arguments: JSON.stringify(args) }] });
+          if (rounds === 1) return call('get_session', { sessionId: 'fixed-session', detail: 'report' });
+          // post_reply is terminal after a successful receipt. A third model
+          // request would replay reasoning after the formal reply is settled.
+          expect(rounds).toBe(2);
+          const encoded = JSON.parse(String(request.messages.filter(row => row.role === 'tool').at(-1)?.content));
+          const body = encoded.output ?? encoded;
+          expect(body.ok).toBe(true); expect(body.report.evidenceRefs).toContain(fixed);
+          expect(body.report.evidenceRefs).not.toContain('tool-result://fixed-publication');
+          return call('post_reply', { text: 'The fixed trial is saved; the task remains incomplete and unverified.', replyTo: ['input-show-fixed-result'],
+            sources: ['fixed-session'], statusClaims: [{ sessionId: 'fixed-session', status: body.status }] });
+        } } });
+      return createTurnTestRuntime({ host: toolHost, model, modelSelection: createTuiModelSelectionControl({ providerId: 'configured', modelId: 'test-model', displayName: 'test' }) }, runtimeCleanup);
+    } });
+  cleanups.push(() => drainTestCleanup(runtimeCleanup)); cleanups.push(() => host.close());
+  host.leases.acquire(f.workspaceId);
+  expect(host.holdsLease(f.workspaceId)).toBe(true);
+  host.conversations.appendMessage(f.conversationId, { id: 'fixed-anchor', role: 'user', kind: 'user_input', content: 'Compare the fixed trial' } as never);
+  const history = host.conversations.getPersistedConversationHistory!(f.conversationId);
+  const child = host.conversations.createChildConversation!({ parentConversationId: f.conversationId, role: 'work_session', anchorMessageId: 'fixed-anchor',
+    delegation: { sessionId: 'fixed-session', anchorMessageId: 'fixed-anchor', inputId: 'fixed-input' }, capturedAt: new Date().toISOString(),
+    runtimeState: { conversationId: f.conversationId, contentRevision: history!.contentRevision, status: 'idle' }, backgroundMessageIds: ['fixed-anchor'], confirmMissing: true,
+    title: 'Fixed worker', workspaceId: f.workspaceId } as never);
+  const selection = { modelProviderId: 'configured', providerId: 'openai', modelId: 'test-model', family: 'fixture' };
+  const plan = host.plans.createPlan({ title: 'Fixed trial', conversationId: child.id, status: 'executing',
+    tasks: [{ taskId: 'trial', title: 'Fixed trial', status: 'pending' }, { taskId: 'remaining', title: 'Remaining analysis', status: 'pending' }],
+    delegationOrigin: { workspaceId: f.workspaceId, parentConversationId: f.conversationId, sessionId: 'fixed-session', phase: 'running',
+      anchorMessageId: 'fixed-anchor', inputId: 'fixed-input', modelSelection: { worker: selection, explorer: selection, verifier: selection, resolvedAt: new Date().toISOString() } } } as never);
+  const published = await host.interactive.provider.executeCapability({ call: { toolCallId: 'fixed-publication', capabilityId: 'local.interactive.publish', arguments: {
+    publication: { kind: 'create' }, title: 'Fixed terminal trial', textFallback: 'Unverified saved model trial.', program: 'root=Metric("Value",2)', inputs: [],
+  } } }, { toolContext: { workspaceId: f.workspaceId, conversationId: child.id, turnProfile: resolveWorkSessionProfile({ plan, kind: 'worker' }) }, requestPermission: async () => ({ granted: true }) });
+  expect(published!.result.status).toBe('success'); fixed = (published!.result.outputPreview as any).artifactRef;
+  host.plans.recordEvidenceRefs({ evidenceRefs: ['tool-result://fixed-publication'], artifactRefs: [fixed], planId: plan.planId, conversationId: child.id,
+    toolCallId: 'fixed-publication', capabilityId: 'local.interactive.publish', toolName: 'publish_interactive_result' } as never);
+  host.plans.recordTaskEvidence(plan.planId, 'trial', { status: 'completed', result: 'Saved unverified trial.', evidenceRefs: ['tool-result://fixed-publication'] });
+  host.plans.revisePlan(plan.planId, { status: 'failed', runner: { status: 'failed', error: 'Fixture task incomplete' },
+    delegationOrigin: { ...host.plans.getPlan(plan.planId).delegationOrigin, phase: 'paused' } } as never);
+  const executable = process.env.PEER_TEST_STANDALONE_BINARY;
+  const command = executable ? [executable] : [process.execPath, path.join(import.meta.dir, '../index.tsx')];
+  const prompt = 'Show the saved fixed trial and its current task status';
+  const run = (id: string, text: string, waitMs = 5000) => {
+    const child = Bun.spawn([...command, 'exec', '--bot', '--input-id', id, '--wait-ms', String(waitMs), '--output-format', 'json', text],
+      { cwd: f.workspacePath, env: { ...process.env, PEER_AGENT_HOME: f.dataHome }, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
+    cleanups.push(() => { if (child.exitCode === null) child.kill(); });
+    return Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  };
+  const cli = run('show-fixed-result', prompt);
+  for (let attempt = 0; attempt < 80 && !host.inputs.findSubmission(f.workspaceId, 'show-fixed-result'); attempt++) await Bun.sleep(25);
+  expect(host.inputs.findSubmission(f.workspaceId, 'show-fixed-result')?.text).toBe(prompt);
+  await host.tick();
+  const [exit, stdout, stderr] = await cli;
+  expect(exit, stderr + stdout).toBe(0);
+  const delivered = JSON.parse(stdout);
+  expect(delivered).toMatchObject({ ok: true, botInput: { inputId: 'show-fixed-result', status: 'replied' },
+    interactiveResults: [{ ref: fixed, availability: 'available', textFallback: 'Unverified saved model trial.' }] });
+  expect(host.holdsLease(f.workspaceId)).toBe(true);
+  const [retryExit, retryOut] = await run('show-fixed-result', prompt);
+  expect(retryExit).toBe(0);
+  expect(JSON.parse(retryOut).botInput).toEqual(delivered.botInput);
+  const [conflictExit, conflictOut] = await run('show-fixed-result', 'A different prompt');
+  expect(conflictExit).toBe(1);
+  expect(JSON.parse(conflictOut).error).toBe('bot_input_conflict');
+  const [pendingExit, pendingOut] = await run('later', 'Another queued request', 30);
+  expect(pendingExit).toBe(8);
+  expect(JSON.parse(pendingOut)).toMatchObject({ ok: false, error: 'bot_reply_pending', botInput: { inputId: 'later', status: 'received' } });
+  const messages = host.conversations.getPersistedConversationHistory!(f.conversationId)!.messages;
+  const post = messages.flatMap((row: any) => row.rounds ?? []).flatMap((round: any) => round.toolCalls ?? []).find((call: any) => call.name === 'post_reply');
+  expect((post as any)?.result?.ok, JSON.stringify((post as any)?.result)).toBe(true);
+  expect((post as any)?.result?.meta?.evidenceRefs).toEqual([fixed]);
+  const reply = messages.filter((row: any) => row.kind === 'agent_reply').at(-1);
+  expect(reply).toBeDefined();
+  expect(rounds).toBe(2); expect((reply as any).meta.evidenceRefs).toEqual([fixed]);
+  expect((host.supervisor.get({ sessionId: 'fixed-session', detail: 'report' }) as any).report.evidenceRefs).toEqual([fixed]);
+  expect((reply as any).marks.some((mark: any) => mark.outcome === 'passed')).toBe(false);
+});
 
 test('terminal plan approval is durable before admission and replays only an awaiting plan', async () => {
   const f = fixture(), host = start(f, async () => ({ ok: true, text: 'ready' }));

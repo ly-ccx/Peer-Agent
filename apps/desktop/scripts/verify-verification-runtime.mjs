@@ -25,10 +25,17 @@ for (const name of names) {
 async function packagedChecks() {
   const assert = (await import('node:assert/strict')).default;
   const { pathToFileURL } = await import('node:url');
+  const { join } = await import('node:path');
+  const { setTimeout: delay } = await import('node:timers/promises');
   const base = pathToFileURL(process.argv[2] + '/node_modules/@peer-agent/runtime-node/dist/project-agent/').href;
+  const root = process.env.PEER_AGENT_HOME;
   const { runContinuedVerification } = await import(base + 'verification-continuation.mjs');
   const { assessStall } = await import(base + 'watchdog.mjs');
-  const { createSessionTakeover } = await import(base + 'session-takeover.mjs');
+  const { createSessionSupervisor } = await import(base + 'session-supervisor.mjs');
+  const { createWorkCoordinationStore } = await import(base + 'work-coordination-store.mjs');
+  const { createGoalPlanStore } = await import(new URL('../goal-plan-store.mjs', base));
+  const { createConversationStore } = await import(pathToFileURL(
+    process.argv[2] + '/node_modules/@peer-agent/conversation-store/dist/index.mjs').href);
   const { registerWorkBudget } = await import(base + 'work-budget.mjs');
   const identity = { planId: 'packaged-review', sourceRevision: 'source', modelKey: 'model' };
   let count = 0;
@@ -52,26 +59,46 @@ async function packagedChecks() {
       deadlineAt: new Date(at + 60_000).toISOString(), modelRequests: 1, toolCalls: 0, formatAttempt: 0, evidenceRefs: [] }) },
     run: () => assert.fail('idle packaged review must not dispatch') }), { code: 'verifier_no_progress' });
 
-  let plan = { planId: 'p', conversationId: 'child', status: 'executing', runner: { status: 'paused', intent: 'verify' },
-    delegationOrigin: { workspaceId: 'w', parentConversationId: 'parent', sessionId: 's', phase: 'paused', pausedRunnerIntent: 'verify' } };
-  const binding = { workId: 'work', goalRevision: 1, executionEpoch: 'epoch' };
-  const state = { transitions: { op: { action: 'handoff', oldSessionId: 's', executionEpoch: 'epoch', phase: 'stopping' } },
-    mandates: { work: { goalRevision: 1 } }, works: { work: {} } };
-  const store = { read: () => state, bindSession() {}, advanceTransition(id, from, patch) { Object.assign(state.transitions[id], patch); } };
-  const release = registerWorkBudget('w', store);
-  let promote;
-  const promoted = new Promise(resolve => { promote = resolve; });
+  const workspaceId = 'packaged-takeover';
+  const conversationStore = createConversationStore({ storeDir: join(root, 'conversations') });
+  const goalPlanStore = createGoalPlanStore({ storeDir: join(root, 'goal-plans') });
+  const parent = conversationStore.createConversation({ title: 'Packaged probe', role: 'project_agent', workspaceId, workspacePath: root });
+  conversationStore.appendMessage(parent.id, { id: 'anchor', role: 'user', kind: 'user_input', content: 'Correct the remaining work.' });
+  const model = { modelProviderId: 'probe', providerId: 'local', modelId: 'probe', family: 'probe', tools: true, contextTokens: 32_000 };
+  const route = { mode: 'tier', tier: 'strong' };
+  const starts = [];
+  const supervisor = createSessionSupervisor({ conversationStore, goalPlanStore, catalog: [model],
+    routing: { tiers: { strong: { primary: 'probe' } }, roles: { session_worker: route, explorer: route, verifier: route } },
+    goalRunner: { async start(planId) { starts.push(goalPlanStore.getPlan(planId)?.runner?.intent); }, async resume() {} },
+    readDelegationCapabilities: () => ['local.file.read'], autonomousCoordinationEnabled: () => true });
+  await supervisor.reconciled;
+  const store = createWorkCoordinationStore({ rootDir: root, workspaceId, holdsLease: () => true, leaseEpoch: () => 'packaged-owner',
+    formatVersion: 2, fenceLegacyWrites: true });
+  await store.prepare();
+  store.saveWork({ workId: 'work', parentConversationId: parent.id, state: 'waiting_children' });
+  const release = registerWorkBudget(workspaceId, store);
   try {
-    const takeover = createSessionTakeover({ findBySession: () => plan,
-      goalPlanStore: { getPlan: () => plan, revisePlan(id, patch) { plan = { ...plan, ...patch }; return plan; },
-        setRunnerState(id, patch) { plan.runner = { ...plan.runner, ...patch }; } },
-      goalRunner: { pause() {}, async waitForIdle() {} },
-      executionScheduler: { cancelPlan() {}, async waitForPlanIdle() {} },
-      exclusive: fn => fn(), canManageWorkspace: () => true, promote: async () => promote(),
-      emit() {}, now: () => startedAt });
-    assert.equal((await takeover.request({ sessionId: 's', operationId: 'op', binding }, { workspaceId: 'w', parentConversationId: 'parent' })).pending, true);
-    await promoted;
-    assert.equal(plan.runner.intent, 'execute', 'packaged correction handoff must execute remaining work');
+    const context = { workspaceId, workspacePath: root, conversationId: parent.id, parentConversationId: parent.id,
+      currentInputAnchors: ['anchor'], inputId: 'anchor', workId: 'work', surface: 'desktop' };
+    const opened = await supervisor.coordinateWork({ action: 'parallel', reason: 'Inspect remaining work', task: {
+      anchorMessageIds: ['anchor'], title: 'Inspect', brief: 'Read the current report', kind: 'research', readOnly: true,
+      requiredCapabilities: ['local.file.read'], successCriteria: [{ kind: 'model_review', description: 'Explain the remaining work' }],
+    } }, { ...context, deliveryKey: 'original' });
+    assert.ok(opened.sessionId, JSON.stringify(opened));
+    const { planId } = supervisor.get({ sessionId: opened.sessionId });
+    const plan = goalPlanStore.getPlan(planId);
+    goalPlanStore.revisePlan(planId, { delegationOrigin: { ...plan.delegationOrigin,
+      phase: 'paused', pausedFromPhase: 'running', pausedRunnerIntent: 'verify' } });
+    goalPlanStore.setRunnerState(planId, { status: 'paused', intent: 'verify' });
+    starts.length = 0;
+    const handoff = await supervisor.coordinateWork({ action: 'handoff', sessionId: opened.sessionId,
+      expectedRevision: 1, reason: 'Apply the correction to the remaining work' }, { ...context, deliveryKey: 'correction' });
+    assert.ok(['stopping', 'ready', 'completed'].includes(handoff.phase), JSON.stringify(handoff));
+    const deadline = Date.now() + 3000;
+    while (store.read().transitions.correction?.phase !== 'completed' && Date.now() < deadline) await delay(20);
+    assert.equal(store.read().transitions.correction?.phase, 'completed', JSON.stringify(store.read().transitions.correction));
+    assert.equal(starts.at(-1), 'execute', 'packaged correction handoff must execute remaining work');
+    assert.equal(goalPlanStore.getPlan(planId).delegationOrigin.takeover.phase, 'completed');
   } finally { release(); }
   console.log(JSON.stringify({ checks: ['format_repair_no_tools', 'verification_stall', 'idle_review_settlement', 'correction_handoff_execute'], passed: true }));
 }

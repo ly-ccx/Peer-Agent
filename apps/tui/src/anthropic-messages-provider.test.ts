@@ -6,6 +6,24 @@ import {
 } from './anthropic-messages-provider.ts';
 
 describe('createAnthropicMessagesProvider', () => {
+  test('restored DeepSeek assistant/tool history is admitted as factual context without invented thinking', async () => {
+    let sent: Record<string, unknown> | undefined;
+    const provider = createAnthropicMessagesProvider({ providerId: 'fixture', getApiKey: async () => 'fixture-key',
+      async sendStream(args) { sent = args; return { ok: true, textContent: 'done' }; } });
+    await provider.stream({ model: 'deepseek-flash', tools: [{ name: 'get_session' }], messages: [
+      { role: 'assistant', content: null, toolCalls: [{ id: 'old', name: 'get_session', arguments: '{}' }] },
+      { role: 'tool', toolCallId: 'old', content: 'old result' },
+      { role: 'assistant', content: 'public reply' },
+      { role: 'user', content: 'continue' },
+    ] });
+    const messages = sent?.messages as Array<{ role: string; content: string }>;
+    expect(messages.map(row => row.role)).toEqual(['user', 'user', 'user']);
+    expect(messages[0]?.content).toContain('context only');
+    expect(messages[0]?.content).toContain('old result');
+    expect(messages[1]?.content).toContain('public reply');
+    expect(messages[2]?.content).toBe('continue');
+  });
+
   test('channel session headers preserve Anthropic authentication', async () => {
     let sent: any;
     const provider = createAnthropicMessagesProvider({providerId:'go',getApiKey:async()=> 'fixture-key',

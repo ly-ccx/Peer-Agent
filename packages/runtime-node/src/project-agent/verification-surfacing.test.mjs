@@ -8,6 +8,7 @@ import { createGoalPlanStore } from '../goal-plan-store.mjs';
 import { createSessionVerification } from './session-verification.mjs';
 import { createSessionSupervisor } from './session-supervisor.mjs';
 import { createDelegationProvider } from './delegation-provider.mjs';
+import { beginVerificationAttempt } from './session-facts.mjs';
 import { composeReply } from './reply-composer.mjs';
 
 for (const passed of [true, false]) test(`task verification and main-bot reporting share host facts after restart: ${passed}`, async t => {
@@ -34,21 +35,52 @@ for (const passed of [true, false]) test(`task verification and main-bot reporti
   const context = { mode: 'project_agent', role: 'project_agent', workspaceId: 'ws', parentConversationId: parent.id,
     messages: [{ id: 'input', role: 'user', kind: 'user_input' }] };
   const call = (name, args) => ({ call: { toolCallId: name, capabilityId: `local.delegation.${name}`, arguments: args } });
-  const reviewed = await provider.executeCapability(call('verify_session', { sessionId: 'session' }), context);
+  const baseline = await provider.executeCapability(call('get_verification_detail', { sessionId: 'session' }), context);
+  assert.equal(verification.facts('session').explicitVerification, undefined);
+  assert.equal(baseline.result.output.explicitVerification, undefined);
+  const endAutomaticReview = beginVerificationAttempt(plan.planId, 'automatic-review');
+  try {
+    const pending = await provider.executeCapability(call('get_verification_detail', { sessionId: 'session' }), context);
+    assert.equal(pending.result.output.verificationInProgress, true);
+    assert.equal(pending.result.output.outcome, baseline.result.output.outcome);
+    assert.equal(pending.result.output.explicitVerification, undefined);
+    const busy = await provider.executeCapability(call('verify_session', { sessionId: 'session' }), context);
+    assert.equal(busy.result.status, 'failed');
+    assert.equal(busy.result.output.error, 'verifier_in_progress');
+    assert.equal(busy.result.output.nextAction, 'wait_for_verification');
+    assert.equal(supervisor.get({ sessionId: 'session' }).status, 'verifying');
+    assert.equal(plans.getPlan(plan.planId).hostVerification, undefined);
+  } finally {
+    endAutomaticReview();
+  }
+  const request = call('verify_session', { sessionId: 'session' });
+  request.call.toolCallId = 'verify-session-after-automatic-review';
+  const reviewed = await provider.executeCapability(request, context);
   assert.equal(reviewed.result.status, 'success', JSON.stringify(reviewed.result.output));
   assert.ok(reviewed.grant.granted);
   assert.ok(reviewed.result.evidence);
   const result = reviewed.result.output;
   assert.equal(result.card, undefined);
   assert.equal(result.status, passed ? 'passed' : 'failed');
+  const current = supervisor.get({ sessionId: 'session' });
+  assert.notEqual(current.status, 'verifying');
+  assert.deepEqual(result.sessionState, { sessionId: 'session', status: current.status,
+    sourceRevision: current.sourceRevision, observationRevision: current.observationRevision });
   assert.deepEqual(readFileSync(parentFile), before, 'verification does not append or rewrite public messages');
   const reopened = createGoalPlanStore({ storeDir: plans.getStoreDir() });
   verification = createSessionVerification({ goalPlanStore: reopened, readReport: plan => supervisor.readReportSummary(plan.delegationOrigin.sessionId) });
+  assert.deepEqual(verification.facts('session').explicitVerification, { verdictRef: result.event.verdictRef, outcome: result.status });
+  const stale = createSessionVerification({ goalPlanStore: reopened, readReport: () => 'Changed worker report' });
+  assert.equal(stale.facts('session').explicitVerification, undefined);
+  const staleDetail = (await createDelegationProvider({ verification: stale }).executeCapability(call('get_verification_detail', { sessionId: 'session' }), context)).result.output;
+  assert.equal(staleDetail.explicitVerification, undefined);
   const detail = supervisor.get({ sessionId: 'session', detail: 'report' }).report.verification;
   const toolDetail = (await createDelegationProvider({ verification }).executeCapability(call('get_verification_detail', { sessionId: 'session' }), context)).result.output;
   const { ok, ...body } = toolDetail;
   assert.deepEqual(detail, body, 'task drawer and model tool use the same current verification');
+  assert.deepEqual(detail.explicitVerification, { verdictRef: result.event.verdictRef, outcome: result.status });
   assert.equal(detail.outcome, result.status);
+  assert.equal(detail.verificationInProgress, undefined);
   assert.ok(detail.checks.some(check => check.evidenceRefs.includes('tool-result://fact')));
   const session = supervisor.get({ sessionId: 'session' });
   const reply = composeReply({ messageId: 'reply', kind: 'user', replyTo: ['input'], sources: ['session'],

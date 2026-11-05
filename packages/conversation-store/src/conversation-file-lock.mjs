@@ -11,16 +11,24 @@ export function withFileLock(file, operation) {
   finally { rmSync(lock, { recursive: true, force: true }); }
 }
 
-/** Async terminal callers never spin the main thread while another writer owns a lock. */
-export async function withFileLockAsync(file, operation, timeoutMs = 5000) {
-  const lock = `${file}.lock`, deadline = Date.now() + timeoutMs;
+/** Retry acquisition without holding any lock across a yield to synchronous writers. */
+export async function withFileLocksAsync(files, operation, timeoutMs = 5000) {
+  const locks = files.map(file => `${file}.lock`);
+  const deadline = Date.now() + timeoutMs;
   while (true) {
-    try { mkdirSync(lock); break; }
-    catch (error) {
+    const acquired = [];
+    try {
+      for (const lock of locks) {
+        mkdirSync(lock);
+        acquired.push(lock);
+      }
+    } catch (error) {
+      for (const lock of acquired.reverse()) rmSync(lock, { recursive: true, force: true });
       if (error.code !== 'EEXIST' || Date.now() >= deadline) throw error;
       await delay(5);
+      continue;
     }
+    try { return operation(); }
+    finally { for (const lock of acquired.reverse()) rmSync(lock, { recursive: true, force: true }); }
   }
-  try { return await operation(); }
-  finally { rmSync(lock, { recursive: true, force: true }); }
 }

@@ -51,7 +51,9 @@ export function EvidenceView({ evidence: target, i18n, workspaceId: requestedOwn
     {evidence.deliveryStatus === 'scope_denied' ? <p role="alert">{i18n.locale.startsWith('zh') ? '此证据不属于当前机器人或任务。' : 'This evidence does not belong to the current Bot or task.'}</p> : null}
     {evidence.deliveryStatus === 'available' && evidence.deliveries?.length ? <EvidenceDeliveries deliveries={evidence.deliveries} isZh={i18n.locale.startsWith('zh')} /> : null}
     {resource.loaded && evidence.ok ? <>
-      <p className="bot-evidence-help">{i18n.t('projectAgent.evidence.historical')}</p>
+      {evidence.interactiveAvailability === 'origin_only' ? <p className="bot-evidence-help" role="status">{i18n.locale.startsWith('zh')
+        ? '结果保存在原设备。此处显示已保存的模型摘要，未验证。' : 'The result is stored on the original device. Showing the saved, unverified model summary.'}</p>
+        : <p className="bot-evidence-help">{i18n.t('projectAgent.evidence.historical')}</p>}
       <div className="bot-evidence-content">{content || i18n.t('projectAgent.evidence.emptyOutput')}</div>
     </> : resource.loaded ? <div className="bot-evidence-empty"><PeerIcon name="info" size={18} />
       <div><h4>{i18n.t(message)}</h4><p>{i18n.t(state === 'unavailable' ? 'projectAgent.evidence.tryLater' : 'projectAgent.evidence.cannotVerify')}</p></div></div> : null}

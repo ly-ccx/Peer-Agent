@@ -12,9 +12,9 @@ export function EvidenceDeliveries({ deliveries, isZh }: { readonly deliveries: 
     {deliveries.map(delivery => <article key={JSON.stringify([delivery.evidenceRef, delivery.artifactRef])}>
       <h4><PeerIcon name={delivery.kind === 'image' ? 'image' : 'fileText'} size={16} />{delivery.label}</h4>
       <DeliveryHistory delivery={delivery} isZh={isZh} />
-      <button type="button" className="ui-button is-compact" disabled={!workspace?.ready || !delivery.reference} onClick={() => workspace?.openDelivery(delivery)}>
-        {isZh ? '打开当前文件' : 'Open current file'}</button>
-      {!delivery.reference ? <p className="resource-source-label">{isZh ? '未保存可核对的文件位置。' : 'No verifiable file location was saved.'}</p> : null}
+      <button type="button" className="ui-button is-compact" disabled={!workspace?.ready || delivery.kind !== 'interactive' && !delivery.reference} onClick={() => workspace?.openDelivery(delivery)}>
+        {delivery.kind === 'interactive' ? (isZh ? '打开交互结果' : 'Open interactive result') : (isZh ? '打开当前文件' : 'Open current file')}</button>
+      {delivery.kind !== 'interactive' && !delivery.reference ? <p className="resource-source-label">{isZh ? '未保存可核对的文件位置。' : 'No verifiable file location was saved.'}</p> : null}
     </article>)}
   </MotionDetails>;
 }

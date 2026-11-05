@@ -82,6 +82,24 @@ test('verification reads canonical report content without reentering acceptance 
   } finally {await env.cleanup();}
 });
 
+test('outward evidence projection never changes internal source revisions, report summaries or task facts', async () => {
+  let reads = 0, projected = 'fixed-result-1';
+  const env = await harness({ projectReportEvidence: (_plan, refs) => { reads++; return [...refs, projected]; } });
+  try {
+    const opened = await env.supervisor.spawn(spawnInput(), contextOf(env));
+    const before = env.supervisor.get({ sessionId: opened.sessionId });
+    assert.equal(reads, 0, 'list/status/sourceRevision must not invoke a result display projection');
+    const summary = env.supervisor.readReportSummary(opened.sessionId), first = env.supervisor.get({ sessionId: opened.sessionId, detail: 'report' });
+    assert.ok(first.report.evidenceRefs.includes('fixed-result-1')); assert.equal(reads, 1);
+    projected = 'fixed-result-2';
+    const second = env.supervisor.get({ sessionId: opened.sessionId, detail: 'report' });
+    assert.ok(second.report.evidenceRefs.includes('fixed-result-2')); assert.equal(reads, 2);
+    assert.equal(first.sourceRevision, before.sourceRevision); assert.equal(second.sourceRevision, before.sourceRevision);
+    assert.equal(env.supervisor.readReportSummary(opened.sessionId), summary);
+    assert.equal(env.goalPlanStore.getPlan(second.planId).evidenceRefs.includes('fixed-result-2'), false);
+  } finally { await env.cleanup(); }
+});
+
 test('local plan approval is frozen before execution and survives store reload', async () => {
   let latest;
   const env = await harness({ readPlanApproval: () => 'always', approvalStore: {
@@ -188,6 +206,8 @@ async function harness({
   runGoalTurn = null,
   resolveAcceptancePolicy = null,
   readSessionFacts = null,
+  projectReportEvidence = null,
+  recoverStoppedPublications = null,
   approvalStore = null,
   readPlanApproval = null,
   objectives = null,
@@ -251,6 +271,8 @@ async function harness({
     emitEvent: (event) => { events.push(event); },
     resolveAcceptancePolicy,
     readSessionFacts,
+    projectReportEvidence,
+    recoverStoppedPublications,
     approvalStore,
     readPlanApproval,
     ...(isolationPlanner ? { isolationPlanner } : {}),
@@ -309,6 +331,30 @@ test('structured Git requirements survive plan storage and idempotent spawn repl
     assert.ok(Number.isFinite(Date.parse(reloaded.delegationOrigin.capabilityAdmission.checkedAt)));
     const again = await env.supervisor.spawn(input, contextOf(env));
     assert.equal(again.sessionId, opened.sessionId); assert.equal(again.replayed, true);
+  } finally { await env.cleanup(); }
+});
+
+test('interactive delivery admission requires the actual Verifier inventory before creating any child', async () => {
+  const calls = [];
+  let verifierReady = false;
+  const env = await harness({ readDelegationCapabilities: input => {
+    calls.push(input);
+    return input.agentKind === 'verifier' ? verifierReady ? ['local.interactive.inspect'] : ['local.file.read']
+      : ['local.interactive.publish', 'local.interactive.inspect'];
+  } });
+  try {
+    const input = spawnInput({ kind: 'research', readOnly: true, requiredCapabilities: ['local.interactive.publish'],
+      successCriteria: [{ id: 'interactive', kind: 'model_review', description: 'Check fixed program and data', requiredCapabilities: ['local.interactive.inspect'] }] });
+    const before = env.conversationStore.listChildren(env.parent.id, { role: 'work_session' }).length;
+    const denied = await env.supervisor.spawn(input, contextOf(env));
+    assert.equal(denied.error, 'delegation_capability_unavailable');
+    assert.equal(denied.diagnostic.role, 'verifier');
+    assert.deepEqual(denied.diagnostic.missing, ['local.interactive.inspect']);
+    assert.equal(env.conversationStore.listChildren(env.parent.id, { role: 'work_session' }).length, before);
+    assert.deepEqual(calls.at(-1), { readOnly: true, workspaceId: 'ws-1', agentKind: 'verifier' });
+    verifierReady = true;
+    const opened = await env.supervisor.spawn(input, contextOf(env));
+    assert.equal(opened.error, undefined);
   } finally { await env.cleanup(); }
 });
 
@@ -876,8 +922,8 @@ function hostPassPatch() {
   };
 }
 
-async function completedSession(env) {
-  const opened = await env.supervisor.spawn(spawnInput(), contextOf(env));
+async function completedSession(env, input = spawnInput()) {
+  const opened = await env.supervisor.spawn(input, contextOf(env));
   const planId = env.supervisor.get({ sessionId: opened.sessionId }).planId;
   env.goalPlanStore.revisePlan(planId, hostPassPatch(), { reason: 'host evidence', changedBy: 'test' });
   env.goalPlanStore.recordEvidenceRefs({
@@ -940,7 +986,8 @@ test('missing independent verification cannot mint policy acceptance', async () 
 test('回复引用任务之后才代签，字段含 acceptedBy、acceptedAt 和 verdictRef', { timeout: 20_000 }, async () => {
   const env = await harness({ readSessionFacts: () => ({ hostAuthority: { independentVerifier: 'passed' } }) });
   try {
-    const opened = await completedSession(env);
+    const opened = await completedSession(env, spawnInput({ kind: 'research', readOnly: true,
+      successCriteria: [{ id: 'c1', kind: 'model_review', description: '核对执行结果' }] }));
     const early = await env.supervisor.settle(opened.sessionId, { userAgreed: true, acceptedBy: 'user' });
     assert.equal(early.accepted, false);
     assert.equal(early.acceptedBy, undefined);
@@ -956,13 +1003,23 @@ test('回复引用任务之后才代签，字段含 acceptedBy、acceptedAt 和 
     assert.equal(unlabeled.accepted, false);
     assert.equal(env.goalPlanStore.getPlan(opened.planId).resultAcceptance, undefined);
 
-    env.conversationStore.appendMessage(env.parent.id, {
-      id: 'reply-1',
-      role: 'assistant',
-      kind: 'agent_reply',
-      content: '登录已经修好',
-      sources: [opened.sessionId],
+    env.goalPlanStore.setRunnerState(opened.planId, { waitingOnUser: false });
+    const { sessionId, status, sourceRevision, observationRevision } = env.supervisor.get({ sessionId: opened.sessionId });
+    assert.equal(status, 'result_ready');
+    const state = { sessionId, status, sourceRevision, observationRevision };
+    const report = (id, content, sessionState) => env.conversationStore.appendMessage(env.parent.id, {
+      id, role: 'assistant', kind: 'agent_reply', content,
+      meta: { sources: [sessionId], sessionStates: [sessionState] },
     });
+    report('progress-1', '正在独立核验', { ...state, status: 'verifying' });
+    assert.equal((await env.supervisor.settle(sessionId)).accepted, false);
+    assert.equal(env.goalPlanStore.getPlan(opened.planId).resultAcceptance, undefined);
+    report('old-result', '早先版本已核验', { ...state, sourceRevision: 'older-result' });
+    assert.equal((await env.supervisor.settle(sessionId)).accepted, false);
+    report('old-review', '早先观察已核验', { ...state, observationRevision: 'older-observation' });
+    assert.equal((await env.supervisor.settle(sessionId)).accepted, false);
+
+    report('reply-1', '登录已经修好', state);
     const settled = await env.supervisor.settle(opened.sessionId);
     assert.equal(settled.accepted, true);
     assert.equal(settled.acceptedBy, 'policy');
@@ -2095,11 +2152,15 @@ test('explicit work pause and resume preserve the original GoalPlan and finish i
 });
 
 test('new host resumes only a handoff suspension and preserves its verification intent', async () => {
-  const resumed = [];
+  const resumed = [], recoveryOrder = [];
   let env;
-  env = await harness({goalRunner:{async start(){}, async resume(planId, options){
-    resumed.push({planId,...options}); env.goalPlanStore.resumeRunner(planId,{intent:options.intent});
-  }}});
+  env = await harness({
+    recoverStoppedPublications: workspaceId => recoveryOrder.push(['recover-publications', workspaceId]),
+    goalRunner:{async start(){}, async resume(planId, options){
+      recoveryOrder.push(['resume', planId]);
+      resumed.push({planId,...options}); env.goalPlanStore.resumeRunner(planId,{intent:options.intent});
+    }},
+  });
   try {
     const handoff = await env.supervisor.spawn(spawnInput({kind:'research',readOnly:true}),contextOf(env));
     const manual = await env.supervisor.spawn(spawnInput({kind:'research',readOnly:true,successCriteria:[{id:'c1',kind:'manual',description:'other outcome'}]}),contextOf(env));
@@ -2113,6 +2174,7 @@ test('new host resumes only a handoff suspension and preserves its verification 
     await env.supervisor.resumeRecovered('ws-1');
     const planId = env.supervisor.get({sessionId:handoff.sessionId}).planId;
     assert.deepEqual(resumed,[{planId,awaitIdle:false,intent:'verify'}]);
+    assert.deepEqual(recoveryOrder, [['recover-publications', 'ws-1'], ['resume', planId]]);
     assert.equal(env.goalPlanStore.getPlan(planId).delegationOrigin.phase,'running');
     assert.equal(env.supervisor.get({sessionId:manual.sessionId}).status,'paused');
   } finally {await env.cleanup();}

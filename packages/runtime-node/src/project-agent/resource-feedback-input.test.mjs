@@ -49,8 +49,9 @@ test('recipient changes before consume leave the accepted queue intact and write
 });
 test('delegation admits only explicit anchor feedback and rejects conflicting identities', () => {
   const hidden = { ...feedback, id: 'other', excerpt: 'not selected' };
-  const messages = [{ id: 'chosen', resourceFeedback: [feedback] }, { id: 'unrelated', resourceFeedback: [hidden] }];
+  const messages = [{ id: 'chosen', role: 'user', resourceFeedback: [feedback] }, { id: 'unrelated', role: 'user', resourceFeedback: [hidden] }];
   assert.deepEqual(resourceFeedbackFromMessages(messages, ['chosen']), [feedback]);
   assert.deepEqual(resourceFeedbackFromMessages(messages, []), []);
-  assert.throws(() => resourceFeedbackFromMessages([...messages, { id: 'conflict', resourceFeedback: [{ ...feedback, excerpt: 'changed' }] }], ['chosen', 'conflict']), /ID_CONFLICT/);
+  assert.throws(() => resourceFeedbackFromMessages([...messages, { id: 'conflict', role: 'user', resourceFeedback: [{ ...feedback, excerpt: 'changed' }] }], ['chosen', 'conflict']), /ID_CONFLICT/);
+  assert.deepEqual(resourceFeedbackFromMessages([{ id: 'assistant', role: 'assistant', resourceFeedback: [feedback] }], ['assistant']), []);
 });

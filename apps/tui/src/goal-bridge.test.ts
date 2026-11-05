@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { encodeProviderToolResult } from '@peer-agent/runtime-node/providers';
 
 import { createTuiGoalBridge, GOAL_CAPABILITY_IDS, GOAL_TOOL_NAMES } from './goal-bridge.ts';
 
@@ -185,6 +186,31 @@ describe('TuiGoalBridge', () => {
         args: { question: '   ' },
       });
       expect(invalid.result.status).toBe('failed');
+    } finally {
+      await rm(storeDir, { recursive: true, force: true });
+    }
+  });
+
+  test('a materialized plan retains its authoritative task ID in the model preview', async () => {
+    const storeDir = await mkdtemp(path.join(tmpdir(), 'peer-tui-goal-preview-'));
+    try {
+      const bridge = createTuiGoalBridge({ storeDir });
+      const goal = 'Long delegated brief. '.repeat(500);
+      const plan = bridge.store.createPlan({
+        title: 'Long delegated plan', goal, conversationId: 'conv-preview', status: 'executing',
+        tasks: [{ taskId: 'actual-leaf', title: 'Publish fixed result', status: 'pending' }],
+      });
+      const execution = await bridge.execute({
+        capabilityId: GOAL_TOOL_NAMES.getPlan, conversationId: 'conv-preview', mode: 'goal', args: { planId: plan.planId },
+      });
+      const encoded = encodeProviderToolResult({ result: execution.result, execution,
+        conversationId: 'conv-preview', toolCallId: 'read-long-plan', baseDir: path.join(storeDir, 'artifacts') });
+      expect(encoded.materialized).toBe(true);
+      const preview = JSON.parse(encoded.content);
+      expect(preview.stdoutPreview).toContain('"taskId":"actual-leaf"');
+      const full = JSON.parse(await readFile(preview.artifactRef, 'utf8'));
+      expect(full.output.plan.goal).toBe(goal);
+      expect(full.output.plan.tasks[0].taskId).toBe('actual-leaf');
     } finally {
       await rm(storeDir, { recursive: true, force: true });
     }

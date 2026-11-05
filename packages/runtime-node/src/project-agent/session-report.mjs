@@ -17,6 +17,14 @@ export function visibleResult(message) {
   return last ? text(last.content) : segments.length ? '' : text(message?.content);
 }
 
+export function sessionReportEvidenceRefs(plan) {
+  return [...new Set([
+    ...(Array.isArray(plan.evidenceRefs) ? plan.evidenceRefs : []),
+    ...(Array.isArray(plan.criterionResults) ? plan.criterionResults.map(result => result?.evidenceRef) : []),
+    ...completedLeaves(plan.tasks).flatMap(task => Array.isArray(task.evidenceRefs) ? task.evidenceRefs : []),
+  ].map(text).filter(Boolean))];
+}
+
 /** Project actual worker output separately from host verification and requirements. */
 export function buildSessionReport(plan, session, history) {
   const messages = Array.isArray(history?.messages) ? history.messages : [];
@@ -24,11 +32,7 @@ export function buildSessionReport(plan, session, history) {
   const leaves = completedLeaves(plan.tasks);
   const findings = leaves.map(task => text(task.result));
   const summary = worker ? visibleResult(worker) : findings.join('\n\n');
-  const evidenceRefs = new Set([
-    ...(Array.isArray(plan.evidenceRefs) ? plan.evidenceRefs : []),
-    ...(Array.isArray(plan.criterionResults) ? plan.criterionResults.map(result => result?.evidenceRef) : []),
-    ...leaves.flatMap(task => Array.isArray(task.evidenceRefs) ? task.evidenceRefs : []),
-  ].map(text).filter(Boolean));
+  const evidenceRefs = sessionReportEvidenceRefs(plan);
   const changedFiles = (Array.isArray(plan.involvedFiles) ? plan.involvedFiles : []).flatMap(item => {
     const filePath = text(typeof item === 'string' ? item : item?.path);
     return filePath ? [{ path: filePath, summary: text(item?.summary) }] : [];
@@ -41,7 +45,7 @@ export function buildSessionReport(plan, session, history) {
     taskBrief: text(plan.goal),
     keyFindings: findings,
     changedFiles,
-    evidenceRefs: [...evidenceRefs],
+    evidenceRefs,
     ...(summary ? { contentSource: {
       kind: worker ? 'worker_message' : 'task_results',
       ...(worker ? { conversationId: plan.conversationId, messageId: worker.id } : {}),

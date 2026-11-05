@@ -61,7 +61,7 @@ export function BotComposer({
   const fileInput = useRef<HTMLInputElement>(null);
   const trimmed = text.trim();
   const resourceRecipientChanged = !!resourceRecipientConversationId && !!draft.resourceFeedback?.some(row => row.recipient.conversationId !== resourceRecipientConversationId);
-  const hasContent = Boolean(trimmed) || uploads.attachments.length > 0;
+  const hasContent = Boolean(trimmed) || uploads.attachments.length > 0 || !!draft.resourceFeedback?.some(row => row.resource.kind === 'interactive');
   const tooLong = trimmed.length > 100_000;
   const prompt = i18n.t('projectAgent.chat.placeholder', { name: botName });
   const textareaRef = useRef<HTMLTextAreaElement>(null);

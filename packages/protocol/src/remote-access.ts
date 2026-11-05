@@ -101,7 +101,7 @@ export function admitRemoteRead(value: unknown, context: RemoteReadContext): Rem
 }
 
 export const REMOTE_PROJECT_LIMITS = Object.freeze({
-  projects: 200, messages: 50, text: 4000,
+  projects: 200, messages: 50, text: 4000, interactiveResults: 8, interactiveSummary: 256,
   requestBytes: 32 * 1024, delegationBytes: 128 * 1024, resultBytes: 2 * 1024 * 1024,
 });
 
@@ -130,6 +130,13 @@ export type RemoteProjectRequest = RemoteProjectRequestBase & (
   | { readonly operation: 'project.session.read'; readonly workspaceId: string; readonly sessionId: string }
   | { readonly operation: 'project.input.submit'; readonly workspaceId: string; readonly text: string }
 );
+
+/** Optional fixed-result projection on the existing project.session.read response. */
+export type RemoteProjectInteractiveResult = {
+  readonly ref: string;
+  readonly availability: 'available' | 'cleaned';
+} & ({ readonly title: string; readonly summary: string; readonly truncated: boolean }
+  | { readonly title?: never; readonly summary?: never; readonly truncated?: never });
 
 export interface RemoteProjectContext extends Omit<RemoteReadContext, 'delegation' | 'task'> {
   readonly delegation: {

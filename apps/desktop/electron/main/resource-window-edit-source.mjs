@@ -6,7 +6,7 @@ export function createResourceWindowEditSource({ registry, reader, getScope }) {
   function locate(sender, source) {
     const found = registry.readBinding(sender, source?.identity); if (!found.ok) return null;
     const context = found.context, scope = getScope(context.viewId), resource = context.resource;
-    if (!scope || resource.kind === 'comparison' || resource.reference.revision || resource.kind === 'document' && resource.mode === 'diff') return null;
+    if (!scope || resource.kind === 'interactive' || resource.kind === 'comparison' || resource.reference.revision || resource.kind === 'document' && resource.mode === 'diff') return null;
     const target = source.path ?? (resource.kind === 'document' ? scope.target : null);
     if (!target || !path.isAbsolute(target) || (resource.kind === 'directory' ? !inside(scope.target, target) : target !== scope.target)) return null;
     return { context, scope, target };

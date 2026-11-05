@@ -8,6 +8,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.mjs"
+    },
+    "./persisted-history": {
+      "types": "./dist/persisted-history.d.mts",
+      "default": "./dist/persisted-history.mjs"
     }
   },
   "scripts": {
