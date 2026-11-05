@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { createServer } from 'vite';
@@ -16,18 +17,33 @@ test('the SDK transform removes the development bootstrap from the actual public
   assert.match(transformed.code, /Renderer/);
 });
 
-test('the actual Vite dev transform applies the policy before import analysis, without a GUI or listening port', async () => {
+test('the actual Vite dev transform applies the policy before import analysis, without a GUI or listening port', { timeout: 60000 }, async () => {
   const file = fileURLToPath(import.meta.resolve('@openuidev/react-lang'));
   const root = fileURLToPath(new URL('../', import.meta.url));
-  const server = await createServer({ configFile: path.join(root, 'vite.config.ts'), root,
+  const cacheDir = mkdtempSync(path.join(tmpdir(), 'peer-sdk-policy-cache-'));
+  const server = await createServer({ configFile: path.join(root, 'vite.config.ts'), root, cacheDir,
+    plugins: [{ name: 'peer-sdk-policy-test-lifecycle', enforce: 'post', config(config) {
+      // React adds optimizer entries after the inline config is merged. This
+      // middleware-only fixture has no browser crawl to settle their lifecycle.
+      config.optimizeDeps.include = [];
+      // Vite drops null values while merging file and inline config. Apply the
+      // no-watch setting after that merge so shutdown cannot race a root scan.
+      config.server.watch = null;
+    } }],
     optimizeDeps: { noDiscovery: true }, server: { middlewareMode: true, hmr: false, watch: null }, appType: 'custom', logLevel: 'silent' });
   try {
     assert.ok(server.config.optimizeDeps.exclude.includes('@openuidev/react-lang'));
+    assert.deepEqual(server.config.optimizeDeps.include, []);
+    assert.equal(server.config.server.watch, null);
+    assert.deepEqual(server.watcher.getWatched(), {});
     const result = await server.transformRequest(`/@fs/${file}`);
     assert.ok(result?.code);
     assert.doesNotMatch(result.code, /@openuidev\/devtools|data-openui-devtools-auto-mount/);
     assert.match(result.code, /Renderer/);
-  } finally { await server.close(); }
+  } finally {
+    await server.close();
+    rmSync(cacheDir, { recursive: true, force: true });
+  }
 });
 
 test('application and other dependency development behavior stays outside the SDK transform', async () => {
