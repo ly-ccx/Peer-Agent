@@ -70,7 +70,7 @@ test('the real SDK mounts Peer controls without tools or telemetry and recovers 
   for (const mode of ['production', 'development']) {
     const output = path.join(root, mode); await buildFixture(output, mode);
     const main = path.join(output, 'main.cjs');
-    writeFileSync(main, `const{app,BrowserWindow}=require('electron');app.setPath('userData',${JSON.stringify(path.join(root, `data-${mode}`))});app.whenReady().then(()=>new BrowserWindow({width:1100,height:900,show:false,webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true}}).loadURL('data:text/html,<!doctype html><html><body></body></html>'));`);
+    writeFileSync(main, `const{app,BrowserWindow}=require('electron');app.setPath('userData',${JSON.stringify(path.join(root, `data-${mode}`))});app.whenReady().then(()=>new BrowserWindow({width:1100,height:900,show:process.platform==='linux',webPreferences:{backgroundThrottling:false,nodeIntegration:false,contextIsolation:true,sandbox:true}}).loadURL('data:text/html,<!doctype html><html><body></body></html>'));`);
     const app = await _electron.launch({ executablePath: process.env.PEER_TEST_ELECTRON ?? require('electron'), args: [main] });
     try {
       const page = await app.firstWindow(), external = [], errors = [];

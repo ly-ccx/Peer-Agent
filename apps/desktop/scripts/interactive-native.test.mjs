@@ -52,8 +52,15 @@ test('native resource window uses actual preload, authorized IPC, domain state a
     windows.registerWindow({window:source,role:'main',allowedLocations:[${JSON.stringify(location)}]});
     let host,legacyWrites=0,fileReads=0;const resource={kind:'interactive',reference:receipt.reference};
     const interactive=createDesktopInteractiveApplication({getRole:sender=>windows.getRole(sender),getOwner:workspaceId=>workspaceId===owner.workspaceId?owner:null,getNativeBinding:sender=>host.interactiveBinding(sender),getRuntime:()=>runtime});
-    const nativeWindows=[];function QuietWindow(options){const win=new BrowserWindow(options);win.show=()=>{};nativeWindows.push(win);return win}QuietWindow.fromWebContents=contents=>BrowserWindow.fromWebContents(contents);
-    host=createResourceWindowController({BrowserWindow:QuietWindow,trustedWindows:windows,rendererLocation:${JSON.stringify(location)},preloadPath:${JSON.stringify(path.join(desktop, 'electron/preload/resource-window.cjs'))},interactiveResources:interactive,getOwner:()=>owner,getLocale:()=> 'en',readHistory:()=>undefined,writeHistory:()=>{legacyWrites++},resolveDocument:()=>{throw Error('unexpected file lookup')},fileAccess:{readFile:()=>{fileReads++;throw Error('unexpected file read')}}});
+    const nativeWindows=[];
+    function FixtureWindow(options) {
+      // An unmapped X11 window does not reliably produce screenshot frames.
+      const win=new BrowserWindow({...options,webPreferences:{...options.webPreferences,backgroundThrottling:false}});
+      if (process.platform !== 'linux') win.show=()=>{};
+      nativeWindows.push(win);return win;
+    }
+    FixtureWindow.fromWebContents=contents=>BrowserWindow.fromWebContents(contents);
+    host=createResourceWindowController({BrowserWindow:FixtureWindow,trustedWindows:windows,rendererLocation:${JSON.stringify(location)},preloadPath:${JSON.stringify(path.join(desktop, 'electron/preload/resource-window.cjs'))},interactiveResources:interactive,getOwner:()=>owner,getLocale:()=> 'en',readHistory:()=>undefined,writeHistory:()=>{legacyWrites++},resolveDocument:()=>{throw Error('unexpected file lookup')},fileAccess:{readFile:()=>{fileReads++;throw Error('unexpected file read')}}});
     const ipc=createCatalogIpcMain({ipcMain,authorize:windows.authorize});registerIpcOwners({ipc,registrations:[...createResourceWindowIpcRegistrations({resourceWindows:host}),...createInteractiveResultsIpcRegistrations({interactiveResults:interactive})]});
     let current;
     globalThis.nativeFixture={async open(){current=await host.open(source.webContents,{resource,sourceTabId:'fixed-result',navigation:{top:0,left:0}});if(!current.ok)throw Error(JSON.stringify(current));return current},
