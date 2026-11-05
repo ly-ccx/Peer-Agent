@@ -11,7 +11,7 @@ Peer is a local work delegation system for people moving code, documents and res
 
 You keep the important decisions and permissions. Tasks, plans and success criteria organize execution behind the project conversation.
 
-> **Choose the matching version.** The project Bot experience belongs to the **0.1 preview**, with this source prepared for beta channel **`0.1.0-rc.35`** (npm `rc`). Current stable release: **`0.0.18`** (npm `latest`) uses the classic interface. Download availability is determined by [published releases](https://github.com/ly-ccx/Peer-Agent/releases), not the source version.
+> **Choose the matching version.** The project Bot experience belongs to the **0.1 preview**, with this source prepared for beta channel **`0.1.0-rc.36`** (npm `rc`). Current stable release: **`0.0.18`** (npm `latest`) uses the classic interface. Download availability is determined by [published releases](https://github.com/ly-ccx/Peer-Agent/releases), not the source version.
 
 ![Actual project Bot interface with fictional website, documentation and research projects](docs/screenshots/project-bot-showcase-light.jpg)
 
@@ -50,6 +50,8 @@ The preview keeps supervision, stopping and resource handoff durable, and distin
 The work panel beside the conversation groups current tasks, child Agent progress, attention and saved materials. It keeps the main conversation and draft in place while you inspect the work.
 
 In the 0.1 preview, the Workspace beside the conversation opens web pages, documents, code, directories and diffs. From RC30, an independent fourth pane also holds read-only child Agent conversations, separate from Bot settings. Use Quote under a saved Bot reply to follow up on that message while keeping your draft. Reading a result, authorizing a write, accepting work and integrating Git changes are distinct actions.
+
+RC36 includes an opt-in preview of interactive results. See the [user documentation](docs/docs.html#working) for saved versions and follow-ups.
 
 <a id="-quick-start"></a>
 

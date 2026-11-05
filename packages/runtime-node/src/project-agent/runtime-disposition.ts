@@ -49,12 +49,12 @@ export function decideRuntimeDisposition({ previous = {}, sessions = [], outcome
   const result = (state: ProjectWorkState, end: ProjectTurnEnd, handling: RuntimeHandling, waitFor: readonly Wait[] = [], blockedCode?: string): RuntimeDisposition => ({
     state, end, handling, waitFor, repairSessionIds: ownership.repairSessionIds, ...(blockedCode ? { blockedCode } : {}),
   });
-  if (held || previous.pendingControl || previous.stopScope === 'work' && ['paused', 'cancelled'].includes(previous.state || '')) {
+  if (held || runtimeWorkControlHeld(previous) || (!outcome.stopped && runtimeWorkHeld(previous))) {
     const state = previous.state === 'cancelled' ? 'cancelled' : previous.state === 'waiting_children' ? 'waiting_children' : 'paused';
     return result(state, 'user_stopped', previous.pendingControl ? 'host' : 'none',
       state === 'waiting_children' ? ownership.waitingSessionIds.map(id => ({ kind: 'session' as const, id })) : []);
   }
-  if (outcome.stopped || ['paused', 'waiting_children'].includes(previous.state || '') && previous.end === 'user_stopped') {
+  if (outcome.stopped) {
     const waiting = ownership.waitingSessionIds;
     return result(waiting.length ? 'waiting_children' : 'paused', 'user_stopped', 'none', waiting.map(id => ({ kind: 'session' as const, id })));
   }
@@ -86,8 +86,12 @@ export function decideRuntimeDisposition({ previous = {}, sessions = [], outcome
   return result('delivered', 'reply_committed', 'none');
 }
 
-/** Only this durable user-stop shape holds a reply; ordinary child waits remain autonomous. */
+export function runtimeWorkControlHeld(work: Work | null | undefined): boolean {
+  return Boolean(work?.pendingControl || work?.stopScope === 'work'
+    && (['paused', 'cancelled'].includes(work.state || '') || work.end === 'user_stopped'));
+}
+
+/** A stopped reply remains closed while host settlement or child work proceeds. */
 export function runtimeWorkHeld(work: Work | null | undefined): boolean {
-  return Boolean(work && (work.pendingControl || work.stopScope === 'work' && ['paused', 'cancelled'].includes(work.state || '')
-    || ['paused', 'waiting_children'].includes(work.state || '') && work.end === 'user_stopped'));
+  return runtimeWorkControlHeld(work) || work?.end === 'user_stopped';
 }

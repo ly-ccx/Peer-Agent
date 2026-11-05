@@ -17,6 +17,7 @@ const packages = [
 // Host adapters stay private and must not publish as open runtime.
 const privatePackages = [
   { dir: 'packages/runtime-node', name: '@peer-agent/runtime-node' },
+  { dir: 'packages/interactive-content', name: '@peer-agent/interactive-content' },
 ];
 
 if (!['--contents', '--smoke'].includes(mode)) {

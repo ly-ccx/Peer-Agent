@@ -97,7 +97,10 @@ test('the main workspace opens canonical interactive deliveries, restores result
     import{registerIpcOwners}from${JSON.stringify(href('apps/desktop/electron/main/ipc/register-all.mjs'))};
     import{createResourceWindowIpcRegistrations}from${JSON.stringify(href('apps/desktop/electron/main/ipc/register-resource-window-ipc.mjs'))};
     import{createInteractiveResultsIpcRegistrations}from${JSON.stringify(href('apps/desktop/electron/main/ipc/register-interactive-results-ipc.mjs'))};
-    app.setPath('userData',${JSON.stringify(path.join(root, 'app-data'))});await app.whenReady();
+    app.setPath('userData',${JSON.stringify(path.join(root, 'app-data'))});
+    // The driver verifies closing the last window before it closes the app.
+    app.on('window-all-closed',()=>{});
+    await app.whenReady();
     const conversations=createConversationStore({storeDir:${JSON.stringify(path.join(root, 'conversations'))}}),parent=conversations.createConversation({role:'project_agent',workspaceId:'workspace-bot',title:'Trial Bot'});
     const owner={workspaceId:'workspace-bot',conversationId:parent.id},resultStore=createInteractiveResultStore({rootDir:${JSON.stringify(path.join(root, 'runtime'))},assertCompatibility:()=>true}),stateStore=createInteractiveStateStore({resultStore}),runtime={resultStore,stateStore};
     const feedback=createInteractiveFeedbackAdmission({stateStore}),drafts=createProjectInputDraftStore({rootDir:${JSON.stringify(path.join(root, 'runtime'))},validateInteractiveFeedback:feedback.validate});

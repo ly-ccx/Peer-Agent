@@ -2,6 +2,32 @@
 
 All notable changes to Peer Agent are tracked here.
 
+## 0.1.0-rc.36 - 2026-11-05
+
+### 新功能
+
+- 加入默认关闭的 OpenUI 交互结果预览，保留固定版本和选定条件。Desktop 提供交互视图，CLI 提供摘要。符合条件的 Linux x64/ext4 受管部署可在维护窗口清理。
+
+### 修复与改进
+
+- 统一父协调处置和执行所有权事实，接通真实资源等待的查询、准入、事件与冷恢复闭环；静默等待保留无进展保护。
+- 停止回复、工作控制、旧事件托管和技术修复分清责任；现有接管交叉状态通过原停稳回执恢复，不重放未知工具。
+- 任务列表和详情首层直接打开完整会话，其他资料由独立详情按钮展开；主 Bot 排查规则核对版本和搜索范围。
+- 持久化回复停止，重开补回继续入口，原任务从保存的结果续跑。TUI 汇集绑定选择与提示，恢复键入焦点，显示新发消息的时间。
+- 同步双语用户文档、发布说明与站点更新日志。保持协调格式9和未知效果保护。
+
+### What's new (English)
+
+- Add opt-in OpenUI interactive results with fixed versions and saved conditions. Desktop renders the interactive view and the CLI reads the summary. Eligible managed Linux x64/ext4 deployments can run cleanup during maintenance.
+
+### Fixes and improvements (English)
+
+- Unify parent disposition and execution facts; connect real resource waits through query, admission, events and cold recovery while preserving silent-wait progress guards.
+- Separate reply stops, work controls, durable event custody and technical repair. Recover retained takeover interleavings through the original stop proof without replaying unknown tools.
+- Keep complete conversations directly reachable in task lists and details; disclose secondary information separately and improve main-Bot version/search investigation rules.
+- Persist reply stops and restore the Continue action after reopening. Continue from saved results on the original work. TUI groups binding choices, restores typing focus and shows timestamps on newly sent messages.
+- Update bilingual documentation, release notes and the website changelog. Retain coordination format 9 and unknown-effect protection.
+
 ## 0.1.0-rc.35 - 2026-11-02
 
 ### 修复与恢复

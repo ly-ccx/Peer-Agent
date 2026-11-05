@@ -479,6 +479,13 @@ export function createProjectAgentRunner({
     }
   }
 
+  function stoppedReplyCard(turnId, workId, content, replyTo = []) {
+    return { id: `${turnId}-stopped`, turnId, role: 'assistant', kind: 'system_card', card: 'agent_stopped', content, replyTo,
+      ...(workId ? { meta: { workId } } : {}),
+      cards: [{ cardId: `card:agent_stopped:${turnId}`, kind: 'agent_stopped', content,
+        actions: [{ id: 'retry', channel: 'project-agent:retry', payload: { workspaceId: workspace, turnId } }] }] };
+  }
+
   async function completeStoppedTurn(job, outcome, diagnosticTiming) {
     circuitBreaker?.abandonTrial();
     stoppedJob = { ...job, turnId: outcome.turnId };
@@ -488,10 +495,7 @@ export function createProjectAgentRunner({
       publicUpdates: preview?.segments.filter(segment => segment.kind === 'text') ?? [] });
     message.meta = { ...message.meta, diagnosticTiming, recovery: { events: job.events, throughSeq: job.throughSeq } };
     remember(message);
-    remember({ id: `${outcome.turnId}-stopped`, turnId: outcome.turnId, role: 'assistant',
-      kind: 'system_card', card: 'agent_stopped', content: partial, replyTo: preview?.replyTo || [],
-      cards: [{ cardId: `card:agent_stopped:${outcome.turnId}`, kind: 'agent_stopped', content: partial,
-        actions: [{ id: 'retry', channel: 'project-agent:retry', payload: { workspaceId: workspace, turnId: outcome.turnId } }] }] });
+    remember(stoppedReplyCard(outcome.turnId, job.workId, partial, preview?.replyTo));
     coordination?.finish(job, { ...outcome, stopped: true }, readSlot(resolveRoster, job.kind));
     activity.finish('stopped');
     commit(job.throughSeq);
@@ -772,6 +776,14 @@ export function createProjectAgentRunner({
 
   function restoreRecoverableTurn() {
     const messages = readMessages() || [];
+    if (coordination && holdsLease() === true) {
+      for (const { work, job } of coordination.interruptedStops(messages)) {
+        const turn = messages.find(row => row.kind === 'agent_turn' && row.id === work.attemptId)
+          || agentTurnMessage({ turnId: work.attemptId, plan: job });
+        remember({ ...turn, meta: { workId: work.workId, diagnosticTiming: { outcome: 'stopped' } } });
+        remember(stoppedReplyCard(work.attemptId, work.workId, '', turn.replyTo));
+      }
+    }
     const turn = messages.findLast(message => message.kind === 'agent_turn');
     const card = turn && messages.findLast(message => message.turnId === turn.id && ['agent_unavailable', 'agent_stopped'].includes(message.card));
     if (!card || (card.card !== 'agent_stopped' && projectAgentFailureKind(card.content) !== 'budget_exhausted')) return;
@@ -877,6 +889,7 @@ export function createProjectAgentRunner({
     stopResponse(turnId) {
       if (disposed || !acceptingStop || !abortController || abortController.signal.aborted || activity.snapshot()?.turnId !== turnId
         || ['done', 'error', 'stopped', 'disposed'].includes(activity.snapshot()?.phase)) return { ok: false, code: 'STALE_TURN' };
+      if (coordination && !coordination.stopReply(activeWorkId, turnId)) return { ok: false, code: 'STALE_TURN' };
       abortController.abort('user-stop');
       return { ok: true };
     },
