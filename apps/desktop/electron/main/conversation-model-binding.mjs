@@ -11,6 +11,7 @@ export function resolveConversationModelProviderId({
   modelProviderId = null,
   conversationId = null,
   conversationStore = null,
+  loadedConversation = undefined,
 } = {}) {
   const explicitModelProviderId = normalizeModelProviderId(modelProviderId);
   if (explicitModelProviderId) return explicitModelProviderId;
@@ -18,11 +19,16 @@ export function resolveConversationModelProviderId({
   const normalizedConversationId = typeof conversationId === 'string'
     ? conversationId.trim()
     : '';
-  if (!normalizedConversationId || typeof conversationStore?.getConversation !== 'function') {
+  if (!normalizedConversationId) return null;
+  if (
+    loadedConversation === undefined
+    && typeof conversationStore?.getConversation !== 'function'
+  ) {
     return null;
   }
 
-  return normalizeModelProviderId(
-    conversationStore.getConversation(normalizedConversationId)?.modelProviderId,
-  );
+  const conversation = loadedConversation !== undefined
+    ? loadedConversation
+    : conversationStore.getConversation(normalizedConversationId);
+  return normalizeModelProviderId(conversation?.modelProviderId);
 }

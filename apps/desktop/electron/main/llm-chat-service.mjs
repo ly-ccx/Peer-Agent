@@ -59,6 +59,7 @@ import { fetchWithConnectionRecovery } from './provider-transports/recovering-fe
 import { getQoderModelMetadata, resolveQoderModelOptionProjection } from './provider-adapters/qoder-model-catalog.mjs';
 import { startOfLocalDayMs, sumRoleSpendUsd } from './usage-stats.mjs';
 import { resolveConversationModelProviderId } from './conversation-model-binding.mjs';
+import { createConversationLoadHandle, isConversationLoadHandle } from './conversation-load-handle.mjs';
 import { persistContextAccounting } from './chat-runtime/persist-context-accounting.mjs';
 import { afterTerminalCommit } from './chat-runtime/stream-terminal-delivery.mjs';
 import { createApprovalStore } from "@peer-agent/runtime-node/storage";
@@ -166,10 +167,13 @@ function resolveRunWorkspacePath({
   conversationId = null,
   incomingWorkspacePath = null,
   activeWorkspacePath = null,
+  loadConversation = null,
 } = {}) {
-  if (conversationId && conversationStore?.getConversation) {
+  if (conversationId && (typeof loadConversation === 'function' || conversationStore?.getConversation)) {
     try {
-      const conv = conversationStore.getConversation(conversationId);
+      const conv = typeof loadConversation === 'function'
+        ? loadConversation()
+        : conversationStore.getConversation(conversationId);
       const bound = conv?.workspacePath;
       if (bound && typeof bound === 'string') return bound;
     } catch {
@@ -302,11 +306,17 @@ function joinThinkingSeed(segments) {
   return acc;
 }
 
-function resolveResumeSeed(conversationId, assistantMessageId, { resumeInterruptedReply = false, conversationStore = null } = {}) {
+function resolveResumeSeed(conversationId, assistantMessageId, {
+  resumeInterruptedReply = false,
+  conversationStore = null,
+  loadedConversation = undefined,
+} = {}) {
   if (!resumeInterruptedReply) return null;
   if (!conversationId || !assistantMessageId) return null;
-  if (!conversationStore?.getConversation) return null;
-  const conversation = conversationStore.getConversation(conversationId);
+  if (loadedConversation === undefined && !conversationStore?.getConversation) return null;
+  const conversation = loadedConversation !== undefined
+    ? loadedConversation
+    : conversationStore.getConversation(conversationId);
   const message = Array.isArray(conversation?.messages)
     ? conversation.messages.find((m) => m && m.id === assistantMessageId)
     : null;
@@ -418,12 +428,13 @@ export function createLlmChatService({
 
   // 闭包薄封装：把当前捕获的 conversationStore / activeWorkspacePath 注入模块级纯函数
   // resolveRunWorkspacePath（见文件顶部，含完整兜底链说明与单测）。
-  function resolveRunWorkspacePathForRun(conversationId = null, incomingWorkspacePath = null) {
+  function resolveRunWorkspacePathForRun(conversationId = null, incomingWorkspacePath = null, loadConversation = null) {
     return resolveRunWorkspacePath({
       conversationStore,
       conversationId,
       incomingWorkspacePath,
       activeWorkspacePath,
+      loadConversation,
     });
   }
 
@@ -662,7 +673,12 @@ export function createLlmChatService({
     // 时间戳，不重置。用于「网络中断 → 继续」的原地续写，而不是整条重写。
     resumeInterruptedReply = false,
     turnProfile = null,
+    conversationLoad: conversationLoadParam = null,
   }) {
+    const conversationLoad = isConversationLoadHandle(conversationLoadParam)
+      ? conversationLoadParam
+      : createConversationLoadHandle(conversationStore, conversationId);
+    const readLoadedConversation = () => (conversationId ? conversationLoad.load() : null);
     // 托管回合（Goal Runner 等）没有 renderer 再次透传 modelProviderId，但只要绑定了
     // conversationId，就必须继承该会话的模型选择。否则会静默落到全局默认 provider，
     // 造成 UI 显示 ChatGPT、后台实际改跑 Grok 的跨模型漂移。
@@ -675,6 +691,7 @@ export function createLlmChatService({
         modelProviderId,
         conversationId,
         conversationStore,
+        loadedConversation: readLoadedConversation(),
       });
     const providerCandidates = getProviderCandidates(
       effectiveModelProviderId,
@@ -712,7 +729,11 @@ export function createLlmChatService({
     // 会话 workspace 是本轮的 origin：用户从哪里发起、有哪些知识上下文。Goal 模式下，
     // active Goal 可绑定 targetWorkspacePath；此时工具 cwd / 项目指令切换到 target，
     // origin 作为 runtime context extension 注入，不再把 origin 当写入边界。
-    const conversationWorkspacePath = resolveRunWorkspacePathForRun(conversationId, incomingWorkspacePath);
+    const conversationWorkspacePath = resolveRunWorkspacePathForRun(
+      conversationId,
+      incomingWorkspacePath,
+      conversationId ? () => readLoadedConversation() : null,
+    );
     // Agent 默认（chat）与 legacy goal 均可绑定 active Goal 的 target workspace。
     // 项目代理回合不进入 Goal 工作区准备。
     if (!projectAgentTurn && (mode === 'goal' || mode === 'chat')) {
@@ -721,9 +742,7 @@ export function createLlmChatService({
           ? goalPlanStore.getActivePlanByConversation(conversationId)
           : null;
         if (activePlan) {
-          const conversation = typeof conversationStore?.getConversation === 'function'
-            ? conversationStore.getConversation(conversationId)
-            : null;
+          const conversation = readLoadedConversation();
           await preparePlanExecutionWorkspace({
             plan: activePlan,
             conversation,
@@ -753,6 +772,7 @@ export function createLlmChatService({
     const resumeSeed = resolveResumeSeed(conversationId, assistantMessageId, {
       resumeInterruptedReply,
       conversationStore,
+      loadedConversation: readLoadedConversation(),
     });
     const streamRecord = {
       runtimeSessionId: runtimeTurn.sessionId,
@@ -1032,9 +1052,7 @@ export function createLlmChatService({
           oauthProjectId: provider.oauthProjectId || credential.oauthProjectId || null,
           sessionId: conversationId || streamId || undefined,
         });
-        const storedConversation = conversationId
-          ? conversationStore?.getConversation?.(conversationId)
-          : null;
+        const storedConversation = readLoadedConversation();
         const taskAcceptance = taskAcceptanceFromMessages(messages)
           || taskAcceptanceFromMessages(storedConversation?.messages);
         const accountingIdentity = {
@@ -1129,6 +1147,8 @@ export function createLlmChatService({
           continuityContext: nextContinuityContext = continuityContext,
           reason = 'post-compact',
         } = {}) => {
+          // Compaction rebuild runs after the summary request, so this read must see
+          // store updates from that request. It is not part of the pre-send load.
           const rebuiltAutomationCreateContext = conversationId
             ? conversationStore?.getConversation?.(conversationId)?.automationCreateContext ?? null
             : null;
@@ -1714,7 +1734,18 @@ export function createLlmChatService({
   }
 
   return {
-    sendMessage: (params) => withSelectionRequestContext(conversationStore, params?.conversationId, () => sendMessage(params)),
+    sendMessage: (params) => {
+      const handle = isConversationLoadHandle(params?.conversationLoad)
+        ? params.conversationLoad
+        : createConversationLoadHandle(conversationStore, params?.conversationId);
+      const loadedConversation = params?.conversationId ? handle.load() : undefined;
+      return withSelectionRequestContext(
+        conversationStore,
+        params?.conversationId,
+        () => sendMessage({ ...params, conversationLoad: handle }),
+        loadedConversation,
+      );
+    },
     abort,
     forceCompleteConversationStreams,
     setWorkspacePath,
