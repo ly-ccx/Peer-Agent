@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHistorySourceReader } from './history-source-reader.mjs';
+import { createHistorySourceReader, createListPreviewSource } from './history-source-reader.mjs';
+import { readPersistedHistoryFiles } from './persisted-history.mjs';
 
 test('shared source capacity eviction changes cost only, and oversized inputs are not retained',()=>{
  let loads=0;const read=createHistorySourceReader({maxEntries:1,maxBytes:128,load:d=>{loads++;return {messages:[{id:d.conversationId,content:d.body||'value'}]}}});
@@ -19,4 +20,19 @@ test('source publication rejects racing versions and stable errors rather than r
  fail=true;assert.throws(()=>read({...desc,version:2},options),/corrupt/);
  current=false;assert.throws(()=>read({...desc,version:2},options),{code:'BACKGROUND_VERSION_CHANGED'});
  current=true;fail=false;assert.equal(read({...desc,version:3},options).messages[0].content,'fact');
+});
+
+test('list preview source rejects a full history load and serves cache hits from the preview', () => {
+  assert.throws(() => createListPreviewSource({
+    describe: () => '1',
+    load: readPersistedHistoryFiles,
+  }), { code: 'LIST_HOT_PATH_FORBIDS_FULL_HISTORY' });
+  let loads = 0;
+  const read = createListPreviewSource({
+    describe: (id) => id,
+    load(id) { loads += 1; return { excerpt: `preview ${id}`, availability: 'ready' }; },
+  });
+  assert.equal(read('a').excerpt, 'preview a');
+  assert.equal(read('a').excerpt, 'preview a');
+  assert.equal(loads, 1);
 });

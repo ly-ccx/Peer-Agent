@@ -37,13 +37,15 @@ function asWindowPage(conversation, page = {}) {
 }
 
 /** Read-side presentation of frozen task identity and current context-window accounting. */
-export function createConversationReadProjection({ conversationStore, goalPlanStore, llmConfigStore }) {
+export function createConversationReadProjection({ conversationStore, goalPlanStore, llmConfigStore, readWindow }) {
   const project = (conversation) => projectConversationView(conversation, { goalPlanStore, llmConfigStore });
   return (id, options = {}) => {
-    if (options.full === true || typeof conversationStore.readConversationWindow !== 'function') {
+    if (options.full === true || (typeof readWindow !== 'function' && typeof conversationStore.readConversationWindow !== 'function')) {
       return asWindowPage(project(conversationStore.getConversation(id)));
     }
-    const page = conversationStore.readConversationWindow(id, options);
+    const page = typeof readWindow === 'function'
+      ? readWindow(id, options)
+      : conversationStore.readConversationWindow(id, options);
     if (!page) return null;
     return asWindowPage(project({ ...page.meta, messages: page.window }), page);
   };

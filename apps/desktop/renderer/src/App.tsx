@@ -108,6 +108,10 @@ interface ConversationMeta {
   workspacePath?: string | null;
   messageCount: number;
   updatedAt: string;
+  preview?: {
+    excerpt?: string;
+    availability?: 'ready' | 'rebuilding' | 'version_changed' | 'damaged';
+  } | null;
   status?: ConversationStatus;
   archivedAt?: string | null;
   pinnedAt?: string | null;

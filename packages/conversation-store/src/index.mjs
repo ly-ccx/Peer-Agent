@@ -5,7 +5,8 @@ import os from 'node:os';
 import { readPersistedHistoryFiles } from './persisted-history.mjs';
 import { createHistoryProjectionReader } from './history-projection-reader.mjs';
 import { createInteractionReader } from './interaction-reader.mjs';
-import { createHistorySourceReader } from './history-source-reader.mjs';
+import { createHistorySourceReader, createListPreviewSource } from './history-source-reader.mjs';
+import { assignSessionPreview, coerceSessionPreview, sessionPreviewRecord, truncatePreview } from './session-preview.mjs';
 import { buildInheritedBackground } from './inherited-background.mjs';
 import { validateSelectionReference } from './selection-reference.mjs';
 import { createBackgroundSnapshotStore } from './background-snapshot-store.mjs';
@@ -556,6 +557,79 @@ export function createConversationStore(options = {}) {
 
   function readIndex() { return readJsonl(indexFile).map(normalizeMeta); }
 
+  const previewRebuildIds = new Set();
+  let previewRebuildTimer = null;
+
+  function rebuildPreviewFromTail(id) {
+    const before = readIndex().find((row) => row.id === id);
+    if (!before) return;
+    if (coerceSessionPreview(before).availability === 'ready') return;
+    const tail = readJsonlByteWindow(convFile(id), { limit: 40 });
+    withFileLock(indexFile, () => {
+      const index = readIndex();
+      const meta = index.find((row) => row.id === id);
+      if (!meta || meta.contentRevision !== before.contentRevision) return;
+      if (coerceSessionPreview(meta).availability === 'ready') return;
+      assignSessionPreview(meta, tail.messages);
+      writeJsonl(indexFile, index);
+    });
+  }
+
+  function schedulePreviewRebuild(id) {
+    if (!id) return;
+    previewRebuildIds.add(id);
+    if (previewRebuildTimer) return;
+    previewRebuildTimer = setTimeout(() => {
+      previewRebuildTimer = null;
+      const ids = [...previewRebuildIds];
+      previewRebuildIds.clear();
+      for (const conversationId of ids) {
+        try {
+          rebuildPreviewFromTail(conversationId);
+        } catch (error) {
+          if (error?.code === 'ENOENT') continue;
+          console.warn('[conversation-store] preview rebuild failed:', error);
+        }
+      }
+    }, 0);
+    previewRebuildTimer.unref?.();
+  }
+
+  function projectSessionPreview(meta) {
+    if (!meta) return meta;
+    const preview = coerceSessionPreview(meta);
+    if (preview.availability === 'rebuilding') schedulePreviewRebuild(meta.id);
+    return { ...meta, preview, availability: preview.availability };
+  }
+
+  function loadListPreview(id) {
+    const meta = readIndex().find((row) => row.id === id);
+    if (!meta) return null;
+    return projectSessionPreview(meta).preview;
+  }
+
+  function describeListPreview(id) {
+    const meta = readIndex().find((row) => row.id === id);
+    if (!meta) return null;
+    const preview = coerceSessionPreview(meta);
+    return `${meta.contentRevision}:${preview.availability}:${preview.excerpt}:${preview.messageId || ''}`;
+  }
+
+  const listPreviews = createListPreviewSource({
+    describe: describeListPreview,
+    load: loadListPreview,
+  });
+
+  function readSessionPreview(id) {
+    return listPreviews(id);
+  }
+
+  function readSessionMeta(id) {
+    const meta = readIndex().find((row) => row.id === id);
+    if (!meta) return null;
+    return projectSessionPreview({ ...meta, contextSnapshot: durableContextSnapshot(meta) });
+  }
+
   function withMessageCount(meta) {
     if (!meta) return null;
     if (Number.isFinite(Number(meta.messageCount))) {
@@ -676,7 +750,7 @@ export function createConversationStore(options = {}) {
 
     // 显式 backfill 仅用于迁移工具/测试；默认 list 热路径永不读正文。
     if (params?.backfillMessageCount === true) {
-      const filled = ensureMessageCounts(sorted);
+      const filled = ensureMessageCounts(sorted).map(projectSessionPreview);
       const page = applyListPagination(filled, params);
       return params?.paginated === true ? page : page.items;
     }
@@ -688,9 +762,10 @@ export function createConversationStore(options = {}) {
       scheduleMessageCountMigration(missingIds);
     }
 
+    const previewed = sorted.map(projectSessionPreview);
     const projected = params?.includeMessageCount === false
-      ? sorted
-      : sorted.map(projectListMeta);
+      ? previewed
+      : previewed.map(projectListMeta);
     const page = applyListPagination(projected, params);
     return params?.paginated === true ? page : page.items;
   }
@@ -711,7 +786,7 @@ export function createConversationStore(options = {}) {
     const sorted = sortByUpdatedAtDesc(filtered.map((meta) => ({ ...meta })));
 
     if (params?.backfillMessageCount === true) {
-      const filled = ensureMessageCounts(sorted);
+      const filled = ensureMessageCounts(sorted).map(projectSessionPreview);
       const page = applyListPagination(filled, params);
       return params?.paginated === true ? page : page.items;
     }
@@ -723,9 +798,10 @@ export function createConversationStore(options = {}) {
       scheduleMessageCountMigration(missingIds);
     }
 
+    const previewed = sorted.map(projectSessionPreview);
     const projected = params?.includeMessageCount === false
-      ? sorted
-      : sorted.map(projectListMeta);
+      ? previewed
+      : previewed.map(projectListMeta);
     const page = applyListPagination(projected, params);
     return params?.paginated === true ? page : page.items;
   }
@@ -809,6 +885,7 @@ export function createConversationStore(options = {}) {
       createdAt: now,
       updatedAt: now,
     };
+    meta.preview = sessionPreviewRecord(meta, null);
     withFileLock(indexFile, () => appendJsonl(indexFile, meta));
     return { ...meta, messageCount: 0 };
   }
@@ -1204,9 +1281,7 @@ export function createConversationStore(options = {}) {
   const CONVERSATION_OPEN_WINDOW = 80;
 
   function conversationMeta(id) {
-    const meta = readIndex().find((row) => row.id === id);
-    if (!meta) return null;
-    return { ...meta, contextSnapshot: durableContextSnapshot(meta) };
+    return readSessionMeta(id);
   }
 
   function normalizeWindowLimit(value) {
@@ -1374,6 +1449,14 @@ export function createConversationStore(options = {}) {
       meta.titleSource = 'manual';
     }
     meta.updatedAt = new Date().toISOString();
+    if (meta.preview && typeof meta.preview === 'object') {
+      meta.preview = {
+        ...meta.preview,
+        conversationId: meta.id,
+        title: truncatePreview(meta.title),
+        updatedAt: meta.updatedAt,
+      };
+    }
     writeJsonl(indexFile, index);
     return withMessageCount(meta);
   }
@@ -1449,6 +1532,7 @@ export function createConversationStore(options = {}) {
       meta.contentRevision = (Number.isSafeInteger(Number(meta.contentRevision)) ? Number(meta.contentRevision) : 0) + 1;
       meta.contextSnapshot = null;
       meta.updatedAt = new Date().toISOString();
+      assignSessionPreview(meta, message);
       writeJsonl(indexFile, index);
       return returnMessages ? { ...meta, messages: readJsonl(convFile(id)) } : { ...meta };
     });
@@ -1465,6 +1549,7 @@ export function createConversationStore(options = {}) {
       meta.contentRevision = (Number.isSafeInteger(Number(meta.contentRevision)) ? Number(meta.contentRevision) : 0) + 1;
       meta.contextSnapshot = null;
       meta.updatedAt = new Date().toISOString();
+      assignSessionPreview(meta, messages);
       writeJsonl(indexFile, index);
     }
     return meta ? { ...meta, messages } : null;
@@ -1484,6 +1569,7 @@ export function createConversationStore(options = {}) {
       meta.contentRevision = (Number.isSafeInteger(Number(meta.contentRevision)) ? Number(meta.contentRevision) : 0) + 1;
       meta.contextSnapshot = null;
       meta.updatedAt = new Date().toISOString();
+      assignSessionPreview(meta, durableMessages);
       writeJsonl(indexFile, index);
     }
     return meta ? { ...meta, messages: durableMessages } : null;
@@ -1519,6 +1605,7 @@ export function createConversationStore(options = {}) {
       meta.contentRevision = (Number.isSafeInteger(Number(meta.contentRevision)) ? Number(meta.contentRevision) : 0) + 1;
       meta.contextSnapshot = null;
       meta.updatedAt = new Date().toISOString();
+      assignSessionPreview(meta, messages);
       writeJsonl(indexFile, index);
     }
     return meta ? { ...meta, messages } : null;
@@ -1533,6 +1620,7 @@ export function createConversationStore(options = {}) {
         renameSync(prepared.temporaryFile, prepared.historyFile);
         meta.contentRevision = (Number.isSafeInteger(Number(meta.contentRevision)) ? Number(meta.contentRevision) : 0) + 1;
         meta.messageCount = prepared.messageCount; meta.contextSnapshot = null; meta.updatedAt = new Date().toISOString();
+        assignSessionPreview(meta, readJsonlByteWindow(prepared.historyFile, { limit: 40 }).messages);
         writeJsonl(indexFile, index);
         if (readJson(streamPatchFile(prepared.id))?.messageId === prepared.messageId) clearStreamPatch(prepared.id);
         return { meta, receipt: { id: prepared.id, messageId: prepared.messageId, contentRevision: meta.contentRevision } };
@@ -1952,6 +2040,8 @@ export function createConversationStore(options = {}) {
     searchConversations,
     createConversation: changed(createConversation, 'created'),
     getConversation,
+    readSessionPreview,
+    readSessionMeta,
     readConversationWindow,
     readConversationYielding,
     getPersistedConversationHistory,
@@ -2000,3 +2090,10 @@ export function createConversationStore(options = {}) {
     subscribeChanges,
   };
 }
+
+export {
+  createClassicJsonlAdapter,
+  createBotSqliteAdapter,
+  createSessionService,
+} from './session-service.mjs';
+export { coerceSessionPreview, truncatePreview } from './session-preview.mjs';
