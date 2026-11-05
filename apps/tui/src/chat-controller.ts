@@ -98,6 +98,8 @@ export interface ChatMessage {
   readonly id: string;
   readonly role: ChatRole;
   readonly content: string;
+  /** Epoch ms when the message was created. Display only. */
+  readonly timestamp?: number;
   readonly images?: readonly ChatMessageImage[];
   readonly pending?: boolean;
   /**
@@ -1186,6 +1188,7 @@ export function createChatController(options: {
                 id: `user-${++sequence}`,
                 role: 'user' as const,
                 content: userContent,
+                timestamp: Date.now(),
                 ...(images.length > 0 ? { images } : {}),
               }]),
           // Insert a pending assistant immediately so the UI can show a Thinking

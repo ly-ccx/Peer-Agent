@@ -43,6 +43,7 @@ import {
 } from './composer-status-view.tsx';
 import { composerLayoutModel } from './composer-layout-model.ts';
 import { compactWorkspacePath, createComposerStatus, type ComposerStatus } from './composer-status.ts';
+import { formatMessageTime } from './message-time.ts';
 import {
   createChatController,
   formatCompactingStatusLabel,
@@ -451,6 +452,7 @@ function ChatHistory({
       ) : null}
       <scrollbox
         ref={scrollRef}
+        width="100%"
         flexGrow={1}
         flexShrink={1}
         minHeight={0}
@@ -613,13 +615,16 @@ function ChatHistory({
           return (
             <box id={conversationMessageRenderId(message.id)} key={message.id} flexDirection="row" width="100%" gap={roleBodyGap} marginBottom={1}>
               <box width={roleRailWidth}><text fg={COLOR.muted}>YOU</text></box>
-              <box flexDirection="row" flexGrow={1} minWidth={0}>
-                <text fg={COLOR.user}>{APP_CHROME.userRailBar}</text>
-                <box flexDirection="column" flexGrow={1} minWidth={0} paddingLeft={1}>
-                  {userText ? <ThemedText selectable fg={COLOR.text}>{userText}</ThemedText> : null}
-                  {imageLabel ? <ThemedText selectable fg={COLOR.user}>{imageLabel}</ThemedText> : null}
-                  {!userText && !imageLabel ? <ThemedText selectable fg={COLOR.textSoft}>{' '}</ThemedText> : null}
+              <box flexDirection="row" flexGrow={1} minWidth={0} justifyContent="space-between">
+                <box flexDirection="row" flexGrow={1} minWidth={0}>
+                  <text fg={COLOR.user}>{APP_CHROME.userRailBar}</text>
+                  <box flexDirection="column" flexGrow={1} minWidth={0} paddingLeft={1}>
+                    {userText ? <ThemedText selectable fg={COLOR.text}>{userText}</ThemedText> : null}
+                    {imageLabel ? <ThemedText selectable fg={COLOR.user}>{imageLabel}</ThemedText> : null}
+                    {!userText && !imageLabel ? <ThemedText selectable fg={COLOR.textSoft}>{' '}</ThemedText> : null}
+                  </box>
                 </box>
+                {message.timestamp ? <text fg={COLOR.muted} wrapMode="none">{formatMessageTime(message.timestamp)}</text> : null}
               </box>
             </box>
           );
