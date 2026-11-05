@@ -27,11 +27,12 @@ export interface TypewriterOptions {
    */
   readonly framesToDrain?: number;
   /**
-   * 两次「真正写出文本」之间的最小间隔（毫秒）。0 = 每个显示帧都可以写（默认）。
+   * 两次「真正写出文本」之间的最小间隔（毫秒）。0 = 每个显示帧都可以写（默认基线）。
    *
    * 每一次写出都会落到会话状态并触发一次聊天界面重渲染，所以这个值决定的是
-   * 重渲染频率，而不是文字本身的平滑度。可见正文需要跟随屏幕刷新率，保持 0；
-   * 折叠状态下不可见的思考过程没有这个需求，放宽它即可把写入从 60 次/秒降到低频批量。
+   * 重渲染频率，而不是文字本身的平滑度。可见正文走 VISIBLE_TYPEWRITER_OPTIONS
+   * （40ms，仍由 rAF 调度）；折叠状态下不可见的思考过程走 THINKING_TYPEWRITER_OPTIONS。
+   * 这里的 0 只留给不节流的基线与测试，前台正文不要再用它。
    */
   readonly minIntervalMs?: number;
 }
@@ -56,6 +57,19 @@ export const DEFAULT_TYPEWRITER_OPTIONS: Required<TypewriterOptions> = {
  * 模型输出，也不会因为节流丢字。流结束时 flush() 会把剩余 buffer 一次写完。
  */
 export const THINKING_TYPEWRITER_OPTIONS: TypewriterOptions = { minIntervalMs: 250 };
+
+/**
+ * 可见正文的写入节奏。
+ *
+ * 正文要跟手，但每一笔写出都会重渲染聊天界面，不能再按显示帧（约 60 次/秒）写。
+ * 40ms 落在 32–50ms 这一档：rAF 仍是调度时钟，两次真正写出之间至少隔这么久，
+ * 单批字符数按经过的帧数放大，所以平均吐字吞吐与逐帧模式一致，只是把多次小写入
+ * 收成一次。思考通道继续用 THINKING_TYPEWRITER_OPTIONS，不要把两档合成一个间隔。
+ */
+export const VISIBLE_TEXT_MIN_INTERVAL_MS = 40;
+export const VISIBLE_TYPEWRITER_OPTIONS: TypewriterOptions = {
+  minIntervalMs: VISIBLE_TEXT_MIN_INTERVAL_MS,
+};
 
 export function typewriterChunkSize(
   bufferLength: number,

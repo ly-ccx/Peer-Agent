@@ -198,7 +198,11 @@ function AssistantContentImpl({
           if (run.kind === 'text') {
             return (
               <div key={`stream-text-${idx}`} className="segment-text-after-tools">
-                <MarkdownMessage content={run.group.content} selectionSource={selectionSources.get(run.group) ?? null} />
+                <MarkdownMessage
+                  content={run.group.content}
+                  openSlot={isStreaming ? run.group.openSlot : undefined}
+                  selectionSource={selectionSources.get(run.group) ?? null}
+                />
               </div>
             );
           }
@@ -275,7 +279,11 @@ function AssistantContentImpl({
       {finalTextGroups.length > 0 ? (
         finalTextGroups.map((textGroup, idx) => (
           <div key={`final-text-${idx}`} className="segment-text-after-tools">
-            <MarkdownMessage content={textGroup.content} selectionSource={selectionSources.get(textGroup) ?? null} />
+            <MarkdownMessage
+              content={textGroup.content}
+              openSlot={isStreaming ? textGroup.openSlot : undefined}
+              selectionSource={selectionSources.get(textGroup) ?? null}
+            />
           </div>
         ))
       ) : !groups.some(isProcessingGroup) ? (

@@ -61,6 +61,11 @@ describe('chat turn virtualization weight', () => {
       segmentCount: 163,
       maxTurnSegmentCount: 113,
       toolCallCount: 104,
+      maxTurnToolCallCount: 74,
+      paragraphCount: 6,
+      maxTurnParagraphCount: 2,
+      textChars: 12,
+      maxTurnTextChars: 4,
       attachmentBytes: 0,
       maxTurnAttachmentBytes: 0,
     });
@@ -90,6 +95,11 @@ describe('chat turn virtualization weight', () => {
       segmentCount: 0,
       maxTurnSegmentCount: 0,
       toolCallCount: 0,
+      maxTurnToolCallCount: 0,
+      paragraphCount: 14,
+      maxTurnParagraphCount: 2,
+      textChars: 28,
+      maxTurnTextChars: 4,
       attachmentBytes: 947_514,
       maxTurnAttachmentBytes: 778_462,
     });
@@ -121,6 +131,32 @@ describe('chat turn virtualization weight', () => {
     assert.equal(shouldVirtualizeChatTurns(small, false), false);
     assert.equal(shouldVirtualizeChatTurns(long, false), true);
     assert.equal(shouldVirtualizeChatTurns(long, true), false);
+  });
+
+  it('virtualizes a short turn whose text or fenced code is already heavy', () => {
+    const prose = groupMessagesIntoTurns([
+      message('u1', 'user'),
+      {
+        ...message('a1', 'assistant'),
+        content: Array.from({ length: 12 }, (_, index) => `段落 ${index} 说明下一步。`).join('\n\n'),
+      },
+    ]);
+    const fenced = groupMessagesIntoTurns([
+      message('u1', 'user'),
+      {
+        ...message('a1', 'assistant'),
+        content: `\`\`\`ts\n${'const value = 1;\n'.repeat(80)}\`\`\``,
+      },
+    ]);
+    const light = groupMessagesIntoTurns([
+      message('u1', 'user'),
+      { ...message('a1', 'assistant'), content: '好的，我来看一下。' },
+    ]);
+
+    assert.equal(shouldVirtualizeChatTurns(prose, false), true);
+    assert.equal(shouldVirtualizeChatTurns(fenced, false), true);
+    assert.equal(shouldVirtualizeChatTurns(light, false), false);
+    assert.equal(shouldVirtualizeChatTurns(prose, true), false);
   });
 });
 

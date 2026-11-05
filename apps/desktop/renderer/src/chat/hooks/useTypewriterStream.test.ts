@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import {
   DEFAULT_TYPEWRITER_OPTIONS,
   THINKING_TYPEWRITER_OPTIONS,
   TYPEWRITER_FRAME_MS,
+  VISIBLE_TEXT_MIN_INTERVAL_MS,
+  VISIBLE_TYPEWRITER_OPTIONS,
   createTypewriterPacerState,
   planTypewriterEmit,
   planTypewriterHandoff,
@@ -12,14 +15,14 @@ import {
 } from './useTypewriterStream.ts';
 
 describe('typewriter stream pacing', () => {
-  it('keeps per-frame pacing as the default so visible text stays smooth', () => {
+  it('keeps an unthrottled baseline for pacing math', () => {
     assert.deepEqual(DEFAULT_TYPEWRITER_OPTIONS, {
       minCharsPerFrame: 1,
       maxCharsPerFrame: 80,
       framesToDrain: 10,
       minIntervalMs: 0,
     });
-    // minIntervalMs = 0 即「每个显示帧都可以写」，可见正文的原有行为不变。
+    // 0 是「每个显示帧都可以写」的基线。前台正文用 VISIBLE_TYPEWRITER_OPTIONS，不走这条。
     assert.equal(DEFAULT_TYPEWRITER_OPTIONS.minIntervalMs, 0);
   });
 
@@ -158,6 +161,23 @@ describe('typewriter write throttling', () => {
     // 被间隔挡下的帧不丢字：字符留在 buffer 里，由后续批次或流结束时的 flush() 写出。
     assert.equal(thinking.written.length + thinking.backlog, thinking.produced);
     assert.ok(thinking.firstWriteAtMs !== null && thinking.firstWriteAtMs <= TYPEWRITER_FRAME_MS * 2);
+  });
+
+  it('batches visible text inside a 32–50ms window instead of every frame', () => {
+    assert.equal(VISIBLE_TEXT_MIN_INTERVAL_MS, 40);
+    assert.ok(VISIBLE_TEXT_MIN_INTERVAL_MS >= 32 && VISIBLE_TEXT_MIN_INTERVAL_MS <= 50);
+    assert.equal(VISIBLE_TYPEWRITER_OPTIONS.minIntervalMs, VISIBLE_TEXT_MIN_INTERVAL_MS);
+
+    const visible = simulateStream(VISIBLE_TYPEWRITER_OPTIONS, { producerCps: 3000, seconds: 10 });
+    assert.ok(visible.writesPerSecond <= 1000 / 32, `visible profile wrote ${visible.writesPerSecond}/s`);
+    assert.ok(visible.writesPerSecond >= 15, `visible profile wrote only ${visible.writesPerSecond}/s`);
+    assert.ok(visible.writes < 600);
+    const perFrame = simulateStream({}, { producerCps: 3000, seconds: 10 });
+    assert.ok(visible.written.length >= perFrame.written.length * 0.98);
+
+    const router = readFileSync(new URL('./useConversationStreamRouter.ts', import.meta.url), 'utf8');
+    assert.match(router, /useTypewriterStream\(appendActiveText,\s*VISIBLE_TYPEWRITER_OPTIONS\)/);
+    assert.match(router, /useTypewriterStream\(appendActiveThinking,\s*THINKING_TYPEWRITER_OPTIONS\)/);
   });
 
   it('ships a thinking profile that only loosens the write cadence', () => {

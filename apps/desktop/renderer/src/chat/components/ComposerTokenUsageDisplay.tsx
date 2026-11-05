@@ -1,10 +1,13 @@
 import type React from 'react';
-import { useConversationContextAccounting } from '../hooks/useConversationState';
+import {
+  useConversationActiveUsage,
+  useConversationContextAccounting,
+} from '../hooks/useConversationState';
 import { TokenUsageDisplay } from './thread/TokenUsageDisplay';
 
 type TokenUsageDisplayProps = React.ComponentProps<typeof TokenUsageDisplay>;
 
-type ComposerTokenUsageDisplayProps = Omit<TokenUsageDisplayProps, 'contextAccounting'> & {
+type ComposerTokenUsageDisplayProps = Omit<TokenUsageDisplayProps, 'contextAccounting' | 'activeUsage'> & {
   readonly conversationId: string | null;
 };
 
@@ -14,10 +17,12 @@ export function ComposerTokenUsageDisplay({
   ...props
 }: ComposerTokenUsageDisplayProps) {
   const contextAccounting = useConversationContextAccounting(conversationId);
+  const activeUsage = useConversationActiveUsage(conversationId);
 
   return (
     <TokenUsageDisplay
       {...props}
+      activeUsage={activeUsage}
       contextAccounting={contextAccounting}
       emptyContext={conversationId == null}
     />

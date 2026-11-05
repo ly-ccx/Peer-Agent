@@ -213,7 +213,15 @@ export interface ChatMsg {
 }
 
 /** 渲染分组：连续正文 / 思考 / 工具调用组。 */
-export interface TextGroup { type: 'text'; content: string }
+export interface TextGroup {
+  type: 'text';
+  content: string;
+  /**
+   * 流式正文的开放块。只活在渲染分组上，文本段本身不带这个字段，
+   * 因此不会进主进程持久化。
+   */
+  openSlot?: import('./streamingMarkdownSlot.ts').MarkdownOpenSlot;
+}
 export interface ThinkingGroup { type: 'thinking'; content: string; kind?: ThinkingKind }
 export interface ToolCallGroup { type: 'tool-call-group'; calls: ToolCallLegacy[] }
 export type SegmentGroup = TextGroup | ThinkingGroup | ToolCallGroup;
