@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { after } from 'node:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -49,4 +49,11 @@ test('the actual Vite dev transform applies the policy before import analysis, w
 test('application and other dependency development behavior stays outside the SDK transform', async () => {
   const plugin = peerOpenuiSdkPolicy(), code = 'if (process.env.NODE_ENV === "development") console.log("application development");';
   for (const id of ['/tmp/peer/Panel.jsx', '/tmp/react/index.js', '\0virtual:peer']) assert.equal(await plugin.transform(code, id), null);
+});
+
+// Emit ownership diagnostics only if a native resource outlives the completed tests.
+after(() => {
+  setTimeout(() => console.info('[sdk-policy-test] Residual resources', JSON.stringify({
+    resources: process.getActiveResourcesInfo(), libuv: process.report.getReport().libuv,
+  })), 1000).unref();
 });
