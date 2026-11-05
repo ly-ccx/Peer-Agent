@@ -9,8 +9,11 @@ export function cardFocusIntent(key: { name: string; sequence?: string; ctrl?: b
   if (['up', 'down'].includes(key.name)) return 'card';
   if (['left', 'right'].includes(key.name)) return 'option';
   if (isEnterKeyName(key.name) && (!key.eventType || key.eventType === 'press')) return 'act';
+  return printableKeyText(key) === undefined ? 'none' : 'type';
+}
+
+export function printableKeyText(key: { name: string; sequence?: string; ctrl?: boolean; meta?: boolean; eventType?: string; isComposing?: boolean }): string | undefined {
   const text = key.sequence ?? key.name;
-  if (!key.ctrl && !key.meta && (!key.eventType || key.eventType === 'press')
-    && Array.from(text).length === 1 && !/[\u0000-\u001f\u007f]/.test(text)) return 'type';
-  return 'none';
+  if (!key.isComposing && !key.ctrl && !key.meta && (!key.eventType || key.eventType === 'press')
+    && Array.from(text).length === 1 && !/[\u0000-\u001f\u007f]/.test(text)) return text;
 }
