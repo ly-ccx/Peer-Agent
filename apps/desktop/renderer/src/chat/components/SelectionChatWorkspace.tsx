@@ -66,13 +66,14 @@ export function SelectionChatWorkspace(props: ComponentProps<typeof ChatSurface>
           text: conversationStore.getSnapshot(child.id).draft, referenceIds: [child.reference.id] });
       }
       const session = await clientApi.conversationsGet({ id });
+      const meta = session?.meta;
       if (generation !== openGeneration.current || parentRef.current !== parentId) return;
-      if (!session?.selectionOrigin || session.selectionOrigin.parentConversationId !== props.conversationId) throw new Error('子会话不存在或来源已变化');
-      if (!loadComposerEntry(id) && session.selectionDraft?.text) {
-        saveComposerEntry(id, { draft: session.selectionDraft.text, queue: [] });
+      if (!meta?.selectionOrigin || meta.selectionOrigin.parentConversationId !== props.conversationId) throw new Error('子会话不存在或来源已变化');
+      if (!loadComposerEntry(id) && meta.selectionDraft?.text) {
+        saveComposerEntry(id, { draft: meta.selectionDraft.text, queue: [] });
       }
-      setChild({ id, title: session.title, parentId: session.selectionOrigin.parentConversationId,
-        workspacePath: props.workspacePath ?? null, reference: session.selectionOrigin.reference, persisted: true });
+      setChild({ id, title: meta.title, parentId: meta.selectionOrigin.parentConversationId,
+        workspacePath: props.workspacePath ?? null, reference: meta.selectionOrigin.reference, persisted: true });
       setError('');
     } catch (cause) {
       if (generation === openGeneration.current && parentRef.current === parentId) setError(String(cause));

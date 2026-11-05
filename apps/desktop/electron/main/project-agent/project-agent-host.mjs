@@ -9,6 +9,7 @@ import {createDesktopObjectiveWatchHost} from './objective-watch-host.mjs';
 import path from 'node:path';
 import { readFileSync, statSync } from 'node:fs';
 import { projectConversationHistory } from '@peer-agent/runtime-core';
+import { createBotSqliteAdapter, createSessionService } from '@peer-agent/conversation-store';
 
 import {
   createApprovalStore,
@@ -338,16 +339,34 @@ export function registerDesktopProjectAgent({
     onWrote: memoryChanged,
   });
   const summaryHistory = createBotSummaryHistory(conversationStore);
+  const botAdapter = createBotSqliteAdapter(conversationStore);
+  const botSessions = createSessionService(botAdapter);
   const searchHistory = createBotSearchHistory(conversationStore);
   const directory = createBotDirectory({
     rootDir: dataHome,
     registry,
     readMessages: readCanonicalMessages,
     readConversationMessages: conversationMessages || readCanonicalMessages,
-    readInteractionPage: conversationStore.readInteractionPage?.bind(conversationStore),
+    readInteractionPage: typeof conversationStore.readInteractionPage === 'function'
+      ? async (id, params = {}) => {
+        const page = await botSessions.getWindow({
+          conversationId: id,
+          ...(params.limit != null ? { limit: params.limit } : {}),
+          ...(params.before ? { before: params.before } : {}),
+        });
+        if (!page || page.diagnostic === true) return null;
+        return {
+          messages: page.window,
+          nextCursor: page.cursor,
+          sourceVersion: page.sourceVersion,
+          contentRevision: page.meta?.contentRevision,
+          conversationId: id,
+        };
+      }
+      : undefined,
     readInteractionProcess: conversationStore.readInteractionProcess?.bind(conversationStore),
     readSummaryMessages: summaryHistory,
-    readSummaryMessagesBatch: ids => new Map(ids.map(id => [id, summaryHistory(id) || []])),
+    readSummaryMessagesBatch: (ids) => new Map(ids.map((id) => [id, summaryHistory(id) || []])),
     readMessagesBatch: botHistory ? ids => new Map(ids.map(id => [id, botHistory(id) || []]))
       : typeof conversationStore.getPersistedConversationHistories === 'function'
         ? ids => new Map([...conversationStore.getPersistedConversationHistories(ids)].map(([id, history]) => [id, history?.messages || []])) : null,
@@ -409,7 +428,7 @@ export function registerDesktopProjectAgent({
   }
 
   function appendMessage(conversationId, message) {
-    conversationStore.appendMessage(conversationId, message, { returnMessages: false });
+    botAdapter.append({ conversationId, message });
     if (typeof onAppendedMessage !== 'function') return;
     try {
       onAppendedMessage({ conversationId, message });

@@ -1,1 +1,6 @@
-export { createConversationStore } from '@peer-agent/conversation-store';
+export {
+  createBotSqliteAdapter,
+  createClassicJsonlAdapter,
+  createConversationStore,
+  createSessionService,
+} from '@peer-agent/conversation-store';

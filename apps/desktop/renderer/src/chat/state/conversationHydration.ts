@@ -7,6 +7,8 @@ import { mapInChunks } from "./yieldToMain";
 
 let msgSeq = 0;
 
+export { shouldLoadOlderHistory } from "./conversationWindowPolicy";
+
 export function nextId() { return `msg-${++msgSeq}-${Date.now()}`; }
 
 function usageFromLifetime(lifetime: {
@@ -23,7 +25,9 @@ function usageFromLifetime(lifetime: {
   };
 }
 
-export async function loadConversationMessages(conversationId: string): Promise<{
+export async function loadConversationMessages(conversationId: string, options?: {
+  readonly before?: string | null;
+}): Promise<{
   messages: ChatMsg[];
   tokenUsage: { input: number; output: number; cacheWrite: number; cacheRead: number } | null;
   mode: ChatMode;
@@ -33,9 +37,16 @@ export async function loadConversationMessages(conversationId: string): Promise<
   modelProviderId: string | null;
   contextAccounting: ContextAccountingSnapshot | null;
   automationCreateContext: AutomationCreateContext | null;
+  cursor: string | null;
+  hasMore: boolean;
 }> {
-  const conv = await clientApi.conversationsGet({ id: conversationId });
-  if (!conv?.messages) return {
+  const page = await clientApi.conversationsGet({
+    id: conversationId,
+    ...(options?.before ? { before: options.before } : {}),
+  });
+  const rows = page?.window ?? [];
+  const meta = page?.meta;
+  if (!page || !meta) return {
     messages: [],
     tokenUsage: null,
     mode: 'chat',
@@ -45,22 +56,24 @@ export async function loadConversationMessages(conversationId: string): Promise<
     modelProviderId: null,
     contextAccounting: null,
     automationCreateContext: null,
+    cursor: null,
+    hasMore: false,
   };
   // 对话模式按会话持久化在会话 meta 上;老会话无该字段时回退 'chat'，历史 'goal' 归一化为 'plan'。
-  const convMode: ChatMode = normalizeChatMode(conv.mode);
-  const convFastMode = conv.fastMode === true;
+  const convMode: ChatMode = normalizeChatMode(meta.mode);
+  const convFastMode = meta.fastMode === true;
   const convPreferredExecutionIsolation: 'none' | 'worktree' =
-    conv.preferredExecutionIsolation === 'worktree' ? 'worktree' : 'none';
+    meta.preferredExecutionIsolation === 'worktree' ? 'worktree' : 'none';
   // 思考强度 + 模型 provider 也按会话持久化在会话 meta 上（与 mode 同口径，每会话独立）。
   // 老会话无字段时：effort 回退 'default'，modelProviderId 回退 null（用全局默认 provider）。
-  const convEffort: EffortLevel = isEffortLevel(conv.effort) ? conv.effort : 'default';
+  const convEffort: EffortLevel = isEffortLevel(meta.effort) ? meta.effort : 'default';
   const convModelProviderId: string | null =
-    typeof conv.modelProviderId === 'string' && conv.modelProviderId ? conv.modelProviderId : null;
+    typeof meta.modelProviderId === 'string' && meta.modelProviderId ? meta.modelProviderId : null;
   const contextAccounting: ContextAccountingSnapshot | null =
-    conv.contextSnapshot?.version === 1 ? conv.contextSnapshot : null;
+    meta.contextSnapshot?.version === 1 ? meta.contextSnapshot : null;
   let totalInput = 0, totalOutput = 0, totalCacheWrite = 0, totalCacheRead = 0;
   const mapped = await mapInChunks(
-    conv.messages as Record<string, unknown>[],
+    rows,
     (m) => {
     const msg: ChatMsg = {
       id: (m.id as string) || nextId(),
@@ -105,7 +118,7 @@ export async function loadConversationMessages(conversationId: string): Promise<
   const loaded = mapped.filter((message) => !isEmptyAssistantPlaceholder(message) && !isEmptyUserMessage(message));
   // ADR 23: 计费优先读 index meta 的权威累计 lifetimeUsage(不受压缩影响)。
   // 仅当老会话尚无该字段时,才回退到遍历消息累加(此路径会被压缩低估,属兼容降级)。
-  const lifetime = conv.lifetimeUsage as
+  const lifetime = meta.lifetimeUsage as
     | { inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number }
     | undefined;
   if (
@@ -124,7 +137,9 @@ export async function loadConversationMessages(conversationId: string): Promise<
       effort: convEffort,
       modelProviderId: convModelProviderId,
       contextAccounting,
-      automationCreateContext: conv.automationCreateContext ?? null,
+      automationCreateContext: meta.automationCreateContext ?? null,
+      cursor: page.cursor ?? null,
+      hasMore: page.hasMore === true,
     };
   }
   return {
@@ -138,6 +153,8 @@ export async function loadConversationMessages(conversationId: string): Promise<
     effort: convEffort,
     modelProviderId: convModelProviderId,
     contextAccounting,
-    automationCreateContext: conv.automationCreateContext ?? null,
+    automationCreateContext: meta.automationCreateContext ?? null,
+    cursor: page.cursor ?? null,
+    hasMore: page.hasMore === true,
   };
 }

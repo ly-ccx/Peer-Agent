@@ -28,27 +28,43 @@ export async function checkEffortStability({ page, slider, strength, until, getB
         const drawerSelector = '.resource-workspace:has(.resource-details-slot[data-active="true"]):not([inert]), .bot-drawer-dock:not([inert]), .pa-overlay-panel.bot-drawer-panel';
         const drawer = document.querySelector(drawerSelector);
         let start = 0;
-        const finish = () => { clearTimeout(deadline); slider.removeEventListener('keyup', begin); resolve(frames); };
-        const capture = () => {
+        let stopped = false;
+        const finish = () => {
+          if (stopped) return;
+          stopped = true;
+          clearInterval(pulse);
+          clearTimeout(deadline);
+          slider.removeEventListener('keyup', begin);
+          resolve(frames);
+        };
+        const rect = node => { const { x, y, width, height } = node.getBoundingClientRect(); return { x, y, width, height }; };
+        // Paint frames plus a short timer. macOS CI can present well under 12fps
+        // while the main thread is still free; each sample is a real layout read.
+        const record = () => {
+          if (stopped || !start) return;
           if (performance.now() - start > 1100) { finish(); return; }
-          const slider = document.querySelector('.model-selection-popover[data-surface-state="open"] .reasoning-effort-slider');
+          const currentSlider = document.querySelector('.model-selection-popover[data-surface-state="open"] .reasoning-effort-slider');
           const trigger = document.querySelector(selector);
           const panel = document.querySelector('.model-selection-popover[data-surface-state="open"] .model-selection-panel');
-          const rect = node => { const { x, y, width, height } = node.getBoundingClientRect(); return { x, y, width, height }; };
+          if (!currentSlider || !trigger || !panel) { finish(); return; }
+          const now = performance.now() - start;
+          if (frames.length && now - frames.at(-1).timeMs < 12) return;
           const currentDrawer = document.querySelector(drawerSelector);
-          frames.push({ timeMs: performance.now() - start, value: slider.value, trigger: rect(trigger), panel: rect(panel),
+          frames.push({ timeMs: now, value: currentSlider.value, trigger: rect(trigger), panel: rect(panel),
             popoverRetained: document.querySelector('.model-selection-popover[data-surface-state="open"]') === popover,
             popoverOpacity: Number(getComputedStyle(popover).opacity),
             drawerRetained: currentDrawer === drawer,
             drawerOpacity: drawer ? Number(getComputedStyle(drawer).opacity) : 1,
             drawer: drawer ? rect(drawer) : null });
-          requestAnimationFrame(capture);
         };
+        const onFrame = () => { if (stopped) return; record(); requestAnimationFrame(onFrame); };
         const begin = event => {
           if (event.key !== key) return;
           slider.removeEventListener('keyup', begin);
-          start = performance.now(); requestAnimationFrame(capture);
+          start = performance.now();
+          requestAnimationFrame(onFrame);
         };
+        const pulse = setInterval(record, 50);
         const deadline = setTimeout(finish, 15_000);
         slider.addEventListener('keyup', begin);
       });
@@ -61,9 +77,9 @@ export async function checkEffortStability({ page, slider, strength, until, getB
       return frames;
     });
   const expected = key === 'End' ? '100' : '0';
-    assert.ok(frames.length >= 5);
+    assert.ok(frames.length >= 5, `effort frames ${frames.length}`);
     const pendingFrames = frames.filter(frame => frame.timeMs < 420);
-    assert.ok(pendingFrames.length >= 5);
+    assert.ok(pendingFrames.length >= 5, `pending effort frames ${pendingFrames.length} of ${frames.length}`);
     assert.ok(pendingFrames.every(frame => frame.value === expected), 'selected effort must stay put throughout the delayed save');
     assert.ok(frames.at(-1).timeMs > 950, 'observe the actual 650ms receipt and the following entrance window');
     assert.ok(frames.every(frame => frame.popoverRetained && frame.drawerRetained && frame.popoverOpacity >= 0.99 && frame.drawerOpacity >= 0.99),

@@ -7,13 +7,15 @@ function read(conversation=child, plan=frozen) {
   return createConversationReadProjection({conversationStore:{getConversation:()=>conversation},goalPlanStore:{listPlansByConversation:()=>[{planId:'p'}],getPlan:()=>plan},llmConfigStore:{listProviders:()=>[]}})('child');
 }
 test('legacy child metadata is projected from frozen worker, without rewriting preferences or borrowing verifier effort',()=>{
-  assert.deepEqual(read(),{...child,modelProviderId:'worker',effort:'max'});
+  assert.deepEqual(read().meta,{...child,modelProviderId:'worker',effort:'max'});
   assert.equal(child.effort,'high');
-  assert.equal(read(child,{...frozen,delegationOrigin:{...frozen.delegationOrigin,modelSelection:{worker:{modelProviderId:'worker'}}}}).effort,'default');
+  assert.equal(read(child,{...frozen,delegationOrigin:{...frozen.delegationOrigin,modelSelection:{worker:{modelProviderId:'worker'}}}}).meta.effort,'default');
+  assert.deepEqual(read().window,[]);
+  assert.equal(read().hasMore,false);
 });
 test('ordinary conversations, absent snapshots and foreign task identities retain their own preference',()=>{
-  assert.equal(read({...child,role:'project_agent'}).effort,'high');
-  for(const plan of [null,{...frozen,conversationId:'foreign'}, {...frozen,delegationOrigin:{...frozen.delegationOrigin,workspaceId:'other'}}, {...frozen,delegationOrigin:{...frozen.delegationOrigin,sessionId:'other'}}]) assert.equal(read(child,plan),child);
+  assert.equal(read({...child,role:'project_agent'}).meta.effort,'high');
+  for(const plan of [null,{...frozen,conversationId:'foreign'}, {...frozen,delegationOrigin:{...frozen.delegationOrigin,workspaceId:'other'}}, {...frozen,delegationOrigin:{...frozen.delegationOrigin,sessionId:'other'}}]) assert.deepEqual(read(child,plan).meta,child);
 });
 
 test('context accounting follows the frozen worker window, retaining occupied-token truth',()=>{
@@ -21,6 +23,7 @@ test('context accounting follows the frozen worker window, retaining occupied-to
   const projection=createConversationReadProjection({conversationStore:{getConversation:()=>({...child,contextSnapshot:snapshot})},
     goalPlanStore:{listPlansByConversation:()=>[{planId:'p'}],getPlan:()=>frozen},
     llmConfigStore:{listProviders:()=>[{id:'old',contextWindow:100},{id:'worker',contextWindow:200}]}});
-  const view=projection('child');assert.equal(view.modelProviderId,'worker');assert.equal(view.contextSnapshot.contextWindow,200);
-  assert.equal(view.contextSnapshot.percent,12);assert.equal(view.contextSnapshot.authoritativeInputTokens,24);assert.equal(snapshot.contextWindow,100);
+  const view=projection('child');assert.equal(view.meta.modelProviderId,'worker');assert.equal(view.meta.contextSnapshot.contextWindow,200);
+  assert.equal(view.meta.contextSnapshot.percent,12);assert.equal(view.meta.contextSnapshot.authoritativeInputTokens,24);assert.equal(snapshot.contextWindow,100);
+  assert.equal(Object.hasOwn(view.meta,'messages'),false);
 });
