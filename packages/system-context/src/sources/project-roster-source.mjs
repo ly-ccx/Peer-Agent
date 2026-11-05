@@ -184,7 +184,7 @@ export function createProjectRosterPromptSource() {
   };
 }
 
-const frameKeys = new Set(['workId', 'workRevision', 'goalRevision', 'sourceInputIds', 'sourceEventIds', 'sourceDecisionRef', 'intent', 'lifecycle', 'outcome',
+const frameKeys = new Set(['workId', 'workRevision', 'goalRevision', 'currentReplyRef', 'sourceInputIds', 'sourceEventIds', 'sourceDecisionRef', 'intent', 'lifecycle', 'outcome',
   'constraints', 'nonGoals', 'openQuestions', 'openQuestionCount', 'remainingRequirementCount', 'inputDispositions', 'inputId', 'requirements', 'requirementId', 'text', 'status', 'disposition', 'review', 'reviewRef', 'passed', 'current', 'sessions',
   'sessionId', 'title', 'sourceRevision', 'observationRevision', 'followUp', 'owner', 'reason', 'inCurrentList', 'blockedReason', 'humanGate', 'reportSummary',
   'events', 'eventId', 'kind', 'at', 'summary', 'payload', 'lastError', 'cause', 'error', 'errorCode', 'blockedCode', 'failureKind', 'sameCauseCount', 'stopAutoRetry', 'askUser', 'leafIds',

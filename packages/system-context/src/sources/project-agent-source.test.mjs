@@ -101,7 +101,9 @@ test('后台启动保持安静，完成事件仍要求核验和真实来源', ()
     events: [{ kind: 'session_started', sessionId: 'sess-private', summary: 'worker label' }] });
   const rules = assembled.sections.find(section => section.id === 'project-agent');
   assert.match(rules.content, /session_started or routine progress event is not a request for another status report/);
-  assert.match(rules.content, /finish quietly without querying tools/);
+  assert.match(rules.content, /do not query tools for progress/);
+  assert.match(rules.content, /Use wait_for_sessions when projected for the advancing work/);
+  assert.match(rules.content, /A tool-free finish is for a wake with no remaining responsibility/);
   assert.match(rules.content, /focus on its sessionId and the current request/);
   assert.match(rules.content, /result_ready event is a task result to review/);
   assert.match(rules.content, /use verify_session when independent verification is missing/);

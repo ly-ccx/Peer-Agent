@@ -75,6 +75,22 @@ function assertArchiveRuntime(archivePath) {
   console.log(`[packaged-runtime] verified ${workspaceDependencies.length} main-process workspace imports in ${archivePath}`);
 }
 
+function assertInteractiveContentExports(archivePath) {
+  const directory = 'node_modules/@peer-agent/interactive-content';
+  const { exports } = readArchiveJson(archivePath, `${directory}/package.json`);
+  for (const [name, declaration] of Object.entries(exports)) {
+    const target = runtimeExportTarget({ exports: declaration });
+    if (!target) throw new Error(`Missing runtime target for @peer-agent/interactive-content export ${name}`);
+    const targetPath = path.posix.join(directory, target);
+    try {
+      extractFile(archivePath, targetPath);
+    } catch (error) {
+      throw new Error(`${archivePath}: interactive-content export ${name} is missing: ${targetPath}`, { cause: error });
+    }
+  }
+  console.log(`[packaged-runtime] verified ${Object.keys(exports).length} interactive-content exports in ${archivePath}`);
+}
+
 function assertPackagedDockIcons(archivePath) {
   const iconDirectory = path.join(path.dirname(archivePath), 'app-icons');
   for (const iconName of PACKAGED_DOCK_ICONS) {
@@ -97,5 +113,6 @@ if (archives.length === 0) {
 
 for (const archivePath of archives) {
   assertArchiveRuntime(archivePath);
+  assertInteractiveContentExports(archivePath);
   assertPackagedDockIcons(archivePath);
 }

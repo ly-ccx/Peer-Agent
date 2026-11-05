@@ -7,7 +7,8 @@ import {
   runBoundedVerification,
   isVerificationTurn,
   verificationExecutionBudget,
-  evaluateWorkSessionWrite
+  readOnlyWorkCapabilityAllowed,
+  agentCommunicationExcludedPrefixes
 } from "@peer-agent/runtime-node/project-agent";
 import {
   resolveRoleRoute,
@@ -67,6 +68,8 @@ export function createTuiTurnExecutor(options: {
   readMemory(workspaceId: string): readonly any[];
   memoryEnabled(workspaceId: string): boolean;
   getProviders(): readonly TuiCapabilityProvider[];
+  captureExecution?: import('../tui-host.ts').CreateTuiHostOptions['captureExecution'];
+  userMaterialNotices?: (toolContext: Record<string, unknown>) => readonly unknown[];
   onApproval?(approval: PendingApproval | null, streamId: string): void;
   oneTimeApprovals?: { match(input: object): boolean };
   goalPlanStore?: ReturnType<typeof createGoalPlanStore>;
@@ -101,7 +104,7 @@ export function createTuiTurnExecutor(options: {
     const mode = (input.mode ?? (profile.role === 'project_agent' ? 'project_agent' : 'chat')) as TuiRuntimeMode;
     const streamId = input.streamId || randomUUID();
     const runtime: TuiRuntime = runtimeFactory({ workspaceRoot: workspacePath, userDataPath: options.dataHome,
-      accessLevel: options.getSettings().localAccessLevel ?? 'restricted_local', providers: options.getProviders(), oneTimeApprovals: options.oneTimeApprovals, goalPlanStore: options.goalPlanStore, sessionApprovals });
+      accessLevel: options.getSettings().localAccessLevel ?? 'restricted_local', providers: options.getProviders(), oneTimeApprovals: options.oneTimeApprovals, goalPlanStore: options.goalPlanStore, sessionApprovals, captureExecution: options.captureExecution });
     const selectedId = input.modelProviderId || profile.modelSelection?.modelProviderId;
     runtime.setSessionFastMode(profile.modelSelection?.fastMode === true);
     if (selectedId) {
@@ -126,6 +129,8 @@ export function createTuiTurnExecutor(options: {
     const content = !saved && last?.role === 'user' && typeof last.content === 'string' ? last.content : '';
     const history = content ? messages.slice(0, -1) : messages;
     const useMemory = options.memoryEnabled(workspaceId);
+    const planReminder = profile.role === 'project_agent' ? input.plan?.reminder : null;
+    const runtimeReminders = planReminder ? [...(input.runtimeReminders ?? []), planReminder] : input.runtimeReminders;
     const toolContext: Record<string, any> = { workspaceId, workspacePath, conversationId: input.conversationId,
       permissionPolicy: input.permissionPolicy,
       mode, role: profile.role, turnRole: profile.role, planId: profile.planId, turnProfile: profile, surface: 'tui', turnId: streamId, messages: publicFacts ?? options.readMessages(input.conversationId ?? ''),
@@ -200,7 +205,8 @@ export function createTuiTurnExecutor(options: {
           yieldAtTurnLimit: true, shouldYield: input.shouldYield, maxToolBatchCalls: 32,
         } : {}), input: { content, omitCurrentUser: !content, history: [], modelMessages: history, turnId: streamId, turnIndex: 0,
           systemContextInput: { role: profile.role, workspaceId, workId: profile.workId, sessionId: profile.sessionId, planId: profile.planId,
-            turnContext: {...profile.context, agentKind: profile.agentKind}, runtimeReminders: input.runtimeReminders, continuityContext: input.continuityContext,
+            interactiveMaterials: options.userMaterialNotices?.(toolContext),
+            turnContext: {...profile.context, agentKind: profile.agentKind}, runtimeReminders, continuityContext: input.continuityContext,
             ...(profile.role === 'project_agent' && useMemory ? { projectMemory: options.readMemory(workspaceId) } : {}),
             ...(profile.role === 'work_session' ? { workSessionExecution: { phase: input.plan?.delegationOrigin?.phase, goalRevision: input.plan?.delegationOrigin?.coordinationBinding?.goalRevision, takeover: input.plan?.delegationOrigin?.takeover?.text }, workSessionOrigin: { ...profile.context?.workSessionOrigin,
               readOnly: input.plan?.delegationOrigin?.readOnly === true,
@@ -210,8 +216,9 @@ export function createTuiTurnExecutor(options: {
           },
         } }, { signal: controller.signal });
       const requestedUserInput = result.reason === 'requested_user_input';
-      const replied = result.status === 'stopped' && result.reason === 'project_agent_reply';
-      const ok = result.status === 'completed' || result.status === 'yielded' || requestedUserInput || replied;
+      const projectTurnCompleted = result.status === 'stopped'
+        && (result.reason === 'project_agent_reply' || result.reason === 'project_agent_wait');
+      const ok = result.status === 'completed' || result.status === 'yielded' || requestedUserInput || projectTurnCompleted;
       const text = !ok && streamedText ? streamedText : result.output ?? '';
       input.sink.send(ok ? 'chat:stream:done' : 'chat:stream:error', { streamId, error: result.reason });
       if (!input.ephemeral) options.persistTurn?.(input, { text, calls, usage: result.state?.usage,
@@ -263,12 +270,15 @@ export function createTuiTurnExecutor(options: {
     return done;
   }
   return { runTurn, resolveGoalRole, executionScheduler,
-    async readDelegationCapabilities({ readOnly, workspaceId }: { readOnly: boolean; workspaceId: string }) {
+    async readDelegationCapabilities({ readOnly, workspaceId, agentKind = 'worker' }: { readOnly: boolean; workspaceId: string; agentKind?: string }) {
       const host = createTuiHost({ workspaceRoot: options.resolveWorkspacePath(workspaceId), userDataPath: options.dataHome,
         accessLevel: options.getSettings().localAccessLevel, providers: options.getProviders(), goalPlanStore: options.goalPlanStore });
       try {
+        const turnProfile = { role: 'work_session', agentKind, workspaceId };
+        const excluded = agentCommunicationExcludedPrefixes(turnProfile);
         return (host.toolDefinitionsForMode?.('goal') || []).filter(tool => !tool.capabilityId.startsWith('local.web.control.')
-          && evaluateWorkSessionWrite({ delegationOrigin: { readOnly } }, { capabilityId: tool.capabilityId, riskLevel: tool.metadata?.riskLevel }).allowed)
+          && !excluded.some((prefix: string) => tool.capabilityId.startsWith(prefix))
+          && (!readOnly || readOnlyWorkCapabilityAllowed({ capabilityId: tool.capabilityId, riskLevel: tool.metadata?.riskLevel, turnProfile })))
           .map(tool => tool.capabilityId);
       } finally { await host.dispose(); }
     },

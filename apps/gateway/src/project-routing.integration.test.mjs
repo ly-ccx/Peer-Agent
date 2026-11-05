@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import {createProjectRelayFixture} from './testing/project-relay-fixture.mjs';
 
 test('real paired WebSocket and HTTP export only granted bots and safe pages; concurrent retries enqueue once', {timeout:20_000},async t=>{
-  const f=await createProjectRelayFixture({scriptedReply:true});t.after(()=>f.close());
+  const f=await createProjectRelayFixture({scriptedReply:true,interactiveResults:true});t.after(()=>f.close());
   const listed=await f.request('/api/projects');assert.equal(listed.status,200);const bots=await listed.json();assert.equal(bots.projects.length,1);
   assert.equal(bots.projects[0].deviceId,f.deviceId);assert.equal(bots.projects[0].workspaceId,f.workspaceId);
   const url='/api/projects/'+f.workspaceId,body={deviceId:f.deviceId,inputId:'same-input',text:'中'.repeat(4000)};
@@ -14,8 +14,13 @@ test('real paired WebSocket and HTTP export only granted bots and safe pages; co
   const page=await (await f.request(url+'/conversation?deviceId='+f.deviceId)).json();assert.ok(page.result.messages.some(row=>row.kind==='agent_reply'));
   assert.equal(page.result.pendingApprovals[0].needsDesktopApproval,true);
   const task=await (await f.request(url+'/sessions/task-1?deviceId='+f.deviceId)).json();assert.equal(task.result.summary,'已读取项目说明，正在核对测试结果。');
-  for(const forbidden of [f.root,'private-evidence','apiKey','arguments','toolResult'])assert.equal(JSON.stringify([bots,page,task]).includes(forbidden),false,forbidden);
+  assert.equal(task.result.interactiveResults.length,2);
+  const [visible,restricted]=task.result.interactiveResults;
+  assert.match(visible.ref,/^interactive-result:\/\//);assert.equal(visible.availability,'available');assert.match(visible.summary,/\[local path\]/);
+  assert.deepEqual(Object.keys(restricted).sort(),['availability','ref']);
+  for(const forbidden of [f.root,'private-fixed-text','私有标题','stored program','private-evidence','apiKey','arguments','toolResult'])assert.equal(JSON.stringify([bots,page,task]).includes(forbidden),false,forbidden);
   f.changePolicy({delegationVersion:2,projectGrants:[]});
+  assert.equal((await f.request(url+'/sessions/task-1?deviceId='+f.deviceId)).status,403);
   assert.equal((await f.request(url+'/input',{method:'POST',body})).status,403);assert.equal(f.history().filter(row=>row.kind==='user_input').length,1);
 });
 

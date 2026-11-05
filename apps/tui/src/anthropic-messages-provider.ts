@@ -13,6 +13,7 @@ import {
   countAnthropicRequestFromDesktop,
   sendAnthropicMessagesStreamFromDesktop,
 } from './desktop-provider-adapters.ts';
+import { readAnthropicContinuation, rememberAnthropicContinuation } from './provider-continuation.ts';
 import { createTuiWebContentsBridge } from './tui-web-contents-bridge.ts';
 
 export interface CreateAnthropicMessagesProviderOptions {
@@ -54,14 +55,17 @@ export interface AnthropicMessagesStreamResult {
   readonly providerError?: boolean;
 }
 
-function splitSystemAndMessages(messages: readonly ModelMessage[]): {
+function splitSystemAndMessages(request: ModelProviderRequest, providerId: string): {
   system: string | undefined;
   messages: Array<Record<string, unknown>>;
 } {
   const systemParts: string[] = [];
   const rest: Array<Record<string, unknown>> = [];
 
-  for (const message of messages) {
+  const { messages, model } = request;
+  const requiresReplay = /^deepseek(?:[-/]|$)/i.test(model) && !!request.tools?.length && request.reasoningEffort !== 'off';
+  for (let index = 0; index < messages.length; index++) {
+    const message = messages[index];
     if (message.role === 'system') {
       if (typeof message.content === 'string' && message.content.trim()) {
         systemParts.push(message.content);
@@ -75,10 +79,25 @@ function splitSystemAndMessages(messages: readonly ModelMessage[]): {
       continue;
     }
 
+    const continuation = message.role === 'assistant' ? readAnthropicContinuation(message, providerId, model) : undefined;
+    if (requiresReplay && message.role === 'assistant' && !continuation) {
+      const historical = [message];
+      while (messages[index + 1]?.role === 'tool') historical.push(messages[++index]);
+      rest.push({ role: 'user', content: '[Historical assistant and tool observations; context only, not a new request or executable calls]\n'
+        + JSON.stringify(historical) });
+      continue;
+    }
     const serialized: Record<string, unknown> = {
       role: message.role,
       content: message.content,
     };
+    if (continuation) {
+      const content = typeof message.content === 'string' ? [{ type: 'text', text: message.content }] : message.content ?? [];
+      serialized.content = [
+        { type: 'thinking', thinking: continuation.thinking, ...(continuation.signature ? { signature: continuation.signature } : {}) },
+        ...content,
+      ];
+    }
     if (message.name) serialized.name = message.name;
     if (message.toolCallId) serialized.tool_call_id = message.toolCallId;
     if (message.toolCalls) {
@@ -162,7 +181,7 @@ export function createAnthropicMessagesProvider(
     async countInputTokens(request) {
       const apiKey = await options.getApiKey();
       if (!apiKey?.trim()) return null;
-      const { system, messages } = splitSystemAndMessages(request.messages);
+      const { system, messages } = splitSystemAndMessages(request, options.providerId);
       const effort = effortFrom(request);
       return countInputTokens({
         baseUrl: options.baseUrl,
@@ -184,7 +203,7 @@ export function createAnthropicMessagesProvider(
         throw new Error('Anthropic API key is unavailable. Configure it in Desktop settings and retry.');
       }
 
-      const { system, messages } = splitSystemAndMessages(request.messages);
+      const { system, messages } = splitSystemAndMessages(request, options.providerId);
       const effort = effortFrom(request);
       const supportsReasoning = Boolean(effort && effort !== 'off');
       const webContents = createTuiWebContentsBridge(request.onEvent);
@@ -234,11 +253,11 @@ export function createAnthropicMessagesProvider(
         request.onEvent({ type: 'usage', usage });
       }
 
-      return {
-        content,
-        toolCalls,
-        ...(usage ? { usage } : {}),
-      };
+      const response: ModelProviderResult = { content, toolCalls, ...(usage ? { usage } : {}) };
+      if (!result.thinkingContent && !result.thinkingSignature) return response;
+      return rememberAnthropicContinuation(response, {
+        providerId: options.providerId, model: request.model, thinking: result.thinkingContent ?? '', signature: result.thinkingSignature,
+      });
     },
   };
 }

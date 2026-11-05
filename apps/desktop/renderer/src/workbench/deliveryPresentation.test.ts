@@ -37,3 +37,17 @@ test('document association reads with original task context and fails visibly on
   state.error = true; tree = component.DocumentDeliveryTools({ binding, reference, active: true, isZh: true }); assert.equal(find(tree, n => n.type === 'history'), undefined); assert.ok(text(tree).includes('关联未确认'));
   state.error = false; state.value = { ok: true }; tree = component.DocumentDeliveryTools({ binding, reference, active: true, isZh: true }); assert.ok(text(tree).includes('关联未确认'));
 });
+
+test('an interactive card names the fixed result and opens the domain reference without a file locator', () => {
+  const result = { evidenceRef: 'interactive-result://fixed', artifactRef: 'interactive-result://fixed', kind: 'interactive', label: 'Trial',
+    interactiveReference: { owner: { workspaceId: 'bot', conversationId: 'parent' }, resultId: 'result-a', contentVersion: 'sha256:' + 'a'.repeat(64) }, specHash: 'sha256:' + 'b'.repeat(64) };
+  const history = load('./DeliveryHistory.tsx', { './file-preview/RasterImageView': { RasterImageView: 'image' } });
+  assert.ok(text(history.DeliveryHistory({ delivery: result, isZh: true })).includes('固定版本'));
+  const opened: any[] = [];
+  const list = load('../project-agent/drawer/EvidenceDeliveries.tsx', { '../../app/components/MotionDetails': { MotionDetails: 'details' }, '../../ui/icons': { PeerIcon: 'icon' },
+    '../../workbench/ResourceWorkspaceContext': { useResourceWorkspace: () => ({ ready: true, openDelivery: (value: any) => opened.push(value) }) }, '../../workbench/DeliveryHistory': { DeliveryHistory: 'history' } });
+  const tree = list.EvidenceDeliveries({ deliveries: [result], isZh: true }), button = find(tree, node => node.type === 'button');
+  assert.equal(button.props.disabled, false); assert.equal(text(button), '打开交互结果');
+  button.props.onClick(); assert.equal(opened[0], result);
+  assert.equal('reference' in opened[0], false); assert.equal(text(tree).includes('未保存可核对的文件位置'), false);
+});

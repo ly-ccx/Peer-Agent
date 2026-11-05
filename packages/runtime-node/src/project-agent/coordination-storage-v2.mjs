@@ -501,6 +501,19 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
       durable(manifestFile, JSON.stringify(next)); manifest = next;
     },
     readSessionControl(sessionId) { if (typeof sessionId !== 'string' || !sessionId) return undefined; load(); const head = get(db, 'sessionControlHeads', sessionId); return head ? get(db, 'sessionControls', head.operationId) : undefined; },
+    readStoppedExecution(execution) {
+      load();
+      const row = statement(db, `SELECT value FROM objects WHERE bucket='sessionControls'
+        AND json_extract(value,'$.stopReceipt.receiptId') IS NOT NULL
+        AND json_extract(value,'$.expectedExecution.planId')=?
+        AND json_extract(value,'$.expectedExecution.sessionId')=?
+        AND json_extract(value,'$.expectedExecution.executionEpoch')=?
+        AND json_extract(value,'$.expectedExecution.generation') IS ?
+        AND json_extract(value,'$.expectedExecution.goalRevision') IS ?
+        ORDER BY rowid DESC LIMIT 1`).get(execution.planId, execution.sessionId, execution.executionEpoch,
+        execution.generation ?? null, execution.goalRevision ?? null);
+      return row ? JSON.parse(row.value) : undefined;
+    },
     readSupervision(bucket, id) {
       if (!SUPERVISION_BUCKETS.includes(bucket)) throw fail('supervision_query_invalid');
       load(); return get(db, bucket, id);

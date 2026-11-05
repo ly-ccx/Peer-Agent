@@ -1,15 +1,17 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { normalizeResourceWindowOwner, normalizeResourceWindowRequest } from '@peer-agent/protocol';
+import { interactiveReadingSourceBinding } from '@peer-agent/runtime-node/interactive-results';
 
 const digest = value => `sha256:${createHash('sha256').update(JSON.stringify(value)).digest('hex')}`;
-export const resourceWindowSourceBinding = scope => digest(['peer-reading-source-v1', scope.owner, scope.root, scope.target]);
+export const resourceWindowSourceBinding = scope => scope.resource?.kind === 'interactive'
+  ? interactiveReadingSourceBinding(scope.owner, scope.resource.reference) : digest(['peer-reading-source-v1', scope.owner, scope.root, scope.target]);
 const token = value => typeof value === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,255}$/.test(value) && !value.includes('..');
 const publicEntry = ({ sourceBinding: _private, ...entry }) => structuredClone(entry);
 function normalize(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw) || Object.keys(raw).some(key => !['id', 'owner', 'request', 'savedAt', 'sourceBinding'].includes(key))) return null;
   const owner = normalizeResourceWindowOwner(raw.owner), request = normalizeResourceWindowRequest(raw.request);
-  if (!token(raw.id) || !owner || !request || request.resource.reference.workspaceId !== owner.workspaceId
+  if (!token(raw.id) || !owner || !request || request.resource.kind === 'interactive' || request.resource.reference.workspaceId !== owner.workspaceId
     || !isDeepStrictEqual(request.resource.reference.task, owner.task)
     || !/^sha256:[a-f0-9]{64}$/.test(raw.sourceBinding) || typeof raw.savedAt !== 'string' || raw.savedAt.length > 40 || !Number.isFinite(Date.parse(raw.savedAt)) || Buffer.byteLength(JSON.stringify(raw)) > 16 * 1024) return null;
   return { id: raw.id, owner, request, sourceBinding: raw.sourceBinding, savedAt: new Date(raw.savedAt).toISOString() };
@@ -33,7 +35,7 @@ export function createResourceWindowHistory({ read = () => undefined, write = ()
     },
     save(context, scope, recoveryId) {
       try {
-        if (!isDeepStrictEqual(context.owner, scope.owner) || context.resource.reference.path !== scope.target) return null;
+        if (context.resource.kind === 'interactive' || !isDeepStrictEqual(context.owner, scope.owner) || context.resource.reference.path !== scope.target) return null;
         const entry = normalize({ id: recoveryId ?? createId(), owner: context.owner, request: {
           resource: context.resource, ...(context.sourceTabId ? { sourceTabId: context.sourceTabId } : {}), ...(context.navigation ? { navigation: context.navigation } : {}),
         }, sourceBinding: resourceWindowSourceBinding(scope), savedAt: now() });

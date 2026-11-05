@@ -6,8 +6,9 @@ import { projectReplyQuestions } from './question-lifecycle.mjs';
 import { workBudgetBinding } from './work-budget.mjs';
 import { composeReply } from './reply-composer.mjs';
 import { prepareReplyReport } from './reply-report-facts.mjs';
+import { parseInteractiveArtifactRef } from '@peer-agent/protocol';
 
-export function createDesktopReplyComposer({ readDelivery = null } = {}) {
+export function createDesktopReplyComposer({ readDelivery = null, readResultReferences = null } = {}) {
   return {
     postReply(input, view) {
       const delivery = typeof readDelivery === 'function' ? (readDelivery(view) || {}) : {};
@@ -63,6 +64,16 @@ export function createDesktopReplyComposer({ readDelivery = null } = {}) {
         ...(composed.messageIds ? { messageIds: composed.messageIds } : {}),
         ...(composed.availableReplyAnchors ? { availableReplyAnchors: composed.availableReplyAnchors } : {}),
         ...(composed.sessionStates ? { sessionStates: composed.sessionStates } : {}) };
+      if (typeof readResultReferences === 'function') {
+        let refs;
+        try { refs = readResultReferences({ workspaceId: view?.workspaceId, conversationId: view?.conversationId, sessionIds: composed.meta.sources }); }
+        catch { return { error: 'result_references_unavailable', message: 'The cited task result references could not be confirmed. Read the current task state and retry.' }; }
+        if (!Array.isArray(refs) || refs.length > 20 || refs.some(ref => {
+          const fixed = parseInteractiveArtifactRef(ref);
+          return !fixed || fixed.owner.workspaceId !== view?.workspaceId || fixed.owner.conversationId !== view?.conversationId;
+        })) return { error: 'result_references_unavailable', message: 'The host result references do not match the current Bot.' };
+        if (refs.length) composed.meta.evidenceRefs = [...new Set([...(composed.meta.evidenceRefs ?? []), ...refs])].slice(0, 20);
+      }
       if (previousUserRequestRef && composed.message.question) composed.message.question.previousUserRequestRef = previousUserRequestRef;
       const report = prepareReplyReport({ workspaceId: view?.workspaceId, message: composed.message,
         currentInputAnchors: view?.currentInputAnchors || [],

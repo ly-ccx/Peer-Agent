@@ -6,6 +6,7 @@ export type ExecOutputFormat = 'text' | 'json';
 export type ExecMode = 'chat' | 'plan' | 'goal';
 
 export interface PeerExecOptions {
+  readonly bot?: { readonly inputId?: string; readonly waitMs: number };
   readonly access: ExecAccess;
   readonly tools: readonly string[] | undefined;
   readonly outputFormat: ExecOutputFormat;
@@ -21,9 +22,11 @@ export interface PeerExecOptions {
 
 export type PeerCliCommand =
   | { readonly kind: 'version' }
-  | { readonly kind: 'help'; readonly topic: 'root' | 'exec' }
+  | { readonly kind: 'help'; readonly topic: 'root' | 'exec' | 'result' }
   | { readonly kind: 'tui'; readonly classic?: boolean; readonly bots?: boolean }
   | { readonly kind: 'exec'; readonly options: PeerExecOptions }
+  | { readonly kind: 'result-cleanup-receipt' }
+  | { readonly kind: 'result'; readonly reference: string; readonly json: boolean }
   | { readonly kind: 'error'; readonly message: string; readonly exitCode: typeof CLI_EXIT.usage };
 
 const ACCESS_VALUES = new Set<ExecAccess>(['ask', 'session', 'full']);
@@ -60,6 +63,8 @@ function readValue(
 
 function parseExecArgs(argv: readonly string[]): PeerCliCommand {
   const rest = [...argv];
+  let bot = false, inputId: string | undefined, waitMs: number | undefined;
+  const explicit = new Set<string>();
   let access: ExecAccess = 'session';
   let tools: string[] | undefined;
   let outputFormat: ExecOutputFormat = 'text';
@@ -90,6 +95,15 @@ function parseExecArgs(argv: readonly string[]): PeerCliCommand {
     if (flag.name === '--') {
       endOfFlags = true;
       continue;
+    }
+    explicit.add(flag.name);
+    if (flag.name === '--bot' && flag.inline === undefined) { bot = true; continue; }
+    if (flag.name === '--input-id' || flag.name === '--wait-ms') {
+      const value = readValue(flag.name, flag.inline, rest);
+      if (!value.ok) return { kind: 'error', message: value.message, exitCode: CLI_EXIT.usage };
+      if (flag.name === '--input-id' && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value.value)) { inputId = value.value; continue; }
+      if (flag.name === '--wait-ms' && /^[1-9]\d{0,6}$/.test(value.value) && Number(value.value) <= 1_800_000) { waitMs = Number(value.value); continue; }
+      return { kind: 'error', message: `peer exec: invalid ${flag.name}`, exitCode: CLI_EXIT.usage };
     }
     if (flag.name === '--access') {
       const value = readValue('--access', flag.inline, rest);
@@ -196,9 +210,14 @@ function parseExecArgs(argv: readonly string[]): PeerCliCommand {
     };
   }
 
+  if (bot && ['--access', '--tools', '--provider', '--model', '--effort', '--mode', '--fast', '--max-turns'].some(flag => explicit.has(flag)))
+    return { kind: 'error', message: 'peer exec: --bot uses the bound Bot policy and model', exitCode: CLI_EXIT.usage };
+  if (!bot && (inputId !== undefined || waitMs !== undefined))
+    return { kind: 'error', message: 'peer exec: --input-id and --wait-ms require --bot', exitCode: CLI_EXIT.usage };
   return {
     kind: 'exec',
     options: {
+      ...(bot ? { bot: { inputId, waitMs: waitMs ?? 1_800_000 } } : {}),
       access,
       tools,
       outputFormat,
@@ -225,12 +244,29 @@ export function parsePeerArgv(argv: readonly string[]): PeerCliCommand {
   if (head === 'bots' && rest.length === 0) return { kind: 'tui', bots: true };
   if (isHelpFlag(head) && rest.length === 0) return { kind: 'help', topic: 'root' };
   if (head === 'exec') return parseExecArgs(rest);
+  if (head === 'result-cleanup-receipt') {
+    if (rest.length === 0) return { kind: 'result-cleanup-receipt' };
+    return { kind: 'error', message: 'Usage: peer result-cleanup-receipt < request.json', exitCode: CLI_EXIT.usage };
+  }
+  if (head === 'result') {
+    if (rest.length === 1 && isHelpFlag(rest[0]!)) return { kind: 'help', topic: 'result' };
+    const [reference, flag] = rest;
+    if (!reference || !reference.startsWith('interactive-result://') || rest.length > 2 || flag !== undefined && flag !== '--json')
+      return { kind: 'error', message: 'Usage: peer result <interactive-result://…> [--json]', exitCode: CLI_EXIT.usage };
+    return { kind: 'result', reference, json: flag === '--json' };
+  }
   if (isHelpFlag(head)) return { kind: 'help', topic: 'root' };
   if (argv.some(isHelpFlag) && !argv.includes('exec')) return { kind: 'help', topic: 'root' };
   return { kind: 'tui' };
 }
 
-export function formatPeerHelp(topic: 'root' | 'exec', version = formatPeerVersionLine()): string {
+export function formatPeerHelp(topic: 'root' | 'exec' | 'result', version = formatPeerVersionLine()): string {
+  if (topic === 'result') return [
+    version,
+    '',
+    'Usage: peer result <interactive-result://…> [--json]',
+    'Read a fixed result summary from the local Bot.',
+  ].join('\n');
   if (topic === 'exec') {
     return [
       version,
@@ -242,6 +278,9 @@ export function formatPeerHelp(topic: 'root' | 'exec', version = formatPeerVersi
       '  echo "..." | peer exec [options]',
       '',
       'Options:',
+      '  --bot                      Submit through the Bot bound to this workspace',
+      '  --input-id <id>            Reuse the same Bot input on retry',
+      '  --wait-ms <n>              Bot reply wait, up to 30 minutes',
       '  --access ask|session|full   Permission policy (default: session)',
       '  --tools <list>              Projection allowlist, e.g. bash,file',
       '  --output-format text|json   stdout shape (default: text)',
@@ -255,6 +294,7 @@ export function formatPeerHelp(topic: 'root' | 'exec', version = formatPeerVersi
       '  -h, --help                  Show this help',
       '',
       'Prompt is the remaining arguments, or stdin when none are given.',
+      'A Bot reply still pending at the deadline exits 8 with the input ID.',
       '--access ask fails without a TTY. Evaluation containers should pass --access full.',
       'If two providers share a model id, pass --provider or --model <provider>::<model>.',
       'Do not join with / — that character is part of some model ids.',
@@ -271,6 +311,8 @@ export function formatPeerHelp(topic: 'root' | 'exec', version = formatPeerVersi
     '  peer --version       Print version',
     '  peer --help          Show this help',
     '  peer exec [options] [prompt]',
+    '  peer result <interactive-result://…> [--json]',
+    '  peer result-cleanup-receipt < request.json',
     '',
     'Use `peer exec --help` for headless flags.',
     'Inside bot mode, press F2 or type /classic to switch to task mode.',

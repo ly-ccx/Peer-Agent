@@ -9,13 +9,14 @@ test('event-related old tasks and full bounded decision facts enter L7 with secr
   const roster = Array.from({ length: 40 }, (_, i) => ({ sessionId: `s${i}`, title: 'Task', status: 'running' }));
   const observation = source.observe({ role: 'project_agent', turnContext: { roster,
     events: [{ eventId: 'actual-event', sessionId: 's39', kind: 'interrupted', payload: { reason: 'ECONNRESET', lastError: 'HTTP 503', privateThoughts: 'PRIVATE_THOUGHTS' } }],
-    decisionFrame: { workId: 'g', workRevision: 4, goalRevision: 2, intent: { lifecycle: 'active', outcome: 'Finish repair', requirements: [{ requirementId: 'fix', text: 'Implementation', status: 'remaining' }] },
+    decisionFrame: { workId: 'g', workRevision: 4, goalRevision: 2, currentReplyRef: 'current-turn-reply-1', intent: { lifecycle: 'active', outcome: 'Finish repair', requirements: [{ requirementId: 'fix', text: 'Implementation', status: 'remaining' }] },
       sessions: [], events: [], questions: [{ requestId: 'real-human', prompt: 'API_KEY=hidden' }], operations: [{ operationId: 'op', executionEffect: 'unknown' }],
       privateThoughts: 'PRIVATE_THOUGHTS', token: 'PRIVATE_SECRET', availableActions: [{ action: 'resume', allowed: false, reason: 'unknown_effect' }],
       omitted: { sessions: 16 }, retrieval: { tool: 'coordinate_work', action: 'query', workId: 'g', expectedRevision: 2, afterSessionId: 's23' }, truncated: true } } });
   assert.equal(observation.sessions[0].sessionId, 's39');
   const section = source.render(observation)[0]; assert.equal(section.layer, 'L7_CONTINUITY');
   assert.match(section.content, /actual-event/); assert.match(section.content, /ECONNRESET/); assert.match(section.content, /HTTP 503/);
+  assert.match(section.content, /current-turn-reply-1/);
   assert.match(section.content, /Implementation/); assert.match(section.content, /afterSessionId/); assert.match(section.content, /unknown_effect/);
   assert.doesNotMatch(section.content, /PRIVATE_|API_KEY|hidden/);
 });

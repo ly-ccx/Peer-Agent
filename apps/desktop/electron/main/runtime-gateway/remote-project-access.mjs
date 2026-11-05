@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import {admitRemoteProject,generateAvatar,parseRemoteProjectRequest,REMOTE_PROJECT_LIMITS} from '@peer-agent/protocol';
+import {admitRemoteProject,generateAvatar,parseInteractiveArtifactRef,parseRemoteProjectRequest,REMOTE_PROJECT_LIMITS} from '@peer-agent/protocol';
 
 const id = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/.test(value) ? value : null;
 const count = value => Number.isSafeInteger(value) && value >= 0 ? value : 0;
@@ -19,6 +19,31 @@ function text(value,limit,privatePaths=[]) {
 function sessionProjection(row,paths,summaryLimit=4000) {
   return {sessionId:id(row.sessionId),title:text(row.title,200,paths),status:state(row.status),
     updatedAt:at(row.updatedAt),summary:text(row.report?.summary??row.summary,summaryLimit,paths)};
+}
+
+function sessionResultRefs(row) {
+  const refs = row?.report?.evidenceRefs;
+  return Array.isArray(refs) ? [...new Set(refs.filter(ref => !!parseInteractiveArtifactRef(ref)))].slice(0, REMOTE_PROJECT_LIMITS.interactiveResults) : [];
+}
+
+function sessionResults(row, workspaceId, paths, read) {
+  if (typeof read !== 'function') return [];
+  /** @type {import('@peer-agent/protocol').RemoteProjectInteractiveResult[]} */
+  const results = [];
+  for (const ref of sessionResultRefs(row)) {
+    const reference = parseInteractiveArtifactRef(ref);
+    if (reference.owner.workspaceId !== workspaceId) continue;
+    try {
+      const saved = read(reference);
+      if (saved.ref !== ref || !['available', 'cleaned'].includes(saved.availability)) continue;
+      const shareText = ['D0_public', 'D1_internal'].includes(saved.dataLevel);
+      const summary = shareText ? text(saved.textFallback, REMOTE_PROJECT_LIMITS.interactiveSummary, paths) : undefined;
+      results.push({ ref, availability: saved.availability, ...(summary !== undefined ? {
+        title: text(saved.title, 120, paths), summary, truncated: saved.truncated === true || Array.from(saved.textFallback).length > REMOTE_PROJECT_LIMITS.interactiveSummary,
+      } : {}) });
+    } catch { /* The ordinary task report remains readable when a result is unavailable. */ }
+  }
+  return results;
 }
 
 function messageProjection(row,paths) {
@@ -84,7 +109,8 @@ export function createRemoteProjectAccess({resolveLocal,receipts,onAccess=()=>{}
             .slice(0,20).map(row=>({state:state(row.state),summary:text(row.summary,250,paths),needsDesktopApproval:true})),
           canMessage:local.admission.delegation.projectGrants.find(grant=>grant.workspaceId===request.workspaceId)?.allowProjectMessage===true};
       } else {
-        result={workspaceId:request.workspaceId,...sessionProjection(local.sessionFacts,paths)};
+        const interactiveResults = sessionResults(local.sessionFacts, request.workspaceId, paths, ports.readInteractiveResult);
+        result={workspaceId:request.workspaceId,...sessionProjection(local.sessionFacts,paths),...(interactiveResults.length ? { interactiveResults } : {})};
       }
       // An async read may cross a settings change, disconnect, or bot removal.
       const current=resolveLocal(request),exportAdmission=admitRemoteProject(request,current.admission);
@@ -92,6 +118,12 @@ export function createRemoteProjectAccess({resolveLocal,receipts,onAccess=()=>{}
       if(request.operation==='project.list')result.projects=result.projects.filter(row=>
         current.admission.delegation.projectGrants.some(grant=>grant.workspaceId===row.workspaceId&&grant.allowProjectRead)
         && current.projectAccess.directory.get(row.workspaceId)?.profile?.status==='active');
+      if (request.operation==='project.session.read' && result.interactiveResults) {
+        const allowed = new Set(sessionResultRefs(current.sessionFacts));
+        const retained = current.projectAccess?.readInteractiveResult === ports.readInteractiveResult ? result.interactiveResults.filter(row => allowed.has(row.ref)) : [];
+        if (retained.length) result.interactiveResults = retained;
+        else delete result.interactiveResults;
+      }
       onAccess({at:local.admission.now,operation:request.operation,...('workspaceId' in request?{workspaceId:request.workspaceId}:{})});
       return {ok:true,result};
     }catch(error){return {ok:false,code:error?.message==='REQUEST_CONFLICT'?'REQUEST_CONFLICT':inputAttempted?'OUTCOME_UNKNOWN':'LOCAL_STATE_UNAVAILABLE'};}

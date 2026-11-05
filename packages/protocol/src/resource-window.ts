@@ -1,12 +1,14 @@
 import type { BotDocumentReference, LocalDocumentReadResult } from './document-reference.ts';
 import type { EvidenceDeliveryBinding } from './evidence-inspection.ts';
+import { interactiveToken, normalizeInteractiveReference, type InteractiveOwner, type InteractiveResultReference } from './interactive-result.ts';
 
 /** Read-only presentation. None of these fields grant access or identify a browser guest/writer. */
 export type ResourceWindowResource =
   | ({ readonly kind: 'document'; readonly reference: BotDocumentReference; readonly line?: number; readonly delivery?: EvidenceDeliveryBinding }
     & ({ readonly mode: 'preview' | 'source' } | { readonly mode: 'diff'; readonly comparison: 'working' | 'staged' }))
   | { readonly kind: 'directory'; readonly reference: BotDocumentReference }
-  | { readonly kind: 'comparison'; readonly reference: BotDocumentReference; readonly fromRef: string; readonly toRef?: string; readonly comparison?: 'working' | 'staged' };
+  | { readonly kind: 'comparison'; readonly reference: BotDocumentReference; readonly fromRef: string; readonly toRef?: string; readonly comparison?: 'working' | 'staged' }
+  | { readonly kind: 'interactive'; readonly reference: InteractiveResultReference };
 export interface ResourceWindowNavigation {
   readonly top: number;
   readonly left: number;
@@ -30,21 +32,52 @@ export interface ResourceWindowIdentity { readonly viewId: string; readonly wind
 export interface ResourceWindowContext extends ResourceWindowIdentity {
   readonly owner: ResourceWindowOwner;
   readonly resource: ResourceWindowResource;
+  /** Factual presentation title resolved by the host; never an access grant. */
+  readonly title?: string;
   readonly sourceTabId?: string;
   readonly navigation?: ResourceWindowNavigation;
   readonly sourceNavigation?: ResourceWindowNavigation;
   readonly navigationVersion?: number;
   readonly phase: 'prepared' | 'attached' | 'ready';
 }
-export type ResourceWindowStatus = 'invalid_request' | 'scope_denied' | 'permission_denied' | 'not_found' | 'workspace_unavailable' | 'revision_unavailable' | 'source_unavailable' | 'source_changed' | 'storage_unavailable' | 'limit_reached' | 'stale_view' | 'not_ready' | 'cancelled' | 'disposed';
-export type ResourceWindowResult = { readonly ok: true; readonly context: ResourceWindowContext; readonly persisted?: boolean; readonly returnStatus?: 'returned' | 'source_tab_closed' } | { readonly ok: false; readonly status: ResourceWindowStatus };
+export type ResourceWindowStatus = 'invalid_request' | 'scope_denied' | 'permission_denied' | 'not_found' | 'workspace_unavailable' | 'revision_unavailable' | 'source_unavailable' | 'source_changed' | 'storage_unavailable' | 'limit_reached' | 'stale_view' | 'not_ready' | 'cancelled' | 'disposed' | 'content_cleaned' | 'incompatible_result' | 'result_unavailable';
+export type ResourceWindowResult = { readonly ok: true; readonly context: ResourceWindowContext; readonly persisted?: boolean;
+  readonly checkpointStatus?: 'owner_replaced'; readonly returnStatus?: 'returned' | 'source_tab_closed' } | { readonly ok: false; readonly status: ResourceWindowStatus };
 export interface ResourceWindowReturnRequest { readonly requestId: string; readonly context: ResourceWindowContext; readonly expiresAt: number }
 export interface ResourceWindowReturnAck { readonly requestId: string; readonly identity: ResourceWindowIdentity; readonly status: 'returned' | 'source_tab_closed' | 'cancelled' }
 export interface ResourceWindowCheckpointRequest { readonly requestId: string; readonly identity: ResourceWindowIdentity }
 export interface ResourceWindowCheckpointAck extends ResourceWindowCheckpointRequest { readonly status: 'confirmed' | 'blocked' }
 export interface ResourceWindowCloseBlocked { readonly identity: ResourceWindowIdentity; readonly reason: 'save_failed' | 'unconfirmed' }
-export interface ResourceWindowHistoryEntry { readonly id: string; readonly owner: ResourceWindowOwner; readonly request: ResourceWindowOpenRequest; readonly savedAt: string }
+export interface ResourceWindowHistoryEntry { readonly id: string; readonly owner: ResourceWindowOwner; readonly request: ResourceWindowOpenRequest; readonly savedAt: string; readonly title?: string }
 export interface ResourceWindowHistoryResult { readonly ok: boolean; readonly status: 'ok' | 'scope_denied' | 'storage_unavailable'; readonly entries: readonly ResourceWindowHistoryEntry[] }
+export interface ResourceLayoutSnapshot {
+  readonly formatVersion: 2;
+  readonly revision: number;
+  readonly order: readonly string[];
+  readonly recent: readonly string[];
+  readonly interactive: ResourceInteractiveSession;
+  readonly updatedAt: string;
+}
+export interface ResourceInteractiveTab {
+  readonly id: string;
+  readonly reference: InteractiveResultReference;
+  readonly title?: string;
+  readonly navigation?: Pick<ResourceWindowNavigation, 'top' | 'left'>;
+}
+/** Domain presentation references only; values, raw drafts and writer truth stay in the state store. */
+export interface ResourceInteractiveSession {
+  readonly tabs: readonly ResourceInteractiveTab[];
+  readonly activeTabId: string | null;
+}
+export type ResourceRecentReference =
+  | { readonly kind: 'document'; readonly path: string; readonly relativeTo?: string; readonly task?: BotDocumentReference['task']; readonly revision?: BotDocumentReference['revision'] }
+  | { readonly kind: 'comparison'; readonly path: string; readonly relativeTo?: string; readonly task?: BotDocumentReference['task']; readonly comparison: { readonly fromRef: string; readonly toRef?: string; readonly comparison?: 'working' | 'staged' } }
+  | { readonly kind: 'browser'; readonly url: string }
+  | { readonly kind: 'interactive'; readonly reference: InteractiveResultReference; readonly title?: string };
+export interface ResourcePresentationApi {
+  readLayout(request: { readonly owner: InteractiveOwner }): Promise<{ readonly ok: true; readonly snapshot: ResourceLayoutSnapshot | null } | { readonly ok: false; readonly code: string }>;
+  writeLayout(request: { readonly owner: InteractiveOwner; readonly expectedRevision: number } & Pick<ResourceLayoutSnapshot, 'order' | 'recent' | 'interactive'>): Promise<{ readonly ok: true; readonly snapshot: ResourceLayoutSnapshot } | { readonly ok: false; readonly code: string }>;
+}
 
 /** The host supplies owner, task, revision and allowed root from its lease, never from this request. */
 export interface ResourceWindowReadRequest {
@@ -93,6 +126,11 @@ function reference(raw: unknown): BotDocumentReference | undefined {
 }
 function resource(raw: unknown): ResourceWindowResource | undefined {
   if (!object(raw)) return;
+  if (raw.kind === 'interactive') {
+    if (!keys(raw, ['kind', 'reference'])) return;
+    const fixed = normalizeInteractiveReference(raw.reference);
+    return fixed ? { kind: 'interactive', reference: fixed } : undefined;
+  }
   const ref = reference(raw.reference); if (!ref) return;
   if (raw.kind === 'directory') {
     if (!keys(raw, ['kind', 'reference']) || ref.revision || ref.expectedObservation) return;
@@ -126,7 +164,7 @@ function resource(raw: unknown): ResourceWindowResource | undefined {
 }
 /** Only bounded hints for this kind of view; never accept a body, permission, browser instance or draft. */
 export function normalizeResourceWindowNavigation(raw: unknown, kind: ResourceWindowResource['kind']): ResourceWindowNavigation | undefined {
-  if (!object(raw) || !keys(raw, kind === 'directory' ? ['top', 'left', 'selected', 'expanded', 'filter'] : kind === 'comparison' ? ['top', 'left', 'selected', 'positions'] : ['top', 'left', 'mode', 'positions']) || !point(raw.top) || !point(raw.left)) return;
+  if (!object(raw) || !keys(raw, kind === 'interactive' ? ['top', 'left'] : kind === 'directory' ? ['top', 'left', 'selected', 'expanded', 'filter'] : kind === 'comparison' ? ['top', 'left', 'selected', 'positions'] : ['top', 'left', 'mode', 'positions']) || !point(raw.top) || !point(raw.left)) return;
   if (raw.selected !== undefined && !text(raw.selected, 8192) || raw.filter !== undefined && (typeof raw.filter !== 'string' || raw.filter.length > 256 || /[\u0000-\u001f]/.test(raw.filter))
     || raw.expanded !== undefined && (!Array.isArray(raw.expanded) || raw.expanded.length > 64 || !raw.expanded.every(value => text(value, 8192)))) return;
   if (raw.mode !== undefined && raw.mode !== 'preview' && raw.mode !== 'source') return;
@@ -152,4 +190,89 @@ export function normalizeResourceWindowOwner(raw: unknown): ResourceWindowOwner 
   if (raw.task !== undefined && (!object(raw.task) || !keys(raw.task, ['sessionId', 'planId']) || !token(raw.task.sessionId) || !token(raw.task.planId))) return;
   return { workspaceId: raw.workspaceId, conversationId: raw.conversationId,
     ...(object(raw.task) ? { task: { sessionId: raw.task.sessionId as string, planId: raw.task.planId as string } } : {}) };
+}
+export function resourceWindowWorkspaceId(resource: ResourceWindowResource): string {
+  return resource.kind === 'interactive' ? resource.reference.owner.workspaceId : resource.reference.workspaceId;
+}
+export function resourceWindowTask(resource: ResourceWindowResource): BotDocumentReference['task'] | undefined {
+  return resource.kind === 'interactive' ? undefined : resource.reference.task;
+}
+export function interactiveReferenceKey(reference: InteractiveResultReference): string {
+  return JSON.stringify([reference.owner.workspaceId, reference.owner.conversationId, reference.resultId, reference.contentVersion]);
+}
+const titleHint = (value: unknown): value is string => typeof value === 'string' && !!value.trim() && value.length <= 160 && !value.includes('\0');
+export function normalizeResourceInteractiveSession(raw: unknown): ResourceInteractiveSession | undefined {
+  if (!object(raw) || !keys(raw, ['tabs', 'activeTabId']) || !Array.isArray(raw.tabs) || raw.tabs.length > 32
+    || raw.activeTabId !== null && !interactiveToken(raw.activeTabId)) return;
+  const tabs: ResourceInteractiveTab[] = [];
+  const ids = new Set<string>(), references = new Set<string>();
+  for (const item of raw.tabs) {
+    if (!object(item) || !keys(item, ['id', 'reference', 'title', 'navigation']) || !interactiveToken(item.id) || item.title !== undefined && !titleHint(item.title)) return;
+    const reference = normalizeInteractiveReference(item.reference);
+    const navigation = item.navigation === undefined ? undefined : normalizeResourceWindowNavigation(item.navigation, 'interactive');
+    if (!reference || item.navigation !== undefined && !navigation || ids.has(item.id) || references.has(interactiveReferenceKey(reference))) return;
+    ids.add(item.id); references.add(interactiveReferenceKey(reference));
+    tabs.push({ id: item.id, reference, ...(item.title !== undefined ? { title: item.title } : {}), ...(navigation ? { navigation } : {}) });
+  }
+  if (raw.activeTabId !== null && !ids.has(raw.activeTabId)) return;
+  return { tabs, activeTabId: raw.activeTabId as string | null };
+}
+export function normalizeResourceRecentReference(raw: unknown): ResourceRecentReference | undefined {
+  if (!object(raw)) return;
+  if (raw.kind === 'interactive') {
+    if (!keys(raw, ['kind', 'reference', 'title']) || raw.title !== undefined && !titleHint(raw.title)) return;
+    const reference = normalizeInteractiveReference(raw.reference);
+    return reference ? { kind: 'interactive', reference, ...(raw.title !== undefined ? { title: raw.title } : {}) } : undefined;
+  }
+  if (raw.kind === 'browser') {
+    if (!keys(raw, ['kind', 'url']) || !text(raw.url, 8192)) return;
+    try { const url = new URL(raw.url); if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) return;
+      return { kind: 'browser', url: url.href };
+    } catch { return; }
+  }
+  if (!['document', 'comparison'].includes(String(raw.kind)) || !keys(raw, raw.kind === 'document' ? ['kind', 'path', 'relativeTo', 'task', 'revision'] : ['kind', 'path', 'relativeTo', 'task', 'comparison'])) return;
+  // A recent descriptor is a hint scoped by its containing owner. It never supplies a workspace or an access grant.
+  const ref = { workspaceId: 'presentation', path: raw.path, ...(raw.relativeTo !== undefined ? { relativeTo: raw.relativeTo } : {}),
+    ...(raw.task !== undefined ? { task: raw.task } : {}), ...(raw.revision !== undefined ? { revision: raw.revision } : {}) };
+  if (raw.kind === 'document') {
+    const request = normalizeResourceWindowRequest({ resource: { kind: 'document', reference: ref, mode: 'preview' } });
+    if (request?.resource.kind !== 'document') return;
+    const fixed = request.resource.reference;
+    return { kind: 'document', path: fixed.path, ...(fixed.relativeTo ? { relativeTo: fixed.relativeTo } : {}), ...(fixed.task ? { task: fixed.task } : {}), ...(fixed.revision ? { revision: fixed.revision } : {}) };
+  }
+  if (!object(raw.comparison) || !keys(raw.comparison, ['fromRef', 'toRef', 'comparison'])) return;
+  const request = normalizeResourceWindowRequest({ resource: { kind: 'comparison', reference: ref, ...raw.comparison } });
+  if (request?.resource.kind !== 'comparison') return;
+  const fixed = request.resource;
+  return { kind: 'comparison', path: fixed.reference.path, ...(fixed.reference.relativeTo ? { relativeTo: fixed.reference.relativeTo } : {}), ...(fixed.reference.task ? { task: fixed.reference.task } : {}),
+    comparison: { fromRef: fixed.fromRef, ...(fixed.toRef ? { toRef: fixed.toRef } : {}), ...(fixed.comparison ? { comparison: fixed.comparison } : {}) } };
+}
+export function normalizeResourceLayout(raw: unknown): Pick<ResourceLayoutSnapshot, 'order' | 'recent' | 'interactive'> | undefined {
+  if (!object(raw) || !keys(raw, ['order', 'recent', 'interactive'])) return;
+  const interactive = normalizeResourceInteractiveSession(raw.interactive); if (!interactive) return;
+  const list = (value: unknown, limit: number): value is string[] => Array.isArray(value) && value.length <= limit
+    && value.every(key => typeof key === 'string' && key.length <= 8192 && !/[\u0000-\u001f]/.test(key)
+      && (key === 'launcher' || /^(?:document|browser|conversation|interactive):.+$/.test(key) || key === 'comparison:workspace')) && new Set(value).size === value.length;
+  if (!list(raw.order, 200) || !Array.isArray(raw.recent) || raw.recent.length > 16 || new TextEncoder().encode(JSON.stringify(raw)).byteLength > 256 * 1024) return;
+  const mapped = new Set(interactive.tabs.map(tab => `interactive:${tab.id}`));
+  if (raw.order.some(key => key.startsWith('interactive:') && !mapped.has(key))
+    || interactive.activeTabId !== null && !raw.order.includes(`interactive:${interactive.activeTabId}`)) return;
+  const recent: string[] = [];
+  for (const item of raw.recent) {
+    if (typeof item !== 'string' || item.length > 8192) return;
+    if (list([item], 1)) { recent.push(item); continue; }
+    try { const ref = normalizeResourceRecentReference(JSON.parse(item)); if (!ref) return;
+      const descriptor = JSON.stringify(ref); if (descriptor.length > 8192) return; recent.push(descriptor);
+    }
+    catch { return; }
+  }
+  if (new Set(recent).size !== recent.length) return;
+  const layout = { order: [...raw.order], recent, interactive };
+  return new TextEncoder().encode(JSON.stringify(layout)).byteLength <= 256 * 1024 ? layout : undefined;
+}
+export function normalizeResourceLayoutSnapshot(raw: unknown): ResourceLayoutSnapshot | undefined {
+  if (!object(raw) || !keys(raw, ['formatVersion', 'revision', 'order', 'recent', 'interactive', 'updatedAt']) || raw.formatVersion !== 2
+    || !Number.isSafeInteger(raw.revision) || Number(raw.revision) < 1 || typeof raw.updatedAt !== 'string' || raw.updatedAt.length > 40 || !Number.isFinite(Date.parse(raw.updatedAt))) return;
+  const layout = normalizeResourceLayout({ order: raw.order, recent: raw.recent, interactive: raw.interactive });
+  return layout ? { formatVersion: 2, ...layout, revision: raw.revision as number, updatedAt: raw.updatedAt } : undefined;
 }

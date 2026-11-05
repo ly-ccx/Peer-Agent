@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { existsSync, mkdirSync } from 'node:fs';
 import { getDataHome } from '../data-store.mjs';
+import { interactiveMaterialCaptureEnabled } from '../interactive-results/runtime-port.mjs';
 import { evaluateWorkSessionWrite, capabilityDenial } from '@peer-agent/runtime-node';
 import {
   buildGoalModeDenial,
@@ -216,6 +217,7 @@ export async function executeProjectedModelTool({
     const gate = evaluateWorkSessionWrite(dispatchPlan, {
       capabilityId: projection.call.capabilityId, toolName: name,
       executionIdentity: toolContext?.turnProfile?.executionIdentity,
+      turnProfile: toolContext?.turnProfile,
       permissionKind: projection.tool?.permissionPolicy?.kind, riskLevel: projection.capability?.riskLevel, resourceScopes,
     });
     return gate.allowed ? null : gate.error;
@@ -238,6 +240,7 @@ export async function executeProjectedModelTool({
   const effectiveToolContext = toolContext
     ? {
       ...toolContext,
+      interactiveMaterialsEnabled: interactiveMaterialCaptureEnabled(toolContext),
       checkAccessPolicy: workSessionGate,
       workspacePath: cwd,
       originWorkspacePath: goalBinding?.originWorkspacePath ?? toolContext.originWorkspacePath ?? requestedCwd,

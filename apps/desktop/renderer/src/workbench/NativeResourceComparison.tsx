@@ -11,6 +11,7 @@ import { prepareDiffPresentation } from './file-preview/diffPresentationState';
 import { DiffViewer } from './file-preview/DiffViewer';
 
 export function NativeResourceComparison({ context, isZh }: { readonly context: ResourceWindowContext; readonly isZh: boolean }) {
+  if (context.resource.kind !== 'comparison') throw Error('invalid_comparison_resource');
   const navigation = useNativeNavigation()!, read = useNativeRead(context, 'diff');
   const [selected, setSelected] = useState<string | null>(context.navigation?.selected ?? null);
   const presentation = useMemo(() => prepareDiffPresentation(read.value?.diff?.diffText ?? ''), [read.value]);

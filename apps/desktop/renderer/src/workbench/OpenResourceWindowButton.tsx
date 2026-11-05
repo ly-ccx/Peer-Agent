@@ -2,12 +2,12 @@ import { useState } from 'react';
 import type { ResourceWindowOpenRequest } from '@peer-agent/protocol';
 import { PeerIcon } from '../ui/icons';
 
-export function OpenResourceWindowButton({ request, isZh, disabled = false }: { readonly request: ResourceWindowOpenRequest | (() => ResourceWindowOpenRequest); readonly isZh: boolean; readonly disabled?: boolean }) {
+export function OpenResourceWindowButton({ request, isZh, disabled = false, label: customLabel }: { readonly request: ResourceWindowOpenRequest | (() => ResourceWindowOpenRequest); readonly isZh: boolean; readonly disabled?: boolean; readonly label?: string }) {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const open = window.peerAgent?.resourceWindowOpen;
   if (!open) return null;
-  const label = isZh ? '另开只读窗口' : 'Open read-only window';
+  const label = customLabel ?? (isZh ? '另开只读窗口' : 'Open read-only window');
   return <span className="resource-window-open"><button type="button" className="ui-button is-compact" disabled={disabled || busy} aria-label={label} title={label} onClick={async () => {
     setBusy(true); setFailure(null);
     try {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { decideSurfacing } from '@peer-agent/protocol';
+import { decideSurfacing, interactiveArtifactRef } from '@peer-agent/protocol';
 import { planDelivery } from './digest.mjs';
 import { projectCards } from './card-projection.mjs';
 import { composeReply } from './reply-composer.mjs';
@@ -21,6 +21,14 @@ function reply(extra = {}) {
     ...extra,
   });
 }
+
+test('fixed interactive references use their protocol length while ordinary evidence keeps its original short-reference limit', () => {
+  const ref = interactiveArtifactRef({ owner: { workspaceId: 'w'.repeat(200), conversationId: 'c'.repeat(200) },
+    resultId: 'r'.repeat(36), contentVersion: 'sha256:' + 'a'.repeat(64) });
+  assert.ok(ref.length > 500);
+  assert.deepEqual(reply({ evidenceRefs: [ref] }).meta.evidenceRefs, [ref]);
+  assert.equal(reply({ evidenceRefs: ['ordinary:' + 'a'.repeat(501)] }).error, 'invalid_input');
+});
 
 test('核验通过但任务仍阻塞时不能声明已签收', () => {
   const result = reply({ sources: ['sess-1'],

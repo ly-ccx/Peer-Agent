@@ -93,7 +93,9 @@ test('用户回合带上预算和上下文槽，唤醒回合只注入提醒', ()
   assert.equal(wake.reminder.layer, 'L6_MODE_REMINDER');
   assert.equal(wake.reminder.kind, 'project-agent-wake');
   assert.match(wake.reminder.content, /not a new user message/);
-  assert.match(wake.reminder.content, /only confirm acknowledged work need no tool queries or status reply/);
+  assert.match(wake.reminder.content, /Routine progress needs no status query or repeated reply/);
+  assert.match(wake.reminder.content, /resolve the current disposition before posting/);
+  assert.match(wake.reminder.content, /Do not reopen the historical request or spawn the same work again/);
   assert.match(wake.reminder.content, /Review a new result or exception for the affected session/);
   assert.match(wake.reminder.content, /do not reopen unrelated past work or poll a running session/);
   assert.doesNotMatch(wake.reminder.content, /Roster:/);

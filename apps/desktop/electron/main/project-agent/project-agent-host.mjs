@@ -26,6 +26,7 @@ import {
   createBotProfileStore,
   createBotAccessPolicyAuthority,
   createInputQueue,
+  createProjectInputDraftStore,
   createMemoryStore,
   createEpisodeLog,
   createMemoryCurator,
@@ -75,6 +76,9 @@ import { createDesktopProjectFacts } from './project-facts.mjs';
 import { createProjectLifecycleEffects } from './project-lifecycle-effects.mjs';
 import { createDiagnosticsExport } from './diagnostics-export.mjs';
 import { retryProjectAgentTurn } from './response-retry.mjs';
+import { createInteractiveRuntime, createInteractiveTextReader } from '@peer-agent/runtime-node/interactive-results';
+import { readStoredWorkHistory } from '@peer-agent/conversation-store/persisted-history';
+import { installDesktopInteractiveRuntime } from '../interactive-results/runtime-port.mjs';
 import { createDesktopRecoveryController } from './project-recovery-controller.mjs';
 
 /** Current user inputs become the model messages, including bounded image thumbnails. */
@@ -134,6 +138,7 @@ export function registerDesktopProjectAgent({
   onAppendedMessage = null,
   onViewing = null,
   configurePermissions = null,
+  acquireInteractiveRetentionCompatibility = null,
 } = {}) {
   const runtimeRoot = path.join(dataHome, 'project-runtime');
   const botHistory = conversationStore.createHistoryProjection?.(history => history.messages, { immutableInput: true, maxEntries: 8, maxBytes: 32 * 1024 * 1024 });
@@ -153,6 +158,7 @@ export function registerDesktopProjectAgent({
   executionScheduler.configure({ rootDir: runtimeRoot, getConcurrency: () => readRuntimePolicy()?.projectAgent?.concurrency, isWorkspaceReady: workspaceId => host?.isReady(workspaceId) === true,
     isPlanRecoveryHeld: plan => host?.sessionHeld(plan?.delegationOrigin?.workspaceId, plan?.delegationOrigin?.sessionId) === true });
   const readEvidenceBody = createEvidenceReader({
+    resolveScopedRecord: (ref, context) => interactive.publications.resolveEvidence(ref, context),
     readScopedExternal: createScopedExternalEvidenceReader({ findWatch: ref => objectiveWatches?.resolveEvidence(ref),
       readWatchBody: ref => objectiveWatches?.readEvidenceBody(ref) }),
     projectDeliveries: createEvidenceDeliveryProjection({ getConversationId: id => profileStore.read(id)?.agentConversationId,
@@ -176,6 +182,26 @@ export function registerDesktopProjectAgent({
   const accessAuthority = createBotAccessPolicyAuthority({ dataHome, profileStore, conversationStore, goalPlanStore,
     legacyAccessLevel: getSettings()?.localAccessLevel });
   accessAuthority.initialize();
+  const interactiveEnabled = workspaceId => ownsProject(workspaceId) && readRuntimePolicy()?.projectAgent?.interactiveResults === true;
+  const validateInteractiveFeedback = (row, workspaceId) => interactive.feedback.validate(row, workspaceId);
+  const inputDrafts = createProjectInputDraftStore({ rootDir: runtimeRoot, validateInteractiveFeedback });
+  const inputQueue = createInputQueue({
+    rootDir: runtimeRoot,
+    validateInteractiveFeedback,
+    holdsLease: ownsProject,
+    resolveConversationId,
+    hasMessage,
+    appendMessage,
+  });
+  const interactive = createInteractiveRuntime({ rootDir: runtimeRoot, goalPlanStore, conversationStore,
+    readPortableWorkHistory: (scope, readBudget) => readStoredWorkHistory(path.join(dataHome, 'conversations'), scope, readBudget),
+    retentionPorts: { inputQueue, drafts: inputDrafts, acquireCompatibility: acquireInteractiveRetentionCompatibility },
+    getBotConversationId(id) {
+      const profile = profileStore.read(id);
+      return profile?.status === 'active' ? profile.agentConversationId : undefined;
+    }, holdsLease: ownsProject, enabled: interactiveEnabled,
+    classifyContext: () => 'D3_private', getSession: (id, detail = 'report') => supervisor.get({ sessionId: id, ...(detail === 'report' ? { detail } : {}) }) });
+  const uninstallInteractive = installDesktopInteractiveRuntime({ runtime: interactive, enabled: interactiveEnabled });
   const memoryStore = createMemoryStore({ rootDir: dataHome });
   configurePermissions?.(approvalStore);
   const memoryChanged = workspaceId => {
@@ -210,6 +236,9 @@ export function registerDesktopProjectAgent({
     canManageWorkspace: ownsProject,
     deferRecovery: true,
     readDelegationCapabilities: input => agentTurnExecutor.readDelegationCapabilities?.(input),
+    readResourceFeedback: interactive.feedback.restore,
+    projectReportEvidence: interactive.publications.projectReportEvidence,
+    recoverStoppedPublications: interactive.recoverWorkspace,
     approvalStore,
     memoryStore,
     resolveModel: (input) => agentTurnExecutor.resolveGoalRole({
@@ -246,6 +275,7 @@ export function registerDesktopProjectAgent({
   const uninstallVerification = installSessionVerification(verification);
   const projectFacts = createDesktopProjectFacts({ requirePreparedCoordination: true, supervisor, approvalStore, profileStore, conversationStore, runtimeRoot, memoryStore,objectiveProposals:workspaceId=>objectiveActions.pending(workspaceId).filter(row=>{const item=objectiveStore.get(workspaceId,row.objectiveId);return item?.status==='active'&&!item.pendingConfirmation&&item.autonomy!=='report_only'&&item.version===row.version;}) });
   const uninstallDelivery = installDeliveryFacts({
+    readResultReferences: interactive.publications.replyReferences,
     read(view) {
       const settings = normalizeProjectAgentSettings(readRuntimePolicy()?.projectAgent);
       const level = profileStore.read(view?.workspaceId)?.proactivity;
@@ -397,13 +427,6 @@ export function registerDesktopProjectAgent({
     return '';
   }
 
-  const inputQueue = createInputQueue({
-    rootDir: runtimeRoot,
-    holdsLease: ownsProject,
-    resolveConversationId,
-    hasMessage,
-    appendMessage,
-  });
   host = createProjectAgentHost({
     rootDir: runtimeRoot,
     readLeaseEpoch,
@@ -411,7 +434,7 @@ export function registerDesktopProjectAgent({
     acquireLease: workspaceId => { if (runtimeEnabled() && profileStore.read(workspaceId)?.status === 'active') return acquireLease?.(workspaceId); },
     readMessages: readCanonicalMessages,
     readInputFacts: inputFacts || readCanonicalMessages,
-    restoreQueue: workspaceId => { applyStartupApprovalRecovery({approvalStore, goalPlanStore, canRecover: row => row.workspaceId === workspaceId}); return supervisor.recoverQueue(workspaceId); },
+    restoreQueue: workspaceId => { interactive.recoverWorkspace(workspaceId); applyStartupApprovalRecovery({approvalStore, goalPlanStore, canRecover: row => row.workspaceId === workspaceId}); return supervisor.recoverQueue(workspaceId); },
     recoverTasks: workspaceId => goalRunner?.recoverContextCheckpoints?.({ workspaceId, deferPump: true }),
     restoreWatches:objectiveWatches.restore,stopWatches:objectiveWatches.stopWorkspace,
     activateSessions: workspaceId => supervisor.resumeRecovered(workspaceId),
@@ -500,6 +523,7 @@ export function registerDesktopProjectAgent({
     readLeaseEpoch, supervisor, goalPlanStore, goalRunner, agentTurnExecutor, objectiveWatches, executionScheduler,
     changed: workspaceId => broadcast?.('project-agent:changed', { workspaceIds: [workspaceId] }) });
   const projectAgent = createProjectAgentApplicationService({
+    inputDrafts,
     recoveryControl,
     accessAuthority,
     diagnostics: diagnostics.execute,
@@ -626,8 +650,12 @@ export function registerDesktopProjectAgent({
     },
   });
   if (typeof onReady === 'function') {
+    const readInteractiveResult = createInteractiveTextReader({ resultStore: interactive.resultStore, assertOwner: owner => {
+      const profile = profileStore.read(owner.workspaceId);
+      return profile?.status === 'active' && profile.agentConversationId === owner.conversationId;
+    } });
     onReady({
-      projectAccess: {directory,inputQueue,getSession:sessionId=>supervisor.get({sessionId,detail:'report'}),
+      projectAccess: {directory,inputQueue,readInteractiveResult,getSession:sessionId=>supervisor.get({sessionId,detail:'report'}),
         wake:workspaceId=>{void host.sync([workspaceId]).catch(()=>{});}},
       listItems: () => directory.list(),
       submitInput: (input) => {
@@ -648,7 +676,9 @@ export function registerDesktopProjectAgent({
       supervisor,
       objectives,
       objectiveWatches,
-      dispose: () => { accessAuthority.close(); projectAgent.dispose(); uninstallYield?.(); host.dispose();void objectiveWatches.dispose(); uninstallDelegation(); uninstallVerification(); uninstallDelivery(); uninstallProactivity(); uninstallMemory(); },
+      interactive,
+      readInputDraft: projectAgent.readInputDraft,
+      dispose: () => { uninstallInteractive(); interactive.close(); accessAuthority.close(); projectAgent.dispose(); uninstallYield?.(); host.dispose();void objectiveWatches.dispose(); uninstallDelegation(); uninstallVerification(); uninstallDelivery(); uninstallProactivity(); uninstallMemory(); },
     });
   }
   const memory = createProjectMemoryService({

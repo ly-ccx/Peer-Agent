@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { interactiveArtifactRef } from '@peer-agent/protocol';
 import { createEvidenceDeliveryProjection } from './evidence-deliveries.mjs';
 import { createEvidenceReader } from './evidence-reader.mjs';
 import { createProjectAgentApplicationService } from './project-agent-application-service.mjs';
@@ -63,4 +64,22 @@ test('path-like owner and plan IDs are rejected before reaching registry getters
   assert.equal(project(record, { workspaceId: '../other' }).deliveryStatus, 'scope_denied');
   assert.equal(project({ ...record, planId: '../plan' }, { workspaceId: 'bot' }).deliveryStatus, 'scope_denied');
   assert.equal(project(record, { workspaceId: 'bot', task: { sessionId: '../session', planId: 'plan' } }).deliveryStatus, 'scope_denied');
+});
+
+test('interactive deliveries come only from an exact canonical worker publication for the current Bot owner', () => {
+  const reference = { owner: { workspaceId: 'bot', conversationId: 'bot-chat' }, resultId: 'result-a', contentVersion: 'sha256:' + 'a'.repeat(64) };
+  const artifact = { kind: 'interactive', ref: interactiveArtifactRef(reference), reference, label: 'Saved trial', specHash: 'sha256:' + 'b'.repeat(64) };
+  const publication = { evidenceRef: artifact.ref, planId: 'plan', conversationId: 'worker-chat', toolCallId: 'publish-a', capabilityId: 'local.interactive.publish', toolName: 'publish_interactive_result', userArtifacts: [artifact] };
+  const project = projection({ getPlan: () => ({ planId: 'plan', conversationId: 'worker-chat', delegationOrigin: { workspaceId: 'bot', sessionId: 'session' } }) });
+  const delivery = project(publication, { workspaceId: 'bot' }).deliveries[0];
+  assert.deepEqual(delivery, { evidenceRef: artifact.ref, artifactRef: artifact.ref, kind: 'interactive', label: artifact.label, interactiveReference: reference, specHash: artifact.specHash });
+  assert.equal(delivery.reference, undefined);
+  for (const patch of [{ capabilityId: 'local.file.write' }, { toolName: 'read_file' }, { evidenceRef: 'tool-result://fake' }, { toolCallId: undefined }, { planId: undefined }, { conversationId: 'other-worker' }]) {
+    assert.deepEqual(project({ ...publication, ...patch }, { workspaceId: 'bot' }).deliveries, []);
+  }
+  for (const patch of [{ reference: { ...reference, owner: { ...reference.owner, conversationId: 'old-parent' } } }, { path: '/fake' }, { ref: 'file:///fake' }, { specHash: 'latest' }]) {
+    assert.deepEqual(project({ ...publication, userArtifacts: [{ ...artifact, ...patch }] }, { workspaceId: 'bot' }).deliveries, []);
+  }
+  assert.deepEqual(project({ ...publication, userArtifacts: [], summary: artifact.ref, artifactRefs: [artifact.ref] }, { workspaceId: 'bot' }).deliveries, []);
+  assert.equal(project(publication, { workspaceId: 'other' }).deliveryStatus, 'scope_denied');
 });

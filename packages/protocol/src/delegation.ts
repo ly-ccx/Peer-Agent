@@ -286,6 +286,10 @@ export interface VerificationVerdict {
 export interface SessionVerificationDetail {
   readonly sessionId: string;
   readonly outcome: VerificationOutcome;
+  /** A host review is active. The outcome describes evidence already recorded. */
+  readonly verificationInProgress?: true;
+  /** A persisted explicit review of the current task and report. */
+  readonly explicitVerification?: { readonly verdictRef: string; readonly outcome: VerificationOutcome };
   readonly checks: readonly {
     readonly name: string;
     readonly result: 'passed' | 'failed';

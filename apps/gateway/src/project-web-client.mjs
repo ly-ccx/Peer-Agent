@@ -3,6 +3,7 @@ export function projectWebClient(createRemoteHistory) {
   const byId = id => document.getElementById(id);
   const shell = document.querySelector('.project-shell'), list = byId('project-list'), chat = byId('project-chat');
   const messages = byId('project-messages'), tasks = byId('project-tasks'), detail = byId('project-task-detail');
+  const detailResults = byId('detail-results');
   const status = byId('project-status'), login = byId('project-login'), logout = byId('project-logout');
   const text = byId('project-text'), send = byId('project-send'), inputStatus = byId('input-status');
   const key = bot => JSON.stringify([bot.deviceId, bot.workspaceId]);
@@ -22,7 +23,7 @@ export function projectWebClient(createRemoteHistory) {
     for (const container of [list, messages, tasks, byId('project-devices')]) container.replaceChildren();
     detail.hidden = true; chat.hidden = true; text.value = ''; shell.dataset.chat = 'false';
     for (const id of ['detail-title', 'detail-status', 'detail-summary']) byId(id).textContent = '';
-    taskOpener = null; text.readOnly = false;
+    detailResults.replaceChildren(); taskOpener = null; text.readOnly = false;
     login.hidden = false; logout.hidden = true; status.textContent = message;
     byId('project-refresh').disabled = false; byId('chat-refresh').disabled = false; byId('chat-older').disabled = false; send.disabled = true;
   }
@@ -87,7 +88,7 @@ function avatar(value){const ns='http://www.w3.org/2000/svg',svg=document.create
   function leaveChat() {
     saveDraft(); rememberReading(); const id = selected && key(selected);
     chatGeneration++; taskGeneration++; selected = null; taskTarget = null; loadingChat = false;
-    chat.hidden = true; detail.hidden = true; shell.dataset.chat = 'false'; renderList();
+    chat.hidden = true; detail.hidden = true; detailResults.replaceChildren(); shell.dataset.chat = 'false'; renderList();
     [...list.children].find(el => el.dataset.navKey === id)?.focus({ preventScroll: true });
   }
   async function load() {
@@ -107,7 +108,7 @@ function avatar(value){const ns='http://www.w3.org/2000/svg',svg=document.create
         else if (device && device.status !== 'online') { selected = { ...selected, offline: true }; renderComposer(); }
         else {
           const id = key(selected); leaveChat(); histories.delete(id); reading.delete(id);
-          messages.replaceChildren(); tasks.replaceChildren(); byId('detail-summary').textContent = ''; text.value = '';
+          messages.replaceChildren(); tasks.replaceChildren(); byId('detail-summary').textContent = ''; detailResults.replaceChildren(); text.value = '';
         }
       }
       renderList();
@@ -151,7 +152,7 @@ function avatar(value){const ns='http://www.w3.org/2000/svg',svg=document.create
   }
   function openBot(bot) {
     saveDraft(); rememberReading(); selected = bot; chatGeneration++; taskGeneration++; taskTarget = null; composing = false; loadingChat = false;
-    detail.hidden = true; chat.hidden = false; shell.dataset.chat = 'true'; following = true;
+    detail.hidden = true; detailResults.replaceChildren(); chat.hidden = false; shell.dataset.chat = 'true'; following = true;
     messages.replaceChildren(); tasks.replaceChildren(); byId('chat-title').textContent = bot.name;
     const checkpoint = reading.get(key(bot)); following = checkpoint?.following ?? true;
     renderList(); renderComposer(true); renderMessages(bot, history(bot).snapshot());
@@ -183,7 +184,7 @@ function avatar(value){const ns='http://www.w3.org/2000/svg',svg=document.create
     } catch (error) {
       if (generation !== chatGeneration || !current(bot, auth)) return;
       if (['PROJECT_DENIED', 'DELEGATION_EXPIRED'].includes(error.message)) {
-        histories.delete(key(bot)); reading.delete(key(bot)); messages.replaceChildren(); tasks.replaceChildren(); taskGeneration++; taskTarget = null; detail.hidden = true; byId('detail-summary').textContent = ''; selected = { ...selected, denied: true }; renderComposer();
+        histories.delete(key(bot)); reading.delete(key(bot)); messages.replaceChildren(); tasks.replaceChildren(); taskGeneration++; taskTarget = null; detail.hidden = true; byId('detail-summary').textContent = ''; detailResults.replaceChildren(); selected = { ...selected, denied: true }; renderComposer();
       }
       byId('chat-status').textContent = errorText[error.message] || '读取未完成，保留上次内容，请重试。';
     } finally {
@@ -193,7 +194,7 @@ function avatar(value){const ns='http://www.w3.org/2000/svg',svg=document.create
   async function readTask(bot, sessionId) {
     const ticket = ++taskGeneration, auth = authGeneration;
     taskTarget = { bot, sessionId }; detail.hidden = false;
-    byId('detail-title').textContent = '任务'; byId('detail-status').textContent = '正在读取…'; byId('detail-summary').textContent = '';
+    byId('detail-title').textContent = '任务'; byId('detail-status').textContent = '正在读取…'; byId('detail-summary').textContent = ''; detailResults.replaceChildren();
     byId('task-retry').hidden = true; byId('task-close').focus({ preventScroll: true });
     try {
       const payload = await api('/api/projects/' + encodeURIComponent(bot.workspaceId) + '/sessions/' + encodeURIComponent(sessionId) + '?deviceId=' + encodeURIComponent(bot.deviceId));
@@ -202,6 +203,16 @@ function avatar(value){const ns='http://www.w3.org/2000/svg',svg=document.create
       byId('detail-title').textContent = payload.result.title || '任务';
       byId('detail-status').textContent = labels[payload.result.status] || payload.result.status;
       byId('detail-summary').textContent = payload.result.summary || '暂无报告摘要';
+      for (const result of (Array.isArray(payload.result.interactiveResults) ? payload.result.interactiveResults : []).slice(0, 8)) {
+        if (typeof result?.ref !== 'string' || !['available', 'cleaned'].includes(result.availability)) continue;
+        const status = result.availability === 'cleaned' ? '交互正文已清理' : '固定版本可用';
+        const detail = [result.title || '固定结果', status, result.ref];
+        if (typeof result.summary === 'string' && result.summary) {
+          detail.push('已保存的模型摘要 · 未验证' + (result.truncated === true ? ' · 已截断' : ''), result.summary);
+        }
+        detailResults.append(node('li', detail.join('\n')));
+      }
+
     } catch (error) {
       if (ticket !== taskGeneration || !current(bot, auth)) return;
       byId('detail-status').textContent = errorText[error.message] || '任务读取未完成。'; byId('task-retry').hidden = false;
@@ -242,7 +253,7 @@ function avatar(value){const ns='http://www.w3.org/2000/svg',svg=document.create
   byId('chat-refresh').addEventListener('click', () => void readConversation(false));
   byId('chat-older').addEventListener('click', () => void readConversation(true));
   byId('project-back').addEventListener('click', leaveChat);
-  byId('task-close').addEventListener('click', () => { taskGeneration++; taskTarget = null; detail.hidden = true; (taskOpener?.isConnected ? taskOpener : byId('chat-refresh')).focus({ preventScroll: true }); });
+  byId('task-close').addEventListener('click', () => { taskGeneration++; taskTarget = null; detail.hidden = true; detailResults.replaceChildren(); (taskOpener?.isConnected ? taskOpener : byId('chat-refresh')).focus({ preventScroll: true }); });
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && !event.isComposing && !composing && !detail.hidden) { event.preventDefault(); byId('task-close').click(); }
   });

@@ -1,5 +1,32 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { interactiveFeedbackFromFollowup, interactiveFeedbackAttachment, interactiveArtifactRef } from '@peer-agent/protocol';
+
+test('host reply fixed-result references remain exact in the conversation projection, including valid long protocol identities', () => {
+  const ref = interactiveArtifactRef({ owner: { workspaceId: 'w'.repeat(200), conversationId: 'c'.repeat(200) },
+    resultId: 'r'.repeat(36), contentVersion: 'sha256:' + 'a'.repeat(64) });
+  const raw = { id: 'host-reply', role: 'assistant', kind: 'agent_reply', content: 'Saved fixed result, unverified.',
+    meta: { sources: ['session'], evidenceRefs: [ref], sessionStates: [{ sessionId: 'session', status: 'running' }] } };
+  const before = JSON.stringify(raw), row = normalizeBotMessage(raw)!;
+  assert.deepEqual(row.meta.evidenceRefs, [ref]); assert.equal(row.content, raw.content);
+  assert.equal(JSON.stringify(raw), before);
+});
+
+test('canonical frozen-condition attachments project to one unverified resource card without changing user text or hiding damaged bytes', () => {
+  const hash = `sha256:${'a'.repeat(64)}`, owner = { workspaceId: 'bot', conversationId: 'parent' };
+  const feedback = interactiveFeedbackFromFollowup({ followupId: 'selection', recipient: owner,
+    result: { owner, resultId: 'result', contentVersion: hash }, specHash: hash, stateRevision: 4, stateDigest: hash, selectionDigest: hash,
+    values: { $x: 7 }, dataLevel: 'D3_private', capturedAt: '2026-11-03T00:00:00.000Z', excerpt: 'Selected conditions' })!;
+  const carrier = interactiveFeedbackAttachment(feedback), ordinary = { id: 'doc', kind: 'text', name: 'brief.txt', text: 'original attachment' };
+  const raw = { id: 'input', role: 'user', content: 'Discuss', attachments: [ordinary, carrier] }, before = JSON.stringify(raw);
+  const projected = normalizeBotMessage(raw)!;
+  assert.equal(projected.content, 'Discuss'); assert.deepEqual(projected.resourceFeedback, [feedback]);
+  assert.deepEqual(projected.attachments?.map(row => row.id), ['doc']); assert.equal(projected.resourceFeedbackInvalid, false);
+  assert.equal(JSON.stringify(raw), before);
+  const invalid = normalizeBotMessage({ ...raw, attachments: [ordinary, { ...carrier, size: carrier.size + 1 }] })!;
+  assert.equal(invalid.resourceFeedbackInvalid, true); assert.deepEqual(invalid.resourceFeedback, []);
+  assert.deepEqual(invalid.attachments?.map(row => row.id), ['doc', carrier.id]);
+});
 
 test('internal verdict cards never become public replies; real text and actionable cards survive', () => {
   for (const content of ['passed', 'failed', 'partial', 'unverifiable']) {

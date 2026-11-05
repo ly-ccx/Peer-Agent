@@ -37,6 +37,9 @@ export interface SystemContextInput extends Readonly<Record<string, unknown>> {
   readonly runtimeReminders?: readonly unknown[];
   readonly workId?: string;
   readonly workingContext?: Readonly<Record<string, unknown>>;
+  /** Host-derived capability IDs from this turn's actual Runtime Projection. */
+  readonly interactiveResultCapabilities?: readonly string[];
+  readonly interactiveMaterials?: readonly unknown[];
   readonly continuityContext?: readonly unknown[];
   readonly explorerContext?: unknown;
   readonly verifierContext?: unknown;

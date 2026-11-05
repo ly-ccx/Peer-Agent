@@ -45,6 +45,7 @@ function allowedWindowRolesFor(channel, rendererToMain) {
   if (!rendererToMain) return Object.freeze([]);
   if (channel.startsWith('browser-window:')) return ['browser-window:copy', 'browser-window:return-ack'].includes(channel) ? MAIN_WINDOW_ONLY : Object.freeze(['browser-resource']);
   if (channel.startsWith('resource-edit:')) return Object.freeze(['main', 'resource']);
+  if (channel.startsWith('interactive-results:')) return Object.freeze(['main', 'resource']);
   if (channel.startsWith('resource-window:')) return ['resource-window:open', 'resource-window:history', 'resource-window:restore', 'resource-window:forget', 'resource-window:return-ack'].includes(channel) ? MAIN_WINDOW_ONLY : Object.freeze(['resource']);
   if (channel === 'settings:get-sync') return ALL_APP_WINDOW_ROLES;
   const roles = ['main'];
@@ -61,6 +62,18 @@ function allowedWindowRolesFor(channel, rendererToMain) {
 }
 
 const INVOKE_CHANNELS = Object.freeze([
+  'interactive-results:open',
+  'interactive-results:cancel-open',
+  'interactive-results:read-state',
+  'interactive-results:read-versions',
+  'interactive-results:open-version',
+  'interactive-results:acquire',
+  'interactive-results:save',
+  'interactive-results:release',
+  'interactive-results:prepare-followup',
+  'interactive-results:prepare-draft',
+  'resource-presentation:read-layout',
+  'resource-presentation:write-layout',
   'input-prediction:request',
   'input-prediction:cancel',
   'input-prediction:validate',

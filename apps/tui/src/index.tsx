@@ -16,6 +16,10 @@ import { CLI_EXIT } from './cli-exit.ts';
 import { handleCliVersionArgs } from './cli-version.ts';
 
 const argv = process.argv.slice(2);
+if (argv[0] === '__interactive-maintenance') {
+  const { runInteractiveMaintenance } = await import('./cli-interactive-maintenance.ts');
+  process.exit(runInteractiveMaintenance(argv.slice(1)));
+}
 if (handleCliVersionArgs(argv)) {
   process.exit(0);
 }
@@ -33,6 +37,14 @@ if (command.kind === 'error') {
 if (command.kind === 'exec') {
   const { runPeerExec } = await import('./cli-exec.ts');
   process.exit(await runPeerExec(command.options));
+}
+if (command.kind === 'result-cleanup-receipt') {
+  const { runInteractiveMaintenance } = await import('./cli-interactive-maintenance.ts');
+  process.exit(runInteractiveMaintenance());
+}
+if (command.kind === 'result') {
+  const { runPeerResult } = await import('./cli-result.ts');
+  process.exit(runPeerResult(command));
 }
 if (shouldRefuseInteractiveTui(process.stdout.isTTY)) {
   console.error('peer: refusing to start the interactive TUI without a TTY. Use `peer exec`.');

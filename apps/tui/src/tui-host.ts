@@ -34,6 +34,7 @@ import {
   appendNodeHookEvidence,
   createGoalPlanStore,
   type NodeRuntimePermissionPrompt,
+  type NodeRuntimePermissionResponse,
 } from '@peer-agent/runtime-node';
 import { createRuntimeSdk,
   type RuntimeSdkEvent,
@@ -60,6 +61,8 @@ export interface PendingApproval {
 }
 
 export interface TuiExecutionContext {
+  /** Installed at actual Provider dispatch, never accepted as caller authority. */
+  readonly requestPermission?: (prompt: NodeRuntimePermissionPrompt) => Promise<NodeRuntimePermissionResponse>;
   /** Overwritten by execute for this dispatch; callers cannot supply authority through it. */
   readonly accessPolicyStamp?: string;
   /** Bound by the host at dispatch, so a late callback cannot adopt a replacement epoch. */
@@ -123,6 +126,7 @@ export interface CreateTuiHostOptions {
   readonly oneTimeApprovals?: { match(input: object): boolean };
   readonly goalPlanStore?: ReturnType<typeof createGoalPlanStore>;
   readonly sessionApprovals?: Set<string>;
+  readonly captureExecution?: (execution: RuntimeSdkProviderExecution, toolContext: Record<string, unknown>) => RuntimeSdkProviderExecution;
 }
 
 function isNodeShellRiskLevel(value: unknown): value is keyof typeof NODE_SHELL_RISK_ORDER {
@@ -181,6 +185,7 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
       planId: context?.project?.planId, sessionId: context?.project?.sessionId, role: profile?.role });
     const policy = result?.ok ? result.policy : null;
     return { valid: result == null || result.ok, level: policy?.accessLevel ?? accessLevel,
+      resolution: result,
       stamp: policy ? `bot:${policy.workspaceId}:${policy.conversationId}:${policy.revision}` : `global:${accessEpoch}` };
   };
 
@@ -408,7 +413,11 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
       });
       if (!provider) return null;
       return provider.execute(request.call.capabilityId, request.call.arguments as Record<string, unknown>, {
-        ...localContext, toolContext: { ...localContext.toolContext, ...(context.toolContext as object) },
+        ...localContext, requestPermission, toolContext: { ...localContext.toolContext, ...(context.toolContext as object),
+          conversationId: localContext.conversationId, workspaceId: localContext.project?.workspaceId,
+          streamId: localContext.streamId, turnProfile: localContext.toolContext?.turnProfile,
+          resolveAccessPolicy: () => accessFor(localContext).resolution,
+          checkAccessPolicy: () => projectAuthorityReason(localContext, request.call.capabilityId) },
       });
     } },
   }) });
@@ -427,7 +436,7 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
       .find(item => item.capabilityId === capabilityId);
     const profile = context?.toolContext?.turnProfile as { executionIdentity?: import('@peer-agent/protocol').SessionExecutionIdentity } | undefined;
     const gate = evaluateWorkSessionWrite(plan || { delegationOrigin: { readOnly } }, { capabilityId, riskLevel: manifest?.riskLevel, resourceScopes,
-      executionIdentity: profile?.executionIdentity });
+      executionIdentity: profile?.executionIdentity, turnProfile: profile });
     return gate.allowed ? null : gate.error ?? 'read_only';
   }
 
@@ -447,6 +456,11 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
       ...nodeGrant, toolCallId: options.toolCallId, granted: nodeGrant.decision === 'allow',
       scope: options.capabilityId, duration: nodeGrant.decision === 'allow' ? 'once' : 'denied', decidedAt: nodeGrant.grantedAt,
     } };
+    const localContext = executionContext.getStore();
+    execution = resolvedOptions.captureExecution?.(execution, { ...localContext?.toolContext,
+      conversationId: options.conversationId, workspaceId: localContext?.project?.workspaceId,
+      streamId: options.streamId, resolveAccessPolicy: () => accessFor(localContext).resolution,
+      checkAccessPolicy: () => projectAuthorityReason(localContext, options.capabilityId) }) ?? execution;
     const evidenceRefs = collectToolEvidenceRefs({
       toolCallId: options.toolCallId,
       execution,

@@ -89,9 +89,14 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+          # Desktop tests and retries include real Electron windows.
+          display=()
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            display=(xvfb-run -a)
+          fi
           log="${RUNNER_TEMP}/peer-test.log"
           set +e
-          pnpm test 2>&1 | tee "$log"
+          "${display[@]}" pnpm test 2>&1 | tee "$log"
           code=${PIPESTATUS[0]}
           set -e
           if [ "$code" -eq 0 ]; then
@@ -112,7 +117,7 @@ jobs:
             if [[ "$file" == apps/tui/* ]]; then
               bun test "$file" || retry_failed=1
             else
-              node --test --test-reporter=tap "$file" || retry_failed=1
+              "${display[@]}" node --test --test-reporter=tap "$file" || retry_failed=1
             fi
             echo "::endgroup::"
           done < "$RUNNER_TEMP/retry-files.txt"

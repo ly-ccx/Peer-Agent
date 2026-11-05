@@ -10,6 +10,7 @@ export { createDelegationProvider } from './project-agent/delegation-provider.mj
 export {
   createSessionSupervisor,
   evaluateWorkSessionWrite,
+  readOnlyWorkCapabilityAllowed,
 } from './project-agent/session-supervisor.mjs';
 export {
   PROGRESS_THROTTLE_MS,
@@ -216,6 +217,7 @@ export { agentMessagesForContext, createAgentCommunication } from './project-age
 export { agentDelivery, recordAgentContextAdmission } from './project-agent/agent-delivery.mjs';
 export { createAgentEventPublisher } from './project-agent/agent-activity.mjs';
 export { agentCommunicationExcludedPrefixes } from './project-agent/work-session-profile.mjs';
+export { sessionWaitProjected } from './project-agent/wake-wait.mjs';
 export {
   createImageReadAuthority,
   resolvePermissionPrincipal,

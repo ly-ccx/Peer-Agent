@@ -147,7 +147,7 @@ body:has(.quick-chat-shell) {
   padding: 0 6px;
   border: 0;
   border-radius: var(--ui-radius-control);
-  color: var(--quick-muted);
+  color: var(--quick-text);
   background: transparent;
   cursor: pointer;
   font: inherit;
@@ -371,7 +371,7 @@ select.quick-chat-workspace-name {
   place-items: center;
   border: 0;
   border-radius: var(--ui-radius-row);
-  color: var(--quick-muted);
+  color: var(--quick-text);
   background: transparent;
   cursor: pointer;
 }
@@ -409,7 +409,7 @@ select.quick-chat-workspace-name {
 }
 
 .quick-chat-composer textarea::placeholder {
-  color: var(--quick-muted);
+  color: var(--quick-text);
 }
 
 .quick-chat-send {

@@ -10,5 +10,5 @@
     "rootDir": "src"
   },
   "include": ["src"],
-  "exclude": ["src/**/*.test.ts", "src/**/*.test.mjs"]
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.mjs", "src/interactive-results/test-fixtures/**"]
 }

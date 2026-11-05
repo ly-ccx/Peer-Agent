@@ -6,7 +6,7 @@
  */
 import type { TranslationKey } from '@peer-agent/i18n';
 import type { ChatAttachment } from '../../chat/state/types';
-import { normalizeResourceFeedbackList, type ResourceFeedback, type ProjectInputAttachment } from '@peer-agent/protocol';
+import { normalizeResourceFeedbackList, projectResourceFeedbackTransport, type ResourceFeedback, type ProjectInputAttachment } from '@peer-agent/protocol';
 import {
   dispositionEventsFromToolCalls,
   WORK_SESSION_STATUSES,
@@ -162,7 +162,7 @@ export function normalizeBotMessage(raw: Readonly<Record<string, unknown>> | nul
   if (kind === 'agent_activity' && agentActivity && ['verifying', 'verified'].includes(agentActivity.state)) return null;
   const cards = readBotCards(raw.cards);
   if (kind === 'system_card' && cards.length && cards.every(card => card.kind === 'verdict')) return null;
-  const feedback = normalizeResourceFeedbackList(raw.resourceFeedback);
+  const material = projectResourceFeedbackTransport(raw.resourceFeedback, raw.attachments);
   const meta = readMeta(raw.meta);
   const replyTo = readStringList(raw.replyTo).length > 0 ? readStringList(raw.replyTo) : (meta.replyTo ?? []);
   const sources = readStringList(raw.sources).length > 0 ? readStringList(raw.sources) : (meta.sources ?? []);
@@ -191,9 +191,10 @@ export function normalizeBotMessage(raw: Readonly<Record<string, unknown>> | nul
     cards: cards.filter(card => card.kind !== 'verdict'),
     quoteRefs: readStringList(raw.quoteRefs),
     separatorLabel: readString(raw.separatorLabel) || meta.separatorLabel || '',
-    ...imageField(raw.attachments),
-    attachments: readAttachments(raw.attachments),
-    ...(raw.resourceFeedback !== undefined ? { resourceFeedback: feedback ?? [], resourceFeedbackInvalid: !feedback } : {}),
+    ...imageField(material.attachments),
+    attachments: readAttachments(material.attachments),
+    ...(raw.resourceFeedback !== undefined || material.resourceFeedback.length || material.invalid
+      ? { resourceFeedback: material.resourceFeedback, resourceFeedbackInvalid: material.invalid } : {}),
   };
 }
 

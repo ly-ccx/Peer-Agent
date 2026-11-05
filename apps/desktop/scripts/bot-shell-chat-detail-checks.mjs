@@ -134,6 +134,8 @@ export async function checkBotChatDetails({ page, app, until, report, captureDir
   // Keep the visible raw-detail assertion, waiting for the real revealed text.
   assert.match(await until(() => technical.innerText(), text => /post_reply/.test(text)), /post_reply/);
   await technical.locator('summary').press('Enter');
+  assert.equal(await technical.getAttribute('open'), null);
+  await until(() => technical.innerText(), text => !/post_reply/.test(text), 5000);
   // A dock's body has its final width while the opening transition is still running.
   await until(() => process.evaluate(node => {
     const dock = node.closest('.resource-workspace, .bot-drawer-dock');

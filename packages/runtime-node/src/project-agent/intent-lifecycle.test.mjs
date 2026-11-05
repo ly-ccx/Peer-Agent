@@ -18,7 +18,7 @@ import { createDelegationProvider } from './delegation-provider.mjs';
 import { waitResult } from './wake-wait.mjs';
 import { progressFacts } from './continuation-policy.mjs';
 
-async function fixture(t, { resourceWaits = createEmptyResourceWaitPort() } = {}) {
+async function fixture(t, { explicitVerification, reviewResult, resourceWaits = createEmptyResourceWaitPort() } = {}) {
   const rootDir = mkdtempSync(path.join(os.tmpdir(), 'peer-intent-lifecycle-'));
   const options = { rootDir, workspaceId: 'w', holdsLease: () => true, leaseEpoch: () => 'owner', formatVersion: 2, fenceLegacyWrites: true };
   const store = createWorkCoordinationStore(options);
@@ -28,9 +28,13 @@ async function fixture(t, { resourceWaits = createEmptyResourceWaitPort() } = {}
   const sessions = new Map(); let reviews = 0;
   const digestFile = path.join(rootDir, 'digest.json'), digests = createDigestQueue({ file: digestFile });
   const lifecycle = createCoordinationLifecycle({ resourceWaits, holdsLease: () => true, readMessages: () => messages,
-    readSession: ({ sessionId }) => sessions.get(sessionId), readGoalFacts: id => ({ plan: { planId: id, goal: 'Stage', successCriteria: [] }, evidenceIndex: [`ev:${id}`], independentVerifier: 'passed' }),
+    readSession: ({ sessionId }) => sessions.get(sessionId), readGoalFacts: id => ({ plan: { planId: id, goal: 'Stage', successCriteria: [] }, evidenceIndex: [`ev:${id}`], independentVerifier: 'passed',
+      ...(id === 's2' && explicitVerification ? { explicitVerification } : {}) }),
     verifyGoal: async ({ goalReview }) => { reviews++; assert.equal(goalReview.canonicalInputs[0].text, messages[0].content);
-      assert.equal(goalReview.requirements.length, 2); return { passed: true, evidenceRefs: goalReview.evidenceRefs }; },
+      assert.equal(goalReview.requirements.length, 2);
+      assert.deepEqual(goalReview.explicitVerifications, explicitVerification
+        ? [{ sessionId: 's2', sourceRevision: 'source:s2', ...explicitVerification }] : []);
+      return reviewResult ? reviewResult(goalReview) : { passed: true, evidenceRefs: goalReview.evidenceRefs }; },
     spawn: async (_task, context) => { const id = `s${sessions.size + 1}`;
       store.bindSession(context.coordinationBinding.workId, context.coordinationBinding.goalRevision, id, { ...context.coordinationBinding, sessionId: id });
       const row = { sessionId: id, workspaceId: 'w', status: 'running', sourceRevision: `source:${id}`, observationRevision: `obs:${id}`,
@@ -95,10 +99,16 @@ test('a paired session wait suspends active intent without exhausting or resetti
 });
 
 test('research acceptance retains the original goal, continues without user input, then closes once after actual delivery and root review', async t => {
-  const f = await fixture(t);
+  const f = await fixture(t, { explicitVerification: { verdictRef: 'verdict:s2:passed', outcome: 'passed' } });
   await f.coordinate({ action: 'parallel', task: { anchorMessageIds: ['input-i'], brief: 'Research' } }, f.context('spawn', { currentInputAnchors: ['input-i'] }));
   const initial = await f.coordinate({ action: 'assess', assessment: f.initial }, f.context('t1', { currentInputAnchors: ['input-i'] }));
   assert.equal(initial.ok, true, JSON.stringify(initial));
+  const edited = await f.coordinate({ action: 'assess', assessment: { ...f.initial, expectedWorkRevision: 1,
+    interpretation: { ...f.initial.interpretation, outcome: 'Rephrased outcome' } } },
+  f.context('t1', { currentInputAnchors: ['input-i'], deliveryKey: 't1:rewrite' }));
+  assert.equal(edited.error, 'intent_revision_required');
+  assert.match(edited.message, /Omit assessment\.interpretation/);
+  assert.equal(f.store.readWork('g').intentCoordination.revision, 1);
   f.coordinator.finish(f.job, { rounds: [] }, [...f.sessions.values()]);
   assert.equal(f.store.readWork('g').state, 'waiting_children');
   f.sessions.get('s1').status = 'accepted';
@@ -110,6 +120,12 @@ test('research acceptance retains the original goal, continues without user inpu
     coverage: [{ ...f.initial.coverage[0], status: 'covered', sources: [{ sessionId: 's1', sourceRevision: 'source:s1', evidenceRefs: ['ev:s1'] }] }, f.initial.coverage[1]],
     disposition: { kind: 'continue', operationRefs: ['requirement:fix'] } };
   assert.equal((await f.coordinate({ action: 'assess', assessment: continuation }, f.context('t2', { events: [event] }))).ok, true);
+  const progress = { id: 'progress:t2', turnId: 't2', role: 'assistant', kind: 'agent_reply', content: 'Research is ready. The fix still needs verification.',
+    sources: [], meta: { workId: 'g' } };
+  f.coordinator.prepareReplies([progress], wake);
+  await f.coordinator.deliver(progress);
+  assert.equal(f.store.read().deliveries[progress.id]?.state, 'delivered');
+  assert.deepEqual(progress.meta.intentScopes, [{ workId: 'g', goalRevision: 1 }]);
   f.coordinator.finish(wake, { rounds: [] }, [...f.sessions.values()]);
   assert.equal(f.store.readWork('g').state, 'runnable');
   const next = f.coordinator.recoverJob(); assert.equal(next.kind, 'wake'); assert.deepEqual(next.userInputs, []);
@@ -122,13 +138,23 @@ test('research acceptance retains the original goal, continues without user inpu
   f.sessions.get('s2').status = 'result_ready';
   const complete = { ...continuation, expectedWorkRevision: 2, sourceEventIds: [], sourceDecisionRef: next.sourceDecisionRef,
     coverage: [continuation.coverage[0], { ...continuation.coverage[1], status: 'covered', sources: [{ sessionId: 's2', sourceRevision: 'source:s2', evidenceRefs: ['ev:s2'] }] }],
-    disposition: { kind: 'return', replyRef: 't3-reply-1' } };
+    disposition: { kind: 'return', replyRef: 'current_turn_reply' } };
+  const stale = await f.coordinate({ action: 'assess', assessment: { ...complete,
+    disposition: { kind: 'return', replyRef: 't2-reply-1' } } }, ctx);
+  assert.equal(stale.error, 'reply_reference_out_of_scope');
   const result = await f.coordinate({ action: 'assess', assessment: complete }, { ...ctx, deliveryKey: 't3:assess' });
   assert.equal(result.review.passed, true); assert.equal(f.reviews(), 1);
+  assert.equal(f.store.readWork('g').intentCoordination.decision.disposition.replyRef, 't3-reply-1');
   assert.equal(f.store.readWork('g').intentCoordination.lifecycle, 'active');
   f.coordinator.finish(next, { rounds: [], turnId: 't3', yielded: true,
     providerCheckpoint: { provider: 'openai', providerId: 'p', model: 'm', messages: [] } }, [...f.sessions.values()]);
-  const nativeNext = f.coordinator.recoverJob(); nativeNext.attemptId = 't4'; f.coordinator.start(nativeNext);
+  const reviewedCheckpoint = f.store.readWork('g').checkpointRef;
+  f.store.transfer([{ eventId: 'new-verdict-event', sessionId: 's2', kind: 'session_verified' }]);
+  await f.coordinator.recover();
+  assert.equal(f.store.readWork('g').state, 'runnable', 'recovering old progress leaves the reviewed return checkpoint runnable');
+  assert.equal(f.store.readWork('g').checkpointRef, reviewedCheckpoint);
+  assert.equal(f.store.read().events['new-verdict-event'].handled, false);
+  const nativeNext = f.coordinator.selectNext().job; nativeNext.attemptId = 't4'; f.coordinator.start(nativeNext);
   assert.ok(f.coordinator.resume(nativeNext, { modelProviderId: 'p', modelId: 'm', family: 'openai' }).providerCheckpoint);
   assert.equal(nativeNext.resumedIntentDecisionRef, 't3:assess');
   assert.equal(f.coordinator.dispositionMissing(nativeNext), false, 'a real native slice carries the current judgment');
@@ -153,6 +179,51 @@ test('research acceptance retains the original goal, continues without user inpu
   finally { rebuilt.close(); }
 });
 
+test('root review failures retain scoped diagnostics without admitting a return, and a corrected assessment can pass', async t => {
+  let response, sourceChanged;
+  const f = await fixture(t, { reviewResult: goalReview => {
+    if (sourceChanged) sourceChanged();
+    return response ?? { passed: true, evidenceRefs: goalReview.evidenceRefs };
+  } });
+  const userContext = f.context('t1', { currentInputAnchors: ['input-i'] });
+  await f.coordinate({ action: 'parallel', task: { anchorMessageIds: ['input-i'], brief: 'Full work' } }, { ...userContext, deliveryKey: 'spawn' });
+  const session = f.sessions.get('s1'); session.status = 'result_ready';
+  const assessment = { ...f.initial,
+    coverage: f.initial.coverage.map(row => ({ ...row, status: 'covered', sources: [{ sessionId: 's1', sourceRevision: 'source:s1', evidenceRefs: ['ev:s1'] }] })),
+    disposition: { kind: 'return', replyRef: 'current_turn_reply' } };
+  const assess = (revision, current = assessment) => f.coordinate({ action: 'assess', assessment: { ...current, expectedWorkRevision: revision,
+    ...(revision ? { interpretation: undefined } : {}) } }, { ...userContext, deliveryKey: `assess:${revision}` });
+
+  response = { passed: false, failedCriteria: [{ criterionId: 'fix', reason: 'The result lacks the requested comparison.', evidenceRefs: ['internal-ref'] },
+    { criterionId: 'unrelated-id', reason: 'a'.repeat(1000) }], missingEvidence: Array.from({ length: 4 }, () => ({ reason: 'Bearer secret0123456789', taskId: 'other-plan' })) };
+  const failed = await assess(0);
+  assert.equal(failed.ok, true);
+  assert.equal(failed.nextAction, 'resolve_remaining_goal_obligations');
+  assert.equal(failed.review.error, 'goal_review_failed');
+  const { diagnostic } = failed.review;
+  assert.deepEqual({ ...diagnostic, issues: undefined }, { operationId: 'assess:0', workRevision: 1, goalRevision: 1,
+    kind: 'requirements_unmet', issues: undefined, omittedIssues: 1 });
+  assert.deepEqual(diagnostic.issues[0], { kind: 'requirement_unmet', requirementId: 'fix', reason: 'The result lacks the requested comparison.' });
+  assert.deepEqual(diagnostic.issues[1], { kind: 'requirement_unmet', reason: 'a'.repeat(160) });
+  assert.deepEqual(diagnostic.issues.slice(2), Array.from({ length: 3 }, () => ({ kind: 'missing_evidence', reason: '[sensitive content omitted]' })));
+  assert.equal(f.store.readWork('g').intentCoordination.review, undefined);
+
+  response = { passed: false, error: 'verifier_report_invalid' };
+  assert.equal((await assess(1)).review.diagnostic.kind, 'invalid_report');
+  const staleReplay = await assess(0);
+  assert.deepEqual(staleReplay.review, { passed: false, error: 'goal_review_stale' });
+  assert.equal(f.reviews(), 2);
+
+  sourceChanged = () => { session.sourceRevision = 'new-source'; };
+  assert.deepEqual((await assess(2)).review, { passed: false, error: 'goal_review_stale' });
+  sourceChanged = undefined; response = undefined;
+  const repaired = await assess(3, { ...assessment, coverage: assessment.coverage.map(row => ({ ...row,
+    sources: row.sources.map(source => ({ ...source, sourceRevision: 'new-source' })) })) });
+  assert.equal(repaired.review.passed, true);
+  assert.equal(repaired.nextAction, 'deliver_referenced_reply');
+  assert.equal(f.store.readWork('g').intentCoordination.review.reviewRef, repaired.review.reviewRef);
+});
+
 test('a deferred goal reply stays unaccepted and active until its actual digest is committed and settled', async t => {
   const f = await fixture(t);
   await f.coordinate({ action: 'parallel', task: { anchorMessageIds: ['input-i'], brief: 'Full work' } }, f.context('spawn', { currentInputAnchors: ['input-i'] }));
@@ -161,6 +232,15 @@ test('a deferred goal reply stays unaccepted and active until its actual digest 
   f.sessions.get('s1').status = 'result_ready';
   const event = { eventId: 'ready', sessionId: 's1', kind: 'report_available' }; f.store.transfer([event]);
   const job = { workId: 'g', kind: 'wake', attemptId: 't2', userInputs: [], events: [event] }; f.coordinator.start(job);
+  for (const [sourceInputIds, error] of [[['i'], 'source_not_admitted'], [[], 'input_disposition_required']]) {
+    const rejected = await f.coordinate({ action: 'assess', assessment: { ...f.initial, expectedWorkRevision: 1,
+      sourceInputIds, sourceEventIds: [event.eventId], interpretation: undefined,
+      disposition: { kind: 'return', replyRef: 't2-reply-1' } } }, f.context('t2', { events: [event] }));
+    assert.equal(rejected.error, error);
+    assert.deepEqual(rejected.sourceInputIds, []);
+    assert.deepEqual(rejected.sourceEventIds, [event.eventId]);
+    assert.equal(f.store.readWork('g').intentCoordination.revision, 1);
+  }
   const result = await f.coordinate({ action: 'assess', assessment: { ...f.initial, expectedWorkRevision: 1, sourceInputIds: [], sourceEventIds: [event.eventId], inputs: [], interpretation: undefined,
     coverage: f.initial.coverage.map(row => ({ ...row, status: 'covered', sources: [{ sessionId: 's1', sourceRevision: 'source:s1', evidenceRefs: ['ev:s1'] }] })),
     disposition: { kind: 'return', replyRef: 't2-reply-1' } } }, f.context('t2', { events: [event] }));
@@ -215,7 +295,9 @@ test('a quiet final disposition reuses delivered current-goal results but never 
     coverage: f.initial.coverage.map(row => ({ ...row, status: 'covered', sources: [{ sessionId: 's1', sourceRevision: 'source:s1', evidenceRefs: ['ev:s1'] }] })),
     disposition: { kind: 'return', replyRef: 't2-reply-1' } } }, f.context('t2', { events: [event] }));
   assert.equal(result.review.passed, true);
-  f.coordinator.finish(job, { rounds: [] }, [...f.sessions.values()]);
+  f.coordinator.finish(job, { rounds: [], turnId: 't2', yielded: true,
+    providerCheckpoint: { provider: 'openai', providerId: 'p', model: 'm', messages: [] } }, [...f.sessions.values()]);
+  await f.coordinator.recover();
   assert.equal(f.store.readWork('g').intentCoordination.lifecycle, 'fulfilled');
   assert.equal(f.store.readWork('g').intentCoordination.closure.replyRef, progress.id);
   assert.equal(f.messages.filter(row => row.kind === 'agent_reply').length, 1);
@@ -370,12 +452,79 @@ test('assessment query has no child requirement, forged typed waits fail, and si
   const f = await fixture(t);
   const query = await f.coordinate({ action: 'query', workId: 'g' }, f.context('t1'));
   assert.equal(query.ok, true); assert.equal(query.goalRevision, 0); assert.equal(query.currentReplyRef, 't1-reply-1');
+  assert.equal(query.decisionFrame.currentReplyRef, 't1-reply-1');
+  assert.equal(f.coordinator.turnFacts({ ...f.job, attemptId: 'new-attempt' }).currentReplyRef, 'new-attempt-reply-1');
   assert.equal(f.coordinator.dispositionMissing(f.job), false); assert.equal(f.store.read().mandates, undefined);
   const result = await f.coordinate({ action: 'assess', assessment: { ...f.initial, expectedGoalRevision: 0 } }, f.context('t1', { currentInputAnchors: ['input-i'] }));
   assert.equal(result.error, 'wait_source_stale');
   assert.equal(validateDelegationInput('coordinate_work', { action: 'query', workId: 'g', reason: 'Read facts' }).ok, true);
   assert.equal(validateDelegationInput('coordinate_work', { action: 'assess', assessment: f.initial, reason: 'Assign responsibility' }).ok, true);
   assert.equal(validateDelegationInput('coordinate_work', { action: 'assess', assessment: { ...f.initial, permissionGrant: 'fake' }, reason: 'Assign' }).ok, false);
+});
+
+test('stale session waits return only current in-scope facts and cannot park a ready result', async t => {
+  const f = await fixture(t);
+  await f.coordinate({ action: 'parallel', task: { anchorMessageIds: ['input-i'], brief: 'Original' } },
+    f.context('spawn', { currentInputAnchors: ['input-i'] }));
+  const session = f.sessions.get('s1');
+  const context = f.context('t1', { currentInputAnchors: ['input-i'] });
+  const assessWait = (id, revision, extra = {}) => f.coordinate({ action: 'assess', assessment: { ...f.initial,
+    disposition: { kind: 'wait', waitFor: [{ kind: 'session', id, revision }] } } }, { ...context, ...extra });
+  const state = () => [{ sessionId: 's1', status: session.status, sourceRevision: session.sourceRevision,
+    observationRevision: session.observationRevision }];
+
+  for (const [patch, error] of [[{ expectedWorkRevision: 2 }, 'work_revision_conflict'], [{ expectedGoalRevision: 2 }, 'goal_revision_conflict']]) {
+    const conflict = await f.coordinate({ action: 'assess', assessment: { ...f.initial, ...patch } }, context);
+    assert.equal(conflict.error, error);
+    assert.equal(conflict.workRevision, 0);
+    assert.equal(conflict.goalRevision, 1);
+    assert.equal(f.store.readWork('g').intentCoordination, undefined);
+  }
+  const stale = await assessWait('s1', session.sourceRevision);
+  assert.equal(stale.error, 'wait_source_stale');
+  assert.deepEqual(stale.sessionStates, state());
+  assert.match(stale.message, /current observationRevision/);
+  assert.deepEqual(await assessWait('foreign', 'obs:foreign'), { ok: false, error: 'wait_source_stale' });
+
+  session.status = 'result_ready';
+  const ready = await assessWait('s1', session.observationRevision);
+  assert.equal(ready.error, 'wait_source_stale');
+  assert.deepEqual(ready.sessionStates, state());
+  assert.match(ready.message, /Review the current result or exception/);
+  assert.equal(f.store.readWork('g').intentCoordination, undefined);
+});
+
+test('root review identifies stale versions and unindexed references without exposing the task index', async t => {
+  const f = await fixture(t);
+  const context = f.context('t1', { currentInputAnchors: ['input-i'] });
+  await f.coordinate({ action: 'parallel', task: { anchorMessageIds: ['input-i'], brief: 'Original' } }, context);
+  const current = { sessionId: 's1', sourceRevision: 'source:s1', evidenceRefs: ['ev:s1'] };
+  const assessment = { ...f.initial,
+    coverage: [
+      { ...f.initial.coverage[0], status: 'covered', sources: [{ ...current, sourceRevision: 'stale' }] },
+      { ...f.initial.coverage[1], status: 'covered', sources: [current,
+        { ...current, evidenceRefs: ['tool-result://bot-query', 'ev:s1', 'tool-result://bot-verdict'] }] },
+    ],
+    disposition: { kind: 'return', replyRef: 'current_turn_reply' },
+  };
+  const result = await f.coordinate({ action: 'assess', assessment }, { ...context, deliveryKey: 'review' });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.review.sourceIssues, [
+    { requirementId: 'research', sessionId: 's1', sourceRevision: 'source:s1', reason: 'source_revision_changed' },
+    { requirementId: 'fix', sessionId: 's1', sourceRevision: 'source:s1', reason: 'reference_not_indexed',
+      sourceIndex: 1, unindexedEvidenceRefIndexes: [0, 2] },
+  ]);
+  assert.equal(result.review.error, 'goal_evidence_stale');
+  assert.doesNotMatch(JSON.stringify(result.review), /ev:s1|bot-query|bot-verdict/);
+  assert.equal(f.reviews(), 0);
+
+  const repaired = await f.coordinate({ action: 'assess', assessment: { ...assessment, interpretation: undefined,
+    expectedWorkRevision: result.receipt.workRevision,
+    coverage: assessment.coverage.map(row => ({ ...row, sources: [current] })),
+  } }, { ...context, deliveryKey: 'repair-review' });
+  assert.equal(repaired.review?.passed, true, JSON.stringify(repaired));
+  assert.deepEqual(repaired.review.evidenceRefs, ['ev:s1']);
+  assert.equal(f.reviews(), 1);
 });
 
 test('a model cannot invent physical failure truth or borrow another work failure; semantic unresolved responsibility remains active', async t => {
@@ -395,6 +544,8 @@ test('root reviewer receives the entire canonical goal as factual input without 
   const message = buildVerifierMessage({ plan: { goal: 'Research', successCriteria: [] }, goalReview: { canonicalInputs: [{ text: 'Research AND implement' }], requirements: ['Research', 'Implement'] } });
   assert.match(message, /ALL root requirements/); assert.match(message, /Research AND implement/);
   assert.match(message, /never accepts a child/);
+  assert.match(message, /any independently required deliverables/);
+  assert.match(message, /Delivery of the reply reserved by this return decision follows this review/);
   assert.equal(verificationRequestRevision('child-content'), 'child-content');
   assert.notEqual(verificationRequestRevision('child-content', { goalRevision: 1 }), 'child-content');
   assert.notEqual(verificationRequestRevision('child-content', { goalRevision: 1 }), verificationRequestRevision('child-content', { goalRevision: 2 }));

@@ -1,4 +1,5 @@
 import { computeVerificationVerdict } from './verification-verdict.mjs';
+import { verdictRefFor } from './acceptance.mjs';
 
 const OUTPUT_LIMIT = 2000;
 
@@ -16,6 +17,11 @@ export function buildVerificationDetail(facts = {}) {
   if (typeof facts.verifierModel === 'string') authority.verifierModel = facts.verifierModel;
   if (typeof facts.sameFamilyAsWorker === 'boolean') authority.sameFamilyAsWorker = facts.sameFamilyAsWorker;
   const verdict = computeVerificationVerdict(plan, evidenceIndex, authority);
+  const sessionId = typeof facts.sessionId === 'string' ? facts.sessionId : '';
+  const explicit = facts.explicitVerification;
+  const explicitVerification = sessionId && ['passed', 'failed', 'partial', 'unverifiable'].includes(explicit?.outcome)
+    && explicit.verdictRef === verdictRefFor(sessionId, explicit.outcome)
+    ? { verdictRef: explicit.verdictRef, outcome: explicit.outcome } : undefined;
   const allowed = new Set(verdict.evidenceRefs);
   const outputs = [];
   for (const item of Array.isArray(facts.outputs) ? facts.outputs : []) {
@@ -31,8 +37,10 @@ export function buildVerificationDetail(facts = {}) {
     });
   }
   return {
-    sessionId: typeof facts.sessionId === 'string' ? facts.sessionId : '',
+    sessionId,
     outcome: verdict.outcome,
+    ...(facts.verificationInProgress === true ? { verificationInProgress: true } : {}),
+    ...(explicitVerification ? { explicitVerification } : {}),
     checks: verdict.checks.map((check) => ({
       name: check.name,
       result: check.passed === true ? 'passed' : 'failed',

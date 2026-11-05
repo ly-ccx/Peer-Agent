@@ -1,4 +1,6 @@
 import { CONTINUITY_CAPABILITY_IDS } from './working-context-specs.mjs';
+import { INTERACTIVE_INSPECT_CAPABILITY, INTERACTIVE_PUBLISH_CAPABILITY } from '@peer-agent/protocol';
+import { interactiveRoleAllows } from '../interactive-results/role-policy.mjs';
 import { controlProjectWork } from './work-control.mjs';
 import { executionAdmissionDenial } from './execution-admission.mjs';
 import { createSessionControl } from './session-control.mjs';
@@ -30,7 +32,7 @@ import path from 'node:path';
 import { createExecutionScheduler } from './execution-scheduler.mjs';
 import { randomUUID } from 'node:crypto';
 
-import { normalizeResourceFeedbackList, projectWorkSession, resolveRoleModel } from '@peer-agent/protocol';
+import { encodeResourceFeedbackTransport, normalizeResourceFeedbackList, restoreResourceFeedbackTransport, projectWorkSession, resolveRoleModel } from '@peer-agent/protocol';
 
 import { canConsumeRequestedUserInput } from '../goal-plan-store.mjs';
 import { normalizeInputAttachments } from './input-queue.mjs';
@@ -69,6 +71,7 @@ const READ_ONLY_CAPABILITIES = new Set([
   ...CONTINUITY_CAPABILITY_IDS,
   'local.file.read', 'local.file.list', 'local.file.search', 'local.search.aggregate', 'local.image.read',
   'local.git.query',
+  INTERACTIVE_INSPECT_CAPABILITY,
   'local.goal.get_plan', 'local.goal.update_task', 'local.goal.revise_plan',
   'local.goal.record_evidence', 'local.interaction.request_user_input',
   'local.goal.explore',
@@ -87,7 +90,15 @@ export function evaluateWorkSessionWrite(plan, action = {}) {
   if (!sessionExecutionCurrent(plan)) return { allowed: false, error: 'work_execution_stopped' };
   const resourceDenial = executionAdmissionDenial(plan, action);
   if (resourceDenial) return { allowed: false, error: resourceDenial };
+  if (!interactiveRoleAllows(action.capabilityId, action.turnProfile)) return { allowed: false, error: 'interactive_role_denied' };
+  if (action.capabilityId === INTERACTIVE_PUBLISH_CAPABILITY && (!plan?.delegationOrigin || !action.executionIdentity
+    || !sameExecution(action.executionIdentity, executionIdentity(plan)))) return { allowed: false, error: 'interactive_execution_stale' };
   if (plan?.delegationOrigin?.readOnly !== true) return { allowed: true };
+  return readOnlyWorkCapabilityAllowed(action) ? { allowed: true } : { allowed: false, error: 'read_only', message: '只读任务不能写入。' };
+}
+
+/** Inventory has no execution grant. Actual dispatch additionally checks plan/epoch above. */
+export function readOnlyWorkCapabilityAllowed(action = {}) {
   const capabilityId = typeof action.capabilityId === 'string' ? action.capabilityId : '';
   const permissionKind = typeof action.permissionKind === 'string' ? action.permissionKind : '';
   const toolName = typeof action.toolName === 'string'
@@ -99,8 +110,9 @@ export function evaluateWorkSessionWrite(plan, action = {}) {
   // Bookkeeping of task facts and loading Skill text do not execute project mutations.
   const reading = READ_ONLY_CAPABILITIES.has(capabilityId) || capabilityId.startsWith('local.skill.')
     || (capabilityId.startsWith('local.mcp.') && ['L0_inert', 'L1_local_read'].includes(action.riskLevel));
-  if (!writing && reading) return { allowed: true };
-  return { allowed: false, error: 'read_only', message: '只读任务不能写入。' };
+  const internalPublication = capabilityId === INTERACTIVE_PUBLISH_CAPABILITY && interactiveRoleAllows(capabilityId, action.turnProfile)
+    && (action.riskLevel === undefined || ['L2_local_write', 'L2_low_write'].includes(action.riskLevel));
+  return !writing && (reading || internalPublication) && interactiveRoleAllows(capabilityId, action.turnProfile);
 }
 
 export function resolvePlanApproval(policy, input = {}) {
@@ -133,6 +145,9 @@ export function createSessionSupervisor({
   readManualCriterionAuthorities = null,
   readLegacyCriterionProvenance = () => null,
   readDelegationCapabilities = null,
+  readResourceFeedback = null,
+  projectReportEvidence = null,
+  recoverStoppedPublications = null,
   autonomousCoordinationEnabled = () => process.env.PEER_AUTONOMOUS_COORDINATION !== '0',
   now = () => new Date().toISOString(),
 } = {}) {
@@ -321,7 +336,7 @@ export function createSessionSupervisor({
     if (session.status === 'result_ready') {
       session.resultConfirmationRequired = humanGate;
     }
-    session.sourceRevision = verificationContentHash(plan, (({ status, ...body }) => body)(report));
+    session.sourceRevision = reportSourceRevision(plan, report);
     session.observationRevision = sessionObservationRevision(plan, session.sourceRevision);
     const interventions = interventionsOf(plan.conversationId);
     return interventions.length > 0 ? { ...session, interventions } : session;
@@ -334,6 +349,14 @@ export function createSessionSupervisor({
   function buildReport(plan, session) {
     const history = readConversationFacts(plan.conversationId);
     return buildSessionReport(plan, session, history);
+  }
+  function reportSourceRevision(plan, { status, ...body }) {
+    return verificationContentHash(plan, body);
+  }
+  function publicReport(plan, session) {
+    const report = buildReport(plan, session);
+    return typeof projectReportEvidence === 'function'
+      ? { ...report, evidenceRefs: projectReportEvidence(plan, report.evidenceRefs) } : report;
   }
 
   function freezeModels(input, workspaceId) {
@@ -403,7 +426,13 @@ export function createSessionSupervisor({
     let availableCapabilities;
     try { availableCapabilities = await readDelegationCapabilities?.({ readOnly: input.readOnly === true, workspaceId }); }
     catch { availableCapabilities = undefined; }
-    return evaluateDelegationCapabilities(input, availableCapabilities);
+    const worker = evaluateDelegationCapabilities(input, availableCapabilities);
+    if (!worker.ok || !worker.required.includes(INTERACTIVE_PUBLISH_CAPABILITY)) return worker;
+    let verifierCapabilities;
+    try { verifierCapabilities = await readDelegationCapabilities?.({ readOnly: true, workspaceId, agentKind: 'verifier' }); }
+    catch { verifierCapabilities = undefined; }
+    const verifier = evaluateDelegationCapabilities({ requiredCapabilities: [INTERACTIVE_INSPECT_CAPABILITY] }, verifierCapabilities);
+    return verifier.ok ? worker : { ...verifier, diagnostic: { ...verifier.diagnostic, role: 'verifier' } };
   }
 
   async function spawnLocked(input, context) {
@@ -505,7 +534,9 @@ export function createSessionSupervisor({
       // A delegation admits its explicit anchors, not an implicit fork of all
       // prior chat. Missing admitted material and explicit snapshots still ask.
       const attachments = attachmentsFromMessages(history.messages, anchorMessageIds);
-      const resourceFeedback = resourceFeedbackFromMessages(history.messages, anchorMessageIds);
+      const resourceFeedback = resourceFeedbackFromMessages(history.messages, anchorMessageIds,
+        { recipient: { workspaceId, conversationId: parentConversationId }, readResourceFeedback });
+      const feedbackTransport = encodeResourceFeedbackTransport(resourceFeedback, attachments);
       const carried = attachmentRefsFromMessages(history.messages, anchorMessageIds);
       const completeInlineAttachments = !presetSnapshotId
         && inlineAttachmentsCoverOmissions(history.messages, anchorMessageIds);
@@ -534,6 +565,7 @@ export function createSessionSupervisor({
       const stored = conversationStore.appendMessage(child.id, {
         id: messageId,
         role: 'user',
+        createdAt: now(),
         content: delegationMessage({
           brief,
           successCriteria: input.successCriteria,
@@ -541,8 +573,7 @@ export function createSessionSupervisor({
           readOnly: input.readOnly === true,
         }),
         ...(carried.length > 0 ? { attachmentRefs: carried } : {}),
-        ...(attachments.length > 0 ? { attachments } : {}),
-        ...(resourceFeedback.length ? { resourceFeedback } : {}),
+        ...feedbackTransport,
       });
       if (!stored) throw new Error('delegation message was not stored');
 
@@ -783,7 +814,7 @@ export function createSessionSupervisor({
           relatedWorks:Object.values(journal.readSnapshot().works).filter(row => row.parentConversationId === plan.delegationOrigin.parentConversationId
             && row.sessionIds?.includes(session.sessionId) && row.state === 'blocked_system').slice(-8)});
       }
-      return { ...session, report: { ...buildReport(plan, session), ...(agentSupervision ? { agentSupervision } : {}), ...(reviewed ? {
+      return { ...session, report: { ...publicReport(plan, session), ...(agentSupervision ? { agentSupervision } : {}), ...(reviewed ? {
         verification: buildVerificationDetail({ ...authority, plan, sessionId: session.sessionId, evidenceIndex: indexedRefs(plan) }),
       } : {}) } };
     }
@@ -860,11 +891,24 @@ export function createSessionSupervisor({
     const anchor = messages.find((message) => message?.id === origin.anchorMessageId);
     const extra = hostFacts(plan);
     const hostAuthority = extra.hostAuthority && typeof extra.hostAuthority === 'object' ? extra.hostAuthority : {};
+    let sourceRevision, observationRevision;
+    const reported = messages.some(message => {
+      if (!replyCites(message, origin.sessionId)) return false;
+      const states = message.meta?.sessionStates;
+      // Preserve the historical citation contract for replies written before state receipts.
+      if (states === undefined) return true;
+      return states.some(state => {
+        if (state.sessionId !== origin.sessionId || !['result_ready', 'accepted'].includes(state.status)) return false;
+        sourceRevision ??= reportSourceRevision(plan, buildReport(plan, { sessionId: origin.sessionId }));
+        observationRevision ??= sessionObservationRevision(plan, sourceRevision);
+        return state.sourceRevision === sourceRevision && state.observationRevision === observationRevision;
+      });
+    });
     return {
       plan,
       sessionId: origin.sessionId,
       policy: policyFor(origin.workspaceId, plan),
-      reported: messages.some((message) => replyCites(message, origin.sessionId)),
+      reported,
       readOnly: origin.readOnly === true,
       changedFiles: Array.isArray(extra.changedFiles) ? extra.changedFiles : filesOf(plan),
       irreversible: extra.irreversible === true,
@@ -1151,7 +1195,15 @@ export function createSessionSupervisor({
         reason: 'supersession_expired', promote: false });
     }
   }
-  const reconcileControls = workspaceId => sessionControl.reconcile(delegatedPlans().filter(plan => !workspaceId || plan.delegationOrigin.workspaceId === workspaceId));
+  async function reconcileControls(workspaceId) {
+    const plans = delegatedPlans().filter(plan => !workspaceId || plan.delegationOrigin.workspaceId === workspaceId);
+    const failures = await sessionControl.reconcile(plans);
+    if (typeof recoverStoppedPublications === 'function') {
+      const workspaces = new Set(plans.map(plan => plan.delegationOrigin.workspaceId));
+      for (const id of workspaces) if (canManageWorkspace(id)) await recoverStoppedPublications(id);
+    }
+    return failures;
+  }
   async function recoverStops() {
     const workspaces = new Set(delegatedPlans().map(plan => plan.delegationOrigin.workspaceId));
     for (const workspaceId of workspaces) if (canManageWorkspace(workspaceId)) {
@@ -1476,13 +1528,21 @@ function stringList(value) {
 
 
 /** Explicit delegation anchors only. Resource materials remain user context, not authority. */
-export function resourceFeedbackFromMessages(messages, anchorMessageIds) {
+export function resourceFeedbackFromMessages(messages, anchorMessageIds, { recipient, readResourceFeedback } = {}) {
   const anchors = new Set(anchorMessageIds), rows = new Map();
   for (const message of messages) {
     if (!anchors.has(message?.id)) continue;
-    const refs = normalizeResourceFeedbackList(message.resourceFeedback);
-    if (!refs) throw new TypeError('INVALID_RESOURCE_FEEDBACK');
+    // Only canonical user material can admit a prior fixed result. Assistant
+    // fields and prose cannot manufacture a frozen user selection.
+    if (message.role !== 'user') continue;
+    const refs = restoreResourceFeedbackTransport(message.resourceFeedback, message.attachments);
+    if (refs.some(ref => ref.resource.kind === 'interactive')) {
+      if (!recipient || typeof readResourceFeedback !== 'function') throw Object.assign(new TypeError('INTERACTIVE_FEEDBACK_UNAVAILABLE'), { code: 'INTERACTIVE_FEEDBACK_UNAVAILABLE' });
+      const actual = readResourceFeedback(message, recipient.workspaceId);
+      if (JSON.stringify(actual) !== JSON.stringify(refs)) throw Object.assign(new TypeError('INTERACTIVE_FEEDBACK_MISMATCH'), { code: 'INTERACTIVE_FEEDBACK_MISMATCH' });
+    }
     for (const ref of refs) {
+      if (recipient && (ref.recipient.workspaceId !== recipient.workspaceId || ref.recipient.conversationId !== recipient.conversationId)) throw new TypeError('RESOURCE_FEEDBACK_RECIPIENT_CHANGED');
       if (rows.has(ref.id) && JSON.stringify(rows.get(ref.id)) !== JSON.stringify(ref)) throw new TypeError('RESOURCE_FEEDBACK_ID_CONFLICT');
       rows.set(ref.id, ref);
     }

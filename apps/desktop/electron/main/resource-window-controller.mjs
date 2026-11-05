@@ -7,8 +7,8 @@ import { createResourceWindowHandoffs } from './resource-window-handoffs.mjs';
 
 const fail = status => ({ ok: false, status });
 /** Owns only read-only native views. No runtime/task/write port is admitted here. */
-export function createResourceWindowController({ BrowserWindow, trustedWindows, rendererLocation, preloadPath, resolveDocument, fileAccess, getOwner, getAppearance = () => ({}), getLocale = () => '', readHistory, writeHistory, prepareFeedback }) {
-  const reader = createResourceWindowReader({ resolveDocument, fileAccess, getOwner });
+export function createResourceWindowController({ BrowserWindow, trustedWindows, rendererLocation, preloadPath, resolveDocument, fileAccess, getOwner, getAppearance = () => ({}), getLocale = () => '', readHistory, writeHistory, prepareFeedback, interactiveResources }) {
+  const reader = createResourceWindowReader({ resolveDocument, fileAccess, getOwner, interactiveResources });
   const history = createResourceWindowHistory({ read: readHistory, write: writeHistory });
   const handoffs = createResourceWindowHandoffs();
   const scopes = new Map(), windows = new Map();
@@ -25,6 +25,11 @@ export function createResourceWindowController({ BrowserWindow, trustedWindows, 
   });
   const editSource = createResourceWindowEditSource({ registry, reader, getScope: id => scopes.get(id) });
   const feedback = createResourceWindowFeedback({ registry, reader, getScope: id => scopes.get(id), prepare: prepareFeedback });
+  function mergedHistory(owner) {
+    const original = history.list(owner), interactive = interactiveResources?.listWindows(owner) ?? { ok: true, status: 'ok', entries: [] };
+    if (!original.ok || !interactive.ok) return { ok: false, status: 'storage_unavailable', entries: [] };
+    return { ok: true, status: 'ok', entries: [...original.entries, ...interactive.entries].sort((a, b) => Date.parse(b.savedAt) - Date.parse(a.savedAt)) };
+  }
   // Awaiting a local app page is bounded; close/dispose retires even a load promise that never settles.
   async function loadWindow(win, url) {
     let timer, onClosed;
@@ -43,7 +48,8 @@ export function createResourceWindowController({ BrowserWindow, trustedWindows, 
     if (resource.kind === 'document') resource = { ...resource,
       ...(resource.mode !== 'diff' && context.navigation?.mode ? { mode: context.navigation.mode } : {}),
       reference: { ...resource.reference, ...(scope.lastObservation ? { expectedObservation: { resourceId: scope.lastObservation.resourceId, contentVersion: scope.lastObservation.contentVersion } } : {}) } };
-    const id = history.save({ ...context, resource }, scope, scope.recoveryId);
+    const id = resource.kind === 'interactive' ? interactiveResources?.saveWindow({ ...context, resource }, scope, scope.recoveryId)
+      : history.save({ ...context, resource }, scope, scope.recoveryId);
     if (id) scope.recoveryId = id;
     scope.persisted = !!id; return !!id;
   }
@@ -68,9 +74,9 @@ export function createResourceWindowController({ BrowserWindow, trustedWindows, 
       // Re-resolve after preparation; a root/owner change between the two is never accepted.
       const scope = await reader.prepare(context.resource);
       const captured = scopes.get(context.viewId);
-      if (!scope.ok || !captured || scope.root !== captured.root || scope.target !== captured.target || scope.owner.conversationId !== context.owner.conversationId || disposed) throw new Error('source_unavailable');
+      if (!scope.ok || !captured || resourceWindowSourceBinding(scope) !== resourceWindowSourceBinding(captured) || scope.owner.conversationId !== context.owner.conversationId || disposed) throw new Error('source_unavailable');
       win = new BrowserWindow({ width: 1040, height: 780, minWidth: 480, minHeight: 400, show: false,
-        title: context.resource.reference.path.split(/[\\/]/).pop() || 'Peer',
+        title: context.title || (context.resource.kind === 'interactive' ? 'Peer' : context.resource.reference.path.split(/[\\/]/).pop()) || 'Peer',
         webPreferences: { preload: preloadPath, contextIsolation: true, sandbox: true, nodeIntegration: false, webviewTag: false } });
       trustedWindows.registerWindow({ window: win, role: 'resource', allowedLocations: [rendererLocation] });
       const attached = registry.attach(context, win.webContents);
@@ -93,7 +99,10 @@ export function createResourceWindowController({ BrowserWindow, trustedWindows, 
               win.webContents.send('resource-window:close-blocked', { identity: context, reason: status === 'blocked' ? 'save_failed' : 'unconfirmed' });
               return;
             }
-            persist(latest.context); authorizedClose = true; win.close();
+            // A rejected old reading position can only become durable through a new
+            // authenticated navigation receipt, even if its Bot returns before close.
+            if (!scopes.get(context.viewId)?.checkpointNeedsFreshWrite) persist(latest.context);
+            authorizedClose = true; win.close();
           });
       });
       win.once('closed', cleanup);
@@ -113,6 +122,13 @@ export function createResourceWindowController({ BrowserWindow, trustedWindows, 
   }
   return {
     open,
+    interactiveBinding(sender) {
+      const found = registry.bootstrap(sender);
+      if (!found.ok || found.context.resource.kind !== 'interactive') return fail('scope_denied');
+      const binding = registry.readBinding(sender, found.context), target = registry.returnTarget(sender, found.context);
+      // Private host binding only. bootstrap/IPC never serialize this sender.
+      return { ...binding, ...(binding.ok && target.ok ? { sourceSender: target.sourceSender } : {}) };
+    },
     prepareFeedback: feedback,
     isEditingSourceCurrent: editSource.isCurrent,
     readEditingSource: editSource.read,
@@ -128,23 +144,31 @@ export function createResourceWindowController({ BrowserWindow, trustedWindows, 
     navigation(sender, payload) {
       if (!Number.isSafeInteger(payload?.sequence) || payload.sequence < 1) return fail('invalid_request');
       const result = registry.updateNavigation(sender, payload?.identity, payload?.navigation, payload.sequence);
-      return result.ok ? { ...result, persisted: persist(result.context) } : result;
+      if (result.ok && result.context.resource.kind === 'interactive' && interactiveResources?.hasOwnerReplacement?.(result.context.owner)) {
+        const scope = scopes.get(result.context.viewId);
+        if (scope) { scope.persisted = false; scope.checkpointNeedsFreshWrite = true; }
+        return { ...result, persisted: false, checkpointStatus: 'owner_replaced' };
+      }
+      if (!result.ok) return result;
+      const persisted = persist(result.context), scope = scopes.get(result.context.viewId);
+      if (persisted && scope?.checkpointNeedsFreshWrite) scope.checkpointNeedsFreshWrite = false;
+      return { ...result, persisted };
     },
     acknowledgeCheckpoint: (sender, payload) => ({ ok: handoffs.acknowledge(sender, payload, 'checkpoint') }),
     acknowledgeReturn: (sender, payload) => ({ ok: handoffs.acknowledge(sender, payload, 'return') }),
     async history(sender, { workspaceId } = {}) {
       const owner = await ownerFor(sender, workspaceId);
-      return owner ? history.list(owner) : { ok: false, status: 'scope_denied', entries: [] };
+      return owner ? mergedHistory(owner) : { ok: false, status: 'scope_denied', entries: [] };
     },
     async restore(sender, { workspaceId, id } = {}) {
       const owner = await ownerFor(sender, workspaceId); if (!owner) return fail('scope_denied');
-      if (!history.list(owner).ok) return fail('storage_unavailable');
-      const record = history.find(id, owner); if (!record) return fail('source_unavailable');
+      if (!mergedHistory(owner).ok) return fail('storage_unavailable');
+      const record = history.find(id, owner) ?? interactiveResources?.findWindow(id, owner); if (!record) return fail('source_unavailable');
       return open(sender, record.request, { restoration: record });
     },
     async forget(sender, { workspaceId, id } = {}) {
       const owner = await ownerFor(sender, workspaceId);
-      const ok = !!owner && history.remove(id, owner);
+      const ok = !!owner && (history.remove(id, owner) || interactiveResources?.removeWindow(id, owner) === true);
       if (ok) for (const scope of scopes.values()) if (scope.recoveryId === id) scope.historySuppressed = true;
       return { ok };
     },
@@ -168,7 +192,7 @@ export function createResourceWindowController({ BrowserWindow, trustedWindows, 
       if (!target.ok) return target;
       const scope = scopes.get(target.context.viewId);
       const current = await reader.prepare(target.context.resource).catch(() => null);
-      if (!scope || !current?.ok || current.root !== scope.root || current.target !== scope.target || current.owner.conversationId !== target.context.owner.conversationId) return fail('source_unavailable');
+      if (!scope || !current?.ok || resourceWindowSourceBinding(current) !== resourceWindowSourceBinding(scope) || current.owner.conversationId !== target.context.owner.conversationId) return fail('source_unavailable');
       const latest = registry.returnTarget(sender, identity);
       if (!latest.ok) return latest;
       const win = BrowserWindow.fromWebContents(latest.sourceSender);

@@ -358,9 +358,9 @@ export function createDelegationProvider({
     if (!verificationAvailable() || typeof verification?.run !== 'function') {
       return { ok: false, output: { ok: false, error: 'verifier_unavailable', message: 'verifier_unavailable' } };
     }
-    if (typeof verification.markVerifying === 'function') {
-      await verification.markVerifying(input.sessionId);
-    }
+    const admission = await verification.markVerifying?.(input.sessionId);
+    if (admission?.ok === false) return { ok: false, output: admission };
+    let verdict;
     try {
       const reviewed = await verification.run({
         sessionId: input.sessionId,
@@ -375,7 +375,8 @@ export function createDelegationProvider({
             ...(reviewed?.nextAction ? { nextAction: reviewed.nextAction } : {}) },
         };
       }
-      const detail = buildVerificationDetail({ ...reviewed.facts, sessionId: input.sessionId });
+      // The new verdict below has its own event. A previous persisted review cannot describe it.
+      const detail = buildVerificationDetail({ ...reviewed.facts, explicitVerification: undefined, sessionId: input.sessionId });
       const event = {
         kind: 'verdict',
         sessionId: input.sessionId,
@@ -388,10 +389,22 @@ export function createDelegationProvider({
         if (recorded?.ok === false) return { ok: false,
           output: { ok: false, error: recorded.error || 'verification_persistence_failed' } };
       }
-      return { ok: true, output: { ok: true, status: detail.outcome, event, detail } };
+      verdict = { status: detail.outcome, event, detail };
     } finally {
       await verification.finish?.(input.sessionId);
     }
+    let sessionState;
+    try {
+      const current = await supervisor?.get?.({ sessionId: input.sessionId });
+      if (current?.sessionId === input.sessionId && typeof current.status === 'string'
+        && (!view.workspaceId || current.workspaceId === view.workspaceId)) {
+        const { sessionId, status, sourceRevision, observationRevision } = current;
+        sessionState = { sessionId, status, sourceRevision, observationRevision };
+      }
+    } catch {
+      // A status read can fail after the verdict is durably recorded.
+    }
+    return { ok: true, output: { ok: true, status: verdict.status, ...(sessionState ? { sessionState } : {}), event: verdict.event, detail: verdict.detail } };
   }
 
   async function setProactivity(input, view) {

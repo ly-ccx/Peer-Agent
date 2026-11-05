@@ -55,6 +55,29 @@ describe('Desktop provider request coordinator', () => {
     assert.equal(JSON.stringify(messages), before);
   });
 
+  it('keeps the entire active verifier input after four tool pairs in both message formats', async () => {
+    const historical = { role: 'user', content: 'old history '.repeat(1000) };
+    const mission = { role: 'user', content: `Verifier mission\n${'current goal '.repeat(400)}"explicitVerifications":[{"outcome":"passed"}]${'current evidence '.repeat(400)}` };
+    for (const format of ['openai', 'anthropic']) {
+      const messages = [historical, mission];
+      for (let index = 0; index < 4; index++) {
+        const id = `call-${index}`;
+        if (format === 'openai') messages.push(
+          { role: 'assistant', tool_calls: [{ id, type: 'function', function: { name: 'inspect_interactive_result', arguments: '{}' } }] },
+          { role: 'tool', tool_call_id: id, content: `inspection ${index}` });
+        else messages.push({ role: 'assistant', content: [{ type: 'tool_use', id, name: 'inspect_interactive_result', input: {} }] },
+          { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: `inspection ${index}` }] });
+      }
+      await executeDesktopProviderRequest({ request: { messages, systemPrompt: 'fixture', contextWindow: 1_000_000, preserveLatestUserTurn: true },
+        send: request => {
+          assert.notEqual(request.messages[0].content, historical.content, format);
+          assert.equal(request.messages[1].content, mission.content, format);
+          assert.deepEqual(request.messages.slice(2), messages.slice(2), format);
+          return { ok: true, content: 'finished' };
+        } });
+    }
+  });
+
   it('coordinates compaction without publishing a parallel context projection', async () => {
     const result = await coordinateDesktopProviderRequest({
       messages: [

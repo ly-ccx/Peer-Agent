@@ -1,7 +1,7 @@
 import { goalFileVersion as fileVersion } from "./goal-plan-files.mjs";
-import { appendJsonl, mergeEvidenceIndexRecords, normalizeEvidenceIndexRecord, readEvidenceRecordsFromTail, readJsonl } from "./goal-plan-files.mjs";
+import { appendJsonl, mergeEvidenceIndexRecords, normalizeEvidenceIndexRecord, readEvidenceRecordsFromTail, readJsonl, retainInteractiveEvidence, syncJsonl } from "./goal-plan-files.mjs";
 import { normalizeConversationId, normalizeEvidenceRefList, normalizeOptionalString } from "./goal-plan-domain.mjs";
-import { statSync } from "node:fs";
+import { existsSync, lstatSync, statSync } from "node:fs";
 import path from "node:path";
 import { DESKTOP_PREVIEW_CAPABILITY } from "@peer-agent/protocol";
 
@@ -37,9 +37,9 @@ export function createGoalPlanEvidence({ storeDir, getActivePlanByConversation }
     if (evidenceIndexReadCache?.version !== version) {
       evidenceIndexReadCache = { version, records: readJsonl(evidenceIndexFile) };
     }
-    return evidenceIndexReadCache.records
+    return retainInteractiveEvidence(evidenceIndexReadCache.records
       .map(normalizeEvidenceIndexRecord)
-      .filter(Boolean);
+      .filter(Boolean));
   }
 
   function recordHasDesktopPreviewArtifact(record) {
@@ -135,7 +135,7 @@ export function createGoalPlanEvidence({ storeDir, getActivePlanByConversation }
     return getActivePlanByConversation(normalizedConversationId)?.planId ?? null;
   }
 
-  function recordEvidenceRefs(entry = {}) {
+  function recordEvidenceRefs(entry = {}, { durable = false } = {}) {
     refreshEvidenceCache();
     const refs = normalizeEvidenceRefList(entry.evidenceRefs ?? entry.evidenceRef);
     if (refs.length === 0) return [];
@@ -145,6 +145,7 @@ export function createGoalPlanEvidence({ storeDir, getActivePlanByConversation }
     const createdAt = normalizeOptionalString(entry.createdAt) || new Date().toISOString();
     const base = { createdAt };
     if (entry.bodyPreview) base.bodyPreview = entry.bodyPreview;
+    if (entry.interactiveInspection) base.interactiveInspection = entry.interactiveInspection;
     if (planId) base.planId = planId;
     if (conversationId) base.conversationId = conversationId;
     for (const field of ['streamId', 'toolCallId', 'capabilityId', 'toolName']) {
@@ -162,13 +163,18 @@ export function createGoalPlanEvidence({ storeDir, getActivePlanByConversation }
     for (const record of records) {
       const previous = findEvidenceIndexRecords([record.evidenceRef])[0];
       const merged = mergeEvidenceIndexRecords(previous, record);
+      if (previous && (merged.interactiveInspection || merged.userArtifacts?.some(item => item.kind === 'interactive')) && JSON.stringify(previous) === JSON.stringify(merged)) {
+        if (durable) syncJsonl(evidenceIndexFile);
+        mergedRecords.push(merged);
+        continue;
+      }
       let sizeBefore = 0;
       try {
         sizeBefore = statSync(evidenceIndexFile).size;
       } catch {
         sizeBefore = 0;
       }
-      appendJsonl(evidenceIndexFile, merged);
+      appendJsonl(evidenceIndexFile, merged, { durable });
       noteDesktopPreviewEvidenceAppend(merged, sizeBefore);
       missingEvidenceRefCache.delete(record.evidenceRef);
       evidenceRecordCache.set(record.evidenceRef, merged);
@@ -216,5 +222,19 @@ export function createGoalPlanEvidence({ storeDir, getActivePlanByConversation }
       `[goal-plan-store] ${context} evidenceRef is not registered in EvidenceIndex: ${normalizedRef}`,
     );
   }
-  return { findEvidenceIndexRecords, assertEvidenceRefIndexed, evidenceRecordMatchesPlan, readEvidenceIndex, assertAnyEvidenceRefIndexed, hasDesktopPreviewEvidence, recordEvidenceRefs };
+  function assertInteractiveEvidenceCompatible() {
+    // The existing index has no rewrite/compaction path. Legacy appends, including
+    // already-open descriptors, leave the original publication row intact. New
+    // readers fold that original row instead of accepting a lossy later projection.
+    if (existsSync(storeDir)) {
+      const stat = lstatSync(storeDir);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('interactive_evidence_incompatible');
+    }
+    if (existsSync(evidenceIndexFile)) {
+      const stat = lstatSync(evidenceIndexFile);
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) throw new Error('interactive_evidence_incompatible');
+    }
+    return true;
+  }
+  return { findEvidenceIndexRecords, assertEvidenceRefIndexed, evidenceRecordMatchesPlan, readEvidenceIndex, assertAnyEvidenceRefIndexed, hasDesktopPreviewEvidence, recordEvidenceRefs, assertInteractiveEvidenceCompatible };
 }

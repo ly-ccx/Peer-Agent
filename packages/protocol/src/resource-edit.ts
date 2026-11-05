@@ -51,7 +51,7 @@ export function normalizeResourceEditTarget(raw: unknown): ResourceEditTarget | 
     || !keys(raw.recipient, ['workspaceId', 'conversationId']) || !resourceEditToken(raw.recipient.workspaceId) || !resourceEditToken(raw.recipient.conversationId)
     || !object(raw.base) || !keys(raw.base, ['resourceId', 'contentVersion']) || !resourceEditDigest(raw.base.resourceId) || !resourceEditDigest(raw.base.contentVersion)) return;
   const normalized = normalizeResourceWindowRequest({ resource: { kind: 'document', mode: 'source', reference: raw.reference } });
-  const reference = normalized?.resource.reference;
+  const reference = normalized?.resource.kind === 'document' ? normalized.resource.reference : undefined;
   if (!reference || reference.revision || reference.kind === 'directory' || reference.relativeTo !== undefined
     || reference.workspaceId !== raw.recipient.workspaceId || !/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(reference.path)) return;
   if (reference.expectedObservation && (reference.expectedObservation.resourceId !== raw.base.resourceId
@@ -173,7 +173,7 @@ export function normalizeResourceEditSource(raw: unknown): ResourceEditSource | 
   if (raw.kind === 'document') {
     if (!keys(raw, ['kind', 'reference', 'observed'])) return;
     const normalized = normalizeResourceWindowRequest({ resource: { kind: 'document', mode: 'source', reference: raw.reference } });
-    const reference = normalized?.resource.reference;
+    const reference = normalized?.resource.kind === 'document' ? normalized.resource.reference : undefined;
     if (!reference || reference.kind === 'directory' || reference.revision || reference.expectedObservation
       && (reference.expectedObservation.resourceId !== observed.resourceId || reference.expectedObservation.contentVersion !== undefined && reference.expectedObservation.contentVersion !== observed.contentVersion)) return;
     return { kind: 'document', reference: { ...reference, kind: 'file', expectedObservation: observed }, observed };

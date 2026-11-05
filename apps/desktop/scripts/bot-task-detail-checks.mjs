@@ -183,6 +183,9 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
   assert.equal(await noteRow.isVisible(), true);
   assert.equal(await noteRow.locator('.markdown-content').getAttribute('data-selection-source'), note.content, 'the full related reply remains available in the main conversation');
   assert.equal(readTurns(), beforeNavigation, 'reading the related bot note does not execute anything');
+  const workRows = page.locator('.bot-work-panel-session');
+  assert.ok(await workRows.count(), 'default work rows are visible beside the main note');
+  assert.doesNotMatch((await workRows.allTextContents()).join(' '), /waiting_user|internal-execution-model-id/);
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'task-main-note.png') });
   await open();
   const composer = page.locator('.bot-composer textarea');
@@ -210,6 +213,12 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
   await until(() => answer.evaluate(node => document.activeElement === node), Boolean);
   await until(() => page.locator(BOT_DETAIL_SURFACE).count(), count => count === 0);
   assert.equal(await answer.isVisible(), true);
+  const answerFocus = await answer.evaluate(node => {
+    const style = getComputedStyle(node);
+    return { visible: node.matches(':focus-visible'), width: style.outlineWidth, offset: style.outlineOffset };
+  });
+  assert.deepEqual(answerFocus, { visible: true, width: '2px', offset: '-2px' },
+    'keyboard focus remains inside the clipped question card');
   assert.equal(readTurns(), beforeNavigation, 'locating a decision does not answer, confirm or resume the task');
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'task-main-question.png') });
   conversationMessages = [note, { ...question, cards: question.cards.map(card => ({ ...card, resolvedState: 'resolved' })) }];

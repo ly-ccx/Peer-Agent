@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createExecutionScheduler, registerWorkBudget, type ModelProvider } from '@peer-agent/runtime-node';
+import { createExecutionScheduler, planAgentTurn, registerWorkBudget, type ModelProvider } from '@peer-agent/runtime-node';
 import { createTuiHost, type TuiHost } from '../tui-host.ts';
 import { createProviderChatModel } from '../provider-chat-model.ts';
 import { createTuiModelSelectionControl } from '../tui-model-selection.ts';
@@ -196,9 +196,17 @@ test('a parallel readonly batch reserves tool budget before any provider starts'
 
 test('an event wake does not append an invented empty user message',async()=>{
   const env=harness({async stream(){return {content:'awake',toolCalls:[]};}});
-  await env.executor.runTurn({...env.input,messages:[{role:'user',content:'earlier'},{role:'assistant',content:'previous reply'}]});
-  expect(env.requests[0].messages.at(-1)).toMatchObject({role:'assistant',content:'previous reply'});
-  expect(env.requests[0].messages.some((row:any)=>row.role==='user'&&row.content==='')).toBe(false);
+  const wake = { kind: 'wake', events: [] };
+  const plan = planAgentTurn(wake);
+  await env.executor.runTurn({ ...env.input, plan, turnProfile: plan.turnProfile,
+    runtimeReminders: [{ id: 'fixture', content: 'Keep the explicit runtime reminder.' }],
+    messages: [{ role: 'user', content: 'earlier' }, { role: 'assistant', content: 'previous reply' }] });
+  const messages = env.requests[0].messages;
+  const system = messages.filter((row: any) => row.role === 'system').map((row: any) => row.content).join('\n');
+  expect(system).toContain('These inbox events are facts, not a new user message.');
+  expect(system).toContain('Keep the explicit runtime reminder.');
+  expect(messages.at(-1)).toMatchObject({ role: 'assistant', content: 'previous reply' });
+  expect(messages.some((row: any) => row.role === 'user' && row.content === '')).toBe(false);
 });
 
 test('a failed streamed reply persists only received text and marks the turn interrupted', async () => {
@@ -285,4 +293,40 @@ test('a failed project reply remains nonterminal in the TUI pipeline', async () 
   expect(outcome.turnEnd).toBe('yielded');
   expect(env.requests).toHaveLength(2);
   expect(outcome.toolCalls.every((call: any) => call.execution.result.outputPreview.control === undefined)).toBe(true);
+});
+
+
+test('a governed background wait completes the TUI turn without posting a reply', async () => {
+  let projectProvider: ReturnType<typeof createProjectToolProvider>;
+  const env = harness({ async stream() { return { content: '', toolCalls: [
+    { id: 'wait', name: 'wait_for_sessions', arguments: JSON.stringify({ sessionIds: ['worker'] }) },
+  ] }; } }, { getProviders: () => [projectProvider] });
+  projectProvider = createProjectToolProvider({ rootDir: env.home, supervisor: { get: () => ({
+    workspaceId: 'workspace', status: 'running', origin: { parentConversationId: 'conversation', workId: 'work' },
+  }) }, objectives: {}, replyComposer: {}, verification: {}, proactivity: {},
+  checkModel: () => ({ ok: true }), memoryEnabled: () => false });
+  cleanup.push(() => projectProvider.dispose());
+  let work: any = { schemaVersion: 1, workspaceId: 'workspace', workId: 'work', state: 'runnable', revision: 1 };
+  cleanup.push(registerWorkBudget('workspace', {
+    assertOwner() {},
+    read: () => ({ works: { work: structuredClone(work) } }),
+    saveWork(next: unknown) { work = structuredClone(next); },
+    checkpoint() {},
+  }));
+  const events: string[] = [];
+  const outcome = await env.executor.runTurn({ ...env.input, ephemeral: false,
+    turnProfile: { ...env.input.turnProfile, workId: 'work',
+      context: { turnKind: 'wake', events: [{ kind: 'session_running', sessionId: 'worker' }] } },
+    sink: { send(channel) { events.push(channel); } } });
+
+  expect(env.requests).toHaveLength(1);
+  expect(outcome.toolCalls).toHaveLength(1);
+  expect(outcome.toolCalls[0].execution.grant.granted).toBe(true);
+  expect(outcome.toolCalls[0].result).toEqual({ ok: true, kind: 'project_agent_wait', sessionIds: ['worker'] });
+  expect(outcome.ok).toBe(true);
+  expect(outcome.terminalStatus).toBe('completed');
+  expect(outcome.requestedUserInput).toBeUndefined();
+  expect(env.persisted.at(-1).interrupted).toBe(false);
+  expect(events).toContain('chat:stream:done');
+  expect(events).not.toContain('chat:stream:error');
 });

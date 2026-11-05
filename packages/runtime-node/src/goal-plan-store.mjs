@@ -414,7 +414,7 @@ export function createGoalPlanStore({
 } = {}) {
   const { supersedeContextCheckpoint, markContextCheckpointConsumed, markContextCompactionPersisted, commitContextCheckpoint, prepareContextCheckpoint } = createGoalPlanCheckpoints({ getPlan, persist, appendRunEvent });
 
-  const { findEvidenceIndexRecords, assertEvidenceRefIndexed, evidenceRecordMatchesPlan, readEvidenceIndex, assertAnyEvidenceRefIndexed, hasDesktopPreviewEvidence, recordEvidenceRefs } = createGoalPlanEvidence({ storeDir, getActivePlanByConversation });
+  const { findEvidenceIndexRecords, assertEvidenceRefIndexed, evidenceRecordMatchesPlan, readEvidenceIndex, assertAnyEvidenceRefIndexed, hasDesktopPreviewEvidence, recordEvidenceRefs, assertInteractiveEvidenceCompatible } = createGoalPlanEvidence({ storeDir, getActivePlanByConversation });
 
   const { subscribeChanges, notifyChanged, publishPersistedChange, setOnChange } = createGoalPlanEvents({ storeDir, onChange });
 
@@ -2504,6 +2504,7 @@ export function createGoalPlanStore({
     reportExplorer,
     recordVerifierRun,
     recordEvidenceRefs,
+    assertInteractiveEvidenceCompatible,
     listEvidenceIndex: readEvidenceIndex,
     hasDesktopPreviewEvidence,
     isUiDeliveryRequired,

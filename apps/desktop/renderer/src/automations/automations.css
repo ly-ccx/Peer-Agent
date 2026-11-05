@@ -7,6 +7,10 @@
 .automation-list-row{border-radius:var(--ui-radius-row)}
 .automation-review-surface .automation-review-card{border-radius:var(--ui-radius-panel)}
 .automation-list-toolbar input{border-radius:var(--ui-radius-control)}
+.automation-list-toolbar input::placeholder {
+  color: var(--za-text);
+  opacity: 1;
+}
 
 
 

@@ -3,7 +3,7 @@ export type ProjectCommand =
   | { kind: 'retry_input'; inputId: string }
   | { kind: 'save_draft' }
   | { kind: 'view'; view: 'bots'|'tasks'|'memory'|'objectives'|'cards'|'diagnostics' }
-  | { kind: 'task'; number: number }
+  | { kind: 'task' | 'result'; number: number }
   | { kind: 'card'; operation: 'approve'|'deny'|'answer'|'action'; number: number; text: string; option?: number }
   | { kind: 'takeover'|'classic'|'older'|'latest'|'help' }
   | { kind: 'invalid' };
@@ -18,7 +18,7 @@ export function parseProjectCommand(input: string): ProjectCommand {
   if (name === 'retry-input' && args.length === 1 && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(args[0]!)) return {kind:'retry_input',inputId:args[0]!};
   const number = Number(args[0]);
   if (!/^[1-9]\d{0,5}$/.test(args[0] ?? '')) return {kind:'invalid'};
-  if (name === 'task' && args.length === 1) return {kind:'task',number};
+  if ((name === 'task' || name === 'result') && args.length === 1) return {kind:name,number};
   if (['approve','deny'].includes(name!) && args.length === 1) return {kind:'card',operation:name as any,number,text:''};
   if (name === 'answer' && args.slice(1).join(' ').trim()) return {kind:'card',operation:'answer',number,text:args.slice(1).join(' ')};
   if (name === 'action' && args.length === 2 && /^[1-9]\d{0,3}$/.test(args[1]!)) return {kind:'card',operation:'action',number,text:'',option:Number(args[1])};

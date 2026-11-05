@@ -15,8 +15,17 @@ export function hostWakeWait(job, work, sessions) {
     ? { sessionIds: ids, source: 'host' } : null;
 }
 
+function backgroundWaitAllowed(workId, turnKind, anchors, events) {
+  return Boolean(workId) && turnKind === 'wake' && !anchors?.length && Boolean(events?.length);
+}
+
+export function sessionWaitProjected(profile) {
+  const turn = profile?.context ?? profile?.turnContext;
+  return profile?.role === 'project_agent' && backgroundWaitAllowed(profile.workId, turn?.turnKind, turn?.inputAnchors, turn?.events);
+}
+
 export async function admitSessionWait(input, view, getSession) {
-  if (!view.workId || view.currentInputAnchors.length || view.turnKind !== 'wake' || !view.events.length
+  if (!backgroundWaitAllowed(view.workId, view.turnKind, view.currentInputAnchors, view.events)
     || typeof getSession !== 'function') return { ok: false, error: 'background_wait_required' };
   for (const sessionId of input.sessionIds) {
     const row = await getSession({ sessionId });

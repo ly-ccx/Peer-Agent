@@ -2,7 +2,7 @@ import { createReplyDelivery } from './reply-delivery.mjs';
 import { ownedSessions } from './repair-ownership.mjs';
 import { decideRuntimeDisposition, runtimeWorkHeld } from './runtime-disposition.ts';
 import { intentWorkDisposition } from './intent-lifecycle.mjs';
-import { intentReplyBindings, retainedIntentReplyBindings, intentReplyScopes, intentReviewCurrent } from './intent-reply-bindings.mjs';
+import { intentReplyBindings, retainedIntentReplyBindings, intentReplyScopes, intentReviewCurrent, intentDeliveredReplyRefs } from './intent-reply-bindings.mjs';
 import { historyExecutionHeld } from './history-resumption.mjs';
 
 /** Owns reply/goal bindings, post-settlement custody and deferred expression over the existing journal. */
@@ -34,12 +34,18 @@ export function createRunnerReplyLifecycle({ store, workspaceId, conversationId,
     onRecovered: message => {
       for (const workId of new Set([message.meta?.workId, ...(message.meta?.intentBindings || []).map(row => row.workId)].filter(Boolean))) {
         const work = readWork(workId);
+        if (!work || historyExecutionHeld(work) || runtimeWorkHeld(work) || ['paused', 'cancelled'].includes(work.state)) continue;
+        const intent = work.intentCoordination;
         const binding = message.meta?.intentBindings?.find(row => row.workId === workId
-          && row.intentRevision === work?.intentCoordination?.revision && row.decisionRef === work.intentCoordination?.decision.operationId);
-        const returningSameGoal = work?.intentCoordination?.lifecycle === 'active' && work.intentCoordination.decision.disposition.kind === 'return'
-          && message.meta?.intentScopes?.some(scope => scope.workId === workId && scope.goalRevision === work.intentCoordination.goalRevision);
-        if (!work || historyExecutionHeld(work) || runtimeWorkHeld(work) || ['paused', 'cancelled'].includes(work.state)
-          || !binding && !returningSameGoal && (!['runnable', 'retry_wait'].includes(work.state) || work.attemptId && work.attemptId !== message.turnId)) continue;
+          && row.intentRevision === intent?.revision && row.decisionRef === intent?.decision.operationId);
+        const currentAttempt = ['runnable', 'retry_wait'].includes(work.state) && (!work.attemptId || work.attemptId === message.turnId);
+        if (!currentAttempt) {
+          // Older progress can share the goal without settling the current return.
+          const sameGoal = message.meta?.intentScopes?.some(scope => scope.workId === workId && scope.goalRevision === intent?.goalRevision);
+          if ((!binding && !sameGoal) || intent?.lifecycle !== 'active' || intent.decision.disposition.kind !== 'return') continue;
+          const state = readSnapshot();
+          if (!intentReviewCurrent(intent.review, state, workId, rows()) || !intentDeliveredReplyRefs(state, work).includes(message.id)) continue;
+        }
         const related = ownedSessions(work, { events: [] }, rows());
         const sessionIds = [...new Set([...(work.sessionIds || []), ...related.map(row => row.sessionId)])];
         const events = (work.pendingEventIds || []).map(id => readSnapshot().events[id]?.event).filter(Boolean);

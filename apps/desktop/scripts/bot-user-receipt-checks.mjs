@@ -12,7 +12,12 @@ export async function checkBotUserReceipt({ page, until, report, captureDirector
   await page.locator('.bot-thread[aria-busy="false"]').waitFor();
   await page.locator('.bot-thread').focus();
   await page.keyboard.press('Home');
-  await page.locator('.bot-thread-latest').waitFor();
+  const latest = page.locator('.bot-thread-latest');
+  await latest.waitFor();
+  assert.equal(await latest.evaluate(button => {
+    const thread = button.closest('.bot-thread-shell').querySelector('.bot-thread');
+    return button.getBoundingClientRect().top >= thread.getBoundingClientRect().bottom;
+  }), true, 'the return-to-latest action does not cover the reading viewport');
   const initial = JSON.parse(readFileSync(commandFile, 'utf8'));
   const titles = ['入口样式收尾', '中断原因核查收尾', '设置按钮记录核对'];
   const sessions = titles.map((title, index) => ({ ...initial.sessions[0], sessionId: `receipt-task-${index}`,

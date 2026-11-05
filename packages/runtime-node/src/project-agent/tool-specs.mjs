@@ -9,13 +9,14 @@ import { validCapabilityRequirements } from './capability-admission.mjs';
 import { validIntentAssessment } from './intent-coordination-kernel.mjs';
 const intentIdsSchema = { type: 'array', maxItems: 64, items: { type: 'string', maxLength: 200 } };
 const intentAssessmentSchema = { type: 'object', additionalProperties: false,
+  description: 'For action assess, put the work ID, revisions, source IDs, decision fields and assessment reason inside this object.',
   required: ['workId', 'expectedWorkRevision', 'expectedGoalRevision', 'sourceInputIds', 'sourceEventIds', 'inputs', 'coverage', 'disposition', 'reason'],
   properties: {
     workId: { type: 'string', maxLength: 200 }, expectedWorkRevision: { type: 'integer', minimum: 0 }, expectedGoalRevision: { type: 'integer', minimum: 0 },
     sourceInputIds: intentIdsSchema, sourceEventIds: intentIdsSchema, sourceDecisionRef: { type: 'string', maxLength: 200 },
     inputs: { type: 'array', maxItems: 64, items: { type: 'object', required: ['inputId', 'kind', 'reason'], additionalProperties: false,
       properties: { inputId: { type: 'string' }, kind: { type: 'string', enum: ['discuss', 'answer', 'delegate', 'augment', 'revise', 'withdraw'] }, reason: { type: 'string', maxLength: 500 } } } },
-    interpretation: { type: 'object', additionalProperties: false, required: ['outcome', 'constraints', 'nonGoals', 'openQuestions', 'requirements'], properties: {
+    interpretation: { type: 'object', additionalProperties: false, description: 'Provide on first assessment or an admitted goal revision. Omit when updating coverage or disposition for the same goal.', required: ['outcome', 'constraints', 'nonGoals', 'openQuestions', 'requirements'], properties: {
       outcome: { type: 'string', maxLength: 4000 }, ...Object.fromEntries(['constraints', 'nonGoals', 'openQuestions'].map(key => [key, { type: 'array', maxItems: 16, items: { type: 'string', maxLength: 500 } }])),
       requirements: { type: 'array', minItems: 1, maxItems: 32, items: { type: 'object', required: ['requirementId', 'text', 'sourceInputIds'], additionalProperties: false,
         properties: { requirementId: { type: 'string', maxLength: 200 }, text: { type: 'string', maxLength: 1000 }, sourceInputIds: intentIdsSchema } } } } },
@@ -27,11 +28,12 @@ const intentAssessmentSchema = { type: 'object', additionalProperties: false,
       { type: 'object', required: ['kind', 'operationRefs'], additionalProperties: false, properties: { kind: { const: 'continue' }, operationRefs: intentIdsSchema } },
       { type: 'object', required: ['kind', 'waitFor'], additionalProperties: false, properties: { kind: { const: 'wait' }, waitFor: { type: 'array', minItems: 1, maxItems: 32, items: {
         type: 'object', required: ['kind', 'id', 'revision'], additionalProperties: false, properties: { kind: { type: 'string', enum: ['session', 'human_request', 'resource', 'recovery'] }, id: { type: 'string' }, revision: { type: 'string' } } } } } },
-      { type: 'object', required: ['kind', 'replyRef'], additionalProperties: false, properties: { kind: { const: 'return' }, replyRef: { type: 'string' } } },
+      { type: 'object', required: ['kind', 'replyRef'], additionalProperties: false, properties: { kind: { const: 'return' }, replyRef: { type: 'string', description: 'Use current_turn_reply to bind the host reservation for this execution slice.' } } },
       { type: 'object', required: ['kind', 'code', 'recoveryRef'], additionalProperties: false, properties: { kind: { const: 'blocked_system' }, code: { type: 'string' }, recoveryRef: { type: 'string' } } },
       { type: 'object', required: ['kind', 'controlRef'], additionalProperties: false, properties: { kind: { const: 'withdraw' }, controlRef: { type: 'string' } } },
     ] }, reason: { type: 'string', maxLength: 1000 },
   } };
+const CRITERION_DESCRIPTION_LIMIT = 500;
 const SPAWN_INPUT_SCHEMA = {
     type: 'object',
     properties: {
@@ -51,7 +53,7 @@ const SPAWN_INPUT_SCHEMA = {
         items: { type: 'object', properties: {
             id: { type: 'string', maxLength: 200 },
             kind: { type: 'string', enum: ['command', 'test', 'file-contains', 'file-exists', 'model_review', 'manual'] },
-            description: { type: 'string', maxLength: 500 },
+            description: { type: 'string', maxLength: CRITERION_DESCRIPTION_LIMIT },
             command: { type: 'string', maxLength: 2000 },
             path: { type: 'string', maxLength: 1000 },
             expect: { type: 'string', maxLength: 2000 },
@@ -241,10 +243,28 @@ export function validateDelegationInput(name, raw) {
   if (OBJECTIVE_TOOL_SPECS.some(spec => spec.name === name)) return validateObjectiveToolInput(name, raw);
   if (name === 'coordinate_work') {
     if (Object.keys(input).some(key => !['action','workId','sessionId','expectedRevision','reason','text','replyTo','task','assessment','afterSessionId','eventId','payloadOffset','inputId','afterInputId','expectedWorkRevision'].includes(key))
-      || !['parallel','augment','revise','query','answer','cancel','replace','handoff','resume','assess'].includes(input.action) || !text(input.reason,500)) return invalid('A scoped coordination action and reason are required. Authority is assigned by the host.');
+      || !['parallel','augment','revise','query','answer','cancel','replace','handoff','resume','assess'].includes(input.action) || !text(input.reason,500)) {
+      return invalid(input.action === 'assess'
+        ? 'Send action, reason and a nested assessment object. Put the work ID, both revisions, source IDs, inputs, coverage and disposition inside assessment.'
+        : 'A scoped coordination action and reason are required. Authority is assigned by the host.');
+    }
     if (input.action === 'assess') {
-      if (input.assessment?.operationId !== undefined || !validIntentAssessment({ ...input.assessment, operationId: 'host' })) return invalid('A bounded intent assessment with both current revisions and source identities is required. The host assigns its operationId.');
-      return { ok: true, value: { action: 'assess', reason: input.reason.trim(), assessment: structuredClone(input.assessment) } };
+      const assessment = input.assessment;
+      if (!assessment || typeof assessment !== 'object' || Array.isArray(assessment)) {
+        return invalid('Action assess requires a nested assessment object containing both current revisions and source identities.');
+      }
+      const missing = intentAssessmentSchema.required.filter(key => !Object.hasOwn(assessment, key));
+      if (missing.length) return invalid(`Missing assessment fields: ${missing.map(key => `assessment.${key}`).join(', ')}.`);
+      if (assessment.operationId !== undefined || !validIntentAssessment({ ...assessment, operationId: 'host' })) {
+        const missingSources = Array.isArray(assessment.coverage) ? assessment.coverage.findIndex(row => row && !Array.isArray(row.sources)) : -1;
+        if (missingSources >= 0) return invalid(`assessment.coverage[${missingSources}].sources must be an array. Use [] for a remaining requirement without evidence. Put evidenceRefs inside each source, not on the coverage row.`);
+        const uncovered = Array.isArray(assessment.coverage) ? assessment.coverage.findIndex(row =>
+          row?.status === 'covered' && Array.isArray(row.sources)
+          && (!row.sources.length || row.sources.some(source => Array.isArray(source?.evidenceRefs) && !source.evidenceRefs.length))) : -1;
+        if (uncovered >= 0) return invalid(`assessment.coverage[${uncovered}] marks a requirement covered without persisted evidence. Each covered source needs a non-empty evidenceRefs list. Use return and the currentReplyRef for the reply you are about to deliver.`);
+        return invalid('A bounded intent assessment with both current revisions and source identities is required. The host assigns its operationId.');
+      }
+      return { ok: true, value: { action: 'assess', reason: input.reason.trim(), assessment: structuredClone(assessment) } };
     }
     if (input.assessment !== undefined) return invalid('assessment is only valid for action assess.');
     if (input.afterSessionId !== undefined && (input.action !== 'query' || !text(input.afterSessionId,200) || !Number.isSafeInteger(input.expectedRevision))) return invalid('Frame pagination requires query, afterSessionId and current expectedRevision.');
@@ -347,7 +367,9 @@ function validateSpawn(input) {
   if (!anchorMessageIds) return invalid('anchorMessageIds must contain 1 to 8 message ids.');
   if (!title) return invalid('title is required and must be at most 60 characters.');
   if (!brief) return invalid('brief is required and must be at most 4000 characters.');
-  if (!successCriteria) return invalid('successCriteria must contain 1 to 8 items.');
+  if (!successCriteria) return invalid(
+    `successCriteria must contain 1 to 8 valid structured items with a non-empty description of at most ${CRITERION_DESCRIPTION_LIMIT} characters each.`,
+  );
   if (!kinds.has(input.kind)) return invalid('kind must be code, research, docs, ui, ops, or other.');
   if (typeof input.readOnly !== 'boolean') return invalid('readOnly must be a boolean.');
   if (input.requiredCapabilities !== undefined && !validCapabilityRequirements(input.requiredCapabilities)) return invalid('requiredCapabilities must contain distinct capability IDs.');
@@ -415,7 +437,7 @@ function validatedCriteria(items) {
     if (Object.keys(item).some(key => !['id', 'kind', 'description', 'command', 'path', 'expect', 'requiredCapabilities'].includes(key))) return null;
     if (item.requiredCapabilities !== undefined && !validCapabilityRequirements(item.requiredCapabilities)) return null;
     if (!['command', 'test', 'file-contains', 'file-exists', 'model_review', 'manual'].includes(item.kind)) return null;
-    const description = text(item.description, 500);
+    const description = text(item.description, CRITERION_DESCRIPTION_LIMIT);
     if (!description) return null;
     const criterion = { kind: item.kind, description };
     if (item.requiredCapabilities !== undefined) criterion.requiredCapabilities = item.requiredCapabilities;

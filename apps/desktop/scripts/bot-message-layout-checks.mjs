@@ -1,5 +1,5 @@
 import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
-import { openReplyDetails, closeReplyDetails, scrollToBotMessage } from './bot-reply-details-checks.mjs';
+import { openReplyDetails, closeReplyDetails, scrollToBotMessage, wheelBotConversation } from './bot-reply-details-checks.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { BUDGET_RECOVERY_CASES } from './work-budget-fixture.mjs';
@@ -22,11 +22,27 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
     assert.match(await budgetMessage.innerText(), /模型请求：已用 256 次，上限 256 次。.*来源：执行预算设置。/s);
     assert.equal(await budgetMessage.evaluate(node => node.scrollWidth <= node.clientWidth), true);
     assert.doesNotMatch(await budgetMessage.innerText(), /work_budget_limited/);
+    // Capture the summary before opening the drawer. At narrow widths, closing
+    // the full-screen drawer restores the prior conversation reading position.
+    const budgetSummary = budgetMessage.locator('.bot-card');
+    const budgetPosition = () => budgetSummary.evaluate(node => {
+      const card = node.getBoundingClientRect();
+      const thread = node.closest('.bot-thread').getBoundingClientRect();
+      const top = Math.max(thread.top, 0);
+      const bottom = Math.min(thread.bottom, innerHeight);
+      return { top, bottom, cardTop: card.top, cardBottom: card.bottom };
+    });
+    // A wheel gesture releases follow-latest while virtual rows are measured.
+    const initial = await budgetPosition();
+    const offset = (initial.cardTop + initial.cardBottom - initial.top - initial.bottom) / 2;
+    if (Math.abs(offset) > 1) await wheelBotConversation(page, offset);
+    const position = await budgetPosition();
+    assert.ok(position.cardBottom > position.cardTop && position.cardTop >= position.top - 1
+      && position.cardBottom <= position.bottom + 1, `budget summary must fit at ${width}px: ${JSON.stringify(position)}`);
+    await page.screenshot({ path: path.join(captureDirectory, `budget-exhausted-${appearance}.png`), animations: 'disabled' });
     await openReplyDetails(page, budgetMessage);
     assert.match(await rawError.textContent(), /^代理暂时不可用：work_budget_limited/);
     await closeReplyDetails(page);
-    await scrollToBotMessage(page, budgetMessage);
-    await page.screenshot({ path: path.join(captureDirectory, `budget-exhausted-${appearance}.png`), animations: 'disabled' });
   }
   report.budgetFailure = { reasonVisible: true, diagnosticInDrawer: true, retrySuppressed: true, limitVisible: true, narrowFits: true };
   const recoveryCases = [

@@ -5,6 +5,7 @@ import { directoryReadingKey, rememberDirectoryReading, type DirectorySession } 
 /** Returning activates the source view; the copy's later reading never overwrites it. */
 export function returnDocumentSession(session: DocumentSessionState, context: ResourceWindowContext) {
   const resource = context.resource;
+  if (resource.kind === 'interactive') return { session, status: 'source_tab_closed' as const };
   const original = session.tabs.find(tab => tab.id === context.sourceTabId && tab.reference?.workspaceId === context.owner.workspaceId
     && JSON.stringify(tab.reference?.task) === JSON.stringify(resource.reference.task)
     && (resource.kind === 'comparison' ? tab.comparison?.fromRef === resource.fromRef && tab.comparison?.toRef === resource.toRef && tab.comparison?.comparison === resource.comparison
@@ -18,6 +19,7 @@ export function returnDocumentSession(session: DocumentSessionState, context: Re
   return { session: openDocumentTab(session, { ...tab, ...(context.sourceNavigation ? { resourceReading: context.sourceNavigation } : {}) }), status: 'returned' as const };
 }
 export function seedSourceDirectory(session: DirectorySession, context: ResourceWindowContext): DirectorySession {
+  if (context.resource.kind !== 'directory') return session;
   const nav = context.sourceNavigation, root = context.resource.reference.path, task = context.resource.reference.task;
   if (!nav || session.readings.some(reading => directoryReadingKey(reading) === directoryReadingKey({ root, task }))) return session;
   return rememberDirectoryReading(session, { root, task, expanded: nav.expanded ?? ['.'], selected: nav.selected ?? null, filter: nav.filter ?? '', top: nav.top, left: nav.left });
