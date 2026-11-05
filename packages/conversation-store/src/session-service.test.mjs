@@ -41,6 +41,22 @@ test('append materializes a preview and listMeta ignores a broken transcript', a
   assert.equal(JSON.stringify(listed).includes('not-json'), false);
 });
 
+test('preview reads share one index parse and still observe the next append', (t) => {
+  const { store } = tempStore(t);
+  const ids = [];
+  for (let index = 0; index < 30; index += 1) {
+    const created = store.createConversation({ title: `bot ${index}` });
+    store.appendMessage(created.id, { id: `m-${index}`, role: 'user', content: `hello ${index}` }, { returnMessages: false });
+    ids.push(created.id);
+  }
+  for (let round = 0; round < 3; round += 1) {
+    for (const id of ids) assert.equal(store.readSessionPreview(id).excerpt, `hello ${ids.indexOf(id)}`);
+  }
+  store.appendMessage(ids[4], { id: 'next', role: 'assistant', content: 'updated excerpt' }, { returnMessages: false });
+  assert.equal(store.readSessionPreview(ids[4]).excerpt, 'updated excerpt');
+  assert.equal(store.readSessionPreview(ids[3]).excerpt, 'hello 3');
+});
+
 test('updateMessageById and replaceMessages refresh the materialized excerpt with the revision', (t) => {
   const { store } = tempStore(t);
   const conversation = store.createConversation({ title: 'revise' });

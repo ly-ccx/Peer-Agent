@@ -84,11 +84,16 @@ test('known attachments carry the complete selection through a real already-open
   assert.deepEqual(queue.submitInput(f.input('selected')).resourceFeedback, [f.feedback]);
   // These blocks are from 8b3ffbcf, whose complete Conversation source was pinned
   // before the independent metadata and asynchronous terminal lock changes.
+  // The isEmptyUserMessage writer block now assigns the index preview in the same
+  // successful append/update/replace, and writes that index through writeIndex so
+  // the list cache drops. Message JSONL bytes are unchanged: the assertions above
+  // already require the attachment text to survive rewrite and reopen. The new
+  // digest covers that index preview, not a new message shape.
   const code = readFileSync(new URL('../../../conversation-store/src/index.mjs', import.meta.url), 'utf8');
   const pinnedWriterBlocks = [
     ['function readJsonl(', '\nfunction readJson(', 'f943550e04e210417ac7615ceb2facfcbe46757d58b6fe4b5743e8dd70cb65c0'],
     ['function normalizeMeta(', '\n// 一次性数据迁移', 'f6517a5371f61f887e3b58dc22292a5edfc33a27484e87adcea9f9024c955060'],
-    ['  function isEmptyUserMessage(', '\n  const terminalCommitter', 'e6b1748a647a34a37e94092f5a4db8b97bc39a92c818fab3f4d7cf065b5103d4'],
+    ['  function isEmptyUserMessage(', '\n  const terminalCommitter', 'a361fd9fc24b51a70792f30424e56606f431826233c9b24ce02ca28fcd3ed768'],
     ['  const messageWrite =', '\n\n  // 会话级累计用量账本', '627b6d84b4d011357a67384253575c7a8b431870939ec233765c53f3ca9af693'],
     ['    appendMessage: changed(', '\n    commitStreamingMessage:', 'a9b2e4fe91f3d89e7eb0ec8755502ac46e9b17cf90c9feb595b90e06050a5c98'],
     ['    replaceMessages: changed(', '\n', 'af3abf6e886b6f8f9b449f80273d4a26554123f662087c934933ad279cb8ecb9'],
