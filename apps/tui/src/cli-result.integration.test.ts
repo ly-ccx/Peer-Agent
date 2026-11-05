@@ -15,11 +15,12 @@ test('headless fixed-result CLI preserves identity and verified cleaned summarie
   const resultStore = createInteractiveResultStore({ rootDir: path.join(root, 'project-runtime'), assertCompatibility: () => true });
   const stateStore = createInteractiveStateStore({ resultStore });
   const executable = process.env.PEER_TEST_STANDALONE_BINARY;
-  const run = (...args: string[]) => {
+  const runWithInput = (input: string | undefined, ...args: string[]) => {
     const result = Bun.spawnSync(executable ? [executable, ...args] : [process.execPath, entry, ...args],
-      { cwd: root, env: { ...process.env, PEER_AGENT_HOME: root }, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
+      { cwd: root, env: { ...process.env, PEER_AGENT_HOME: root }, stdin: input === undefined ? 'ignore' : Buffer.from(input), stdout: 'pipe', stderr: 'pipe' });
     return { status: result.exitCode, stdout: result.stdout.toString(), stderr: result.stderr.toString() };
   };
+  const run = (...args: string[]) => runWithInput(undefined, ...args);
   try {
     const profiles = createBotProfileStore({ rootDir: root } as never);
     expect(profiles.create({ ...owner, displayName: 'Local Bot', agentConversationId: owner.conversationId }).ok).toBe(true);
@@ -51,7 +52,16 @@ test('headless fixed-result CLI preserves identity and verified cleaned summarie
       acquireRoots: () => ({ sources: Object.fromEntries(INTERACTIVE_RETENTION_SOURCES.map(source => [source, 'sha256:' + '0'.repeat(64)])),
         pins: [], followupIds: [], assertCurrent: () => true, release() {} }) });
     const preview = retirement.preview(published.reference);
-    retirement.cleanup({ reference: published.reference, expectedDigest: preview.cleanupDigest, requestId: 'cli-cleanup' });
+    const request = { op: 'receipt', kind: 'result', target: published.reference, expectedDigest: preview.cleanupDigest, requestId: 'cli-cleanup' };
+    const readReceipt = (input = request) => runWithInput(JSON.stringify(input), 'result-cleanup-receipt');
+    expect(readReceipt()).toEqual({ status: 0, stdout: 'null\n', stderr: '' });
+    expect(readReceipt({ ...request, op: 'cleanup' })).toMatchObject({ status: 2, stdout: '' });
+    expect(runWithInput(JSON.stringify({ ...request, op: 'cleanup' }), '__interactive-maintenance', '3', '4'))
+      .toMatchObject({ status: 3, stdout: '', stderr: 'peer interactive maintenance: interactive_retention_unavailable\n' });
+    const receipt = retirement.cleanup({ reference: published.reference, expectedDigest: preview.cleanupDigest, requestId: 'cli-cleanup' });
+    expect(JSON.parse(readReceipt().stdout)).toEqual(receipt);
+    expect(readReceipt({ ...request, target: { ...published.reference, owner: { ...owner, conversationId: 'foreign' } } }))
+      .toMatchObject({ status: 3, stdout: '', stderr: 'peer interactive maintenance: interactive_scope_denied\n' });
     const cleaned = run('result', ref, '--json');
     expect(cleaned.status).toBe(0);
     expect(JSON.parse(cleaned.stdout)).toMatchObject({ ref, reference: published.reference, availability: 'cleaned', summaryKind: 'saved-model-summary', truncated: true, source });

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Assemble a CLI release archive: peer + peer-credential-helper side by side.
+ * Assemble a CLI release archive with peer, the credential helper and the Linux maintenance launcher.
  *
  * Usage:
  *   node scripts/package-cli-archive.mjs [target]
@@ -88,6 +88,11 @@ export function packageCliArchive(options = {}) {
   const helperDest = join(stage, helperName);
   copyFileSync(peerSrc, peerDest);
   copyFileSync(helperSrc, helperDest);
+  if (platform === 'linux') {
+    const launcher = join(stage, 'peer-interactive-maintenance');
+    copyFileSync(join(repositoryRoot, 'apps/tui/scripts/interactive-maintenance-linux.py'), launcher);
+    chmodSync(launcher, 0o755);
+  }
   if (platform !== 'win32') {
     chmodSync(peerDest, 0o755);
     chmodSync(helperDest, 0o755);

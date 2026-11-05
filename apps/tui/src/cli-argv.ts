@@ -25,6 +25,7 @@ export type PeerCliCommand =
   | { readonly kind: 'help'; readonly topic: 'root' | 'exec' | 'result' }
   | { readonly kind: 'tui'; readonly classic?: boolean; readonly bots?: boolean }
   | { readonly kind: 'exec'; readonly options: PeerExecOptions }
+  | { readonly kind: 'result-cleanup-receipt' }
   | { readonly kind: 'result'; readonly reference: string; readonly json: boolean }
   | { readonly kind: 'error'; readonly message: string; readonly exitCode: typeof CLI_EXIT.usage };
 
@@ -243,6 +244,10 @@ export function parsePeerArgv(argv: readonly string[]): PeerCliCommand {
   if (head === 'bots' && rest.length === 0) return { kind: 'tui', bots: true };
   if (isHelpFlag(head) && rest.length === 0) return { kind: 'help', topic: 'root' };
   if (head === 'exec') return parseExecArgs(rest);
+  if (head === 'result-cleanup-receipt') {
+    if (rest.length === 0) return { kind: 'result-cleanup-receipt' };
+    return { kind: 'error', message: 'Usage: peer result-cleanup-receipt < request.json', exitCode: CLI_EXIT.usage };
+  }
   if (head === 'result') {
     if (rest.length === 1 && isHelpFlag(rest[0]!)) return { kind: 'help', topic: 'result' };
     const [reference, flag] = rest;
@@ -307,6 +312,7 @@ export function formatPeerHelp(topic: 'root' | 'exec' | 'result', version = form
     '  peer --help          Show this help',
     '  peer exec [options] [prompt]',
     '  peer result <interactive-result://…> [--json]',
+    '  peer result-cleanup-receipt < request.json',
     '',
     'Use `peer exec --help` for headless flags.',
     'Inside bot mode, press F2 or type /classic to switch to task mode.',
