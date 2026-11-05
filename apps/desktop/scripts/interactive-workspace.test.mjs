@@ -108,7 +108,7 @@ test('the main workspace opens canonical interactive deliveries, restores result
       +Array.from({length:32},(_,i)=>'Text("Saved model observation '+i+'. Fixed content preserves the reading position while changing local conditions.")').join(',')+'])';
     const draft={publication:{kind:'create'},title:'Workspace trial',textFallback:'Unverified saved model trial.',program,inputs:[]};
     const receipt=resultStore.commitPublication({owner,source:{conversationId:'worker',sessionId:'session',planId:'plan',executionEpoch:'epoch',toolCallId:'publication'},draft,content:await validateDraft(draft),provenance:[],dataLevel:'D3_private',grant:{toolCallId:'publication',grantId:'fixture-grant',granted:true}},()=>true);resultStore.markIndexed(receipt.callRef,receipt.indexEntry);
-    const windows=createTrustedWindowRegistry(),source=new BrowserWindow({show:false,width:1180,height:820,webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false,preload:${JSON.stringify(path.join(desktop, 'electron/preload/preload.cjs'))}}});
+    const windows=createTrustedWindowRegistry(),source=new BrowserWindow({show:process.platform==='linux',width:1180,height:820,webPreferences:{backgroundThrottling:false,sandbox:true,contextIsolation:true,nodeIntegration:false,preload:${JSON.stringify(path.join(desktop, 'electron/preload/preload.cjs'))}}});
     source.show=()=>{};windows.registerWindow({window:source,role:'main',allowedLocations:[${JSON.stringify(location)}]});
     let host,activeOwner=owner,settingsWrites=[],fileReads=0,legacyHistoryWrites=0,blockedCloses=0,closeAttempts=0,navigations=0;
     source.on('will-prevent-unload',()=>{blockedCloses++});
@@ -136,8 +136,15 @@ test('the main workspace opens canonical interactive deliveries, restores result
       const reply=originalSave(sender,request);
       return withholdOwnerOutcome&&reply.code==='interactive_owner_replaced'?{ok:false,code:reply.code}:reply;
     };
-    const nativeWindows=[];function QuietWindow(options){const win=new BrowserWindow(options);win.show=()=>{};nativeWindows.push(win);return win}QuietWindow.fromWebContents=contents=>BrowserWindow.fromWebContents(contents);
-    host=createResourceWindowController({BrowserWindow:QuietWindow,trustedWindows:windows,rendererLocation:${JSON.stringify(location)},preloadPath:${JSON.stringify(path.join(desktop, 'electron/preload/resource-window.cjs'))},interactiveResources:interactive,getOwner:()=>activeOwner,getLocale:()=> 'en',readHistory:()=>undefined,writeHistory:()=>{legacyHistoryWrites++},resolveDocument:()=>{throw Error('unexpected file lookup')},fileAccess:{readFile:()=>{fileReads++;throw Error('unexpected file read')}}});
+    const nativeWindows=[];
+    function FixtureWindow(options) {
+      // An unmapped X11 window does not reliably produce screenshot frames.
+      const win=new BrowserWindow({...options,webPreferences:{...options.webPreferences,backgroundThrottling:false}});
+      if (process.platform !== 'linux') win.show=()=>{};
+      nativeWindows.push(win);return win;
+    }
+    FixtureWindow.fromWebContents=contents=>BrowserWindow.fromWebContents(contents);
+    host=createResourceWindowController({BrowserWindow:FixtureWindow,trustedWindows:windows,rendererLocation:${JSON.stringify(location)},preloadPath:${JSON.stringify(path.join(desktop, 'electron/preload/resource-window.cjs'))},interactiveResources:interactive,getOwner:()=>activeOwner,getLocale:()=> 'en',readHistory:()=>undefined,writeHistory:()=>{legacyHistoryWrites++},resolveDocument:()=>{throw Error('unexpected file lookup')},fileAccess:{readFile:()=>{fileReads++;throw Error('unexpected file read')}}});
     const ipc=createCatalogIpcMain({ipcMain,authorize:windows.authorize});registerIpcOwners({ipc,registrations:[...createResourceWindowIpcRegistrations({resourceWindows:host}),...createInteractiveResultsIpcRegistrations({interactiveResults:interactive}),...createResourceFeedbackIpcRegistrations({preparation})]});
     const governanceCalls=[];
     ipc.handle('project-agent:decide-approval',()=>{governanceCalls.push('approval');return {ok:false,code:'FIXTURE_APPROVAL'};});
