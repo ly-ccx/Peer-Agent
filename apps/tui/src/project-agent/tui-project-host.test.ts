@@ -139,13 +139,11 @@ test('actual terminal project host returns fixed report references and attaches 
           expect(request.tools?.some(tool => tool.name === 'publish_interactive_result')).toBe(false);
           const call = (name: string, args: object) => ({ content: '', toolCalls: [{ id: `fixed-main-${rounds}`, name, arguments: JSON.stringify(args) }] });
           if (rounds === 1) return call('get_session', { sessionId: 'fixed-session', detail: 'report' });
+          // post_reply is terminal after a successful receipt. A third model
+          // request would replay reasoning after the formal reply is settled.
+          expect(rounds).toBe(2);
           const encoded = JSON.parse(String(request.messages.filter(row => row.role === 'tool').at(-1)?.content));
           const body = encoded.output ?? encoded;
-          if (rounds === 3) {
-            expect(body.ok).toBe(true); expect(body.meta.evidenceRefs).toEqual([fixed]);
-            return { content: '', toolCalls: [] };
-          }
-          expect(rounds).toBe(2);
           expect(body.ok).toBe(true); expect(body.report.evidenceRefs).toContain(fixed);
           expect(body.report.evidenceRefs).not.toContain('tool-result://fixed-publication');
           return call('post_reply', { text: 'The fixed trial is saved; the task remains incomplete and unverified.', replyTo: ['input-show-fixed-result'],
@@ -207,9 +205,10 @@ test('actual terminal project host returns fixed report references and attaches 
   const messages = host.conversations.getPersistedConversationHistory!(f.conversationId)!.messages;
   const post = messages.flatMap((row: any) => row.rounds ?? []).flatMap((round: any) => round.toolCalls ?? []).find((call: any) => call.name === 'post_reply');
   expect((post as any)?.result?.ok, JSON.stringify((post as any)?.result)).toBe(true);
+  expect((post as any)?.result?.meta?.evidenceRefs).toEqual([fixed]);
   const reply = messages.filter((row: any) => row.kind === 'agent_reply').at(-1);
   expect(reply).toBeDefined();
-  expect(rounds).toBe(3); expect((reply as any).meta.evidenceRefs).toEqual([fixed]);
+  expect(rounds).toBe(2); expect((reply as any).meta.evidenceRefs).toEqual([fixed]);
   expect((host.supervisor.get({ sessionId: 'fixed-session', detail: 'report' }) as any).report.evidenceRefs).toEqual([fixed]);
   expect((reply as any).marks.some((mark: any) => mark.outcome === 'passed')).toBe(false);
 });
