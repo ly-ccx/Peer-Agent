@@ -6,13 +6,19 @@ import path from 'node:path';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
 import { registerWorkBudget } from './work-budget.mjs';
 import { createCoordinationLifecycle } from './coordination-lifecycle.mjs';
+import { createEmptyResourceWaitPort, createResourceWaitPort } from './resource-wait.ts';
+import { createExecutionScheduler } from './execution-scheduler.mjs';
+import { executionIdentity } from './session-control-kernel.mjs';
 import { createRunnerCoordination } from './runner-coordination.mjs';
 import { validateDelegationInput } from './tool-specs.mjs';
 import { buildVerifierMessage } from './goal-runner-host.mjs';
 import { verificationRequestRevision } from './verification-completion.mjs';
 import { createDigestQueue } from './digest.mjs';
+import { createDelegationProvider } from './delegation-provider.mjs';
+import { waitResult } from './wake-wait.mjs';
+import { progressFacts } from './continuation-policy.mjs';
 
-async function fixture(t, { explicitVerification, reviewResult } = {}) {
+async function fixture(t, { explicitVerification, reviewResult, resourceWaits = createEmptyResourceWaitPort() } = {}) {
   const rootDir = mkdtempSync(path.join(os.tmpdir(), 'peer-intent-lifecycle-'));
   const options = { rootDir, workspaceId: 'w', holdsLease: () => true, leaseEpoch: () => 'owner', formatVersion: 2, fenceLegacyWrites: true };
   const store = createWorkCoordinationStore(options);
@@ -21,7 +27,7 @@ async function fixture(t, { explicitVerification, reviewResult } = {}) {
   const messages = [{ id: 'input-i', inputId: 'i', role: 'user', kind: 'user_input', content: 'Research and implement the fix' }];
   const sessions = new Map(); let reviews = 0;
   const digestFile = path.join(rootDir, 'digest.json'), digests = createDigestQueue({ file: digestFile });
-  const lifecycle = createCoordinationLifecycle({ holdsLease: () => true, readMessages: () => messages,
+  const lifecycle = createCoordinationLifecycle({ resourceWaits, holdsLease: () => true, readMessages: () => messages,
     readSession: ({ sessionId }) => sessions.get(sessionId), readGoalFacts: id => ({ plan: { planId: id, goal: 'Stage', successCriteria: [] }, evidenceIndex: [`ev:${id}`], independentVerifier: 'passed',
       ...(id === 's2' && explicitVerification ? { explicitVerification } : {}) }),
     verifyGoal: async ({ goalReview }) => { reviews++; assert.equal(goalReview.canonicalInputs[0].text, messages[0].content);
@@ -35,6 +41,7 @@ async function fixture(t, { explicitVerification, reviewResult } = {}) {
         origin: { parentConversationId: 'p', workId: context.coordinationBinding.workId, anchorMessageId: 'input-i' } }; sessions.set(id, row); return row; },
     requestCancel: async () => ({ pending: false }), send: async () => ({ ok: true }), takeover: async () => ({ ok: true }) });
   const coordinator = createRunnerCoordination({ store, workspaceId: 'w', conversationId: 'p', inbox: {}, readMessages: () => messages,
+    resourceWaits,
     remember: message => messages.push(message), onReplied: async () => { sessions.forEach(row => { if (row.status === 'result_ready') row.status = 'accepted'; }); },
     onDeferred: message => digests.hold('w', { id: message.id, text: message.content, message }),
     resolveRoster: () => [...sessions.values()] });
@@ -50,6 +57,46 @@ async function fixture(t, { explicitVerification, reviewResult } = {}) {
   return { store, options, rootDir, lifecycle, coordinator, job, context, initial, sessions, messages, digests, digestFile, reviews: () => reviews,
     coordinate: (input, ctx) => lifecycle.coordinate({ reason: 'Test intention', ...input }, ctx) };
 }
+
+test('a paired session wait suspends active intent without exhausting or resetting the progress guard', async t => {
+  const f = await fixture(t);
+  await f.coordinate({ action: 'parallel', task: { anchorMessageIds: ['input-i'], brief: 'Research' } }, f.context('spawn', { currentInputAnchors: ['input-i'] }));
+  await f.coordinate({ action: 'assess', assessment: { ...f.initial,
+    disposition: { kind: 'continue', operationRefs: ['requirement:fix'] } } }, f.context('t1', { currentInputAnchors: ['input-i'] }));
+  const event = { eventId: 'observed', sessionId: 's1', kind: 'report_available' };
+  const job = { workId: 'g', kind: 'wake', attemptId: 'wait-turn', userInputs: [], events: [event] };
+  f.coordinator.start(job);
+  const roster = [...f.sessions.values()];
+  f.store.saveWork({ ...f.store.readWork('g'), repeats: 2, progressFacts: progressFacts([], roster) });
+  const provider = createDelegationProvider({ supervisor: { get: ({ sessionId }) => f.sessions.get(sessionId) } });
+  const receipt = await provider.executeCapability({ call: { toolCallId: 'wait-call', capabilityId: 'local.delegation.wait_for_sessions', arguments: { sessionIds: ['s1'] } } },
+    { mode: 'project_agent', workspaceId: 'w', conversationId: 'p', currentInputAnchors: [],
+      turnProfile: { workId: 'g', context: { turnKind: 'wake', events: [event] } } });
+  assert.equal(receipt.grant.granted, true);
+  const outcome = { rounds: [{ toolCalls: [{ name: 'wait_for_sessions', result: receipt.result }] }],
+    silentWait: { source: 'tool', sessionIds: waitResult(receipt.result).sessionIds } };
+  for (let i = 0; i < 3; i++) {
+    assert.equal(f.coordinator.stalls(job, outcome, roster), false);
+    assert.equal(f.coordinator.finish(job, outcome, roster).state, 'waiting_children');
+  }
+  const work = f.store.readWork('g');
+  assert.equal(work.repeats, 2);
+  assert.equal(work.end, 'awaiting_children');
+  assert.deepEqual(work.waitFor, [{ kind: 'session', id: 's1' }]);
+  assert.equal(work.intentCoordination.lifecycle, 'active');
+  assert.equal(work.recovery, undefined);
+  assert.equal(f.coordinator.recoverJob(), null, 'unchanged waiting does not poll the model');
+  assert.equal(f.messages.length, 1, 'waiting delivers no reply or failure card');
+  const reopened = createWorkCoordinationStore(f.options);
+  try {
+    await reopened.prepare();
+    assert.equal(reopened.readWork('g').state, 'waiting_children');
+    assert.deepEqual(reopened.readWork('g').waitFor, work.waitFor);
+  } finally { reopened.close(); }
+  f.sessions.get('s1').status = 'accepted';
+  f.store.transfer([{ ...event, eventId: 'actual-result', kind: 'result_ready' }]);
+  assert.ok(f.coordinator.pending().some(row => row.eventId === 'actual-result'), 'real results retain wake responsibility');
+});
 
 test('research acceptance retains the original goal, continues without user input, then closes once after actual delivery and root review', async t => {
   const f = await fixture(t, { explicitVerification: { verdictRef: 'verdict:s2:passed', outcome: 'passed' } });
@@ -502,4 +549,58 @@ test('root reviewer receives the entire canonical goal as factual input without 
   assert.equal(verificationRequestRevision('child-content'), 'child-content');
   assert.notEqual(verificationRequestRevision('child-content', { goalRevision: 1 }), 'child-content');
   assert.notEqual(verificationRequestRevision('child-content', { goalRevision: 1 }), verificationRequestRevision('child-content', { goalRevision: 2 }));
+});
+
+test('a protocol-valid resource wait flows through query, admission, host waiting, stop settlement and cold runner recovery', async t => {
+  let scheduler, target; const plans = [];
+  const resourceWaits = createResourceWaitPort({ readPlan: id => plans.find(row => row.delegationOrigin.sessionId === id),
+    inspectPlan: row => scheduler.inspect(row, plans), executionOf: executionIdentity,
+    readClaims: () => scheduler.resourceSnapshot(), ownsWorkspace: () => true });
+  const f = await fixture(t, { resourceWaits });
+  scheduler = createExecutionScheduler({ rootDir: f.rootDir }); scheduler.prepareResources(); t.after(() => scheduler.close());
+  await f.coordinate({ action: 'parallel', task: { anchorMessageIds: ['input-i'], brief: 'Implement' } },
+    f.context('spawn', { currentInputAnchors: ['input-i'] }));
+  const plan = (id, phase) => ({ planId: id, title: id, createdAt: '2026-11-03T00:00:00.000Z',
+    targetWorkspacePath: f.rootDir, status: phase === 'running' ? 'executing' : 'paused',
+    delegationOrigin: { sessionId: id, workspaceId: 'w', parentConversationId: 'p', workId: 'g', readOnly: false, phase } });
+  const owner = plan('owner', 'running'); target = plan('s1', 'queued');
+  target.delegationOrigin.coordinationBinding = f.store.read().mandates.g.executionBindings.s1;
+  plans.push(owner, target);
+  scheduler.reconcile(plans);
+  const context = f.context('t1', { currentInputAnchors: ['input-i'] });
+  const query = await f.coordinate({ action: 'query', workId: 'g' }, context);
+  const [fact] = query.decisionFrame.resourceWaits;
+  assert.equal(fact.sessionId, 's1'); assert.equal(fact.wait.kind, 'resource');
+  const assessment = { ...f.initial, disposition: { kind: 'wait', waitFor: [fact.wait] } };
+  assert.equal(validateDelegationInput('coordinate_work', { action: 'assess', reason: 'Resource occupied', assessment }).ok, true);
+  const forged = { ...assessment, disposition: { kind: 'wait', waitFor: [{ ...fact.wait, revision: 'invented' }] } };
+  assert.equal((await f.coordinate({ action: 'assess', assessment: forged }, context)).error, 'resource_wait_stale');
+  assert.equal((await f.coordinate({ action: 'assess', assessment }, context)).ok, true);
+  f.coordinator.finish(f.job, { rounds: [{ toolCalls: [{ name: 'coordinate_work', input: { action: 'assess' }, result: { ok: true } }] }] }, [...f.sessions.values()]);
+  const waiting = f.store.readWork('g'); assert.equal(waiting.state, 'waiting_children');
+  for (let i = 0; i < 4; i++) assert.equal(f.coordinator.recoverJob(), null);
+  assert.equal(f.store.readWork('g').repeats, waiting.repeats);
+  assert.equal(f.store.readWork('g').fingerprint, waiting.fingerprint);
+  owner.status = 'cancelled'; owner.delegationOrigin.phase = 'cancelled';
+  scheduler.settleResources(owner, { receiptId: 'resource-stop', operationId: 'stop', execution: executionIdentity(owner),
+    admissionClosed: true, runnerIdle: true, schedulerIdle: true, resourceClaims: scheduler.resourceClaimsFor(owner),
+    unknownCalls: [], scope: 'managed_execution', completedAt: '2026-11-03T00:01:00.000Z' });
+  scheduler.close(); scheduler = createExecutionScheduler({ rootDir: f.rootDir }); scheduler.reconcile(plans);
+  const recovered = createRunnerCoordination({ store: f.store, workspaceId: 'w', conversationId: 'p', inbox: {},
+    readMessages: () => f.messages, remember() {}, resourceWaits, resolveRoster: () => [...f.sessions.values()] });
+  const next = recovered.recoverJob();
+  assert.equal(next.workId, 'g'); assert.deepEqual(next.userInputs, []); assert.equal(next.sourceDecisionRef, undefined);
+  assert.equal(next.events.length, 1); assert.equal(next.events[0].payload.reason, 'resource_available');
+  const nativeCheckpointRef = f.store.checkpoint('g', { providerId: 'configured', model: 'model', provider: 'openai' });
+  f.store.saveWork({ workId: 'g', nativeCheckpointRef });
+  assert.equal(recovered.resume(next, { modelProviderId: 'configured', modelId: 'model' }).providerCheckpoint, undefined);
+  assert.equal(Object.values(f.store.read().events).filter(row => row.event.payload?.reason === 'resource_available').length, 1);
+  assert.equal(scheduler.hasResourceClaim(target), false, 'the normal scheduler must still reserve before dispatch');
+  next.attemptId = 't2'; recovered.start(next);
+  const continuation = { ...f.initial, expectedWorkRevision: 1, interpretation: undefined, inputs: [], sourceInputIds: [],
+    sourceEventIds: next.events.map(event => event.eventId), disposition: { kind: 'continue', operationRefs: ['requirement:fix'] } };
+  assert.equal((await f.coordinate({ action: 'assess', assessment: continuation }, f.context('t2', { events: next.events }))).ok, true);
+  recovered.finish(next, { rounds: [] }, [...f.sessions.values()]);
+  const following = recovered.recoverJob();
+  assert.equal(following.sourceDecisionRef, 't2:op'); assert.deepEqual(following.events, [], 'a consumed resource event cannot trigger the next step again');
 });

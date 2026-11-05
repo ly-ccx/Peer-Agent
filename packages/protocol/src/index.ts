@@ -21,6 +21,9 @@ export type {
   CoordinationSessionFacts,
 } from './delegation-coordination.ts';
 export { deriveSessionFacts, type SessionFactSnapshot } from './session-facts.ts';
+export { runtimeSessionFacts, runtimeSessionOwnership, hasPendingRuntimeSessions } from './runtime-session-facts.ts';
+export type { RuntimeHandling, RuntimeSessionFacts, RuntimeSessionOwnership, ResourceWaitScope, ResourceWaitReference,
+  ResourceWaitFact, ResourceWaitInspection, ResourceWaitPort } from './runtime-session-facts.ts';
 export { projectAgentFailureKind, classifyProjectAgentFailure, type ProjectRecoveryFailureKind, type ProviderRequestRecovery, type ProjectAgentTurnRecovery, type ReplyAnchorCandidate } from './project-agent-failure.ts';
 export type { EvidenceSourceDescription, EvidenceDeliveryBinding, EvidenceDelivery, ProjectAgentEvidenceReadRequest, ProjectAgentEvidenceReadResult } from './evidence-inspection.ts';
 export { toolActivityPreview, toolActivitySummary } from './tool-activity-preview.ts';

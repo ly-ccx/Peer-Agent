@@ -6,6 +6,7 @@ import { sessionFactsFromPlan } from './session-facts.mjs';
 import { unsettledExecution } from './execution-resources.mjs';
 import { isCanonicalUserInput } from './user-priority.mjs';
 import { controlDigest, executionIdentity, sameExecution, reduceSessionControl } from './session-control-kernel.mjs';
+import { fencedResumeStop } from './takeover-stop-recovery.mjs';
 
 /** One stop barrier shared by cancellation, takeover and reversible suspension. */
 export function createSessionControl({ goalPlanStore, goalRunner, executionScheduler, canManageWorkspace, abortStream,
@@ -88,7 +89,10 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
     let timedOut = false, timeout;
     const work = (async () => {
       const ended = sessionFactsFromPlan(readPlan(plan.planId)).executionOwnership === 'ended';
-      if ((operation.hostEpoch && operation.hostEpoch !== hostEpoch && !operation.stopReceipt || operation.unproven) && !ended && !legacyCancellationStopped(readPlan(plan.planId)) && !legacyTakeoverIdle(readPlan(plan.planId)))
+      const retainedFence = operation.kind === 'pause' && operation.authorityRef?.startsWith('coordination-recovery:')
+        && fencedResumeProof(readPlan(plan.planId))?.operationId === operation.operationId;
+      if ((operation.hostEpoch && operation.hostEpoch !== hostEpoch && !operation.stopReceipt || operation.unproven) && !ended
+        && !legacyCancellationStopped(readPlan(plan.planId)) && !legacyTakeoverIdle(readPlan(plan.planId)) && !retainedFence)
         throw new Error('execution_stop_unconfirmed');
       const registration = { sessionId: operation.sessionId, planId: plan.planId, workspaceId: operation.workspaceId, conversationId: plan.conversationId };
       await abortStream?.({ ...registration, reason: operation.reason || operation.kind });
@@ -198,6 +202,33 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
       return settle(readPlan(plan.planId), draining, receipt).phase === 'settled';
     } catch { return false; }
   }
+  function fencedResumeProof(plan) {
+    if (plan.delegationOrigin.takeover?.phase !== 'stopping' || !plan.delegationOrigin.executionGeneration) return null;
+    const store = journal(plan), state = store?.readSnapshot?.() ?? store?.read();
+    if (!state) return null;
+    return fencedResumeStop(plan, state, readMessages(plan.delegationOrigin.parentConversationId), {
+      live: sessionFactsFromPlan(plan).executionOwnership === 'live',
+      handles: typeof executionScheduler.hasUnsettledHandles !== 'function' || executionScheduler.hasUnsettledHandles(plan),
+      unknownCalls: unsettledExecution(plan),
+      claims: executionScheduler.resourceSnapshot?.().filter(row => sameExecution(row.execution, executionIdentity(plan))),
+    });
+  }
+  async function settleFencedResume(plan) {
+    const spec = fencedResumeProof(plan);
+    if (!spec) return false;
+    const store = journal(plan);
+    const existing = read(plan);
+    const operation = existing?.operationId === spec.operationId ? existing : persist(plan, { ...spec,
+      requestDigest: controlDigest({ kind: spec.kind, operationId: spec.operationId, authorityRef: spec.authorityRef, execution: spec.execution }),
+      revision: 1, workspaceId: plan.delegationOrigin.workspaceId, parentConversationId: plan.delegationOrigin.parentConversationId,
+      sessionId: spec.execution.sessionId, planId: plan.planId, expectedExecution: spec.execution,
+      hostEpoch: store.writerEpoch(), phase: 'recorded', updatedAt: now() });
+    if (operation.phase === 'settled') return true;
+    if (operation.phase === 'recorded') executionScheduler.protectResources?.(plan, { operationId: operation.operationId, state: 'draining' });
+    const draining = operation.phase === 'recorded' ? change(plan, operation, { phase: 'draining' }) : operation;
+    const receipt = await drain(readPlan(plan.planId), draining);
+    return settle(readPlan(plan.planId), draining, receipt).phase === 'settled';
+  }
   return { begin, drain, settle, read, retireTakeover, settleEnded,
     async prepareResume(plan, authorityRef, exclusive) {
       const barrier = await exclusive(() => {
@@ -237,8 +268,11 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
       for (const plan of plans) {
         const origin = plan.delegationOrigin;
         if (!canManageWorkspace(origin.workspaceId)) continue;
-        const current = read(plan);
+        let current = read(plan);
         if (origin.cancellation?.phase !== 'completed') {
+          try { await settleFencedResume(plan); }
+          catch (error) { failures.push({ planId: plan.planId, sessionId: origin.sessionId, error: error.message }); }
+          current = read(readPlan(plan.planId));
           await settleQueued(plan);
           // Old hosts could persist takeover.stopping after both the worker and verifier
           // had returned. Import those structured end receipts, then run today's barrier.

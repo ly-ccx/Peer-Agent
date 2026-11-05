@@ -81,6 +81,7 @@ test('a public progress reply transfers event custody while retaining runnable r
 
 test('a delivered related reply retains follow-up in its user work until the original session settles', () => {
   const f = coordinationFixture();
+  f.roster[0].origin = { workId: 'w', parentConversationId: 'parent', anchorMessageId: 'input-i' };
   f.work().sessionIds = [];
   const job = { workId: 'w', events: [] };
   f.coordination.finish(job, { rounds: [], reportedSessionIds: ['s'] }, f.roster);

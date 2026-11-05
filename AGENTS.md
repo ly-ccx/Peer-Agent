@@ -74,7 +74,7 @@ Implementation rules:
 - Render authorization, execution, verification and acceptance from existing structured facts. A click, timer, animation or assistant sentence must never create permission truth, successful execution or Evidence.
 - Treat motion as presentation: short, interruptible, semantically useful, and complete without animation. Preserve static end states and recovery when motion/transparency is reduced or APIs are unavailable.
 - Record the user goal, relevant states, fact source, controls and recovery for the changed flow. Migrate touched paths within scope; do not turn a small change into an unsolicited product rewrite.
-- Follow Validation Scope below: ordinary work receives content/diff review; tests and screenshot/interaction regression are deferred to release unless explicitly requested. This standard does not create a daily validation gate.
+- Follow Validation Scope below: ordinary code work receives scoped behavioral validation and content/diff review; the complete product regression remains a release gate. Documentation-only changes receive content/diff review.
 
 Current surface/component coverage lives in `peer-knowledge/design/product/peer-interaction-standardization-matrix.md`; UI, motion and transition coverage lives in `peer-knowledge/design/product/peer-ui-motion-transition-matrix.md`. Follow `peer-knowledge/design/product/peer-product-renovation-plan.md` for scoped work packages. Update the relevant matrix entries when adding or changing pages, components or states; static implementation is not release acceptance.
 
@@ -145,6 +145,18 @@ Before implementing a non-trivial change, classify it:
 - B-level: changes chat runtime, tool runtime, prompt assembly, compaction, task-thread event model, or IPC surfaces. Explain the architecture impact.
 - C-level: local UI, styles, copy, tests, or small bug fixes. Keep it scoped, but upgrade to A/B if it touches capability, permission, Evidence, protocol, or prompt boundaries.
 
+## Engineering Delivery Consensus (2026-11-03)
+
+This repository-wide rule applies to every future session, feature, refactor, fix and prototype. Validation and recovery are the implementer's responsibility; the user must not become the first effective tester of a claimed fix. The durable rationale is in `peer-knowledge/knowledge/architecture/00-engineering-philosophy.md`.
+
+- Before a non-trivial change, trace the actual entry, call/data flow, Module responsibilities, Interface invariants, authoritative fact owners and state transitions. Identify relevant denial, failure, timeout, cancellation, interruption, restart and recovery paths. File separation alone does not prove working boundaries.
+- Define observable acceptance criteria and proportional validation before implementation. For a defect, preserve the failing source/data identity and establish a reproducible baseline or recorded factual trace. If exact reproduction is unavailable, identify the substitute and its limits; do not claim reproduction.
+- Address prevention and existing-state recovery together when persistent state is involved. Cover already-stuck or partially-applied work, late results, stale revisions, idempotency and subsequent task admission as relevant. Never erase unknown effects, permissions, history or Evidence to manufacture recovery. A blocked recovery needs a concrete blocker and a supported reconciliation or recovery path.
+- Validate changed behavior through its real Module/host seams and relevant abnormal exits. Added tests, a commit, a PR, a build or green CI do not by themselves prove the original user outcome. Scope daily verification to the change; keep the full release gate separate.
+- Investigate and fix relevant validation failures, including patch regressions. Preserve failed attempts and bind later results to the actual candidate. Do not silently weaken assertions, call an unexplained regression a flake or substitute an unrelated passing check.
+- Distinguish source implementation, validated behavior, existing-state recovery and installed/release acceptance. Report candidate identity, actual checks/results, blockers, unrun coverage and real-model/platform/installed-build limits. Unverified work remains a candidate; never ask the user to discover whether it works by installing or retrying it.
+- This consensus does not authorize publishing, installing, restarting running apps, changing personal task data, bypassing permission/Evidence gates or including unrelated dirty work.
+
 ## Git Sync
 
 Once a change is committed locally, push it to the tracked remote branch in the same turn. Multi-device work treats `origin` as the source of truth. Do not leave commits only on this machine.
@@ -161,17 +173,17 @@ User preference (2026-10-22): a new version or RC must include all open pull req
 
 ## Validation Scope
 
-User clarification (2026-10-22): tests and product regression run before a version/RC release, not after every feature or fix. This supersedes the earlier daily-focused-testing preference.
+User consensus (2026-11-03) supersedes the 2026-10-22 blanket deferral of daily validation. Every code change requires validation proportionate to its behavior and boundaries; a full release campaign is not required after every edit.
 
-- During ordinary development and fixes, do not automatically run unit/integration tests, regressions, screenshot acceptance, or broad build/type/architecture/IPC check suites, including so-called focused batches. Complete the implementation and review the changed content/diff; do not expand a small change into a validation campaign.
-- Run tests early only when the user explicitly requests them for the current task. Do not infer that authorization from the task being A/B-level, a shared contract change, an old playbook, or an agent's own risk assessment.
-- Before a version or RC release, run the full build, test suite, typecheck, architecture/IPC checks and complete product regression on the final combined candidate. The release gate remains mandatory.
-- Do not invoke or wait for test workflows as a daily handoff prerequisite. Report any existing automatic CI separately; do not describe unrun checks as passed.
-- Documentation-only and instruction-only edits require content/diff review only. State clearly that testing is deferred to release unless explicitly requested.
+- During ordinary code development and fixes, review the diff and run the relevant focused tests or isolated interaction/visual checks. Select build, type, contract, architecture or IPC checks when needed for the touched seam. This standing instruction authorizes scoped validation without asking again.
+- Cover the reported failure and affected normal/recovery paths. For persistent execution, verify existing-state recovery and later task admission as applicable, using isolated fixtures or data copies rather than experimenting on personal tasks.
+- Check available automatic CI results for the candidate and investigate relevant failures. Do not claim completion with known relevant failures. Do not trigger or wait for unrelated suites as a daily prerequisite; pending or unavailable results remain explicitly unverified.
+- Before a version or RC release, run the full build, test suite, typecheck, architecture/IPC checks and complete product regression on the final combined candidate. The merge-all PR and release gates remain mandatory.
+- Documentation-only and instruction-only edits require content/diff and consistency review only; do not run code tests for prose changes. Code changes lacking executable validation remain unverified candidates with concrete blockers, not completed fixes.
 
 ## Product Regression
 
-During ordinary UI development, do not automatically run screenshot or interaction regression. Use `peer-knowledge/playbook/product-regression.md` when preparing a release or when the user explicitly requests early validation.
+During ordinary UI development, run the interaction or screenshot checks needed for the changed behavior; do not automatically run the complete product packet. Use `peer-knowledge/playbook/product-regression.md` for scoped checks and the full release gate.
 
 Before a version release or RC release, perform the complete product regression:
 

@@ -10,11 +10,11 @@ const hash = value => createHash('sha256').update(JSON.stringify(value)).digest(
 const ended = new Set(['accepted', 'result_ready', 'cancelled']);
 
 /** Recoverable coordination effects over the existing task ports, never a second task engine. */
-export function createCoordinationLifecycle({ readSession, readSessionSummary = readSession, readMessages, readGoalFacts, verifyGoal, now, checkTakeover, admitTask = () => ({ ok: true }), spawn, requestCancel, send, takeover, holdsLease, canExecute = () => true, isEnabled = () => true }) {
+export function createCoordinationLifecycle({ readSession, readSessionSummary = readSession, readMessages, readGoalFacts, verifyGoal, resourceWaits, now, checkTakeover, admitTask = () => ({ ok: true }), spawn, requestCancel, send, takeover, holdsLease, canExecute = () => true, isEnabled = () => true }) {
   const drains = new Map();
   const queued = new Set();
   const storeFor = workspaceId => workBudgetBinding(workspaceId)?.store;
-  const intents = createIntentLifecycle({ storeFor, readSession, readMessages, readGoalFacts, verifyGoal, holdsLease, canExecute, now });
+  const intents = createIntentLifecycle({ storeFor, readSession, readMessages, readGoalFacts, verifyGoal, resourceWaits, holdsLease, canExecute, now });
   const lifecycleFacts = store => typeof store?.readLifecycleFacts === 'function' ? store.readLifecycleFacts() : store?.read();
   function lifecycleOf(state, mandate, summary = false) {
     const work=(state.workStates || state.works)[mandate.workId];
@@ -223,10 +223,13 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
       for (let transition of Object.values(store.read().transitions || {})) {
         try {
           if (transition.phase === 'awaiting_outcome') {
-            const newer = Object.values(store.read().transitions || {}).findLast(row => row.oldSessionId === transition.oldSessionId);
-            if (newer?.operationId !== transition.operationId) continue;
+            const related = Object.values(store.read().transitions || {}).filter(row => row.oldSessionId === transition.oldSessionId);
+            const session = readSession({ sessionId: transition.oldSessionId });
+            const retainedTakeover = session?.origin?.takeover?.operationId === transition.operationId;
+            if (retainedTakeover ? related.some(row => row.operationId !== transition.operationId && !['completed', 'blocked'].includes(row.phase))
+              : related.at(-1)?.operationId !== transition.operationId) continue;
             const work = store.readWork(transition.workId);
-            const patch = transitionReconciliation(transition,work,readSession({sessionId:transition.oldSessionId}));
+            const patch = transitionReconciliation(transition,work,session);
             if (patch) {
               store.enableSupervision(6);
               store.advanceTransition(transition.operationId,transition.phase,patch);

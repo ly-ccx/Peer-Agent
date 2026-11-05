@@ -89,6 +89,7 @@ export interface WorkSessionConversationMeta extends SessionQueueFacts {
 }
 
 export interface WorkSession extends SessionQueueFacts {
+  readonly executionOwnership?: ExecutionOwnership;
   readonly followUp?: import('./task-overview.ts').FollowUpProjection;
   readonly verificationProgress?: VerificationProgress;
   readonly completionReviewRequired?: boolean;
@@ -532,6 +533,7 @@ export function projectWorkSession(
     statusLabel: projected.statusLabel,
     cancelable: projected.cancelable,
     followUp: projected.followUp,
+    ...(conversationMeta.executionOwnership ? { executionOwnership: conversationMeta.executionOwnership } : {}),
     ...(projected.needsYouReason ? { needsYouReason: projected.needsYouReason } : {}),
     ...(conversationMeta.coordination ? { coordination: conversationMeta.coordination } : {}),
     spawnedAt: conversationMeta.spawnedAt ?? plan.updatedAt ?? '',

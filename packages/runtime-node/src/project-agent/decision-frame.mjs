@@ -19,7 +19,7 @@ export function publicEventPayload(event, maxText = 300) {
 
 /** Bounded factual projection. It carries retrieval identity, never executable authority or private reasoning. */
 export function createDecisionFrame({ state, workspaceId, parentConversationId, workId, sessions = [], eventIds = [], currentInputIds = [], afterSessionId,
-  originDecisionRef, turnId, maxSessions = 24, maxEvents = 16, maxBytes = 24000 }) {
+  originDecisionRef, turnId, resourceWaits = [], resourceWaitError, maxSessions = 24, maxEvents = 16, maxBytes = 24000 }) {
   const work = state.works?.[workId];
   if (!work || work.workspaceId !== workspaceId || work.parentConversationId !== parentConversationId) return null;
   const mandate = state.mandates?.[workId], intent = work.intentCoordination, goalRevision = mandate?.goalRevision || 0;
@@ -46,7 +46,8 @@ export function createDecisionFrame({ state, workspaceId, parentConversationId, 
         .sort((a, b) => Number(a.status === 'covered') - Number(b.status === 'covered')),
       disposition: intent.decision.disposition.kind, review: intent.review ? { reviewRef: intent.review.reviewRef, passed: intent.review.passed,
         current: intentReviewCurrent(intent.review, state, workId, related), goalRevision: intent.review.goalRevision } : null } : null,
-    sessions: [], events: [], questions: [], operations: [], unknownEffects: [], controls: { state: work.state, stopScope: work.stopScope,
+    sessions: [], events: [], resourceWaits: [], ...(resourceWaitError ? { resourceWaitError: text(resourceWaitError, 200) } : {}),
+    questions: [], operations: [], unknownEffects: [], controls: { state: work.state, stopScope: work.stopScope,
       pendingControl: Boolean(work.pendingControl), recovery: work.recovery ? { failureKind: work.recovery.failureKind, blockedCode: work.recovery.blockedCode, retryAt: work.recovery.retryAt } : null },
     progressObservation: work.progressObservation || null,
     availableActions: ['query', 'assess', 'parallel', 'augment', 'revise', 'answer', 'cancel', 'replace', 'handoff', 'resume'].map(action => {
@@ -55,7 +56,7 @@ export function createDecisionFrame({ state, workspaceId, parentConversationId, 
       const allowed = action === 'query' || !stopped && Boolean(hasSource) && (action === 'assess' || Boolean(mandate?.allowedActions.includes(action)));
       return { action, allowed, ...(!allowed ? { reason: stopped ? 'work_execution_stopped' : 'current_user_or_mandate_required' } : {}) };
     }),
-    omitted: { sessions: 0, events: 0, questions: 0, operations: 0, unknownEffects: 0, requirements: 0, inputDispositions: Math.max(0, Object.keys(intent?.inputs || {}).length - 16),
+    omitted: { sessions: 0, events: 0, resourceWaits: 0, questions: 0, operations: 0, unknownEffects: 0, requirements: 0, inputDispositions: Math.max(0, Object.keys(intent?.inputs || {}).length - 16),
       sourceInputIds: Math.max(0, currentInputIds.length - 16), sourceEventIds: Math.max(0, eventIds.length - 16), text: false },
     retrieval: { tool: 'coordinate_work', action: 'query', workId, expectedRevision: goalRevision }, truncated: false };
   function append(key, rows, limit) {
@@ -82,6 +83,8 @@ export function createDecisionFrame({ state, workspaceId, parentConversationId, 
     followUp: row.followUp ? { owner: row.followUp.owner, reason: text(row.followUp.reason, 100), inCurrentList: row.followUp.inCurrentList === true } : null,
     blockedReason: text(row.blockedReason), humanGate: row.followUp?.owner === 'user' || row.resultConfirmationRequired === true,
     reportSummary: text(row.report?.summary, 500), retrieval: { tool: 'get_session', sessionId: row.sessionId } })), maxSessions);
+  append('resourceWaits', resourceWaits.filter(row => frame.sessions.some(session => session.sessionId === row.sessionId))
+    .map(row => ({ sessionId: row.sessionId, wait: { kind: 'resource', id: text(row.wait.id, 200), revision: text(row.wait.revision, 200) }, reason: text(row.reason, 100) })), maxSessions);
   const questions = Object.values(state.agentRequests || {}).filter(row => row.status === 'open' && relatedIds.has(row.sessionId));
   append('questions', questions.map(row => ({ requestId: row.requestId, sessionId: row.sessionId, revision: row.revision,
     responder: row.responder, userRequestRef: row.userRequestRef, prompt: text(row.prompt || row.text, 500) })), 16);

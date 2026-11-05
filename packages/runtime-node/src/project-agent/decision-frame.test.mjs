@@ -35,6 +35,22 @@ test('worst-sized factual input remains bounded and explicitly retrieves clipped
   assert.equal(frame.retrieval.tool, 'coordinate_work');
 });
 
+test('resource facts share the bounded session page and foreign targets cannot enter the decision frame', () => {
+  const sessions = Array.from({ length: 40 }, (_, i) => ({ sessionId: `s${String(i).padStart(2, '0')}`, workspaceId: 'w',
+    origin: { parentConversationId: 'p' }, title: 'Task', status: 'queued' }));
+  const resourceWaits = [...sessions, { sessionId: 'foreign' }].map(row => ({ sessionId: row.sessionId, reason: 'write_slot',
+    wait: { kind: 'resource', id: `resource:${row.sessionId}`, revision: 'revision' } }));
+  const state = { works: { g: { workId: 'g', workspaceId: 'w', parentConversationId: 'p', state: 'waiting_children', sessionIds: sessions.map(row => row.sessionId) } } };
+  const input = { state, sessions, resourceWaits, workspaceId: 'w', parentConversationId: 'p', workId: 'g' };
+  const first = createDecisionFrame(input);
+  assert.equal(first.resourceWaits.length, 24); assert.equal(first.omitted.sessions, 16);
+  assert.ok(Buffer.byteLength(JSON.stringify(first)) <= 24000);
+  assert.equal(first.resourceWaits.some(row => row.sessionId === 'foreign'), false);
+  const next = createDecisionFrame({ ...input, afterSessionId: first.retrieval.afterSessionId });
+  assert.equal(next.resourceWaits.length, 16);
+  assert.equal(next.resourceWaits.some(row => first.resourceWaits.some(old => old.sessionId === row.sessionId)), false);
+});
+
 test('paraphrased failures and changing UUIDs survive restart without gaining progress, while real object identities remain distinct', () => {
   let previous = {};
   for (let i = 0; i < 3; i++) {

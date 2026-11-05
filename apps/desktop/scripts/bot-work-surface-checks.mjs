@@ -25,8 +25,10 @@ export async function checkBotWorkSurfaces({ page, until, report, captureDirecto
   await referencedDetail.waitFor({ state: 'visible' });
   assert.equal(await referencedDetail.locator('h2').innerText(), '核查历史任务完成情况');
   assert.equal(await referencedDetail.getAttribute('data-status'), 'running');
-  assert.equal(await referencedDetail.locator('.bot-task-full').getAttribute('open'), null);
-  assert.match(await referencedDetail.innerText(), /打开完整任务/);
+  assert.equal(await referencedDetail.locator('.bot-task-full').isVisible(), false);
+  assert.equal(await referencedDetail.locator('.bot-task-full-toggle').getAttribute('aria-expanded'), 'false');
+  assert.equal(await referencedDetail.locator('.bot-task-scene').isVisible(), true);
+  assert.match(await referencedDetail.innerText(), /打开完整会话/);
   assert.doesNotMatch(await referencedDetail.innerText(), /取消任务|创建于|核验结果/);
   await page.locator(BOT_DETAIL_CLOSE).click();
   await referencedDetail.waitFor({ state: 'hidden' });

@@ -1,12 +1,10 @@
 .bot-drawer-detail.bot-task-detail { gap: 16px; padding: 4px 2px 16px; }
-.bot-task-detail .bot-task-back,
-.bot-task-detail .bot-task-scene {
+.bot-task-detail .bot-task-back {
   display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
   padding: 5px 0; border: 0; border-radius: var(--ui-radius-control-compact); background: transparent;
   color: var(--graphite-secondary); font-size: 12px;
 }
-.bot-task-detail .bot-task-back:hover,
-.bot-task-detail .bot-task-scene:hover { color: var(--graphite-base); background: transparent; }
+.bot-task-detail .bot-task-back:hover { color: var(--graphite-base); background: transparent; }
 .bot-task-detail-head { display: flex; flex-direction: column; gap: 10px; }
 .bot-task-detail .bot-task-detail-head h2 { font-size: 18px; line-height: 1.5; overflow-wrap: anywhere; }
 .bot-task-detail-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--graphite-secondary); }
@@ -52,7 +50,6 @@
 .bot-task-detail .bot-task-information dd { font-size: 12px; overflow-wrap: anywhere; }
 .bot-task-information code { font-family: var(--font-mono, monospace); font-size: 11px; }
 .bot-task-information ul { list-style: none; padding: 0; margin: 0; }
-.bot-task-detail .bot-task-scene { margin-top: 12px; }
 .bot-task-detail button:focus-visible,
 .bot-task-information > summary:focus-visible { outline: 2px solid var(--za-accent); outline-offset: 3px; }
 @supports (interpolate-size: allow-keywords) {
@@ -65,13 +62,12 @@
   .bot-task-information > summary .peer-icon { transition-duration: 1ms; }
 }
 
-/* The compact task is a read model; full controls remain in one native disclosure. */
+/* Conversation navigation stays visible independently of task-detail disclosure. */
+.bot-task-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); border-top: 1px solid var(--chrome-hairline); padding-top: var(--space-4); }
+.bot-task-actions > .bot-task-full-toggle { display: inline-flex; align-items: center; gap: 6px; border-color: transparent; background: transparent; color: var(--graphite-secondary); }
+.bot-task-full-toggle[aria-expanded="true"] .peer-icon { transform: rotate(180deg); }
+.bot-task-actions > .bot-task-scene { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
 .bot-task-full { align-self: stretch; }
-.bot-task-full > .bot-task-full-toggle { display: inline-flex; gap: 8px; list-style: none; }
-.bot-task-full > summary::-webkit-details-marker { display: none; }
-.bot-task-full-close { display: none; }
-.bot-task-full[open] > summary .bot-task-full-open { display: none; }
-.bot-task-full[open] > summary .bot-task-full-close { display: inline; }
-.bot-task-full[open] > summary .peer-icon { transform: rotate(90deg); }
-.bot-task-full-content { display: flex; flex-direction: column; gap: 22px; margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--chrome-hairline); }
+.bot-task-detail .bot-task-full[hidden] { display: none; }
+.bot-task-full-content { display: flex; flex-direction: column; gap: 22px; }
 .bot-task-created { font-size: var(--ui-font-meta); color: var(--graphite-secondary); }

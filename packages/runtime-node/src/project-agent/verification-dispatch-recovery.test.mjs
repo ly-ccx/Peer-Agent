@@ -8,7 +8,7 @@ import { createProjectInbox } from './project-inbox.mjs';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
 import { createWorkBudgetGuard, registerWorkBudget, workBudgetBinding } from './work-budget.mjs';
 
-function fixture({ legacy = false, capabilityId = 'verify_session', state = 'blocked_system', query } = {}) {
+function fixture({ legacy = false, capabilityId = 'verify_session', state = 'blocked_system', query, sessions } = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'peer-outcome-recovery-'));
   let owned = true, epoch = 'owner', calls = 0, queries = 0;
   const options = { rootDir: root, workspaceId: 'w', holdsLease: () => owned, leaseEpoch: () => epoch };
@@ -31,6 +31,7 @@ function fixture({ legacy = false, capabilityId = 'verify_session', state = 'blo
   let context;
   const kinds = [];
   const ports = { workspaceId: 'w', conversationId: 'c', inbox, coordinationStore: store, reconcileVerification,
+    ...(sessions ? { resolveRoster: () => sessions } : {}),
     holdsLease: () => owned, readMessages: () => messages, appendMessage: (_id, row) => messages.push(row),
     resolveModel: () => ({ modelProviderId: 'm' }), retryDelays: [], executeTurn: async input => { const guard = createWorkBudgetGuard(input.turnProfile);
       try { guard.beforeRequest(); calls++; context = input.turnProfile.context; kinds.push(input.plan.kind);
@@ -266,11 +267,17 @@ test('startup continuation discovery reconciles an old review even without a new
 });
 
 test('a fresh user goal retains priority over an old system-blocked review that has just been reconciled', async () => {
-  const env = fixture();
+  const env = fixture({ sessions: [{ sessionId: 's', status: 'accepted', executionOwnership: 'ended' }] });
   try {
     await env.runner.enqueueUserInputs([{ inputId: 'new-input', text: '处理新的独立问题' }]);
     assert.deepEqual(env.kinds, ['user', 'wake'], 'the new input runs before the independent recovered work');
     assert.equal(Object.keys(env.store.read().works).length, 2, 'new input never inherits the old work');
     assert.equal(env.work().state, 'delivered');
   } finally { env.close(); }
+});
+
+test('a reconciled dispatch cannot close an owned session whose current facts are unavailable', async () => {
+  const env = fixture();
+  try { await env.runner.kick(); assert.equal(env.work().state, 'waiting_children'); }
+  finally { env.close(); }
 });

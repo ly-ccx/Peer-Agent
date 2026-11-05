@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { PeerIcon } from '../../ui/icons';
+import { TaskConversationButton } from './TaskConversationButton';
+import { taskProgressPreview } from '../state/taskDetailState';
 import type { HistoryConversation } from '../HistorySheet';
 import { formatDrawerSessionStatus, formatDrawerStamp, groupDrawerSessions, type DrawerSession, type TaskGroup } from '../state/drawerState';
 
@@ -22,6 +24,10 @@ export interface ClassicGoalRow {
 }
 
 export function TasksTab({
+  workspaceId,
+  workspacePath,
+  onOpenSession,
+  onOpenBot,
   sessions,
   history = [],
   goals = [],
@@ -33,6 +39,10 @@ export function TasksTab({
   onResume,
   onOpenObjective,
 }: {
+  readonly workspaceId: string;
+  readonly workspacePath: string;
+  readonly onOpenSession: (session: DrawerSession) => void;
+  readonly onOpenBot: () => void;
   readonly sessions: readonly DrawerSession[];
   readonly history?: readonly HistoryConversation[];
   readonly goals?: readonly ClassicGoalRow[];
@@ -78,8 +88,10 @@ export function TasksTab({
               <span>{groups[group].length}</span>
             </div>
             <ul className="bot-tasks-list">
-              {groups[group].map((session) => (
-                <li key={session.sessionId} className="bot-task-with-action">
+              {groups[group].map((session) => {
+                const status = formatDrawerSessionStatus(session, i18n);
+                const progress = taskProgressPreview(session, null, i18n);
+                return <li key={session.sessionId} className="bot-task-with-action">
                   <button
                     type="button"
                     className={session.sessionId === selectedId ? 'bot-task-row is-selected' : 'bot-task-row'}
@@ -89,21 +101,28 @@ export function TasksTab({
                       <span className="bot-task-row-title" title={session.title}>{session.title}</span>
                       <span className="bot-task-row-meta">{session.status === 'superseded' && session.supersededBy
                         ? i18n.t('projectAgent.drawer.supersededBy', { task: sessions.find(item => item.sessionId === session.supersededBy)?.title || i18n.t('projectAgent.drawer.replacement') })
-                        : formatDrawerSessionStatus(session, i18n)}</span>
+                        : status}</span>
+                      {progress !== status && progress !== i18n.t('projectAgent.drawer.task.progressPending')
+                        ? <span className="bot-task-row-progress">{progress}</span> : null}
                     </span>
                     <PeerIcon name="chevronRight" size={14} className="bot-task-row-arrow" />
                   </button>
-                  {session.objectiveId && onOpenObjective && <button type="button" className="bot-task-resume"
-                    onClick={() => onOpenObjective(session.objectiveId!)}>{i18n.t('projectAgent.drawer.objective.source')}</button>}
-                  {group === 'paused'  && onResume && (
-                    <button type="button" className="bot-task-resume" disabled={resuming !== null}
-                      aria-label={`${i18n.t('projectAgent.drawer.resume')} ${session.title}`}
-                      onClick={() => { void restore(session.sessionId); }}>
-                      <PeerIcon name="back" size={14} />{i18n.t('projectAgent.drawer.resume')}
-                    </button>
-                  )}
-                </li>
-              ))}
+                  <div className="bot-task-row-actions">
+                    <TaskConversationButton className="ui-button bot-task-list-conversation" workspaceId={workspaceId} workspacePath={workspacePath}
+                      session={session} title={session.title || i18n.t('projectAgent.chat.work.related')} i18n={i18n}
+                      onOpenFallback={onOpenSession} onOpenBot={onOpenBot} />
+                    {session.objectiveId && onOpenObjective && <button type="button" className="bot-task-resume"
+                      onClick={() => onOpenObjective(session.objectiveId!)}>{i18n.t('projectAgent.drawer.objective.source')}</button>}
+                    {group === 'paused'  && onResume && (
+                      <button type="button" className="bot-task-resume" disabled={resuming !== null}
+                        aria-label={`${i18n.t('projectAgent.drawer.resume')} ${session.title}`}
+                        onClick={() => { void restore(session.sessionId); }}>
+                        <PeerIcon name="back" size={14} />{i18n.t('projectAgent.drawer.resume')}
+                      </button>
+                    )}
+                  </div>
+                </li>;
+              })}
             </ul>
           </section>
         )

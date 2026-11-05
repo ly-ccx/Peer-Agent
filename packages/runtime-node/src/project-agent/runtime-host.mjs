@@ -12,6 +12,7 @@ import { createDigestQueue } from './digest.mjs';
 import { createWatchPublisher } from './watch-publisher.mjs';
 import { normalizeProjectAgentSettings } from './digest.mjs';
 import { resolveRoleRoute } from '../model-router.mjs';
+import { requireResourceWaitPort, createEmptyResourceWaitPort } from './resource-wait.ts';
 
 export function createProjectAgentHost({
   rootDir = null,
@@ -48,6 +49,7 @@ export function createProjectAgentHost({
   reconcileVerification = null,
   findEvidenceRecords = null,
   readResourceClaims = null,
+  resourceWaits = null,
   restoreQueue = null,
   recoverTasks = null,
   restoreWatches = null,
@@ -64,6 +66,8 @@ export function createProjectAgentHost({
   if (typeof executeTurn !== 'function') {
     throw new TypeError('ProjectAgentHost requires executeTurn');
   }
+  const resourceWaitPort = resourceWaits ? requireResourceWaitPort(resourceWaits)
+    : typeof readResourceClaims === 'function' ? requireResourceWaitPort(null) : createEmptyResourceWaitPort();
   const inboxStore = inbox || createProjectInbox({ rootDir, now });
   const queue = inputQueue || createInputQueue({
     rootDir,
@@ -160,6 +164,7 @@ export function createProjectAgentHost({
       reconcileVerification,
       findEvidenceRecords,
       readResourceClaims: typeof readResourceClaims === 'function' ? () => readResourceClaims(workspaceId) : undefined,
+      resourceWaits: resourceWaitPort,
       appendMessage,
       readMessages: () => typeof readMessages === 'function' ? readMessages(conversationId) : [],
       hasMessage,
