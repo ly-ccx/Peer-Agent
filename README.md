@@ -51,6 +51,8 @@ The work panel beside the conversation groups current tasks, child Agent progres
 
 In the 0.1 preview, the Workspace beside the conversation opens web pages, documents, code, directories and diffs. From RC30, an independent fourth pane also holds read-only child Agent conversations, separate from Bot settings. Use Quote under a saved Bot reply to follow up on that message while keeping your draft. Reading a result, authorizing a write, accepting work and integrating Git changes are distinct actions.
 
+RC36 includes an opt-in preview of interactive results. See the [user documentation](docs/docs.html#working) for saved versions and follow-ups.
+
 <a id="-quick-start"></a>
 
 ## Get started

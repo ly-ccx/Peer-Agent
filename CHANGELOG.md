@@ -2,7 +2,11 @@
 
 All notable changes to Peer Agent are tracked here.
 
-## 0.1.0-rc.36 - 2026-11-03
+## 0.1.0-rc.36 - 2026-11-05
+
+### 新功能
+
+- 加入默认关闭的 OpenUI 交互结果预览，保留固定版本和选定条件。Desktop 提供交互视图，CLI 提供摘要。符合条件的 Linux x64/ext4 受管部署可在维护窗口清理。
 
 ### 修复与改进
 
@@ -11,6 +15,10 @@ All notable changes to Peer Agent are tracked here.
 - 任务列表和详情首层直接打开完整会话，其他资料由独立详情按钮展开；主 Bot 排查规则核对版本和搜索范围。
 - 持久化回复停止，重开补回继续入口，原任务从保存的结果续跑。TUI 汇集绑定选择与提示，恢复键入焦点，显示新发消息的时间。
 - 同步双语用户文档、发布说明与站点更新日志。保持协调格式9和未知效果保护。
+
+### What's new (English)
+
+- Add opt-in OpenUI interactive results with fixed versions and saved conditions. Desktop renders the interactive view and the CLI reads the summary. Eligible managed Linux x64/ext4 deployments can run cleanup during maintenance.
 
 ### Fixes and improvements (English)
 

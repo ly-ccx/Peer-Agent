@@ -1,6 +1,6 @@
 {
   "name": "@peer-agent/interactive-content",
-  "version": "0.1.0-rc.35",
+  "version": "0.1.0-rc.36",
   "private": true,
   "type": "module",
   "sideEffects": false,
@@ -9,9 +9,18 @@
       "types": "./src/index.d.ts",
       "default": "./src/index.mjs"
     },
-    "./values": { "types": "./src/values.d.ts", "default": "./src/limits.mjs" },
-    "./state": { "types": "./src/state.d.ts", "default": "./src/state.mjs" },
-    "./context": { "types": "./src/context.d.ts", "default": "./src/context.generated.mjs" }
+    "./values": {
+      "types": "./src/values.d.ts",
+      "default": "./src/limits.mjs"
+    },
+    "./state": {
+      "types": "./src/state.d.ts",
+      "default": "./src/state.mjs"
+    },
+    "./context": {
+      "types": "./src/context.d.ts",
+      "default": "./src/context.generated.mjs"
+    }
   },
   "files": [
     "src",
