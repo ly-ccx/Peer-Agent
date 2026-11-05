@@ -4,7 +4,10 @@ import test from 'node:test';
 import {
   createContextAccountingCompactionPipeline,
   createRestoredObservedContextAccountingSnapshot,
+  fingerprintCanonicalRequest,
   normalizeObservedInputTokens,
+  readCanonicalRequestFingerprintEvaluations,
+  resetCanonicalRequestFingerprintEvaluations,
 } from './context-accounting-pipeline.ts';
 
 test('provider observed usage is authoritative and triggers compaction before the next send', async () => {
@@ -259,4 +262,38 @@ test('attaches a presentation usage breakdown from the built request without cha
   assert.equal(result.snapshot.usageBreakdown?.quality, 'scaled');
   assert.equal(result.snapshot.usageBreakdown?.estimatedTokens, 800);
   assert.ok(result.snapshot.usageBreakdown?.categories.some((row) => row.id === 'conversation'));
+});
+
+test('fingerprints the canonical request once before send, including the exact-count path', async () => {
+  resetCanonicalRequestFingerprintEvaluations();
+  const pipeline = createContextAccountingCompactionPipeline({
+    identity: { conversationId: 'conversation-fingerprint-once', contentRevision: 1, modelKey: 'model-c' },
+    contextWindow: 100_000,
+    countCapability: { kind: 'provider_count_api' },
+    countRequest: () => ({ inputTokens: 20, source: 'provider_count_api' }),
+    buildRequest: (state: { messages: string[] }) => ({ messages: [...state.messages], system: 'fixture' }),
+    compact: async ({ state }) => ({ compacted: false, state }),
+    send: async (request) => {
+      assert.equal(readCanonicalRequestFingerprintEvaluations(), 1);
+      assert.equal(fingerprintCanonicalRequest(request), fingerprintCanonicalRequest(request));
+      return { usage: { inputTokens: 20 } };
+    },
+    getUsage: (response) => response.usage,
+  });
+
+  const result = await pipeline.execute({ state: { messages: ['hello'] } });
+  assert.equal(readCanonicalRequestFingerprintEvaluations(), 1);
+  assert.equal(result.snapshot.nextCounted?.inputTokens, 20);
+  assert.equal(result.snapshot.lastObserved?.requestFingerprint, result.snapshot.nextCounted?.requestFingerprint);
+});
+
+test('refreshes a canonical fingerprint after the request object changes', () => {
+  resetCanonicalRequestFingerprintEvaluations();
+  const request = { messages: ['before'] };
+  const first = fingerprintCanonicalRequest(request);
+  request.messages.push('after');
+  assert.equal(fingerprintCanonicalRequest(request), first);
+  const refreshed = fingerprintCanonicalRequest(request, { refresh: true });
+  assert.notEqual(refreshed, first);
+  assert.equal(readCanonicalRequestFingerprintEvaluations(), 2);
 });

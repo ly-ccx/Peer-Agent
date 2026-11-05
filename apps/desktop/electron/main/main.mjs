@@ -146,6 +146,7 @@ import {
   createRestoredObservedContextAccountingSnapshot,
   createUnknownContextAccountingSnapshot,
   projectConversationHistory,
+  projectConversationHistoryYielding,
   reprojectContextAccountingWindow,
 } from '@peer-agent/runtime-core';
 import { contextAccountingModelKey } from '@peer-agent/protocol';
@@ -157,6 +158,7 @@ import { buildSystemContext, renderSystemContext } from './llm-prompts.mjs';
 import { createContextBaselineRecorder } from './prompt/context-baseline-recorder.mjs';
 import { createPromptSnapshotStore } from './prompt/prompt-snapshot-store.mjs';
 import { createConversationStore } from './conversation-store.mjs';
+import { createConversationLoadHandle, peekConversationLoad } from './conversation-load-handle.mjs';
 import { resolveConversationModelProviderId } from './conversation-model-binding.mjs';
 import { bindExternalGoalPlanChanges } from './goal-plan-change-bridge.mjs';
 import { createTaskNotificationBroker } from './task-notification-broker.mjs';
@@ -1432,7 +1434,7 @@ const conversationApplicationService = createConversationApplicationService({
   updateAutomationCreateContext: (id, context) =>
     conversationStore.updateAutomationCreateContext(id, context),
   updateModelEffort: (id, options) => conversationStore.updateModelEffort(id, options),
-  appendMessage: (id, message) => conversationStore.appendMessage(id, message),
+  appendMessage: (id, message, options) => conversationStore.appendMessage(id, message, options),
   updateLastMessage: (id, content) => conversationStore.updateLastMessage(id, content),
   replaceMessages: (id, messages, options) =>
     conversationStore.replaceMessages(id, messages, options),
@@ -2787,14 +2789,14 @@ async function handleChatStartTask({
     content: normalizedText,
     timestamp: now,
     ...(Array.isArray(attachments) && attachments.length > 0 ? { attachments } : {}),
-  });
+  }, { returnMessages: false });
   conversationStore.appendMessage(conversation.id, {
     id: assistantMessageId,
     role: 'assistant',
     content: '',
     timestamp: now,
     segments: [],
-  });
+  }, { returnMessages: false });
   void Promise.resolve(handleChatSend({
     streamId,
     assistantMessageId,
@@ -2833,9 +2835,8 @@ function handleChatSend({
   configInstructions,
   contextExtensions,
 }, sender) {
-  const persistedConversation = conversationId
-    ? conversationStore.getConversation(conversationId)
-    : null;
+  const conversationLoad = createConversationLoadHandle(conversationStore, conversationId);
+  const persistedConversation = conversationId ? conversationLoad.load() : null;
   const persistedProjection = persistedConversation?.messages
     ? projectConversationHistory(persistedConversation.messages)
     : null;
@@ -2899,7 +2900,7 @@ function handleChatSend({
           }
         } else if (route.type === 'start_intake') {
           const conversationWorkspacePath =
-            conversationStore.getConversation(conversationId)?.workspacePath ||
+            persistedConversation?.workspacePath ||
             workspacePath ||
             null;
           // 「先判别再建目标」：用户在 goal 模式下的首发消息不再无条件建成 accepted 目标。
@@ -2954,7 +2955,8 @@ function handleChatSend({
   // 保证「模型随会话绑定」在续传/重载等渲染端未带参场景下仍以后端 store 为真值。
   const resolvedModelProviderId =
     modelProviderId
-    ?? (conversationId ? conversationStore.getConversation(conversationId)?.modelProviderId ?? null : null);
+    ?? persistedConversation?.modelProviderId
+    ?? null;
   // 续写中断回复的运行时提醒：末条 assistant 是被网络中断截断的半截回复，
   // 模型必须把它当作自己「未写完的话」从断点继续，而不是当作新输入重新作答。
   const effectiveRuntimeReminders = resumeInterruptedReply
@@ -2977,6 +2979,7 @@ function handleChatSend({
     mode,
     conversationId,
     modelProviderId: resolvedModelProviderId,
+    conversationLoad,
     // B2 兜底：透传渲染端当前工作区，仅在会话未绑定 workspacePath 时由
     // resolveRunWorkspacePath 作为兜底/校验使用，主真值仍按 conversationId 从 store 解析。
     workspacePath,
@@ -3296,7 +3299,21 @@ async function handleChatCompact({ conversationId, streamId }, sender) {
 async function handleChatContextRestored(
   { conversationId, modelProviderId = null } = {},
 ) {
-  const conv = conversationStore.getConversation(conversationId);
+  // Let the open-window IPC and the first paint run before any full-history work.
+  await new Promise((resolve) => { setImmediate(resolve); });
+  const cached = peekConversationLoad(conversationId);
+  const cachedRevision = Number(cached?.contentRevision);
+  const currentMeta = typeof conversationStore.readConversationWindow === 'function'
+    ? conversationStore.readConversationWindow(conversationId, { limit: 1 })
+    : null;
+  const revisionMatches = currentMeta
+    && Number.isSafeInteger(cachedRevision)
+    && cachedRevision === Number(currentMeta.meta?.contentRevision);
+  const conv = revisionMatches
+    ? cached
+    : typeof conversationStore.readConversationYielding === 'function'
+      ? await conversationStore.readConversationYielding(conversationId)
+      : null;
   if (!conv || !conv.messages?.length) return null;
 
   // 同一会话存在两条真实请求路径、组成不同(ADR 42 口径分离):
@@ -3308,7 +3325,7 @@ async function handleChatContextRestored(
     ? goalPlanStore.listPlansByConversation(conversationId)
     : [];
   const runningPlan = conversationPlans.find((plan) => plan?.runner?.status === 'running') ?? null;
-  const canonicalHistory = projectConversationHistory(conv.messages);
+  const canonicalHistory = await projectConversationHistoryYielding(conv.messages);
   const activeMessages = runningPlan
     ? [
         ...canonicalHistory.messages,

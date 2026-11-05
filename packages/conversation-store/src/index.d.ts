@@ -213,6 +213,26 @@ export interface ConversationStore {
     roles?: readonly ConversationRoleFilter[];
   }): ConversationMeta[];
   getConversation(id: string): StoredConversation | null;
+  /**
+   * Tail window for the product get path. `full: true` reads every message and
+   * is reserved for diagnostics and migration scripts.
+   */
+  readConversationWindow?(id: string, options?: {
+    limit?: number;
+    before?: string | null;
+    full?: boolean;
+    chunkBytes?: number;
+  }): {
+    meta: ConversationMeta;
+    window: Record<string, unknown>[];
+    cursor: string | null;
+    hasMore: boolean;
+  } | null;
+  /** Full history for background projection. Yields between parse batches. */
+  readConversationYielding?(id: string, options?: {
+    yieldEvery?: number;
+    yield?: () => Promise<void>;
+  }): Promise<StoredConversation | null>;
   getLatestContextObservation(
     id: string,
     options?: { modelKey?: string | null },

@@ -4,7 +4,11 @@ import {
   coordinateDesktopProviderRequest,
   executeDesktopProviderRequest,
 } from './provider-request-coordinator.mjs';
-import { createRestoredObservedContextAccountingSnapshot } from '@peer-agent/runtime-core';
+import {
+  createRestoredObservedContextAccountingSnapshot,
+  readCanonicalRequestFingerprintEvaluations,
+  resetCanonicalRequestFingerprintEvaluations,
+} from '@peer-agent/runtime-core';
 import { dispatchProviderRequest } from './provider-request-recovery.mjs';
 
 describe('Desktop provider request coordinator', () => {
@@ -211,5 +215,25 @@ describe('Desktop provider request coordinator', () => {
     assert.equal(result.retriedAfterOverflow, true);
     assert.equal(result.snapshot.lastOverflow.requestedTokens, 501_244);
     assert.equal(result.snapshot.lastOverflow.maximumTokens, 500_000);
+  });
+
+  it('stringifies the canonical request once before the real provider send', async () => {
+    resetCanonicalRequestFingerprintEvaluations();
+    let duringSend = -1;
+    await executeDesktopProviderRequest({
+      request: {
+        messages: [{ role: 'user', content: 'fixture request' }],
+        systemPrompt: 'fixture',
+        contextWindow: 100_000,
+        countCapability: { kind: 'provider_count_api' },
+        countRequest: () => ({ inputTokens: 12, source: 'provider_count_api' }),
+      },
+      send: async () => {
+        duringSend = readCanonicalRequestFingerprintEvaluations();
+        return { ok: true, streamUsage: { inputTokens: 12, outputTokens: 1 } };
+      },
+    });
+    assert.equal(duringSend, 1);
+    assert.equal(readCanonicalRequestFingerprintEvaluations(), 1);
   });
 });

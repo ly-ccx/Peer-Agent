@@ -88,7 +88,7 @@ export type ContextAccountingPipelineOptions<TState, TRequest, TResponse> = Read
     error?: unknown;
   }>) => void;
   getOverflow?: (response: TResponse) => ContextOverflowEvidence | null | undefined;
-  fingerprintRequest?: (request: TRequest) => string;
+  fingerprintRequest?: (request: TRequest, options?: { readonly refresh?: boolean }) => string;
   now?: () => number;
 }>;
 
@@ -243,14 +243,44 @@ function stableValue(value: unknown, seen: WeakSet<object>): unknown {
   return result;
 }
 
-export function fingerprintCanonicalRequest(request: unknown): string {
+const canonicalFingerprintCache = new WeakMap<object, string>();
+let canonicalFingerprintEvaluations = 0;
+
+/** Counts real canonical JSON.stringify passes, not cache hits. Test seam. */
+export function readCanonicalRequestFingerprintEvaluations(): number {
+  return canonicalFingerprintEvaluations;
+}
+
+export function resetCanonicalRequestFingerprintEvaluations(): void {
+  canonicalFingerprintEvaluations = 0;
+}
+
+/**
+ * Fingerprint a canonical provider request once per object.
+ * A later call with the same reference reuses the digest. Pass `{ refresh: true }`
+ * only after an await that may have mutated the request, such as a transport retry.
+ */
+export function fingerprintCanonicalRequest(
+  request: unknown,
+  options?: { readonly refresh?: boolean },
+): string {
+  const refresh = options?.refresh === true;
+  if (!refresh && request !== null && typeof request === 'object') {
+    const cached = canonicalFingerprintCache.get(request);
+    if (cached) return cached;
+  }
   const text = JSON.stringify(stableValue(request, new WeakSet<object>()));
+  canonicalFingerprintEvaluations += 1;
   let hash = 0x811c9dc5;
   for (let index = 0; index < text.length; index += 1) {
     hash ^= text.charCodeAt(index);
     hash = Math.imul(hash, 0x01000193);
   }
-  return `ctx_${(hash >>> 0).toString(16).padStart(8, '0')}_${text.length}`;
+  const fingerprint = `ctx_${(hash >>> 0).toString(16).padStart(8, '0')}_${text.length}`;
+  if (request !== null && typeof request === 'object') {
+    canonicalFingerprintCache.set(request, fingerprint);
+  }
+  return fingerprint;
 }
 
 function errorDetails(error: unknown): { status?: number; message: string } {
@@ -481,13 +511,11 @@ export function createContextAccountingCompactionPipeline<TState, TRequest, TRes
     }
   };
 
-  const count = async (request: TRequest, requestFingerprint: string) => {
+  // Exact count must not mutate the canonical request. The digest is taken once
+  // after the counter returns, so the count path does not stringify again.
+  const count = async (request: TRequest): Promise<ExactCountResult | null> => {
     nextCounted = undefined;
-    if (!options.countRequest || counterStatus === 'degraded') return;
-    const before = fingerprint(request);
-    if (before !== requestFingerprint) {
-      throw new Error('context_request_fingerprint_mismatch: request changed before exact count');
-    }
+    if (!options.countRequest || counterStatus === 'degraded') return null;
     let rawCount: ExactCountResult | number | null | undefined;
     try {
       rawCount = await options.countRequest(request);
@@ -497,27 +525,24 @@ export function createContextAccountingCompactionPipeline<TState, TRequest, TRes
       // explicitly and continue with observed usage instead of blocking chat.
       counterStatus = 'degraded';
       nextCounted = undefined;
-      return;
+      return null;
     }
-    const counted = exactResult(rawCount, capability);
-    const after = fingerprint(request);
-    if (after !== requestFingerprint) {
-      throw new Error('context_request_fingerprint_mismatch: exact counter mutated the canonical request');
-    }
-    if (!counted) return;
-    nextCounted = {
-      inputTokens: counted.inputTokens,
-      requestFingerprint,
-      compactionEpoch,
-      source: counted.source,
-      countedAt: now(),
-    };
+    return exactResult(rawCount, capability);
   };
 
   const build = async (state: TState) => {
     const request = await options.buildRequest(state);
+    const counted = await count(request);
     const requestFingerprint = fingerprint(request);
-    await count(request, requestFingerprint);
+    if (counted) {
+      nextCounted = {
+        inputTokens: counted.inputTokens,
+        requestFingerprint,
+        compactionEpoch,
+        source: counted.source,
+        countedAt: now(),
+      };
+    }
     latestBuiltFingerprint = requestFingerprint;
     latestBuiltRequest = request;
     return { request, requestFingerprint };

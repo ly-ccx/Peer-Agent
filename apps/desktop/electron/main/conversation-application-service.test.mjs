@@ -136,13 +136,13 @@ test('conversation commands preserve payload mapping and return values', () => {
   assert.deepEqual(calls, [
     ['search', {}],
     ['create', { title: 'T' }],
-    ['get', 'c'],
+    ['get', 'c', {}],
     ['update-title', 'c', 'New'],
     ['update-mode', 'c', 'goal'],
     ['update-fast-mode', 'c', true],
     ['update-preferred-execution-isolation', 'c', 'worktree'],
     ['update-model-effort', 'c', { effort: 'high', modelProviderId: 'provider' }],
-    ['append-message', 'c', { role: 'user' }],
+    ['append-message', 'c', { role: 'user' }, { returnMessages: false }],
     ['update-last-message', 'c', 'x'],
     ['replace-messages', 'c', [], { allowEmpty: true }],
     ['archive', 'c'],
@@ -152,4 +152,52 @@ test('conversation commands preserve payload mapping and return values', () => {
     ['reorder-pinned', ['b', 'a']],
     ['add-usage', 'c', { input: 1 }],
   ]);
+});
+
+test('product get is a tail window and full history is explicit', () => {
+  const seen = [];
+  const { service } = createHarness({
+    getConversation(id, options) {
+      seen.push({ id, options });
+      return {
+        meta: { id, messageCount: 3 },
+        window: [{ id: 'tail' }],
+        cursor: options.before ?? '20',
+        hasMore: options.full !== true,
+      };
+    },
+  });
+
+  const page = service.get({ id: 'c' });
+  assert.equal(Object.hasOwn(page, 'messages'), false);
+  assert.deepEqual(page.window, [{ id: 'tail' }]);
+  assert.equal(page.hasMore, true);
+  assert.deepEqual(service.get({ id: 'c', before: '20', limit: 40 }).cursor, '20');
+  assert.equal(service.get({ id: 'c', full: true }).hasMore, false);
+  assert.deepEqual(seen.map((call) => call.options), [
+    {},
+    { before: '20', limit: 40 },
+    { full: true },
+  ]);
+});
+
+test('classic append does not return a messages array', () => {
+  const { service } = createHarness({
+    appendMessage(id, message, options) {
+      assert.equal(id, 'c');
+      assert.deepEqual(message, { role: 'user', content: 'hello' });
+      assert.deepEqual(options, { returnMessages: false });
+      return {
+        id,
+        messageCount: 4,
+        contentRevision: 4,
+        messages: [{ role: 'user', content: 'hello' }, { role: 'assistant', content: 'history' }],
+      };
+    },
+  });
+
+  const result = service.appendMessage({ id: 'c', message: { role: 'user', content: 'hello' } });
+  assert.equal(Object.hasOwn(result, 'messages'), false);
+  assert.equal(result.messageCount, 4);
+  assert.equal(result.contentRevision, 4);
 });

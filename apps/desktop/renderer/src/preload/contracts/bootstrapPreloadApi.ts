@@ -1251,7 +1251,33 @@ export interface BootstrapPreloadApi {
     lifetimeUsage?: unknown;
   }[]>;
 readonly conversationsCreate: (params?: { title?: string; workspacePath?: string | null; mode?: string }) => Promise<{ id: string; title: string; mode?: string; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messageCount: number; createdAt: string; updatedAt: string }>;
-  readonly conversationsGet: (params: { id: string }) => Promise<{ id: string; contentRevision: number; selectionDraft?: import('@peer-agent/protocol').SelectionDraft; selectionOrigin?: import('@peer-agent/protocol').SelectionOrigin; title: string; mode?: string; fastMode?: boolean; preferredExecutionIsolation?: 'none' | 'worktree'; effort?: string; modelProviderId?: string | null; status?: 'active' | 'archived'; archivedAt?: string | null; pinnedAt?: string | null; pinnedOrder?: number | null; messages: readonly Record<string, unknown>[]; createdAt: string; updatedAt: string; lifetimeUsage?: LifetimeUsage; contextSnapshot?: ContextAccountingSnapshot | null; automationCreateContext?: AutomationCreateContext | null } | null>;
+  readonly conversationsGet: (params: { id: string; limit?: number; before?: string; full?: boolean }) => Promise<{
+    meta: {
+      id: string;
+      contentRevision: number;
+      selectionDraft?: import('@peer-agent/protocol').SelectionDraft;
+      selectionOrigin?: import('@peer-agent/protocol').SelectionOrigin;
+      title: string;
+      mode?: string;
+      fastMode?: boolean;
+      preferredExecutionIsolation?: 'none' | 'worktree';
+      effort?: string;
+      modelProviderId?: string | null;
+      status?: 'active' | 'archived';
+      archivedAt?: string | null;
+      pinnedAt?: string | null;
+      pinnedOrder?: number | null;
+      createdAt: string;
+      updatedAt: string;
+      messageCount?: number;
+      lifetimeUsage?: LifetimeUsage;
+      contextSnapshot?: ContextAccountingSnapshot | null;
+      automationCreateContext?: AutomationCreateContext | null;
+    };
+    window: readonly Record<string, unknown>[];
+    cursor: string | null;
+    hasMore: boolean;
+  } | null>;
   readonly onConversationsChanged: (listener: (event: { conversationId: string; workspacePath: string | null; changeType: 'created' | 'messages-updated' | 'metadata-updated' | 'deleted'; revision: string; writerPid: number; changedAt: string }) => void) => () => void;
   readonly onWorkspacesChanged: (listener: (event: { workspacePath: string }) => void) => () => void;
   readonly conversationsUpdateTitle: (params: { id: string; title: string }) => Promise<unknown>;

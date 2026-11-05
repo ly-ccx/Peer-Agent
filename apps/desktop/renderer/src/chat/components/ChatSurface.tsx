@@ -4,7 +4,7 @@ import { useThreadScrollGesture } from '../hooks/useThreadScrollGesture';
 
 import { findCurrentTurnIdForScroll } from "../state/threadScrollAnchor.ts";
 import { formatQueueNoticeText, formatRetryCountdownLabel, formatRetryCountdownLabelEn } from "../state/providerRecoveryText.ts";
-import { loadConversationMessages, nextId } from "../state/conversationHydration.ts";
+import { loadConversationMessages, nextId, shouldLoadOlderHistory } from "../state/conversationHydration.ts";
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { createUnknownContextAccountingSnapshot } from '@peer-agent/runtime-core';
 import type {
@@ -571,6 +571,12 @@ export function ChatSurface({
   // 避免手动 /compact 完成后把结果/横幅误作用到已切走的当前会话。
   const conversationIdRef = useRef<string | null>(conversationId);
   conversationIdRef.current = conversationId;
+  const historyPageRef = useRef<{ conversationId: string; cursor: string | null; hasMore: boolean }>({
+    conversationId: '',
+    cursor: null,
+    hasMore: false,
+  });
+  const loadingOlderRef = useRef(false);
   // 正文/思考 delta 的追加逻辑已上移到 useConversationStreamRouter（应用级单例流路由器），
   // 由它按 streamId→conversationId 路由到对应会话桶。本组件不再持有本地 append 逻辑与打字机。
 
@@ -746,6 +752,37 @@ export function ChatSurface({
     scrollThreadToBottom('auto');
   }, [scrollThreadToBottom]);
 
+  const loadOlderHistory = useCallback(async (container: HTMLDivElement) => {
+    const id = conversationIdRef.current;
+    const page = historyPageRef.current;
+    if (!id || page.conversationId !== id || !page.hasMore || !page.cursor || loadingOlderRef.current) return;
+    loadingOlderRef.current = true;
+    const beforeTop = container.scrollTop;
+    const beforeHeight = container.scrollHeight;
+    try {
+      const older = await loadConversationMessages(id, { before: page.cursor });
+      if (conversationIdRef.current !== id) return;
+      historyPageRef.current = {
+        conversationId: id,
+        cursor: older.cursor,
+        hasMore: older.hasMore && older.cursor !== page.cursor,
+      };
+      const current = conversationStore.getSnapshot(id).messages;
+      const seen = new Set(current.map((message) => message.id));
+      const prepend = older.messages.filter((message) => !seen.has(message.id));
+      if (prepend.length === 0) return;
+      convActions.set({ messages: [...prepend, ...current] });
+      requestAnimationFrame(() => {
+        const node = threadRef.current;
+        if (!node || conversationIdRef.current !== id) return;
+        const delta = node.scrollHeight - beforeHeight;
+        if (delta > 0) node.scrollTop = beforeTop + delta;
+      });
+    } finally {
+      loadingOlderRef.current = false;
+    }
+  }, [convActions]);
+
   const threadScrollCoalescerRef = useRef(createFrameCoalescer({
     request: (callback) => requestAnimationFrame(callback),
     cancel: (frameId) => cancelAnimationFrame(frameId),
@@ -763,7 +800,16 @@ export function ChatSurface({
     }
     const nextScrolled = container.scrollTop > 4;
     setThreadScrolled((previous) => (previous === nextScrolled ? previous : nextScrolled));
-  }, [conversationId, saveThreadScrollSnapshot, updateCurrentTurnContext, updateThreadBottomState, updateVirtualViewport]);
+    const page = historyPageRef.current;
+    if (shouldLoadOlderHistory({
+      scrollTop: container.scrollTop,
+      hasMore: page.conversationId === conversationId && page.hasMore,
+      loading: loadingOlderRef.current,
+      userInitiated,
+    })) {
+      void loadOlderHistory(container);
+    }
+  }, [conversationId, loadOlderHistory, saveThreadScrollSnapshot, updateCurrentTurnContext, updateThreadBottomState, updateVirtualViewport]);
   const handleThreadScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     const container = event.currentTarget;
     const userInitiated = userScroll.state.current.active;
@@ -1136,8 +1182,15 @@ export function ChatSurface({
         modelProviderId: convModelProviderId,
         contextAccounting: storedContextAccountingSnapshot,
         automationCreateContext,
+        cursor: loadedCursor,
+        hasMore: loadedHasMore,
       } = await loadConversationMessages(conversationId);
       if (cancelled) return;
+      historyPageRef.current = {
+        conversationId,
+        cursor: loadedCursor,
+        hasMore: loadedHasMore,
+      };
       // 消息可以先投影到 UI；硬加载时 loadStatus 仍保持 loading，直到 compaction/stream
       // reattach 全部收敛；静默刷新则保持 ready，避免闪空。
       // 选区子会话首次发送会在 await 期间写入本地回合；必须读最新桶，不能用 effect 开始时的空快照。
@@ -1320,8 +1373,15 @@ export function ChatSurface({
       tokenUsage: usage,
       contextAccounting: storedContextAccountingSnapshot,
       automationCreateContext,
+      cursor: loadedCursor,
+      hasMore: loadedHasMore,
     }) => {
       if (cancelled) return;
+      historyPageRef.current = {
+        conversationId,
+        cursor: loadedCursor,
+        hasMore: loadedHasMore,
+      };
       appliedExternalRevisionRef.current = conversationRevision;
       convActions.commitLoad({
         messages: loaded,

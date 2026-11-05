@@ -113,7 +113,7 @@ export function SelectionQuoteAction({ root, conversationId, onQuote, onOpenChil
         const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(range.text));
         if (!request.isCurrent()) return;
         const selection = {
-          conversationId, messageId: range.messageId, blockId: 'content' as const, revision: source.contentRevision,
+          conversationId, messageId: range.messageId, blockId: 'content' as const, revision: source.meta.contentRevision,
           start: range.start, end: range.end, exactText: range.text.slice(range.start, range.end),
           sourceTextHash: Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, '0')).join(''),
         };
