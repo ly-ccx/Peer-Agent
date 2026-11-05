@@ -7,6 +7,7 @@
 // 这是对既有 user/assistant 文本的事实解析，不是把文本提升为工具执行或系统指令。
 
 import type { ContentSegment, ChatMsg, ToolCallLegacy, SegmentGroup } from './types';
+import { readStreamingOpenSlot } from './streamingMarkdownSlot.ts';
 import { joinSummaryThinkingContent } from './thinkingSummaryJoin.ts';
 
 type ToolCallSegment = Extract<ContentSegment, { type: 'tool-call' }>;
@@ -291,7 +292,10 @@ export function groupSegments(segments: ContentSegment[]): SegmentGroup[] {
   const groups: SegmentGroup[] = [];
   for (const seg of segments) {
     if (seg.type === 'text') {
-      groups.push({ type: 'text', content: seg.content || '' });
+      const openSlot = readStreamingOpenSlot(seg);
+      groups.push(openSlot
+        ? { type: 'text', content: seg.content || '', openSlot }
+        : { type: 'text', content: seg.content || '' });
     } else if (seg.type === 'thinking') {
       const last = groups[groups.length - 1];
       // Only merge consecutive thinking segments with the same kind (including both

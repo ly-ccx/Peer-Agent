@@ -253,6 +253,11 @@ export function useVirtualChatTurns({
         pendingScrollCompensationRef.current = 0;
         if (scrollNode && compensation !== 0) {
           scrollNode.scrollTop += compensation;
+        }
+        // 测高补偿和贴底落在同一次布局回调里。贴底若放到 flush 返回之后，
+        // 会再读一遍 scrollHeight，并把命中测试拖进下一趟布局。
+        if (scrollNode) onMeasuredRef.current?.(index);
+        if (scrollNode) {
           viewportRef.current = {
             scrollTop: scrollNode.scrollTop,
             clientHeight: scrollNode.clientHeight,
@@ -264,10 +269,7 @@ export function useVirtualChatTurns({
       // 视口内/下方 turn（流式增长的那条）必须在本帧就把 spacer 同步到最新高度，
       // 否则贴底逻辑用的是上一帧的 totalSize，每帧都会“先窜上去再被拉回”。
       // 上方补偿仍走 rAF 合并，避免滚动惯性期间回跳。
-      if (!isAboveViewport) {
-        measurementFlushRef.current.flush();
-        onMeasuredRef.current?.(index);
-      }
+      if (!isAboveViewport) measurementFlushRef.current.flush();
     };
 
     element.dataset.virtualTurnIndex = String(index);

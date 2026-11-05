@@ -203,23 +203,31 @@ function isConversationValueEqual(previous: unknown, next: unknown): boolean {
   return false;
 }
 
-/** 高频工具参数进度由局部提示订阅，不应唤醒整棵 ChatSurface。 */
+/**
+ * 高频、且已有叶子自己订阅的字段，不应唤醒整棵 ChatSurface。
+ * draft 归输入区，toolProgress 归活动工具提示，activeUsage / contextAccounting 归用量叶子。
+ */
+const SURFACE_IGNORED_KEYS = new Set<keyof ConversationRuntimeState>([
+  'draft',
+  'toolProgress',
+  'activeUsage',
+  'contextAccounting',
+]);
+
 export function areConversationStatesEqualForSurface(
   previous: ConversationRuntimeState,
   next: ConversationRuntimeState,
 ): boolean {
   if (previous === next) return true;
   return CONVERSATION_STATE_KEYS.every((key) =>
-    key === 'draft'
-    || key === 'toolProgress'
-    || Object.is(previous[key], next[key]),
+    SURFACE_IGNORED_KEYS.has(key) || Object.is(previous[key], next[key]),
   );
 }
 
 /**
- * 缓存供 ChatSurface 使用的快照引用。仅 draft / toolProgress 变化时继续返回上一引用，
- * 满足 useSyncExternalStore 的稳定快照要求；两者由输入区和活动工具提示各自叶子订阅，
- * 其他任意字段变化都会立即透出新快照。
+ * 缓存供 ChatSurface 使用的快照引用。draft / toolProgress / activeUsage /
+ * contextAccounting 变化时继续返回上一引用，满足 useSyncExternalStore 的稳定快照要求。
+ * 这些字段由输入区、活动工具提示和用量叶子各自订阅；其他字段变化会立即透出新快照。
  */
 export function createConversationSurfaceSnapshotReader(
   readSnapshot: () => ConversationRuntimeState,
