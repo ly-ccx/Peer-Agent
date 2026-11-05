@@ -36,13 +36,22 @@ Version is pinned to the npm package version (e.g. `@peer-agent/cli@0.0.1-beta.3
 
 On an interactive launch, `peer` checks GitHub Releases in the background at most once every 24 hours. The check never blocks startup, is skipped in CI and non-TTY sessions, and silently preserves the current version when the network is unavailable.
 
-Stable versions follow stable Releases; beta versions follow prerelease Releases. When a newer matching version is available, the TUI asks for confirmation before changing anything:
+Stable versions follow stable Releases. Beta versions follow `-beta.N` prereleases, and rc versions follow `-rc.N` prereleases. When a newer matching version is available, the classic TUI asks for confirmation before changing anything:
 
 - npm installs upgrade with `npm install --global @peer-agent/cli@<version>`
 - pnpm installs upgrade with `pnpm add --global @peer-agent/cli@<version>`
 - direct GitHub Release installs download the matching archive and replace `peer` plus `peer-credential-helper` using staged files and rollback backups
 
-Press **Y** or **Enter** to confirm, or **N** / **Esc** to dismiss. Restart `peer` after a successful update. Automatic checks can be disabled with `PEER_AGENT_NO_UPDATE_CHECK=1`; manual reinstall commands continue to work.
+Press **Y** or **Enter** to confirm, or **N** / **Esc** to dismiss. Restart `peer` after a successful update. Automatic checks can be disabled with `PEER_AGENT_NO_UPDATE_CHECK=1`; `peer update` still checks when you run it.
+
+## Update command
+
+```bash
+peer update
+peer update --check
+```
+
+`peer update` ignores the 24-hour background interval, finds the newest release on the same channel, and installs it. `--check` prints the result and does not change the install. npm and pnpm installs upgrade that global package. A release-archive install replaces `peer` and `peer-credential-helper`. Restart `peer` after a successful update.
 
 ## Supported platforms (today)
 

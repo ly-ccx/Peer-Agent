@@ -31,6 +31,20 @@ describe('peer CLI entry', () => {
     expect(result.stderr).toBe('');
   });
 
+  test('peer update --help prints update usage without checking the network', async () => {
+    const result = await runPeer(['update', '--help']);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('peer update --check');
+    expect(result.stdout).toContain('rc (-rc.N)');
+    expect(result.stderr).toBe('');
+  });
+
+  test('peer update rejects unknown options before any install', async () => {
+    const result = await runPeer(['update', '--force']);
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain('unknown option --force');
+  });
+
   test('peer exec --help prints exec flags', async () => {
     const result = await runPeer(['exec', '--help']);
     expect(result.exitCode).toBe(0);
