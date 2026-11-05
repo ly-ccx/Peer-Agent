@@ -177,7 +177,7 @@ export async function checkBotHistoryMotion({ page, until, report, captureDirect
   const readInputs = () => existsSync(inputFile)
     ? readFileSync(inputFile, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
   const beforeInputs = readInputs().filter(input => input.historyRef === historyId).length;
-  const original = await page.evaluate(id => window.peerAgent.conversationsGet({ id }), historyId);
+  const original = await page.evaluate(id => window.peerAgent.conversationsGet({ id, full: true }), historyId);
   await sheet.getByRole('button', { name: '交给这个机器人继续', exact: true }).click();
   await until(async () => ({ confirmation: await sheet.locator('.bot-history-confirm').count(), shown: await sheet.count() }), state => state.confirmation === 1 || state.shown === 0);
   if (await sheet.count()) await sheet.getByRole('button', { name: '仍然继续', exact: true }).click();
@@ -185,9 +185,9 @@ export async function checkBotHistoryMotion({ page, until, report, captureDirect
   const inputs = await until(() => readInputs().filter(input => input.historyRef === historyId), rows => rows.length === beforeInputs + 1);
   const input = inputs.at(-1); assert.equal(input.workspaceId, workspaceId); assert.ok(input.historySnapshotId);
   await until(() => page.evaluate(workspaceId => window.peerAgent.projectAgentReadConversation({ workspaceId, latest: true }), workspaceId), result => result.messages.some(message => message.id === `input-${input.inputId}`));
-  const retained = await page.evaluate(id => window.peerAgent.conversationsGet({ id }), historyId);
-  assert.deepEqual(retained.messages, original.messages);
-  assert.equal(retained.contentRevision, original.contentRevision);
+  const retained = await page.evaluate(id => window.peerAgent.conversationsGet({ id, full: true }), historyId);
+  assert.deepEqual(retained.window, original.window);
+  assert.equal(retained.meta.contentRevision, original.meta.contentRevision);
   checks.push('preview bot picker uses SVG and the existing continuation IPC persists a canonical historical input in the selected bot; background confirmation remains governed');
   report.historyRegression = { grouping: true, search: true, preview: true, keyboard: true,
     errorRecovery: true, continuation: true, animations: true, reducedMotion: true };

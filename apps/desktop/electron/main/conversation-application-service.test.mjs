@@ -136,7 +136,7 @@ test('conversation commands preserve payload mapping and return values', () => {
   assert.deepEqual(calls, [
     ['search', {}],
     ['create', { title: 'T' }],
-    ['get', 'c'],
+    ['get', 'c', {}],
     ['update-title', 'c', 'New'],
     ['update-mode', 'c', 'goal'],
     ['update-fast-mode', 'c', true],
@@ -151,6 +151,33 @@ test('conversation commands preserve payload mapping and return values', () => {
     ['unpin', 'c'],
     ['reorder-pinned', ['b', 'a']],
     ['add-usage', 'c', { input: 1 }],
+  ]);
+});
+
+test('product get is a tail window and full history is explicit', () => {
+  const seen = [];
+  const { service } = createHarness({
+    getConversation(id, options) {
+      seen.push({ id, options });
+      return {
+        meta: { id, messageCount: 3 },
+        window: [{ id: 'tail' }],
+        cursor: options.before ?? '20',
+        hasMore: options.full !== true,
+      };
+    },
+  });
+
+  const page = service.get({ id: 'c' });
+  assert.equal(Object.hasOwn(page, 'messages'), false);
+  assert.deepEqual(page.window, [{ id: 'tail' }]);
+  assert.equal(page.hasMore, true);
+  assert.deepEqual(service.get({ id: 'c', before: '20', limit: 40 }).cursor, '20');
+  assert.equal(service.get({ id: 'c', full: true }).hasMore, false);
+  assert.deepEqual(seen.map((call) => call.options), [
+    {},
+    { before: '20', limit: 40 },
+    { full: true },
   ]);
 });
 

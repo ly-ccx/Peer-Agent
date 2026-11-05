@@ -132,7 +132,11 @@ export function createConversationApplicationService({
     list,
     search: (params) => ports.searchConversations(params || {}),
     create: (params) => ports.createConversation(params),
-    get: ({ id }) => ports.getConversation(id),
+    get: ({ id, limit, before, full } = {}) => ports.getConversation(id, {
+      ...(limit != null ? { limit } : {}),
+      ...(typeof before === 'string' && before ? { before } : {}),
+      ...(full === true ? { full: true } : {}),
+    }),
     updateTitle: ({ id, title }) => ports.updateTitle(id, title),
     updateMode: ({ id, mode }) => ports.updateMode(id, mode),
     updateFastMode: ({ id, fastMode }) => ports.updateFastMode(id, fastMode),

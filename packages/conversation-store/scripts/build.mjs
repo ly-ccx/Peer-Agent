@@ -21,6 +21,7 @@ const runtimeFiles = [
   'inherited-background.mjs',
   'background-snapshot-store.mjs',
   'conversation-file-lock.mjs',
+  'jsonl-byte-window.mjs',
   'message-retention-guard.mjs',
   'terminal-message-committer.mjs',
   'terminal-message-worker.cjs',

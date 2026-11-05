@@ -5,6 +5,7 @@ import { interactiveFeedbackFromFollowup, interactiveFeedbackAttachment } from '
 import {
   CANONICAL_HISTORY_PROJECTOR_VERSION,
   projectConversationHistory,
+  projectConversationHistoryYielding,
 } from './conversation-history-projector.ts';
 
 test('frozen conditions restored from legacy attachments remain user facts once, with full values and fixed versions', () => {
@@ -315,4 +316,15 @@ test('resource feedback is admitted only as bounded user-role material, with ver
   assert.match(String(result.messages[0]!.content), /untrusted factual material/); assert.match(String(result.messages[0]!.content), /sha256:/);
   assert.equal(result.messages.some(row => row.role === 'tool'), false); assert.equal(JSON.stringify(original), before);
   assert.notEqual(result.historyFingerprint, projectConversationHistory([{ role: 'user', content: 'Explain this excerpt' }]).historyFingerprint);
+});
+
+test('yielding projection matches the sync fingerprint and returns to the event loop', async () => {
+  const messages = Array.from({ length: 30 }, (_, index) => ({ role: 'user', content: `row ${index}` }));
+  let yields = 0;
+  const yielded = await projectConversationHistoryYielding(messages, {
+    yieldEvery: 10,
+    yield: async () => { yields += 1; },
+  });
+  assert.ok(yields > 0);
+  assert.equal(yielded.historyFingerprint, projectConversationHistory(messages).historyFingerprint);
 });

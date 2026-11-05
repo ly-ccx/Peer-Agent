@@ -146,6 +146,7 @@ import {
   createRestoredObservedContextAccountingSnapshot,
   createUnknownContextAccountingSnapshot,
   projectConversationHistory,
+  projectConversationHistoryYielding,
   reprojectContextAccountingWindow,
 } from '@peer-agent/runtime-core';
 import { contextAccountingModelKey } from '@peer-agent/protocol';
@@ -157,7 +158,7 @@ import { buildSystemContext, renderSystemContext } from './llm-prompts.mjs';
 import { createContextBaselineRecorder } from './prompt/context-baseline-recorder.mjs';
 import { createPromptSnapshotStore } from './prompt/prompt-snapshot-store.mjs';
 import { createConversationStore } from './conversation-store.mjs';
-import { createConversationLoadHandle } from './conversation-load-handle.mjs';
+import { createConversationLoadHandle, peekConversationLoad } from './conversation-load-handle.mjs';
 import { resolveConversationModelProviderId } from './conversation-model-binding.mjs';
 import { bindExternalGoalPlanChanges } from './goal-plan-change-bridge.mjs';
 import { createTaskNotificationBroker } from './task-notification-broker.mjs';
@@ -3298,7 +3299,21 @@ async function handleChatCompact({ conversationId, streamId }, sender) {
 async function handleChatContextRestored(
   { conversationId, modelProviderId = null } = {},
 ) {
-  const conv = conversationStore.getConversation(conversationId);
+  // Let the open-window IPC and the first paint run before any full-history work.
+  await new Promise((resolve) => { setImmediate(resolve); });
+  const cached = peekConversationLoad(conversationId);
+  const cachedRevision = Number(cached?.contentRevision);
+  const currentMeta = typeof conversationStore.readConversationWindow === 'function'
+    ? conversationStore.readConversationWindow(conversationId, { limit: 1 })
+    : null;
+  const revisionMatches = currentMeta
+    && Number.isSafeInteger(cachedRevision)
+    && cachedRevision === Number(currentMeta.meta?.contentRevision);
+  const conv = revisionMatches
+    ? cached
+    : typeof conversationStore.readConversationYielding === 'function'
+      ? await conversationStore.readConversationYielding(conversationId)
+      : null;
   if (!conv || !conv.messages?.length) return null;
 
   // 同一会话存在两条真实请求路径、组成不同(ADR 42 口径分离):
@@ -3310,7 +3325,7 @@ async function handleChatContextRestored(
     ? goalPlanStore.listPlansByConversation(conversationId)
     : [];
   const runningPlan = conversationPlans.find((plan) => plan?.runner?.status === 'running') ?? null;
-  const canonicalHistory = projectConversationHistory(conv.messages);
+  const canonicalHistory = await projectConversationHistoryYielding(conv.messages);
   const activeMessages = runningPlan
     ? [
         ...canonicalHistory.messages,

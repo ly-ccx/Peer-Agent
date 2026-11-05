@@ -1,4 +1,5 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, readdirSync, rmSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import { readPersistedHistoryFiles } from './persisted-history.mjs';
@@ -12,6 +13,7 @@ import path from 'node:path';
 import { contextAccountingModelKey, normalizeContextUsageBreakdown } from '@peer-agent/protocol';
 import { acquireMessageRetentionGuard } from './message-retention-guard.mjs';
 import { withFileLock, withFileLocksAsync } from './conversation-file-lock.mjs';
+import { readJsonlByteWindow } from './jsonl-byte-window.mjs';
 import { createTerminalMessageCommitter, conversationFileVersion } from './terminal-message-committer.mjs';
 
 function defaultStoreDir() {
@@ -1199,6 +1201,80 @@ export function createConversationStore(options = {}) {
     };
   }
 
+  const CONVERSATION_OPEN_WINDOW = 80;
+
+  function conversationMeta(id) {
+    const meta = readIndex().find((row) => row.id === id);
+    if (!meta) return null;
+    return { ...meta, contextSnapshot: durableContextSnapshot(meta) };
+  }
+
+  function normalizeWindowLimit(value) {
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed <= 0) return CONVERSATION_OPEN_WINDOW;
+    return Math.min(parsed, 200);
+  }
+
+  function parseWindowCursor(value) {
+    if (value == null || value === '') return null;
+    if (typeof value !== 'string' || !/^[0-9]+$/.test(value)) return null;
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) ? parsed : null;
+  }
+
+  /**
+   * Product read: tail window by default. `full: true` is a temporary compat
+   * hatch for diagnostics and migration scripts, not the chat open path.
+   */
+  function readConversationWindow(id, { limit, before, full = false, chunkBytes } = {}) {
+    const meta = conversationMeta(id);
+    if (!meta) return null;
+    if (full === true) {
+      const messages = mergeStreamPatch(id, readJsonl(convFile(id)));
+      return { meta, window: messages, cursor: null, hasMore: false };
+    }
+    const beforeByte = parseWindowCursor(before);
+    if (before != null && before !== '' && beforeByte == null) {
+      return { meta, window: [], cursor: null, hasMore: false };
+    }
+    const page = readJsonlByteWindow(convFile(id), {
+      limit: normalizeWindowLimit(limit),
+      beforeByte,
+      ...(chunkBytes ? { chunkBytes } : {}),
+    });
+    return {
+      meta,
+      window: mergeStreamPatch(id, page.messages),
+      cursor: page.cursor,
+      hasMore: page.hasMore,
+    };
+  }
+
+  async function readConversationYielding(id, { yieldEvery = 200, yield: pause } = {}) {
+    const meta = conversationMeta(id);
+    if (!meta) return null;
+    let text = '';
+    try {
+      text = await readFile(convFile(id), 'utf8');
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+    const lines = text.split('\n');
+    const messages = [];
+    const wait = pause ?? (() => new Promise((resolve) => { setImmediate(resolve); }));
+    for (let index = 0; index < lines.length; index += 1) {
+      if (index > 0 && index % yieldEvery === 0) await wait();
+      const line = lines[index].trim();
+      if (!line) continue;
+      try {
+        messages.push(JSON.parse(line));
+      } catch {
+        // Same as readJsonl: a corrupt line does not fail the conversation.
+      }
+    }
+    return { ...meta, messages: mergeStreamPatch(id, messages) };
+  }
+
   /**
    * 读取时合并流式 sidecar：主进程若在流式期间崩溃，JSONL 里那条 assistant
    * 消息可能落后于 sidecar 中的最新正文；按 messageId 匹配并浅合并，保证
@@ -1876,6 +1952,8 @@ export function createConversationStore(options = {}) {
     searchConversations,
     createConversation: changed(createConversation, 'created'),
     getConversation,
+    readConversationWindow,
+    readConversationYielding,
     getPersistedConversationHistory,
     readInteractionPage: interactions.readPage,
     readInteractionContext: interactions.readContext,

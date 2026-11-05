@@ -13,6 +13,10 @@ test('observed-only restore uses provider-request observations and never billing
   assert.doesNotMatch(handler, /conversationStore\.getLatestObservedUsage/);
   assert.match(handler, /conversationStore\.getLatestContextObservation/);
   assert.match(handler, /createRestoredObservedContextAccountingSnapshot/);
+  assert.match(handler, /peekConversationLoad\(conversationId\)/);
+  assert.match(handler, /readConversationYielding\(conversationId\)/);
+  assert.match(handler, /await projectConversationHistoryYielding\(conv\.messages\)/);
+  assert.doesNotMatch(handler, /conversationStore\.getConversation\(conversationId\)/);
 });
 
 test('main terminal writer persists request usage with the final assistant message', async () => {

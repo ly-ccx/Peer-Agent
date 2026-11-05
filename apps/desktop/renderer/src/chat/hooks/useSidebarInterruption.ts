@@ -18,7 +18,7 @@ export function useSidebarInterruption(id: string, updatedAt: string | null | un
     const state = conversationStore.getSnapshot(id);
     if (!isRunning && state.loadStatus !== 'ready' && state.messages.length === 0) {
       void clientApi.conversationsGet({ id }).then((conversation) => {
-        if (!cancelled) setPersisted(hasSidebarInterruption(conversation?.messages ?? []));
+        if (!cancelled) setPersisted(hasSidebarInterruption(conversation?.window ?? []));
       }).catch(() => { /* Unknown history is not evidence of interruption. */ });
     }
     return () => { cancelled = true; };
