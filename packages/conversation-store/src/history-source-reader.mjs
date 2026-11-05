@@ -17,8 +17,51 @@ export function freezeHistoryValue(value, plainOnly = false) {
   return value;
 }
 
+const FULL_HISTORY_LOADS = new Set([
+  'readPersistedHistoryFiles',
+  'getPersistedConversationHistory',
+  'getPersistedConversationHistories',
+  'getConversation',
+  'readConversationYielding',
+]);
+
+/** List preview loaders must not be a full JSONL history read. */
+export function assertListPreviewLoad(load) {
+  if (typeof load !== 'function' || FULL_HISTORY_LOADS.has(load.name) || load.fullHistory === true) {
+    throw Object.assign(new Error('LIST_HOT_PATH_FORBIDS_FULL_HISTORY'), { code: 'LIST_HOT_PATH_FORBIDS_FULL_HISTORY' });
+  }
+}
+
+/**
+ * Cache for list preview / tail reads. `load` is the cache-miss path and may
+ * return a materialized preview or an index tail. It must not be a full history read.
+ */
+export function createListPreviewSource({ describe, load, maxEntries = 512 }) {
+  assertListPreviewLoad(load);
+  if (describe) assertListPreviewLoad(describe);
+  const entries = new Map();
+  return (id) => {
+    const version = describe(id);
+    if (version == null) {
+      entries.delete(id);
+      return null;
+    }
+    const cached = entries.get(id);
+    if (cached && cached.version === version) {
+      entries.delete(id);
+      entries.set(id, cached);
+      return cached.value;
+    }
+    const value = load(id);
+    entries.set(id, { version, value });
+    while (entries.size > maxEntries) entries.delete(entries.keys().next().value);
+    return value;
+  };
+}
+
 /** One strictly versioned parse per Store, shared by explicit, version-checked history projections.
  * Default callbacks receive a copy. Explicit immutable consumers share frozen input.
+ * Not the list hot path: list previews use createListPreviewSource.
  */
 export function createHistorySourceReader({ load, maxEntries = 8, maxBytes = 64 * 1024 * 1024 }) {
   const entries = new Map(); let bytes = 0;

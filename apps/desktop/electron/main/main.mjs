@@ -157,7 +157,7 @@ import {
 import { buildSystemContext, renderSystemContext } from './llm-prompts.mjs';
 import { createContextBaselineRecorder } from './prompt/context-baseline-recorder.mjs';
 import { createPromptSnapshotStore } from './prompt/prompt-snapshot-store.mjs';
-import { createConversationStore } from './conversation-store.mjs';
+import { createClassicJsonlAdapter, createConversationStore, createSessionService } from './conversation-store.mjs';
 import { createConversationLoadHandle, peekConversationLoad } from './conversation-load-handle.mjs';
 import { resolveConversationModelProviderId } from './conversation-model-binding.mjs';
 import { bindExternalGoalPlanChanges } from './goal-plan-change-bridge.mjs';
@@ -382,13 +382,15 @@ const waitForMcpOAuthCallback = mcpOAuthCallback.wait;
 
 const llmConfigStore = createLlmConfigStore();
 const conversationStore = createConversationStore();
+const classicAdapter = createClassicJsonlAdapter(conversationStore);
+const classicSessions = createSessionService(classicAdapter);
 // taskOverview:changed 节流调度器：合并 conversations/automations/goalPlans 三类变更的
 // fan-out 广播（最小间隔 2s，payload 携带合并 scope）。治理 ~300ms 自激循环，详见
 // task-overview-broadcast.mjs 头注释与知识库 multi-task-ui-performance-remediation.md §12。
 const taskOverviewBroadcast = createTaskOverviewBroadcastScheduler({
   broadcast: (channel, payload) => broadcastToAllWindows(channel, payload),
 });
-const stopConversationChangeSubscription = conversationStore.subscribeChanges((event) => {
+const stopConversationChangeSubscription = classicSessions.subscribeRevision({}, (event) => {
   taskOverviewBroadcast.request({
     reason: 'conversations:changed',
     conversationId: event?.conversationId ?? null,
@@ -1420,12 +1422,21 @@ const mcpApplicationService = createMcpApplicationService({
 });
 
 const conversationApplicationService = createConversationApplicationService({
-  listConversations: (params) => conversationStore.listConversations(params),
+  listConversations: (params) => classicAdapter.listMeta(params),
   listConversationsByWorkspace: (workspacePath, params) =>
     conversationStore.listConversationsByWorkspace(workspacePath, params),
   searchConversations: (params) => conversationStore.searchConversations(params),
   createConversation: (params) => conversationStore.createConversation(params),
-  getConversation: createConversationReadProjection({ conversationStore, goalPlanStore, llmConfigStore }),
+  getConversation: createConversationReadProjection({
+    conversationStore,
+    goalPlanStore,
+    llmConfigStore,
+    readWindow: (id, options = {}) => classicAdapter.getWindow({
+      conversationId: id,
+      ...(options.limit != null ? { limit: options.limit } : {}),
+      ...(options.before != null ? { before: options.before } : {}),
+    }),
+  }),
   updateTitle: (id, title) => conversationStore.updateTitle(id, title),
   updateMode: (id, mode) => conversationStore.updateMode(id, mode),
   updateFastMode: (id, fastMode) => conversationStore.updateFastMode(id, fastMode),
@@ -1434,7 +1445,7 @@ const conversationApplicationService = createConversationApplicationService({
   updateAutomationCreateContext: (id, context) =>
     conversationStore.updateAutomationCreateContext(id, context),
   updateModelEffort: (id, options) => conversationStore.updateModelEffort(id, options),
-  appendMessage: (id, message, options) => conversationStore.appendMessage(id, message, options),
+  appendMessage: (id, message) => classicAdapter.append({ conversationId: id, message })?.meta ?? null,
   updateLastMessage: (id, content) => conversationStore.updateLastMessage(id, content),
   replaceMessages: (id, messages, options) =>
     conversationStore.replaceMessages(id, messages, options),
@@ -3303,9 +3314,7 @@ async function handleChatContextRestored(
   await new Promise((resolve) => { setImmediate(resolve); });
   const cached = peekConversationLoad(conversationId);
   const cachedRevision = Number(cached?.contentRevision);
-  const currentMeta = typeof conversationStore.readConversationWindow === 'function'
-    ? conversationStore.readConversationWindow(conversationId, { limit: 1 })
-    : null;
+  const currentMeta = classicAdapter.getWindow({ conversationId, limit: 1 });
   const revisionMatches = currentMeta
     && Number.isSafeInteger(cachedRevision)
     && cachedRevision === Number(currentMeta.meta?.contentRevision);

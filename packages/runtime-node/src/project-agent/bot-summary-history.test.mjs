@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { projectBotSummaryHistory } from './bot-summary-history.mjs';
+import { createBotSummaryHistory, projectBotSummaryHistory } from './bot-summary-history.mjs';
 import { projectBotListMessage } from './bot-directory.mjs';
 import { replyQuestionAnswered } from './card-projection.mjs';
 
@@ -17,19 +17,26 @@ test('summary records bound process bodies while preserving preview, question an
   assert.ok(JSON.stringify(summary).length<1500);assert.ok(!JSON.stringify(summary).includes('private'));
 });
 
-test('200 bot summaries stay warm within the bounded metadata cache and changed versions invalidate exactly one', () => {
-  const versions = new Map(Array.from({length:200},(_,i)=>[String(i),1])); let loads=0; let options;
-  const store={createHistoryProjection(project,opts){options=opts;return createHistoryProjectionReader({...opts,project,
-    describe:id=>({id,version:versions.get(id)}),load:({id})=>{loads++;return {messages:[{id,role:'assistant',kind:'agent_reply',content:'preview '+versions.get(id)}]};}});}};
-  const read=createBotSummaryHistory(store);
-  for(let round=0;round<5;round++)for(const id of versions.keys())assert.equal(read(id)[0].content,'preview 1');
-  assert.equal(loads,200);assert.equal(options.maxBytes,8*1024*1024);assert.ok(options.maxEntries<=512);
-  versions.set('73',2);assert.equal(read('73')[0].content,'preview 2');assert.equal(loads,201);
+test('list summaries stay on materialized previews and do not load full history when the revision is unchanged', () => {
+  let tails = 0;
+  const previews = new Map(Array.from({ length: 200 }, (_, i) => [String(i), {
+    availability: 'ready', excerpt: 'preview 1', contentRevision: 1, messageId: String(i), role: 'assistant', kind: 'agent_reply',
+  }]));
+  const store = {
+    readSessionPreview(id) { return previews.get(id) ?? null; },
+    readConversationWindow() { tails += 1; return { window: [] }; },
+    getPersistedConversationHistory() { throw new Error('FULL_HISTORY'); },
+    createHistoryProjection() { throw new Error('FULL_HISTORY'); },
+  };
+  const read = createBotSummaryHistory(store);
+  for (let round = 0; round < 5; round += 1) {
+    for (const id of previews.keys()) assert.equal(read(id)[0].content, 'preview 1');
+  }
+  assert.equal(tails, 0);
+  previews.set('73', { ...previews.get('73'), excerpt: 'preview 2', contentRevision: 2 });
+  assert.equal(read('73')[0].content, 'preview 2');
+  assert.equal(tails, 0);
 });
-import { createBotSummaryHistory } from './bot-summary-history.mjs';
-import { createHistoryProjectionReader } from '../../../conversation-store/src/history-projection-reader.mjs';
-
-
 test('only the current question carries bounded public context; older large replies never grow the list snapshot', () => {
   const messages = Array.from({ length: 1000 }, (_, i) => ({ id: String(i), kind: 'agent_reply', role: 'assistant',
     content: 'public preface '.repeat(1000) + 'Concrete decision at the end', question: { options: ['A', 'B'] } }));
@@ -38,6 +45,24 @@ test('only the current question carries bounded public context; older large repl
   assert.equal(summary.at(-1).questionContext.length, 2000);
   assert.ok(summary.at(-1).questionContext.endsWith('Concrete decision at the end'));
   assert.ok(JSON.stringify(summary).length < 250000);
+});
+
+test('a preview cache miss reads a tail window and never the full history', () => {
+  let windowOptions = null;
+  const store = {
+    readSessionPreview() { return { availability: 'rebuilding', excerpt: '', contentRevision: 4, messageId: '' }; },
+    readConversationWindow(_id, options) {
+      windowOptions = options;
+      return { window: [{ id: 'm', role: 'assistant', kind: 'agent_reply', content: 'tail text' }] };
+    },
+    getPersistedConversationHistory() { throw new Error('FULL_HISTORY'); },
+    createHistoryProjection() { throw new Error('FULL_HISTORY'); },
+  };
+  const read = createBotSummaryHistory(store);
+  assert.equal(read('c')[0].content, 'tail text');
+  assert.equal(read('c')[0].content, 'tail text');
+  assert.equal(windowOptions.full, undefined);
+  assert.equal(windowOptions.limit > 0, true);
 });
 
 test('short and long Unicode previews preserve ordinary code point and whitespace semantics', () => {

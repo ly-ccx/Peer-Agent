@@ -18,6 +18,8 @@ const runtimeFiles = [
   'persisted-history.d.mts',
   'history-projection-reader.mjs',
   'history-source-reader.mjs',
+  'session-preview.mjs',
+  'session-service.mjs',
   'inherited-background.mjs',
   'background-snapshot-store.mjs',
   'conversation-file-lock.mjs',

@@ -122,6 +122,7 @@ export function BotListShell({
   }, []);
   const replyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [attention, setAttention] = useState<{ workspaceId?: string } | null>(null);
+  const openBotAttention = useCallback((workspaceId: string) => { setAttention({ workspaceId }); }, []);
   const attentionRequestRef = useRef(0);
   const [attentionFocus, setAttentionFocus] = useState<{ workspaceId: string; messageId: string; requestId: number; notificationRequestId: number | null } | null>(null);
   const focusTarget = resolveBotMessageFocus(notificationFocus, attentionFocus);
@@ -399,7 +400,7 @@ export function BotListShell({
           i18n={i18n}
           onHighlight={list.setHighlightedId}
           onOpen={list.openBot}
-          onAttention={workspaceId => setAttention({ workspaceId })}
+          onAttention={openBotAttention}
         />
         {list.catalog.length === 0 && list.status === 'ready' && !list.searching ? (
           <p className="bot-list-hint">{i18n.t('projectAgent.list.emptyHint')}</p>
