@@ -1,3 +1,4 @@
+import { runtimeWorkControlHeld } from './runtime-disposition.ts';
 import { hasUnsettledDispatch, recoveryCheckpointAvailable } from './recovery-policy.mjs';
 import { workBudgetCanResume, workBudgetBinding } from './work-budget.mjs';
 import { budgetBoundary, budgetReservationBoundary, effectiveWorkLimits, legacyBudgetMigration } from './work-budget-policy.mjs';
@@ -7,7 +8,7 @@ export function replyRecoveryAdmission(work, checkpoint, { limits, readCheckpoin
   const fail = (code, budget) => ({ ok: false, code, ...(budget ? { budget } : {}) });
   if (work?.recovery?.blockedCode === 'COORDINATION_RECONCILIATION_REQUIRED') return fail('COORDINATION_RECONCILIATION_REQUIRED');
   if (!work || ['delivered', 'cancelled', 'waiting_user', 'coalesced'].includes(work.state)) return fail('STALE_TURN');
-  if (work.pendingControl || work.stopScope === 'work' && work.state === 'paused') return fail('STALE_TURN');
+  if (runtimeWorkControlHeld(work)) return fail('STALE_TURN');
   if (work.state === 'waiting_children' && !(work.stopScope === 'reply' && checkpoint?.outcome?.stopped === true)) return fail('STALE_TURN');
   if (hasUnsettledDispatch(work) || work.recovery?.failureKind === 'execution_outcome_unknown') return fail('EXECUTION_OUTCOME_UNKNOWN');
   const effective = effectiveWorkLimits(work.budget, limits || work.budget?.limits);

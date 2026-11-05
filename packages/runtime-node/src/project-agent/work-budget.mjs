@@ -1,5 +1,6 @@
 import { verificationDispatchTarget } from './verification-dispatch-recovery.mjs';
 import { randomUUID } from 'node:crypto';
+import { runtimeWorkHeld } from './runtime-disposition.ts';
 import { executionBindingCurrent } from './coordination-kernel.mjs';
 import { resolveWorkBudgetPolicy, effectiveWorkLimits, budgetBoundary, budgetReservationBoundary, legacyBudgetMigration } from './work-budget-policy.mjs';
 export { DEFAULT_WORK_BUDGET } from './work-budget-policy.mjs';
@@ -37,7 +38,7 @@ export function createWorkBudgetGuard(profile) {
   function change(update, requireActive = true) {
     store.assertOwner();
     const work = readWork();
-    const stopped = work && ['paused', 'cancelled', 'budget_limited', 'blocked_system', 'coalesced'].includes(work.state);
+    const stopped = work && (runtimeWorkHeld(work) || ['paused', 'cancelled', 'budget_limited', 'blocked_system', 'coalesced'].includes(work.state));
     const stopsExecutor = profile.role === 'project_agent' || work?.stopScope !== 'reply' || ['budget_limited', 'coalesced'].includes(work?.state);
     if (!work || requireActive && stopped && stopsExecutor) throw new Error('work_execution_stopped');
     if (requireActive && profile.coordinationBinding) {

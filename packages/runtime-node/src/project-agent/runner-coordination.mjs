@@ -13,7 +13,7 @@ import { historyExecutionHeld } from './history-resumption.mjs';
 import { reconcileRepairCustody } from './repair-custody.mjs';
 import { createDecisionFrame } from './decision-frame.mjs';
 import { intentDecisionAdmittedForTurn } from './intent-reply-bindings.mjs';
-import { decideRuntimeDisposition, runtimeWorkHeld } from './runtime-disposition.ts';
+import { decideRuntimeDisposition, runtimeWorkControlHeld, runtimeWorkHeld } from './runtime-disposition.ts';
 import { createEmptyResourceWaitPort, resourceWaitScope, readResourceWaitFacts } from './resource-wait.ts';
 import { reconcileResourceWait } from './resource-wait-recovery.mjs';
 
@@ -40,7 +40,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
   const delivery = createRunnerReplyLifecycle({ store, workspaceId, conversationId, readMessages, remember, onReplied, onDeferred, onDeliveryChanged, resolveRoster: rows, eventObserved, now });
   function start(job) {
     const inputs = (job.userInputs || []).map(input => input.inputId);
-    const events = job.events || [];
+    let events = job.events || [];
     const missing = events.filter(event => !readSnapshot().events[event.eventId]);
     if (missing.length) store.transfer(missing);
     // A fresh batch must not replace an unfinished slice's protected checkpoint.
@@ -50,6 +50,16 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     delegationRecovery.reconcile(job.workId);
     dispatchRecovery.reconcile(job.workId);
     const existing = readWork(job.workId);
+    const resumingStoppedReply = job.manualRecovery && existing?.end === 'user_stopped';
+    if (resumingStoppedReply) {
+      const snapshot = readSnapshot();
+      const sessionIds = ownedSessionIds(existing, snapshot, rows());
+      const otherEvents = new Set(Object.values(snapshot.works).filter(work => work.workId !== job.workId)
+        .flatMap(work => [...(work.pendingEventIds || []), ...(work.consumedEventIds || [])]));
+      const available = store.pendingEvents().filter(event => sessionIds.has(event.sessionId) && !otherEvents.has(event.eventId));
+      events = [...new Map([...events, ...available].map(event => [event.eventId, event])).values()];
+      job.events = events;
+    }
     if (existing?.recovery?.dispatchesReconciled) job.continuation = true;
     const checkpointRef = existing?.checkpointRef || store.checkpoint(job.workId, { job: { ...job, continuation: true }, outcome: { rounds: [] } });
     const recovery = job.manualRecovery ? manualRecovery(existing?.recovery, now())
@@ -57,7 +67,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
         autoAttempts: existing.recovery.autoAttempts + (job.recoveryReservationId ? 1 : 0) } : undefined;
     store.saveWork({ checkpointRef, schemaVersion: 1, workspaceId, parentConversationId: conversationId,
       anchorInputIds: inputs, sessionIds: [], waitFor: [], consumedEventIds: [], pendingResultRefs: [], stopScope: 'reply',
-      ...existing, workId: job.workId, attemptId: job.attemptId, pendingEventIds: events.map(event => event.eventId), state: 'runnable', recovery,
+      ...existing, ...(resumingStoppedReply ? { end: 'yielded' } : {}), workId: job.workId, attemptId: job.attemptId, pendingEventIds: events.map(event => event.eventId), state: 'runnable', recovery,
       waitFor: (existing?.waitFor || []).filter(wait => wait.kind !== 'retry_timer') }, { returnState: false });
   }
 
@@ -99,6 +109,10 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
         blockedCode: 'RECOVERY_CHECKPOINT_UNAVAILABLE' },
       waitFor: (work.waitFor || []).filter(wait => wait.kind !== 'retry_timer') }, { returnState: false });
   }
+  function ownedSessionIds(work, snapshot, roster) {
+    return new Set([...(work.sessionIds || []), ...(snapshot.mandates?.[work.workId]?.sessionIds || []),
+      ...ownedSessions(work, { events: [] }, roster).map(row => row.sessionId)]);
+  }
   function pendingFrom(snapshot) {
     const works = Object.values(snapshot.works);
     // An owned batch continues through its durable job, never a duplicate wake.
@@ -107,11 +121,13 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     if (!pending.length) return [];
     const history = snapshot.lastRecovery;
     const foreign = new Set(Object.values(snapshot.mandates || {}).filter(row => row.parentConversationId !== conversationId).flatMap(row => row.sessionIds));
-    for (const row of rows()) if (row.origin?.parentConversationId && row.origin.parentConversationId !== conversationId) foreign.add(row.sessionId);
+    const roster = rows();
+    const heldSessions = new Set(works.filter(runtimeWorkHeld).flatMap(work => [...ownedSessionIds(work, snapshot, roster)]));
+    for (const row of roster) if (row.origin?.parentConversationId && row.origin.parentConversationId !== conversationId) foreign.add(row.sessionId);
     return pending.filter(event => !foreign.has(event.sessionId)
       && !history?.quarantinedSessionIds?.includes(event.sessionId) && !history?.quarantinedEventIds?.includes(event.eventId)
       && !works.some(work => historyExecutionHeld(work) && work.sessionIds?.includes(event.sessionId))
-      && !works.some(work => work.sessionIds?.includes(event.sessionId) && runtimeWorkHeld(work)));
+      && !heldSessions.has(event.sessionId));
   }
   // A synchronous selection shares preparation only until control returns to its
   // caller. All writes invalidate the decision; no snapshot crosses an await.
@@ -293,7 +309,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       const existing = readWork(job.workId);
       if (!existing || existing.parentConversationId !== conversationId) return false;
       if (historyExecutionHeld(existing)) return false;
-      if (existing.pendingControl || existing.stopScope === 'work' && ['paused', 'cancelled'].includes(existing.state)) return false;
+      if (runtimeWorkControlHeld(existing)) return false;
       if (runtimeWorkHeld(existing) && !job.manualRecovery) return false;
       if (job.recoveryRevision !== undefined && existing.revision !== job.recoveryRevision) return false;
       if (job.recoveryReservationId && (existing.recovery?.reservationId !== job.recoveryReservationId || !recoveryReservationDue(existing, now()))) return false;
@@ -301,6 +317,23 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       return true;
     },
     start,
+    interruptedStops(messages) {
+      const presented = new Set(messages.filter(row => row.card === 'agent_stopped').map(row => row.turnId));
+      return Object.values(readSnapshot().works).flatMap(work => {
+        if (work.parentConversationId !== conversationId || work.stopScope !== 'reply' || work.end !== 'user_stopped'
+          || !['paused', 'waiting_children'].includes(work.state) || !work.attemptId || presented.has(work.attemptId)
+          || historyExecutionHeld(work) || runtimeWorkControlHeld(work)) return [];
+        const job = readProtectedWork(work)?.job;
+        return job?.workId === work.workId ? [{ work, job }] : [];
+      });
+    },
+    stopReply(workId, turnId) {
+      const work = readWork(workId);
+      if (work?.parentConversationId !== conversationId || work.attemptId !== turnId) return false;
+      if (runtimeWorkControlHeld(work)) return true;
+      store.saveWork({ ...work, state: 'paused', stopScope: 'reply', end: 'user_stopped' }, { returnState: false });
+      return true;
+    },
     stalls(job, outcome, roster) {
       if (outcome.silentWait) return false;
       if (reportedWaitFor({ job, outcome, state: readSnapshot(), messages: readMessages(), sessions: Array.isArray(roster) ? roster : roster?.items || roster?.sessions || [] })) return false;

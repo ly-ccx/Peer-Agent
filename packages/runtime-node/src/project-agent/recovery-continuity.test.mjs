@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createProjectAgentRunner } from './runner.mjs';
@@ -8,6 +8,7 @@ import { createProjectInbox } from './project-inbox.mjs';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
 import { createWorkBudgetGuard, registerWorkBudget } from './work-budget.mjs';
 import { createRuntimePipeline } from '@peer-agent/runtime-sdk';
+import { createNodeProviderBundle } from '../provider-bundle.ts';
 
 function world(executeTurn, extra = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'peer-request-recovery-'));
@@ -28,7 +29,7 @@ function world(executeTurn, extra = {}) {
   let budgetPolicy = extra.workBudget || {};
   let release = registerWorkBudget('w', store, budgetPolicy);
   let runner = createProjectAgentRunner({ ...ports, coordinationStore: store });
-  return { messages, inbox, get store() { return store; }, get runner() { return runner; },
+  return { root, messages, inbox, get store() { return store; }, get runner() { return runner; },
     work: () => Object.values(store.read().works)[0],
     loseLease: () => { owned = false; },
     async advance(ms) { clock += ms; for (const [id, timer] of [...timers]) if (timer.at <= clock) { timers.delete(id); await timer.fn(); } },
@@ -502,6 +503,92 @@ test('a stopped parent reply can explicitly continue while its child runs, but a
     } finally { env.close(); }
   }
 });
+
+for (const interruptedHost of [false, true]) {
+  test(`user stop holds through child wakes and host reload, then explicit continue delivers the original work (${interruptedHost ? 'before' : 'after'} drain)`, async () => {
+    let begin, finish, activeGuard, bundle, requests = 0;
+    const started = new Promise(resolve => { begin = resolve; });
+    const draining = new Promise(resolve => { finish = resolve; });
+    const roster = [], executions = [];
+    async function readInput(guard, file, toolCallId) {
+      const call = { toolCallId, capabilityId: 'local.file.read', arguments: { path: file } };
+      guard.beforeTool(call);
+      const execution = await bundle.runtime.execute({ sessionId: 'file-task', projectionId: bundle.projection.createdAt, call });
+      assert.equal(execution.result.status, 'completed');
+      assert.equal(execution.result.permissionGrant.decision, 'allow');
+      assert.equal(execution.result.evidence.toolCallId, toolCallId);
+      executions.push({ call, result: execution.result });
+      return { role: 'tool', tool_call_id: toolCallId, content: execution.result.output.content };
+    }
+    const env = world(async ({ plan, turnProfile, signal }) => {
+      const guard = createWorkBudgetGuard(turnProfile);
+      try {
+        guard.beforeRequest({ accounting: 'physical_dispatch' });
+        if (++requests === 1) {
+          activeGuard = guard;
+          const first = await readInput(guard, 'first.txt', 'already-read');
+          guard.checkpoint({ provider: 'openai', messages: [first] }, executions);
+          roster.push({ sessionId: 'child', status: 'running', executionOwnership: 'live', origin: { workId: turnProfile.workId } });
+          begin(); await draining;
+          assert.equal(signal.aborted, true);
+          return { text: 'late output that must never be delivered' };
+        }
+        if (plan.userInputs.some(row => row.inputId === 'independent')) return { text: '独立任务已完成。' };
+        const first = turnProfile.providerCheckpoint?.messages[0];
+        assert.equal(first?.content, '19');
+        assert.ok(plan.events.some(event => event.eventId === 'child-done'), 'the original recovery observes its queued child result');
+        assert.equal(roster[0].status, 'accepted');
+        const second = await readInput(guard, 'second.txt', 'remaining-read');
+        guard.checkpoint({ provider: 'openai', messages: [first, second] }, executions);
+        return { text: `两个文件的合计是 ${Number(first.content) + Number(second.content)}。` };
+      } finally { guard.finish(); }
+    }, { resolveRoster: () => roster });
+    try {
+      writeFileSync(path.join(env.root, 'first.txt'), '19');
+      writeFileSync(path.join(env.root, 'second.txt'), '23');
+      bundle = createNodeProviderBundle({ workspaceRoot: env.root, mode: 'project_agent', shell: false });
+      const active = env.runner.enqueueUserInputs([{ inputId: 'one', text: '读取两个文件里的数字并交付合计' }]);
+      await started;
+      const original = env.work();
+      assert.equal(env.runner.stopResponse(original.attemptId).ok, true);
+      assert.throws(() => activeGuard.beforeRequest({ accounting: 'physical_dispatch' }), /work_execution_stopped/);
+      assert.throws(() => activeGuard.beforeTool({ toolCallId: 'after-stop', capabilityId: 'local.file.read' }), /work_execution_stopped/);
+      if (interruptedHost) env.runner.dispose();
+      finish();
+      await active;
+
+      roster[0] = { ...roster[0], status: 'accepted', executionOwnership: 'ended' };
+      env.inbox.append('w', [{ eventId: 'child-done', kind: 'report_available', sessionId: 'child', at: '2026-10-10T06:00:00Z' }]);
+      env.restart(); await env.advance(120000); await env.runner.kick();
+      assert.equal(requests, 1, 'host restart, time and an owned child result cannot wake a stopped reply');
+      assert.equal(env.work().end, 'user_stopped');
+      assert.equal(env.messages.filter(row => row.kind === 'agent_reply').length, 0);
+      const stoppedCards = () => env.messages.filter(row => row.card === 'agent_stopped' && row.turnId === original.attemptId);
+      assert.equal(stoppedCards().length, 1, 'a lost drain must still restore the original explicit continue entry');
+      assert.equal(stoppedCards()[0].cards[0].actions[0].payload.turnId, original.attemptId);
+      await env.runner.enqueueUserInputs([input('independent')]);
+      assert.equal(requests, 2, 'a fresh independent input is still runnable');
+      assert.equal(env.store.readWork(original.workId).end, 'user_stopped');
+
+      const results = await Promise.all([env.runner.retryStopped(original.attemptId), env.runner.retryStopped(original.attemptId)]);
+      assert.ok(results.some(result => result.ok && result.workId === original.workId), JSON.stringify(results));
+      const delivered = env.store.readWork(original.workId);
+      assert.equal(delivered.state, 'delivered');
+      assert.equal(delivered.end, 'reply_committed');
+      assert.equal(delivered.budget.modelRequests, 2);
+      assert.equal(delivered.budget.toolCalls, 2);
+      assert.deepEqual(executions.map(row => row.result.evidence.toolCallId), ['already-read', 'remaining-read']);
+      assert.deepEqual(env.store.readCheckpoint(delivered.nativeCheckpointRef).messages.map(row => row.content), ['19', '23']);
+      assert.deepEqual(delivered.sessionIds, ['child']);
+      assert.ok(delivered.consumedEventIds.includes('child-done'));
+      const replies = env.messages.filter(row => row.kind === 'agent_reply' && row.meta?.workId === original.workId);
+      assert.deepEqual(replies.map(row => row.content), ['两个文件的合计是 42。']);
+      env.restart(); await env.runner.kick();
+      assert.equal(requests, 3, 'duplicate continue and restart do not repeat delivery');
+      assert.equal(stoppedCards().length, 1);
+    } finally { finish(); await bundle?.dispose(); env.close(); }
+  });
+}
 
 test('a new user input interrupts a long user slice without pausing its independent continuation', async () => {
   let started, release; const began = new Promise(resolve => { started = resolve; });

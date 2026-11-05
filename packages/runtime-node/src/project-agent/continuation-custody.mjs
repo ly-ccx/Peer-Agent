@@ -1,6 +1,7 @@
 import { hasUnsettledDispatch } from './recovery-policy.mjs';
 import { reportedWaitCurrent } from './reported-wait.mjs';
 import { workBudgetBinding } from './work-budget.mjs';
+import { runtimeWorkHeld } from './runtime-disposition.ts';
 
 /** One automatic observer for each child-result scope. Never transfers execution authority. */
 export function reconcileContinuationCustody({ store, conversationId, sessions }) {
@@ -12,7 +13,7 @@ export function reconcileContinuationCustody({ store, conversationId, sessions }
   for (const work of Object.values(state.works)) {
     if (work.parentConversationId !== conversationId || work.anchorInputIds?.length || work.intentCoordination || work.stopScope === 'work'
       || !['runnable', 'waiting_children', 'waiting_user'].includes(work.state) || !work.checkpointRef
-      || work.recovery || work.pendingControl || prepared.has(work.workId) || hasUnsettledDispatch(work)
+      || work.recovery || runtimeWorkHeld(work) || prepared.has(work.workId) || hasUnsettledDispatch(work)
       || Object.keys(work.budget?.attempts || {}).some(id => workBudgetBinding(work.workspaceId)?.activeAttempts?.has(id))
       || Object.values(work.budget?.attempts || {}).some(attempt => attempt.pendingTools?.length)) continue;
     let checkpoint;

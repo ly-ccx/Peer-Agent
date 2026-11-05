@@ -595,6 +595,51 @@ try {
     await page.locator('.bot-composer textarea').waitFor();
     await checkBotYieldFeedback({ page, until, report, captureDirectory: root,
       advance: (scenario, phase) => writeStreamingCommand(streamCommand, scenario, phase), readFixtureTurns: () => readObserved('turns') });
+  } else if (process.argv.includes('--stop-resume-only')) {
+    assert.ok(process.argv.includes('--streaming'), '--stop-resume-only requires the isolated --streaming cognition fixture');
+    const bot = fixture.bots[0];
+    const readStore = createWorkCoordinationStore({ rootDir: path.join(home, 'project-runtime'), workspaceId: bot.workspaceId });
+    try {
+      await page.setViewportSize({ width: 1280, height: 780 });
+      await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+      const scenario = 'RC_STREAM_STOP', composer = page.locator('.bot-composer textarea');
+      await composer.fill(scenario); await composer.press('Enter');
+      const stop = page.getByRole('button', { name: '停止生成', exact: true });
+      await stop.waitFor();
+      writeStreamingCommand(streamCommand, scenario, 2);
+      await page.locator('.bot-live-reply').getByText('我先看看项目的整体情况，整理好后告诉你重点。', { exact: true }).waitFor();
+      const userRowId = await page.locator('.bot-user').filter({ hasText: scenario }).getAttribute('id');
+      const workId = coordinationWorkId(bot.conversationId, [userRowId.slice('bot-msg-input-'.length)]);
+      const original = await until(() => readStore.readWork(workId), work => Boolean(work?.attemptId));
+      const attempts = () => readObserved('turns').filter(turn => turn.role === 'project_agent' && turn.scenario === scenario);
+      assert.equal(attempts().length, 1);
+      await composer.fill('停止后保留这份草稿');
+      await stop.click();
+      const stopped = page.locator('.bot-stopped-reply');
+      await stopped.getByText('生成已停止，以上内容未完成', { exact: true }).waitFor();
+      const held = readStore.readWork(workId);
+      assert.equal(held.end, 'user_stopped'); assert.equal(held.attemptId, original.attemptId);
+      assert.equal(await composer.inputValue(), '停止后保留这份草稿');
+      await page.screenshot({ animations: 'disabled', path: path.join(root, 'stop-resume-stopped.png') });
+      // Let the old fixture become able to finish and re-open the conversation.
+      // It may only dispatch a second attempt after the explicit retry.
+      writeStreamingCommand(streamCommand, scenario, 3);
+      await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-001' }) }).click();
+      await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+      const resume = stopped.getByRole('button', { name: '继续尝试', exact: true });
+      await resume.waitFor();
+      assert.equal(attempts().length, 1);
+      assert.equal(readStore.readWork(workId).end, 'user_stopped');
+      await resume.click();
+      await page.locator('.bot-reply').filter({ hasText: '开始修改前，先核对项目规则。' }).waitFor();
+      const delivered = await until(() => readStore.readWork(workId), work => work?.state === 'delivered');
+      assert.equal(delivered.end, 'reply_committed');
+      assert.notEqual(delivered.attemptId, original.attemptId);
+      assert.equal(attempts().length, 2);
+      await page.screenshot({ animations: 'disabled', path: path.join(root, 'stop-resume-delivered.png') });
+      report.stopResume = { workId, before: original.attemptId, held: held.end, after: delivered.attemptId, end: delivered.end, attempts: attempts().length };
+      report.checks.push('stop via production IPC remains durable on conversation re-entry; explicit retry commits one reply on the original work');
+    } finally { readStore.close(); }
   } else if (process.argv.includes('--streaming-only')) {
     assert.ok(process.argv.includes('--streaming'), '--streaming-only requires the isolated --streaming cognition fixture');
     await page.setViewportSize({ width: 1280, height: 780 });
