@@ -142,7 +142,7 @@ test('conversation commands preserve payload mapping and return values', () => {
     ['update-fast-mode', 'c', true],
     ['update-preferred-execution-isolation', 'c', 'worktree'],
     ['update-model-effort', 'c', { effort: 'high', modelProviderId: 'provider' }],
-    ['append-message', 'c', { role: 'user' }],
+    ['append-message', 'c', { role: 'user' }, { returnMessages: false }],
     ['update-last-message', 'c', 'x'],
     ['replace-messages', 'c', [], { allowEmpty: true }],
     ['archive', 'c'],
@@ -152,4 +152,25 @@ test('conversation commands preserve payload mapping and return values', () => {
     ['reorder-pinned', ['b', 'a']],
     ['add-usage', 'c', { input: 1 }],
   ]);
+});
+
+test('classic append does not return a messages array', () => {
+  const { service } = createHarness({
+    appendMessage(id, message, options) {
+      assert.equal(id, 'c');
+      assert.deepEqual(message, { role: 'user', content: 'hello' });
+      assert.deepEqual(options, { returnMessages: false });
+      return {
+        id,
+        messageCount: 4,
+        contentRevision: 4,
+        messages: [{ role: 'user', content: 'hello' }, { role: 'assistant', content: 'history' }],
+      };
+    },
+  });
+
+  const result = service.appendMessage({ id: 'c', message: { role: 'user', content: 'hello' } });
+  assert.equal(Object.hasOwn(result, 'messages'), false);
+  assert.equal(result.messageCount, 4);
+  assert.equal(result.contentRevision, 4);
 });

@@ -3,6 +3,13 @@ function assertFunction(value, label) {
   return value;
 }
 
+function withoutReturnedMessages(result) {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return result;
+  if (!Object.hasOwn(result, 'messages')) return result;
+  const { messages: _messages, ...meta } = result;
+  return meta;
+}
+
 export function createConversationApplicationService({
   listConversations,
   listConversationsByWorkspace,
@@ -135,7 +142,9 @@ export function createConversationApplicationService({
       ports.updateAutomationCreateContext(id, context),
     updateModelEffort: ({ id, effort, modelProviderId }) =>
       ports.updateModelEffort(id, { effort, modelProviderId }),
-    appendMessage: ({ id, message }) => ports.appendMessage(id, message),
+    appendMessage: ({ id, message }) => withoutReturnedMessages(
+      ports.appendMessage(id, message, { returnMessages: false }),
+    ),
     updateLastMessage: ({ id, content }) => ports.updateLastMessage(id, content),
     replaceMessages: ({ id, messages, allowEmpty = false }) =>
       ports.replaceMessages(id, messages, { allowEmpty }),
