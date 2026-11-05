@@ -375,7 +375,8 @@ export function createDelegationProvider({
             ...(reviewed?.nextAction ? { nextAction: reviewed.nextAction } : {}) },
         };
       }
-      const detail = buildVerificationDetail({ ...reviewed.facts, sessionId: input.sessionId });
+      // The new verdict below has its own event. A previous persisted review cannot describe it.
+      const detail = buildVerificationDetail({ ...reviewed.facts, explicitVerification: undefined, sessionId: input.sessionId });
       const event = {
         kind: 'verdict',
         sessionId: input.sessionId,

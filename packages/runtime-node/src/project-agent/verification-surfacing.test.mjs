@@ -37,11 +37,13 @@ for (const passed of [true, false]) test(`task verification and main-bot reporti
   const call = (name, args) => ({ call: { toolCallId: name, capabilityId: `local.delegation.${name}`, arguments: args } });
   const baseline = await provider.executeCapability(call('get_verification_detail', { sessionId: 'session' }), context);
   assert.equal(verification.facts('session').explicitVerification, undefined);
+  assert.equal(baseline.result.output.explicitVerification, undefined);
   const endAutomaticReview = beginVerificationAttempt(plan.planId, 'automatic-review');
   try {
     const pending = await provider.executeCapability(call('get_verification_detail', { sessionId: 'session' }), context);
     assert.equal(pending.result.output.verificationInProgress, true);
     assert.equal(pending.result.output.outcome, baseline.result.output.outcome);
+    assert.equal(pending.result.output.explicitVerification, undefined);
     const busy = await provider.executeCapability(call('verify_session', { sessionId: 'session' }), context);
     assert.equal(busy.result.status, 'failed');
     assert.equal(busy.result.output.error, 'verifier_in_progress');
@@ -70,10 +72,13 @@ for (const passed of [true, false]) test(`task verification and main-bot reporti
   assert.deepEqual(verification.facts('session').explicitVerification, { verdictRef: result.event.verdictRef, outcome: result.status });
   const stale = createSessionVerification({ goalPlanStore: reopened, readReport: () => 'Changed worker report' });
   assert.equal(stale.facts('session').explicitVerification, undefined);
+  const staleDetail = (await createDelegationProvider({ verification: stale }).executeCapability(call('get_verification_detail', { sessionId: 'session' }), context)).result.output;
+  assert.equal(staleDetail.explicitVerification, undefined);
   const detail = supervisor.get({ sessionId: 'session', detail: 'report' }).report.verification;
   const toolDetail = (await createDelegationProvider({ verification }).executeCapability(call('get_verification_detail', { sessionId: 'session' }), context)).result.output;
   const { ok, ...body } = toolDetail;
   assert.deepEqual(detail, body, 'task drawer and model tool use the same current verification');
+  assert.deepEqual(detail.explicitVerification, { verdictRef: result.event.verdictRef, outcome: result.status });
   assert.equal(detail.outcome, result.status);
   assert.equal(detail.verificationInProgress, undefined);
   assert.ok(detail.checks.some(check => check.evidenceRefs.includes('tool-result://fact')));
