@@ -139,11 +139,23 @@ New Modules must increase Locality or Leverage. Avoid shallow pass-through wrapp
 
 ## Change Discipline
 
-Before implementing a non-trivial change, classify it:
+Before any modification or new feature, pass the existing ADR set, then classify the change. This keeps new work on the decisions already recorded and leaves superseded clauses, revision dates, and unfinished debt in the knowledge repo instead of rediscovering them as rework.
 
-- A-level: changes runtime contracts, capability exposure, permissions, Evidence, System Context ordering, or storage boundaries. Write or update an architecture document or ADR first.
-- B-level: changes chat runtime, tool runtime, prompt assembly, compaction, task-thread event model, or IPC surfaces. Explain the architecture impact.
-- C-level: local UI, styles, copy, tests, or small bug fixes. Keep it scoped, but upgrade to A/B if it touches capability, permission, Evidence, protocol, or prompt boundaries.
+ADR pass, in order:
+
+1. Read `peer-knowledge/knowledge/decisions/00-adr-map.md`. When a number is used twice, open the file name. If the map is not on the current knowledge checkout, search `knowledge/decisions/` by topic.
+2. Name the ADR files that already decide the behavior. A header that says Accepted means the decision was accepted. It does not mean the implementation has passed release acceptance. Drafts, unaccepted ADRs, and clauses marked superseded are not current contracts.
+3. If an ADR already decides the behavior and this change does not move that boundary, implement against that ADR. Do not open another one.
+4. If no ADR covers it, two ADRs conflict, or this change revises a written boundary, update or add the ADR and the map row before writing code. Use an unused number. Record the date and what was added, removed, fixed, or tightened, and which clause was superseded.
+5. Documentation, comments, and test-only edits that do not change behavior still require the pass. They do not require a new ADR once the pass shows no decision boundary moved.
+
+Do not start implementation until this pass is done. In the reply, name the ADR files read. Say when the boundary did not move. When it did, point at the ADR revision.
+
+Then classify:
+
+- A-level: changes runtime contracts, capability exposure, permissions, Evidence, System Context ordering, or storage boundaries, or the ADR pass shows a written decision must change. Write or update the ADR and the map first, then implement here.
+- B-level: changes chat runtime, tool runtime, prompt assembly, compaction, task-thread event model, or IPC surfaces, and the ADR pass shows the written boundary stays. Explain the architecture impact and name the ADR files. If the boundary moves, upgrade to A.
+- C-level: local UI, styles, copy, tests, or small bug fixes after the ADR pass confirms no capability, permission, Evidence, protocol, prompt, or recorded decision boundary is touched. Upgrade to A/B if that confirmation fails.
 
 ## Engineering Delivery Consensus (2026-11-03)
 
