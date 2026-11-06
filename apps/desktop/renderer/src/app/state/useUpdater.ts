@@ -1,6 +1,7 @@
 import type { UpdaterStatus } from '@peer-agent/protocol';
 import { useCallback, useEffect, useState } from 'react';
 import { clientApi } from '../../clientApi';
+import { reduceUpdaterStatus } from './updaterStatus';
 
 /**
  * useUpdater —— 渲染层消费更新能力的统一入口（表达层）。
@@ -62,42 +63,7 @@ export function useUpdater(): UseUpdaterResult {
   // 订阅主进程事件，增量合并到状态快照。
   useEffect(() => {
     const unsubscribe = clientApi.onUpdaterEvent((event) => {
-      setStatus((prev) => {
-        const base = prev ?? FALLBACK;
-        switch (event.type) {
-          case 'checking-for-update':
-            return { ...base, phase: 'checking', error: undefined };
-          case 'update-available':
-            return {
-              ...base,
-              phase: 'available',
-              availableVersion: event.version,
-              releaseNotes: event.releaseNotes ?? base.releaseNotes,
-              error: undefined,
-            };
-          case 'update-not-available':
-            return { ...base, phase: 'not-available', availableVersion: undefined };
-          case 'download-progress':
-            return { ...base, phase: 'downloading', percent: event.percent ?? base.percent };
-          case 'update-downloaded':
-            return {
-              ...base,
-              phase: 'downloaded',
-              percent: 100,
-              availableVersion: event.version ?? base.availableVersion,
-              releaseNotes: event.releaseNotes ?? base.releaseNotes,
-            };
-          case 'error':
-            return {
-              ...base,
-              phase: 'error',
-              error: event.message,
-              releaseUrl: event.releaseUrl ?? base.releaseUrl,
-            };
-          default:
-            return base;
-        }
-      });
+      setStatus((prev) => reduceUpdaterStatus(prev ?? FALLBACK, event));
     });
     return unsubscribe;
   }, []);

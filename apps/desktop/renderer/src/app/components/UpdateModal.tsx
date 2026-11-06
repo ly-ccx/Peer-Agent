@@ -1,9 +1,10 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { UpdaterStatus } from '@peer-agent/protocol';
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Overlay } from './Overlay';
 import { selectReleaseNotesByLocale } from './releaseNotesLocale';
 import { ReleaseNotesView } from './ReleaseNotesView';
+import { shouldDismissUpdateProgress } from './updateProgressDismiss';
 
 /**
  * UpdateModal —— 更新摘要弹窗（表达层）。
@@ -16,12 +17,36 @@ import { ReleaseNotesView } from './ReleaseNotesView';
  *   - not-available：已是最新 +「重新检查」。
  *   - error：错误信息 +（可选）打开 Release 页 +「重新检查」。
  *   - downloading：用户主动点开徽标时展示进度条（不自动弹）。
+ *     用户一直停在这个弹窗时，下载完成会自己收起，安装交给徽标旁的按钮。
  *
  * 下载中 / 已下载 / 待打开的常驻展示分别交给「徽标环形进度」与「徽标旁安装按钮」。
  *
  * 能力真相在主进程；本组件仅触发 onUpdate/onOpenReleasePage/onRecheck/onClose 回调。
  * 关闭统一经 Overlay 的 requestClose 走退场动画，不再直接卸载。
  */
+
+function DismissProgressOnComplete({
+  active,
+  onDismiss,
+}: {
+  readonly active: boolean;
+  readonly onDismiss: () => void;
+}) {
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
+  const fired = useRef(false);
+  useEffect(() => {
+    if (!active) {
+      fired.current = false;
+      return;
+    }
+    if (fired.current) return;
+    fired.current = true;
+    onDismissRef.current();
+  }, [active]);
+  return null;
+}
+
 export function UpdateModal({
   i18n,
   open,
@@ -52,6 +77,16 @@ export function UpdateModal({
   const { phase } = displayed;
   const newVersion = displayed.availableVersion ?? '';
   const percent = Math.max(0, Math.min(100, Math.round(status.percent ?? 0)));
+  const trackingProgress = useRef(false);
+  if (!open) trackingProgress.current = false;
+  else if (status.phase === 'downloading' || (pendingDownload && !closingStatus)) trackingProgress.current = true;
+  const dismissProgress = shouldDismissUpdateProgress({
+    open,
+    trackingProgress: trackingProgress.current,
+    closing: closingStatus != null,
+    phase: status.phase,
+  });
+  const showProgress = phase === 'downloading' || (pendingDownload && !closingStatus) || dismissProgress;
   const localizedReleaseNotes = selectReleaseNotesByLocale(
     status.releaseNotes,
     i18n.locale,
@@ -66,32 +101,40 @@ export function UpdateModal({
       panelClassName="updater-modal"
       closeTarget={closingStatus ? progressTarget : undefined}
     >
-      {({ requestClose }) =>
-        phase === 'downloading' || (pendingDownload && !closingStatus) ? (
-          <div className="updater-modal-body">
-            <h2 className="updater-modal-title">{i18n.t('updater.modal.title')}</h2>
-            <p className="updater-modal-downloading">
-              {i18n.t('updater.modal.downloading')} {percent}%
-            </p>
-            <div
-              className="updater-modal-progress"
-              role="progressbar"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={percent}
-            >
-              <span
-                className="updater-modal-progress-fill"
-                style={{ '--pa-update-pct': percent } as CSSProperties}
-              />
+      {({ requestClose }) => (
+        <>
+          <DismissProgressOnComplete
+            active={dismissProgress}
+            onDismiss={() => {
+              setClosingStatus({ ...status, phase: 'downloading', percent: 100 });
+              requestClose();
+            }}
+          />
+          {showProgress ? (
+            <div className="updater-modal-body">
+              <h2 className="updater-modal-title">{i18n.t('updater.modal.title')}</h2>
+              <p className="updater-modal-downloading">
+                {i18n.t('updater.modal.downloading')} {percent}%
+              </p>
+              <div
+                className="updater-modal-progress"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={percent}
+              >
+                <span
+                  className="updater-modal-progress-fill"
+                  style={{ '--pa-update-pct': percent } as CSSProperties}
+                />
+              </div>
+              <div className="updater-modal-actions">
+                <button type="button" className="updater-btn ghost" onClick={requestClose}>
+                  {i18n.t('updater.modal.close')}
+                </button>
+              </div>
             </div>
-            <div className="updater-modal-actions">
-              <button type="button" className="updater-btn ghost" onClick={requestClose}>
-                {i18n.t('updater.modal.close')}
-              </button>
-            </div>
-          </div>
-        ) : phase === 'not-available' ? (
+          ) : phase === 'not-available' ? (
           <div className="updater-modal-body">
             <h2 className="updater-modal-title">{i18n.t('updater.modal.title')}</h2>
             <p className="updater-modal-uptodate">{i18n.t('updater.modal.upToDate')}</p>
@@ -181,8 +224,9 @@ export function UpdateModal({
               </span>
             </div>
           </div>
-        )
-      }
+        )}
+        </>
+      )}
     </Overlay>
   );
 }

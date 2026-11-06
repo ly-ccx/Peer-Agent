@@ -103,6 +103,18 @@ describe('production updater rejects downgrade before presentation, download and
     });
   });
 
+  it('progress after the package is ready does not reopen the download', async () => {
+    await withUpdater({ preference: 'beta', candidates: ['0.1.0-rc.4'] }, async ({ module, updater, events }) => {
+      await module.downloadUpdate();
+      assert.equal(module.getUpdaterStatus().phase, 'downloaded');
+      const emitted = events.length;
+      updater.emit('download-progress', { percent: 100 });
+      assert.equal(module.getUpdaterStatus().phase, 'downloaded');
+      assert.equal(module.getUpdaterStatus().percent, 100);
+      assert.equal(events.length, emitted);
+    });
+  });
+
   it('auto preview graduates only to a newer stable, while explicit beta never probes stable', async () => {
     await withUpdater({ candidates: ['0.1.0'] }, async ({ module, updater, checks }) => {
       assert.equal(module.getUpdaterStatus().channel, 'stable');

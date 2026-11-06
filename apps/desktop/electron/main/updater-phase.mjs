@@ -65,6 +65,8 @@ export function isLockedPhase(phase) {
  *     update-not-available）返回 true（迟到事件，丢弃）；
  *     其余事件（download-progress / update-downloaded / error）返回
  *     false（下载链路自身的事件，正常落地）。
+ *     已下载或已失败之后的迟到 download-progress 不在这里丢弃，
+ *     由 shouldApplyDownloadProgress 单独挡住，避免把终态打回 downloading。
  *
  * @param {string | undefined} phase 当前更新流程相位。
  * @param {string} eventType electron-updater 事件名。
@@ -73,6 +75,20 @@ export function isLockedPhase(phase) {
 export function shouldSkipStaleUpdateEvent(phase, eventType) {
   if (!isLockedPhase(phase)) return false;
   return CHECK_EVENT_TYPES.has(eventType);
+}
+
+/**
+ * 下载进度是否还允许改写相位。
+ *
+ * downloaded 之后的迟到 progress（常见是字节已经下完的 100%）会把相位
+ * 打回 downloading。渲染层因此继续留在进度弹窗，安装按钮也不出现。
+ * error 之后的迟到 progress 会把失败说明盖掉。这两种终态都不再接受进度。
+ *
+ * @param {string | undefined} phase 当前更新流程相位。
+ * @returns {boolean} true 表示这条进度应写入状态并广播。
+ */
+export function shouldApplyDownloadProgress(phase) {
+  return phase !== 'downloaded' && phase !== 'error';
 }
 
 /**

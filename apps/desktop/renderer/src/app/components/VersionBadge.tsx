@@ -140,7 +140,9 @@ function ClassicVersionBadge({ i18n, showChannel = false, variant = 'classic' }:
   const { status, hasUpdate, check, download, install, openReleasePage, setChannel } = useUpdater();
   const [modalOpen, setModalOpen] = useState(false);
   const badgeRef = useRef<HTMLDivElement>(null);
-  const progressTarget = useCallback(() => badgeRef.current?.querySelector<HTMLElement>('.sidebar-version-progress') ?? badgeRef.current, []);
+  const progressTarget = useCallback(() => badgeRef.current?.querySelector<HTMLElement>('.sidebar-version-install-btn')
+    ?? badgeRef.current?.querySelector<HTMLElement>('.sidebar-version-progress')
+    ?? badgeRef.current, []);
   // Reserve the visible destination until the host publishes download state.
   const [pendingDownload, setPendingDownload] = useState(false);
 
