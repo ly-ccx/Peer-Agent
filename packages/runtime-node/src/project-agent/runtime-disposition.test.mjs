@@ -127,3 +127,15 @@ test('normal completion, delivered-reply recovery and repair custody agree on th
   assert.deepEqual(results[0], { state: 'runnable', end: 'yielded', repairSessionIds: ['child'], waitFor: [] });
   assert.deepEqual(results[1], results[0]); assert.deepEqual(results[2], results[0]);
 });
+
+test('local storage failure blocks semantic continue and repeated polling, while unrelated inputs remain runnable', () => {
+  const session = { sessionId: 'local', status: 'failed', executionOwnership: 'ended',
+    followUp: { owner: 'bot', inCurrentList: true, reason: 'local_persistence_failed' } };
+  for (const outcome of [{ yielded: true }, { silentWait: { sessionIds: ['local'] } }]) {
+    const result = decideRuntimeDisposition({ sessions: [session], outcome, semantic: { state: 'runnable' }, unseenEvents: true });
+    assert.equal(result.handling, 'host'); assert.equal(result.state, 'blocked_system');
+    assert.equal(result.blockedCode, 'conversation_persistence_failed'); assert.deepEqual(result.repairSessionIds, []);
+  }
+  assert.equal(decideRuntimeDisposition({ sessions: [session], previous: { state: 'paused', stopScope: 'work' } }).state, 'paused');
+  assert.equal(decideRuntimeDisposition({ sessions: [], outcome: { yielded: true } }).state, 'runnable');
+});

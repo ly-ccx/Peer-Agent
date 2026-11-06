@@ -28,3 +28,31 @@ export function takeoverBlocker(plan, action, humanGate = false) {
     || plan.status === 'completed' && action !== 'resume') return 'session_not_running';
   return null;
 }
+
+/** The host terminal barrier writes this machine prefix; arbitrary prose is not a fault fact. */
+export const isLocalPersistenceFailure = value => typeof value === 'string'
+  && /^conversation_persistence_failed(?::|$)/.test(value.trim());
+
+/** Called only after the current takeover's stop/unknown-effect barrier has settled. */
+export function prepareLocalPersistenceRetry(plan, goalPlanStore, operationId) {
+  if (!isLocalPersistenceFailure(plan?.runner?.lastError)) return [];
+  const prior = plan.runTrace?.events?.find(event => event.payload?.summaryCode === 'local_persistence_retry_prepared'
+    && event.payload.operationId === operationId);
+  const ids = [], prepared = [];
+  const prepare = tasks => tasks.map(task => {
+    if (task.subtasks?.length) return { ...task, subtasks: prepare(task.subtasks) };
+    if (task.status === 'pending' && isLocalPersistenceFailure(task.failureReason) && prior?.payload.taskIds?.includes(task.taskId)) prepared.push(task.taskId);
+    if (task.status !== 'failed' || !isLocalPersistenceFailure(task.failureReason)) return task;
+    ids.push(task.taskId);
+    // Keep the previous result, failure, timestamps and Evidence as attempt history.
+    return { ...task, status: 'pending' };
+  });
+  const tasks = prepare(plan.tasks || []);
+  if (!ids.length) return prepared;
+  if (!prior) goalPlanStore.appendRunEvent(plan.planId, {
+    type: 'problem_found', summary: 'Preparing remaining work after local persistence failure',
+    payload: { summaryCode: 'local_persistence_retry_prepared', operationId, taskIds: ids, previousError: plan.runner.lastError },
+  });
+  goalPlanStore.revisePlan(plan.planId, { tasks }, { reason: 'prepare safe local persistence retry', changedBy: 'session-takeover' });
+  return [...ids, ...prepared];
+}

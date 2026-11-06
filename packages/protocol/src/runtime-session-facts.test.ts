@@ -54,3 +54,16 @@ test('missing identities and invalid public enums remain host obligations', () =
   }
   assert.equal(hasPendingRuntimeSessions([], ['missing']), true);
 });
+
+test('host-owned local persistence failure remains a current Bot obligation rather than model verification repair', () => {
+  const session = projectWorkSession({ planId: 'p', title: 'Task', status: 'failed', runnerStatus: 'failed',
+    blockedReason: 'conversation_persistence_failed', delegated: true }, {
+    workspaceId: 'w', sessionId: 's', executionOwnership: 'ended',
+    origin: { anchorMessageId: 'input', inputId: 'input', surface: 'desktop', memorySnapshotId: 'memory', modelSelection: {} } as never,
+  });
+  assert.equal(session.followUp?.owner, 'bot');
+  assert.equal(session.followUp?.reason, 'local_persistence_failed');
+  assert.deepEqual(runtimeSessionOwnership([session]).repairSessionIds, []);
+  assert.deepEqual(runtimeSessionOwnership([session]).hostSessionIds, ['s']);
+  assert.equal(hasPendingRuntimeSessions([session]), true);
+});
