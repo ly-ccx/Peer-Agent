@@ -6,9 +6,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createGoalPlanStore } from './goal-plan-store.mjs';
 
-function createTempStore() {
+function createTempStore(options = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), 'goal-plan-cache-'));
-  const store = createGoalPlanStore({ storeDir: dir });
+  const store = createGoalPlanStore({ storeDir: dir, ...options });
   return { dir, store };
 }
 
@@ -157,6 +157,27 @@ test('旧宿主的待刷进度在新宿主写盘后失效，不覆盖接管状�
     assert.equal(nextHost.getPlan(plan.planId).runner.turnCount, 23);
     assert.equal(store.getPlan(plan.planId).runner.turnCount, 23);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('runner progress on a large plan does not rewrite the plan document', async () => {
+  const { dir, store } = createTempStore({ runnerProgressFullRewriteBytes: 32 });
+  const plan = store.createPlan({ title: 'big', goal: 'x'.repeat(400) });
+  const file = path.join(dir, `${plan.planId}.json`);
+  const before = fs.readFileSync(file);
+  assert.ok(before.length > 32);
+  store.setRunnerState(plan.planId, { turnCount: 4, roundCount: 2, phase: 'act' });
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+  assert.deepEqual(fs.readFileSync(file), before, 'progress must not rewrite a large plan body');
+  assert.equal(store.getPlan(plan.planId).runner.turnCount, 4);
+  assert.equal(store.getPlan(plan.planId).runner.roundCount, 2);
+  const other = createGoalPlanStore({ storeDir: dir, runnerProgressFullRewriteBytes: 32 });
+  assert.equal(other.getPlan(plan.planId).runner.turnCount, 4);
+  assert.equal(other.getPlan(plan.planId).runner.roundCount, 2);
+  store.setRunnerState(plan.planId, { status: 'paused', turnCount: 9 });
+  const disk = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(disk.runner.turnCount, 9);
+  assert.equal(disk.runner.status, 'paused');
+  assert.equal(fs.existsSync(path.join(dir, 'runner-progress', `${plan.planId}.json`)), false);
 });
 
 test('证据索引跨进程追加后，命中和缺失缓存均失效且保留已有字段', () => {

@@ -411,6 +411,7 @@ export function createGoalPlanStore({
   readUiDelivery,
   onUiDeliveryRequired,
   onPlanCompleted,
+  runnerProgressFullRewriteBytes = 1024 * 1024,
 } = {}) {
   const { supersedeContextCheckpoint, markContextCheckpointConsumed, markContextCompactionPersisted, commitContextCheckpoint, prepareContextCheckpoint } = createGoalPlanCheckpoints({ getPlan, persist, appendRunEvent });
 
@@ -492,6 +493,12 @@ export function createGoalPlanStore({
 
   // runner-progress 内存叠加 + 写盘节流：保证同 tick 内 getPlan 读到最新计数，
   // 同时把磁盘写入合并到 1s 窗口，降低 CLI 后台跑时跨进程 .changes.jsonl 放大。
+  // 计划正文已经到数十 MB 时，每秒 JSON.stringify 整份文档会占满主进程。
+  // 那种计划只落一个很小的 runner 补丁，正文文件保持不动。
+  const RUNNER_PROGRESS_FULL_REWRITE_BYTES = Number.isFinite(runnerProgressFullRewriteBytes)
+    && runnerProgressFullRewriteBytes >= 0
+    ? runnerProgressFullRewriteBytes
+    : 1024 * 1024;
   const runnerProgressOverlay = new Map();
   const runnerProgressVersions = new Map();
   const runnerProgressTimers = new Map();
@@ -534,6 +541,39 @@ export function createGoalPlanStore({
     return overlay;
   }
 
+  function runnerProgressPatchFile(planId) {
+    if (typeof planId !== 'string' || !/^[A-Za-z0-9_-]+$/.test(planId)) return null;
+    return path.join(storeDir, 'runner-progress', `${planId}.json`);
+  }
+
+  function removeRunnerProgressPatch(planId) {
+    const file = runnerProgressPatchFile(planId);
+    if (!file) return;
+    try { unlinkSync(file); } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+  }
+
+  function readRunnerProgressPatch(planId) {
+    const file = runnerProgressPatchFile(planId);
+    if (!file) return null;
+    const patch = readJson(file);
+    if (!patch || patch.planId !== planId || !patch.runner || typeof patch.runner !== 'object') return null;
+    return patch;
+  }
+
+  function planFileBytes(planId) {
+    try { return statSync(planFile(planId)).size; }
+    catch { return 0; }
+  }
+
+  function rememberRunnerProgress(planId, next) {
+    runnerProgressOverlay.set(planId, next);
+    if (!runnerProgressVersions.has(planId)) {
+      runnerProgressVersions.set(planId, fileVersion(planFile(planId)));
+    }
+  }
+
   function flushRunnerProgressPersist(planId, { notify = false } = {}) {
     const timer = runnerProgressTimers.get(planId);
     if (timer) {
@@ -549,7 +589,24 @@ export function createGoalPlanStore({
         ? 'executing' : derivePlanStatus(normalized.status, normalized.tasks),
       progress: aggregateProgress(normalized.tasks),
     });
+    if (planFileBytes(planId) >= RUNNER_PROGRESS_FULL_REWRITE_BYTES) {
+      const patchFile = runnerProgressPatchFile(next.planId);
+      if (patchFile) {
+        writeJsonAtomic(patchFile, {
+          planId: next.planId,
+          updatedAt: next.updatedAt,
+          status: next.status,
+          progress: next.progress,
+          runner: next.runner ?? null,
+        });
+      }
+      // 不重写计划正文，也不追加 .changes.jsonl。本进程 UI 仍走 100ms notify。
+      rememberRunnerProgress(planId, next);
+      syncIndex(next);
+      return next;
+    }
     writeJsonAtomic(planFile(next.planId), next);
+    removeRunnerProgressPatch(next.planId);
     syncIndex(next);
     // 落盘后保留 overlay 内容一致；完整 persist 路径会清 overlay。
     runnerProgressOverlay.set(planId, next);
@@ -734,6 +791,7 @@ export function createGoalPlanStore({
     // 完整写盘优先：清掉 runner-progress 节流状态，避免旧计数回写覆盖。
     clearRunnerProgressState(next.planId);
     writeJsonAtomic(planFile(next.planId), next);
+    removeRunnerProgressPatch(next.planId);
     syncIndex(next);
     publishPersistedChange('persist', next.planId, {
       conversationId: next.conversationId ?? null,
@@ -978,10 +1036,26 @@ export function createGoalPlanStore({
     return plans[0] ?? null;
   }
 
+  function applyRunnerProgressPatch(plan) {
+    if (!plan?.planId) return plan;
+    const patch = readRunnerProgressPatch(plan.planId);
+    if (!patch) return plan;
+    const patchAt = Date.parse(patch.updatedAt || patch.runner?.updatedAt || '');
+    const planAt = Date.parse(plan.runner?.updatedAt || plan.updatedAt || '');
+    if (!Number.isFinite(patchAt) || (Number.isFinite(planAt) && patchAt <= planAt)) return plan;
+    return guardUiCompletion(normalizePlan({
+      ...plan,
+      status: typeof patch.status === 'string' ? patch.status : plan.status,
+      ...(patch.progress ? { progress: patch.progress } : {}),
+      runner: patch.runner,
+      updatedAt: typeof patch.updatedAt === 'string' ? patch.updatedAt : plan.updatedAt,
+    }));
+  }
+
   function getPlan(planId) {
     const overlay = currentRunnerProgress(planId);
     if (overlay) return guardUiCompletion(normalizePlan(overlay));
-    return guardUiCompletion(normalizePlan(readJson(planFile(planId))));
+    return applyRunnerProgressPatch(guardUiCompletion(normalizePlan(readJson(planFile(planId)))));
   }
 
   /**
