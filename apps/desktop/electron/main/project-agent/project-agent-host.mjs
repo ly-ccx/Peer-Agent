@@ -503,7 +503,12 @@ export function registerDesktopProjectAgent({
     readFacts: createDelegationFactsReader({ conversationStore, goalPlanStore }),
     subscribePlans: (listener) => (
       typeof goalPlanStore?.subscribeChanges === 'function'
-        ? goalPlanStore.subscribeChanges(() => { listener(); })
+        ? goalPlanStore.subscribeChanges((event) => {
+          // 本进程自己的 runner 计数回写会追加 .changes.jsonl。
+          // 那条尾通知不能再排一次全量 sweep，否则大计划每秒写盘就把主进程叫醒。
+          if (event?.writerPid === process.pid && event?.changeKind === 'runner-progress') return;
+          listener();
+        })
         : () => {}
     ),
   });

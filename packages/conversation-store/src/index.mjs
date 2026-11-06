@@ -610,40 +610,101 @@ export function createConversationStore(options = {}) {
 
   const previewRebuildIds = new Set();
   let previewRebuildTimer = null;
-
-  function rebuildPreviewFromTail(id) {
-    const before = readIndex().find((row) => row.id === id);
-    if (!before) return;
-    if (coerceSessionPreview(before).availability === 'ready') return;
-    const tail = readJsonlByteWindow(convFile(id), { limit: 40 });
-    withFileLock(indexFile, () => {
-      const index = readIndex();
-      const meta = index.find((row) => row.id === id);
-      if (!meta || meta.contentRevision !== before.contentRevision) return;
-      if (coerceSessionPreview(meta).availability === 'ready') return;
-      assignSessionPreview(meta, tail.messages);
-      writeIndex(index);
-    });
-  }
+  let previewRebuildRunning = false;
+  // Tail reads stay off the index lock and yield, so upgrading a library does
+  // not rewrite index.jsonl once per conversation on the UI thread.
+  const PREVIEW_REBUILD_BATCH = 4;
 
   function schedulePreviewRebuild(id) {
     if (!id) return;
     previewRebuildIds.add(id);
-    if (previewRebuildTimer) return;
+    if (previewRebuildTimer || previewRebuildRunning) return;
     previewRebuildTimer = setTimeout(() => {
       previewRebuildTimer = null;
-      const ids = [...previewRebuildIds];
-      previewRebuildIds.clear();
-      for (const conversationId of ids) {
-        try {
-          rebuildPreviewFromTail(conversationId);
-        } catch (error) {
-          if (error?.code === 'ENOENT') continue;
-          console.warn('[conversation-store] preview rebuild failed:', error);
-        }
-      }
+      previewRebuildRunning = true;
+      drainPreviewRebuilds();
     }, 0);
     previewRebuildTimer.unref?.();
+  }
+
+  function finishPreviewRebuild() {
+    if (previewRebuildIds.size > 0) {
+      const handle = setImmediate(drainPreviewRebuilds);
+      handle.unref?.();
+      return;
+    }
+    previewRebuildRunning = false;
+  }
+
+  function commitPreviewRebuilds(work, tails) {
+    if (tails.size === 0) return;
+    withFileLock(indexFile, () => {
+      const index = readIndex();
+      const byId = new Map(index.map((row) => [row.id, row]));
+      let dirty = false;
+      for (const item of work) {
+        const messages = tails.get(item.id);
+        if (!messages) continue;
+        const meta = byId.get(item.id);
+        if (!meta || meta.contentRevision !== item.contentRevision) continue;
+        if (coerceSessionPreview(meta).availability === 'ready') continue;
+        assignSessionPreview(meta, messages);
+        dirty = true;
+      }
+      if (dirty) writeIndex(index);
+    });
+  }
+
+  function drainPreviewRebuilds() {
+    const ids = [...previewRebuildIds];
+    previewRebuildIds.clear();
+    if (ids.length === 0) {
+      previewRebuildRunning = false;
+      return;
+    }
+    let metas;
+    try {
+      metas = readIndex();
+    } catch (error) {
+      if (error?.code !== 'ENOENT') console.warn('[conversation-store] preview rebuild failed:', error);
+      finishPreviewRebuild();
+      return;
+    }
+    const byId = new Map(metas.map((row) => [row.id, row]));
+    const work = [];
+    for (const id of ids) {
+      const before = byId.get(id);
+      if (!before) continue;
+      if (coerceSessionPreview(before).availability === 'ready') continue;
+      work.push({ id, contentRevision: before.contentRevision });
+    }
+    const tails = new Map();
+    let cursor = 0;
+    const step = () => {
+      try {
+        const sliceEnd = Math.min(cursor + PREVIEW_REBUILD_BATCH, work.length);
+        for (; cursor < sliceEnd; cursor += 1) {
+          const item = work[cursor];
+          try {
+            tails.set(item.id, readJsonlByteWindow(convFile(item.id), { limit: 40 }).messages);
+          } catch (error) {
+            if (error?.code === 'ENOENT') continue;
+            console.warn('[conversation-store] preview rebuild failed:', error);
+          }
+        }
+        if (cursor < work.length) {
+          const handle = setImmediate(step);
+          handle.unref?.();
+          return;
+        }
+        commitPreviewRebuilds(work, tails);
+        finishPreviewRebuild();
+      } catch (error) {
+        if (error?.code !== 'ENOENT') console.warn('[conversation-store] preview rebuild failed:', error);
+        previewRebuildRunning = false;
+      }
+    };
+    step();
   }
 
   function projectSessionPreview(meta) {

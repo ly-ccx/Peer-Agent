@@ -6,6 +6,10 @@ const DEFAULT_CHUNK_BYTES = 64 * 1024;
  * Read a chronological JSONL window ending at `beforeByte` (exclusive), or at
  * EOF when `beforeByte` is null. Only the bytes that hold the requested tail
  * are parsed. `cursor` is the byte offset of the oldest returned record.
+ *
+ * Chunks are kept as slices and joined once. A single huge line must not be
+ * recopied on every 64KB step — that was quadratic and stalled the main thread
+ * while opening or rebuilding a preview for a large transcript.
  */
 export function readJsonlByteWindow(filePath, {
   limit = 80,
@@ -29,24 +33,40 @@ export function readJsonlByteWindow(filePath, {
       end = Math.min(beforeByte, size);
     }
     if (end <= 0) return empty;
-    const found = [];
+
+    const pieces = [];
     let position = end;
-    let carry = Buffer.alloc(0);
-    while (found.length < limit && position > 0) {
+    let newlines = 0;
+    const readOlder = () => {
+      if (position <= 0) return false;
       const readSize = Math.min(chunkBytes, position);
       const start = position - readSize;
       const buf = Buffer.allocUnsafe(readSize);
       const read = readSync(fd, buf, 0, readSize, start);
+      if (read <= 0) {
+        position = start;
+        return false;
+      }
       const chunk = read === readSize ? buf : buf.subarray(0, read);
-      const combined = Buffer.concat([chunk, carry]);
-      const incomplete = start > 0;
-      const consumed = collectNewestLines(combined, start, incomplete, limit - found.length);
-      found.push(...consumed.lines);
-      carry = consumed.carry;
+      pieces.push(chunk);
+      for (let index = 0; index < chunk.length; index += 1) {
+        if (chunk[index] === 0x0a) newlines += 1;
+      }
       position = start;
-      if (consumed.filled) break;
+      return true;
+    };
+
+    while (position > 0 && newlines < limit) readOlder();
+    let lines = extractNewestLines(joinPieces(pieces), position, limit);
+    while (lines.length < limit && position > 0) {
+      const beforeNewlines = newlines;
+      while (position > 0 && newlines === beforeNewlines) {
+        if (!readOlder()) break;
+      }
+      lines = extractNewestLines(joinPieces(pieces), position, limit);
     }
-    const chronological = found.reverse();
+
+    const chronological = lines.reverse();
     const messages = [];
     for (const row of chronological) {
       const text = row.bytes.toString('utf8').trim();
@@ -69,47 +89,47 @@ export function readJsonlByteWindow(filePath, {
   }
 }
 
-function collectNewestLines(combined, base, incomplete, remaining) {
+function joinPieces(pieces) {
+  if (pieces.length === 0) return Buffer.alloc(0);
+  if (pieces.length === 1) return pieces[0];
+  const ordered = new Array(pieces.length);
+  for (let index = 0; index < pieces.length; index += 1) {
+    ordered[index] = pieces[pieces.length - 1 - index];
+  }
+  return Buffer.concat(ordered);
+}
+
+/**
+ * Newest non-empty lines first. When `base > 0` the bytes before the first
+ * newline are the tail of an older line and are not a record.
+ * The scan walks each byte once.
+ */
+function extractNewestLines(buffer, base, limit) {
   const lines = [];
-  let end = combined.length;
-  while (lines.length < remaining) {
+  let end = buffer.length;
+  const atFileStart = base === 0;
+  while (lines.length < limit && end > 0) {
     let newline = -1;
     for (let index = end - 1; index >= 0; index -= 1) {
-      if (combined[index] === 0x0a) {
+      if (buffer[index] === 0x0a) {
         newline = index;
         break;
       }
     }
     if (newline === -1) {
-      if (!incomplete && end > 0) {
-        lines.push({ byteStart: base, bytes: Buffer.from(combined.subarray(0, end)) });
+      if (atFileStart) {
+        lines.push({ byteStart: base, bytes: Buffer.from(buffer.subarray(0, end)) });
       }
-      return {
-        lines,
-        carry: incomplete ? Buffer.from(combined.subarray(0, end)) : Buffer.alloc(0),
-        filled: lines.length >= remaining,
-      };
+      break;
     }
     const lineStart = newline + 1;
-    const bytes = combined.subarray(lineStart, end);
-    if (bytes.length > 0) {
-      lines.push({ byteStart: base + lineStart, bytes: Buffer.from(bytes) });
+    if (end > lineStart) {
+      lines.push({
+        byteStart: base + lineStart,
+        bytes: Buffer.from(buffer.subarray(lineStart, end)),
+      });
     }
     end = newline;
-    if (incomplete && !hasNewlineBefore(combined, end)) {
-      return {
-        lines,
-        carry: Buffer.from(combined.subarray(0, end)),
-        filled: lines.length >= remaining,
-      };
-    }
   }
-  return { lines, carry: Buffer.alloc(0), filled: true };
-}
-
-function hasNewlineBefore(buffer, end) {
-  for (let index = end - 1; index >= 0; index -= 1) {
-    if (buffer[index] === 0x0a) return true;
-  }
-  return false;
+  return lines;
 }
