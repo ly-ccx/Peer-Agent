@@ -4,6 +4,8 @@
  * Desktop send, Desktop restore and CLI/TUI restore must all cross this seam.
  * Provider adapters may lower the camelCase tool fields to their wire format,
  * but must not reinterpret persisted segments.
+ * Oversized tool bodies stay intact here so the host can spill them to a
+ * local file before the provider request. This projector does not drop them.
  */
 
 export const CANONICAL_HISTORY_PROJECTOR_VERSION = 1;

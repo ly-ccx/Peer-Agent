@@ -8,6 +8,8 @@ import { afterEach, describe, it } from 'node:test';
 import {
   enforceConversationArtifactBudget,
   materializeToolResultContent,
+  spillOversizedToolResultsForProvider,
+  spillProviderToolResultContent,
   removeConversationToolArtifacts,
   resolveToolArtifactDir,
   writeToolResultArtifact,
@@ -99,6 +101,52 @@ describe('tool result materialization (17 号文档 §3.1)', () => {
     assert.ok(String(ref.note).includes('Do NOT re-run'));
     // ref 骨架必须显著小于原文。
     assert.ok(result.content.length < content.length / 2);
+  });
+
+  it('saves an oversized provider tool result locally and returns size, path, and shell commands', () => {
+    const baseDir = makeBaseDir();
+    const middle = 'UNIQUE_SPILL_MIDDLE';
+    const content = `${'head-'.repeat(4_000)}${middle}${'tail-'.repeat(4_000)}`;
+    const spilled = spillOversizedToolResultsForProvider([
+      { role: 'user', content: 'keep this' },
+      { role: 'tool', toolCallId: 'call-log', content },
+    ], { conversationId: 'conv-spill', baseDir });
+    assert.equal(spilled[0]?.content, 'keep this');
+    const ref = JSON.parse(String(spilled[1]?.content));
+    assert.equal(ref.kind, 'local_tool_result_ref');
+    assert.equal(ref.originalChars, content.length);
+    assert.ok(ref.artifactRef);
+    assert.equal(readFileSync(ref.artifactRef, 'utf8').includes(middle), true);
+    assert.ok(ref.suggestedRetrieval.some((command: string) => command.startsWith('rg ') && command.includes(ref.artifactRef)));
+    assert.ok(ref.suggestedRetrieval.some((command: string) => command.startsWith('tail ')));
+    assert.ok(String(ref.note).includes(String(content.length)));
+    assert.ok(String(spilled[1]?.content).length < content.length / 2);
+    const again = spillProviderToolResultContent({
+      content,
+      conversationId: 'conv-spill',
+      toolCallId: 'call-log',
+      baseDir,
+    });
+    assert.equal(JSON.parse(again).artifactRef, ref.artifactRef);
+  });
+
+  it('spills a local ref that still embeds a multi-megabyte body', () => {
+    const baseDir = makeBaseDir();
+    const already = JSON.stringify({
+      kind: 'local_tool_result_ref',
+      artifactRef: '/tmp/existing.txt',
+      stdoutPreview: 'z'.repeat(70_000),
+    });
+    const result = materializeToolResultContent({
+      conversationId: 'conv-1',
+      toolCallId: 'call-huge-ref',
+      content: already,
+      baseDir,
+    });
+    assert.equal(result.materialized, true);
+    assert.ok(result.content.length < 8_000);
+    assert.equal(JSON.parse(result.content).kind, 'local_tool_result_ref');
+    assert.ok(result.artifactPath);
   });
 
   it('does not re-materialize content that is already a structured local ref', () => {

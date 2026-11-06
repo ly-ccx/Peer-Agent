@@ -43,6 +43,8 @@ export {
   materializeToolResultContent,
   removeConversationToolArtifacts,
   resolveToolArtifactDir,
+  spillOversizedToolResultsForProvider,
+  spillProviderToolResultContent,
   TOOL_RESULT_MATERIALIZE_CONFIG,
   writeToolResultArtifact,
 } from './tool-artifact-store.ts';

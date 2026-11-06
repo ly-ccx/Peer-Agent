@@ -21,7 +21,7 @@ import type {
   ModelToolCall,
   ModelToolDefinition,
 } from '@peer-agent/runtime-node';
-import { encodeProviderToolResult, evaluateWorkSessionWrite, agentCommunicationExcludedPrefixes } from '@peer-agent/runtime-node';
+import { encodeProviderToolResult, evaluateWorkSessionWrite, agentCommunicationExcludedPrefixes, spillOversizedToolResultsForProvider } from '@peer-agent/runtime-node';
 import type { RuntimeSdkProviderExecution } from '@peer-agent/runtime-sdk';
 
 import type {
@@ -522,7 +522,9 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         buildRequest(pipelineState) {
           return {
             model,
-            messages: microcompactMessagesForContext(pipelineState.messages).messages,
+            messages: microcompactMessagesForContext(spillOversizedToolResultsForProvider(pipelineState.messages, {
+              conversationId: state.conversationId ?? context.run.conversationId,
+            })).messages,
             tools,
             ...(!reasoningEffort || reasoningEffort === 'default' ? {} : { reasoningEffort }),
             ...(options.getFastMode?.() === true ? { fastMode: true } : {}),

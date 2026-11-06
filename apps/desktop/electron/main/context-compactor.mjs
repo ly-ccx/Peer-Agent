@@ -23,6 +23,7 @@ import {
   selectGoalKeepMessages,
   splitMessagesForCompaction,
 } from '@peer-agent/runtime-core';
+import { spillOversizedToolResultsForProvider } from '@peer-agent/runtime-node';
 import { buildClaudeCliIdentityHeaders } from './provider-adapters/anthropic-cli-identity.mjs';
 import { buildCompactionMarker } from '@peer-agent/protocol';
 import { encodeOpenAIResponsesRequest } from './provider-encoders/responses-encoder.mjs';
@@ -1494,7 +1495,9 @@ export async function compactIfNeeded({
   usageTokens = null,
   onProviderUsage = null,
   budgetGuard = null,
+  baseDir = undefined,
 }) {
+  messages = spillOversizedToolResultsForProvider(messages, { conversationId, baseDir });
   const microcompactResult = microcompactMessagesForContext(messages);
   messages = microcompactResult.messages;
   const previousMessageCount = countContinuityMessages(continuityContext);
