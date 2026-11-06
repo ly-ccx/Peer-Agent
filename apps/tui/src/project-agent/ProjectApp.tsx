@@ -62,7 +62,7 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
   const refresh=()=>{void client.poll(true).then(setSnapshot).catch(()=>setNotice(copy('error')));};
   useEffect(()=>{let live=true;const read=()=>{void client.poll().then(next=>{if(live)setSnapshot(next);}).catch(()=>{if(live)setNotice(copy('error'));});};read();const timer=setInterval(read,1000);return()=>{live=false;clearInterval(timer);};},[client]);
   useEffect(()=>themeStore.subscribe(setTheme),[themeStore]);
-  useEffect(()=>{if(inputDraft.state.ready&&!busy&&!cardFocus&&!['bind','bots','cards'].includes(view))queueMicrotask(()=>editor.current?.focus());},[view,busy,cardFocus,inputDraft.state.ready,inputDraft.session]);
+  useEffect(()=>{if(!busy&&!cardFocus&&!['bind','bots','cards'].includes(view))queueMicrotask(()=>editor.current?.focus());},[view,busy,cardFocus,inputDraft.session]);
   const lastId=snapshot.messages.filter(row=>['user_input','agent_reply','system_card'].includes(row.kind)).at(-1)?.id;
   useEffect(()=>{if(view==='conversation'&&!earlier&&snapshot.workspaceId&&snapshot.messageState==='ready')host.directory.markRead(snapshot.workspaceId);},[lastId,snapshot.workspaceId,snapshot.messageState,view,earlier]);
   async function perform(run:()=>Promise<any>|any,success=copy('done')) {
@@ -117,7 +117,7 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
     void perform(()=>runProjectCardAction(host,client,action));
   }
   useKeyboard(key=>{
-    if((key as {isComposing?:boolean}).isComposing)return;
+    if((key as {isComposing?:boolean}).isComposing){if(view==='conversation'&&!cardFocus)editor.current?.focus();return;}
     if(key.ctrl&&key.name==='c'){key.preventDefault();editor.current?.blur();setBusy(true);setNotice(copy('leaving'));onQuit();return;}
     if(busy)return;
     if(key.name==='f2'){key.preventDefault();key.stopPropagation();openClassic();return;}
@@ -142,7 +142,7 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
     }
     const composer=editor.current;
     const text=printableKeyText(key);
-    if(view!=='cards'&&!cardFocus&&inputDraft.state.ready&&composer&&!composer.focused&&text!==undefined){
+    if(view!=='cards'&&!cardFocus&&composer&&!composer.focused&&text!==undefined){
       key.preventDefault();key.stopPropagation();
       composer.focus();composer.insertText(text);inputDraft.changed();return;
     }
@@ -183,12 +183,13 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
   const messageDegraded=snapshot.messageState==='unavailable',cardsDegraded=snapshot.cardsUnavailable;
   return <box flexDirection="column" height={terminal.height} width={terminal.width} backgroundColor={COLOR.background} padding={1}>
     {view==='bind'?null:<box flexDirection="row" justifyContent="space-between" marginBottom={1}>
-      <ThemedText fg={COLOR.accent}>Peer · {terminalText(bot?.profile.displayName??copy('bots'))} · {copy('botMode')}</ThemedText>
-      <ThemedText fg={COLOR.link} onMouseDown={openClassic}>{copy('switchClassic')}</ThemedText>
-      <ThemedText fg={COLOR.muted}>{snapshot.workspaceId?snapshot.isHost?copy('host'):copy('client'):''}</ThemedText>
+      <ThemedText fg={COLOR.accent}>{view==='bots'?'Peer':`Peer · ${terminalText(bot?.profile.displayName??copy('bots'))}`}</ThemedText>
+      {view==='bots'?null:<ThemedText fg={COLOR.muted}>{snapshot.workspaceId?snapshot.isHost?copy('host'):copy('client'):''}</ThemedText>}
     </box>}
-    {view!=='bind'&&snapshot.messageState==='unavailable'?<ThemedText fg={COLOR.info}>{copy('messageUnavailable')}</ThemedText>:null}
-    {view!=='bind'&&snapshot.cardsUnavailable?<ThemedText fg={COLOR.muted}>{copy('cardsUnavailable')}</ThemedText>:null}
+    {view!=='bind'&&(snapshot.messageState==='unavailable'||snapshot.cardsUnavailable)?<box flexDirection="column" marginBottom={1}>
+      {snapshot.messageState==='unavailable'?<ThemedText fg={COLOR.warning}>{copy('messageUnavailable')}</ThemedText>:null}
+      {snapshot.cardsUnavailable?<ThemedText fg={COLOR.muted}>{copy('cardsUnavailable')}</ThemedText>:null}
+    </box>:null}
     {view==='bind'?<box flexGrow={1} flexDirection="column" justifyContent="center" alignItems="center" paddingX={2}>
       <box flexDirection="column" gap={1}>
         <ThemedText fg={COLOR.accent}>{copy('botMode')}</ThemedText>
@@ -202,7 +203,7 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
         <ThemedText fg={COLOR.muted}>{copy('bindKeys')}</ThemedText>
       </box>
     </box>
-      :view==='bots'?<BotListView bots={snapshot.bots} selected={selected} locale={locale} height={terminal.height}/>
+      :view==='bots'?<BotListView bots={snapshot.bots} selected={selected} locale={locale} height={terminal.height} width={Math.max(24, terminal.width - 2)}/>
       :view==='conversation'?<BotConversationView messages={displayedMessages} cards={cards} locale={locale} isHost={snapshot.isHost} selectedCard={cardIndex} option={option} cardFocus={cardFocus}/>
       :view==='cards'?<box flexDirection="column" flexGrow={1}><ThemedText fg={COLOR.textSoft}>{copy('cards')} · {cards.length}</ThemedText>{currentCard?<CardLine row={currentCard} locale={locale} isHost={snapshot.isHost} selected option={option}/>:<ThemedText fg={COLOR.muted}>{copy('empty')}</ThemedText>}<ThemedText fg={COLOR.muted}>{copy('cardKeys')}</ThemedText></box>
       :<scrollbox ref={view==='task'?taskScroll:undefined} flexGrow={1} flexBasis={view==='task'?0:undefined} minHeight={0}><ThemedText fg={COLOR.textSoft}>{view==='help'?copy('help'):projectStatus(locale,view)}</ThemedText>{records?.error?<ThemedText fg={COLOR.info}>{copy('recordsUnavailable')}</ThemedText>:null}{rows.length?rows.map((row,index)=><ThemedText key={index} selectable fg={COLOR.text} marginBottom={1}>{row}</ThemedText>):view!=='help'&&!records?.error?<ThemedText fg={COLOR.muted}>{copy('empty')}</ThemedText>:null}
@@ -212,19 +213,22 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
       </scrollbox>}
     <ThemedText fg={COLOR.info}>{notice}</ThemedText>
     {snapshot.workspaceId?<InputRecoveryStatus state={inputDraft.state} locale={locale}/>:null}
-    {!['bind','bots','cards'].includes(view)?<>
-      <box flexDirection="column" border borderColor={COLOR.border} paddingX={1}>
-      <ThemedTextarea ref={editor} focused={!busy&&!cardFocus&&inputDraft.state.ready} height={3} placeholder={copy('composer')} wrapMode="char" onContentChange={()=>{if(inputDraft.state.ready)inputDraft.changed();}} onKeyDown={event=>{
-        if(busy||!inputDraft.state.ready){event.preventDefault();event.stopPropagation();return;}
-        const action=composerEnterAction({keyName:event.name,shift:event.shift,eventType:event.eventType,isComposing:(event as {isComposing?:boolean}).isComposing});
-        if(action==='none')return;event.preventDefault();event.stopPropagation();
-        if(action==='suppress')return;if(action==='newline'){editor.current?.newLine();return;}
-        const text=editor.current?.plainText??'';if(text.trim()){
-          submit(text);
-        }
-      }}/></box>
-      <ThemedText fg={COLOR.muted}>/help · {copy('switchHint')} · {view==='task'&&resultRefs.length?copy('resultScroll'):earlier?copy('earlier'):copy('latest')}</ThemedText>
-      {cards.length?<ThemedText fg={COLOR.muted}>/cards · {cardFocus?copy('cardKeysFocused'):copy('cardKeys')}</ThemedText>:null}
-    </>:null}
+    {!['bind','bots','cards'].includes(view)?<box flexDirection="column" width="100%" flexShrink={0}>
+      <ThemedText fg={COLOR.subtle} wrapMode="none">{PICKER_CHROME.separator.repeat(Math.max(1, terminal.width - 2))}</ThemedText>
+      <box flexDirection="row" width="100%">
+        <ThemedText fg={COLOR.accent}>{PICKER_CHROME.caretSelected}</ThemedText>
+        <box flexGrow={1} minWidth={0}>
+          <ThemedTextarea ref={editor} focused={!busy&&!cardFocus} width="100%" height={3} placeholder={copy('composer')} wrapMode="char" onContentChange={()=>{inputDraft.changed();}} onKeyDown={event=>{
+            if(busy){event.preventDefault();event.stopPropagation();return;}
+            const action=composerEnterAction({keyName:event.name,shift:event.shift,eventType:event.eventType,isComposing:(event as {isComposing?:boolean}).isComposing});
+            if(action==='none')return;event.preventDefault();event.stopPropagation();
+            if(action==='suppress')return;if(action==='newline'){editor.current?.newLine();return;}
+            const text=editor.current?.plainText??'';if(text.trim()){
+              submit(text);
+            }
+          }}/>
+        </box>
+      </box>
+    </box>:null}
   </box>;
 }
