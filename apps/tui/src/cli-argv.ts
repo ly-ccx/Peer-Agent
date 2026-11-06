@@ -22,9 +22,10 @@ export interface PeerExecOptions {
 
 export type PeerCliCommand =
   | { readonly kind: 'version' }
-  | { readonly kind: 'help'; readonly topic: 'root' | 'exec' | 'result' }
+  | { readonly kind: 'help'; readonly topic: 'root' | 'exec' | 'result' | 'update' }
   | { readonly kind: 'tui'; readonly classic?: boolean; readonly bots?: boolean }
   | { readonly kind: 'exec'; readonly options: PeerExecOptions }
+  | { readonly kind: 'update'; readonly checkOnly: boolean }
   | { readonly kind: 'result-cleanup-receipt' }
   | { readonly kind: 'result'; readonly reference: string; readonly json: boolean }
   | { readonly kind: 'error'; readonly message: string; readonly exitCode: typeof CLI_EXIT.usage };
@@ -233,6 +234,25 @@ function parseExecArgs(argv: readonly string[]): PeerCliCommand {
   };
 }
 
+function parseUpdateArgs(argv: readonly string[]): PeerCliCommand {
+  let checkOnly = false;
+  for (const arg of argv) {
+    if (isHelpFlag(arg)) return { kind: 'help', topic: 'update' };
+    if (arg === '--check') {
+      checkOnly = true;
+      continue;
+    }
+    return {
+      kind: 'error',
+      message: arg.startsWith('-')
+        ? `peer update: unknown option ${arg}`
+        : `peer update: unexpected argument ${arg}`,
+      exitCode: CLI_EXIT.usage,
+    };
+  }
+  return { kind: 'update', checkOnly };
+}
+
 export function parsePeerArgv(argv: readonly string[]): PeerCliCommand {
   if (argv.some((arg) => arg === '--version' || arg === '-v')) {
     return { kind: 'version' };
@@ -243,6 +263,7 @@ export function parsePeerArgv(argv: readonly string[]): PeerCliCommand {
   if (head === '--classic' && rest.length === 0) return { kind: 'tui', classic: true };
   if (head === 'bots' && rest.length === 0) return { kind: 'tui', bots: true };
   if (isHelpFlag(head) && rest.length === 0) return { kind: 'help', topic: 'root' };
+  if (head === 'update') return parseUpdateArgs(rest);
   if (head === 'exec') return parseExecArgs(rest);
   if (head === 'result-cleanup-receipt') {
     if (rest.length === 0) return { kind: 'result-cleanup-receipt' };
@@ -260,7 +281,24 @@ export function parsePeerArgv(argv: readonly string[]): PeerCliCommand {
   return { kind: 'tui' };
 }
 
-export function formatPeerHelp(topic: 'root' | 'exec' | 'result', version = formatPeerVersionLine()): string {
+export function formatPeerHelp(topic: 'root' | 'exec' | 'result' | 'update', version = formatPeerVersionLine()): string {
+  if (topic === 'update') {
+    return [
+      version,
+      '',
+      'peer update — install the newest release on this channel',
+      '',
+      'Usage:',
+      '  peer update',
+      '  peer update --check',
+      '',
+      'Channels stay separate: stable, beta (-beta.N), and rc (-rc.N).',
+      'npm and pnpm installs upgrade that global package.',
+      'A release-archive install replaces peer and peer-credential-helper.',
+      'Restart peer after a successful update.',
+      'This command always checks. PEER_AGENT_NO_UPDATE_CHECK=1 only disables the background prompt.',
+    ].join('\n');
+  }
   if (topic === 'result') return [
     version,
     '',
@@ -310,11 +348,13 @@ export function formatPeerHelp(topic: 'root' | 'exec' | 'result', version = form
     '  peer --classic       Open ordinary task mode, even when a bot is bound',
     '  peer --version       Print version',
     '  peer --help          Show this help',
+    '  peer update          Install the newest release on this channel',
     '  peer exec [options] [prompt]',
     '  peer result <interactive-result://…> [--json]',
     '  peer result-cleanup-receipt < request.json',
     '',
     'Use `peer exec --help` for headless flags.',
+    'Use `peer update --help` to check or install a release.',
     'Inside bot mode, press F2 or type /classic to switch to task mode.',
   ].join('\n');
 }

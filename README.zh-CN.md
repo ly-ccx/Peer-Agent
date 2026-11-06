@@ -85,7 +85,7 @@ Linux x64 选择 `Peer-Agent-<ver>-x64.AppImage`（推荐）或 `.deb`。两者�
 
     npm install -g @peer-agent/cli
 
-npm 包安装对应平台的二进制及 helper；可用平台与安装包以对应发布页为准。npm beta 标签属于较早的 beta 通道，不是当前 RC。模式与脚本用法见 [CLI 文档](https://ly-ccx.github.io/Peer-Agent/docs.html#cli)。
+npm 包安装对应平台的二进制及 helper；可用平台与安装包以对应发布页为准。npm beta 标签属于较早的 beta 通道，不是当前 RC。`peer update` 安装当前通道（正式版、beta 或 rc）的最新版本。`peer update --check` 只报告，不安装。模式与脚本用法见 [CLI 文档](https://ly-ccx.github.io/Peer-Agent/docs.html#cli)。
 
 ### 从 0.1 源码启动
 
