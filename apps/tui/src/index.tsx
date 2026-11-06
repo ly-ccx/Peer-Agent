@@ -50,6 +50,44 @@ if (command.kind === 'update') {
   const { runPeerUpdate } = await import('./cli-update.ts');
   process.exit(await runPeerUpdate({ checkOnly: command.checkOnly }));
 }
+if (command.kind === 'models') {
+  const { runPeerModels } = await import('./cli-models.ts');
+  process.exit(await runPeerModels());
+}
+if (command.kind === 'doctor') {
+  const { runPeerDoctor } = await import('./cli-doctor.ts');
+  process.exit(await runPeerDoctor());
+}
+if (command.kind === 'completions') {
+  const { runPeerCompletions } = await import('./cli-completions.ts');
+  process.exit(runPeerCompletions(command.shell));
+}
+if (command.kind === 'export') {
+  const { runPeerExport } = await import('./cli-export.ts');
+  process.exit(await runPeerExport({
+    sessionId: command.sessionId,
+    outputPath: command.outputPath,
+    force: command.force,
+  }));
+}
+if (command.kind === 'sessions' && command.sessions.action === 'resume') {
+  if (process.stdout.isTTY !== true) {
+    console.error('peer sessions resume needs a TTY. Use `peer exec` for a headless turn.');
+    process.exit(CLI_EXIT.usage);
+  }
+  const { sessionIsStored } = await import('./cli-sessions.ts');
+  if (!await sessionIsStored(command.sessions.id)) {
+    console.error(`peer sessions: session not found: ${command.sessions.id}`);
+    process.exit(CLI_EXIT.runtime);
+  }
+  const { runInteractiveTui } = await import('./interactive-entry.tsx');
+  await runInteractiveTui({ kind: 'tui', classic: true, resumeConversationId: command.sessions.id });
+  process.exit(process.exitCode ?? 0);
+}
+if (command.kind === 'sessions') {
+  const { runPeerSessions } = await import('./cli-sessions.ts');
+  process.exit(await runPeerSessions(command.sessions));
+}
 if (shouldRefuseInteractiveTui(process.stdout.isTTY)) {
   console.error('peer: refusing to start the interactive TUI without a TTY. Use `peer exec`.');
   process.exit(CLI_EXIT.usage);
