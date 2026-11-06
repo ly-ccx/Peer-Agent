@@ -5,6 +5,7 @@
  */
 import { planDelivery } from './digest.mjs';
 import { WORK_SESSION_STATUSES, parseInteractiveArtifactRef } from '@peer-agent/protocol';
+import { resolveUserAnchors, userAnchorCandidates } from './user-anchor.mjs';
 
 const TEXT_MAX = 2000;
 const ID_MAX = 200;
@@ -79,8 +80,10 @@ export function composeReply(input = {}) {
     return fail('fallback_not_allowed', 'Only a user turn can fall back to an anchored reply.');
   }
 
-  const anchors = fallback ? turnInputIds.ids : replyTo.ids;
+  const resolution = resolveUserAnchors(fallback ? turnInputIds.ids : replyTo.ids, input.userMessages, 'replyTo');
   const indexed = indexUserMessages(input.userMessages);
+  if (!resolution.ok) return { ...resolution, availableReplyAnchors: replyAnchorCandidates(indexed) };
+  const anchors = resolution.ids;
   if (anchors.length === 0 && !proactive) {
     return fail('reply_to_required', 'replyTo is required unless proactive is true.', {
       availableReplyAnchors: replyAnchorCandidates(indexed),
@@ -156,7 +159,7 @@ export function composeReply(input = {}) {
     meta,
     marks,
   };
-  return { ok: true, message, meta, marks };
+  return { ok: true, message, meta, marks, anchorResolutions: resolution.anchorResolutions };
 }
 
 function fail(error, message, extra = {}) {
@@ -350,10 +353,7 @@ function checkAnchors(ids, byId) {
 
 /** Recent conversation facts only. The caller must explicitly choose and validate an anchor again. */
 function replyAnchorCandidates(byId) {
-  return [...byId].filter(([, message]) => isUserInput(message)).slice(-5).map(([messageId, message]) => ({
-    messageId,
-    text: typeof message.content === 'string' ? message.content.slice(0, 120) : '',
-  }));
+  return userAnchorCandidates([...byId.values()], isUserInput);
 }
 
 function readSurfacing(value) {

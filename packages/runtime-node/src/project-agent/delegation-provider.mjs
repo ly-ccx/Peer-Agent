@@ -7,6 +7,8 @@ import { createEvidenceBundle } from '@peer-agent/runtime-core';
 import { createDurableGoalIdempotencyLedger } from '@peer-agent/runtime-core/goal-idempotency-durable';
 import { createPermissionGrant } from '../tool-result-factory.mjs';
 import { resolveAnchorScope } from './anchor-scope.mjs';
+import { resolveDelegationAnchors, userAnchorCandidates } from './user-anchor.mjs';
+import { isCanonicalUserInput } from './user-priority.mjs';
 import { verdictRefFor } from './acceptance.mjs';
 import { isProjectAgentTurn } from './mode-policy.mjs';
 import { buildVerificationDetail } from './verification-detail.mjs';
@@ -57,8 +59,11 @@ export function createDelegationProvider({
     const item = delegationSpecByCapability(capabilityId);
     const view = executionView(context);
     const locale = context.locale === 'en-US' ? 'en-US' : 'zh-CN';
+    let anchorResolutions = [];
+    const complete = args => finish({ ...args, output: anchorResolutions.length
+      ? { ...args.output, anchorResolutions } : args.output });
     if (!item) {
-      return finish({
+      return complete({
         call,
         capabilityId: capabilityId || 'local.delegation',
         name: 'delegation',
@@ -71,7 +76,7 @@ export function createDelegationProvider({
       mode: view.mode ?? request?.mode,
       role: view.role ?? request?.turnProfile?.role,
     })) {
-      return finish({
+      return complete({
         call,
         capabilityId,
         name: item.name,
@@ -89,7 +94,7 @@ export function createDelegationProvider({
 
     const validated = validateDelegationInput(item.name, parseArgs(call));
     if (!validated.ok) {
-      return finish({
+      return complete({
         call,
         capabilityId,
         name: item.name,
@@ -106,21 +111,21 @@ export function createDelegationProvider({
         || view.sourceDecisionRef && (row.intent?.decision?.operationId === view.sourceDecisionRef && row.intent.decision.disposition.kind === 'continue'
           || row.intent?.decisionTurnId === view.turnId)));
     if (item.name === 'spawn_session' && !view.currentInputAnchors.length && !view.objectiveWakeIds.length && !wakeMandate) {
-      return finish({ call, capabilityId, name: item.name, locale, status: 'failed',
+      return complete({ call, capabilityId, name: item.name, locale, status: 'failed',
         output: { ok: false, error: 'current_user_required', message: 'Historical user messages cannot authorize new tasks during an ordinary wake.' } });
     }
     if (['spawn_session', 'coordinate_work', 'resume_session', 'message_session', 'control_work', 'cancel_session', 'reprioritize_session', 'set_proactivity'].includes(item.name)
-      && onlyHandoffAnswers(view)) return finish({ call, capabilityId, name: item.name, locale, status: 'failed',
+      && onlyHandoffAnswers(view)) return complete({ call, capabilityId, name: item.name, locale, status: 'failed',
       output: { ok: false, error: 'host_decision_already_handled', message: 'The host handles this merge decision. A separate current user instruction is required for new work.' } });
-    if(view.objectiveWakeIds.length&&!view.currentInputAnchors.length&&item.name==='spawn_session'&&typeof objectives?.prepareSpawn!=='function')return finish({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,error:'objective_user_confirmation_required'}});
+    if(view.objectiveWakeIds.length&&!view.currentInputAnchors.length&&item.name==='spawn_session'&&typeof objectives?.prepareSpawn!=='function')return complete({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,error:'objective_user_confirmation_required'}});
     if(view.objectiveWakeIds.length&& !view.currentInputAnchors.length && ['control_work','resume_session','message_session','reprioritize_session','cancel_session','set_proactivity'].includes(item.name)){
-      return finish({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,error:'objective_user_confirmation_required'}});
+      return complete({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,error:'objective_user_confirmation_required'}});
     }
     if (item.name === 'verify_session' && view.objectiveWakeIds.length && !view.currentInputAnchors.length) {
       const session = await supervisor?.get?.({ sessionId: input.sessionId });
       if (!session || session.workspaceId !== view.workspaceId
         || !view.objectiveWakeIds.includes(session.origin?.objectiveId) && !view.sessionWakeIds.includes(input.sessionId)) {
-        return finish({ call, capabilityId, name: item.name, locale, status: 'failed', output: { ok: false, error: 'objective_verification_out_of_scope' } });
+        return complete({ call, capabilityId, name: item.name, locale, status: 'failed', output: { ok: false, error: 'objective_verification_out_of_scope' } });
       }
     }
     if (['coordinate_work', 'control_work', 'message_session', 'cancel_session', 'verify_session', 'resume_session', 'reprioritize_session'].includes(item.name) && input.sessionId || item.name === 'spawn_session' && input.supersedes) {
@@ -130,7 +135,7 @@ export function createDelegationProvider({
         replyTo: view.replyTo,
       });
       if (scope.scoped && !scope.sessionIds.includes(input.sessionId || input.supersedes)) {
-        return finish({
+        return complete({
           call,
           capabilityId,
           name: item.name,
@@ -149,16 +154,25 @@ export function createDelegationProvider({
       }
     }
     if (!view.currentInputAnchors.length && ['resume_session', 'message_session', 'control_work', 'cancel_session', 'reprioritize_session', 'set_proactivity'].includes(item.name)) {
-      return finish({ call, capabilityId, name: item.name, locale, status: 'failed', output: { ok: false,
+      return complete({ call, capabilityId, name: item.name, locale, status: 'failed', output: { ok: false,
         error: 'current_user_required',
         message: 'This direct tool requires current user input. For already authorized work, use coordinate_work query, then the matching coordination action with its numeric goalRevision and an active mandate. This entry-point rejection does not establish a need for new user confirmation.',
         ...(input.sessionId ? { nextAction: 'query_coordination', suggestedCall: { tool: 'coordinate_work',
           arguments: { action: 'query', sessionId: input.sessionId, reason: 'Read current task facts before autonomous recovery' } } } : {}) } });
     }
+    const resolved = resolveDelegationAnchors(item.name, input, view.messages);
+    if (!resolved.ok) {
+      const candidates = item.name === 'post_reply'
+        ? { availableReplyAnchors: userAnchorCandidates(view.messages, isUserInput) }
+        : { availableAnchors: userAnchorCandidates(view.messages, isCanonicalUserInput, view.currentInputAnchors) };
+      return complete({ call, capabilityId, name: item.name, locale, status: 'failed', output: { ...resolved, ...candidates } });
+    }
+    input = resolved.input;
+    anchorResolutions = resolved.anchorResolutions;
     if (item.name === 'set_proactivity' || item.name === 'resume_session') {
       const anchorError = validateAnchors([input.anchorMessageId], view.messages);
       if (anchorError) {
-        return finish({
+        return complete({
           call,
           capabilityId,
           name: item.name,
@@ -169,9 +183,9 @@ export function createDelegationProvider({
       }
     }
     if (item.name === 'spawn_session') {
-      const anchorError = validateAnchors(input.anchorMessageIds, view.messages);
+      const anchorError = validateAnchors(input.anchorMessageIds, view.messages, isCanonicalUserInput);
       if (anchorError) {
-        return finish({
+        return complete({
           call,
           capabilityId,
           name: item.name,
@@ -183,12 +197,12 @@ export function createDelegationProvider({
       if (view.currentInputAnchors.length && !input.objectiveId
         && !view.messages.some(message => view.currentInputAnchors.includes(message.id) && message.answerTo?.startsWith('card:question:objective:'))
         && !input.anchorMessageIds.some(id => view.currentInputAnchors.includes(id))) {
-        return finish({ call, capabilityId, name: item.name, locale, status: 'failed', output: { ok: false, error: 'current_user_required' } });
+        return complete({ call, capabilityId, name: item.name, locale, status: 'failed', output: { ok: false, error: 'current_user_required' } });
       }
       if (input.modelPreference?.modelProviderId && typeof checkModel === 'function') {
         const checked = await checkModel({ modelProviderId: input.modelPreference.modelProviderId });
         if (checked && checked.ok === false) {
-          return finish({
+          return complete({
             call,
             capabilityId,
             name: item.name,
@@ -208,14 +222,14 @@ export function createDelegationProvider({
     if (input.sessionId && typeof supervisor?.get === 'function') {
       const session = await supervisor.get({ sessionId: input.sessionId });
       if (session?.workspaceId && view.workspaceId && session.workspaceId !== view.workspaceId) {
-        return finish({ call, capabilityId, name: item.name, locale, status: 'failed', output: { ok: false, error: 'out_of_scope' } });
+        return complete({ call, capabilityId, name: item.name, locale, status: 'failed', output: { ok: false, error: 'out_of_scope' } });
       }
     }
 
     if(item.name==='spawn_session'&&(input.objectiveId||view.objectiveWakeIds.length&&!view.currentInputAnchors.length||view.messages.some(message=>view.currentInputAnchors.includes(message.id)&&message.answerTo?.startsWith('card:question:objective:')))){
-      if(typeof objectives?.prepareSpawn!=='function')return finish({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,error:'objectives_unavailable'}});
+      if(typeof objectives?.prepareSpawn!=='function')return complete({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,error:'objectives_unavailable'}});
       const authorized=await objectives.prepareSpawn(input,spawnContext(view));
-      if(!authorized?.ok)return finish({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,...authorized}});
+      if(!authorized?.ok)return complete({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,...authorized}});
       input=authorized.input||input;
     }
     const key = idempotencyKey({
@@ -231,7 +245,7 @@ export function createDelegationProvider({
       : ledgerFor({ ...context, workspaceId: view.workspaceId, conversationId: view.conversationId });
     const previous = item.name === 'wait_for_sessions' ? null : readResult(book?.get?.(key));
     if (previous && item.name !== 'send_agent_message') {
-      return finish({
+      return complete({
         call,
         capabilityId,
         name: item.name,
@@ -252,7 +266,7 @@ export function createDelegationProvider({
         message: String(error?.message || error).slice(0, OUTPUT_LIMIT) } };
     }
     if (!dispatched.ok) {
-      return finish({
+      return complete({
         call,
         capabilityId,
         name: item.name,
@@ -268,7 +282,7 @@ export function createDelegationProvider({
       toolName: item.name,
       evidenceRefs: [`${RESULT_PREFIX}${encodeURIComponent(JSON.stringify(dispatched.output))}`],
     });
-    return finish({
+    return complete({
       call,
       capabilityId,
       name: item.name,
@@ -478,7 +492,7 @@ function idempotencyKey({ turnId, toolCallOrdinal, name, input }) {
   return createHash('sha256').update(material).digest('hex');
 }
 
-function validateAnchors(ids, messages) {
+function validateAnchors(ids, messages, isAllowedUser = isUserInput) {
   const byId = new Map();
   for (const message of Array.isArray(messages) ? messages : []) {
     const id = text(message?.id) || text(message?.messageId);
@@ -493,7 +507,7 @@ function validateAnchors(ids, messages) {
       message: 'Anchor message was not found in this conversation.',
     };
   }
-  const rejected = ids.filter((id) => !isUserInput(byId.get(id)));
+  const rejected = ids.filter((id) => !isAllowedUser(byId.get(id)));
   if (rejected.length > 0) {
     return {
       ok: false,
@@ -536,6 +550,9 @@ async function callPort(fn, input, unavailable, context) {
         error: result.error,
         ...(Array.isArray(result.messageIds) ? { messageIds: result.messageIds } : {}),
         ...(Array.isArray(result.availableReplyAnchors) ? { availableReplyAnchors: result.availableReplyAnchors } : {}),
+        ...(Array.isArray(result.availableAnchors) ? { availableAnchors: result.availableAnchors } : {}),
+        ...(Array.isArray(result.anchorResolutions) ? { anchorResolutions: result.anchorResolutions } : {}),
+        ...(typeof result.operationId === 'string' ? { operationId: result.operationId, phase: result.phase, goalRevision: result.goalRevision } : {}),
         ...(Array.isArray(result.sessionStates) ? { sessionStates: result.sessionStates } : {}),
         ...(result.missing ? { missing: result.missing, message: result.missing } : {}),
         ...(result.message ? { message: result.message } : {}),

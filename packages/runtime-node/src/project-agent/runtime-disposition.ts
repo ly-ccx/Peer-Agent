@@ -8,6 +8,7 @@ interface Work {
   readonly stopScope?: 'reply' | 'work';
   readonly end?: ProjectTurnEnd;
   readonly pendingControl?: unknown;
+  readonly delegationFollowUp?: ProjectWorkReceipt['delegationFollowUp'];
   readonly sessionIds?: readonly string[];
 }
 interface Outcome {
@@ -72,6 +73,8 @@ export function decideRuntimeDisposition({ previous = {}, sessions = [], outcome
     reportedWait.sessionStates.map(row => ({ kind: 'session' as const, id: row.sessionId })));
   if (settlement.length) return result('waiting_children', 'awaiting_children', 'host', settlement.map(id => ({ kind: 'session' as const, id })));
   if (continuation?.state === 'blocked_system') return result('blocked_system', continuation.end || 'no_progress', 'host');
+  if (previous.delegationFollowUp?.blockers.length && !ownership.needsUser) return previous.delegationFollowUp.blockers.every(row => row.retryable)
+    ? result('runnable', 'yielded', 'model') : result('blocked_system', 'fatal', 'host');
   if (semantic) {
     const handling: RuntimeHandling = semantic.state === 'runnable' ? 'model' : semantic.state === 'waiting_user' ? 'user'
       : ['delivered', 'cancelled', 'paused'].includes(semantic.state) ? 'none' : 'host';

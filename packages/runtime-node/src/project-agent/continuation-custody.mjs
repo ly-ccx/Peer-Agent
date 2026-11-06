@@ -13,7 +13,7 @@ export function reconcileContinuationCustody({ store, conversationId, sessions }
   for (const work of Object.values(state.works)) {
     if (work.parentConversationId !== conversationId || work.anchorInputIds?.length || work.intentCoordination || work.stopScope === 'work'
       || !['runnable', 'waiting_children', 'waiting_user'].includes(work.state) || !work.checkpointRef
-      || work.recovery || runtimeWorkHeld(work) || prepared.has(work.workId) || hasUnsettledDispatch(work)
+      || work.recovery || work.delegationFollowUp?.blockers.length || runtimeWorkHeld(work) || prepared.has(work.workId) || hasUnsettledDispatch(work)
       || Object.keys(work.budget?.attempts || {}).some(id => workBudgetBinding(work.workspaceId)?.activeAttempts?.has(id))
       || Object.values(work.budget?.attempts || {}).some(attempt => attempt.pendingTools?.length)) continue;
     let checkpoint;

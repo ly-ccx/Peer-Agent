@@ -50,7 +50,7 @@ export function createRunnerReplyLifecycle({ store, workspaceId, conversationId,
         const sessionIds = [...new Set([...(work.sessionIds || []), ...related.map(row => row.sessionId)])];
         const events = (work.pendingEventIds || []).map(id => readSnapshot().events[id]?.event).filter(Boolean);
         const unseen = events.filter(event => !eventObserved(event));
-        const semantic = resolveIntent(work);
+        const semantic = work.delegationFollowUp?.blockers.length ? null : resolveIntent(work);
         const { handling, ...disposition } = decideRuntimeDisposition({ previous: work, sessions: related, semantic, unseenEvents: unseen.length > 0 });
         store.saveWork({ ...work, sessionIds, ...semantic, ...disposition, intentCoordination: readWork(work.workId).intentCoordination }, { returnState: false });
         store.handled(events.filter(eventObserved).map(event => event.eventId));

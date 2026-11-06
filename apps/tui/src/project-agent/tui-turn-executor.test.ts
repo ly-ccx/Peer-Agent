@@ -245,6 +245,8 @@ test('role routing retains declared effort levels and defaults across the TUI me
   } } })).toMatchObject({ ok: false, reason: 'reasoning' });
 });
 
+const citedUser = { id: 'user-reply', role: 'user', kind: 'user_input', content: 'read README' };
+
 test('successful project replies terminate the actual TUI pipeline with Grant and Evidence', async () => {
   for (const suppressed of [false, true]) {
     let posts = 0;
@@ -253,7 +255,7 @@ test('successful project replies terminate the actual TUI pipeline with Grant an
     const env = harness({ async stream() { return {
       content: '', toolCalls: [{ id: 'reply', name: 'post_reply',
         arguments: JSON.stringify({ text: 'connection ready', sources: [], replyTo: ['user-reply'] }) }],
-    }; } }, { getProviders: () => [projectProvider] });
+    }; } }, { getProviders: () => [projectProvider], readMessages: () => [citedUser] });
     projectProvider = createProjectToolProvider({ rootDir: env.home, supervisor: {}, objectives: {},
       replyComposer: { postReply() { posts++; return { ok: true, suppressed }; } },
       verification: {}, proactivity: {}, checkModel: () => ({ ok: true }), memoryEnabled: () => false });
@@ -283,7 +285,7 @@ test('a failed project reply remains nonterminal in the TUI pipeline', async () 
   let projectProvider: ReturnType<typeof createProjectToolProvider>;
   const env = harness({ async stream() { return { content: '', toolCalls: [{ id: 'reply', name: 'post_reply',
     arguments: JSON.stringify({ text: 'not verified', sources: [], replyTo: ['user-reply'] }) }] }; } },
-  { getProviders: () => [projectProvider] });
+  { getProviders: () => [projectProvider], readMessages: () => [citedUser] });
   projectProvider = createProjectToolProvider({ rootDir: env.home, supervisor: {}, objectives: {},
     replyComposer: { postReply() { return { ok: false, error: 'verification_required' }; } },
     verification: {}, proactivity: {}, checkModel: () => ({ ok: true }), memoryEnabled: () => false });

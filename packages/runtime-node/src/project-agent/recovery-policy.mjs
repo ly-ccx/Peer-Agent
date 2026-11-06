@@ -44,6 +44,8 @@ export function recoveryCheckpointAvailable(work, checkpoint, readCheckpoint) {
   if (work.intentCoordination?.lifecycle === 'active' && work.intentCoordination.decision.disposition.kind === 'continue'
     && checkpoint.outcome?.yielded !== true && !hasUnsettledDispatch(work)
     && rounds.every(round => (round.toolCalls || []).every(call => call.result !== undefined))) return true;
+  if (work.delegationFollowUp?.blockers.length && !checkpoint.outcome?.yielded && !hasUnsettledDispatch(work)
+    && rounds.every(round => (round.toolCalls || []).every(call => call.result != null))) return true;
   // A fully committed progress reply starts a fresh reasoning step over current
   // child facts. It does not replay this turn's tools and needs no native tail.
   if (work.repairSessionIds?.length && checkpoint.outcome?.failed !== true

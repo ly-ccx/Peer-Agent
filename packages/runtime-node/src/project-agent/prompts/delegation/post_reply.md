@@ -6,3 +6,6 @@ The host attaches bounded fixed references to confirmed interactive results from
 
 
 For a child decision that genuinely requires the user, link the native `question` with `agentRequestId` and `expectedRequestRevision` from the current session report. This prepares one native user question tied to the original Agent request; it never grants a capability, approves a plan or accepts a result. After the actual user answers that card in the current turn, relay an appropriately scoped `decisionAnswer` using the request's current revision. An unrelated later message is not that answer.
+
+
+Use canonical messageIds for replyTo. A unique canonical inputId may be resolved locally as an identity alias; it does not authorize execution. Anchor diagnostics contain only bounded message IDs and short excerpts. A successful reply is delivery, not successful delegation or completion. Unresolved dispatch receipts remain the Bot's responsibility; correct the indicated parameter or preserve the actual admission blocker rather than repeatedly posting the same reply.

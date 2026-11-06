@@ -177,3 +177,18 @@ test('a missing user checkpoint is blocked and selection rereads before returnin
   assert.equal(f.store.read().works.missing.recovery.blockedCode,'RECOVERY_CHECKPOINT_UNAVAILABLE');
  }finally{f.close();}
 });
+
+test('a dispatch obligation cannot be absorbed into a pure observation continuation', () => {
+ const f = fixture();
+ try {
+  f.seed('observer');
+  const delegationFollowUp = { blockers: [{ taskKey: 'pending-dispatch', sourceTurnId: 'turn', toolCallId: 'call', action: 'parallel', error: 'current_user_required', retryable: false }] };
+  f.seed('dispatcher', { delegationFollowUp });
+  const checkpoint = f.store.readWork('dispatcher').checkpointRef;
+  f.reconcile(); f.restart(); f.reconcile();
+  assert.equal(f.store.readWork('dispatcher').state, 'runnable');
+  assert.equal(f.store.readWork('dispatcher').checkpointRef, checkpoint);
+  assert.deepEqual(f.store.readWork('dispatcher').delegationFollowUp, delegationFollowUp);
+  assert.equal(f.store.readWork('observer').state, 'runnable');
+ } finally { f.close(); }
+});
