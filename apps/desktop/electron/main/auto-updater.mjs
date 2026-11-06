@@ -39,6 +39,7 @@ import { isPrerelease } from './update-version.mjs';
 import { installPeerGitHubProvider, isStrictlyNewerUpdate } from './update-github-provider.mjs';
 import {
   isLockedPhase,
+  shouldApplyDownloadProgress,
   shouldSkipUpdateCheck,
   shouldSkipStaleUpdateEvent,
 } from './updater-phase.mjs';
@@ -465,7 +466,8 @@ function wireEvents() {
   // update-not-available）属于迟到事件——来源是并发重查（激活聚焦、定时、
   // 手动）产生的旧检查流程。必须丢弃，否则会把相位打回 available，
   // 安装按钮消失。下载链路自身的事件（download-progress /
-  // update-downloaded / error）不受此过滤影响。
+  // update-downloaded / error）不受此过滤影响。已结束之后的迟到
+  // download-progress 另由 shouldApplyDownloadProgress 丢弃。
 
   autoUpdater.on('checking-for-update', () => {
     if (state.probing) return;
@@ -499,6 +501,8 @@ function wireEvents() {
 
   autoUpdater.on('download-progress', (p) => {
     if (state.probing) return;
+    // 终态之后的迟到进度不能把 downloaded/error 打回 downloading。
+    if (!shouldApplyDownloadProgress(state.phase)) return;
     state.percent = Math.round(p?.percent ?? 0);
     state.stallWatchdog?.notifyProgress();
     setPhase('downloading');
