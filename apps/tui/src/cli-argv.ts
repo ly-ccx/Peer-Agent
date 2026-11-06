@@ -20,12 +20,24 @@ export interface PeerExecOptions {
   readonly promptParts: readonly string[];
 }
 
+export type PeerSessionsAction =
+  | { readonly action: 'list' }
+  | { readonly action: 'resume'; readonly id: string }
+  | { readonly action: 'delete'; readonly id: string; readonly yes: boolean };
+
+export type CompletionShell = 'bash' | 'zsh' | 'fish';
+
 export type PeerCliCommand =
   | { readonly kind: 'version' }
-  | { readonly kind: 'help'; readonly topic: 'root' | 'exec' | 'result' | 'update' }
-  | { readonly kind: 'tui'; readonly classic?: boolean; readonly bots?: boolean }
+  | { readonly kind: 'help'; readonly topic: 'root' | 'exec' | 'result' | 'update' | 'sessions' | 'models' | 'doctor' | 'completions' | 'export' }
+  | { readonly kind: 'tui'; readonly classic?: boolean; readonly bots?: boolean; readonly resumeConversationId?: string }
   | { readonly kind: 'exec'; readonly options: PeerExecOptions }
   | { readonly kind: 'update'; readonly checkOnly: boolean }
+  | { readonly kind: 'sessions'; readonly sessions: PeerSessionsAction }
+  | { readonly kind: 'models' }
+  | { readonly kind: 'doctor' }
+  | { readonly kind: 'completions'; readonly shell: CompletionShell }
+  | { readonly kind: 'export'; readonly sessionId: string; readonly outputPath?: string; readonly force: boolean }
   | { readonly kind: 'result-cleanup-receipt' }
   | { readonly kind: 'result'; readonly reference: string; readonly json: boolean }
   | { readonly kind: 'error'; readonly message: string; readonly exitCode: typeof CLI_EXIT.usage };
@@ -253,6 +265,98 @@ function parseUpdateArgs(argv: readonly string[]): PeerCliCommand {
   return { kind: 'update', checkOnly };
 }
 
+const COMPLETION_SHELLS = new Set<CompletionShell>(['bash', 'zsh', 'fish']);
+
+function usageError(message: string): PeerCliCommand {
+  return { kind: 'error', message, exitCode: CLI_EXIT.usage };
+}
+
+function parseSessionsArgs(argv: readonly string[]): PeerCliCommand {
+  if (argv.some(isHelpFlag)) return { kind: 'help', topic: 'sessions' };
+  const positional: string[] = [];
+  let yes = false;
+  for (const arg of argv) {
+    if (arg === '--yes') {
+      yes = true;
+      continue;
+    }
+    if (arg.startsWith('-')) return usageError(`peer sessions: unknown option ${arg}`);
+    positional.push(arg);
+  }
+  const [action, id, extra] = positional;
+  if (!action) {
+    if (yes) return usageError('peer sessions: --yes is only valid with delete');
+    return { kind: 'sessions', sessions: { action: 'list' } };
+  }
+  if (action === 'list') {
+    if (id || yes) return usageError('peer sessions list does not take arguments');
+    return { kind: 'sessions', sessions: { action: 'list' } };
+  }
+  if (action !== 'resume' && action !== 'delete') {
+    return usageError(`peer sessions: unexpected argument ${action}`);
+  }
+  if (!id) return usageError(`peer sessions ${action} requires a session id`);
+  if (extra) return usageError(`peer sessions: unexpected argument ${extra}`);
+  if (action === 'resume') {
+    if (yes) return usageError('peer sessions: --yes is only valid with delete');
+    return { kind: 'sessions', sessions: { action: 'resume', id } };
+  }
+  return { kind: 'sessions', sessions: { action: 'delete', id, yes } };
+}
+
+function parseCompletionsArgs(argv: readonly string[]): PeerCliCommand {
+  if (argv.some(isHelpFlag)) return { kind: 'help', topic: 'completions' };
+  const [shell, extra] = argv;
+  if (!shell || !COMPLETION_SHELLS.has(shell as CompletionShell) || extra) {
+    return usageError('Usage: peer completions <bash|zsh|fish>');
+  }
+  return { kind: 'completions', shell: shell as CompletionShell };
+}
+
+function parseExportArgs(argv: readonly string[]): PeerCliCommand {
+  if (argv.some(isHelpFlag)) return { kind: 'help', topic: 'export' };
+  const positional: string[] = [];
+  let outputPath: string | undefined;
+  let force = false;
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index] ?? '';
+    if (arg === '--force') {
+      force = true;
+      continue;
+    }
+    if (arg === '--output') {
+      const value = argv[index + 1];
+      if (!value || value.startsWith('-')) return usageError('peer export: --output requires a path');
+      outputPath = value;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith('--output=')) {
+      const value = arg.slice('--output='.length);
+      if (!value) return usageError('peer export: --output requires a path');
+      outputPath = value;
+      continue;
+    }
+    if (arg.startsWith('-')) return usageError(`peer export: unknown option ${arg}`);
+    positional.push(arg);
+  }
+  const [sessionId, extra] = positional;
+  if (!sessionId) return usageError('peer export requires a session id');
+  if (extra) return usageError(`peer export: unexpected argument ${extra}`);
+  return { kind: 'export', sessionId, ...(outputPath ? { outputPath } : {}), force };
+}
+
+function parseBareCommand(name: 'models' | 'doctor', argv: readonly string[]): PeerCliCommand {
+  if (argv.some(isHelpFlag)) return { kind: 'help', topic: name };
+  const unexpected = argv[0];
+  if (unexpected) {
+    return usageError(unexpected.startsWith('-')
+      ? `peer ${name}: unknown option ${unexpected}`
+      : `peer ${name}: unexpected argument ${unexpected}`);
+  }
+  return { kind: name };
+}
+
 export function parsePeerArgv(argv: readonly string[]): PeerCliCommand {
   if (argv.some((arg) => arg === '--version' || arg === '-v')) {
     return { kind: 'version' };
@@ -264,6 +368,11 @@ export function parsePeerArgv(argv: readonly string[]): PeerCliCommand {
   if (head === 'bots' && rest.length === 0) return { kind: 'tui', bots: true };
   if (isHelpFlag(head) && rest.length === 0) return { kind: 'help', topic: 'root' };
   if (head === 'update') return parseUpdateArgs(rest);
+  if (head === 'sessions') return parseSessionsArgs(rest);
+  if (head === 'models') return parseBareCommand('models', rest);
+  if (head === 'doctor') return parseBareCommand('doctor', rest);
+  if (head === 'completions') return parseCompletionsArgs(rest);
+  if (head === 'export') return parseExportArgs(rest);
   if (head === 'exec') return parseExecArgs(rest);
   if (head === 'result-cleanup-receipt') {
     if (rest.length === 0) return { kind: 'result-cleanup-receipt' };
@@ -281,7 +390,76 @@ export function parsePeerArgv(argv: readonly string[]): PeerCliCommand {
   return { kind: 'tui' };
 }
 
-export function formatPeerHelp(topic: 'root' | 'exec' | 'result' | 'update', version = formatPeerVersionLine()): string {
+export function formatPeerHelp(
+  topic: 'root' | 'exec' | 'result' | 'update' | 'sessions' | 'models' | 'doctor' | 'completions' | 'export',
+  version = formatPeerVersionLine(),
+): string {
+  if (topic === 'sessions') {
+    return [
+      version,
+      '',
+      'peer sessions — list, resume, or delete a stored session',
+      '',
+      'Usage:',
+      '  peer sessions',
+      '  peer sessions resume <id>',
+      '  peer sessions delete <id> [--yes]',
+      '',
+      'list writes updated time, id, and title to stdout.',
+      'resume opens that session in the TUI and needs a TTY.',
+      'delete removes that session and its goal plans. A TTY asks first; otherwise pass --yes.',
+    ].join('\n');
+  }
+  if (topic === 'models') {
+    return [
+      version,
+      '',
+      'peer models — list configured models',
+      '',
+      'Usage:',
+      '  peer models',
+      '',
+      'Reads the local model configuration. It does not call the network or print credentials.',
+    ].join('\n');
+  }
+  if (topic === 'doctor') {
+    return [
+      version,
+      '',
+      'peer doctor — check the local install',
+      '',
+      'Usage:',
+      '  peer doctor',
+      '',
+      'Checks the peer binary, credential helper, data root, and version.',
+      'It does not install, sign in, or change configuration.',
+    ].join('\n');
+  }
+  if (topic === 'completions') {
+    return [
+      version,
+      '',
+      'peer completions — print a shell completion script',
+      '',
+      'Usage:',
+      '  peer completions <bash|zsh|fish>',
+      '',
+      'The script is written to stdout. This command does not edit your shell configuration.',
+    ].join('\n');
+  }
+  if (topic === 'export') {
+    return [
+      version,
+      '',
+      'peer export — write a stored session as Markdown',
+      '',
+      'Usage:',
+      '  peer export <id>',
+      '  peer export <id> --output <path> [--force]',
+      '',
+      'The file is a reading copy, not Evidence. An existing output path is kept unless --force is set.',
+    ].join('\n');
+  }
   if (topic === 'update') {
     return [
       version,
@@ -349,12 +527,19 @@ export function formatPeerHelp(topic: 'root' | 'exec' | 'result' | 'update', ver
     '  peer --version       Print version',
     '  peer --help          Show this help',
     '  peer update          Install the newest release on this channel',
+    '  peer sessions        List, resume, or delete stored sessions',
+    '  peer models          List configured models',
+    '  peer doctor          Check the local install',
+    '  peer completions     Print a shell completion script',
+    '  peer export <id>     Export a stored session as Markdown',
     '  peer exec [options] [prompt]',
     '  peer result <interactive-result://…> [--json]',
     '  peer result-cleanup-receipt < request.json',
     '',
     'Use `peer exec --help` for headless flags.',
     'Use `peer update --help` to check or install a release.',
+    'Use `peer sessions --help`, `peer models --help`, `peer doctor --help`,',
+    '`peer completions --help`, or `peer export --help` for the other shell commands.',
     'Inside bot mode, press F2 or type /classic to switch to task mode.',
   ].join('\n');
 }

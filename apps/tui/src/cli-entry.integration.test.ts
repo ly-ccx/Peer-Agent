@@ -39,6 +39,21 @@ describe('peer CLI entry', () => {
     expect(result.stderr).toBe('');
   });
 
+  test('basic shell help exits before opening a session', async () => {
+    for (const args of [
+      ['sessions', '--help'],
+      ['models', '--help'],
+      ['doctor', '--help'],
+      ['completions', '--help'],
+      ['export', '--help'],
+    ]) {
+      const result = await runPeer(args);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout.length).toBeGreaterThan(0);
+      expect(result.stderr).toBe('');
+    }
+  });
+
   test('peer update rejects unknown options before any install', async () => {
     const result = await runPeer(['update', '--force']);
     expect(result.exitCode).toBe(2);

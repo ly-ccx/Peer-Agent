@@ -56,6 +56,7 @@ export async function runInteractiveTui(command: InteractiveCommand) {
     runtime = classic;
     root.render(<App host={classic.host} model={classic.model} modelLabel={classic.modelConfig.modelLabel}
       modelSelection={classic.modelSelection} languageStore={classic.languageStore} themeStore={classic.themeStore} cliUpdate={cliUpdate}
+      initialConversationId={command.resumeConversationId}
       getSessionFastMode={() => classic.getSessionFastMode()} setSessionFastMode={value => classic.setSessionFastMode(value)}
       onQuit={() => { void shutdown(); }} />);
     queueMicrotask(() => void cliUpdate.check());

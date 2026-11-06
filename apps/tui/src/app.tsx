@@ -1186,7 +1186,7 @@ function findPendingUserInput(messages: readonly ChatMessage[]): TuiUserInputReq
 }
 
 
-export function App({ host, model, modelLabel, modelSelection, languageStore, themeStore, cliUpdate, getSessionFastMode, setSessionFastMode, onQuit }: {
+export function App({ host, model, modelLabel, modelSelection, languageStore, themeStore, cliUpdate, initialConversationId, getSessionFastMode, setSessionFastMode, onQuit }: {
   readonly host: TuiHost;
   readonly model: ChatModelPort;
   readonly modelLabel: string;
@@ -1194,6 +1194,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   readonly languageStore?: TuiLanguageStore;
   readonly themeStore?: TuiThemeStore;
   readonly cliUpdate?: CliUpdateController;
+  readonly initialConversationId?: string;
   readonly getSessionFastMode?: () => boolean;
   readonly setSessionFastMode?: (fastMode: boolean) => void;
   readonly onQuit: () => void;
@@ -1299,6 +1300,15 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   const [approvalSelection, setApprovalSelection] = useState(0);
   const [planSelection, setPlanSelection] = useState(0);
   const [commandNotice, setCommandNotice] = useState<string | null>(null);
+  const initialResumeStarted = useRef(false);
+  useEffect(() => {
+    if (!initialConversationId || initialResumeStarted.current || snapshot.status !== 'idle') return;
+    initialResumeStarted.current = true;
+    const conversation = persistence.loadConversation(initialConversationId);
+    if (conversation && resumeTuiConversation(controller, persistence, conversation)) return;
+    if (persistence.adoptConversation(initialConversationId)) return;
+    setCommandNotice('Failed to load session');
+  }, [controller, initialConversationId, persistence, snapshot.status]);
   const [leaderArmed, setLeaderArmed] = useState(false);
   const [skills, setSkills] = useState<readonly TuiSkillSummary[]>(() => host.skillMcpBridge?.listSkills() ?? []);
   const [mcpServers, setMcpServers] = useState<readonly TuiMcpServerSummary[]>(() => host.skillMcpBridge?.listMcpServers() ?? []);
