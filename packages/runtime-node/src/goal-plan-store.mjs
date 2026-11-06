@@ -483,13 +483,38 @@ export function createGoalPlanStore({
     'lastTickAt',
   ]);
 
-  function classifyRunnerChangeKind(patch = {}) {
+  function runnerValueEqual(left, right) {
+    if (Object.is(left, right)) return true;
+    if (left == null || right == null) return false;
+    if (typeof left !== 'object' || typeof right !== 'object') return false;
+    return JSON.stringify(left) === JSON.stringify(right);
+  }
+
+  /**
+   * 小计划仍按 patch key 分级，保持原有即时写盘。
+   * 大计划上，pump 每个 tick 都会带上 enabled/status/intent，以及不会被
+   * normalizeRunnerState 保存的 reanchor。这些字段若没有真正变化，必须算作
+   * runner-progress。否则 persist() 会整篇重写正文，并清掉 sidecar 定时器。
+   */
+  function classifyRunnerChangeKind(currentRunner, nextRunner, patch = {}, {
+    largeFile = false,
+    timingChanged = false,
+    planId = null,
+  } = {}) {
     const keys = Object.keys(patch).filter((key) => patch[key] !== undefined);
     if (keys.length === 0) return 'runner-state';
-    return keys.every((key) => RUNNER_PROGRESS_KEYS.has(key))
-      ? 'runner-progress'
-      : 'runner-state';
+    const namedProgress = keys.every((key) => RUNNER_PROGRESS_KEYS.has(key));
+    if (!largeFile) return namedProgress ? 'runner-progress' : 'runner-state';
+    if (timingChanged) return 'runner-state';
+    if (namedProgress) return 'runner-progress';
+    const currentNorm = normalizeRunnerState(currentRunner, planId) || {};
+    const hardKeys = keys.filter((key) => !RUNNER_PROGRESS_KEYS.has(key));
+    const unchanged = hardKeys.every((key) => runnerValueEqual(currentNorm[key], nextRunner?.[key]));
+    return unchanged ? 'runner-progress' : 'runner-state';
   }
+
+  // 每个 runner tick 都会追加的轨迹。它们不改变任务事实，不能为了记一行而重写大计划。
+  const SOFT_RUN_EVENT_TYPES = new Set(['step_started', 'step_completed']);
 
   // runner-progress 内存叠加 + 写盘节流：保证同 tick 内 getPlan 读到最新计数，
   // 同时把磁盘写入合并到 1s 窗口，降低 CLI 后台跑时跨进程 .changes.jsonl 放大。
@@ -502,6 +527,8 @@ export function createGoalPlanStore({
   const runnerProgressOverlay = new Map();
   const runnerProgressVersions = new Map();
   const runnerProgressTimers = new Map();
+  // 尚未写入计划正文的 tick 轨迹。sidecar 只带这些新事件，不拷贝整份 runTrace。
+  const runnerProgressPendingEvents = new Map();
   // soft progress：同进程广播 100ms；跨进程写盘 1s。硬状态仍即时。
   const runnerProgressNotifyTimers = new Map();
   const RUNNER_PROGRESS_PERSIST_MS = 1000;
@@ -521,6 +548,7 @@ export function createGoalPlanStore({
         clearTimeout(notifyTimer);
         runnerProgressNotifyTimers.delete(planId);
       }
+      runnerProgressPendingEvents.delete(planId);
       return;
     }
     for (const timer of runnerProgressTimers.values()) clearTimeout(timer);
@@ -529,6 +557,7 @@ export function createGoalPlanStore({
     runnerProgressNotifyTimers.clear();
     runnerProgressOverlay.clear();
     runnerProgressVersions.clear();
+    runnerProgressPendingEvents.clear();
   }
 
   function currentRunnerProgress(planId) {
@@ -592,12 +621,14 @@ export function createGoalPlanStore({
     if (planFileBytes(planId) >= RUNNER_PROGRESS_FULL_REWRITE_BYTES) {
       const patchFile = runnerProgressPatchFile(next.planId);
       if (patchFile) {
+        const pendingEvents = runnerProgressPendingEvents.get(planId) || [];
         writeJsonAtomic(patchFile, {
           planId: next.planId,
           updatedAt: next.updatedAt,
           status: next.status,
           progress: next.progress,
           runner: next.runner ?? null,
+          ...(pendingEvents.length > 0 ? { runEvents: pendingEvents } : {}),
         });
       }
       // 不重写计划正文，也不追加 .changes.jsonl。本进程 UI 仍走 100ms notify。
@@ -1042,14 +1073,69 @@ export function createGoalPlanStore({
     if (!patch) return plan;
     const patchAt = Date.parse(patch.updatedAt || patch.runner?.updatedAt || '');
     const planAt = Date.parse(plan.runner?.updatedAt || plan.updatedAt || '');
-    if (!Number.isFinite(patchAt) || (Number.isFinite(planAt) && patchAt <= planAt)) return plan;
-    return guardUiCompletion(normalizePlan({
-      ...plan,
-      status: typeof patch.status === 'string' ? patch.status : plan.status,
-      ...(patch.progress ? { progress: patch.progress } : {}),
-      runner: patch.runner,
-      updatedAt: typeof patch.updatedAt === 'string' ? patch.updatedAt : plan.updatedAt,
-    }));
+    let next = plan;
+    // 同一毫秒内的进度补丁和正文 updatedAt 会打成平手。平手时采用 sidecar，
+    // 只有补丁严格更旧才保留正文，避免刚写入的计数被读丢。
+    if (Number.isFinite(patchAt) && !(Number.isFinite(planAt) && patchAt < planAt)) {
+      next = {
+        ...plan,
+        status: typeof patch.status === 'string' ? patch.status : plan.status,
+        ...(patch.progress ? { progress: patch.progress } : {}),
+        runner: patch.runner,
+        updatedAt: typeof patch.updatedAt === 'string' ? patch.updatedAt : plan.updatedAt,
+      };
+    }
+    if (Array.isArray(patch.runEvents) && patch.runEvents.length > 0) {
+      const trace = normalizeRunTrace(next.runTrace, { goalPlanId: plan.planId });
+      const seen = new Set(trace.events.map((event) => event.id));
+      const extra = [];
+      for (const event of patch.runEvents) {
+        const normalized = normalizeRunEvent(event, { goalPlanId: plan.planId });
+        if (!normalized || seen.has(normalized.id)) continue;
+        seen.add(normalized.id);
+        extra.push(normalized);
+      }
+      if (extra.length > 0) {
+        next = {
+          ...next,
+          runTrace: {
+            ...trace,
+            events: [...trace.events, ...extra],
+          },
+        };
+        const pending = runnerProgressPendingEvents.get(plan.planId) || [];
+        const pendingSeen = new Set(pending.map((event) => event.id));
+        const mergedPending = pending.slice();
+        for (const event of extra) {
+          if (!pendingSeen.has(event.id)) mergedPending.push(event);
+        }
+        runnerProgressPendingEvents.set(plan.planId, mergedPending);
+      }
+    }
+    if (next === plan) return plan;
+    return guardUiCompletion(normalizePlan(next));
+  }
+
+  function projectRunnerProgressPlan(plan) {
+    const normalized = normalizePlan(plan);
+    return guardUiCompletion({
+      ...normalized,
+      status: (hasActiveGoalRepair(normalized) && derivePlanStatus(normalized.status, normalized.tasks) === TERMINAL_OK)
+        ? 'executing'
+        : derivePlanStatus(normalized.status, normalized.tasks),
+      progress: aggregateProgress(normalized.tasks),
+      ...(normalized.timing ? { timing: normalized.timing } : {}),
+    });
+  }
+
+  function stageRunnerProgress(planId, next) {
+    runnerProgressOverlay.set(planId, next);
+    if (!runnerProgressVersions.has(planId)) {
+      runnerProgressVersions.set(planId, fileVersion(planFile(planId)));
+    }
+    scheduleRunnerProgressPersist(planId);
+    scheduleRunnerProgressNotify(next.planId, next.conversationId ?? null);
+    return next;
   }
 
   function getPlan(planId) {
@@ -1670,7 +1756,6 @@ export function createGoalPlanStore({
       updatedAt: now,
     };
     const nextRunner = normalizeRunnerState({ ...current, ...patch, updatedAt: patch.updatedAt || now }, planId);
-    const changeKind = classifyRunnerChangeKind(patch);
     // 高频 overlay 与完整持久化共享同一最终状态校正；即使状态字符串未变化，
     // 也会修复 active runner 缺 segment / paused runner 仍开 segment 的历史脏状态。
     const timing = reconcileGoalTimingWithRunner(
@@ -1679,26 +1764,19 @@ export function createGoalPlanStore({
       nextRunner?.status,
       now,
     );
+    const timingChanged = JSON.stringify(normalizeGoalTiming(plan.timing) ?? null) !== JSON.stringify(timing ?? null);
+    const changeKind = classifyRunnerChangeKind(current, nextRunner, patch, {
+      largeFile: planFileBytes(planId) >= RUNNER_PROGRESS_FULL_REWRITE_BYTES,
+      timingChanged,
+      planId,
+    });
     const nextPlan = { ...plan, runner: nextRunner, updatedAt: now, ...(timing ? { timing } : {}) };
 
     // 高频 runner 进度：内存即时可见 + 广播 runner-progress（带 runner 本地 patch），
     // 写盘节流到 1s，避免 CLI 后台跑时跨进程刷新把 Desktop 打卡。
     if (changeKind === 'runner-progress') {
-      const normalized = normalizePlan(nextPlan);
-      const next = guardUiCompletion({
-        ...normalized,
-        status: (hasActiveGoalRepair(normalized) && derivePlanStatus(normalized.status, normalized.tasks) === TERMINAL_OK)
-          ? 'executing'
-          : derivePlanStatus(normalized.status, normalized.tasks),
-        progress: aggregateProgress(normalized.tasks),
-        ...(normalized.timing ? { timing: normalized.timing } : {}),
-      });
-      runnerProgressOverlay.set(planId, next);
-      if (!runnerProgressVersions.has(planId)) runnerProgressVersions.set(planId, fileVersion(planFile(planId)));
-      scheduleRunnerProgressPersist(planId);
       // soft progress：IPC 合并；硬状态跃迁仍走下面即时 persist 路径。
-      scheduleRunnerProgressNotify(next.planId, next.conversationId ?? null);
-      return next;
+      return stageRunnerProgress(planId, projectRunnerProgressPlan(nextPlan));
     }
 
     // 状态跃迁/终态等：立即 flush + 完整 persist（会清 overlay）。
@@ -1893,7 +1971,21 @@ export function createGoalPlanStore({
     if (normalizedEvent.type === 'checkpoint_created' && activeNodeId) {
       nextTrace.lastCheckpointNodeId = activeNodeId;
     }
-    return persist({ ...plan, runTrace: nextTrace, updatedAt: now });
+    const nextPlan = { ...plan, runTrace: nextTrace, updatedAt: now };
+    // step_started / step_completed 每个 tick 各写一次。大计划上它们跟在
+    // setRunnerState 后面同步 persist，会清掉 sidecar 并重写整份正文。
+    if (
+      SOFT_RUN_EVENT_TYPES.has(normalizedEvent.type)
+      && planFileBytes(planId) >= RUNNER_PROGRESS_FULL_REWRITE_BYTES
+    ) {
+      const pending = runnerProgressPendingEvents.get(planId) || [];
+      if (!pending.some((event) => event.id === normalizedEvent.id)) {
+        pending.push(normalizedEvent);
+        runnerProgressPendingEvents.set(planId, pending);
+      }
+      return stageRunnerProgress(planId, projectRunnerProgressPlan(nextPlan));
+    }
+    return persist(nextPlan);
   }
 
   /** 动态派发只读 Explorer 子 Agent 实例；只记录运行契约，不改写任务状态或 Evidence。 */
