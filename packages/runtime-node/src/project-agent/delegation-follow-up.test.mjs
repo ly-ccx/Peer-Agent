@@ -45,6 +45,35 @@ test('A4 current user or mandate refusal remains blocked after identity repair, 
   }
 });
 
+test('A6 correcting a rejected anchor clears the original obligation through its recovery identity', async t => {
+  const corrected = { ...dispatch(), input: { ...task('导航'), anchorMessageIds: ['input-request'] }, result: { ok: true, sessionId: 'real' } };
+  for (const error of ['anchor_not_found', 'anchor_not_user_input', 'anchor_ambiguous', 'anchor_out_of_scope']) {
+    const f = await world(t);
+    f.finish([{ ...dispatch(error), input: { ...task('导航'), anchorMessageIds: ['missing'] } }]);
+    assert.equal(f.work().delegationFollowUp.blockers[0].error, error);
+    assert.equal(typeof f.work().delegationFollowUp.blockers[0].recoveryKey, 'string');
+    await f.restart();
+    f.finish([corrected, reply]);
+    assert.equal(f.work().delegationFollowUp, undefined, error);
+  }
+  const differentTask = await world(t);
+  differentTask.finish([dispatch()]);
+  const kept = differentTask.work().delegationFollowUp.blockers[0].taskKey;
+  differentTask.finish([{ ...corrected, input: { ...task('别的任务'), anchorMessageIds: ['input-request'] } }]);
+  assert.equal(differentTask.work().delegationFollowUp.blockers[0].taskKey, kept);
+  const denied = await world(t);
+  denied.finish([{ ...dispatch('current_user_required'), input: { ...task('导航'), anchorMessageIds: ['missing'] } }]);
+  denied.finish([corrected]);
+  assert.equal(denied.work().delegationFollowUp.blockers[0].error, 'current_user_required');
+  const coordinated = await world(t);
+  const rejectedCoordination = { name: 'coordinate_work', toolCallId: 'coord-call', result: { ok: false, error: 'anchor_not_found' },
+    input: { action: 'parallel', task: { ...task('导航'), anchorMessageIds: ['missing'] } } };
+  coordinated.finish([rejectedCoordination]);
+  coordinated.finish([{ ...rejectedCoordination, input: { action: 'parallel', task: { ...task('导航'), anchorMessageIds: ['input-request'] } },
+    result: { ok: true, sessionId: 'real' } }]);
+  assert.equal(coordinated.work().delegationFollowUp, undefined);
+});
+
 test('A6 only a successful matching dispatch clears its obligation, not another task or a reply', async t => {
   const f = await world(t); f.finish([dispatch()]);
   f.finish([{ ...dispatch(null, '别的任务'), result: { ok: true, sessionId: 'other' } }, reply]);

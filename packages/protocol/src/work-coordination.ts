@@ -92,6 +92,8 @@ export interface ProjectWorkReceipt {
   /** Unresolved dispatch receipts, not execution grants or permission truth. */
   readonly delegationFollowUp?: { readonly blockers: readonly {
     readonly taskKey: string;
+    /** Task body without the anchor ids being repaired. A corrected retry clears that obligation. */
+    readonly recoveryKey?: string;
     readonly sourceTurnId: string;
     readonly toolCallId: string;
     readonly action: 'parallel' | 'replace';

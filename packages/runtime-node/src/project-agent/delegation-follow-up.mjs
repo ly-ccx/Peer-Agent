@@ -5,6 +5,7 @@ const correctable = new Set(['anchor_not_found', 'anchor_not_user_input', 'ancho
 const parse = value => { if (typeof value !== 'string') return value; try { return JSON.parse(value); } catch { return null; } };
 const stable = value => value && typeof value === 'object' ? Array.isArray(value) ? value.map(stable)
   : Object.fromEntries(Object.keys(value).sort().map(key => [key, stable(value[key])])) : value;
+const digest = value => createHash('sha256').update(JSON.stringify(stable(value))).digest('hex');
 
 /** Read actual Tool Results. A missing receipt never proves an unexecuted write. */
 function receipt(value) {
@@ -31,15 +32,21 @@ export function delegationFollowUp(previous, rounds, messages, turnId) {
     if (!task?.anchorMessageIds?.length) continue;
     const resolved = resolveUserAnchors(task.anchorMessageIds, messages, 'anchorMessageIds');
     const action = name === 'spawn_session' ? input.supersedes ? 'replace' : 'parallel' : input.action;
-    const { supersedes, ...spec } = task;
-    const taskKey = createHash('sha256').update(JSON.stringify(stable({ action, sessionId: input.sessionId || supersedes,
-      task: { ...spec, anchorMessageIds: resolved.ok ? resolved.ids : task.anchorMessageIds } }))).digest('hex');
+    const { supersedes, anchorMessageIds, ...spec } = task;
+    const sessionId = input.sessionId || supersedes;
+    const anchors = resolved.ok ? resolved.ids : anchorMessageIds;
+    // The rejected anchor is the field under repair. Recovery identity is the task body without it.
+    const recoveryKey = digest({ action, sessionId, task: spec });
+    const taskKey = digest({ action, sessionId, task: { ...spec, anchorMessageIds: anchors } });
     const result = receipt(call.result);
     if (result.ok !== false && !result.error && typeof result.sessionId === 'string' && result.sessionId) {
       pending.delete(taskKey);
+      for (const [key, row] of [...pending]) {
+        if (row.recoveryKey === recoveryKey && correctable.has(row.error)) pending.delete(key);
+      }
     } else {
       const error = typeof result.error === 'string' ? result.error.slice(0, 160) : 'execution_outcome_unknown';
-      pending.set(taskKey, { taskKey, sourceTurnId: turnId, toolCallId: call.toolCallId || call.result?.toolCallId || `${turnId}:${ordinal}`,
+      pending.set(taskKey, { taskKey, recoveryKey, sourceTurnId: turnId, toolCallId: call.toolCallId || call.result?.toolCallId || `${turnId}:${ordinal}`,
         action, error, retryable: correctable.has(error), ...(typeof result.operationId === 'string' ? { operationId: result.operationId } : {}) });
     }
   }
