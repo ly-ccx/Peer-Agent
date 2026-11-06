@@ -2,6 +2,32 @@
 
 All notable changes to Peer Agent are tracked here.
 
+## 0.1.0-rc.38 - 2026-11-06
+
+### 修复与改进
+
+- #288：大计划的 runner 进度写入 sidecar，不再每个 tick 整篇排版正文；会话预览回填改为一次索引写入，并停止按会话全文扫描。
+- #290：生命周期未变的 tick 以及 `step_started` / `step_completed` 也走 sidecar，无变化的 `setRunnerState` 不再清掉 sidecar 并重写正文。
+- #291：runner 仍在运行时，正文未变的 `persist()` 走 sidecar；检查点在返回前同步刷写 sidecar，并保存、还原 `runTraceCursor`。
+- #292：已停住的大计划（completed 投影为 executing、paused、waiting_user / interrupted）在任务和契约未变时跳过整篇 persist。对 `d69282e0` 的本地 Electron 复测记为已修复。
+- #285：下载完成时关闭仍开着的更新进度对话框；迟到的 100% 进度不再把阶段改回下载中。
+- #287：一条尚未落盘的任务记录不再让整个机器人列表读取失败。展示路径跳过该记录，执行路径仍严格读取。
+- #289（与 Knowledge #126 成对）：保留已落盘回合，并公平恢复失败工作。迟到的流终止不再删掉下一回合占位；安全接管保留历史、完成步骤和证据；本地存储故障留在宿主阻塞。
+- #286：请求发往模型前把超大工具结果落到本地文件。外置之后，Layer 2 压缩仍由更早的超窗片段触发。bot-shell 不再在 `app.evaluate` 里读取屏幕。
+- 同步双语发布说明与站点更新日志。延续联合协调格式 9，更新前完整备份。正式版仍为 0.0.18。本版不宣称 P3、内网 Gateway、远程配对或真实打包 Electron 手感已经交付。打包或已安装应用的手感尚未测试。
+
+### Fixes and improvements (English)
+
+- #288: large plans write runner progress to a sidecar instead of pretty-printing the body on every tick. Session-preview backfill is one index write, and per-conversation full scans stop.
+- #290: unchanged lifecycle ticks and `step_started` / `step_completed` also use the sidecar, so a no-op `setRunnerState` no longer clears it and rewrites the body.
+- #291: unchanged `persist()` on a still-running large plan uses the sidecar. Checkpoint lifecycle sync-flushes it and stores and restores `runTraceCursor`.
+- #292: settled large plans (completed projected to executing, paused, waiting_user / interrupted) skip a full-body persist when tasks and contracts are unchanged. The local Electron retest of `d69282e0` is recorded as fixed.
+- #285: close the update progress dialog when a download finishes, and ignore a late 100% event that would return the phase to downloading.
+- #287: one unpersisted task record no longer fails the whole bot list. The display path skips it; the execution path stays strict.
+- #289 (paired with Knowledge #126): preserve persisted turns and resume failed work fairly. A late stream terminal no longer deletes the next placeholder. Safe takeover keeps history, completed steps, and evidence. A local storage fault stays host-blocked.
+- #286: spill oversized tool results to local files before the model request. After the spill, Layer 2 compaction is still triggered by older over-budget slices. Bot-shell no longer reads the screen inside `app.evaluate`.
+- Update bilingual release notes and the website changelog. Retain coordination format 9 and a complete pre-update backup. Stable remains 0.0.18. This release does not establish P3, an intranet Gateway, remote pairing, or a real packaged Electron feel. The packaged or installed app feel remains untested.
+
 ## 0.1.0-rc.37 - 2026-11-06
 
 ### 新功能
