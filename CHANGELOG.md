@@ -2,6 +2,24 @@
 
 All notable changes to Peer Agent are tracked here.
 
+## 0.1.0-rc.38 - 2026-11-06
+
+### 修复与改进
+
+- #288：大计划的 runner 进度写入 sidecar，不再每个 tick 整篇排版正文；会话预览回填改为一次索引写入，并停止按会话全文扫描。
+- #290：生命周期未变的 tick 以及 `step_started` / `step_completed` 也走 sidecar，无变化的 `setRunnerState` 不再清掉 sidecar 并重写正文。
+- #291：runner 仍在运行时，正文未变的 `persist()` 走 sidecar；检查点在返回前同步刷写 sidecar，并保存、还原 `runTraceCursor`。
+- #292：已停住的大计划（completed 投影为 executing、paused、waiting_user / interrupted）在任务和契约未变时跳过整篇 persist。
+- 同步双语发布说明与站点更新日志。延续联合协调格式 9，更新前完整备份。正式版仍为 0.0.18。本版不宣称 P3、内网 Gateway、远程配对或真实打包 Electron 手感已经交付。
+
+### Fixes and improvements (English)
+
+- #288: large plans write runner progress to a sidecar instead of pretty-printing the body on every tick. Session-preview backfill is one index write, and per-conversation full scans stop.
+- #290: unchanged lifecycle ticks and `step_started` / `step_completed` also use the sidecar, so a no-op `setRunnerState` no longer clears it and rewrites the body.
+- #291: unchanged `persist()` on a still-running large plan uses the sidecar. Checkpoint lifecycle sync-flushes it and stores and restores `runTraceCursor`.
+- #292: settled large plans (completed projected to executing, paused, waiting_user / interrupted) skip a full-body persist when tasks and contracts are unchanged.
+- Update bilingual release notes and the website changelog. Retain coordination format 9 and a complete pre-update backup. Stable remains 0.0.18. This release does not establish P3, an intranet Gateway, remote pairing, or a real packaged Electron feel.
+
 ## 0.1.0-rc.37 - 2026-11-06
 
 ### 新功能
