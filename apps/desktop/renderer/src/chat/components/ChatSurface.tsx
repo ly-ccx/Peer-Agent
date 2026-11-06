@@ -582,10 +582,13 @@ export function ChatSurface({
   const threadRef = useRef<HTMLDivElement>(null);
   const virtualTurnListRef = useRef<VirtualChatTurnListHandle>(null);
   const messageTurnIndex = turnGroupCache.messageTurnIndex;
-  // 观测：这次调用会遍历全部 turn × 全部 segment，且没有 memo（每次渲染都跑）。
-  // 流式期间它落在热路径上，必须单独计时，才能判断「渲染贵」到底贵在哪。
-  const virtualizeChatTurns = getStreamProfiler().measure('render.virtualizeWeight', () =>
-    shouldVirtualizeChatTurns(chatTurns, findOpen),
+  // 权重会扫已加载正文的每一个字符（段落 / 围栏）。流式尾轮换的是 liveTurn，
+  // 历史 turns 数组身份不变；按这个身份缓存，避免每次打字、每次 40ms 提交都重扫全文。
+  const virtualizeChatTurns = useMemo(
+    () => getStreamProfiler().measure('render.virtualizeWeight', () =>
+      shouldVirtualizeChatTurns(chatTurns, findOpen),
+    ),
+    [chatTurns, findOpen],
   );
   const scrollToTurn = useCallback<VirtualChatTurnListHandle['scrollToTurn']>((index, options) => {
     virtualTurnListRef.current?.scrollToTurn(index, options);
