@@ -9,6 +9,7 @@ import { shouldShowCompletedUnreadDot } from '../state/completedUnreadState';
 import { useSidebarInterruption } from '../hooks/useSidebarInterruption';
 import { sidebarActiveState, type SidebarPage } from './sidebarActiveState';
 import { workspaceLabelFromPath } from './workspacePathDisplay';
+import { sidebarSummaryExcerpt } from '../state/sidebarSummary';
 
 export type SidebarConversationMeta = {
   readonly id: string;
@@ -16,6 +17,10 @@ export type SidebarConversationMeta = {
   readonly workspacePath?: string | null;
   readonly messageCount: number;
   readonly updatedAt: string;
+  readonly preview?: {
+    readonly excerpt?: string;
+    readonly availability?: 'ready' | 'rebuilding' | 'version_changed' | 'damaged';
+  } | null;
   readonly status?: 'active' | 'archived';
   readonly archivedAt?: string | null;
   readonly pinnedAt?: string | null;
@@ -174,6 +179,7 @@ export const SidebarConversationRow = memo(function SidebarConversationRow({
   const pendingApprovalText = pendingApprovalCount > 1
     ? `${pendingApprovalLabel} · ${pendingApprovalCount}`
     : pendingApprovalLabel;
+  const summaryExcerpt = sidebarSummaryExcerpt(conv);
   const isPinned = Boolean(conv.pinnedAt);
   const canTogglePin = !isArchivedView;
   const isEditing = editingConversationId === conv.id;
@@ -295,12 +301,17 @@ export const SidebarConversationRow = memo(function SidebarConversationRow({
               {isZh ? '自动化' : 'Auto'}
             </span>
           ) : null}
-          <span
-            className="sidebar-conv-title"
-            title={isArchivedView ? undefined : (isZh ? '双击编辑标题' : 'Double-click to edit title')}
-            onDoubleClick={(e) => { e.stopPropagation(); beginRenameConversation(conv); }}
-          >
-            {conv.title || (isZh ? '新对话' : 'New Chat')}
+          <span className="sidebar-conv-copy">
+            <span
+              className="sidebar-conv-title"
+              title={isArchivedView ? undefined : (isZh ? '双击编辑标题' : 'Double-click to edit title')}
+              onDoubleClick={(e) => { e.stopPropagation(); beginRenameConversation(conv); }}
+            >
+              {conv.title || (isZh ? '新对话' : 'New Chat')}
+            </span>
+            {summaryExcerpt ? (
+              <span className="sidebar-conv-preview" title={summaryExcerpt}>{summaryExcerpt}</span>
+            ) : null}
           </span>
           {conv.selectionOrigin ? (
             <span className="sidebar-conv-parent" title={conv.selectionOrigin.reference.exactText}>

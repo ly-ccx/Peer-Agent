@@ -36,7 +36,12 @@ test('draft input stays in the composer leaf and never becomes context token aut
   assert.match(attachmentStrip, /export const AttachmentStrip = memo\(function AttachmentStrip/);
   assert.match(attachmentStrip, /attachmentThumbCache|AttachmentThumb|downscaleDataUrl/);
   assert.match(tokenUsage, /useConversationContextAccounting\(conversationId\)/);
+  assert.match(tokenUsage, /useConversationActiveUsage\(conversationId\)/);
   assert.match(tokenUsage, /contextAccounting=\{contextAccounting\}/);
+  assert.match(tokenUsage, /activeUsage=\{activeUsage\}/);
+  assert.doesNotMatch(surface, /const activeUsage = convState\.activeUsage/);
+  assert.doesNotMatch(surface, /const contextAccounting = convState\.contextAccounting/);
+  assert.match(surface, /<ContextAccountingRestore/);
   assert.match(tokenUsage, /emptyContext=\{conversationId == null\}/);
   assert.doesNotMatch(tokenUsage, /useConversationDraft|estimateDraftTokens|estimateStreamDeltaTokens/);
 });

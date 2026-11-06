@@ -2,9 +2,9 @@ import { useConversationGitEnvironment } from '../hooks/useConversationGitEnviro
 import { useComposerAttachmentIntake } from '../hooks/useComposerAttachmentIntake';
 import { useThreadScrollGesture } from '../hooks/useThreadScrollGesture';
 
-import { findCurrentTurnIdForScroll } from "../state/threadScrollAnchor.ts";
+import { findCurrentTurnIdForScroll, planStickToBottomScroll, shouldProbeTurnForScroll, type StickScrollAnchor } from "../state/threadScrollAnchor.ts";
 import { formatQueueNoticeText, formatRetryCountdownLabel, formatRetryCountdownLabelEn } from "../state/providerRecoveryText.ts";
-import { loadConversationMessages, nextId } from "../state/conversationHydration.ts";
+import { loadConversationMessages, nextId, shouldLoadOlderHistory } from "../state/conversationHydration.ts";
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { createUnknownContextAccountingSnapshot } from '@peer-agent/runtime-core';
 import type {
@@ -60,7 +60,7 @@ import {
   COMPOSER_ENV_ISOLATION_ON
 } from '../state/taskBoundBranch';
 import { canAutoDispatchQueuedMessage, dispatchQueuedMessage } from '../state/messageQueueDispatch';
-import { contextAccountingRestoreKey, shouldStartContextAccountingRestore } from '../state/contextRestore';
+import { ContextAccountingRestore } from './ContextAccountingRestore';
 import { getProviderModelDisplayLabel } from '../state/providerDisplay';
 import { getStreamProfiler } from '../state/streamProfiler.ts';
 import { createStreamingScrollScheduler, type StreamingScrollScheduler } from '../state/streamingScrollScheduler';
@@ -385,12 +385,11 @@ export function ChatSurface({
   const setTokenUsage = useMemo(() => makeSetter('tokenUsage'), [makeSetter]) as Dispatch<
     SetStateAction<TokenUsageState | null>
   >;
-  const activeUsage = convState.activeUsage;
+  // activeUsage / contextAccounting 由用量叶子自己订阅，壳层只保留写入句柄。
   const setActiveUsage = useMemo(() => makeSetter('activeUsage'), [makeSetter]) as Dispatch<
     SetStateAction<TokenUsageState | null>
   >;
   // ADR 52：主进程随回合结束下发下一次最终请求投影。
-  const contextAccounting = convState.contextAccounting;
   const setContextAccountingSnapshot = useMemo(() => makeSetter('contextAccounting'), [makeSetter]) as Dispatch<
     SetStateAction<ContextAccountingSnapshot | null>
   >;
@@ -571,6 +570,12 @@ export function ChatSurface({
   // 避免手动 /compact 完成后把结果/横幅误作用到已切走的当前会话。
   const conversationIdRef = useRef<string | null>(conversationId);
   conversationIdRef.current = conversationId;
+  const historyPageRef = useRef<{ conversationId: string; cursor: string | null; hasMore: boolean }>({
+    conversationId: '',
+    cursor: null,
+    hasMore: false,
+  });
+  const loadingOlderRef = useRef(false);
   // 正文/思考 delta 的追加逻辑已上移到 useConversationStreamRouter（应用级单例流路由器），
   // 由它按 streamId→conversationId 路由到对应会话桶。本组件不再持有本地 append 逻辑与打字机。
 
@@ -592,6 +597,7 @@ export function ChatSurface({
     virtualTurnListRef.current?.resetMeasurements();
   }, []);
   const shouldAutoScrollRef = useRef(true);
+  const stickAnchorRef = useRef<StickScrollAnchor | null>(null);
   // 用户主动滚动意图：只有 wheel/touch/pointer 等手势可退出 follow。
   // 流式增高、虚拟列表重测、程序贴底触发的 scroll 不得清掉 follow。
   const threadScrollSnapshotsRef = useRef(new Map<string, ThreadScrollSnapshot>());
@@ -614,6 +620,7 @@ export function ChatSurface({
   // 不能放进 conversationId 的 useEffect：那会在首帧虚拟列表已经停在顶部之后才写入 pending。
   if (lastThreadOpenConversationIdRef.current !== conversationId) {
     lastThreadOpenConversationIdRef.current = conversationId; userScroll.clear();
+    stickAnchorRef.current = null;
     const explicitTarget = Boolean(
         conversationId
         && messageTarget
@@ -663,6 +670,17 @@ export function ChatSurface({
     const turnId = currentTurnId === undefined
       ? findCurrentTurnIdForScroll(container)
       : currentTurnId;
+    const existing = threadScrollSnapshotsRef.current.get(id);
+    // 贴底跟随期间轮次没变：只改滚动数字，不再为了 turnOffset 去量 offsetTop。
+    if (turnId && existing?.turnId === turnId && shouldAutoScrollRef.current) {
+      threadScrollSnapshotsRef.current.set(id, {
+        top: container.scrollTop,
+        atBottom: true,
+        turnId,
+        turnOffset: existing.turnOffset,
+      });
+      return;
+    }
     const turnElement = turnId
       ? container.querySelector<HTMLElement>(`[data-chat-turn-id="${CSS.escape(turnId)}"]`)
       : null;
@@ -686,23 +704,36 @@ export function ChatSurface({
     setCurrentTurnId((previous) => (previous === nextTurnId ? previous : nextTurnId));
   }, []);
 
-  const scrollThreadToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
+  const scrollThreadToBottom = useCallback((
+    behavior: ScrollBehavior = 'auto',
+    mode: 'snap' | 'delta' = 'snap',
+  ) => {
     const container = threadRef.current;
     if (!container) return;
-    // 观测：这是每个流式写入后都要走一遍的提交，内部包含多次强制同步布局。
+    // 观测：这是每个流式写入后都要走一遍的提交。跟随期间只按高度差改 scrollTop，
+    // 不再做 elementFromPoint。命中测试只留给「第一次建立锚点」和用户主动回到底部。
     getStreamProfiler().measure('scroll.bottom', () => {
-      // 程序贴底：进入 follow，并清掉用户上滑意图，避免紧随其后的 scroll 事件误退出。
       userScroll.clear();
-      container.scrollTo({ top: container.scrollHeight, behavior });
+      const plan = planStickToBottomScroll({
+        anchor: stickAnchorRef.current,
+        scrollHeight: container.scrollHeight,
+        clientHeight: container.clientHeight,
+        snap: mode === 'snap',
+      });
+      if (behavior === 'smooth') container.scrollTo({ top: plan.scrollTop, behavior });
+      else if (container.scrollTop !== plan.scrollTop) container.scrollTop = plan.scrollTop;
       shouldAutoScrollRef.current = true;
       setIsThreadAtBottom((previous) => (previous ? previous : true));
-      // 命中测试只做一次：saveThreadScrollSnapshot 与 updateCurrentTurnContext 需要的是
-      // 同一时刻的同一个值，此前各自算一遍，等于每次写入多做一次
-      // getBoundingClientRect + elementFromPoint（强制布局 + 命中测试）。
-      // 两次读之间没有任何写，所以合并不会改变结果。
-      const currentTurnId = findCurrentTurnIdForScroll(container);
-      saveThreadScrollSnapshot(conversationIdRef.current, container, currentTurnId);
-      updateCurrentTurnContext(container, currentTurnId);
+      const turnId = plan.probe
+        ? findCurrentTurnIdForScroll(container)
+        : stickAnchorRef.current?.turnId ?? null;
+      stickAnchorRef.current = {
+        turnId,
+        scrollTop: plan.scrollTop,
+        scrollHeight: container.scrollHeight,
+      };
+      saveThreadScrollSnapshot(conversationIdRef.current, container, turnId);
+      updateCurrentTurnContext(container, turnId);
       // 贴底后立刻用真实 scrollTop/高度重算窗口，避免视口已回到顶部、条目还挂在底部 spacer。
       updateVirtualViewport();
     });
@@ -724,7 +755,7 @@ export function ChatSurface({
         cancel: (frameId) => cancelAnimationFrame(frameId),
       },
       // 回调在执行时读取最新的 ref/callback，而不是创建时捕获的，避免调度器持旧闭包。
-      follow: () => scrollThreadToBottomRef.current('auto'),
+      follow: () => scrollThreadToBottomRef.current('auto', 'delta'),
       refresh: () => {
         const container = threadRef.current;
         updateThreadBottomStateRef.current(container);
@@ -743,8 +774,39 @@ export function ChatSurface({
     if (!shouldStickAfterVirtualMeasurement({ currentlyFollowing: shouldAutoScrollRef.current })) {
       return;
     }
-    scrollThreadToBottom('auto');
+    scrollThreadToBottom('auto', 'delta');
   }, [scrollThreadToBottom]);
+
+  const loadOlderHistory = useCallback(async (container: HTMLDivElement) => {
+    const id = conversationIdRef.current;
+    const page = historyPageRef.current;
+    if (!id || page.conversationId !== id || !page.hasMore || !page.cursor || loadingOlderRef.current) return;
+    loadingOlderRef.current = true;
+    const beforeTop = container.scrollTop;
+    const beforeHeight = container.scrollHeight;
+    try {
+      const older = await loadConversationMessages(id, { before: page.cursor });
+      if (conversationIdRef.current !== id) return;
+      historyPageRef.current = {
+        conversationId: id,
+        cursor: older.cursor,
+        hasMore: older.hasMore && older.cursor !== page.cursor,
+      };
+      const current = conversationStore.getSnapshot(id).messages;
+      const seen = new Set(current.map((message) => message.id));
+      const prepend = older.messages.filter((message) => !seen.has(message.id));
+      if (prepend.length === 0) return;
+      convActions.set({ messages: [...prepend, ...current] });
+      requestAnimationFrame(() => {
+        const node = threadRef.current;
+        if (!node || conversationIdRef.current !== id) return;
+        const delta = node.scrollHeight - beforeHeight;
+        if (delta > 0) node.scrollTop = beforeTop + delta;
+      });
+    } finally {
+      loadingOlderRef.current = false;
+    }
+  }, [convActions]);
 
   const threadScrollCoalescerRef = useRef(createFrameCoalescer({
     request: (callback) => requestAnimationFrame(callback),
@@ -756,14 +818,36 @@ export function ChatSurface({
   ) => {
     updateVirtualViewport();
     updateThreadBottomState(container, { userInitiated });
-    const currentTurnId = findCurrentTurnIdForScroll(container);
+    const probeTurn = shouldProbeTurnForScroll({
+      anchoredScrollTop: stickAnchorRef.current?.scrollTop ?? null,
+      scrollTop: container.scrollTop,
+    });
+    const currentTurnId = probeTurn
+      ? findCurrentTurnIdForScroll(container)
+      : stickAnchorRef.current?.turnId ?? null;
+    if (probeTurn) {
+      stickAnchorRef.current = {
+        turnId: currentTurnId,
+        scrollTop: container.scrollTop,
+        scrollHeight: container.scrollHeight,
+      };
+    }
     updateCurrentTurnContext(container, currentTurnId);
     if (pendingThreadScrollRestoreRef.current?.conversationId !== conversationId) {
       saveThreadScrollSnapshot(conversationId, container, currentTurnId);
     }
     const nextScrolled = container.scrollTop > 4;
     setThreadScrolled((previous) => (previous === nextScrolled ? previous : nextScrolled));
-  }, [conversationId, saveThreadScrollSnapshot, updateCurrentTurnContext, updateThreadBottomState, updateVirtualViewport]);
+    const page = historyPageRef.current;
+    if (shouldLoadOlderHistory({
+      scrollTop: container.scrollTop,
+      hasMore: page.conversationId === conversationId && page.hasMore,
+      loading: loadingOlderRef.current,
+      userInitiated,
+    })) {
+      void loadOlderHistory(container);
+    }
+  }, [conversationId, loadOlderHistory, saveThreadScrollSnapshot, updateCurrentTurnContext, updateThreadBottomState, updateVirtualViewport]);
   const handleThreadScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     const container = event.currentTarget;
     const userInitiated = userScroll.state.current.active;
@@ -876,18 +960,19 @@ export function ChatSurface({
       targetProvider?.provider === 'anthropic'
         ? { kind: 'provider_count_api' as const }
         : { kind: 'observed_usage_only' as const };
+    const accounting = conversationStore.getSnapshot(conversationId).contextAccounting;
     setContextAccountingSnapshot(
       createUnknownContextAccountingSnapshot({
         identity: {
           conversationId: conversationId || '__draft__',
-          contentRevision: contextAccounting?.contentRevision ?? 0,
+          contentRevision: accounting?.contentRevision ?? 0,
           modelKey: contextAccountingModelKey(providerId, targetProvider?.model),
         },
         contextWindow: targetProvider?.contextWindow ?? null,
         countCapability,
         phase: 'model_changed',
-        revision: (contextAccounting?.revision ?? 0) + 1,
-        compactionEpoch: contextAccounting?.compactionEpoch ?? 0,
+        revision: (accounting?.revision ?? 0) + 1,
+        compactionEpoch: accounting?.compactionEpoch ?? 0,
         pendingUncountedChanges: messages.length > 0,
       }),
     );
@@ -896,7 +981,6 @@ export function ChatSurface({
   }, [
     changeEffort,
     changeModelProviderId,
-    contextAccounting,
     conversationId,
     effort,
     messages.length,
@@ -989,63 +1073,8 @@ export function ChatSurface({
     railItemsCacheRef.current = { conversationId, isZh, cache };
     return cache.items;
   }, [conversationId, isStreaming, isZh, messages]);
-  const contextAccountingWindow = contextAccounting?.contextWindow ?? undefined;
   // 当前轮进行中(流式/压缩)。草稿是否有内容由输入叶子自行判断。
   const isBusy = isStreaming || isCompactionActive;
-
-  // restored 计量:会话就绪但无权威快照(缺失/失效/跨宿主被守卫置 null)时,
-  // 请求 Runtime 按完整成分重算;未知期间圆环保持 unknown,不渲染伪造百分比。
-  // 同一会话、模型和内容版本只尝试一次。unknown 是合法结果，不能让它触发重投影死循环。
-  // 运行中不触发:计量由 Runtime context.accounting 事件接管。
-  const contextRestoreAttemptedKeysRef = useRef(new Set<string>());
-  useEffect(() => {
-    if (loadStatus !== 'ready' || !conversationId || isDraftConversation) return;
-    const restoreInput = {
-      conversationId,
-      snapshot: contextAccounting,
-      providerId: activeProvider?.id ?? modelProviderId,
-      model: activeProvider?.model,
-    };
-    const requiresRestore = shouldStartContextAccountingRestore({
-      attemptedKeys: contextRestoreAttemptedKeysRef.current,
-      ...restoreInput,
-    });
-    if (!requiresRestore || isBusy) return;
-    if (typeof clientApi.chatContextRestored !== 'function') return;
-    const restoreKey = contextAccountingRestoreKey(restoreInput);
-    let cancelled = false;
-    void clientApi.chatContextRestored({
-      conversationId,
-      modelProviderId: activeProvider?.id ?? modelProviderId,
-    })
-      .then((snap) => {
-        if (cancelled) return;
-        // 仅在请求真正结算后锁定 key：effect cleanup / 快速切会话不再把 restore 锁死。
-        contextRestoreAttemptedKeysRef.current.add(restoreKey);
-        if (!snap) return;
-        contextRestoreAttemptedKeysRef.current.add(contextAccountingRestoreKey({
-          ...restoreInput,
-          snapshot: snap,
-        }));
-        setContextAccountingSnapshot(snap);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        // 失败也锁定同一 key，避免接口异常时重投影死循环。
-        contextRestoreAttemptedKeysRef.current.add(restoreKey);
-      });
-    return () => { cancelled = true; };
-  }, [
-    loadStatus,
-    conversationId,
-    isDraftConversation,
-    contextAccounting,
-    activeProvider?.id,
-    activeProvider?.model,
-    modelProviderId,
-    isBusy,
-    setContextAccountingSnapshot,
-  ]);
 
   useEffect(() => {
     setAttachments([]);
@@ -1136,8 +1165,15 @@ export function ChatSurface({
         modelProviderId: convModelProviderId,
         contextAccounting: storedContextAccountingSnapshot,
         automationCreateContext,
+        cursor: loadedCursor,
+        hasMore: loadedHasMore,
       } = await loadConversationMessages(conversationId);
       if (cancelled) return;
+      historyPageRef.current = {
+        conversationId,
+        cursor: loadedCursor,
+        hasMore: loadedHasMore,
+      };
       // 消息可以先投影到 UI；硬加载时 loadStatus 仍保持 loading，直到 compaction/stream
       // reattach 全部收敛；静默刷新则保持 ready，避免闪空。
       // 选区子会话首次发送会在 await 期间写入本地回合；必须读最新桶，不能用 effect 开始时的空快照。
@@ -1320,8 +1356,15 @@ export function ChatSurface({
       tokenUsage: usage,
       contextAccounting: storedContextAccountingSnapshot,
       automationCreateContext,
+      cursor: loadedCursor,
+      hasMore: loadedHasMore,
     }) => {
       if (cancelled) return;
+      historyPageRef.current = {
+        conversationId,
+        cursor: loadedCursor,
+        hasMore: loadedHasMore,
+      };
       appliedExternalRevisionRef.current = conversationRevision;
       convActions.commitLoad({
         messages: loaded,
@@ -2258,8 +2301,6 @@ export function ChatSurface({
       conversationId={conversationId}
       providers={providers}
       tokenUsage={tokenUsage}
-      activeUsage={activeUsage}
-      contextWindow={contextAccountingWindow}
       isStreaming={isStreaming}
       isZh={isZh}
       effort={effort}
@@ -2281,8 +2322,6 @@ export function ChatSurface({
       conversationId={conversationId}
       providers={providers}
       tokenUsage={tokenUsage}
-      activeUsage={activeUsage}
-      contextWindow={contextAccountingWindow}
       isStreaming={isStreaming}
       isZh={isZh}
       effort={effort}
@@ -2303,6 +2342,15 @@ export function ChatSurface({
     <InteractionActionsContext.Provider value={interactionActions}>
     <InteractionStreamingContext.Provider value={interactionStreaming}>
     <div className="chat-workspace">
+    <ContextAccountingRestore
+      conversationId={conversationId}
+      loadStatus={loadStatus}
+      isDraftConversation={isDraftConversation}
+      providerId={activeProvider?.id ?? null}
+      model={activeProvider?.model}
+      modelProviderId={modelProviderId}
+      isBusy={isBusy}
+    />
     <div
       className={`chat-surface${showEmptyHome ? ' chat-surface--empty-home' : ''}${taskMonitorOpen ? ' chat-surface--with-monitor' : ''}${!showComposer ? ' chat-surface--process' : ''}`}
       onDragEnter={showComposer ? handleSurfaceDragEnter : undefined}

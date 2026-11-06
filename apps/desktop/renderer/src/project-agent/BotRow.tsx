@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { BotListItem } from '@peer-agent/protocol';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { BotAvatar } from './BotAvatar';
@@ -16,7 +17,7 @@ interface BotRowProps {
   readonly onOpen: (workspaceId: string) => void;
 }
 
-export function BotRow({ item, avatarMood, highlighted, opened, timeLabel, i18n, onHighlight, onOpen, onAttention }: BotRowProps) {
+export const BotRow = memo(function BotRow({ item, avatarMood, highlighted, opened, timeLabel, i18n, onHighlight, onOpen, onAttention }: BotRowProps) {
   const name = item.profile.displayName;
   const preview = item.preview.trim() || i18n.t('projectAgent.list.noPreview');
   const needsYou = item.state.needsYou;
@@ -58,4 +59,4 @@ export function BotRow({ item, avatarMood, highlighted, opened, timeLabel, i18n,
       </span>
     </div>
   );
-}
+});

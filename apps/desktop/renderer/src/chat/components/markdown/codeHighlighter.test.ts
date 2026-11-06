@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { highlightCode } from './codeHighlighter.ts';
+import { highlightClosedCode, highlightCode } from './codeHighlighter.ts';
 
 describe('highlightCode', () => {
   it('给 diff 增删行输出 addition / deletion token', () => {
@@ -58,5 +58,15 @@ describe('highlightCode', () => {
     const first = highlightCode(code, 'typescript');
     const second = highlightCode(code, 'typescript');
     assert.strictEqual(second, first);
+  });
+
+  it('未闭合围栏不进入高亮缓存，闭合后仍按 language+code 命中', () => {
+    const code = 'const openFence = 1;';
+    assert.equal(highlightClosedCode(code, 'ts', false).html, null);
+    const closed = highlightClosedCode(code, 'ts', true);
+    assert.equal(closed.language, 'typescript');
+    assert.ok(closed.html);
+    assert.equal(highlightClosedCode(code, 'ts', true), closed);
+    assert.equal(highlightCode(code, 'ts'), closed);
   });
 });

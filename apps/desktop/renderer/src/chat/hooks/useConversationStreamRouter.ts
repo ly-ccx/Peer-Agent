@@ -50,7 +50,8 @@ import {
 import type { ChatMsg, ThinkingKind } from '../state/types';
 import { joinSummaryThinkingContent } from '../state/thinkingSummaryJoin';
 import type { ContextAccountingSnapshot } from '@peer-agent/protocol';
-import { THINKING_TYPEWRITER_OPTIONS, useTypewriterStream } from './useTypewriterStream';
+import { nextStreamingTextSegment } from '../state/streamingMarkdownSlot.ts';
+import { THINKING_TYPEWRITER_OPTIONS, VISIBLE_TYPEWRITER_OPTIONS, useTypewriterStream } from './useTypewriterStream';
 import { getStreamProfiler } from '../state/streamProfiler.ts';
 import { createLatestValueThrottle } from '../state/latestValueThrottle';
 
@@ -79,9 +80,9 @@ function appendText(messages: readonly ChatMsg[], chunk: string): ChatMsg[] {
   const segments = [...(last.segments || [])];
   const lastSeg = segments[segments.length - 1];
   if (lastSeg && lastSeg.type === 'text') {
-    segments[segments.length - 1] = { ...lastSeg, content: (lastSeg.content || '') + chunk };
+    segments[segments.length - 1] = nextStreamingTextSegment(lastSeg, (lastSeg.content || '') + chunk);
   } else {
-    segments.push({ type: 'text', content: chunk });
+    segments.push(nextStreamingTextSegment(undefined, chunk));
   }
   return [...prev.slice(0, -1), { ...last, content: getTextContent(segments), segments }];
 }
@@ -188,7 +189,7 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
       messages: appendThinking(prev.messages, chunk, kind),
     }));
   }, []);
-  const textTypewriter = useTypewriterStream(appendActiveText);
+  const textTypewriter = useTypewriterStream(appendActiveText, VISIBLE_TYPEWRITER_OPTIONS);
   const thinkingTypewriter = useTypewriterStream(appendActiveThinking, THINKING_TYPEWRITER_OPTIONS);
   const flushTextTypewriter = textTypewriter.flush;
   const flushThinkingTypewriter = thinkingTypewriter.flush;

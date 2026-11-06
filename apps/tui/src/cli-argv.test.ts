@@ -100,6 +100,21 @@ describe('parsePeerArgv', () => {
     });
   });
 
+  test('parses update and rejects extra arguments', () => {
+    expect(parsePeerArgv(['update'])).toEqual({ kind: 'update', checkOnly: false });
+    expect(parsePeerArgv(['update', '--check'])).toEqual({ kind: 'update', checkOnly: true });
+    expect(parsePeerArgv(['update', '--help'])).toEqual({ kind: 'help', topic: 'update' });
+    expect(parsePeerArgv(['update', '--force'])).toMatchObject({
+      kind: 'error',
+      message: 'peer update: unknown option --force',
+      exitCode: CLI_EXIT.usage,
+    });
+    expect(parsePeerArgv(['update', 'now'])).toMatchObject({
+      kind: 'error',
+      message: 'peer update: unexpected argument now',
+    });
+  });
+
   test('parses exec --fast as a boolean flag', () => {
     expect(parsePeerArgv(['exec', '--fast', 'hello'])).toMatchObject({
       kind: 'exec',
@@ -117,7 +132,15 @@ describe('formatPeerHelp', () => {
     const help = formatPeerHelp('root', 'peer 0.0.0-test');
     expect(help).toContain('peer 0.0.0-test');
     expect(help).toContain('peer exec');
+    expect(help).toContain('peer update');
     expect(help).not.toContain('OpenTUI');
+  });
+
+  test('update help documents check-only and separate channels', () => {
+    const help = formatPeerHelp('update', 'peer 0.0.0-test');
+    expect(help).toContain('peer update --check');
+    expect(help).toContain('rc (-rc.N)');
+    expect(help).toContain('PEER_AGENT_NO_UPDATE_CHECK=1');
   });
 
   test('exec help documents default session and required full for evals', () => {

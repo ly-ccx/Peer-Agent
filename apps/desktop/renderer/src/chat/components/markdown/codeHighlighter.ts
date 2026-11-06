@@ -4,8 +4,9 @@
  * 设计约束：
  * - 只引入 highlight.js core + 按需注册语言子集，避免全量语言包进入 bundle。
  * - 同步文本/常用语言高亮；低频语言按需载入后只刷新代码着色，源码始终可读。
- * - 结果按 (language, code) 做 LRU 缓存：流式期间同一代码块会被反复重渲，
- *   缓存把重复的 highlight 计算降为一次。
+ * - 结果按 (language, code) 做 LRU 缓存。缓存只服务已经闭合的代码块；
+ *   流式未闭合围栏必须走 highlightClosedCode(..., false)，避免把不断变长的
+ *   半成品写进 LRU。
  * - 超长代码块跳过高亮，直接回退纯文本，避免长文本在流式渲染中卡顿。
  * - 配色不在这里决定：输出标准 hljs-* class，由 CSS 变量驱动深浅色主题。
  */
@@ -194,6 +195,19 @@ function absorbTrailingNewlineIntoBlockTokens(html: string): string {
  */
 export function highlightCode(code: string, rawLanguage: string | undefined): HighlightedCode {
   return highlightWithinBudget(code, rawLanguage, MAX_HIGHLIGHT_CHARS, true);
+}
+
+/**
+ * 闭合围栏才高亮。未闭合时直接回退纯文本，且不读写 LRU：
+ * 缓存键仍是 language + code，但只出现在闭合后的热路径上。
+ */
+export function highlightClosedCode(
+  code: string,
+  rawLanguage: string | undefined,
+  closed: boolean,
+): HighlightedCode {
+  if (!closed) return FALLBACK;
+  return highlightCode(code, rawLanguage);
 }
 
 /** Source documents are memoized by SourceViewer, not retained in the chat LRU.

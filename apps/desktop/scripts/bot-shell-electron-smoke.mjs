@@ -239,6 +239,11 @@ if (oversizedCiWindow) {
   assert.equal(isolatedMain.split(windowSeam).length, 2, 'exact production main window assembly seam required');
   isolatedMain = isolatedMain.replace(windowSeam, `${windowSeam}\n    enableLargerThanScreen: true,`);
 }
+// macOS CI can throttle paints on the product window. The effort sampler still
+// reads real layout; it needs the renderer timers to keep running while focused.
+const throttleSeam = 'webviewTag: true,';
+assert.equal(isolatedMain.split(throttleSeam).length, 2, 'exact main window webPreferences seam required');
+isolatedMain = isolatedMain.replace(throttleSeam, 'webviewTag: true,\n      backgroundThrottling: false,');
 if (botModelFixtures.length) {
   const catalogueSeam = 'listModels: () => llmConfigStore.listProviders(),';
   assert.equal(isolatedMain.split(catalogueSeam).length, 2, 'exact production catalogue assembly seam required');

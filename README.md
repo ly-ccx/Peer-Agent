@@ -85,7 +85,7 @@ Stable channel:
 
     npm install -g @peer-agent/cli
 
-The npm package installs the platform binary and its helper. Available platforms and artifacts are listed on the corresponding release page. The npm beta tag is an older beta channel, not the current RC. See the [CLI reference](https://ly-ccx.github.io/Peer-Agent/docs.html#cli) for modes and scripted usage.
+The npm package installs the platform binary and its helper. Available platforms and artifacts are listed on the corresponding release page. The npm beta tag is an older beta channel, not the current RC. `peer update` installs the newest release on the channel already installed (stable, beta, or rc). `peer update --check` only reports it. See the [CLI reference](https://ly-ccx.github.io/Peer-Agent/docs.html#cli) for modes and scripted usage.
 
 ### Run the 0.1 source
 

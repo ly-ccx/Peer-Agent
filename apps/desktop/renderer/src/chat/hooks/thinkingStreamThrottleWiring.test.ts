@@ -18,8 +18,13 @@ describe('stream router typewriter wiring', () => {
     );
   });
 
-  it('keeps the visible text pump on per-frame pacing', () => {
-    assert.match(routerSource, /useTypewriterStream\(\s*appendActiveText,?\s*\)/);
+  it('batches the visible text pump instead of writing every frame', () => {
+    // 可见正文走 40ms 批量档。裸调用 useTypewriterStream(appendActiveText) 会退回逐帧写入。
+    assert.match(
+      routerSource,
+      /useTypewriterStream\(\s*appendActiveText,\s*VISIBLE_TYPEWRITER_OPTIONS,?\s*\)/,
+    );
+    assert.doesNotMatch(routerSource, /useTypewriterStream\(\s*appendActiveText,?\s*\)/);
   });
 
   it('uses handoff (not flush) for per-delta ordering so the throttle survives', () => {

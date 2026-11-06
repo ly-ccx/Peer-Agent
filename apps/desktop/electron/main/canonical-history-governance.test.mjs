@@ -16,7 +16,13 @@ const tuiPersistenceSource = readFileSync(
 test('conversation send, restore, Goal Runner and TUI resume share the canonical history seam', () => {
   assert.match(mainSource, /projectConversationHistory\(persistedConversation\.messages\)/);
   assert.match(goalRunnerHostSource, /projectConversationHistory\(conversation\.messages\)/);
-  assert.match(mainSource, /projectConversationHistory\(conv\.messages\)/);
+  // Open-path restore must stay on the shared projector. It yields, and may
+  // reuse the Send Prep load, instead of blocking on a sync full projection.
+  assert.match(
+    mainSource,
+    /async function handleChatContextRestored[\s\S]*?peekConversationLoad\(conversationId\)[\s\S]*?projectConversationHistoryYielding\(conv\.messages\)/,
+  );
+  assert.doesNotMatch(mainSource, /projectConversationHistory\(conv\.messages\)/);
   assert.match(tuiPersistenceSource, /projectConversationHistory\(messages\)/);
 });
 

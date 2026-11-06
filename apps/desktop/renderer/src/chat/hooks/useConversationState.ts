@@ -18,7 +18,7 @@ import {
   createConversationSurfaceSnapshotReader,
   type ConversationRuntimeState,
 } from '../state/conversationStore';
-import type { CompactionState, QueuedMessage, ToolProgress } from '../state/types';
+import type { CompactionState, QueuedMessage, TokenUsageState, ToolProgress } from '../state/types';
 import type { ContextAccountingSnapshot } from '@peer-agent/protocol';
 
 /** 绑定到具体 conversationId 的运行态写入句柄。 */
@@ -91,6 +91,25 @@ export function useConversationCompactionState(
   );
   const getSnapshot = useCallback(
     () => conversationStore.getSnapshot(conversationId).compactionState,
+    [conversationId],
+  );
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+/** 只让用量叶子响应本轮 in-flight usage，避免每个 usage 事件重渲染消息表面。 */
+export function useConversationActiveUsage(
+  conversationId: string | null,
+): TokenUsageState | null {
+  const subscribe = useCallback(
+    (listener: () => void) => conversationStore.subscribeSelector(
+      conversationId,
+      snapshot => snapshot.activeUsage,
+      listener,
+    ),
+    [conversationId],
+  );
+  const getSnapshot = useCallback(
+    () => conversationStore.getSnapshot(conversationId).activeUsage,
     [conversationId],
   );
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
