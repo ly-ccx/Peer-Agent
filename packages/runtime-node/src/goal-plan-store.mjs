@@ -718,20 +718,95 @@ export function createGoalPlanStore({
     writeIndex( index);
   }
 
+  function sameJsonValue(left, right) {
+    if (Object.is(left, right)) return true;
+    if (left == null || right == null) return left == null && right == null;
+    try { return JSON.stringify(left) === JSON.stringify(right); }
+    catch { return false; }
+  }
+
+  // 这些字段一变就必须写回正文。tasks 用引用比较，避免为了判定再 stringify 几十 MB。
+  const HARD_PLAN_BODY_KEYS = [
+    'goal',
+    'title',
+    'successCriteria',
+    'criterionResults',
+    'approval',
+    'activation',
+    'executionPolicy',
+    'delegationOrigin',
+    'deliveryBinding',
+    'deliveryHandoff',
+    'evidenceRefs',
+    'qualityReview',
+    'manualConfirmations',
+    'modelReviews',
+    'resultAcceptance',
+    'revisionHistory',
+    'involvedFiles',
+    'workflowKind',
+    'hostVerification',
+  ];
+
+  function hardPlanBodyChanged(existing, next) {
+    if (!existing || !next) return true;
+    if (existing.tasks !== next.tasks) return true;
+    return HARD_PLAN_BODY_KEYS.some((key) => !sameJsonValue(existing[key], next[key]));
+  }
+
+  function readExistingPlan(planId) {
+    if (!planId) return null;
+    const file = planFile(planId);
+    try {
+      if (!existsSync(file)) return null;
+      // 大文件走读缓存，避免 persist 在 getPlan 刚刚解析之后再整篇 readFileSync。
+      const parsed = planFileBytes(planId) >= RUNNER_PROGRESS_FULL_REWRITE_BYTES
+        ? readJson(file)
+        : JSON.parse(readFileSync(file, 'utf8'));
+      return normalizePlan(parsed);
+    } catch {
+      return null;
+    }
+  }
+
+  function rememberNewRunEvents(existing, next) {
+    const seen = new Set(
+      (existing?.runTrace?.events || []).map((event) => event?.id).filter(Boolean),
+    );
+    const pending = runnerProgressPendingEvents.get(next.planId) || [];
+    for (const event of pending) if (event?.id) seen.add(event.id);
+    const merged = pending.slice();
+    let changed = false;
+    for (const event of next.runTrace?.events || []) {
+      if (!event?.id || seen.has(event.id)) continue;
+      seen.add(event.id);
+      merged.push(event);
+      changed = true;
+    }
+    if (changed) runnerProgressPendingEvents.set(next.planId, merged);
+  }
+
+  /**
+   * .changes.jsonl 里 reason/changeKind 都是 persist 的写入都进这里。
+   * setRunnerState 的硬跃迁会带 runner-state，不会落到这个签名。
+   * 大计划上 runner 仍在跑、计划正文（任务/契约/状态）没变时，整篇 pretty-print
+   * 会占满主进程，并且 clearRunnerProgressState 让 sidecar 目录永远建不出来。
+   */
+  function shouldSidecarRunningPersist(existing, next, options = {}) {
+    if (!existing || !next?.planId) return false;
+    if ((options.changeKind ?? 'persist') !== 'persist') return false;
+    if (planFileBytes(next.planId) < RUNNER_PROGRESS_FULL_REWRITE_BYTES) return false;
+    if (!RUNNER_ACTIVE_STATUSES.has(next.runner?.status)) return false;
+    if (existing.status !== next.status) return false;
+    return !hardPlanBodyChanged(existing, next);
+  }
+
   function persist(plan, options = {}) {
     // progress 始终由子任务聚合派生，写入前强制重算覆盖（不可手填）。
     // timing 在 status 实际迁移时推进；同状态写入仅规范化，不重复开关 segment。
     // 调用方通常传入 { ...plan, status: next }，所以 prevStatus 必须取磁盘旧值
     // （或 options 显式覆盖），不能用入参上的新 status。
-    const existing = plan?.planId ? (() => {
-      try {
-        const file = planFile(plan.planId);
-        if (!existsSync(file)) return null;
-        return normalizePlan(JSON.parse(readFileSync(file, 'utf8')));
-      } catch {
-        return null;
-      }
-    })() : null;
+    const existing = readExistingPlan(plan?.planId);
     const prevStatus = options.prevStatus ?? existing?.status;
     const prevTiming = options.prevTiming ?? existing?.timing;
     const shouldAttachBinding = Boolean(
@@ -818,6 +893,11 @@ export function createGoalPlanStore({
     // 终态 / 非执行态时若 timing 已清空 open segment 且历史无 timing，不强制写空对象
     if (!timing && Object.prototype.hasOwnProperty.call(next, 'timing')) {
       delete next.timing;
+    }
+    if (shouldSidecarRunningPersist(existing, next, options)) {
+      rememberNewRunEvents(existing, next);
+      // 不写正文，也不追加 changeKind=persist。硬状态跃迁仍走下面的整篇写盘。
+      return stageRunnerProgress(next.planId, next);
     }
     // 完整写盘优先：清掉 runner-progress 节流状态，避免旧计数回写覆盖。
     clearRunnerProgressState(next.planId);
@@ -1609,6 +1689,15 @@ export function createGoalPlanStore({
       } else {
         safePatch.title = nextTitle;
       }
+    }
+    // 调度器会反复 revise 成「已经是 executing / phase=running」。
+    // 大计划上这会带 changeKind=persist 把整份正文再写一遍，并清掉 sidecar。
+    if (
+      planFileBytes(planId) >= RUNNER_PROGRESS_FULL_REWRITE_BYTES
+      && RUNNER_ACTIVE_STATUSES.has(plan.runner?.status)
+      && Object.entries(safePatch).every(([key, value]) => sameJsonValue(plan[key], value))
+    ) {
+      return plan;
     }
     const nextVersion = (plan.version || 1) + 1;
     const next = {
