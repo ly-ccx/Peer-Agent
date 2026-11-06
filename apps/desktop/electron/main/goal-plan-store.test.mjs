@@ -308,6 +308,10 @@ test('appendRunEvent records checkpoint resume coordinates when a node is suppli
 
   assert.equal(updated.runTrace.activeNodeId, 'node-verify-agent-binding');
   assert.equal(updated.runTrace.lastCheckpointNodeId, 'node-verify-agent-binding');
+  const reopened = createGoalPlanStore();
+  const restored = reopened.getPlan(plan.planId);
+  assert.equal(restored.runTrace.activeNodeId, 'node-verify-agent-binding');
+  assert.equal(restored.runTrace.lastCheckpointNodeId, 'node-verify-agent-binding');
 });
 
 test('derivePlanStatus: executing + 全叶子 completed → completed（自动收尾）', () => {

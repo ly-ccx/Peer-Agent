@@ -622,6 +622,13 @@ export function createGoalPlanStore({
       const patchFile = runnerProgressPatchFile(next.planId);
       if (patchFile) {
         const pendingEvents = runnerProgressPendingEvents.get(planId) || [];
+        const runTraceCursor = {};
+        if (typeof next.runTrace?.activeNodeId === 'string' && next.runTrace.activeNodeId) {
+          runTraceCursor.activeNodeId = next.runTrace.activeNodeId;
+        }
+        if (typeof next.runTrace?.lastCheckpointNodeId === 'string' && next.runTrace.lastCheckpointNodeId) {
+          runTraceCursor.lastCheckpointNodeId = next.runTrace.lastCheckpointNodeId;
+        }
         writeJsonAtomic(patchFile, {
           planId: next.planId,
           updatedAt: next.updatedAt,
@@ -629,6 +636,7 @@ export function createGoalPlanStore({
           progress: next.progress,
           runner: next.runner ?? null,
           ...(pendingEvents.length > 0 ? { runEvents: pendingEvents } : {}),
+          ...(Object.keys(runTraceCursor).length > 0 ? { runTraceCursor } : {}),
         });
       }
       // 不重写计划正文，也不追加 .changes.jsonl。本进程 UI 仍走 100ms notify。
@@ -718,20 +726,104 @@ export function createGoalPlanStore({
     writeIndex( index);
   }
 
+  function sameJsonValue(left, right) {
+    if (Object.is(left, right)) return true;
+    if (left == null || right == null) return left == null && right == null;
+    try { return JSON.stringify(left) === JSON.stringify(right); }
+    catch { return false; }
+  }
+
+  // 这些字段一变就必须写回正文。tasks 用引用比较，避免为了判定再 stringify 几十 MB。
+  const HARD_PLAN_BODY_KEYS = [
+    'goal',
+    'title',
+    'successCriteria',
+    'criterionResults',
+    'approval',
+    'activation',
+    'executionPolicy',
+    'delegationOrigin',
+    'deliveryBinding',
+    'deliveryHandoff',
+    'evidenceRefs',
+    'qualityReview',
+    'manualConfirmations',
+    'modelReviews',
+    'resultAcceptance',
+    'revisionHistory',
+    'involvedFiles',
+    'workflowKind',
+    'hostVerification',
+  ];
+
+  function hardPlanBodyChanged(existing, next) {
+    if (!existing || !next) return true;
+    if (existing.tasks !== next.tasks) return true;
+    return HARD_PLAN_BODY_KEYS.some((key) => !sameJsonValue(existing[key], next[key]));
+  }
+
+  function readExistingPlan(planId) {
+    if (!planId) return null;
+    const file = planFile(planId);
+    try {
+      if (!existsSync(file)) return null;
+      // 大文件走读缓存，避免 persist 在 getPlan 刚刚解析之后再整篇 readFileSync。
+      const parsed = planFileBytes(planId) >= RUNNER_PROGRESS_FULL_REWRITE_BYTES
+        ? readJson(file)
+        : JSON.parse(readFileSync(file, 'utf8'));
+      return normalizePlan(parsed);
+    } catch {
+      return null;
+    }
+  }
+
+  function rememberNewRunEvents(existing, next) {
+    const seen = new Set(
+      (existing?.runTrace?.events || []).map((event) => event?.id).filter(Boolean),
+    );
+    const pending = runnerProgressPendingEvents.get(next.planId) || [];
+    for (const event of pending) if (event?.id) seen.add(event.id);
+    const merged = pending.slice();
+    let changed = false;
+    for (const event of next.runTrace?.events || []) {
+      if (!event?.id || seen.has(event.id)) continue;
+      seen.add(event.id);
+      merged.push(event);
+      changed = true;
+    }
+    if (changed) runnerProgressPendingEvents.set(next.planId, merged);
+  }
+
+  /**
+   * .changes.jsonl 里 reason/changeKind 都是 persist 的写入都进这里。
+   * setRunnerState 的硬跃迁会带 runner-state，不会落到这个签名。
+   * 大计划上 runner 仍在跑、计划正文（任务/契约/状态）没变时，整篇 pretty-print
+   * 会占满主进程，并且 clearRunnerProgressState 让 sidecar 目录永远建不出来。
+   */
+  function shouldSidecarRunningPersist(existing, next, options = {}) {
+    if (!existing || !next?.planId) return false;
+    if ((options.changeKind ?? 'persist') !== 'persist') return false;
+    if (planFileBytes(next.planId) < RUNNER_PROGRESS_FULL_REWRITE_BYTES) return false;
+    if (!RUNNER_ACTIVE_STATUSES.has(next.runner?.status)) return false;
+    if (existing.status !== next.status) return false;
+    return !hardPlanBodyChanged(existing, next);
+  }
+
+  // prepare/commit 在压缩开始前返回。sidecar 若只排 1s 定时器，进程在窗口内崩溃就失去恢复点。
+  function checkpointLifecycleChanged(existing, next) {
+    const previous = existing?.runner;
+    const current = next?.runner;
+    return !sameJsonValue(previous?.contextCheckpoint, current?.contextCheckpoint)
+      || !sameJsonValue(previous?.lastConsumedCheckpointId, current?.lastConsumedCheckpointId)
+      || !sameJsonValue(previous?.lastConsumedCheckpointSequence, current?.lastConsumedCheckpointSequence);
+  }
+
   function persist(plan, options = {}) {
     // progress 始终由子任务聚合派生，写入前强制重算覆盖（不可手填）。
     // timing 在 status 实际迁移时推进；同状态写入仅规范化，不重复开关 segment。
     // 调用方通常传入 { ...plan, status: next }，所以 prevStatus 必须取磁盘旧值
     // （或 options 显式覆盖），不能用入参上的新 status。
-    const existing = plan?.planId ? (() => {
-      try {
-        const file = planFile(plan.planId);
-        if (!existsSync(file)) return null;
-        return normalizePlan(JSON.parse(readFileSync(file, 'utf8')));
-      } catch {
-        return null;
-      }
-    })() : null;
+    const existing = readExistingPlan(plan?.planId);
     const prevStatus = options.prevStatus ?? existing?.status;
     const prevTiming = options.prevTiming ?? existing?.timing;
     const shouldAttachBinding = Boolean(
@@ -818,6 +910,15 @@ export function createGoalPlanStore({
     // 终态 / 非执行态时若 timing 已清空 open segment 且历史无 timing，不强制写空对象
     if (!timing && Object.prototype.hasOwnProperty.call(next, 'timing')) {
       delete next.timing;
+    }
+    if (shouldSidecarRunningPersist(existing, next, options)) {
+      rememberNewRunEvents(existing, next);
+      // 不写正文，也不追加 changeKind=persist。硬状态跃迁仍走下面的整篇写盘。
+      stageRunnerProgress(next.planId, next);
+      if (checkpointLifecycleChanged(existing, next)) {
+        flushRunnerProgressPersist(next.planId, { notify: false });
+      }
+      return next;
     }
     // 完整写盘优先：清掉 runner-progress 节流状态，避免旧计数回写覆盖。
     clearRunnerProgressState(next.planId);
@@ -1085,31 +1186,46 @@ export function createGoalPlanStore({
         updatedAt: typeof patch.updatedAt === 'string' ? patch.updatedAt : plan.updatedAt,
       };
     }
-    if (Array.isArray(patch.runEvents) && patch.runEvents.length > 0) {
+    if (Array.isArray(patch.runEvents) && patch.runEvents.length > 0 || patch.runTraceCursor) {
       const trace = normalizeRunTrace(next.runTrace, { goalPlanId: plan.planId });
       const seen = new Set(trace.events.map((event) => event.id));
       const extra = [];
-      for (const event of patch.runEvents) {
+      let activeNodeId = trace.activeNodeId;
+      let lastCheckpointNodeId = trace.lastCheckpointNodeId;
+      for (const event of Array.isArray(patch.runEvents) ? patch.runEvents : []) {
         const normalized = normalizeRunEvent(event, { goalPlanId: plan.planId });
         if (!normalized || seen.has(normalized.id)) continue;
         seen.add(normalized.id);
         extra.push(normalized);
-      }
-      if (extra.length > 0) {
-        next = {
-          ...next,
-          runTrace: {
-            ...trace,
-            events: [...trace.events, ...extra],
-          },
-        };
-        const pending = runnerProgressPendingEvents.get(plan.planId) || [];
-        const pendingSeen = new Set(pending.map((event) => event.id));
-        const mergedPending = pending.slice();
-        for (const event of extra) {
-          if (!pendingSeen.has(event.id)) mergedPending.push(event);
+        if (normalized.nodeId) activeNodeId = normalized.nodeId;
+        if (normalized.type === 'checkpoint_created' && normalized.nodeId) {
+          lastCheckpointNodeId = normalized.nodeId;
         }
-        runnerProgressPendingEvents.set(plan.planId, mergedPending);
+      }
+      const cursor = patch.runTraceCursor;
+      if (cursor && typeof cursor === 'object') {
+        if (typeof cursor.activeNodeId === 'string' && cursor.activeNodeId) activeNodeId = cursor.activeNodeId;
+        if (typeof cursor.lastCheckpointNodeId === 'string' && cursor.lastCheckpointNodeId) {
+          lastCheckpointNodeId = cursor.lastCheckpointNodeId;
+        }
+      }
+      if (extra.length > 0 || activeNodeId !== trace.activeNodeId || lastCheckpointNodeId !== trace.lastCheckpointNodeId) {
+        const runTrace = {
+          ...trace,
+          events: [...trace.events, ...extra],
+        };
+        if (activeNodeId) runTrace.activeNodeId = activeNodeId;
+        if (lastCheckpointNodeId) runTrace.lastCheckpointNodeId = lastCheckpointNodeId;
+        next = { ...next, runTrace };
+        if (extra.length > 0) {
+          const pending = runnerProgressPendingEvents.get(plan.planId) || [];
+          const pendingSeen = new Set(pending.map((event) => event.id));
+          const mergedPending = pending.slice();
+          for (const event of extra) {
+            if (!pendingSeen.has(event.id)) mergedPending.push(event);
+          }
+          runnerProgressPendingEvents.set(plan.planId, mergedPending);
+        }
       }
     }
     if (next === plan) return plan;
@@ -1609,6 +1725,15 @@ export function createGoalPlanStore({
       } else {
         safePatch.title = nextTitle;
       }
+    }
+    // 调度器会反复 revise 成「已经是 executing / phase=running」。
+    // 大计划上这会带 changeKind=persist 把整份正文再写一遍，并清掉 sidecar。
+    if (
+      planFileBytes(planId) >= RUNNER_PROGRESS_FULL_REWRITE_BYTES
+      && RUNNER_ACTIVE_STATUSES.has(plan.runner?.status)
+      && Object.entries(safePatch).every(([key, value]) => sameJsonValue(plan[key], value))
+    ) {
+      return plan;
     }
     const nextVersion = (plan.version || 1) + 1;
     const next = {
