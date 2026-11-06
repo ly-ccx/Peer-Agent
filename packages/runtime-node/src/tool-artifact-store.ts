@@ -7,8 +7,10 @@
 //
 // 原则:It moves evidence out of prompt and keeps the route back.
 
+import { createHash } from 'node:crypto';
 import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { MICROCOMPACTION_CONFIG, boundProviderToolResultContent } from '@peer-agent/runtime-core';
 import { pathOf } from './data-store.mjs';
 import { projectDelegationContinuation } from './project-agent/model-tool-result.ts';
 
@@ -154,8 +156,13 @@ export function materializeToolResultContent(options: {
     return { content, materialized: false };
   }
   // 已是结构化 ref(shell/file/capability 自带落盘)则不重复材料化。
+  // 超过单条请求上限的 ref 仍会把巨大正文带回模型，必须继续外置。
   const trimmed = content.trim();
-  if (trimmed.startsWith('{') && /"kind"\s*:\s*"local_(?:tool_result|file|capability_result)_ref"/.test(trimmed.slice(0, 400))) {
+  if (
+    content.length <= Math.max(inlineMax, 64_000)
+    && trimmed.startsWith('{')
+    && /"kind"\s*:\s*"local_(?:tool_result|file|capability_result)_ref"/.test(trimmed.slice(0, 400))
+  ) {
     return { content, materialized: false };
   }
 
@@ -198,11 +205,99 @@ export function materializeToolResultContent(options: {
       `sed -n '1,120p' "${artifact.artifactPath}"`,
       `tail -n 120 "${artifact.artifactPath}"`,
     ],
-    note: 'Full tool output preserved on disk. Read the artifact (rg/sed/tail or read_file) when you need the omitted middle. Do NOT re-run the original command to recover it.',
+    note: `Full output saved locally (${content.length} chars) at ${artifact.artifactPath}. The preview is not the full result. Use the suggested shell commands to read only the part you need. Do NOT re-run the original command to recover it.`,
   };
   return {
     content: JSON.stringify(ref, null, 2),
     materialized: true,
     artifactPath: artifact.artifactPath,
   };
+}
+
+function spillIdentity(toolCallId: string | null | undefined, content: string): string {
+  const hash = createHash('sha256').update(content).digest('hex').slice(0, 16);
+  const id = typeof toolCallId === 'string' ? toolCallId.trim() : '';
+  return id ? `${id}-${hash}` : `history-${hash}`;
+}
+
+/**
+ * Model-facing copy of one tool result.
+ * Bodies within the provider cap stay inline. Larger bodies are written to a
+ * local artifact; the model receives the size, path, and shell retrieval commands.
+ * A failed write falls back to a preview and does not put the full body on the wire.
+ */
+export function spillProviderToolResultContent(options: {
+  readonly content: string;
+  readonly conversationId?: string | null;
+  readonly toolCallId?: string | null;
+  readonly tool?: string | null;
+  readonly baseDir?: string;
+  readonly maxChars?: number;
+}): string {
+  const content = String(options.content ?? '');
+  const maxChars = options.maxChars ?? MICROCOMPACTION_CONFIG.recentToolResultChars;
+  if (content.length <= maxChars) return content;
+  const materialized = materializeToolResultContent({
+    conversationId: options.conversationId,
+    toolCallId: spillIdentity(options.toolCallId, content),
+    tool: options.tool ?? 'tool',
+    content,
+    baseDir: options.baseDir,
+    inlineMaxChars: maxChars,
+  });
+  if (materialized.materialized) return materialized.content;
+  return boundProviderToolResultContent(content, maxChars);
+}
+
+type SpillMessage = {
+  readonly role?: string;
+  readonly content?: unknown;
+  readonly toolCallId?: string;
+  readonly tool_call_id?: string;
+};
+
+function spillBlockContent(
+  content: unknown,
+  options: {
+    readonly conversationId?: string | null;
+    readonly baseDir?: string;
+    readonly toolCallId?: string;
+  },
+): unknown {
+  if (typeof content === 'string') {
+    return spillProviderToolResultContent({ ...options, content });
+  }
+  if (!Array.isArray(content)) return content;
+  let changed = false;
+  const blocks = content.map((block, index) => {
+    if (!block || typeof block !== 'object' || Array.isArray(block)) return block;
+    const record = block as { type?: string; content?: unknown; tool_use_id?: string };
+    if (record.type !== 'tool_result' || typeof record.content !== 'string') return block;
+    const next = spillProviderToolResultContent({
+      ...options,
+      content: record.content,
+      toolCallId: record.tool_use_id || `${options.toolCallId ?? 'tool'}-${index}`,
+    });
+    if (next === record.content) return block;
+    changed = true;
+    return { ...record, content: next };
+  });
+  return changed ? blocks : content;
+}
+
+/** Replace oversized tool bodies in a provider history with local-file refs. */
+export function spillOversizedToolResultsForProvider<T extends SpillMessage>(
+  messages: readonly T[],
+  options: { readonly conversationId?: string | null; readonly baseDir?: string } = {},
+): readonly T[] {
+  let changed = false;
+  const next = messages.map((message, index) => {
+    if (message?.role !== 'tool' && !Array.isArray(message?.content)) return message;
+    const toolCallId = message.toolCallId || message.tool_call_id || `history-${index}`;
+    const content = spillBlockContent(message.content, { ...options, toolCallId });
+    if (content === message.content) return message;
+    changed = true;
+    return { ...message, content };
+  });
+  return changed ? next : messages;
 }

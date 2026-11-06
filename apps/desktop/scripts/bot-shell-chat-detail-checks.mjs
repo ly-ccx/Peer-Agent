@@ -5,6 +5,18 @@ import path from 'node:path';
 import { checkBotChoiceMotion } from './bot-choice-motion-checks.mjs';
 import { checkReplyPresence } from './bot-reply-presence-checks.mjs';
 
+// Chromium drops an inspector promise ("Resulting promise was garbage collected")
+// when app.evaluate touches screen while the main process is busy. Native
+// display is already observed outside that promise; retry the window call once.
+async function evaluateElectronMain(app, pageFunction, arg) {
+  try {
+    return await app.evaluate(pageFunction, arg);
+  } catch (error) {
+    if (!/garbage collected|Promise was collected/i.test(String(error?.message ?? ''))) throw error;
+    return await app.evaluate(pageFunction, arg);
+  }
+}
+
 /** Uses the isolated fixture's actual input queue and the production question projection. */
 export async function checkBotChatDetails({ page, app, until, report, captureDirectory, conversationFile }) {
   const checks = report.chatDetails = [];
@@ -24,9 +36,12 @@ export async function checkBotChatDetails({ page, app, until, report, captureDir
   const entryTheme = await page.evaluate(() => document.documentElement.dataset.theme);
   const entryChecks = [];
   const entryViewport = page.viewportSize() ?? await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+  const density = report.nativeDisplay?.scaleFactor;
+  assert.equal(typeof density, 'number', 'native display scale is observed outside the inspector');
+  assert.ok(density > 0);
   // Capture the actual view for hover states: surface capture temporarily drops
   // Chromium's :hover even while the pointer, layout and scroll remain unchanged.
-  const nativeView = await app.evaluate(({ app, BrowserWindow, screen }, { url, viewport }) => {
+  const nativeView = await evaluateElectronMain(app, ({ app, BrowserWindow }, { url, viewport }) => {
     const window = BrowserWindow.getAllWindows().find(window => window.webContents.getURL() === url);
     if (!window) throw Error('fixture window missing');
     const previous = window.getContentSize();
@@ -37,8 +52,9 @@ export async function checkBotChatDetails({ page, app, until, report, captureDir
     window.show();
     window.focus();
     window.setContentSize(viewport.width, viewport.height);
-    return { previous, size: window.getContentSize(), density: screen.getDisplayMatching(window.getBounds()).scaleFactor };
+    return { previous, size: window.getContentSize() };
   }, { url: page.url(), viewport: entryViewport });
+  nativeView.density = density;
   assert.deepEqual(nativeView.size, [entryViewport.width, entryViewport.height], 'native window matches the established CSS viewport');
   for (const theme of ['dark', 'light']) {
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
@@ -67,7 +83,7 @@ export async function checkBotChatDetails({ page, app, until, report, captureDir
     assert.equal(beforeCapture.hovered, true);
     // Electron's frame capture works for its native window even when Chromium
     // cannot capture a fromSurface=false view. Preserve the real hover state.
-    const png = await app.evaluate(async ({ BrowserWindow }, url) => {
+    const png = await evaluateElectronMain(app, async ({ BrowserWindow }, url) => {
       const window = BrowserWindow.getAllWindows().find(window => window.webContents.getURL() === url);
       if (!window) throw Error('fixture window missing for hover capture');
       return (await window.webContents.capturePage()).toPNG().toString('base64');
@@ -87,7 +103,7 @@ export async function checkBotChatDetails({ page, app, until, report, captureDir
     assert.deepEqual(afterCapture.bounds, beforeCapture.bounds, 'hover capture preserves reply geometry');
     assert.equal(afterCapture.top, beforeCapture.top, 'hover capture preserves the reading position');
   }
-  await app.evaluate(({ BrowserWindow }, { url, nativeSize }) => {
+  await evaluateElectronMain(app, ({ BrowserWindow }, { url, nativeSize }) => {
     BrowserWindow.getAllWindows().find(window => window.webContents.getURL() === url)?.setContentSize(...nativeSize);
   }, { url: page.url(), nativeSize: nativeView.previous });
   await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, entryTheme);

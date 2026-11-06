@@ -22,7 +22,7 @@ import type {
   ModelToolDefinition,
 } from '@peer-agent/runtime-node';
 import { modelAssistantMessage } from './provider-continuation.ts';
-import { encodeProviderToolResult, readOnlyWorkCapabilityAllowed, agentCommunicationExcludedPrefixes, admitInteractiveToolSet, sessionWaitProjected } from '@peer-agent/runtime-node';
+import { encodeProviderToolResult, readOnlyWorkCapabilityAllowed, agentCommunicationExcludedPrefixes, admitInteractiveToolSet, sessionWaitProjected, spillOversizedToolResultsForProvider } from '@peer-agent/runtime-node';
 import type { RuntimeSdkProviderExecution, RuntimeSdkStreamDiscardEvent } from '@peer-agent/runtime-sdk';
 
 import type {
@@ -527,7 +527,9 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         buildRequest(pipelineState) {
           return {
             model,
-            messages: microcompactMessagesForContext(pipelineState.messages, { preserveLatestUserTurn: true }).messages,
+            messages: microcompactMessagesForContext(spillOversizedToolResultsForProvider(pipelineState.messages, {
+              conversationId: state.conversationId ?? context.run.conversationId,
+            }), { preserveLatestUserTurn: true }).messages,
             tools,
             ...(!reasoningEffort || reasoningEffort === 'default' ? {} : { reasoningEffort }),
             ...(options.getFastMode?.() === true ? { fastMode: true } : {}),

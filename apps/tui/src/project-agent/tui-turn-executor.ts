@@ -16,7 +16,8 @@ import {
   type ModelMessage
 } from "@peer-agent/runtime-node/models";
 import {
-  createFailedClientToolResult
+  createFailedClientToolResult,
+  encodeProviderToolResult
 } from "@peer-agent/runtime-node/providers";
 import {
   createGoalPlanStore
@@ -29,6 +30,26 @@ import type { TuiRuntimeMode } from '../tui-mode.ts';
 import { createTuiRuntime, type TuiRuntime } from '../tui-runtime.ts';
 import { resolvePersistedModelSelection } from '../tui-model-selection.ts';
 import { createTuiHost, type PendingApproval, type TuiCapabilityProvider } from '../tui-host.ts';
+
+function providerToolResultForStream(
+  execution: { readonly result?: { readonly status?: string; readonly output?: unknown; readonly error?: unknown; readonly toolCallId?: string } | null },
+  conversationId: string | null | undefined,
+  toolCallId: string,
+): string {
+  try {
+    return encodeProviderToolResult({
+      result: execution.result,
+      execution,
+      conversationId,
+      toolCallId,
+    }).content;
+  } catch {
+    return JSON.stringify({
+      status: execution.result?.status ?? 'completed',
+      note: 'Tool result omitted from the replayed stream. The local execution record still holds the outcome.',
+    });
+  }
+}
 
 export interface TuiTurnRequest {
   conversationId?: string | null;
@@ -190,7 +211,8 @@ export function createTuiTurnExecutor(options: {
         if (typeof result === 'string') { try { result = JSON.parse(result); } catch { /* Text remains factual output. */ } }
         calls.push({ toolCallId: call.toolCallId, execution, name: toolName, input: call.arguments, result });
         input.sink.send('chat:stream:tool-result', { streamId, toolCallId: call.toolCallId,
-          result: JSON.stringify(execution.result), evidenceRefs: collectToolEvidenceRefs({toolCallId:call.toolCallId, execution}) });
+          result: providerToolResultForStream(execution, input.conversationId, call.toolCallId),
+          evidenceRefs: collectToolEvidenceRefs({toolCallId:call.toolCallId, execution}) });
         const control = (execution.result as any).control ?? (execution.result.outputPreview as any)?.control
           ?? (execution.result.output as any)?.control ?? (execution.result.metadata as any)?.control;
         const requestUserInput = control?.requestUserInput || control?.kind === 'request_user_input' || control?.reason === 'request_user_input';

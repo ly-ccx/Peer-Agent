@@ -13,6 +13,12 @@ export const MICROCOMPACTION_CONFIG = Object.freeze({
   keepRecentCount: 8,
   triggerChars: 6_000,
   previewChars: 800,
+  /**
+   * Hard cap for one tool-result body in a provider request.
+   * The recent window stays more complete than older history, but it cannot
+   * carry a multi-megabyte tool body. File reads under this cap stay inline.
+   */
+  recentToolResultChars: 32_000,
 });
 
 type AnyRecord = Record<string, unknown>;
@@ -338,6 +344,89 @@ function microcompactBlockContent(block: AnyRecord, config: typeof MICROCOMPACTI
   return { block, compacted: false, beforeChars: 0, afterChars: 0 };
 }
 
+/**
+ * Bound one tool-result body before it is serialized into a provider request.
+ * Small and already-structured results pass through. Oversized text keeps a
+ * retrieval skeleton or a short preview, including original size.
+ */
+export function boundProviderToolResultContent(
+  content: string,
+  maxChars: number = MICROCOMPACTION_CONFIG.recentToolResultChars,
+): string {
+  if (content.length <= maxChars) return content;
+  const previewChars = Math.min(MICROCOMPACTION_CONFIG.previewChars, Math.max(200, maxChars));
+  const parsed = tryParseJsonObject(content);
+  if (parsed) {
+    const ref = compactLocalRefPayload(parsed, previewChars);
+    const shrunk = ref ?? shrinkOversizedToolRecord(parsed, previewChars, content.length);
+    const next = JSON.stringify(ref ? { ...shrunk, originalChars: content.length } : shrunk);
+    if (next.length <= maxChars && next.length < content.length) return next;
+  }
+  const preview = compactLongHistoricalString(content, previewChars);
+  return preview.length <= maxChars ? preview : preview.slice(0, maxChars);
+}
+
+function shrinkOversizedToolRecord(value: AnyRecord, previewChars: number, originalChars: number): AnyRecord {
+  const next: AnyRecord = {
+    contextPreviewTruncated: true,
+    originalChars,
+    note: 'Tool result omitted from provider history; use artifact, path, or evidence refs for the full output.',
+  };
+  for (const [key, item] of Object.entries(value)) {
+    if (typeof item === 'string') {
+      next[key] = item.length > previewChars ? previewHistoricalText(item, previewChars) : item;
+      continue;
+    }
+    if (Array.isArray(item)) {
+      next[key] = item.length > 16 ? item.slice(0, 16) : item;
+      continue;
+    }
+    if (item && typeof item === 'object') {
+      const nested = shrinkOversizedToolRecord(item as AnyRecord, Math.min(previewChars, 400), originalChars);
+      delete nested.note;
+      delete nested.originalChars;
+      next[key] = nested;
+      continue;
+    }
+    next[key] = item;
+  }
+  return next;
+}
+
+function boundToolMessageContent(content: unknown, maxChars: number): {
+  readonly content: unknown;
+  readonly bounded: boolean;
+  readonly beforeChars: number;
+  readonly afterChars: number;
+} {
+  if (typeof content === 'string') {
+    const next = boundProviderToolResultContent(content, maxChars);
+    return {
+      content: next,
+      bounded: next !== content,
+      beforeChars: content.length,
+      afterChars: next.length,
+    };
+  }
+  if (!Array.isArray(content)) {
+    return { content, bounded: false, beforeChars: 0, afterChars: 0 };
+  }
+  let bounded = false;
+  let beforeChars = 0;
+  let afterChars = 0;
+  const blocks = content.map((block) => {
+    const record = block as AnyRecord;
+    if (record?.type !== 'tool_result' || typeof record.content !== 'string') return block;
+    const next = boundProviderToolResultContent(record.content, maxChars);
+    if (next === record.content) return block;
+    bounded = true;
+    beforeChars += record.content.length;
+    afterChars += next.length;
+    return { ...record, content: next };
+  });
+  return { content: blocks, bounded, beforeChars, afterChars };
+}
+
 function microcompactMessageContent(content: unknown, config: typeof MICROCOMPACTION_CONFIG) {
   if (typeof content === 'string') {
     const result = microcompactStringContent(content, config);
@@ -392,8 +481,25 @@ export function microcompactMessagesForContext<TMessage extends MicrocompactMess
   let compactedCount = 0;
   let beforeChars = 0;
   let afterChars = 0;
+  const recentCap = config.recentToolResultChars;
   const nextMessages = messages.map((message, index) => {
-    if (!compactableIndexes.has(index)) return message;
+    if (!compactableIndexes.has(index)) {
+      if (message?.role !== 'tool' && !Array.isArray(message?.content)) return message;
+      const bounded = boundToolMessageContent(message?.content, recentCap);
+      if (!bounded.bounded) return message;
+      compactedCount++;
+      beforeChars += bounded.beforeChars;
+      afterChars += bounded.afterChars;
+      return {
+        ...message,
+        content: bounded.content,
+        _microCompaction: {
+          method: 'provider_tool_result_cap',
+          beforeChars: bounded.beforeChars,
+          afterChars: bounded.afterChars,
+        },
+      } as TMessage;
+    }
     const result = microcompactMessageContent(message.content, config);
     if (!result.compacted) return message;
     compactedCount++;
