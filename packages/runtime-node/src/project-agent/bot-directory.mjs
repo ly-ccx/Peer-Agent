@@ -211,7 +211,30 @@ export function createBotDirectory({
     let sessions = null;
     try { sessions = readSessionsBatch?.(current.map(profile => profile.workspaceId)) ?? null; }
     catch { /* Existing single reads retain their normal failure behavior. */ }
-    return current.map(profile => projectRow(profile, messages, approvals, sessions));
+    return current.map(profile => {
+      try {
+        return projectRow(profile, messages, approvals, sessions);
+      } catch (error) {
+        // One torn task transcript must not blank the whole bot list.
+        if (typeof error?.code !== 'string' || !error.code.startsWith('BACKGROUND_')) throw error;
+        const isolated = new Map([[profile.workspaceId, []]]);
+        try { return projectRow(profile, messages, approvals, sessions instanceof Map ? sessions : isolated); }
+        catch (again) {
+          if (typeof again?.code !== 'string' || !again.code.startsWith('BACKGROUND_')) throw again;
+          let last = null;
+          try {
+            const loaded = summaryMessagesOf(profile, messages);
+            const visible = loaded.filter(message => isVisibleBotMessage(message) && messageKind(message) !== 'agent_activity');
+            last = visible.length ? projectBotListMessage(visible[visible.length - 1]) : null;
+          } catch { /* 预览读不到时仍保留机器人本身。 */ }
+          return {
+            item: projectBotListItem({ profile: { ...profile }, lastMessage: last, sessions: [], attention: [] }),
+            attention: [],
+            titles: [],
+          };
+        }
+      }
+    });
   }
 
   function list() {
