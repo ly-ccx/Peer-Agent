@@ -159,6 +159,94 @@ test('旧宿主的待刷进度在新宿主写盘后失效，不覆盖接管状�
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+function fileStamp(file) {
+  const stat = statSync(file);
+  return `${stat.mtimeNs}:${stat.size}`;
+}
+
+test('live runner ticks on a large plan use the sidecar instead of rewriting the body', async () => {
+  const { dir, store } = createTempStore({ runnerProgressFullRewriteBytes: 32 });
+  try {
+    const plan = store.createPlan({ title: 'big', goal: 'x'.repeat(400) });
+    const file = path.join(dir, `${plan.planId}.json`);
+    const changes = path.join(dir, '.changes.jsonl');
+    // 先完成一次真正的状态跃迁，之后的 tick 只重复 enabled/status/intent/reanchor。
+    store.setRunnerState(plan.planId, {
+      enabled: true,
+      status: 'running',
+      intent: 'execute',
+      phase: 'act',
+      updatedAt: '2026-11-06T00:00:00.000Z',
+    });
+    const bodyBefore = fileStamp(file);
+    const changesBefore = fileStamp(changes);
+    assert.ok(statSync(file).size > 32);
+
+    store.setRunnerState(plan.planId, {
+      enabled: true,
+      status: 'running',
+      intent: 'execute',
+      phase: 'act',
+      reanchor: false,
+      turnCount: 3,
+      updatedAt: '2026-11-06T00:00:01.000Z',
+    });
+    store.appendRunEvent(plan.planId, {
+      type: 'step_started',
+      summary: 'Goal Runner turn 3 started',
+      payload: { summaryCode: 'turn_started', turnNumber: 3, phase: 'act', reanchor: false },
+    });
+    store.setRunnerState(plan.planId, { roundCount: 2, toolCallCount: 5 });
+    store.appendRunEvent(plan.planId, {
+      type: 'step_completed',
+      summary: 'Goal Runner turn 3 completed',
+      payload: { summaryCode: 'turn_completed', turnNumber: 3 },
+    });
+
+    assert.equal(fileStamp(file), bodyBefore, 'tick must not rewrite a large plan body');
+    assert.equal(fileStamp(changes), changesBefore, 'tick must not append .changes.jsonl');
+    assert.equal(store.getPlan(plan.planId).runner.turnCount, 3);
+    assert.equal(store.getPlan(plan.planId).runner.toolCallCount, 5);
+    assert.deepEqual(
+      store.getPlan(plan.planId).runTrace.events.map((event) => event.type),
+      ['plan_created', 'step_started', 'step_completed'],
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    assert.equal(fileStamp(file), bodyBefore);
+    assert.equal(fileStamp(changes), changesBefore);
+    const sidecarPath = path.join(dir, 'runner-progress', `${plan.planId}.json`);
+    const sidecar = JSON.parse(fs.readFileSync(sidecarPath, 'utf8'));
+    assert.ok(statSync(sidecarPath).size < statSync(file).size);
+    assert.equal(sidecar.runner.turnCount, 3);
+    assert.equal(sidecar.runner.roundCount, 2);
+    assert.equal(sidecar.runner.toolCallCount, 5);
+    assert.deepEqual(sidecar.runEvents.map((event) => event.type), ['step_started', 'step_completed']);
+
+    const other = createGoalPlanStore({ storeDir: dir, runnerProgressFullRewriteBytes: 32 });
+    const reloaded = other.getPlan(plan.planId);
+    assert.equal(reloaded.runner.turnCount, 3);
+    assert.equal(reloaded.runner.toolCallCount, 5);
+    assert.deepEqual(
+      reloaded.runTrace.events.map((event) => event.type),
+      ['plan_created', 'step_started', 'step_completed'],
+    );
+
+    store.setRunnerState(plan.planId, { status: 'paused', turnCount: 9 });
+    const disk = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.equal(disk.runner.status, 'paused');
+    assert.equal(disk.runner.turnCount, 9);
+    assert.deepEqual(
+      disk.runTrace.events.map((event) => event.type),
+      ['plan_created', 'step_started', 'step_completed'],
+    );
+    assert.equal(fs.existsSync(sidecarPath), false);
+    assert.notEqual(fileStamp(changes), changesBefore);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('runner progress on a large plan does not rewrite the plan document', async () => {
   const { dir, store } = createTempStore({ runnerProgressFullRewriteBytes: 32 });
   const plan = store.createPlan({ title: 'big', goal: 'x'.repeat(400) });
