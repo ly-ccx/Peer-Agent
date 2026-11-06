@@ -796,16 +796,21 @@ export function createGoalPlanStore({
 
   /**
    * .changes.jsonl 里 reason/changeKind 都是 persist 的写入都进这里。
-   * setRunnerState 的硬跃迁会带 runner-state，不会落到这个签名。
-   * 大计划上 runner 仍在跑、计划正文（任务/契约/状态）没变时，整篇 pretty-print
-   * 会占满主进程，并且 clearRunnerProgressState 让 sidecar 目录永远建不出来。
+   * 不能只放行 running/exploring：现场大计划停在 completed、paused、
+   * waiting_user / interrupted。这些状态下正文没变的 persist 仍会 pretty-print
+   * 整份文件，并在 sidecar 定时器触发前把它清掉。
+   * completed→executing 是读路径把已完成计划投影回执行中，不是新的正文事实。
    */
+  function statusAllowsUnchangedSidecar(existingStatus, nextStatus) {
+    if (existingStatus === nextStatus) return true;
+    return existingStatus === 'completed' && nextStatus === 'executing';
+  }
+
   function shouldSidecarRunningPersist(existing, next, options = {}) {
     if (!existing || !next?.planId) return false;
     if ((options.changeKind ?? 'persist') !== 'persist') return false;
     if (planFileBytes(next.planId) < RUNNER_PROGRESS_FULL_REWRITE_BYTES) return false;
-    if (!RUNNER_ACTIVE_STATUSES.has(next.runner?.status)) return false;
-    if (existing.status !== next.status) return false;
+    if (!statusAllowsUnchangedSidecar(existing.status, next.status)) return false;
     return !hardPlanBodyChanged(existing, next);
   }
 
@@ -1730,7 +1735,6 @@ export function createGoalPlanStore({
     // 大计划上这会带 changeKind=persist 把整份正文再写一遍，并清掉 sidecar。
     if (
       planFileBytes(planId) >= RUNNER_PROGRESS_FULL_REWRITE_BYTES
-      && RUNNER_ACTIVE_STATUSES.has(plan.runner?.status)
       && Object.entries(safePatch).every(([key, value]) => sameJsonValue(plan[key], value))
     ) {
       return plan;
