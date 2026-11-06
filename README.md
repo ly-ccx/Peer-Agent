@@ -11,7 +11,7 @@ Peer is a local work delegation system for people moving code, documents and res
 
 You keep the important decisions and permissions. Tasks, plans and success criteria organize execution behind the project conversation.
 
-> **Choose the matching version.** The project Bot experience belongs to the **0.1 preview**, with this source prepared for beta channel **`0.1.0-rc.36`** (npm `rc`). Current stable release: **`0.0.18`** (npm `latest`) uses the classic interface. Download availability is determined by [published releases](https://github.com/ly-ccx/Peer-Agent/releases), not the source version.
+> **Choose the matching version.** The project Bot experience belongs to the **0.1 preview**, with this source prepared for beta channel **`0.1.0-rc.37`** (npm `rc`). Current stable release: **`0.0.18`** (npm `latest`) uses the classic interface. Download availability is determined by [published releases](https://github.com/ly-ccx/Peer-Agent/releases), not the source version.
 
 ![Actual project Bot interface with fictional website, documentation and research projects](docs/screenshots/project-bot-showcase-light.jpg)
 
@@ -85,7 +85,7 @@ Stable channel:
 
     npm install -g @peer-agent/cli
 
-The npm package installs the platform binary and its helper. Available platforms and artifacts are listed on the corresponding release page. The npm beta tag is an older beta channel, not the current RC. `peer update` installs the newest release on the channel already installed (stable, beta, or rc). `peer update --check` only reports it. See the [CLI reference](https://ly-ccx.github.io/Peer-Agent/docs.html#cli) for modes and scripted usage.
+The npm package installs the platform binary and its helper. Available platforms and artifacts are listed on the corresponding release page. The npm beta tag is an older beta channel, not the current RC. `peer update` installs the newest release on the channel already installed (stable, beta, or rc). `peer update --check` only reports it. `peer sessions`, `peer models`, `peer doctor`, `peer completions`, and `peer export` are the basic shell commands beside it. `peer sessions delete` also removes that session's goal plans; a non-interactive delete requires `--yes`. See the [CLI reference](https://ly-ccx.github.io/Peer-Agent/docs.html#cli) for modes and scripted usage.
 
 ### Run the 0.1 source
 

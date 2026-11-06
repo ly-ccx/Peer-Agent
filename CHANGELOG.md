@@ -2,6 +2,30 @@
 
 All notable changes to Peer Agent are tracked here.
 
+## 0.1.0-rc.37 - 2026-11-06
+
+### 新功能
+
+- `peer update` 安装当前通道的最新版本，`peer update --check` 只报告。新增 `peer sessions`、`peer models`、`peer doctor`、`peer completions` 与 `peer export`；删除会话同时移除其目标计划，非交互删除必须带 `--yes`。
+
+### 修复与改进
+
+- Desktop P0–P2：经典会话发送与打开不再经 IPC 搬运全文历史；列表使用只读物化预览，经典与 Bot 共用 Session Service；流式块约每 40ms 提交，已闭合块保持不变，贴底跟随高度变化。
+- 用户锚点按真实用户输入解析。可纠正的锚点错误在成功重试后不再挂起，真正的派发失败仍保留原责任。
+- 实现前先阅读 ADR；书面边界变化时先更新 ADR。TUI 机器人列表显示光标、名称、计数和一行预览，去掉常驻 F2 提示；草稿恢复失败时输入框仍可编辑并占满整行。这是现有 Bot TUI 壳上的呈现，不是 P3。
+- 同步双语用户文档、发布说明与站点更新日志。延续联合协调格式 9，更新前完整备份。正式版仍为 0.0.18。本版不宣称真实 Electron 手感、真实模型质量，或 P3、内网 Gateway、远程配对已经交付。
+
+### What's new (English)
+
+- `peer update` installs the newest release on the installed channel, and `peer update --check` only reports it. Add `peer sessions`, `peer models`, `peer doctor`, `peer completions`, and `peer export`. Deleting a session also removes its goal plans, and a non-interactive delete requires `--yes`.
+
+### Fixes and improvements (English)
+
+- Desktop P0–P2: classic send and open no longer ship full history over IPC; lists use a read-only materialized preview shared by classic and Bot through Session Service; streaming blocks commit about every 40ms, closed blocks stay unchanged, and stick-to-bottom follows height.
+- Resolve user anchors against real user input. A corrected anchor error does not stay pending after a successful retry, while a real dispatch failure keeps its responsibility.
+- Read the ADR before implementation and update it first when a written boundary moves. The TUI bot list shows a caret, name, counts, and a one-line preview, and drops standing F2 hints. The composer stays editable and full-width if draft recovery fails. This is presentation on the existing bot TUI shell, not P3.
+- Update bilingual documentation, release notes, and the website changelog. Retain coordination format 9 and a complete pre-update backup. Stable remains 0.0.18. This release does not establish a real Electron feel, real-model quality, or delivery of P3, an intranet Gateway, or remote pairing.
+
 ## 0.1.0-rc.36 - 2026-11-05
 
 ### 新功能

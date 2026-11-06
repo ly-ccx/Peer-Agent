@@ -127,6 +127,8 @@ export const referenceCopy = {
     "cli.lede": "peer 是一等 TUI 入口，不是附属 demo。它启动由 @peer-agent/cli（或 Release 压缩包）安装的 vendor 二进制，并接入与 Desktop 相同的本地 Runtime。",
     "cli.startTitle": "启动 / 校验",
     "cli.startBody": "如果 version 正常但移动文件后凭证失败，检查 peer-credential-helper 是否仍与 peer 同目录。",
+    "cli.shellTitle": "Shell 命令",
+    "cli.shellBody": "<code>peer update</code> 安装当前通道的最新版本。<code>--check</code> 只报告。<code>peer sessions delete</code> 同时移除该会话的目标计划；非交互删除必须带 <code>--yes</code>，交互终端会先询问。<code>peer export</code> 写出阅读副本，不是 Evidence。",
     "cli.statusTitle": "状态栏（读什么）",
     "cli.statusBody": "TUI 状态行应像 GUI chips 一样可治理：mode、access/权限策略、model、reasoning effort、上下文用量。把它当作 Desktop Composer 元信息的终端等价物。",
     "cli.slashTitle": "斜杠命令（真实 registry）",
