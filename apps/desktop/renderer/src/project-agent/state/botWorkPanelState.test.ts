@@ -66,3 +66,12 @@ test('artifacts without a confirmed path retain preview provenance without inven
   assert.equal(material.sessionId, 'one');
   assert.equal(material.source, 'artifact');
 });
+
+test('a local persistence blocker retains the host Bot responsibility through the drawer and current work projection', () => {
+  const row = readDrawerSession({ sessionId: 'local', planId: 'plan', status: 'failed',
+    followUp: { owner: 'bot', inCurrentList: true, reason: 'local_persistence_failed' }, origin: { anchorMessageId: 'input' } })!;
+  assert.equal(row.followUp?.reason, 'local_persistence_failed');
+  assert.equal(workPanelNeedsUser(row), false);
+  const current = workPanelSessions(indexBotWork([row], true));
+  assert.equal(current.tasks.some(task => task.sessionId === 'local'), true);
+});

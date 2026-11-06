@@ -15,7 +15,7 @@ export function BotWorkSessionRow({ session, overview, parent, question, variant
   readonly onOpen: (sessionId: string) => void;
 }) {
   const needsUser = workPanelNeedsUser(session);
-  const blocked = needsUser || session.followUp?.reason === 'technical_block' || session.followUp?.reason === 'verification_failed';
+  const blocked = needsUser || ['technical_block', 'local_persistence_failed'].includes(session.followUp?.reason || '') || session.followUp?.reason === 'verification_failed';
   const knownStatus = WORK_SESSION_STATUSES.find(value => value === session.status);
   const status = session.status === 'waiting_user' && session.followUp?.owner === 'bot' ? i18n.t('projectAgent.chat.work.waiting')
     : session.coordination?.phase === 'stopping' || ['stopping', 'awaiting_outcome'].includes(session.status)

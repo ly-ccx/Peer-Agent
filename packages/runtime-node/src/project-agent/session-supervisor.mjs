@@ -281,7 +281,7 @@ export function createSessionSupervisor({
       runnerStatus: plan.runner?.status,
       needsUser: facts.needsUser,
       executionOwnership: facts.executionOwnership,
-      blockedReason: plan.runner?.blockedReason,
+      blockedReason: facts.blockedReason,
       agentWaiting: Boolean(plan.delegationOrigin?.agentWaitMessageId) || plan.runner?.blockedReason === 'waiting_parent_agent',
       delegated: Boolean(plan.delegationOrigin),
       updatedAt: plan.updatedAt,

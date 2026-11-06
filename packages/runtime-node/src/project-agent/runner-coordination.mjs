@@ -196,14 +196,26 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
             || work.checkpointRef && recoveryReservationDue(work, now())
             || work.state === 'blocked_system' && work.stopScope !== 'work' && work.recovery?.dispatchesReconciled
               && !work.recovery.blockedCode && !hasUnsettledDispatch(work)));
-        const inputPriority = new Map(candidates.filter(work => work.anchorInputIds?.length).map(work => {
+        const inputArrivals = new Map(), workInputs = new Map();
+        const decisionInputs = work => work.intentCoordination?.lifecycle === 'active'
+          ? work.intentCoordination.decision?.sourceInputIds || [] : [];
+        for (const work of candidates.filter(work => work.anchorInputIds?.length)) {
           let inputs;
           try { inputs = (store.readContinuationCheckpoint?.(work.checkpointRef) ?? readProtectedWork(work))?.job?.userInputs || []; }
           catch { inputs = []; }
-          return [work.workId, Math.max(0, ...inputs.map(input => Date.parse(input.createdAt) || 0)) || Date.parse(work.updatedAt) || 0];
-        }));
+          workInputs.set(work.workId, inputs.map(input => input.inputId));
+          for (const input of inputs) inputArrivals.set(input.inputId,
+            Math.max(inputArrivals.get(input.inputId) || 0, Date.parse(input.createdAt) || 0));
+        }
+        // An accepted correction can assign this intake to an existing goal. Share
+        // its original arrival, never the goal's refreshed metadata timestamp.
+        const inputPriority = new Map(candidates.map(work => [work.workId,
+          Math.max(0, ...[...(workInputs.get(work.workId) || []), ...decisionInputs(work)].map(id => inputArrivals.get(id) || 0))]));
+        const assignedIntake = (owner, intake) => !intake.intentCoordination && intake.anchorInputIds?.length
+          && intake.anchorInputIds.every(id => decisionInputs(owner).includes(id));
         const work = candidates.sort((a, b) => Number(Boolean(b.anchorInputIds?.length)) - Number(Boolean(a.anchorInputIds?.length))
           || (a.anchorInputIds?.length && b.anchorInputIds?.length ? inputPriority.get(b.workId) - inputPriority.get(a.workId) : 0)
+          || Number(Boolean(assignedIntake(b, a))) - Number(Boolean(assignedIntake(a, b)))
           || String(a.updatedAt).localeCompare(String(b.updatedAt))).find(row => row.state === 'runnable' && row.checkpointRef)
           || candidates.find(row => row.checkpointRef && recoveryReservationDue(row, now()))
           || candidates.find(row => row.state === 'blocked_system' && row.stopScope !== 'work' && row.recovery?.dispatchesReconciled && !row.recovery.blockedCode && !hasUnsettledDispatch(row));

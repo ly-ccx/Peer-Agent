@@ -11,11 +11,11 @@
 //   把每个事件路由到对应会话桶。于是：
 //     - 前台会话（cid === activeConversationId）的正文/思考 delta 走打字机平滑吐字；
 //     - 后台会话（cid !== activeConversationId）的 delta 直接整段写入其桶（不做逐字动画）；
-//     - 终结类事件（done/aborted/error）清理对应桶的运行态并把表达层落回主进程持久化。
+//     - 终结类事件（done/aborted/error）只清理对应桶的表达层运行态。
 //   组件不再持有会话运行态，切会话只是「换订阅 key」，物理上不存在被复用的 messages 槽位。
 //
-// 真值边界：发送链路与用量账本真值仍在主进程；本路由器只把主进程下发的事件映射到表达层，
-//   并通过 conversationsReplaceMessages 把内存消息回写主进程的开放袋（与原 hook 一致）。
+// 真值边界：发送、终态消息持久化与用量账本真值仍在主进程；本路由器只映射表达层。
+//   迟到的终止事件不得用旧的全量消息快照覆盖主进程已追加的下一轮占位。
 
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 
@@ -41,7 +41,6 @@ import {
   EMPTY_VISIBLE_MODEL_RESPONSE_ERROR,
   getTextContent,
   isEmptyAssistantPlaceholder,
-  isEmptyUserMessage,
   isStaleStreamTerminal,
   isSuccessorEmptyAssistantPlaceholder,
   markDanglingToolCallsInterrupted,
@@ -125,32 +124,6 @@ function appendThinking(
 
 function normalizeThinkingKind(value: unknown): ThinkingKind | undefined {
   return value === 'summary' || value === 'reasoning' ? value : undefined;
-}
-
-/** 把内存消息映射回主进程持久化（与原 hook persistMessages 逐字一致，按会话 id）。 */
-function persistMessages(conversationId: string, msgs: readonly ChatMsg[]): void {
-  // A stream can finish after its bucket was reset during a page/mode switch. That empty
-  // snapshot is not an intentional clear and must never replace persisted history.
-  // Also drop empty user bubbles (no text, no attachments): they are residual noise and
-  // must not be re-written by stream-end full-list replace after the user deleted them.
-  if (!conversationId || msgs.length === 0) return;
-  const durable = msgs.filter((m) => !isEmptyUserMessage(m));
-  if (durable.length === 0) return;
-  void clientApi.conversationsReplaceMessages({
-    id: conversationId,
-    messages: durable.map((m) => ({
-      id: m.id,
-      role: m.role,
-      content: m.content,
-      segments: m.segments,
-      usage: m.usage,
-      durationMs: m.durationMs,
-      _compaction: m.compaction,
-      attachments: m.attachments,
-      interrupted: m.interrupted,
-      streamFailure: m.streamFailure,
-    })),
-  });
 }
 
 /**
@@ -405,7 +378,6 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
           };
           if (shouldReportEmptyVisibleModelResponse({ reason, lastMessage: last, messages: msgs })) {
             const next = msgs.slice(0, -1);
-            persistMessages(cid, next);
             return {
               ...settled,
               messages: next,
@@ -484,7 +456,6 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
         if (isSuccessorEmptyAssistantPlaceholder(msgs)) return {};
         if (last && isEmptyAssistantPlaceholder(last)) {
           const next = msgs.slice(0, -1);
-          persistMessages(cid, next);
           return { ...settled, messages: next };
         }
         // 停止时留痕：记录整轮耗时，并给未回填的 tool-call 段补写中断标记。
@@ -495,10 +466,8 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
             segments: markDanglingToolCallsInterrupted(last.segments, '工具调用已中断（生成停止）'),
           };
           const updated = [...msgs.slice(0, -1), patched];
-          persistMessages(cid, updated);
           return { ...settled, messages: updated };
         }
-        persistMessages(cid, msgs);
         return settled;
       });
       onUpdatedRef.current?.(cid);
@@ -626,7 +595,6 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
         if (isSuccessorEmptyAssistantPlaceholder(msgs)) return {};
         if (last && isEmptyAssistantPlaceholder(last)) {
           const next = msgs.slice(0, -1);
-          persistMessages(cid, next);
           return { ...settled, messages: next, streamError: error };
         }
         // 长流中断保留：已产出内容的 assistant 消息因连接中断未自然收尾，标记 interrupted。
@@ -639,10 +607,8 @@ export function useConversationStreamRouter(params: ConversationStreamRouterPara
             segments: markDanglingToolCallsInterrupted(last.segments, '工具调用已中断'),
           };
           const updated = [...msgs.slice(0, -1), patched];
-          persistMessages(cid, updated);
           return { ...settled, messages: updated, streamError: error };
         }
-        persistMessages(cid, msgs);
         return { ...settled, streamError: error };
       });
       onUpdatedRef.current?.(cid);

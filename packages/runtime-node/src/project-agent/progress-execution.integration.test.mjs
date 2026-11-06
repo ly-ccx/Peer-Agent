@@ -129,3 +129,26 @@ test('host projection and retry admission agree on a real exhausted explicit lim
     assert.equal((await env.runner.retry(env.work().attemptId)).ok, true); assert.equal(calls, 1);
   } finally { env.close(); }
 });
+
+test('query artifact wrappers stop the real parent loop across restart without blocking a subsequent independent input', async () => {
+  let calls = 0, fresh = false;
+  const env = world(async () => {
+    calls++;
+    if (fresh) return { text: 'The new question is answered.' };
+    return { turnEnd: 'yielded', toolCalls: [{ name: 'read_file',
+      input: { path: `/tmp/artifacts/get_session-call_generated${calls}.txt` },
+      result: { kind: 'local_file_ref', tool: 'read_file', truncated: true,
+        originalChars: calls, evidenceRefs: [`tool-result://changed-${calls}`], outputPreview: { preview: '{"partial":' + calls } } }] , providerCheckpoint: { index: calls, messages: [{ role: 'tool', content: 'paired artifact retrieval' }] } };
+  });
+  try {
+    await env.runner.enqueueUserInputs([{ inputId: 'old', text: 'Inspect the failed session' }]);
+    env.restart();
+    for (let n = 0; n < 6; n++) await env.runner.kick();
+    assert.equal(calls, 3); assert.equal(env.work().state, 'blocked_system'); assert.equal(env.work().end, 'no_progress');
+    env.restart(); await env.runner.kick(); assert.equal(calls, 3, 'restart cannot renew the same material');
+    fresh = true;
+    await env.runner.enqueueUserInputs([{ inputId: 'new', text: 'Answer a separate question' }]);
+    assert.equal(calls, 4);
+    assert.equal(env.messages.filter(row => row.kind === 'agent_reply' && row.content === 'The new question is answered.').length, 1);
+  } finally { env.close(); }
+});

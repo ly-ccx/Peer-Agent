@@ -65,6 +65,8 @@ export function decideRuntimeDisposition({ previous = {}, sessions = [], outcome
     : result('blocked_system', outcome.reason === 'agent_no_progress' ? 'no_progress' : 'fatal', 'host');
   if (outcome.deliveryPending) return result('retry_wait', 'provider_retryable', 'host');
   if (checked.some(row => !row.sessionId)) return result('blocked_system', 'fatal', 'host', [], 'runtime_session_invalid');
+  if (!ownership.needsUser && checked.some(row => row.reason === 'local_persistence_failed'))
+    return result('blocked_system', 'fatal', 'host', [], 'conversation_persistence_failed');
   if (outcome.silentWait) return result(ownership.needsUser ? 'waiting_user' : 'waiting_children',
     ownership.needsUser ? 'awaiting_user' : 'awaiting_children', ownership.needsUser ? 'user' : 'host',
     (outcome.silentWait.sessionIds || ownership.waitingSessionIds).map(id => ({ kind: 'session' as const, id })));
