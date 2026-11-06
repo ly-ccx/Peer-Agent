@@ -48,6 +48,14 @@ test('streaming stick-to-bottom follows height delta and does not hit-test on ev
   );
 });
 
+test('virtualization weight is cached on the stable turn list, not recomputed every render', async () => {
+  const source = await readChatSurface();
+  const weight = source.match(/const virtualizeChatTurns = useMemo\([\s\S]*?\n {2}\);/)?.[0];
+  assert.ok(weight, 'virtualization weight should be memoized');
+  assert.match(weight, /shouldVirtualizeChatTurns\(chatTurns, findOpen\)/);
+  assert.match(weight, /\[chatTurns, findOpen\]/);
+});
+
 test('messageTarget navigation applies each requestId once so sending a message does not replay scrollToMessage', async () => {
   const source = await readChatSurface();
   assert.match(source, /lastAppliedMessageTargetRequestId = useRef<number \| null>\(null\)/);

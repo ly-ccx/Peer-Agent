@@ -17,6 +17,7 @@ import { createSessionSupervisor, evaluateWorkSessionWrite } from './session-sup
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
 import { registerWorkBudget, createWorkBudgetGuard } from './work-budget.mjs';
 import { beginExecutionAttempt } from './session-facts.mjs';
+import { runtimeSessionFacts } from '@peer-agent/protocol';
 import { createDelegationProvider } from './delegation-provider.mjs';
 
 function model(id, extra = {}) {
@@ -3125,4 +3126,113 @@ test('manual resume waits for the stop barrier outside the supervisor writer', a
     release();
     assert.equal((await resumed).status, 'running');
   } finally { release(); await env.cleanup(); }
+});
+
+test('a stopped local persistence failure resumes its remaining leaf through actual Supervisor, Scheduler and GoalRunner once', async () => {
+  let env, calls = 0, resumedTask;
+  env = await harness({ runGoalTurn: async ({ plan, planId }) => {
+    calls++;
+    if (calls === 1) throw Error('conversation_persistence_failed: CONVERSATION_MESSAGE_MISSING');
+    assert.equal(plan.runner.intent, 'execute');
+    resumedTask = plan.tasks.find(task => task.taskId !== 'known-complete');
+    assert.equal(resumedTask.status, 'pending');
+    assert.match(resumedTask.failureReason, /^conversation_persistence_failed:/);
+    env.goalPlanStore.recordTaskEvidence(planId, resumedTask.taskId, { status: 'running' });
+    writeFileSync(path.join(env.root, 'one-resumed-effect.txt'), 'executed once');
+    return { terminalStatus: 'done', requestedUserInput: true, blockedReason: 'fixture verification remains pending' };
+  } });
+  const store = createWorkCoordinationStore({ rootDir: env.root, workspaceId: 'ws-1', holdsLease: () => true,
+    leaseEpoch: () => 'recovery-owner', formatVersion: 2, fenceLegacyWrites: true });
+  await store.prepare(); store.saveWork({ workId: 'root', parentConversationId: env.parent.id, state: 'waiting_children' });
+  const release = registerWorkBudget('ws-1', store);
+  try {
+    const context = { ...contextOf(env), conversationId: env.parent.id, workId: 'root', currentInputAnchors: ['anchor-1'], deliveryKey: 'original' };
+    const opened = await env.supervisor.coordinateWork({ action: 'parallel', reason: 'fixture', task: spawnInput({ kind: 'research', readOnly: true }) }, context);
+    const planId = planIdOf(env, opened.sessionId);
+    await env.goalRunner.waitForIdle(planId);
+    const failed = env.goalPlanStore.getPlan(planId);
+    assert.equal(calls, 1); assert.equal(failed.tasks[0].status, 'failed');
+    for (const row of [env.supervisor.get({ sessionId: opened.sessionId }),
+      ...env.supervisor.summaries({ workspaceId: 'ws-1', all: true })]) {
+      assert.equal(row.followUp.reason, 'local_persistence_failed');
+      assert.equal(runtimeSessionFacts(row).handling, 'host');
+    }
+    // A representative completed sibling and its result belong to the old attempt.
+    const known = { taskId: 'known-complete', title: 'already done', status: 'completed', result: 'retained', evidenceRefs: ['tool-result://known'] };
+    env.goalPlanStore.revisePlan(planId, { tasks: [known, ...failed.tasks] });
+    const before = env.goalPlanStore.getPlan(planId);
+    const receipt = await env.supervisor.coordinateWork({ action: 'resume', sessionId: opened.sessionId, expectedRevision: 1,
+      reason: 'retry after local storage repair', text: 'Continue the remaining work; retain prior results.' }, { ...context, deliveryKey: 'local-recovery' });
+    assert.equal(receipt.error, undefined, JSON.stringify(receipt));
+    await until(() => store.read().transitions['local-recovery']?.phase === 'completed');
+    await until(() => calls === 2);
+    await env.goalRunner.waitForIdle(planId);
+    const after = env.goalPlanStore.getPlan(planId);
+    assert.equal(calls, 2, 'queued/completed takeover must reach an actual execution turn');
+    assert.equal(readFileSync(path.join(env.root, 'one-resumed-effect.txt'), 'utf8'), 'executed once');
+    assert.deepEqual(after.tasks.find(task => task.taskId === known.taskId), before.tasks.find(task => task.taskId === known.taskId));
+    assert.deepEqual(after.criterionResults, before.criterionResults);
+    assert.ok(after.runTrace.events.some(event => event.payload?.message?.startsWith('conversation_persistence_failed:')));
+    assert.equal(after.resultAcceptance?.acceptedAt, undefined);
+    const repeated = await env.supervisor.coordinateWork({ action: 'resume', sessionId: opened.sessionId, expectedRevision: 1,
+      reason: 'retry after local storage repair', text: 'Continue the remaining work; retain prior results.' }, { ...context, deliveryKey: 'local-recovery' });
+    assert.equal(repeated.error, undefined); await env.supervisor.reconcile();
+    assert.equal(calls, 2, 'replaying recovery cannot execute the same operation twice');
+    assert.equal(createGoalPlanStore({ storeDir: env.goalPlanStore.getStoreDir() }).getPlan(planId).tasks[0].result, 'retained');
+  } finally { release(); store.close(); await env.cleanup(); }
+});
+
+test('unknown child effects fence local-persistence task preparation at the real takeover barrier', async () => {
+  let starts = 0;
+  const env = await harness({ goalRunner: { async start() { starts++; }, pause() {}, async waitForIdle() {} } });
+  const store = createWorkCoordinationStore({ rootDir: env.root, workspaceId: 'ws-1', holdsLease: () => true,
+    leaseEpoch: () => 'local-unknown-owner', formatVersion: 2, fenceLegacyWrites: true });
+  await store.prepare(); store.saveWork({ workId: 'root', parentConversationId: env.parent.id, state: 'runnable' });
+  const release = registerWorkBudget('ws-1', store);
+  try {
+    const context = { ...contextOf(env), conversationId: env.parent.id, workId: 'root', currentInputAnchors: ['anchor-1'], deliveryKey: 'original' };
+    const opened = await env.supervisor.coordinateWork({ action: 'parallel', reason: 'fixture', task: spawnInput({ kind: 'research', readOnly: true }) }, context);
+    const planId = planIdOf(env, opened.sessionId), plan = env.goalPlanStore.getPlan(planId);
+    const reason = 'conversation_persistence_failed: CONVERSATION_MESSAGE_MISSING';
+    env.goalPlanStore.revisePlan(planId, { tasks: plan.tasks.map(task => ({ ...task, status: 'failed', failureReason: reason, result: reason })) });
+    env.goalPlanStore.setRunnerState(planId, { status: 'failed', lastError: reason });
+    const unknown = [{ toolCallId: 'child-shell', planId, role: 'work_session' }];
+    store.saveWork({ ...store.readWork('root'), budget: { ...store.readWork('root').budget, uncertainDispatches: unknown } });
+    await env.supervisor.coordinateWork({ action: 'resume', sessionId: opened.sessionId, expectedRevision: 1, reason: 'retry local failure' },
+      { ...context, deliveryKey: 'local-unknown' });
+    await until(() => store.read().transitions['local-unknown']?.phase === 'awaiting_outcome');
+    assert.equal(env.goalPlanStore.getPlan(planId).tasks[0].status, 'failed');
+    assert.equal(env.goalPlanStore.getPlan(planId).tasks[0].failureReason, reason);
+    assert.equal(starts, 1);
+    assert.deepEqual(store.readWork('root').budget.uncertainDispatches, unknown);
+    await env.supervisor.recoverCoordination('ws-1');
+    assert.equal(starts, 1); assert.equal(env.goalPlanStore.getPlan(planId).tasks[0].status, 'failed');
+  } finally { release(); store.close(); await env.cleanup(); }
+});
+
+test('an immediately failed recovery stays a host blocker after reload and a repeated operation cannot retry it', async () => {
+  let calls = 0;
+  const reason = 'conversation_persistence_failed: CONVERSATION_MESSAGE_MISSING';
+  const env = await harness({ runGoalTurn: async () => { calls++; throw Error(reason); } });
+  const store = createWorkCoordinationStore({ rootDir: env.root, workspaceId: 'ws-1', holdsLease: () => true,
+    leaseEpoch: () => 'failed-recovery-owner', formatVersion: 2, fenceLegacyWrites: true });
+  await store.prepare(); store.saveWork({ workId: 'root', parentConversationId: env.parent.id, state: 'waiting_children' });
+  const release = registerWorkBudget('ws-1', store);
+  try {
+    const context = { ...contextOf(env), conversationId: env.parent.id, workId: 'root', currentInputAnchors: ['anchor-1'], deliveryKey: 'original' };
+    const opened = await env.supervisor.coordinateWork({ action: 'parallel', reason: 'fixture', task: spawnInput({ kind: 'research', readOnly: true }) }, context);
+    const planId = planIdOf(env, opened.sessionId); await env.goalRunner.waitForIdle(planId);
+    const input = { action: 'resume', sessionId: opened.sessionId, expectedRevision: 1, reason: 'retry local storage failure' };
+    await env.supervisor.coordinateWork(input, { ...context, deliveryKey: 'failed-recovery' });
+    await until(() => calls === 2); await env.goalRunner.waitForIdle(planId);
+    assert.equal(store.read().transitions['failed-recovery'].phase, 'completed');
+    assert.equal(store.read().transitions['failed-recovery'].executionEffect, 'pending', 'coordination completion cannot invent execution success');
+    const saved = createGoalPlanStore({ storeDir: env.goalPlanStore.getStoreDir() }).getPlan(planId);
+    assert.equal(saved.tasks[0].status, 'failed'); assert.equal(saved.runner.lastError, reason);
+    assert.ok(saved.runTrace.events.filter(event => event.payload?.message === reason).length >= 2);
+    assert.equal(env.supervisor.get({ sessionId: opened.sessionId }).followUp.reason, 'local_persistence_failed');
+    await env.supervisor.coordinateWork(input, { ...context, deliveryKey: 'failed-recovery' });
+    await env.supervisor.recoverCoordination('ws-1'); await env.supervisor.reconcile();
+    assert.equal(calls, 2); assert.equal(env.goalPlanStore.getPlan(planId).tasks[0].status, 'failed');
+  } finally { release(); store.close(); await env.cleanup(); }
 });

@@ -6,9 +6,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createGoalPlanStore } from './goal-plan-store.mjs';
 
-function createTempStore() {
+function createTempStore(options = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), 'goal-plan-cache-'));
-  const store = createGoalPlanStore({ storeDir: dir });
+  const store = createGoalPlanStore({ storeDir: dir, ...options });
   return { dir, store };
 }
 
@@ -157,6 +157,383 @@ test('旧宿主的待刷进度在新宿主写盘后失效，不覆盖接管状�
     assert.equal(nextHost.getPlan(plan.planId).runner.turnCount, 23);
     assert.equal(store.getPlan(plan.planId).runner.turnCount, 23);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+function fileStamp(file) {
+  const stat = statSync(file);
+  return `${stat.mtimeNs}:${stat.size}`;
+}
+
+test('live runner ticks on a large plan use the sidecar instead of rewriting the body', async () => {
+  const { dir, store } = createTempStore({ runnerProgressFullRewriteBytes: 32 });
+  try {
+    const plan = store.createPlan({ title: 'big', goal: 'x'.repeat(400) });
+    const file = path.join(dir, `${plan.planId}.json`);
+    const changes = path.join(dir, '.changes.jsonl');
+    // 先完成一次真正的状态跃迁，之后的 tick 只重复 enabled/status/intent/reanchor。
+    store.setRunnerState(plan.planId, {
+      enabled: true,
+      status: 'running',
+      intent: 'execute',
+      phase: 'act',
+      updatedAt: '2026-11-06T00:00:00.000Z',
+    });
+    const bodyBefore = fileStamp(file);
+    const changesBefore = fileStamp(changes);
+    assert.ok(statSync(file).size > 32);
+
+    store.setRunnerState(plan.planId, {
+      enabled: true,
+      status: 'running',
+      intent: 'execute',
+      phase: 'act',
+      reanchor: false,
+      turnCount: 3,
+      updatedAt: '2026-11-06T00:00:01.000Z',
+    });
+    store.appendRunEvent(plan.planId, {
+      type: 'step_started',
+      summary: 'Goal Runner turn 3 started',
+      payload: { summaryCode: 'turn_started', turnNumber: 3, phase: 'act', reanchor: false },
+    });
+    store.setRunnerState(plan.planId, { roundCount: 2, toolCallCount: 5 });
+    store.appendRunEvent(plan.planId, {
+      type: 'step_completed',
+      summary: 'Goal Runner turn 3 completed',
+      payload: { summaryCode: 'turn_completed', turnNumber: 3 },
+    });
+
+    assert.equal(fileStamp(file), bodyBefore, 'tick must not rewrite a large plan body');
+    assert.equal(fileStamp(changes), changesBefore, 'tick must not append .changes.jsonl');
+    assert.equal(store.getPlan(plan.planId).runner.turnCount, 3);
+    assert.equal(store.getPlan(plan.planId).runner.toolCallCount, 5);
+    assert.deepEqual(
+      store.getPlan(plan.planId).runTrace.events.map((event) => event.type),
+      ['plan_created', 'step_started', 'step_completed'],
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    assert.equal(fileStamp(file), bodyBefore);
+    assert.equal(fileStamp(changes), changesBefore);
+    const sidecarPath = path.join(dir, 'runner-progress', `${plan.planId}.json`);
+    const sidecar = JSON.parse(fs.readFileSync(sidecarPath, 'utf8'));
+    assert.ok(statSync(sidecarPath).size < statSync(file).size);
+    assert.equal(sidecar.runner.turnCount, 3);
+    assert.equal(sidecar.runner.roundCount, 2);
+    assert.equal(sidecar.runner.toolCallCount, 5);
+    assert.deepEqual(sidecar.runEvents.map((event) => event.type), ['step_started', 'step_completed']);
+
+    const other = createGoalPlanStore({ storeDir: dir, runnerProgressFullRewriteBytes: 32 });
+    const reloaded = other.getPlan(plan.planId);
+    assert.equal(reloaded.runner.turnCount, 3);
+    assert.equal(reloaded.runner.toolCallCount, 5);
+    assert.deepEqual(
+      reloaded.runTrace.events.map((event) => event.type),
+      ['plan_created', 'step_started', 'step_completed'],
+    );
+
+    store.setRunnerState(plan.planId, { status: 'paused', turnCount: 9 });
+    const disk = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.equal(disk.runner.status, 'paused');
+    assert.equal(disk.runner.turnCount, 9);
+    assert.deepEqual(
+      disk.runTrace.events.map((event) => event.type),
+      ['plan_created', 'step_started', 'step_completed'],
+    );
+    assert.equal(fs.existsSync(sidecarPath), false);
+    assert.notEqual(fileStamp(changes), changesBefore);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('large running plan persist (changeKind persist) does not rewrite the body', async () => {
+  const { dir, store } = createTempStore({ runnerProgressFullRewriteBytes: 32 });
+  try {
+    const plan = store.createPlan({ title: 'big', goal: 'x'.repeat(400) });
+    const file = path.join(dir, `${plan.planId}.json`);
+    const changes = path.join(dir, '.changes.jsonl');
+    store.setRunnerState(plan.planId, {
+      enabled: true,
+      status: 'running',
+      intent: 'execute',
+      phase: 'act',
+      updatedAt: '2026-11-06T00:00:00.000Z',
+    });
+    const running = store.getPlan(plan.planId);
+    assert.equal(running.runner.status, 'running');
+    assert.ok(statSync(file).size > 32);
+    const bodyBefore = fileStamp(file);
+    const changesBefore = fileStamp(changes);
+
+    // 现场 .changes.jsonl 的签名是 reason/changeKind = persist，不是 runner-state。
+    // 这些调用都不经过 setRunnerState 的进度分级。
+    store.setPlanStatus(plan.planId, running.status);
+    store.appendRunEvent(plan.planId, {
+      type: 'checkpoint_created',
+      summary: 'Checkpoint: tick',
+      payload: { summaryCode: 'checkpoint_created', reason: 'tick' },
+    });
+    store.revisePlan(plan.planId, {
+      status: running.status,
+      title: running.title,
+    }, { reason: 'scheduler admitted session', changedBy: 'session-supervisor' });
+
+    assert.equal(fileStamp(file), bodyBefore, 'persist while the runner is running must not rewrite a large plan');
+    assert.equal(fileStamp(changes), changesBefore, 'persist while the runner is running must not append .changes.jsonl');
+    assert.equal(store.getPlan(plan.planId).runner.status, 'running');
+    assert.ok(
+      store.getPlan(plan.planId).runTrace.events.some((event) => event.type === 'checkpoint_created'),
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    assert.equal(fileStamp(file), bodyBefore);
+    assert.equal(fileStamp(changes), changesBefore);
+    const sidecarPath = path.join(dir, 'runner-progress', `${plan.planId}.json`);
+    const sidecar = JSON.parse(fs.readFileSync(sidecarPath, 'utf8'));
+    assert.ok(statSync(sidecarPath).size < statSync(file).size);
+    assert.equal(sidecar.runner.status, 'running');
+    assert.ok(sidecar.runEvents.some((event) => event.type === 'checkpoint_created'));
+    const other = createGoalPlanStore({ storeDir: dir, runnerProgressFullRewriteBytes: 32 });
+    assert.ok(other.getPlan(plan.planId).runTrace.events.some((event) => event.type === 'checkpoint_created'));
+
+    store.setRunnerState(plan.planId, { status: 'paused' });
+    const disk = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.equal(disk.runner.status, 'paused');
+    assert.ok(disk.runTrace.events.some((event) => event.type === 'checkpoint_created'));
+    assert.equal(fs.existsSync(sidecarPath), false);
+    assert.notEqual(fileStamp(changes), changesBefore);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('context checkpoint on a large plan is durable in the sidecar before persist returns', () => {
+  const { dir, store } = createTempStore({ runnerProgressFullRewriteBytes: 32 });
+  try {
+    const plan = store.createPlan({
+      title: 'big',
+      goal: 'x'.repeat(400),
+      tasks: [
+        { taskId: 't1', title: 'First', status: 'completed', evidenceRefs: ['tool-result://seed'] },
+        { taskId: 't2', title: 'Second', status: 'pending' },
+      ],
+    });
+    store.setPlanStatus(plan.planId, 'executing');
+    store.setRunnerState(plan.planId, {
+      enabled: true,
+      status: 'running',
+      currentTaskId: 't2',
+      phase: 'act',
+      intent: 'execute',
+    });
+    const file = path.join(dir, `${plan.planId}.json`);
+    const changes = path.join(dir, '.changes.jsonl');
+    const bodyBefore = fileStamp(file);
+    const changesBefore = fileStamp(changes);
+    const latest = store.getPlan(plan.planId);
+    const prepared = store.prepareContextCheckpoint(plan.planId, {
+      expectedPlanVersion: latest.version,
+      reason: 'soft_threshold',
+      checkpoint: {
+        objectiveNow: latest.goal,
+        currentWork: 'Continue t2',
+        mostImportantFact: 't2 is next',
+        handoffNote: 'resume t2',
+        firstAction: {
+          kind: 'inspect',
+          instruction: 'Continue task t2',
+          successCheck: 'progress written with evidenceRefs',
+          requiredEvidenceRefs: [],
+        },
+        progress: {
+          total: 2,
+          completed: 1,
+          failed: 0,
+          blocked: 0,
+          percent: 50,
+          nextRunnableTaskIds: ['t2'],
+        },
+      },
+    });
+    assert.equal(prepared.runner.contextCheckpoint.status, 'preparing');
+    assert.equal(fileStamp(file), bodyBefore, 'preparing a checkpoint must not rewrite the plan body');
+    assert.equal(fileStamp(changes), changesBefore);
+    const sidecarPath = path.join(dir, 'runner-progress', `${plan.planId}.json`);
+    const preparedSidecar = JSON.parse(fs.readFileSync(sidecarPath, 'utf8'));
+    assert.equal(preparedSidecar.runner.contextCheckpoint.status, 'preparing');
+    assert.equal(preparedSidecar.runner.contextCheckpoint.checkpointId, prepared.runner.contextCheckpoint.checkpointId);
+    const afterPrepare = createGoalPlanStore({ storeDir: dir, runnerProgressFullRewriteBytes: 32 });
+    assert.equal(afterPrepare.getPlan(plan.planId).runner.contextCheckpoint.status, 'preparing');
+
+    const committed = store.commitContextCheckpoint(plan.planId, {
+      expectedPlanVersion: prepared.version,
+      expectedRunId: prepared.runner.runId,
+      checkpoint: prepared.runner.contextCheckpoint,
+    });
+    assert.equal(committed.runner.contextCheckpoint.status, 'committed');
+    assert.equal(fileStamp(file), bodyBefore, 'committing a checkpoint must not rewrite the plan body');
+    assert.equal(fileStamp(changes), changesBefore);
+    const afterCommit = createGoalPlanStore({ storeDir: dir, runnerProgressFullRewriteBytes: 32 });
+    const recovered = afterCommit.getPlan(plan.planId);
+    assert.equal(recovered.runner.contextCheckpoint.status, 'committed');
+    assert.equal(recovered.runner.contextCheckpoint.checkpointId, committed.runner.contextCheckpoint.checkpointId);
+    assert.equal(recovered.runner.contextCheckpoint.committedAt, committed.runner.contextCheckpoint.committedAt);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('checkpoint_created coordinates survive a sidecar reopen', async () => {
+  const { dir, store } = createTempStore({ runnerProgressFullRewriteBytes: 32 });
+  try {
+    const plan = store.createPlan({ title: 'big', goal: 'x'.repeat(400) });
+    store.setRunnerState(plan.planId, {
+      enabled: true,
+      status: 'running',
+      intent: 'execute',
+      phase: 'act',
+    });
+    const file = path.join(dir, `${plan.planId}.json`);
+    const changes = path.join(dir, '.changes.jsonl');
+    const bodyBefore = fileStamp(file);
+    const changesBefore = fileStamp(changes);
+    store.appendRunEvent(plan.planId, {
+      type: 'checkpoint_created',
+      nodeId: 'node-verify-agent-binding',
+      summary: '恢复点：正在验证 agent binding 分支',
+    });
+    assert.equal(store.getPlan(plan.planId).runTrace.activeNodeId, 'node-verify-agent-binding');
+    assert.equal(store.getPlan(plan.planId).runTrace.lastCheckpointNodeId, 'node-verify-agent-binding');
+    assert.equal(fileStamp(file), bodyBefore);
+    assert.equal(fileStamp(changes), changesBefore);
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    assert.equal(fileStamp(file), bodyBefore);
+    const reopened = createGoalPlanStore({ storeDir: dir, runnerProgressFullRewriteBytes: 32 });
+    const restored = reopened.getPlan(plan.planId);
+    assert.equal(restored.runTrace.activeNodeId, 'node-verify-agent-binding');
+    assert.equal(restored.runTrace.lastCheckpointNodeId, 'node-verify-agent-binding');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('settled large plans do not full-rewrite on changeKind persist', async () => {
+  const { dir, store } = createTempStore({ runnerProgressFullRewriteBytes: 32 });
+  try {
+    const cases = [
+      {
+        name: 'completed-executing',
+        setup(planId) {
+          store.setPlanStatus(planId, 'completed');
+          store.setRunnerState(planId, { enabled: false, status: 'completed', intent: 'synthesize', phase: 'synthesize' });
+        },
+        tick(planId) {
+          store.setPlanStatus(planId, 'executing');
+        },
+        diskStatus: 'completed',
+      },
+      {
+        name: 'paused',
+        setup(planId) {
+          store.setPlanStatus(planId, 'paused');
+          store.setRunnerState(planId, { enabled: true, status: 'paused', intent: 'block', phase: 'blocked' });
+        },
+        tick(planId) {
+          const current = store.getPlan(planId);
+          store.setPlanStatus(planId, 'paused');
+          store.appendRunEvent(planId, {
+            type: 'checkpoint_created',
+            nodeId: 'node-paused',
+            summary: 'paused tick',
+          });
+          store.revisePlan(planId, { status: 'paused', title: current.title }, {
+            reason: 'scheduler admitted session',
+            changedBy: 'session-supervisor',
+          });
+        },
+        diskStatus: 'paused',
+      },
+      {
+        name: 'waiting-user-interrupted',
+        setup(planId) {
+          store.setPlanStatus(planId, 'interrupted');
+          store.setRunnerState(planId, {
+            enabled: true,
+            status: 'waiting_user',
+            intent: 'block',
+            phase: 'waiting_user',
+            waitingOnUser: true,
+          });
+        },
+        tick(planId) {
+          store.setPlanStatus(planId, 'interrupted');
+          store.appendRunEvent(planId, {
+            type: 'checkpoint_created',
+            nodeId: 'node-interrupted',
+            summary: 'interrupted tick',
+          });
+        },
+        diskStatus: 'interrupted',
+      },
+    ];
+    const files = [];
+    for (const entry of cases) {
+      const plan = store.createPlan({ title: entry.name, goal: 'x'.repeat(400) });
+      entry.setup(plan.planId);
+      const file = path.join(dir, `${plan.planId}.json`);
+      files.push({ ...entry, planId: plan.planId, file, body: fileStamp(file) });
+    }
+    const changes = path.join(dir, '.changes.jsonl');
+    const journal = fileStamp(changes);
+    for (const entry of files) entry.tick(entry.planId);
+    assert.equal(fileStamp(changes), journal, 'settled persist appended .changes.jsonl');
+    for (const entry of files) {
+      assert.equal(fileStamp(entry.file), entry.body, `${entry.name} persist rewrote the plan body`);
+      assert.equal(JSON.parse(fs.readFileSync(entry.file, 'utf8')).status, entry.diskStatus);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    assert.equal(fileStamp(changes), journal, 'sidecar flush appended .changes.jsonl');
+    for (const entry of files) {
+      assert.equal(fileStamp(entry.file), entry.body, `${entry.name} sidecar flush rewrote the plan body`);
+      const sidecarPath = path.join(dir, 'runner-progress', `${entry.planId}.json`);
+      assert.equal(fs.existsSync(sidecarPath), true, `${entry.name} did not use the sidecar`);
+      const sidecar = JSON.parse(fs.readFileSync(sidecarPath, 'utf8'));
+      if (entry.name === 'completed-executing') assert.equal(sidecar.status, 'executing');
+      if (entry.name !== 'completed-executing') {
+        assert.ok(sidecar.runEvents.some((event) => event.type === 'checkpoint_created'));
+      }
+    }
+    const other = createGoalPlanStore({ storeDir: dir, runnerProgressFullRewriteBytes: 32 });
+    assert.equal(other.getPlan(files[0].planId).status, 'executing');
+    assert.equal(other.getPlan(files[1].planId).runTrace.lastCheckpointNodeId, 'node-paused');
+    assert.equal(other.getPlan(files[2].planId).runner.status, 'waiting_user');
+    assert.equal(other.getPlan(files[2].planId).runTrace.lastCheckpointNodeId, 'node-interrupted');
+    assert.equal(JSON.parse(fs.readFileSync(files[0].file, 'utf8')).status, 'completed');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('runner progress on a large plan does not rewrite the plan document', async () => {
+  const { dir, store } = createTempStore({ runnerProgressFullRewriteBytes: 32 });
+  const plan = store.createPlan({ title: 'big', goal: 'x'.repeat(400) });
+  const file = path.join(dir, `${plan.planId}.json`);
+  const before = fs.readFileSync(file);
+  assert.ok(before.length > 32);
+  store.setRunnerState(plan.planId, { turnCount: 4, roundCount: 2, phase: 'act' });
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+  assert.deepEqual(fs.readFileSync(file), before, 'progress must not rewrite a large plan body');
+  assert.equal(store.getPlan(plan.planId).runner.turnCount, 4);
+  assert.equal(store.getPlan(plan.planId).runner.roundCount, 2);
+  const other = createGoalPlanStore({ storeDir: dir, runnerProgressFullRewriteBytes: 32 });
+  assert.equal(other.getPlan(plan.planId).runner.turnCount, 4);
+  assert.equal(other.getPlan(plan.planId).runner.roundCount, 2);
+  store.setRunnerState(plan.planId, { status: 'paused', turnCount: 9 });
+  const disk = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(disk.runner.turnCount, 9);
+  assert.equal(disk.runner.status, 'paused');
+  assert.equal(fs.existsSync(path.join(dir, 'runner-progress', `${plan.planId}.json`)), false);
 });
 
 test('证据索引跨进程追加后，命中和缺失缓存均失效且保留已有字段', () => {

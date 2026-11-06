@@ -499,6 +499,7 @@ export type FollowUpReason =
   | 'human_request'
   | 'awaiting_human_gate'
   | 'technical_block'
+  | 'local_persistence_failed'
   | 'awaiting_acceptance_technical'
   | 'verification_failed'
   | 'live_execution'
@@ -553,6 +554,7 @@ export function decideFollowUp(
   //    退出只影响“当前列表归属”，不改写原验收、原核验与未完成事实。
   if (facts.superseded === true || status === 'superseded') return followUpOf('none', 'superseded');
   // 3) 核验失败/缺证据：即使存在历史 accepted 事实也不能静默（那次验收是旧结论）。
+  if (['failed', 'waiting_agent'].includes(status) && facts.blockedReason === 'conversation_persistence_failed') return followUpOf('bot', 'local_persistence_failed');
   if (status === 'failed') return followUpOf('bot', 'verification_failed');
   if (facts.accepted === true) return followUpOf('none', 'settled');
   if (stopStatus) return followUpOf('none', 'stop_confirmed');

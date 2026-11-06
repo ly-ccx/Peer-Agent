@@ -91,7 +91,7 @@ export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recoverin
     [workspaceId, sessions.agents, messages, workIndex]);
   const byPlan = useMemo(() => new Map(data.items.map(item => [item.taskId, item])), [data.items]);
   const blockers = sessions.agents.filter(session => workPanelNeedsUser(session)
-    || session.followUp?.reason === 'technical_block' || session.followUp?.reason === 'verification_failed').length;
+    || ['technical_block', 'local_persistence_failed'].includes(session.followUp?.reason || '') || session.followUp?.reason === 'verification_failed').length;
   const needsYou = sessions.agents.some(workPanelNeedsUser);
   const setMaterialsView = (next: 'overview' | 'materials') => {
     viewFocus.current = true;

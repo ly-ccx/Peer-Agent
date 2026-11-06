@@ -281,7 +281,7 @@ export function createSessionSupervisor({
       runnerStatus: plan.runner?.status,
       needsUser: facts.needsUser,
       executionOwnership: facts.executionOwnership,
-      blockedReason: plan.runner?.blockedReason,
+      blockedReason: facts.blockedReason,
       agentWaiting: Boolean(plan.delegationOrigin?.agentWaitMessageId) || plan.runner?.blockedReason === 'waiting_parent_agent',
       delegated: Boolean(plan.delegationOrigin),
       updatedAt: plan.updatedAt,
@@ -780,6 +780,15 @@ export function createSessionSupervisor({
       .slice(0, 24).map(({summary}) => summary);
   }
 
+  function presentSession(plan, plans = null) {
+    try { return project(plan, plans); }
+    catch (error) {
+      // A torn transcript must not hide every other task. Execution still uses project().
+      if (typeof error?.code === 'string' && error.code.startsWith('BACKGROUND_')) return null;
+      throw error;
+    }
+  }
+
   function list(input = {}) {
     const limit = Number.isInteger(input?.limit) && input.limit > 0 ? Math.min(input.limit, 50) : 50;
     const workspaceId = text(input?.workspaceId);
@@ -787,7 +796,10 @@ export function createSessionSupervisor({
     return delegatedPlans()
       .filter((plan) => !workspaceId || plan.delegationOrigin.workspaceId === workspaceId)
       .filter(plan => !input.workId && !input.sessionIds?.length || plan.delegationOrigin.workId === input.workId || input.sessionIds?.includes(plan.delegationOrigin.sessionId))
-      .map(project)
+      .flatMap(plan => {
+        const session = presentSession(plan);
+        return session ? [session] : [];
+      })
       .filter((session) => !status || session.status === status)
       .slice(0, limit);
   }
@@ -1350,7 +1362,8 @@ export function createSessionSupervisor({
       const plans = delegatedPlans();
       for (const plan of plans) {
         const rows = grouped.get(plan.delegationOrigin.workspaceId);
-        if (rows && rows.length < 50) rows.push(project(plan, plans));
+        const session = rows && rows.length < 50 ? presentSession(plan, plans) : null;
+        if (session) rows.push(session);
       }
       return grouped;
       });
@@ -1359,7 +1372,10 @@ export function createSessionSupervisor({
     sessionsForProject(workspaceId) {
       return readQuery.run(() => {
       const workspace = text(workspaceId);
-      return workspace ? delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspace).map(project) : [];
+      return workspace ? delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspace).flatMap(plan => {
+        const session = presentSession(plan);
+        return session ? [session] : [];
+      }) : [];
       });
     },
     get: input => readQuery.run(() => get(input)),

@@ -1,7 +1,7 @@
 import { createSessionControl } from './session-control.mjs';
 import { workBudgetBinding } from './work-budget.mjs';
 import { agentDelivery } from './agent-delivery.mjs';
-import { takeoverBlocker, takeoverHumanBlocker } from './session-repair.mjs';
+import { takeoverBlocker, takeoverHumanBlocker, prepareLocalPersistenceRetry } from './session-repair.mjs';
 import { takeoverStopReceipt } from './takeover-stop-recovery.mjs';
 export { takeoverHumanBlocker } from './session-repair.mjs';
 
@@ -85,6 +85,7 @@ export function createSessionTakeover({ findBySession, goalPlanStore, goalRunner
             store.advanceTransition(input.operationId, 'stopping', { phase: 'awaiting_outcome', error: 'execution_outcome_unknown' });
             emit({kind:'interrupted',eventId:`coordination-outcome:${input.operationId}`,workspaceId:context.workspaceId,sessionId:input.sessionId,planId:plan.planId,reason:'execution_outcome_unknown'}); return;
           }
+          const persistenceRetry = prepareLocalPersistenceRetry(plan, goalPlanStore, input.operationId).length > 0;
           const binding = { ...input.binding, sessionId: input.sessionId };
           store.bindSession(binding.workId, binding.goalRevision, input.sessionId, binding);
           // Persist feedback before publishing a queueable plan or ready transition.
@@ -100,7 +101,7 @@ export function createSessionTakeover({ findBySession, goalPlanStore, goalRunner
           // 换执行体的续接是"接着做剩下的活"：核验结论属于被替换的那个执行体，
           // 重放 verify 会让新执行体第一轮就去核验旧成果，然后原地停滞/等用户（复盘症状）。
           const pausedIntent = plan.delegationOrigin.pausedRunnerIntent || 'execute';
-          const resumeIntent = plan.delegationOrigin.takeover?.repair === true ? 'execute' : transition.action === 'revise'
+          const resumeIntent = persistenceRetry || plan.delegationOrigin.takeover?.repair === true ? 'execute' : transition.action === 'revise'
             ? 'explore'
             : pausedIntent === 'verify' ? 'execute' : pausedIntent;
           goalPlanStore.setRunnerState(plan.planId, { status: 'paused', intent: resumeIntent, interruption: undefined });

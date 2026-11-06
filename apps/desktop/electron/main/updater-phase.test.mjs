@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   LOCKED_PHASES,
   isLockedPhase,
+  shouldApplyDownloadProgress,
   shouldSkipStaleUpdateEvent,
   shouldSkipUpdateCheck,
 } from './updater-phase.mjs';
@@ -88,6 +89,20 @@ describe('updater phase locking', () => {
           );
         });
       }
+    }
+  });
+
+  describe('shouldApplyDownloadProgress: terminal phases ignore late progress', () => {
+    for (const phase of ['downloaded', 'error']) {
+      it(`drops download progress while ${phase}`, () => {
+        assert.equal(shouldApplyDownloadProgress(phase), false, `phase=${phase}`);
+      });
+    }
+
+    for (const phase of ['idle', 'checking', 'available', 'not-available', 'downloading', undefined]) {
+      it(`accepts download progress while ${phase}`, () => {
+        assert.equal(shouldApplyDownloadProgress(phase), true, `phase=${phase}`);
+      });
     }
   });
 

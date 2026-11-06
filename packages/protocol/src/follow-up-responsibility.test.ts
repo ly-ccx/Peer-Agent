@@ -203,3 +203,15 @@ test('completed cancellation dominates stale recovery and takeover without hidin
   assert.equal(decideLifecycle(snapshot,{...facts,executionOwnership:'live'}).followUp.inCurrentList,true);
  }
 });
+
+test('local persistence diagnosis cannot bypass live, human, stop or supersession facts', () => {
+  const blocked = { blockedReason: 'conversation_persistence_failed' };
+  assert.equal(followUp('failed', blocked).reason, 'local_persistence_failed');
+  assert.equal(followUp('waiting_user', blocked).owner, 'user');
+  assert.equal(followUp('paused', { ...blocked, interrupted: true, interruptionOrigin: 'user' }).reason, 'paused');
+  assert.equal(followUp('failed', blocked, 'live').reason, 'live_execution');
+  assert.equal(followUp('awaiting_outcome', blocked).reason, 'stop_unconfirmed');
+  assert.equal(followUp('cancelled', { ...blocked, cancellationPhase: 'completed' }).reason, 'stop_confirmed');
+  assert.equal(followUp('superseded', { ...blocked, superseded: true }).reason, 'superseded');
+  assert.equal(followUp('failed', { blockedReason: 'text mentions conversation_persistence_failed' }).reason, 'verification_failed');
+});

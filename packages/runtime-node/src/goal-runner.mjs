@@ -37,7 +37,7 @@ import { scheduleVisualRepair, hasActiveGoalRepair } from './goal-visual-repair.
 import { planRequiresQualityReview, evaluateUiDelivery } from '@peer-agent/protocol';
 import { buildDeterministicGoalCheckpoint } from '@peer-agent/runtime-core';
 import { canCompleteAfterRecheck } from './project-agent/verification-completion.mjs';
-import { repairExecutionPending } from './project-agent/session-repair.mjs';
+import { repairExecutionPending, isLocalPersistenceFailure } from './project-agent/session-repair.mjs';
 
 const DEFAULT_MAX_TURNS = 8;
 const DEFAULT_MAX_TOOL_CALLS = 40;
@@ -82,7 +82,7 @@ function isHostVisualReviewFailure(value) {
 }
 
 function isRecoverableInterruption(value) {
-  if (isHostVisualReviewFailure(value)) return false;
+  if (isHostVisualReviewFailure(value) || isLocalPersistenceFailure(value?.failureReason || errorMessage(value))) return false;
   if (value?.recoverable === true || value?.retryable === true) return true;
   // 显式否决优先：调用方明确说过不可恢复时，即使流被中断也不要重试。
   if (value?.recoverable === false || value?.retryable === false) return false;

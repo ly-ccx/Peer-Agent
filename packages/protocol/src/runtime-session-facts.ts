@@ -22,9 +22,9 @@ const statuses: ReadonlySet<string> = new Set(WORK_SESSION_STATUSES);
 const ownerships: ReadonlySet<unknown> = new Set(['live', 'ended', 'unknown']);
 const owners: ReadonlySet<unknown> = new Set(['bot', 'user', 'none']);
 const reasons: ReadonlySet<unknown> = new Set<FollowUpReason>(['settled', 'superseded', 'stop_confirmed', 'user_withdrawn',
-  'stop_unconfirmed', 'human_request', 'awaiting_human_gate', 'technical_block', 'awaiting_acceptance_technical',
+  'stop_unconfirmed', 'human_request', 'awaiting_human_gate', 'technical_block', 'local_persistence_failed', 'awaiting_acceptance_technical',
   'verification_failed', 'live_execution', 'paused', 'unknown_facts']);
-const hostReasons = new Set(['live_execution', 'stop_unconfirmed', 'unknown_facts']);
+const hostReasons = new Set(['live_execution', 'stop_unconfirmed', 'unknown_facts', 'local_persistence_failed']);
 
 export function runtimeSessionFacts(value: unknown): RuntimeSessionFacts {
   const row = record(value), origin = record(row.origin), cancellation = record(origin.cancellation);

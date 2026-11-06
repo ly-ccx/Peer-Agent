@@ -15,6 +15,22 @@ function tempRoot() {
   return mkdtempSync(path.join(os.tmpdir(), 'b2-13-directory-'));
 }
 
+test('a torn task transcript does not blank the bot list', () => {
+  const root = tempRoot();
+  try {
+    const { directory } = harness(root, {
+      listSessions: () => { throw Object.assign(new Error('BACKGROUND_STREAM_TARGET_MISSING'), { code: 'BACKGROUND_STREAM_TARGET_MISSING' }); },
+      readSessionsBatch: () => { throw Object.assign(new Error('BACKGROUND_STREAM_TARGET_MISSING'), { code: 'BACKGROUND_STREAM_TARGET_MISSING' }); },
+      readQuestionCards: () => { throw Object.assign(new Error('BACKGROUND_STREAM_TARGET_MISSING'), { code: 'BACKGROUND_STREAM_TARGET_MISSING' }); },
+    });
+    const items = directory.list();
+    assert.equal(items.length, 1);
+    assert.equal(items[0].profile.displayName.length > 0, true);
+    assert.match(items[0].preview, /项/);
+    assert.equal(items[0].state.running, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('active identity lookup preserves profile gating without reading conversation or task facts', () => {
   const root = tempRoot();
   try {
