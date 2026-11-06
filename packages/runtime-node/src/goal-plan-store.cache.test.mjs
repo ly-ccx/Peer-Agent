@@ -308,6 +308,116 @@ test('large running plan persist (changeKind persist) does not rewrite the body'
   }
 });
 
+test('context checkpoint on a large plan is durable in the sidecar before persist returns', () => {
+  const { dir, store } = createTempStore({ runnerProgressFullRewriteBytes: 32 });
+  try {
+    const plan = store.createPlan({
+      title: 'big',
+      goal: 'x'.repeat(400),
+      tasks: [
+        { taskId: 't1', title: 'First', status: 'completed', evidenceRefs: ['tool-result://seed'] },
+        { taskId: 't2', title: 'Second', status: 'pending' },
+      ],
+    });
+    store.setPlanStatus(plan.planId, 'executing');
+    store.setRunnerState(plan.planId, {
+      enabled: true,
+      status: 'running',
+      currentTaskId: 't2',
+      phase: 'act',
+      intent: 'execute',
+    });
+    const file = path.join(dir, `${plan.planId}.json`);
+    const changes = path.join(dir, '.changes.jsonl');
+    const bodyBefore = fileStamp(file);
+    const changesBefore = fileStamp(changes);
+    const latest = store.getPlan(plan.planId);
+    const prepared = store.prepareContextCheckpoint(plan.planId, {
+      expectedPlanVersion: latest.version,
+      reason: 'soft_threshold',
+      checkpoint: {
+        objectiveNow: latest.goal,
+        currentWork: 'Continue t2',
+        mostImportantFact: 't2 is next',
+        handoffNote: 'resume t2',
+        firstAction: {
+          kind: 'inspect',
+          instruction: 'Continue task t2',
+          successCheck: 'progress written with evidenceRefs',
+          requiredEvidenceRefs: [],
+        },
+        progress: {
+          total: 2,
+          completed: 1,
+          failed: 0,
+          blocked: 0,
+          percent: 50,
+          nextRunnableTaskIds: ['t2'],
+        },
+      },
+    });
+    assert.equal(prepared.runner.contextCheckpoint.status, 'preparing');
+    assert.equal(fileStamp(file), bodyBefore, 'preparing a checkpoint must not rewrite the plan body');
+    assert.equal(fileStamp(changes), changesBefore);
+    const sidecarPath = path.join(dir, 'runner-progress', `${plan.planId}.json`);
+    const preparedSidecar = JSON.parse(fs.readFileSync(sidecarPath, 'utf8'));
+    assert.equal(preparedSidecar.runner.contextCheckpoint.status, 'preparing');
+    assert.equal(preparedSidecar.runner.contextCheckpoint.checkpointId, prepared.runner.contextCheckpoint.checkpointId);
+    const afterPrepare = createGoalPlanStore({ storeDir: dir, runnerProgressFullRewriteBytes: 32 });
+    assert.equal(afterPrepare.getPlan(plan.planId).runner.contextCheckpoint.status, 'preparing');
+
+    const committed = store.commitContextCheckpoint(plan.planId, {
+      expectedPlanVersion: prepared.version,
+      expectedRunId: prepared.runner.runId,
+      checkpoint: prepared.runner.contextCheckpoint,
+    });
+    assert.equal(committed.runner.contextCheckpoint.status, 'committed');
+    assert.equal(fileStamp(file), bodyBefore, 'committing a checkpoint must not rewrite the plan body');
+    assert.equal(fileStamp(changes), changesBefore);
+    const afterCommit = createGoalPlanStore({ storeDir: dir, runnerProgressFullRewriteBytes: 32 });
+    const recovered = afterCommit.getPlan(plan.planId);
+    assert.equal(recovered.runner.contextCheckpoint.status, 'committed');
+    assert.equal(recovered.runner.contextCheckpoint.checkpointId, committed.runner.contextCheckpoint.checkpointId);
+    assert.equal(recovered.runner.contextCheckpoint.committedAt, committed.runner.contextCheckpoint.committedAt);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('checkpoint_created coordinates survive a sidecar reopen', async () => {
+  const { dir, store } = createTempStore({ runnerProgressFullRewriteBytes: 32 });
+  try {
+    const plan = store.createPlan({ title: 'big', goal: 'x'.repeat(400) });
+    store.setRunnerState(plan.planId, {
+      enabled: true,
+      status: 'running',
+      intent: 'execute',
+      phase: 'act',
+    });
+    const file = path.join(dir, `${plan.planId}.json`);
+    const changes = path.join(dir, '.changes.jsonl');
+    const bodyBefore = fileStamp(file);
+    const changesBefore = fileStamp(changes);
+    store.appendRunEvent(plan.planId, {
+      type: 'checkpoint_created',
+      nodeId: 'node-verify-agent-binding',
+      summary: '恢复点：正在验证 agent binding 分支',
+    });
+    assert.equal(store.getPlan(plan.planId).runTrace.activeNodeId, 'node-verify-agent-binding');
+    assert.equal(store.getPlan(plan.planId).runTrace.lastCheckpointNodeId, 'node-verify-agent-binding');
+    assert.equal(fileStamp(file), bodyBefore);
+    assert.equal(fileStamp(changes), changesBefore);
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    assert.equal(fileStamp(file), bodyBefore);
+    const reopened = createGoalPlanStore({ storeDir: dir, runnerProgressFullRewriteBytes: 32 });
+    const restored = reopened.getPlan(plan.planId);
+    assert.equal(restored.runTrace.activeNodeId, 'node-verify-agent-binding');
+    assert.equal(restored.runTrace.lastCheckpointNodeId, 'node-verify-agent-binding');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('runner progress on a large plan does not rewrite the plan document', async () => {
   const { dir, store } = createTempStore({ runnerProgressFullRewriteBytes: 32 });
   const plan = store.createPlan({ title: 'big', goal: 'x'.repeat(400) });

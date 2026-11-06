@@ -622,6 +622,13 @@ export function createGoalPlanStore({
       const patchFile = runnerProgressPatchFile(next.planId);
       if (patchFile) {
         const pendingEvents = runnerProgressPendingEvents.get(planId) || [];
+        const runTraceCursor = {};
+        if (typeof next.runTrace?.activeNodeId === 'string' && next.runTrace.activeNodeId) {
+          runTraceCursor.activeNodeId = next.runTrace.activeNodeId;
+        }
+        if (typeof next.runTrace?.lastCheckpointNodeId === 'string' && next.runTrace.lastCheckpointNodeId) {
+          runTraceCursor.lastCheckpointNodeId = next.runTrace.lastCheckpointNodeId;
+        }
         writeJsonAtomic(patchFile, {
           planId: next.planId,
           updatedAt: next.updatedAt,
@@ -629,6 +636,7 @@ export function createGoalPlanStore({
           progress: next.progress,
           runner: next.runner ?? null,
           ...(pendingEvents.length > 0 ? { runEvents: pendingEvents } : {}),
+          ...(Object.keys(runTraceCursor).length > 0 ? { runTraceCursor } : {}),
         });
       }
       // 不重写计划正文，也不追加 .changes.jsonl。本进程 UI 仍走 100ms notify。
@@ -801,6 +809,15 @@ export function createGoalPlanStore({
     return !hardPlanBodyChanged(existing, next);
   }
 
+  // prepare/commit 在压缩开始前返回。sidecar 若只排 1s 定时器，进程在窗口内崩溃就失去恢复点。
+  function checkpointLifecycleChanged(existing, next) {
+    const previous = existing?.runner;
+    const current = next?.runner;
+    return !sameJsonValue(previous?.contextCheckpoint, current?.contextCheckpoint)
+      || !sameJsonValue(previous?.lastConsumedCheckpointId, current?.lastConsumedCheckpointId)
+      || !sameJsonValue(previous?.lastConsumedCheckpointSequence, current?.lastConsumedCheckpointSequence);
+  }
+
   function persist(plan, options = {}) {
     // progress 始终由子任务聚合派生，写入前强制重算覆盖（不可手填）。
     // timing 在 status 实际迁移时推进；同状态写入仅规范化，不重复开关 segment。
@@ -897,7 +914,11 @@ export function createGoalPlanStore({
     if (shouldSidecarRunningPersist(existing, next, options)) {
       rememberNewRunEvents(existing, next);
       // 不写正文，也不追加 changeKind=persist。硬状态跃迁仍走下面的整篇写盘。
-      return stageRunnerProgress(next.planId, next);
+      stageRunnerProgress(next.planId, next);
+      if (checkpointLifecycleChanged(existing, next)) {
+        flushRunnerProgressPersist(next.planId, { notify: false });
+      }
+      return next;
     }
     // 完整写盘优先：清掉 runner-progress 节流状态，避免旧计数回写覆盖。
     clearRunnerProgressState(next.planId);
@@ -1165,31 +1186,46 @@ export function createGoalPlanStore({
         updatedAt: typeof patch.updatedAt === 'string' ? patch.updatedAt : plan.updatedAt,
       };
     }
-    if (Array.isArray(patch.runEvents) && patch.runEvents.length > 0) {
+    if (Array.isArray(patch.runEvents) && patch.runEvents.length > 0 || patch.runTraceCursor) {
       const trace = normalizeRunTrace(next.runTrace, { goalPlanId: plan.planId });
       const seen = new Set(trace.events.map((event) => event.id));
       const extra = [];
-      for (const event of patch.runEvents) {
+      let activeNodeId = trace.activeNodeId;
+      let lastCheckpointNodeId = trace.lastCheckpointNodeId;
+      for (const event of Array.isArray(patch.runEvents) ? patch.runEvents : []) {
         const normalized = normalizeRunEvent(event, { goalPlanId: plan.planId });
         if (!normalized || seen.has(normalized.id)) continue;
         seen.add(normalized.id);
         extra.push(normalized);
-      }
-      if (extra.length > 0) {
-        next = {
-          ...next,
-          runTrace: {
-            ...trace,
-            events: [...trace.events, ...extra],
-          },
-        };
-        const pending = runnerProgressPendingEvents.get(plan.planId) || [];
-        const pendingSeen = new Set(pending.map((event) => event.id));
-        const mergedPending = pending.slice();
-        for (const event of extra) {
-          if (!pendingSeen.has(event.id)) mergedPending.push(event);
+        if (normalized.nodeId) activeNodeId = normalized.nodeId;
+        if (normalized.type === 'checkpoint_created' && normalized.nodeId) {
+          lastCheckpointNodeId = normalized.nodeId;
         }
-        runnerProgressPendingEvents.set(plan.planId, mergedPending);
+      }
+      const cursor = patch.runTraceCursor;
+      if (cursor && typeof cursor === 'object') {
+        if (typeof cursor.activeNodeId === 'string' && cursor.activeNodeId) activeNodeId = cursor.activeNodeId;
+        if (typeof cursor.lastCheckpointNodeId === 'string' && cursor.lastCheckpointNodeId) {
+          lastCheckpointNodeId = cursor.lastCheckpointNodeId;
+        }
+      }
+      if (extra.length > 0 || activeNodeId !== trace.activeNodeId || lastCheckpointNodeId !== trace.lastCheckpointNodeId) {
+        const runTrace = {
+          ...trace,
+          events: [...trace.events, ...extra],
+        };
+        if (activeNodeId) runTrace.activeNodeId = activeNodeId;
+        if (lastCheckpointNodeId) runTrace.lastCheckpointNodeId = lastCheckpointNodeId;
+        next = { ...next, runTrace };
+        if (extra.length > 0) {
+          const pending = runnerProgressPendingEvents.get(plan.planId) || [];
+          const pendingSeen = new Set(pending.map((event) => event.id));
+          const mergedPending = pending.slice();
+          for (const event of extra) {
+            if (!pendingSeen.has(event.id)) mergedPending.push(event);
+          }
+          runnerProgressPendingEvents.set(plan.planId, mergedPending);
+        }
       }
     }
     if (next === plan) return plan;
