@@ -50,7 +50,13 @@ test('binding refusal enters classic without creating any bot',async()=>{
 for(const view of ['conversation','bots'] as const)test(`F2 opens task mode from a bound bot ${view} without unbinding`,async()=>{
   const f=await harness(view);try{
     const workspaceId=f.host.workspaceId();
-    expect(await f.frame()).toContain('F2');
+    const profile=f.host.profiles.read(workspaceId);
+    const frame=await f.frame();
+    expect(profile?.status).toBe('active');
+    expect(profile?.displayName).toBeTruthy();
+    expect(frame).toContain(profile!.displayName);
+    expect(frame).toContain(view==='conversation'?'Message this bot, or /help':'Up/down to select');
+    expect(frame).not.toContain('Bind this directory');
     await f.press('F2');await f.frame();
     expect(f.classic()).toBe(1);
     expect(f.host.profiles.read(workspaceId)?.status).toBe('active');
