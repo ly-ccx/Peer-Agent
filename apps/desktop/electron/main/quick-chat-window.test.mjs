@@ -545,3 +545,23 @@ test('quick chat send branches on the shell', () => {
   assert.equal(quickChatSubmission({ shell: 'bots', workspaceId: '', text: '继续' }).ok, false);
 });
 
+
+
+test('retire the independent popover content on selection and native-menu handoff before reopening', () => {
+  const parent = createFakeWindow(), popover = createFakeWindow(), menu = createFakeMenu();
+  const controller = createQuickChatWindowController({ screen, createWindow: () => parent,
+    createPopoverWindow: () => popover, Menu: menu });
+  const state = { kind: 'model', selectedValue: 'one', items: [{ value: 'one', label: 'One' }, { value: 'two', label: 'Two' }] };
+  const sends = () => popover.calls.filter(([name]) => name === 'send').map(call => call.slice(1));
+  controller.show(); controller.showPopover(state);
+  assert.equal(controller.selectPopoverValue('two'), true);
+  assert.equal(popover.isVisible(), false);
+  assert.deepEqual(sends().at(-1), ['quick-chat:popover-closed']);
+  controller.showPopover({ ...state, selectedValue: 'two' });
+  assert.equal(popover.isVisible(), true);
+  assert.equal(sends().at(-1)[0], 'quick-chat-popover:state');
+  assert.equal(sends().at(-1)[1].selectedValue, 'two');
+  controller.showPopover({ kind: 'effort', selectedValue: 'high', items: [{ value: 'high', label: 'High' }] });
+  assert.equal(popover.isVisible(), false);
+  assert.deepEqual(sends().at(-1), ['quick-chat:popover-closed']);
+});

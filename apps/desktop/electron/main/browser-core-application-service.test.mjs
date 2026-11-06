@@ -4,6 +4,7 @@ import { createBrowserCoreApplicationService } from './browser-core-application-
 
 function createHarness(overrides = {}) {
   const calls = [];
+  const sender = { id: 19 };
   let activeWebContentsId = null;
   const image = {
     isEmpty: () => false,
@@ -12,6 +13,8 @@ function createHarness(overrides = {}) {
   const browserWebContents = {
     isDestroyed: () => false,
     capturePage: async () => image,
+    getType: () => 'webview',
+    hostWebContents: sender,
   };
   const browserSession = {
     async clearStorageData(options) {
@@ -61,6 +64,7 @@ function createHarness(overrides = {}) {
 
   return {
     calls,
+    sender,
     image,
     browserSession,
     browserWebContents,
@@ -71,21 +75,20 @@ function createHarness(overrides = {}) {
   };
 }
 
-test('registry commands rebuild the app menu only when active-browser presence changes', () => {
-  const { calls, service, setActiveWebContentsId } = createHarness();
+test('registry commands require actual guest ownership and rebuild on presence changes', () => {
+  const { calls, service, sender, setActiveWebContentsId } = createHarness();
   const registration = { webContentsId: 42, conversationId: 'conversation-1' };
-
-  assert.deepEqual(service.registerWebContents(registration), { ok: true, webContentsId: 42 });
-  assert.deepEqual(calls, [['register', registration], ['rebuild-menu']]);
-
+  assert.equal(service.registerWebContents(registration, {}).ok, false);
+  assert.equal(service.registerWebContents(registration).ok, false);
   calls.length = 0;
-  setActiveWebContentsId(7);
-  service.registerWebContents({ webContentsId: 42 });
-  assert.deepEqual(calls, [['register', { webContentsId: 42 }]]);
-
+  assert.deepEqual(service.registerWebContents(registration, sender), { ok: true, webContentsId: 42 });
+  assert.deepEqual(calls.filter(c => c[0] !== 'get-web-contents'), [['register', registration], ['rebuild-menu']]);
+  calls.length = 0; setActiveWebContentsId(7);
+  service.registerWebContents({ webContentsId: 42, surface: 'native', windowId: 'forged' }, sender);
+  assert.deepEqual(calls.filter(c => c[0] !== 'get-web-contents'), [['register', { webContentsId: 42 }]]);
   calls.length = 0;
-  assert.deepEqual(service.unregisterWebContents(registration), { ok: true, cleared: true });
-  assert.deepEqual(calls, [['unregister', registration], ['rebuild-menu']]);
+  assert.deepEqual(service.unregisterWebContents(registration, sender), { ok: true, cleared: true });
+  assert.deepEqual(calls.filter(c => c[0] !== 'get-web-contents'), [['unregister', registration], ['rebuild-menu']]);
 });
 
 test('clearSiteData validates URLs and preserves protocol error results', async () => {
@@ -273,4 +276,18 @@ test('openExternal only opens http(s) URLs in the system browser', async () => {
     ['open-external', 'https://github.com/ly-ccx/Peer-Agent'],
     ['open-external', 'http://localhost:5173/app'],
   ]);
+});
+
+test('selection binding follows the actual guest owner; registration updates reuse one listener and retirement removes it', () => {
+  const bindings = []; let stopped = 0;
+  const h = createHarness({ bindSelectionFeedback: request => { bindings.push(request); return () => { stopped++; }; } });
+  const first = { webContentsId: 42, conversationId: 'c', browserTabId: 'tab' };
+  h.service.registerWebContents(first, h.sender); h.service.registerWebContents({ ...first, active: false }, h.sender);
+  assert.equal(bindings.length, 1); assert.equal(bindings[0].sourceSender, h.sender);
+  assert.equal(bindings[0].getRegistration().registration.active, false);
+  const another = { id: 20 }; h.browserWebContents.hostWebContents = another;
+  h.service.registerWebContents(first, another); assert.equal(stopped, 1); assert.equal(bindings.length, 2);
+  assert.equal(bindings[1].sourceSender, another);
+  assert.equal(h.service.unregisterWebContents(first, h.sender).ok, false);
+  h.service.unregisterWebContents(first, another); assert.equal(stopped, 2); assert.equal(bindings[1].getRegistration(), undefined);
 });

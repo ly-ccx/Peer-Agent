@@ -1,3 +1,4 @@
+import { MotionDetails } from '../../app/components/MotionDetails';
 import { useEffect, useRef, useState } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { ProjectDiagnostics } from '@peer-agent/protocol';
@@ -40,9 +41,9 @@ export function ProjectDiagnosticsPanel({ i18n }: { readonly i18n: I18nRuntime }
         <div><dt>{i18n.t('developer.diagnostics.waiting')}</dt><dd>{report.scheduler?.stats.waiting ?? unknown}</dd></div>
         <div><dt>{i18n.t('developer.diagnostics.errors')}</dt><dd>{report.errors.length + report.bots.reduce((sum, bot) => sum + bot.errors.length, 0)}</dd></div>
       </dl>
-      <details><summary><PeerIcon name="chevronRight" size={14} />{i18n.t('developer.diagnostics.preview')}</summary>
+      <MotionDetails><summary><PeerIcon name="chevronRight" size={14} />{i18n.t('developer.diagnostics.preview')}</summary>
         <pre tabIndex={0} aria-label={i18n.t('developer.diagnostics.preview')}>{JSON.stringify(report, null, 2)}</pre>
-      </details>
+      </MotionDetails>
     </>}
   </section>;
 }

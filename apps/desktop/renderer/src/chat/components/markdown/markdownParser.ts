@@ -171,6 +171,17 @@ export function parseMarkdownBlocks(markdown: string): readonly MarkdownBlock[] 
         items.push(nextListLine.content);
         index += 1;
       }
+      // 空行不结束列表：模型常用「空行 + 编号」写步骤，逐条拆开会在每条之间撑出空行。
+      // 空行之后必须仍是同类条目，才并入同一个列表；段落、代码块、标题等照常结束列表。
+      while (index < lines.length) {
+        let probe = index;
+        while (probe < lines.length && !lines[probe].trim()) probe += 1;
+        if (probe === index || probe >= lines.length) break;
+        const continuation = parseListLine(lines[probe]);
+        if (!continuation || continuation.ordered !== ordered) break;
+        items.push(continuation.content);
+        index = probe + 1;
+      }
       blocks.push({ type: 'list', ordered, start, items });
       continue;
     }

@@ -16,11 +16,19 @@ export function mergeBotActivity(current: ProjectAgentActivity | null, incoming:
   return incoming;
 }
 
+/** A read may retire activity only alongside its messages and before any newer push. */
+export function activityFromConversationSnapshot(current: ProjectAgentActivity | null, incoming: ProjectAgentActivity | null | undefined,
+  workspaceId: string, readRevision: number | undefined, pushRevision: number): ProjectAgentActivity | null {
+  if (incoming === null && readRevision !== undefined && readRevision === pushRevision) return null;
+  return mergeBotActivity(current, incoming, workspaceId);
+}
+
 export function visibleBotActivity(activity: ProjectAgentActivity | null, messages: readonly BotChatMessage[]): ProjectAgentActivity | null {
   if (!activity || activity.phase === 'disposed') return null;
   if (messages.some(message => message.turnId === activity.turnId && (message.kind === 'agent_reply'
     || message.kind === 'system_card' && message.cards.some(card => ['agent_stopped', 'agent_unavailable'].includes(card.kind))))) return null;
-  if (TERMINAL.has(activity.phase) && messages.some(message => message.id === activity.turnId)) return null;
+  const delivering = activity.phase === 'done' && Boolean(activity.replyText.trim());
+  if (!delivering && TERMINAL.has(activity.phase) && messages.some(message => message.id === activity.turnId)) return null;
   return activity;
 }
 

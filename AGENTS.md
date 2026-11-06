@@ -54,6 +54,32 @@ Starting a session in the knowledge repo does not make the knowledge repo the de
 
 Do not recreate, stage, or submit architecture / design knowledge under `docs/architecture/*` or other knowledge trees in this code repo unless the user explicitly asks. If a code change would normally require architecture documentation, explain the architecture impact in the response and write durable knowledge into `peer-knowledge` instead.
 
+## Product Experience Standard (2026-10-23)
+
+All future product design and implementation must follow Peer’s own experience standard. Resolve the companion knowledge root above, then read the relevant sections before changing a product surface, copy, input behavior, state feedback, keyboard/focus/scroll behavior, or animation:
+
+- `peer-knowledge/knowledge/specifications/peer-product-experience-standard.md` — the current Frost visual and component baseline.
+- `peer-knowledge/knowledge/specifications/peer-human-agent-interaction-contract.md` — the human/agent interaction contract.
+- `peer-knowledge/knowledge/specifications/motion-system.md` — motion semantics, shared primitives, interruption and reduced-motion behavior.
+- `peer-knowledge/knowledge/specifications/transition-system.md` — continuity of identity, drafts, focus, reading position and recovery across pages, layers and objects.
+- `peer-knowledge/playbook/product-experience-development.md` — implementation and review workflow.
+
+The product north star and architecture governance retain their respective authority. These standards supersede conflicting experience rules in older design documents; historical demos and source research are references, not competing standards. `peer-knowledge/design/product/open-claude-ui-study.md` records the upstream study and adoption decisions.
+
+Implementation rules:
+
+- Preserve six invariants: acknowledged intent, clear action ownership, bounded execution, evidence-backed results, recoverable interruption, and user control of attention.
+- Reuse existing Frost/`--ui-*` tokens, shared components, SVG icons, motion primitives and reducer/kernel seams. Do not import a second design system or copy upstream brand values and physics constants into components.
+- Protect IME composition, drafts, focus and reading position. Background progress must not steal focus or resume auto-scroll after the user has chosen to read history.
+- Render authorization, execution, verification and acceptance from existing structured facts. A click, timer, animation or assistant sentence must never create permission truth, successful execution or Evidence.
+- Treat motion as presentation: short, interruptible, semantically useful, and complete without animation. Preserve static end states and recovery when motion/transparency is reduced or APIs are unavailable.
+- Record the user goal, relevant states, fact source, controls and recovery for the changed flow. Migrate touched paths within scope; do not turn a small change into an unsolicited product rewrite.
+- Follow Validation Scope below: ordinary code work receives scoped behavioral validation and content/diff review; the complete product regression remains a release gate. Documentation-only changes receive content/diff review.
+
+Current surface/component coverage lives in `peer-knowledge/design/product/peer-interaction-standardization-matrix.md`; UI, motion and transition coverage lives in `peer-knowledge/design/product/peer-ui-motion-transition-matrix.md`. Follow `peer-knowledge/design/product/peer-product-renovation-plan.md` for scoped work packages. Update the relevant matrix entries when adding or changing pages, components or states; static implementation is not release acceptance.
+
+These are development instructions. They do not add runtime capabilities, change permission or acceptance policy, or authorize a new System Context injection path. Any such boundary change still requires A/B-level handling.
+
 ## Non-Negotiable Runtime Chain
 
 All local capabilities must flow through:
@@ -113,11 +139,35 @@ New Modules must increase Locality or Leverage. Avoid shallow pass-through wrapp
 
 ## Change Discipline
 
-Before implementing a non-trivial change, classify it:
+Before any modification or new feature, pass the existing ADR set, then classify the change. This keeps new work on the decisions already recorded and leaves superseded clauses, revision dates, and unfinished debt in the knowledge repo instead of rediscovering them as rework.
 
-- A-level: changes runtime contracts, capability exposure, permissions, Evidence, System Context ordering, or storage boundaries. Write or update an architecture document or ADR first.
-- B-level: changes chat runtime, tool runtime, prompt assembly, compaction, task-thread event model, or IPC surfaces. Explain the architecture impact.
-- C-level: local UI, styles, copy, tests, or small bug fixes. Keep it scoped, but upgrade to A/B if it touches capability, permission, Evidence, protocol, or prompt boundaries.
+ADR pass, in order:
+
+1. Read `peer-knowledge/knowledge/decisions/00-adr-map.md`. When a number is used twice, open the file name. If the map is not on the current knowledge checkout, search `knowledge/decisions/` by topic.
+2. Name the ADR files that already decide the behavior. A header that says Accepted means the decision was accepted. It does not mean the implementation has passed release acceptance. Drafts, unaccepted ADRs, and clauses marked superseded are not current contracts.
+3. If an ADR already decides the behavior and this change does not move that boundary, implement against that ADR. Do not open another one.
+4. If no ADR covers it, two ADRs conflict, or this change revises a written boundary, update or add the ADR and the map row before writing code. Use an unused number. Record the date and what was added, removed, fixed, or tightened, and which clause was superseded.
+5. Documentation, comments, and test-only edits that do not change behavior still require the pass. They do not require a new ADR once the pass shows no decision boundary moved.
+
+Do not start implementation until this pass is done. In the reply, name the ADR files read. Say when the boundary did not move. When it did, point at the ADR revision.
+
+Then classify:
+
+- A-level: changes runtime contracts, capability exposure, permissions, Evidence, System Context ordering, or storage boundaries, or the ADR pass shows a written decision must change. Write or update the ADR and the map first, then implement here.
+- B-level: changes chat runtime, tool runtime, prompt assembly, compaction, task-thread event model, or IPC surfaces, and the ADR pass shows the written boundary stays. Explain the architecture impact and name the ADR files. If the boundary moves, upgrade to A.
+- C-level: local UI, styles, copy, tests, or small bug fixes after the ADR pass confirms no capability, permission, Evidence, protocol, prompt, or recorded decision boundary is touched. Upgrade to A/B if that confirmation fails.
+
+## Engineering Delivery Consensus (2026-11-03)
+
+This repository-wide rule applies to every future session, feature, refactor, fix and prototype. Validation and recovery are the implementer's responsibility; the user must not become the first effective tester of a claimed fix. The durable rationale is in `peer-knowledge/knowledge/architecture/00-engineering-philosophy.md`.
+
+- Before a non-trivial change, trace the actual entry, call/data flow, Module responsibilities, Interface invariants, authoritative fact owners and state transitions. Identify relevant denial, failure, timeout, cancellation, interruption, restart and recovery paths. File separation alone does not prove working boundaries.
+- Define observable acceptance criteria and proportional validation before implementation. For a defect, preserve the failing source/data identity and establish a reproducible baseline or recorded factual trace. If exact reproduction is unavailable, identify the substitute and its limits; do not claim reproduction.
+- Address prevention and existing-state recovery together when persistent state is involved. Cover already-stuck or partially-applied work, late results, stale revisions, idempotency and subsequent task admission as relevant. Never erase unknown effects, permissions, history or Evidence to manufacture recovery. A blocked recovery needs a concrete blocker and a supported reconciliation or recovery path.
+- Validate changed behavior through its real Module/host seams and relevant abnormal exits. Added tests, a commit, a PR, a build or green CI do not by themselves prove the original user outcome. Scope daily verification to the change; keep the full release gate separate.
+- Investigate and fix relevant validation failures, including patch regressions. Preserve failed attempts and bind later results to the actual candidate. Do not silently weaken assertions, call an unexplained regression a flake or substitute an unrelated passing check.
+- Distinguish source implementation, validated behavior, existing-state recovery and installed/release acceptance. Report candidate identity, actual checks/results, blockers, unrun coverage and real-model/platform/installed-build limits. Unverified work remains a candidate; never ask the user to discover whether it works by installing or retrying it.
+- This consensus does not authorize publishing, installing, restarting running apps, changing personal task data, bypassing permission/Evidence gates or including unrelated dirty work.
 
 ## Git Sync
 
@@ -135,17 +185,17 @@ User preference (2026-10-22): a new version or RC must include all open pull req
 
 ## Validation Scope
 
-User clarification (2026-10-22): tests and product regression run before a version/RC release, not after every feature or fix. This supersedes the earlier daily-focused-testing preference.
+User consensus (2026-11-03) supersedes the 2026-10-22 blanket deferral of daily validation. Every code change requires validation proportionate to its behavior and boundaries; a full release campaign is not required after every edit.
 
-- During ordinary development and fixes, do not automatically run unit/integration tests, regressions, screenshot acceptance, or broad build/type/architecture/IPC check suites, including so-called focused batches. Complete the implementation and review the changed content/diff; do not expand a small change into a validation campaign.
-- Run tests early only when the user explicitly requests them for the current task. Do not infer that authorization from the task being A/B-level, a shared contract change, an old playbook, or an agent's own risk assessment.
-- Before a version or RC release, run the full build, test suite, typecheck, architecture/IPC checks and complete product regression on the final combined candidate. The release gate remains mandatory.
-- Do not invoke or wait for test workflows as a daily handoff prerequisite. Report any existing automatic CI separately; do not describe unrun checks as passed.
-- Documentation-only and instruction-only edits require content/diff review only. State clearly that testing is deferred to release unless explicitly requested.
+- During ordinary code development and fixes, review the diff and run the relevant focused tests or isolated interaction/visual checks. Select build, type, contract, architecture or IPC checks when needed for the touched seam. This standing instruction authorizes scoped validation without asking again.
+- Cover the reported failure and affected normal/recovery paths. For persistent execution, verify existing-state recovery and later task admission as applicable, using isolated fixtures or data copies rather than experimenting on personal tasks.
+- Check available automatic CI results for the candidate and investigate relevant failures. Do not claim completion with known relevant failures. Do not trigger or wait for unrelated suites as a daily prerequisite; pending or unavailable results remain explicitly unverified.
+- Before a version or RC release, run the full build, test suite, typecheck, architecture/IPC checks and complete product regression on the final combined candidate. The merge-all PR and release gates remain mandatory.
+- Documentation-only and instruction-only edits require content/diff and consistency review only; do not run code tests for prose changes. Code changes lacking executable validation remain unverified candidates with concrete blockers, not completed fixes.
 
 ## Product Regression
 
-During ordinary UI development, do not automatically run screenshot or interaction regression. Use `peer-knowledge/playbook/product-regression.md` when preparing a release or when the user explicitly requests early validation.
+During ordinary UI development, run the interaction or screenshot checks needed for the changed behavior; do not automatically run the complete product packet. Use `peer-knowledge/playbook/product-regression.md` for scoped checks and the full release gate.
 
 Before a version release or RC release, perform the complete product regression:
 
@@ -158,6 +208,7 @@ Before a version release or RC release, perform the complete product regression:
 ## Implementation Expectations
 
 - UI icons must use SVG components. Reuse the shared `PeerIcon` or an existing SVG icon; do not use text characters, emoji, icon fonts, or CSS-generated glyphs as icons, including arrows, checks, close buttons, and disclosure indicators.
+- All selection of configured models must use the shared `ui/model-picker/ModelPicker` (or its `ModelSelectionPanel` for an existing embedded/native popover host), including multi-selection. Reuse the input composer's provider/model list and keyboard/focus behavior. Callers own eligibility, persisted scope and save receipts; do not build a model picker with `Dropdown`, `CascadingMenu`, or a separate model checklist. The component contract lives in `peer-knowledge/knowledge/specifications/model-picker.md`. Provider catalog import/configuration is a separate management flow.
 - Prefer existing protocol types, reducers, registries, providers, and stores.
 - Add a Provider adapter instead of adding `capabilityId` branches to central hosts.
 - Add reducer/kernel logic instead of growing a large React component.

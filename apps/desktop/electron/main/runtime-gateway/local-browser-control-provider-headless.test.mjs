@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   getActiveBrowserEntry,
+  registerBrowserWebContents,
   resetBrowserControlRegistryForTests,
 } from './browser-control-registry.mjs';
 import { createLocalBrowserControlProvider } from './local-browser-control-provider.mjs';
@@ -232,4 +233,31 @@ test('visible entry still takes priority over headless fallback', async () => {
   assert.equal(output.browserTabId, 'tab-visible', '可见 entry 优先');
   assert.equal(output.headless, undefined, '非 headless 执行不带标记');
   assert.equal(electron2.created.windows.length, 0, '可见目标在场时不创建 headless 窗口');
+});
+
+
+test('native crash/reveal failure never creates a headless replacement or replays navigation', async () => {
+  registerBrowserWebContents({ conversationId: 'native-c', browserTabId: 'copy', webContentsId: 501,
+    active: true, surface: 'native', windowId: 'w', generation: 'g', available: false });
+  const { provider, electron, headlessManager } = createProviderWithHeadless({ ensureBrowserReady: async () => { throw Error('native_browser_unavailable'); } });
+  try {
+    const result = await provider.executeCapability({ call: { toolCallId: 'native-failed', capabilityId: 'local.web.control.navigate', arguments: { url: 'https://example.com' } } },
+      { locale: 'en-US', toolContext: { conversationId: 'native-c' } });
+    assert.equal(result.result.status, 'failed'); assert.equal(electron.created.views.length, 0);
+    assert.equal(getActiveBrowserEntry('native-c').webContentsId, 501);
+  } finally { await headlessManager.dispose?.(); }
+});
+
+test('a user-selected target change during native reveal fails this action instead of applying it elsewhere', async () => {
+  registerBrowserWebContents({ conversationId: 'native-c', browserTabId: 'copy', webContentsId: 501,
+    active: true, surface: 'native', windowId: 'w', generation: 'g' });
+  const { provider, electron, headlessManager } = createProviderWithHeadless({ ensureBrowserReady: async () => {
+    registerBrowserWebContents({ conversationId: 'native-c', browserTabId: 'source', webContentsId: 502, active: true });
+    return { status: 'opened', focused: false };
+  } });
+  try {
+    const result = await provider.executeCapability({ call: { toolCallId: 'native-changed', capabilityId: 'local.web.control.navigate', arguments: { url: 'https://example.com' } } },
+      { locale: 'en-US', toolContext: { conversationId: 'native-c' } });
+    assert.equal(result.result.status, 'failed'); assert.equal(electron.created.views.length, 0);
+  } finally { await headlessManager.dispose?.(); }
 });

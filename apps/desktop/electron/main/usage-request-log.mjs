@@ -10,10 +10,10 @@
  * - 不回填历史 null 绑定
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, openSync, closeSync, fstatSync, readSync } from 'node:fs';
 import path from 'node:path';
 import { pathOf } from './data-store.mjs';
-import { estimateUsageCostUsd } from './usage-stats.mjs';
+import { estimateUsageCostUsd } from './usage-pricing.mjs';
 
 function finiteNumber(value) {
   const n = Number(value);
@@ -69,7 +69,11 @@ export function createUsageRequestLog({
       groupId: resolveGroupId(entry),
       model: optionalText(entry.model),
       providerName: optionalText(entry.providerName),
-      usageScope: 'runtime_turn',
+      usageScope: entry.requestPurpose === 'input_prediction' ? 'provider_request' : 'runtime_turn',
+      ...(entry.requestPurpose === 'input_prediction' ? {
+        requestPurpose: 'input_prediction', accountingState: entry.accountingState === 'settled' ? 'settled' : 'reserved',
+        usageIsEstimate: entry.usageIsEstimate !== false,
+      } : {}),
       providerRequestCount: Math.max(
         1,
         Math.floor(finiteNumber(entry.providerRequestCount || usage.providerRequestCount) || 1),
@@ -91,8 +95,8 @@ export function createUsageRequestLog({
 
   function readAll({ limit = 5000 } = {}) {
     if (!existsSync(logFile)) return [];
-    const lines = readFileSync(logFile, 'utf8').split('\n').filter(Boolean);
-    const start = Math.max(0, lines.length - Math.max(1, Number(limit) || 5000));
+    const lines = readUsageTail(logFile, Math.max(1, Math.min(50000, Math.floor(Number(limit) || 5000))));
+    const start = Math.max(0, lines.length - Math.max(1, Math.min(50000, Math.floor(Number(limit) || 5000))));
     const rows = [];
     for (let i = start; i < lines.length; i += 1) {
       try {
@@ -101,16 +105,56 @@ export function createUsageRequestLog({
         // skip corrupt line
       }
     }
-    return rows;
+    return foldPredictionUsage(rows);
+  }
+
+  function readForBudget(sinceMs) {
+    if (!existsSync(logFile)) return { complete: true, rows: [] };
+    const lines = readUsageTail(logFile, 50_000);
+    const parsed = lines.map(line => { try { return JSON.parse(line); } catch { return null; } });
+    // Missing/corrupt records cannot be interpreted as zero spend.
+    const complete = parsed.every(Boolean) && (lines.complete || parsed.some(row => Date.parse(row?.at) < sinceMs));
+    return { complete, rows: foldPredictionUsage(parsed.filter(Boolean)).filter(row => Date.parse(row.at) >= sinceMs) };
   }
 
   return {
     logFile,
     append,
     readAll,
+    readForBudget,
   };
 }
 
 export function appendUsageRequestLog(entry, options) {
   return createUsageRequestLog(options).append(entry);
+}
+
+/** Bounded tail I/O: old logs must not block every settings read as they grow. */
+function readUsageTail(file, limit) {
+  const fd = openSync(file, 'r');
+  try {
+    let position = fstatSync(fd).size, bytes = 0, newlines = 0;
+    const chunks = [], maxBytes = 8 * 1024 * 1024;
+    while (position > 0 && bytes < maxBytes && newlines <= limit) {
+      const size = Math.min(64 * 1024, position, maxBytes - bytes);
+      const chunk = Buffer.allocUnsafe(size);
+      position -= size;
+      const count = readSync(fd, chunk, 0, size, position);
+      const read = chunk.subarray(0, count);
+      for (const byte of read) if (byte === 10) newlines += 1;
+      chunks.unshift(read); bytes += count;
+      if (count < size) break;
+    }
+    const lines = Buffer.concat(chunks).toString('utf8').split('\n');
+    if (position > 0) lines.shift(); // Discard the incomplete first record.
+    const result = lines.filter(Boolean);
+    result.complete = position === 0;
+    return result;
+  } finally { closeSync(fd); }
+}
+
+function foldPredictionUsage(rows) {
+  const latest = new Map();
+  for (const row of rows) if (row.requestPurpose === 'input_prediction') latest.set(row.id, row);
+  return rows.filter(row => row.requestPurpose !== 'input_prediction' || latest.get(row.id) === row);
 }

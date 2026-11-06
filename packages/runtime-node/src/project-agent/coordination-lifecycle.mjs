@@ -1,18 +1,27 @@
 import { createHash } from 'node:crypto';
 import { workBudgetBinding } from './work-budget.mjs';
 import { isCanonicalUserInput } from './user-priority.mjs';
+import { historyExecutionHeld } from './history-resumption.mjs';
+import { transitionReconciliation } from './supervision-recovery.mjs';
+import { sessionNeedsCancellation } from './session-cancellation.mjs';
+import { createIntentLifecycle } from './intent-lifecycle.mjs';
+import { stableOperationFailureKey } from './progress-policy.mjs';
+import { resolveDelegationAnchors, userAnchorCandidates } from './user-anchor.mjs';
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const ended = new Set(['accepted', 'result_ready', 'cancelled']);
 
 /** Recoverable coordination effects over the existing task ports, never a second task engine. */
-export function createCoordinationLifecycle({ readSession, readSessionSummary = readSession, readMessages, checkTakeover, admitTask = () => ({ ok: true }), spawn, requestCancel, send, takeover, holdsLease, isEnabled = () => true }) {
+export function createCoordinationLifecycle({ readSession, readSessionSummary = readSession, readMessages, readGoalFacts, verifyGoal, resourceWaits, now, checkTakeover, admitTask = () => ({ ok: true }), spawn, requestCancel, send, takeover, holdsLease, canExecute = () => true, isEnabled = () => true }) {
   const drains = new Map();
   const queued = new Set();
   const storeFor = workspaceId => workBudgetBinding(workspaceId)?.store;
+  const intents = createIntentLifecycle({ storeFor, readSession, readMessages, readGoalFacts, verifyGoal, resourceWaits, holdsLease, canExecute, now });
   const lifecycleFacts = store => typeof store?.readLifecycleFacts === 'function' ? store.readLifecycleFacts() : store?.read();
   function lifecycleOf(state, mandate, summary = false) {
     const work=(state.workStates || state.works)[mandate.workId];
     if (work?.stopScope === 'work' && ['paused','cancelled'].includes(work.state)) return 'cancelled';
+    if (work?.intentCoordination) return work.intentCoordination.lifecycle;
+    if (mandate.intentSchemaVersion === 1) return mandate.lifecycle;
     const sessions=mandate.sessionIds.map(sessionId=>(summary ? readSessionSummary : readSession)({sessionId}));
     const pending=Object.values(state.transitions || {}).some(row=>row.workId===mandate.workId && !['completed','blocked'].includes(row.phase));
     return sessions.length && sessions.every(row=>row && ['accepted','cancelled'].includes(row.status)) && !pending ? 'fulfilled' : mandate.lifecycle;
@@ -22,6 +31,7 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
     return Object.values(state?.mandates || {}).filter(row => row.parentConversationId === parentConversationId)
       .filter(row => !scope || row.workId === scope.workId || row.sessionIds.some(id => scope.sessionIds?.includes(id)))
       .slice(-24).map(row => ({ workId: row.workId, goalRevision: row.goalRevision, lifecycle: lifecycleOf(state,row,true),
+        intent: (state.workStates || state.works)?.[row.workId]?.intentCoordination,
         sessionIds: row.sessionIds.filter(id => !row.revokedSessionIds?.includes(id)), rootInputIds: row.rootInputIds,
         transitions: Object.values(state.transitions || {}).filter(item => item.workId === row.workId && item.phase !== 'completed')
           .slice(-8).map(item => ({ operationId: item.operationId, action: item.action, phase: item.phase, oldSessionId: item.oldSessionId, replacementSessionId: item.replacementSessionId })) }));
@@ -31,17 +41,25 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
     const workspaceId = context.workspaceId, parentConversationId = context.conversationId || context.parentConversationId;
     const store = storeFor(workspaceId);
     if (!store || !holdsLease(workspaceId)) return { ok: false, error: 'coordination_host_unavailable' };
-    const operationId = context.deliveryKey || `coordination-${hash([context.turnId, context.toolCallOrdinal, input])}`;
     const state = store.read();
+    if (input.action === 'assess') return intents.assess(input, context);
+    if (input.action === 'query' && !input.sessionId) return intents.query(input, context);
     if (input.action === 'query') {
       const session = readSession({ sessionId: input.sessionId, detail: 'report' });
       if (!session || session.workspaceId !== workspaceId || session.origin?.parentConversationId !== parentConversationId
         || context.scopedSessionIds && !context.scopedSessionIds.includes(session.sessionId)) return { ok: false, error: 'out_of_scope' };
       const mandate = Object.values(state.mandates || {}).find(row => row.parentConversationId === parentConversationId && row.sessionIds.includes(session.sessionId));
-      return { ok: true, session, legacy: !mandate, goalRevision: mandate?.goalRevision ?? null,
-        ...(mandate ? { workId: mandate.workId } : {}), nextAction: mandate ? 'use_current_revision_for_changes' : 'legacy_session_requires_current_user_for_changes' };
+      return { ok: true, legacy: !mandate, goalRevision: mandate?.goalRevision ?? null,
+        ...(mandate ? { workId: mandate.workId } : {}), nextAction: mandate ? 'use_current_revision_for_changes' : 'legacy_session_requires_current_user_for_changes',
+        session };
     }
+    if (!canExecute(workspaceId)) return { ok: false, error: 'recovery_pending' };
+    if (state.lastRecovery?.quarantinedSessionIds?.includes(input.sessionId)) return { ok: false, error: 'coordination_reconciliation_required' };
     const messages = readMessages(parentConversationId);
+    const resolved = resolveDelegationAnchors('coordinate_work', input, messages);
+    if (!resolved.ok) return { ...resolved, availableAnchors: userAnchorCandidates(messages, isCanonicalUserInput, context.currentInputAnchors || []) };
+    input = resolved.input;
+    const operationId = context.deliveryKey || `coordination-${hash([context.turnId, context.toolCallOrdinal, input])}`;
     const current = messages.filter(row => context.currentInputAnchors?.includes(row.id) && isCanonicalUserInput(row));
     const sourceInputIds = current.map(row => row.inputId || row.id);
     const events = context.events || [];
@@ -50,9 +68,10 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
       if (previous.payload?.requestIdentity !== hash(input)) return { ok: false, error: 'operation_identity_conflict' };
       const owner = state.mandates[previous.workId];
       if (owner.workspaceId !== workspaceId || owner.parentConversationId !== parentConversationId
-        || !previous.sourceInputIds.some(id => sourceInputIds.includes(id)) && !previous.sourceEventIds.some(id => events.some(row => row.eventId === id))) return { ok: false, error: 'out_of_scope' };
+        || !previous.sourceInputIds.some(id => sourceInputIds.includes(id)) && !previous.sourceEventIds.some(id => events.some(row => row.eventId === id))
+          && !(previous.sourceDecisionRef && previous.sourceDecisionRef === context.sourceDecisionRef && previous.workId === context.workId)) return { ok: false, error: 'out_of_scope' };
       await recover(workspaceId);
-      return receipt(store, operationId, true);
+      return { ...receipt(store, operationId, true), anchorResolutions: resolved.anchorResolutions };
     }
     let target = input.sessionId ? readSession({ sessionId: input.sessionId, detail: 'report' }) : null;
     if (input.sessionId && (!target || target.workspaceId !== workspaceId || target.origin?.parentConversationId !== parentConversationId)) return { ok: false, error: 'out_of_scope' };
@@ -68,47 +87,62 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
       if (!next || next.workspaceId !== workspaceId || next.origin?.parentConversationId !== parentConversationId) return { ok: false, error: 'out_of_scope' };
       target = next; scopedSessionIds?.push(next.sessionId);
     }
-    if (target && ['handoff', 'revise'].includes(input.action)) {
-      const blocked = checkTakeover?.(target.sessionId);
+    if (target && ['handoff', 'revise', 'resume'].includes(input.action)) {
+      const blocked = checkTakeover?.(target.sessionId, input.action);
       if (blocked) return { ok: false, error: blocked };
+    }
+    if (input.action === 'cancel' && ['result_ready', 'failed'].includes(target?.status) && !current.length) {
+      return { ok: false, error: 'current_user_required' };
     }
     const workId = input.workId || target?.origin?.workId || Object.values(state.mandates || {}).find(row => row.sessionIds.includes(target?.sessionId))?.workId || context.workId;
     const mandate = state.mandates?.[workId];
     if (!current.length && mandate && lifecycleOf(state,mandate) !== 'active') return {ok:false,error:'mandate_inactive'};
     const work = state.works[workId];
-    if (!work || work.parentConversationId !== parentConversationId || work.stopScope === 'work' && ['paused', 'cancelled'].includes(work.state)) return { ok: false, error: 'work_execution_stopped' };
+    if (!work || work.parentConversationId !== parentConversationId || work.stopScope === 'work' && ['paused', 'cancelled'].includes(work.state)
+      && !(input.action === 'cancel' && current.length)) return { ok: false, error: 'work_execution_stopped' };
     const eventIds = events.filter(row => mandate?.sessionIds.includes(row.sessionId) && state.events[row.eventId] && !state.events[row.eventId].handled).map(row => row.eventId);
     const materialRefs = current.flatMap(row => [...(row.attachmentRefs || []), ...(row.attachments || []).map(item => item.path || item.ref || item.id).filter(Boolean)]);
     const anchors = [...new Set([...current.map(row => row.id), ...messages
       .filter(row => [...(mandate?.rootInputIds || []), ...(mandate?.revisionInputIds || [])].includes(row.inputId || row.id) && isCanonicalUserInput(row)).map(row => row.id)])];
     if (!anchors.length) return { ok: false, error: 'current_user_required' };
-    if (input.task && input.task.anchorMessageIds.some(id => !anchors.includes(id))) return { ok: false, error: 'material_out_of_scope' };
+    if (input.task && input.task.anchorMessageIds.some(id => !anchors.includes(id))) return { ok: false, error: 'anchor_out_of_scope',
+      message: 'Anchor is outside this action scope; identity resolution does not authorize work.',
+      anchorResolutions: resolved.anchorResolutions, availableAnchors: userAnchorCandidates(messages, isCanonicalUserInput, anchors) };
     if (input.task && ['parallel', 'replace'].includes(input.action)) {
       const admission = await admitTask(input.task, { workspaceId, parentConversationId });
       if (!admission.ok) return admission;
     }
+    const repair = input.action === 'resume' && (target?.status === 'result_ready' || target?.origin?.takeover?.repair === true);
+    const semantic = state.works[workId]?.intentCoordination;
+    const sourceDecisionRef = !sourceInputIds.length && !eventIds.length && (context.turnId && semantic?.decisionTurnId === context.turnId && semantic.decision.disposition.kind === 'continue'
+      ? semantic.decision.operationId : context.sourceDecisionRef);
     const decision = { operationId, workId, expectedRevision: input.expectedRevision ?? (input.action === 'parallel' ? mandate?.goalRevision || 0 : -1),
       action: input.action, sourceInputIds, sourceEventIds: sourceInputIds.length ? [] : eventIds,
+      ...(sourceDecisionRef ? { sourceDecisionRef } : {}),
       ...(target ? { sessionId: target.sessionId } : {}), reason: input.reason,
-      payload: { requestIdentity: hash(input), ...(input.task ? { task: input.task } : {}), ...(input.text ? { text: input.text } : {}), ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+      payload: { requestIdentity: hash(input), ...(repair ? {repair:true} : {}), ...(input.task ? { task: input.task } : {}), ...(input.text ? { text: input.text } : {}), ...(input.replyTo ? { replyTo: input.replyTo } : {}),
         context: { workspaceId, parentConversationId, workspacePath: context.workspacePath || '', surface: context.surface,
           anchorMessageIds: anchors, currentInputAnchors: current.map(row => row.id),
           ...(context.manualCriterionAuthorities ? { manualCriterionAuthorities: context.manualCriterionAuthorities } : {}) } } };
-    const failures = Object.values(state.decisions || {}).filter(row => row.workId === workId && JSON.stringify(row.sourceInputIds) === JSON.stringify(decision.sourceInputIds)
-      && row.action === decision.action && row.sessionId === decision.sessionId && row.reason === decision.reason
-      && state.transitions?.[row.operationId]?.phase === 'blocked');
-    if (failures.length >= 2) return { ok: false, error: 'coordination_no_progress' };
-    const admitted = store.decide(decision, { parentConversationId, currentInputIds: sourceInputIds, eventIds, materialRefs,
+    const failures = Object.values(state.decisions || {}).filter(row => row.workId === workId && row.goalRevision === mandate?.goalRevision
+      && row.action === decision.action && row.sessionId === decision.sessionId && state.transitions?.[row.operationId]?.phase === 'blocked');
+    const causes = new Map();
+    for (const row of failures) { const key = stableOperationFailureKey({ ...row, error: state.transitions[row.operationId].error }); causes.set(key, (causes.get(key) || 0) + 1); }
+    if (!current.length && [...causes.values()].some(count => count >= 2)) return { ok: false, error: 'coordination_no_progress' };
+    if (['resume', 'handoff', 'revise'].includes(input.action)) store.enableSupervision();
+    const admitted = store.decide(decision, { parentConversationId, currentInputIds: sourceInputIds, eventIds, materialRefs, sourceDecisionRef,
+      intentRequired: !mandate || mandate.intentSchemaVersion === 1,
+      turnId: context.turnId, originDecisionRef: context.sourceDecisionRef,
       ...(!mandate && current.length && target ? { adoptSessionIds: [target.sessionId] } : {}),
       ...(scopedSessionIds ? { scopedSessionIds } : {}) });
     if (!admitted.ok) return admitted;
     await recover(workspaceId);
-    return receipt(store, operationId, admitted.replayed === true);
+    return { ...receipt(store, operationId, admitted.replayed === true), anchorResolutions: resolved.anchorResolutions };
   }
   function receipt(store, operationId, replayed) {
     const state = store.read(), transition = state.transitions[operationId], decision = state.decisions[operationId];
     return { ok: !transition.error, replayed, workId: decision.workId, goalRevision: decision.goalRevision,
-      operationId, phase: transition.phase, sessionId: transition.replacementSessionId || transition.oldSessionId,
+      operationId, phase: transition.phase, executionAdmission: transition.executionAdmission, executionEffect: transition.executionEffect, sessionId: transition.replacementSessionId || transition.oldSessionId,
       ...(decision.action === 'query' ? { session: readSession({sessionId: transition.oldSessionId, detail: 'report'}) } : {}),
       ...(transition.error ? { error: transition.error } : {}), ...(transition.diagnostic ? { diagnostic: transition.diagnostic } : {}) };
   }
@@ -118,6 +152,8 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
     const read = () => store.read().transitions[transition.operationId];
     const move = (phase, patch = {}) => { const current = read(); store.advanceTransition(current.operationId, current.phase, { phase, ...patch }); return read(); };
     const state = store.read(), mandate = state.mandates[transition.workId], decision = state.decisions[transition.operationId];
+    if (mandate && !canExecute(mandate.workspaceId)) return;
+    if (historyExecutionHeld(state.works[transition.workId]) || state.lastRecovery?.quarantinedOperationIds?.includes(transition.operationId)) return;
     if (!mandate || mandate.goalRevision !== transition.expectedGoalRevision) {
       if (!['blocked', 'completed'].includes(transition.phase)) move('blocked', { error: 'goal_revision_stale' });
       return;
@@ -127,21 +163,27 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
     const payload = decision.payload, context = { ...payload.context, workId: mandate.workId, coordinationBinding: binding, coordinationOperationId: transition.operationId, deliveryKey: transition.operationId };
     const old = transition.oldSessionId ? readSession({ sessionId: transition.oldSessionId, detail: 'report' }) : null;
     if (transition.phase === 'recorded') {
+      if (transition.action === 'cancel' && ['result_ready', 'failed'].includes(old?.status) && !decision.sourceInputIds.length) {
+        move('blocked', { error: 'current_user_required' }); return;
+      }
       if (payload.task && ['parallel', 'replace'].includes(transition.action)) {
         const admission = await admitTask(payload.task, context);
         if (!admission.ok) { move('blocked', { error: admission.error, diagnostic: admission.diagnostic }); return; }
       }
-      if (['replace', 'cancel', 'handoff', 'revise'].includes(transition.action) && old && !ended.has(old.status)) {
+      const needsStop = transition.action === 'cancel' ? sessionNeedsCancellation(old)
+        : old && (!ended.has(old.status) || transition.action === 'resume' && old.status === 'result_ready');
+      if (['replace', 'cancel', 'handoff', 'revise', 'resume'].includes(transition.action) && needsStop) {
         move('stopping');
         if (['replace', 'cancel'].includes(transition.action)) {
-          const requested = await requestCancel({ sessionId: old.sessionId, reason: transition.reason, operationId: transition.operationId, promote: false });
+          const requested = await requestCancel({ sessionId: old.sessionId, reason: transition.reason, operationId: transition.operationId, promote: false },
+            transition.action === 'cancel' ? context : undefined);
           if (requested?.error) { move('blocked', { error: requested.error }); return; }
         }
       } else move('ready');
     }
     let phase = read().phase;
     if (phase === 'stopping') {
-      if (['handoff', 'revise'].includes(transition.action)) {
+      if (['handoff', 'revise', 'resume'].includes(transition.action)) {
         const result = await takeover({ sessionId: old.sessionId, binding, text: payload.text || transition.reason,
           operationId: transition.operationId }, context);
         if (result?.error) { move(result.error === 'execution_outcome_unknown' ? 'awaiting_outcome' : 'blocked', { error: result.error }); return; }
@@ -150,8 +192,9 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
       }
       const fresh = readSession({ sessionId: old.sessionId, detail: 'report' });
       if (fresh?.origin?.cancellation?.phase === 'awaiting_outcome') { move('awaiting_outcome', { error: 'execution_outcome_unknown' }); return; }
-      if (fresh?.status !== 'cancelled' && !ended.has(fresh?.status)) {
-        const result = await requestCancel({ sessionId: old.sessionId, reason: transition.reason, operationId: transition.operationId, promote: false });
+      if (transition.action === 'cancel' ? sessionNeedsCancellation(fresh) : fresh?.status !== 'cancelled' && !ended.has(fresh?.status)) {
+        const result = await requestCancel({ sessionId: old.sessionId, reason: transition.reason, operationId: transition.operationId, promote: false },
+          transition.action === 'cancel' ? context : undefined);
         if (result?.error) move('blocked', { error: result.error });
         return;
       }
@@ -183,9 +226,25 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
     const store = storeFor(workspaceId);
     if (!store || !holdsLease(workspaceId)) return Promise.resolve();
     const promise = Promise.resolve().then(async () => {
-      for (const transition of Object.values(store.read().transitions || {})) {
-        if (['completed', 'blocked', 'awaiting_outcome'].includes(transition.phase)) continue;
-        try { store.assertOwner(); await effect(store, transition); }
+      for (let transition of Object.values(store.read().transitions || {})) {
+        try {
+          if (transition.phase === 'awaiting_outcome') {
+            const related = Object.values(store.read().transitions || {}).filter(row => row.oldSessionId === transition.oldSessionId);
+            const session = readSession({ sessionId: transition.oldSessionId });
+            const retainedTakeover = session?.origin?.takeover?.operationId === transition.operationId;
+            if (retainedTakeover ? related.some(row => row.operationId !== transition.operationId && !['completed', 'blocked'].includes(row.phase))
+              : related.at(-1)?.operationId !== transition.operationId) continue;
+            const work = store.readWork(transition.workId);
+            const patch = transitionReconciliation(transition,work,session);
+            if (patch) {
+              store.enableSupervision(6);
+              store.advanceTransition(transition.operationId,transition.phase,patch);
+              transition = store.read().transitions[transition.operationId];
+            }
+          }
+          if (['completed', 'blocked', 'awaiting_outcome'].includes(transition.phase)) continue;
+          store.assertOwner(); await effect(store, transition);
+        }
         catch (error) {
           if (!holdsLease(workspaceId)) return;
           const current = store.read().transitions[transition.operationId];
@@ -203,9 +262,11 @@ export function createCoordinationLifecycle({ readSession, readSessionSummary = 
     if (!transition) return undefined;
     const lineage=related.findLast(row=>row.action==='replace' && row.replacementSessionId) || transition;
     return {operationId:transition.operationId,action:transition.action,phase:transition.phase,reason:transition.reason,
-      goalRevision:transition.expectedGoalRevision, ...(lineage.action === 'replace' ? {
+      goalRevision:transition.expectedGoalRevision, executionAdmission:transition.executionAdmission, executionEffect:transition.executionEffect,
+      executionAttemptRef:transition.executionAttemptRef, ...(lineage.action === 'replace' ? {
         priorSessionId:lineage.oldSessionId, replacementSessionId:lineage.replacementSessionId,
         replacementTitle:state.decisions[lineage.operationId].payload?.task?.title} : {})};
   }
-  return { coordinate, recover, facts, forSession };
+  return { coordinate, recover, facts, forSession,
+    async waitForIdle(workspaceId) { while (drains.has(workspaceId)) await drains.get(workspaceId); } };
 }

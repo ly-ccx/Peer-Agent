@@ -1,16 +1,20 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, readdirSync, rmSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import { readPersistedHistoryFiles } from './persisted-history.mjs';
 import { createHistoryProjectionReader } from './history-projection-reader.mjs';
 import { createInteractionReader } from './interaction-reader.mjs';
-import { createHistorySourceReader } from './history-source-reader.mjs';
+import { createHistorySourceReader, createListPreviewSource } from './history-source-reader.mjs';
+import { assignSessionPreview, coerceSessionPreview, sessionPreviewRecord, truncatePreview } from './session-preview.mjs';
 import { buildInheritedBackground } from './inherited-background.mjs';
 import { validateSelectionReference } from './selection-reference.mjs';
 import { createBackgroundSnapshotStore } from './background-snapshot-store.mjs';
 import path from 'node:path';
 import { contextAccountingModelKey, normalizeContextUsageBreakdown } from '@peer-agent/protocol';
-import { withFileLock, withFileLockAsync } from './conversation-file-lock.mjs';
+import { acquireMessageRetentionGuard } from './message-retention-guard.mjs';
+import { withFileLock, withFileLocksAsync } from './conversation-file-lock.mjs';
+import { readJsonlByteWindow } from './jsonl-byte-window.mjs';
 import { createTerminalMessageCommitter, conversationFileVersion } from './terminal-message-committer.mjs';
 
 function defaultStoreDir() {
@@ -407,16 +411,19 @@ function migrateLegacyGoalMode(storeDir, indexFile) {
   try {
     const markerFile = path.join(storeDir, '.goal-to-plan-migrated');
     if (existsSync(markerFile)) return;
-    if (existsSync(indexFile)) {
-      const rows = readJsonl(indexFile);
-      let changed = false;
-      for (const row of rows) {
-        if (row && row.mode === 'goal') { row.mode = 'plan'; changed = true; }
+    mkdirSync(storeDir, { recursive: true });
+    withFileLock(indexFile, () => {
+      if (existsSync(markerFile)) return;
+      if (existsSync(indexFile)) {
+        const rows = readJsonl(indexFile);
+        let changed = false;
+        for (const row of rows) {
+          if (row && row.mode === 'goal') { row.mode = 'plan'; changed = true; }
+        }
+        if (changed) writeJsonl(indexFile, rows);
       }
-      if (changed) writeJsonl(indexFile, rows);
-    }
-    if (!existsSync(storeDir)) mkdirSync(storeDir, { recursive: true });
-    writeFileSync(markerFile, new Date().toISOString(), 'utf8');
+      writeFileSync(markerFile, new Date().toISOString(), 'utf8');
+    });
   } catch {
     // 迁移失败不应阻断 store 初始化;下次启动 marker 不存在会重试。
   }
@@ -550,6 +557,130 @@ export function createConversationStore(options = {}) {
 
   function readIndex() { return readJsonl(indexFile).map(normalizeMeta); }
 
+  // One index parse per file version, and one stat per turn. Listing asks for
+  // every bot's preview; stating index.jsonl once per id blew the 100ms budget.
+  let previewIndexToken = null;
+  let previewIndexRows = new Map();
+  let previewIndexTurn = null;
+  function forgetPreviewIndex() {
+    previewIndexToken = null;
+    previewIndexTurn = null;
+  }
+  function writeIndex(rows) {
+    forgetPreviewIndex();
+    writeJsonl(indexFile, rows);
+  }
+  function appendIndex(row) {
+    forgetPreviewIndex();
+    appendJsonl(indexFile, row);
+  }
+  function currentPreviewIndex() {
+    if (previewIndexTurn) return previewIndexTurn;
+    let token;
+    try { token = conversationFileVersion(indexFile); }
+    catch (error) {
+      if (error?.code === 'ENOENT') {
+        previewIndexTurn = new Map();
+        queueMicrotask(() => { previewIndexTurn = null; });
+        return previewIndexTurn;
+      }
+      throw error;
+    }
+    if (token !== previewIndexToken) {
+      const rows = readIndex();
+      const map = new Map();
+      for (const row of rows) if (!map.has(row.id)) map.set(row.id, row);
+      let after = token;
+      try { after = conversationFileVersion(indexFile); }
+      catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+        after = null;
+      }
+      if (after === token) {
+        previewIndexToken = token;
+        previewIndexRows = map;
+      }
+      previewIndexTurn = after === token ? previewIndexRows : map;
+    } else {
+      previewIndexTurn = previewIndexRows;
+    }
+    queueMicrotask(() => { previewIndexTurn = null; });
+    return previewIndexTurn;
+  }
+
+  const previewRebuildIds = new Set();
+  let previewRebuildTimer = null;
+
+  function rebuildPreviewFromTail(id) {
+    const before = readIndex().find((row) => row.id === id);
+    if (!before) return;
+    if (coerceSessionPreview(before).availability === 'ready') return;
+    const tail = readJsonlByteWindow(convFile(id), { limit: 40 });
+    withFileLock(indexFile, () => {
+      const index = readIndex();
+      const meta = index.find((row) => row.id === id);
+      if (!meta || meta.contentRevision !== before.contentRevision) return;
+      if (coerceSessionPreview(meta).availability === 'ready') return;
+      assignSessionPreview(meta, tail.messages);
+      writeIndex(index);
+    });
+  }
+
+  function schedulePreviewRebuild(id) {
+    if (!id) return;
+    previewRebuildIds.add(id);
+    if (previewRebuildTimer) return;
+    previewRebuildTimer = setTimeout(() => {
+      previewRebuildTimer = null;
+      const ids = [...previewRebuildIds];
+      previewRebuildIds.clear();
+      for (const conversationId of ids) {
+        try {
+          rebuildPreviewFromTail(conversationId);
+        } catch (error) {
+          if (error?.code === 'ENOENT') continue;
+          console.warn('[conversation-store] preview rebuild failed:', error);
+        }
+      }
+    }, 0);
+    previewRebuildTimer.unref?.();
+  }
+
+  function projectSessionPreview(meta) {
+    if (!meta) return meta;
+    const preview = coerceSessionPreview(meta);
+    if (preview.availability === 'rebuilding') schedulePreviewRebuild(meta.id);
+    return { ...meta, preview, availability: preview.availability };
+  }
+
+  function loadListPreview(id) {
+    const meta = currentPreviewIndex().get(id);
+    if (!meta) return null;
+    return projectSessionPreview(meta).preview;
+  }
+
+  function describeListPreview(id) {
+    const meta = currentPreviewIndex().get(id);
+    if (!meta) return null;
+    const preview = coerceSessionPreview(meta);
+    return `${meta.contentRevision}:${preview.availability}:${preview.excerpt}:${preview.messageId || ''}`;
+  }
+
+  const listPreviews = createListPreviewSource({
+    describe: describeListPreview,
+    load: loadListPreview,
+  });
+
+  function readSessionPreview(id) {
+    return listPreviews(id);
+  }
+
+  function readSessionMeta(id) {
+    const meta = readIndex().find((row) => row.id === id);
+    if (!meta) return null;
+    return projectSessionPreview({ ...meta, contextSnapshot: durableContextSnapshot(meta) });
+  }
+
   function withMessageCount(meta) {
     if (!meta) return null;
     if (Number.isFinite(Number(meta.messageCount))) {
@@ -567,30 +698,33 @@ export function createConversationStore(options = {}) {
    * 为缺 messageCount 的 index 行批量回填并一次写回。
    * 仅用于后台迁移 / 显式 backfill，不在 list 热路径调用。
    */
-  function ensureMessageCounts(metas) {
+  function fillMissingMessageCounts(wanted) {
+    const index = readIndex();
     let dirty = false;
-    const byId = new Map();
-    const next = metas.map((meta) => {
-      if (Number.isFinite(Number(meta.messageCount))) {
-        const normalized = { ...meta, messageCount: Number(meta.messageCount) };
-        byId.set(meta.id, normalized);
-        return normalized;
+    const counts = new Map();
+    for (const row of index) {
+      if (wanted && !wanted.has(row.id)) continue;
+      if (!Number.isFinite(Number(row.messageCount))) {
+        row.messageCount = computeMessageCount(row.id);
+        dirty = true;
       }
-      dirty = true;
-      const filled = { ...meta, messageCount: computeMessageCount(meta.id) };
-      byId.set(meta.id, filled);
-      return filled;
-    });
-    if (dirty) {
-      const index = readIndex().map((row) => {
-        if (!Number.isFinite(Number(row.messageCount)) && byId.has(row.id)) {
-          return byId.get(row.id);
-        }
-        return row;
-      });
-      writeJsonl(indexFile, index);
+      counts.set(row.id, Number(row.messageCount));
     }
-    return next;
+    if (dirty) writeIndex(index);
+    return counts;
+  }
+
+  function ensureMessageCounts(metas) {
+    const missingIds = metas.filter(meta => !Number.isFinite(Number(meta.messageCount))).map(meta => meta.id);
+    if (!missingIds.length) return metas.map(projectListMeta);
+    return withFileLock(indexFile, () => {
+      const counts = fillMissingMessageCounts(new Set(missingIds));
+      return metas.map(meta => ({
+        ...meta,
+        messageCount: counts.get(meta.id) ?? (Number.isFinite(Number(meta.messageCount))
+          ? Number(meta.messageCount) : computeMessageCount(meta.id)),
+      }));
+    });
   }
 
   let messageCountMigrationScheduled = false;
@@ -604,22 +738,12 @@ export function createConversationStore(options = {}) {
     messageCountMigrationTimer = setTimeout(() => {
       messageCountMigrationTimer = null;
       messageCountMigrationScheduled = false;
-      try {
-        const index = readIndex();
-        let dirty = false;
-        const next = index.map((row) => {
-          if (Number.isFinite(Number(row.messageCount))) {
-            return { ...row, messageCount: Number(row.messageCount) };
-          }
-          if (wanted && !wanted.has(row.id)) return row;
-          dirty = true;
-          return { ...row, messageCount: computeMessageCount(row.id) };
-        });
-        if (dirty) writeJsonl(indexFile, next);
-      } catch (err) {
+      if (!existsSync(indexFile)) return;
+      void withFileLocksAsync([indexFile], () => fillMissingMessageCounts(wanted)).catch((err) => {
+        if (err.code === 'ENOENT' && !existsSync(storeDir)) return;
         // 后台迁移失败不影响 list；下次 list 会再次调度。
         console.warn('[conversation-store] messageCount migration failed:', err);
-      }
+      });
     }, 0);
   }
 
@@ -677,7 +801,7 @@ export function createConversationStore(options = {}) {
 
     // 显式 backfill 仅用于迁移工具/测试；默认 list 热路径永不读正文。
     if (params?.backfillMessageCount === true) {
-      const filled = ensureMessageCounts(sorted);
+      const filled = ensureMessageCounts(sorted).map(projectSessionPreview);
       const page = applyListPagination(filled, params);
       return params?.paginated === true ? page : page.items;
     }
@@ -689,9 +813,10 @@ export function createConversationStore(options = {}) {
       scheduleMessageCountMigration(missingIds);
     }
 
+    const previewed = sorted.map(projectSessionPreview);
     const projected = params?.includeMessageCount === false
-      ? sorted
-      : sorted.map(projectListMeta);
+      ? previewed
+      : previewed.map(projectListMeta);
     const page = applyListPagination(projected, params);
     return params?.paginated === true ? page : page.items;
   }
@@ -712,7 +837,7 @@ export function createConversationStore(options = {}) {
     const sorted = sortByUpdatedAtDesc(filtered.map((meta) => ({ ...meta })));
 
     if (params?.backfillMessageCount === true) {
-      const filled = ensureMessageCounts(sorted);
+      const filled = ensureMessageCounts(sorted).map(projectSessionPreview);
       const page = applyListPagination(filled, params);
       return params?.paginated === true ? page : page.items;
     }
@@ -724,9 +849,10 @@ export function createConversationStore(options = {}) {
       scheduleMessageCountMigration(missingIds);
     }
 
+    const previewed = sorted.map(projectSessionPreview);
     const projected = params?.includeMessageCount === false
-      ? sorted
-      : sorted.map(projectListMeta);
+      ? previewed
+      : previewed.map(projectListMeta);
     const page = applyListPagination(projected, params);
     return params?.paginated === true ? page : page.items;
   }
@@ -810,7 +936,8 @@ export function createConversationStore(options = {}) {
       createdAt: now,
       updatedAt: now,
     };
-    withFileLock(indexFile, () => appendJsonl(indexFile, meta));
+    meta.preview = sessionPreviewRecord(meta, null);
+    withFileLock(indexFile, () => appendIndex(meta));
     return { ...meta, messageCount: 0 };
   }
 
@@ -924,7 +1051,7 @@ export function createConversationStore(options = {}) {
         ...(delegation ? { delegation } : {}),
         backgroundSnapshotId,
       });
-      writeJsonl(indexFile, [...index, child]);
+      writeIndex([...index, child]);
       return withMessageCount(child);
     });
   }
@@ -971,7 +1098,7 @@ export function createConversationStore(options = {}) {
       });
       // One atomic index replacement publishes identity, relationship and draft together.
       // A failed publication may leave an unreferenced snapshot, never a half child.
-      writeJsonl(indexFile, [...index, child]);
+      writeIndex([...index, child]);
       return withMessageCount(child);
     });
   }
@@ -1018,7 +1145,7 @@ export function createConversationStore(options = {}) {
       if (ids.some((referenceId) => !owned.has(referenceId))) fail('CHILD_DRAFT_REFERENCE_INVALID');
       child.selectionDraft = { text: draft.text, references: ids.map((referenceId) => owned.get(referenceId)) };
       // Draft edits are not committed conversation content and do not move its watermark.
-      writeJsonl(indexFile, index);
+      writeIndex(index);
       return structuredClone(child.selectionDraft);
     });
   }
@@ -1029,7 +1156,7 @@ export function createConversationStore(options = {}) {
     if (!meta) return null;
     meta.mode = normalizeMode(mode);
     meta.updatedAt = new Date().toISOString();
-    writeJsonl(indexFile, index);
+    writeIndex(index);
     return withMessageCount(meta);
   }
 
@@ -1039,7 +1166,7 @@ export function createConversationStore(options = {}) {
     if (!meta) return null;
     meta.fastMode = fastMode === true;
     meta.updatedAt = new Date().toISOString();
-    writeJsonl(indexFile, index);
+    writeIndex(index);
     return withMessageCount(meta);
   }
 
@@ -1049,7 +1176,7 @@ export function createConversationStore(options = {}) {
     if (!meta) return null;
     meta.preferredExecutionIsolation = normalizePreferredExecutionIsolation(preferredExecutionIsolation);
     meta.updatedAt = new Date().toISOString();
-    writeJsonl(indexFile, index);
+    writeIndex(index);
     return withMessageCount(meta);
   }
 
@@ -1060,7 +1187,7 @@ export function createConversationStore(options = {}) {
     if (context === null || context === undefined) delete meta.automationCreateContext;
     else meta.automationCreateContext = structuredClone(context);
     meta.updatedAt = new Date().toISOString();
-    writeJsonl(indexFile, index);
+    writeIndex(index);
     return withMessageCount(meta);
   }
 
@@ -1087,7 +1214,7 @@ export function createConversationStore(options = {}) {
       meta.contextSnapshot = null;
     }
     meta.updatedAt = new Date().toISOString();
-    writeJsonl(indexFile, index);
+    writeIndex(index);
     return withMessageCount(meta);
   }
 
@@ -1112,7 +1239,7 @@ export function createConversationStore(options = {}) {
     if (!normalized) return null;
     meta.contentRevision = contentRevision;
     meta.contextSnapshot = normalized;
-    writeJsonl(indexFile, index);
+    writeIndex(index);
     // Keep the capacity snapshot in a sidecar as the cross-process authority.
     // Older Desktop/TUI builds rewrite the whole index after normalizing fields
     // they understand and can erase a newer snapshot. The sidecar survives that
@@ -1200,6 +1327,78 @@ export function createConversationStore(options = {}) {
       contextSnapshot: durableContextSnapshot(meta),
       messages: mergeStreamPatch(id, messages),
     };
+  }
+
+  const CONVERSATION_OPEN_WINDOW = 80;
+
+  function conversationMeta(id) {
+    return readSessionMeta(id);
+  }
+
+  function normalizeWindowLimit(value) {
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed <= 0) return CONVERSATION_OPEN_WINDOW;
+    return Math.min(parsed, 200);
+  }
+
+  function parseWindowCursor(value) {
+    if (value == null || value === '') return null;
+    if (typeof value !== 'string' || !/^[0-9]+$/.test(value)) return null;
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) ? parsed : null;
+  }
+
+  /**
+   * Product read: tail window by default. `full: true` is a temporary compat
+   * hatch for diagnostics and migration scripts, not the chat open path.
+   */
+  function readConversationWindow(id, { limit, before, full = false, chunkBytes } = {}) {
+    const meta = conversationMeta(id);
+    if (!meta) return null;
+    if (full === true) {
+      const messages = mergeStreamPatch(id, readJsonl(convFile(id)));
+      return { meta, window: messages, cursor: null, hasMore: false };
+    }
+    const beforeByte = parseWindowCursor(before);
+    if (before != null && before !== '' && beforeByte == null) {
+      return { meta, window: [], cursor: null, hasMore: false };
+    }
+    const page = readJsonlByteWindow(convFile(id), {
+      limit: normalizeWindowLimit(limit),
+      beforeByte,
+      ...(chunkBytes ? { chunkBytes } : {}),
+    });
+    return {
+      meta,
+      window: mergeStreamPatch(id, page.messages),
+      cursor: page.cursor,
+      hasMore: page.hasMore,
+    };
+  }
+
+  async function readConversationYielding(id, { yieldEvery = 200, yield: pause } = {}) {
+    const meta = conversationMeta(id);
+    if (!meta) return null;
+    let text = '';
+    try {
+      text = await readFile(convFile(id), 'utf8');
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+    const lines = text.split('\n');
+    const messages = [];
+    const wait = pause ?? (() => new Promise((resolve) => { setImmediate(resolve); }));
+    for (let index = 0; index < lines.length; index += 1) {
+      if (index > 0 && index % yieldEvery === 0) await wait();
+      const line = lines[index].trim();
+      if (!line) continue;
+      try {
+        messages.push(JSON.parse(line));
+      } catch {
+        // Same as readJsonl: a corrupt line does not fail the conversation.
+      }
+    }
+    return { ...meta, messages: mergeStreamPatch(id, messages) };
   }
 
   /**
@@ -1301,7 +1500,15 @@ export function createConversationStore(options = {}) {
       meta.titleSource = 'manual';
     }
     meta.updatedAt = new Date().toISOString();
-    writeJsonl(indexFile, index);
+    if (meta.preview && typeof meta.preview === 'object') {
+      meta.preview = {
+        ...meta.preview,
+        conversationId: meta.id,
+        title: truncatePreview(meta.title),
+        updatedAt: meta.updatedAt,
+      };
+    }
+    writeIndex(index);
     return withMessageCount(meta);
   }
 
@@ -1324,7 +1531,7 @@ export function createConversationStore(options = {}) {
       return withMessageCount(meta);
     }
     meta.lastReadAt = candidate;
-    writeJsonl(indexFile, index);
+    writeIndex(index);
     return withMessageCount(meta);
   }
 
@@ -1376,7 +1583,8 @@ export function createConversationStore(options = {}) {
       meta.contentRevision = (Number.isSafeInteger(Number(meta.contentRevision)) ? Number(meta.contentRevision) : 0) + 1;
       meta.contextSnapshot = null;
       meta.updatedAt = new Date().toISOString();
-      writeJsonl(indexFile, index);
+      assignSessionPreview(meta, message);
+      writeIndex(index);
       return returnMessages ? { ...meta, messages: readJsonl(convFile(id)) } : { ...meta };
     });
   }
@@ -1392,7 +1600,8 @@ export function createConversationStore(options = {}) {
       meta.contentRevision = (Number.isSafeInteger(Number(meta.contentRevision)) ? Number(meta.contentRevision) : 0) + 1;
       meta.contextSnapshot = null;
       meta.updatedAt = new Date().toISOString();
-      writeJsonl(indexFile, index);
+      assignSessionPreview(meta, messages);
+      writeIndex(index);
     }
     return meta ? { ...meta, messages } : null;
   }
@@ -1411,7 +1620,8 @@ export function createConversationStore(options = {}) {
       meta.contentRevision = (Number.isSafeInteger(Number(meta.contentRevision)) ? Number(meta.contentRevision) : 0) + 1;
       meta.contextSnapshot = null;
       meta.updatedAt = new Date().toISOString();
-      writeJsonl(indexFile, index);
+      assignSessionPreview(meta, durableMessages);
+      writeIndex(index);
     }
     return meta ? { ...meta, messages: durableMessages } : null;
   }
@@ -1446,24 +1656,26 @@ export function createConversationStore(options = {}) {
       meta.contentRevision = (Number.isSafeInteger(Number(meta.contentRevision)) ? Number(meta.contentRevision) : 0) + 1;
       meta.contextSnapshot = null;
       meta.updatedAt = new Date().toISOString();
-      writeJsonl(indexFile, index);
+      assignSessionPreview(meta, messages);
+      writeIndex(index);
     }
     return meta ? { ...meta, messages } : null;
   }
 
   const terminalCommitter = createTerminalMessageCommitter({ storeDir,
     commitPrepared: async prepared => {
-      const result = await withFileLockAsync(indexFile, () => withFileLockAsync(prepared.historyFile, () => {
-      const index = readIndex(), meta = index.find(row => row.id === prepared.id);
-      if (!meta) throw Object.assign(new Error('Conversation was deleted'), { code: 'CONVERSATION_COMMIT_DELETED' });
-      if (conversationFileVersion(prepared.historyFile) !== prepared.sourceVersion) return false;
-      renameSync(prepared.temporaryFile, prepared.historyFile);
-      meta.contentRevision = (Number.isSafeInteger(Number(meta.contentRevision)) ? Number(meta.contentRevision) : 0) + 1;
-      meta.messageCount = prepared.messageCount; meta.contextSnapshot = null; meta.updatedAt = new Date().toISOString();
-      writeJsonl(indexFile, index);
-      if (readJson(streamPatchFile(prepared.id))?.messageId === prepared.messageId) clearStreamPatch(prepared.id);
-      return { meta, receipt: { id: prepared.id, messageId: prepared.messageId, contentRevision: meta.contentRevision } };
-      }));
+      const result = await withFileLocksAsync([indexFile, prepared.historyFile], () => {
+        const index = readIndex(), meta = index.find(row => row.id === prepared.id);
+        if (!meta) throw Object.assign(new Error('Conversation was deleted'), { code: 'CONVERSATION_COMMIT_DELETED' });
+        if (conversationFileVersion(prepared.historyFile) !== prepared.sourceVersion) return false;
+        renameSync(prepared.temporaryFile, prepared.historyFile);
+        meta.contentRevision = (Number.isSafeInteger(Number(meta.contentRevision)) ? Number(meta.contentRevision) : 0) + 1;
+        meta.messageCount = prepared.messageCount; meta.contextSnapshot = null; meta.updatedAt = new Date().toISOString();
+        assignSessionPreview(meta, readJsonlByteWindow(prepared.historyFile, { limit: 40 }).messages);
+        writeIndex(index);
+        if (readJson(streamPatchFile(prepared.id))?.messageId === prepared.messageId) clearStreamPatch(prepared.id);
+        return { meta, receipt: { id: prepared.id, messageId: prepared.messageId, contentRevision: meta.contentRevision } };
+      });
       if (result === false) return false;
       // Subscribers may write again. Notify only after both locks have been released.
       publishChange(result.meta, 'messages-updated');
@@ -1494,7 +1706,7 @@ export function createConversationStore(options = {}) {
       cacheReadTokens: (prev.cacheReadTokens || 0) + (usage?.cacheReadTokens || 0),
     };
     meta.updatedAt = new Date().toISOString();
-    writeJsonl(indexFile, index);
+    writeIndex(index);
     return meta.lifetimeUsage;
   }
 
@@ -1608,7 +1820,7 @@ export function createConversationStore(options = {}) {
       };
       meta.runtimeTurnCount = Math.max(0, Math.floor(Number(meta.runtimeTurnCount) || 0)) + 1;
       meta.updatedAt = new Date().toISOString();
-      writeJsonl(indexFile, index);
+      writeIndex(index);
 
       const optionalText = (value) => (
         typeof value === 'string' && value.trim() ? value.trim() : null
@@ -1677,7 +1889,7 @@ export function createConversationStore(options = {}) {
       meta.pinnedOrder = null;
     }
     meta.updatedAt = now;
-    writeJsonl(indexFile, index);
+    writeIndex(index);
     return withMessageCount(meta);
   }
 
@@ -1708,7 +1920,7 @@ export function createConversationStore(options = {}) {
       meta.pinnedOrder = getPinnedOrderSeed(index);
     }
     meta.updatedAt = now;
-    writeJsonl(indexFile, index);
+    writeIndex(index);
     return withMessageCount(meta);
   }
 
@@ -1720,7 +1932,7 @@ export function createConversationStore(options = {}) {
     meta.pinnedAt = null;
     meta.pinnedOrder = null;
     meta.updatedAt = now;
-    writeJsonl(indexFile, index);
+    writeIndex(index);
     return withMessageCount(meta);
   }
 
@@ -1739,7 +1951,7 @@ export function createConversationStore(options = {}) {
     for (const meta of index) {
       if (orderById.has(meta.id)) meta.pinnedOrder = orderById.get(meta.id);
     }
-    writeJsonl(indexFile, index);
+    writeIndex(index);
     return listConversations({ status: 'active' });
   }
 
@@ -1762,13 +1974,13 @@ export function createConversationStore(options = {}) {
       meta.updatedAt = now;
       archivedIds.push(meta.id);
     }
-    if (archivedIds.length) writeJsonl(indexFile, index);
+    if (archivedIds.length) writeIndex(index);
     return { archivedIds, archivedCount: archivedIds.length };
   }
 
   function deleteConversation(id) {
     const index = readIndex().filter((c) => c.id !== id);
-    writeJsonl(indexFile, index);
+    writeIndex(index);
     try { if (existsSync(convFile(id))) unlinkSync(convFile(id)); } catch {}
     clearStreamPatch(id);
     try {
@@ -1795,7 +2007,7 @@ export function createConversationStore(options = {}) {
       else kept.push(meta);
     }
     if (removed.length === 0) return [];
-    writeJsonl(indexFile, kept);
+    writeIndex(kept);
     for (const meta of removed) {
       try { if (existsSync(convFile(meta.id))) unlinkSync(convFile(meta.id)); } catch {}
       clearStreamPatch(meta.id);
@@ -1812,16 +2024,18 @@ export function createConversationStore(options = {}) {
   const legacyFile = path.join(path.dirname(storeDir), 'conversations.json');
   if (existsSync(legacyFile) && !existsSync(indexFile)) {
     try {
-      const legacy = JSON.parse(readFileSync(legacyFile, 'utf8'));
-      if (Array.isArray(legacy)) {
-        mkdirSync(storeDir, { recursive: true });
+      mkdirSync(storeDir, { recursive: true });
+      withFileLock(indexFile, () => {
+        if (existsSync(indexFile)) return;
+        const legacy = JSON.parse(readFileSync(legacyFile, 'utf8'));
+        if (!Array.isArray(legacy)) return;
         for (const conv of legacy) {
           const { messages, ...meta } = conv;
-          appendJsonl(indexFile, normalizeMeta(meta));
+          appendIndex(normalizeMeta(meta));
           if (messages?.length) writeJsonl(convFile(meta.id), messages);
         }
         console.log(`[conversation-store] migrated ${legacy.length} conversations from JSON to JSONL`);
-      }
+      });
     } catch (err) {
       console.warn('[conversation-store] migration failed:', err?.message);
     }
@@ -1836,6 +2050,9 @@ export function createConversationStore(options = {}) {
       return result;
     };
   }
+
+  const indexWrite = operation => (...args) => withFileLock(indexFile, () => operation(...args));
+  const metadataWrite = operation => changed(indexWrite(operation), 'metadata-updated');
 
   function readChangeEvent(changeFile) {
     try {
@@ -1874,12 +2091,17 @@ export function createConversationStore(options = {}) {
     searchConversations,
     createConversation: changed(createConversation, 'created'),
     getConversation,
+    readSessionPreview,
+    readSessionMeta,
+    readConversationWindow,
+    readConversationYielding,
     getPersistedConversationHistory,
     readInteractionPage: interactions.readPage,
     readInteractionContext: interactions.readContext,
     readInteractionProcess: interactions.readProcess,
     createHistoryProjection,
     getPersistedConversationHistories,
+    acquireMessageRetentionGuard: scope => acquireMessageRetentionGuard(indexFile, convFile, scope),
     resolveSelectionReference,
     createSelectionChild: changed(createSelectionChild, 'created'),
     createChildConversation: changed(createChildConversation, 'created'),
@@ -1889,14 +2111,14 @@ export function createConversationStore(options = {}) {
     captureInheritedBackground,
     readInheritedBackground,
     getLatestContextObservation,
-    updateTitle: changed(updateTitle, 'metadata-updated'),
-    markRead: changed(markRead, 'metadata-updated'),
-    updateMode: changed(updateMode, 'metadata-updated'),
-    updateFastMode: changed(updateFastMode, 'metadata-updated'),
-    updatePreferredExecutionIsolation: changed(updatePreferredExecutionIsolation, 'metadata-updated'),
-    updateAutomationCreateContext: changed(updateAutomationCreateContext, 'metadata-updated'),
-    updateModelEffort: changed(updateModelEffort, 'metadata-updated'),
-    updateContextSnapshot: changed(updateContextSnapshot, 'metadata-updated'),
+    updateTitle: metadataWrite(updateTitle),
+    markRead: metadataWrite(markRead),
+    updateMode: metadataWrite(updateMode),
+    updateFastMode: metadataWrite(updateFastMode),
+    updatePreferredExecutionIsolation: metadataWrite(updatePreferredExecutionIsolation),
+    updateAutomationCreateContext: metadataWrite(updateAutomationCreateContext),
+    updateModelEffort: metadataWrite(updateModelEffort),
+    updateContextSnapshot: metadataWrite(updateContextSnapshot),
     appendMessage: changed(appendMessage, 'messages-updated'),
     updateLastMessage: changed(messageWrite(updateLastMessage), 'messages-updated'),
     updateMessageById: changed(messageWrite(updateMessageById), 'messages-updated'),
@@ -1906,16 +2128,23 @@ export function createConversationStore(options = {}) {
     patchStreamingMessage,
     clearStreamPatch,
     replaceMessages: changed(messageWrite(replaceMessages), 'messages-updated'),
-    addUsage: changed(addUsage, 'metadata-updated'),
-    recordRuntimeTurnUsage: changed(recordRuntimeTurnUsage, 'metadata-updated'),
-    archiveConversation: changed(archiveConversation, 'metadata-updated'),
-    restoreConversation: changed(restoreConversation, 'metadata-updated'),
-    pinConversation: changed(pinConversation, 'metadata-updated'),
-    unpinConversation: changed(unpinConversation, 'metadata-updated'),
-    reorderPinnedConversations,
-    autoArchiveConversations,
+    addUsage: metadataWrite(addUsage),
+    recordRuntimeTurnUsage: metadataWrite(recordRuntimeTurnUsage),
+    archiveConversation: metadataWrite(archiveConversation),
+    restoreConversation: metadataWrite(restoreConversation),
+    pinConversation: metadataWrite(pinConversation),
+    unpinConversation: metadataWrite(unpinConversation),
+    reorderPinnedConversations: indexWrite(reorderPinnedConversations),
+    autoArchiveConversations: indexWrite(autoArchiveConversations),
     deleteConversation: changed(messageWrite(deleteConversation), 'deleted'),
     deleteConversationsByWorkspace: (...args) => withFileLock(indexFile, () => deleteConversationsByWorkspace(...args)),
     subscribeChanges,
   };
 }
+
+export {
+  createClassicJsonlAdapter,
+  createBotSqliteAdapter,
+  createSessionService,
+} from './session-service.mjs';
+export { coerceSessionPreview, truncatePreview } from './session-preview.mjs';

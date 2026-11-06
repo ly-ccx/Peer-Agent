@@ -1,4 +1,5 @@
-import { openSync, closeSync, fstatSync, readSync, statSync } from 'node:fs';
+import path from 'node:path';
+import { existsSync, openSync, closeSync, fstatSync, readSync, statSync } from 'node:fs';
 import { reduceCoordination } from './work-coordination.mjs';
 import { journalLines } from './journal-lines.mjs';
 
@@ -36,6 +37,7 @@ export function createCoordinationJournalReader({ file, onRead = () => {} }) {
   }
   function clear() { cached = null; previous = null; anchors = null; }
   function readState() {
+    if (existsSync(path.join(path.dirname(file), 'coordination-v2')) || existsSync(path.join(path.dirname(file), 'coordination-recovery.json'))) throw new Error('coordination_writer_upgrade_required');
     let fd;
     try {
       const info = statSync(file, { bigint: true });
@@ -81,6 +83,7 @@ export function createCoordinationJournalReader({ file, onRead = () => {} }) {
       const state = readState();
       const record = { ...(typeof entry === 'function' ? entry() : entry), revision: state.revision + 1 };
       const next = reduceCoordination(state, record);
+      if (existsSync(path.join(path.dirname(file), 'coordination-v2')) || existsSync(path.join(path.dirname(file), 'coordination-recovery.json'))) throw new Error('coordination_writer_upgrade_required');
       persist(record);
       // The reducer owns new entry values; neither it nor this state escapes
       // through the persistence callback. Publish only after durable success.
@@ -92,7 +95,7 @@ export function createCoordinationJournalReader({ file, onRead = () => {} }) {
       const state = readState();
       return structuredClone({ revision: state.revision, mandates: state.mandates || {},
         transitions: state.transitions || {}, decisions: state.decisions || {},
-        workStates: Object.fromEntries(Object.entries(state.works).map(([id, work]) => [id, { state: work.state, stopScope: work.stopScope }])) });
+        workStates: Object.fromEntries(Object.entries(state.works).map(([id, work]) => [id, { state: work.state, stopScope: work.stopScope, intentCoordination: work.intentCoordination }])) });
     },
     committed: state => publish(structuredClone(state)), clear };
 }

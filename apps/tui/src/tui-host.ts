@@ -34,6 +34,7 @@ import {
   appendNodeHookEvidence,
   createGoalPlanStore,
   type NodeRuntimePermissionPrompt,
+  type NodeRuntimePermissionResponse,
 } from '@peer-agent/runtime-node';
 import { createRuntimeSdk,
   type RuntimeSdkEvent,
@@ -50,7 +51,7 @@ import {
 } from './tui-mode.ts';
 import { normalizeLocalAccessLevel } from './tui-permission-policy.ts';
 
-export type TuiApprovalDecision = 'allow-once' | 'allow-session' | 'deny';
+export type TuiApprovalDecision = 'allow-once' | 'allow-session' | 'deny' | 'cancel';
 
 export interface PendingApproval {
   readonly prompt: NodeRuntimePermissionPrompt;
@@ -60,8 +61,12 @@ export interface PendingApproval {
 }
 
 export interface TuiExecutionContext {
+  /** Installed at actual Provider dispatch, never accepted as caller authority. */
+  readonly requestPermission?: (prompt: NodeRuntimePermissionPrompt) => Promise<NodeRuntimePermissionResponse>;
   /** Overwritten by execute for this dispatch; callers cannot supply authority through it. */
   readonly accessPolicyStamp?: string;
+  /** Bound by the host at dispatch, so a late callback cannot adopt a replacement epoch. */
+  readonly executionPlan?: ReturnType<ReturnType<typeof createTuiGoalBridge>['store']['getPlan']>;
   readonly toolCallId?: string;
   readonly sessionId: string;
   readonly conversationId?: string;
@@ -121,6 +126,7 @@ export interface CreateTuiHostOptions {
   readonly oneTimeApprovals?: { match(input: object): boolean };
   readonly goalPlanStore?: ReturnType<typeof createGoalPlanStore>;
   readonly sessionApprovals?: Set<string>;
+  readonly captureExecution?: (execution: RuntimeSdkProviderExecution, toolContext: Record<string, unknown>) => RuntimeSdkProviderExecution;
 }
 
 function isNodeShellRiskLevel(value: unknown): value is keyof typeof NODE_SHELL_RISK_ORDER {
@@ -179,6 +185,7 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
       planId: context?.project?.planId, sessionId: context?.project?.sessionId, role: profile?.role });
     const policy = result?.ok ? result.policy : null;
     return { valid: result == null || result.ok, level: policy?.accessLevel ?? accessLevel,
+      resolution: result,
       stamp: policy ? `bot:${policy.workspaceId}:${policy.conversationId}:${policy.revision}` : `global:${accessEpoch}` };
   };
 
@@ -295,13 +302,13 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
           if (policyWatch) clearInterval(policyWatch);
           const policyChanged = accessFor(context).stamp !== access.stamp || !accessFor(context).valid;
           context?.signal?.removeEventListener('abort', abort);
-          let permitted = decision !== 'deny' && !context?.signal?.aborted && (!project || project.holdsLease())
+          let permitted = (decision === 'allow-once' || decision === 'allow-session') && !context?.signal?.aborted && (!project || project.holdsLease())
             && accessFor(context).valid && accessFor(context).stamp === access.stamp;
           let persistenceFailed = false;
           if (record) {
             try {
-              if (!store.append({ ...record, state: permitted ? 'approved' : policyChanged ? 'expired' : context?.signal?.aborted ? 'stale' : 'denied',
-                ...(policyChanged ? { decisionReason: 'permission_policy_changed' } : {}),
+              if (!store.append({ ...record, state: permitted ? 'approved' : policyChanged ? 'expired' : context?.signal?.aborted ? 'stale' : decision === 'cancel' ? 'cancelled' : 'denied',
+                ...(policyChanged ? { decisionReason: 'permission_policy_changed' } : decision === 'cancel' ? { decisionReason: 'permission_cancelled' } : {}),
                 decidedAt: new Date().toISOString(), decidedBy: policyChanged ? 'policy' : 'local_ui' })) persistenceFailed = true;
             } catch { persistenceFailed = true; }
             if (persistenceFailed) permitted = false;
@@ -313,7 +320,7 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
           } else if (permitted && decision === 'allow-session' && approvalKey) sessionApprovals.add(approvalKey);
           if (activeApproval === approval) completeApproval();
           else { const index = approvalQueue.indexOf(approval); if (index >= 0) approvalQueue.splice(index, 1); }
-          resolve({ granted: permitted, reason: permitted ? decision === 'allow-session' ? approvalKey ? 'approved_for_tui_session' : 'approved_once_without_session_context' : 'approved_once_in_tui' : persistenceFailed ? 'permission_unavailable' : policyChanged ? 'permission_policy_changed' : 'denied_in_tui',
+          resolve({ granted: permitted, reason: permitted ? decision === 'allow-session' ? approvalKey ? 'approved_for_tui_session' : 'approved_once_without_session_context' : 'approved_once_in_tui' : persistenceFailed ? 'permission_unavailable' : policyChanged ? 'permission_policy_changed' : decision === 'cancel' ? 'permission_cancelled' : 'denied_in_tui',
             ...(prompt.capabilityId === 'local.image.read' ? { validate: () => (access.stamp.startsWith('bot:') || requestedEpoch === accessEpoch)
               && !context?.signal?.aborted && (!project || project.holdsLease())
               && Boolean(resolvePermissionPrincipal({ workspaceId: project?.workspaceId, conversationId: context?.conversationId,
@@ -357,7 +364,7 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
       hookRunner,
       requestPermission,
       git: { artifactRoot: path.join(userDataPath, 'artifacts') },
-      executionGate: call => projectAuthorityReason(executionContext.getStore(), call.capabilityId),
+      executionGate: (call, scopes) => projectAuthorityReason(executionContext.getStore(), call.capabilityId, scopes),
       shell: {
         taskManager: shellTaskManager,
         sessionManager: shellSessionManager,
@@ -406,24 +413,30 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
       });
       if (!provider) return null;
       return provider.execute(request.call.capabilityId, request.call.arguments as Record<string, unknown>, {
-        ...localContext, toolContext: { ...localContext.toolContext, ...(context.toolContext as object) },
+        ...localContext, requestPermission, toolContext: { ...localContext.toolContext, ...(context.toolContext as object),
+          conversationId: localContext.conversationId, workspaceId: localContext.project?.workspaceId,
+          streamId: localContext.streamId, turnProfile: localContext.toolContext?.turnProfile,
+          resolveAccessPolicy: () => accessFor(localContext).resolution,
+          checkAccessPolicy: () => projectAuthorityReason(localContext, request.call.capabilityId) },
       });
     } },
   }) });
 
-  function projectAuthorityReason(context: TuiExecutionContext | undefined, capabilityId: string) {
+  function projectAuthorityReason(context: TuiExecutionContext | undefined, capabilityId: string, resourceScopes?: readonly import('@peer-agent/protocol').ExecutionResourceScope[]) {
     if (context?.signal?.aborted) return 'execution_cancelled';
     if (context?.project && !context.project.holdsLease()) return 'host_unavailable';
     if (!accessFor(context).valid) return 'access_identity_invalid';
     if (context?.accessPolicyStamp && context.accessPolicyStamp !== accessFor(context).stamp) return 'permission_policy_changed';
     const modeGate = evaluateProjectAgentTurn({ mode: context?.mode, role: context?.toolContext?.turnRole ?? (context?.toolContext?.turnProfile as any)?.role, capabilityId });
     if (!modeGate.allowed) return modeGate.reason ?? 'project_agent_capability_denied';
-    const plan = context?.project?.planId ? goalBridge.store.getPlan(context.project.planId) : null;
+    const plan = context?.executionPlan ?? (context?.project?.planId ? goalBridge.store.getPlan(context.project.planId) : null);
     const readOnly = plan?.delegationOrigin?.readOnly === true || context?.project?.readOnly === true;
     const bundle = bundleForMode(normalizeTuiRuntimeMode(context?.mode));
     const manifest = [...bundle.manifests, ...(resolvedOptions.providers?.flatMap(item => item.manifests) ?? [])]
       .find(item => item.capabilityId === capabilityId);
-    const gate = evaluateWorkSessionWrite({ delegationOrigin: { readOnly } }, { capabilityId, riskLevel: manifest?.riskLevel });
+    const profile = context?.toolContext?.turnProfile as { executionIdentity?: import('@peer-agent/protocol').SessionExecutionIdentity } | undefined;
+    const gate = evaluateWorkSessionWrite(plan || { delegationOrigin: { readOnly } }, { capabilityId, riskLevel: manifest?.riskLevel, resourceScopes,
+      executionIdentity: profile?.executionIdentity, turnProfile: profile });
     return gate.allowed ? null : gate.error ?? 'read_only';
   }
 
@@ -443,6 +456,11 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
       ...nodeGrant, toolCallId: options.toolCallId, granted: nodeGrant.decision === 'allow',
       scope: options.capabilityId, duration: nodeGrant.decision === 'allow' ? 'once' : 'denied', decidedAt: nodeGrant.grantedAt,
     } };
+    const localContext = executionContext.getStore();
+    execution = resolvedOptions.captureExecution?.(execution, { ...localContext?.toolContext,
+      conversationId: options.conversationId, workspaceId: localContext?.project?.workspaceId,
+      streamId: options.streamId, resolveAccessPolicy: () => accessFor(localContext).resolution,
+      checkAccessPolicy: () => projectAuthorityReason(localContext, options.capabilityId) }) ?? execution;
     const evidenceRefs = collectToolEvidenceRefs({
       toolCallId: options.toolCallId,
       execution,
@@ -600,7 +618,8 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
 
   // AsyncLocalStorage applies to every Provider seam, including Goal and Skill/MCP.
   const execute: TuiHost['execute'] = (capabilityId, args, context) => {
-    const bound = context ? { ...context, accessPolicyStamp: accessFor(context).stamp } : undefined;
+    const bound = context ? { ...context, accessPolicyStamp: accessFor(context).stamp,
+      executionPlan: context.project?.planId ? goalBridge.store.getPlan(context.project.planId) : undefined } : undefined;
     return bound ? executionContext.run(bound, () => executeInternal(capabilityId, args, bound))
       : executeInternal(capabilityId, args, bound);
   };

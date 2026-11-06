@@ -9,6 +9,27 @@ export async function checkBotEvidence({ page, until, report, captureDirectory, 
   await until(() => list.locator('strong').nth(1).textContent(), value => value === '查看工作会话');
   assert.equal(await list.locator('li').count(),20);
   assert.match(await list.innerText(), /读取文件[\s\S]*10月7日/);
+  const layouts = [];
+  for (const width of [1280, 760]) for (const appearance of ['dark', 'light']) {
+    await page.setViewportSize({ width, height: 820 });
+    await page.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
+    const layout = await list.evaluate(node => {
+      const rows = [...node.querySelectorAll('button')].slice(0, 2);
+      const [first, second] = rows.map(row => row.getBoundingClientRect());
+      const [icon, copy, arrow] = [...rows[0].children].map(child => child.getBoundingClientRect());
+      return { height: first.height, gap: second.top - first.bottom,
+        horizontal: icon.right <= copy.left && copy.right <= arrow.left,
+        centered: Math.abs(icon.top + icon.height / 2 - first.top - first.height / 2) < 1
+          && Math.abs(arrow.top + arrow.height / 2 - first.top - first.height / 2) < 1,
+        fits: node.scrollWidth <= node.clientWidth + 1, scrollable: node.scrollHeight > node.clientHeight };
+    });
+    assert.ok(layout.height >= 48 && layout.height <= 56, 'evidence rows stay compact');
+    assert.ok(layout.gap >= 8, 'evidence cards have visible separation');
+    assert.ok(layout.horizontal && layout.centered && layout.fits && layout.scrollable, 'evidence row geometry');
+    layouts.push({ width, appearance, ...layout });
+  }
+  await page.setViewportSize(viewport);
+  await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
   await page.locator('.bot-drawer-body').screenshot({animations:'disabled',path:path.join(captureDirectory,'evidence-list-dark.png')});
   const view = page.locator('.bot-evidence-view');
   const back = page.getByRole('button',{name:'返回回复详情',exact:true});
@@ -20,7 +41,10 @@ export async function checkBotEvidence({ page, until, report, captureDirectory, 
   };
   const restore = async () => {
     await back.click(); await context.waitFor({state:'visible'});
-    await until(()=>context.evaluate(node=>node.contains(document.activeElement)),Boolean);
+    try { await until(()=>context.evaluate(node=>node.contains(document.activeElement)),Boolean); } catch (error) {
+      report.evidenceReturnFocus = await context.evaluate(node => ({ active: document.activeElement?.outerHTML?.slice(0, 700), controls: [...node.querySelectorAll('button, summary')].slice(0, 8).map(item => ({ text: item.textContent?.slice(0, 80), rects: item.getClientRects().length, hidden: item.closest('[hidden],[inert],[aria-hidden="true"]')?.className })), layout: document.querySelector('.bot-resource-layout')?.dataset }));
+      throw error;
+    }
   };
   await open(0);
   assert.equal(await view.getAttribute('data-availability'),'available');
@@ -48,8 +72,9 @@ export async function checkBotEvidence({ page, until, report, captureDirectory, 
   await restore(); await open(4);
   assert.equal(await view.locator('.bot-evidence-content').innerText(),'回归通过：5 项检查完成。');
   await view.locator('summary').click();
-  assert.match(await view.innerText(),/rc-evidence-4/);
+  // Opening the native disclosure precedes its content-visibility commit.
+  assert.match(await until(()=>view.innerText(),text=>/rc-evidence-4/.test(text)),/rc-evidence-4/);
   await restore();
   report.evidenceSources={namedSources:true,savedFile:true,exactHistory:true,missingBodyExplained:true,
-    unknownRefDistinct:true,diagnosticsCollapsed:true,commandReadable:true,narrowFits:fits};
+    unknownRefDistinct:true,diagnosticsCollapsed:true,commandReadable:true,narrowFits:fits,layouts};
 }

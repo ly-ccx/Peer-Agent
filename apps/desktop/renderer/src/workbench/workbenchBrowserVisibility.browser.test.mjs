@@ -47,6 +47,22 @@ test('browser visibility matrix and retained page identity', { skip: !modulePath
       window.retainedPage.dataset.active = 'true';
     });
     assert.equal(await page.locator('webview').evaluate(el => getComputedStyle(el).visibility), 'visible');
+    await t.test('a closed resource pane cannot contribute its retained border to page scrolling', async () => {
+      const resourceCss = readFileSync(new URL('./resource-workspace.css', import.meta.url), 'utf8');
+      await page.setViewportSize({ width: 1280, height: 780 });
+      await page.setContent(`<style>html,body{height:100%;margin:0}${resourceCss}</style>
+        <div class="bot-resource-layout" data-resource-active="true" data-resource-open="false">
+          <main class="bot-resource-primary">Retained conversation</main>
+          <div class="bot-resource-pane" data-resource-exiting="false"><aside class="resource-workspace" inert style="width:0;border:1px solid transparent"></aside></div>
+        </div>`);
+      const geometry = await page.locator('.bot-resource-layout').evaluate(node => {
+        node.scrollLeft = 2;
+        return { width: node.clientWidth, scrollWidth: node.scrollWidth, left: node.scrollLeft };
+      });
+      assert.deepEqual(geometry, { width: 1280, scrollWidth: 1280, left: 0 });
+      await page.locator('.bot-resource-pane').evaluate(node => { node.dataset.resourceExiting = 'true'; });
+      assert.equal(await page.locator('.bot-resource-pane').evaluate(node => getComputedStyle(node).overflow), 'hidden', 'the existing exit-animation clipping remains in charge during exit');
+    });
   } finally {
     await browser.close();
   }

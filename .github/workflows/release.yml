@@ -10,7 +10,7 @@
 #               只产出安装包与更新清单（*-mac.yml / *.yml / *-linux.yml），不直接发布，
 #               产物经 upload-artifact 上传。
 #   build-cli → 构建 CLI 归档（peer + peer-credential-helper 同目录），
-#               当前矩阵：darwin-arm64（macos-14）+ linux-x64（ubuntu-latest）。
+#               当前矩阵：darwin-arm64（macos-15）+ linux-x64（ubuntu-latest）。
 #               关键失败阻断整个 Release。
 #   release   → 单个 job 下载 Desktop + CLI 产物，一次性创建/更新同一个 GitHub Release。
 #
@@ -100,7 +100,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-15
             platform: mac
             ebflags: --mac
           - os: windows-latest
@@ -125,6 +125,11 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+
+      # Both macOS outputs are arm64; fail before compiling a mismatched archive.
+      - name: Verify macOS build architecture
+        if: runner.os == 'macOS'
+        run: node -e "if (process.platform !== 'darwin' || process.arch !== 'arm64') throw new Error('macOS release runner must be darwin-arm64')"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -267,7 +272,7 @@ jobs:
           retention-days: 5
 
   # ── CLI 一等发布：peer + peer-credential-helper 同归档 ──
-  # 当前矩阵：macos-14 → peer-darwin-arm64.tar.gz
+  # 当前矩阵：macos-15 → peer-darwin-arm64.tar.gz
   #           ubuntu-latest → peer-linux-x64.tar.gz
   # 失败策略：needs 纳入 release，任一 CLI 目标失败阻断整个 tag 发布。
   build-cli:
@@ -276,7 +281,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-15
             target: darwin-arm64
           - os: ubuntu-latest
             target: linux-x64
@@ -300,6 +305,10 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.2.17
+
+      - name: Verify macOS build architecture
+        if: runner.os == 'macOS'
+        run: node -e "if (process.platform !== 'darwin' || process.arch !== 'arm64') throw new Error('macOS CLI runner must be darwin-arm64')"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable

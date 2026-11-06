@@ -1,20 +1,22 @@
 .bot-reply-context, .bot-delegated-work { min-width: 0; color: var(--graphite-soft); font-size: 12px; line-height: 1.6; }
-.bot-reply-context { display: flex; align-items: center; min-height: 28px; margin-top: 2px; max-width: calc(100% - var(--bot-reply-inset, 14px) - 14px); box-sizing: border-box; font-size: 12px; }
+.bot-reply-context { display: flex; align-items: center; align-self: flex-start; min-width: 0; min-height: 28px; margin-top: 0; max-width: min(680px, 100%); box-sizing: border-box; font-size: 12px; }
 .bot-delegated-work summary, .bot-background-work > summary { list-style: none; cursor: pointer; }
 .bot-delegated-work summary::-webkit-details-marker, .bot-background-work > summary::-webkit-details-marker { display: none; }
-.bot-reply-context > button { display: inline-flex; align-items: center; gap: 6px; min-width: 0; min-height: 32px; margin-inline-start: -8px; padding: 6px 8px; border: 0; border-radius: var(--ui-radius-control); background: transparent; color: inherit; font: inherit; cursor: pointer; opacity: 0; pointer-events: none; transition: opacity 140ms ease, background 140ms ease, color 140ms ease; }
+.bot-reply-context > button { display: inline-flex; align-items: center; gap: 4px; min-width: 0; min-height: 28px; padding: 2px 0; border: 0; border-radius: var(--ui-radius-control); background: transparent; color: var(--graphite-soft); font: inherit; font-size: 12px; cursor: pointer; opacity: 0; pointer-events: none; transition: opacity var(--za-motion-fast) var(--za-ease-standard), color var(--za-motion-fast) var(--za-ease-standard); }
 .bot-reply-context > button > svg { flex-shrink: 0; }
 .bot-reply-context[data-running="true"] > button,
 .bot-reply:is(:hover, :focus-within) > .bot-reply-context > button,
 .bot-system:is(:hover, :focus-within) > .bot-reply-context > button { opacity: 1; pointer-events: auto; }
+.bot-reply-context[data-quotable="true"] { gap: 14px; flex-wrap: nowrap; }
+.bot-reply-context[data-quotable="true"] > button:last-child { margin-inline-start: auto; min-width: 0; }
 @media (hover: none) { .bot-reply-context > button { opacity: 1; pointer-events: auto; } }
 @media (forced-colors: active) { .bot-reply-context > button { opacity: 1; pointer-events: auto; } }
 .bot-reply-context > button .bot-avatar { width: 18px; height: 18px; flex-basis: 18px; }
 .bot-context-running { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--graphite-soft); }
 .bot-reply-context[data-running="true"] .bot-context-running { color: var(--graphite-base); }
-.bot-reply-context > button { flex-shrink: 1; max-width: calc(100% + 8px); }
-.bot-reply-context > button:hover { background: var(--paper-hover); }
+.bot-reply-context > button { flex-shrink: 1; max-width: 100%; }
 .bot-reply-context > button:hover, .bot-work-row > summary:hover { color: var(--graphite-base); }
+.bot-reply-context > button:hover > span:not(.bot-context-running) { text-decoration: underline; text-underline-offset: 3px; }
 @media (prefers-reduced-motion: reduce) { .bot-reply-context > button { transition: none; } }
 .bot-work-row > summary > svg:last-child { transition: transform 160ms ease; }
 .bot-work-row[open] > summary > svg:last-child { transform: rotate(180deg); }
@@ -30,16 +32,10 @@
 .bot-reply-context-body > section { padding: 16px; background: var(--chrome-canvas); border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-panel); }
 .bot-reply-context-body .bot-delegated-work { margin-top: 0; }
 .bot-reply-context-body h3 { margin: 0 0 12px; font-size: 12px; font-weight: 500; color: var(--graphite-base); }
-.bot-context-error pre { margin: 0; max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.75 var(--font-mono, monospace); color: var(--graphite-soft); }
+.bot-context-error pre { margin: 0; max-width: 100%; white-space: pre-wrap; white-space: break-spaces; overflow-wrap: anywhere; font: 11px/1.75 var(--font-mono, monospace); color: var(--graphite-soft); }
 .bot-reply-context-body button { display: inline-flex; align-items: center; gap: 6px; padding: 5px 0; min-height: 27px; border: 0; background: transparent; border-radius: var(--ui-radius-control); color: var(--graphite-soft); font: inherit; cursor: pointer; }
 .bot-reply-context-body button:hover { color: var(--graphite-base); background: var(--paper-hover); }
 .bot-reply-context-body button:focus-visible { outline: 2px solid var(--graphite-base); outline-offset: 3px; }
-.bot-evidence-list { list-style: none; margin: 0; padding: 0; max-height: 192px; overflow: auto; }
-.bot-evidence-list button { width: 100%; justify-content: flex-start; gap: 10px; padding: 8px 4px; }
-.bot-evidence-list button > span { flex: 1; text-align: left; }
-.bot-evidence-list strong { display: block; color: var(--graphite-base); font-size: 12px; font-weight: 500; line-height: 1.5; }
-.bot-evidence-list small { display: block; font-size: 10px; line-height: 1.5; color: var(--graphite-soft); }
-.bot-evidence-list svg { flex-shrink: 0; }
 .bot-context-process { justify-self: start; }
 .bot-context-metadata { display: grid; gap: 8px; padding-top: 16px; border-top: 1px solid var(--chrome-hairline); color: var(--graphite-soft); font-size: 11px; }
 .bot-reply-context-body .bot-reply-delivery { margin: 0; }
@@ -48,9 +44,11 @@
 .bot-work-row > summary { display: flex; align-items: center; gap: 8px; min-height: 32px; width: fit-content; max-width: 100%; }
 .bot-work-row > summary > svg { flex-shrink: 0; }
 .bot-work-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bot-work-status { font-size: 11px; margin-left: 3px; white-space: nowrap; flex-shrink: 0; color: var(--graphite-mute); }
+.bot-work-status { font-size: 11px; margin-left: 3px; white-space: nowrap; flex-shrink: 0; color: var(--graphite-soft); }
 .bot-work-status.is-running { color: var(--graphite-base); }
-.bot-work-row[data-status='waiting_user'] .bot-work-status, .bot-work-row[data-status='result_ready'] .bot-work-status { color: var(--graphite-base); font-weight: 500; }
+.bot-work-row[data-status='waiting_user'] .bot-work-status,
+.bot-work-row[data-status='waiting_agent'] .bot-work-status,
+.bot-work-row[data-status='result_ready'] .bot-work-status { color: var(--graphite-base); font-weight: 500; }
 .bot-work-detail { margin: 4px 0 8px 22px; padding: 10px 12px; background: var(--control-fill); border-radius: var(--ui-radius-control); }
 .bot-work-detail p { margin: 0 0 7px; overflow-wrap: anywhere; }
 .bot-work-detail .bot-work-hint { color: var(--graphite-soft); font-size: 11px; font-weight: 400; }

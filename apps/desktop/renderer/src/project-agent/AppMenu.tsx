@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { PeerIcon } from '../ui/icons';
+import { MotionSurface } from '../app/components/MotionSurface';
 
 interface AppMenuProps {
   readonly open: boolean;
@@ -36,11 +37,11 @@ export function AppMenu({
     const target = returnFocus.current === 'metadata'
       ? rootRef.current?.querySelector<HTMLButtonElement>('.bot-app-menu-metadata button') : triggerRef.current;
     returnFocus.current = null;
-    (target ?? triggerRef.current)?.focus();
+    (target ?? triggerRef.current)?.focus({ preventScroll: true });
   }, [open]);
 
   useEffect(() => {
-    if (open) rootRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
+    if (open) rootRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus({ preventScroll: true });
   }, [open]);
 
   useEffect(() => {
@@ -76,7 +77,7 @@ export function AppMenu({
       onClose();
     } else if (next !== undefined) {
       event.preventDefault();
-      items[next]?.focus();
+      items[next]?.focus({ preventScroll: true });
     } else if (event.key === 'Tab') {
       event.preventDefault();
       returnFocus.current = event.shiftKey ? 'trigger' : 'metadata';
@@ -86,8 +87,10 @@ export function AppMenu({
 
   return (
     <div className="bot-app-menu" ref={rootRef}>
-      {open ? (
-        <div className="bot-app-menu-menu" id={menuId} role="menu" aria-labelledby={triggerId} onKeyDown={navigateMenu}>
+      <MotionSurface>{open ? (
+        <div className="bot-app-menu-menu"
+          id={menuId} role="menu" aria-labelledby={triggerId}
+          onKeyDown={navigateMenu}>
           <button type="button" role="menuitem" tabIndex={-1} onClick={onOpenSettings}>
             <PeerIcon name="settings" size={16} />
             {i18n.t('projectAgent.list.settings')}
@@ -108,7 +111,7 @@ export function AppMenu({
             </span>
           </button>
         </div>
-      ) : null}
+      ) : null}</MotionSurface>
       <div className="bot-app-menu-details">
         <button
           type="button"

@@ -7,6 +7,9 @@ import {
   loadLocalImageDataUrl,
 } from '../../state/localImagePreview';
 import { findMarkdownImage, findMarkdownLink, safeExternalHref } from './inlineMarkdownLinks';
+import { DocumentPreviewContext, LocalDocumentRenderingContext } from './DocumentPreviewContext';
+import { documentReferenceLocation, documentReferencePath, documentReferencesInText, isGitReferenceContext } from './documentReference';
+import { PeerIcon } from '../../../ui/icons';
 
 /**
  * 透传当前会话的 workspacePath，作为聊天消息内"相对文件路径"的解析基准。
@@ -101,6 +104,10 @@ function resolveAbsolutePath(
 }
 
 function FilePathCode({ raw, alt, children }: { raw: string; alt?: string; children?: ReactNode }) {
+  const preview = useContext(DocumentPreviewContext);
+  const localDocument = useContext(LocalDocumentRenderingContext);
+  const candidate = preview ? documentReferencePath(raw) : null;
+  const reference = candidate && preview?.resolve ? preview.resolve(candidate) : candidate;
   const workspacePath = useContext(WorkspacePathContext);
   const workbench = useWorkbenchOptional();
   const parsed = parseFilePathToken(raw);
@@ -110,12 +117,12 @@ function FilePathCode({ raw, alt, children }: { raw: string; alt?: string; child
   const relPath = parsed && !parsed.isAbsolute ? parsed.path : undefined;
   // 路径以「看起来像路径」为前提；最终是否可点取决于 fileExists 结果。
   // 绝对路径即使当前 workspace 未绑定也允许探测（主进程会直接 stat）。
-  const canProbe = Boolean(absPath && (parsed?.isAbsolute || workspacePath));
+  const canProbe = Boolean(!preview && !localDocument && absPath && (parsed?.isAbsolute || workspacePath));
   const [exists, setExists] = useState<boolean | null>(canProbe ? null : false);
   const [isDir, setIsDir] = useState(false);
   const [previewDataUrl, setPreviewDataUrl] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const looksLikeImage = Boolean(parsed && isLocalImagePath(parsed.path));
+  const looksLikeImage = Boolean(!localDocument && parsed && isLocalImagePath(parsed.path));
 
   useEffect(() => {
     if (!canProbe || !absPath) return;
@@ -151,6 +158,21 @@ function FilePathCode({ raw, alt, children }: { raw: string; alt?: string; child
   }, [absPath, exists, isDir, looksLikeImage, relPath, workspacePath]);
 
   const content = children ?? raw;
+
+  if (preview && reference) {
+    const line = documentReferenceLocation(raw)?.line;
+    const target = line ? `${reference}#L${line}` : reference;
+    return <code className="markdown-file-path" role="link" tabIndex={0}
+      title={`${preview.label}: ${target}`}
+      onClick={event => { if (window.getSelection()?.type !== 'Range') preview.open(target, event.currentTarget); }}
+      onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); preview.open(target, event.currentTarget); } }}>
+      {content}
+    </code>;
+  }
+
+  if (preview) return <><code>{content}</code>{candidate && preview.locate ? <button type="button" className="markdown-file-locate"
+    title={`${preview.locateLabel ?? 'Find file location'}: ${candidate}`} aria-label={`${preview.locateLabel ?? 'Find file location'}: ${candidate}`}
+    onClick={() => { if (window.getSelection()?.type !== 'Range') preview.locate?.(candidate); }}><PeerIcon name="search" size={12} /></button> : null}</>;
 
   if (!parsed || !absPath) {
     return <code>{content}</code>;
@@ -242,6 +264,40 @@ function FilePathCode({ raw, alt, children }: { raw: string; alt?: string; child
   );
 }
 
+function MarkdownExternalLink({ href, children }: { readonly href: string; readonly children: ReactNode }) {
+  const preview = useContext(DocumentPreviewContext);
+  return <a href={href} target="_blank" rel="noreferrer noopener" onClick={event => {
+    if (preview?.openUrl && /^https?:\/\//i.test(href) && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.button === 0) {
+      event.preventDefault(); preview.openUrl(href);
+    }
+  }}>{children}</a>;
+}
+
+function MarkdownFileLink({ destination, children }: { readonly destination: string; readonly children: ReactNode }) {
+  const preview = useContext(DocumentPreviewContext);
+  return (preview ? documentReferencePath(destination) : parseFilePathToken(destination))
+    ? <FilePathCode raw={destination}>{children}</FilePathCode> : <span>{children}</span>;
+}
+
+function DocumentReferenceText({ text }: { readonly text: string }) {
+  const preview = useContext(DocumentPreviewContext);
+  if (!preview) return <>{text}</>;
+  return <>{documentReferencesInText(text).map((part, index) => part.path
+    ? <FilePathCode key={index} raw={part.text}>{part.text}</FilePathCode> : part.text)}</>;
+}
+
+function RemoteMarkdownImage({ url, alt }: { readonly url: string; readonly alt: string }) {
+  const preview = useContext(DocumentPreviewContext);
+  const localDocument = useContext(LocalDocumentRenderingContext);
+  if (localDocument && preview?.remoteImages !== 'link') return <MarkdownExternalLink href={url}><PeerIcon name="globe" size={14} />{alt || url}</MarkdownExternalLink>;
+  return preview?.remoteImages === 'link'
+    ? <button type="button" className="ui-button is-compact" title={url}
+      onClick={() => preview.openUrl?.(url)} disabled={!preview.openUrl}>
+      <PeerIcon name="globe" size={14} />{preview.remoteImageLabel ?? 'Open external image'}: {alt}
+    </button>
+    : <span className="markdown-local-image"><img src={url} alt={alt} /></span>;
+}
+
 /**
  * 将纯文本切片中的「绝对本地图片路径」提升为可预览节点；非图片路径保持原样。
  * 仅匹配绝对路径（/… 或 C:\…），避免误伤普通单词。
@@ -272,14 +328,15 @@ function pushTextWithBareImagePaths(nodes: ReactNode[], text: string, keyPrefix:
   return localIndex;
 }
 
-function renderInlineMarkdown(text: string, keyPrefix: string, offsets?: readonly number[]): ReactNode[] {
+function renderInlineMarkdown(text: string, keyPrefix: string, offsets?: readonly number[], autoDocuments = true): ReactNode[] {
   const nodes: ReactNode[] = [];
   const mappedText = (start: number, end: number) => {
     const children: ReactNode[] = [];
     pushTextWithBareImagePaths(children, text.slice(start, end), `${keyPrefix}-${start}`, 0);
+    const referenced = autoDocuments ? children.map((child, index) => typeof child === 'string' ? <DocumentReferenceText key={index} text={child} /> : child) : children;
     return offsets
-      ? <span key={`${keyPrefix}-source-${start}`} data-source-offsets={JSON.stringify(offsets.slice(start, end + 1))}>{children}</span>
-      : children;
+      ? <span key={`${keyPrefix}-source-${start}`} data-source-offsets={JSON.stringify(offsets.slice(start, end + 1))}>{referenced}</span>
+      : referenced;
   };
   let cursor = 0;
   let tokenIndex = 0;
@@ -312,9 +369,7 @@ function renderInlineMarkdown(text: string, keyPrefix: string, offsets?: readonl
       const externalHref = safeExternalHref(next.destination);
       if (externalHref) {
         nodes.push(
-          <span key={key} className="markdown-local-image">
-            <img src={externalHref} alt={alt} />
-          </span>,
+          <RemoteMarkdownImage key={key} url={externalHref} alt={alt} />,
         );
       } else if (parseFilePathToken(next.destination) || isLocalImagePath(next.destination)) {
         nodes.push(
@@ -331,18 +386,16 @@ function renderInlineMarkdown(text: string, keyPrefix: string, offsets?: readonl
     }
     if (next.type === 'link') {
       const key = `${keyPrefix}-inline-${tokenIndex}`;
-      const label = renderInlineMarkdown(next.label, `${key}-label`);
+      const label = renderInlineMarkdown(next.label, `${key}-label`, undefined, false);
       const externalHref = safeExternalHref(next.destination);
       if (externalHref) {
         nodes.push(
-          <a key={key} href={externalHref} target="_blank" rel="noreferrer noopener">
+          <MarkdownExternalLink key={key} href={externalHref}>
             {label}
-          </a>,
+          </MarkdownExternalLink>,
         );
-      } else if (parseFilePathToken(next.destination)) {
-        nodes.push(<FilePathCode key={key} raw={next.destination}>{label}</FilePathCode>);
       } else {
-        nodes.push(<span key={key}>{label}</span>);
+        nodes.push(<MarkdownFileLink key={key} destination={next.destination}>{label}</MarkdownFileLink>);
       }
       tokenIndex += 1;
       cursor = next.end;
@@ -358,7 +411,7 @@ function renderInlineMarkdown(text: string, keyPrefix: string, offsets?: readonl
       const key = `${keyPrefix}-inline-${tokenIndex}`;
       nodes.push(
         <span key={key} className={`markdown-token markdown-token-${next.tone}`}>
-          {renderInlineMarkdown(text.slice(contentStart, contentEnd), key)}
+          {renderInlineMarkdown(text.slice(contentStart, contentEnd), key, undefined, autoDocuments)}
         </span>,
       );
       tokenIndex += 1;
@@ -376,11 +429,12 @@ function renderInlineMarkdown(text: string, keyPrefix: string, offsets?: readonl
     const content = text.slice(contentStart, contentEnd);
     const key = `${keyPrefix}-inline-${tokenIndex}`;
     if (next.type === 'code') {
-      nodes.push(<FilePathCode key={key} raw={content} />);
+      nodes.push(autoDocuments && !isGitReferenceContext(text.slice(0, next.start))
+        ? <FilePathCode key={key} raw={content} /> : <code key={key}>{content}</code>);
     } else if (next.type === 'strong') {
-      nodes.push(<strong key={key}>{renderInlineMarkdown(content, key, offsets?.slice(contentStart, contentEnd + 1))}</strong>);
+      nodes.push(<strong key={key}>{renderInlineMarkdown(content, key, offsets?.slice(contentStart, contentEnd + 1), autoDocuments)}</strong>);
     } else {
-      nodes.push(<em key={key}>{renderInlineMarkdown(content, key, offsets?.slice(contentStart, contentEnd + 1))}</em>);
+      nodes.push(<em key={key}>{renderInlineMarkdown(content, key, offsets?.slice(contentStart, contentEnd + 1), autoDocuments)}</em>);
     }
     tokenIndex += 1;
     cursor = contentEnd + next.marker.length;

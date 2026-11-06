@@ -181,6 +181,7 @@ test('今日小结到点合并，空队列跳过，同一天不重复', () => {
 test('缺省设置是标准档、关闭的安静时段和 09:00', () => {
   assert.deepEqual(normalizeProjectAgentSettings(null), {
     concurrency: 4,
+    interactiveResults: false,
     proactivity: 'standard',
     quietHours: { enabled: false, start: '22:00', end: '08:00' },
     digestTime: '09:00',
@@ -189,6 +190,8 @@ test('缺省设置是标准档、关闭的安静时段和 09:00', () => {
     shellIntroDismissed: false,
   });
   assert.equal(normalizeProjectAgentSettings({ shell: 'classic' }).shell, 'classic');
+  assert.equal(normalizeProjectAgentSettings({ interactiveResults: true }).interactiveResults, true);
+  for (const value of [1, 'true', {}, null]) assert.equal(normalizeProjectAgentSettings({ interactiveResults: value }).interactiveResults, false);
   assert.equal(normalizeProjectAgentSettings({ shell: 'other' }).shell, 'bots');
   assert.equal(normalizeProjectAgentSettings({ proactivity: 'nope', digestTime: '9am' }).proactivity, 'standard');
   assert.equal(normalizeProjectAgentSettings({ proactivity: 'high', digestTime: '18:30' }).digestTime, '18:30');

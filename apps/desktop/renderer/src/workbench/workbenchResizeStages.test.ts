@@ -82,7 +82,7 @@ describe('workbench progressive resize stages', () => {
     assert.match(contextSource, /0\.6/);
     assert.match(contextSource, /0\.8/);
     assert.doesNotMatch(contextSource, /WORKBENCH_MAX_VW_RATIO/);
-    assert.match(panelSource, /WORKBENCH_MAXIMIZE_RATIO/);
+    assert.match(panelSource, /resolveWorkbenchResizeStage\(\{ viewportWidth: window\.innerWidth/);
     assert.doesNotMatch(panelSource, /WORKBENCH_MAX_VW_RATIO/);
     assert.doesNotMatch(panelSource, /0\.55/);
   });

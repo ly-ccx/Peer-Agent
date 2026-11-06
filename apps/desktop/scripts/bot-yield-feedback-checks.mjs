@@ -66,7 +66,7 @@ export async function checkBotYieldFeedback({ page, until, report, captureDirect
   await opening.waitFor();
   assert.equal(await opening.count(), 1, 'persisted opening survives the next scheduling slice');
   assert.equal(await page.locator('.bot-stop-response').count(), 1, 'actual resumed reply remains stoppable');
-  assert.equal(await page.locator('.bot-live-reply .bot-reply-bar').count(), 0, 'another slice does not invent a user-selected quote');
+  assert.equal(await page.locator('.bot-live-reply .bot-reply-source').count(), 0, 'another slice does not invent a user-selected quote');
   assert.equal(await page.locator('.bot-thread').getByText('PRIVATE_YIELD_REASONING', { exact: true }).count(), 0);
   const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   const theme = await page.evaluate(() => document.documentElement.dataset.theme);

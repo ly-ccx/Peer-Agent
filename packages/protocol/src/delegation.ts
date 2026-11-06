@@ -3,6 +3,7 @@
  * The user-visible conclusion of a work session is `decideLifecycle`'s conclusion.
  */
 
+import { controlPhasesForOrigin } from './session-control.ts';
 import type { ModelSelectionSnapshot } from './model-routing.ts';
 import {
   decideLifecycle,
@@ -34,9 +35,15 @@ export type InputSurface = 'desktop' | 'quick_chat' | 'tui' | 'remote';
 
 export interface DelegationOrigin {
   readonly capabilityAdmission?: import('./capability-admission.ts').DelegationCapabilityAdmission;
-  readonly takeover?: { operationId: string; phase: 'stopping' | 'completed'; text: string; binding: import('./delegation-coordination.ts').CoordinationExecutionBinding; requestedAt: string; completedAt?: string };
+  readonly executionGeneration?: string;
+  readonly executionControl?: import('./session-control.ts').SessionControlOperation;
+  readonly takeover?: { operationId: string; phase: 'stopping' | 'completed' | 'superseded' | 'rejected'; supersededBy?: string; text: string; binding: import('./delegation-coordination.ts').CoordinationExecutionBinding; requestedAt: string; completedAt?: string; repair?: boolean };
   readonly coordinationBinding?: import('./delegation-coordination.ts').CoordinationExecutionBinding;
-  readonly cancellation?: { readonly operationId: string; readonly reason: string; readonly phase: 'stopping' | 'awaiting_outcome' | 'completed'; readonly requestedAt: string; readonly completedAt?: string; readonly evidenceCalls?: readonly string[] };
+  readonly cancellation?: { readonly operationId: string; readonly reason: string; readonly phase: 'stopping' | 'awaiting_outcome' | 'completed'; readonly requestedAt: string; readonly completedAt?: string; readonly evidenceCalls?: readonly string[]; readonly preserveArtifacts?: boolean;
+    readonly disposition?: 'user_withdrawn';
+    readonly withdrawal?: { readonly workspaceId: string; readonly parentConversationId: string; readonly sessionId: string; readonly planId: string; readonly anchorMessageId: string; readonly inputId: string; readonly admittedAt: string };
+  };
+  readonly retainedForRecovery?: boolean;
   readonly workId?: string;
   readonly anchorMessageId: string;
   readonly inputId: string;
@@ -59,8 +66,9 @@ export interface DelegationOrigin {
 }
 
 export interface SessionQueueFacts {
+  readonly resourceBlocker?: import('./session-control.ts').ExecutionResourceBlocker;
   readonly queuedBehind?: readonly { readonly sessionId: string; readonly title: string }[];
-  readonly queueReason?: 'dependencies' | 'dependency_missing' | 'dependency_failed' | 'read_slot' | 'write_slot' | 'disk_space' | 'isolation_failed' | null;
+  readonly queueReason?: 'dependencies' | 'dependency_missing' | 'dependency_failed' | 'read_slot' | 'write_slot' | 'disk_space' | 'isolation_failed' | 'resource_protection' | 'resource_recovery' | null;
 }
 
 export interface WorkSessionConversationMeta extends SessionQueueFacts {
@@ -72,6 +80,7 @@ export interface WorkSessionConversationMeta extends SessionQueueFacts {
   readonly origin: DelegationOrigin;
   readonly supersededBy?: string;
   readonly acceptance?: 'auto' | 'confirm';
+  readonly resultConfirmationRequired?: boolean;
   readonly accepted?: boolean;
   readonly verifying?: boolean;
   readonly phase?: 'starting' | 'verifying' | 'paused';
@@ -80,6 +89,8 @@ export interface WorkSessionConversationMeta extends SessionQueueFacts {
 }
 
 export interface WorkSession extends SessionQueueFacts {
+  readonly executionOwnership?: ExecutionOwnership;
+  readonly followUp?: import('./task-overview.ts').FollowUpProjection;
   readonly verificationProgress?: VerificationProgress;
   readonly completionReviewRequired?: boolean;
   readonly resultConfirmationRequired?: boolean;
@@ -102,6 +113,7 @@ export interface WorkSession extends SessionQueueFacts {
 }
 
 export interface SessionReport {
+  readonly agentSupervision?: import('./agent-supervision.ts').AgentSupervisionReport;
   /** Current host verification, loaded with task details; never assistant prose. */
   readonly verification?: SessionVerificationDetail;
   readonly sessionId: string;
@@ -136,6 +148,11 @@ export type DelegationEventKind =
 
 /** Local orchestration facts; never a human authorization or a verified result. */
 export interface AgentMessage {
+  readonly deliveryIntent?: import('./agent-supervision.ts').AgentDeliveryIntent;
+  readonly decisionRequest?: import('./agent-supervision.ts').AgentDecisionRequest;
+  readonly decisionAnswer?: import('./agent-supervision.ts').AgentDecisionAnswer;
+  readonly goalRevision?: number;
+  readonly executionEpoch?: string;
   readonly replyTo?: string;
   readonly messageId: string;
   readonly workspaceId: string;
@@ -269,6 +286,10 @@ export interface VerificationVerdict {
 export interface SessionVerificationDetail {
   readonly sessionId: string;
   readonly outcome: VerificationOutcome;
+  /** A host review is active. The outcome describes evidence already recorded. */
+  readonly verificationInProgress?: true;
+  /** A persisted explicit review of the current task and report. */
+  readonly explicitVerification?: { readonly verdictRef: string; readonly outcome: VerificationOutcome };
   readonly checks: readonly {
     readonly name: string;
     readonly result: 'passed' | 'failed';
@@ -366,6 +387,7 @@ export interface ProjectInput {
   readonly quoteRefs: readonly string[];
   readonly attachmentRefs: readonly string[];
   readonly attachments?: readonly ProjectInputAttachment[];
+  readonly resourceFeedback?: readonly import('./resource-feedback.ts').ResourceFeedback[];
   readonly createdAt: string;
 }
 
@@ -476,6 +498,7 @@ export function projectWorkSession(
     // `delegated` 必须是真实事实；不能用"这是工作会话"反推，否则会改写非委派历史语义。
     ...(plan.delegated === true ? { delegated: true } : {}),
     ...(conversationMeta.acceptance ? { acceptance: conversationMeta.acceptance } : {}),
+    humanGate: conversationMeta.resultConfirmationRequired === true,
     accepted:
       conversationMeta.accepted === true ||
       (plan.delegated !== true &&
@@ -489,14 +512,13 @@ export function projectWorkSession(
     verificationActive: conversationMeta.verifying === true,
     ...(conversationMeta.phase ? { phase: conversationMeta.phase } : {}),
     blockedReason: plan.agentWaiting ? 'waiting_parent_agent' : plan.blockedReason,
-    ...(conversationMeta.origin.cancellation?.phase
-      ? { cancellationPhase: conversationMeta.origin.cancellation.phase }
-      : {}),
-    ...(conversationMeta.coordination?.phase === 'awaiting_outcome'
+    interrupted: plan.interrupted,
+    interruptionOrigin: plan.interruptionOrigin,
+    ...controlPhasesForOrigin(conversationMeta.origin),
+    ...(conversationMeta.origin.cancellation?.disposition ? { cancellationDisposition: conversationMeta.origin.cancellation.disposition } : {}),
+    ...(!conversationMeta.origin.executionControl && conversationMeta.coordination?.phase === 'awaiting_outcome'
       ? { takeoverPhase: 'awaiting_outcome' }
-      : conversationMeta.origin.takeover?.phase
-        ? { takeoverPhase: conversationMeta.origin.takeover.phase }
-        : {}),
+      : {}),
   });
   const status = projected.status;
   return {
@@ -510,11 +532,14 @@ export function projectWorkSession(
     nextAction: projected.nextAction,
     statusLabel: projected.statusLabel,
     cancelable: projected.cancelable,
+    followUp: projected.followUp,
+    ...(conversationMeta.executionOwnership ? { executionOwnership: conversationMeta.executionOwnership } : {}),
     ...(projected.needsYouReason ? { needsYouReason: projected.needsYouReason } : {}),
     ...(conversationMeta.coordination ? { coordination: conversationMeta.coordination } : {}),
     spawnedAt: conversationMeta.spawnedAt ?? plan.updatedAt ?? '',
     ...(conversationMeta.conversationId ? { conversationId: conversationMeta.conversationId } : {}),
     origin: conversationMeta.origin,
+    ...(conversationMeta.resourceBlocker ? { resourceBlocker: conversationMeta.resourceBlocker } : {}),
     ...(conversationMeta.queuedBehind ? { queuedBehind: conversationMeta.queuedBehind.map(item => ({ ...item })) } : {}),
     ...(conversationMeta.queueReason ? { queueReason: conversationMeta.queueReason } : {}),
     ...(conversationMeta.supersededBy ? { supersededBy: conversationMeta.supersededBy } : {}),

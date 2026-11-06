@@ -43,6 +43,7 @@ import {
 } from './composer-status-view.tsx';
 import { composerLayoutModel } from './composer-layout-model.ts';
 import { compactWorkspacePath, createComposerStatus, type ComposerStatus } from './composer-status.ts';
+import { formatMessageTime } from './message-time.ts';
 import {
   createChatController,
   formatCompactingStatusLabel,
@@ -451,6 +452,7 @@ function ChatHistory({
       ) : null}
       <scrollbox
         ref={scrollRef}
+        width="100%"
         flexGrow={1}
         flexShrink={1}
         minHeight={0}
@@ -613,13 +615,16 @@ function ChatHistory({
           return (
             <box id={conversationMessageRenderId(message.id)} key={message.id} flexDirection="row" width="100%" gap={roleBodyGap} marginBottom={1}>
               <box width={roleRailWidth}><text fg={COLOR.muted}>YOU</text></box>
-              <box flexDirection="row" flexGrow={1} minWidth={0}>
-                <text fg={COLOR.user}>{APP_CHROME.userRailBar}</text>
-                <box flexDirection="column" flexGrow={1} minWidth={0} paddingLeft={1}>
-                  {userText ? <ThemedText selectable fg={COLOR.text}>{userText}</ThemedText> : null}
-                  {imageLabel ? <ThemedText selectable fg={COLOR.user}>{imageLabel}</ThemedText> : null}
-                  {!userText && !imageLabel ? <ThemedText selectable fg={COLOR.textSoft}>{' '}</ThemedText> : null}
+              <box flexDirection="row" flexGrow={1} minWidth={0} justifyContent="space-between">
+                <box flexDirection="row" flexGrow={1} minWidth={0}>
+                  <text fg={COLOR.user}>{APP_CHROME.userRailBar}</text>
+                  <box flexDirection="column" flexGrow={1} minWidth={0} paddingLeft={1}>
+                    {userText ? <ThemedText selectable fg={COLOR.text}>{userText}</ThemedText> : null}
+                    {imageLabel ? <ThemedText selectable fg={COLOR.user}>{imageLabel}</ThemedText> : null}
+                    {!userText && !imageLabel ? <ThemedText selectable fg={COLOR.textSoft}>{' '}</ThemedText> : null}
+                  </box>
                 </box>
+                {message.timestamp ? <text fg={COLOR.muted} wrapMode="none">{formatMessageTime(message.timestamp)}</text> : null}
               </box>
             </box>
           );
@@ -1181,7 +1186,7 @@ function findPendingUserInput(messages: readonly ChatMessage[]): TuiUserInputReq
 }
 
 
-export function App({ host, model, modelLabel, modelSelection, languageStore, themeStore, cliUpdate, getSessionFastMode, setSessionFastMode, onQuit }: {
+export function App({ host, model, modelLabel, modelSelection, languageStore, themeStore, cliUpdate, initialConversationId, getSessionFastMode, setSessionFastMode, onQuit }: {
   readonly host: TuiHost;
   readonly model: ChatModelPort;
   readonly modelLabel: string;
@@ -1189,6 +1194,7 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   readonly languageStore?: TuiLanguageStore;
   readonly themeStore?: TuiThemeStore;
   readonly cliUpdate?: CliUpdateController;
+  readonly initialConversationId?: string;
   readonly getSessionFastMode?: () => boolean;
   readonly setSessionFastMode?: (fastMode: boolean) => void;
   readonly onQuit: () => void;
@@ -1294,6 +1300,15 @@ export function App({ host, model, modelLabel, modelSelection, languageStore, th
   const [approvalSelection, setApprovalSelection] = useState(0);
   const [planSelection, setPlanSelection] = useState(0);
   const [commandNotice, setCommandNotice] = useState<string | null>(null);
+  const initialResumeStarted = useRef(false);
+  useEffect(() => {
+    if (!initialConversationId || initialResumeStarted.current || snapshot.status !== 'idle') return;
+    initialResumeStarted.current = true;
+    const conversation = persistence.loadConversation(initialConversationId);
+    if (conversation && resumeTuiConversation(controller, persistence, conversation)) return;
+    if (persistence.adoptConversation(initialConversationId)) return;
+    setCommandNotice('Failed to load session');
+  }, [controller, initialConversationId, persistence, snapshot.status]);
   const [leaderArmed, setLeaderArmed] = useState(false);
   const [skills, setSkills] = useState<readonly TuiSkillSummary[]>(() => host.skillMcpBridge?.listSkills() ?? []);
   const [mcpServers, setMcpServers] = useState<readonly TuiMcpServerSummary[]>(() => host.skillMcpBridge?.listMcpServers() ?? []);

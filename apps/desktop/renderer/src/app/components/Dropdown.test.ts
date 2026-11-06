@@ -22,10 +22,10 @@ test('open menus clamp against the open workbench and visible webviews', () => {
   assert.match(source, /width: menuRef\.current\?\.offsetWidth \?\? rect\.width/);
 });
 
-test('source menus can render local and remote tabs without filtering untagged options', () => {
+test('source menus can render local and remote filters without filtering untagged options', () => {
   assert.match(source, /readonly tabs\?: readonly DropdownTab\[\];/);
-  assert.match(source, /role="tablist"/);
-  assert.match(source, /role="tab"/);
+  assert.match(source, /role="radiogroup"/);
+  assert.match(source, /role="radio"/);
   assert.match(source, /filterDropdownOptions\(options, query, menuTab\)/);
   assert.match(source, /resolveDropdownActiveTab\(\{ tabs: tabList, options, value \}\)/);
   assert.match(source, /onClick=\{\(\) => setActiveTab\(tab\.id\)\}/);

@@ -60,7 +60,11 @@ describe('agentLoopQoder', () => {
     assert.equal(attempts[0].messages.some((message) => /tool-call dialect/i.test(message.content)), false);
     assert.equal(attempts[1].messages.some((message) => Array.isArray(message.tool_calls)), true);
     assert.equal(attempts[1].messages.some((message) => message.role === 'tool' && message.tool_call_id === 'call_1'), true);
-    assert.match(attempts[1].messages.at(-1).content, /Unknown tool: missing_tool/);
+    const missing = JSON.parse(attempts[1].messages.at(-1).content);
+    assert.equal(missing.error, 'capability_not_projected');
+    assert.equal(missing.diagnostic.stage, 'projection');
+    assert.equal(missing.diagnostic.userActionRequired, false);
+    assert.deepEqual(missing.evidenceRefs, ['tool-result://call_1']);
     assert.ok(sent.some((event) => event.channel === 'chat:stream:tool-call'));
     assert.ok(sent.some((event) => event.channel === 'chat:stream:tool-result'));
     assert.ok(sent.some((event) => event.channel === 'chat:stream:done'));

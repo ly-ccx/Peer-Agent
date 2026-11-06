@@ -1,0 +1,241 @@
+/* 自定义下拉(替代原生 select,贴合暗色设计语言) */
+.pa-dropdown {
+  position: relative;
+  display: inline-block;
+  min-width: 200px;
+}
+.pa-dropdown-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 32px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--ui-radius-control);
+  background: var(--chrome-sunken);
+  color: var(--graphite-base);
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: border-color var(--za-motion-fast), background var(--za-motion-fast);
+}
+.pa-dropdown-trigger:hover:not(:disabled) {
+  background: var(--chrome-hover);
+}
+.pa-dropdown-trigger.open {
+  border-color: var(--za-primary-control-bg, var(--chrome-hairline));
+}
+.pa-dropdown-trigger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.pa-dropdown-prefix {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.pa-dropdown-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pa-dropdown-caret {
+  width: 16px;
+  height: 16px;
+  opacity: 0.7;
+  flex-shrink: 0;
+  transition: transform var(--za-motion-fast) var(--za-ease-out), opacity var(--za-motion-fast);
+}
+.pa-dropdown-trigger.open .pa-dropdown-caret {
+  opacity: 0.95;
+  transform: rotate(180deg);
+}
+.pa-dropdown-menu {
+  /* 菜单经 createPortal 投到 document.body，用 fixed 按触发器位置定位(left/top 由 JS 内联注入)，
+     彻底脱离祖先滚动容器(如 .mcp-modal-body)的溢出计算，展开时不会撑高容器/冒出滚动条。
+     作为全局 portal 浮层，层级必须高于设置页 provider 卡片、默认卡片发光伪元素与普通 modal 内容。 */
+  position: fixed;
+  width: var(--pa-dropdown-menu-width, auto);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2);
+  /* 选择器菜单统一 glass-popover 毛玻璃 */
+  background: var(--glass-popover);
+  backdrop-filter: blur(var(--blur-popover)) saturate(var(--blur-saturate, 1.6));
+  -webkit-backdrop-filter: blur(var(--blur-popover)) saturate(var(--blur-saturate, 1.6));
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--ui-radius-control);
+  box-shadow: var(--shadow-popover), var(--glass-edge-highlight);
+  isolation: isolate;
+  z-index: var(--z-dropdown-portal, 10000);
+  max-height: 280px;
+  overflow-y: auto;
+  --motion-enter-from: calc(-1 * var(--za-motion-shift-sm));
+  animation: motion-enter-rise var(--za-motion-fast) var(--za-ease-out) both;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .pa-dropdown-menu {
+    background: var(--paper-sheet, var(--chrome-raised));
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: var(--shadow-popover);
+  }
+}
+.pa-dropdown-menu.is-up {
+  --motion-enter-from: var(--za-motion-shift-sm);
+}
+.pa-dropdown-up .pa-dropdown-caret {
+  transform: rotate(180deg);
+}
+.pa-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 34px;
+  padding: var(--space-2) var(--space-2);
+  border: none;
+  border-radius: var(--ui-radius-control-compact);
+  background: transparent;
+  color: var(--graphite-base);
+  text-align: left;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.pa-dropdown-item:hover,
+.pa-dropdown-item.active {
+  background: var(--chrome-sunken);
+}
+.pa-dropdown-item.selected {
+  font-weight: 600;
+}
+.pa-dropdown-item:disabled,
+.pa-dropdown-item.is-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.pa-dropdown-item:disabled:hover,
+.pa-dropdown-item.is-disabled.active {
+  background: transparent;
+}
+.pa-dropdown-item.danger {
+  color: var(--state-danger);
+}
+.pa-dropdown-item.danger:hover,
+.pa-dropdown-item.danger.active {
+  background: var(--za-danger-soft);
+}
+.pa-dropdown-item.danger .pa-dropdown-check {
+  color: var(--state-danger);
+}
+.pa-dropdown-danger .pa-dropdown-trigger {
+  color: var(--state-danger);
+  border-color: rgba(122, 62, 80, 0.22);
+  background: var(--za-danger-soft);
+}
+.pa-dropdown-check {
+  width: 14px;
+  flex-shrink: 0;
+  color: var(--azure-seal, var(--graphite-base));
+}
+.pa-dropdown-item-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pa-dropdown-item-hint {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-size: 0.68rem;
+  color: var(--graphite-mute);
+}
+.pa-dropdown-search {
+  padding: 0 2px 4px;
+}
+.pa-dropdown-search input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--ui-radius-control);
+  background: var(--surface-inset, transparent);
+  color: inherit;
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 6px 8px;
+  outline: none;
+}
+.pa-dropdown-search input:focus {
+  border-color: var(--azure-seal, var(--graphite-base));
+}
+.pa-dropdown-tabs {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 4px;
+  margin: 0 2px 6px;
+  padding: 3px;
+  border-radius: var(--ui-radius-control);
+  background: var(--chrome-sunken, var(--pa-surface-muted));
+  border: 1px solid var(--chrome-hairline, var(--pa-border-subtle));
+}
+.pa-dropdown-tab {
+  min-height: 24px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--ui-radius-control-compact);
+  background: transparent;
+  color: var(--graphite-mute, var(--pa-text-secondary));
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+.pa-dropdown-tab:hover {
+  color: var(--graphite-base, var(--pa-text-primary));
+}
+.pa-dropdown-tab.is-active {
+  background: var(--surface-raised, var(--pa-surface-card));
+  color: var(--graphite-base, var(--pa-text-primary));
+  font-weight: 600;
+}
+.pa-dropdown-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 16rem;
+  overflow: auto;
+}
+.pa-dropdown-group {
+  padding: 6px 8px 2px;
+  font-size: 0.68rem;
+  color: var(--graphite-mute);
+}
+.pa-dropdown-empty {
+  padding: 8px;
+  font-size: 0.78rem;
+  color: var(--graphite-mute);
+}
+.pa-dropdown-footer {
+  margin-top: 4px;
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--chrome-hairline);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.78rem;
+  text-align: left;
+  padding: 8px;
+  border-radius: var(--ui-radius-control);
+  cursor: pointer;
+}
+.pa-dropdown-footer:hover:not(:disabled) {
+  background: var(--composer-addon-hover-bg, rgba(127, 127, 127, 0.12));
+}
+.pa-dropdown-footer:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

@@ -1,3 +1,4 @@
+import { MotionSurface } from '../../../app/components/MotionSurface';
 import type { ContextUsageBreakdown } from '@peer-agent/protocol';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -69,12 +70,12 @@ export function ContextUsagePanel({
       setCoords({ left, top });
     };
     updatePosition();
-    const observer = new ResizeObserver(updatePosition);
-    if (panelRef.current) observer.observe(panelRef.current);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updatePosition);
+    if (panelRef.current) observer?.observe(panelRef.current);
     window.addEventListener('resize', updatePosition);
     window.addEventListener('scroll', updatePosition, true);
     return () => {
-      observer.disconnect();
+      observer?.disconnect();
       window.removeEventListener('resize', updatePosition);
       window.removeEventListener('scroll', updatePosition, true);
     };
@@ -102,9 +103,7 @@ export function ContextUsagePanel({
     };
   }, [open]);
 
-  const panel = open
-    ? createPortal(
-        <div
+  const panel = createPortal(<MotionSurface>{open ? (<div
           ref={panelRef}
           id={panelId}
           className="ctx-usage-panel"
@@ -175,10 +174,7 @@ export function ContextUsagePanel({
             </div>
           ) : null}
           {accountUsage}
-        </div>,
-        document.body,
-      )
-    : null;
+        </div>) : null}</MotionSurface>, document.body);
 
   return (
     <div ref={rootRef} className="ctx-usage-control">

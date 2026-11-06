@@ -6,6 +6,34 @@ import { OBJECTIVE_TOOL_SPECS, validateObjectiveToolInput } from './objective-to
 import { TOOL_LEVELS } from './digest.mjs';
 import { WORK_SESSION_STATUSES } from '@peer-agent/protocol';
 import { validCapabilityRequirements } from './capability-admission.mjs';
+import { validIntentAssessment } from './intent-coordination-kernel.mjs';
+const intentIdsSchema = { type: 'array', maxItems: 64, items: { type: 'string', maxLength: 200 } };
+const intentAssessmentSchema = { type: 'object', additionalProperties: false,
+  description: 'For action assess, put the work ID, revisions, source IDs, decision fields and assessment reason inside this object.',
+  required: ['workId', 'expectedWorkRevision', 'expectedGoalRevision', 'sourceInputIds', 'sourceEventIds', 'inputs', 'coverage', 'disposition', 'reason'],
+  properties: {
+    workId: { type: 'string', maxLength: 200 }, expectedWorkRevision: { type: 'integer', minimum: 0 }, expectedGoalRevision: { type: 'integer', minimum: 0 },
+    sourceInputIds: intentIdsSchema, sourceEventIds: intentIdsSchema, sourceDecisionRef: { type: 'string', maxLength: 200 },
+    inputs: { type: 'array', maxItems: 64, items: { type: 'object', required: ['inputId', 'kind', 'reason'], additionalProperties: false,
+      properties: { inputId: { type: 'string' }, kind: { type: 'string', enum: ['discuss', 'answer', 'delegate', 'augment', 'revise', 'withdraw'] }, reason: { type: 'string', maxLength: 500 } } } },
+    interpretation: { type: 'object', additionalProperties: false, description: 'Provide on first assessment or an admitted goal revision. Omit when updating coverage or disposition for the same goal.', required: ['outcome', 'constraints', 'nonGoals', 'openQuestions', 'requirements'], properties: {
+      outcome: { type: 'string', maxLength: 4000 }, ...Object.fromEntries(['constraints', 'nonGoals', 'openQuestions'].map(key => [key, { type: 'array', maxItems: 16, items: { type: 'string', maxLength: 500 } }])),
+      requirements: { type: 'array', minItems: 1, maxItems: 32, items: { type: 'object', required: ['requirementId', 'text', 'sourceInputIds'], additionalProperties: false,
+        properties: { requirementId: { type: 'string', maxLength: 200 }, text: { type: 'string', maxLength: 1000 }, sourceInputIds: intentIdsSchema } } } } },
+    coverage: { type: 'array', maxItems: 32, items: { type: 'object', additionalProperties: false, required: ['requirementId', 'status', 'explanation', 'sources'], properties: {
+      requirementId: { type: 'string' }, status: { type: 'string', enum: ['remaining', 'covered', 'uncertain'] }, explanation: { type: 'string', maxLength: 1000 },
+      sources: { type: 'array', maxItems: 32, items: { type: 'object', additionalProperties: false, required: ['sessionId', 'sourceRevision', 'evidenceRefs'], properties: {
+        sessionId: { type: 'string' }, sourceRevision: { type: 'string' }, evidenceRefs: intentIdsSchema } } } } } },
+    disposition: { oneOf: [
+      { type: 'object', required: ['kind', 'operationRefs'], additionalProperties: false, properties: { kind: { const: 'continue' }, operationRefs: intentIdsSchema } },
+      { type: 'object', required: ['kind', 'waitFor'], additionalProperties: false, properties: { kind: { const: 'wait' }, waitFor: { type: 'array', minItems: 1, maxItems: 32, items: {
+        type: 'object', required: ['kind', 'id', 'revision'], additionalProperties: false, properties: { kind: { type: 'string', enum: ['session', 'human_request', 'resource', 'recovery'] }, id: { type: 'string' }, revision: { type: 'string' } } } } } },
+      { type: 'object', required: ['kind', 'replyRef'], additionalProperties: false, properties: { kind: { const: 'return' }, replyRef: { type: 'string', description: 'Use current_turn_reply to bind the host reservation for this execution slice.' } } },
+      { type: 'object', required: ['kind', 'code', 'recoveryRef'], additionalProperties: false, properties: { kind: { const: 'blocked_system' }, code: { type: 'string' }, recoveryRef: { type: 'string' } } },
+      { type: 'object', required: ['kind', 'controlRef'], additionalProperties: false, properties: { kind: { const: 'withdraw' }, controlRef: { type: 'string' } } },
+    ] }, reason: { type: 'string', maxLength: 1000 },
+  } };
+const CRITERION_DESCRIPTION_LIMIT = 500;
 const SPAWN_INPUT_SCHEMA = {
     type: 'object',
     properties: {
@@ -25,7 +53,7 @@ const SPAWN_INPUT_SCHEMA = {
         items: { type: 'object', properties: {
             id: { type: 'string', maxLength: 200 },
             kind: { type: 'string', enum: ['command', 'test', 'file-contains', 'file-exists', 'model_review', 'manual'] },
-            description: { type: 'string', maxLength: 500 },
+            description: { type: 'string', maxLength: CRITERION_DESCRIPTION_LIMIT },
             command: { type: 'string', maxLength: 2000 },
             path: { type: 'string', maxLength: 1000 },
             expect: { type: 'string', maxLength: 2000 },
@@ -57,9 +85,13 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
   ...OBJECTIVE_TOOL_SPECS,
   spec('coordinate_work', 'local.delegation.coordinate_work', {
     type: 'object', properties: {
-      action: { type: 'string', enum: ['parallel','augment','revise','query','answer','cancel','replace','handoff'] },
+      action: { type: 'string', enum: ['parallel','augment','revise','query','answer','cancel','replace','handoff','resume','assess'] },
+      assessment: intentAssessmentSchema,
+      afterSessionId: { type: 'string', maxLength: 200 },
+      eventId: { type: 'string', maxLength: 200 }, payloadOffset: { type: 'integer', minimum: 0 },
+      inputId: { type: 'string', maxLength: 200 }, afterInputId: { type: 'string', maxLength: 200 }, expectedWorkRevision: { type: 'integer', minimum: 0 },
       workId: { type: 'string', maxLength: 200 }, sessionId: { type: 'string', maxLength: 200 },
-      expectedRevision: { type: 'integer', minimum: 0 }, reason: { type: 'string', maxLength: 500 },
+      expectedRevision: { type: 'integer', minimum: 0, description: 'Use the exact numeric goalRevision returned by coordinate_work query (for example 1, never "1.0"). Query does not require a revision.' }, reason: { type: 'string', maxLength: 500 },
       text: { type: 'string', maxLength: 4000 }, replyTo: { type: 'string', maxLength: 200 }, task: SPAWN_INPUT_SCHEMA,
     }, required: ['action','reason'], additionalProperties: false,
   }),
@@ -68,6 +100,19 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
       sessionId: { type: 'string', maxLength: 200, description: 'Direct child session for the parent. Workers use their own host identity.' },
       text: { type: 'string', maxLength: 4000 },
       purpose: { type: 'string', enum: ['update', 'question', 'answer'] },
+      delivery: { type: 'string', enum: ['mailbox_only', 'ensure_turn'] },
+      expectedRevision: { type: 'integer', minimum: 0 },
+      expectedExecutionEpoch: { type: 'string', maxLength: 200 },
+      decisionRequest: { type: 'object', properties: {
+        options: { type: 'array', maxItems: 16, items: { type: 'object', properties: {
+          optionId: { type: 'string', maxLength: 100 }, label: { type: 'string', maxLength: 1000 },
+        }, required: ['optionId', 'label'], additionalProperties: false } },
+        multiple: { type: 'boolean' }, allowText: { type: 'boolean' },
+      }, additionalProperties: false },
+      decisionAnswer: { type: 'object', properties: {
+        requestId: { type: 'string', maxLength: 200 }, expectedRequestRevision: { type: 'integer', minimum: 1 },
+        optionIds: { type: 'array', maxItems: 16, items: { type: 'string', maxLength: 100 } }, text: { type: 'string', maxLength: 4000 },
+      }, required: ['requestId', 'expectedRequestRevision'], additionalProperties: false },
       replyTo: { type: 'string', maxLength: 200, description: 'Question messageId being answered. Required to resume a worker waiting for its parent.' },
     }, required: ['text', 'purpose'], additionalProperties: false,
   }),
@@ -168,6 +213,8 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
         properties: {
           options: { type: 'array', items: { type: 'string' }, minItems: 1 },
           expiresAt: { type: 'string', description: 'Optional ISO deadline for this conversational decision; never a permission grant.' },
+          agentRequestId: { type: 'string', maxLength: 200 },
+          expectedRequestRevision: { type: 'integer', minimum: 1 },
         },
         required: ['options'],
         additionalProperties: false,
@@ -195,10 +242,41 @@ export function validateDelegationInput(name, raw) {
   const input = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   if (OBJECTIVE_TOOL_SPECS.some(spec => spec.name === name)) return validateObjectiveToolInput(name, raw);
   if (name === 'coordinate_work') {
-    if (Object.keys(input).some(key => !['action','workId','sessionId','expectedRevision','reason','text','replyTo','task'].includes(key))
-      || !['parallel','augment','revise','query','answer','cancel','replace','handoff'].includes(input.action) || !text(input.reason,500)) return invalid('A scoped coordination action and reason are required. Authority is assigned by the host.');
-    if (input.workId !== undefined && !text(input.workId,200) || input.sessionId !== undefined && !text(input.sessionId,200) || input.expectedRevision !== undefined && (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0)) return invalid('Malformed task identity or version.');
-    if (input.action === 'query' && !text(input.sessionId,200)) return invalid('Select a real session to discover its current facts and goalRevision.');
+    if (Object.keys(input).some(key => !['action','workId','sessionId','expectedRevision','reason','text','replyTo','task','assessment','afterSessionId','eventId','payloadOffset','inputId','afterInputId','expectedWorkRevision'].includes(key))
+      || !['parallel','augment','revise','query','answer','cancel','replace','handoff','resume','assess'].includes(input.action) || !text(input.reason,500)) {
+      return invalid(input.action === 'assess'
+        ? 'Send action, reason and a nested assessment object. Put the work ID, both revisions, source IDs, inputs, coverage and disposition inside assessment.'
+        : 'A scoped coordination action and reason are required. Authority is assigned by the host.');
+    }
+    if (input.action === 'assess') {
+      const assessment = input.assessment;
+      if (!assessment || typeof assessment !== 'object' || Array.isArray(assessment)) {
+        return invalid('Action assess requires a nested assessment object containing both current revisions and source identities.');
+      }
+      const missing = intentAssessmentSchema.required.filter(key => !Object.hasOwn(assessment, key));
+      if (missing.length) return invalid(`Missing assessment fields: ${missing.map(key => `assessment.${key}`).join(', ')}.`);
+      if (assessment.operationId !== undefined || !validIntentAssessment({ ...assessment, operationId: 'host' })) {
+        const missingSources = Array.isArray(assessment.coverage) ? assessment.coverage.findIndex(row => row && !Array.isArray(row.sources)) : -1;
+        if (missingSources >= 0) return invalid(`assessment.coverage[${missingSources}].sources must be an array. Use [] for a remaining requirement without evidence. Put evidenceRefs inside each source, not on the coverage row.`);
+        const uncovered = Array.isArray(assessment.coverage) ? assessment.coverage.findIndex(row =>
+          row?.status === 'covered' && Array.isArray(row.sources)
+          && (!row.sources.length || row.sources.some(source => Array.isArray(source?.evidenceRefs) && !source.evidenceRefs.length))) : -1;
+        if (uncovered >= 0) return invalid(`assessment.coverage[${uncovered}] marks a requirement covered without persisted evidence. Each covered source needs a non-empty evidenceRefs list. Use return and the currentReplyRef for the reply you are about to deliver.`);
+        return invalid('A bounded intent assessment with both current revisions and source identities is required. The host assigns its operationId.');
+      }
+      return { ok: true, value: { action: 'assess', reason: input.reason.trim(), assessment: structuredClone(assessment) } };
+    }
+    if (input.assessment !== undefined) return invalid('assessment is only valid for action assess.');
+    if (input.afterSessionId !== undefined && (input.action !== 'query' || !text(input.afterSessionId,200) || !Number.isSafeInteger(input.expectedRevision))) return invalid('Frame pagination requires query, afterSessionId and current expectedRevision.');
+    if (input.eventId !== undefined && (input.action !== 'query' || !text(input.eventId,200))
+      || input.inputId !== undefined && (input.action !== 'query' || !text(input.inputId,200) || input.eventId)
+      || input.expectedWorkRevision !== undefined && (input.action !== 'query' || !Number.isSafeInteger(input.expectedWorkRevision) || input.expectedWorkRevision < 0)
+      || input.afterInputId !== undefined && (input.action !== 'query' || !text(input.afterInputId,200) || !Number.isSafeInteger(input.expectedWorkRevision))
+      || input.payloadOffset !== undefined && ((!input.eventId && !input.inputId) || !Number.isSafeInteger(input.payloadOffset) || input.payloadOffset < 0)) return invalid('Factual retrieval requires query, a scoped inputId/eventId and a non-negative integer payloadOffset; input paging also requires current expectedWorkRevision.');
+    if (input.workId !== undefined && !text(input.workId,200) || input.sessionId !== undefined && !text(input.sessionId,200)) return invalid('workId and sessionId must be non-empty strings of at most 200 characters.');
+    if (input.expectedRevision !== undefined && (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0)) return invalid('expectedRevision must be a non-negative integer, not a string. Call coordinate_work query for this session, then use its numeric goalRevision unchanged. No new user confirmation is implied by this input error.');
+
+    if (input.action === 'query' && !text(input.sessionId,200) && !text(input.workId,200)) return invalid('Select a real session or workId to discover current facts and revisions.');
     if (!['parallel','query'].includes(input.action) && (!text(input.sessionId,200) || !Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0)) return invalid('Select a real session and its current goalRevision.');
     if (['parallel','replace'].includes(input.action) && (!input.task || input.task.supersedes || input.task.objectiveId)) return invalid('A task specification is required; objective and supersession authorities are host-owned.');
     if (['augment','revise','answer'].includes(input.action) && !text(input.text,4000)) return invalid('A bounded work instruction is required.');
@@ -206,16 +284,22 @@ export function validateDelegationInput(name, raw) {
     const task = input.task ? validateSpawn(input.task) : null;
     if (task && !task.ok) return task;
     return { ok:true, value:{action:input.action,reason:input.reason.trim(),
+      ...(input.afterSessionId ? { afterSessionId: input.afterSessionId } : {}),
+      ...(input.eventId ? { eventId: input.eventId, ...(input.payloadOffset !== undefined ? { payloadOffset: input.payloadOffset } : {}) } : {}),
+      ...(input.inputId ? { inputId: input.inputId, ...(input.payloadOffset !== undefined ? { payloadOffset: input.payloadOffset } : {}) } : {}),
+      ...(input.afterInputId ? { afterInputId: input.afterInputId } : {}), ...(input.expectedWorkRevision !== undefined ? { expectedWorkRevision: input.expectedWorkRevision } : {}),
       ...(input.workId ? {workId:input.workId} : {}), ...(input.sessionId ? {sessionId:input.sessionId} : {}),
       ...(input.expectedRevision !== undefined ? {expectedRevision:input.expectedRevision} : {}),
       ...(input.text ? {text:input.text.trim()} : {}), ...(input.replyTo ? {replyTo:input.replyTo.trim()} : {}), ...(task ? {task:task.value} : {})} };
   }
   if (name === 'send_agent_message') {
     const body = text(input.text, 4000), sessionId = text(input.sessionId, 200);
-    if (Object.keys(input).some(key => !['sessionId', 'text', 'purpose', 'replyTo'].includes(key))
+    if (Object.keys(input).some(key => !['sessionId', 'text', 'purpose', 'replyTo', 'delivery', 'expectedRevision', 'expectedExecutionEpoch', 'decisionRequest', 'decisionAnswer'].includes(key))
       || !body || !['update', 'question', 'answer'].includes(input.purpose)
       || input.sessionId !== undefined && !sessionId || input.replyTo !== undefined && !text(input.replyTo, 200)) return invalid('A bounded message and purpose are required; identity is assigned by the host.');
-    return { ok: true, value: { text: body, purpose: input.purpose, ...(sessionId ? { sessionId } : {}), ...(input.replyTo ? { replyTo: input.replyTo.trim() } : {}) } };
+    const extension = parseAgentMessageExtension(input);
+    if (!extension.ok) return invalid('Invalid Agent decision or delivery contract.');
+    return { ok: true, value: { ...extension.value, text: body, purpose: input.purpose, ...(sessionId ? { sessionId } : {}), ...(input.replyTo ? { replyTo: input.replyTo.trim() } : {}) } };
   }
   if (name === 'spawn_session') return validateSpawn(input);
   if (name === 'control_work') {
@@ -283,7 +367,9 @@ function validateSpawn(input) {
   if (!anchorMessageIds) return invalid('anchorMessageIds must contain 1 to 8 message ids.');
   if (!title) return invalid('title is required and must be at most 60 characters.');
   if (!brief) return invalid('brief is required and must be at most 4000 characters.');
-  if (!successCriteria) return invalid('successCriteria must contain 1 to 8 items.');
+  if (!successCriteria) return invalid(
+    `successCriteria must contain 1 to 8 valid structured items with a non-empty description of at most ${CRITERION_DESCRIPTION_LIMIT} characters each.`,
+  );
   if (!kinds.has(input.kind)) return invalid('kind must be code, research, docs, ui, ops, or other.');
   if (typeof input.readOnly !== 'boolean') return invalid('readOnly must be a boolean.');
   if (input.requiredCapabilities !== undefined && !validCapabilityRequirements(input.requiredCapabilities)) return invalid('requiredCapabilities must contain distinct capability IDs.');
@@ -351,7 +437,7 @@ function validatedCriteria(items) {
     if (Object.keys(item).some(key => !['id', 'kind', 'description', 'command', 'path', 'expect', 'requiredCapabilities'].includes(key))) return null;
     if (item.requiredCapabilities !== undefined && !validCapabilityRequirements(item.requiredCapabilities)) return null;
     if (!['command', 'test', 'file-contains', 'file-exists', 'model_review', 'manual'].includes(item.kind)) return null;
-    const description = text(item.description, 500);
+    const description = text(item.description, CRITERION_DESCRIPTION_LIMIT);
     if (!description) return null;
     const criterion = { kind: item.kind, description };
     if (item.requiredCapabilities !== undefined) criterion.requiredCapabilities = item.requiredCapabilities;
@@ -478,7 +564,13 @@ function validateReply(input) {
   if (input.question !== undefined) {
     const options = stringList(input.question?.options, { min: 1, max: 8, itemMax: 200 });
     if (!options) return invalid('question.options must contain 1 to 8 choices.');
-    value.question = { options };
+    const question = input.question;
+    if (Object.keys(question).some(key => !['options', 'expiresAt', 'agentRequestId', 'expectedRequestRevision'].includes(key))
+      || question.expiresAt !== undefined && !Number.isFinite(Date.parse(question.expiresAt))
+      || question.agentRequestId !== undefined && (!text(question.agentRequestId, 200) || !Number.isSafeInteger(question.expectedRequestRevision) || question.expectedRequestRevision < 1)
+      || question.expectedRequestRevision !== undefined && !question.agentRequestId) return invalid('Invalid linked question identity or revision.');
+    value.question = { options, ...(question.expiresAt ? { expiresAt: question.expiresAt } : {}),
+      ...(question.agentRequestId ? { agentRequestId: question.agentRequestId, expectedRequestRevision: question.expectedRequestRevision } : {}) };
   }
   return { ok: true, value };
 }
@@ -609,3 +701,4 @@ function validateMemoryForget(input) {
   if (!reason) return invalid('reason is required and must be at most 500 characters.');
   return { ok: true, value: { id, reason } };
 }
+import { parseAgentMessageExtension } from './agent-message-input.mjs';

@@ -23,9 +23,10 @@ test('workspace git refreshes after checkout without waiting for a new workspace
 test('ChatSurface reuses the workspace git hook and refreshes after a turn ends', async () => {
   const source = await readSurface();
 
-  assert.match(source, /useWorkspaceGit/);
+  assert.match(source, /useConversationGitEnvironment/);
+  const environment = await readFile(new URL('./useConversationGitEnvironment.ts', import.meta.url), 'utf8');
   assert.match(
-    source,
+    environment,
     /useWorkspaceGit\(\s*workspacePath,\s*\{\s*refreshWhenIdle:\s*!isStreaming,\s*\}\)/,
   );
   assert.doesNotMatch(source, /void clientApi\.gitListBranches\(\{ workspaceRoot: workspacePath \}\)/);

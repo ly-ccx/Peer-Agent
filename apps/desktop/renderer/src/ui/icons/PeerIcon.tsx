@@ -3,6 +3,8 @@ import lucideLicense from './LUCIDE-LICENSE?raw';
 
 export type PeerIconName =
   | 'loader'
+  | 'globe'
+  | 'folder'
   | 'back'
   | 'plus'
   | 'close'
@@ -12,7 +14,10 @@ export type PeerIconName =
   | 'chevronRight'
   | 'arrowUpRight'
   | 'send'
+  | 'arrowDown'
   | 'terminal'
+  | 'hand'
+  | 'shieldAlert'
   | 'info'
   | 'fileText'
   | 'image'
@@ -40,10 +45,15 @@ export type PeerIconName =
   | 'archive'
   | 'arrowRight'
   | 'panelRight'
+  | 'panelLeft'
+  | 'maximize'
+  | 'restore'
   | 'arrowRightOff'
   | 'bolt';
 
 const PATHS: Record<PeerIconName, ReactNode> = {
+  globe: <><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a17 17 0 0 1 0 18 17 17 0 0 1 0-18Z" /></>,
+  folder: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />,
   loader: <path d="M20 12a8 8 0 1 1-5.5-7.6" />,
   back: (
     <>
@@ -59,6 +69,9 @@ const PATHS: Record<PeerIconName, ReactNode> = {
     </>
   ),
   terminal: <><rect x="3" y="4" width="18" height="16" rx="3" /><path d="m7 9 3 3-3 3m6 0h4" /></>,
+  // Lucide hand / shield-alert (ISC); source and notice in LUCIDE-LICENSE.
+  hand: <g data-license={lucideLicense}><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2" /><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2" /><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8" /><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" /></g>,
+  shieldAlert: <g data-license={lucideLicense}><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" /><path d="M12 8v4M12 16h.01" /></g>,
   info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v6m0-10v.01" /></>,
   fileText: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6M8 13h8m-8 4h6" /></>,
   image: <><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-5-5L5 21" /></>,
@@ -86,6 +99,9 @@ const PATHS: Record<PeerIconName, ReactNode> = {
   archive: <><rect x="3" y="3" width="18" height="4" rx="1" /><path d="M5 7v14h14V7m-10 5h6" /></>,
   arrowRight: <path d="M4 12h16m-6-6 6 6-6 6" />,
   panelRight: <><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M15 3v18" /></>,
+  panelLeft: <><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /></>,
+  maximize: <path d="M9 3H3v6M15 3h6v6M9 21H3v-6M15 21h6v-6" />,
+  restore: <path d="M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6" />,
   arrowRightOff: <><path d="M4 12h10m2 0h4m-6-6 6 6-3 3M3 3l18 18" /></>,
   bolt: <path d="M13 2 4 14h7l-1 8 10-12h-7l0-8Z" />,
   stop: <rect x="5" y="5" width="14" height="14" rx="2" />,
@@ -98,6 +114,12 @@ const PATHS: Record<PeerIconName, ReactNode> = {
     <>
       <path d="M12 19V5" />
       <path d="m5 12 7-7 7 7" />
+    </>
+  ),
+  arrowDown: (
+    <>
+      <path d="M12 5v14" />
+      <path d="m5 12 7 7 7-7" />
     </>
   ),
 };

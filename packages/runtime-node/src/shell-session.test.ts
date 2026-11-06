@@ -6,8 +6,20 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { createNodeShellSessionManager } from './shell-session.ts';
+import { executionHandlesLive, stopExecutionHandles } from './project-agent/execution-handles.mjs';
 
 const posixOnly = process.platform === 'win32' ? { skip: 'POSIX persistent shell only' } : {};
+
+test('an idle managed shell remains a native handle until the shared stop barrier closes it', posixOnly, async t => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'peer-shell-native-handle-'));
+  t.after(() => import('node:fs/promises').then(({rm}) => rm(workspaceRoot,{recursive:true,force:true})));
+  const manager=createManager(t,workspaceRoot), conversationId='managed-shell-stop';
+  const result=await manager.runCommand({conversationId,toolCallId:'actual-call',command:'printf done',timeoutMs:5000});
+  assert.equal(result.status,'completed');
+  assert.equal(executionHandlesLive(conversationId),true,'command completion does not prove its persistent shell has exited');
+  await stopExecutionHandles(conversationId);
+  assert.equal(executionHandlesLive(conversationId),false);
+});
 
 function createManager(t: test.TestContext, workspaceRoot: string) {
   const manager = createNodeShellSessionManager({ workspaceRoot });

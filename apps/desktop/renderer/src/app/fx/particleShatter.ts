@@ -1,3 +1,6 @@
+import { browserMotionEnvironment } from '../state/motionEnvironment.ts';
+import { watchVisualMotion } from '../state/visualMotion.ts';
+
 /**
  * 整卡从右向左粒子粉碎引擎（与 scratch demo 同构）。
  * 纯 DOM/Canvas 能力，不依赖 React。
@@ -27,6 +30,7 @@ export type ShatterParticle = {
 };
 
 export type SampleParticlesOptions = {
+  readonly signal?: AbortSignal;
   readonly gapCss?: number;
   readonly sweepMs?: number;
   readonly alphaThreshold?: number;
@@ -39,6 +43,7 @@ export type SampleParticlesOptions = {
 };
 
 export type RunParticleShatterOptions = {
+  readonly environment?: typeof browserMotionEnvironment;
   readonly canvas: HTMLCanvasElement;
   readonly particles: readonly ShatterParticle[];
   readonly gravity?: number;
@@ -330,8 +335,9 @@ function clipCloneToVisibleViewport(source: HTMLElement, clone: HTMLElement): vo
  * 尝试用 SVG foreignObject 截取元素像素；失败返回 null。
  */
 export async function captureElementImageData(
-  element: HTMLElement,
+  element: HTMLElement, signal?: AbortSignal,
 ): Promise<{ imageData: ImageData; cssWidth: number; cssHeight: number } | null> {
+  if (signal?.aborted || !browserMotionEnvironment.allowed()) return null;
   const rect = element.getBoundingClientRect();
   const cssWidth = Math.max(1, rect.width);
   const cssHeight = Math.max(1, rect.height);
@@ -352,6 +358,7 @@ export async function captureElementImageData(
     clone.style.visibility = 'visible';
     clone.style.opacity = '1';
     clone.classList.remove('is-shattering');
+    clone.removeAttribute('data-peer-shatter-painted');
 
     const cssText = collectDocumentCssText();
     const serialized = new XMLSerializer().serializeToString(clone);
@@ -379,10 +386,21 @@ export async function captureElementImageData(
     image.decoding = 'async';
     // 同域 data URL 不需要 crossOrigin，但显式设置更稳
     await new Promise<void>((resolve, reject) => {
-      image.onload = () => resolve();
-      image.onerror = () => reject(new Error('particle shatter image load failed'));
-      image.src = url;
+      let settled = false;
+      const finish = (error?: Error) => {
+        if (settled) return; settled = true;
+        clearTimeout(timer); signal?.removeEventListener('abort', abort);
+        image.onload = null; image.onerror = null;
+        if (error) { image.src = ''; reject(error); } else resolve();
+      };
+      const abort = () => finish(new Error('capture interrupted'));
+      const timer = setTimeout(() => finish(new Error('capture unavailable')), 2000);
+      image.onload = () => finish();
+      image.onerror = () => finish(new Error('capture unavailable'));
+      signal?.addEventListener('abort', abort, { once: true });
+      if (signal?.aborted) abort(); else image.src = url;
     });
+    if (signal?.aborted || !browserMotionEnvironment.allowed()) return null;
 
     const pixelWidth = Math.max(1, Math.ceil(cssWidth * dpr));
     const pixelHeight = Math.max(1, Math.ceil(cssHeight * dpr));
@@ -408,18 +426,15 @@ export async function sampleElementParticles(
   element: HTMLElement,
   options: SampleParticlesOptions = {},
 ): Promise<ShatterParticle[]> {
-  const rect = element.getBoundingClientRect();
-  const cssWidth = Math.max(1, rect.width);
-  const cssHeight = Math.max(1, rect.height);
-  const dpr = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 2);
-
-  const captured = await captureElementImageData(element);
+  if (options.signal?.aborted || !browserMotionEnvironment.allowed()) return [];
+  const captured = await captureElementImageData(element, options.signal);
+  if (options.signal?.aborted || !browserMotionEnvironment.allowed()) return [];
   if (captured) {
     return sampleParticlesFromImageData(captured.imageData, captured.cssWidth, captured.cssHeight, options);
   }
 
-  const fallback = createFallbackCardImageData(cssWidth, cssHeight, dpr);
-  return sampleParticlesFromImageData(fallback.imageData, cssWidth, cssHeight, options);
+  // A failed capture leaves the real source visible; do not replace it with synthetic pixels.
+  return [];
 }
 
 export function resizeShatterCanvas(
@@ -456,20 +471,24 @@ export function runParticleShatter(options: RunParticleShatterOptions): Particle
     onDone,
   } = options;
 
+  const environment = options.environment ?? browserMotionEnvironment;
+  if (!environment.allowed()) { onDone?.(); return { stop() {} }; }
   const ctx = canvas.getContext('2d');
   const particles = initial.map((p) => ({ ...p }));
   let frameId = 0;
   let stopped = false;
   const start = now();
+  let lifetime: ReturnType<typeof watchVisualMotion> | null = null;
 
   const stop = () => {
     if (stopped) return;
     stopped = true;
-    cancelFrame(frameId);
+    lifetime?.cancel();
+    try { cancelFrame(frameId); } catch { /* Frame API may disappear with the host. */ }
     if (ctx) {
       const width = canvas.clientWidth || canvas.width;
       const height = canvas.clientHeight || canvas.height;
-      ctx.clearRect(0, 0, width, height);
+      try { ctx.clearRect(0, 0, width, height); } catch { /* Detached canvas still completes. */ }
     }
   };
 
@@ -510,15 +529,16 @@ export function runParticleShatter(options: RunParticleShatterOptions): Particle
     }
 
     if (alive > 0 && timestamp - start < maxDurationMs) {
-      frameId = requestFrame(frame);
+      try { frameId = requestFrame(frame); } catch { lifetime?.finish(); }
       return;
     }
 
-    ctx.clearRect(0, 0, width, height);
-    stopped = true;
-    onDone?.();
+    lifetime?.finish();
   };
 
-  frameId = requestFrame(frame);
+  lifetime = watchVisualMotion([], () => { stop(); onDone?.(); }, { durationMs: maxDurationMs, environment });
+  if (!stopped) {
+    try { frameId = requestFrame(frame); } catch { lifetime.finish(); }
+  }
   return { stop };
 }

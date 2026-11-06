@@ -385,6 +385,7 @@ export interface EvidenceIndexRecord {
   readonly capabilityId?: string;
   readonly toolName?: string;
   readonly createdAt: string;
+  readonly interactiveInspection?: import('./interactive-verification.ts').InteractiveInspectionReceipt;
   readonly artifactRefs?: readonly string[];
   /** Redacted, bounded execution-time snapshot of a successful local Tool Result. */
   readonly bodyPreview?: { readonly kind: 'file' | 'command' | 'observation'; readonly text: string; readonly truncated: boolean };
@@ -1088,6 +1089,7 @@ export interface GoalRunnerState {
    * 中断在计划状态重派生时被误判为完成。
    */
   readonly interruption?: {
+    readonly origin?: import('./agent-supervision.ts').InterruptionOrigin;
     readonly source: string;
     readonly reason: string;
     readonly interruptedAt: string;

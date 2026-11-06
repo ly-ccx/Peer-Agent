@@ -14,6 +14,8 @@ const QUICK_CHAT_CHANNELS = new Set([
   'project-agent:update-model-selection',
   'project-agent:list',
   'project-agent:submit-input',
+  'project-agent:read-input-draft',
+  'project-agent:write-input-draft',
   'chat:send',
   'chat:start-task',
   'conversations:append-message',
@@ -41,6 +43,10 @@ const QUICK_CHAT_POPOVER_CHANNELS = new Set([
 
 function allowedWindowRolesFor(channel, rendererToMain) {
   if (!rendererToMain) return Object.freeze([]);
+  if (channel.startsWith('browser-window:')) return ['browser-window:copy', 'browser-window:return-ack'].includes(channel) ? MAIN_WINDOW_ONLY : Object.freeze(['browser-resource']);
+  if (channel.startsWith('resource-edit:')) return Object.freeze(['main', 'resource']);
+  if (channel.startsWith('interactive-results:')) return Object.freeze(['main', 'resource']);
+  if (channel.startsWith('resource-window:')) return ['resource-window:open', 'resource-window:history', 'resource-window:restore', 'resource-window:forget', 'resource-window:return-ack'].includes(channel) ? MAIN_WINDOW_ONLY : Object.freeze(['resource']);
   if (channel === 'settings:get-sync') return ALL_APP_WINDOW_ROLES;
   const roles = ['main'];
   if (
@@ -56,6 +62,64 @@ function allowedWindowRolesFor(channel, rendererToMain) {
 }
 
 const INVOKE_CHANNELS = Object.freeze([
+  'interactive-results:open',
+  'interactive-results:cancel-open',
+  'interactive-results:read-state',
+  'interactive-results:read-versions',
+  'interactive-results:open-version',
+  'interactive-results:acquire',
+  'interactive-results:save',
+  'interactive-results:release',
+  'interactive-results:prepare-followup',
+  'interactive-results:prepare-draft',
+  'resource-presentation:read-layout',
+  'resource-presentation:write-layout',
+  'input-prediction:request',
+  'input-prediction:cancel',
+  'input-prediction:validate',
+  'input-prediction:status',
+  'resource-edit:open',
+  'resource-edit:resume',
+  'resource-edit:cancel-open',
+  'resource-edit:read',
+  'resource-edit:acquire',
+  'resource-edit:save',
+  'resource-edit:discard',
+  'resource-edit:close',
+  'resource-edit:list',
+  'resource-edit:history',
+  'resource-edit:snapshot',
+  'resource-edit:cleanup',
+  'resource-edit:archive',
+  'resource-edit:clear-delivery',
+  'resource-edit:submit',
+  'resource-edit:continue-submission',
+  'resource-edit:operation-status',
+  'resource-edit:reconcile-submission',
+  'resource-edit:cancel-submission',
+  'resource-edit:decide-submission-permission',
+  'resource-edit:execution',
+  'resource-edit:submission',
+  'resource-feedback:claim',
+  'resource-feedback:ack',
+  'resource-window:feedback',
+  'browser-window:copy',
+  'browser-window:bootstrap',
+  'browser-window:action',
+  'browser-window:viewport',
+  'browser-window:return-ack',
+  'resource-window:open',
+  'resource-window:history',
+  'resource-window:restore',
+  'resource-window:forget',
+  'resource-window:return-ack',
+  'resource-window:checkpoint-ack',
+  'resource-window:bootstrap',
+  'resource-window:ready',
+  'resource-window:read',
+  'resource-window:navigation',
+  'resource-window:return',
+  'resource-window:close',
   'project-agent:read-access-policy',
   'project-agent:update-access-policy',
   'about:open-link',
@@ -251,7 +315,10 @@ const INVOKE_CHANNELS = Object.freeze([
   'project-agent:retry',
   'project-agent:stop-response',
   'project-agent:takeover-host',
+  'project-agent:recovery',
   'project-agent:submit-input',
+  'project-agent:read-input-draft',
+  'project-agent:write-input-draft',
   'project-agent:update-model-selection',
   'project-agent:update-profile',
   'project-objectives:list',
@@ -346,6 +413,8 @@ const INVOKE_CHANNELS = Object.freeze([
 ]);
 
 const SEND_SYNC_CHANNELS = Object.freeze([
+  'browser-window:appearance',
+  'resource-window:appearance',
   'browser:hide-fda-drag-float-sync',
   'browser:start-app-drag',
   'settings:get-sync',
@@ -356,6 +425,14 @@ const SEND_CHANNELS = Object.freeze([
 ]);
 
 const EVENT_CHANNELS = Object.freeze([
+  'resource-edit:changed',
+  'resource-feedback:notice',
+  'resource-feedback:prepare',
+  'browser-window:state',
+  'browser-window:return-target',
+  'resource-window:return-target',
+  'resource-window:checkpoint-request',
+  'resource-window:close-blocked',
   'appearance:changed',
   'automations:changed',
   'automations:open-run',

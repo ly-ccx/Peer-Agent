@@ -1,3 +1,4 @@
+import { BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { BOT_AVATAR_COLORS } from '@peer-agent/protocol';
@@ -12,14 +13,14 @@ export async function checkBotMessageColors({ page, until, report, captureDirect
   }), workspaceId);
   const reply = page.locator('#bot-msg-rc-message-9999');
   const changeColor = async color => {
-    await page.locator('.bot-profile').click();
+    await page.getByRole('button', { name: '机器人设置', exact: true }).click();
     await page.getByRole('tab', { name: '设置', exact: true }).click();
     const swatch = page.locator('.bot-avatar-color');
     const index = BOT_AVATAR_COLORS.indexOf(color);
     assert.ok(index >= 0);
     await swatch.nth(index).click();
     await until(() => swatch.nth(index).getAttribute('aria-pressed'), value => value === 'true');
-    await page.getByRole('button', { name: '关闭', exact: true }).click();
+    await page.locator(BOT_DETAIL_CLOSE).click();
     await until(() => page.locator('.bot-convo').evaluate(node => node.style.getPropertyValue('--bot-message-accent')), value => value === color);
     await reply.scrollIntoViewIfNeeded();
   };
@@ -83,9 +84,9 @@ export async function checkBotMessageColors({ page, until, report, captureDirect
   } finally {
     await page.locator(`#bot-row-${workspaceId}`).click();
     await changeColor(original.avatar.color);
-    await page.locator('.bot-profile').click();
+    await page.getByRole('button', { name: '机器人设置', exact: true }).click();
     await page.getByRole('tab', { name: '概况', exact: true }).click();
-    await page.getByRole('button', { name: '关闭', exact: true }).click();
+    await page.locator(BOT_DETAIL_CLOSE).click();
     await page.evaluate(original => {
       for (const key of ['theme', 'palette']) if (original[key] === undefined) delete document.documentElement.dataset[key]; else document.documentElement.dataset[key] = original[key];
     }, original);

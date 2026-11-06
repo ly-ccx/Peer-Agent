@@ -1,5 +1,6 @@
 import type { TranslationKey } from '@peer-agent/i18n';
-import { buildModelMenuGroups, modelMenuChannelName } from '@peer-agent/protocol';
+import { buildModelMenuGroups, modelMenuChannelName, modelReasoningLevels,
+  type ModelReasoningEffort, type ModelTierBinding, type RoleSetting } from '@peer-agent/protocol';
 
 export const MODEL_TIERS = ['strong', 'fast', 'economy', 'vision'] as const;
 export const MODEL_ROLES = [
@@ -11,6 +12,7 @@ export const MODEL_ROLES = [
   'memory_curator',
   'objective_probe',
   'compactor',
+  'input_predictor',
 ] as const;
 
 export type ModelTierName = (typeof MODEL_TIERS)[number];
@@ -28,6 +30,32 @@ export interface RoutingModelOption {
   readonly supportsTools: boolean;
   readonly supportsStructured: boolean;
   readonly contextTokens: number;
+  readonly reasoningEffortLevels?: readonly ModelReasoningEffort[];
+  readonly defaultReasoningEffort?: ModelReasoningEffort;
+}
+
+/** A role override must be usable by every eligible candidate without changing its routing mode. */
+export function routingReasoningLevels(setting: RoleSetting, tiers: Partial<Record<ModelTierName, ModelTierBinding>>,
+  options: readonly RoutingModelOption[], role: ModelRoleName): readonly ModelReasoningEffort[] {
+  const candidates = routingParameterCandidates(setting, tiers, options, { kind: 'role', role });
+  if (!candidates.length) return [];
+  return modelReasoningLevels(candidates[0]!).filter(level => candidates.every(option => modelReasoningLevels(option).includes(level)));
+}
+
+export function routingParameterCandidates(setting: RoleSetting, tiers: Partial<Record<ModelTierName, ModelTierBinding>>,
+  options: readonly RoutingModelOption[], target: Parameters<typeof optionRejectReason>[1]): readonly RoutingModelOption[] {
+  const binding = setting.mode === 'tier' ? tiers[setting.tier] : undefined;
+  const ids = setting.mode === 'fixed' ? [setting.modelProviderId] : setting.mode === 'auto' ? setting.pool
+    : binding ? [binding.primary, ...(binding.fallbacks ?? [])] : [];
+  return ids.flatMap(id => {
+    const option = options.find(item => item.id === id);
+    return option && !optionRejectReason(option, target) ? [option] : [];
+  });
+}
+
+export function setRoutingReasoning(setting: RoleSetting, effort?: ModelReasoningEffort | null): RoleSetting {
+  const { reasoningEffort: _previous, ...route } = setting;
+  return { ...route, ...(effort !== undefined ? { reasoningEffort: effort } : {}) };
 }
 
 export function routingMenuGroups(
@@ -67,7 +95,7 @@ const EXPLORER_MIN_CONTEXT = 8_000;
 const ESSENTIAL_ROLES = new Set<ModelRoleName>(['project_agent', 'session_worker']);
 
 export function isRoutingReadOnly(providerCount: number): boolean {
-  return providerCount <= 1;
+  return providerCount === 0;
 }
 
 export function isEssentialRole(role: string): boolean {
@@ -90,6 +118,7 @@ export function optionRejectReason(
     case 'memory_curator':
       return option.supportsStructured === true ? null : 'structured';
     case 'compactor':
+    case 'input_predictor':
       return null;
     default:
       return option.supportsTools === true ? null : 'tools';
@@ -146,6 +175,7 @@ export function roleTranslationKey(role: string): TranslationKey | null {
     case 'memory_curator': return 'modelRouting.role.memory_curator';
     case 'objective_probe': return 'modelRouting.role.objective_probe';
     case 'compactor': return 'modelRouting.role.compactor';
+    case 'input_predictor': return 'modelRouting.role.input_predictor';
     default: return null;
   }
 }

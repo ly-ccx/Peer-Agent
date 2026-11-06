@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { createConversationStore } from '@peer-agent/conversation-store';
 import { createProjectRegistry, createBotDirectory, createInputQueue, createProjectInbox, createProjectAgentHost,
-  createMemoryStore, createMemoryProvider, createGoalPlanStore, createApprovalStore } from '@peer-agent/runtime-node';
+  createMemoryStore, createMemoryProvider, createGoalPlanStore, createApprovalStore, createBotSummaryHistory, createBotSearchHistory } from '@peer-agent/runtime-node';
 import { createProjectAgentApplicationService } from '../electron/main/project-agent/project-agent-application-service.mjs';
 import { createClassicGoalProjection } from '../electron/main/project-agent/classic-goal-projection.mjs';
 import { seedBotShellHome, RC_SCALE } from './seed-bot-shell-home.mjs';
@@ -24,19 +24,40 @@ export function metric(name, samples, budget = PERF_BUDGETS[name]) {
   return { samples, median: p50, budget, pass: p50 < budget };
 }
 
+export async function measureOperation(fn, now = () => performance.now()) {
+  const start = now();
+  const value = fn();
+  if (value != null && typeof value.then === 'function') {
+    const settled = await value;
+    return { value: settled, elapsed: now() - start };
+  }
+  return { value, elapsed: now() - start };
+}
+
 function readers(home, fixture) {
   const conversations = createConversationStore({ storeDir: path.join(home, 'conversations') });
   const registry = createProjectRegistry({ filePath: path.join(home, 'projects/registry.json') });
   const memories = createMemoryStore({ rootDir: home });
   const approvals = createApprovalStore({ rootDir: path.join(home, 'project-runtime') });
-  const readMessages = id => conversations.getPersistedConversationHistory(id)?.messages || [];
+  // Match Desktop's canonical read projection, including its bounded cache and
+  // file-version invalidation. Re-reading the complete global index per bot
+  // measures a legacy adapter rather than the current host composition.
+  const history = conversations.createHistoryProjection(value => value.messages,
+    { immutableInput: true, maxEntries: 8, maxBytes: 32 * 1024 * 1024 });
+  const readMessages = id => history(id) || [];
+  const readMessagesBatch = ids => new Map([...conversations.getPersistedConversationHistories(ids)]
+    .map(([id, value]) => [id, value?.messages || []]));
+  const summaryHistory = createBotSummaryHistory(conversations);
+  const searchHistory = createBotSearchHistory(conversations);
   const classicGoals = createClassicGoalProjection({ registry, conversationStore: conversations,
     goalPlanStore: createGoalPlanStore({ storeDir: path.join(home, 'goal-plans') }) });
   const directory = createBotDirectory({ rootDir: home, registry, readMessages,
     listApprovals: workspaceId => approvals.list({ workspaceId }), readApprovalsBatch: ids => approvals.listByWorkspaceIds(ids),
-    readMessagesBatch: ids => new Map([...conversations.getPersistedConversationHistories(ids)].map(([id, history]) => [id, history?.messages || []])),
+    readMessagesBatch,
+    readSummaryMessages: summaryHistory,
+    readSummaryMessagesBatch: ids => new Map(ids.map(id => [id, summaryHistory(id) || []])),
     listClassicGoals: classicGoals.one, readClassicGoalsBatch: classicGoals.batch });
-  return { conversations, registry, memories, readMessages, directory };
+  return { conversations, registry, memories, readMessages, readMessagesBatch, searchHistory, directory };
 }
 
 async function idleChild(home) {
@@ -46,7 +67,7 @@ async function idleChild(home) {
   let modelCalls = 0;
   global.gc(); const before = process.memoryUsage();
   const ids = fixture.bots.map(b => b.workspaceId), byId = new Map(fixture.bots.map(b => [b.workspaceId, b.conversationId]));
-  const host = createProjectAgentHost({ rootDir: path.join(home, 'project-runtime'), listWorkspaceIds: () => ids, holdsLease: () => true,
+  const host = createProjectAgentHost({ rootDir: path.join(home, 'project-runtime'), listWorkspaceIds: () => ids, holdsLease: () => true, readLeaseEpoch: () => 'isolated-perf-owner',
     resolveConversationId: id => byId.get(id), hasMessage: (id, messageId) => r.readMessages(id).some(m => m.id === messageId),
     appendMessage: (id,m) => r.conversations.appendMessage(id,m), readMessages: r.readMessages,
     readSettings: () => ({ projectAgent: { shell: 'bots', digest: false } }),
@@ -54,7 +75,7 @@ async function idleChild(home) {
   const start = performance.now();
   try {
     const initialized = await host.sync(ids);
-    assert.equal(initialized.workspaces.length, ids.length);
+    assert.equal(initialized.workspaces.length, ids.length, JSON.stringify(initialized.outcomes.filter(row => !row.ok)));
     assert.equal(modelCalls, 0);
     global.gc(); const after = process.memoryUsage();
     return { coldInbox: performance.now() - start, heapBytesPerBot: Math.max(0, after.heapUsed-before.heapUsed)/ids.length,
@@ -70,14 +91,15 @@ export async function runProjectAgentPerf({ output, localOnly = false, realModel
     sourceHead: execFileSync('git',['rev-parse','HEAD'],{cwd:fileURLToPath(new URL('../../..',import.meta.url)),encoding:'utf8'}).trim(),
     sourceDirty: Boolean(execFileSync('git',['status','--porcelain'],{cwd:fileURLToPath(new URL('../../..',import.meta.url)),encoding:'utf8'}).trim()),
     platform: process.platform, arch: process.arch, node: process.versions.node, metrics: {}, idle: [], scope: {
+      timing: 'Synchronous APIs end at return; asynchronous APIs end at settlement. Mixed cold-list/search/input/memory rounds remain; no in-operation GC cost is excluded.',
       list: 'Production directory and application service projection of all 200 bots; fresh reader each sample',
-      search: 'Production service includes full message/memory corpus; first rebuild separately recorded',
+      search: 'Production service with Desktop versioned public search projection and full message/memory corpus; first rebuild separately recorded',
       received: 'Application receipt includes queue durability and synchronous fixture wake/consume; UI rendering measured by Electron smoke',
       consume: 'Online lease-owning production queue to canonical conversation and onCommitted wake; no model latency',
       memory: 'Warm production capability search, scope filtering, use accounting and Evidence envelope; rebuild separately recorded',
-      coldInbox: 'Fresh independent process: real host recovery and idle sync of 200 bots after 100000 persisted/consumed events',
+      coldInbox: 'Fresh independent process: real host recovery with Desktop versioned history projection and idle sync of 200 bots after 100000 persisted/consumed events',
       idle: 'Five fresh processes, aggregate incremental RSS per initialized bot; heap and zero model calls also reported' } };
-  const time = async fn => { const start = performance.now(); const value = await fn(); return { value, elapsed: performance.now()-start }; };
+  const time = measureOperation;
   try {
     const fixture = seedBotShellHome({ home });
     const r = readers(home, fixture), first = fixture.bots[0];
@@ -90,17 +112,26 @@ export async function runProjectAgentPerf({ output, localOnly = false, realModel
     const eventLines = readFileSync(path.join(home,'project-runtime',first.workspaceId,'inbox.jsonl'),'utf8').trim().split('\n');
     assert.equal(eventLines.length, RC_SCALE.inboxEvents);
     assert.equal(JSON.parse(eventLines.at(-1)).seq, RC_SCALE.inboxEvents);
+    // Measure the one-time schema/index preparation separately. The five cold
+    // processes below reopen the same already-prepared production stores.
+    const bootstrap = spawnSync(process.execPath, ['--expose-gc', fileURLToPath(import.meta.url), '--idle-child', home], {encoding:'utf8',timeout:180000});
+    assert.equal(bootstrap.status, 0, bootstrap.error?.message || bootstrap.stderr);
+    report.initialStoragePreparation = JSON.parse(bootstrap.stdout.trim().split('\n').at(-1));
     for (let i=0;i<5;i++) {
       const child = spawnSync(process.execPath, ['--expose-gc', fileURLToPath(import.meta.url), '--idle-child', home], {encoding:'utf8',timeout:60000});
-      assert.equal(child.status,0,child.stderr);
+      assert.equal(child.status,0,child.error?.message || child.stderr);
       const fact=JSON.parse(child.stdout.trim().split('\n').at(-1)); report.idle.push(fact);
       samples.coldInbox.push(fact.coldInbox); samples.idleBytesPerBot.push(fact.rssBytesPerBot);
     }
     const queue = createInputQueue({ rootDir:path.join(home,'project-runtime'), holdsLease:()=>true,
       resolveConversationId:()=>first.conversationId, hasMessage:(id,m)=>r.readMessages(id).some(row=>row.id===m),
       appendMessage:(id,m)=>r.conversations.appendMessage(id,m) });
-    const corpus = catalog => ({ bots:catalog ?? r.directory.list(), messages:fixture.bots.flatMap(b=>r.readMessages(b.conversationId).map(message=>({workspaceId:b.workspaceId,message}))),
-      memories:r.memories.list({status:'active'}) });
+    const corpus = catalog => {
+      const histories = new Map(fixture.bots.map(bot => [bot.conversationId, r.searchHistory(bot.conversationId) || []]));
+      return { bots:catalog ?? r.directory.list(),
+        messages:fixture.bots.flatMap(bot => histories.get(bot.conversationId).map(message => ({workspaceId:bot.workspaceId,message}))),
+        memories:r.memories.list({status:'active'}) };
+    };
     const app = createProjectAgentApplicationService({enabled:()=>true,directory:r.directory,inputQueue:queue,wake:id=>queue.consume(id),
       readSearchCorpus:corpus,corpusStamp:()=>JSON.stringify(r.conversations.listConversations().map(c=>[c.id,c.contentRevision]))+'|'+r.memories.getVersion()});
     const rebuild = await time(()=>app.search({query:'unique-needle'}));

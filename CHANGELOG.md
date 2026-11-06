@@ -2,6 +2,188 @@
 
 All notable changes to Peer Agent are tracked here.
 
+## 0.1.0-rc.37 - 2026-11-06
+
+### 新功能
+
+- `peer update` 安装当前通道的最新版本，`peer update --check` 只报告。新增 `peer sessions`、`peer models`、`peer doctor`、`peer completions` 与 `peer export`；删除会话同时移除其目标计划，非交互删除必须带 `--yes`。
+
+### 修复与改进
+
+- Desktop P0–P2：经典会话发送与打开不再经 IPC 搬运全文历史；列表使用只读物化预览，经典与 Bot 共用 Session Service；流式块约每 40ms 提交，已闭合块保持不变，贴底跟随高度变化。
+- 用户锚点按真实用户输入解析。可纠正的锚点错误在成功重试后不再挂起，真正的派发失败仍保留原责任。
+- 实现前先阅读 ADR；书面边界变化时先更新 ADR。TUI 机器人列表显示光标、名称、计数和一行预览，去掉常驻 F2 提示；草稿恢复失败时输入框仍可编辑并占满整行。这是现有 Bot TUI 壳上的呈现，不是 P3。
+- 同步双语用户文档、发布说明与站点更新日志。延续联合协调格式 9，更新前完整备份。正式版仍为 0.0.18。本版不宣称真实 Electron 手感、真实模型质量，或 P3、内网 Gateway、远程配对已经交付。
+
+### What's new (English)
+
+- `peer update` installs the newest release on the installed channel, and `peer update --check` only reports it. Add `peer sessions`, `peer models`, `peer doctor`, `peer completions`, and `peer export`. Deleting a session also removes its goal plans, and a non-interactive delete requires `--yes`.
+
+### Fixes and improvements (English)
+
+- Desktop P0–P2: classic send and open no longer ship full history over IPC; lists use a read-only materialized preview shared by classic and Bot through Session Service; streaming blocks commit about every 40ms, closed blocks stay unchanged, and stick-to-bottom follows height.
+- Resolve user anchors against real user input. A corrected anchor error does not stay pending after a successful retry, while a real dispatch failure keeps its responsibility.
+- Read the ADR before implementation and update it first when a written boundary moves. The TUI bot list shows a caret, name, counts, and a one-line preview, and drops standing F2 hints. The composer stays editable and full-width if draft recovery fails. This is presentation on the existing bot TUI shell, not P3.
+- Update bilingual documentation, release notes, and the website changelog. Retain coordination format 9 and a complete pre-update backup. Stable remains 0.0.18. This release does not establish a real Electron feel, real-model quality, or delivery of P3, an intranet Gateway, or remote pairing.
+
+## 0.1.0-rc.36 - 2026-11-05
+
+### 新功能
+
+- 加入默认关闭的 OpenUI 交互结果预览，保留固定版本和选定条件。Desktop 提供交互视图，CLI 提供摘要。符合条件的 Linux x64/ext4 受管部署可在维护窗口清理。
+
+### 修复与改进
+
+- 统一父协调处置和执行所有权事实，接通真实资源等待的查询、准入、事件与冷恢复闭环；静默等待保留无进展保护。
+- 停止回复、工作控制、旧事件托管和技术修复分清责任；现有接管交叉状态通过原停稳回执恢复，不重放未知工具。
+- 任务列表和详情首层直接打开完整会话，其他资料由独立详情按钮展开；主 Bot 排查规则核对版本和搜索范围。
+- 持久化回复停止，重开补回继续入口，原任务从保存的结果续跑。TUI 汇集绑定选择与提示，恢复键入焦点，显示新发消息的时间。
+- 同步双语用户文档、发布说明与站点更新日志。保持协调格式9和未知效果保护。
+
+### What's new (English)
+
+- Add opt-in OpenUI interactive results with fixed versions and saved conditions. Desktop renders the interactive view and the CLI reads the summary. Eligible managed Linux x64/ext4 deployments can run cleanup during maintenance.
+
+### Fixes and improvements (English)
+
+- Unify parent disposition and execution facts; connect real resource waits through query, admission, events and cold recovery while preserving silent-wait progress guards.
+- Separate reply stops, work controls, durable event custody and technical repair. Recover retained takeover interleavings through the original stop proof without replaying unknown tools.
+- Keep complete conversations directly reachable in task lists and details; disclose secondary information separately and improve main-Bot version/search investigation rules.
+- Persist reply stops and restore the Continue action after reopening. Continue from saved results on the original work. TUI groups binding choices, restores typing focus and shows timestamps on newly sent messages.
+- Update bilingual documentation, release notes and the website changelog. Retain coordination format 9 and unknown-effect protection.
+
+## 0.1.0-rc.35 - 2026-11-02
+
+### 修复与恢复
+
+- 核对成功派发的登记 Evidence、完整调用结果与协调操作，修复父执行已退役后遗留资源记录导致的排队自阻塞。
+- 原任务经真实停止屏障结清自身保护后恢复正常调度；保留身份、历史、预算与其他未知调用，不重放工具。
+- 活跃父协调调用不再冒充子执行的未知效果；Desktop 与 CLI/TUI 共用恢复路径。
+- 批量取消按任务保存独立停止回执；任务回复提供原任务入口与回复时状态，防止部分取消被误报为全部成功。
+
+### Fixes and recovery (English)
+
+- Reconcile registered delegation Evidence, complete results and completed coordination operations to recover queued self-holds left after the parent attempt retired.
+- Restore normal scheduling of the original task through the existing stop barrier; retain identity, history, budget and unrelated unknown effects without replaying tools.
+- Keep live parent coordination calls out of child unknown-execution protection across Desktop and CLI/TUI.
+- Give batch cancellation separate per-task receipts and expose original task references with their At reply state instead of claiming partial cancellation stopped all tasks.
+
+## 0.1.0-rc.34 - 2026-11-02
+
+### 新功能、修复与优化
+
+- 任务详情默认只保留当前进度、状态与完整任务入口，其余资料和操作按需展开。
+- ChatGPT 订阅目录新增 GPT-6.1 Terra，补齐独立能力、推理与计价元数据，保留现有默认选择。
+- 修复旧取消/接管停止确认、诊断期限后的实际收尾与资源回执幂等恢复，保留活跃执行和未知结果保护。
+- 主 Bot 输入框复用 Frost 表面与阴影，增强悬浮层次而不改变输入和草稿行为。
+
+### Improvements (English)
+
+- Default task details to status, short progress and the full-task entry; disclose all remaining information and controls on demand.
+- Add GPT-6.1 Terra to the ChatGPT subscription catalog with independent capabilities, reasoning and pricing metadata; preserve defaults.
+- Repair audited legacy stops, late drain completion and idempotent resource settlement while protecting live execution and unknown outcomes.
+- Reuse Frost composer surface and shadow tokens for clearer floating depth without changing input or draft behavior.
+
+## 0.1.0-rc.33 - 2026-11-01
+
+### 新功能、修复与优化
+
+- 加入任务、子 Agent、注意力与产出资料工作面板；保留主对话、草稿、独立第四栏和回复引用，整理文件阅读层次。
+- 智能输入建议使用一个开关与专用模型，未选模型不请求，并在选择旁说明对话与草稿外发；各入口共用模型选择器。
+- 整合原目标持续协调、当前覆盖核验与实际交付后的唯一关闭；停止屏障和设备资源移交共用正式接口，未知结果继续受保护。
+- 保留用户确认顺畅的长会话输入修复，修复旧任务缺标识查询、资源账本初始化顺序，以及窗口缩窄时面板留位导致的阅读位置和划词引用丢失。
+- 发布的 Desktop 和 CLI macOS 构建迁移至受支持的 macOS 15 runner，保留 arm64、签名与公证门禁；RC32 因旧 runner 停用未生成 Release。
+- 引入联合协调格式 9；升级前完整备份并保持各入口版本匹配。更新双语 README、使用文档、落地页与网站更新日志。
+
+### Improvements (English)
+
+- Add a work panel for tasks, child Agents, attention and materials; preserve the conversation, draft, fourth pane and quoting, and clarify document reading controls.
+- Use one suggestion switch and a dedicated model with adjacent conversation/draft disclosure; require a selected model before requests and share model controls across entry points.
+- Continue the original goal with current verification and actual delivery before unique root closure; unify stop barriers and resource handoff while protecting unknown outcomes.
+- Retain the user-confirmed long-conversation typing fix; repair missing legacy IDs, resource-ledger initialization ordering, and reading/selection disruption from panel reservation during narrowing.
+- Move macOS Desktop and CLI releases to supported macOS 15 runners while preserving arm64, signing and notarization gates. RC32 produced no Release after the old runner was unavailable.
+- Introduce combined coordination format 9, requiring complete backups and matching executors. Update bilingual READMEs, user docs, landing copy and website changelog.
+
+## 0.1.0-rc.31 - 2026-10-31
+
+### 修复与优化
+
+- 回复详情和引用在悬停或焦点时出现，并与气泡正文对齐；生成中只保留状态。读取对话和恢复草稿使用同一套弱化状态字。
+- 回复进行中锁定模型选择。保存草稿不再投影整份机器人历史。
+- 打不开的引用标明项目根；PDF 与 Office 用系统应用打开。收起机器人列表时标题避开红绿灯。
+
+### Improvements (English)
+
+- Show reply details and quote on hover or focus, aligned with the bubble text, and keep only live status while a reply is generating. Use the same quiet status for loading a conversation and restoring a draft.
+- Lock model selection during a reply. Stop projecting full bot history on each draft save.
+- Name the project root when a citation cannot be opened, open PDF and Office files in the system app, and shift the title clear of the traffic lights when the bot list is hidden.
+
+## 0.1.0-rc.30 - 2026-10-30
+
+### 修复与优化
+
+- 网页、文件、变更与子 Agent 会话进入独立第四栏，机器人资料和设置独立开关。
+- Bot 回复提供直接引用入口并保留原草稿；隔离逐键草稿更新，移除同步高度测量。
+- 修复暂停期空任务 ID 的 SQLite 异常及恢复分段后未释放的试运行标记；下载进度圈保持正圆。
+- 更新双语 README、使用说明与网站更新日志。
+
+### Improvements (English)
+
+- Separate the fourth pane for web pages, files, diffs and child conversations from Bot settings.
+- Add direct reply quoting with draft preservation and isolate draft updates from conversation rendering.
+- Fix missing-ID SQLite failures during cooldown and stuck recovery admission after yielded progress; keep the download ring circular.
+- Update bilingual READMEs, usage documentation and the website changelog.
+
+## 0.1.0-rc.29 - 2026-10-29
+
+### 修复与优化
+
+- 主 Bot 持续承接子任务的问题、技术中断、核验与返修；未签收结果可在原任务内返修，未回答的问题不因上下文变长而丢失。
+- 可取消已交回未签收的旧任务；撤回委托后不再占用当前任务，历史未知结果如实保留。
+- 中断任务保留恢复责任与真实失败原因；修复超长事件编号卡住历史恢复，恢复入口按需显示并支持确认后全部结束旧执行。
+- 子 Agent 活动行原位更新、引用预览分两层、任务流程只读查看、授权卡终态回执与按需加载；官网、使用文档与双语 README 围绕项目 Bot 重写。
+
+### Improvements (English)
+
+- Keep child questions, interruptions, verification and repair with the main Bot; repair unaccepted results within the original task and keep unanswered questions as context grows.
+- Cancel returned but unaccepted tasks; withdrawn delegations leave Current Tasks while unknown historical outcomes remain recorded.
+- Preserve recovery ownership and real failure causes; fix oversized event IDs blocking history recovery, show recovery only when needed and end all earlier executions after confirmation.
+- Update child Agent rows in place, add two-line quote previews, read-only task-flow viewing, terminal authorization receipts and on-demand loading; rewrite the website, user docs and bilingual READMEs around project Bots.
+
+## 0.1.0-rc.28 - 2026-10-28
+
+### 修复与优化
+
+- 修复子任务核验停滞，沿原任务补齐有界验收修复，保留历史与成果。
+- 新增用户可操作的实例交接、只读检查、保全恢复和安全续跑；原输入、已完成操作及未知结果均不重放。
+- 隔离历史任务、回复、交接和子任务，支持保留工作树与报告后结束旧执行；补齐中断重入、停止超时和防止旁路重启。
+- 改善证据卡片排版、版本展示和更新入口，同步中英文文档及生成式网站更新日志。
+
+### Improvements (English)
+
+- Recover stalled child verification through bounded repair of the original task.
+- Add user-operated handoff, source-bound history preservation and safe continuation without replaying historical inputs or completed/unknown operations.
+- Isolate uncertain work, deliveries and handoffs; preserve worktrees and reports when ending earlier execution, with resumable maintenance and enforced stop boundaries.
+- Improve evidence cards and update controls, with bilingual release and website documentation.
+
+## 0.1.0-rc.27 - 2026-10-27
+
+### 新功能与优化
+
+- 完成右侧资源工作区：网页、文档/代码、目录、Diff、真实 Git 历史及按模式阅读恢复；来源范围、文件变化和历史缺失明确表达。
+- 新增有界原生独立窗口与返回、统一 Bot/任务/回复详情、格式降级、交付关联、固定来源选区反馈、本机草稿与三方比较。
+- 文档提交沿现有本地授权与 Evidence 链处理固定稿，授权后核对版本；冲突保留输入，未知结果只核对不重写。
+- 优化提供商首个模型选择、稳定浮层与思考强度粒子，修正草稿/模型辅助文案、暗色选中及面板间拖拽反馈。
+- 改善服务商、权限菜单、档位参数、回复等待和历史任务图标；修复嵌套工作区读取身份。
+- 同步中英文发布说明、README、使用文档和生成式网站更新日志。
+
+### Improvements (English)
+
+- Complete scoped side-by-side reading, historical revisions, native windows, details and resource adapters.
+- Add source-bound feedback, recoverable local drafts and governed conditional submission without replaying unknown writes.
+- Improve model selection/motion, dark selection, draft presentation, task feedback and nested-root identity.
+- Update bilingual release documentation and the generated website changelog.
+
 ## 0.1.0-rc.26 - 2026-10-23
 
 ### 修复与优化

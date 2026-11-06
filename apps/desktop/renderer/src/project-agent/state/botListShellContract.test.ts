@@ -46,7 +46,7 @@ test('开关关闭时 App 仍走原来的主布局，机器人壳只在打开时
 
 test('Sidebar.tsx 行数保持当前壳层', () => {
   const sidebar = readFileSync(sidebarUrl, 'utf8');
-  assert.equal(lineCount(sidebar), 1152);
+  assert.ok(lineCount(sidebar) <= 1141, 'shared surfaces must keep the shell below its reduced module budget');
 });
 
 test('应用设置菜单可以打开历史对话', () => {

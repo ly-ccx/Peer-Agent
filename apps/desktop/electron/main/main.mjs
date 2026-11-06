@@ -1,17 +1,27 @@
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain as electronIpcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, screen, session, shell, systemPreferences, Tray, webContents } from 'electron';
+import { createDesktopInputPrediction } from './input-prediction/desktop-service.mjs';
+import { createInputPredictionIpcRegistrations } from './ipc/register-input-prediction-ipc.mjs';
+import { createResourceEditApplicationService } from './resource-edit-application-service.mjs';
+import { createResourceEditSources } from './resource-edit-sources.mjs';
+import { createResourceEditSubmissionHost } from './resource-edit-submission-host.mjs';
+import { createResourceEditIpcRegistrations } from './ipc/register-resource-edit-ipc.mjs';
+import { bindBrowserSelectionFeedback } from './browser-selection-feedback.mjs';
+import { resolveResourceFeedbackRecipient } from './resource-feedback-recipient.mjs';
+import { createResourceFeedbackPreparation } from './resource-feedback-preparation.mjs';
+import { createResourceFeedbackIpcRegistrations } from './ipc/register-resource-feedback-ipc.mjs';
+import { createBrowserWindowController } from './browser-window-controller.mjs';
+import { createBrowserWindowIpcRegistrations } from './ipc/register-browser-window-ipc.mjs';
+import { app, net, BrowserWindow, WebContentsView, clipboard, dialog, globalShortcut, ipcMain as electronIpcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, screen, session, shell, systemPreferences, Tray, webContents } from 'electron';
 import { randomUUID } from 'node:crypto';
-import http from 'node:http';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, watch as fsWatch, writeFileSync } from 'node:fs';
+import { createMcpOAuthCallback } from './mcp-oauth-callback.mjs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, watch as fsWatch, writeFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import os from 'node:os';
-
 /** 内嵌 Browser 持久分区（与 renderer BrowserView 一致）。 */
 const PEER_BROWSER_PARTITION = 'persist:peer-browser';
-
 const execFileAsync = promisify(execFile);
 import { createAgentTurnExecutor } from './agent-host/agent-turn-executor.mjs';
 import { buildGoalRunnerMessage, createDesktopGoalRunnerHost } from './agent-host/goal-runner-host.mjs';
@@ -34,6 +44,7 @@ import { createRemoteAccessController } from './runtime-gateway/remote-access-co
 import { createBrowserPanelRevealCoordinator } from './runtime-gateway/browser-panel-reveal-coordinator.mjs';
 import {
   getActiveBrowserEntry,
+  getBrowserEntry,
   registerBrowserWebContents,
   unregisterBrowserWebContents,
   getActiveWebContentsId,
@@ -56,7 +67,11 @@ import { createPasswordVaultStore } from './password-vault-store.mjs';
 import { buildAppMenu } from './app-menu.mjs';
 import { createLocalShellProvider } from './runtime-gateway/local-shell-provider.mjs';
 import { getApplicationShellTasks, disposeApplicationShellTasks } from './runtime-gateway/application-shell-tasks.mjs';
-import { getApplicationShellSessions, disposeApplicationShellConversation, disposeApplicationShellSessions } from './runtime-gateway/application-shell-sessions.mjs';
+import {
+  getApplicationShellSessions,
+  disposeApplicationShellConversation,
+  disposeApplicationShellSessions,
+} from './runtime-gateway/application-shell-sessions.mjs';
 import { createLocalSkillProvider } from './runtime-gateway/local-skill-provider.mjs';
 import { createSkillStore } from './skill-store.mjs';
 import { createSkillHubApiClient } from './skillhub-api-client.mjs';
@@ -97,28 +112,41 @@ import { buildRuntimeTools, createLlmChatService } from './llm-chat-service.mjs'
 import {
   createAutomationStore,
   createGoalPlanStore,
-  resolveWorkspaceHead,
-  decideIntakeConvergence,
   exportBundle,
   getDataHome,
   goalPlanIsSelfDriven,
   importBundle,
   migrateFromLegacy,
-  removeConversationToolArtifacts,
+  applyStartupApprovalRecovery,
+  createApprovalStore,
+  createHostLease,
+  listBotWorkspaceIds
+} from "@peer-agent/runtime-node/storage";
+import {
+  resolveWorkspaceHead,
+  decideIntakeConvergence,
   isStalledAcceptedGoalRunner,
   serializeAcceptedGoalRunnerHandoff,
   shouldAutoStartAcceptedGoalRunner,
   shouldAutoStartAcceptedGoalRunnerFromChange,
   shouldRearmFailedGoalPlanFromChange,
   shouldResumeGoalRunnerAfterUserDecision,
-  shouldRecoverAcceptedGoalRunnerOnConversationOpen,
-  applyStartupApprovalRecovery, createApprovalStore, createHostLease, listBotWorkspaceIds,
-} from '@peer-agent/runtime-node';
+  shouldRecoverAcceptedGoalRunnerOnConversationOpen
+} from "@peer-agent/runtime-node/project-agent";
+import {
+  removeConversationToolArtifacts
+} from "@peer-agent/runtime-node/providers";
+import {
+  createResourceEditStorage,
+  createBotProfileStore,
+  createBotAccessPolicyAuthority
+} from "@peer-agent/runtime-node/project-agent";
 import {
   createContextAccountingCompactionPipeline,
   createRestoredObservedContextAccountingSnapshot,
   createUnknownContextAccountingSnapshot,
   projectConversationHistory,
+  projectConversationHistoryYielding,
   reprojectContextAccountingWindow,
 } from '@peer-agent/runtime-core';
 import { contextAccountingModelKey } from '@peer-agent/protocol';
@@ -129,7 +157,8 @@ import {
 import { buildSystemContext, renderSystemContext } from './llm-prompts.mjs';
 import { createContextBaselineRecorder } from './prompt/context-baseline-recorder.mjs';
 import { createPromptSnapshotStore } from './prompt/prompt-snapshot-store.mjs';
-import { createConversationStore } from './conversation-store.mjs';
+import { createClassicJsonlAdapter, createConversationStore, createSessionService } from './conversation-store.mjs';
+import { createConversationLoadHandle, peekConversationLoad } from './conversation-load-handle.mjs';
 import { resolveConversationModelProviderId } from './conversation-model-binding.mjs';
 import { bindExternalGoalPlanChanges } from './goal-plan-change-bridge.mjs';
 import { createTaskNotificationBroker } from './task-notification-broker.mjs';
@@ -181,6 +210,10 @@ import { createAutomationChatProposalService } from './automation-chat-proposal-
 import { createHostIpcRegistrations } from './ipc/register-host-ipc.mjs';
 import { createMcpIpcRegistrations } from './ipc/register-mcp-ipc.mjs';
 import { createFileAccessIpcRegistrations } from './ipc/register-file-access-ipc.mjs';
+import { createResourceWindowIpcRegistrations } from './ipc/register-resource-window-ipc.mjs';
+import { createResourceWindowController } from './resource-window-controller.mjs';
+import { createDesktopInteractiveApplication } from './interactive-results/application-service.mjs';
+import { createInteractiveResultsIpcRegistrations } from './ipc/register-interactive-results-ipc.mjs';
 import { createPendingTaskIpcRegistrations } from './ipc/register-pending-task-ipc.mjs';
 import { createPasswordVaultIpcRegistrations } from './ipc/register-password-vault-ipc.mjs';
 import { createProviderConfigurationIpcRegistrations } from './ipc/register-provider-configuration-ipc.mjs';
@@ -207,6 +240,8 @@ import { createConversationApplicationService } from './conversation-application
 import { createConversationReadProjection } from './conversation-read-projection.mjs';
 import { createConversationSessionApplicationService } from './conversation-session-application-service.mjs';
 import { createFileAccessApplicationService } from './file-access-application-service.mjs';
+import { readBoundedDirectoryEntries } from './workspace-file-search.mjs';
+import { createBotDocumentResolver } from './bot-document-reference.mjs';
 import { createGoalApplicationService } from './goal-application-service.mjs';
 import { createOpenPathApplicationService } from './open-path-application-service.mjs';
 import { createEditorLaunchService } from './editor-launch-service.mjs';
@@ -224,7 +259,6 @@ import {
   quitAndInstall,
   openReleasePage,
 } from './auto-updater.mjs';
-
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const trustedWindowRegistry = createTrustedWindowRegistry({
   openExternal: (url) => shell.openExternal(url),
@@ -233,7 +267,6 @@ const ipcMain = createCatalogIpcMain({
   ipcMain: electronIpcMain,
   authorize: trustedWindowRegistry.authorize,
 });
-
 function findWorkspaceRoot(startDir) {
   let current = startDir;
   while (current !== path.dirname(current)) {
@@ -244,7 +277,6 @@ function findWorkspaceRoot(startDir) {
   }
   return path.resolve(__dirname, '../../..');
 }
-
 const isPackaged = app.isPackaged;
 // Only the private managed child entry opts out of daily-host integrations.
 const isManagedPreview = !isPackaged && Boolean(process.send && process.env.PEER_PREVIEW_INSTANCE)
@@ -266,11 +298,9 @@ const {
   light: macDockIconPath,
   dark: macDarkDockIconPath,
 } = resolveDockIconPaths({ isPackaged, workspaceRoot, resourcesRoot });
-
 function getDesktopIconPath() {
   return desktopIconPath && existsSync(desktopIconPath) ? desktopIconPath : undefined;
 }
-
 function applyNativeThemeSource(appearance = settingsStore.getAll().appearance) {
   // Keep Electron/nativeTheme (and thus vibrancy materials) aligned with app appearance.
   // Without this, Quick Chat vibrancy can stay system-light while renderer is dark (or vice versa).
@@ -345,71 +375,22 @@ const mcpCredentialResolver = async (auth, server) => {
   }
   return injection;
 };
-const MCP_OAUTH_CALLBACK_PORT = 33418;
-const MCP_OAUTH_CALLBACK_PATH = '/mcp/oauth/callback';
-const MCP_OAUTH_CALLBACK_URL = `http://127.0.0.1:${MCP_OAUTH_CALLBACK_PORT}${MCP_OAUTH_CALLBACK_PATH}`;
-const MCP_OAUTH_CALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
-let activeMcpOAuthCallback = null;
-
-function closeMcpOAuthCallback() {
-  if (activeMcpOAuthCallback?.server) {
-    try { activeMcpOAuthCallback.server.close(); } catch {}
-  }
-  if (activeMcpOAuthCallback?.timer) clearTimeout(activeMcpOAuthCallback.timer);
-  activeMcpOAuthCallback = null;
-}
-
-function waitForMcpOAuthCallback(expectedState) {
-  closeMcpOAuthCallback();
-  return new Promise((resolve, reject) => {
-    const server = http.createServer((req, res) => {
-      try {
-        const callbackUrl = new URL(req.url ?? '/', MCP_OAUTH_CALLBACK_URL);
-        if (callbackUrl.pathname !== MCP_OAUTH_CALLBACK_PATH) {
-          res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
-          res.end('Not found');
-          return;
-        }
-        const state = callbackUrl.searchParams.get('state') ?? '';
-        const code = callbackUrl.searchParams.get('code') ?? '';
-        const error = callbackUrl.searchParams.get('error') ?? '';
-        if (expectedState && state && state !== expectedState) throw new Error('MCP OAuth state mismatch.');
-        if (error) throw new Error(`MCP OAuth failed: ${error}`);
-        if (!code) throw new Error('MCP OAuth callback missing authorization code.');
-        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-        res.end('<!doctype html><meta charset="utf-8"><title>Peer Agent MCP OAuth</title><p>授权已完成，可以回到 Peer Agent。</p>');
-        resolve(code);
-      } catch (error) {
-        res.writeHead(400, { 'content-type': 'text/html; charset=utf-8' });
-        res.end('<!doctype html><meta charset="utf-8"><title>Peer Agent MCP OAuth</title><p>授权失败，请回到 Peer Agent 重试。</p>');
-        reject(error);
-      } finally {
-        closeMcpOAuthCallback();
-      }
-    });
-    server.once('error', (error) => {
-      closeMcpOAuthCallback();
-      reject(error);
-    });
-    server.listen(MCP_OAUTH_CALLBACK_PORT, '127.0.0.1', () => {
-      const timer = setTimeout(() => {
-        closeMcpOAuthCallback();
-        reject(new Error('MCP OAuth authorization timed out.'));
-      }, MCP_OAUTH_CALLBACK_TIMEOUT_MS);
-      activeMcpOAuthCallback = { server, timer };
-    });
-  });
-}
+const mcpOAuthCallback = createMcpOAuthCallback();
+const MCP_OAUTH_CALLBACK_URL = mcpOAuthCallback.url;
+const closeMcpOAuthCallback = mcpOAuthCallback.dispose;
+const waitForMcpOAuthCallback = mcpOAuthCallback.wait;
 
 const llmConfigStore = createLlmConfigStore();
 const conversationStore = createConversationStore();
+const classicAdapter = createClassicJsonlAdapter(conversationStore);
+const classicSessions = createSessionService(classicAdapter);
 // taskOverview:changed 节流调度器：合并 conversations/automations/goalPlans 三类变更的
 // fan-out 广播（最小间隔 2s，payload 携带合并 scope）。治理 ~300ms 自激循环，详见
 // task-overview-broadcast.mjs 头注释与知识库 multi-task-ui-performance-remediation.md §12。
 const taskOverviewBroadcast = createTaskOverviewBroadcastScheduler({
   broadcast: (channel, payload) => broadcastToAllWindows(channel, payload),
 });
-const stopConversationChangeSubscription = conversationStore.subscribeChanges((event) => {
+const stopConversationChangeSubscription = classicSessions.subscribeRevision({}, (event) => {
   taskOverviewBroadcast.request({
     reason: 'conversations:changed',
     conversationId: event?.conversationId ?? null,
@@ -565,8 +546,10 @@ const taskOverviewAggregator = createTaskOverviewAggregator({
     }).resolveArtifact } : {}),
   },
 });
+let browserWindowController = null;
 const browserPanelRevealCoordinator = createBrowserPanelRevealCoordinator({
   broadcast: broadcastToAllWindows,
+  revealNative: request => browserWindowController?.reveal(request),
   isBrowserReady: (conversationId) => {
     const entry = getActiveBrowserEntry(conversationId);
     if (!entry?.webContentsId) return false;
@@ -1439,12 +1422,21 @@ const mcpApplicationService = createMcpApplicationService({
 });
 
 const conversationApplicationService = createConversationApplicationService({
-  listConversations: (params) => conversationStore.listConversations(params),
+  listConversations: (params) => classicAdapter.listMeta(params),
   listConversationsByWorkspace: (workspacePath, params) =>
     conversationStore.listConversationsByWorkspace(workspacePath, params),
   searchConversations: (params) => conversationStore.searchConversations(params),
   createConversation: (params) => conversationStore.createConversation(params),
-  getConversation: createConversationReadProjection({ conversationStore, goalPlanStore, llmConfigStore }),
+  getConversation: createConversationReadProjection({
+    conversationStore,
+    goalPlanStore,
+    llmConfigStore,
+    readWindow: (id, options = {}) => classicAdapter.getWindow({
+      conversationId: id,
+      ...(options.limit != null ? { limit: options.limit } : {}),
+      ...(options.before != null ? { before: options.before } : {}),
+    }),
+  }),
   updateTitle: (id, title) => conversationStore.updateTitle(id, title),
   updateMode: (id, mode) => conversationStore.updateMode(id, mode),
   updateFastMode: (id, fastMode) => conversationStore.updateFastMode(id, fastMode),
@@ -1453,7 +1445,7 @@ const conversationApplicationService = createConversationApplicationService({
   updateAutomationCreateContext: (id, context) =>
     conversationStore.updateAutomationCreateContext(id, context),
   updateModelEffort: (id, options) => conversationStore.updateModelEffort(id, options),
-  appendMessage: (id, message) => conversationStore.appendMessage(id, message),
+  appendMessage: (id, message) => classicAdapter.append({ conversationId: id, message })?.meta ?? null,
   updateLastMessage: (id, content) => conversationStore.updateLastMessage(id, content),
   replaceMessages: (id, messages, options) =>
     conversationStore.replaceMessages(id, messages, options),
@@ -1479,7 +1471,32 @@ const conversationApplicationService = createConversationApplicationService({
   },
 });
 
+const popupResourceFeedback = (window, item) => {
+  Menu.buildFromTemplate([{ label: item.label, enabled: item.enabled, click: () => { void item.onClick(); } }, { type: 'separator' }, { role: 'copy' }])
+    .popup({ window: window ?? undefined, ...(item.params?.frame ? { frame: item.params.frame } : {}) });
+};
+const feedbackRecipientForConversation = conversationId => resolveResourceFeedbackRecipient(conversationId, {
+  items: projectAgentDirectory.listItems?.() ?? [],
+  conversations: conversationStore.listConversations({ roles: ['default', 'project_agent', 'work_session'], includeMessageCount: false }),
+});
+const resourceFeedbackPreparation = createResourceFeedbackPreparation({
+  isMainSender: sender => trustedWindowRegistry.getRole(sender) === 'main',
+  getRecipient: workspaceId => {
+    const item = projectAgentDirectory.listItems?.().find(value => value.workspaceId === workspaceId);
+    return item?.profile?.status === 'active' && item.profile.agentConversationId ? { conversationId: item.profile.agentConversationId } : null;
+  },
+});
+
 const browserCoreApplicationService = createBrowserCoreApplicationService({
+  bindSelectionFeedback: ({ contents, getRegistration, sourceSender }) => bindBrowserSelectionFeedback({ contents,
+    getBinding: () => { const owned = getRegistration(), registration = owned?.registration;
+      const recipient = registration ? feedbackRecipientForConversation(registration.conversationId) : null;
+      return owned?.sender === sourceSender && contents.hostWebContents === sourceSender && recipient
+        ? { sourceSender, recipient, conversationId: registration.conversationId, browserTabId: registration.browserTabId } : null; },
+    prepare: request => resourceFeedbackPreparation.prepare(request), isZh: () => sessionStore.getSession().locale?.startsWith('zh'),
+    popup: item => popupResourceFeedback(BrowserWindow.fromWebContents(sourceSender), item),
+    report: notice => { if (!sourceSender.isDestroyed()) sourceSender.send('resource-feedback:notice', notice); },
+  }),
   getActiveWebContentsId: () => getActiveWebContentsId(),
   registerWebContents: (registration) => registerBrowserWebContents(registration),
   unregisterWebContents: (registration) => unregisterBrowserWebContents(registration),
@@ -1646,17 +1663,94 @@ const workspaceApplicationService = createWorkspaceApplicationService({
   readProjectIndex: (options) => readProjectIndex(options),
 });
 
+const resolveBotDocumentReference = createBotDocumentResolver({
+  getWorkspace: workspaceId => projectAgentDirectory.projectAccess?.directory?.get(workspaceId),
+  getTaskSession: sessionId => projectAgentDirectory.projectAccess?.getSession(sessionId),
+  getTaskPlan: planId => goalPlanStore.getPlan(planId),
+  getKnownRoots: () => {
+    const settings = settingsStore.getAll();
+    return [...(settings.workspaces || []).map(item => typeof item === 'string' ? item : item?.path), settings.activeWorkspace]
+      .filter(value => typeof value === 'string' && path.isAbsolute(value));
+  },
+  readGitOrigin: async root => {
+    const [location, remote] = await Promise.all([
+      execFileAsync('git', ['-C', root, 'rev-parse', '--show-toplevel']),
+      execFileAsync('git', ['-C', root, 'config', '--local', '--get', 'remote.origin.url']),
+    ]);
+    return realpathSync(location.stdout.trim()) === root ? remote.stdout : '';
+  },
+});
 const fileAccessApplicationService = createFileAccessApplicationService({
+  resolveBotDocument: resolveBotDocumentReference,
   getSettings: () => settingsStore.getAll(),
   pathExists: (candidate) => existsSync(candidate),
   statPath: (candidate) => statSync(candidate),
   readDirectory: (candidate) => readdirSync(candidate, { withFileTypes: true }),
+  readDirectoryBounded: readBoundedDirectoryEntries,
   readFile: (candidate) => readFileSync(candidate),
   writeFile: (candidate, content) => writeFileSync(candidate, content, 'utf8'),
   createDirectory: (candidate) => mkdirSync(candidate, { recursive: false }),
   watchDirectory: (candidate, options, onChange) => fsWatch(candidate, options, onChange),
   executeGit: (cwd, args, options) =>
     execFileAsync('git', ['-C', cwd, ...args], options),
+});
+
+const interactiveResultsApplication = createDesktopInteractiveApplication({ getRole: sender => trustedWindowRegistry.getRole(sender),
+  getOwner: workspaceId => resourceEditOwner(workspaceId),
+  getNativeBinding: sender => resourceWindowController.interactiveBinding(sender), openWindow: (sender, reference) => resourceWindowController.open(sender, { resource: { kind: 'interactive', reference } }),
+  prepareFeedback: resourceFeedbackPreparation.prepare, readDraft: request => projectAgentDirectory.readInputDraft?.(request),
+});
+const resourceWindowController = createResourceWindowController({
+  BrowserWindow, trustedWindows: trustedWindowRegistry, rendererLocation: getTrustedRendererLocation(),
+  preloadPath: path.join(__dirname, '../preload/resource-window.cjs'),
+  resolveDocument: resolveBotDocumentReference, fileAccess: fileAccessApplicationService,
+  interactiveResources: interactiveResultsApplication,
+  prepareFeedback: request => resourceFeedbackPreparation.prepare(request),
+  getAppearance: () => settingsStore.getAll().appearance,
+  getLocale: () => sessionStore.getSession().locale,
+  readHistory: () => settingsStore.getAll().resourceWindowReadingHistory,
+  writeHistory: value => settingsStore.merge({ resourceWindowReadingHistory: value }),
+  getOwner: workspaceId => {
+    const item = projectAgentDirectory.listItems?.().find(value => value.workspaceId === workspaceId);
+    return item?.profile?.status === 'active' && item.profile.agentConversationId
+      ? { conversationId: item.profile.agentConversationId } : null;
+  },
+});
+
+const resourceEditProfiles = createBotProfileStore({ rootDir: dataHome });
+const resourceEditOwner = workspaceId => {
+  const profile = resourceEditProfiles.read(workspaceId);
+  return profile && (profile.status === 'active' || profile.status == null) && profile.agentConversationId ? { conversationId: profile.agentConversationId } : null;
+};
+const resourceEditStorage = createResourceEditStorage({ rootDir: path.join(dataHome, 'project-runtime') });
+const resourceEditSources = createResourceEditSources({ fileAccess: fileAccessApplicationService, resourceWindows: resourceWindowController,
+  getRole: sender => trustedWindowRegistry.getRole(sender), getOwner: resourceEditOwner });
+const resourceEdits = createResourceEditApplicationService({ storage: resourceEditStorage,
+  notify: (sender, notice) => sender.send('resource-edit:changed', notice),
+  getRole: sender => trustedWindowRegistry.getRole(sender), getOwner: resourceEditOwner,
+  getWindowId: sender => { const window = BrowserWindow.fromWebContents(sender); return window && !window.isDestroyed() ? `window-${window.id}` : null; },
+  readSource: resourceEditSources.read, isSourceCurrent: resourceEditSources.isCurrent, canReadRetained: resourceEditSources.canReadRetained,
+});
+const resourceEditAuthority = createBotAccessPolicyAuthority({ dataHome, profileStore: resourceEditProfiles, conversationStore, goalPlanStore,
+  legacyAccessLevel: sessionStore.getSession().accessLevel });
+const resourceEditSubmissionHost = createResourceEditSubmissionHost({ edits: resourceEdits, storage: resourceEditStorage, sources: resourceEditSources,
+  authority: resourceEditAuthority, approvalStore: createApprovalStore({ rootDir: path.join(dataHome, 'project-runtime') }), sessionStore, userDataPath: dataHome });
+
+browserWindowController = createBrowserWindowController({
+  getFeedbackRecipient: feedbackRecipientForConversation,
+  prepareFeedback: request => resourceFeedbackPreparation.prepare(request), popupFeedback: popupResourceFeedback, isZh: () => sessionStore.getSession().locale?.startsWith('zh'),
+  BrowserWindow, WebContentsView, trustedWindows: trustedWindowRegistry, rendererLocation: getTrustedRendererLocation(),
+  preloadPath: path.join(__dirname, '../preload/browser-window.cjs'), getWebContents: id => webContents.fromId(id),
+  getEntry: (conversationId, tabId) => tabId ? getBrowserEntry(conversationId, tabId) : getActiveBrowserEntry(conversationId),
+  register: registerBrowserWebContents, unregister: unregisterBrowserWebContents, rebuildMenu: () => rebuildAppMenu(),
+  getOwner: conversationId => {
+    const conversation = conversationStore.getConversation(conversationId);
+    if (!conversation || conversation.archivedAt) return null;
+    const workspaceId = projectAgentDirectory.workspaceIdForConversation(conversationId);
+    return { conversationId, ...(workspaceId ? { workspaceId } : {}) };
+  },
+  canFocus: conversationId => !!viewingBotWorkspaceId && projectAgentDirectory.workspaceIdForConversation(conversationId) === viewingBotWorkspaceId,
+  getAppearance: () => settingsStore.getAll().appearance, getLocale: () => sessionStore.getSession().locale,
 });
 
 const goalApplicationService = createGoalApplicationService({
@@ -1828,12 +1922,17 @@ const goalApplicationService = createGoalApplicationService({
 });
 
 function registerDesktopIpcHost() {
+  const inputPrediction = createDesktopInputPrediction({ getSettings: () => settingsStore.getAll(),
+    listModels: llmConfigStore.listProviders, llmConfigStore, conversationStore,
+    getProjectAgent: () => projectAgentDirectory, trustedWindows: trustedWindowRegistry,
+    isBusy: id => llmChatService.listActiveConversationIds().includes(id), fetchImpl: (...args) => net.fetch(...args) });
   const productLinkService = createProductLinkService({
     openExternal: (url) => shell.openExternal(url),
   });
   return registerIpcOwners({
   ipc: ipcMain,
   registrations: [
+    ...createInputPredictionIpcRegistrations({ prediction: inputPrediction }),
     ...createDesktopIpcRegistrations({
     about: {
       openLink: (kind) => productLinkService.open(kind),
@@ -1953,8 +2052,8 @@ function registerDesktopIpcHost() {
     }),
     ...createChatIpcRegistrations({
       chat: {
-        send: handleChatSend,
-        startTask: handleChatStartTask,
+        send: (...args) => { inputPrediction.preempt(); return handleChatSend(...args); },
+        startTask: (...args) => { inputPrediction.preempt(); return handleChatStartTask(...args); },
         abort: (payload) => chatStreamApplicationService.abort(payload),
         reattach: (payload) => chatStreamApplicationService.reattach(payload),
         listActive: () => chatStreamApplicationService.listActive(),
@@ -2137,8 +2236,13 @@ function registerDesktopIpcHost() {
     ...createProviderAccessIpcRegistrations({
       providers: providerAccessApplicationService,
     }),
-    ...createWorkspaceIpcRegistrations({ workspace: workspaceApplicationService }),
+    ...createWorkspaceIpcRegistrations({ workspace: workspaceApplicationService, searchFiles: fileAccessApplicationService.searchWorkspaceFiles }),
     ...createFileAccessIpcRegistrations({ fileAccess: fileAccessApplicationService }),
+    ...createResourceWindowIpcRegistrations({ resourceWindows: resourceWindowController }),
+    ...createInteractiveResultsIpcRegistrations({ interactiveResults: interactiveResultsApplication }),
+    ...createResourceEditIpcRegistrations({ edits: resourceEdits, submissions: resourceEditSubmissionHost.submissions }),
+    ...createResourceFeedbackIpcRegistrations({ preparation: resourceFeedbackPreparation }),
+    ...createBrowserWindowIpcRegistrations({ browserWindows: browserWindowController }),
     ...registerDesktopProjectAgent({
       configurePermissions: approvalStore => llmChatService.setApprovalStore(approvalStore),
       enabled: () => true,
@@ -2696,14 +2800,14 @@ async function handleChatStartTask({
     content: normalizedText,
     timestamp: now,
     ...(Array.isArray(attachments) && attachments.length > 0 ? { attachments } : {}),
-  });
+  }, { returnMessages: false });
   conversationStore.appendMessage(conversation.id, {
     id: assistantMessageId,
     role: 'assistant',
     content: '',
     timestamp: now,
     segments: [],
-  });
+  }, { returnMessages: false });
   void Promise.resolve(handleChatSend({
     streamId,
     assistantMessageId,
@@ -2742,9 +2846,8 @@ function handleChatSend({
   configInstructions,
   contextExtensions,
 }, sender) {
-  const persistedConversation = conversationId
-    ? conversationStore.getConversation(conversationId)
-    : null;
+  const conversationLoad = createConversationLoadHandle(conversationStore, conversationId);
+  const persistedConversation = conversationId ? conversationLoad.load() : null;
   const persistedProjection = persistedConversation?.messages
     ? projectConversationHistory(persistedConversation.messages)
     : null;
@@ -2808,7 +2911,7 @@ function handleChatSend({
           }
         } else if (route.type === 'start_intake') {
           const conversationWorkspacePath =
-            conversationStore.getConversation(conversationId)?.workspacePath ||
+            persistedConversation?.workspacePath ||
             workspacePath ||
             null;
           // 「先判别再建目标」：用户在 goal 模式下的首发消息不再无条件建成 accepted 目标。
@@ -2863,7 +2966,8 @@ function handleChatSend({
   // 保证「模型随会话绑定」在续传/重载等渲染端未带参场景下仍以后端 store 为真值。
   const resolvedModelProviderId =
     modelProviderId
-    ?? (conversationId ? conversationStore.getConversation(conversationId)?.modelProviderId ?? null : null);
+    ?? persistedConversation?.modelProviderId
+    ?? null;
   // 续写中断回复的运行时提醒：末条 assistant 是被网络中断截断的半截回复，
   // 模型必须把它当作自己「未写完的话」从断点继续，而不是当作新输入重新作答。
   const effectiveRuntimeReminders = resumeInterruptedReply
@@ -2886,6 +2990,7 @@ function handleChatSend({
     mode,
     conversationId,
     modelProviderId: resolvedModelProviderId,
+    conversationLoad,
     // B2 兜底：透传渲染端当前工作区，仅在会话未绑定 workspacePath 时由
     // resolveRunWorkspacePath 作为兜底/校验使用，主真值仍按 conversationId 从 store 解析。
     workspacePath,
@@ -3205,7 +3310,19 @@ async function handleChatCompact({ conversationId, streamId }, sender) {
 async function handleChatContextRestored(
   { conversationId, modelProviderId = null } = {},
 ) {
-  const conv = conversationStore.getConversation(conversationId);
+  // Let the open-window IPC and the first paint run before any full-history work.
+  await new Promise((resolve) => { setImmediate(resolve); });
+  const cached = peekConversationLoad(conversationId);
+  const cachedRevision = Number(cached?.contentRevision);
+  const currentMeta = classicAdapter.getWindow({ conversationId, limit: 1 });
+  const revisionMatches = currentMeta
+    && Number.isSafeInteger(cachedRevision)
+    && cachedRevision === Number(currentMeta.meta?.contentRevision);
+  const conv = revisionMatches
+    ? cached
+    : typeof conversationStore.readConversationYielding === 'function'
+      ? await conversationStore.readConversationYielding(conversationId)
+      : null;
   if (!conv || !conv.messages?.length) return null;
 
   // 同一会话存在两条真实请求路径、组成不同(ADR 42 口径分离):
@@ -3217,7 +3334,7 @@ async function handleChatContextRestored(
     ? goalPlanStore.listPlansByConversation(conversationId)
     : [];
   const runningPlan = conversationPlans.find((plan) => plan?.runner?.status === 'running') ?? null;
-  const canonicalHistory = projectConversationHistory(conv.messages);
+  const canonicalHistory = await projectConversationHistoryYielding(conv.messages);
   const activeMessages = runningPlan
     ? [
         ...canonicalHistory.messages,
@@ -3740,6 +3857,11 @@ const desktopCompositionRoot = hasSingleInstanceLock ? createDesktopCompositionR
     { name: 'task-overview-broadcast', dispose: () => taskOverviewBroadcast.dispose() },
     { name: 'goal-plan-change-subscription', dispose: stopGoalPlanChangeSubscription },
     { name: 'mcp-oauth-callback', dispose: closeMcpOAuthCallback },
+    { name: 'browser-windows', dispose: () => browserWindowController?.dispose() },
+    { name: 'resource-feedback-preparation', dispose: () => resourceFeedbackPreparation.dispose() },
+    { name: 'resource-windows', dispose: () => resourceWindowController.dispose() },
+    { name: 'interactive-result-views', dispose: () => interactiveResultsApplication.dispose() },
+    { name: 'resource-edit-host', dispose: async () => { resourceEdits.dispose(); await resourceEditSubmissionHost.dispose(); resourceEditStorage.close(); resourceEditAuthority.close(); } },
     { name: 'catalog-ipc-main', dispose: () => ipcMain.dispose() },
     { name: 'project-agent', dispose: () => projectAgentDirectory?.dispose() },
     { name: 'trusted-window-registry', dispose: () => trustedWindowRegistry.dispose() },

@@ -4,7 +4,8 @@
  * 模型附在工具参数上的结论、标记和卡片不会进入结果。
  */
 import { planDelivery } from './digest.mjs';
-import { WORK_SESSION_STATUSES } from '@peer-agent/protocol';
+import { WORK_SESSION_STATUSES, parseInteractiveArtifactRef } from '@peer-agent/protocol';
+import { resolveUserAnchors, userAnchorCandidates } from './user-anchor.mjs';
 
 const TEXT_MAX = 2000;
 const ID_MAX = 200;
@@ -79,8 +80,10 @@ export function composeReply(input = {}) {
     return fail('fallback_not_allowed', 'Only a user turn can fall back to an anchored reply.');
   }
 
-  const anchors = fallback ? turnInputIds.ids : replyTo.ids;
+  const resolution = resolveUserAnchors(fallback ? turnInputIds.ids : replyTo.ids, input.userMessages, 'replyTo');
   const indexed = indexUserMessages(input.userMessages);
+  if (!resolution.ok) return { ...resolution, availableReplyAnchors: replyAnchorCandidates(indexed) };
+  const anchors = resolution.ids;
   if (anchors.length === 0 && !proactive) {
     return fail('reply_to_required', 'replyTo is required unless proactive is true.', {
       availableReplyAnchors: replyAnchorCandidates(indexed),
@@ -100,7 +103,7 @@ export function composeReply(input = {}) {
   const missingSources = (Array.isArray(input.unreportedResults) ? input.unreportedResults : [])
     .filter(item => anchors.includes(item?.anchorMessageId) && !sources.ids.includes(item.sessionId));
   if (missingSources.length) {
-    return fail('result_source_required', 'Cite the completed tasks for this anchor before reporting their result.', {
+    return fail('result_source_required', 'Cite the affected tasks for this anchor before reporting their current state.', {
       sessionStates: missingSources.map(item => actualStates.get(item.sessionId)).filter(Boolean),
     });
   }
@@ -156,7 +159,7 @@ export function composeReply(input = {}) {
     meta,
     marks,
   };
-  return { ok: true, message, meta, marks };
+  return { ok: true, message, meta, marks, anchorResolutions: resolution.anchorResolutions };
 }
 
 function fail(error, message, extra = {}) {
@@ -272,8 +275,8 @@ function pilesOf(value, depth = 0) {
 
 function readEvidenceRefs(value) {
   if (value == null) return { ids: [] };
-  const ids = stringList(value, { min: 0, max: LIST_MAX, itemMax: 500 });
-  if (!ids) return fail('invalid_input', 'evidenceRefs must be a list of evidence refs.');
+  const ids = stringList(value, { min: 0, max: LIST_MAX, itemMax: 1024 });
+  if (!ids || ids.some(id => id.length > 500 && !parseInteractiveArtifactRef(id))) return fail('invalid_input', 'evidenceRefs must be a list of evidence refs.');
   const allowed = ids.filter((id) => !id.includes('..') && !/[\s\\]/.test(id));
   return { ids: allowed };
 }
@@ -292,7 +295,8 @@ function readQuestion(question) {
   const options = stringList(question.options, { min: 1, max: 8, itemMax: ID_MAX });
   if (!options) return fail('invalid_input', 'question.options must contain 1 to 8 choices.');
   if (question.expiresAt !== undefined && (typeof question.expiresAt !== 'string' || !Number.isFinite(Date.parse(question.expiresAt)))) return fail('invalid_input', 'question.expiresAt must be an ISO date.');
-  return { value: { options, ...(question.expiresAt ? { expiresAt: new Date(question.expiresAt).toISOString() } : {}) } };
+  if (question.agentRequestId !== undefined && (!boundedId(question.agentRequestId, 200) || !Number.isSafeInteger(question.expectedRequestRevision) || question.expectedRequestRevision < 1)) return fail('invalid_input', 'Invalid linked Agent question.');
+  return { value: { options, ...(question.agentRequestId ? { agentRequestId: question.agentRequestId, expectedRequestRevision: question.expectedRequestRevision } : {}), ...(question.expiresAt ? { expiresAt: new Date(question.expiresAt).toISOString() } : {}) } };
 }
 
 function stringList(value, { min, max, itemMax }) {
@@ -349,10 +353,7 @@ function checkAnchors(ids, byId) {
 
 /** Recent conversation facts only. The caller must explicitly choose and validate an anchor again. */
 function replyAnchorCandidates(byId) {
-  return [...byId].filter(([, message]) => isUserInput(message)).slice(-5).map(([messageId, message]) => ({
-    messageId,
-    text: typeof message.content === 'string' ? message.content.slice(0, 120) : '',
-  }));
+  return userAnchorCandidates([...byId.values()], isUserInput);
 }
 
 function readSurfacing(value) {

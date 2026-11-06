@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { prefersReducedMotion, useMotionPresence } from '../../app/hooks/useMotionPresence.ts';
+import { useMotionPresence } from '../../app/hooks/useMotionPresence.ts';
 import {
   projectTaskMonitorArtifacts,
   projectTaskMonitorEnvironment,
@@ -238,13 +238,10 @@ export function TaskMonitorRailView({
   readonly onExitComplete: () => void;
   readonly onClose: () => void;
 }) {
-  const { exiting, startExit, onAnimationEnd } = useMotionPresence({ onExitComplete, exitDurationMs: 240 });
+  const { exiting, startExit, cancelExit, onAnimationEnd } = useMotionPresence({ onExitComplete, exitDurationMs: 240 });
   useEffect(() => {
-    if (!visible) {
-      if (prefersReducedMotion()) onExitComplete();
-      else startExit();
-    }
-  }, [visible, startExit, onExitComplete]);
+    if (visible) cancelExit(); else startExit();
+  }, [visible, startExit, cancelExit]);
   const workbench = useWorkbenchOptional();
   // 复用 Provider 的单一轮询 reader，避免第二套 poller 重复打主进程。
   const runsReader = useBackgroundRunsContext();
@@ -354,7 +351,8 @@ export function TaskMonitorRailView({
     <aside
       className={`task-monitor-rail ${exiting ? 'motion-exit-slide-inline' : 'motion-enter-slide-inline'}`}
       aria-label={isZh ? '任务监控卡片' : 'Task monitor card'}
-      aria-hidden={exiting}
+      aria-hidden={!visible}
+      inert={!visible}
       onAnimationEnd={(event) => {
         if (event.target === event.currentTarget && event.animationName === 'motion-exit-slide-inline') onAnimationEnd();
       }}

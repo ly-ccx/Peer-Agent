@@ -1,6 +1,16 @@
+import { CONTINUITY_CAPABILITY_IDS } from './working-context-specs.mjs';
+import { INTERACTIVE_INSPECT_CAPABILITY, INTERACTIVE_PUBLISH_CAPABILITY } from '@peer-agent/protocol';
+import { interactiveRoleAllows } from '../interactive-results/role-policy.mjs';
 import { controlProjectWork } from './work-control.mjs';
+import { executionAdmissionDenial } from './execution-admission.mjs';
+import { createSessionControl } from './session-control.mjs';
+import { createResourceWaitPort } from './resource-wait.ts';
+import { createSessionResourceContention } from './session-resource-contention.mjs';
+import { executionIdentity, sameExecution } from './session-control-kernel.mjs';
 import { createSessionCancellation } from './session-cancellation.mjs';
 import { createSessionTakeover } from './session-takeover.mjs';
+import { takeoverBlocker } from './session-repair.mjs';
+import { supervisionRecovery } from './supervision-recovery.mjs';
 import { createCoordinationLifecycle } from './coordination-lifecycle.mjs';
 import { sessionExecutionCurrent } from './execution-ownership.mjs';
 import { workBudgetBinding } from './work-budget.mjs';
@@ -17,12 +27,12 @@ import { sessionFactsFromPlan } from './session-facts.mjs';
 import { admitDelegationCriteria } from './criterion-authority.mjs';
 import { evaluateDelegationCapabilities, validCapabilityRequirements } from './capability-admission.mjs';
 import { isHostHandoffPause } from './session-host-handoff.mjs';
-import { hasCurrentUserUrgency } from './user-priority.mjs';
+import { hasCurrentUserUrgency, isCanonicalUserInput } from './user-priority.mjs';
 import path from 'node:path';
 import { createExecutionScheduler } from './execution-scheduler.mjs';
 import { randomUUID } from 'node:crypto';
 
-import { projectWorkSession, resolveRoleModel } from '@peer-agent/protocol';
+import { encodeResourceFeedbackTransport, normalizeResourceFeedbackList, restoreResourceFeedbackTransport, projectWorkSession, resolveRoleModel } from '@peer-agent/protocol';
 
 import { canConsumeRequestedUserInput } from '../goal-plan-store.mjs';
 import { normalizeInputAttachments } from './input-queue.mjs';
@@ -58,8 +68,10 @@ const WRITE_CAPABILITIES = new Set(['local.file.write', 'local.file.edit', 'loca
 const WRITE_KINDS = new Set(['file-write', 'shell']);
 const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'bash']);
 const READ_ONLY_CAPABILITIES = new Set([
+  ...CONTINUITY_CAPABILITY_IDS,
   'local.file.read', 'local.file.list', 'local.file.search', 'local.search.aggregate', 'local.image.read',
   'local.git.query',
+  INTERACTIVE_INSPECT_CAPABILITY,
   'local.goal.get_plan', 'local.goal.update_task', 'local.goal.revise_plan',
   'local.goal.record_evidence', 'local.interaction.request_user_input',
   'local.goal.explore',
@@ -73,8 +85,20 @@ const ROLE_SLOTS = [
 ];
 
 export function evaluateWorkSessionWrite(plan, action = {}) {
+  if (plan?.delegationOrigin && action.executionIdentity && !sameExecution(action.executionIdentity, executionIdentity(plan)))
+    return { allowed: false, error: 'execution_revision_stale' };
   if (!sessionExecutionCurrent(plan)) return { allowed: false, error: 'work_execution_stopped' };
+  const resourceDenial = executionAdmissionDenial(plan, action);
+  if (resourceDenial) return { allowed: false, error: resourceDenial };
+  if (!interactiveRoleAllows(action.capabilityId, action.turnProfile)) return { allowed: false, error: 'interactive_role_denied' };
+  if (action.capabilityId === INTERACTIVE_PUBLISH_CAPABILITY && (!plan?.delegationOrigin || !action.executionIdentity
+    || !sameExecution(action.executionIdentity, executionIdentity(plan)))) return { allowed: false, error: 'interactive_execution_stale' };
   if (plan?.delegationOrigin?.readOnly !== true) return { allowed: true };
+  return readOnlyWorkCapabilityAllowed(action) ? { allowed: true } : { allowed: false, error: 'read_only', message: '只读任务不能写入。' };
+}
+
+/** Inventory has no execution grant. Actual dispatch additionally checks plan/epoch above. */
+export function readOnlyWorkCapabilityAllowed(action = {}) {
   const capabilityId = typeof action.capabilityId === 'string' ? action.capabilityId : '';
   const permissionKind = typeof action.permissionKind === 'string' ? action.permissionKind : '';
   const toolName = typeof action.toolName === 'string'
@@ -86,8 +110,9 @@ export function evaluateWorkSessionWrite(plan, action = {}) {
   // Bookkeeping of task facts and loading Skill text do not execute project mutations.
   const reading = READ_ONLY_CAPABILITIES.has(capabilityId) || capabilityId.startsWith('local.skill.')
     || (capabilityId.startsWith('local.mcp.') && ['L0_inert', 'L1_local_read'].includes(action.riskLevel));
-  if (!writing && reading) return { allowed: true };
-  return { allowed: false, error: 'read_only', message: '只读任务不能写入。' };
+  const internalPublication = capabilityId === INTERACTIVE_PUBLISH_CAPABILITY && interactiveRoleAllows(capabilityId, action.turnProfile)
+    && (action.riskLevel === undefined || ['L2_local_write', 'L2_low_write'].includes(action.riskLevel));
+  return !writing && (reading || internalPublication) && interactiveRoleAllows(capabilityId, action.turnProfile);
 }
 
 export function resolvePlanApproval(policy, input = {}) {
@@ -120,6 +145,9 @@ export function createSessionSupervisor({
   readManualCriterionAuthorities = null,
   readLegacyCriterionProvenance = () => null,
   readDelegationCapabilities = null,
+  readResourceFeedback = null,
+  projectReportEvidence = null,
+  recoverStoppedPublications = null,
   autonomousCoordinationEnabled = () => process.env.PEER_AUTONOMOUS_COORDINATION !== '0',
   now = () => new Date().toISOString(),
 } = {}) {
@@ -133,10 +161,18 @@ export function createSessionSupervisor({
   const readConversationFacts = id => readQuery.memo(`conversation:${id}`, () => conversationFacts(id));
 
   executionScheduler ??= createExecutionScheduler({ rootDir: path.join(path.dirname(goalPlanStore.getStoreDir()), 'project-runtime'), now });
+  executionScheduler.configure({ ownsWorkspace: canManageWorkspace, currentPlan: plan => goalPlanStore.getPlan(plan.planId) || plan,
+    onResourceChanged: () => { void reconcileSessions().catch(() => {}); } });
+  const sessionControl = createSessionControl({ goalPlanStore, goalRunner, executionScheduler, canManageWorkspace, abortStream,
+    readMessages: id => conversationStore.getPersistedConversationHistory?.(id)?.messages || [],
+    onStopReceipt: () => { void reconcileSessions().catch(() => {}); }, now });
+  const resourceContention = createSessionResourceContention({ goalPlanStore, sessionControl, canManageWorkspace, exclusive, promote });
+  executionScheduler.configure({ onResourceConflict: (plan, blocker) => resourceContention.request(plan, blocker) });
   const communication = createAgentCommunication({ conversationStore, goalPlanStore, goalRunner, findSession: findBySession,
     listSessions: delegatedPlans, canManageWorkspace, emitEvent, now });
-  const handoff = createSessionHandoff({ findBySession, goalPlanStore, goalRunner, canManageWorkspace, conversationStore, promote, now });
-  const continuity = createSessionContinuity({ goalPlanStore, conversationStore, goalRunner, executionScheduler,
+  const recoveryHeld = plan => Boolean(plan && executionScheduler.inspect(plan).reason === 'coordination_reconciliation_required');
+  const handoff = createSessionHandoff({ findBySession, goalPlanStore, goalRunner, canManageWorkspace, isRecoveryHeld: recoveryHeld, conversationStore, promote, now });
+  const continuity = createSessionContinuity({ sessionControl, goalPlanStore, conversationStore, goalRunner, executionScheduler,
     findBySession, canManageWorkspace, abortStream, emit, now });
   const legacyCriteria = createLegacyCriterionRecovery({ store: goalPlanStore, readProvenance: readLegacyCriterionProvenance,
     holdsLease: planId => canManageWorkspace(goalPlanStore.getPlan(planId)?.delegationOrigin?.workspaceId), now });
@@ -156,7 +192,10 @@ export function createSessionSupervisor({
   }
 
   function emit(event) {
-    if (['cancelled', 'session_resumed', 'interrupted'].includes(event.kind)) queueMicrotask(() => { void coordination?.recover(event.workspaceId); });
+    if (['cancelled', 'session_resumed', 'interrupted'].includes(event.kind)) queueMicrotask(() => {
+      // Background recovery keeps its durable pending state; explicit callers still receive failures.
+      void coordination?.recover(event.workspaceId).catch(() => {});
+    });
     try {
       emitEvent?.({ ...event, at: event.at || now() });
     } catch {
@@ -164,25 +203,29 @@ export function createSessionSupervisor({
     }
   }
 
-  const cancellation = createSessionCancellation({ findBySession, goalPlanStore, goalRunner, executionScheduler, canManageWorkspace,
-    abortStream, isolationPlanner, exclusive, project, emit, promote, now });
-  const takeover = createSessionTakeover({ findBySession, goalPlanStore, goalRunner, executionScheduler, exclusive, canManageWorkspace,
-    abortStream, promote, emit, now });
-  coordination = createCoordinationLifecycle({ readSession: input => get(input),
+  const cancellation = createSessionCancellation({ sessionControl, findBySession, goalPlanStore, goalRunner, executionScheduler, canManageWorkspace,
+    abortStream, isolationPlanner, exclusive, project, emit, promote,
+    readMessages: id => conversationStore.getPersistedConversationHistory?.(id)?.messages || [], now });
+  const takeover = createSessionTakeover({ sessionControl, findBySession, goalPlanStore, goalRunner, executionScheduler, exclusive, canManageWorkspace,
+    abortStream, promote, emit, now, humanGateOf });
+  const resourceWaits = createResourceWaitPort({ readPlan: findBySession, inspectPlan: plan => executionScheduler.inspect(plan, delegatedPlans()),
+    executionOf: executionIdentity, readClaims: () => executionScheduler.resourceSnapshot(), ownsWorkspace: canManageWorkspace });
+  coordination = createCoordinationLifecycle({ readSession: input => get(input), resourceWaits,
+    readGoalFacts: sessionId => { const plan = findBySession(sessionId); return plan ? hostFacts(plan).hostAuthority : null; },
+    verifyGoal: input => goalRunner?.verifyDelegatedSession?.(input),
     admitTask: (input, context) => checkDelegationCapabilities(input, context),
     readSessionSummary: input => {
       const plan = findBySession(input.sessionId);
       return plan ? summaries({ workspaceId: plan.delegationOrigin.workspaceId, sessionIds: [input.sessionId] })[0] : null;
     },
-    checkTakeover: id => {
+    checkTakeover: (id, action) => {
       const plan = findBySession(id);
-      return plan?.runner?.status === 'waiting_user' ? 'human_decision_required'
-        : plan?.resultAcceptance?.acceptedAt || ['completed','cancelled'].includes(plan?.status) ? 'session_not_running' : null;
+      return takeoverBlocker(plan, action, plan && humanGateOf(plan));
     },
     readMessages: id => conversationStore.getPersistedConversationHistory?.(id)?.messages || [],
     spawn: (input, context) => exclusive(() => spawnLocked(input, context)), requestCancel: cancellation.request,
     send: (input, context) => exclusive(() => communication.send(input, context)), takeover: takeover.request,
-    holdsLease: canManageWorkspace, isEnabled: autonomousCoordinationEnabled, now });
+    holdsLease: canManageWorkspace, canExecute: workspaceId => executionScheduler.isWorkspaceReady(workspaceId), isEnabled: autonomousCoordinationEnabled, now });
 
   function delegatedPlans() {
     return readQuery.memo('delegated-plans', () => planCatalog.read());
@@ -239,12 +282,13 @@ export function createSessionSupervisor({
       needsUser: facts.needsUser,
       executionOwnership: facts.executionOwnership,
       blockedReason: plan.runner?.blockedReason,
-      agentWaiting: Boolean(plan.delegationOrigin?.agentWaitMessageId),
+      agentWaiting: Boolean(plan.delegationOrigin?.agentWaitMessageId) || plan.runner?.blockedReason === 'waiting_parent_agent',
       delegated: Boolean(plan.delegationOrigin),
       updatedAt: plan.updatedAt,
       conversationId: plan.conversationId,
       progress: plan.progress,
       interrupted: Boolean(plan.runner?.interruption),
+      interruptionOrigin: plan.runner?.interruption?.origin,
     };
   }
 
@@ -262,14 +306,16 @@ export function createSessionSupervisor({
   }
 
   function project(plan, plans = null) {
-    const origin = plan.delegationOrigin;
+    const origin = { ...plan.delegationOrigin, executionControl: sessionControl.read(plan) };
     const coordinationFacts = coordination?.forSession(origin.workspaceId, origin.sessionId);
     const conversation = readConversationFacts(plan.conversationId);
+    const humanGate = humanGateOf(plan);
     const session = projectWorkSession(snapshotOf(plan), {
       sessionId: origin.sessionId,
       workspaceId: origin.workspaceId || '',
       acceptance: 'confirm',
       accepted: Boolean(plan.resultAcceptance?.acceptedAt),
+      resultConfirmationRequired: humanGate,
       spawnedAt: conversation?.createdAt || plan.createdAt || '',
       ...(typeof plan.conversationId === 'string' && plan.conversationId ? { conversationId: plan.conversationId } : {}),
       ...(sessionFactsFromPlan(plan).verificationActive ? { verifying: true } : {}),
@@ -278,7 +324,7 @@ export function createSessionSupervisor({
       ...(origin.supersededBy ? { supersededBy: origin.supersededBy } : {}),
       ...(origin.phase === 'paused' ? { phase: 'paused' } : {}),
       ...(origin.phase === 'queued'
-        ? (({ queuedBehind, reason }) => ({ queuedBehind, queueReason: reason }))(executionScheduler.inspect(plan, Array.isArray(plans) ? plans : delegatedPlans())) : {}),
+        ? (({ queuedBehind, reason, blocker }) => ({ queuedBehind, queueReason: reason, ...(blocker ? { resourceBlocker: blocker } : {}) }))(executionScheduler.inspect(plan, Array.isArray(plans) ? plans : delegatedPlans())) : {}),
     });
     const report = buildReport(plan, session);
     if (sessionFactsFromPlan(plan).verificationActive) {
@@ -288,10 +334,9 @@ export function createSessionSupervisor({
     const completionReview = projectCompletionReview(plan, report);
     if (completionReview && !completionReview.confirmed) session.completionReviewRequired = true;
     if (session.status === 'result_ready') {
-      const decision = decideSessionAcceptance(acceptanceFacts(plan));
-      session.resultConfirmationRequired = decision.mode === 'confirm' && decision.closeGatePassed;
+      session.resultConfirmationRequired = humanGate;
     }
-    session.sourceRevision = verificationContentHash(plan, (({ status, ...body }) => body)(report));
+    session.sourceRevision = reportSourceRevision(plan, report);
     session.observationRevision = sessionObservationRevision(plan, session.sourceRevision);
     const interventions = interventionsOf(plan.conversationId);
     return interventions.length > 0 ? { ...session, interventions } : session;
@@ -304,6 +349,14 @@ export function createSessionSupervisor({
   function buildReport(plan, session) {
     const history = readConversationFacts(plan.conversationId);
     return buildSessionReport(plan, session, history);
+  }
+  function reportSourceRevision(plan, { status, ...body }) {
+    return verificationContentHash(plan, body);
+  }
+  function publicReport(plan, session) {
+    const report = buildReport(plan, session);
+    return typeof projectReportEvidence === 'function'
+      ? { ...report, evidenceRefs: projectReportEvidence(plan, report.evidenceRefs) } : report;
   }
 
   function freezeModels(input, workspaceId) {
@@ -373,7 +426,13 @@ export function createSessionSupervisor({
     let availableCapabilities;
     try { availableCapabilities = await readDelegationCapabilities?.({ readOnly: input.readOnly === true, workspaceId }); }
     catch { availableCapabilities = undefined; }
-    return evaluateDelegationCapabilities(input, availableCapabilities);
+    const worker = evaluateDelegationCapabilities(input, availableCapabilities);
+    if (!worker.ok || !worker.required.includes(INTERACTIVE_PUBLISH_CAPABILITY)) return worker;
+    let verifierCapabilities;
+    try { verifierCapabilities = await readDelegationCapabilities?.({ readOnly: true, workspaceId, agentKind: 'verifier' }); }
+    catch { verifierCapabilities = undefined; }
+    const verifier = evaluateDelegationCapabilities({ requiredCapabilities: [INTERACTIVE_INSPECT_CAPABILITY] }, verifierCapabilities);
+    return verifier.ok ? worker : { ...verifier, diagnostic: { ...verifier.diagnostic, role: 'verifier' } };
   }
 
   async function spawnLocked(input, context) {
@@ -475,6 +534,9 @@ export function createSessionSupervisor({
       // A delegation admits its explicit anchors, not an implicit fork of all
       // prior chat. Missing admitted material and explicit snapshots still ask.
       const attachments = attachmentsFromMessages(history.messages, anchorMessageIds);
+      const resourceFeedback = resourceFeedbackFromMessages(history.messages, anchorMessageIds,
+        { recipient: { workspaceId, conversationId: parentConversationId }, readResourceFeedback });
+      const feedbackTransport = encodeResourceFeedbackTransport(resourceFeedback, attachments);
       const carried = attachmentRefsFromMessages(history.messages, anchorMessageIds);
       const completeInlineAttachments = !presetSnapshotId
         && inlineAttachmentsCoverOmissions(history.messages, anchorMessageIds);
@@ -503,6 +565,7 @@ export function createSessionSupervisor({
       const stored = conversationStore.appendMessage(child.id, {
         id: messageId,
         role: 'user',
+        createdAt: now(),
         content: delegationMessage({
           brief,
           successCriteria: input.successCriteria,
@@ -510,7 +573,7 @@ export function createSessionSupervisor({
           readOnly: input.readOnly === true,
         }),
         ...(carried.length > 0 ? { attachmentRefs: carried } : {}),
-        ...(attachments.length > 0 ? { attachments } : {}),
+        ...feedbackTransport,
       });
       if (!stored) throw new Error('delegation message was not stored');
 
@@ -572,11 +635,12 @@ export function createSessionSupervisor({
       }
       if (replacingHolder && !hold) {
         const current = goalPlanStore.getPlan(plan.planId) || plan;
-        if (executionScheduler.inspect(current, delegatedPlans()).allowed) {
+        if (executionScheduler.inspect(current, delegatedPlans()).allowed && executionScheduler.reserveResources(current).allowed) {
           goalPlanStore.revisePlan(plan.planId, { status: 'executing', delegationOrigin: { ...current.delegationOrigin, phase: 'running' } },
             { reason: 'replacement inherited available slot', changedBy: 'session-supervisor' });
           executionScheduler.reconcile(delegatedPlans());
           if (typeof goalRunner?.start !== 'function') throw new Error('goal runner unavailable');
+          if (!executionScheduler.activateResources(goalPlanStore.getPlan(plan.planId))) throw new Error('execution_resource_owner_changed');
           await goalRunner.start(plan.planId, { awaitIdle: false });
         }
       }
@@ -601,6 +665,7 @@ export function createSessionSupervisor({
       if (releasedHolder && planId && spawnedSessionId) {
         goalPlanStore.setPlanStatus(planId, 'failed');
         goalPlanStore.setRunnerState(planId, { status: 'failed', lastError: reason });
+        await sessionControl.settleEnded(goalPlanStore.getPlan(planId));
         if (isolationPlanner) await isolationPlanner.cleanup(goalPlanStore.getPlan(planId));
         await promote();
         if (input.objectiveId) objectives.linkSession(workspaceId,input.objectiveId,spawnedSessionId);
@@ -627,9 +692,11 @@ export function createSessionSupervisor({
   async function promote(spawningPlanId = null) {
     const eligible = plan => canManageWorkspace(plan.delegationOrigin.workspaceId) === true
       && executionScheduler.isWorkspaceReady(plan.delegationOrigin.workspaceId)
+      && executionScheduler.inspect(plan).reason !== 'coordination_reconciliation_required'
       && (autonomousCoordinationEnabled() || plan.delegationOrigin.phase !== 'queued'
         || coordination.forSession(plan.delegationOrigin.workspaceId, plan.delegationOrigin.sessionId)?.replacementSessionId !== plan.delegationOrigin.sessionId);
     let observed = delegatedPlans();
+    executionScheduler.reconcile(observed);
     if (isolationPlanner) {
       const virtual = observed.filter(eligible);
       let preparedAny = false;
@@ -646,7 +713,7 @@ export function createSessionSupervisor({
       if (preparedAny) observed = delegatedPlans();
     }
     const plans = observed.filter(eligible);
-    const { start, blocked } = executionScheduler.select(plans);
+    const { start, blocked } = executionScheduler.select(plans, { allPlans: observed });
     for (const plan of blocked) {
       goalPlanStore.revisePlan(plan.planId, {
         status: 'executing',
@@ -669,11 +736,18 @@ export function createSessionSupervisor({
     let spawnError;
     let failedStart = false;
     for (const plan of start) {
-      try { await goalRunner.start(plan.planId, { awaitIdle: false }); }
+      try {
+        const fresh = goalPlanStore.getPlan(plan.planId);
+        if (!sessionExecutionCurrent(fresh) || !executionScheduler.activateResources(fresh)) throw new Error('execution_resource_owner_changed');
+        if (fresh.delegationOrigin.executionControl?.kind === 'resume' && typeof goalRunner.resume === 'function')
+          await goalRunner.resume(plan.planId, { awaitIdle: false, intent: fresh.runner?.intent || 'execute' });
+        else await goalRunner.start(plan.planId, { awaitIdle: false });
+      }
       catch (error) {
         failedStart = true;
         goalPlanStore.setPlanStatus(plan.planId, 'failed');
         goalPlanStore.setRunnerState(plan.planId, { status: 'failed', lastError: error?.message || 'runner start failed' });
+        await sessionControl.settleEnded(goalPlanStore.getPlan(plan.planId));
         if (plan.planId === spawningPlanId) spawnError = error;
       }
     }
@@ -684,15 +758,26 @@ export function createSessionSupervisor({
 
   function summaries(input = {}) {
     const ids = new Set(input.sessionIds || []), anchors = new Set(input.anchorMessageIds || []);
-    return delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === input.workspaceId
-      && (input.all === true || ids.has(plan.delegationOrigin.sessionId) || input.workId && plan.delegationOrigin.workId === input.workId
-        || anchors.has(plan.delegationOrigin.anchorMessageId))).slice(0, 24).map(plan => {
-      const origin = plan.delegationOrigin;
-      return { ...projectWorkSession(snapshotOf(plan), { sessionId: origin.sessionId, workspaceId: origin.workspaceId,
-        acceptance: 'confirm', accepted: Boolean(plan.resultAcceptance?.acceptedAt), spawnedAt: plan.createdAt || '',
-        conversationId: plan.conversationId, origin, ...(sessionFactsFromPlan(plan).verificationActive ? { verifying: true } : {}) }),
-        metadataRevision: plan.updatedAt || plan.createdAt || '' };
-    });
+    const related = plan => input.all === true || ids.has(plan.delegationOrigin.sessionId)
+      || input.workId && plan.delegationOrigin.workId === input.workId || anchors.has(plan.delegationOrigin.anchorMessageId);
+    const userFollowUp = plan => input.kind === 'user' && input.conversationId === plan.delegationOrigin.parentConversationId;
+    return delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === input.workspaceId && (related(plan) || userFollowUp(plan)))
+      .map(plan => {
+        const origin = { ...plan.delegationOrigin, executionControl: sessionControl.read(plan) };
+        const summary = { ...projectWorkSession(snapshotOf(plan), { sessionId: origin.sessionId, workspaceId: origin.workspaceId,
+          acceptance: 'confirm', accepted: Boolean(plan.resultAcceptance?.acceptedAt), resultConfirmationRequired: humanGateOf(plan), spawnedAt: plan.createdAt || '',
+          conversationId: plan.conversationId, origin, ...(sessionFactsFromPlan(plan).verificationActive ? { verifying: true } : {}),
+          ...(origin.supersededBy ? { supersededBy: origin.supersededBy } : {}),
+          ...(origin.phase === 'paused' ? { phase: 'paused' } : {}),
+          ...(origin.phase === 'queued' ? (({ queuedBehind, reason, blocker }) => ({ queuedBehind, queueReason: reason, resourceBlocker: blocker }))(executionScheduler.inspect(plan)) : {}) }),
+          ...(sessionFactsFromPlan(plan).blockedReason ? { blockedReason: sessionFactsFromPlan(plan).blockedReason } : {}),
+          metadataRevision: plan.updatedAt || plan.createdAt || '' };
+        return { plan, summary };
+      }).filter(({plan,summary}) => related(plan) || userFollowUp(plan) && summary.followUp.inCurrentList)
+      .sort((a,b) => Number(ids.has(b.plan.delegationOrigin.sessionId)) - Number(ids.has(a.plan.delegationOrigin.sessionId))
+        || Number(Boolean(related(b.plan))) - Number(Boolean(related(a.plan)))
+        || String(b.plan.updatedAt || '').localeCompare(String(a.plan.updatedAt || '')))
+      .slice(0, 24).map(({summary}) => summary);
   }
 
   function list(input = {}) {
@@ -715,7 +800,21 @@ export function createSessionSupervisor({
       const authority = hostFacts(plan).hostAuthority || {};
       const reviewed = plan.hostVerification?.verdictRef || authority.reviewAttempts?.length
         || ['passed', 'failed', 'not_required'].includes(authority.independentVerifier);
-      return { ...session, report: { ...buildReport(plan, session), ...(reviewed ? {
+      const journal = workBudgetBinding(plan.delegationOrigin.workspaceId)?.store;
+      const agentSupervision = journal?.querySupervision ? {
+        requests: journal.querySupervision('agentRequests', 'sessionId', session.sessionId, { pendingOnly: true, limit: 16 }),
+        receipts: journal.querySupervision('agentCommands', 'sessionId', session.sessionId, { limit: 16 }),
+      } : undefined;
+      if (agentSupervision) {
+        const facts = journal.readLifecycleFacts();
+        const workId = text(plan.delegationOrigin.workId);
+        agentSupervision.recovery = supervisionRecovery({plan,session,
+          work:workId ? journal.readWork(workId) : null,mandate:workId ? facts.mandates?.[workId] : undefined,
+          transitions:Object.values(facts.transitions || {}),receipts:agentSupervision.receipts,requests:agentSupervision.requests,
+          relatedWorks:Object.values(journal.readSnapshot().works).filter(row => row.parentConversationId === plan.delegationOrigin.parentConversationId
+            && row.sessionIds?.includes(session.sessionId) && row.state === 'blocked_system').slice(-8)});
+      }
+      return { ...session, report: { ...publicReport(plan, session), ...(agentSupervision ? { agentSupervision } : {}), ...(reviewed ? {
         verification: buildVerificationDetail({ ...authority, plan, sessionId: session.sessionId, evidenceIndex: indexedRefs(plan) }),
       } : {}) } };
     }
@@ -781,17 +880,35 @@ export function createSessionSupervisor({
       .filter((ref) => typeof ref === 'string' && ref.trim());
   }
 
+  function humanGateOf(plan) {
+    const decision = resultCanBeAccepted(plan) ? decideSessionAcceptance(acceptanceFacts(plan)) : null;
+    return decision?.mode === 'confirm' && decision.closeGatePassed === true;
+  }
+
   function acceptanceFacts(plan) {
     const origin = plan.delegationOrigin || {};
     const messages = parentMessages(plan);
     const anchor = messages.find((message) => message?.id === origin.anchorMessageId);
     const extra = hostFacts(plan);
     const hostAuthority = extra.hostAuthority && typeof extra.hostAuthority === 'object' ? extra.hostAuthority : {};
+    let sourceRevision, observationRevision;
+    const reported = messages.some(message => {
+      if (!replyCites(message, origin.sessionId)) return false;
+      const states = message.meta?.sessionStates;
+      // Preserve the historical citation contract for replies written before state receipts.
+      if (states === undefined) return true;
+      return states.some(state => {
+        if (state.sessionId !== origin.sessionId || !['result_ready', 'accepted'].includes(state.status)) return false;
+        sourceRevision ??= reportSourceRevision(plan, buildReport(plan, { sessionId: origin.sessionId }));
+        observationRevision ??= sessionObservationRevision(plan, sourceRevision);
+        return state.sourceRevision === sourceRevision && state.observationRevision === observationRevision;
+      });
+    });
     return {
       plan,
       sessionId: origin.sessionId,
       policy: policyFor(origin.workspaceId, plan),
-      reported: messages.some((message) => replyCites(message, origin.sessionId)),
+      reported,
       readOnly: origin.readOnly === true,
       changedFiles: Array.isArray(extra.changedFiles) ? extra.changedFiles : filesOf(plan),
       irreversible: extra.irreversible === true,
@@ -821,6 +938,7 @@ export function createSessionSupervisor({
   async function settleLocked(sessionId) {
     const plan = findBySession(text(sessionId));
     if (!plan) return null;
+    if (recoveryHeld(plan)) return { ok: false, error: 'coordination_reconciliation_required' };
     if (!sessionExecutionCurrent(plan)) return { ok: false, error: 'execution_revision_stale' };
     if (plan.resultAcceptance?.acceptedAt) {
       return { ok: true, alreadyAccepted: true, resultAcceptance: plan.resultAcceptance };
@@ -854,6 +972,7 @@ export function createSessionSupervisor({
   async function confirmLocked(sessionId) {
     const plan = findBySession(text(sessionId));
     if (!plan) return null;
+    if (recoveryHeld(plan)) return { ok: false, error: 'coordination_reconciliation_required' };
     if (plan.resultAcceptance?.acceptedAt) {
       return { ok: true, alreadyAccepted: true, resultAcceptance: plan.resultAcceptance };
     }
@@ -879,6 +998,7 @@ export function createSessionSupervisor({
     const plan = findBySession(text(input?.sessionId));
     const body = text(input?.text);
     if (!plan || !body) return null;
+    if (recoveryHeld(plan)) return { error: 'coordination_reconciliation_required' };
     const origin = plan.delegationOrigin;
     if (!context || context.role !== 'project_agent' || context.workspaceId !== origin.workspaceId
       || context.conversationId !== origin.parentConversationId || !canManageWorkspace(origin.workspaceId)) {
@@ -994,6 +1114,7 @@ export function createSessionSupervisor({
     if (!planId) return { ok: false, reason: 'missing_plan' };
     const current = goalPlanStore.getPlan(planId) || plan;
     if (!current) return { ok: false, reason: 'missing_plan' };
+    if (recoveryHeld(current)) return { ok: false, reason: 'coordination_reconciliation_required', planId };
     if (['paused', 'superseded'].includes(current.delegationOrigin?.phase)) return { ok: false, reason: 'session_not_paused_by_approval', planId };
     if (current.delegationOrigin?.phase === 'awaiting_approval') {
       const decision = readLocalPlanApproval(current, approvalStore);
@@ -1022,8 +1143,10 @@ export function createSessionSupervisor({
     const plan = goalPlanStore.getPlan(planId);
     const origin = plan?.delegationOrigin;
     if (!origin?.sessionId || !origin.workspaceId) return { ok: false, reason: 'not_delegated' };
-    if (occupiesRunningSlot(plan)) return { ok: false, reason: 'still_running' };
+    if (recoveryHeld(plan)) return { ok: false, reason: 'coordination_reconciliation_required' };
+    if (occupiesRunningSlot(plan) && !['completed', 'failed', 'cancelled', 'stopped'].includes(plan.runner?.status)) return { ok: false, reason: 'still_running' };
     if (origin.phase !== 'running' || !settled(plan)) return { ok: false, reason: 'not_slot_holder' };
+    if (!await sessionControl.settleEnded(plan)) return { ok: false, reason: 'execution_stop_unconfirmed' };
     if (isolationPlanner) await isolationPlanner.cleanup(plan);
     await promote();
     return { ok: true, planId };
@@ -1050,6 +1173,7 @@ export function createSessionSupervisor({
   async function reconcilePersistedQueues() {
     for (const plan of delegatedPlans()) {
       if (canManageWorkspace(plan.delegationOrigin.workspaceId) !== true || !executionScheduler.isWorkspaceReady(plan.delegationOrigin.workspaceId)) continue;
+      if (recoveryHeld(plan)) continue;
       if (plan.delegationOrigin.phase === 'awaiting_approval' && readLocalPlanApproval(plan, approvalStore)) {
         await resumeFromApprovalLocked({ sessionId: plan.delegationOrigin.sessionId, planId: plan.planId });
       }
@@ -1058,8 +1182,10 @@ export function createSessionSupervisor({
       if (plan.status === 'completed' && plan.resultAcceptance?.acceptedAt && plan.delegationOrigin.handoffAuthorizedAt
         && plan.deliveryHandoff?.status !== 'delivered' && plan.deliveryHandoff?.status !== 'stopped'
         && typeof goalRunner?.handoffDelegatedPlan === 'function') await handoff.afterAcceptance(plan);
+      if (TERMINAL.has(plan.status) && executionScheduler.hasResourceClaim(plan)) await sessionControl.settleEnded(plan);
       if (plan.status === 'completed' && !plan.resultAcceptance?.acceptedAt) await settleLocked(plan.delegationOrigin.sessionId);
     }
+    communication.recover({ includeLegacy: false, recoveringStarted: false });
     await promote();
   }
 
@@ -1069,10 +1195,44 @@ export function createSessionSupervisor({
         reason: 'supersession_expired', promote: false });
     }
   }
-  const reconciled = deferRecovery ? Promise.resolve() : reconcileExpired().then(() => exclusive(() => reconcilePersistedQueues()));
+  async function reconcileControls(workspaceId) {
+    const plans = delegatedPlans().filter(plan => !workspaceId || plan.delegationOrigin.workspaceId === workspaceId);
+    const failures = await sessionControl.reconcile(plans);
+    if (typeof recoverStoppedPublications === 'function') {
+      const workspaces = new Set(plans.map(plan => plan.delegationOrigin.workspaceId));
+      for (const id of workspaces) if (canManageWorkspace(id)) await recoverStoppedPublications(id);
+    }
+    return failures;
+  }
+  async function recoverStops() {
+    const workspaces = new Set(delegatedPlans().map(plan => plan.delegationOrigin.workspaceId));
+    for (const workspaceId of workspaces) if (canManageWorkspace(workspaceId)) {
+      await cancellation.recover(delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId));
+      await coordination.recover(workspaceId);
+    }
+  }
+  function reconcileSessions() { return reconcileControls().then(() => recoverStops()).then(() => resourceContention.reconcile(delegatedPlans()))
+    .then(() => reconcileExpired()).then(() => exclusive(() => reconcilePersistedQueues())); }
+  const reconciled = deferRecovery ? Promise.resolve() : reconcileControls().then(() => reconcileExpired()).then(() => exclusive(() => reconcilePersistedQueues()));
 
   return {
     executionScheduler,
+    sessionControl,
+    resourceWaits,
+    async readWorkHistory(input, context) {
+      const work = workBudgetBinding(context.workspaceId)?.store.readWork(input.workId);
+      if (!work) return { error: 'work_not_found' };
+      const target = input.conversationId || context.conversationId;
+      if (context.role === 'project_agent') {
+        if (work.parentConversationId !== context.conversationId) return { error: 'history_out_of_scope' };
+        if (target !== context.conversationId && !delegatedPlans().some(plan => plan.conversationId === target
+          && plan.delegationOrigin.workId === work.workId)) return { error: 'history_out_of_scope' };
+      } else if (context.role !== 'work_session' || target !== context.conversationId
+        || context.workId !== work.workId || findBySession(context.sessionId)?.conversationId !== target) return { error: 'history_out_of_scope' };
+      if (typeof conversationStore.readInteractionPage !== 'function') return { error: 'history_unavailable' };
+      const page = await conversationStore.readInteractionPage(target, { before: input.before, limit: Math.min(50, input.limit || 20) });
+      return page || { error: 'source_unavailable' };
+    },
     summaries: input => readQuery.run(() => summaries(input)),
     coordinateWork: (input, context) => coordination.coordinate(input, context),
     coordinationFacts: (workspaceId, conversationId, scope) => coordination.facts(workspaceId, conversationId, scope),
@@ -1096,15 +1256,24 @@ export function createSessionSupervisor({
       });
     },
     resumeRecovered(workspaceId) {
-      return cancellation.recover(delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)).then(() => coordination.recover(workspaceId)).then(() => exclusive(async () => {
+      return reconcileControls(workspaceId).then(() => resourceContention.reconcile(delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)))
+        .then(() => cancellation.recover(delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId))).then(() => coordination.recover(workspaceId)).then(async () => {
+        for (const plan of delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId && isHostHandoffPause(plan))) {
+          if (canManageWorkspace(workspaceId) && executionScheduler.isWorkspaceReady(workspaceId))
+            await sessionControl.prepareResume(plan, `host-handoff:${plan.planId}:${plan.delegationOrigin.pausedRunnerIntent || plan.runner?.intent || 'execute'}`, exclusive);
+        }
+      }).then(() => exclusive(async () => {
         if (!executionScheduler.isWorkspaceReady(workspaceId) || !canManageWorkspace(workspaceId)) return;
         for (const plan of delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)) {
+          if (executionScheduler.inspect(plan).reason === 'coordination_reconciliation_required') continue;
           if (isHostHandoffPause(plan)) {
             const { pausedFromPhase, pausedRunnerIntent, ...origin } = plan.delegationOrigin;
-            goalPlanStore.revisePlan(plan.planId, {delegationOrigin:{...origin, phase:pausedFromPhase}},
+            await sessionControl.resume(plan, `host-handoff:${plan.planId}:${plan.delegationOrigin.pausedRunnerIntent || plan.runner?.intent || 'execute'}`);
+            goalPlanStore.revisePlan(plan.planId, {delegationOrigin:{...origin,
+              executionControl: goalPlanStore.getPlan(plan.planId).delegationOrigin.executionControl,
+              executionGeneration: goalPlanStore.getPlan(plan.planId).delegationOrigin.executionGeneration, phase:'queued'}},
               {reason:'host handoff recovered', changedBy:'session-supervisor'});
-            if (typeof goalRunner?.resume === 'function') await goalRunner.resume(plan.planId,
-              {awaitIdle:false, intent:pausedRunnerIntent || 'execute'});
+            goalPlanStore.setRunnerState(plan.planId, { status: 'paused', intent: pausedRunnerIntent || 'execute' });
             continue;
           }
           if (plan.delegationOrigin.phase !== 'running' || !['executing', 'interrupted'].includes(plan.status)
@@ -1126,11 +1295,13 @@ export function createSessionSupervisor({
       }
       return { ok: true };
     },
-    reconcile() { return reconcileExpired().then(() => exclusive(() => reconcilePersistedQueues())); },
+    reconcile: reconcileSessions,
     spawn(input, context) {
       return exclusive(() => spawnLocked(input, context || {}));
     },
-    resume(input, context = {}) {
+    async resume(input, context = {}) {
+      const prepared = await continuity.prepareResume(input, context, exclusive);
+      if (!prepared.ok) return prepared;
       return exclusive(async () => {
         const result = await continuity.resume(input, context);
         if (!result.ok) return result;
@@ -1153,14 +1324,18 @@ export function createSessionSupervisor({
         if (!plan || plan.delegationOrigin.workspaceId !== context.workspaceId
           || plan.delegationOrigin.parentConversationId !== context.parentConversationId
           || !context.currentInputAnchors?.includes(input.anchorMessageId)
-          || !history?.messages?.some(row => row.id === input.anchorMessageId && row.role === 'user')) return { error: 'current_user_required' };
+          || !history?.messages?.some(row => row.id === input.anchorMessageId && isCanonicalUserInput(row))) return { error: 'current_user_required' };
         return { session: project(plan) };
       });
       if (checked.error) return checked;
       const controlled = await controlProjectWork({ session: checked.session, action: input.action, anchorMessageId: input.anchorMessageId, context,
         sessions: () => delegatedPlans().filter(row => row.delegationOrigin.workspaceId === context.workspaceId).map(project),
-        pause: id => continuity.suspend(id, null, context), cancel: id => cancellation.cancel({ sessionId: id, reason: 'user cancelled work' }),
-        resume: (sessionId, anchorMessageId) => continuity.resume({ sessionId, anchorMessageId }, context),
+        pause: id => continuity.suspend(id, null, context),
+        cancel: id => cancellation.cancel({ sessionId: id, reason: 'user cancelled work', anchorMessageId: input.anchorMessageId }, context),
+        resume: async (sessionId, anchorMessageId) => {
+          const prepared = await continuity.prepareResume({ sessionId, anchorMessageId }, context, exclusive);
+          return prepared.ok ? exclusive(() => continuity.resume({ sessionId, anchorMessageId }, context)) : prepared;
+        },
       });
       if (controlled.ok && input.action === 'resume') await exclusive(() => promote());
       return controlled;
@@ -1197,9 +1372,10 @@ export function createSessionSupervisor({
     },
     deliveryFacts: id => readQuery.run(() => handoff.facts(id)),
     handleHandoffAnswer(input) { return exclusive(() => handoff.answer(input || {})); },
-    cancel(input) {
-      return cancellation.cancel(input || {});
+    cancel(input, context = {}) {
+      return cancellation.cancel(input || {}, context);
     },
+    waitForCoordinationIdle: workspaceId => coordination.waitForIdle(workspaceId),
     requestCancel: input => cancellation.request(input || {}),
     recoverCancellations: workspaceId => cancellation.recover(delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)),
     message(input, context) {
@@ -1231,6 +1407,7 @@ export function createSessionSupervisor({
       return exclusive(async () => {
         const plan = findBySession(text(input?.sessionId));
         if (!plan || !canManageWorkspace(plan.delegationOrigin.workspaceId)) return { ok: false, error: 'not_found' };
+        if (recoveryHeld(plan)) return { ok: false, error: 'coordination_reconciliation_required' };
         try {
           const report = buildSessionReport(plan, project(plan), conversationStore.getPersistedConversationHistory(plan.conversationId));
           return await confirmCompletionReview({ plan, report, review: projectCompletionReview(plan, report),
@@ -1347,4 +1524,30 @@ function text(value) {
 function stringList(value) {
   if (!Array.isArray(value)) return [];
   return value.map((item) => text(item)).filter(Boolean);
+}
+
+
+/** Explicit delegation anchors only. Resource materials remain user context, not authority. */
+export function resourceFeedbackFromMessages(messages, anchorMessageIds, { recipient, readResourceFeedback } = {}) {
+  const anchors = new Set(anchorMessageIds), rows = new Map();
+  for (const message of messages) {
+    if (!anchors.has(message?.id)) continue;
+    // Only canonical user material can admit a prior fixed result. Assistant
+    // fields and prose cannot manufacture a frozen user selection.
+    if (message.role !== 'user') continue;
+    const refs = restoreResourceFeedbackTransport(message.resourceFeedback, message.attachments);
+    if (refs.some(ref => ref.resource.kind === 'interactive')) {
+      if (!recipient || typeof readResourceFeedback !== 'function') throw Object.assign(new TypeError('INTERACTIVE_FEEDBACK_UNAVAILABLE'), { code: 'INTERACTIVE_FEEDBACK_UNAVAILABLE' });
+      const actual = readResourceFeedback(message, recipient.workspaceId);
+      if (JSON.stringify(actual) !== JSON.stringify(refs)) throw Object.assign(new TypeError('INTERACTIVE_FEEDBACK_MISMATCH'), { code: 'INTERACTIVE_FEEDBACK_MISMATCH' });
+    }
+    for (const ref of refs) {
+      if (recipient && (ref.recipient.workspaceId !== recipient.workspaceId || ref.recipient.conversationId !== recipient.conversationId)) throw new TypeError('RESOURCE_FEEDBACK_RECIPIENT_CHANGED');
+      if (rows.has(ref.id) && JSON.stringify(rows.get(ref.id)) !== JSON.stringify(ref)) throw new TypeError('RESOURCE_FEEDBACK_ID_CONFLICT');
+      rows.set(ref.id, ref);
+    }
+  }
+  const result = normalizeResourceFeedbackList([...rows.values()]);
+  if (!result) throw new TypeError('RESOURCE_FEEDBACK_LIMIT');
+  return result;
 }

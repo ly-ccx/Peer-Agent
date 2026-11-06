@@ -1,5 +1,6 @@
-import type { SkillDetail, SkillSummary } from '@peer-agent/protocol';
-import { useEffect, useState } from 'react';
+import { useResourceRead } from '../../ui/resources/useResourceState';
+import type { SkillSummary } from '@peer-agent/protocol';
+import { useState } from 'react';
 import { Overlay } from '../../app/components/Overlay';
 import { MarkdownMessage } from '../../chat/components/markdown/MarkdownMessage';
 import { clientApi } from '../../clientApi';
@@ -8,7 +9,7 @@ import { Switch } from '../../ui/boolean-controls';
 function ScopeBadge({ scope }: { readonly scope: SkillSummary['scope'] }) {
   return (
     <span className={`skill-scope-badge skill-scope-badge--${scope}`}>
-      {scope === 'workspace' ? '工作空间' : '全局'}
+      {scope === 'workspace' ? '机器人' : '全局'}
     </span>
   );
 }
@@ -24,31 +25,16 @@ export function SkillDetailDialog({
   readonly onToggle: (skillId: string, enabled: boolean, workspacePath?: string | null) => Promise<void>;
   readonly onUninstall?: (skillId: string) => Promise<void>;
 }) {
-  const [detail, setDetail] = useState<SkillDetail | null>(null);
-  const [loading, setLoading] = useState(true);
+  const reader = useResourceRead(JSON.stringify([skill.skillId, skill.workspacePath ?? null]), async () => {
+    const value = await clientApi.getSkillDetail(skill.skillId, skill.workspacePath ?? null);
+    if (!value) throw Error('skill_detail_unavailable');
+    return value;
+  });
+  const detail = reader.value;
   const [toggling, setToggling] = useState(false);
   const [confirmUninstall, setConfirmUninstall] = useState(false);
   const [uninstalling, setUninstalling] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    void clientApi.getSkillDetail(skill.skillId, skill.workspacePath ?? null)
-      .then((value) => {
-        if (cancelled) return;
-        setDetail(value);
-        if (!value) setError('无法读取 Skill 内容');
-      })
-      .catch(() => {
-        if (!cancelled) setError('读取 Skill 内容失败');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [skill.skillId, skill.workspacePath]);
 
   const current = detail ?? skill;
   const canUninstall = current.canUninstall && typeof onUninstall === 'function';
@@ -72,6 +58,8 @@ export function SkillDetailDialog({
   return (
     <Overlay
       onClose={onClose}
+      closeOnBackdrop={!toggling && !uninstalling}
+      onEscape={() => toggling || uninstalling}
       ariaLabel={current.name}
       panelClassName="skill-detail-dialog"
     >
@@ -90,29 +78,30 @@ export function SkillDetailDialog({
             </div>
             <Switch
               checked={current.enabled}
-              disabled={toggling || uninstalling}
-              aria-label="挂载到当前工作空间"
+              disabled={reader.loading || toggling || uninstalling}
+              aria-label="挂载到当前机器人"
               onClick={(event) => event.stopPropagation()}
               onCheckedChange={async (enabled) => {
-                setToggling(true);
+                setToggling(true); setError(null);
                 try {
                   await onToggle(current.skillId, enabled, current.workspacePath ?? null);
-                  setDetail((previous) => previous ? { ...previous, enabled } : previous);
-                } finally {
+                  if (detail) reader.accept({ ...detail, enabled });
+                } catch (error) { setError(error instanceof Error ? error.message : '技能开关尚未确认'); } finally {
                   setToggling(false);
                 }
               }}
             />
-            <button type="button" className="skill-detail-close" aria-label="关闭" onClick={requestClose}><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg></button>
+            <button type="button" className="ui-button is-icon is-compact skill-detail-close" disabled={toggling || uninstalling} aria-label="关闭" onClick={requestClose}><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg></button>
           </header>
 
           <div className="skill-detail-meta">
-            <span>{current.scope === 'workspace' ? '仅当前工作空间可用' : '所有工作空间均可挂载'}</span>
+            <span>{current.scope === 'workspace' ? '仅当前机器人可用' : '所有机器人均可挂载'}</span>
             {detail?.sourcePath ? <code>{detail.sourcePath}</code> : null}
           </div>
 
           <div className="skill-detail-content">
-            {loading ? <div className="skill-loading">加载内容中…</div> : null}
+            {reader.loading ? <div className="skill-loading" role="status">加载内容中…</div> : null}
+            {reader.error ? <p className="ui-form-feedback is-error" role="alert">内容尚未读到最新值 <button type="button" className="ui-button is-compact" onClick={() => void reader.reload()}>重新读取</button></p> : null}
             {error ? <div className="skill-link-error" role="alert">{error}</div> : null}
             {detail?.whenToUse ? (
               <section className="skill-detail-when">
@@ -129,7 +118,7 @@ export function SkillDetailDialog({
                 <div className="skill-uninstall-confirm" role="group" aria-label="确认卸载">
                   <p>
                     {current.scope === 'workspace'
-                      ? `确认卸载「${current.name}」？当前工作区中的安装目录会被永久删除，且无法撤销。`
+                      ? `确认卸载「${current.name}」？当前机器人中的安装目录会被永久删除，且无法撤销。`
                       : `确认卸载「${current.name}」？用户安装目录会被删除；若是借用技能，仅取消本地软链。`}
                   </p>
                   <div className="skill-uninstall-actions">

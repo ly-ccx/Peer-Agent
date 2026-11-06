@@ -4,8 +4,11 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 const requestContext = new AsyncLocalStorage();
 const backgroundProvenance = Symbol('selection-background');
 
-export function withSelectionRequestContext(store, conversationId, run) {
-  const child = !!store?.getConversation?.(conversationId)?.selectionOrigin;
+export function withSelectionRequestContext(store, conversationId, run, loadedConversation = undefined) {
+  const conversation = loadedConversation !== undefined
+    ? loadedConversation
+    : store?.getConversation?.(conversationId);
+  const child = !!conversation?.selectionOrigin;
   return requestContext.run({ store, conversationId, child }, run);
 }
 

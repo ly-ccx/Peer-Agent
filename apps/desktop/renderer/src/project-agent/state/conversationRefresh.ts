@@ -1,5 +1,6 @@
 /** Coalesce notifications without losing a fact change that arrives during a read. */
-export function createConversationRefresh(read: () => Promise<void>, { delayMs = 0 } = {}) {
+export function createConversationRefresh(read: () => Promise<void>, { delayMs = 0, active: initiallyActive = true } = {}) {
+  let active = initiallyActive;
   let stopped = false;
   let pending = false;
   let running: Promise<void> | null = null;
@@ -12,12 +13,13 @@ export function createConversationRefresh(read: () => Promise<void>, { delayMs =
   const request = (): Promise<void> => {
     if (stopped) return Promise.resolve();
     pending = true;
+    if (!active) return Promise.resolve();
     if (running) return running;
     running = (async () => {
       try {
-        while (pending && !stopped) {
+        while (pending && !stopped && active) {
           if (delayMs > 0) await delay();
-          if (stopped) break;
+          if (stopped || !active) break;
           pending = false;
           await read();
         }
@@ -27,7 +29,11 @@ export function createConversationRefresh(read: () => Promise<void>, { delayMs =
     })();
     return running;
   };
-  return { request, stop: () => {
+  return { request, setActive: (next: boolean) => {
+    if (stopped || active === next) return Promise.resolve();
+    active = next;
+    return active ? request() : Promise.resolve();
+  }, stop: () => {
     stopped = true; pending = false;
     if (timer !== null) clearTimeout(timer);
     timer = null; releaseDelay?.(); releaseDelay = null;

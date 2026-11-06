@@ -255,3 +255,15 @@ test('executor admits UI heartbeats before cognition and after settled accountin
   await executor.runTurn({turnProfile:{role:'goal_runner'},sink:{send(){}}});
   assert.equal(after,true);
 });
+
+test('frozen normal and fast channels override unrelated request defaults', async () => {
+  const seen = [];
+  const executor = createAgentTurnExecutor({ llmChatService: { async sendMessage(input) {
+    seen.push({ fast: input.fastMode, effort: input.effort });
+    return { terminalStatus: 'done', toolCallCount: 0 };
+  } } });
+  for (const fastMode of [false, true]) await executor.runTurn({ fastMode: !fastMode,
+    turnProfile: { role: 'work_session', modelSelection: { modelProviderId: 'm', reasoningEffort: 'high', fastMode } },
+    sink: { send() {} } });
+  assert.deepEqual(seen, [{ fast: false, effort: 'high' }, { fast: true, effort: 'high' }]);
+});

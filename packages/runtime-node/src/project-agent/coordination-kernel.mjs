@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 
-export const COORDINATION_ACTIONS = Object.freeze(['parallel', 'augment', 'revise', 'query', 'answer', 'cancel', 'replace', 'handoff']);
+export const COORDINATION_ACTIONS = Object.freeze(['parallel', 'augment', 'revise', 'query', 'answer', 'cancel', 'replace', 'handoff', 'resume']);
 const revisions = new Set(['revise', 'cancel', 'replace']);
 const phases = { recorded: ['stopping', 'ready', 'completed', 'blocked'], stopping: ['awaiting_outcome', 'ready', 'completed', 'blocked'],
-  awaiting_outcome: ['ready', 'completed', 'blocked'], ready: ['started', 'completed', 'blocked'], started: ['completed', 'blocked'], blocked: ['stopping', 'ready'], completed: [] };
+  awaiting_outcome: ['stopping', 'ready', 'completed', 'blocked'], ready: ['started', 'completed', 'blocked'], started: ['completed', 'blocked'], blocked: ['stopping', 'ready', 'completed'], completed: [] };
 const unique = values => [...new Set(values || [])];
 const fingerprint = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
@@ -16,7 +16,7 @@ export function admitCoordinationDecision(state, decision, host) {
     || !Number.isSafeInteger(decision.expectedRevision) || decision.expectedRevision < 0
     || !Array.isArray(decision.sourceInputIds) || !Array.isArray(decision.sourceEventIds)) return reject('invalid_coordination_decision');
   // Model-controlled fields must not impersonate a host-issued mandate or execution lease.
-  if (Object.keys(decision).some(key => !['operationId', 'workId', 'expectedRevision', 'action', 'sourceInputIds', 'sourceEventIds', 'sessionId', 'reason', 'payload'].includes(key))) return reject('untrusted_coordination_authority');
+  if (Object.keys(decision).some(key => !['operationId', 'workId', 'expectedRevision', 'action', 'sourceInputIds', 'sourceEventIds', 'sourceDecisionRef', 'sessionId', 'reason', 'payload'].includes(key))) return reject('untrusted_coordination_authority');
   if (!host?.holdsLease || !host.workspaceId || !host.parentConversationId) return reject('coordination_lease_lost');
   const digest = fingerprint(decision);
   const prior = state.mandates?.[decision.workId];
@@ -26,34 +26,44 @@ export function admitCoordinationDecision(state, decision, host) {
   if ((prior?.goalRevision || 0) !== decision.expectedRevision) return reject('goal_revision_conflict');
   const inputs = unique(decision.sourceInputIds), events = unique(decision.sourceEventIds);
   if (inputs.some(id => !host.currentInputIds?.includes(id)) || events.some(id => !host.eventIds?.includes(id))) return reject('source_not_admitted');
-  if (!inputs.length && !events.length) return reject('coordination_source_required');
+  const intent = state.works?.[decision.workId]?.intentCoordination;
+  if (intent && intent.lifecycle !== 'active') return reject('mandate_inactive');
+  const continuation = !inputs.length && !events.length && decision.sourceDecisionRef
+    && decision.sourceDecisionRef === host.sourceDecisionRef && intent?.lifecycle === 'active' && intent.goalRevision === prior?.goalRevision
+    && (intent.decision.operationId === decision.sourceDecisionRef && intent.decision.disposition.kind === 'continue'
+      || typeof host.turnId === 'string' && host.turnId.length > 0 && intent.decisionTurnId === host.turnId && decision.sourceDecisionRef === host.originDecisionRef
+        && state.intentDecisions?.[decision.sourceDecisionRef]?.continuation === true
+        && state.intentDecisions[decision.sourceDecisionRef].goalRevision === prior.goalRevision);
+  if (!inputs.length && !events.length && !continuation) return reject('coordination_source_required');
   if (!inputs.length && (!prior || prior.lifecycle !== 'active')) return reject('mandate_inactive');
   const adopted = !prior && inputs.length && decision.sessionId && host.adoptSessionIds?.includes(decision.sessionId);
   if (!prior && (!inputs.length || decision.action !== 'parallel' && !adopted)) return reject('mandate_required');
-  if (prior?.lifecycle === 'cancelled' || prior?.lifecycle === 'fulfilled') return reject('mandate_inactive');
+  if (prior?.lifecycle === 'fulfilled' || prior?.lifecycle === 'cancelled' && !(decision.action === 'cancel' && inputs.length)) return reject('mandate_inactive');
   if (decision.sessionId && (!(prior?.sessionIds.includes(decision.sessionId) || adopted)
     || host.scopedSessionIds && !host.scopedSessionIds.includes(decision.sessionId))) return reject('out_of_scope');
   if (!inputs.length && events.some(id => (!prior.sessionIds.includes(state.events?.[id]?.event?.sessionId) || prior.revokedSessionIds?.includes(state.events?.[id]?.event?.sessionId)))) return reject('event_out_of_scope');
-  if (prior && !prior.allowedActions.includes(decision.action)) return reject('coordination_action_denied');
+  if (prior && !prior.allowedActions.includes(decision.action) && !(decision.action === 'resume' && prior.allowedActions.includes('handoff'))) return reject('coordination_action_denied');
   // Quote-scoped human corrections cannot bind an unrelated goal merely because it is recent.
   if (host.scopedSessionIds && prior && !prior.sessionIds.some(id => host.scopedSessionIds.includes(id))) return reject('out_of_scope');
   const materialRefs = unique(host.materialRefs);
   if (!inputs.length && materialRefs.some(ref => !prior.materialRefs.includes(ref))) return reject('material_out_of_scope');
   const goalRevision = prior ? prior.goalRevision + (revisions.has(decision.action) ? 1 : 0) : 1;
   const executionBindings = { ...prior?.executionBindings };
-  if (decision.sessionId && ['revise', 'cancel', 'replace', 'handoff'].includes(decision.action)) delete executionBindings[decision.sessionId];
+  if (decision.sessionId && ['revise', 'cancel', 'replace', 'handoff', 'resume'].includes(decision.action)) delete executionBindings[decision.sessionId];
   const mandate = { schemaVersion: 1, mandateId: prior?.mandateId || `mandate-${fingerprint([host.workspaceId, decision.workId])}`,
+    ...(prior?.intentSchemaVersion === 1 || host.intentRequired === true ? { intentSchemaVersion: 1 } : {}),
     workId: decision.workId, workspaceId: host.workspaceId, parentConversationId: host.parentConversationId,
     rootInputIds: prior?.rootInputIds || inputs, revisionInputIds: unique([...(prior?.revisionInputIds || []), ...inputs]),
     goalRevision, allowedActions: prior?.allowedActions || [...COORDINATION_ACTIONS], sessionIds: prior?.sessionIds || (adopted ? [decision.sessionId] : []),
     materialRefs: unique([...(prior?.materialRefs || []), ...materialRefs]), policyRevision: host.policyRevision || 'existing-project-policy',
-    executionBindings, revokedSessionIds: unique([...(prior?.revokedSessionIds || []), ...(decision.sessionId && ['revise', 'cancel', 'replace', 'handoff'].includes(decision.action) ? [decision.sessionId] : [])]), lifecycle: 'active' };
+    executionBindings, revokedSessionIds: unique([...(prior?.revokedSessionIds || []), ...(decision.sessionId && ['revise', 'cancel', 'replace', 'handoff', 'resume'].includes(decision.action) ? [decision.sessionId] : [])]),
+    lifecycle: prior?.lifecycle === 'cancelled' ? 'cancelled' : 'active' };
   const transition = { schemaVersion: 1, operationId: decision.operationId, workId: decision.workId,
     mandateId: mandate.mandateId, expectedGoalRevision: goalRevision, sourceInputIds: inputs, sourceEventIds: events,
     initiator: 'project_agent', decisionSource: inputs.length ? 'user_revision' : 'execution_repair',
     action: decision.action, reason: decision.reason, ...(decision.sessionId ? { oldSessionId: decision.sessionId } : {}),
     executionEpoch: `execution-${fingerprint([decision.workId, goalRevision, decision.operationId])}`,
-    phase: 'recorded', minimumExecutorVersion: 1, updatedAt: host.now };
+    phase: 'recorded', minimumExecutorVersion: decision.payload?.repair === true ? 3 : decision.action === 'resume' ? 2 : 1, updatedAt: host.now };
   const receipt = { ...decision, digest, goalRevision, mandateId: mandate.mandateId };
   return { ok: true, entry: { kind: 'coordination_decision', mandate, receipt, transition }, receipt };
 }
@@ -89,8 +99,20 @@ export function reduceCoordinationDecision(state, entry) {
   } else {
     const transition = next.transitions[entry.operationId];
     if (!transition || transition.phase !== entry.expectedPhase) throw new Error('transition_phase_conflict');
-    if (!phases[transition.phase]?.includes(entry.patch.phase)) throw new Error('invalid_transition_phase');
-    next.transitions[entry.operationId] = { ...transition, ...structuredClone(entry.patch) };
+    if (entry.patch.phase !== undefined && entry.patch.phase !== transition.phase
+      && !phases[transition.phase]?.includes(entry.patch.phase)) throw new Error('invalid_transition_phase');
+    if (entry.patch.phase === 'completed' && transition.phase === 'blocked' && !entry.patch.controlOperationRef) throw new Error('control_receipt_required');
+    if (entry.patch.controlOperationRef) {
+      const control = state.sessionControls?.[entry.patch.controlOperationRef];
+      if (!control || control.kind !== 'cancel' || control.sessionId !== transition.oldSessionId || !control.stopReceipt) throw new Error('control_receipt_required');
+    }
+    if (entry.patch.executionAdmission !== undefined && !['queued', 'admitted', 'rejected'].includes(entry.patch.executionAdmission)
+      || entry.patch.executionEffect !== undefined && !['pending', 'applied', 'unknown', 'rejected'].includes(entry.patch.executionEffect)) throw new Error('invalid_execution_receipt');
+    if (entry.patch.executionEffect === 'applied' && (!entry.patch.executionAttemptRef
+      || (entry.patch.executionAdmission || transition.executionAdmission) !== 'admitted')) throw new Error('execution_receipt_unproven');
+    const patch = structuredClone(entry.patch);
+    if (transition.executionEffect === 'applied') { delete patch.executionEffect; delete patch.executionAdmission; }
+    next.transitions[entry.operationId] = { ...transition, ...patch };
   }
   return next;
 }

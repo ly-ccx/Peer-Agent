@@ -7,6 +7,8 @@
 //
 // 原则(17 号文档):It moves evidence out of prompt and keeps the route back.
 
+import { isHumanUserMessage } from './context-compaction.ts';
+
 export const MICROCOMPACTION_CONFIG = Object.freeze({
   keepRecentCount: 8,
   triggerChars: 6_000,
@@ -456,9 +458,10 @@ function microcompactMessageContent(content: unknown, config: typeof MICROCOMPAC
  */
 export function microcompactMessagesForContext<TMessage extends MicrocompactMessage>(
   messages: readonly TMessage[],
-  options: Partial<typeof MICROCOMPACTION_CONFIG> = {},
+  options: Partial<typeof MICROCOMPACTION_CONFIG> & { preserveLatestUserTurn?: boolean } = {},
 ): MicrocompactResult<TMessage> {
   const config = { ...MICROCOMPACTION_CONFIG, ...options };
+  let protectLatestUser = options.preserveLatestUserTurn === true;
   let recentNonSystemSeen = 0;
   const compactableIndexes = new Set<number>();
 
@@ -466,6 +469,10 @@ export function microcompactMessagesForContext<TMessage extends MicrocompactMess
     const message = messages[index];
     if (message?.role === 'system' || message?._compaction) continue;
     recentNonSystemSeen++;
+    if (protectLatestUser && message && isHumanUserMessage(message)) {
+      protectLatestUser = false;
+      continue;
+    }
     if (recentNonSystemSeen > config.keepRecentCount) {
       compactableIndexes.add(index);
     }

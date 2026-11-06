@@ -3,9 +3,14 @@ import test from 'node:test';
 import { createI18n } from '@peer-agent/i18n';
 import {
   briefFromMemories,
+  clampDrawerWidth,
   closeDrawer,
   conversationModelLabel,
   drawerLayout,
+  drawerStorageKey,
+  DRAWER_MAX_WIDTH,
+  DRAWER_MIN_WIDTH,
+  DRAWER_WIDTH,
   formatDrawerStamp,
   formatDrawerSessionStatus,
   groupDrawerSessions,
@@ -17,6 +22,7 @@ import {
   readMemoryItems,
   readMemoryRecords,
   readMemorySwitches,
+  resizeDrawer,
   writeDrawerMemory,
   type DrawerMemory,
   type DrawerSession,
@@ -72,7 +78,7 @@ test('缺失前置任务没有 blocker 行时仍显示需要重新安排的原�
     queuedBehind: [{ sessionId: 'dep', title: '修改' }] }), i18n), '等待 修改');
 });
 
-test('打开、定位，并按机器人记住抽屉', () => {
+test('打开与任务定位只作用于当前界面，重新进入机器人只恢复页签', () => {
   const closed: DrawerMemory = { open: false, tab: 'overview', sessionId: null };
   const opened = openDrawer(closed, 'memory');
   assert.deepEqual(opened, { open: true, tab: 'memory', sessionId: null });
@@ -80,11 +86,22 @@ test('打开、定位，并按机器人记住抽屉', () => {
   assert.deepEqual(located, { open: true, tab: 'tasks', sessionId: 'sess-1' });
   const store = memoryStore();
   writeDrawerMemory('ws-1', located, store);
-  assert.deepEqual(readDrawerMemory('ws-1', store), located);
+  assert.deepEqual(readDrawerMemory('ws-1', store), { open: false, tab: 'tasks', sessionId: null });
+  assert.deepEqual(JSON.parse(store.get(drawerStorageKey('ws-1'))!), { tab: 'tasks' });
   assert.deepEqual(readDrawerMemory('ws-2', store), closed);
   writeDrawerMemory('ws-1', closeDrawer(located), store);
   assert.equal(readDrawerMemory('ws-1', store).open, false);
-  assert.equal(readDrawerMemory('ws-1', store).sessionId, 'sess-1');
+  assert.equal(readDrawerMemory('ws-1', store).sessionId, null);
+});
+
+test('旧版展开与定位记录不会自动打开设置，页签和宽度仍保留', () => {
+  const store = memoryStore();
+  store.set(drawerStorageKey('ws-legacy'), JSON.stringify({
+    open: true, tab: 'settings', width: 460, sessionId: 'old-session', objectiveId: 'old-objective',
+  }));
+  const restored = readDrawerMemory('ws-legacy', store);
+  assert.deepEqual(restored, { open: false, tab: 'settings', sessionId: null, width: 460 });
+  assert.deepEqual(openDrawer(restored), { open: true, tab: 'settings', sessionId: null, width: 460 });
 });
 
 test('宽窗口推开对话，窄窗口覆盖', () => {
@@ -213,8 +230,52 @@ test('memory page retains maintenance state and sources while overview only uses
   assert.equal(filterMemoryRecords(records,{kind:'',trust:'',status:'conflicted'}).length,1);
 });
 
-test('task origin and persisted drawer state retain objective navigation',()=>{
+test('task origin retains objective navigation while drawer preferences do not persist the active target',()=>{
   assert.equal(readDrawerSession({sessionId:'s',status:'running',origin:{objectiveId:'objective-x'}})?.objectiveId,'objective-x');
   const store=memoryStore();writeDrawerMemory('w',{open:true,tab:'objectives',sessionId:null,objectiveId:'objective-x'},store);
-  assert.equal(readDrawerMemory('w',store).objectiveId,'objective-x');
+  assert.equal(readDrawerMemory('w',store).objectiveId,undefined);
+  assert.equal(readDrawerMemory('w',store).tab,'objectives');
+});
+
+test('drawer width clamps to its bounds and rejects non-finite input', () => {
+  assert.equal(clampDrawerWidth(DRAWER_MIN_WIDTH - 100), DRAWER_MIN_WIDTH);
+  assert.equal(clampDrawerWidth(DRAWER_MAX_WIDTH + 100), DRAWER_MAX_WIDTH);
+  assert.equal(clampDrawerWidth(400), 400);
+  assert.equal(clampDrawerWidth(400.6), 401);
+  assert.equal(clampDrawerWidth(Number.NaN), DRAWER_WIDTH);
+  assert.equal(clampDrawerWidth(Number.POSITIVE_INFINITY), DRAWER_WIDTH);
+});
+
+test('resizeDrawer keeps memory intact and only writes a legal width', () => {
+  const base: DrawerMemory = { open: true, tab: 'settings', sessionId: 's-1' };
+  const widened = resizeDrawer(base, DRAWER_MAX_WIDTH + 999);
+  assert.equal(widened.width, DRAWER_MAX_WIDTH);
+  assert.equal(widened.open, true);
+  assert.equal(widened.tab, 'settings');
+  assert.equal(widened.sessionId, 's-1');
+  // 非法输入不改动原对象，避免把 NaN 写进持久化。
+  assert.equal(resizeDrawer(base, Number.NaN), base);
+});
+
+test('persisted drawer width survives a round trip and is re-clamped on read', () => {
+  const store = memoryStore();
+  writeDrawerMemory('w', { open: true, tab: 'settings', sessionId: null, width: 460 }, store);
+  assert.equal(readDrawerMemory('w', store).width, 460);
+  // 旧数据被外部改坏（越界 / 非数字）时，读回必须收敛到合法区间。
+  store.set(drawerStorageKey('w'), JSON.stringify({ open: true, tab: 'settings', sessionId: null, width: 9999 }));
+  assert.equal(readDrawerMemory('w', store).width, DRAWER_MAX_WIDTH);
+  store.set(drawerStorageKey('w'), JSON.stringify({ open: true, tab: 'settings', sessionId: null, width: 'wide' }));
+  assert.equal(readDrawerMemory('w', store).width, undefined);
+});
+
+test('drawer memory without a width never fabricates one', () => {
+  const store = memoryStore();
+  writeDrawerMemory('w', { open: true, tab: 'overview', sessionId: null }, store);
+  assert.equal(readDrawerMemory('w', store).width, undefined);
+});
+
+test('task detail reading preserves the structured plan ID for scoped resource navigation', () => {
+  const session = readDrawerSession({ sessionId: 'work', status: 'accepted', report: { planId: 'confirmed-plan' } });
+  assert.equal(session?.planId, 'confirmed-plan');
+  assert.equal(readDrawerSession({ sessionId: 'legacy' })?.planId, undefined);
 });

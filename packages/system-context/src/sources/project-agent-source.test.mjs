@@ -42,6 +42,9 @@ test('项目代理规则只在 project_agent 角色进入 L1', () => {
   assert.match(section.content, /On wake turns, remain quiet unless post_reply is needed/);
   assert.match(section.content, /short, self-contained messages/);
   assert.match(section.content, /structured details the interface can reveal on request/);
+  assert.match(section.content, /A child work question belongs to you first/);
+  assert.match(section.content, /does not create a native human gate/);
+  assert.match(section.content, /Do not repeatedly reverify the same unchanged report/);
   assert.match(section.content, /never hide a required user action or uncertainty in details/);
   assert.match(section.content, /explicitly asks for code or technical explanation/);
   assert.doesNotMatch(section.content, /mem-/);
@@ -98,7 +101,9 @@ test('后台启动保持安静，完成事件仍要求核验和真实来源', ()
     events: [{ kind: 'session_started', sessionId: 'sess-private', summary: 'worker label' }] });
   const rules = assembled.sections.find(section => section.id === 'project-agent');
   assert.match(rules.content, /session_started or routine progress event is not a request for another status report/);
-  assert.match(rules.content, /finish quietly without querying tools/);
+  assert.match(rules.content, /do not query tools for progress/);
+  assert.match(rules.content, /Use wait_for_sessions when projected for the advancing work/);
+  assert.match(rules.content, /A tool-free finish is for a wake with no remaining responsibility/);
   assert.match(rules.content, /focus on its sessionId and the current request/);
   assert.match(rules.content, /result_ready event is a task result to review/);
   assert.match(rules.content, /use verify_session when independent verification is missing/);

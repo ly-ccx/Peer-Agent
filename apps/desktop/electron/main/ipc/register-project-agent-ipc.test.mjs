@@ -16,6 +16,8 @@ const CHANNELS = [
   'project-agent:update-model-selection',
   'project-agent:delete',
   'project-agent:submit-input',
+  'project-agent:read-input-draft',
+  'project-agent:write-input-draft',
   'project-agent:read-conversation',
   'project-agent:stop-response',
   'project-agent:read-evidence',
@@ -34,6 +36,7 @@ const CHANNELS = [
   'project-agent:accept-readme',
   'project-agent:retry',
   'project-agent:takeover-host',
+  'project-agent:recovery',
   'project-agent:diagnostics',
 ];
 
@@ -56,6 +59,8 @@ function harness() {
       updateModelSelection: port('update-model-selection'),
       deleteBot: port('delete'),
       submitInput: port('submit-input'),
+      readInputDraft: port('read-input-draft'),
+      writeInputDraft: port('write-input-draft'),
       readConversation: port('read-conversation'),
       readEvidence: port('read-evidence'),
       listSessions: port('list-sessions'),
@@ -72,6 +77,7 @@ function harness() {
       confirmResult: port('confirm-result'),
       acceptReadme: port('accept-readme'),
       takeoverHost: port('takeover-host'),
+      controlRecovery: port('recovery'),
       retry: port('retry'),
       stopResponse: port('stop-response'),
       diagnostics: port('diagnostics'),

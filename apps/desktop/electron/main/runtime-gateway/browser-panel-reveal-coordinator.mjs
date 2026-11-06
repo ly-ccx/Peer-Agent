@@ -10,6 +10,7 @@ const DEFAULT_RETRY_INTERVAL_MS = 250;
  */
 export function createBrowserPanelRevealCoordinator({
   broadcast,
+  revealNative = () => null,
   isBrowserReady = () => true,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   retryIntervalMs = DEFAULT_RETRY_INTERVAL_MS,
@@ -23,6 +24,8 @@ export function createBrowserPanelRevealCoordinator({
     if (typeof conversationId !== 'string' || !conversationId.trim()) {
       return Promise.reject(new Error('conversationId is required'));
     }
+    try { const native = revealNative({ conversationId, focus }); if (native) return Promise.resolve(native); }
+    catch (error) { return Promise.reject(error); }
     const existing = pendingByConversation.get(conversationId);
     if (existing) return existing.promise;
     const requestId = randomUUID();
@@ -53,6 +56,9 @@ export function createBrowserPanelRevealCoordinator({
       pendingByConversation.delete(conversationId);
     };
     const finishIfReady = () => {
+      try { const native = revealNative({ conversationId, focus: request.focus });
+        if (native) { clearRequest(); request.resolve(native); return true; }
+      } catch (error) { clearRequest(); request.reject(error); return true; }
       if (!request.accepted || !isBrowserReady(conversationId)) return false;
       clearRequest();
       const payload = request.acceptedPayload || {};

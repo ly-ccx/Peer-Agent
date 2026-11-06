@@ -11,6 +11,11 @@
 
   /* Startup owns the full window, including the traffic-light area. Reusing
      .thread would inset its different-colored wash by 40px / 52px / 24px. */
+  body:has(.app-shell.is-starting) {
+    min-width: 0;
+    min-height: 0;
+  }
+
   .app-shell.is-starting {
     animation: none;
   }
@@ -26,7 +31,7 @@
     background: var(--za-app-bg);
   }
 
-  .startup-surface > .running-note {
+  .startup-surface > .ui-form-feedback {
     margin: 0;
     padding: 52px 40px 24px;
   }

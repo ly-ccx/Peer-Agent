@@ -2,6 +2,27 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createConversationRefresh } from './conversationRefresh.ts';
 
+test('hidden readers retain changes and read the latest facts once on reveal', async () => {
+  let reads = 0;
+  const refresh = createConversationRefresh(async () => { reads++; }, { active: false });
+  await Promise.all([refresh.request(), refresh.request(), refresh.request()]);
+  assert.equal(reads, 0);
+  await refresh.setActive(true);
+  assert.equal(reads, 1);
+  refresh.setActive(false); await refresh.request(); refresh.stop(); refresh.setActive(true);
+  assert.equal(reads, 1);
+});
+
+test('hiding during a read defers the queued reread until visible', async () => {
+  let reads = 0, release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const refresh = createConversationRefresh(async () => { if (++reads === 1) await gate; });
+  const first = refresh.request(); void refresh.request(); refresh.setActive(false);
+  release(); await first; assert.equal(reads, 1);
+  await refresh.setActive(true);
+  assert.equal(reads, 2); refresh.stop();
+});
+
 test('notifications during the read coalesce into one subsequent read', async () => {
   let reads = 0;
   let release!: () => void;

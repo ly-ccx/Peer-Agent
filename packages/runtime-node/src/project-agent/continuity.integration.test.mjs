@@ -70,24 +70,32 @@ test('main reply failure, continuing child, quiet restart and successful deliver
   } finally { env.close(); }
 });
 
-test('a model can end observation with a real waiting Tool Result and the result event wakes it later', async () => {
+test('a governed wait after a rejected progress reply remains quiet and a result wakes it later', async () => {
   let requests = 0;
   const roster = [{ sessionId: 's', workspaceId: 'w', status: 'running', origin: { parentConversationId: 'c' } }];
-  const provider = createDelegationProvider({ supervisor: { get: () => roster[0] } });
+  const provider = createDelegationProvider({ supervisor: { get: () => roster[0] },
+    replyComposer: { postReply: () => ({ ok: false, error: 'status_claim_mismatch' }) } });
   const env = world(async ({ turnProfile }) => {
     requests++;
     if (requests === 1) {
       roster[0].origin.workId = turnProfile.workId;
-      const receipt = await provider.executeCapability({ call: { toolCallId: 'real-wait', capabilityId: 'local.delegation.wait_for_sessions', arguments: { sessionIds: ['s'] } } },
-        { mode: 'project_agent', workspaceId: 'w', conversationId: 'c', currentInputAnchors: [], turnProfile });
+      const context = { mode: 'project_agent', workspaceId: 'w', conversationId: 'c', currentInputAnchors: [], turnProfile };
+      const reply = { text: '任务已有结果。', sources: ['s'], proactive: true };
+      const rejected = await provider.executeCapability({ call: { toolCallId: 'stale-reply', capabilityId: 'local.delegation.post_reply', arguments: reply } }, context);
+      assert.equal(rejected.result.output.error, 'status_claim_mismatch');
+      const wait = { sessionIds: ['s'] };
+      const receipt = await provider.executeCapability({ call: { toolCallId: 'real-wait', capabilityId: 'local.delegation.wait_for_sessions', arguments: wait } }, context);
       assert.equal(receipt.grant.granted, true);
-      return { continued: true, toolCalls: [{ name: 'wait_for_sessions', input: { sessionIds: ['s'] }, result: receipt.result }] };
+      return { continued: true, toolCalls: [
+        { name: 'post_reply', input: reply, result: rejected.result },
+        { name: 'wait_for_sessions', input: wait, result: receipt.result },
+      ] };
     }
     return { toolCalls: [{ name: 'post_reply', input: { text: '结果已核对。', replyTo: [] }, result: { ok: true } }] };
   }, { resolveRoster: () => roster });
   try {
     env.inbox.append('w', [event('observation', 'report_available')]); await env.runner.kick();
-    assert.equal(requests, 1); assert.equal(env.messages.at(-1).meta.silentWait.source, 'tool');
+    assert.equal(requests, 1); assert.equal(env.messages.at(-1).meta?.silentWait?.source, 'tool', JSON.stringify(env.messages));
     assert.equal(env.messages.some(row => row.card === 'agent_unavailable' || row.kind === 'agent_reply'), false);
     env.restart(); await env.runner.kick(); assert.equal(requests, 1);
     roster[0].status = 'accepted'; env.inbox.append('w', [event('done', 'result_ready')]); await env.runner.kick();
@@ -340,12 +348,13 @@ test('explicit retry transfers the persisted legacy wake batch before acknowledg
   } finally { env.close(); }
 });
 
+// These report slices have already been accepted by the host; result_ready now retains Bot settlement responsibility.
 test('a later result preserves the earlier report slice until both batches settle', async () => {
   let requests = 0;
   const env = world(async () => ++requests === 1
     ? { turnEnd: 'yielded', toolCalls: [{ name: 'get_session', input: { sessionId: 's' }, result: { status: 'result_ready' } }], providerCheckpoint: { messages: [] } }
     : { toolCalls: [{ name: 'post_reply', input: { text: '核对好了。', replyTo: [] }, result: { ok: true } }] },
-  { resolveRoster: () => [{ sessionId: 's', status: 'result_ready', sourceRevision: 'r1' }] });
+  { resolveRoster: () => [{ sessionId: 's', status: 'accepted', sourceRevision: 'r1' }] });
   try {
     env.inbox.append('w', [event('readable', 'report_available')]); await env.runner.kick();
     const initial = Object.values(env.store.read().works)[0];
@@ -390,7 +399,7 @@ test('new result batches never overwrite a yielded result checkpoint; each survi
     seen.push([id, Boolean(checkpoint)]);
     if (!checkpoint) return { turnEnd: 'yielded', toolCalls: [{ name: 'get_session', input: { sessionId: id }, result: { status: 'result_ready', report: id } }], providerCheckpoint: { result: id } };
     return { toolCalls: [{ name: 'post_reply', input: { text: `${id} 已核对并交付。`, replyTo: [] }, result: { ok: true } }] };
-  }, { resolveRoster: () => [{ sessionId: 'B', status: 'result_ready' }, { sessionId: 'C', status: 'result_ready' }] });
+  }, { resolveRoster: () => [{ sessionId: 'B', status: 'accepted' }, { sessionId: 'C', status: 'accepted' }] });
   try {
     env.inbox.append('w', [event('done-B', 'result_ready', 'B')]);
     await env.runner.kick();

@@ -1,0 +1,11 @@
+.deferred-panel {
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: var(--space-3);
+  min-block-size: 6rem;
+  padding: var(--space-4);
+  color: var(--graphite-base);
+  font-size: var(--ui-font-body);
+}
+.deferred-panel p { margin: 0; }

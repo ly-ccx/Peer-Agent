@@ -1,24 +1,33 @@
 import { syncApprovalConversation } from './approval-conversation.mjs';
-import { shouldPauseForHostHandoff } from '@peer-agent/runtime-node';
-import { createProjectAgentHost as createPortableProjectAgentHost } from '@peer-agent/runtime-node';
+import {
+  shouldPauseForHostHandoff
+} from "@peer-agent/runtime-node/project-agent";
+import {
+  createProjectAgentHost as createPortableProjectAgentHost
+} from "@peer-agent/runtime-node/project-agent";
 import {createDesktopObjectiveWatchHost} from './objective-watch-host.mjs';
 import path from 'node:path';
 import { readFileSync, statSync } from 'node:fs';
 import { projectConversationHistory } from '@peer-agent/runtime-core';
+import { createBotSqliteAdapter, createSessionService } from '@peer-agent/conversation-store';
 
 import {
   createApprovalStore,
-  applyStartupApprovalRecovery,
+  applyStartupApprovalRecovery
+} from "@peer-agent/runtime-node/storage";
+import {
   createObjectiveStore,
   createObjectiveActions,
   createObjectiveService,
   createBotDirectory,
   createBotSummaryHistory,
+  createBotSearchHistory,
   createBotConversationHistory,
   createBotLifecycle,
   createBotProfileStore,
   createBotAccessPolicyAuthority,
   createInputQueue,
+  createProjectInputDraftStore,
   createMemoryStore,
   createEpisodeLog,
   createMemoryCurator,
@@ -32,19 +41,25 @@ import {
   createAgentEventPublisher,
   createWatchPublisher,
   normalizeProjectAgentSettings,
-  createProjectRegistry,
   createSessionSupervisor,
   createExecutionScheduler,
   createProjectDiagnostics,
   createCircuitBreaker,
   createProjectRecovery,
-  resolveRoleRoute,
-} from '@peer-agent/runtime-node';
+  supervisorEventId
+} from "@peer-agent/runtime-node/project-agent";
+import {
+  createProjectRegistry
+} from "@peer-agent/runtime-node/providers";
+import {
+  resolveRoleRoute
+} from "@peer-agent/runtime-node/models";
 import { runMemoryCuratorTurn } from './memory-curator-turn.mjs';
 import { createProjectAgentApplicationService } from './project-agent-application-service.mjs';
 import { createDelegationFactsReader } from './delegation-facts-reader.mjs';
 import { createManagedFolder } from './managed-folder.mjs';
 import { createEvidenceReader } from './evidence-reader.mjs';
+import { createEvidenceDeliveryProjection, createScopedExternalEvidenceReader } from './evidence-deliveries.mjs';
 import { readProjectInstructionLines } from './project-instruction-lines.mjs';
 import { createProjectAgentIpcRegistrations } from '../ipc/register-project-agent-ipc.mjs';
 import { createProjectObjectivesIpcRegistrations } from '../ipc/register-project-objectives-ipc.mjs';
@@ -62,6 +77,10 @@ import { createDesktopProjectFacts } from './project-facts.mjs';
 import { createProjectLifecycleEffects } from './project-lifecycle-effects.mjs';
 import { createDiagnosticsExport } from './diagnostics-export.mjs';
 import { retryProjectAgentTurn } from './response-retry.mjs';
+import { createInteractiveRuntime, createInteractiveTextReader } from '@peer-agent/runtime-node/interactive-results';
+import { readStoredWorkHistory } from '@peer-agent/conversation-store/persisted-history';
+import { installDesktopInteractiveRuntime } from '../interactive-results/runtime-port.mjs';
+import { createDesktopRecoveryController } from './project-recovery-controller.mjs';
 
 /** Current user inputs become the model messages, including bounded image thumbnails. */
 export function messagesFromUserInputs(plan) {
@@ -71,6 +90,7 @@ export function messagesFromUserInputs(plan) {
     role: 'user',
     content: typeof item?.text === 'string' ? item.text : '',
     attachments: Array.isArray(item?.attachments) ? item.attachments : [],
+    resourceFeedback: item?.resourceFeedback,
   }))).messages;
   if (projected.length === 0) return null;
   return projected.map((message) => ({ role: message.role, content: message.content }));
@@ -119,6 +139,7 @@ export function registerDesktopProjectAgent({
   onAppendedMessage = null,
   onViewing = null,
   configurePermissions = null,
+  acquireInteractiveRetentionCompatibility = null,
 } = {}) {
   const runtimeRoot = path.join(dataHome, 'project-runtime');
   const botHistory = conversationStore.createHistoryProjection?.(history => history.messages, { immutableInput: true, maxEntries: 8, maxBytes: 32 * 1024 * 1024 });
@@ -135,8 +156,14 @@ export function registerDesktopProjectAgent({
   const runtimeEnabled = () => enabled() && readRuntimePolicy()?.projectAgent?.shell !== 'classic';
   const ownsProject = workspaceId => runtimeEnabled() && profileStore.read(workspaceId)?.status === 'active' && holdsLease(workspaceId) === true;
   const executionScheduler = agentTurnExecutor.executionScheduler ?? goalRunner?.executionScheduler ?? createExecutionScheduler();
-  executionScheduler.configure({ rootDir: runtimeRoot, getConcurrency: () => readRuntimePolicy()?.projectAgent?.concurrency, isWorkspaceReady: workspaceId => host?.isReady(workspaceId) === true });
+  executionScheduler.configure({ rootDir: runtimeRoot, getConcurrency: () => readRuntimePolicy()?.projectAgent?.concurrency, isWorkspaceReady: workspaceId => host?.isReady(workspaceId) === true,
+    isPlanRecoveryHeld: plan => host?.sessionHeld(plan?.delegationOrigin?.workspaceId, plan?.delegationOrigin?.sessionId) === true });
   const readEvidenceBody = createEvidenceReader({
+    resolveScopedRecord: (ref, context) => interactive.publications.resolveEvidence(ref, context),
+    readScopedExternal: createScopedExternalEvidenceReader({ findWatch: ref => objectiveWatches?.resolveEvidence(ref),
+      readWatchBody: ref => objectiveWatches?.readEvidenceBody(ref) }),
+    projectDeliveries: createEvidenceDeliveryProjection({ getConversationId: id => profileStore.read(id)?.agentConversationId,
+      getPlan: id => goalPlanStore.getPlan(id), getSession: id => supervisor.get({ sessionId: id, detail: 'report' }) }),
     findRecords: refs => goalPlanStore.findEvidenceIndexRecords?.(refs),
     readMessages: id => conversationStore.getPersistedConversationHistory(id)?.messages ?? [],
     readArtifact: (ref, record) => readRegisteredArtifact(dataHome, ref, record),
@@ -156,6 +183,26 @@ export function registerDesktopProjectAgent({
   const accessAuthority = createBotAccessPolicyAuthority({ dataHome, profileStore, conversationStore, goalPlanStore,
     legacyAccessLevel: getSettings()?.localAccessLevel });
   accessAuthority.initialize();
+  const interactiveEnabled = workspaceId => ownsProject(workspaceId) && readRuntimePolicy()?.projectAgent?.interactiveResults === true;
+  const validateInteractiveFeedback = (row, workspaceId) => interactive.feedback.validate(row, workspaceId);
+  const inputDrafts = createProjectInputDraftStore({ rootDir: runtimeRoot, validateInteractiveFeedback });
+  const inputQueue = createInputQueue({
+    rootDir: runtimeRoot,
+    validateInteractiveFeedback,
+    holdsLease: ownsProject,
+    resolveConversationId,
+    hasMessage,
+    appendMessage,
+  });
+  const interactive = createInteractiveRuntime({ rootDir: runtimeRoot, goalPlanStore, conversationStore,
+    readPortableWorkHistory: (scope, readBudget) => readStoredWorkHistory(path.join(dataHome, 'conversations'), scope, readBudget),
+    retentionPorts: { inputQueue, drafts: inputDrafts, acquireCompatibility: acquireInteractiveRetentionCompatibility },
+    getBotConversationId(id) {
+      const profile = profileStore.read(id);
+      return profile?.status === 'active' ? profile.agentConversationId : undefined;
+    }, holdsLease: ownsProject, enabled: interactiveEnabled,
+    classifyContext: () => 'D3_private', getSession: (id, detail = 'report') => supervisor.get({ sessionId: id, ...(detail === 'report' ? { detail } : {}) }) });
+  const uninstallInteractive = installDesktopInteractiveRuntime({ runtime: interactive, enabled: interactiveEnabled });
   const memoryStore = createMemoryStore({ rootDir: dataHome });
   configurePermissions?.(approvalStore);
   const memoryChanged = workspaceId => {
@@ -190,6 +237,9 @@ export function registerDesktopProjectAgent({
     canManageWorkspace: ownsProject,
     deferRecovery: true,
     readDelegationCapabilities: input => agentTurnExecutor.readDelegationCapabilities?.(input),
+    readResourceFeedback: interactive.feedback.restore,
+    projectReportEvidence: interactive.publications.projectReportEvidence,
+    recoverStoppedPublications: interactive.recoverWorkspace,
     approvalStore,
     memoryStore,
     resolveModel: (input) => agentTurnExecutor.resolveGoalRole({
@@ -202,7 +252,7 @@ export function registerDesktopProjectAgent({
       ...(verification.facts(plan.delegationOrigin.sessionId) || {}),
       ...(typeof readUiDelivery === 'function' ? { uiDeliveryRequired: readUiDelivery(plan)?.required === true, uiDelivery: readUiDelivery(plan) } : {}),
     } }),
-    emitEvent: (event) => inbox.append(event.workspaceId, [{ ...event, eventId: event.eventId || `supervisor:${event.kind}:${event.sessionId}:${event.verdictRef || event.anchorMessageId || event.supersededBy || event.reason || ''}` }]),
+    emitEvent: (event) => inbox.append(event.workspaceId, [{ ...event, eventId: event.eventId || supervisorEventId(event) }]),
     readPlanApproval: (workspaceId) => profileStore.read(workspaceId)?.planApproval,
   });
   objectiveService = createObjectiveService({store:objectiveStore,actions:objectiveActions,readSessions:workspaceId=>supervisor.sessionsForProject(workspaceId),canManageWorkspace:ownsProject,resolveConversationId,
@@ -226,6 +276,7 @@ export function registerDesktopProjectAgent({
   const uninstallVerification = installSessionVerification(verification);
   const projectFacts = createDesktopProjectFacts({ requirePreparedCoordination: true, supervisor, approvalStore, profileStore, conversationStore, runtimeRoot, memoryStore,objectiveProposals:workspaceId=>objectiveActions.pending(workspaceId).filter(row=>{const item=objectiveStore.get(workspaceId,row.objectiveId);return item?.status==='active'&&!item.pendingConfirmation&&item.autonomy!=='report_only'&&item.version===row.version;}) });
   const uninstallDelivery = installDeliveryFacts({
+    readResultReferences: interactive.publications.replyReferences,
     read(view) {
       const settings = normalizeProjectAgentSettings(readRuntimePolicy()?.projectAgent);
       const level = profileStore.read(view?.workspaceId)?.proactivity;
@@ -288,15 +339,34 @@ export function registerDesktopProjectAgent({
     onWrote: memoryChanged,
   });
   const summaryHistory = createBotSummaryHistory(conversationStore);
+  const botAdapter = createBotSqliteAdapter(conversationStore);
+  const botSessions = createSessionService(botAdapter);
+  const searchHistory = createBotSearchHistory(conversationStore);
   const directory = createBotDirectory({
     rootDir: dataHome,
     registry,
     readMessages: readCanonicalMessages,
     readConversationMessages: conversationMessages || readCanonicalMessages,
-    readInteractionPage: conversationStore.readInteractionPage?.bind(conversationStore),
+    readInteractionPage: typeof conversationStore.readInteractionPage === 'function'
+      ? async (id, params = {}) => {
+        const page = await botSessions.getWindow({
+          conversationId: id,
+          ...(params.limit != null ? { limit: params.limit } : {}),
+          ...(params.before ? { before: params.before } : {}),
+        });
+        if (!page || page.diagnostic === true) return null;
+        return {
+          messages: page.window,
+          nextCursor: page.cursor,
+          sourceVersion: page.sourceVersion,
+          contentRevision: page.meta?.contentRevision,
+          conversationId: id,
+        };
+      }
+      : undefined,
     readInteractionProcess: conversationStore.readInteractionProcess?.bind(conversationStore),
     readSummaryMessages: summaryHistory,
-    readSummaryMessagesBatch: ids => new Map(ids.map(id => [id, summaryHistory(id) || []])),
+    readSummaryMessagesBatch: (ids) => new Map(ids.map((id) => [id, summaryHistory(id) || []])),
     readMessagesBatch: botHistory ? ids => new Map(ids.map(id => [id, botHistory(id) || []]))
       : typeof conversationStore.getPersistedConversationHistories === 'function'
         ? ids => new Map([...conversationStore.getPersistedConversationHistories(ids)].map(([id, history]) => [id, history?.messages || []])) : null,
@@ -358,7 +428,7 @@ export function registerDesktopProjectAgent({
   }
 
   function appendMessage(conversationId, message) {
-    conversationStore.appendMessage(conversationId, message, { returnMessages: false });
+    botAdapter.append({ conversationId, message });
     if (typeof onAppendedMessage !== 'function') return;
     try {
       onAppendedMessage({ conversationId, message });
@@ -376,13 +446,6 @@ export function registerDesktopProjectAgent({
     return '';
   }
 
-  const inputQueue = createInputQueue({
-    rootDir: runtimeRoot,
-    holdsLease: ownsProject,
-    resolveConversationId,
-    hasMessage,
-    appendMessage,
-  });
   host = createProjectAgentHost({
     rootDir: runtimeRoot,
     readLeaseEpoch,
@@ -390,7 +453,7 @@ export function registerDesktopProjectAgent({
     acquireLease: workspaceId => { if (runtimeEnabled() && profileStore.read(workspaceId)?.status === 'active') return acquireLease?.(workspaceId); },
     readMessages: readCanonicalMessages,
     readInputFacts: inputFacts || readCanonicalMessages,
-    restoreQueue: workspaceId => { applyStartupApprovalRecovery({approvalStore, goalPlanStore, canRecover: row => row.workspaceId === workspaceId}); return supervisor.recoverQueue(workspaceId); },
+    restoreQueue: workspaceId => { interactive.recoverWorkspace(workspaceId); applyStartupApprovalRecovery({approvalStore, goalPlanStore, canRecover: row => row.workspaceId === workspaceId}); return supervisor.recoverQueue(workspaceId); },
     recoverTasks: workspaceId => goalRunner?.recoverContextCheckpoints?.({ workspaceId, deferPump: true }),
     restoreWatches:objectiveWatches.restore,stopWatches:objectiveWatches.stopWorkspace,
     activateSessions: workspaceId => supervisor.resumeRecovered(workspaceId),
@@ -406,6 +469,9 @@ export function registerDesktopProjectAgent({
     resolveTurnRoster: scope => supervisor.summaries(scope),
     reconcileSessions: () => supervisor.reconcile(),
     reconcileVerification: input => verification.reconcileInterrupted(input),
+    findEvidenceRecords: refs => goalPlanStore.findEvidenceIndexRecords(refs),
+    readResourceClaims: workspaceId => executionScheduler.resourceSnapshot().filter(row => row.workspaceId === workspaceId),
+    resourceWaits: supervisor.resourceWaits,
     ...createProjectLifecycleEffects({ objectiveService,profileStore, lifecycle, supervisor, conversationStore, resolveConversationId, broadcast,
       memoryEnabled: workspaceId => memoryUseEnabled({ settings: readRuntimePolicy(), profile: profileStore.read(workspaceId) }),
       resolveEvidence: ref => readEvidenceBody(ref)?.text || '' }),
@@ -426,6 +492,7 @@ export function registerDesktopProjectAgent({
     onMaintenance: info => {
       if (ownsProject(info.workspaceId) && memoryUseEnabled({ settings: readRuntimePolicy(), profile: profileStore.read(info.workspaceId) })) memoryMaintenance.runDue(info);
     },
+    onRecoveryStatus: workspaceId => broadcast?.('project-agent:changed', { workspaceIds: [workspaceId] }),
     onStatus: (workspaceId) => {
       if (typeof broadcast === 'function') broadcast('project-agent:changed', { workspaceIds: [workspaceId] });
     },
@@ -471,7 +538,12 @@ export function registerDesktopProjectAgent({
       defaultPath: 'peer-agent-diagnostics.json', filters: [{ name: 'JSON', extensions: ['json'] }] };
     return parent ? dialog.showSaveDialog(parent, options) : dialog.showSaveDialog(options);
   } });
+  const recoveryControl = createDesktopRecoveryController({ rootDir: runtimeRoot, host, hostLeases, holdsLease: ownsProject,
+    readLeaseEpoch, supervisor, goalPlanStore, goalRunner, agentTurnExecutor, objectiveWatches, executionScheduler,
+    changed: workspaceId => broadcast?.('project-agent:changed', { workspaceIds: [workspaceId] }) });
   const projectAgent = createProjectAgentApplicationService({
+    inputDrafts,
+    recoveryControl,
     accessAuthority,
     diagnostics: diagnostics.execute,
     enabled: runtimeEnabled,
@@ -490,6 +562,7 @@ export function registerDesktopProjectAgent({
     listModels,
     readModelRouting: () => readRuntimePolicy()?.modelRouting,
     readActivity: workspaceId => host.runnerFor(workspaceId)?.activity() || null,
+    readRecovery: workspaceId => host.recovery.status(workspaceId),
     stopResponseTurn: ({ workspaceId, turnId }) => {
       if (!ownsProject(workspaceId)) return { ok: false, code: 'HOST_OFFLINE' };
       return host.runnerFor(workspaceId)?.stopResponse(turnId) || { ok: false, code: 'STALE_TURN' };
@@ -541,16 +614,13 @@ export function registerDesktopProjectAgent({
     readSearchCorpus(catalog) {
       const bots = Array.isArray(catalog) ? catalog : (typeof directory.list === 'function' ? directory.list() : []);
       const messages = [];
-      let histories = null;
-      try { histories = conversationStore.getPersistedConversationHistories?.(bots.map(bot => bot.profile?.agentConversationId).filter(Boolean)); }
-      catch { /* Per-conversation fallback below preserves optional corpus recovery. */ }
       for (const bot of bots) {
         const workspaceId = bot.workspaceId;
         const conversationId = bot.profile?.agentConversationId;
         if (!conversationId) continue;
         let history = [];
         try {
-          history = (histories instanceof Map ? histories.get(conversationId) : conversationStore.getPersistedConversationHistory(conversationId))?.messages || [];
+          history = searchHistory(conversationId) || [];
         } catch {
           history = [];
         }
@@ -599,8 +669,12 @@ export function registerDesktopProjectAgent({
     },
   });
   if (typeof onReady === 'function') {
+    const readInteractiveResult = createInteractiveTextReader({ resultStore: interactive.resultStore, assertOwner: owner => {
+      const profile = profileStore.read(owner.workspaceId);
+      return profile?.status === 'active' && profile.agentConversationId === owner.conversationId;
+    } });
     onReady({
-      projectAccess: {directory,inputQueue,getSession:sessionId=>supervisor.get({sessionId,detail:'report'}),
+      projectAccess: {directory,inputQueue,readInteractiveResult,getSession:sessionId=>supervisor.get({sessionId,detail:'report'}),
         wake:workspaceId=>{void host.sync([workspaceId]).catch(()=>{});}},
       listItems: () => directory.list(),
       submitInput: (input) => {
@@ -621,7 +695,9 @@ export function registerDesktopProjectAgent({
       supervisor,
       objectives,
       objectiveWatches,
-      dispose: () => { accessAuthority.close(); projectAgent.dispose(); uninstallYield?.(); host.dispose();void objectiveWatches.dispose(); uninstallDelegation(); uninstallVerification(); uninstallDelivery(); uninstallProactivity(); uninstallMemory(); },
+      interactive,
+      readInputDraft: projectAgent.readInputDraft,
+      dispose: () => { uninstallInteractive(); interactive.close(); accessAuthority.close(); projectAgent.dispose(); uninstallYield?.(); host.dispose();void objectiveWatches.dispose(); uninstallDelegation(); uninstallVerification(); uninstallDelivery(); uninstallProactivity(); uninstallMemory(); },
     });
   }
   const memory = createProjectMemoryService({

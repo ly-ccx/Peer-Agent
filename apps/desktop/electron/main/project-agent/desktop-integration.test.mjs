@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import os from 'node:os';
@@ -10,7 +12,7 @@ process.env.PEER_AGENT_HOME = root;
 const { createConversationStore } = await import('@peer-agent/conversation-store');
 const { createGoalPlanStore, createMemoryStore,createObjectiveStore,mapObjectiveObservationEvent, resolveRoleRoute } = await import('@peer-agent/runtime-node');
 const { registerDesktopProjectAgent } = await import('./project-agent-host.mjs');
-const { projectTurnSystemContext } = await import('../llm-chat-service.mjs');
+const { projectTurnSystemContext, buildRuntimeTools } = await import('../llm-chat-service.mjs');
 const { createWorkCoordinationStore } = await import('../../../../../packages/runtime-node/src/project-agent/work-coordination-store.mjs');
 const { createAgentTurnExecutor } = await import('../agent-host/agent-turn-executor.mjs');
 const { executeProjectedModelTool } = await import('../chat-runtime/projected-tool-executor.mjs');
@@ -35,6 +37,11 @@ function harness({ blank = false, send = null, folder = null, dataHome = null, c
   const calls = []; const routes = []; const starts = []; const events = [];
   let api;
   const executor = createAgentTurnExecutor({ llmChatService: {
+    readDelegationCapabilities({ readOnly = false } = {}) {
+      const { runtimeProjection } = buildRuntimeTools({ mode: 'goal', readOnlyWorkSession: readOnly,
+        excludeCapabilityPrefixes: ['local.web.control.'] });
+      return runtimeProjection.capabilities.filter(item => ['available', 'needs_permission'].includes(item.health)).map(item => item.capabilityId);
+    },
     resolveGoalRole(input) { routes.push(input); return resolveRoleRoute({ ...input, providers: configured ? [modelProvider] : [] }); },
     async sendMessage(input) { calls.push(input); return send ? send(input, { plans, conversations, api }) : { terminalStatus: 'done', text: 'hello' }; },
   } });
@@ -57,6 +64,58 @@ function harness({ blank = false, send = null, folder = null, dataHome = null, c
       await api.host.sync([bot.workspaceId]);
     }, dispose: () => api.dispose() };
 }
+
+test('desktop startup recovers a stopped publication from a prior process', async () => {
+  const childFixture = process.env.PEER_TEST_STOPPED_PUBLICATION;
+  const settings = { projectAgent: { interactiveResults: true }, memory: { enabled: false } };
+  if (childFixture) {
+    const { dataHome, callRef } = JSON.parse(childFixture);
+    const env = harness({ dataHome, settings });
+    try {
+      await env.api.host.sync([callRef.owner.workspaceId]);
+      const store = env.api.interactive.resultStore;
+      assert.equal(store.getAttempt(callRef)?.phase, 'failed');
+      assert.equal(store.getAttempt(callRef)?.code, 'publication_interrupted');
+      assert.equal(store.getOperation(callRef), null);
+      assert.equal(env.calls.length, 0);
+    } finally { env.dispose(); }
+    return;
+  }
+
+  const env = harness({ settings });
+  let callRef;
+  try {
+    const { workspaceId, profile: { agentConversationId } } = env.bot;
+    await env.api.host.sync([workspaceId]);
+    const child = env.conversations.createConversation({ role: 'work_session', parentConversationId: agentConversationId,
+      workspaceId, workspacePath: env.project, title: 'Stopped worker' });
+    const model = { modelProviderId: provider.id, providerId: provider.provider, modelId: provider.model, family: 'fixture' };
+    const plan = env.plans.createPlan({ title: 'Stopped worker', conversationId: child.id, status: 'completed', tasks: [],
+      delegationOrigin: { workspaceId, parentConversationId: agentConversationId, sessionId: 'stopped-session',
+        phase: 'paused', readOnly: true, anchorMessageId: 'stop-anchor', inputId: 'stop-input',
+        modelSelection: { worker: model, explorer: model, verifier: model, resolvedAt: new Date().toISOString() } } });
+    const control = env.api.supervisor.sessionControl;
+    const operation = control.begin(plan, { kind: 'pause', operationId: 'pause-test', authorityRef: 'stop-input' });
+    callRef = { owner: { workspaceId, conversationId: agentConversationId }, conversationId: child.id, toolCallId: 'prepared-call' };
+    const store = env.api.interactive.resultStore;
+    store.beginAttempt({ callRef, source: { ...operation.expectedExecution, conversationId: child.id, toolCallId: callRef.toolCallId },
+      draft: { publication: { kind: 'create' }, title: 'Candidate', textFallback: 'Unverified', program: 'root=Text("test")', inputs: [] },
+    }, () => true);
+    const receipt = await control.drain(env.plans.getPlan(plan.planId), operation);
+    control.settle(env.plans.getPlan(plan.planId), operation, receipt);
+    assert.equal(store.getAttempt(callRef)?.phase, 'prepared');
+  } finally { env.dispose(); }
+
+  const childEnv = { ...process.env, PEER_TEST_STOPPED_PUBLICATION: JSON.stringify({ dataHome: env.home, callRef }) };
+  delete childEnv.NODE_TEST_CONTEXT;
+  const child = spawnSync(process.execPath, ['--test', '--test-reporter=tap',
+    '--test-name-pattern=desktop startup recovers a stopped publication', fileURLToPath(import.meta.url)], {
+    env: childEnv,
+    encoding: 'utf8', timeout: 15_000,
+  });
+  assert.equal(child.status, 0, child.error?.message || child.stderr || child.stdout);
+  assert.match(child.stdout, /pass 1/);
+});
 
 test('desktop diagnostic assembly reads actual input and turn stores without running cognition or accepting renderer paths', async () => {
   const env=harness();
@@ -146,8 +205,18 @@ test('200-bot attention search skips legacy catalogs; explicit history still rea
     assert.equal(env.invoke('search', { query: 'test' }).ok, true);
     assert.equal(conversationReads, 0, 'attention is not inferred from old classic waiting goals');
     assert.ok(planReads <= 2, 'one projection read and at most one corpus rebuild read');
-    assert.equal(batchReads, 1, 'only corpus uses the raw batch; directory uses versioned presentation views');
+    assert.equal(batchReads, 0, 'both directory and corpus use versioned presentation views');
     assert.equal(singleReads, 0, 'no repeated index read for each bot');
+    env.conversations.appendMessage(env.bot.profile.agentConversationId, {
+      id: 'search-projection-public', kind: 'agent_reply', role: 'assistant', content: 'versioned-search-freshness public body',
+    });
+    env.conversations.appendMessage(env.bot.profile.agentConversationId, {
+      id: 'search-projection-private', kind: 'agent_turn', role: 'assistant', content: 'versioned-search-freshness private process',
+    });
+    const changed = env.invoke('search', { query: 'versioned-search-freshness' });
+    assert.ok(changed.hits.some(hit => hit.messageId === 'search-projection-public'));
+    assert.ok(!changed.hits.some(hit => hit.messageId === 'search-projection-private'));
+    assert.equal(batchReads, 0); assert.equal(singleReads, 0);
     assert.equal(env.invoke('list-history').ok, true);
     assert.equal(conversationReads, 1, 'explicit history remains available');
   } finally { env.dispose(); }
@@ -720,14 +789,18 @@ test('actual SDK reports survive restart and suppress repeated wake delivery whi
     const args={text:'Verified project',replyTo:[`lifecycle-research-${current.bot.workspaceId}`],sources:[sessionId],statusClaims:[{sessionId,status:current.api.supervisor.get({sessionId}).status}]};
     const result=await tool({...current,turnId:input.streamId,currentInputAnchors:input.turnProfile.context.inputAnchors?.map(a=>a.messageId)||[]},'post_reply',args);
     assert.equal(result.execution.result.status,'success');
-    input.webContents.send('chat:stream:tool-call',{toolCallId:'report',tool:'post_reply',args});
-    input.webContents.send('chat:stream:tool-result',{toolCallId:'report',result:JSON.parse(result.output)});
+    const toolCallId=result.execution.call.toolCallId;
+    input.webContents.send('chat:stream:tool-call',{toolCallId,tool:'post_reply',args});
+    input.agentProgress.onToolExecution(result.execution);
+    input.webContents.send('chat:stream:tool-result',{toolCallId,result:JSON.parse(result.output)});
     return {terminalStatus:'done'};
   };
   env=harness({send,verify:async()=>({passed:true,evidenceRefs:['ev'],verifierModel:provider.id})});current=env;
   try{
     sessionId=(await env.invoke('start-familiarize')).profile.familiarize.sessionId;
     const planId=env.api.supervisor.get({sessionId}).planId;
+    env.plans.recordEvidenceRefs({planId,evidenceRef:'ev',toolName:'read_file',capabilityId:'local.file.read',
+      bodyPreview:{kind:'file',text:'Verified project',truncated:false}});
     env.plans.revisePlan(planId,{tasks:[{taskId:'read',title:'Read',status:'completed',evidenceRefs:['ev']}]},{reason:'read',changedBy:'test'});
     assert.equal(env.plans.getPlan(planId).successCriteria.every(row=>row.kind==='model_review'),true);
     env.plans.setPlanStatus(planId,'completed');

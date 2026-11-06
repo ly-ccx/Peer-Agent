@@ -9,7 +9,7 @@ const MODEL_ROUTING_ROLES = [
   'visual_verifier',
   'memory_curator',
   'objective_probe',
-  'compactor',
+  'compactor', 'input_predictor',
 ];
 
 function assertFunction(value, label) {
@@ -71,8 +71,8 @@ export function createSettingsIpcRegistrations({ settings, permissions, listProv
       ipc.handle('model-routing:get', () => describeModelRouting(readProviders()));
       ipc.handle('model-routing:update', (_event, partial) => {
         const current = describeModelRouting(readProviders());
-        if (current.singleModel) return current;
-        updateModelRouting(partial);
+        if (!current.providers.length) return current;
+        updateModelRouting(partial, readProviders());
         return describeModelRouting(readProviders());
       });
       ipc.handle('model-routing:preview', () => previewModelRouting(readProviders(), {

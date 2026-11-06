@@ -74,6 +74,21 @@ const STREAM_ERROR_COPY: ReadonlyArray<{
   readonly en: string;
 }> = [
   {
+    pattern: /^conversation_persistence_failed(?:\s*:|$)/,
+    zh: '本地会话保存失败，执行已停止。请先查看错误详情。',
+    en: 'The local conversation could not be saved. Execution stopped; inspect the error details first.',
+  },
+  {
+    pattern: /^reply_interrupted$/,
+    zh: '回复中断，原因未记录。',
+    en: 'The reply was interrupted; the cause was not recorded.',
+  },
+  {
+    pattern: /^(?:HTTP\s*)?429(?:\s|:|$)/i,
+    zh: '模型服务暂时限流，回复未完成。',
+    en: 'The model service temporarily limited requests; the reply was not finished.',
+  },
+  {
     pattern: /repetition_detected/i,
     zh: '检测到重复输出，已自动停止本轮回复。',
     en: 'Repetitive output detected; this reply was stopped automatically.',
@@ -130,15 +145,15 @@ export function canShowStreamResume(
   isStreaming: boolean,
 ): boolean {
   if (isStreaming || !String(error || '').trim()) return false;
+  if (/^conversation_persistence_failed(?:\s*:|$)/.test(String(error).trim())) return false;
   return resolveStreamResumeTarget(messages) !== null;
 }
 
 /**
  * Fallback streamError when an interrupted assistant turn is reloaded
- * without a live in-memory banner. `fetch failed` maps to the generic
- * network-interrupt copy in formatStreamErrorLabel.
+ * without a recorded cause. An interrupted flag does not establish a network failure.
  */
-export const RESTORED_INTERRUPTED_STREAM_ERROR = 'fetch failed';
+export const RESTORED_INTERRUPTED_STREAM_ERROR = 'reply_interrupted';
 
 function lastAssistantIsInterrupted(messages: readonly ChatMsg[]): boolean {
   const last = messages[messages.length - 1];
@@ -147,7 +162,7 @@ function lastAssistantIsInterrupted(messages: readonly ChatMsg[]): boolean {
 
 /**
  * Bind the composer interrupt banner to the loaded turn.
- * - Last assistant is still interrupted: keep a live error, or restore a generic network one.
+ * - Last assistant is still interrupted: keep a live error, or restore its recorded cause.
  * - Turn continued / user abort (no interrupted flag): do not show a leftover banner.
  */
 export function restoreStreamErrorFromInterrupted(
@@ -157,5 +172,6 @@ export function restoreStreamErrorFromInterrupted(
 ): string | null {
   if (isStreaming || !lastAssistantIsInterrupted(messages)) return null;
   const trimmed = String(existingError || '').trim();
-  return trimmed || RESTORED_INTERRUPTED_STREAM_ERROR;
+  const failure = messages[messages.length - 1]?.streamFailure;
+  return failure?.code ? [failure.code, failure.causeCode].filter(Boolean).join(': ') : trimmed || RESTORED_INTERRUPTED_STREAM_ERROR;
 }

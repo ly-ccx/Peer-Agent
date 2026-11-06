@@ -66,11 +66,23 @@ export const DATA_STORE_ENTRIES = {
   userMemory:        { rel: 'memory',                  kind: 'dir',  scope: 'portable' },
   // 项目运行时事实（待批准、后续宿主租约）。设备本地，不随设置导出。
   // Includes coordination.jsonl, coordination-snapshot.json and protected checkpoints/<id>.json;
+  // coordination-fence.json and .coordination-fence/ hold lease-owned writer-fence publication intents and unchanged old files.
+  // recovery-action.json retains the local maintenance phase and pending hold count; v4 journal admission retains per-work/session holds.
+  // coordination-recovery.json and .coordination-recovery/ retain device-local repair intents, original journals and reviewed fork receipts.
+  // coordination-v2/baseline.jsonl plus the coordination.jsonl directory barrier fence repaired history from old binary writers.
   // coordination-v2/ retains immutable increment segments and the version fence; .read-models/ is rebuildable device-local indexing.
   // bot-access.sqlite and bot-access-imported.json bind policies and safe import provenance to this device.
   // these retain local work/delivery receipts and must never enter portable exports.
   // Includes per-project circuit-breaker/recovery state, memory-maintenance checkpoints, objective watch-state/probe-evidence reservations and delivery/execution cursors (device only).
+  // input-drafts/<surface>.json and input-draft-blobs/<digest>.json retain device-local UI intent only; never model context or execution truth.
+  // resource-edits/store.sqlite holds device-local text drafts, retained versions and modification receipts.
+  // It is not portable configuration, permission truth, or an execution queue; recovery never starts writes.
+  // execution-resources.sqlite (+ WAL/SHM) is device-local claim/hold authority; never export it.
+  // Missing/corrupt state requires reconciliation, never deletion to unlock. Back up through SQLite.
+  // interactive-results/store.sqlite (+ WAL/SHM) retains device-local immutable result/material objects,
+  // publication receipts/outbox, version heads, UI state/writers and frozen followups. Never portable authority.
   projectRuntime:    { rel: 'project-runtime',         kind: 'dir',  scope: 'device'   },
+  executionResources: { rel: 'project-runtime/execution-resources.sqlite', kind: 'file', scope: 'device' },
 };
 
 /** 返回数据根并确保其存在。mkdir recursive 对已存在目录是 no-op，可安全多次调用。 */

@@ -31,6 +31,11 @@
 .remote-access-bot > span:last-child { overflow-wrap:anywhere; }
 .remote-access-activity > div { display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px; margin-top:12px; font-size:.82rem; }
 .remote-access-activity time { color:var(--pa-text-secondary); }
+.remote-access-diagnostics > summary { display:flex; align-items:center; justify-content:space-between; gap:var(--space-3); color:var(--pa-text-secondary); font-size:var(--ui-font-control); font-weight:500; list-style:none; cursor:pointer; }
+.remote-access-diagnostics > summary::-webkit-details-marker { display:none; }
+.remote-access-diagnostics > summary:focus-visible { outline:2px solid var(--azure-seal); outline-offset:3px; }
+.remote-access-diagnostics > summary .peer-icon { flex-shrink:0; }
+.remote-access-diagnostics[open] > summary .peer-icon { transform:rotate(180deg); }
 .remote-access-pairing > div { display:grid; grid-template-columns:100px minmax(0,1fr) auto; align-items:center; gap:8px; margin-top:12px; font-size:.8rem; }
 .remote-access-pairing code { overflow-wrap:anywhere; user-select:text; }
 @media (max-width:760px) { .remote-access-panel { padding:28px var(--space-4); } .remote-access-gateway > div { flex-wrap:wrap; } .remote-access-gateway input { flex-basis:100%; } .remote-access-pairing > div { grid-template-columns:minmax(0,1fr) auto; } .remote-access-pairing > div > span { grid-column:1/-1; } }

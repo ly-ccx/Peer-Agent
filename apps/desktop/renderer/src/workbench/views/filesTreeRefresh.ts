@@ -35,6 +35,20 @@ export function isSkippedFileTreePath(absPath: string | null | undefined): boole
   return parts.some((part) => isSkippedFileTreeDirName(part));
 }
 
+/** Read generations survive path reuse. Cancelling an old tree cannot accept its late response. */
+export function createDirectoryReadRequests() {
+  let sequence = 0;
+  const requests = new Map<string, number>();
+  return {
+    begin(path: string) { const id = ++sequence; requests.set(path, id); return { path, id }; },
+    current(ticket: { path: string; id: number }) { return requests.get(ticket.path) === ticket.id; },
+    reset() { requests.clear(); },
+    prune(parent: string, loading: ReadonlySet<string>) {
+      for (const path of requests.keys()) if (isDescendantPath(parent, path) && !loading.has(path)) requests.delete(path);
+    },
+  };
+}
+
 /** 去掉路径末尾分隔符。 */
 export function stripTrailingSep(p: string): string {
   return p.replace(/[/\\]+$/, '');

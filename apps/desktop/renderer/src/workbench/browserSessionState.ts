@@ -7,6 +7,8 @@ export interface BrowserTabSession {
   readonly id: string;
   readonly url: string;
   readonly title: string;
+  /** Reading recovery metadata, never evidence that a guest still exists. */
+  readonly visited?: boolean;
 }
 
 export interface BrowserSessionState {
@@ -63,6 +65,7 @@ function normalizeBrowserTab(raw: unknown): BrowserTabSession | null {
     id: tab.id,
     url: typeof tab.url === 'string' && tab.url ? tab.url : BROWSER_HOME_URL,
     title: typeof tab.title === 'string' ? tab.title : '',
+    ...(tab.visited === true ? { visited: true } : {}),
   };
 }
 
@@ -87,7 +90,9 @@ export function normalizeBrowserSessionMap(raw: unknown): BrowserSessionMap {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
   const sessions: BrowserSessionMap = {};
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    sessions[key] = normalizeBrowserSessionState(value);
+    const session = normalizeBrowserSessionState(value);
+    // This map is read from settings at bootstrap. Legacy nonblank URLs are address records too.
+    sessions[key] = { ...session, tabs: session.tabs.map(tab => tab.url !== BROWSER_HOME_URL ? { ...tab, visited: true } : tab) };
   }
   return sessions;
 }
@@ -120,10 +125,10 @@ export function updateBrowserTab(
     if (tab.id !== tabId) return tab;
     const next = {
       ...tab,
-      ...(typeof patch.url === 'string' && patch.url ? { url: patch.url } : {}),
+      ...(typeof patch.url === 'string' && patch.url ? { url: patch.url, visited: patch.url !== BROWSER_HOME_URL } : {}),
       ...(typeof patch.title === 'string' ? { title: patch.title } : {}),
     };
-    if (next.url === tab.url && next.title === tab.title) return tab;
+    if (next.url === tab.url && next.title === tab.title && next.visited === tab.visited) return tab;
     changed = true;
     return next;
   });

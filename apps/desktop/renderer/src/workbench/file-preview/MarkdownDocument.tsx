@@ -1,9 +1,13 @@
-import { useState, type ReactNode } from 'react';
+import { LocalDocumentRenderingContext } from '../../chat/components/markdown/DocumentPreviewContext';
+import { boundedPresentation, MARKDOWN_BUDGET } from './presentationBudget';
+import { SourceViewer } from './SourceViewer';
+import { useMemo, useState, type ReactNode } from 'react';
 import { renderInlineLines } from '../../chat/components/markdown/InlineMarkdown';
 import { parseMarkdownBlocks, type MarkdownBlock } from '../../chat/components/markdown/markdownParser';
 
 interface MarkdownDocumentProps {
   readonly content: string;
+  readonly isZh?: boolean;
   readonly emptyLabel: string;
   readonly copyLabel: string;
   readonly copiedLabel: string;
@@ -132,16 +136,20 @@ function renderBlock(
   }
 }
 
-export function MarkdownDocument({ content, emptyLabel, copyLabel, copiedLabel }: MarkdownDocumentProps) {
-  const blocks = parseMarkdownBlocks(content);
+export function MarkdownDocument({ content, emptyLabel, copyLabel, copiedLabel, isZh = false }: MarkdownDocumentProps) {
+  const bounded = useMemo(() => boundedPresentation(content, MARKDOWN_BUDGET), [content]);
+  const sourceOnly = bounded.truncated || bounded.maxLineLength > 16_000;
+  const blocks = useMemo(() => sourceOnly ? [] : parseMarkdownBlocks(content), [content, sourceOnly]);
+  if (sourceOnly) return <><p className="resource-adapter-notice" role="status">{isZh ? '文档超出富文本展示限额，改为受限源码显示。' : 'This document exceeds the rich-text display budget. A bounded source view is shown.'}</p>
+    <SourceViewer content={content} emptyLabel={emptyLabel} isZh={isZh} /></>;
 
   if (blocks.length === 0) {
     return <div className="workbench-empty-hint workbench-diff-status">{emptyLabel}</div>;
   }
 
   return (
-    <article className="workbench-document">
+    <LocalDocumentRenderingContext.Provider value={true}><article className="workbench-document">
       {blocks.map((block, index) => renderBlock(block, index, { copyLabel, copiedLabel }))}
-    </article>
+    </article></LocalDocumentRenderingContext.Provider>
   );
 }

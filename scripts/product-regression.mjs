@@ -4,6 +4,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, closeSync, 
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { recoveryShots } from '../apps/desktop/scripts/bot-history-recovery-checks.mjs';
 
 const sharedUiShots = ['diagnostics', 'appearance', 'automation-list', 'automation-receipt', 'automation-editor', 'classic-chat', 'classic-image-lightbox', 'classic-artifacts', 'classic-diff']
   .flatMap(scene => [`ui-${scene}-1280-dark.png`, `ui-${scene}-760-light.png`]);
@@ -27,23 +28,24 @@ const verificationShots = [[1280, 'dark'], [760, 'light']].flatMap(([width, them
 ]);
 const startupShots = [1280, 760].flatMap(width => ['dark', 'light'].map(theme => `startup-${width}-${theme}.png`)).concat('startup-error-760-light.png');
 const settingsFloatingShots = [[1280, 'dark'], [760, 'light']].flatMap(([width, theme]) => ['glass', 'solid'].map(material => `settings-floating-${material}-${width}-${theme}.png`)).concat('settings-floating-reduced-760-light.png');
-const requiredShots = [...settingsFloatingShots, ...startupShots, ...verificationShots, 'window-material-drawer-1280-dark.png', 'window-material-settings-1280.png', 'window-material-reduced-760-light.png', ...[[1280, 'dark'], [760, 'light']].flatMap(([width, theme]) => ['glass', 'solid'].map(material => `window-material-${material}-${width}-${theme}.png`)), 'conversation-cards-failed-dark.png','conversation-refresh-failed-dark.png','conversation-initial-failed-light.png','conversation-recovered-light.png','bot-access-1280-dark.png', 'bot-access-760-light.png', 'bot-access-child-1280-dark.png', 'bot-access-child-760-light.png', ...sharedUiShots, ...[[1280,'dark'],[760,'light']].flatMap(([width,theme])=>['stopping','awaiting_outcome','cancelled','handoff'].map(state=>`coordination-${state}-${width}-${theme}.png`)), ...[[1280, 'dark'], [760, 'light']].flatMap(([width, theme]) => [`agent-activity-${width}-${theme}.png`, `agent-activity-detail-${width}-${theme}.png`]), 'quick-chat-bots-dark.png', 'quick-chat-bots-light.png', 'evidence-list-dark.png', 'evidence-file-dark.png', 'evidence-history-dark.png', 'evidence-missing-dark.png', 'evidence-missing-760-light.png', 'pending-reply-1600-dark.png', 'pending-reply-docked-light.png', 'pending-reply-760-light.png',
+const requiredShots = [...recoveryShots, ...settingsFloatingShots, ...startupShots, ...verificationShots, 'window-material-drawer-1280-dark.png', 'window-material-settings-1280.png', 'window-material-reduced-760-light.png', ...[[1280, 'dark'], [760, 'light']].flatMap(([width, theme]) => ['glass', 'solid'].map(material => `window-material-${material}-${width}-${theme}.png`)), 'conversation-cards-failed-dark.png','conversation-refresh-failed-dark.png','conversation-initial-failed-light.png','conversation-recovered-light.png','bot-access-1280-dark.png', 'bot-access-760-light.png', 'bot-access-child-1280-dark.png', 'bot-access-child-760-light.png', ...sharedUiShots, ...[[1280,'dark'],[760,'light']].flatMap(([width,theme])=>['stopping','awaiting_outcome','cancelled','handoff'].map(state=>`coordination-${state}-${width}-${theme}.png`)), ...[[1280, 'dark'], [760, 'light']].flatMap(([width, theme]) => [`agent-activity-${width}-${theme}.png`, `agent-activity-detail-${width}-${theme}.png`]), 'quick-chat-bots-dark.png', 'quick-chat-bots-light.png', 'evidence-list-dark.png', 'evidence-file-dark.png', 'evidence-history-dark.png', 'evidence-missing-dark.png', 'evidence-missing-760-light.png', 'pending-reply-1600-dark.png', 'pending-reply-docked-light.png', 'pending-reply-760-light.png',
   'history-dark.png', 'history-light.png', 'history-preview.png', 'history-narrow-large.png',
   'choice-send-1280-dark-before.png', 'choice-send-1280-dark-after.png', 'choice-send-760-light-before.png', 'choice-send-760-light-after.png',
   'updater-minimize-1280-dark-before.png', 'updater-minimize-1280-dark-after.png',
-  'updater-minimize-760-light-before.png', 'updater-minimize-760-light-after.png', 'bot-footer-progress-dark-narrow.png',
+  'updater-minimize-760-light-before.png', 'updater-minimize-760-light-after.png', 'bot-header-progress-dark-narrow.png',
   'task-report-loading.png', 'task-report-unavailable.png', 'task-report-stale.png',
   'conversation-updates-dark.png', 'conversation-updates-light.png', 'conversation-complete.png', 'conversation-complete-light.png', 'conversation-details.png', 'task-main-note.png', 'task-follow-up-draft.png', 'task-decision.png', 'task-main-question.png', 'task-detail-running.png', 'task-detail-waiting_user.png', 'task-detail-accepted.png',
   'task-detail-failed.png', 'task-detail-1280-dark.png', 'task-detail-1280-light.png',
   'task-detail-760-dark.png', 'task-detail-760-light.png', 'work-running.png', 'work-waiting.png', 'work-waiting-760-light.png', 'bot-overview.png', 'bot-memory.png', 'chat-process-summary.png',
   'task-cancel-failed-dark.png', 'task-cancelled-dark.png', 'task-cancel-detail-760-light.png',
   'long-error-760-dark.png', 'long-error-docked-light.png',
-  'background-work-1600-dark.png', 'background-work-760-light.png', 'parallel-work-1280-dark.png', 'parallel-work-760-light.png',
+  'work-panel-unavailable.png', 'work-panel-1600-dark.png', 'work-panel-760-light.png', 'parallel-work-1280-dark.png', 'parallel-work-760-light.png',
   'fallback-vision-1280-dark.png', 'fallback-vision-1280-light.png', 'fallback-vision-760-dark.png', 'fallback-vision-760-light.png',
   'providers-1280-dark.png', 'providers-expanded-1280-dark.png',
   'composer-empty-1280-dark.png', 'composer-empty-1280-light.png', 'composer-empty-760-dark.png',
   'composer-multiline-760-light.png', 'composer-attachment-1280-dark.png',
   'reply-dark.png', 'reply-light.png', 'reply-narrow-quote.png', 'reply-narrow-sent.png',
+  'question-pending-dark.png', 'question-pending-light.png', 'question-retired-dark.png', 'question-retired-light.png',
   ...['purple', 'pink', 'green'].flatMap(color => [`bot-message-${color}-dark.png`, `bot-message-${color}-light.png`]),
   'quote-sent-1280-dark.png', 'quote-sent-1280-light.png',
   'quote-reply-1280-dark.png', 'quote-reply-1280-light.png', 'quote-reply-760-dark.png', 'quote-reply-760-light.png',
@@ -67,7 +69,13 @@ export function continuousReplyPresencePassed(presence) {
     && (!quietStates.includes(state) || sample.quiet === true)));
 }
 
+export function completedReplyActionsPassed(entry) {
+  return ['dark', 'light'].every(theme => entry?.themes?.some(item =>
+    item.theme === theme && item.visibleAtRest === false && item.afterCapture?.opacity === '1'));
+}
+
 export function createReviewPacket({ root, output, artifactRoot, machine }) {
+  if (!machine.historyRecovery?.passed || machine.historyRecovery.cases?.length !== 2) throw new Error('History recovery interaction failed');
   if (!['budget','question'].every(key => [[1280,'dark'],[760,'light']].every(([width,appearance]) =>
     machine.lifecycleGates?.cases?.some(row => row.key===key && row.width===width && row.appearance===appearance
       && row.listVisible && row.detailVisible && row.cancellationFromDecision && row.sameFacts))))
@@ -84,7 +92,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     throw new Error('Agent activity identity or duplicate-report regression failed');
   if (!machine.parallelWork?.neutralGroup || ![[1280, 'dark'], [760, 'light']].every(([width, appearance]) =>
     machine.parallelWork.cases?.some(row => row.width === width && row.appearance === appearance
-      && row.sameLevel && row.uniqueRows && row.independentExpansion))) throw new Error('Parallel task grouping regression failed');
+      && row.sameLevel && row.uniqueRows && row.independentNavigation))) throw new Error('Parallel task grouping regression failed');
   const requiredStates = ['running', 'waiting_user', 'result_ready', 'accepted', 'failed', 'queued', 'paused', 'cancelled', 'unavailable'];
   const requiredErrorLayouts = [[1280, false], [1280, true], [760, false]].flatMap(([width, docked]) =>
     ['dark', 'light'].map(appearance => ({ width, docked, appearance })));
@@ -113,7 +121,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     || !['grouping', 'search', 'preview', 'keyboard', 'errorRecovery', 'continuation', 'animations', 'reducedMotion'].every(check => machine.historyRegression?.[check] === true)
     || !['anchored', 'scrollTracking', 'offscreenDismissed', 'keyboard', 'mouseClick', 'draftPreserved', 'bodyBoundary', 'widthReflow', 'dockedFits'].every(check => machine.selectionQuote?.[check] === true)
     || ![1280, 760].every(width => ['dark', 'light'].every(appearance => machine.shortReplyQuote?.some(item =>
-      item.width === width && item.appearance === appearance && item.inside && item.horizontal && item.compact && item.fits)))
+      item.width === width && item.appearance === appearance && item.inside && item.stacked && item.compact && item.fits)))
     || !['multilineScroll', 'widthReflow', 'attachmentFits', 'keyboard'].every(check => machine.composerLayout?.[check] === true)
     || ![1280, 760].every(width => ['dark', 'light'].every(appearance => machine.composerLayout?.cases?.some(item =>
       item.width === width && item.appearance === appearance && item.fits && item.grouped && item.centered && item.distinctSurface && item.sendFilled)))
@@ -140,17 +148,18 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     || ![[1280, 'dark'], [760, 'light']].every(([width, appearance]) => machine.userReceipt?.cases?.some(sample => sample.width === width && sample.appearance === appearance && sample.fits && sample.singleReceipt && sample.sourcesRetained && sample.keyboard))
     || !machine.replyDetailsEntry?.keyboard || !machine.replyDetailsEntry?.leftAligned || !machine.replyDetailsEntry?.unifiedActivity || !machine.replyDetailsEntry?.collapsedHeight
     || !continuousReplyPresencePassed(machine.replyPresence)
-    || !['dark', 'light'].every(theme => machine.replyDetailsEntry?.themes?.some(item => item.theme === theme && item.hiddenUntilHover))
+    || !completedReplyActionsPassed(machine.replyDetailsEntry)
     || !['legacyHidden', 'botExplanation', 'historyKeyboard', 'staleHidden', 'retry', 'activeProgressOnly'].every(key => machine.taskVerification?.[key] === true)
     || !['passed', 'failed', 'partial', 'unverifiable'].every(outcome => machine.taskVerification?.outcomes?.includes(outcome))
     || !machine.verificationPresentation?.currentPhaseWins || !machine.verificationPresentation?.exitsToFollowUp || !machine.verificationPresentation?.technicalOwnedByBot
-    || !['directWaitingAction', 'keyboard', 'detailAction', 'sharedPending', 'failureRetry', 'latestReceipt', 'noDuplicate', 'unrelatedPreserved', 'narrowFits', 'focusReturned', 'deferredStopReceipt', 'focusPreserved'].every(check => machine.taskCancellation?.[check] === true)
+    || !['panelTaskAction', 'keyboard', 'detailAction', 'sharedPending', 'failureRetry', 'failureVisible', 'latestReceipt', 'noDuplicate', 'unrelatedPreserved', 'narrowFits', 'focusReturned', 'deferredStopReceipt', 'focusPreserved'].every(check => machine.taskCancellation?.[check] === true)
     || !['internalInstructionsHidden', 'relatedNoteLocated', 'followUpDraftFocused', 'existingDraftPreserved', 'concreteQuestionLocated', 'noAutomaticExecution']
       .every(check => machine.taskDetails?.[check] === true)
     || !['compactControls','persistedModel','persistedEffort','perBot','failedSaveRetained','keyboardTrigger','aligned','sentSelection'].every(check => machine.quickChatBots?.[check] === true)
     || !machine.replyEvidenceReturn?.sameReply || !machine.replyEvidenceReturn?.focusInDetails
     || !['namedSources','savedFile','exactHistory','missingBodyExplained','unknownRefDistinct','diagnosticsCollapsed','commandReadable','narrowFits'].every(check=>machine.evidenceSources?.[check]===true)
-    || !machine.delegatedWorkHandoff?.reply || !machine.delegatedWorkHandoff?.background
+    || !['hostOwner', 'botFollowUp', 'userRequest'].every(key => machine.workPanelOwnership?.[key] === true)
+    || !machine.delegatedWorkHandoff?.reply || !machine.delegatedWorkHandoff?.workPanel
     || !machine.delegatedWorkHandoff?.noDirectHandling || !machine.delegatedWorkHandoff?.detailReturnsToBot
     || !['dark', 'light'].every(appearance => machine.delegatedWorkHandoff?.hintChecks?.some(item =>
       item.appearance === appearance && item.contrast >= 4.5 && item.fits && item.hintSize < item.progressSize))
@@ -159,8 +168,8 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     || !machine.fallbackVision?.openingAnimated || !machine.fallbackVision?.closingAnimated
     || !machine.fallbackVision?.persisted || !machine.fallbackVision?.serviceManagement || !machine.fallbackVision?.keyboard
     || ![1600, 1280, 760].every(width => ['dark', 'light'].every(appearance => [false, true].every(expanded =>
-      machine.backgroundWorkLayout?.some(item => item.width === width && item.appearance === appearance && item.expanded === expanded
-        && item.aligned && item.contentFits && item.expandedFits))))
+      machine.workPanelLayout?.some(item => item.width === width && item.appearance === appearance && item.expanded === expanded
+        && item.aligned && item.contentFits && item.panelFits && item.continuity))))
     || ![1280, 760].every(width => ['dark', 'light'].every(appearance => machine.fallbackVision?.cases?.some(item =>
       item.width === width && item.appearance === appearance && item.centered && item.fits && item.helpSize < item.labelSize)))
     || !requiredErrorLayouts.every(expected => machine.messageLayout.cases?.some(item =>
@@ -185,11 +194,11 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
     checks: { startupSurface: machine.startupSurface, conversationTypography: machine.conversationTypography, userReceipt: machine.userReceipt, attention: machine.attention, historyRegression: machine.historyRegression, disclosureFrames: machine.disclosureFrames,
       quickChatBots: machine.quickChatBots, taskDetails: machine.taskDetails, autonomousCoordination: machine.autonomousCoordination, modelSwitch: machine.modelSwitch, messageLayout: machine.messageLayout, workSurfaces: machine.workSurfaces, windowMaterial: machine.windowMaterial,
       botAccessPolicy: machine.botAccessPolicy, chatDetails: machine.chatDetails, imagePermissionLifecycle: machine.imagePermissionLifecycle, imageFullAccess: machine.imageFullAccess, conversationFlow: machine.conversationFlow, composerLayout: machine.composerLayout, botMessageColors: machine.botMessageColors, accessibility: machine.accessibility, fallbackVision: machine.fallbackVision,
-      backgroundWorkLayout: machine.backgroundWorkLayout, parallelWork: machine.parallelWork, pendingReplyLayout: machine.pendingReplyLayout, evidenceSources: machine.evidenceSources,
+      workPanelLayout: machine.workPanelLayout, workPanelOwnership: machine.workPanelOwnership, parallelWork: machine.parallelWork, pendingReplyLayout: machine.pendingReplyLayout, evidenceSources: machine.evidenceSources,
       delegatedWorkHandoff: machine.delegatedWorkHandoff, taskCancellation: machine.taskCancellation, completionReview: machine.completionReview,
       processEmptyLayout: machine.processEmptyLayout, processTiming: machine.processTiming, budgetFailure: machine.budgetFailure, replyRecovery: machine.replyRecovery, agentActivity: machine.agentActivity, manualWakeRetry: machine.manualWakeRetry, streamingFailureRecovery: machine.streamingFailureRecovery, choiceSendMotion: machine.choiceSendMotion, updaterMinimize: machine.updaterMinimize,
       replyDetailsEntry: machine.replyDetailsEntry, verificationPresentation: machine.verificationPresentation,
-      selectionQuote: machine.selectionQuote, shortReplyQuote: machine.shortReplyQuote, retryRetirement: machine.retryRetirement },
+      selectionQuote: machine.selectionQuote, shortReplyQuote: machine.shortReplyQuote, retryRetirement: machine.retryRetirement, questionRetirement: machine.questionRetirement },
     supplementalCoverage: {sharedUiConventions:machine.sharedUiConventions,lifecycleGates:machine.lifecycleGates},
     reviewCriteria: [
       '默认内容能回答任务目标、当前进展和下一步；动作写明去向，主机器人负责对用户传达。',
@@ -260,6 +269,7 @@ function main() {
     '--streaming', '--effort-stability', '--work-surfaces', '--output', path.join(output, 'machine.json')], path.join(output, 'capture.log'));
   // The long-history selection fixture has its own Electron data directory;
   // it must not change the baseline stream-following scenario's history.
+  command(process.execPath, ['apps/desktop/scripts/bot-shell-electron-smoke.mjs', '--recovery-only', '--output', path.join(output, 'recovery-machine.json')], path.join(output, 'recovery-capture.log'));
   command(process.execPath, ['apps/desktop/scripts/bot-shell-electron-smoke.mjs', '--startup-only', '--output', path.join(output, 'startup-machine.json')], path.join(output, 'startup-capture.log'));
   command(process.execPath, ['apps/desktop/scripts/bot-shell-electron-smoke.mjs', '--selection-quote-only',
     '--output', path.join(output, 'selection-machine.json')], path.join(output, 'selection-capture.log'));
@@ -285,6 +295,11 @@ function main() {
   if (!verification.ok || verification.pageErrors?.length || verification.mainAuthorizationErrors?.length) throw new Error('Task verification interaction failed');
   const startup = JSON.parse(readFileSync(path.join(output, 'startup-machine.json'), 'utf8'));
   if (!startup.ok || startup.pageErrors?.length || startup.mainAuthorizationErrors?.length) throw new Error('Startup interaction failed');
+  const recovered = JSON.parse(readFileSync(path.join(output, 'recovery-machine.json')));
+  if (!recovered.ok || recovered.pageErrors?.length || recovered.mainAuthorizationErrors?.length) throw new Error('History recovery interaction failed');
+  machine.historyRecovery = recovered.historyRecovery;
+  const recoveryLine = readFileSync(path.join(output, 'recovery-capture.log'), 'utf8').trim().split('\n').findLast(value => value.startsWith('{'));
+  for (const file of recoveryShots) copyFileSync(path.join(JSON.parse(recoveryLine).root, file), path.join(artifactRoot, file));
   machine.startupSurface = startup.startupSurface;
   const startupLine = readFileSync(path.join(output, 'startup-capture.log'), 'utf8').trim().split('\n').findLast(value => value.startsWith('{'));
   for (const file of startupShots) copyFileSync(path.join(JSON.parse(startupLine).root, file), path.join(artifactRoot, file));

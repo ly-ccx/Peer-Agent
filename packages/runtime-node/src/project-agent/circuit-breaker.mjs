@@ -17,9 +17,18 @@ export function createCircuitBreaker({ rootDir = null, workspaceId, now = () => 
     if (stored.version !== 1 || !Number.isSafeInteger(stored.failures) || stored.failures < 0
       || !['closed', 'open', 'half_open'].includes(stored.status)
       || stored.status !== 'closed' && !Number.isFinite(Date.parse(stored.openUntil))) throw new Error('invalid circuit state');
+    if (stored.providerScopes !== undefined && (!stored.providerScopes || typeof stored.providerScopes !== 'object' || Array.isArray(stored.providerScopes)
+      || Object.values(stored.providerScopes).some(row => !row || !Number.isSafeInteger(row.failures) || row.failures < 0
+        || !['closed', 'open', 'half_open'].includes(row.status) || row.status !== 'closed' && !Number.isFinite(Date.parse(row.openUntil))))) throw new Error('invalid circuit scopes');
     value = stored;
   } catch (error) { if (error?.code !== 'ENOENT') throw error; }
-  let trial = false;
+  const trials = new Set();
+  const scopeId = key => key || '__legacy__';
+  function current(key) {
+    if (!key) { const { providerScopes, ...legacy } = value; return legacy; }
+    return (value.providerScopes && Object.hasOwn(value.providerScopes, key) ? value.providerScopes[key] : null) || (!value.providerScopes && !value.scopeKey ? current() : {
+      version: 1, failures: 0, status: 'closed', openUntil: null, lastTurnId: null });
+  }
   const at = () => { const clock = now(); return clock instanceof Date ? clock.getTime() : typeof clock === 'number' ? clock : Date.parse(clock); };
   function save(patch) {
     value = { ...value, ...patch };
@@ -27,23 +36,30 @@ export function createCircuitBreaker({ rootDir = null, workspaceId, now = () => 
     const temporary = `${file}.${randomUUID()}.tmp`;
     writeFileSync(temporary, JSON.stringify(value) + '\n'); renameSync(temporary, file);
   }
-  function admit({ manual = false } = {}) {
-    if (value.status === 'closed') return { allowed: true };
-    if (trial) return { allowed: false, reason: 'circuit_trial_running', openUntil: value.openUntil };
-    if (!manual && at() < Date.parse(value.openUntil)) return { allowed: false, reason: 'circuit_open', openUntil: value.openUntil };
-    trial = true; save({ status: 'half_open' });
+  function saveScope(scopeKey, patch) {
+    if (!scopeKey) return save(patch);
+    const next = { ...current(scopeKey), ...patch, scopeKey };
+    save({ ...next, providerScopes: { ...value.providerScopes, [scopeKey]: next } });
+  }
+  function admit({ manual = false, scopeKey } = {}) {
+    const state = current(scopeKey);
+    if (state.status === 'closed') return { allowed: true };
+    if (trials.has(scopeId(scopeKey))) return { allowed: false, reason: 'circuit_trial_running', openUntil: state.openUntil };
+    if (!manual && at() < Date.parse(state.openUntil)) return { allowed: false, reason: 'circuit_open', openUntil: state.openUntil };
+    trials.add(scopeId(scopeKey)); saveScope(scopeKey, { status: 'half_open' });
     return { allowed: true, trial: true };
   }
-  function failure({ turnId, reason = '', retry = null } = {}) {
-    if (turnId && value.lastTurnId === turnId) return { replayed: true, ...value };
-    const failures = value.failures + 1;
+  function failure({ turnId, reason = '', retry = null, scopeKey } = {}) {
+    const state = current(scopeKey);
+    if (turnId && state.lastTurnId === turnId) return { replayed: true, ...state };
+    const failures = state.failures + 1;
     const opened = failures >= CIRCUIT_FAILURE_LIMIT;
-    trial = false;
-    save({ failures, lastTurnId: turnId || null, reason: String(reason).slice(0, 500), retry,
+    trials.delete(scopeId(scopeKey));
+    saveScope(scopeKey, { failures, lastTurnId: turnId || null, reason: String(reason).slice(0, 500), retry,
       status: opened ? 'open' : 'closed', openUntil: opened ? new Date(at() + CIRCUIT_COOLDOWN_MS).toISOString() : null });
-    return { ...value, opened };
+    return { ...current(scopeKey), opened };
   }
-  function success() { trial = false; save({ failures: 0, status: 'closed', openUntil: null, lastTurnId: null, reason: '', retry: null }); }
-  function abandonTrial() { trial = false; }
-  return { admit, failure, success, abandonTrial, state: () => ({ ...value }) };
+  function success({ scopeKey } = {}) { trials.delete(scopeId(scopeKey)); saveScope(scopeKey, { failures: 0, status: 'closed', openUntil: null, lastTurnId: null, reason: '', retry: null }); }
+  function abandonTrial({ scopeKey } = {}) { if (scopeKey) trials.delete(scopeId(scopeKey)); else trials.clear(); }
+  return { admit, failure, success, abandonTrial, state: ({ scopeKey } = {}) => ({ ...current(scopeKey) }) };
 }

@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { ModelSelectionPanel } from '../../ui/model-picker/ModelPicker';
+import { selectionGroupsFromItems } from '../../ui/model-picker/modelSelection';
 import { PeerIcon } from '../../ui/icons';
-import { effortIndexFromValue, snapEffortValue } from '../../chat/components/thread/effortSlider';
+import { effortIndexFromValue, snapEffortValue } from '../../ui/model-picker/effortSlider';
 import { effortLabel, isEffortLevel } from '../../chat/state/preferences';
 import type {
   QuickChatPopoverAnchorRect,
   QuickChatPopoverState,
 } from '../../preload/contracts/bootstrapPreloadApi';
 import {
-  resolveModelSubmenuTop,
   resolveQuickChatPopoverPosition,
   resolveQuickChatPopoverVisualSize,
 } from './quickChatPopoverLayout.ts';
@@ -37,22 +38,7 @@ export function QuickChatPopover({ state, onSelect, onDismiss, layout = 'inline'
   const selectedIndex = Math.max(0, state.items.findIndex((item) => item.value === state.selectedValue));
   const [activeIndex, setActiveIndex] = useState(selectedIndex);
   const [previewIndex, setPreviewIndex] = useState(selectedIndex);
-  const modelGroups = useMemo(() => (
-    state.kind === 'model'
-      ? [...new Set(state.items.map((item) => item.group).filter((group): group is string => Boolean(group)))]
-      : []
-  ), [state.items, state.kind]);
-  const selectedModelGroupIndex = Math.max(
-    0,
-    modelGroups.findIndex((group) => state.items.some(
-      (item) => item.group === group && item.value === state.selectedValue,
-    )),
-  );
-  const [activeModelGroupIndex, setActiveModelGroupIndex] = useState(selectedModelGroupIndex);
-  const activeModelGroup = modelGroups[activeModelGroupIndex];
-  const activeModelItems = activeModelGroup
-    ? state.items.filter((item) => item.group === activeModelGroup)
-    : [];
+  const modelGroups = useMemo(() => selectionGroupsFromItems(state.items), [state.items]);
 
   const effortLevels = useMemo(
     () => state.items.map((item) => item.value).filter(isEffortLevel),
@@ -75,17 +61,18 @@ export function QuickChatPopover({ state, onSelect, onDismiss, layout = 'inline'
   useEffect(() => {
     setActiveIndex(selectedIndex);
     setPreviewIndex(selectedIndex);
-    setActiveModelGroupIndex(selectedModelGroupIndex);
     pendingEffortValueRef.current = initialEffortValue;
     if (sliderRef.current) {
       sliderRef.current.value = String(initialEffortValue);
       sliderRef.current.style.setProperty('--effort-progress', `${initialEffortValue}%`);
     }
     const focusFrame = requestAnimationFrame(() => {
-      (state.kind === 'effort' ? sliderRef.current : shellRef.current)?.focus({ preventScroll: true });
+      const modelFocus = state.kind === 'model'
+        ? shellRef.current?.querySelector<HTMLElement>('.model-selection-model[aria-selected=true]:not(:disabled), .model-selection-provider') : null;
+      (state.kind === 'effort' ? sliderRef.current : modelFocus ?? shellRef.current)?.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(focusFrame);
-  }, [initialEffortValue, selectedIndex, selectedModelGroupIndex, state.kind]);
+  }, [initialEffortValue, selectedIndex, state.kind]);
 
   useEffect(() => () => {
     if (previewFrameRef.current !== null) cancelAnimationFrame(previewFrameRef.current);
@@ -117,10 +104,11 @@ export function QuickChatPopover({ state, onSelect, onDismiss, layout = 'inline'
   return (
     <main
       ref={shellRef}
-      className={`quick-chat-popover-shell${layout === 'host' ? ' is-host' : ''}`}
+      className={`quick-chat-popover-shell motion-enter-fade${layout === 'host' ? ' is-host' : ''}${state.kind === 'model' ? ' is-model' : ''}`}
       style={shellStyle}
       tabIndex={-1}
       onKeyDown={(event) => {
+        if (event.defaultPrevented || state.kind === 'model') return;
         if (event.key === 'Escape') {
           event.preventDefault();
           onDismiss();
@@ -214,55 +202,9 @@ export function QuickChatPopover({ state, onSelect, onDismiss, layout = 'inline'
             />
           </div>
         </section>
-      ) : state.kind === 'model' && modelGroups.length > 0 ? (
-        <section className="quick-chat-model-cascade" aria-label="选择模型">
-          <div className="quick-chat-model-providers" role="menu" aria-label="模型供应商">
-            {modelGroups.map((group, index) => {
-              const selected = state.items.some(
-                (item) => item.group === group && item.value === state.selectedValue,
-              );
-              return (
-                <button
-                  key={group}
-                  type="button"
-                  className={`quick-chat-model-provider${index === activeModelGroupIndex ? ' is-active' : ''}${selected ? ' is-selected' : ''}`}
-                  onMouseEnter={() => setActiveModelGroupIndex(index)}
-                  onFocus={() => setActiveModelGroupIndex(index)}
-                >
-                  <span>{group}</span>
-                  <span className="quick-chat-model-arrow" aria-hidden="true"><PeerIcon name="chevronRight" size={12} /></span>
-                </button>
-              );
-            })}
-          </div>
-          <div
-            className="quick-chat-model-submenu"
-            role="menu"
-            aria-label={`${activeModelGroup ?? ''} 模型`}
-            style={{
-              top: resolveModelSubmenuTop(activeModelGroupIndex),
-              maxHeight: `calc(100% - ${resolveModelSubmenuTop(activeModelGroupIndex)}px)`,
-            }}
-          >
-            {activeModelItems.map((item) => {
-              const selected = item.value === state.selectedValue;
-              return (
-                <button
-                  key={item.value}
-                  type="button"
-                  className={`quick-chat-popover-option${selected ? ' is-selected' : ''}`}
-                  onClick={() => onSelect(item.value)}
-                >
-                  <span className="quick-chat-popover-copy">
-                    <strong>{item.label}</strong>
-                    {item.detail ? <span>{item.detail}</span> : null}
-                  </span>
-                  {selected ? <PeerIcon name="check" size={14} className="quick-chat-popover-check" /> : null}
-                </button>
-              );
-            })}
-          </div>
-        </section>
+      ) : state.kind === 'model' ? (
+        <ModelSelectionPanel groups={modelGroups} selectedModelId={state.selectedValue}
+          isZh embedded onSelectModel={onSelect} onDismiss={onDismiss} />
       ) : (
         <section className="quick-chat-popover-panel" role="listbox" aria-label="快速选择">
           {state.items.map((item, index) => {

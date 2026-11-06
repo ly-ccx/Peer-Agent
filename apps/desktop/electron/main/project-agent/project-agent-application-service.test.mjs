@@ -20,6 +20,8 @@ const METHODS = [
   ['create', { kind: 'managed', name: '笔记' }],
   ['updateProfile', { workspaceId: 'ws-1', displayName: '新名字' }],
   ['deleteBot', { workspaceId: 'ws-1' }],
+  ['readInputDraft', { workspaceId: 'ws-1', surface: 'desktop' }],
+  ['writeInputDraft', { workspaceId: 'ws-1', surface: 'desktop' }],
   ['submitInput', { workspaceId: 'ws-1', inputId: 'in-1', text: '你好' }],
   ['readConversation', { workspaceId: 'ws-1' }],
   ['stopResponse', { workspaceId: 'ws-1', turnId: 't' }],
@@ -900,4 +902,48 @@ test('desktop forwards uploads on the existing input queue seam, including attac
   assert.equal(result.ok, true);
   assert.deepEqual(submitted.attachments, attachments);
   assert.equal(submitted.text, '');
+});
+
+
+test('draft persistence checks active identity without projecting history, tasks or execution', async () => {
+  const calls = [];
+  const service = createProjectAgentApplicationService({ enabled: () => true,
+    directory: { list: () => [], hasActiveBot: id => id === 'local',
+      get() { assert.fail('draft keystrokes must not project the bot overview'); } }, schedule: () => 1,
+    inputDrafts: { read: request => { calls.push(['read', request]); return { ok: true, snapshot: { revision: 0 } }; },
+      write: request => { calls.push(['write', request]); return { ok: true, revision: 1 }; } },
+    inputQueue: { submitInput() { assert.fail('draft writes never submit'); } },
+    broadcast() { assert.fail('draft writes never broadcast execution'); },
+  });
+  for (const surface of ['desktop', 'quick_chat', 'tui']) assert.equal(service.readInputDraft({ workspaceId: 'local', surface }).ok, true);
+  assert.equal(service.writeInputDraft({ workspaceId: 'local', surface: 'desktop', revision: 0 }).ok, true);
+  assert.equal(service.readInputDraft({ workspaceId: 'foreign', surface: 'desktop' }).ok, false);
+  assert.equal(service.writeInputDraft({ workspaceId: 'foreign', surface: 'desktop' }).ok, false);
+  assert.equal(service.writeInputDraft({ workspaceId: 'local', surface: 'remote' }).ok, false);
+  assert.equal(calls.length, 4);
+});
+
+test('explicit resource feedback follows the existing input queue without materializing a file or granting access', async () => {
+  let submitted;
+  const service = createProjectAgentApplicationService({ enabled: () => true, inputQueue: { submitInput(value) { submitted = value; return value; } } });
+  const resourceFeedback = [{ id: 'selected', recipient: { workspaceId: 'w', conversationId: 'c' }, excerpt: 'user selection' }];
+  const result = await service.submitInput({ workspaceId: 'w', inputId: 'i', text: 'Explain this', resourceFeedback });
+  assert.equal(result.ok, true); assert.equal(submitted.text, 'Explain this'); assert.deepEqual(submitted.resourceFeedback, resourceFeedback);
+});
+
+test('conversation reads expose recovery failure independently of readable messages and cards', async () => {
+  let status = { status: 'failed', phase: 'inputs', error: 'coordination_legacy_changed' };
+  const service = createProjectAgentApplicationService({ enabled: () => true, schedule: () => 1,
+    directory: { readInteractions: () => ({ ok: true, messages: [{ id: 'existing', content: 'preserved' }] }),
+      readConversation: () => ({ ok: false, code: 'coordination_legacy_changed', cards: [] }) },
+    readRecovery: () => status });
+  const messages = service.readConversation({ workspaceId: 'w', view: 'interactions' });
+  assert.equal(messages.ok, true); assert.equal(messages.messages[0].id, 'existing');
+  assert.equal(messages.recovery.code, 'coordination_legacy_changed'); assert.equal(messages.recovery.retryable, false);
+  assert.equal(service.readConversation({ workspaceId: 'w', view: 'cards' }).recovery.reason, 'history_conflict');
+  status = { status: 'failed', phase: 'inputs', error: 'coordination_reconciliation_required' };
+  assert.equal(service.readConversation({ workspaceId: 'w', view: 'interactions' }).recovery.reason, 'reconciliation_required');
+  status = { status: 'ready' };
+  assert.equal(service.readConversation({ workspaceId: 'w', view: 'interactions' }).recovery, null);
+  service.dispose?.();
 });

@@ -1,25 +1,63 @@
 import path from 'node:path';
 import { statSync } from 'node:fs';
+import { createTuiTaskResultReader } from './task-result-reader.ts';
 import { createTuiEvidenceReader } from './tui-evidence-reader.ts';
 import { randomUUID } from 'node:crypto';
 import { createConversationStore } from '@peer-agent/conversation-store';
+import { readStoredWorkHistory } from '@peer-agent/conversation-store/persisted-history';
 import {
-  createHostLease, createProjectRegistry, createBotProfileStore, createBotDirectory,
-  createProjectAgentHost, createSessionSupervisor, createExecutionScheduler, createAgentEventPublisher,
-  createProjectInbox, createInputQueue, createApprovalStore, createGoalPlanStore, applyStartupApprovalRecovery,
-  createProjectGoalRunnerHost, createGoalWorktreeAdapter, createGoalTaskBranchAdapter,
-  createAutomationWorktreeAdapter, createObjectiveStore, createObjectiveActions,
-  createObjectiveService, createDesktopObjectiveWatchHost, createSessionVerification,
-  createDesktopProjectFacts, createDesktopReplyComposer, createProjectLifecycleEffects,
-  createBotLifecycle, createMemoryStore, createMemoryCurator, createEpisodeLog,
-  createMemoryMaintenance, createMemoryFileAnchors, runMemoryCuratorTurn,
-  createOneTimeApprovalBook, createCallbackSink, inQuietHours, loadMigratedSettings,
-  isEffectiveMemory, delegationFactsForWorkspace, readProjectInstructionLines,
-  encodeProviderToolResult,
+  createHostLease,
+  createApprovalStore,
+  createGoalPlanStore,
+  applyStartupApprovalRecovery
+} from "@peer-agent/runtime-node/storage";
+import {
+  createProjectRegistry,
+  loadMigratedSettings,
+  encodeProviderToolResult
+} from "@peer-agent/runtime-node/providers";
+import {
+  createBotProfileStore,
+  createBotDirectory,
+  createProjectAgentHost,
+  createSessionSupervisor,
+  createExecutionScheduler,
+  createAgentEventPublisher,
+  createProjectInbox,
+  createInputQueue,
+  createProjectInputDraftStore,
+  createProjectGoalRunnerHost,
+  createGoalWorktreeAdapter,
+  createGoalTaskBranchAdapter,
+  createAutomationWorktreeAdapter,
+  createObjectiveStore,
+  createObjectiveActions,
+  createObjectiveService,
+  createDesktopObjectiveWatchHost,
+  createSessionVerification,
+  createDesktopProjectFacts,
+  createDesktopReplyComposer,
+  createProjectLifecycleEffects,
+  createBotLifecycle,
+  createMemoryStore,
+  createMemoryCurator,
+  createEpisodeLog,
+  createMemoryMaintenance,
+  createMemoryFileAnchors,
+  runMemoryCuratorTurn,
+  createOneTimeApprovalBook,
+  createCallbackSink,
+  inQuietHours,
+  isEffectiveMemory,
+  delegationFactsForWorkspace,
+  readProjectInstructionLines,
   shouldPauseForHostHandoff,
-} from '@peer-agent/runtime-node';
+  supervisorEventId
+} from "@peer-agent/runtime-node/project-agent";
 import { resolveGitBranchPrefix } from '@peer-agent/system-context';
 import { createProjectToolProvider } from './project-tool-provider.ts';
+import { createInteractiveRuntime } from '@peer-agent/runtime-node/interactive-results';
+import { createInteractiveToolProvider } from './interactive-tool-provider.ts';
 import { createTuiTurnExecutor } from './tui-turn-executor.ts';
 import type { PendingApproval } from '../tui-host.ts';
 
@@ -30,6 +68,7 @@ export function createTuiProjectHost(options: {
   appVersion?: string;
   getSettings?: () => any;
   executeTurn?: (request: any) => Promise<any>;
+  acquireInteractiveRetentionCompatibility?: (owner: { workspaceId: string; conversationId: string }) => { revision: string; assertCurrent(): boolean; release(): void };
   createRuntime?: Parameters<typeof createTuiTurnExecutor>[0]['createRuntime'];
   onChanged?: () => void;
   autoStart?: boolean;
@@ -64,14 +103,35 @@ export function createTuiProjectHost(options: {
   const readMessages = (id: string): any[] => conversations.getPersistedConversationHistory?.(id)?.messages as any[] ?? [];
   const holds = (id: string): boolean => !closed && !admissionClosed && id === selectedId && profiles.read(id)?.status === 'active' && leases.holds(id);
   const scheduler = createExecutionScheduler({ rootDir: runtimeRoot, getConcurrency: () => getSettings().projectAgent?.concurrency } as never);
-  scheduler.configure({ isWorkspaceReady: (id: string) => host?.isReady(id) === true });
+  scheduler.configure({ isWorkspaceReady: (id: string) => host?.isReady(id) === true,
+    isPlanRecoveryHeld: (plan: any) => host?.sessionHeld(plan?.delegationOrigin?.workspaceId, plan?.delegationOrigin?.sessionId) === true });
   const leases = createHostLease({ rootDir: runtimeRoot, hostId: `tui-${randomUUID()}`, surface: 'tui', appVersion: options.appVersion ?? '',
     projectAgentEnabled: () => !closed, botWorkspaceIds: () => selectedId && profiles.read(selectedId)?.status === 'active' ? [selectedId] : [] } as never);
+  const interactiveEnabled = (id: string) => holds(id) && getSettings().projectAgent?.interactiveResults === true;
+  const resolveConversationId = (id: string) => profiles.read(id)?.agentConversationId ?? '';
+  function validateInteractiveFeedback(row: unknown, workspaceId: string): boolean { return interactive.feedback.validate(row, workspaceId); }
+  const drafts = createProjectInputDraftStore({ rootDir: runtimeRoot, validateInteractiveFeedback });
+  const inputs = createInputQueue({rootDir:runtimeRoot, holdsLease:holds, resolveConversationId,
+    validateInteractiveFeedback,
+    hasMessage:(id: string, messageId: string) => readMessages(id).some(row=>row.id===messageId),
+    appendMessage:(id: string, message: any) => {conversations.appendMessage(id,message);changed();}} as never);
+  const interactive = createInteractiveRuntime({ rootDir: runtimeRoot, goalPlanStore: plans, conversationStore: conversations,
+    readPortableWorkHistory: (scope: Parameters<typeof readStoredWorkHistory>[1], readBudget?: Parameters<typeof readStoredWorkHistory>[2]) =>
+      readStoredWorkHistory(path.join(dataHome, 'conversations'), scope, readBudget),
+    retentionPorts: { inputQueue: inputs, drafts, acquireCompatibility: options.acquireInteractiveRetentionCompatibility },
+    getBotConversationId(id: string) {
+      const profile = profiles.read(id);
+      return profile?.status === 'active' ? profile.agentConversationId : undefined;
+    }, holdsLease: holds, enabled: interactiveEnabled,
+    classifyContext: () => 'D3_private', getSession: (id: string, detail = 'report') => supervisor.get({ sessionId: id, ...(detail === 'report' ? { detail } : {}) }) });
+  const interactiveProvider = createInteractiveToolProvider(interactive);
   const executor = createTuiTurnExecutor({ dataHome, getSettings, holdsLease: holds,
     resolveWorkspacePath: id => registry.get(id)?.path ?? options.workspacePath,
     readMessages, readInteractionContext: async id => (await conversations.readInteractionContext(id))?.messages || [],
     readMemory: id => memory.list({workspaceId: id, status: 'active'}).filter(item => isEffectiveMemory(item)),
-    memoryEnabled, getProviders: () => toolProvider ? [toolProvider] : [], scheduler, oneTimeApprovals, goalPlanStore: plans, createRuntime: options.createRuntime,
+    memoryEnabled, getProviders: () => [...(toolProvider ? [toolProvider] : []), ...(interactiveEnabled(selectedId) ? [interactiveProvider] : [])],
+    captureExecution: interactive.captureExecution, userMaterialNotices: interactive.userMaterialNotices,
+    scheduler, oneTimeApprovals, goalPlanStore: plans, createRuntime: options.createRuntime,
     onApproval(approval, streamId) { if (approval) liveApprovals.set(streamId, approval); else liveApprovals.delete(streamId); changed(); },
     persistTurn(input, output) {
       if (!input.conversationId || !input.assistantMessageId) return;
@@ -79,7 +139,7 @@ export function createTuiProjectHost(options: {
         content: output.text, interrupted: output.interrupted,
         segments: [...output.calls.map(call => ({type: 'tool-call', tool: call.name, toolCallId: call.toolCallId,
           args: call.input, status: call.execution.result.status, result: encodeProviderToolResult({result: call.execution.result,
-            execution: call.execution, conversationId: input.conversationId, toolCallId: call.toolCallId}).content})),
+            execution: call.execution, conversationId: input.conversationId, toolCallId: call.toolCallId, baseDir: path.join(dataHome, 'artifacts')}).content})),
           ...(output.text ? [{type: 'text', content: output.text}] : [])],
       } as never);
       if (output.usage && !output.interrupted) conversations.recordRuntimeTurnUsage?.(input.conversationId, {usage: output.usage,
@@ -93,6 +153,7 @@ export function createTuiProjectHost(options: {
     worktreeAdapter: createAutomationWorktreeAdapter({rootDir: path.join(dataHome, 'goal-plans/worktrees'), artifactDir: path.join(dataHome, 'goal-plans/artifacts')})} as never);
   const taskBranch = createGoalTaskBranchAdapter({goalPlanStore: plans, resolvePrefix: () => resolveGitBranchPrefix({gitBranchPrefix: getSettings().gitBranchPrefix})} as never);
   const goalHost = createProjectGoalRunnerHost({goalPlanStore: plans, conversationStore: conversations,
+    getInteractiveVerification: () => interactive.verification,
     agentTurnExecutor: turns, llmChatService: turns, broadcast: changed, hostLeases: {holds},
     goalWorktreeAdapter: worktree, goalTaskBranchAdapter: taskBranch, workspaceRoot: options.workspacePath,
     createSink: () => createCallbackSink(), resolveConversationModelProviderId: ({conversationId}: any) => conversations.getConversation(conversationId)?.modelProviderId,
@@ -100,11 +161,14 @@ export function createTuiProjectHost(options: {
   } as never);
   const goalRunner = goalHost.goalRunner as typeof goalHost.goalRunner & { verifyDelegatedSession(input: object): Promise<any> };
   const verification = createSessionVerification({goalPlanStore: plans,
-    verifySession: (plan: any, focus: string) => goalRunner.verifyDelegatedSession({plan, focus}),
+    verifySession: (plan: any, focus: string, context: any) => goalRunner.verifyDelegatedSession({plan, focus, workId: context?.workId}),
     readReport: (plan: any) => supervisor.readReportSummary(plan.delegationOrigin.sessionId),
     completeRecheck: (input: any) => goalRunner.completeRecheck(input)} as never);
   const supervisor = createSessionSupervisor({conversationStore: conversations, goalPlanStore: plans, goalRunner,
     readDelegationCapabilities: (input: { readOnly: boolean; workspaceId: string }) => executor.readDelegationCapabilities(input),
+    readResourceFeedback: interactive.feedback.restore,
+    projectReportEvidence: interactive.publications.projectReportEvidence,
+    recoverStoppedPublications: interactive.recoverWorkspace,
     executionScheduler: scheduler, deferRecovery: true, approvalStore: approvals, memoryStore: memory, canManageWorkspace: holds,
     objectives: {prepareSpawn: (...args: any[]) => (objectives.prepareSpawn as any)(...args), linkSession: (...args: any[]) => (objectives.linkSession as any)(...args)},
     resolveModel: (input: any) => turns.resolveGoalRole({...input, workerModelProviderId: input.workerModel?.modelProviderId, projectPolicy: profiles.read(input.workspaceId)?.modelPolicy}),
@@ -112,9 +176,8 @@ export function createTuiProjectHost(options: {
     readSessionFacts: (plan: any) => ({autoHandoffOnPolicyAccept: profiles.read(plan.delegationOrigin.workspaceId)?.autoHandoffOnPolicyAccept === true,
       hostAuthority: verification.facts(plan.delegationOrigin.sessionId)}),
     readPlanApproval: (id: string) => profiles.read(id)?.planApproval,
-    emitEvent: (event: any) => {inbox.append(event.workspaceId, [{...event, eventId: event.eventId || `supervisor:${event.kind}:${event.sessionId}:${event.verdictRef || event.anchorMessageId || event.reason || ''}`}]); changed();},
+    emitEvent: (event: any) => {inbox.append(event.workspaceId, [{...event, eventId: event.eventId || supervisorEventId(event)}]); changed();},
   } as never);
-  const resolveConversationId = (id: string) => profiles.read(id)?.agentConversationId ?? '';
   objectives = createObjectiveService({store: objectivesStore, actions: objectiveActions, canManageWorkspace: holds, resolveConversationId,
     readSessions: (id: string) => supervisor.sessionsForProject(id), readConversation: readMessages,
     readSession: (id: string) => {const session=supervisor.get({sessionId:id,detail:'report'}) as any;return session ? {...session,evidenceRefs:session.report?.evidenceRefs ?? []} : null;},
@@ -136,7 +199,7 @@ export function createTuiProjectHost(options: {
       return supervisor.spawn({...input.task,anchorMessageIds:[anchor]},{workspaceId:input.workspaceId,parentConversationId:input.conversationId,workspacePath:input.workspacePath});
     }} as never);
   toolProvider = createProjectToolProvider({rootDir: dataHome, supervisor, objectives, verification,
-    replyComposer: createDesktopReplyComposer({readDelivery: (view: any) => ({...facts.delivery(view.workspaceId), ...watches.deliveryFacts(view),
+    replyComposer: createDesktopReplyComposer({readResultReferences: interactive.publications.replyReferences, readDelivery: (view: any) => ({...facts.delivery(view.workspaceId), ...watches.deliveryFacts(view),
       proactivity: getSettings().projectAgent?.proactivity, botLevel: profiles.read(view.workspaceId)?.proactivity,
       quietHours: inQuietHours(new Date(), getSettings().projectAgent?.quietHours)})} as never),
     proactivity: {set: ({workspaceId, level}: any) => profiles.save({...profiles.read(workspaceId),proactivity:level})},
@@ -149,9 +212,6 @@ export function createTuiProjectHost(options: {
     resolveEvidence:(ref: string)=>readEvidence(ref)?.text || '',
     contradicts:(id: string)=>readProjectInstructionLines(registry.get(id)?.path),
     resolveFileAnchors:fileAnchors.capture, onWrote:changed} as never);
-  const inputs = createInputQueue({rootDir:runtimeRoot, holdsLease:holds, resolveConversationId,
-    hasMessage:(id: string, messageId: string) => readMessages(id).some(row=>row.id===messageId),
-    appendMessage:(id: string, message: any) => {conversations.appendMessage(id,message);changed();}} as never);
   host = createProjectAgentHost({rootDir:runtimeRoot, holdsLease:holds, acquireLease:(id: string)=>leases.acquire(id),
     listWorkspaceIds:()=> selectedId ? [selectedId] : [], resolveConversationId,
     appendMessage:(id: string,message: any)=>{conversations.appendMessage(id,message);changed();}, readMessages,
@@ -165,6 +225,9 @@ export function createTuiProjectHost(options: {
     recoverTasks:(id: string)=>goalRunner.recoverContextCheckpoints({workspaceId:id,deferPump:true} as never), activateSessions:supervisor.resumeRecovered,
     restoreWatches:watches.restore,stopWatches:watches.stopWorkspace, reconcileSessions:supervisor.reconcile,
     reconcileVerification: (input: any) => verification.reconcileInterrupted(input),
+    findEvidenceRecords: (refs: string[]) => plans.findEvidenceIndexRecords(refs),
+    readResourceClaims: (workspaceId: string) => scheduler.resourceSnapshot().filter((row: any) => row.workspaceId === workspaceId),
+    resourceWaits: supervisor.resourceWaits,
     readSettings:getSettings, inputQueue:inputs, inbox, onStatus:changed,
     onCurator:(input: any)=>curator.consider(input), onMaintenance:(input: any)=>{if(holds(input.workspaceId)&&memoryEnabled(input.workspaceId))maintenance.runDue(input);},
     readFacts:(id: string)=>delegationFactsForWorkspace(plans.listPlans().map((row: any)=>plans.getPlan(row.planId)),id),
@@ -183,7 +246,7 @@ export function createTuiProjectHost(options: {
     const next = currentWakeStamp();
     if (running.size && next === wakeStamp) return Promise.allSettled([...running]);
     wakeStamp = next;
-    const job = host.sync([selectedId]).finally(()=>{running.delete(job);});
+    const job = host.sync([selectedId]).then(() => { interactive.recoverWorkspace(selectedId); }).finally(()=>{running.delete(job);});
     running.add(job);
     return job;
   }
@@ -201,29 +264,36 @@ export function createTuiProjectHost(options: {
   const timer = options.autoStart === false ? null : setInterval(()=>void tick().catch(()=>changed()),1000);
   timer?.unref();
   if(options.autoStart!==false){watches.start(()=>selectedId?[selectedId]:[]);void tick();}
-  return { registry, profiles, directory, conversations, plans, approvals, memory, objectives, supervisor, host, leases, executor, inputs, lifecycle, readEvidence,
+  const readTaskResult = createTuiTaskResultReader({
+    resultStore: interactive.resultStore,
+    readPortableSummary: interactive.readPortableSummary,
+    assertOwner: owner => !closed && !admissionClosed && selectedId === owner.workspaceId
+      && profiles.read(owner.workspaceId)?.status === 'active' && resolveConversationId(owner.workspaceId) === owner.conversationId,
+    readTask: sessionId => supervisor.get({ sessionId, detail: 'report' }),
+  });
+  return { registry, profiles, directory, conversations, plans, approvals, memory, objectives, supervisor, host, leases, executor, inputs, drafts, lifecycle, readEvidence, interactive, readTaskResult,
     workspaceId:()=>selectedId, holdsLease:holds, tick,
     async selectWorkspace(id: string) {if(id===selectedId)return;admissionClosed=true;const old=selectedId;if(old){await stopExecution(old);leases.release(old);}selectedId=id;admissionClosed=false;await host.restart(id);changed();},
     async takeover() {if(!selectedId)return {requested:false};const request=leases.requestTakeover(selectedId);if(request.reason==='free')leases.acquire(selectedId);await tick();return request;},
-    async decideApproval(approvalId: string, decision: 'approve'|'deny', duration: 'once'|'task' = 'once') {
+    async decideApproval(approvalId: string, decision: 'approve'|'deny'|'cancel', duration: 'once'|'task' = 'once') {
       if(!holds(selectedId))return {ok:false,error:'desktop_approval_required'};
       const record=approvals.list({workspaceId:selectedId}).find(row=>row.approvalId===approvalId);
       if(!record)return {ok:false,error:'not_found'};
       const planApproval=record.capabilityId==='goal.plan' || record.approvalId.startsWith('plan:');
       const live=[...liveApprovals.values()].find(row=>row.toolCallId===approvalId);
-      if(record.state==='open'&&live){live.resolve(decision==='approve'?duration==='task'?'allow-session':'allow-once':'deny');return {ok:true};}
+      if(record.state==='open'&&live){live.resolve(decision==='approve'?duration==='task'?'allow-session':'allow-once':decision==='cancel'?'cancel':'deny');return {ok:true,approval:approvals.list({workspaceId:selectedId}).find(row=>row.approvalId===approvalId)};}
       if(!['open','stale'].includes(record.state)){
         const session=decision==='approve' && record.state==='approved' && planApproval && record.sessionId ? supervisor.get({sessionId:record.sessionId}) : null;
         if((session?.origin as {phase?: string} | undefined)?.phase==='awaiting_approval'){
           const resumed=await supervisor.resumeFromApproval(record) as unknown as {ok: boolean; reason?: string};
           changed();return resumed.ok ? {ok:true} : {ok:false,error:resumed.reason};
         }
-        return {ok:true,replayed:true};
+        return {ok:true,replayed:true,approval:record};
       }
       let saved: typeof record | null = null;
       if(decision==='approve'){
         const session=record.sessionId ? supervisor.get({sessionId:record.sessionId}) : null;
-        if(session && ['paused','superseded'].includes(session.status))return {ok:false,error:'session_paused'};
+        if(session && ['paused','superseded','cancelled'].includes(session.status))return {ok:false,error:'session_paused'};
         if(record.state==='open' && !planApproval)return {ok:false,error:'approval_not_live'};
         if(!planApproval)oneTimeApprovals.remember({...record,at:Date.now()});
         if(planApproval){
@@ -235,8 +305,8 @@ export function createTuiProjectHost(options: {
         if(!resumed.ok)return {ok:false,error:resumed.reason};
       }
       else if(planApproval)await supervisor.cancel({sessionId:record.sessionId,reason:'plan_approval_denied'});
-      if(!saved)approvals.append({...record,state:decision==='approve'?'approved':'denied',decidedAt:new Date().toISOString(),decidedBy:'local_ui'});changed();return {ok:true};
+      if(!saved){saved=approvals.append({...record,state:decision==='approve'?'approved':decision==='cancel'?'cancelled':'denied',decidedAt:new Date().toISOString(),decidedBy:'local_ui',...(decision==='cancel'?{decisionReason:'permission_cancelled'}:{})});if(!saved)return {ok:false,error:'approval_store_failed'};}changed();return {ok:true,approval:approvals.list({workspaceId:selectedId}).find(row=>row.approvalId===approvalId)};
     },
-    async close() {admissionClosed=true;if(timer)clearInterval(timer);if(selectedId)await stopExecution(selectedId);closed=true;host.dispose();watches.dispose();toolProvider.dispose();leases.close();},
+    async close() {const wasHost=holds(selectedId);admissionClosed=true;if(timer)clearInterval(timer);if(selectedId)await stopExecution(selectedId,wasHost?'handoff':'lost');closed=true;interactive.close();host.dispose();watches.dispose();toolProvider.dispose();leases.close();},
   };
 }

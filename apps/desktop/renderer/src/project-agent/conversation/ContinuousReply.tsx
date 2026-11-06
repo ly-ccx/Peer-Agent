@@ -1,3 +1,5 @@
+import { ReplyResourceContext } from './ReplyResourceContext';
+import { referencesForReplyParagraph } from '../state/botResourceReference';
 import { useRef } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { MarkdownMessage } from '../../chat/components/markdown/MarkdownMessage';
@@ -8,13 +10,16 @@ import { CardView } from './CardView';
 import { ReplyAnchors } from './ReplyAnchors';
 import type { ReplyAnchor } from '../state/replyReferenceState';
 import { ReplyPresence } from './ReplyPresence';
+import { ReplyTaskReferences } from './ReplyTaskReferences';
+import type { BotWorkIndex } from '../state/botWorkState';
 
 /** One DOM carrier from receipt to delivery, including yields, recovery and terminal cards. */
-export function ContinuousReply({ workspaceId, reply, referenceIds, anchors, highlighted, i18n, onJump, onQuote, onReload, onOpenDetails }: {
+export function ContinuousReply({ workspaceId, reply, referenceIds, anchors, highlighted, i18n, onJump, onQuote, onReload, onOpenDetails, workIndex, onOpenWork }: {
   readonly workspaceId: string; readonly reply: BotReplyRow; readonly referenceIds: readonly string[];
   readonly anchors: ReadonlyMap<string, ReplyAnchor>; readonly highlighted: boolean; readonly i18n: I18nRuntime;
   readonly onJump: (id: string) => void; readonly onQuote: (id: string, excerpt: string) => void;
   readonly onReload: () => void; readonly onOpenDetails?: (id: string) => void;
+  readonly workIndex: BotWorkIndex; readonly onOpenWork: (sessionId: string) => void;
 }) {
   const body = useRef<HTMLDivElement>(null);
   const message = reply.message;
@@ -31,12 +36,16 @@ export function ContinuousReply({ workspaceId, reply, referenceIds, anchors, hig
     {reply.paragraphs.map((paragraph, index) => <div key={paragraph.id} className="bot-reply-body bot-narration-segment" aria-live="off" data-narration-id={paragraph.id}>
       {index === 0 ? <ReplyAnchors ids={referenceIds} anchors={anchors} i18n={i18n} onJump={onJump} /> : null}
       <div className="bot-reply-text" ref={message?.kind === 'agent_reply' && index === reply.paragraphs.length - 1 ? body : undefined}>
-        <MarkdownMessage content={paragraph.text} />
+        <ReplyResourceContext references={referencesForReplyParagraph(paragraph.id, reply.messages, reply.activity)}>
+          <MarkdownMessage content={paragraph.text} />
+        </ReplyResourceContext>
       </div>
     </div>)}
     </div>
+    <ReplyTaskReferences messages={reply.messages} workIndex={workIndex} i18n={i18n} onOpen={onOpenWork} />
     <CardView workspaceId={workspaceId} cards={cards} i18n={i18n} />
     {message?.kind === 'agent_reply' ? <BotSelectionQuote root={body} label={i18n.t('projectAgent.chat.quote')} onQuote={excerpt => onQuote(message.id, excerpt)} /> : null}
-    <ReplyPresence reply={reply} i18n={i18n} onReload={onReload} onOpenDetails={openDetails} />
+    <ReplyPresence reply={reply} i18n={i18n} onReload={onReload} onOpenDetails={openDetails}
+      onQuote={message?.kind === 'agent_reply' && message.content.trim() ? () => onQuote(message.id, message.content) : undefined} />
   </article>;
 }

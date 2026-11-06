@@ -1,3 +1,5 @@
+import type { createInteractiveTextReader } from '@peer-agent/runtime-node/interactive-results';
+
 export interface ExecGoalStopReport {
   readonly planId: string;
   /** Final plan status observed by the exec process (completed / failed / blocked / executing ...). */
@@ -16,6 +18,8 @@ export interface ExecGoalStopReport {
   readonly progress: { readonly completed: number; readonly total: number } | null;
 }
 
+export type ExecInteractiveResult = ReturnType<ReturnType<typeof createInteractiveTextReader>>;
+
 export interface ExecJsonResult {
   readonly sessionId: string;
   readonly ok: boolean;
@@ -24,6 +28,8 @@ export interface ExecJsonResult {
   readonly turns: number;
   readonly durationMs: number;
   readonly usage?: unknown;
+  readonly botInput?: { readonly inputId: string; readonly status: 'received' | 'replied' | 'unknown'; readonly replyId?: string };
+  readonly interactiveResults?: readonly ExecInteractiveResult[];
   /** Present only when a GoalPlan was created (and possibly driven) during this exec run. */
   readonly goal?: ExecGoalStopReport;
 }
@@ -38,6 +44,8 @@ export function encodeExecJson(payload: ExecJsonResult): string {
     durationMs: payload.durationMs,
     ...(payload.usage === undefined ? {} : { usage: payload.usage }),
     ...(payload.goal === undefined ? {} : { goal: payload.goal }),
+    ...(payload.botInput === undefined ? {} : { botInput: payload.botInput }),
+    ...(payload.interactiveResults?.length ? { interactiveResults: payload.interactiveResults } : {}),
   });
 }
 

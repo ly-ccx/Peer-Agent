@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ComponentProps } from 'react';
-import { ChatSurface } from './ChatSurface';
+import { ChatSurface } from '../../app/components/deferredPanels';
 import { Drawer } from '../../app/components/Drawer';
 import { WorkbenchProvider } from '../../workbench/WorkbenchContext';
 import { clientApi } from '../../clientApi';
@@ -66,13 +66,14 @@ export function SelectionChatWorkspace(props: ComponentProps<typeof ChatSurface>
           text: conversationStore.getSnapshot(child.id).draft, referenceIds: [child.reference.id] });
       }
       const session = await clientApi.conversationsGet({ id });
+      const meta = session?.meta;
       if (generation !== openGeneration.current || parentRef.current !== parentId) return;
-      if (!session?.selectionOrigin || session.selectionOrigin.parentConversationId !== props.conversationId) throw new Error('子会话不存在或来源已变化');
-      if (!loadComposerEntry(id) && session.selectionDraft?.text) {
-        saveComposerEntry(id, { draft: session.selectionDraft.text, queue: [] });
+      if (!meta?.selectionOrigin || meta.selectionOrigin.parentConversationId !== props.conversationId) throw new Error('子会话不存在或来源已变化');
+      if (!loadComposerEntry(id) && meta.selectionDraft?.text) {
+        saveComposerEntry(id, { draft: meta.selectionDraft.text, queue: [] });
       }
-      setChild({ id, title: session.title, parentId: session.selectionOrigin.parentConversationId,
-        workspacePath: props.workspacePath ?? null, reference: session.selectionOrigin.reference, persisted: true });
+      setChild({ id, title: meta.title, parentId: meta.selectionOrigin.parentConversationId,
+        workspacePath: props.workspacePath ?? null, reference: meta.selectionOrigin.reference, persisted: true });
       setError('');
     } catch (cause) {
       if (generation === openGeneration.current && parentRef.current === parentId) setError(String(cause));
@@ -156,31 +157,39 @@ export function SelectionChatWorkspace(props: ComponentProps<typeof ChatSurface>
     }
   };
 
-  const close = async () => {
-    if (!child || saving) return;
-    openGeneration.current += 1;
-    if (!child.persisted) {
-      // 未发送的草稿直接丢弃，不落盘。
-      conversationStore.reset(child.id);
-      setChild(null);
-      setError('');
-      return;
-    }
+  const prepareClose = async () => {
+    if (!child || saving) return false;
+    const generation = ++openGeneration.current;
+    const parentId = child.parentId;
+    setError('');
+    if (!child.persisted) return true;
     setSaving(true);
     try {
       const text = conversationStore.getSnapshot(child.id).draft;
       await clientApi.selectionSaveDraft({ conversationId: child.id, text, referenceIds: [child.reference.id] });
-      setChild(null);
-      setError('');
-    } catch (cause) { setError(`草稿保存失败，侧栏保持打开：${String(cause)}`); }
-    finally { setSaving(false); }
+      if (openGeneration.current !== generation || parentRef.current !== parentId) return false;
+      if (conversationStore.getSnapshot(child.id).draft !== text) {
+        setError('保存期间草稿有新修改，侧栏保持打开；再次关闭可保存最新修改。');
+        return false;
+      }
+      return true;
+    } catch (cause) {
+      if (openGeneration.current === generation && parentRef.current === parentId) setError(`草稿保存失败，侧栏保持打开：${String(cause)}`);
+      return false;
+    } finally { if (openGeneration.current === generation) setSaving(false); }
+  };
+  const finishClose = () => {
+    if (!child) return;
+    if (!child.persisted) conversationStore.reset(child.id);
+    setChild(null); setError('');
   };
   const childVisible = child?.parentId === props.conversationId;
   return <>
     {children.length ? <nav aria-label="子会话">{children.map((item) => <button key={item.id} type="button" onClick={() => void open(item.id)}>{item.title} · {item.lifecycle} · {item.runState}</button>)}</nav> : null}
-    {error && error !== 'BACKGROUND_CONFIRMATION_REQUIRED' ? <div role="alert">{error}</div> : null}
+    {!childVisible && error && error !== 'BACKGROUND_CONFIRMATION_REQUIRED' ? <div role="alert">{error}</div> : null}
     <ChatSurface {...props} isPageActive={props.isPageActive && !childVisible} onOpenSelectionChild={(payload) => openDraft(payload)} />
-    {child && childVisible ? <Drawer onClose={() => void close()} ariaLabel="子会话讨论" panelClassName="conversation-result-drawer conversation-chat-drawer" softBackdrop>
+    {child && childVisible ? <Drawer key={child.id} onClose={finishClose} onRequestClose={prepareClose} ariaLabel="子会话讨论" panelClassName="conversation-result-drawer conversation-chat-drawer" softBackdrop>
+      {({ requestClose }) => <>
       <WorkbenchProvider conversationId={child.persisted ? child.id : null} isPageActive={Boolean(props.isPageActive)} layoutHost="local">
         {error === 'BACKGROUND_CONFIRMATION_REQUIRED' ? (
           <div className="selection-action-toolbar__confirm" role="alertdialog" aria-label="背景不完整确认">
@@ -196,12 +205,16 @@ export function SelectionChatWorkspace(props: ComponentProps<typeof ChatSurface>
           onOpenSettings={props.onOpenSettings}
           systemInstructions={props.systemInstructions} replyLanguage={props.replyLanguage}
           isPageActive={props.isPageActive} onConversationUpdated={props.onConversationUpdated}
-          onStreamingChange={props.onStreamingChange} onClose={() => void close()}
+          onStreamingChange={props.onStreamingChange} onClose={requestClose}
           onSelectionChildSend={!child.persisted ? createChildOnSend : undefined}
           pendingSendText={child.persisted ? pendingSendText : undefined}
           onPendingSendConsumed={() => setPendingSendText('')}
-          banner={<div role="note">只讨论 · 已继承创建时背景<blockquote>{child.reference.exactText}</blockquote></div>} />
+          banner={<div role="note" aria-busy={saving}>
+            {saving ? props.i18n.t('forms.saving') : '只讨论 · 已继承创建时背景'}<blockquote>{child.reference.exactText}</blockquote>
+            {error && error !== 'BACKGROUND_CONFIRMATION_REQUIRED' ? <p className="ui-form-feedback is-error" role="alert">{error}</p> : null}
+          </div>} />
       </WorkbenchProvider>
+      </>}
     </Drawer> : null}
   </>;
 }

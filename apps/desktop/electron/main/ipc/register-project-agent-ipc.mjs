@@ -20,6 +20,8 @@ export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
     updateModelSelection: assertFunction(projectAgent?.updateModelSelection, 'projectAgent.updateModelSelection'),
     deleteBot: assertFunction(projectAgent?.deleteBot, 'projectAgent.deleteBot'),
     submitInput: assertFunction(projectAgent?.submitInput, 'projectAgent.submitInput'),
+    readInputDraft: assertFunction(projectAgent?.readInputDraft, 'projectAgent.readInputDraft'),
+    writeInputDraft: assertFunction(projectAgent?.writeInputDraft, 'projectAgent.writeInputDraft'),
     readConversation: assertFunction(projectAgent?.readConversation, 'projectAgent.readConversation'),
     stopResponse: assertFunction(projectAgent?.stopResponse, 'projectAgent.stopResponse'),
     readEvidence: assertFunction(projectAgent?.readEvidence, 'projectAgent.readEvidence'),
@@ -37,6 +39,7 @@ export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
     confirmResult: assertFunction(projectAgent?.confirmResult, 'projectAgent.confirmResult'),
     acceptReadme: assertFunction(projectAgent?.acceptReadme, 'projectAgent.acceptReadme'),
     takeoverHost: assertFunction(projectAgent?.takeoverHost, 'projectAgent.takeoverHost'),
+    controlRecovery: assertFunction(projectAgent?.controlRecovery, 'projectAgent.controlRecovery'),
     retry: assertFunction(projectAgent?.retry, 'projectAgent.retry'),
     diagnostics: assertFunction(projectAgent?.diagnostics, 'projectAgent.diagnostics'),
   };
@@ -54,6 +57,8 @@ export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
       ipc.handle('project-agent:update-model-selection', (_event, payload) => ports.updateModelSelection(payload));
       ipc.handle('project-agent:delete', (_event, payload) => ports.deleteBot(payload));
       ipc.handle('project-agent:submit-input', (_event, payload) => ports.submitInput(payload));
+      ipc.handle('project-agent:read-input-draft', (_event, payload) => ports.readInputDraft(payload));
+      ipc.handle('project-agent:write-input-draft', (_event, payload) => ports.writeInputDraft(payload));
       ipc.handle('project-agent:read-conversation', (_event, payload) => ports.readConversation(payload));
       ipc.handle('project-agent:stop-response', (_event, payload) => ports.stopResponse(payload));
       ipc.handle('project-agent:read-evidence', (_event, payload) => ports.readEvidence(payload));
@@ -72,6 +77,7 @@ export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
       ipc.handle('project-agent:accept-readme', (_event, payload) => ports.acceptReadme(payload));
       ipc.handle('project-agent:retry', (_event, payload) => ports.retry(payload));
       ipc.handle('project-agent:takeover-host', (_event, payload) => ports.takeoverHost(payload));
+      ipc.handle('project-agent:recovery', (_event, payload) => ports.controlRecovery(payload));
       ipc.handle('project-agent:diagnostics', (event, payload) => ports.diagnostics(payload, event.sender));
     }),
   ]);

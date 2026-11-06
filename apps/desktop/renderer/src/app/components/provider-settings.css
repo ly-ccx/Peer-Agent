@@ -70,12 +70,55 @@
 
 /* ── Disclosed body: sunken connection details strip + model manager ── */
 .settings-content .settings-provider-page .llm-group-body {
-  padding: 2px var(--settings-group-inset) 18px 68px; border: 0;
+  padding: 2px var(--settings-group-inset) 18px; border: 0;
 }
 .settings-content .settings-provider-page .llm-service-connection-details {
   display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px;
   padding: 10px 14px; border-radius: var(--ui-radius-control); background: var(--chrome-sunken);
   font-size: .75rem; color: var(--graphite-soft); overflow-wrap: anywhere;
+}
+.settings-content .settings-provider-page .llm-group-section-head,
+.settings-content .settings-provider-page .llm-group-models,
+.settings-content .settings-provider-page .account-usage-toolbar,
+.settings-content .settings-provider-page .account-usage-body {
+  padding-inline: 0;
+}
+.settings-content .settings-provider-page .llm-configured-model-row,
+.settings-content .settings-provider-page .llm-configured-model-row:is(:hover, [open]) {
+  background: var(--paper-sheet);
+}
+.settings-content .settings-provider-page .llm-configured-model-summary:hover {
+  background: var(--paper-hover);
+}
+.settings-content .settings-provider-page .llm-configured-model-details {
+  background: var(--paper-sheet);
+  border-radius: 0 0 var(--ui-radius-row) var(--ui-radius-row);
+}
+.settings-content .settings-provider-page .llm-configured-model-row[open][data-motion-settled='true'] {
+  overflow: visible;
+}
+.settings-content .settings-provider-page .llm-configured-model-summary {
+  border-radius: var(--ui-radius-row);
+}
+.settings-content .settings-provider-page .llm-configured-model-row[open] > .llm-configured-model-summary {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.settings-content .settings-provider-page .llm-group-section-title,
+.settings-content .settings-provider-page .llm-configured-model-metadata small,
+.settings-content .settings-provider-page .llm-configured-model-chevron {
+  color: var(--graphite-soft);
+}
+.settings-content .settings-provider-page .llm-configured-model-metadata small.llm-configured-model-provenance {
+  display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3);
+  color: var(--settings-help-color);
+}
+.settings-content .settings-provider-page .llm-configured-model-actions > button,
+.settings-content .settings-provider-page .llm-configured-model-actions .pa-overflow-trigger {
+  min-height: 32px;
+}
+.settings-content .settings-provider-page .llm-configured-model-actions .pa-overflow-trigger {
+  width: 32px; height: 32px; padding: 0;
 }
 .llm-settings-disclosure { display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden;
   transition: grid-template-rows var(--za-motion-medium) var(--za-ease-standard, ease), opacity var(--za-motion-medium), visibility 0s var(--za-motion-medium); }
@@ -109,7 +152,6 @@
   .settings-content .settings-provider-page .llm-page-heading h1 { font-size: 1.625rem; }
   .settings-content .settings-provider-page .llm-group-header { gap: 12px; }
   .settings-content .settings-provider-page .llm-group-toggle { gap: 12px; }
-  .settings-content .settings-provider-page .llm-group-body { padding-left: var(--settings-group-inset); }
   .llm-fallback-vision-toggle { gap: 12px; }
   .llm-fallback-vision-summary { max-width: 40%; }
 }

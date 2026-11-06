@@ -8,7 +8,7 @@ const css = readFileSync(new URL('../../styles/settings-page.css', import.meta.u
 test('settings header back control includes the title in the same button', () => {
   assert.match(
     source,
-    /<button type="button" onClick=\{onBack\} aria-label=\{i18n\.t\('app\.settings'\)\}>[\s\S]*?<strong>\{i18n\.t\('app\.settings'\)\}<\/strong>\s*<\/button>/,
+    /<button type="button" onClick=\{\(\) => navigate\(onBack\)\} aria-label=\{i18n\.t\('app\.settings'\)\}>[\s\S]*?<strong>\{i18n\.t\('app\.settings'\)\}<\/strong>\s*<\/button>/,
   );
   assert.doesNotMatch(source, /<\/button>\s*<strong>\{i18n\.t\('app\.settings'\)\}<\/strong>/);
   assert.match(css, /\.settings-nav-header button \{[\s\S]*gap:\s*var\(--space-3\)/);

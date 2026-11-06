@@ -21,3 +21,7 @@ export * from './context-accounting-lifecycle.ts';
 export * from './context-usage-breakdown.ts';
 export * from './conversation-history-projector.ts';
 export * from './runtime-usage-accounting.ts';
+export * from './project-input-recovery.ts';
+
+export * from './resource-edit-state.ts';
+export * from './input-prediction.ts';

@@ -39,7 +39,7 @@ export function createSettingsStore({ settingsFile = pathOf('settings') } = {}) 
     if (!Number.isSafeInteger(settings.schemaVersion) || settings.schemaVersion < current) settings = readAll();
     const agent = normalizeProjectAgentSettings(settings.projectAgent), memory = settings.memory;
     return {
-      projectAgent: Object.fromEntries(['shell', 'concurrency', 'proactivity', 'quietHours', 'digestTime']
+      projectAgent: Object.fromEntries(['shell', 'concurrency', 'proactivity', 'quietHours', 'digestTime', 'interactiveResults']
         .map(key => [key, agent[key]])),
       memory: { enabled: memory?.enabled !== false, learnPreferences: memory?.learnPreferences !== false },
     };

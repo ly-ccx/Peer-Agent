@@ -1,0 +1,164 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { admitIntentAssessment, admitIntentClosure, reduceIntentCoordination } from './intent-coordination-kernel.mjs';
+import { controlDigest } from './session-control-kernel.mjs';
+import { createWorkCoordinationStore } from './work-coordination-store.mjs';
+import { createCoordinationJournalReader } from './coordination-journal-reader.mjs';
+import { createExecutionResources } from './execution-resources.mjs';
+
+const host = { holdsLease: true, workspaceId: 'w', parentConversationId: 'p', currentInputIds: ['i'], eventIds: [], now: '2026-11-01T00:00:00Z' };
+const state = () => ({ works: { g: { workId: 'g', workspaceId: 'w', parentConversationId: 'p', state: 'runnable', anchorInputIds: ['i'] } },
+  mandates: { g: { goalRevision: 1, lifecycle: 'active', sessionIds: ['s'], rootInputIds: ['i'] } }, deliveries: {} });
+const assessment = () => ({ operationId: 'd', workId: 'g', expectedWorkRevision: 0, expectedGoalRevision: 1,
+  sourceInputIds: ['i'], sourceEventIds: [], inputs: [{ inputId: 'i', kind: 'delegate', reason: 'User requested implementation.' }],
+  interpretation: { outcome: 'Research and implement', constraints: [], nonGoals: [], openQuestions: [], requirements: [
+    { requirementId: 'research', text: 'Inspect cause', sourceInputIds: ['i'] }, { requirementId: 'fix', text: 'Implement fix', sourceInputIds: ['i'] }] },
+  coverage: [{ requirementId: 'research', status: 'covered', explanation: 'Verified research', sources: [{ sessionId: 's', sourceRevision: 'r1', evidenceRefs: ['ev'] }] },
+    { requirementId: 'fix', status: 'remaining', explanation: 'Implementation remains', sources: [] }],
+  disposition: { kind: 'continue', operationRefs: ['next'] }, reason: 'Research is a stage, not root completion.' });
+
+test('input provenance, Bot scope, every input disposition and independent revisions are enforced', () => {
+  const s = state(), a = assessment();
+  assert.equal(admitIntentAssessment(s, a, host).ok, true);
+  for (const [patch, error] of [[{ expectedWorkRevision: 1 }, 'work_revision_conflict'], [{ expectedGoalRevision: 0 }, 'goal_revision_conflict'],
+    [{ sourceInputIds: ['forged'] }, 'source_not_admitted'], [{ inputs: [] }, 'input_disposition_required'], [{ coverage: [] }, 'goal_coverage_incomplete']]) {
+    assert.equal(admitIntentAssessment(s, { ...a, ...patch }, host).error, error);
+  }
+  assert.equal(admitIntentAssessment(s, a, { ...host, parentConversationId: 'other' }).error, 'out_of_scope');
+  assert.equal(admitIntentAssessment(s, a, { ...host, holdsLease: false }).error, 'coordination_lease_lost');
+  assert.equal(admitIntentAssessment(s, { ...a, permissionGrant: 'forged' }, host).error, 'invalid_intent_assessment');
+});
+
+test('one operation is idempotent; a consumed event continues through the persisted decision only', () => {
+  const a = assessment(), admitted = admitIntentAssessment(state(), a, host);
+  const s = reduceIntentCoordination(state(), admitted.entry);
+  assert.equal(admitIntentAssessment(s, a, host).replayed, true);
+  assert.equal(admitIntentAssessment(s, { ...Object.fromEntries(Object.entries(a).reverse()), interpretation: Object.fromEntries(Object.entries(a.interpretation).reverse()) }, host).replayed, true);
+  assert.equal(admitIntentAssessment(s, { ...a, reason: 'changed' }, host).error, 'operation_identity_conflict');
+  const next = { ...a, operationId: 'd2', expectedWorkRevision: 1, sourceInputIds: [], inputs: [], interpretation: undefined, sourceDecisionRef: 'd' };
+  assert.equal(admitIntentAssessment(s, next, { ...host, currentInputIds: [] }).ok, true);
+  assert.equal(admitIntentAssessment(s, { ...next, sourceDecisionRef: 'invented' }, host).error, 'intent_source_required');
+  assert.equal(s.works.g.intentCoordination.lifecycle, 'active');
+  assert.equal(s.permissionGrants, undefined);
+});
+
+test('accepted research, missing coverage, stale goal, undelivered reply and unverified closure cannot close the root', () => {
+  const s = reduceIntentCoordination(state(), admitIntentAssessment(state(), assessment(), host).entry);
+  const request = { operationId: 'close', workId: 'g', expectedWorkRevision: 1, expectedGoalRevision: 1, lifecycle: 'fulfilled' };
+  assert.equal(admitIntentClosure(s, request, host).error, 'goal_coverage_incomplete');
+  const next = { ...assessment(), operationId: 'return', expectedWorkRevision: 1, disposition: { kind: 'return', replyRef: 'reply' },
+    coverage: assessment().coverage.map(row => ({ ...row, status: 'covered', sources: assessment().coverage[0].sources })) };
+  const s2 = reduceIntentCoordination(s, admitIntentAssessment(s, next, host).entry);
+  const close = { ...request, expectedWorkRevision: 2 };
+  assert.equal(admitIntentClosure(s2, close, host).error, 'goal_delivery_pending');
+  s2.deliveries.reply = { state: 'delivered', message: { id: 'reply', content: 'Actual delivered result', meta: { workId: 'g', sessionStates: [{ sessionId: 's', sourceRevision: 'r1', status: 'result_ready' }], intentBindings: [
+    { workId: 'g', goalRevision: 1, intentRevision: 2, decisionRef: 'return' }] } } };
+  assert.equal(admitIntentClosure(s2, close, host).error, 'goal_review_required');
+  const reviewed = { ...host, pendingObligations: false, verifiedGoalRevision: 1, reviewRef: 'review:1' };
+  s2.works.g.intentCoordination.review = { reviewRef: 'review:1', passed: true, goalRevision: 1, intentRevision: 2, sources: [{ sessionId: 's', sourceRevision: 'r1' }] };
+  const admitted = admitIntentClosure(s2, close, reviewed); assert.equal(admitted.ok, true);
+  const closed = reduceIntentCoordination(s2, admitted.entry);
+  assert.equal(closed.works.g.intentCoordination.lifecycle, 'fulfilled');
+  assert.equal(admitIntentClosure(closed, close, reviewed).replayed, true);
+  s2.mandates.g.goalRevision = 2;
+  assert.equal(admitIntentClosure(s2, close, reviewed).error, 'intent_closure_conflict');
+});
+
+test('v9 intent facts survive index loss, preserve format floor, fence legacy writers and reject future formats', async () => {
+  const rootDir = mkdtempSync(path.join(os.tmpdir(), 'peer-intent-'));
+  const options = { rootDir, workspaceId: 'w', holdsLease: () => true, leaseEpoch: () => 'owner', formatVersion: 2, fenceLegacyWrites: true };
+  let store = createWorkCoordinationStore(options);
+  try {
+    await store.prepare(); store.saveWork(state().works.g);
+    // Goal revision zero is valid for pre-delegation interpretation; it grants no execution rights.
+    const a = assessment(); a.expectedGoalRevision = 0; a.coverage.forEach(row => { row.sources = []; row.status = 'remaining'; });
+    const result = store.assessIntent(a, host); assert.equal(result.ok, true);
+    assert.equal(store.assessIntent(a, host).replayed, true);
+    const expected = store.read(); store.close();
+    const base = path.join(rootDir, 'w');
+    assert.throws(() => createCoordinationJournalReader({ file: path.join(base, 'coordination.jsonl') }).read(), /coordination_writer_upgrade_required/);
+    rmSync(path.join(base, '.read-models'), { recursive: true, force: true });
+    store = createWorkCoordinationStore(options); await store.prepare();
+    assert.deepEqual(store.read(), expected);
+    const file = path.join(base, 'coordination-v2/manifest.json'), manifest = JSON.parse(readFileSync(file));
+    assert.equal(manifest.minimumReaderVersion, 9); assert.equal(manifest.minimumWriterVersion, 9);
+    writeFileSync(file, JSON.stringify({ ...manifest, minimumReaderVersion: 10, minimumWriterVersion: 10 }));
+    assert.throws(() => store.read(), /coordination_schema_unsupported/);
+  } finally { store.close(); rmSync(rootDir, { recursive: true, force: true }); }
+});
+
+test('withdrawal needs an applied current control and stopped managed sessions; it retains unknown history without fulfilling the goal', () => {
+  let s = state(); s.transitions = { cancel: { workId: 'g', action: 'cancel', phase: 'completed', expectedGoalRevision: 1 } };
+  s.works.g.budget = { uncertainDispatches: [{ toolCallId: 'historical-unknown' }] };
+  const a = { ...assessment(), disposition: { kind: 'withdraw', controlRef: 'cancel' } };
+  s = reduceIntentCoordination(s, admitIntentAssessment(s, a, host).entry);
+  const request = { operationId: 'withdraw', workId: 'g', expectedWorkRevision: 1, expectedGoalRevision: 1, lifecycle: 'cancelled' };
+  assert.equal(admitIntentClosure(s, request, { ...host, appliedControlRef: 'cancel', pendingManagedSessions: true }).error, 'goal_control_required');
+  const closed = admitIntentClosure(s, request, { ...host, appliedControlRef: 'cancel', pendingManagedSessions: false });
+  assert.equal(closed.ok, true); s = reduceIntentCoordination(s, closed.entry);
+  assert.equal(s.works.g.intentCoordination.lifecycle, 'cancelled'); assert.equal(s.works.g.budget.uncertainDispatches.length, 1);
+});
+
+test('first intent creates the device ledger before format nine; losing it cannot silently unlock resources', async () => {
+  const rootDir = mkdtempSync(path.join(os.tmpdir(), 'peer-intent-resource-bootstrap-'));
+  const options = { rootDir, workspaceId: 'w', holdsLease: () => true, leaseEpoch: () => 'owner', formatVersion: 2, fenceLegacyWrites: true };
+  let store = createWorkCoordinationStore(options);
+  const a = assessment(); a.expectedGoalRevision = 0; a.coverage.forEach(row => { row.sources = []; row.status = 'remaining'; });
+  try {
+    await store.prepare(); store.saveWork(state().works.g);
+    assert.equal(store.assessIntent(a, host).ok, true);
+    const resources = createExecutionResources({ rootDir });
+    try { assert.equal(resources.revision(), 0); assert.deepEqual(resources.snapshot(), []); } finally { resources.close(); }
+    assert.equal(JSON.parse(readFileSync(path.join(rootDir, 'w/coordination-v2/manifest.json'))).minimumWriterVersion, 9);
+    store.close(); rmSync(path.join(rootDir, 'execution-resources.sqlite'));
+    store = createWorkCoordinationStore(options); await store.prepare();
+    assert.throws(() => store.enableSupervision(9), /execution_resource_store_missing/);
+    const missing = createExecutionResources({ rootDir });
+    try { assert.throws(() => missing.revision(), /execution_resource_store_missing/); } finally { missing.close(); }
+    assert.ok(store.read().intentDecisions.d, 'readable intent history is retained without inventing resource release');
+  } finally { store.close(); rmSync(rootDir, { recursive: true, force: true }); }
+});
+
+// Real historical record shapes remain reducible; version numbers alone do not migrate state.
+for (const version of [7, 8]) test(`historical format ${version} reopens and coexists with both format-nine record families`, async () => {
+  const rootDir = mkdtempSync(path.join(os.tmpdir(), 'peer-combined-format-'));
+  const options = { rootDir, workspaceId: 'w', holdsLease: () => true, leaseEpoch: () => 'owner', formatVersion: 2, fenceLegacyWrites: true };
+  let store = createWorkCoordinationStore(options);
+  const base = path.join(rootDir, 'w'), manifestFile = path.join(base, 'coordination-v2/manifest.json');
+  const operation = { operationId: 'stop', kind: 'cancel', authorityRef: 'input', requestDigest: 'historical-digest', revision: 1,
+    workspaceId: 'w', parentConversationId: 'p', sessionId: 's', planId: 'plan', expectedExecution: { planId: 'plan', sessionId: 's', executionEpoch: 'epoch' },
+    phase: 'recorded', updatedAt: host.now };
+  operation.requestDigest = controlDigest({ kind: operation.kind, operationId: operation.operationId, authorityRef: operation.authorityRef, execution: operation.expectedExecution });
+  const a = assessment(); a.expectedGoalRevision = 0; a.coverage.forEach(row => { row.sources = []; row.status = 'remaining'; });
+  try {
+    await store.prepare(); store.saveWork(state().works.g);
+    if (version === 7) { const resources = createExecutionResources({ rootDir }); resources.revision(); resources.close(); }
+    store.enableSupervision(version);
+    if (version === 7) store.append({ kind: 'session_control', operation, expectedRevision: 0, expectedCurrentOperationId: null });
+    else store.append({ ...admitIntentAssessment(store.read(), a, host).entry, minimumExecutorVersion: 8 });
+    const historical = store.read(); store.close();
+    rmSync(path.join(base, '.read-models'), { recursive: true, force: true });
+    store = createWorkCoordinationStore(options); await store.prepare();
+    assert.deepEqual(store.read(), historical);
+    assert.equal(JSON.parse(readFileSync(manifestFile)).minimumWriterVersion, version);
+    if (version === 7) {
+      store.writeSessionControl({ ...operation, revision: 2, phase: 'draining' }, 1, operation.operationId);
+      assert.equal(store.assessIntent(a, host).ok, true);
+    } else store.writeSessionControl(operation, 0, null);
+    const combined = store.read(); assert.ok(combined.sessionControls.stop); assert.ok(combined.intentDecisions.d);
+    store.close();
+    rmSync(path.join(base, '.read-models'), { recursive: true, force: true });
+    rmSync(manifestFile);
+    store = createWorkCoordinationStore(options); await store.prepare();
+    assert.deepEqual(store.read(), combined);
+    const manifest = JSON.parse(readFileSync(manifestFile)); assert.equal(manifest.minimumWriterVersion, 9);
+    // A stale/lost manifest cannot weaken the durable head's active contract.
+    writeFileSync(manifestFile, JSON.stringify({ ...manifest, minimumReaderVersion: version, minimumWriterVersion: version }));
+    assert.throws(() => store.read(), /coordination_recovery_pending/);
+    await store.prepare(); assert.equal(JSON.parse(readFileSync(manifestFile)).minimumReaderVersion, 9);
+    assert.deepEqual(store.read(), combined);
+  } finally { store.close(); rmSync(rootDir, { recursive: true, force: true }); }
+});

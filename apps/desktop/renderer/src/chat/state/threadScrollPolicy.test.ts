@@ -5,6 +5,7 @@ import {
   planThreadScrollAfterMessagesChange,
   planThreadScrollOnConversationOpen,
   resolveThreadFollowAfterScroll,
+  threadScrollGesture,
   shouldStickAfterVirtualMeasurement,
   shouldStickMessageRailToLatest,
 } from './threadScrollPolicy.ts';
@@ -90,14 +91,14 @@ describe('stick after virtual measurement', () => {
 });
 
 describe('thread follow after scroll', () => {
-  it('enters follow when the viewport is already at bottom', () => {
+  it('does not enter follow when layout merely places a reading viewport at bottom', () => {
     assert.deepEqual(
       resolveThreadFollowAfterScroll({
         currentlyFollowing: false,
         atBottom: true,
         userInitiated: false,
       }),
-      { nextFollowing: true, shouldReaffirmBottom: false },
+      { nextFollowing: false, shouldReaffirmBottom: false },
     );
   });
 
@@ -132,5 +133,24 @@ describe('thread follow after scroll', () => {
       }),
       { nextFollowing: false, shouldReaffirmBottom: false },
     );
+  });
+});
+
+
+describe('explicit reading intent', () => {
+  it('resumes only on the user returning down to bottom, never on an upward candidate at bottom', () => {
+    assert.equal(resolveThreadFollowAfterScroll({ currentlyFollowing: false, atBottom: true, userInitiated: true, direction: 'down' }).nextFollowing, true);
+    assert.equal(resolveThreadFollowAfterScroll({ currentlyFollowing: false, atBottom: true, userInitiated: true, direction: 'up' }).nextFollowing, false);
+    assert.equal(resolveThreadFollowAfterScroll({ currentlyFollowing: true, atBottom: true, userInitiated: true, direction: 'up' }).nextFollowing, false);
+    assert.equal(planThreadScrollOnConversationOpen({ hasExplicitMessageTarget: false, savedFollowing: false }).stickToBottom, false);
+    assert.equal(planThreadScrollOnConversationOpen({ hasExplicitMessageTarget: true, savedFollowing: true }).stickToBottom, false);
+  });
+  it('classifies only scroll inputs; a key used for typing is not a navigation gesture', () => {
+    assert.equal(threadScrollGesture({ type: 'wheel', deltaY: -1 }), 'up');
+    assert.equal(threadScrollGesture({ type: 'wheel', deltaY: 0 }), null);
+    assert.equal(threadScrollGesture({ type: 'keydown', key: 'End' }), 'down');
+    assert.equal(threadScrollGesture({ type: 'keydown', key: ' ', shiftKey: true }), 'up');
+    assert.equal(threadScrollGesture({ type: 'keydown', key: 'a' }), null);
+    assert.equal(threadScrollGesture({ type: 'resize' }), null);
   });
 });

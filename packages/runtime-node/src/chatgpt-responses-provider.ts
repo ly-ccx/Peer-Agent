@@ -155,7 +155,7 @@ function usageOf(value: unknown): ModelUsage | undefined {
   };
 }
 
-async function consumeResponsesStream(response: Response, request: ModelProviderRequest): Promise<ModelProviderResult> {
+export async function consumeResponsesStream(response: Response, request: ModelProviderRequest): Promise<ModelProviderResult> {
   if (!response.body) throw new ModelProviderStreamError('chatgpt-subscription', 'ChatGPT Responses stream has no body.');
   const reader = response.body.getReader();
   const decoder = new TextDecoder();

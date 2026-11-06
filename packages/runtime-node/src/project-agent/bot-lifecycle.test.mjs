@@ -194,7 +194,8 @@ test('熟悉非空项目只开只读任务，git 事实由宿主提供', () => {
     assert.equal(started.plan.kind, 'research');
     assert.equal(started.plan.task.readOnly, true);
     assert.equal(started.plan.task.allowedCapabilities.some((id) => /write|edit|shell/.test(id)), false);
-    assert.match(started.plan.task.brief, /当前分支：main/);
+    assert.match(started.plan.task.brief, /建立任务时的分支快照（需重新核对）：main/);
+    assert.match(started.plan.task.brief, /用 git_query 核对当前仓库身份/);
     assert.match(started.plan.task.brief, /abc123/);
     assert.equal(spawned.length, 1);
     assert.equal(spawned[0].readOnly, true);

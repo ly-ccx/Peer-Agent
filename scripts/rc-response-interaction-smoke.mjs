@@ -1,4 +1,5 @@
-import { openReplyDetails, closeReplyDetails } from '../apps/desktop/scripts/bot-reply-details-checks.mjs';
+import { BOT_DETAIL_SURFACE } from '../apps/desktop/scripts/bot-detail-surface-selectors.mjs';
+import { openReplyDetails, closeReplyDetails, wheelBotConversation, selectBotByName } from '../apps/desktop/scripts/bot-reply-details-checks.mjs';
 import { checkReplyPresence } from '../apps/desktop/scripts/bot-reply-presence-checks.mjs';
 import { runYieldFeedbackFixture } from '../apps/desktop/scripts/bot-yield-feedback-checks.mjs';
 import assert from 'node:assert/strict';
@@ -194,7 +195,7 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   const checks = report.streamingInteraction = [];
   const command = (scenario, phase) => writeStreamingCommand(commandFile, scenario, phase);
   const composer = page.locator('.bot-composer textarea'), live = page.locator('.bot-live-reply');
-  const detail = page.locator('.bot-reply-details');
+  const detail = page.locator(BOT_DETAIL_SURFACE).locator('.bot-reply-details');
   const openDetails = target => openReplyDetails(page, target);
   const start = async scenario => {
     command(scenario, 0); await composer.fill(scenario); await composer.press('Enter');
@@ -213,9 +214,9 @@ export async function checkResponseInteraction({ page, until, report, captureDir
       for (const docked of width === 1280 ? [false, true] : [false]) {
         if (docked) {
           await openDetails(live);
-          await until(() => page.locator('.bot-drawer-dock').evaluate(node =>
-            node.classList.contains('is-open') && node.getBoundingClientRect().width >=
-              parseFloat(getComputedStyle(node).getPropertyValue('--pa-drawer-width'))), Boolean);
+          await until(() => page.locator(BOT_DETAIL_SURFACE).evaluate(node =>
+            !node.getAnimations({ subtree: true }).some(animation => animation.playState === 'running'
+              && Number.isFinite(animation.effect?.getComputedTiming().endTime))), Boolean);
         }
         const bounds = await live.evaluate(node => {
           const row = node.closest('.bot-thread-row');
@@ -303,12 +304,12 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   const originalTheme = await page.evaluate(() => document.documentElement.dataset.theme);
   await page.setViewportSize({ width: 760, height: 780 });
-  // setViewportSize acknowledges the native window resize before React's resize
-  // listener necessarily replaces the pushed drawer. Measure the narrow layout
-  // after that mode switch; the outgoing dock still occupies 414px in between.
+  // The compact workspace keeps one visible reading area. Explicitly return
+  // to the conversation before inspecting its streaming geometry.
   if (workCommandFile) {
-    await page.locator('.bot-drawer-dock').waitFor({ state: 'detached' });
-    await page.locator('.bot-drawer-panel').waitFor({ state: 'visible' });
+    await page.locator(BOT_DETAIL_SURFACE).waitFor({ state: 'visible' });
+    await page.getByRole('button', { name: '返回对话', exact: true }).click();
+    await page.locator('.bot-convo').waitFor({ state: 'visible' });
   }
   for (const theme of ['dark', 'light']) {
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
@@ -375,10 +376,10 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   await page.setViewportSize(viewport);
   checks.push('second public paragraph arrives before completion, outside process; first DOM node and finished animation stay intact; reduced motion disables entry');
   // Return from another bot through read-conversation's live snapshot.
-  await page.locator('.bot-search').fill('project-001');
-  await page.locator('.bot-row').first().click(); await live.waitFor({ state: 'detached' });
-  await page.locator('.bot-search').fill('project-000');
-  await page.locator('.bot-row').first().click();
+  await selectBotByName(page, 'project-001'); await live.waitFor({ state: 'detached' });
+  await selectBotByName(page, 'project-000');
+  // Opening a bot restores its reading position; this scenario explicitly resumes latest.
+  if (await page.locator('.bot-thread-latest').count()) await page.locator('.bot-thread-latest').click();
   await live.getByText('我先看看项目的整体情况，整理好后告诉你重点。', { exact: true }).waitFor();
   checks.push('switching bots hides the other stream and restores the active snapshot');
   await openDetails(live);
@@ -387,7 +388,7 @@ export async function checkResponseInteraction({ page, until, report, captureDir
     if (!(await delegated.evaluate(node => node.open))) await delegated.locator(':scope > summary').click();
   }
   // Reading history holds its position while the draft grows.
-  await page.locator('.bot-thread').evaluate(node => { node.scrollTop = Math.max(1, node.scrollTop - 350); });
+  await wheelBotConversation(page, -350);
   await page.locator('.bot-thread-latest').waitFor();
   let readingTop = await page.locator('.bot-thread').evaluate(node => node.scrollTop);
   command('RC_STREAM_TEXT', 1.75);
@@ -425,12 +426,12 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   }
   await until(() => page.locator('.bot-thread').evaluate(node => node.scrollHeight - node.clientHeight - node.scrollTop), gap => gap < 2);
   await page.locator('.bot-thread').evaluate(node => {
-    // Exercise a real DOM scroll whose event has not reached React when the delta arrives.
+    // Delay scroll delivery while preserving the actual wheel reading intent.
     const hold = event => event.stopImmediatePropagation();
     node.addEventListener('scroll', hold, true);
     globalThis.rcReleaseReadingScroll = () => node.removeEventListener('scroll', hold, true);
-    node.scrollTop = Math.max(1, node.scrollTop - 350);
   });
+  await wheelBotConversation(page, -350);
   readingTop = await page.locator('.bot-thread').evaluate(node => node.scrollTop);
   command('RC_STREAM_TEXT', 2.5);
   await until(() => live.textContent(), text => text.includes('项目概况看'));
@@ -451,11 +452,11 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   for (const theme of ['light', 'dark']) {
     await page.setViewportSize({ width: 760, height: 780 });
     if (workCommandFile) {
-      await page.locator('.bot-drawer-dock').waitFor({ state: 'detached' });
-      await page.locator('.bot-drawer-panel').waitFor({ state: 'visible' });
+      await page.locator(BOT_DETAIL_SURFACE).waitFor({ state: 'visible' });
     }
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
-    assert.equal(await live.evaluate(node => node.scrollWidth <= node.clientWidth), true);
+    const visibleReading = workCommandFile ? detail : live;
+    assert.equal(await visibleReading.evaluate(node => node.scrollWidth <= node.clientWidth && node.getBoundingClientRect().left >= 0 && node.getBoundingClientRect().right <= innerWidth), true);
     await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `stream-expanded-narrow-${theme}.png`) });
   }
   await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, originalTheme);
@@ -501,7 +502,8 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   await page.waitForTimeout(180);
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'conversation-complete.png') });
   assert.equal(await completed.locator('.bot-turn-process').count(), 0);
-  assert.equal(await completed.locator('.bot-reply-context > button').innerText(), '回复详情');
+  assert.equal(await completed.getByRole('button', { name: '回复详情', exact: true }).innerText(), '回复详情');
+  assert.equal(await completed.getByRole('button', { name: '引用', exact: true }).isVisible(), true);
   const finalBubble = await completed.locator('.bot-continuous-paragraphs > .bot-reply-body').last().evaluate(node => ({ background: getComputedStyle(node).backgroundColor, padding: getComputedStyle(node).padding, text: node.innerText }));
   assert.notEqual(finalBubble.background, 'rgba(0, 0, 0, 0)');
   assert.match(finalBubble.text, /界面展示结果，本地负责执行能力/);
@@ -526,9 +528,9 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   checks.push('completion replaces preview once, preserves Markdown and follows latest');
   await closeReplyDetails(page);
   const afterDrawer = await readingAnchor();
-  assert.equal(afterDrawer.id, beforeDrawer.id, 'drawer round trip keeps the same reading row');
-  assert.ok(Math.abs(afterDrawer.delta - beforeDrawer.delta) < 2, 'drawer round trip restores the reading offset');
   report.replyDrawerReading = { before: beforeDrawer, after: afterDrawer };
+  assert.equal(afterDrawer.id, beforeDrawer.id, 'drawer round trip keeps the same reading row');
+  assert.ok(Math.abs(afterDrawer.delta - beforeDrawer.delta) < 2, `drawer round trip restores the reading offset: ${JSON.stringify(report.replyDrawerReading)}`);
 
   await start('RC_STREAM_STOP');
   assert.equal(await completed.locator('.bot-narration p').count(), 4);
@@ -549,7 +551,9 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   await live.getByText('我先看看项目的整体情况，整理好后告诉你重点。', { exact: true }).waitFor();
   await composer.fill('停止之后继续保留我的草稿');
   const stop = page.getByRole('button', { name: '停止生成', exact: true });
-  await stop.focus();
+  await composer.focus();
+  for (let step = 0; step < 12 && !await stop.evaluate(node => document.activeElement === node); step++) await page.keyboard.press('Tab');
+  assert.equal(await stop.evaluate(node => document.activeElement === node && node.matches(':focus-visible')), true, 'the stop action is reachable through real keyboard navigation');
   assert.equal(await stop.evaluate(node => getComputedStyle(node).outlineStyle), 'solid');
   await stop.press('Enter');
   await page.getByText('生成已停止，以上内容未完成', { exact: true }).waitFor();
@@ -604,8 +608,7 @@ export async function checkManualWakeRetry({ page, until, report, captureDirecto
   const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   const originalTheme = await page.evaluate(() => document.documentElement.dataset.theme);
   command(0);
-  await page.locator('.bot-search').fill('project-001');
-  await page.locator('.bot-row').first().click();
+  await selectBotByName(page, 'project-001');
   const wakeFailure = page.locator('.bot-unavailable-reply').last();
   assert.equal(await wakeFailure.locator(':scope > p').innerText(), '连接还没有恢复，已有进展已保留。你可以继续尝试，也可以先发新消息。');
   await wakeFailure.getByRole('button', { name: '继续尝试', exact: true }).click();
@@ -637,7 +640,7 @@ export async function checkManualWakeRetry({ page, until, report, captureDirecto
     noPrivateThinking: true, narrowFits: true, nativeLoaded: true, guardedCognitionDispatches: 1, persistedEventBatch: true };
   await page.setViewportSize(viewport);
   await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, originalTheme);
-  await page.locator('.bot-search').fill('project-000'); await page.locator('.bot-row').first().click();
+  await selectBotByName(page, 'project-000');
   checks.push('manual retry of persisted wake shows progress while pending, ends in one reply and retains public paragraphs');
 }
 

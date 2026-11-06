@@ -79,6 +79,16 @@ export function normalizeVisualRepair(repair, { maxAttempts = DEFAULT_MAX_ATTEMP
   return next;
 }
 
+/** Finished leaves do not close a host-scheduled repair turn. */
+export function hasActiveGoalRepair(plan) {
+  const runner = plan?.runner;
+  return !['paused', 'cancelled', 'failed', 'interrupted'].includes(plan?.status)
+    && runner?.status === 'running' && runner.phase === 'repair'
+    && (Boolean(runner.visualRepair)
+      || ['verification_gate_failed', 'verifier_failed'].includes(runner.blockerAudit?.reason)
+      || plan.delegationOrigin?.takeover?.repair === true && plan.delegationOrigin.takeover.phase === 'completed');
+}
+
 export function describeVisualRepair(plan) {
   const repair = plan?.runner?.visualRepair;
   if (!repair?.feedback) return '';

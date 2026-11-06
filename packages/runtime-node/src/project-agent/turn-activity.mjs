@@ -1,5 +1,5 @@
 import { acceptedReplyResult } from './agent-turn-plan.mjs';
-import { toolActivityPreview, toolActivitySummary } from '@peer-agent/protocol';
+import { botResourceReferences, toolActivityPreview, toolActivitySummary } from '@peer-agent/protocol';
 
 const LIMIT = 32_000;
 const INTERVAL = 50;
@@ -9,7 +9,7 @@ const eventTime = (value, fallback) => Number.isFinite(value) && value >= 0 && v
 export function createTurnActivity({ workspaceId, conversationId, publish = null, now = () => new Date().toISOString() } = {}) {
   let state = null, revision = 0, timer = null, textSequence = 0, textSegmentId = null, visible = false, replyCallId = null, previewChars = 0;
   const pendingPermissions = new Map();
-  const snapshot = () => visible && state ? { ...state, replyTo: [...state.replyTo], ...(state.modelSelection ? { modelSelection: { ...state.modelSelection } } : {}), segments: state.segments.map(segment => ({ ...segment,
+  const snapshot = () => visible && state ? { ...state, replyTo: [...state.replyTo], ...(state.resourceReferences ? { resourceReferences: state.resourceReferences.map(item => ({ ...item })) } : {}), ...(state.modelSelection ? { modelSelection: { ...state.modelSelection } } : {}), segments: state.segments.map(segment => ({ ...segment,
     ...(segment.input ? { input: { ...segment.input } } : {}), ...(segment.result ? { result: { ...segment.result } } : {}) })) } : null;
   const preview = (value, limit) => {
     const projected = toolActivityPreview(value, Math.max(0, Math.min(limit, LIMIT - previewChars)));
@@ -117,6 +117,10 @@ export function createTurnActivity({ workspaceId, conversationId, publish = null
         const segment = tool(payload.toolCallId);
         if (segment && ['preparing', 'running', 'awaiting_permission'].includes(segment.status)) {
           segment.status = failedResult(payload.result) ? 'error' : 'done';
+          if (segment.status === 'done') {
+            const fresh = botResourceReferences([{ toolCalls: [{ name: segment.name, result: payload.result }] }]);
+            if (fresh.length) state.resourceReferences = [...new Map([...(state.resourceReferences ?? []), ...fresh].map(item => [item.path, item])).values()].slice(0, 256);
+          }
           segment.startedAt = eventTime(payload.startedAtMs, segment.startedAt);
           segment.finishedAt = eventTime(payload.endedAtMs, now()); segment.result = preview(payload.result ?? null, 4000); changed();
         }
@@ -134,7 +138,7 @@ export function createTurnActivity({ workspaceId, conversationId, publish = null
         changed();
       } else if (channel === 'chat:stream:provider-recovery' || channel === 'chat:stream:connection-recovery') {
         if (channel === 'chat:stream:provider-recovery' && payload.toProviderId) state.modelSelection = { modelProviderId: payload.toProviderId };
-        pendingPermissions.clear(); state.replyText = ''; state.segments = []; textSegmentId = null; previewChars = 0; state.phase = 'waiting';
+        pendingPermissions.clear(); state.replyText = ''; state.segments = []; delete state.resourceReferences; textSegmentId = null; previewChars = 0; state.phase = 'waiting';
         state.recovery = channel === 'chat:stream:provider-recovery' ? 'provider' : 'connection'; changed(true);
       }
     },
@@ -153,7 +157,7 @@ export function createTurnActivity({ workspaceId, conversationId, publish = null
         }
       }
       if (phase === 'error') state.replyText = '';
-      if (phase === 'disposed') { state.replyText = ''; state.segments = []; }
+      if (phase === 'disposed') { state.replyText = ''; state.segments = []; delete state.resourceReferences; }
       changed(true);
     },
     dispose() { this.finish('disposed'); if (timer) clearTimeout(timer); timer = null; visible = false; state = null; },

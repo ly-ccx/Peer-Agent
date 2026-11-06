@@ -8,6 +8,8 @@ import { createBotDirectory, createMemoryStore, createProjectInbox, createProjec
 import { assertIsolatedHome, seedBotShellHome, RC_SCALE } from './seed-bot-shell-home.mjs';
 import { seedExecutionHistory, EXECUTION_HISTORY_SCALE } from './seed-execution-history.mjs';
 import { seedExecutionWorkload } from './seed-execution-workload.mjs';
+import { seedHistoryFixtures, refreshHistoryFixtureDates } from './bot-history-motion-checks.mjs';
+import { presentHistory } from '../renderer/src/project-agent/state/historyPresentation.ts';
 import { execFileSync } from 'node:child_process';
 import { reduceCoordination } from '../../../packages/runtime-node/src/project-agent/work-coordination.mjs';
 
@@ -16,6 +18,31 @@ function fixture(t) {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   return root;
 }
+
+test('history scenario refreshes calendar groups after midnight without changing identities, messages or unrelated records', t => {
+  const root = fixture(t), home = path.join(root, 'data');
+  seedBotShellHome({ home, scale: { bots: 1, messages: 0, memories: 0, inboxEvents: 0 } });
+  const store = createConversationStore({ storeDir: path.join(home, 'conversations') });
+  const unrelated = store.createConversation({ title: 'Unrelated fixture conversation', mode: 'chat' });
+  const rows = seedHistoryFixtures({ home, now: new Date(2026, 11, 31, 23, 59) });
+  const afterMidnight = new Date(2027, 0, 1, 0, 1);
+  assert.deepEqual(presentHistory(rows, '', 48, +afterMidnight).groups.map(group => group.key), ['yesterday', 'week', 'earlier']);
+  const messagesBefore = store.getPersistedConversationHistory(rows[0].id);
+  const readIndex = () => readFileSync(path.join(home, 'conversations', 'index.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  const unrelatedBefore = readIndex().find(row => row.id === unrelated.id);
+  const refreshed = refreshHistoryFixtureDates({ home, rows, now: afterMidnight });
+  assert.deepEqual(presentHistory(refreshed, '', 48, +afterMidnight).groups.map(group => group.key), ['today', 'yesterday', 'week', 'earlier']);
+  assert.deepEqual(refreshed.map(row => row.id), rows.map(row => row.id));
+  assert.deepEqual(store.getPersistedConversationHistory(rows[0].id), messagesBefore);
+  assert.deepEqual(readIndex().find(row => row.id === unrelated.id), unrelatedBefore);
+  assert.equal(readIndex().length, 50);
+  const persisted = readIndex().filter(row => rows.some(fixture => fixture.id === row.id));
+  assert.deepEqual(presentHistory(persisted, '', 48, +afterMidnight).groups.map(group => group.key), ['today', 'yesterday', 'week', 'earlier']);
+  writeFileSync(path.join(home, 'rc-fixture.json'), JSON.stringify({ fixture: false }));
+  const beforeRefusal = readIndex();
+  assert.throws(() => refreshHistoryFixtureDates({ home, rows, now: afterMidnight }));
+  assert.deepEqual(readIndex(), beforeRefusal);
+});
 
 test('execution history represents cancelled real-shaped sessions and refuses a foreign home', t => {
   const root = fixture(t), home = path.join(root, 'data');

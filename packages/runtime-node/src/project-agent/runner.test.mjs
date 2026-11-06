@@ -45,6 +45,24 @@ function input(inputId, text) {
   return { inputId, text, surface: 'desktop' };
 }
 
+test('pending task delivery gets one bounded repair opportunity and never falls back after a second refusal', async () => {
+  for (const deliver of [true, false]) {
+    const box = world(); let calls = 0;
+    const runner = runnerFor(box, async () => {
+      calls++;
+      return calls === 2 && deliver ? { toolCalls: [{ name: 'post_reply', input: { text: '核验仍受阻', replyTo: ['input-q'] },
+        result: { ok: true, message: { id: 'delivered', kind: 'agent_reply', role: 'assistant', content: '核验仍受阻' } } }] }
+        : { text: '已经看完了' };
+    }, { resolveTurnRoster: () => [{ sessionId: 's', followUp: { owner: 'bot', inCurrentList: true } }] });
+    try {
+      await runner.enqueueUserInputs([input('q', '?')]);
+      assert.equal(calls, 2);
+      assert.equal(box.messages.some(row => row.kind === 'agent_reply'), deliver);
+      assert.equal(box.messages.some(row => row.fallback), false);
+    } finally { runner.dispose(); box.cleanup(); }
+  }
+});
+
 test('inner loop exhaustion is not retried and keeps executed tools, timing and public progress', async () => {
   const box = world(); let attempts = 0;
   const runner = runnerFor(box, async ({ sink, streamId, remainingToolCalls }) => {

@@ -8,9 +8,12 @@ const WORKSPACE_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 
 /** Per-project recovery is a barrier: stores can replay before any execution is admitted. */
 export function createProjectRecovery({ rootDir = null, ports = {}, holdsLease = () => false,
-  now = () => new Date().toISOString(), onPhase = null, persistDiagnostic = null } = {}) {
-  const ready = new Set(), flights = new Map(), epochs = new Map();
+  now = () => new Date().toISOString(), onPhase = null, persistDiagnostic = null, onChange = null } = {}) {
+  const ready = new Set(), flights = new Map(), epochs = new Map(), statuses = new Map();
   function diagnostic(workspaceId, record) {
+    const changed = JSON.stringify(statuses.get(workspaceId)) !== JSON.stringify(record);
+    statuses.set(workspaceId, record);
+    if (changed && typeof onChange === 'function') { try { onChange(workspaceId, record); } catch { /* Presentation cannot alter recovery truth. */ } }
     if (typeof persistDiagnostic === 'function') return persistDiagnostic(workspaceId, record);
     const file = path.join(rootDir || pathOf('projectRuntime'), workspaceId, 'recovery.json');
     mkdirSync(path.dirname(file), { recursive: true });
@@ -48,6 +51,7 @@ export function createProjectRecovery({ rootDir = null, ports = {}, holdsLease =
       flights.set(workspaceId, flight); return flight;
     },
     fail(workspaceId, error) { ready.delete(workspaceId); diagnostic(workspaceId, { status: 'failed', phase: 'execution', error: error?.message || String(error) }); },
+    status: workspaceId => statuses.get(workspaceId) || null,
     isReady: workspaceId => ready.has(workspaceId) && holdsLease(workspaceId) === true,
     drop(workspaceId) { ready.delete(workspaceId); epochs.set(workspaceId, (epochs.get(workspaceId) || 0) + 1); },
   };

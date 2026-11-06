@@ -19,7 +19,7 @@ export interface UsageAmounts {
 export interface ProviderRequestUsage extends UsageAmounts {
   readonly usageScope: 'provider_request';
   readonly requestIndex: number;
-  readonly requestPurpose: 'agent' | 'compaction_summary';
+  readonly requestPurpose: 'agent' | 'compaction_summary' | 'input_prediction';
   readonly requestFingerprint?: string;
 }
 

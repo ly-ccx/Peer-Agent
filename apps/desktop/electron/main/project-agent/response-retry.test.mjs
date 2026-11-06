@@ -46,6 +46,13 @@ test('lease loss prevents a successful retry receipt even after provider complet
   assert.deepEqual(f.resolutions, []);
 });
 
+test('a desktop without the bot lease cannot dispatch a retry or resolve the old failure', async () => {
+  const f = fixture(async () => { throw new Error('non-owner dispatched a retry'); });
+  f.deps.holdsLease = () => false;
+  assert.deepEqual(await retryProjectAgentTurn({ workspaceId: 'ws', turnId: 'old' }, f.deps), { ok: false, code: 'HOST_OFFLINE' });
+  assert.deepEqual(f.resolutions, []);
+});
+
 test('unknown outcome and missing checkpoints keep their specific durable recovery rejection', async () => {
   for (const code of ['EXECUTION_OUTCOME_UNKNOWN', 'RECOVERY_CHECKPOINT_UNAVAILABLE', 'STALE_TURN', 'WORK_BUDGET_EXHAUSTED']) {
     const f = fixture(async () => ({ ok: false, code }));

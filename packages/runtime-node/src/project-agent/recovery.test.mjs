@@ -35,3 +35,13 @@ test('losing a lease between recovery stages never opens execution admission', a
   assert.equal((await recovery.recover('ws')).ok, false);
   assert.equal(recovery.isReady('ws'), false); assert.deepEqual(seen, ['lease', 'inputs']);
 });
+
+test('recovery failure is observable without admitting input consumption and identical failures do not flood UI', async () => {
+  const seen = [], ports = Object.fromEntries(RECOVERY_PHASES.map(p => [p, () => {}]));
+  ports.inputs = () => { throw new Error('coordination_legacy_changed'); };
+  const recovery = createProjectRecovery({ persistDiagnostic: () => {}, ports, holdsLease: () => true,
+    onChange: (workspaceId, status) => seen.push({ workspaceId, ...status }) });
+  await recovery.recover('w'); await recovery.recover('w');
+  assert.equal(recovery.status('w').error, 'coordination_legacy_changed');
+  assert.equal(recovery.status('w').phase, 'inputs'); assert.equal(recovery.isReady('w'), false); assert.equal(seen.length, 1);
+});

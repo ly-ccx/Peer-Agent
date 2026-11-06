@@ -19,7 +19,25 @@ test('persistence failure exposes a local failure and never claims done or repla
   await deliver(Promise.reject(Object.assign(new Error('disk'), { code: 'ENOSPC' })), 'chat:stream:done', {});
   assert.equal(record.terminalStatus, 'error'); assert.equal(record.recoverable, false);
   assert.equal(events.length, 1); assert.equal(events[0].channel, 'chat:stream:error');
-  assert.equal(events[0].payload.error, 'conversation_persistence_failed'); assert.equal(events[0].payload.persistenceError, 'ENOSPC');
+  assert.equal(events[0].payload.error, 'conversation_persistence_failed: ENOSPC'); assert.equal(events[0].payload.persistenceError, 'ENOSPC');
+});
+test('failed commit retains the preceding provider error and survives a diagnostic write failure', async () => {
+  const record = { streamId: 's', conversationId: 'c', failureReason: 'HTTP 429: capacity' };
+  const events = [], failures = [], diagnostics = [];
+  const deliver = createStreamTerminalDelivery({ record,
+    send: (channel, payload) => events.push({ channel, payload }),
+    failRuntimeTurn: reason => failures.push(reason),
+    onPersistenceFailure: failure => {
+      diagnostics.push(failure);
+      throw Object.assign(Error('diagnostic storage also unavailable'), { code: 'EIO' });
+    },
+  });
+  await deliver(Promise.reject(Object.assign(Error('write failed'), { code: 'EIO' })), 'chat:stream:error', { error: 'HTTP 429: capacity' });
+  assert.equal(record.recoverable, false);
+  assert.deepEqual(diagnostics, [{ code: 'conversation_persistence_failed', causeCode: 'EIO', precedingCode: 'HTTP 429: capacity' }]);
+  assert.deepEqual(failures, ['conversation_persistence_failed: EIO']);
+  assert.deepEqual(events[0].payload.streamFailure, record.streamFailure);
+  assert.equal(events.length, 1);
 });
 test('a closed presentation surface cannot strand a committed turn', async () => {
   const record = {}; const deliver = createStreamTerminalDelivery({ record, send: () => { throw Error('window closed'); } });

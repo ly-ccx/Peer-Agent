@@ -35,7 +35,7 @@ function harness(count: number, browserScope = 'other', props: Record<string, an
       useState: (initial: unknown) => { const index = cursor++; if (!(index in slots)) slots[index] = initial;
         return [slots[index], (value: any) => { slots[index] = typeof value === 'function' ? value(slots[index]) : value; }]; } },
     'react/jsx-runtime': { jsx, jsxs: jsx },
-    '../../app/hooks/useMotionPresence.ts': { useMotionPresence: () => ({ exiting: false, startExit: () => {}, onAnimationEnd: () => {} }),
+    '../../app/hooks/useMotionPresence.ts': { useMotionPresence: () => ({ exiting: false, startExit: () => {}, cancelExit: () => {}, onAnimationEnd: () => {} }),
       prefersReducedMotion: () => false },
     '../taskMonitorRail.ts': rail,
     '../../app/pages/taskOverviewArtifacts.ts': artifacts,

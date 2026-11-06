@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { decideSurfacing } from '@peer-agent/protocol';
+import { decideSurfacing, interactiveArtifactRef } from '@peer-agent/protocol';
 import { planDelivery } from './digest.mjs';
 import { projectCards } from './card-projection.mjs';
 import { composeReply } from './reply-composer.mjs';
@@ -22,6 +22,14 @@ function reply(extra = {}) {
   });
 }
 
+test('fixed interactive references use their protocol length while ordinary evidence keeps its original short-reference limit', () => {
+  const ref = interactiveArtifactRef({ owner: { workspaceId: 'w'.repeat(200), conversationId: 'c'.repeat(200) },
+    resultId: 'r'.repeat(36), contentVersion: 'sha256:' + 'a'.repeat(64) });
+  assert.ok(ref.length > 500);
+  assert.deepEqual(reply({ evidenceRefs: [ref] }).meta.evidenceRefs, [ref]);
+  assert.equal(reply({ evidenceRefs: ['ordinary:' + 'a'.repeat(501)] }).error, 'invalid_input');
+});
+
 test('核验通过但任务仍阻塞时不能声明已签收', () => {
   const result = reply({ sources: ['sess-1'],
     statusClaims: [{ sessionId: 'sess-1', status: 'accepted' }],
@@ -30,6 +38,20 @@ test('核验通过但任务仍阻塞时不能声明已签收', () => {
   });
   assert.equal(result.ok, false);
   assert.equal(result.error, 'status_claim_mismatch');
+});
+
+test('cancellation reports cite every affected task with its actual host state', () => {
+  const sessionStates = [{ sessionId: 'sess-1', status: 'cancelled' }, { sessionId: 'sess-2', status: 'stopping' }];
+  const facts = { sessionStates, unreportedResults: sessionStates.map(state => ({ sessionId: state.sessionId, anchorMessageId: 'input-a' })) };
+  const missing = reply({ ...facts, text: '全部取消了' });
+  assert.equal(missing.error, 'result_source_required');
+  assert.deepEqual(missing.sessionStates, sessionStates);
+  assert.equal(reply({ ...facts, sources: ['sess-1'], statusClaims: [sessionStates[0]] }).error, 'result_source_required');
+  assert.equal(reply({ ...facts, sources: ['sess-1', 'sess-2'], statusClaims: sessionStates.map(state => ({ ...state, status: 'cancelled' })) }).error, 'status_claim_mismatch');
+  const result = reply({ ...facts, text: '第一条已取消，第二条仍在停止。', sources: ['sess-1', 'sess-2'], statusClaims: sessionStates });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.message.sources, ['sess-1', 'sess-2']);
+  assert.deepEqual(result.message.meta.sessionStates, sessionStates);
 });
 
 test('状态声明必须覆盖来源，待确认不能声明已签收，真实签收可汇报', () => {

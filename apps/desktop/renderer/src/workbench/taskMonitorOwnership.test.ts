@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { runInNewContext } from 'node:vm';
 import { readFileSync } from 'node:fs';
 
 const chatSurface = readFileSync(new URL('../chat/components/ChatSurface.tsx', import.meta.url), 'utf8');
@@ -22,7 +23,17 @@ function assertIndependentControls(): void {
 
 // 卡片宿主：挂载在 .chat-surface 内部，靠 padding-right 让位；单卡+内部分区形态。
 test('监控卡片挂载在 chat-surface 内为单卡分区，正文让位且头部不被挤压', () => {
-  assert.match(chatSurface, /className=\{`chat-surface\$\{showEmptyHome[^}]*\}\$\{taskMonitorOpen \? ' chat-surface--with-monitor' : ''\}`\}/);
+  const expression = chatSurface.match(/className=\{(`chat-surface[^\n]+`)\}/)?.[1];
+  assert.ok(expression, 'the monitor belongs to the chat surface');
+  for (const showEmptyHome of [false, true]) for (const taskMonitorOpen of [false, true]) for (const showComposer of [false, true]) {
+    const className: unknown = runInNewContext(expression, { showEmptyHome, taskMonitorOpen, showComposer });
+    assert.ok(typeof className === 'string');
+    const classes = className.split(/\s+/);
+    assert.ok(classes.includes('chat-surface'));
+    assert.equal(classes.includes('chat-surface--empty-home'), showEmptyHome);
+    assert.equal(classes.includes('chat-surface--with-monitor'), taskMonitorOpen);
+    assert.equal(classes.includes('chat-surface--process'), !showComposer);
+  }
   assert.match(chatSurface, /<TaskMonitorRailView[\s\S]{0,1600}onClose=\{\(\) => setTaskMonitorOpen\(false\)\}/);
   // 卡片渲染在 .chat-surface 的 JSX 子树内（同层还有 ChatFindBar/overlays，但不在 chat-workspace 直挂）。
   assert.doesNotMatch(chatSurface, /chat-workspace">\s*<TaskMonitorRailView/);
@@ -125,7 +136,7 @@ test('卡片开关与挂载分离，关闭后播退场再卸载，快速重开�
   assert.match(chatSurface, /key=\{taskMonitorEpoch\}/);
   assert.match(chatSurface, /visible=\{taskMonitorOpen\}/);
   assert.match(chatSurface, /onExitComplete=\{\(\) => setTaskMonitorPresent\(false\)\}/);
-  assert.match(monitorView, /if \(!visible\) \{\s*if \(prefersReducedMotion\(\)\) onExitComplete\(\);\s*else startExit\(\)/);
+  assert.match(monitorView, /if \(visible\) cancelExit\(\); else startExit\(\)/);
   assert.match(monitorView, /event\.target === event\.currentTarget && event\.animationName === 'motion-exit-slide-inline'/);
 });
 
@@ -136,7 +147,9 @@ test('横向进入/退出动效复用通用基元，减少动态效果时立即�
   assert.doesNotMatch(workbenchStyles, /task-monitor-card-in/);
   assert.match(motionStyles, /\.motion-enter-slide-inline \{\s*animation: motion-enter-slide-inline/);
   assert.match(motionStyles, /\.motion-exit-slide-inline \{\s*animation: motion-exit-slide-inline/);
-  assert.match(monitorView, /if \(prefersReducedMotion\(\)\) onExitComplete\(\)/);
+  const presence = readFileSync(new URL('../app/hooks/useMotionPresence.ts', import.meta.url), 'utf8');
+  assert.match(presence, /watchVisualMotion/);
+  assert.match(presence, /motion\.current\?\.cancel\(\)/);
 });
 
 test('监控栏分行投影当前工作区 HEAD 与任务源头', () => {

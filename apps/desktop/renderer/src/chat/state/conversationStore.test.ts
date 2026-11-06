@@ -7,6 +7,7 @@ import {
   createConversationSurfaceSnapshotReader,
   DRAFT_CONVERSATION_ID,
   EMPTY_CONVERSATION_STATE,
+  type ConversationRuntimeState,
   resolveConversationBucketId,
   restorePendingPermissionCalls,
 } from './conversationStore.ts';
@@ -497,12 +498,14 @@ describe('conversationStore', () => {
     assert.equal(permissionNotifications, 1);
   });
 
-  it('surface equality ignores draft and tool progress but keeps all other state changes visible', () => {
+  it('surface equality ignores draft, tool progress, active usage, and context accounting', () => {
     const base = { ...EMPTY_CONVERSATION_STATE, isStreaming: true };
     const withProgressAndDraft = {
       ...base,
       draft: 'local composer text',
       toolProgress: { tool: 'edit_file', path: 'src/a.ts', receivedLines: 40 },
+      activeUsage: { input: 3, output: 4, cacheWrite: 0, cacheRead: 0 },
+      contextAccounting: { version: 1 } as NonNullable<ConversationRuntimeState['contextAccounting']>,
     };
     assert.equal(areConversationStatesEqualForSurface(base, withProgressAndDraft), true);
     assert.equal(
@@ -539,6 +542,31 @@ describe('conversationStore', () => {
 
     store.setState('A', { messages: [msg('stream', 'visible update')] });
     assert.equal(surfaceNotifications, 1);
+  });
+
+  it('keeps rapid usage and context accounting writes out of the surface subscription', () => {
+    const store = new ConversationStore();
+    let surfaceNotifications = 0;
+    let usageNotifications = 0;
+    let accountingNotifications = 0;
+    store.subscribeSelector(
+      'A',
+      (state) => state,
+      () => { surfaceNotifications += 1; },
+      areConversationStatesEqualForSurface,
+    );
+    store.subscribeSelector('A', (state) => state.activeUsage, () => { usageNotifications += 1; });
+    store.subscribeSelector('A', (state) => state.contextAccounting, () => { accountingNotifications += 1; });
+
+    for (let output = 1; output <= 40; output += 1) {
+      store.setState('A', { activeUsage: { input: 1, output, cacheWrite: 0, cacheRead: 0 } });
+      store.setState('A', {
+        contextAccounting: { version: 1, revision: output } as NonNullable<ConversationRuntimeState['contextAccounting']>,
+      });
+    }
+    assert.equal(surfaceNotifications, 0);
+    assert.equal(usageNotifications, 40);
+    assert.equal(accountingNotifications, 40);
   });
 
   it('keeps rapid draft writes in the composer leaf subscription', () => {

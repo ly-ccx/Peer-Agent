@@ -139,7 +139,7 @@ describe('macOS CLI signed helper assembly', () => {
 });
 
 describe('packageCliArchive', () => {
-  it('builds peer-linux-x64.tar.gz with peer + helper side by side', () => {
+  it('builds peer-linux-x64.tar.gz with the CLI, helper and maintenance launcher', () => {
     const root = mkdtempSync(join(tmpdir(), 'peer-cli-pkg-'));
     const distDir = join(root, 'dist');
     mkdirSync(distDir, { recursive: true });
@@ -147,6 +147,10 @@ describe('packageCliArchive', () => {
     writeFileSync(join(distDir, 'peer-credential-helper'), '#!/bin/sh\necho helper\n');
     chmodSync(join(distDir, 'peer'), 0o755);
     chmodSync(join(distDir, 'peer-credential-helper'), 0o755);
+    const scripts = join(root, 'apps', 'tui', 'scripts');
+    mkdirSync(scripts, { recursive: true });
+    writeFileSync(join(scripts, 'interactive-maintenance-linux.py'), '#!/usr/bin/python3 -I\n');
+
 
     const result = packageCliArchive({
       targetSpec: 'linux-x64',
@@ -164,5 +168,6 @@ describe('packageCliArchive', () => {
     assert.equal(tar.status, 0, tar.stderr);
     assert.match(tar.stdout, /peer-linux-x64\/peer$/m);
     assert.match(tar.stdout, /peer-linux-x64\/peer-credential-helper$/m);
+    assert.match(tar.stdout, /peer-linux-x64\/peer-interactive-maintenance$/m);
   });
 });

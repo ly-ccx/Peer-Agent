@@ -1,17 +1,35 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { openSync, closeSync, fsyncSync, writeSync, readSync, fstatSync, readFileSync, mkdirSync, renameSync, existsSync, copyFileSync, truncateSync, statSync } from 'node:fs';
+import {
+  openSync,
+  closeSync,
+  fsyncSync,
+  writeSync,
+  readSync,
+  fstatSync,
+  readFileSync,
+  mkdirSync,
+  renameSync,
+  existsSync,
+  copyFileSync,
+  truncateSync,
+  statSync,
+} from 'node:fs';
 import path from 'node:path';
 import { pathOf } from '../data-store.mjs';
 import { reduceCoordination } from './work-coordination.mjs';
 import { admitCoordinationDecision } from './coordination-kernel.mjs';
+import { admitIntentAssessment, admitIntentClosure, INTENT_FORMAT_VERSION } from './intent-coordination-kernel.mjs';
 import { createCoordinationJournalReader } from './coordination-journal-reader.mjs';
 import { createRecoveryCheckpointView, createContinuationCheckpointView } from './recovery-checkpoint-view.mjs';
 import { createCoordinationStorageV2 } from './coordination-storage-v2.mjs';
+import { protectCoordinationWriter } from './coordination-writer-fence.mjs';
+import { createExecutionResources } from './execution-resources.mjs';
 import { journalLines } from './journal-lines.mjs';
 
-export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease = () => false, leaseEpoch = () => null, now = () => new Date().toISOString(), onJournalRead, formatVersion = 1, segmentBytes }) {
+export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease = () => false, leaseEpoch = () => null, now = () => new Date().toISOString(), onJournalRead, formatVersion = 1, segmentBytes, fenceLegacyWrites = false }) {
   if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(workspaceId)) throw new Error('invalid_workspace');
-  const dir = path.join(rootDir || pathOf('projectRuntime'), workspaceId);
+  const runtimeRoot = rootDir || pathOf('projectRuntime');
+  const dir = path.join(runtimeRoot, workspaceId);
   const file = path.join(dir, 'coordination.jsonl');
   const epoch = leaseEpoch();
   const legacyReader = createCoordinationJournalReader({ file, onRead: onJournalRead });
@@ -25,9 +43,20 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
     if (holdsLease() !== true || !epoch || leaseEpoch() !== epoch) throw new Error('coordination_lease_lost');
   }
   const read = reader.read;
+  let resourcesPrepared = false;
+  function enableCoordination(minimumVersion = 5) {
+    assertOwner();
+    if (minimumVersion === 9 && !resourcesPrepared) {
+      // Persist the canonical device ledger before advertising the combined resource contract.
+      // Its own guard refuses to recreate a missing ledger for already active format 7/9 data.
+      const resources = createExecutionResources({ rootDir: runtimeRoot });
+      try { resources.revision(); resourcesPrepared = true; } finally { resources.close(); }
+    }
+    storage.enableSupervision(minimumVersion);
+  }
   function recover() {
     assertOwner();
-    if (useV2()) { reader.readSnapshot(); return; }
+    if (useV2()) return reader.readSnapshot();
     // Most kicks see a complete append-only journal. Do not read its entire
     // body merely to inspect its last separator; the reader validates changes.
     let fd;
@@ -73,8 +102,40 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
   }
   return {
     read, readSnapshot: reader.readSnapshot, readWork: reader.readWork, readLifecycleFacts: reader.readLifecycleFacts,
-    append, assertOwner, recover, prepare: () => useV2() ? storage.prepare() : Promise.resolve(), close: storage.close,
+    append, assertOwner, recover, prepare: async () => {
+      if (!useV2()) return;
+      // Finish an interrupted owned fence before trying to load mismatched head/manifest.
+      if (fenceLegacyWrites && existsSync(path.join(dir, 'coordination-fence.json'))) await protectCoordinationWriter({ directory: dir, assertOwner });
+      await storage.prepare();
+      if (fenceLegacyWrites && await protectCoordinationWriter({ directory: dir, assertOwner })) await storage.prepare();
+    }, close: storage.close,
     journalFile: file, readRecoveryCheckpoint, readContinuationCheckpoint,
+    writerEpoch() { assertOwner(); return epoch; },
+    readSessionControl(sessionId) {
+      if (typeof sessionId !== 'string' || !sessionId) return undefined;
+      if (useV2()) return storage.readSessionControl(sessionId);
+      const state = reader.readSnapshot(), head = state.sessionControlHeads?.[sessionId];
+      return head ? structuredClone(state.sessionControls?.[head.operationId]) : undefined;
+    },
+    readStoppedExecution(execution) {
+      return useV2() ? storage.readStoppedExecution(execution) : undefined;
+    },
+    writeSessionControl(operation, expectedRevision, expectedCurrentOperationId) {
+      assertOwner();
+      if (!useV2()) throw new Error('coordination_writer_upgrade_required');
+      enableCoordination(9);
+      append({ kind: 'session_control', minimumExecutorVersion: 9, operation, expectedRevision, expectedCurrentOperationId }, { returnState: false });
+      return operation;
+    },
+    enableSupervision(minimumVersion = 5) { assertOwner(); if (!useV2()) throw new Error('coordination_recovery_pending'); enableCoordination(minimumVersion); },
+    supportsSplitDelivery: () => useV2() && storage.supportsProtectedReceipts(),
+    recordDelivery(entry) {
+      assertOwner(); if (!useV2()) throw new Error('coordination_recovery_pending');
+      if (!['reply_committed', 'reply_settlement_started', 'reply_settlement_failed', 'reply_settled', 'reply_deferred', 'reply_held', 'reply_aggregated'].includes(entry.kind)) throw new Error('invalid_delivery_receipt');
+      enableCoordination(INTENT_FORMAT_VERSION); return append({ ...entry, minimumExecutorVersion: INTENT_FORMAT_VERSION });
+    },
+    readSupervision: (bucket, id) => useV2() ? storage.readSupervision(bucket, id) : undefined,
+    querySupervision: (bucket, field, value, options) => useV2() ? storage.querySupervision(bucket, field, value, options) : [],
     observeUsage(workId, observationId, usage) {
       assertOwner();
       if (useV2() && storage.hasObservation(workId, observationId)) return false;
@@ -106,13 +167,41 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
     decide(decision, host) {
       assertOwner();
       const admitted = admitCoordinationDecision(read(), decision, { ...host, workspaceId, holdsLease: true, now: now() });
-      if (admitted.ok && !admitted.replayed) append(admitted.entry);
+      if (admitted.ok && !admitted.replayed) {
+        if (admitted.entry.mandate.intentSchemaVersion === 1) {
+          if (!useV2()) throw new Error('coordination_recovery_pending');
+          enableCoordination(INTENT_FORMAT_VERSION);
+        }
+        if (admitted.entry.transition.minimumExecutorVersion === 3) {
+          if (!useV2()) throw new Error('coordination_recovery_pending');
+          enableCoordination(6);
+        }
+        append(admitted.entry.mandate?.intentSchemaVersion === 1 ? { ...admitted.entry, minimumExecutorVersion: INTENT_FORMAT_VERSION } : admitted.entry);
+      }
+      return admitted;
+    },
+    assessIntent(assessment, host) {
+      assertOwner();
+      const admitted = admitIntentAssessment(read(), assessment, { ...host, workspaceId, holdsLease: true, now: now() });
+      if (admitted.ok && !admitted.replayed) {
+        if (!useV2()) throw new Error('coordination_recovery_pending');
+        enableCoordination(INTENT_FORMAT_VERSION); append(admitted.entry);
+      }
+      return admitted;
+    },
+    closeIntent(request, host) {
+      assertOwner();
+      const admitted = admitIntentClosure(read(), request, { ...host, workspaceId, holdsLease: true, now: now() });
+      if (admitted.ok && !admitted.replayed) {
+        if (!useV2()) throw new Error('coordination_recovery_pending');
+        enableCoordination(INTENT_FORMAT_VERSION); append(admitted.entry);
+      }
       return admitted;
     },
     bindSession(workId, goalRevision, sessionId, binding) { return append({ kind: 'coordination_binding', workId, goalRevision, sessionId, binding }); },
     advanceTransition(operationId, expectedPhase, patch) {
       assertOwner();
-      if (Object.keys(patch).some(key => !['phase', 'replacementSessionId', 'error', 'updatedAt', 'handoff'].includes(key))) throw new Error('invalid_transition_patch');
+      if (Object.keys(patch).some(key => !['phase', 'replacementSessionId', 'error', 'updatedAt', 'handoff', 'executionAdmission', 'executionEffect', 'executionAttemptRef', 'reconciliationRef', 'controlOperationRef'].includes(key))) throw new Error('invalid_transition_patch');
       return append({ kind: 'coordination_transition', operationId, expectedPhase, patch: { ...patch, updatedAt: now() } });
     },
     checkpoint(workId, checkpoint) {

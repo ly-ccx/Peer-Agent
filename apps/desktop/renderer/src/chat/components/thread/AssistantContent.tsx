@@ -1,6 +1,6 @@
 import { memo, useContext, useEffect, useMemo, useState } from 'react';
 import { ThinkingOrb } from 'thinking-orbs';
-import { prefersReducedMotion } from '../../../app/hooks/useMotionPresence';
+import { useMotionAllowed } from '../../../app/hooks/useMotionAllowed';
 import {
   useConversationCompactionState,
   useConversationToolProgress,
@@ -198,7 +198,11 @@ function AssistantContentImpl({
           if (run.kind === 'text') {
             return (
               <div key={`stream-text-${idx}`} className="segment-text-after-tools">
-                <MarkdownMessage content={run.group.content} selectionSource={selectionSources.get(run.group) ?? null} />
+                <MarkdownMessage
+                  content={run.group.content}
+                  openSlot={isStreaming ? run.group.openSlot : undefined}
+                  selectionSource={selectionSources.get(run.group) ?? null}
+                />
               </div>
             );
           }
@@ -275,7 +279,11 @@ function AssistantContentImpl({
       {finalTextGroups.length > 0 ? (
         finalTextGroups.map((textGroup, idx) => (
           <div key={`final-text-${idx}`} className="segment-text-after-tools">
-            <MarkdownMessage content={textGroup.content} selectionSource={selectionSources.get(textGroup) ?? null} />
+            <MarkdownMessage
+              content={textGroup.content}
+              openSlot={isStreaming ? textGroup.openSlot : undefined}
+              selectionSource={selectionSources.get(textGroup) ?? null}
+            />
           </div>
         ))
       ) : !groups.some(isProcessingGroup) ? (
@@ -305,6 +313,7 @@ function ProcessingDetailsSection({ groups, isActive, label: completedLabel, isZ
   readonly label: string;
   readonly isZh: boolean;
 }) {
+  const motionEnabled = useMotionAllowed();
   const { expanded, toggleExpanded } = useAutoCollapsingExpanded(isActive);
   const [showAll, setShowAll] = useState(false);
   const processingWindow = useMemo(() => windowProcessingGroups(groups), [groups]);
@@ -326,7 +335,7 @@ function ProcessingDetailsSection({ groups, isActive, label: completedLabel, isZ
             state="weaving"
             size={20}
             aria-label={isZh ? '正在思考' : 'Thinking'}
-            paused={prefersReducedMotion()}
+            paused={!motionEnabled}
           />
         ) : null}
         <span className="thinking-label">{label}</span>

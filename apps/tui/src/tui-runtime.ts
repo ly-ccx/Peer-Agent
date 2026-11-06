@@ -1,22 +1,32 @@
+import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { contextAccountingModelKey, type LocalAccessLevel } from '@peer-agent/protocol';
 import {
   createChatGptResponsesProvider,
   createOpenAICompatibleProvider,
-  effectiveFastMode,
   refreshChatGptOAuthTokens,
   type ModelProviderRequest,
-  createGoalPlanStore,
   resolveOpenCodeGoBaseUrl,
-  GROK_SUBSCRIPTION_HEADERS,
-} from '@peer-agent/runtime-node';
+  GROK_SUBSCRIPTION_HEADERS
+} from "@peer-agent/runtime-node/models";
+import {
+  effectiveFastMode
+} from "@peer-agent/runtime-node/providers";
+import {
+  createGoalPlanStore
+} from "@peer-agent/runtime-node/storage";
 
 import {
   missingModelConfigurationMessage,
   resolveTuiModelConfig,
   type TuiModelConfig,
 } from './model-config.ts';
-import { createTuiContextSelectionControl, createTuiModelSelectionControl, type TuiContextSelectionControl, type TuiModelSelectionControl } from './tui-model-selection.ts';
+import {
+  createTuiContextSelectionControl,
+  createTuiModelSelectionControl,
+  type TuiContextSelectionControl,
+  type TuiModelSelectionControl,
+} from './tui-model-selection.ts';
 import {
   createProviderChatModel,
   createUnavailableChatModel,
@@ -35,7 +45,8 @@ import {
 import { denyInteractiveTools, restrictTuiHostTools } from './cli-host-filter.ts';
 import { createTuiHost, type TuiHost, type TuiCapabilityProvider } from './tui-host.ts';
 import { createTuiProviderFetch } from './provider-transport.ts';
-import { buildTuiSystemPrompt, createTuiLanguageStore, type TuiLanguageStore } from './tui-language.ts';
+import { buildTuiSystemContext, createTuiLanguageStore, type TuiLanguageStore } from './tui-language.ts';
+import { agentMessagesForContext, readWorkingContext, recordAgentContextAdmission } from '@peer-agent/runtime-node/project-agent';
 import { createTuiThemeStore, type TuiThemeStore } from './tui-theme.ts';
 import type { ChatModelPort } from './chat-controller.ts';
 
@@ -51,6 +62,7 @@ export interface CreateTuiRuntimeOptions {
   readonly oneTimeApprovals?: { match(input: object): boolean };
   readonly goalPlanStore?: ReturnType<typeof createGoalPlanStore>;
   readonly sessionApprovals?: Set<string>;
+  readonly captureExecution?: import('./tui-host.ts').CreateTuiHostOptions['captureExecution'];
 }
 
 export interface TuiRuntime {
@@ -81,6 +93,7 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
     oneTimeApprovals: options.oneTimeApprovals,
     goalPlanStore: options.goalPlanStore,
     sessionApprovals: options.sessionApprovals,
+    captureExecution: options.captureExecution,
   });
   if (options.toolAllowlist) {
     host = restrictTuiHostTools(host, options.toolAllowlist);
@@ -298,10 +311,13 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
     const providerMetadata = modelConfig.sharedProviders?.find(
       (item) => item.credentialId === selection.providerId,
     );
-    return buildTuiSystemPrompt(
+    const assembled = buildTuiSystemContext(
       languageStore.getPromptSettings(),
       {
         ...(context.systemContextInput ?? {}),
+        ...(context.systemContextInput?.role === 'project_agent' ? { agentMessages: agentMessagesForContext(((context.systemContextInput?.turnContext as any)?.events || []).filter((event: any) => event.kind === 'agent_message').map((event: any) => ({ kind: 'agent_message', agentMessage: event.payload?.agentMessage })), context.conversationId, context.systemContextInput?.workspaceId) } : {}),
+        workingContext: readWorkingContext({ workspaceId: context.systemContextInput?.workspaceId,
+          workId: context.systemContextInput?.workId, conversationId: context.conversationId }),
         workspacePath: workspaceRoot,
         provider: providerMetadata?.channelId ?? selection.providerId,
         model: selection.modelId,
@@ -322,10 +338,13 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
         ],
       },
     );
+    recordAgentContextAdmission(context.systemContextInput?.workspaceId, context.conversationId, assembled);
+    return assembled.rendered;
   };
   const model = provider
     ? createProviderChatModel({
         provider,
+        toolArtifactBaseDir: path.join(userDataPath, 'artifacts'),
         getProvider: () => sharedMetadata
           ? sharedProvider(modelSelection.getSelection().providerId)
           : provider,

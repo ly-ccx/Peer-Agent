@@ -52,6 +52,7 @@ for (const os of ['darwin', 'win32']) {
 const sidebarCss = readFileSync(join(stylesDir, './sidebar.css'), 'utf8');
 const shellCss = readFileSync(join(stylesDir, './shell.css'), 'utf8');
 const chatSurfaceCss = readFileSync(join(stylesDir, '../chat/styles/chat-surface.css'), 'utf8');
+const resourceCss = readFileSync(join(stylesDir, '../workbench/resource-workspace.css'), 'utf8');
 
 function ruleBody(css: string, selector: string) {
   // 归一化空白：选择器在源文件里可能跨行书写。
@@ -111,6 +112,14 @@ test('bare thread top reservation: darwin keeps 52px, non-darwin collapses to 24
     null,
     'fullscreen bare-thread override must be gated to non-darwin',
   );
+});
+
+test('collapsed bot navigation shifts the conversation title right of the traffic lights', () => {
+  const selector = ":root[data-os='darwin'] .bot-resource-layout[data-resource-navigation-collapsed='true']:not([data-resource-full='true']) .bot-main-head";
+  const body = ruleBody(resourceCss, selector);
+  assert.match(body, /padding-left:\s*78px/);
+  assert.doesNotMatch(body, /padding-top:/);
+  assert.doesNotMatch(resourceCss, /\[data-resource-full='false'\]\s+\.bot-main-head/);
 });
 
 test('collapsed chat-header left reservation is darwin-only, windowed and fullscreen', () => {

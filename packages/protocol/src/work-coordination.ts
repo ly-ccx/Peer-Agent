@@ -54,15 +54,29 @@ export type ProjectWorkState = 'runnable' | 'waiting_children' | 'waiting_user' 
   | 'budget_limited' | 'blocked_system' | 'delivered' | 'cancelled' | 'coalesced';
 export type ProjectTurnEnd = 'reply_committed' | 'awaiting_children' | 'yielded' | 'awaiting_user'
   | 'budget_limited' | 'provider_retryable' | 'no_progress' | 'user_stopped' | 'fatal' | 'coalesced';
-/** Host reconciliation closes an interrupted review, never supplies its verdict. */
+/** Host reconciliation closes an interrupted review/query, never supplies its result or verdict. */
 export interface VerificationDispatchReconciliation {
   readonly attemptId: string;
   readonly toolCallId: string;
-  readonly capabilityId: 'verify_session' | 'local.delegation.verify_session';
+  readonly capabilityId: 'verify_session' | 'local.delegation.verify_session'
+    | 'get_session' | 'local.delegation.get_session' | 'get_verification_detail' | 'local.delegation.get_verification_detail';
   readonly sessionId: string;
   readonly planId: string;
   readonly sourceRevision: string;
-  readonly outcome: 'verification_interrupted';
+  readonly outcome: 'verification_interrupted' | 'query_interrupted';
+  readonly at: string;
+}
+
+/** A registered, paired delegation result settles its dispatch, never its task. */
+export interface SettledDelegationDispatch {
+  readonly attemptId?: string;
+  readonly turnId: string;
+  readonly toolCallId: string;
+  readonly evidenceRef: string;
+  readonly operationId: string;
+  readonly sessionId: string;
+  readonly executionEpoch: string;
+  readonly goalRevision: number;
   readonly at: string;
 }
 
@@ -75,6 +89,19 @@ export interface ProjectWorkReceipt {
   readonly sessionIds: readonly string[];
   /** Current owned technical blockers; a public progress update does not discharge them. */
   readonly repairSessionIds?: readonly string[];
+  /** Unresolved dispatch receipts, not execution grants or permission truth. */
+  readonly delegationFollowUp?: { readonly blockers: readonly {
+    readonly taskKey: string;
+    /** Task body without the anchor ids being repaired. A corrected retry clears that obligation. */
+    readonly recoveryKey?: string;
+    readonly sourceTurnId: string;
+    readonly toolCallId: string;
+    readonly action: 'parallel' | 'replace';
+    readonly error: string;
+    readonly retryable: boolean;
+    readonly operationId?: string;
+    readonly sessionId?: string;
+  }[] };
   readonly progressFacts?: readonly string[];
   readonly state: ProjectWorkState;
   readonly revision: number;
@@ -88,7 +115,7 @@ export interface ProjectWorkReceipt {
   readonly end?: ProjectTurnEnd;
   readonly attemptId?: string;
   readonly pendingEventIds?: readonly string[];
-  readonly waitFor: readonly { readonly kind: 'session' | 'approval' | 'question' | 'retry_timer'; readonly id: string }[];
+  readonly waitFor: readonly { readonly kind: 'session' | 'approval' | 'question' | 'retry_timer' | 'human_request' | 'resource' | 'recovery'; readonly id: string; readonly revision?: string }[];
   readonly consumedEventIds: readonly string[];
   readonly pendingResultRefs: readonly string[];
   readonly lastDeliveredFactKey?: string;
@@ -104,6 +131,7 @@ export interface ProjectWorkReceipt {
       readonly checkpointRef?: string;
       readonly pendingTools?: readonly { readonly toolCallId: string | null; readonly capabilityId: string | null; readonly verificationSessionId?: string }[] }>>;
     readonly reconciledDispatches?: readonly VerificationDispatchReconciliation[];
+    readonly settledDispatches?: readonly SettledDelegationDispatch[];
     readonly uncertainDispatches?: readonly { readonly attemptId: string; readonly role: string;
       readonly toolCallId: string | null; readonly capabilityId: string | null; readonly verificationSessionId?: string }[];
   };

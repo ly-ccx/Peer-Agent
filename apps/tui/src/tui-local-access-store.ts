@@ -1,5 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { loadMigratedSettings } from '@peer-agent/runtime-node';
+import {
+  loadMigratedSettings
+} from "@peer-agent/runtime-node/providers";
 import path from 'node:path';
 
 import type { LocalAccessLevel } from '@peer-agent/protocol';

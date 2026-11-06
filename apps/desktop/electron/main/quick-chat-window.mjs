@@ -225,14 +225,18 @@ export function createQuickChatWindowController({
     quickChatWindow.setMaximumSize?.(size.width, size.height);
   }
 
+  function hideWindowPopover() {
+    if (!popoverWindow || popoverWindow.isDestroyed()) return;
+    if (typeof popoverWindow.isVisible !== 'function' || popoverWindow.isVisible()) popoverWindow.hide();
+    // The independent renderer must retire its content too, so the next opening
+    // starts from the new state and replays its entrance once.
+    popoverWindow.webContents?.send?.('quick-chat:popover-closed');
+  }
+
   function hidePopover({ restoreFocus = false } = {}) {
     const wasOpen = popoverState !== null;
     popoverState = null;
-    if (popoverWindow && !popoverWindow.isDestroyed()) {
-      if (typeof popoverWindow.isVisible !== 'function' || popoverWindow.isVisible()) {
-        popoverWindow.hide();
-      }
-    }
+    hideWindowPopover();
     if (wasOpen) resizeBarForContent();
     if (restoreFocus && quickChatWindow && !quickChatWindow.isDestroyed()) {
       quickChatWindow.show();
@@ -341,10 +345,7 @@ export function createQuickChatWindowController({
       return false;
     }
     // Close any Electron window popover first.
-    if (popoverWindow && !popoverWindow.isDestroyed()
-      && (typeof popoverWindow.isVisible !== 'function' || popoverWindow.isVisible())) {
-      popoverWindow.hide();
-    }
+    hideWindowPopover();
 
     popoverState = {
       kind: nextState.kind,

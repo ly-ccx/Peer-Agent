@@ -1,25 +1,52 @@
+import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE, BOT_DETAIL_TITLE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
+
+/** Search results can retain the previous snapshot while the new query loads. */
+export async function selectBotByName(page, name) {
+  await page.locator('.bot-search').fill(name);
+  await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: name }) }).click();
+  await page.waitForFunction(name => document.querySelector('.bot-composer textarea')?.getAttribute('placeholder')?.includes(name), name);
+}
+
+export async function wheelBotConversation(page, deltaY) {
+  const bounds = await page.locator('.bot-thread').boundingBox();
+  assert.ok(bounds, 'conversation scroller must be visible');
+  await page.mouse.move(bounds.x + Math.min(24, bounds.width / 2), bounds.y + bounds.height / 2);
+  await page.mouse.wheel(0, deltaY);
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+}
+
+async function settleBotLayout(page) {
+  // Closing or resizing a side pane can still be remeasuring virtual rows after
+  // its body becomes inert. Locate only after the actual finite layout settles.
+  await page.waitForFunction(() => !document.querySelector('.bot-resource-layout')?.getAnimations({ subtree: true }).some(animation =>
+    animation.playState === 'running' && Number.isFinite(animation.effect?.getComputedTiming().endTime)));
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+}
 
 /** Reach an unmounted row through the real scroller; never disable virtualization. */
 export async function scrollToBotMessage(page, message) {
+  await settleBotLayout(page);
   if (!await message.count()) {
     const thread = page.locator('.bot-thread');
     // Numeric IDs belong to this ordered 10,000-message fixture, not production identity.
-    const match = /#bot-msg-rc-message-(\d+)/.exec(message.toString());
+    // Stationary Agent rows expose the event that placed them as their source message.
+    const match = /(?:#bot-msg-|data-source-message=\W*)rc-message-(\d+)/.exec(message.toString());
     const target = match ? Number(match[1]) : null;
-    if (target === null) await thread.evaluate(node => { node.scrollTop = 0; });
+    if (target === null) { await thread.focus(); await thread.press('Home'); }
     for (let step = 0; step < 240; step++) {
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       if (await message.count()) break;
-      const state = await thread.evaluate(node => ({ busy: node.getAttribute('aria-busy') === 'true',
-        ids: [...node.querySelectorAll('[id^="bot-msg-rc-message-"]')].map(row => Number(row.id.match(/(\d+)$/)?.[1])).filter(Number.isFinite) }));
+      const state = await thread.evaluate(node => ({ busy: node.getAttribute('aria-busy') === 'true', top: node.scrollTop,
+        ids: [...node.querySelectorAll('[id^="bot-msg-rc-message-"], [data-source-message^="rc-message-"]')]
+          .map(row => Number((row.dataset.sourceMessage ?? row.id).match(/(\d+)$/)?.[1])).filter(Number.isFinite) }));
       if (state.busy) { await page.locator('.bot-thread[aria-busy="false"]').waitFor(); continue; }
       const direction = target === null ? 1 : !state.ids.length || target < Math.min(...state.ids) ? -1 : 1;
-      const moved = await thread.evaluate((node, direction) => {
-        const before = node.scrollTop;
-        node.scrollTop += direction * Math.max(80, node.clientHeight * 0.65);
-        return node.scrollTop !== before;
-      }, direction);
+      // Programmatic scrollTop changes are layout, not reading intent. A real
+      // wheel gesture releases follow-latest before virtual rows are measured.
+      const height = await thread.evaluate(node => node.clientHeight);
+      await wheelBotConversation(page, direction * Math.max(80, height * 0.65));
+      const moved = await thread.evaluate((node, before) => node.scrollTop !== before, state.top);
       if (!moved) {
         const older = page.locator('.bot-thread-older');
         if (direction < 0 && await older.count() && await older.isEnabled()) { await older.click(); continue; }
@@ -27,6 +54,7 @@ export async function scrollToBotMessage(page, message) {
       }
     }
   }
+  assert.ok(await message.count(), `message must mount after scrolling the real conversation: ${message}`);
   await message.scrollIntoViewIfNeeded();
 }
 
@@ -40,17 +68,18 @@ export async function openReplyDetails(page, message) {
     }
     const action = history.getByRole('button', { name: '回复详情', exact: true });
     await action.focus(); await action.press('Enter');
-    await page.locator('.bot-reply-details').waitFor({ state: 'visible' });
-    assert.equal(await page.locator('.bot-reply-details').evaluate(node => Boolean(node.closest('.bot-drawer-body'))), true);
+    await page.locator(BOT_DETAIL_SURFACE).locator('.bot-reply-details').waitFor({ state: 'visible' });
+    await settleBotLayout(page);
+    assert.equal(await page.locator(BOT_DETAIL_SURFACE).locator('.bot-reply-details').evaluate(node => Boolean(node.closest('.bot-drawer-body'))), true);
     return;
   }
   const button = message.locator('.bot-reply-context > button').first();
   assert.equal(await message.locator('.bot-reply-context details, .bot-reply-context > summary').count(), 0);
   await page.locator('.bot-composer textarea').focus();
   await page.mouse.move(1, 1);
-  const running = await message.locator('.bot-reply-context').getAttribute('data-running') === 'true';
+  const running = await message.locator('.bot-reply-context').evaluate(node => node.dataset.running === 'true');
   await page.waitForFunction(({ node, running }) => getComputedStyle(node).opacity === (running ? '1' : '0'), { node: await button.elementHandle(), running });
-  assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), running ? '1' : '0', 'live activity remains visible; completed details wait for hover or focus');
+  assert.equal(await button.evaluate(node => getComputedStyle(node).opacity), running ? '1' : '0', 'live replies keep their status visible; details and quote wait for hover or focus');
   // A pushed drawer's body can disappear before its width transition finishes.
   // Let the actual finite layout animations finish before choosing a pointer position.
   await page.waitForFunction(() => {
@@ -68,30 +97,32 @@ export async function openReplyDetails(page, message) {
     const bubble = bubbles.findLast(element => element.getBoundingClientRect().width > 0);
     const style = bubble ? getComputedStyle(bubble) : null;
     const textLeft = bubble ? bubble.getBoundingClientRect().left + parseFloat(style.paddingLeft) + parseFloat(style.borderLeftWidth) : null;
-    const icon = node.querySelector('svg').getBoundingClientRect();
-    return { left: Math.abs(icon.left - footer.left), bubbleLeft: textLeft === null ? null : Math.abs(icon.left - textLeft), height: action.height };
+    const anchor = (node.querySelector('svg') ?? node.querySelector('span') ?? node).getBoundingClientRect();
+    return { left: Math.abs(anchor.left - footer.left), bubbleLeft: textLeft === null ? null : Math.abs(anchor.left - textLeft), height: action.height };
   });
-  assert.ok(placement.left <= 2 && placement.height >= 32, 'details icon aligns left with its footer and keeps a usable hit target');
+  assert.ok(placement.left <= 2 && placement.height >= 28, 'details text aligns left with its footer');
   if (placement.bubbleLeft !== null) assert.ok(placement.bubbleLeft <= 2, 'details starts on the current bubble text column');
   await hoverBotReply(page, message, button);
   await page.mouse.move(1, 1);
   await button.focus(); await button.press('Enter');
-  const details = page.locator('.bot-reply-details');
+  const details = page.locator(BOT_DETAIL_SURFACE).locator('.bot-reply-details');
   await details.waitFor({ state: 'visible' });
+  await settleBotLayout(page);
   assert.equal(await details.evaluate(node => Boolean(node.closest('.bot-drawer-body'))), true);
   assert.equal(await message.locator('.bot-turn-process, .bot-evidence-list, .bot-context-error').count(), 0);
-  assert.equal(await page.locator('.bot-drawer-head > p').innerText(), '回复详情');
+  assert.equal(await page.locator(BOT_DETAIL_TITLE).innerText(), '回复详情');
   return details;
 }
 
 export async function closeReplyDetails(page) {
-  const replyId = await page.locator('.bot-reply-details').getAttribute('data-reply-id');
+  const replyId = await page.locator(BOT_DETAIL_SURFACE).locator('.bot-reply-details').getAttribute('data-reply-id');
   const mountedTrigger = await page.evaluate(id => {
     const reply = document.getElementById(`bot-msg-${id}`)?.closest('.bot-reply, .bot-system');
     return Boolean(reply?.querySelector('.bot-reply-context > button, .bot-recovery-history-body > button'));
   }, replyId);
-  await page.getByRole('button', { name: '关闭', exact: true }).click();
-  await page.locator('.bot-drawer-body').waitFor({ state: 'hidden' });
+  await page.locator(BOT_DETAIL_CLOSE).click();
+  await page.locator(BOT_DETAIL_SURFACE).waitFor({ state: 'hidden' });
+  await settleBotLayout(page);
   // Cancelling work in the scrolled tail can unmount the original reply. The
   // existing drawer contract then returns focus to the thread with preventScroll.
   assert.equal(await page.evaluate(mounted => {

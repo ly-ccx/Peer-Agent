@@ -1,3 +1,4 @@
+import { nextStreamingTextSegment } from './streamingMarkdownSlot.ts';
 import { joinSummaryThinkingContent } from './thinkingSummaryJoin.ts';
 import type { ChatMsg, ContentSegment, ThinkingKind } from './types.ts';
 
@@ -79,9 +80,9 @@ function appendText(messages: readonly ChatMsg[], chunk: string): ChatMsg[] {
   const segments = [...(last.segments || [])];
   const lastSeg = segments[segments.length - 1];
   if (lastSeg && lastSeg.type === 'text') {
-    segments[segments.length - 1] = { ...lastSeg, content: (lastSeg.content || '') + chunk };
+    segments[segments.length - 1] = nextStreamingTextSegment(lastSeg, (lastSeg.content || '') + chunk);
   } else {
-    segments.push({ type: 'text', content: chunk });
+    segments.push(nextStreamingTextSegment(undefined, chunk));
   }
   return [...prev.slice(0, -1), { ...last, content: getTextContent(segments), segments }];
 }

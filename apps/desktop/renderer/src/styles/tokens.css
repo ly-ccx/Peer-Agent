@@ -293,6 +293,13 @@
   /* 字号用 rem 表达：随 <html data-font-scale> 的根 font-size 等比缩放（外观-字体大小生效路径）。
    * 基准 16px：0.6875rem=11 / 0.75rem=12 / 0.8125rem=13 / 0.875rem=14 / 0.9375rem=15 / 1rem=16 / 1.25rem=20 / 1.625rem=26。
    * medium 档 100% 时与旧 px 完全等值，零视觉回归。 */
+  --ui-control-height: 2.375rem;
+  --ui-control-height-compact: 2rem;
+  --ui-target-min: 1.5rem;
+  --ui-focus-width: 2px;
+  --ui-focus-offset: 3px;
+  --ui-focus-color: var(--azure-seal);
+
   --ui-font-caption: 0.6875rem;
   --ui-font-meta: 0.75rem;
   --ui-font-control: 0.8125rem;

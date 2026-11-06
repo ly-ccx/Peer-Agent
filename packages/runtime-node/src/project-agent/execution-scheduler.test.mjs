@@ -9,8 +9,27 @@ import { createExecutionScheduler } from './execution-scheduler.mjs';
 const AT = '2026-10-01T00:00:00.000Z';
 function plan(id, { workspaceId = 'w', phase = 'queued', readOnly = true, priority = 'normal', dependsOn = [], ...rest } = {}) {
   return { planId: id, title: id, status: phase === 'running' ? 'executing' : 'paused', createdAt: AT,
+    targetWorkspacePath: process.cwd(),
     delegationOrigin: { sessionId: id, workspaceId, phase, readOnly, priority, dependsOn }, ...rest };
 }
+function releaseResource(scheduler, value, suffix) {
+  scheduler.settleResources(value, { receiptId: `test-stop:${value.planId}:${suffix}`, operationId: `test-stop:${suffix}`,
+    execution: { planId: value.planId, sessionId: value.delegationOrigin.sessionId, executionEpoch: `legacy:${value.planId}:${value.createdAt}` },
+    admissionClosed: true, runnerIdle: true, schedulerIdle: true, resourceClaims: scheduler.resourceClaimsFor(value), unknownCalls: [], scope: 'managed_execution', completedAt: AT });
+}
+
+test('history isolation denies execution and frees the old write slot for fresh work', async () => {
+  const scheduler = createExecutionScheduler();
+  const old = plan('old', { phase: 'running', readOnly: false }), fresh = plan('fresh', { readOnly: false });
+  scheduler.configure({ isPlanRecoveryHeld: value => value?.planId === 'old' });
+  assert.equal(scheduler.inspect(old, [old, fresh]).reason, 'coordination_reconciliation_required');
+  assert.equal(scheduler.inspect(fresh, [old, fresh]).allowed, true);
+  scheduler.reconcile([old, fresh]);
+  let dispatched = false;
+  const result = await scheduler.withTurn({ planId: 'old' }, () => { dispatched = true; });
+  assert.equal(result.error, 'coordination_reconciliation_required');
+  assert.equal(dispatched, false);
+});
 
 test('one in-place write and two reads run independently; isolation hints do not bypass write slots', () => {
   const s = createExecutionScheduler();
@@ -49,15 +68,18 @@ test('approval starts queue aging at admission and preserves that timestamp afte
     const approval = plan('approval', { phase: 'awaiting_approval', readOnly: false });
     const scheduler = createExecutionScheduler({ rootDir: root, now: () => at });
     assert.deepEqual(scheduler.select([writer, waiting, approval]).start, []);
+    releaseResource(scheduler, writer, 'writer-ended');
     at = '2026-10-01T00:31:00.000Z';
     const approved = { ...approval, delegationOrigin: { ...approval.delegationOrigin, phase: 'queued' } };
     assert.deepEqual(scheduler.select([approved, waiting]).start.map(p => p.planId), ['waiting']);
+    releaseResource(scheduler, waiting, 'waiting-ended');
     const saved = JSON.parse(readFileSync(path.join(root, 'w', 'scheduler.json'), 'utf8'));
     assert.equal(saved.items.find(item => item.sessionId === 'approval').enqueuedAt, at);
     at = '2026-10-01T00:59:00.000Z';
     const restored = createExecutionScheduler({ rootDir: root, now: () => at });
     const high = plan('high', { priority: 'high', readOnly: false, createdAt: at });
     assert.deepEqual(restored.select([approved, high]).start.map(p => p.planId), ['high']);
+    releaseResource(restored, high, 'high-ended');
     at = '2026-10-01T01:01:00.000Z';
     assert.deepEqual(restored.select([approved, high]).start.map(p => p.planId), ['approval']);
   } finally { rmSync(root, { recursive: true, force: true }); }

@@ -2,13 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createWorkspaceIpcRegistrations } from './register-workspace-ipc.mjs';
 
-function createHarness() {
+function createHarness(searchFiles) {
   const calls = [];
   const port = (name) => (...args) => {
     calls.push([name, ...args]);
     return name;
   };
   const [registration] = createWorkspaceIpcRegistrations({
+    searchFiles,
     workspace: {
       listWorkspaces: port('list'),
       ensureDefaultWorkspace: port('ensure-default'),
@@ -49,6 +50,18 @@ test('workspace-ipc owns the exact workspace channel set', () => {
     'workspace:info',
     'workspace:search-files',
   ]);
+});
+
+test('scoped search delegates to the host port and never falls back to a raw renderer root', async () => {
+  const payload = { workspacePath: '/forged', query: 'file', documentReference: { workspaceId: 'b', path: '.' } };
+  const missing = createHarness();
+  assert.deepEqual(await missing.handlers.get('workspace:search-files')({}, payload), {
+    ok: false, status: 'workspace_unavailable', scoped: true, files: [],
+  });
+  let received;
+  const bound = createHarness(async value => { received = value; return { ok: false, status: 'scope_denied', scoped: true, files: [] }; });
+  assert.equal((await bound.handlers.get('workspace:search-files')({}, payload)).status, 'scope_denied');
+  assert.equal(received, payload);
 });
 
 test('workspace-ipc projects sender and path payloads into the service', async () => {

@@ -11,10 +11,11 @@
  */
 export function planThreadScrollOnConversationOpen(input: {
   readonly hasExplicitMessageTarget: boolean;
+  readonly savedFollowing?: boolean;
 }): {
   readonly stickToBottom: boolean;
 } {
-  return { stickToBottom: !input.hasExplicitMessageTarget };
+  return { stickToBottom: !input.hasExplicitMessageTarget && input.savedFollowing !== false };
 }
 
 /** 消息条数下降视为结构重写（压缩/reload 的典型信号）。 */
@@ -86,7 +87,7 @@ export function shouldStickAfterVirtualMeasurement(input: {
  * - 若仅凭瞬时 distanceToBottom 清掉 follow，后续流式就不会再贴底，视口像瞬间回顶。
  *
  * 规则：
- * - 已在底部 → 进入/保持 follow；
+ * - 已跟随或用户主动回到底部 → 跟随；布局碰到底部不改变阅读意图；
  * - follow 中且用户手势导致离底 → 退出 follow；
  * - follow 中但非用户手势离底（内容增高、虚拟测量、程序滚动）→ 保持 follow 并 reaffirm；
  * - 非 follow 且未到底 → 保持离开。
@@ -95,13 +96,14 @@ export function resolveThreadFollowAfterScroll(input: {
   readonly currentlyFollowing: boolean;
   readonly atBottom: boolean;
   readonly userInitiated: boolean;
+  readonly direction?: 'up' | 'down' | 'unknown';
 }): {
   readonly nextFollowing: boolean;
   readonly shouldReaffirmBottom: boolean;
 } {
   if (input.atBottom) {
     return {
-      nextFollowing: true,
+      nextFollowing: input.userInitiated && input.direction === 'up' ? false : input.currentlyFollowing || input.userInitiated,
       shouldReaffirmBottom: false,
     };
   }
@@ -124,4 +126,14 @@ export function resolveThreadFollowAfterScroll(input: {
     nextFollowing: true,
     shouldReaffirmBottom: true,
   };
+}
+
+/** Only input events confer scroll intent; geometry and elapsed time never do. */
+export function threadScrollGesture(event: { type: string; key?: string; deltaY?: number; shiftKey?: boolean }): 'up' | 'down' | 'unknown' | null {
+  if (event.type === 'wheel') return event.deltaY ? event.deltaY < 0 ? 'up' : 'down' : null;
+  if (event.type.startsWith('touch') || event.type === 'pointerdown') return 'unknown';
+  if (event.type !== 'keydown') return null;
+  if (['ArrowUp', 'PageUp', 'Home'].includes(event.key ?? '') || event.key === ' ' && event.shiftKey) return 'up';
+  if (['ArrowDown', 'PageDown', 'End', ' '].includes(event.key ?? '')) return 'down';
+  return null;
 }

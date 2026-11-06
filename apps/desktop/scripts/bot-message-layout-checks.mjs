@@ -1,4 +1,5 @@
-import { openReplyDetails, closeReplyDetails, scrollToBotMessage } from './bot-reply-details-checks.mjs';
+import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
+import { openReplyDetails, closeReplyDetails, scrollToBotMessage, wheelBotConversation } from './bot-reply-details-checks.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { BUDGET_RECOVERY_CASES } from './work-budget-fixture.mjs';
@@ -9,7 +10,7 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
   const theme = await page.evaluate(() => document.documentElement.dataset.theme);
   const message = page.locator('#bot-msg-rc-message-9998');
   const card = message.locator('.bot-card');
-  const details = page.locator('.bot-reply-details');
+  const details = page.locator(BOT_DETAIL_SURFACE).locator('.bot-reply-details');
   const rawError = details.locator('.bot-context-error pre');
   const budgetMessage = page.locator('#bot-msg-rc-message-9997');
   for (const [width, appearance] of [[1280, 'dark'], [760, 'light']]) {
@@ -21,11 +22,27 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
     assert.match(await budgetMessage.innerText(), /模型请求：已用 256 次，上限 256 次。.*来源：执行预算设置。/s);
     assert.equal(await budgetMessage.evaluate(node => node.scrollWidth <= node.clientWidth), true);
     assert.doesNotMatch(await budgetMessage.innerText(), /work_budget_limited/);
+    // Capture the summary before opening the drawer. At narrow widths, closing
+    // the full-screen drawer restores the prior conversation reading position.
+    const budgetSummary = budgetMessage.locator('.bot-card');
+    const budgetPosition = () => budgetSummary.evaluate(node => {
+      const card = node.getBoundingClientRect();
+      const thread = node.closest('.bot-thread').getBoundingClientRect();
+      const top = Math.max(thread.top, 0);
+      const bottom = Math.min(thread.bottom, innerHeight);
+      return { top, bottom, cardTop: card.top, cardBottom: card.bottom };
+    });
+    // A wheel gesture releases follow-latest while virtual rows are measured.
+    const initial = await budgetPosition();
+    const offset = (initial.cardTop + initial.cardBottom - initial.top - initial.bottom) / 2;
+    if (Math.abs(offset) > 1) await wheelBotConversation(page, offset);
+    const position = await budgetPosition();
+    assert.ok(position.cardBottom > position.cardTop && position.cardTop >= position.top - 1
+      && position.cardBottom <= position.bottom + 1, `budget summary must fit at ${width}px: ${JSON.stringify(position)}`);
+    await page.screenshot({ path: path.join(captureDirectory, `budget-exhausted-${appearance}.png`), animations: 'disabled' });
     await openReplyDetails(page, budgetMessage);
     assert.match(await rawError.textContent(), /^代理暂时不可用：work_budget_limited/);
     await closeReplyDetails(page);
-    await scrollToBotMessage(page, budgetMessage);
-    await page.screenshot({ path: path.join(captureDirectory, `budget-exhausted-${appearance}.png`), animations: 'disabled' });
   }
   report.budgetFailure = { reasonVisible: true, diagnosticInDrawer: true, retrySuppressed: true, limitVisible: true, narrowFits: true };
   const recoveryCases = [
@@ -86,7 +103,11 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
       }), Boolean);
       const bounds = await recoveryMessage.evaluate(node => {
         const shell = node.closest('.bot-shell').getBoundingClientRect(), body = node.querySelector('.bot-reply-body').getBoundingClientRect();
-        return { shellLeft: shell.left, shellRight: shell.right, bodyLeft: body.left, bodyRight: body.right, viewport: innerWidth };
+        const layout = node.closest('.bot-resource-layout'), primary = node.closest('.bot-resource-primary');
+        return { shellLeft: shell.left, shellRight: shell.right, bodyLeft: body.left, bodyRight: body.right, viewport: innerWidth,
+          documentScrollLeft: document.documentElement.scrollLeft, bodyScrollLeft: document.body.scrollLeft,
+          layoutScrollLeft: layout?.scrollLeft, layoutScrollWidth: layout?.scrollWidth, layoutWidth: layout?.clientWidth,
+          primaryScrollLeft: primary?.scrollLeft };
       });
       assert.ok(bounds.shellLeft >= -1 && bounds.shellRight <= bounds.viewport + 1 && bounds.bodyLeft >= 0 && bounds.bodyRight <= bounds.viewport,
         `recovery image must use settled page bounds: ${JSON.stringify({ state, width, appearance, ...bounds })}`);
@@ -108,14 +129,14 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
       await page.evaluate(value => { document.documentElement.dataset.theme = value; }, appearance);
       for (const docked of width === 1280 ? [false, true] : [false]) {
         if (docked) {
-          await page.locator('.bot-profile').click();
-          await page.locator('.bot-drawer-dock.is-open').waitFor();
+          await page.getByRole('button', { name: '机器人设置', exact: true }).click();
+          await page.locator(BOT_DETAIL_SURFACE).waitFor();
           await until(() => page.locator('.bot-convo').evaluate(node => node.getBoundingClientRect().width < 700), Boolean);
         }
         await scrollToBotMessage(page, card);
-        if (await page.getByRole('button', { name: '关闭', exact: true }).isVisible()) {
-          await page.getByRole('button', { name: '关闭', exact: true }).click();
-          await page.locator('.bot-drawer-body').waitFor({ state: 'hidden' });
+        if (await page.locator(BOT_DETAIL_CLOSE).isVisible()) {
+          await page.locator(BOT_DETAIL_CLOSE).click();
+          await page.locator(BOT_DETAIL_SURFACE).waitFor({ state: 'hidden' });
         }
         await rawError.waitFor({ state: 'hidden' });
         assert.equal(await card.locator(':scope > p').textContent(), '服务未接受这次请求。需要先检查模型或连接配置，已有进展已保留。', 'failure is stated plainly outside technical details');
@@ -131,18 +152,21 @@ export async function checkBotMessageLayout({ page, until, report, captureDirect
           return {
             textFits: fragments.every(box => box.left >= rect.left - 1 && box.right <= rect.right + 1),
             lines: fragments.length,
+            paragraphWidth: rect.width, whiteSpace: getComputedStyle(paragraph).whiteSpace,
+            overflowRight: Math.max(0, ...fragments.map(box => box.right - rect.right)),
             cardFits: node.scrollWidth <= node.clientWidth,
-            conversationFits: document.querySelector('.bot-convo').scrollWidth <= document.querySelector('.bot-convo').clientWidth,
+            conversationFits: !document.querySelector('.bot-convo').checkVisibility({ visibilityProperty: true }) || document.querySelector('.bot-convo').scrollWidth <= document.querySelector('.bot-convo').clientWidth,
+            detailFits: node.getBoundingClientRect().left >= 0 && node.getBoundingClientRect().right <= innerWidth,
           };
         });
-        assert.ok(bounds.textFits && bounds.cardFits && bounds.conversationFits,
+        assert.ok(bounds.textFits && bounds.cardFits && bounds.conversationFits && bounds.detailFits,
           `long error must fit its text area, card and conversation: ${JSON.stringify({ width, appearance, docked, ...bounds })}`);
         assert.ok(bounds.lines > 1, 'long error should wrap into readable lines');
         cases.push({ viewportWidth: width, appearance, docked, diagnosticsCollapsed: true, detailsKeyboard: true, ...bounds });
         if (width === 760 && appearance === 'dark') await closeReplyDetails(page);
         await page.waitForTimeout(180);
         await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `long-error-${docked ? 'docked' : width}-${appearance}.png`) });
-        if (await page.getByRole('button', { name: '关闭', exact: true }).isVisible()) await closeReplyDetails(page);
+        if (await page.locator(BOT_DETAIL_CLOSE).isVisible()) await closeReplyDetails(page);
       }
     }
   }

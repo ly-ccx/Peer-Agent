@@ -25,6 +25,9 @@ files:
   # system-context 没有 dist：运行时入口就是 src/index.mjs，必须重新 include。
   # 排除通配会把它整包 src 踢出 asar，导致 mac 打包后 Verify packaged runtime entries 失败。
   - "node_modules/@peer-agent/system-context/src/**"
+  # interactive-content 的宿主运行时子路径同样直接指向 ESM 源码。
+  - "node_modules/@peer-agent/interactive-content/src/**/*.mjs"
+  - "!node_modules/@peer-agent/interactive-content/src/**/*.test.mjs"
 
 extraResources:
   # Dock 深浅色图标。正式包运行时由主进程根据外观模式动态选择。

@@ -22,6 +22,12 @@ export function delegationEventId({ sessionId, kind, version, approvalId } = {})
   return createHash('sha256').update(`${sessionId}\0${kind}\0${token}`).digest('hex');
 }
 
+/** 监督器事件缺省 id。原因可能是自由文本，超过 200 字时整串摘要，短 id 保持原样。 */
+export function supervisorEventId({ kind, sessionId, verdictRef, anchorMessageId, supersededBy, reason } = {}) {
+  const id = `supervisor:${kind}:${sessionId}:${verdictRef || anchorMessageId || supersededBy || reason || ''}`;
+  return id.length <= 200 ? id : `supervisor:${createHash('sha256').update(id).digest('hex')}`;
+}
+
 export function mapDelegationEvents(previousFacts, currentFacts, {
   now = () => new Date().toISOString(),
   progressThrottleMs = PROGRESS_THROTTLE_MS,

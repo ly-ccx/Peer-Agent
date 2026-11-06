@@ -20,13 +20,27 @@ export function useReplyFooterBounds() {
       const target = [...bubbles].reverse().find(node => node.getBoundingClientRect().width > 0);
       const bounds = target?.getBoundingClientRect(), parent = reply.getBoundingClientRect();
       const style = target ? getComputedStyle(target) : null;
-      const start = style ? parseFloat(style.paddingLeft) + parseFloat(style.borderLeftWidth) : 0;
-      // Even a one-word bubble must leave room for a readable details label.
-      footer.style.width = bounds ? `${Math.max(0, parent.right - bounds.left - start - 14)}px` : 'calc(100% - 28px)';
-      // Match the message text inset before the first streamed bubble arrives.
-      const inset = bounds ? `${Math.max(0, bounds.left - parent.left + start)}px` : '14px';
-      footer.style.setProperty('--bot-reply-inset', inset);
-      footer.style.marginInlineStart = inset;
+      const start = style ? parseFloat(style.paddingLeft) + parseFloat(style.borderLeftWidth) : 14;
+      const end = style ? parseFloat(style.paddingRight) + parseFloat(style.borderRightWidth) : 14;
+      const padStart = Number.isFinite(start) ? start : 14;
+      const padEnd = Number.isFinite(end) ? end : 14;
+      // Match the text column inside the bubble. Padding stays on the bubble, not added outside this row.
+      footer.style.boxSizing = 'border-box';
+      footer.style.alignSelf = 'flex-start';
+      footer.style.flex = '0 1 auto';
+      footer.style.minWidth = '0';
+      footer.style.paddingInlineStart = '0';
+      footer.style.paddingInlineEnd = '0';
+      if (!bounds) {
+        footer.style.marginInlineStart = `${padStart}px`;
+        footer.style.width = `calc(100% - ${padStart + padEnd}px)`;
+        footer.style.maxWidth = `calc(100% - ${padStart + padEnd}px)`;
+      } else {
+        const inner = Math.max(0, bounds.width - padStart - padEnd);
+        footer.style.marginInlineStart = `${Math.max(0, bounds.left - parent.left + padStart)}px`;
+        footer.style.width = `${inner}px`;
+        footer.style.maxWidth = `${inner}px`;
+      }
       if (observed.length !== bubbles.length || observed.some((node, index) => node !== bubbles[index])) {
         observed.forEach(node => resize.unobserve(node));
         observed = bubbles; observed.forEach(node => resize.observe(node));

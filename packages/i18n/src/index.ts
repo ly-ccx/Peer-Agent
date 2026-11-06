@@ -1,3 +1,7 @@
+import { recoveryZh, recoveryEn, type RecoveryTranslationKey } from './recovery.ts';
+import { resourcesZh, resourcesEn, type ResourcesTranslationKey } from './resources.ts';
+import { formsZh, formsEn, type FormsTranslationKey } from './forms.ts';
+import { workPanelZh, workPanelEn, type WorkPanelTranslationKey } from './work-panel.ts';
 import type { CapabilityManifest, LocaleCode, LocalizedText } from '@peer-agent/protocol';
 import {remoteAccessZh,remoteAccessEn,type RemoteAccessTranslationKey} from './remote-access.ts';
 
@@ -8,7 +12,11 @@ export const DEFAULT_LOCALE: LocaleCode = 'zh-CN';
 export const AVAILABLE_LOCALES = ['zh-CN', 'en-US'] as const satisfies readonly LocaleCode[];
 
 export type TranslationKey =
+  | WorkPanelTranslationKey
+  | RecoveryTranslationKey
   | RemoteAccessTranslationKey
+  | ResourcesTranslationKey
+  | FormsTranslationKey
   | 'app.newTask'
   | 'searchChats.open'
   | 'searchChats.placeholder'
@@ -92,6 +100,7 @@ export type TranslationKey =
   | 'projectAgent.host.requested'
   | 'projectAgent.host.ready'
   | 'projectAgent.host.failed'
+  | 'projectAgent.host.notOwnerAction'
   | 'developer.projectAgent.nav'
   | 'developer.projectAgent.title'
   | 'developer.projectAgent.description'
@@ -210,8 +219,13 @@ export type TranslationKey =
   | 'projectAgent.list.backToBots'
   | 'projectAgent.list.close'
   | 'projectAgent.chat.empty'
+  | 'projectAgent.chat.loading'
   | 'projectAgent.chat.loadFailed'
   | 'projectAgent.chat.cardsUnavailable'
+  | 'projectAgent.chat.recoveryDiagnostics'
+  | 'projectAgent.chat.recoveryBlocked'
+  | 'projectAgent.chat.recoveryReconcile'
+  | 'projectAgent.chat.recoveryConflict'
   | 'projectAgent.chat.refreshFailed'
   | 'projectAgent.chat.thinking'
   | 'projectAgent.chat.waiting'
@@ -220,7 +234,9 @@ export type TranslationKey =
   | 'projectAgent.chat.reply.unconfirmed'
   | 'projectAgent.chat.reply.interrupted'
   | 'projectAgent.chat.reply.synchronizing'
-  | 'projectAgent.chat.reply.slow'
+  | 'projectAgent.chat.reply.received'
+  | 'projectAgent.chat.reply.waitingModel'
+  | 'projectAgent.chat.recoveryReasoning'
   | 'projectAgent.chat.reply.refresh'
   | 'projectAgent.chat.reply.related'
   | 'projectAgent.chat.reply.relatedTurn'
@@ -256,6 +272,9 @@ export type TranslationKey =
   | 'projectAgent.chat.stopped'
   | 'projectAgent.chat.stopFailed'
   | 'projectAgent.chat.latest'
+  | 'projectAgent.chat.restoringReading'
+  | 'projectAgent.chat.readingUnavailable'
+  | 'projectAgent.chat.restoreReading'
   | 'projectAgent.chat.received'
   | 'projectAgent.chat.loadOlder'
   | 'projectAgent.chat.loadingOlder'
@@ -397,8 +416,11 @@ export type TranslationKey =
   | 'projectAgent.task.coordination.replacement'
   | 'projectAgent.task.coordination.prior'
   | 'projectAgent.task.coordination.applied'
+  | 'projectAgent.task.coordination.executionQueued'
+  | 'projectAgent.task.coordination.executionObserved'
   | 'projectAgent.task.coordination.pending'
   | 'projectAgent.task.coordination.unknown'
+  | 'projectAgent.task.coordination.withdrawnUnknown'
   | 'projectAgent.task.coordination.blocked'
   | 'projectAgent.task.coordination.handoff'
   | 'projectAgent.chat.sessionState.paused'
@@ -407,9 +429,11 @@ export type TranslationKey =
   | 'projectAgent.chat.work.heading'
   | 'projectAgent.chat.work.more'
   | 'projectAgent.chat.work.related'
+  | 'projectAgent.chat.work.reportedState'
   | 'projectAgent.chat.work.unavailable'
   | 'projectAgent.chat.work.unavailableHint'
   | 'projectAgent.chat.work.waiting'
+  | 'projectAgent.chat.work.resultSettling'
   | 'projectAgent.chat.work.resultReady'
   | 'projectAgent.chat.work.handoff'
   | 'projectAgent.chat.work.verifyingHint'
@@ -420,6 +444,7 @@ export type TranslationKey =
   | 'projectAgent.chat.work.background'
   | 'projectAgent.chat.context.basis'
   | 'projectAgent.chat.originalMessage'
+  | 'projectAgent.chat.viewOriginal'
   | 'projectAgent.chat.context.details'
   | 'projectAgent.chat.context.title'
   | 'projectAgent.chat.context.back'
@@ -495,6 +520,7 @@ export type TranslationKey =
   | 'projectAgent.model.defaults'
   | 'projectAgent.model.botOnly'
   | 'projectAgent.model.nextReply'
+  | 'projectAgent.model.replyLock'
   | 'projectAgent.model.runningReply'
   | 'projectAgent.model.unavailable'
   | 'projectAgent.model.select'
@@ -524,9 +550,19 @@ export type TranslationKey =
   | 'projectAgent.chat.resultChanged'
   | 'projectAgent.chat.acceptReadme'
   | 'projectAgent.chat.actionFailed'
+  | 'projectAgent.chat.draftLoading'
+  | 'projectAgent.chat.draftSaveFailed'
+  | 'projectAgent.chat.draftConflict'
+  | 'projectAgent.chat.inputUnconfirmed'
+  | 'projectAgent.chat.retrySameInput'
+  | 'projectAgent.chat.inputDeliveryIssue'
+  | 'projectAgent.chat.planDecisionRecord'
+  | 'projectAgent.chat.decisionUpdating'
+  | 'projectAgent.chat.verificationPending'
   | 'projectAgent.drawer.title'
   | 'projectAgent.drawer.close'
   | 'projectAgent.drawer.back'
+  | 'projectAgent.drawer.sceneBack'
   | 'projectAgent.drawer.missing'
   | 'projectAgent.drawer.tab.overview'
   | 'projectAgent.drawer.tab.tasks'
@@ -594,6 +630,12 @@ export type TranslationKey =
   | 'projectAgent.drawer.task.instructions'
   | 'projectAgent.drawer.task.description'
   | 'projectAgent.drawer.task.descriptionMissing'
+  | 'projectAgent.drawer.task.openConversation'
+  | 'projectAgent.drawer.task.conversationUnavailable'
+  | 'projectAgent.drawer.task.openFull'
+  | 'projectAgent.drawer.task.closeFull'
+  | 'projectAgent.drawer.task.progressNote'
+  | 'projectAgent.drawer.task.progressPending'
   | 'projectAgent.drawer.task.information'
   | 'projectAgent.drawer.task.readingReport'
   | 'projectAgent.drawer.task.reportUnavailable'
@@ -711,7 +753,6 @@ export type TranslationKey =
   | 'projectAgent.drawer.settings.save'
   | 'projectAgent.drawer.settings.avatar'
   | 'projectAgent.drawer.settings.avatarNew'
-  | 'projectAgent.drawer.settings.avatarUpload'
   | 'projectAgent.drawer.settings.avatarColor'
   | 'projectAgent.drawer.settings.avatarColorImageHint'
   | 'projectAgent.drawer.settings.avatarColor.0'
@@ -730,6 +771,12 @@ export type TranslationKey =
   | 'projectAgent.drawer.queuedBehind'
   | 'projectAgent.drawer.dependencyFailed'
   | 'projectAgent.drawer.dependencyMissing'
+  | 'projectAgent.drawer.resourceOutcomeUnknown'
+  | 'projectAgent.drawer.resourceStopUnconfirmed'
+  | 'projectAgent.drawer.resourceRecovery'
+  | 'projectAgent.drawer.resourceBusy'
+  | 'projectAgent.drawer.resourceScope'
+  | 'projectAgent.drawer.resourceSource'
   | 'projectAgent.drawer.diskSpace'
   | 'projectAgent.drawer.isolationFailed'
   | 'projectAgent.drawer.settings.autoHandoff'
@@ -877,6 +924,22 @@ export type TranslationKey =
   | 'modelRouting.tiers'
   | 'modelRouting.roles'
   | 'modelRouting.primary'
+  | 'modelRouting.modeLabel'
+  | 'modelRouting.targetLabel'
+  | 'modelRouting.chooseModel'
+  | 'modelRouting.modelUnavailable'
+  | 'modelRouting.followingTier'
+  | 'modelRouting.checkTier'
+  | 'modelRouting.checkFixed'
+  | 'modelRouting.parameters'
+  | 'modelRouting.channel'
+  | 'modelRouting.channelFast'
+  | 'modelRouting.channelNormal'
+  | 'modelRouting.channelUnavailable'
+  | 'modelRouting.inheritedValue'
+  | 'modelRouting.chooseCandidates'
+  | 'modelRouting.noSharedEffort'
+  | 'modelRouting.fastUnsupported'
   | 'modelRouting.fallbacks'
   | 'modelRouting.addFallback'
   | 'modelRouting.moveUp'
@@ -888,6 +951,10 @@ export type TranslationKey =
   | 'modelRouting.pool'
   | 'modelRouting.poolInvalid'
   | 'modelRouting.resolved'
+  | 'modelRouting.reasoning'
+  | 'modelRouting.reasoningDefault'
+  | 'modelRouting.reasoningInvalid'
+  | 'modelRouting.reasoningNoCommon'
   | 'modelRouting.unresolved'
   | 'modelRouting.preferDifferentFamily'
   | 'modelRouting.spendCap'
@@ -905,6 +972,31 @@ export type TranslationKey =
   | 'modelRouting.role.memory_curator'
   | 'modelRouting.role.objective_probe'
   | 'modelRouting.role.compactor'
+  | 'modelRouting.role.input_predictor'
+  | 'inputPrediction.title'
+  | 'inputPrediction.description'
+  | 'inputPrediction.enabled'
+  | 'inputPrediction.nextDisclosure'
+  | 'inputPrediction.model'
+  | 'inputPrediction.modelHelp'
+  | 'inputPrediction.noModels'
+  | 'inputPrediction.chooseModel'
+  | 'inputPrediction.routing'
+  | 'inputPrediction.continuation'
+  | 'inputPrediction.draftDisclosure'
+  | 'inputPrediction.requestLimit'
+  | 'inputPrediction.tokenLimit'
+  | 'inputPrediction.limitHelp'
+  | 'inputPrediction.project'
+  | 'inputPrediction.accept'
+  | 'inputPrediction.available'
+  | 'inputPrediction.statusReady'
+  | 'inputPrediction.statusDisabled'
+  | 'inputPrediction.statusBudget'
+  | 'inputPrediction.statusUsage'
+  | 'inputPrediction.statusProvider'
+  | 'inputPrediction.usage'
+  | 'inputPrediction.estimated'
   | 'modelRouting.reason.vision'
   | 'modelRouting.reason.tools'
   | 'modelRouting.reason.structured'
@@ -1422,6 +1514,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     "projectAgent.settings.minute": "{label}：分钟",
 
     ...remoteAccessZh,
+    ...resourcesZh,
+    ...workPanelZh,
+    ...formsZh,
+    ...recoveryZh,
     'app.newTask': '新任务',
     'searchChats.open': '搜索任务',
     'searchChats.placeholder': '搜索任务',
@@ -1576,11 +1672,27 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'modelRouting.nav': '模型分工',
     'modelRouting.title': '模型分工',
     'modelRouting.description': '为不同工作选择档位或具体模型。普通对话仍使用会话里选中的模型。',
-    'modelRouting.singleModel': '只有一个模型时，所有工作都用它',
+    'modelRouting.singleModel': '只有一个模型时，各角色使用同一模型，仍可分别设置思考强度。',
     'modelRouting.noModel': '没有可用的模型',
     'modelRouting.tiers': '档位',
     'modelRouting.roles': '角色',
     'modelRouting.primary': '主模型',
+    'modelRouting.modeLabel': '选择方式',
+    'modelRouting.targetLabel': '档位 / 模型',
+    'modelRouting.chooseModel': '请选择模型',
+    'modelRouting.modelUnavailable': '原模型已不可用，请重新选择',
+    'modelRouting.followingTier': '跟随“{tier}”档位',
+    'modelRouting.checkTier': '该档位暂无符合要求的模型，请检查上方档位配置',
+    'modelRouting.checkFixed': '所选模型不可用或不满足角色要求，请重新选择',
+    'modelRouting.parameters': '思考强度 / 通道',
+    'modelRouting.channel': '请求通道',
+    'modelRouting.channelFast': '快速',
+    'modelRouting.channelNormal': '正常',
+    'modelRouting.channelUnavailable': '不可用',
+    'modelRouting.inheritedValue': '跟随档位 · {value}',
+    'modelRouting.chooseCandidates': '请先选择可用模型。',
+    'modelRouting.noSharedEffort': '所选模型未声明思考强度，或候选之间没有共同支持的强度。',
+    'modelRouting.fastUnsupported': '快速仅适用于支持的 ChatGPT / Grok 订阅连接；所选候选中有不支持的连接。',
     'modelRouting.fallbacks': '备选',
     'modelRouting.addFallback': '添加备选',
     'modelRouting.moveUp': '上移',
@@ -1592,6 +1704,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'modelRouting.pool': '模型池',
     'modelRouting.poolInvalid': '自动池里需要至少一个满足该角色能力的模型',
     'modelRouting.resolved': '当前解析',
+    'modelRouting.reasoning': '思考强度',
+    'modelRouting.reasoningDefault': '跟随模型默认',
+    'modelRouting.reasoningInvalid': '当前候选不支持',
+    'modelRouting.reasoningNoCommon': '候选模型没有共同支持的强度，可固定模型后设置。',
     'modelRouting.unresolved': '没有可用的模型',
     'modelRouting.preferDifferentFamily': '复核优先不同源',
     'modelRouting.spendCap': '日花费上限（美元）',
@@ -1609,6 +1725,31 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'modelRouting.role.memory_curator': '记忆整理',
     'modelRouting.role.objective_probe': '目标探查',
     'modelRouting.role.compactor': '压缩',
+    'modelRouting.role.input_predictor': '输入建议',
+    'inputPrediction.statusReady': '输入建议已就绪；符合输入条件时显示。',
+    'inputPrediction.statusDisabled': '输入建议已关闭。',
+    'inputPrediction.statusBudget': '今日预测已达到请求或 Token 上限。',
+    'inputPrediction.statusUsage': '用量记录暂不可用，输入建议已暂停。',
+    'inputPrediction.statusProvider': '上次预测未成功，请检查模型连接；正常输入不受影响。',
+    'inputPrediction.usage': '今日请求 / Token',
+    'inputPrediction.estimated': '包含保守估算',
+    'inputPrediction.title': '智能输入建议',
+    'inputPrediction.description': '根据当前对话准备一句表达，按 Tab 或右方向键填入草稿。',
+    'inputPrediction.enabled': '开启智能输入建议',
+    'inputPrediction.nextDisclosure': '预测下一句，也补全正在输入的内容。建议不会自动发送。',
+    'inputPrediction.model': '输入建议模型',
+    'inputPrediction.modelHelp': '当前对话和未发送的草稿会交给所选模型。建议选择响应快的模型。',
+    'inputPrediction.noModels': '先在「服务商」中添加模型，再选择用于输入建议的模型。',
+    'inputPrediction.chooseModel': '请选择输入建议模型',
+    'inputPrediction.routing': '使用模型分工中的配置',
+    'inputPrediction.continuation': '续写未发送的草稿',
+    'inputPrediction.draftDisclosure': '开启后，当前未发送的草稿也会交给输入建议模型。可随时关闭。',
+    'inputPrediction.requestLimit': '每日预测请求上限',
+    'inputPrediction.tokenLimit': '每日 Token 上限',
+    'inputPrediction.limitHelp': '跨本机项目合计；0 表示暂停预测。取消的请求也可能产生用量。',
+    'inputPrediction.project': '在此项目提供输入建议',
+    'inputPrediction.accept': '采纳建议',
+    'inputPrediction.available': '有输入建议，可采纳或忽略：',
     'modelRouting.reason.vision': '不能看图',
     'modelRouting.reason.tools': '不能使用工具',
     'modelRouting.reason.structured': '不能输出结构化结果',
@@ -1679,6 +1820,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'developer.probeFailed': '云端合约探测失败',
     'developer.ipcUnavailable': '开发者模式主进程通道未注册。请完全退出并重启客户端，确保 Electron main 已更新后再重试。',
     'projectAgent.host.title': "执行宿主",
+    'projectAgent.host.notOwnerAction': '当前桌面未持有这个机器人的执行权。请在机器人设置的「运行与全局设置」中接管，再继续尝试。',
     'projectAgent.host.hint': "桌面和终端共享同一机器人。接管会先停止旧宿主，再由桌面继续任务。",
     'projectAgent.host.action': "在桌面接管",
     'projectAgent.host.requested': "已请求接管，旧宿主停止后会继续任务。",
@@ -1802,8 +1944,13 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.list.backToBots': '返回机器人',
     'projectAgent.list.close': '关闭',
     'projectAgent.chat.empty': '还没有对话。说一句，机器人会接着做。',
+    'projectAgent.chat.loading': '正在读取对话',
     'projectAgent.chat.loadFailed': '对话没有加载出来',
     'projectAgent.chat.cardsUnavailable': '任务状态暂不可用，已有对话仍可阅读。',
+    'projectAgent.chat.recoveryDiagnostics': '诊断详情',
+    'projectAgent.chat.recoveryBlocked': '机器人恢复受阻，暂未开始回复；已接收的消息会保留。',
+    'projectAgent.chat.recoveryReconcile': '历史记录已恢复读取，执行仍暂停，需先核对已有任务与写入结果。',
+    'projectAgent.chat.recoveryConflict': '历史任务记录冲突，已暂停执行；已接收的消息会保留。',
     'projectAgent.chat.refreshFailed': '新消息暂未刷新，已保留当前对话。',
     'projectAgent.chat.thinking': '正在思考中',
     'projectAgent.chat.waiting': '等待回复…',
@@ -1812,7 +1959,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.reply.unconfirmed': '尚未确认这条消息的回复状态',
     'projectAgent.chat.reply.interrupted': '这次回复已中断',
     'projectAgent.chat.reply.synchronizing': '正在同步回复',
-    'projectAgent.chat.reply.slow': '这次回复耗时较久',
+    'projectAgent.chat.reply.received': '消息已收到，等待处理进展',
+    'projectAgent.chat.reply.waitingModel': '等待模型响应',
+    'projectAgent.chat.recoveryReasoning': '本地模型配置校验未通过，尚未发起本次请求。请查看回复详情，核对模型与思考强度。',
     'projectAgent.chat.reply.refresh': '刷新状态',
     'projectAgent.chat.reply.related': '这次回复的其他过程（{count}）',
     'projectAgent.chat.reply.relatedTurn': '查看过程 {number}',
@@ -1848,6 +1997,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.stopped': '生成已停止，以上内容未完成',
     'projectAgent.chat.stopFailed': '停止失败，请再试一次。',
     'projectAgent.chat.latest': '回到最新消息',
+    'projectAgent.chat.restoringReading': '正在恢复原阅读位置…',
+    'projectAgent.chat.readingUnavailable': '原阅读位置尚未找到或暂不可用；可继续分批查找，或回到最新消息。',
+    'projectAgent.chat.restoreReading': '继续恢复阅读位置',
     'projectAgent.chat.received': '已收到',
     'projectAgent.chat.loadOlder': '查看更早消息',
     'projectAgent.chat.loadingOlder': '正在加载更早消息',
@@ -1989,8 +2141,11 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.task.coordination.replacement': '后续任务：{title}',
     'projectAgent.task.coordination.prior': '查看之前的任务',
     'projectAgent.task.coordination.applied': '调整已应用，任务进度以当前状态为准。',
+    'projectAgent.task.coordination.executionQueued': '已安排继续，正在等待实际执行回执。',
+    'projectAgent.task.coordination.executionObserved': '已收到继续执行的回执，结果以任务进度和核验为准。',
     'projectAgent.task.coordination.pending': '正在调整执行安排，已有工作会保留。',
     'projectAgent.task.coordination.unknown': '停止后有操作尚未确认结果，核实前不会重复执行。',
+    'projectAgent.task.coordination.withdrawnUnknown': '委托已撤回。撤回时仍有 {count} 项历史执行结果未知；记录和成果已保留，核实前不会重复执行。',
     'projectAgent.task.coordination.blocked': '本次调整未能应用，原有记录已保留。',
     'projectAgent.task.coordination.handoff': '正在接手',
     'projectAgent.chat.sessionState.paused': '已暂停',
@@ -1999,9 +2154,11 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.work.heading': '关联任务',
     'projectAgent.chat.work.more': '另有 {count} 项任务',
     'projectAgent.chat.work.related': '关联任务',
+    'projectAgent.chat.work.reportedState': '回复时：{status}',
     'projectAgent.chat.work.unavailable': '状态暂不可用',
     'projectAgent.chat.work.unavailableHint': '暂时无法获取最新任务状态，请打开任务查看。',
     'projectAgent.chat.work.waiting': '等待跟进',
+    'projectAgent.chat.work.resultSettling': '正在核对结果',
     'projectAgent.chat.work.resultReady': '结果待确认',
     'projectAgent.chat.work.handoff': '由 {name} 在主对话中跟进，需要你决定时会说明。',
     'projectAgent.chat.work.verifyingHint': '正在核对执行结果，结束后会在对话中告诉你。',
@@ -2012,6 +2169,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.work.background': '当前任务（{count}）',
     'projectAgent.chat.context.basis': '结果依据 · {count} 条记录',
     'projectAgent.chat.originalMessage': '查看原消息',
+    'projectAgent.chat.viewOriginal': '查看原文',
     'projectAgent.chat.context.details': '回复详情',
     'projectAgent.chat.context.title': '回复详情',
     'projectAgent.chat.context.back': '返回回复详情',
@@ -2070,7 +2228,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.approvalReceipt.approved': '已授权',
     'projectAgent.chat.approvalReceipt.denied': '已拒绝',
     'projectAgent.chat.approvalReceipt.cancelled': '已取消',
-    'projectAgent.chat.approvalReceipt.expired': '已超时',
+    'projectAgent.chat.approvalReceipt.expired': '已失效',
     'projectAgent.chat.approvalReceipt.closed': '已结束',
     'projectAgent.chat.imageUnavailable': '本次授权请求已结束，没有读取图片。需要查看时可以重新发起。',
     'projectAgent.chat.imageReadNotice': '读取这张图片并交给当前模型。选择“本轮允许”后，仅此图片可供当前机器人及其任务使用，30 分钟内有效。',
@@ -2087,6 +2245,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.model.defaults': '默认与档位',
     'projectAgent.model.botOnly': '本机器人',
     'projectAgent.model.nextReply': '修改用于后续回复或新任务',
+    'projectAgent.model.replyLock': '回复进行中，暂不能切换模型',
     'projectAgent.model.runningReply': '本轮正在使用的模型',
     'projectAgent.model.unavailable': '选择模型',
     'projectAgent.model.select': '选择机器人模型',
@@ -2116,9 +2275,19 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.resultChanged': '任务状态已变化，暂时不能确认。已刷新，请查看最新进展。',
     'projectAgent.chat.acceptReadme': '写 README',
     'projectAgent.chat.actionFailed': '操作失败，请重试',
+    'projectAgent.chat.draftLoading': '正在恢复草稿…',
+    'projectAgent.chat.draftSaveFailed': '草稿暂未保存，内容仍保留在此窗口。请重试；未保存的输入不会发出。',
+    'projectAgent.chat.draftConflict': '另一个窗口更新了这份草稿。当前内容仍在此窗口，请复制保留后重新打开，避免覆盖另一份编辑。',
+    'projectAgent.chat.inputUnconfirmed': '发送结果尚未确认，原消息已保留。',
+    'projectAgent.chat.retrySameInput': '重试同一消息',
+    'projectAgent.chat.inputDeliveryIssue': '输入已收到，后续交接未完成。请回原任务处理。',
+    'projectAgent.chat.planDecisionRecord': '计划决定记录',
+    'projectAgent.chat.decisionUpdating': '决定已提交，正在读取当前状态…',
+    'projectAgent.chat.verificationPending': '核验尚未得出结论',
     'projectAgent.drawer.title': '机器人设置',
     'projectAgent.drawer.close': '关闭',
     'projectAgent.drawer.back': '任务列表',
+    'projectAgent.drawer.sceneBack': '返回详情',
     'projectAgent.drawer.missing': '还没有',
     'projectAgent.drawer.tab.overview': '概况',
     'projectAgent.drawer.tab.tasks': '任务',
@@ -2186,6 +2355,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.task.instructions': "内部任务指令",
     'projectAgent.drawer.task.description': '任务说明',
     'projectAgent.drawer.task.descriptionMissing': '暂未读取到任务说明，可回到对话查看原始要求。',
+    'projectAgent.drawer.task.openConversation': '打开完整会话',
+    'projectAgent.drawer.task.conversationUnavailable': '完整会话暂不可用',
+    'projectAgent.drawer.task.openFull': '任务详情',
+    'projectAgent.drawer.task.closeFull': '收起详情',
+    'projectAgent.drawer.task.progressNote': '最近说明：{content}',
+    'projectAgent.drawer.task.progressPending': '暂无新的进度说明。',
     'projectAgent.drawer.task.information': '任务信息',
     'projectAgent.drawer.task.readingReport': '正在读取任务资料…',
     'projectAgent.drawer.task.reportUnavailable': '任务资料暂时无法读取，请重试。',
@@ -2303,7 +2478,6 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.settings.save': '保存',
     'projectAgent.drawer.settings.avatar': '头像',
     'projectAgent.drawer.settings.avatarNew': '重新生成',
-    'projectAgent.drawer.settings.avatarUpload': '上传自己的图片',
     'projectAgent.drawer.settings.avatarColor': '颜色',
     'projectAgent.drawer.settings.avatarColorImageHint': '选择颜色会切换回生成头像。',
     'projectAgent.drawer.settings.avatarColor.0': '蓝紫色',
@@ -2322,6 +2496,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.queuedBehind': '等待 {tasks}',
     'projectAgent.drawer.dependencyFailed': '前置任务需要处理：{tasks}',
     'projectAgent.drawer.dependencyMissing': '前置任务已缺失，请重新安排',
+    'projectAgent.drawer.resourceOutcomeUnknown': '暂不能写入：此前操作结果未确认',
+    'projectAgent.drawer.resourceStopUnconfirmed': '排队中：正在确认此前执行已停止',
+    'projectAgent.drawer.resourceRecovery': '排队中：正在核对本机资源状态',
+    'projectAgent.drawer.resourceBusy': '排队中：另一任务正在使用所需目录',
+    'projectAgent.drawer.resourceScope': '涉及目录',
+    'projectAgent.drawer.resourceSource': '查看此前任务',
     'projectAgent.drawer.diskSpace': '排队中：可用磁盘不足 2 GB',
     'projectAgent.drawer.isolationFailed': '排队中：隔离工作区暂不可用',
     'projectAgent.drawer.settings.autoHandoff': '策略签收后自动合回',
@@ -2799,6 +2979,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     "projectAgent.settings.minute": "{label}: minute",
 
     ...remoteAccessEn,
+    ...resourcesEn,
+    ...workPanelEn,
+    ...formsEn,
+    ...recoveryEn,
     'app.newTask': 'New task',
     'searchChats.open': 'Search tasks',
     'searchChats.placeholder': 'Search tasks',
@@ -2953,11 +3137,27 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'modelRouting.nav': 'Model routing',
     'modelRouting.title': 'Model routing',
     'modelRouting.description': 'Choose a tier or a specific model for each kind of work. Ordinary chat still uses the model selected in the conversation.',
-    'modelRouting.singleModel': 'When only one model is available, every kind of work uses it',
+    'modelRouting.singleModel': 'Roles share the available model, but can use different reasoning efforts.',
     'modelRouting.noModel': 'No usable model',
     'modelRouting.tiers': 'Tiers',
     'modelRouting.roles': 'Roles',
     'modelRouting.primary': 'Primary',
+    'modelRouting.modeLabel': 'Selection mode',
+    'modelRouting.targetLabel': 'Tier / model',
+    'modelRouting.chooseModel': 'Choose a model',
+    'modelRouting.modelUnavailable': 'Previous model unavailable. Choose again.',
+    'modelRouting.followingTier': 'Following the {tier} tier',
+    'modelRouting.checkTier': 'No eligible model in this tier. Check its configuration above.',
+    'modelRouting.checkFixed': 'The selected model is unavailable or ineligible. Choose again.',
+    'modelRouting.parameters': 'Reasoning / channel',
+    'modelRouting.channel': 'Request channel',
+    'modelRouting.channelFast': 'Fast',
+    'modelRouting.channelNormal': 'Normal',
+    'modelRouting.channelUnavailable': 'Unavailable',
+    'modelRouting.inheritedValue': 'Follow tier · {value}',
+    'modelRouting.chooseCandidates': 'Choose an available model first.',
+    'modelRouting.noSharedEffort': 'Selected models declare no shared reasoning effort.',
+    'modelRouting.fastUnsupported': 'Fast requires a supported ChatGPT / Grok subscription connection. Some selected candidates do not support it.',
     'modelRouting.fallbacks': 'Fallbacks',
     'modelRouting.addFallback': 'Add fallback',
     'modelRouting.moveUp': 'Move up',
@@ -2969,6 +3169,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'modelRouting.pool': 'Pool',
     'modelRouting.poolInvalid': 'An automatic pool needs at least one model that meets the role.',
     'modelRouting.resolved': 'Resolved',
+    'modelRouting.reasoning': 'Reasoning effort',
+    'modelRouting.reasoningDefault': 'Model default',
+    'modelRouting.reasoningInvalid': 'Unsupported by current candidates',
+    'modelRouting.reasoningNoCommon': 'No shared effort level. Choose a fixed model to configure its effort.',
     'modelRouting.unresolved': 'No usable model',
     'modelRouting.preferDifferentFamily': 'Prefer a different family for verification',
     'modelRouting.spendCap': 'Daily spend cap (USD)',
@@ -2986,6 +3190,31 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'modelRouting.role.memory_curator': 'Memory curator',
     'modelRouting.role.objective_probe': 'Objective probe',
     'modelRouting.role.compactor': 'Compactor',
+    'modelRouting.role.input_predictor': 'Input suggestions',
+    'inputPrediction.statusReady': 'Suggestions are ready and appear when input conditions allow.',
+    'inputPrediction.statusDisabled': 'Input suggestions are off.',
+    'inputPrediction.statusBudget': 'Today’s suggestion request or token limit has been reached.',
+    'inputPrediction.statusUsage': 'Usage records are unavailable. Suggestions are paused.',
+    'inputPrediction.statusProvider': 'The last prediction was unsuccessful. Check the model connection; normal typing is unaffected.',
+    'inputPrediction.usage': 'Today’s requests / tokens',
+    'inputPrediction.estimated': 'includes conservative estimates',
+    'inputPrediction.title': 'Smart input suggestions',
+    'inputPrediction.description': 'Suggest a message from the conversation. Press Tab or Right Arrow to add it to your draft.',
+    'inputPrediction.enabled': 'Enable smart input suggestions',
+    'inputPrediction.nextDisclosure': 'Suggest the next message and complete what you are typing. Suggestions are never sent automatically.',
+    'inputPrediction.model': 'Suggestion model',
+    'inputPrediction.modelHelp': 'Your current conversation and unsent draft will be shared with this model. Choose a responsive model.',
+    'inputPrediction.noModels': 'Add a model in Providers, then choose it for input suggestions.',
+    'inputPrediction.chooseModel': 'Choose a suggestion model',
+    'inputPrediction.routing': 'Use the configured model role',
+    'inputPrediction.continuation': 'Complete unsent drafts',
+    'inputPrediction.draftDisclosure': 'When enabled, your current unsent draft is also shared with the suggestion model. You can turn this off at any time.',
+    'inputPrediction.requestLimit': 'Daily suggestion request limit',
+    'inputPrediction.tokenLimit': 'Daily token limit',
+    'inputPrediction.limitHelp': 'Shared across projects on this device. Zero pauses suggestions. Cancelled requests may still incur usage.',
+    'inputPrediction.project': 'Allow input suggestions in this project',
+    'inputPrediction.accept': 'Accept suggestion',
+    'inputPrediction.available': 'Input suggestion available. Accept or ignore:',
     'modelRouting.reason.vision': 'Cannot see images',
     'modelRouting.reason.tools': 'Cannot use tools',
     'modelRouting.reason.structured': 'Cannot return structured output',
@@ -3056,6 +3285,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'developer.probeFailed': 'Cloud contract probe failed',
     'developer.ipcUnavailable': 'Developer mode IPC is not registered in the main process. Fully quit and restart the desktop client so the updated Electron main process is running.',
     'projectAgent.host.title': "Execution host",
+    'projectAgent.host.notOwnerAction': 'This desktop does not hold execution ownership for this bot. Take over under Runtime and global settings in the bot settings, then try again.',
     'projectAgent.host.hint': "Desktop and terminal share this bot. Takeover stops the old host before desktop continues its tasks.",
     'projectAgent.host.action': "Take over on desktop",
     'projectAgent.host.requested': "Takeover requested. Tasks continue after the old host stops.",
@@ -3179,8 +3409,13 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.list.backToBots': 'Back to bots',
     'projectAgent.list.close': 'Close',
     'projectAgent.chat.empty': 'No messages yet. Say something and the bot will continue.',
+    'projectAgent.chat.loading': 'Reading the conversation',
     'projectAgent.chat.loadFailed': 'The conversation did not load',
     'projectAgent.chat.cardsUnavailable': 'Task status is unavailable. Your conversation is still readable.',
+    'projectAgent.chat.recoveryDiagnostics': 'Diagnostic details',
+    'projectAgent.chat.recoveryBlocked': 'Bot recovery is blocked; no reply has started. Received messages are preserved.',
+    'projectAgent.chat.recoveryReconcile': 'Task history is readable again. Execution remains paused until existing work and write results are reconciled.',
+    'projectAgent.chat.recoveryConflict': 'Task history conflicts have paused execution. Received messages are preserved.',
     'projectAgent.chat.refreshFailed': 'New messages could not refresh. Your current conversation is preserved.',
     'projectAgent.chat.thinking': 'Thinking',
     'projectAgent.chat.waiting': 'Waiting for a response…',
@@ -3189,7 +3424,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.reply.unconfirmed': 'The reply status has not been confirmed',
     'projectAgent.chat.reply.interrupted': 'This reply was interrupted',
     'projectAgent.chat.reply.synchronizing': 'Synchronizing the reply',
-    'projectAgent.chat.reply.slow': 'This reply is taking longer',
+    'projectAgent.chat.reply.received': 'Message received; waiting for progress',
+    'projectAgent.chat.reply.waitingModel': 'Waiting for the model',
+    'projectAgent.chat.recoveryReasoning': 'Local model validation blocked this request before dispatch. Check the reply details and the model and reasoning effort settings.',
     'projectAgent.chat.reply.refresh': 'Refresh status',
     'projectAgent.chat.reply.related': 'Other parts of this reply ({count})',
     'projectAgent.chat.reply.relatedTurn': 'View part {number}',
@@ -3225,6 +3462,9 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.stopped': 'Generation stopped. The content above is incomplete.',
     'projectAgent.chat.stopFailed': 'Could not stop. Please try again.',
     'projectAgent.chat.latest': 'Jump to latest message',
+    'projectAgent.chat.restoringReading': 'Restoring your reading position…',
+    'projectAgent.chat.readingUnavailable': 'Your reading position is not loaded or is unavailable. Continue looking in batches, or jump to latest.',
+    'projectAgent.chat.restoreReading': 'Continue restoring reading position',
     'projectAgent.chat.received': 'Received',
     'projectAgent.chat.loadOlder': 'Earlier messages',
     'projectAgent.chat.loadingOlder': 'Loading earlier messages',
@@ -3366,8 +3606,11 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.task.coordination.replacement': 'Follow-up task: {title}',
     'projectAgent.task.coordination.prior': 'View previous task',
     'projectAgent.task.coordination.applied': 'Adjustment applied. Task progress is shown in its current status.',
+    'projectAgent.task.coordination.executionQueued': 'Continuation is scheduled; awaiting an execution receipt.',
+    'projectAgent.task.coordination.executionObserved': 'Continuation was observed. Results follow task progress and verification.',
     'projectAgent.task.coordination.pending': 'Adjusting execution. Existing work is retained.',
     'projectAgent.task.coordination.unknown': 'Some operations have an unconfirmed outcome. They will not be repeated before checking.',
+    'projectAgent.task.coordination.withdrawnUnknown': 'The task was withdrawn with {count} historical execution outcomes still unknown. Records and artifacts are retained; operations will not be repeated before checking.',
     'projectAgent.task.coordination.blocked': 'This adjustment could not be applied. Existing records are retained.',
     'projectAgent.task.coordination.handoff': 'Taking over',
     'projectAgent.chat.sessionState.paused': 'Paused',
@@ -3376,9 +3619,11 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.work.heading': 'Related work',
     'projectAgent.chat.work.more': '{count} more tasks',
     'projectAgent.chat.work.related': 'Related task',
+    'projectAgent.chat.work.reportedState': 'At reply: {status}',
     'projectAgent.chat.work.unavailable': 'Status unavailable',
     'projectAgent.chat.work.unavailableHint': 'The latest status is unavailable. Open the task to check.',
     'projectAgent.chat.work.waiting': 'Awaiting follow-up',
+    'projectAgent.chat.work.resultSettling': 'Reviewing the result',
     'projectAgent.chat.work.resultReady': 'Result awaiting confirmation',
     'projectAgent.chat.work.handoff': '{name} follows up in the main conversation and explains when a decision is needed from you.',
     'projectAgent.chat.work.verifyingHint': 'Checking the execution result. You will hear back in the conversation when the check ends.',
@@ -3389,6 +3634,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.work.background': 'Tasks ({count})',
     'projectAgent.chat.context.basis': 'Result basis · {count} records',
     'projectAgent.chat.originalMessage': 'View original message',
+    'projectAgent.chat.viewOriginal': 'View original',
     'projectAgent.chat.context.details': 'Reply details',
     'projectAgent.chat.context.title': 'Reply details',
     'projectAgent.chat.context.back': 'Back to reply details',
@@ -3447,7 +3693,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.approvalReceipt.approved': 'Permission granted',
     'projectAgent.chat.approvalReceipt.denied': 'Denied',
     'projectAgent.chat.approvalReceipt.cancelled': 'Cancelled',
-    'projectAgent.chat.approvalReceipt.expired': 'Timed out',
+    'projectAgent.chat.approvalReceipt.expired': 'Expired',
     'projectAgent.chat.approvalReceipt.closed': 'Closed',
     'projectAgent.chat.imageUnavailable': 'This permission request ended without reading the image. Start a new request if needed.',
     'projectAgent.chat.imageReadNotice': 'Read this image for the current model. Allowing it for this session covers only this image, for this bot and its tasks, valid for 30 minutes.',
@@ -3464,6 +3710,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.model.defaults': 'Defaults and tiers',
     'projectAgent.model.botOnly': 'This bot',
     'projectAgent.model.nextReply': 'Applies to future replies or new tasks',
+    'projectAgent.model.replyLock': 'Can\'t switch models while a reply is in progress',
     'projectAgent.model.runningReply': 'Model used by the current reply',
     'projectAgent.model.unavailable': 'Choose model',
     'projectAgent.model.select': 'Choose bot model',
@@ -3493,9 +3740,19 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.chat.resultChanged': 'The task state changed and cannot be confirmed yet. The latest progress has been refreshed.',
     'projectAgent.chat.acceptReadme': 'Write README',
     'projectAgent.chat.actionFailed': 'Action failed. Please try again',
+    'projectAgent.chat.draftLoading': 'Restoring draft…',
+    'projectAgent.chat.draftSaveFailed': 'Draft not saved. Its contents remain in this window. Retry; unsaved input will not be sent.',
+    'projectAgent.chat.draftConflict': 'Another window changed this draft. Copy the contents in this window before reopening to preserve both edits.',
+    'projectAgent.chat.inputUnconfirmed': 'Delivery is unconfirmed. The original message is retained.',
+    'projectAgent.chat.retrySameInput': 'Retry same message',
+    'projectAgent.chat.inputDeliveryIssue': 'Input received; the subsequent handoff needs attention in the original task.',
+    'projectAgent.chat.planDecisionRecord': 'Plan decision record',
+    'projectAgent.chat.decisionUpdating': 'Decision submitted. Reading the current state…',
+    'projectAgent.chat.verificationPending': 'Verification has no conclusion yet',
     'projectAgent.drawer.title': 'Bot settings',
     'projectAgent.drawer.close': 'Close',
     'projectAgent.drawer.back': 'Back to tasks',
+    'projectAgent.drawer.sceneBack': 'Back to details',
     'projectAgent.drawer.missing': 'None yet',
     'projectAgent.drawer.tab.overview': 'Overview',
     'projectAgent.drawer.tab.tasks': 'Tasks',
@@ -3563,6 +3820,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.task.instructions': "Internal task instructions",
     'projectAgent.drawer.task.description': 'Task description',
     'projectAgent.drawer.task.descriptionMissing': 'The task description is unavailable. Return to the conversation to see the original request.',
+    'projectAgent.drawer.task.openConversation': 'Open full conversation',
+    'projectAgent.drawer.task.conversationUnavailable': 'Full conversation is currently unavailable',
+    'projectAgent.drawer.task.openFull': 'Task details',
+    'projectAgent.drawer.task.closeFull': 'Hide details',
+    'projectAgent.drawer.task.progressNote': 'Latest note: {content}',
+    'projectAgent.drawer.task.progressPending': 'No further progress update yet.',
     'projectAgent.drawer.task.information': 'Task information',
     'projectAgent.drawer.task.readingReport': 'Reading task information…',
     'projectAgent.drawer.task.reportUnavailable': 'Task information is unavailable. Please retry.',
@@ -3680,7 +3943,6 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.settings.save': 'Save',
     'projectAgent.drawer.settings.avatar': 'Avatar',
     'projectAgent.drawer.settings.avatarNew': 'Generate another',
-    'projectAgent.drawer.settings.avatarUpload': 'Upload an image',
     'projectAgent.drawer.settings.avatarColor': 'Color',
     'projectAgent.drawer.settings.avatarColorImageHint': 'Choosing a color switches back to a generated avatar.',
     'projectAgent.drawer.settings.avatarColor.0': 'Iris blue',
@@ -3699,6 +3961,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.queuedBehind': 'Waiting for {tasks}',
     'projectAgent.drawer.dependencyFailed': 'Dependency needs attention: {tasks}',
     'projectAgent.drawer.dependencyMissing': 'Dependency is missing; please replan',
+    'projectAgent.drawer.resourceOutcomeUnknown': 'Write blocked: a previous operation has an unknown outcome',
+    'projectAgent.drawer.resourceStopUnconfirmed': 'Queued: confirming the previous execution has stopped',
+    'projectAgent.drawer.resourceRecovery': 'Queued: reconciling local execution resources',
+    'projectAgent.drawer.resourceBusy': 'Queued: another task is using the required directory',
+    'projectAgent.drawer.resourceScope': 'Affected directory',
+    'projectAgent.drawer.resourceSource': 'View previous task',
     'projectAgent.drawer.diskSpace': 'Queued: less than 2 GB of free disk space',
     'projectAgent.drawer.isolationFailed': 'Queued: isolated workspace is unavailable',
     'projectAgent.drawer.settings.autoHandoff': 'Merge automatically after policy acceptance',

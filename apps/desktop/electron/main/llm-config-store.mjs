@@ -1,4 +1,5 @@
 import electron from 'electron';
+import { createPredictionCredentialResolver } from './input-prediction/credential-resolver.mjs';
 import {
   closeSync,
   existsSync,
@@ -1913,7 +1914,7 @@ export function createLlmConfigStore({
     }
   }
 
-  return { listProviders, listGroups, listChatProviders, addProvider, addModel, updateProvider, duplicateProvider, duplicateModel, removeProvider, removeGroup, setDefault, getDecryptedApiKey, getCredential, getApiKeyRequestConfig, setOAuthTokens, testConnection, completePrompt, backfillMissingPricingFromModelsDev };
+  return { resolveCredentialAsync: createPredictionCredentialResolver({ configFile, dataHome: credentialDataHome || getDataHome() }), listProviders, listGroups, listChatProviders, addProvider, addModel, updateProvider, duplicateProvider, duplicateModel, removeProvider, removeGroup, setDefault, getDecryptedApiKey, getCredential, getApiKeyRequestConfig, setOAuthTokens, testConnection, completePrompt, backfillMissingPricingFromModelsDev };
 }
 
 async function testOpenAI(resolved, model, start, fetchImpl) {

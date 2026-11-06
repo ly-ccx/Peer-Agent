@@ -14,12 +14,14 @@ export async function runProjectCardAction(host:ReturnType<typeof createTuiProje
     const handoff= session?.workspaceId===workspaceId ? host.supervisor.deliveryFacts(sessionId) as any : null;
     const handoffAnswer=handoff?.questionId && answerTo===`card:question:${sessionId}:${handoff.questionId}` && handoff.accepted;
     if(handoffAnswer && !host.holdsLease(workspaceId))return {ok:false,error:'desktop_approval_required'};
-    const receipt=client.submit(text,{answerTo});
-    if(handoffAnswer){const result=await host.supervisor.handleHandoffAnswer({workspaceId,sessionId,answerTo,text}) as unknown as {error?:string};if(result?.error)return {ok:false,error:result.error};}
+    const submitted=await client.recovery(workspaceId).send({text,answerTo,useDraft:false});
+    if(!submitted.input)return {ok:false,error:submitted.code??'input_unconfirmed'};
+    const receipt=submitted.input;
+    if(handoffAnswer){const result=await host.supervisor.handleHandoffAnswer({workspaceId,sessionId,answerTo,text}) as unknown as {error?:string};if(result?.error)return {ok:false,error:result.error,inputReceived:true};}
     return {ok:true,inputId:receipt.inputId};
   }
   if(!host.holdsLease(workspaceId))return {ok:false,error:'desktop_approval_required'};
-  if(action.channel==='project-agent:decide-approval')return client.decide(payload.approvalId,payload.decision==='approve'?'approve':'deny',payload.duration==='task'?'task':'once');
+  if(action.channel==='project-agent:decide-approval')return client.decide(payload.approvalId,payload.decision==='approve'?'approve':payload.decision==='cancel'?'cancel':'deny',payload.duration==='task'?'task':'once');
   if(action.channel==='project-agent:confirm-result'){
     const session=host.supervisor.get({sessionId:payload.sessionId}) as any;
     if(session?.workspaceId!==workspaceId)return {ok:false,error:'workspace_mismatch'};

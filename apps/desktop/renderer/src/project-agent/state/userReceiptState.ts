@@ -10,6 +10,7 @@ export function userReceipt(
   const responded = replied || message.dispositions.some(item => item.kind === 'answered');
   if (message.pending === 'sending') return { labelKey: 'projectAgent.chat.sending', taskMarks };
   if (message.pending === 'received') return { labelKey: 'projectAgent.chat.received', taskMarks };
+  if (message.pending === 'unknown') return { labelKey: 'projectAgent.chat.inputUnconfirmed', retryInputId: message.inputId, taskMarks };
   if (message.pending === 'failed') return { labelKey: 'projectAgent.chat.failed', retryInputId: message.inputId, taskMarks };
   if (responded) return { labelKey: 'projectAgent.chat.replied', taskMarks };
   return { labelKey: message.inputId && !taskMarks.length ? 'projectAgent.chat.received' : null, taskMarks };

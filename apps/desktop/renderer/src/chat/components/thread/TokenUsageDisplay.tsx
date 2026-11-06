@@ -15,7 +15,7 @@ import {
 } from '../../../app/components/llmModelConfiguration';
 import { type EffortLevel } from '../../state/preferences';
 import { formatTokenCount } from '../../state/format';
-import { ComposerModelMenu } from './ModelSelectionPanel';
+import { ComposerModelMenu } from './ComposerModelMenu';
 import type { TokenUsageState } from '../../state/types';
 import { ContextUsagePanel } from './ContextUsagePanel';
 import { contextDisplayScopeKey, resolveStickyContextDisplay } from './stickyContextDisplay';

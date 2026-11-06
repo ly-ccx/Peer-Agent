@@ -1,9 +1,14 @@
+import { MotionDetails } from '../../app/components/MotionDetails';
 import type { I18nRuntime } from '@peer-agent/i18n';
+import type { ReactNode } from 'react';
 import type { BotModelViews, BotProfile, ModelRole, ModelRoutingMenuOption, ProjectModelPolicy } from '@peer-agent/protocol';
 import { SettingsGroup } from '../../ui/settings/SettingsGroup';
 import { BotModelControls } from '../BotModelControls';
+import type { BotModelsControlState } from '../state/useBotModels';
 import { Dropdown } from '../../app/components/Dropdown';
 import { Switch } from '../../ui/boolean-controls/Switch';
+import { ModelPicker } from '../../ui/model-picker/ModelPicker';
+import { selectionGroupsFromRoutingModels } from '../../ui/model-picker/modelSelection';
 import { PeerIcon } from '../../ui/icons/PeerIcon';
 
 // Compaction currently uses the active conversation provider, without this role routing seam.
@@ -11,7 +16,7 @@ const ROLES: readonly ModelRole[] = ['project_agent', 'session_worker', 'verifie
 type Patch = Pick<BotProfile, 'planApproval' | 'acceptancePolicy' | 'modelPolicy'>;
 type PolicyProps = {
   profile: BotProfile; busy: boolean; i18n: I18nRuntime;
-  onChange: (patch: Patch) => void | Promise<void>;
+  onChange: (patch: Patch) => void | Promise<unknown>;
 };
 
 export function BotApprovalFields({ profile, busy, i18n, onChange }: PolicyProps) {
@@ -34,22 +39,29 @@ export function BotApprovalFields({ profile, busy, i18n, onChange }: PolicyProps
 }
 
 /** Controlled project policy form. All writes and validation belong to update-profile. */
-export function BotPolicyFields({ profile, models, views, busy, i18n, onChange }: PolicyProps & {
+export function BotPolicyFields({ profile, models, views, busy, feedback, modelFeedback, i18n, onChange }: PolicyProps & {
   models: readonly ModelRoutingMenuOption[];
   views: BotModelViews;
+  feedback?: ReactNode;
+  modelFeedback?: BotModelsControlState;
 }) {
   const policy = profile.modelPolicy || {};
   const scopeIds = policy.scope?.modelProviderIds;
+  // Editing membership remains possible for offline models; only removing the final member is locked.
+  const scopeGroups = selectionGroupsFromRoutingModels(models, i18n.locale.startsWith('zh')).map(group => {
+    const choices = group.models.map(model => ({ ...model, disabled: scopeIds?.length === 1 && scopeIds.includes(model.id) }));
+    return { ...group, models: choices, disabled: choices.every(model => model.disabled) };
+  });
   function setPolicy(next: ProjectModelPolicy) { return onChange({ modelPolicy: next }); }
   const roleLabel = (role: ModelRole) => i18n.t(role === 'project_agent' ? 'projectAgent.drawer.model' : `modelRouting.role.${role}`);
   const roleField = (role: ModelRole) => <div className="bot-settings-row bot-model-settings-row" key={role}>
     <span>{roleLabel(role)}</span>
-    <BotModelControls role={role} policy={policy} models={models} view={views[role]} busy={busy} i18n={i18n}
+    <BotModelControls role={role} policy={policy} models={models} view={views[role]} busy={busy} feedback={modelFeedback} i18n={i18n}
       onChange={setPolicy} />
   </div>;
   return <SettingsGroup className="bot-settings-section bot-policy-fields" title={i18n.t('projectAgent.policy.models')} description={i18n.t('projectAgent.policy.modelsHint')}>
     {ROLES.slice(0, 3).map(roleField)}
-    <details className="bot-settings-disclosure bot-model-advanced">
+    <MotionDetails className="bot-settings-disclosure bot-model-advanced">
       <summary>{i18n.t('projectAgent.drawer.settings.advancedModels')}<PeerIcon name="chevronDown" size={14} /></summary>
       <div className="bot-settings-disclosure-body">
         {ROLES.slice(3).map(roleField)}
@@ -65,12 +77,20 @@ export function BotPolicyFields({ profile, models, views, busy, i18n, onChange }
               setPolicy({ ...policy, scope });
             }} />
         </div>
-        {scopeIds ? <div className="bot-policy-models" role="group" aria-label={i18n.t('projectAgent.policy.scope')}>
-          {models.map(model => <button key={model.id} type="button" aria-pressed={scopeIds.includes(model.id)}
-            disabled={busy || scopeIds.length === 1 && scopeIds.includes(model.id)}
-            onClick={() => setPolicy({ ...policy, scope: { ...policy.scope, modelProviderIds: scopeIds.includes(model.id) ? scopeIds.filter(id => id !== model.id) : [...scopeIds, model.id] } })}>
-            {model.label}
-          </button>)}
+        {scopeIds ? <div className="bot-settings-row">
+          <span>{i18n.t('projectAgent.policy.scope.restricted')}</span>
+          <ModelPicker variant="field" selectedModelIds={scopeIds}
+            groups={scopeGroups}
+            emptyLabel={i18n.locale.startsWith('zh') ? '至少保留一个模型。' : 'Keep at least one model.'}
+            selectionDisabled={busy} busy={busy} isZh={i18n.locale.startsWith('zh')}
+            label={scopeIds.map(id => models.find(model => model.id === id)?.label
+              ?? i18n.t('projectAgent.model.unavailable')).join(' / ')}
+            ariaLabel={i18n.t('projectAgent.policy.scope')}
+            onSelectModel={id => {
+              if (busy || scopeIds.length === 1 && scopeIds.includes(id)) return;
+              return setPolicy({ ...policy, scope: { ...policy.scope,
+                modelProviderIds: scopeIds.includes(id) ? scopeIds.filter(value => value !== id) : [...scopeIds, id] } });
+            }} />
         </div> : null}
         <div className="bot-settings-row bot-settings-toggle-row">
           <label htmlFor="bot-local-models">{i18n.t('projectAgent.policy.localOnly')}</label>
@@ -78,6 +98,7 @@ export function BotPolicyFields({ profile, models, views, busy, i18n, onChange }
             onCheckedChange={value => setPolicy({ ...policy, scope: { ...policy.scope, localOnly: value } })} />
         </div>
       </div>
-    </details>
+    </MotionDetails>
+    {feedback}
   </SettingsGroup>;
 }

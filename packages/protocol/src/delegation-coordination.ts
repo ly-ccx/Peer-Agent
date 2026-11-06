@@ -1,8 +1,13 @@
 /** Coordination authority is issued by the local host, never by model arguments. */
-export type CoordinationAction = 'parallel' | 'augment' | 'revise' | 'query' | 'answer' | 'cancel' | 'replace' | 'handoff';
+export type { ReplyDeliveryReceipt, IntentReplyBinding, ReplyGoalScope } from './reply-delivery.ts';
+export type { InputDispositionKind, InputDisposition, IntentRequirement, IntentInterpretation, GoalCoverageItem,
+  WorkDisposition, IntentAssessment, IntentCoordination, IntentClosureRequest, IntentDecisionReceipt,
+  IntentCoordinationRequest, CoordinationDecisionFrame, ProgressObservation } from './intent-coordination.ts';
+export type CoordinationAction = 'parallel' | 'augment' | 'revise' | 'query' | 'answer' | 'cancel' | 'replace' | 'handoff' | 'resume';
 export type CoordinationLifecycle = 'active' | 'paused' | 'cancelled' | 'fulfilled';
 export interface CoordinationMandate {
   schemaVersion: 1;
+  intentSchemaVersion?: 1;
   mandateId: string;
   workId: string;
   workspaceId: string;
@@ -25,6 +30,7 @@ export interface CoordinationDecision {
   expectedRevision: number;
   action: CoordinationAction;
   sourceInputIds: string[];
+  sourceDecisionRef?: string;
   sourceEventIds: string[];
   sessionId?: string;
   reason: string;
@@ -47,7 +53,12 @@ export interface TaskTransition {
   replacementSessionId?: string;
   executionEpoch: string;
   phase: TaskTransitionPhase;
-  minimumExecutorVersion: 1;
+  minimumExecutorVersion: 1 | 2 | 3;
+  executionAdmission?: 'queued' | 'admitted' | 'rejected';
+  executionEffect?: 'pending' | 'applied' | 'unknown' | 'rejected';
+  executionAttemptRef?: string;
+  reconciliationRef?: string;
+  controlOperationRef?: string;
   updatedAt: string;
 }
 export interface CoordinationExecutionBinding {
@@ -59,6 +70,9 @@ export interface CoordinationExecutionBinding {
 
 /** Factual view of a durable operation; completed means disposition applied, not task success. */
 export interface CoordinationSessionFacts {
+  readonly executionAdmission?: TaskTransition['executionAdmission'];
+  readonly executionEffect?: TaskTransition['executionEffect'];
+  readonly executionAttemptRef?: string;
   readonly operationId: string;
   readonly action: CoordinationAction;
   readonly phase: TaskTransitionPhase;

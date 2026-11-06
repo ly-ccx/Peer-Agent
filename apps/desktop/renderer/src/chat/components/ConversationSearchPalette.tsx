@@ -1,3 +1,4 @@
+import { isImeKey } from '../state/compositionGuard';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { Overlay } from '../../app/components/Overlay';
@@ -324,6 +325,7 @@ export function ConversationSearchPalette({
         <div
           className="conversation-search"
           onKeyDown={(event) => {
+            if (event.defaultPrevented || isImeKey(event.nativeEvent)) return;
             if (event.key === 'Escape') {
               event.preventDefault();
               event.stopPropagation();

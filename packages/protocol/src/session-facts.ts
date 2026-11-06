@@ -29,7 +29,10 @@ export function deriveSessionFacts(input: {
   blockedReason?: string;
   verificationActive?: boolean;
   interrupted?: boolean;
+  interruptionOrigin?: LifecycleFacts['interruptionOrigin'];
+  delegated?: boolean;
   cancellationPhase?: string;
+  cancellationDisposition?: LifecycleFacts['cancellationDisposition'];
   takeoverPhase?: string;
   executionOwnership?: ExecutionOwnership;
 }): SessionFactSnapshot {
@@ -49,7 +52,10 @@ export function deriveSessionFacts(input: {
     ...(input.blockedReason ? { blockedReason: input.blockedReason } : {}),
     ...(input.verificationActive !== undefined ? { verificationActive: input.verificationActive } : {}),
     ...(input.interrupted !== undefined ? { interrupted: input.interrupted } : {}),
+    ...(input.interruptionOrigin ? { interruptionOrigin: input.interruptionOrigin } : {}),
+    ...(input.delegated !== undefined ? { delegated: input.delegated } : {}),
     ...(input.cancellationPhase ? { cancellationPhase: input.cancellationPhase } : {}),
+    ...(input.cancellationDisposition ? { cancellationDisposition: input.cancellationDisposition } : {}),
     ...(input.takeoverPhase ? { takeoverPhase: input.takeoverPhase } : {}),
   });
   return {

@@ -1,10 +1,13 @@
+import { openWorkPanel } from './bot-work-panel-checks.mjs';
+import { openReplyDetails, closeReplyDetails, scrollToBotMessage } from './bot-reply-details-checks.mjs';
+import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { createConversationStore } from '@peer-agent/conversation-store';
 
 /** Only disposable fixture history is written; production readers and continuation remain real. */
-export function seedHistoryFixtures({ home }) {
+export function seedHistoryFixtures({ home, now = new Date() }) {
   assert.equal(JSON.parse(readFileSync(path.join(home, 'rc-fixture.json'), 'utf8')).fixture, true);
   const store = createConversationStore({ storeDir: path.join(home, 'conversations') });
   const titles = ['提交引用改动', '本机公证试包', '诊断继续按钮反复失败', '调整模型与推理强度',
@@ -14,14 +17,23 @@ export function seedHistoryFixtures({ home }) {
     const meta = store.createConversation({ title: titles[index] ?? `历史讨论 ${index + 1}`, mode: 'chat' });
     store.appendMessage(meta.id, { id: `history-user-${index}`, role: 'user', content: '请保留之前的讨论，继续完善交互细节。' });
     store.appendMessage(meta.id, { id: `history-assistant-${index}`, role: 'assistant', content: '**下一步**\n\n先核对原有交互，再根据实机表现调整。这是隔离测试的历史预览。' });
-    const date = new Date(); date.setDate(date.getDate() - (index < 2 ? 0 : index < 4 ? 1 : index < 12 ? 3 : 10)); date.setHours(14, 58 - index, 0, 0);
-    return { ...meta, updatedAt: date.toISOString() };
+    return meta;
+  });
+  return refreshHistoryFixtureDates({ home, rows, now });
+}
+
+/** Calendar groups are relative to scenario entry, even if the full run crossed midnight. */
+export function refreshHistoryFixtureDates({ home, rows, now = new Date() }) {
+  assert.equal(JSON.parse(readFileSync(path.join(home, 'rc-fixture.json'), 'utf8')).fixture, true);
+  const dated = rows.map((row, index) => {
+    const date = new Date(now); date.setDate(date.getDate() - (index < 2 ? 0 : index < 4 ? 1 : index < 12 ? 3 : 10)); date.setHours(14, 58 - index, 0, 0);
+    return { ...row, updatedAt: date.toISOString() };
   });
   const file = path.join(home, 'conversations', 'index.jsonl');
-  const fixtures = new Map(rows.map(row => [row.id, row]));
+  const fixtures = new Map(dated.map(row => [row.id, row]));
   const index = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
   writeFileSync(file, index.map(row => JSON.stringify({ ...row, ...(fixtures.has(row.id) ? { updatedAt: fixtures.get(row.id).updatedAt } : {}) })).join('\n') + '\n');
-  return rows;
+  return dated;
 }
 
 export function instrumentHistoryReads(source) {
@@ -36,7 +48,7 @@ export function instrumentHistoryReads(source) {
 export async function checkBotHistoryMotion({ page, until, report, captureDirectory, commandFile, fixtureRows, workspaceId, home }) {
   const checks = report.historyMotion = [];
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  if (await page.locator('.bot-drawer-body').isVisible()) await page.getByRole('button', { name: '关闭', exact: true }).click();
+  if (await page.locator(BOT_DETAIL_SURFACE).count()) await page.locator(BOT_DETAIL_CLOSE).click();
   const initial = JSON.parse(readFileSync(commandFile, 'utf8')); let seq = initial.seq;
   const changeHistory = async mode => {
     writeFileSync(commandFile + '.next', JSON.stringify({ ...initial, seq: ++seq, historyReadMode: mode }));
@@ -54,6 +66,7 @@ export async function checkBotHistoryMotion({ page, until, report, captureDirect
     await page.locator('.bot-history-sheet .bot-sheet-close').click();
     await page.locator('.bot-history-sheet').waitFor({ state: 'detached' });
   };
+  refreshHistoryFixtureDates({ home, rows: fixtureRows });
   await changeHistory('normal'); await openHistory();
   const sheet = page.locator('.bot-history-sheet'); const search = sheet.getByRole('searchbox');
   await until(() => sheet.locator('.bot-history-row').count(), count => count === 40);
@@ -115,17 +128,14 @@ export async function checkBotHistoryMotion({ page, until, report, captureDirect
   checks.push('light/dark and 390px large type fit; transient read failure can retry, true empty stays distinct, close/Escape restore the app-menu focus');
 
   await page.evaluate(({ theme, palette }) => { document.documentElement.dataset.theme = theme; document.documentElement.dataset.palette = palette; }, { theme, palette });
-  const background = page.locator('.bot-background-work');
-  await background.waitFor();
-  assert.equal(await background.locator(':scope > summary > svg:last-child').count(), 1);
-  assert.equal(await background.locator(':scope > summary').evaluate(node => getComputedStyle(node, '::after').content), 'none');
+  await openWorkPanel(page);
+  const panelToggle = page.locator('.bot-work-panel-toggle');
   const samples = report.disclosureFrames = {};
   const cast = await page.context().newCDPSession(page);
   const frameDir = path.join(captureDirectory, 'disclosure-cast'); mkdirSync(frameDir);
   let frameIndex = 0;
   const frameTimes = [];
-  const box = await background.boundingBox();
-  report.disclosureCaptureRect = { x: Math.max(0, box.x - 8), y: Math.max(0, box.y - 190), width: box.width + 16, height: box.height + 206 };
+  report.disclosureCaptureRect = await page.evaluate(() => ({ x: 0, y: 0, width: innerWidth, height: innerHeight }));
   cast.on('Page.screencastFrame', frame => {
     const file = `${String(frameIndex++).padStart(4, '0')}.png`;
     writeFileSync(path.join(frameDir, file), Buffer.from(frame.data, 'base64'));
@@ -133,25 +143,30 @@ export async function checkBotHistoryMotion({ page, until, report, captureDirect
     void cast.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {});
   });
   await cast.send('Page.startScreencast', { format: 'png', everyNthFrame: 2 });
-  await recordDisclosure(background, true, false, capture => { samples.outerOpen = capture; });
-  const work = background.locator('.bot-work-row').first();
-  await recordDisclosure(work, true, false, capture => { samples.innerOpen = capture; });
-  await recordDisclosure(work, false, false, capture => { samples.innerClose = capture; });
+  samples.panelClose = await recordPanelMotion(page, panelToggle, false);
+  samples.panelOpen = await recordPanelMotion(page, panelToggle, true);
+  await recordPanelMotion(page, panelToggle, false);
+  samples.panelReverse = await recordPanelMotion(page, panelToggle, true, true);
+  const workReply = page.locator('#bot-msg-rc-message-9999');
+  await scrollToBotMessage(page, workReply); await openReplyDetails(page, workReply);
+  const work = page.locator(BOT_DETAIL_SURFACE).locator('.bot-work-row').first();
+  await recordDisclosure(work, true, false, capture => { samples.taskOpen = capture; });
+  await recordDisclosure(work, false, false, capture => { samples.taskClose = capture; });
   await work.locator(':scope > summary').focus(); await page.keyboard.press('Tab');
   assert.equal(await work.locator('.bot-work-detail').evaluate(node => node.contains(document.activeElement)), false);
-  await recordDisclosure(background, false, false, capture => { samples.outerClose = capture; });
-  await recordDisclosure(background, true, true, capture => { samples.reverse = capture; });
+  await recordDisclosure(work, true, true, capture => { samples.taskReverse = capture; });
   await cast.send('Page.stopScreencast'); await cast.detach();
   report.disclosureCastFrames = frameIndex;
   writeFileSync(path.join(frameDir, 'timeline.json'), JSON.stringify(frameTimes));
-  assert.equal(await background.getAttribute('open'), null);
+  assert.equal(await work.getAttribute('open'), null);
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await background.locator(':scope > summary').focus(); await page.keyboard.press('Enter');
-  assert.equal(await background.getAttribute('open'), '');
-  assert.equal(await background.evaluate(node => getComputedStyle(node, '::details-content').transitionDuration), '0s');
-  await page.keyboard.press('Enter'); assert.equal(await background.getAttribute('open'), null);
+  await work.locator(':scope > summary').focus(); await page.keyboard.press('Enter');
+  assert.equal(await work.getAttribute('open'), '');
+  assert.equal(await work.evaluate(node => getComputedStyle(node, '::details-content').transitionDuration), '0s');
+  await page.keyboard.press('Enter'); assert.equal(await work.getAttribute('open'), null);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  checks.push('outer and inner task details interpolate opening and closing through real height frames, rotate SVG, reverse without jumps and exclude closed actions from Tab; reduced motion switches directly');
+  checks.push('work panel has real intermediate opacity frames and interruptible reversal; task disclosure has intermediate height, SVG and closed Tab behavior; reduced motion switches directly');
+  await closeReplyDetails(page);
 
   await openHistory(); await search.fill('引用'); await sheet.locator('.bot-history-row').click();
   await until(() => sheet.locator('.bot-history-line').count(), count => count === 2);
@@ -162,7 +177,7 @@ export async function checkBotHistoryMotion({ page, until, report, captureDirect
   const readInputs = () => existsSync(inputFile)
     ? readFileSync(inputFile, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
   const beforeInputs = readInputs().filter(input => input.historyRef === historyId).length;
-  const original = await page.evaluate(id => window.peerAgent.conversationsGet({ id }), historyId);
+  const original = await page.evaluate(id => window.peerAgent.conversationsGet({ id, full: true }), historyId);
   await sheet.getByRole('button', { name: '交给这个机器人继续', exact: true }).click();
   await until(async () => ({ confirmation: await sheet.locator('.bot-history-confirm').count(), shown: await sheet.count() }), state => state.confirmation === 1 || state.shown === 0);
   if (await sheet.count()) await sheet.getByRole('button', { name: '仍然继续', exact: true }).click();
@@ -170,20 +185,27 @@ export async function checkBotHistoryMotion({ page, until, report, captureDirect
   const inputs = await until(() => readInputs().filter(input => input.historyRef === historyId), rows => rows.length === beforeInputs + 1);
   const input = inputs.at(-1); assert.equal(input.workspaceId, workspaceId); assert.ok(input.historySnapshotId);
   await until(() => page.evaluate(workspaceId => window.peerAgent.projectAgentReadConversation({ workspaceId, latest: true }), workspaceId), result => result.messages.some(message => message.id === `input-${input.inputId}`));
-  const retained = await page.evaluate(id => window.peerAgent.conversationsGet({ id }), historyId);
-  assert.deepEqual(retained.messages, original.messages);
-  assert.equal(retained.contentRevision, original.contentRevision);
+  const retained = await page.evaluate(id => window.peerAgent.conversationsGet({ id, full: true }), historyId);
+  assert.deepEqual(retained.window, original.window);
+  assert.equal(retained.meta.contentRevision, original.meta.contentRevision);
   checks.push('preview bot picker uses SVG and the existing continuation IPC persists a canonical historical input in the selected bot; background confirmation remains governed');
   report.historyRegression = { grouping: true, search: true, preview: true, keyboard: true,
     errorRecovery: true, continuation: true, animations: true, reducedMotion: true };
 }
 
 async function recordDisclosure(locator, open, reverse = false, observed) {
-  // Finish the previous finite disclosure transition before starting a new
-  // measurement. The recording keeps all original continuity assertions.
-  await locator.evaluate(node => Promise.all(node.getAnimations({ subtree: true })
-    .filter(animation => animation instanceof CSSTransition && ['height', 'opacity', 'content-visibility'].includes(animation.transitionProperty))
-    .map(animation => animation.finished.catch(() => {}))));
+  // Earlier scenarios can leave this same task open. Start from the opposite
+  // state so this capture measures the requested action rather than toggling it away.
+  const summary = locator.locator(':scope > summary');
+  if (await locator.evaluate(node => node.open) === open) await summary.click({ force: true });
+  await locator.evaluate(async node => {
+    const deadline = performance.now() + 5000;
+    while (node.getAnimations({ subtree: true }).some(animation => animation instanceof CSSTransition
+      && ['height', 'opacity', 'content-visibility'].includes(animation.transitionProperty) && animation.playState === 'running')) {
+      if (performance.now() >= deadline) throw new Error('disclosure transition did not settle');
+      await new Promise(resolve => requestAnimationFrame(resolve));
+    }
+  });
   const expectedClicks = reverse ? 2 : 1;
   // Install before input, then sample a complete interval after the last real click.
   // Remote Playwright dispatch time must not consume the closing observation window.
@@ -208,7 +230,7 @@ async function recordDisclosure(locator, open, reverse = false, observed) {
       summary.addEventListener('click', mark); raf = requestAnimationFrame(frame);
     });
   }, expectedClicks);
-  const summary = locator.locator(':scope > summary'); await summary.click({ force: true });
+  await summary.click({ force: true });
   if (reverse) { await new Promise(resolve => setTimeout(resolve, 85)); await summary.click({ force: true }); }
   const capture = await locator.evaluate(node => node.__rcDisclosureCapture);
   await locator.evaluate(node => { delete node.__rcDisclosureCapture; });
@@ -223,4 +245,34 @@ async function recordDisclosure(locator, open, reverse = false, observed) {
   assert.equal(samples.at(-1).open, reverse ? false : open);
   if (!open || reverse) assert.equal(samples.at(-1).visibility, 'hidden');
   return samples;
+}
+
+
+async function recordPanelMotion(page, toggle, open, reverse = false) {
+  await page.waitForFunction(() => document.querySelector('.bot-work-layout').getAnimations({ subtree: true }).every(a =>
+    a.playState !== 'running' || !Number.isFinite(a.effect?.getComputedTiming().endTime)), null, { timeout: 5000 });
+  await toggle.evaluate((button, expectedClicks) => {
+    button.__rcPanelCapture = new Promise(resolve => {
+      const samples = [], panel = document.querySelector('.bot-work-panel');
+      let clicks = 0, lastClick = null, raf;
+      const mark = () => { clicks++; lastClick = performance.now(); };
+      const finish = timedOut => { clearTimeout(deadline); cancelAnimationFrame(raf); button.removeEventListener('click', mark); resolve({ samples, clicks, timedOut }); };
+      const deadline = setTimeout(() => finish(true), 6000);
+      const frame = now => {
+        samples.push({ opacity: Number(getComputedStyle(panel).opacity), open: panel.dataset.motionOpen === 'true', inert: panel.inert });
+        if (clicks >= expectedClicks && now - lastClick >= 480) finish(false);
+        else raf = requestAnimationFrame(frame);
+      };
+      button.addEventListener('click', mark); raf = requestAnimationFrame(frame);
+    });
+  }, reverse ? 2 : 1);
+  await toggle.click();
+  if (reverse) { await new Promise(resolve => setTimeout(resolve, 85)); await toggle.click(); }
+  const capture = await toggle.evaluate(button => button.__rcPanelCapture);
+  await toggle.evaluate(button => { delete button.__rcPanelCapture; });
+  assert.equal(capture.timedOut, false); assert.equal(capture.clicks, reverse ? 2 : 1);
+  assert.ok(capture.samples.some(row => row.opacity > 0 && row.opacity < 1), 'work panel has actual intermediate frames');
+  assert.equal(capture.samples.at(-1).open, reverse ? false : open);
+  assert.equal(capture.samples.at(-1).inert, reverse || !open);
+  return capture;
 }

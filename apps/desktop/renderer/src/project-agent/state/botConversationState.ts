@@ -6,7 +6,7 @@
  */
 import type { TranslationKey } from '@peer-agent/i18n';
 import type { ChatAttachment } from '../../chat/state/types';
-import type { ProjectInputAttachment } from '@peer-agent/protocol';
+import { normalizeResourceFeedbackList, projectResourceFeedbackTransport, type ResourceFeedback, type ProjectInputAttachment } from '@peer-agent/protocol';
 import {
   dispositionEventsFromToolCalls,
   WORK_SESSION_STATUSES,
@@ -23,7 +23,7 @@ import {
   type ProjectReplyRecoveryAction,
 } from '@peer-agent/protocol';
 
-import { coalesceAgentActivity, readAgentActivity } from './agentActivityState.ts';
+import { coalesceAgentActivity, readAgentActivity, agentActivityPresentationId } from './agentActivityState.ts';
 import { readReplyRecoveryAction } from './replyRecoveryState.ts';
 
 export const CONVERSATION_PAGE_SIZE = 50;
@@ -50,7 +50,7 @@ export interface BotChatCard {
   readonly completionReview?: import('@peer-agent/protocol').SessionCompletionReview;
   readonly resolvedState?: 'open' | 'resolved';
   readonly actions?: readonly BotChatCardAction[];
-  readonly refs?: { readonly sessionId?: string; readonly capabilityId?: string; readonly decisionReason?: string; readonly deadlineAt?: string };
+  readonly refs?: { readonly approvalId?: string; readonly sessionId?: string; readonly capabilityId?: string; readonly decisionReason?: string; readonly deadlineAt?: string };
   readonly resolution?: { readonly state: string };
   readonly recovery?: ProjectWorkRecovery;
   readonly recoveryWorkState?: ProjectWorkState;
@@ -93,6 +93,7 @@ export interface BotDispositionMark {
 }
 
 export interface BotChatMessage {
+  readonly resourceReferences?: readonly import('@peer-agent/protocol').BotResourceReferenceHint[];
   readonly agentActivity?: import('@peer-agent/protocol').AgentActivity;
   readonly id: string;
   readonly kind: string;
@@ -115,18 +116,21 @@ export interface BotChatMessage {
   readonly cards: readonly BotChatCard[];
   readonly quoteRefs: readonly string[];
   readonly separatorLabel: string;
-  readonly pending?: 'sending' | 'received' | 'failed';
+  readonly pending?: 'sending' | 'received' | 'failed' | 'unknown';
   readonly attachments?: readonly ChatAttachment[];
+  readonly resourceFeedback?: readonly ResourceFeedback[];
+  readonly resourceFeedbackInvalid?: boolean;
   readonly images?: readonly { readonly id: string; readonly name: string; readonly dataUrl: string }[];
 }
 
 export interface PendingBotInput {
+  readonly resourceFeedback?: readonly ResourceFeedback[];
   readonly attachments?: readonly ProjectInputAttachment[];
   readonly inputId: string;
   readonly text: string;
   readonly quoteRefs: readonly string[];
   readonly createdAt: string;
-  readonly state: 'sending' | 'received' | 'failed';
+  readonly state: 'sending' | 'received' | 'failed' | 'unknown';
   readonly answerTo?: string;
 }
 
@@ -156,8 +160,9 @@ export function normalizeBotMessage(raw: Readonly<Record<string, unknown>> | nul
   const kind = explicitKind || (role === 'user' ? 'user_input' : '');
   const agentActivity = readAgentActivity(raw.agentActivity);
   if (kind === 'agent_activity' && agentActivity && ['verifying', 'verified'].includes(agentActivity.state)) return null;
-  const cards = readCards(raw.cards);
+  const cards = readBotCards(raw.cards);
   if (kind === 'system_card' && cards.length && cards.every(card => card.kind === 'verdict')) return null;
+  const material = projectResourceFeedbackTransport(raw.resourceFeedback, raw.attachments);
   const meta = readMeta(raw.meta);
   const replyTo = readStringList(raw.replyTo).length > 0 ? readStringList(raw.replyTo) : (meta.replyTo ?? []);
   const sources = readStringList(raw.sources).length > 0 ? readStringList(raw.sources) : (meta.sources ?? []);
@@ -178,14 +183,18 @@ export function normalizeBotMessage(raw: Readonly<Record<string, unknown>> | nul
     marks: readMarks(raw.marks),
     dispositions: [],
     rounds: readRounds(raw.rounds),
+    ...(Array.isArray(raw.resourceReferences) ? { resourceReferences: raw.resourceReferences.filter(item => item && typeof item.path === 'string'
+      && item.path.length < 8192 && ['read_file', 'write_file', 'edit_file'].includes(item.tool)).slice(0, 256) } : {}),
     ...(Array.isArray(raw.dispositionCalls) ? { dispositionCalls: readRounds([{ toolCalls: raw.dispositionCalls }])[0]?.toolCalls ?? [] } : {}),
     meta,
     proactive: raw.proactive === true || meta.surfacing === 'digest',
     cards: cards.filter(card => card.kind !== 'verdict'),
     quoteRefs: readStringList(raw.quoteRefs),
     separatorLabel: readString(raw.separatorLabel) || meta.separatorLabel || '',
-    ...imageField(raw.attachments),
-    attachments: readAttachments(raw.attachments),
+    ...imageField(material.attachments),
+    attachments: readAttachments(material.attachments),
+    ...(raw.resourceFeedback !== undefined || material.resourceFeedback.length || material.invalid
+      ? { resourceFeedback: material.resourceFeedback, resourceFeedbackInvalid: material.invalid } : {}),
   };
 }
 
@@ -285,6 +294,7 @@ export function applyOptimistic(
       separatorLabel: '',
       pending: item.state,
       attachments: item.attachments,
+      ...(item.resourceFeedback ? { resourceFeedback: normalizeResourceFeedbackList(item.resourceFeedback) ?? [] } : {}),
       ...imageField(item.attachments),
     }));
   return [...messages, ...extras];
@@ -490,7 +500,8 @@ export function windowConversationRows<T>(
 
 /** Prepending history must preserve the identity of the current reading window. */
 export function conversationWindowAnchor(previous: readonly ConversationRow[], next: readonly ConversationRow[], index: number): number {
-  const idOf = (row: ConversationRow) => row.type === 'message' ? row.message.id : row.id;
+  const idOf = (row: ConversationRow) => row.type === 'message'
+    ? row.message.kind === 'agent_activity' && row.message.agentActivity ? agentActivityPresentationId(row.message.agentActivity) : row.message.id : row.id;
   const old = previous[index];
   const found = old ? next.findIndex(row => idOf(row) === idOf(old)) : -1;
   return found >= 0 ? found : Math.max(0, Math.min(index, next.length - 1));
@@ -537,7 +548,7 @@ export function showAgentThinking(
   pending: readonly PendingBotInput[],
   awaitingReply: boolean,
 ): boolean {
-  if (pending.some((item) => item.state === 'sending' || item.state === 'failed')) return false;
+  if (pending.some((item) => item.state === 'sending' || item.state === 'failed' || item.state === 'unknown')) return false;
   return awaitingReply;
 }
 
@@ -600,7 +611,7 @@ function readMarks(value: unknown): BotChatMark[] {
   return marks;
 }
 
-function readCards(value: unknown): BotChatCard[] {
+export function readBotCards(value: unknown): BotChatCard[] {
   if (!Array.isArray(value)) return [];
   const cards: BotChatCard[] = [];
   for (const item of value) {
@@ -623,6 +634,7 @@ function readCards(value: unknown): BotChatCard[] {
       ...(readReplyRecoveryAction(record.recoveryAction) ? { recoveryAction: readReplyRecoveryAction(record.recoveryAction)! } : {}),
       actions: readActions(record.actions),
       ...(record.refs && typeof record.refs === 'object' ? { refs: {
+        ...(readString((record.refs as Record<string, unknown>).approvalId) ? { approvalId: readString((record.refs as Record<string, unknown>).approvalId) } : {}),
         sessionId: readString((record.refs as Record<string, unknown>).sessionId),
         capabilityId: readString((record.refs as Record<string, unknown>).capabilityId),
         decisionReason: readString((record.refs as Record<string, unknown>).decisionReason),

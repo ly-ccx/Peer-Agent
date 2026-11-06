@@ -163,3 +163,27 @@ test('returns an already registered target without waiting', async () => {
   const entry = await waitForActiveBrowserEntry('conversation-a', { timeoutMs: 100 });
   assert.equal(entry?.webContentsId, 11);
 });
+
+test('background metadata cannot reclaim a native active target, and another guest cannot replace its identity', () => {
+  registerBrowserWebContents({ webContentsId: 11, conversationId: 'c', browserTabId: 'source', active: true });
+  const native = { webContentsId: 12, conversationId: 'c', browserTabId: 'copy', active: true, surface: 'native', windowId: 'w', generation: 'g' };
+  registerBrowserWebContents(native);
+  registerBrowserWebContents({ webContentsId: 11, conversationId: 'c', browserTabId: 'source', active: true, metadataOnly: true });
+  assert.equal(getActiveWebContentsId('c'), 12);
+  assert.equal(registerBrowserWebContents({ ...native, generation: 'old' }).ok, false);
+  assert.equal(registerBrowserWebContents({ ...native, surface: undefined }).ok, false);
+  assert.equal(getActiveWebContentsId('c'), 12);
+  registerBrowserWebContents({ webContentsId: 11, conversationId: 'c', browserTabId: 'source', active: true });
+  assert.equal(getActiveWebContentsId('c'), 11);
+});
+
+test('native crash tombstone blocks implicit replacement and is retired by a new explicit selection', () => {
+  const native = { webContentsId: 12, conversationId: 'c', browserTabId: 'copy', active: true, surface: 'native', windowId: 'w', generation: 'g', available: false };
+  registerBrowserWebContents(native);
+  assert.equal(getActiveBrowserEntry('c').available, false);
+  registerBrowserWebContents({ webContentsId: 11, conversationId: 'c', browserTabId: 'source', active: true, metadataOnly: true });
+  assert.equal(getActiveBrowserEntry('c').browserTabId, 'copy');
+  registerBrowserWebContents({ webContentsId: 11, conversationId: 'c', browserTabId: 'source', active: true });
+  assert.equal(getActiveBrowserEntry('c').browserTabId, 'source');
+  assert.equal(unregisterBrowserWebContents({ webContentsId: 12, conversationId: 'c', browserTabId: 'copy' }).cleared, false);
+});

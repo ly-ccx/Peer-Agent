@@ -70,7 +70,7 @@ export interface CreateNodeProviderBundleOptions {
   readonly requestCapabilityApproval?: NodeCapabilityApprovalPort;
   readonly hookRunner?: RuntimeSdkHookRunner | null;
   /** Recheck local host authority after asynchronous hooks, immediately before dispatch. */
-  readonly executionGate?: (call: { readonly capabilityId: string }) => string | null;
+  readonly executionGate?: (call: { readonly capabilityId: string }, scopes?: readonly import('@peer-agent/protocol').ExecutionResourceScope[]) => string | null;
   readonly now?: () => string;
   readonly idFactory?: () => string;
   readonly mode?: string;

@@ -36,12 +36,13 @@ describe('historical message editing', () => {
   it('clears historical interrupted markers when conversation continues', () => {
     const history: ChatMsg[] = [
       message('u1', 'user', 'first'),
-      { ...message('a1', 'assistant', 'partial'), interrupted: true },
+      { ...message('a1', 'assistant', 'partial'), interrupted: true, streamFailure: { code: 'HTTP 429' } },
       message('u2', 'user', 'continue'),
     ];
     const cleared = clearInterruptedMarkers(history);
     assert.equal(cleared.changed, true);
     assert.equal(cleared.messages[1]?.interrupted, undefined);
+    assert.equal(cleared.messages[1]?.streamFailure, undefined);
     assert.equal(Object.prototype.hasOwnProperty.call(cleared.messages[1], 'interrupted'), false);
     assert.equal(clearInterruptedMarkers(cleared.messages).changed, false);
   });
@@ -49,7 +50,7 @@ describe('historical message editing', () => {
   it('serializes retained messages for conversation replacement', () => {
     const [persisted, interrupted] = serializeConversationMessages([
       message('u1', 'user', 'hello'),
-      { ...message('a1', 'assistant', 'partial'), interrupted: true },
+      { ...message('a1', 'assistant', 'partial'), interrupted: true, streamFailure: { code: 'HTTP 429' } },
     ]);
     assert.deepEqual(persisted, {
       id: 'u1', role: 'user', content: 'hello', segments: undefined, usage: undefined,
@@ -57,5 +58,6 @@ describe('historical message editing', () => {
       attachments: undefined,
     });
     assert.equal(interrupted?.interrupted, true);
+    assert.deepEqual(interrupted?.streamFailure, { code: 'HTTP 429' });
   });
 });

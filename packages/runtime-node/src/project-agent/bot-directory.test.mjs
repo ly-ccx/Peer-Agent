@@ -15,6 +15,25 @@ function tempRoot() {
   return mkdtempSync(path.join(os.tmpdir(), 'b2-13-directory-'));
 }
 
+test('active identity lookup preserves profile gating without reading conversation or task facts', () => {
+  const root = tempRoot();
+  try {
+    const unexpected = () => assert.fail('identity lookup must not project bot state');
+    const { entry, directory } = harness(root, {
+      readMessages: unexpected, readSummaryMessages: unexpected, listSessions: unexpected,
+      listApprovals: unexpected, listConfirmations: unexpected, readQuestionCards: unexpected,
+    });
+    assert.equal(directory.hasActiveBot(entry.workspaceId), true);
+    for (const id of [undefined, null, '', '../outside', 'missing']) {
+      assert.equal(directory.hasActiveBot(id), false);
+    }
+    const file = path.join(root, 'projects', entry.workspaceId, 'profile.json');
+    const profile = JSON.parse(readFileSync(file, 'utf8'));
+    writeFileSync(file, JSON.stringify({ ...profile, status: 'archived' }));
+    assert.equal(directory.hasActiveBot(entry.workspaceId), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('directory count and detail include the same open child decision without reading full cards', () => {
   const root = tempRoot();
   let answered = false;
@@ -40,6 +59,24 @@ test('legacy freeform replies remove conversational needs-you while approval and
     conversationStore.appendMessage(conversationId, { id: 'legacy-answer', kind: 'user_input', role: 'user', content: '我的回答' });
     assert.equal(directory.get(entry.workspaceId).item.state.needsYou, 2);
     assert.equal(directory.list()[0].state.needsYou, 2);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('moving on after another bot reply clears stale choices across list, search and restart', () => {
+  const root = tempRoot();
+  try {
+    const { entry, directory, conversationId, conversationStore } = harness(root);
+    conversationStore.appendMessage(conversationId, { id: 'extra', kind: 'agent_reply', role: 'assistant', content: '补充说明' });
+    assert.equal(directory.get(entry.workspaceId).item.state.needsYou, 2);
+    conversationStore.appendMessage(conversationId, { id: 'new-topic', kind: 'user_input', role: 'user',
+      content: '先讨论别的问题', quoteRefs: ['user-1'] });
+    assert.equal(directory.get(entry.workspaceId).item.state.needsYou, 2);
+    assert.equal(directory.list()[0].state.needsYou, 2);
+    assert.equal(directory.query('').catalog[0].state.needsYou, 2);
+    const reopened = createBotDirectory({ rootDir: root,
+      readMessages: id => createConversationStore({ storeDir: path.join(root, 'conversations') }).getPersistedConversationHistory(id)?.messages || [] });
+    assert.equal(reopened.get(entry.workspaceId).item.state.needsYou, 0);
+    assert.equal(conversationStore.getPersistedConversationHistory(conversationId).messages.find(message => message.id === 'reply-1').question.answered, false);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

@@ -2,7 +2,7 @@
  * motion.css — 全局动效语义基元层（Single Source of Motion）
  * ----------------------------------------------------------------------------
  * 定位：把散落在各组件 CSS 的 keyframes 收敛为一组「语义命名」基元。
- *   - 5 组 / 13 个基元：入场 enter / 退场 exit / 脉冲 pulse / 流光 sheen / 进度 progress
+ *   - 入场 enter / 退场 exit / 脉冲 pulse / 流光 sheen / 进度 progress
  *   - 每个基元 = 一个 @keyframes motion-* + 一个 utility class .motion-*
  *   - 时长 / 缓动 / 位移一律引用 tokens.css 的 --za-motion-* 变量，禁止 magic number
  *   - 组件只需挂 class（或引用 animation-name），不再自定义时长曲线
@@ -22,6 +22,27 @@
 /* ---------------------------------------------------------------------------
  * 入场 enter — 元素挂载时的呈现（收敛自 ~15 个旧 keyframes）
  * ------------------------------------------------------------------------- */
+
+/* Decorative flow from the left edge toward the effort thumb; not execution/progress. */
+@keyframes motion-effort-mote {
+  0% { opacity: 0; transform: translateX(0%); }
+  15% { opacity: 0.55; }
+  80% { opacity: 0.4; }
+  100% { opacity: 0; transform: translateX(100%); }
+}
+
+/* Fresh content expands its intrinsic footprint without moving existing rows at once. */
+@keyframes motion-enter-layout {
+  from { height: 0; padding-bottom: 0; }
+  to { height: auto; padding-bottom: var(--motion-layout-space, 0px); }
+}
+
+.motion-enter-layout {
+  interpolate-size: allow-keywords;
+  min-height: 0;
+  overflow: clip;
+  animation: motion-enter-layout var(--za-motion-medium) var(--za-ease-standard) backwards;
+}
 
 /* 纯淡入：最克制的入场，用于不需要位移的覆盖层内容 */
 @keyframes motion-enter-fade {
@@ -137,6 +158,21 @@
     opacity: 0;
     transform: translate3d(var(--motion-exit-inline-to, var(--za-motion-shift-lg)), 0, 0);
   }
+}
+
+/* A measured side column gives its space back while its content remains stable. */
+@keyframes motion-exit-collapse-inline {
+  from {
+    flex-basis: var(--motion-collapse-inline-from);
+    width: var(--motion-collapse-inline-from);
+    max-width: var(--motion-collapse-inline-from);
+    padding-inline-end: var(--motion-collapse-inline-padding, 0px);
+  }
+  to { flex-basis: 0px; width: 0px; max-width: 0px; padding-inline-end: 0px; }
+}
+
+.motion-exit-collapse-inline {
+  animation: motion-exit-collapse-inline var(--za-motion-medium) var(--za-ease-accelerate) both;
 }
 
 /* 淡出 + 缩小，支持方向变量（--motion-collapse-x / -y）：
@@ -378,6 +414,78 @@
   animation: motion-spin var(--za-motion-slow) linear infinite;
 }
 
+/* Controlled menus/popovers share mount, exit and static end states. */
+.motion-surface {
+  --motion-enter-from: var(--za-motion-shift-sm);
+}
+.motion-surface[data-surface-state='open'][data-surface-kind] {
+  animation: motion-enter-rise var(--za-motion-medium) var(--za-ease-decelerate) both;
+}
+.motion-surface[data-surface-state='open'][data-surface-kind='fade'] {
+  animation-name: motion-enter-fade;
+}
+.motion-surface[data-surface-state='open'][data-surface-settled='true'] {
+  animation: none;
+}
+.motion-surface[data-surface-state='closed'][data-surface-kind] {
+  opacity: 0;
+  pointer-events: none;
+  animation: motion-exit-fade var(--za-motion-fast) var(--za-ease-accelerate) both;
+}
+
+/* Kept-mounted side panels preserve reading state. CSS reverses from the current
+ * frame; no completion callback, timer or animation API owns their visibility.
+ * Consumers remove interaction immediately with inert/aria-hidden, and provide
+ * the real inline size on their independent layout spacer. */
+.motion-inline-space {
+  transition: inline-size var(--za-motion-medium) var(--za-ease-standard);
+}
+.motion-inline-panel {
+  --motion-inline-shift: var(--za-motion-shift);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate3d(var(--motion-inline-shift), 0, 0);
+  transition: opacity var(--za-motion-fast) var(--za-ease-accelerate),
+    transform var(--za-motion-fast) var(--za-ease-accelerate),
+    visibility 0s linear var(--za-motion-fast);
+}
+.motion-inline-panel:dir(rtl) { --motion-inline-shift: calc(-1 * var(--za-motion-shift)); }
+.motion-inline-panel[data-motion-open='true'] {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: none;
+  transition: opacity var(--za-motion-medium) var(--za-ease-decelerate),
+    transform var(--za-motion-medium) var(--za-ease-decelerate),
+    visibility 0s;
+}
+
+/* Native disclosures retain their own keyboard/focus semantics and static fallback. */
+@supports (interpolate-size: allow-keywords) and selector(details::details-content) {
+  .motion-details {
+    interpolate-size: allow-keywords;
+  }
+  .motion-details::details-content {
+    height: 0;
+    opacity: 0;
+    overflow: clip;
+    transition: height var(--za-motion-medium) var(--za-ease-standard),
+      opacity var(--za-motion-fast) var(--za-ease-out),
+      content-visibility var(--za-motion-medium) allow-discrete;
+  }
+  .motion-details[open]::details-content {
+    height: auto;
+    opacity: 1;
+  }
+  .motion-details[open][data-motion-settled='true']::details-content { overflow: visible; }
+  @media (prefers-reduced-motion: reduce) {
+    .motion-details::details-content {
+      transition: none;
+    }
+  }
+}
+
 .motion-dots {
   animation: motion-dots var(--za-motion-slow) var(--za-ease-standard) infinite;
 }
@@ -425,6 +533,12 @@
   to {
     background-position: var(--motion-shimmer-x, 200%) var(--motion-shimmer-y, 0);
   }
+}
+
+/* A stationary SVG or other masked mark uses the same sweep geometry without moving its box. */
+@keyframes motion-mask-shimmer {
+  from { mask-position: var(--motion-shimmer-from, 0%) var(--motion-shimmer-y, 0); }
+  to { mask-position: var(--motion-shimmer-x, 200%) var(--motion-shimmer-y, 0); }
 }
 
 /* ---------------------------------------------------------------------------

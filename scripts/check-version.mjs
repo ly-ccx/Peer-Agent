@@ -17,6 +17,7 @@ const packageJsonFiles = [
   'packages/runtime-core/package.json',
   'packages/runtime-sdk/package.json',
   'packages/runtime-node/package.json',
+  'packages/interactive-content/package.json',
   'packages/task-thread/package.json',
   'packages/ui/package.json',
 ];

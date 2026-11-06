@@ -21,6 +21,7 @@ export function presentEvidence(body = {}) {
     summary,
     truncated: body.truncated === true || text.length > summary.length,
     availability,
+    ...(body.interactiveAvailability === 'origin_only' ? { interactiveAvailability: 'origin_only' } : {}),
     ...(body.source ? { source: evidenceSourceDescription(body.source, evidenceRef) } : {}),
     ...(availability === 'metadata_only' ? { code: 'BODY_NOT_SAVED' } : {}),
     ...(availability === 'unavailable' ? { code: 'READ_FAILED' } : {}),

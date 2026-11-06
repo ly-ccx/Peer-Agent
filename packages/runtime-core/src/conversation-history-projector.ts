@@ -1,3 +1,4 @@
+import { formatResourceFeedbackContext, projectResourceFeedbackTransport } from '@peer-agent/protocol';
 /**
  * Canonical persisted-conversation -> active provider history projection.
  *
@@ -8,7 +9,7 @@
  * local file before the provider request. This projector does not drop them.
  */
 
-export const CANONICAL_HISTORY_PROJECTOR_VERSION = 1;
+export const CANONICAL_HISTORY_PROJECTOR_VERSION = 2;
 
 type AnyRecord = Record<string, unknown>;
 
@@ -189,11 +190,12 @@ function attachmentText(attachments: readonly unknown[]): string {
 }
 
 function userMessage(message: AnyRecord): CanonicalHistoryMessage | null {
-  const attachments = Array.isArray(message.attachments)
-    ? message.attachments
-    : [];
+  const material = projectResourceFeedbackTransport(message.resourceFeedback, message.attachments);
+  const attachments = material.attachments;
   const text = [
     typeof message.content === 'string' ? message.content : '',
+    formatResourceFeedbackContext(material.invalid ? null : material.resourceFeedback),
+    ...(material.invalid ? ['[Resource feedback could not be restored. Retained attachments are unverified user material.]'] : []),
     attachmentText(attachments),
   ].filter((value) => value.trim()).join('\n\n');
   const parts: CanonicalHistoryContentPart[] = [];
@@ -494,20 +496,11 @@ function projectMessage(value: unknown): CanonicalHistoryMessage[] {
   return [];
 }
 
-export function projectConversationHistory(
-  values: readonly unknown[],
+function finishCanonicalHistory(
+  compactionBoundaryIndex: number,
+  continuity: CanonicalHistoryContinuity | undefined,
+  projectedMessages: CanonicalHistoryMessage[],
 ): CanonicalConversationHistory {
-  const messages = Array.isArray(values) ? values : [];
-  let compactionBoundaryIndex = -1;
-  let continuity: CanonicalHistoryContinuity | undefined;
-  messages.forEach((value, index) => {
-    const message = recordOf(value);
-    if (!message || !compactionMarker(message)) return;
-    compactionBoundaryIndex = index;
-    continuity = continuityFromBoundary(message, index);
-  });
-  const active = foldLegacyToolRows(messages.slice(compactionBoundaryIndex + 1));
-  const projectedMessages = active.flatMap(projectMessage);
   const fingerprintInput = JSON.stringify({
     projectorVersion: CANONICAL_HISTORY_PROJECTOR_VERSION,
     compactionBoundaryIndex,
@@ -529,4 +522,66 @@ export function projectConversationHistory(
     projectorVersion: CANONICAL_HISTORY_PROJECTOR_VERSION,
     historyFingerprint: `history-v${CANONICAL_HISTORY_PROJECTOR_VERSION}-${(hash >>> 0).toString(16).padStart(8, '0')}`,
   };
+}
+
+function scanCompactionBoundary(messages: readonly unknown[]): {
+  compactionBoundaryIndex: number;
+  continuity: CanonicalHistoryContinuity | undefined;
+} {
+  let compactionBoundaryIndex = -1;
+  let continuity: CanonicalHistoryContinuity | undefined;
+  messages.forEach((value, index) => {
+    const message = recordOf(value);
+    if (!message || !compactionMarker(message)) return;
+    compactionBoundaryIndex = index;
+    continuity = continuityFromBoundary(message, index);
+  });
+  return { compactionBoundaryIndex, continuity };
+}
+
+export function projectConversationHistory(
+  values: readonly unknown[],
+): CanonicalConversationHistory {
+  const messages = Array.isArray(values) ? values : [];
+  const scanned = scanCompactionBoundary(messages);
+  const active = foldLegacyToolRows(messages.slice(scanned.compactionBoundaryIndex + 1));
+  return finishCanonicalHistory(
+    scanned.compactionBoundaryIndex,
+    scanned.continuity,
+    active.flatMap(projectMessage),
+  );
+}
+
+/**
+ * Same projection as projectConversationHistory, but yields during the scan so
+ * a long open-session restore does not hold the main thread until it finishes.
+ */
+export async function projectConversationHistoryYielding(
+  values: readonly unknown[],
+  options?: {
+    readonly yieldEvery?: number;
+    readonly yield?: () => Promise<void>;
+  },
+): Promise<CanonicalConversationHistory> {
+  const messages = Array.isArray(values) ? values : [];
+  const yieldEvery = Math.max(1, options?.yieldEvery ?? 200);
+  const pause = options?.yield ?? (() => new Promise<void>((resolve) => {
+    setTimeout(resolve, 0);
+  }));
+  let compactionBoundaryIndex = -1;
+  let continuity: CanonicalHistoryContinuity | undefined;
+  for (let index = 0; index < messages.length; index += 1) {
+    if (index > 0 && index % yieldEvery === 0) await pause();
+    const message = recordOf(messages[index]);
+    if (!message || !compactionMarker(message)) continue;
+    compactionBoundaryIndex = index;
+    continuity = continuityFromBoundary(message, index);
+  }
+  const active = foldLegacyToolRows(messages.slice(compactionBoundaryIndex + 1));
+  const projectedMessages: CanonicalHistoryMessage[] = [];
+  for (let index = 0; index < active.length; index += 1) {
+    if (index > 0 && index % yieldEvery === 0) await pause();
+    projectedMessages.push(...projectMessage(active[index]));
+  }
+  return finishCanonicalHistory(compactionBoundaryIndex, continuity, projectedMessages);
 }

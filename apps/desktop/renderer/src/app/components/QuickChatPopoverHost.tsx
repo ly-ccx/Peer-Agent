@@ -23,9 +23,8 @@ export function QuickChatPopoverHost() {
     const unsubscribe = clientApi.onQuickChatPopoverState?.((next) => {
       setState(next ?? null);
     });
-    return () => {
-      unsubscribe?.();
-    };
+    const offClosed = clientApi.onQuickChatPopoverClosed?.(() => setState(null));
+    return () => { unsubscribe?.(); offClosed?.(); };
   }, []);
 
   if (!state) {

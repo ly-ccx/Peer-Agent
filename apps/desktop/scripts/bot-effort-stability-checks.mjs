@@ -3,11 +3,19 @@ import path from 'node:path';
 
 /** Real component + delayed/failing production IPC save in the disposable smoke host. */
 export async function checkEffortStability({ page, slider, strength, until, getBot, failNext, report, captureDirectory, highEffort, scope = 'settings' }) {
-  const selector = scope === 'composer' ? '.bot-composer .reasoning-effort-trigger' : '.bot-model-settings-row .reasoning-effort-trigger';
-  const sample = async (key, collectionDelayMs = 0) => {
+  const feedback = page.locator(scope === 'settings' ? '.bot-settings-tab' : '.model-selection-popover[data-surface-state="open"]');
+  const selector = scope === 'composer' ? '.bot-composer .model-selection-trigger' : '.bot-model-settings-row .model-selection-trigger';
+  const sample = async (key, collectionDelayMs = 0, errorReceipt = false) => {
+    // Establish the baseline after entry motion, before starting a save.
+    // Continuous decorative particles do not own layout or the completion of a save.
+    await until(() => page.locator('.model-selection-popover[data-surface-state="open"]').evaluate(node =>
+      node.getAnimations({ subtree: true }).filter(animation => animation.effect?.getTiming().iterations !== Infinity)
+        .every(animation => animation.playState !== 'running' && animation.playState !== 'pending')), Boolean);
+    await until(() => page.locator('.resource-workspace:has(.resource-details-slot[data-active="true"]):not([inert]), .bot-drawer-dock:not([inert]), .pa-overlay-panel.bot-drawer-panel').evaluateAll(nodes =>
+      nodes.every(node => node.getAnimations().every(animation => !['running', 'pending'].includes(animation.playState)))), Boolean);
     const baseline = await page.evaluate(selector => {
       const box = selector => { const { x, y, width, height } = document.querySelector(selector).getBoundingClientRect(); return { x, y, width, height }; };
-      return { trigger: box(selector), panel: box('.reasoning-effort-panel') };
+      return { trigger: box(selector), panel: box('.model-selection-popover[data-surface-state="open"] .model-selection-panel') };
     }, selector);
     await slider.focus();
     // Arm inside the renderer before dispatching the real key. A slow CDP round
@@ -15,23 +23,48 @@ export async function checkEffortStability({ page, slider, strength, until, getB
     await page.evaluate(({ selector, key }) => {
       globalThis.rcEffortFrames = new Promise(resolve => {
         const frames = [];
-        const slider = document.querySelector('.reasoning-effort-slider');
+        const slider = document.querySelector('.model-selection-popover[data-surface-state="open"] .reasoning-effort-slider');
+        const popover = document.querySelector('.model-selection-popover[data-surface-state="open"]');
+        const drawerSelector = '.resource-workspace:has(.resource-details-slot[data-active="true"]):not([inert]), .bot-drawer-dock:not([inert]), .pa-overlay-panel.bot-drawer-panel';
+        const drawer = document.querySelector(drawerSelector);
         let start = 0;
-        const finish = () => { clearTimeout(deadline); slider.removeEventListener('keyup', begin); resolve(frames); };
-        const capture = () => {
-          if (performance.now() - start > 420) { finish(); return; }
-          const slider = document.querySelector('.reasoning-effort-slider');
-          const trigger = document.querySelector(selector);
-          const panel = document.querySelector('.reasoning-effort-panel');
-          const rect = node => { const { x, y, width, height } = node.getBoundingClientRect(); return { x, y, width, height }; };
-          frames.push({ value: slider.value, trigger: rect(trigger), panel: rect(panel) });
-          requestAnimationFrame(capture);
+        let stopped = false;
+        const finish = () => {
+          if (stopped) return;
+          stopped = true;
+          clearInterval(pulse);
+          clearTimeout(deadline);
+          slider.removeEventListener('keyup', begin);
+          resolve(frames);
         };
+        const rect = node => { const { x, y, width, height } = node.getBoundingClientRect(); return { x, y, width, height }; };
+        // Paint frames plus a short timer. macOS CI can present well under 12fps
+        // while the main thread is still free; each sample is a real layout read.
+        const record = () => {
+          if (stopped || !start) return;
+          if (performance.now() - start > 1100) { finish(); return; }
+          const currentSlider = document.querySelector('.model-selection-popover[data-surface-state="open"] .reasoning-effort-slider');
+          const trigger = document.querySelector(selector);
+          const panel = document.querySelector('.model-selection-popover[data-surface-state="open"] .model-selection-panel');
+          if (!currentSlider || !trigger || !panel) { finish(); return; }
+          const now = performance.now() - start;
+          if (frames.length && now - frames.at(-1).timeMs < 12) return;
+          const currentDrawer = document.querySelector(drawerSelector);
+          frames.push({ timeMs: now, value: currentSlider.value, trigger: rect(trigger), panel: rect(panel),
+            popoverRetained: document.querySelector('.model-selection-popover[data-surface-state="open"]') === popover,
+            popoverOpacity: Number(getComputedStyle(popover).opacity),
+            drawerRetained: currentDrawer === drawer,
+            drawerOpacity: drawer ? Number(getComputedStyle(drawer).opacity) : 1,
+            drawer: drawer ? rect(drawer) : null });
+        };
+        const onFrame = () => { if (stopped) return; record(); requestAnimationFrame(onFrame); };
         const begin = event => {
           if (event.key !== key) return;
           slider.removeEventListener('keyup', begin);
-          start = performance.now(); requestAnimationFrame(capture);
+          start = performance.now();
+          requestAnimationFrame(onFrame);
         };
+        const pulse = setInterval(record, 50);
         const deadline = setTimeout(finish, 15_000);
         slider.addEventListener('keyup', begin);
       });
@@ -44,33 +77,24 @@ export async function checkEffortStability({ page, slider, strength, until, getB
       return frames;
     });
   const expected = key === 'End' ? '100' : '0';
-    assert.ok(frames.length >= 5);
-    assert.ok(frames.every(frame => frame.value === expected), 'selected effort must stay put throughout the delayed save');
-    for (const frame of frames) for (const node of ['trigger', 'panel']) for (const axis of ['x', 'y', 'width', 'height']) {
+    assert.ok(frames.length >= 5, `effort frames ${frames.length}`);
+    const pendingFrames = frames.filter(frame => frame.timeMs < 420);
+    assert.ok(pendingFrames.length >= 5, `pending effort frames ${pendingFrames.length} of ${frames.length}`);
+    assert.ok(pendingFrames.every(frame => frame.value === expected), 'selected effort must stay put throughout the delayed save');
+    assert.ok(frames.at(-1).timeMs > 950, 'observe the actual 650ms receipt and the following entrance window');
+    assert.ok(frames.every(frame => frame.popoverRetained && frame.drawerRetained && frame.popoverOpacity >= 0.99 && frame.drawerOpacity >= 0.99),
+      'saving effort must not remount or fade the model popover or open profile drawer');
+    if (frames[0].drawer) for (const frame of frames) for (const axis of ['x', 'y', 'width', 'height']) {
+      assert.ok(Math.abs(frame.drawer[axis] - frames[0].drawer[axis]) < 0.5, `drawer.${axis} moved during save or its receipt`);
+    }
+    // A real error adds recovery content after the receipt; pending geometry stays fixed.
+    for (const frame of (errorReceipt ? pendingFrames : frames)) for (const node of ['trigger', 'panel']) for (const axis of ['x', 'y', 'width', 'height']) {
       assert.ok(Math.abs(frame[node][axis] - baseline[node][axis]) < 0.5, `${node}.${axis} moved during save`);
     }
     return frames.length;
   };
-  if (scope === 'composer') {
-    // A click can return before the first frame of the active-color transition.
-    // Assert the painted open state after the browser has begun painting it.
-    await until(() => strength.evaluate(node => {
-      const content = node.querySelector('.reasoning-effort-trigger-content');
-      return node.getAttribute('aria-expanded') === 'true'
-        && getComputedStyle(content).backgroundColor !== 'rgba(0, 0, 0, 0)';
-    }), Boolean);
-    const paint = await strength.evaluate(node => {
-      const content = node.querySelector('.reasoning-effort-trigger-content');
-      const label = node.querySelector('.reasoning-effort-label');
-      const c = content.getBoundingClientRect(), l = label.getBoundingClientRect();
-      return { outerBackground: getComputedStyle(node).backgroundColor,
-        innerBackground: getComputedStyle(content).backgroundColor,
-        left: l.left - c.left, right: c.right - l.right };
-    });
-    assert.equal(paint.outerBackground, 'rgba(0, 0, 0, 0)', 'stable sizing slot must not paint excess active background');
-    assert.notEqual(paint.innerBackground, 'rgba(0, 0, 0, 0)', 'active label must retain visible background');
-    assert.ok(Math.abs(paint.left - paint.right) < 0.5, 'active background padding must match on both sides of the label');
-  }
+  assert.equal(await strength.getAttribute('aria-expanded'), 'true');
+  assert.equal(await page.locator('.model-selection-popover[data-surface-state="open"] .model-selection-panel[role="dialog"]').isVisible(), true);
   const successFrames = await sample('End');
   await page.keyboard.press('Escape');
   assert.equal(await strength.evaluate(node => node === document.activeElement), true, 'Escape must return focus even while the save is pending');
@@ -80,12 +104,23 @@ export async function checkEffortStability({ page, slider, strength, until, getB
   failNext();
   // Collect after the 650ms failure has returned. The renderer's earlier frames
   // must still prove the pending selection, independently of CDP delivery time.
-  const failureFrames = await sample('Home', 900);
-  await page.getByText('模型设置未保存，请重试。', { exact: true }).first().waitFor();
+  const failureFrames = await sample('Home', 900, true);
+  await feedback.locator('.bot-model-error[role="alert"], .bot-model-feedback [role="alert"]').first().waitFor();
   await until(() => slider.inputValue(), value => value === '100');
   assert.equal((await getBot()).modelPolicy.overrides.project_agent.reasoningEffort, highEffort);
-  assert.equal(await strength.locator('.reasoning-effort-label').evaluate(node => node.scrollWidth <= node.clientWidth), true, 'full effort label must fit the normal composer and settings width');
-  if (captureDirectory) await page.screenshot({ path: path.join(captureDirectory, `effort-${scope}-save-rollback.png`) });
+  assert.equal(await strength.locator('.model-selection-trigger-label').evaluate(node => node.scrollWidth <= node.clientWidth), true, 'full effort label must fit the normal composer and settings width');
+  const discard = feedback.locator('.bot-model-feedback').getByRole('button', { name: '舍弃修改', exact: true });
+  if (await discard.count()) {
+    if (scope === 'settings') await page.keyboard.press('Escape');
+    await discard.click();
+    if (await strength.getAttribute('aria-expanded') !== 'true') await strength.click();
+    await slider.waitFor();
+  }
+  if (captureDirectory) {
+    await until(() => page.locator('.model-selection-popover[data-surface-state="open"]').evaluate(node =>
+      node.getAnimations().every(animation => !['running', 'pending'].includes(animation.playState))), Boolean);
+    await page.screenshot({ path: path.join(captureDirectory, `effort-${scope}-save-rollback.png`) });
+  }
   (report.effortStability ??= {})[scope] = { delayMs: 650, failureCollectionDelayMs: 900, successFrames, failureFrames, successHeld: true, failureHeldThenRolledBack: true,
-    stableTriggerAndPanel: true, scope: 'Production settings slider and durable profile over actual IPC; controlled latency and failure' };
+    stableTriggerAndPanel: true, stableDrawerAndPopoverAfterReceipt: true, observationMs: 1100, scope: 'Production settings slider and durable profile over actual IPC; controlled latency and failure' };
 }

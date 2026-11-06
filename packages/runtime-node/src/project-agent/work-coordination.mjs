@@ -1,17 +1,27 @@
 import { createHash } from 'node:crypto';
 import { reduceCoordinationDecision } from './coordination-kernel.mjs';
 import { applyWorkUpdate } from './work-delta.mjs';
+import { admitHistoryResumption, retainHistoricalWork, retainHistoricalSession } from './history-resumption.mjs';
+import { reduceSessionControl } from './session-control-kernel.mjs';
+import { reduceAgentSupervision } from './agent-supervision-state.mjs';
+import { reduceIntentCoordination } from './intent-coordination-kernel.mjs';
 /** Durable event transfer and handling are different receipts. Replay is deterministic. */
 export function reduceCoordination(state, entry) {
   if (entry.schemaVersion !== undefined && entry.schemaVersion !== 1) throw new Error('coordination_schema_unsupported');
   if (entry.kind === 'coordination_decision' && (entry.transition?.schemaVersion !== 1
     || !Number.isSafeInteger(entry.transition?.minimumExecutorVersion)
-    || entry.transition.minimumExecutorVersion !== 1)) throw new Error('coordination_executor_unsupported');
+    || ![1, 2, 3].includes(entry.transition.minimumExecutorVersion))) throw new Error('coordination_executor_unsupported');
   const previous = state || { revision: 0, events: {}, works: {}, deliveries: {} };
   let next = { ...previous, events: { ...previous.events }, works: { ...previous.works }, deliveries: { ...previous.deliveries } };
   if (entry.revision !== next.revision + 1) throw new Error('coordination_revision_gap');
   next.revision = entry.revision;
-  if (['coordination_decision', 'coordination_binding', 'coordination_transition'].includes(entry.kind)) {
+  if (entry.kind === 'session_control') {
+    next = reduceSessionControl(next, entry);
+  } else if (entry.kind.startsWith('intent_')) {
+    next = reduceIntentCoordination(next, entry);
+  } else if (entry.kind.startsWith('agent_') || entry.kind === 'work_note_written' || entry.kind === 'context_window_opened') {
+    next = reduceAgentSupervision(next, entry);
+  } else if (['coordination_decision', 'coordination_binding', 'coordination_transition'].includes(entry.kind)) {
     next = reduceCoordinationDecision(next, entry);
   } else if (entry.kind === 'transfer') {
     for (const event of entry.events) next.events[event.eventId] ||= { event: structuredClone(event), handled: false };
@@ -39,18 +49,71 @@ export function reduceCoordination(state, entry) {
     if (!entry.owner?.workId || !Array.isArray(entry.retired) || entry.retired.some(work => work.state !== 'coalesced'
       || work.continuationOwnerWorkId !== entry.owner.workId || work.workId === entry.owner.workId)) throw new Error('invalid_continuation_custody');
     for (const work of [entry.owner, ...entry.retired]) next.works[work.workId] = structuredClone(work);
+  } else if (entry.kind === 'reply_deferred') {
+    if (!next.deliveries[entry.message.id]) next.deliveries[entry.message.id] = { message: structuredClone(entry.message), state: 'deferred' };
+  } else if (entry.kind === 'reply_held') {
+    const delivery = next.deliveries[entry.messageId];
+    if (delivery?.state !== 'deferred') throw new Error('coordination_delivery_conflict');
+    next.deliveries[entry.messageId] = { ...delivery, heldAt: entry.at };
+  } else if (entry.kind === 'reply_aggregated') {
+    const delivery = next.deliveries[entry.messageId], aggregate = next.deliveries[entry.aggregateId];
+    if (delivery?.state !== 'deferred' || aggregate?.state !== 'delivered'
+      || !aggregate.message.meta?.digestReplyIds?.includes(entry.messageId)
+      || !aggregate.message.content?.includes(delivery.message.content?.trim())) throw new Error('coordination_aggregate_unproven');
+    next.deliveries[entry.messageId] = { ...delivery, state: 'aggregated', deliveredBy: entry.aggregateId };
   } else if (entry.kind === 'reply_prepared') {
-    next.deliveries[entry.message.id] ||= { message: structuredClone(entry.message), state: 'prepared' };
+    if (!next.deliveries[entry.message.id]) {
+      const question = entry.message.question;
+      if (question?.agentRequestId) next = reduceAgentSupervision(next, { kind: 'agent_request_escalated',
+        requestId: question.agentRequestId, expectedRevision: question.expectedRequestRevision,
+        userRequestRef: `card:question:reply:${entry.message.id}`, previousUserRequestRef: question.previousUserRequestRef });
+      next.deliveries[entry.message.id] = { message: structuredClone(entry.message), state: 'prepared' };
+    }
   } else if (entry.kind === 'reply_delivered') {
     const delivery = next.deliveries[entry.messageId];
     if (!delivery) throw new Error('reply_not_prepared');
+    if (delivery.canonicalCommittedAt && delivery.settlement?.status !== 'applied') throw new Error('coordination_delivery_unsettled');
     next.deliveries[entry.messageId] = { ...delivery, state: 'delivered' };
+  } else if (['reply_committed', 'reply_settlement_started', 'reply_settlement_failed', 'reply_settled'].includes(entry.kind)) {
+    const delivery = next.deliveries[entry.messageId];
+    if (!delivery || delivery.state !== 'prepared') throw new Error('coordination_delivery_conflict');
+    if (entry.kind === 'reply_committed') {
+      next.deliveries[entry.messageId] = { ...delivery, canonicalCommittedAt: entry.at };
+    } else {
+      if (entry.kind !== 'reply_settlement_failed' && !delivery.canonicalCommittedAt) throw new Error('coordination_delivery_uncommitted');
+      const attempts = delivery.settlement?.attempts || 0;
+      if (entry.kind === 'reply_settlement_started' && entry.attempt !== attempts + 1
+        || entry.kind !== 'reply_settlement_started' && entry.attempt !== attempts) throw new Error('coordination_delivery_attempt_conflict');
+      next.deliveries[entry.messageId] = { ...delivery, settlement: { operationId: `settlement:${entry.messageId}`,
+        attempts: entry.attempt, status: entry.kind === 'reply_settled' ? 'applied' : entry.kind === 'reply_settlement_started' ? 'pending' : 'failed',
+        updatedAt: entry.at, ...(entry.kind === 'reply_settlement_failed' ? { error: entry.error, phase: entry.phase, retryAt: entry.retryAt } : {}) } };
+    }
   } else if (entry.kind === 'reply_invalidated') {
     const delivery = next.deliveries[entry.messageId];
     if (!delivery) throw new Error('reply_not_prepared');
     next.deliveries[entry.messageId] = { ...delivery, state: 'invalidated', reason: entry.reason };
+    const requestId = delivery.message?.question?.agentRequestId, request = next.agentRequests?.[requestId];
+    if (request?.status === 'open' && request.userRequestRef === `card:question:reply:${entry.messageId}`) {
+      next.agentRequests = { ...next.agentRequests, [requestId]: { ...request, responder: 'parent', userRequestRef: undefined, revision: request.revision + 1 } };
+    }
+  } else if (entry.kind === 'history_reconciled') {
+    const canonical = value => JSON.stringify(value, (_key, v) => v && typeof v === 'object' && !Array.isArray(v)
+      ? Object.fromEntries(Object.keys(v).sort().map(k => [k, v[k]])) : v);
+    if (previous.revision !== 0 || entry.revision !== 1 || entry.state?.revision !== 0
+      || entry.recovery?.executionBlocked !== true || !/^[a-f0-9]{64}$/.test(entry.recovery?.sourceFingerprint || '')
+      || createHash('sha256').update(canonical(entry.state)).digest('hex') !== entry.stateHash
+      || !['events', 'works', 'deliveries'].every(key => entry.state[key] && typeof entry.state[key] === 'object' && !Array.isArray(entry.state[key])))
+      throw new Error('coordination_repair_state_invalid');
+    next = { ...structuredClone(entry.state), revision: entry.revision,
+      lastRecovery: { ...structuredClone(entry.recovery), at: entry.at } };
+  } else if (entry.kind === 'history_resume_admitted') {
+    next = { ...admitHistoryResumption(previous, entry), revision: entry.revision };
+  } else if (entry.kind === 'history_work_retained') {
+    next = { ...retainHistoricalWork(previous, entry), revision: entry.revision };
+  } else if (entry.kind === 'history_session_retained') {
+    next = { ...retainHistoricalSession(previous, entry), revision: entry.revision };
   } else if (entry.kind === 'journal_recovered') {
-    next.lastRecovery = { at: entry.at, backup: entry.backup };
+    next.lastRecovery = { ...previous.lastRecovery, at: entry.at, backup: entry.backup };
   } else throw new Error('unknown_coordination_event');
   return next;
 }

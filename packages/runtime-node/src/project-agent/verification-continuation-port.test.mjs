@@ -61,6 +61,25 @@ test('corrupt continuation metadata is retained and refused rather than giving t
   assert.throws(() => validateVerificationContinuation({ ...f.state, checkpointRef: '../foreign' }));
 });
 
+test('a real terminal verifier receipt closes a stale requesting marker without resetting usage or completing tools', t => {
+  const f = fixture(t);
+  const state = { ...f.state, phase: 'requesting', formatAttempt: 1,
+    startedAt: '2026-10-29T00:00:00Z', lastProgressAt: '2026-10-29T00:01:00Z' };
+  f.plans.setRunnerState(f.plan.planId, { status: 'blocked', blockedReason: 'Verification gate failed: c:criterion_unverified',
+    verificationContinuation: state });
+  f.plans.recordVerifierRun(f.plan.planId, { verifierRunId: 'failed-review', target: { kind: 'plan' }, status: 'failed',
+    completedAt: '2026-10-29T00:02:00Z', evidenceRefs: [], failureReason: 'invalid format' });
+  const port = createVerificationContinuationPort(f.args);
+  const closed = port.load();
+  assert.equal(closed.phase, 'completed');
+  assert.equal(closed.modelRequests, state.modelRequests);
+  assert.equal(closed.toolCalls, state.toolCalls);
+  f.plans.setRunnerState(f.plan.planId, { verificationContinuation: { ...state, phase: 'tools' } });
+  assert.equal(port.load().phase, 'tools');
+  f.plans.setRunnerState(f.plan.planId, { verificationContinuation: { ...state, lastProgressAt: '2099-01-01T00:00:00Z' } });
+  assert.equal(port.load().phase, 'requesting');
+});
+
 test('continuation ownership reads only current work and still rejects a later stop', t => {
   const f = fixture(t);
   const fullRead = f.coord.read;

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { normalizeResourceFeedbackList, restoreResourceFeedbackTransport, encodeResourceFeedbackTransport, isInteractiveFeedbackAttachment } from '@peer-agent/protocol';
 /**
  * 项目输入队列。所有入口把用户输入追加到 input-queue.jsonl。
  * 只有宿主按游标消费：写入机器人对话（消息 id 由 inputId 派生），再推进游标，然后通知唤醒。
@@ -7,20 +9,22 @@ import {
   appendFileSync,
   existsSync,
   mkdirSync,
+  lstatSync,
   readFileSync,
   renameSync,
-  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
 import { INPUT_ATTACHMENT_LIMIT, normalizeUserUpload } from './input-attachments.mjs';
 import { pathOf } from '../data-store.mjs';
+import { acquireInputQueueLock } from './input-queue-lock.mjs';
 
 const WORKSPACE_DIR = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 const INPUT_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 const SURFACES = new Set(['desktop', 'quick_chat', 'tui', 'remote']);
-const LOCK_STALE_MS = 10_000;
+const STORED_INPUT_FIELDS = new Set(['inputId', 'workspaceId', 'surface', 'text', 'anchorRefs', 'quoteRefs', 'attachmentRefs',
+  'attachments', 'resourceFeedback', 'createdAt', 'answerTo', 'historyRef', 'historySnapshotId', 'historyConfirmed']);
 
 export function inputMessageId(inputId) {
   const text = typeof inputId === 'string' ? inputId.trim() : '';
@@ -36,7 +40,16 @@ export function createInputQueue({
   hasMessage = null,
   appendMessage = null,
   onCommitted = null,
+  validateInteractiveFeedback = null,
 } = {}) {
+  function admit(input, workspaceId) {
+    for (const row of input.resourceFeedback ?? []) if (row.resource.kind === 'interactive') {
+      try { if (validateInteractiveFeedback?.(row, workspaceId) !== true) throw Error('not admitted'); }
+      catch (error) { if (/INTERACTIVE_FEEDBACK/.test(error?.code ?? '')) throw error;
+        throw Object.assign(Error('INTERACTIVE_FEEDBACK_UNAVAILABLE'), { code: 'INTERACTIVE_FEEDBACK_UNAVAILABLE', cause: error }); }
+    }
+    return input;
+  }
   const inputCache = new Map();
   let cachedBytes = 0;
   const dropCached = key => { const row = inputCache.get(key); if (row) cachedBytes -= row.bytes; inputCache.delete(key); };
@@ -47,6 +60,7 @@ export function createInputQueue({
   const copyInputs = inputs => inputs.map(input => ({ ...input,
     anchorRefs: [...input.anchorRefs], quoteRefs: [...input.quoteRefs], attachmentRefs: [...input.attachmentRefs],
     ...(input.attachments ? { attachments: input.attachments.map(item => ({ ...item })) } : {}),
+    ...(input.resourceFeedback ? { resourceFeedback: normalizeResourceFeedbackList(input.resourceFeedback) } : {}),
   }));
   function root() {
     return rootDir || pathOf('projectRuntime');
@@ -78,39 +92,8 @@ export function createInputQueue({
   }
 
   function withLock(workspaceId, fn) {
-    const lockDir = `${queueFile(workspaceId)}.lock`;
-    mkdirSync(path.dirname(lockDir), { recursive: true });
-    const deadline = Date.now() + 5_000;
-    while (true) {
-      try {
-        mkdirSync(lockDir);
-        writeFileSync(path.join(lockDir, 'owner.json'), JSON.stringify({ pid: process.pid }));
-        break;
-      } catch (error) {
-        if (error?.code !== 'EEXIST') throw error;
-        try {
-          let dead = false;
-          try {
-            const owner = JSON.parse(readFileSync(path.join(lockDir, 'owner.json'), 'utf8'));
-            if (Number.isInteger(owner.pid) && owner.pid > 0) {
-              try { process.kill(owner.pid, 0); } catch (error) { dead = error?.code === 'ESRCH'; }
-            }
-          } catch { /* A new owner may still be publishing its PID. */ }
-          if (dead || Date.now() - statSync(lockDir).mtimeMs > LOCK_STALE_MS) {
-            rmSync(lockDir, { recursive: true, force: true });
-            continue;
-          }
-        } catch {
-          // 锁刚被释放。
-        }
-        if (Date.now() >= deadline) throw error;
-      }
-    }
-    try {
-      return fn();
-    } finally {
-      rmSync(lockDir, { recursive: true, force: true });
-    }
+    const lock = acquireInputQueueLock(queueFile(workspaceId), 5000);
+    try { return fn(); } finally { lock.release(); }
   }
 
   function readInputs(workspaceId, strict = false, attempt = 0) {
@@ -119,32 +102,41 @@ export function createInputQueue({
     let version;
     try { version = inputVersion(file); }
     catch (error) { dropCached(key); if (strict && error.code !== 'ENOENT') throw error; return []; }
+    if (strict === 'retention' && version.bytes > 64 * 1024 * 1024) throw Error('INPUT_QUEUE_RETENTION_LIMIT');
     const cached = inputCache.get(key);
     if (cached?.version === version.token) {
       inputCache.delete(key); inputCache.set(key, cached);
-      return copyInputs(cached.inputs);
+      return copyInputs(cached.inputs).map(input => admit(input, workspaceId));
     }
     dropCached(key);
     let text = '';
     try {
-      text = readFileSync(file, 'utf8');
+      text = strict === 'retention' ? new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(file)) : readFileSync(file, 'utf8');
     } catch (error) {
       if (strict) throw error;
       return [];
     }
     const inputs = [];
     const seen = new Set();
+    if (strict === 'retention' && text && !text.endsWith('\n')) throw Error('CORRUPT_INPUT_QUEUE');
     for (const line of text.split('\n')) {
       if (!line.trim()) continue;
       try {
-        const input = normalizeStored(JSON.parse(line), workspaceId);
+        const row = JSON.parse(line);
+        if (strict === 'retention' && (!row || row.workspaceId !== workspaceId || Object.keys(row).some(key => !STORED_INPUT_FIELDS.has(key))))
+          throw Error('CORRUPT_INPUT_QUEUE');
+        const input = normalizeStored(row, workspaceId);
         if (!input) { if (strict) throw new Error('CORRUPT_INPUT_QUEUE'); continue; }
-        if (seen.has(input.inputId)) continue;
+        admit(input, workspaceId);
+        if (seen.has(input.inputId)) {
+          if (strict === 'retention') throw Error('CORRUPT_INPUT_QUEUE');
+          continue;
+        }
         seen.add(input.inputId);
         inputs.push(input);
       } catch (error) {
-        if (strict) throw error;
-        // 坏行跳过，不挡住后面的输入。
+        if (strict || line.includes('peer-interactive-selection-') || /INTERACTIVE_FEEDBACK|INTERACTIVE_INPUT/.test(error.code ?? error.message ?? '')) throw error;
+        // Legacy malformed rows keep their old behavior. Recognized selections never skip ahead.
       }
     }
     let current;
@@ -205,7 +197,11 @@ export function createInputQueue({
   function pendingExecution(workspaceId, { repliedTo = [] } = {}) {
     const id = workspaceIdOf(workspaceId);
     if (!id || typeof holdsLease === 'function' && holdsLease(id) !== true) return [];
-    return withLock(id, () => executionState(id, [], Array.isArray(repliedTo) ? repliedTo : []));
+    return withLock(id, () => {
+      const pending = executionState(id, [], Array.isArray(repliedTo) ? repliedTo : []);
+      if (pending.some(input => input.resourceFeedback?.some(row => row.recipient.conversationId !== resolveConversationId?.(id)))) throw new Error('RESOURCE_FEEDBACK_RECIPIENT_CHANGED');
+      return pending;
+    });
   }
 
   function completeExecution(workspaceId, inputIds) {
@@ -222,8 +218,14 @@ export function createInputQueue({
     return withLock(workspaceId, () => {
       const existing = readInputs(workspaceId).find((item) => item.inputId === normalized.inputId);
       if (existing) return existing;
+      admit(normalized, workspaceId);
+      if (normalized.resourceFeedback?.length) {
+        const conversationId = typeof resolveConversationId === 'function' ? resolveConversationId(workspaceId) : null;
+        if (!conversationId || normalized.resourceFeedback.some(row => row.recipient.conversationId !== conversationId)) throw Object.assign(new TypeError('RESOURCE_FEEDBACK_RECIPIENT_CHANGED'), { code: 'RESOURCE_FEEDBACK_RECIPIENT_CHANGED' });
+      }
       mkdirSync(dirFor(workspaceId), { recursive: true });
-      appendFileSync(queueFile(workspaceId), `${JSON.stringify(normalized)}\n`);
+      const { resourceFeedback: _feedback, attachments: _attachments, ...base } = normalized;
+      appendFileSync(queueFile(workspaceId), `${JSON.stringify({ ...base, ...encodeResourceFeedbackTransport(normalized.resourceFeedback, normalized.attachments) })}\n`);
       return normalized;
     });
   }
@@ -246,6 +248,12 @@ export function createInputQueue({
     if (typeof resolveConversationId !== 'function' || typeof hasMessage !== 'function' || typeof appendMessage !== 'function') {
       throw new TypeError('input queue consumer requires conversation writers');
     }
+    // Empty polling is read-only. A real batch still acquires the lock and
+    // re-reads its current contents below; a later submission gets a new wake.
+    if (!pendingAfter(dirName).length) {
+      const conversationId = resolveConversationId(dirName);
+      return { consumed: [], skipped: typeof conversationId === 'string' && conversationId.trim() ? null : 'no-conversation' };
+    }
     const outcome = withLock(dirName, () => {
       const conversationId = resolveConversationId(dirName);
       if (typeof conversationId !== 'string' || !conversationId.trim()) {
@@ -254,9 +262,11 @@ export function createInputQueue({
       const targetId = conversationId.trim();
       const consumed = [];
       for (const input of pendingAfter(dirName)) {
+        if (input.resourceFeedback?.some(row => row.recipient.conversationId !== targetId)) throw new Error('RESOURCE_FEEDBACK_RECIPIENT_CHANGED');
         const messageId = inputMessageId(input.inputId);
         const duplicateMessage = hasMessage(targetId, messageId) === true;
         if (!duplicateMessage) {
+          const transport = encodeResourceFeedbackTransport(input.resourceFeedback, input.attachments);
           appendMessage(targetId, {
             id: messageId,
             role: 'user',
@@ -267,9 +277,10 @@ export function createInputQueue({
             surface: input.surface,
             anchorRefs: input.anchorRefs,
             quoteRefs: input.quoteRefs,
+            ...(transport.resourceFeedback ? { resourceFeedback: transport.resourceFeedback } : {}),
             attachmentRefs: input.attachmentRefs,
-            ...(Array.isArray(input.attachments) && input.attachments.length > 0
-              ? { attachments: input.attachments }
+            ...(Array.isArray(transport.attachments) && transport.attachments.length > 0
+              ? { attachments: transport.attachments }
               : {}),
             ...(input.answerTo ? { answerTo: input.answerTo } : {}),
             ...(input.historyRef ? { historyRef: input.historyRef } : {}),
@@ -292,13 +303,18 @@ export function createInputQueue({
     return { consumed: outcome.consumed, skipped: outcome.skipped };
   }
 
-  function diagnosticSnapshot(workspaceId) {
-    const id = workspaceIdOf(workspaceId);
-    if (!id) throw new Error('INVALID_WORKSPACE');
-    const inputs = readInputs(id, true), state = readCursorState(id);
+  function checkedCursor(id) {
+    const state = readCursorState(id);
     if (!state || typeof state !== 'object' || Array.isArray(state)
       || ['inputId','executedInputId'].some(key => state[key] !== undefined && !INPUT_ID.test(state[key]))
       || state.completedInputIds !== undefined && (!Array.isArray(state.completedInputIds) || state.completedInputIds.some(value => typeof value !== 'string' || !INPUT_ID.test(value)))) throw new Error('CORRUPT_INPUT_CURSOR');
+    return state;
+  }
+
+  function diagnosticSnapshot(workspaceId) {
+    const id = workspaceIdOf(workspaceId);
+    if (!id) throw new Error('INVALID_WORKSPACE');
+    const inputs = readInputs(id, true), state = checkedCursor(id);
     const delivered = inputs.findIndex(input => input.inputId === state.inputId);
     const executed = inputs.findIndex(input => input.inputId === state.executedInputId);
     const completed = new Set(Array.isArray(state.completedInputIds) ? state.completedInputIds : []);
@@ -306,7 +322,51 @@ export function createInputQueue({
       executionDepth: inputs.slice(executed + 1, delivered + 1).filter(input => !completed.has(input.inputId)).length,
       cursor: state.inputId ?? null, executedCursor: state.executedInputId ?? null };
   }
-  return { submitInput, consume, pendingExecution, completeExecution, cursor: readCursor, diagnosticSnapshot,
+  function acquireRetentionInputs(workspaceId) {
+    const id = workspaceIdOf(workspaceId);
+    if (!id || id !== workspaceId) throw Error('INVALID_WORKSPACE');
+    const lock = acquireInputQueueLock(queueFile(id), 0);
+    let released = false;
+    const release = () => { if (!released) { released = true; lock.release(); } };
+    const version = (file, limit) => {
+      try {
+        const stat = lstatSync(file);
+        if (!stat.isFile() || stat.size > limit) throw Error('INPUT_QUEUE_RETENTION_LIMIT');
+        return inputVersion(file).token;
+      }
+      catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+    };
+    try {
+      const queue = queueFile(id), cursor = cursorFile(id);
+      const revisions = () => [version(queue, 32 * 1024 * 1024), version(cursor, 2 * 1024 * 1024)];
+      const before = revisions();
+      const inputs = readInputs(id, 'retention'), state = checkedCursor(id);
+      const positions = new Map(inputs.map((input, index) => [input.inputId, index]));
+      const delivered = positions.get(state.inputId) ?? -1, executed = positions.get(state.executedInputId) ?? -1;
+      if (state.inputId !== undefined && delivered < 0 || state.executedInputId !== undefined && executed < 0 || executed > delivered
+        || (state.completedInputIds ?? []).some(inputId => !positions.has(inputId) || positions.get(inputId) > delivered))
+        throw Error('CORRUPT_INPUT_CURSOR');
+      const selections = [], attachmentIds = new Set();
+      for (const input of inputs) {
+        for (const attachment of input.attachments ?? []) attachmentIds.add(attachment.id);
+        if (attachmentIds.size > 16_384) throw Error('INPUT_QUEUE_RETENTION_LIMIT');
+        for (const row of input.resourceFeedback ?? []) {
+          if (row.resource.kind === 'interactive') {
+            selections.push({ reference: row.resource.reference, followupId: row.version.followupId });
+            if (selections.length > 16_384) throw Error('INPUT_QUEUE_RETENTION_LIMIT');
+          }
+        }
+      }
+      const assertCurrent = () => {
+        try { return !released && lock.current() && revisions().every((revision, index) => revision === before[index]); }
+        catch { return false; }
+      };
+      if (!assertCurrent()) throw Error('INPUT_QUEUE_CHANGED');
+      const revision = `sha256:${createHash('sha256').update(JSON.stringify(before)).digest('hex')}`;
+      return { revision, selections, attachmentIds: [...attachmentIds], assertCurrent, release };
+    } catch (error) { release(); throw error; }
+  }
+  return { submitInput, consume, pendingExecution, completeExecution, cursor: readCursor, diagnosticSnapshot, acquireRetentionInputs,
     findSubmission: (workspaceId, inputId) => readInputs(workspaceId).find(row => row.inputId === inputId) || null,
     findAnswer: (workspaceId, answerTo) => readInputs(workspaceId).find(row => row.answerTo === answerTo) || null,
   };
@@ -317,8 +377,12 @@ function normalizeSubmission(input, workspaceId, createdAt) {
   if (!INPUT_ID.test(inputId)) throw new TypeError('inputId is invalid');
   if (!SURFACES.has(input?.surface)) throw new TypeError('surface is invalid');
   const text = typeof input?.text === 'string' ? input.text.trim() : '';
-  const attachments = normalizeInputAttachments(input?.attachments);
-  if (!text && attachments.length === 0) throw new TypeError('text or attachments are required');
+  const uploaded = normalizeInputAttachments(input?.attachments);
+  const resourceFeedback = restoreResourceFeedbackTransport(input?.resourceFeedback, uploaded);
+  encodeResourceFeedbackTransport(resourceFeedback, uploaded);
+  const attachments = uploaded.filter(item => !isInteractiveFeedbackAttachment(item));
+  if (!resourceFeedback || resourceFeedback.some(row => row.recipient.workspaceId !== workspaceId)) throw Object.assign(new TypeError('INVALID_RESOURCE_FEEDBACK'), { code: 'INVALID_RESOURCE_FEEDBACK' });
+  if (!text && attachments.length === 0 && !resourceFeedback.some(row => row.resource.kind === 'interactive')) throw new TypeError('text or attachments are required');
   if (text.length > 100_000) throw new TypeError('text is too long');
   const suppliedAt = Date.parse(input?.createdAt);
   const normalized = {
@@ -330,6 +394,7 @@ function normalizeSubmission(input, workspaceId, createdAt) {
     quoteRefs: stringRefs(input?.quoteRefs),
     attachmentRefs: stringRefs(input?.attachmentRefs),
     ...(attachments.length > 0 ? { attachments } : {}),
+    ...(resourceFeedback.length > 0 ? { resourceFeedback } : {}),
     createdAt: Number.isFinite(suppliedAt) ? new Date(suppliedAt).toISOString() : createdAt,
   };
   const answerTo = optionalAnswer(input?.answerTo);
@@ -347,7 +412,10 @@ function normalizeStored(value, workspaceId) {
   if (!WORKSPACE_DIR.test(workspaceId)) return null;
   try {
     return normalizeSubmission(value, workspaceId, value.createdAt || new Date().toISOString());
-  } catch {
+  } catch (error) {
+    if (value.resourceFeedback?.some?.(row => row?.resource?.kind === 'interactive') || value.attachments?.some?.(isInteractiveFeedbackAttachment)) {
+      throw Object.assign(Error('INTERACTIVE_INPUT_UNAVAILABLE'), { code: 'INTERACTIVE_INPUT_UNAVAILABLE', cause: error });
+    }
     return null;
   }
 }

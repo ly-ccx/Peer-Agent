@@ -1,21 +1,19 @@
-.bot-drawer-detail.bot-task-detail { gap: 22px; padding: 4px 2px 16px; }
-.bot-task-detail .bot-task-back,
-.bot-task-detail .bot-task-scene {
+.bot-drawer-detail.bot-task-detail { gap: 16px; padding: 4px 2px 16px; }
+.bot-task-detail .bot-task-back {
   display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
   padding: 5px 0; border: 0; border-radius: var(--ui-radius-control-compact); background: transparent;
   color: var(--graphite-secondary); font-size: 12px;
 }
-.bot-task-detail .bot-task-back:hover,
-.bot-task-detail .bot-task-scene:hover { color: var(--graphite-base); background: transparent; }
+.bot-task-detail .bot-task-back:hover { color: var(--graphite-base); background: transparent; }
 .bot-task-detail-head { display: flex; flex-direction: column; gap: 10px; }
 .bot-task-detail .bot-task-detail-head h2 { font-size: 18px; line-height: 1.5; overflow-wrap: anywhere; }
 .bot-task-detail-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--graphite-secondary); }
 .bot-task-status { padding: 3px 7px; border-radius: var(--ui-radius-control-compact); background: var(--chrome-hover); color: var(--graphite-soft); }
 .bot-task-detail section { display: flex; flex-direction: column; gap: 7px; }
 .bot-task-detail h3 { margin: 0; font-size: 11px; font-weight: 500; line-height: 1.5; color: var(--graphite-secondary); }
-.bot-task-progress { padding: 14px; border-radius: var(--ui-radius-panel); background: var(--chrome-canvas); }
+.bot-task-progress { padding: 0; }
 .bot-task-detail p { margin: 0; overflow-wrap: anywhere; }
-.bot-task-progress-text { font-size: 14px; line-height: 1.6; font-weight: 500; color: var(--graphite-base); }
+.bot-task-progress-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font-size: var(--ui-font-body-lg); line-height: var(--ui-line-body); color: var(--graphite-base); }
 .bot-task-hint { font-size: 11px; line-height: 1.6; color: var(--graphite-secondary); }
 .bot-task-next { padding-bottom: 16px; border-bottom: 1px solid var(--chrome-hairline); }
 .bot-task-next h3 { font-size: 13px; color: var(--graphite-base); }
@@ -27,6 +25,8 @@
 .bot-task-update-preview { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font-size: 12px; line-height: 1.7; color: var(--graphite-soft); }
 .bot-task-instructions { margin-top: 14px; }
 .bot-task-verification { margin-top: 14px; font-size: 12px; line-height: 1.7; }
+.bot-task-verification dl dt { color: var(--graphite-soft); }
+.bot-task-verification dl dd { color: var(--graphite-base); }
 .bot-task-verification details { margin-top: 6px; }
 .bot-task-verification summary { display: flex; align-items: center; gap: 6px; list-style: none; cursor: pointer; color: var(--graphite-secondary); }
 .bot-task-verification summary::-webkit-details-marker { display: none; }
@@ -50,7 +50,6 @@
 .bot-task-detail .bot-task-information dd { font-size: 12px; overflow-wrap: anywhere; }
 .bot-task-information code { font-family: var(--font-mono, monospace); font-size: 11px; }
 .bot-task-information ul { list-style: none; padding: 0; margin: 0; }
-.bot-task-detail .bot-task-scene { margin-top: 12px; }
 .bot-task-detail button:focus-visible,
 .bot-task-information > summary:focus-visible { outline: 2px solid var(--za-accent); outline-offset: 3px; }
 @supports (interpolate-size: allow-keywords) {
@@ -62,3 +61,13 @@
   .bot-task-information::details-content,
   .bot-task-information > summary .peer-icon { transition-duration: 1ms; }
 }
+
+/* Conversation navigation stays visible independently of task-detail disclosure. */
+.bot-task-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); border-top: 1px solid var(--chrome-hairline); padding-top: var(--space-4); }
+.bot-task-actions > .bot-task-full-toggle { display: inline-flex; align-items: center; gap: 6px; border-color: transparent; background: transparent; color: var(--graphite-secondary); }
+.bot-task-full-toggle[aria-expanded="true"] .peer-icon { transform: rotate(180deg); }
+.bot-task-actions > .bot-task-scene { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+.bot-task-full { align-self: stretch; }
+.bot-task-detail .bot-task-full[hidden] { display: none; }
+.bot-task-full-content { display: flex; flex-direction: column; gap: 22px; }
+.bot-task-created { font-size: var(--ui-font-meta); color: var(--graphite-secondary); }

@@ -1,3 +1,4 @@
+import { withFileMutationLock } from './file-mutation-lock.mjs';
 import { evaluateObjectiveProbeCall,objectiveProbeDenial } from '../chat-runtime/objective-probe-gate.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
@@ -16,6 +17,7 @@ import { readFile, readdir, stat as statAsync } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, relative, resolve } from 'node:path';
 import {
   FileReadRangeError,
+  providerFileScopes,
   detectLocalImageMediaType,
   parseFileReadLineRange,
   sliceFileReadLines,
@@ -25,6 +27,7 @@ import { createPermissionGrant, nowIso } from './tool-result-factory.mjs';
 const MAX_TOOL_CONTEXT_CHARS = 4_000;
 /** Working-set file reads. Keep in sync with FILE_READ_INLINE_MAX_CHARS. */
 const FILE_READ_INLINE_MAX_CHARS = 32_000;
+const MATERIAL_OBSERVATION = Symbol('file-material-observation');
 const MAX_USER_CODE_PREVIEW_LINES = 40;
 const MAX_USER_CODE_PREVIEW_LINE_CHARS = 240;
 /** Hard cap for write_file content (UTF-8 bytes). Giant single payloads stall SSE tool-arg streams. */
@@ -84,8 +87,8 @@ function throwIfAborted(signal) {
   throw error;
 }
 
-function recheckFileAuthority(toolContext, pathPermission) {
-  return toolContext?.checkAccessPolicy?.()
+function recheckFileAuthority(toolContext, pathPermission, filePath) {
+  return toolContext?.checkAccessPolicy?.(providerFileScopes(filePath))
     || (typeof pathPermission.approval?.validate === 'function' && !pathPermission.approval.validate() ? 'permission_policy_changed' : null);
 }
 
@@ -328,11 +331,11 @@ function formatToolFailure(tool, status, reason, extra = {}) {
   };
 }
 
-function materializeFileRead({ filePath, content, readState, fullContent = null, range = null }) {
+function materializeFileRead({ filePath, content, readState, fullContent = null, range = null, captureMaterial = false }) {
   const source = fullContent ?? content;
   const snapshot = readState ?? getFileSnapshot(filePath, source);
   const preview = previewText(content, FILE_READ_INLINE_MAX_CHARS);
-  return {
+  const result = {
     success: true,
     output: formatContextResult({
       kind: 'local_file_ref',
@@ -357,6 +360,11 @@ function materializeFileRead({ filePath, content, readState, fullContent = null,
       ],
     }),
   };
+  if (captureMaterial && Buffer.byteLength(content, 'utf8') <= 4 * 1024 * 1024) Object.defineProperty(result, MATERIAL_OBSERVATION, {
+    value: { path: filePath, content, contentHash: hashContent(content),
+      ...(range ? { ...range, truncated: true } : { truncated: false }) }, enumerable: false,
+  });
+  return result;
 }
 
 function formatSearchSuccess({ query, cwd, searchRoot, matches, filesWithMatches, truncated }) {
@@ -610,7 +618,13 @@ export async function runFileSearch({ args = {}, cwd, requestPermission, signal 
   });
 }
 
-async function runFileTool({ name, args, cwd, toolContext, requestPermission }) {
+async function runFileTool(options) {
+  if (!['write_file', 'edit_file'].includes(options.name)) return runUnlockedFileTool(options);
+  try { return await withFileMutationLock(resolveToolPath(options.args.path, options.cwd), () => runUnlockedFileTool(options), { signal: options.signal }); }
+  catch (error) { return formatToolFailure(options.name, 'blocked', error.code ?? 'FILE_MUTATION_UNAVAILABLE'); }
+}
+
+async function runUnlockedFileTool({ name, args, cwd, toolContext, requestPermission, signal }) {
   try {
     if (name === 'read_file') {
       const filePath = resolveToolPath(args.path, cwd);
@@ -649,6 +663,7 @@ async function runFileTool({ name, args, cwd, toolContext, requestPermission }) 
         content: slice.content,
         readState,
         fullContent,
+        captureMaterial: toolContext?.interactiveMaterialsEnabled === true,
         range: slice.ranged
           ? {
               start_line: slice.startLine,
@@ -730,8 +745,11 @@ async function runFileTool({ name, args, cwd, toolContext, requestPermission }) 
           permission: pathPermission.approval?.reason || 'not_granted',
         });
       }
-      const accessDenial = recheckFileAuthority(toolContext, pathPermission);
+      const accessDenial = recheckFileAuthority(toolContext, pathPermission, filePath);
       if (accessDenial) return formatToolFailure('edit_file', 'blocked', accessDenial, { path: filePath });
+      const latest = validateFreshReadState(toolContext, filePath);
+      if (!latest.ok) return formatToolFailure('edit_file', 'blocked', latest.reason, { path: filePath });
+      if (signal?.aborted) return formatToolFailure('edit_file', 'cancelled', 'execution_cancelled', { path: filePath });
       writeFileSync(filePath, after, 'utf8');
       const nextState = recordReadState(toolContext, { cwd, filePath, content: after, fullRead: true });
       return {
@@ -799,8 +817,13 @@ async function runFileTool({ name, args, cwd, toolContext, requestPermission }) 
         });
       }
 
-      const accessDenial = recheckFileAuthority(toolContext, pathPermission);
+      const accessDenial = recheckFileAuthority(toolContext, pathPermission, filePath);
       if (accessDenial) return formatToolFailure('write_file', 'blocked', accessDenial, { path: filePath });
+      if (exists) {
+        const latest = validateFreshReadState(toolContext, filePath);
+        if (!latest.ok) return formatToolFailure('write_file', 'blocked', latest.reason, { path: filePath });
+      } else if (existsSync(filePath)) return formatToolFailure('write_file', 'blocked', 'File appeared while awaiting permission; read it before replacing it.', { path: filePath });
+      if (signal?.aborted) return formatToolFailure('write_file', 'cancelled', 'execution_cancelled', { path: filePath });
       mkdirSync(dirname(filePath), { recursive: true });
       writeFileSync(filePath, args.content, 'utf8');
       const nextState = recordReadState(toolContext, { cwd, filePath, content: args.content, fullRead: true });
@@ -915,7 +938,7 @@ function buildFileCapabilityResult({ call, name, locale, fileResult }) {
       ? 'D1_internal'
       : 'D2_sensitive';
   const userArtifacts = userArtifactsFromFileResult(name, fileResult);
-  return {
+  const result = {
     toolCallId: call.toolCallId,
     status,
     outputPreview: {
@@ -939,6 +962,11 @@ function buildFileCapabilityResult({ call, name, locale, fileResult }) {
     },
     completedAt: nowIso(),
   };
+  if (fileResult[MATERIAL_OBSERVATION]) Object.defineProperty(result, 'materialObservation', {
+    value: Object.freeze({ schemaVersion: 1, toolCallId: call.toolCallId, capabilityId: call.capabilityId,
+      evidenceId: result.evidence.evidenceId, payload: fileResult[MATERIAL_OBSERVATION] }), enumerable: false,
+  });
+  return result;
 }
 
 function readArgs(call) {
@@ -968,6 +996,7 @@ export function createLocalFileProvider({ workspaceRoot } = {}) {
       cwd,
       toolContext: context.toolContext,
       requestPermission: context.requestPermission,
+      signal: context.signal,
     });
     const status = statusFromFileResult(fileResult);
     const grant = createPermissionGrant({

@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { createDesktopReplyComposer } from './reply-composer-port.mjs';
 import { installDeliveryFacts, liveDeliveryFacts } from './delivery-facts-port.mjs';
+import { interactiveArtifactRef } from '@peer-agent/protocol';
 
 const view = {
   turnId: 'turn-1',
@@ -10,6 +11,43 @@ const view = {
   workspaceId: 'ws-1',
   messages: [{ id: 'u1', kind: 'user_input', role: 'user', content: '做一下' }],
 };
+
+test('only confirmed host references of actually cited sessions are attached after source/status validation', () => {
+  const actual = { ...view, conversationId: 'parent' }, fixed = interactiveArtifactRef({ owner: { workspaceId: view.workspaceId, conversationId: 'parent' },
+    resultId: 'result', contentVersion: 'sha256:' + 'a'.repeat(64) });
+  let reads = 0;
+  const port = createDesktopReplyComposer({ readDelivery: () => ({ sessionIds: ['s1'], sessionStates: [{ sessionId: 's1', status: 'running' }] }),
+    readResultReferences: input => { reads++; assert.deepEqual(input, { workspaceId: view.workspaceId, conversationId: 'parent', sessionIds: ['s1'] }); return [fixed]; } });
+  const input = { text: 'Saved a trial', replyTo: ['u1'], sources: ['s1'], statusClaims: [{ sessionId: 's1', status: 'running' }],
+    evidenceRefs: ['file:///forged'], userArtifacts: [{ kind: 'interactive', ref: 'invented' }] };
+  assert.equal(port.postReply({ ...input, statusClaims: [{ sessionId: 's1', status: 'accepted' }] }, actual).error, 'status_claim_mismatch');
+  assert.equal(reads, 0);
+  const reply = port.postReply(input, actual);
+  assert.deepEqual(reply.meta.evidenceRefs, [fixed]); assert.deepEqual(reply.message.meta.evidenceRefs, [fixed]); assert.equal(reads, 1);
+  assert.equal(JSON.stringify(reply).includes('file:///forged'), false);
+});
+
+test('objective evidence shares the bounded reply budget with confirmed fixed references and is never overwritten', () => {
+  const actual = { ...view, conversationId: 'parent', objectiveWakeIds: ['wake'] };
+  const refs = Array.from({ length: 20 }, (_, i) => interactiveArtifactRef({ owner: { workspaceId: view.workspaceId, conversationId: 'parent' },
+    resultId: `result-${i}`, contentVersion: 'sha256:' + 'b'.repeat(64) }));
+  const port = createDesktopReplyComposer({ readDelivery: () => ({ objectiveAnchorIds: ['u1'], objectiveEvidenceRefs: ['objective-probe:saved'],
+    sessionIds: ['s1'], sessionStates: [{ sessionId: 's1', status: 'running' }] }), readResultReferences: () => refs });
+  const reply = port.postReply({ text: 'Observation and saved trials', replyTo: ['u1'], sources: ['s1'], statusClaims: [{ sessionId: 's1', status: 'running' }] }, actual);
+  assert.deepEqual(reply.meta.evidenceRefs, ['objective-probe:saved', ...refs.slice(0, 19)]);
+});
+
+test('missing result facts allow an ordinary status reply while malformed or foreign host references cannot be persisted', () => {
+  let refs = [];
+  const port = createDesktopReplyComposer({ readDelivery: () => ({ sessionIds: ['s1'], sessionStates: [{ sessionId: 's1', status: 'waiting_user' }] }),
+    readResultReferences: () => refs });
+  const input = { text: 'Result publication is not confirmed', replyTo: ['u1'], sources: ['s1'], statusClaims: [{ sessionId: 's1', status: 'waiting_user' }] };
+  const actual = { ...view, conversationId: 'parent' };
+  assert.equal(port.postReply(input, actual).meta.evidenceRefs, undefined);
+  for (const invalid of ['file:///fake', interactiveArtifactRef({ owner: { workspaceId: view.workspaceId, conversationId: 'other' }, resultId: 'r', contentVersion: 'sha256:' + 'c'.repeat(64) })]) {
+    refs = [invalid]; assert.equal(port.postReply(input, actual).error, 'result_references_unavailable');
+  }
+});
 
 test('post_reply returns recoverable anchor facts and requires a separately validated retry', () => {
   const port = createDesktopReplyComposer({ readDelivery: () => ({ sessionIds: ['s1'],

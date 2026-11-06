@@ -3,6 +3,13 @@ function assertFunction(value, label) {
   return value;
 }
 
+function withoutReturnedMessages(result) {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return result;
+  if (!Object.hasOwn(result, 'messages')) return result;
+  const { messages: _messages, ...meta } = result;
+  return meta;
+}
+
 export function createConversationApplicationService({
   listConversations,
   listConversationsByWorkspace,
@@ -125,7 +132,11 @@ export function createConversationApplicationService({
     list,
     search: (params) => ports.searchConversations(params || {}),
     create: (params) => ports.createConversation(params),
-    get: ({ id }) => ports.getConversation(id),
+    get: ({ id, limit, before, full } = {}) => ports.getConversation(id, {
+      ...(limit != null ? { limit } : {}),
+      ...(typeof before === 'string' && before ? { before } : {}),
+      ...(full === true ? { full: true } : {}),
+    }),
     updateTitle: ({ id, title }) => ports.updateTitle(id, title),
     updateMode: ({ id, mode }) => ports.updateMode(id, mode),
     updateFastMode: ({ id, fastMode }) => ports.updateFastMode(id, fastMode),
@@ -135,7 +146,9 @@ export function createConversationApplicationService({
       ports.updateAutomationCreateContext(id, context),
     updateModelEffort: ({ id, effort, modelProviderId }) =>
       ports.updateModelEffort(id, { effort, modelProviderId }),
-    appendMessage: ({ id, message }) => ports.appendMessage(id, message),
+    appendMessage: ({ id, message }) => withoutReturnedMessages(
+      ports.appendMessage(id, message, { returnMessages: false }),
+    ),
     updateLastMessage: ({ id, content }) => ports.updateLastMessage(id, content),
     replaceMessages: ({ id, messages, allowEmpty = false }) =>
       ports.replaceMessages(id, messages, { allowEmpty }),

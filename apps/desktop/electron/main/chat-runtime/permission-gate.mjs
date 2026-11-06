@@ -232,6 +232,7 @@ export function createChatPermissionGate({
   now = () => Date.now(),
   permissionWaitMs,
   permissionTimers = {},
+  registerActive = true,
 } = {}) {
   const pendingPermissionRequests = createPendingPermissionWait({ now, waitMs: permissionWaitMs,
     ...permissionTimers, onEnd: (id, grant, options) => settlePermissionRequest(id, grant, options) });
@@ -551,7 +552,7 @@ export function createChatPermissionGate({
     });
   }
 
-  function createLocalCapabilityPermissionRequester({ webContents, streamId, toolCallId, conversationId = null, workspacePath = null, permissionPolicy = null, sourceArguments = undefined, signal = null }) {
+  function createLocalCapabilityPermissionRequester({ webContents, streamId, toolCallId, conversationId = null, workspacePath = null, permissionPolicy = null, sourceArguments = undefined, signal = null, grantScope = undefined, respectConfirmation = false }) {
     return (request = {}) => new Promise((resolve) => {
       const context = { streamId, conversationId, workspacePath, toolCallId };
       const access = accessFor(context);
@@ -559,6 +560,12 @@ export function createChatPermissionGate({
       const call = buildLocalCapabilityPermissionCall({ request, toolCallId });
       if (!access.valid) return resolve(createPolicyDenial({ toolCallId: call.toolCallId, reason: access.reason }));
       const policyDecision = automationCapabilityDecision(permissionPolicy, call);
+      if (policyDecision && !policyDecision.granted) { resolvePermission(policyDecision); return; }
+      if (respectConfirmation && call.confirmation) {
+        askUser({ webContents, streamId, call, scopeKey: scopeKeyFor({ streamId, conversationId, workspacePath, call }),
+          scope: call.capabilityId, resolve: resolvePermission, signal, conversationId, workspacePath });
+        return;
+      }
       if (policyDecision) {
         resolvePermission(policyDecision);
         return;
@@ -569,7 +576,7 @@ export function createChatPermissionGate({
       if (access.level === 'full_local') {
         resolvePermission({
           ...createAutoAccessGrant({ toolCallId: call.toolCallId,
-            scope: request.scope ?? call.capabilityId, reason: 'local_access_level_full' }),
+            scope: grantScope ?? request.scope ?? call.capabilityId, reason: 'local_access_level_full' }),
         });
         return;
       }
@@ -801,6 +808,6 @@ export function createChatPermissionGate({
     settlePermissionRequest,
     settleStreamPermissionRequests,
   };
-  activeGate = gate;
+  if (registerActive) activeGate = gate;
   return gate;
 }

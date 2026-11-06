@@ -1,3 +1,6 @@
+import { MotionSurface } from '../app/components/MotionSurface';
+import { useInteractionLayer } from '../app/hooks/useInteractionLayer';
+import { isImeKey } from '../chat/state/compositionGuard';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { PALETTE_REGISTRY, type AppearancePalette } from './paletteRegistry';
 
@@ -13,14 +16,10 @@ import { PALETTE_REGISTRY, type AppearancePalette } from './paletteRegistry';
  * 可访问性：button(role=combobox) + ul(role=listbox) + li(role=option)，
  * 支持键盘 ↑/↓/Home/End 移动高亮、Enter/Space 选中、Esc 关闭、点外关闭、失焦关闭。
  *
- * 开合过渡：list 挂载后用 data-state=open|closed 驱动 enter/exit；
- * 关闭时先播退场再卸载，避免选中后瞬间消失。
+ * 挂载/退场交给 MotionSurface；关闭立即释放交互层，视觉保留不持有选择。
  */
 
-/** 与 CSS `--za-motion-fast` 对齐的退场兜底时长（ms）。 */
-const EXIT_MS = 160;
-
-type PanelPhase = 'closed' | 'open' | 'closing';
+type PanelPhase = 'closed' | 'open';
 
 export function PaletteSelect({
   value,
@@ -40,36 +39,17 @@ export function PaletteSelect({
   );
   const rootRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement | null>(null);
-  const exitTimerRef = useRef<number | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const listboxId = useId();
 
   const selected = PALETTE_REGISTRY.find((palette) => palette.id === value) ?? PALETTE_REGISTRY[0];
   const isExpanded = phase === 'open';
   const isMounted = phase !== 'closed';
 
-  const clearExitTimer = useCallback(() => {
-    if (exitTimerRef.current != null) {
-      window.clearTimeout(exitTimerRef.current);
-      exitTimerRef.current = null;
-    }
-  }, []);
-
-  const finishClose = useCallback(() => {
-    clearExitTimer();
-    setPhase('closed');
-  }, [clearExitTimer]);
-
-  const openPanel = useCallback(() => {
-    clearExitTimer();
-    setPhase('open');
-  }, [clearExitTimer]);
-
-  const closePanel = useCallback(() => {
-    setPhase((prev) => {
-      if (prev !== 'open') return prev;
-      return 'closing';
-    });
-  }, []);
+  const openPanel = useCallback(() => setPhase('open'), []);
+  const closePanel = useCallback(() => setPhase('closed'), []);
+  useInteractionLayer(isExpanded, { roots: [listRef], trigger: triggerRef, outside: true, closeOnTriggerRemoval: true, dismissOnTab: true,
+    onClose: closePanel, onEnter: () => listRef.current?.focus({ preventScroll: true }) });
 
   const commit = useCallback(
     (palette: AppearancePalette) => {
@@ -78,24 +58,6 @@ export function PaletteSelect({
     },
     [onChange, closePanel],
   );
-
-  // 退场结束后卸载；reduced-motion 时跳过等待。
-  useEffect(() => {
-    if (phase !== 'closing') return;
-
-    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (reduceMotion) {
-      finishClose();
-      return;
-    }
-
-    clearExitTimer();
-    exitTimerRef.current = window.setTimeout(() => {
-      finishClose();
-    }, EXIT_MS);
-
-    return () => clearExitTimer();
-  }, [phase, finishClose, clearExitTimer]);
 
   // 打开时把高亮对齐到当前选中项
   useEffect(() => {
@@ -109,40 +71,8 @@ export function PaletteSelect({
     }
   }, [phase, value]);
 
-  // 点击外部关闭（仅在展开态响应）
-  useEffect(() => {
-    if (phase !== 'open') return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
-        closePanel();
-      }
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    return () => document.removeEventListener('pointerdown', onPointerDown);
-  }, [phase, closePanel]);
-
-  // 挂载后下一帧再切 data-state=open，确保 enter 过渡能播
-  useEffect(() => {
-    if (phase !== 'open') return;
-    const node = listRef.current;
-    if (!node) return;
-    if (node.dataset.state !== 'open') {
-      node.dataset.state = 'closed';
-      // force reflow so the closed -> open transition actually runs
-      void node.offsetHeight;
-      node.dataset.state = 'open';
-    }
-  }, [phase]);
-
-  const onListTransitionEnd = (event: React.TransitionEvent<HTMLUListElement>) => {
-    if (event.target !== event.currentTarget) return;
-    if (event.propertyName !== 'opacity' && event.propertyName !== 'transform') return;
-    if (phase === 'closing') {
-      finishClose();
-    }
-  };
-
   const onTriggerKeyDown = (event: React.KeyboardEvent) => {
+    if (isImeKey(event.nativeEvent)) return;
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       openPanel();
@@ -150,6 +80,7 @@ export function PaletteSelect({
   };
 
   const onListKeyDown = (event: React.KeyboardEvent) => {
+    if (event.defaultPrevented || isImeKey(event.nativeEvent)) return;
     switch (event.key) {
       case 'ArrowDown':
         event.preventDefault();
@@ -193,9 +124,11 @@ export function PaletteSelect({
     <div className="palette-select" ref={rootRef}>
       <button
         type="button"
+        ref={triggerRef}
         className="palette-select-trigger"
         aria-haspopup="listbox"
         aria-expanded={isExpanded}
+        aria-controls={isExpanded ? listboxId : undefined}
         aria-label={label}
         onClick={togglePanel}
         onKeyDown={onTriggerKeyDown}
@@ -215,7 +148,7 @@ export function PaletteSelect({
         </span>
       </button>
 
-      {isMounted ? (
+      <MotionSurface>{isMounted ? (
         <ul
           className="palette-select-list"
           role="listbox"
@@ -224,13 +157,7 @@ export function PaletteSelect({
           data-state={phase === 'open' ? 'open' : 'closed'}
           aria-activedescendant={`${listboxId}-${activeIndex}`}
           onKeyDown={onListKeyDown}
-          onTransitionEnd={onListTransitionEnd}
-          ref={(node) => {
-            listRef.current = node;
-            if (node && phase === 'open') {
-              node.focus();
-            }
-          }}
+          ref={listRef}
         >
           {PALETTE_REGISTRY.map((palette, index) => {
             const isSelected = palette.id === value;
@@ -270,7 +197,7 @@ export function PaletteSelect({
             );
           })}
         </ul>
-      ) : null}
+      ) : null}</MotionSurface>
     </div>
   );
 }

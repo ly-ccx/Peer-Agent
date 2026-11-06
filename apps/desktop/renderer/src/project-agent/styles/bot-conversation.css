@@ -32,9 +32,9 @@
 }
 
 .bot-thread-shell {
-  position: relative;
   display: flex;
   flex: 1;
+  flex-direction: column;
   min-height: 0;
 }
 
@@ -56,10 +56,9 @@
 .bot-thread-failed { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-height: 0; padding: 24px; }
 
 .bot-thread-latest {
-  position: absolute;
-  bottom: 12px;
-  left: 50%;
-  transform: translateX(-50%);
+  flex: none;
+  align-self: center;
+  margin-block-end: var(--space-2, 8px);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -78,9 +77,10 @@
 }
 
 .bot-thread-row {
+  --motion-layout-space: var(--space-4, 16px);
   display: flex;
   flex-direction: column;
-  padding-bottom: var(--space-4, 16px);
+  padding-bottom: var(--motion-layout-space);
 }
 
 /* A one-line status follows the message it belongs to. It does not take a full paragraph gap. */
@@ -89,6 +89,7 @@
 .bot-thread-row:has(> .bot-reply > .bot-reply-context:only-child),
 .bot-thread-row:has(+ .bot-thread-row > .bot-agent-activity),
 .bot-thread-row:has(+ .bot-thread-row > .bot-reply > .bot-reply-context:only-child) {
+  --motion-layout-space: 4px;
   padding-bottom: 4px;
 }
 
@@ -97,6 +98,7 @@
 ):has(
   + .bot-thread-row > .bot-system > .bot-cards > .bot-approval-receipt:only-child
 ) {
+  --motion-layout-space: 4px;
   padding-bottom: 4px;
 }
 
@@ -272,6 +274,7 @@
 .bot-user-content {
   display: flex;
   flex-direction: column;
+  max-width: 100%;
   min-width: 0;
   gap: 10px;
   padding: 12px 16px;
@@ -498,42 +501,96 @@
   transition: color var(--za-motion-fast) var(--za-ease-standard);
 }
 
-/* Reply context belongs to the message, with one quiet horizontal reading line. */
+/* Source metadata and one exact excerpt; the whole preview locates its original. */
 .bot-reply-anchors {
+  display: grid;
+  gap: var(--space-2);
   min-width: 0;
-  max-width: min(680px, 100%);
+  max-width: 100%;
 }
 
-.bot-reply-anchors > .bot-reply-bar {
+.bot-reply-task-references {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.bot-reply-task-references > button {
+  gap: var(--space-2);
+}
+
+.bot-reply-source {
   box-sizing: border-box;
   width: 100%;
   max-width: 100%;
-  min-height: 28px;
-  padding: 4px 0;
-  border-radius: var(--ui-radius-chip);
-  background: transparent;
+  padding: var(--space-3);
 }
 
-.bot-reply-anchors .bot-reply-bar-copy {
-  display: grid;
-  grid-template-columns: fit-content(30%) minmax(0, 1fr);
+.bot-reply-source .bot-reply-bar-copy {
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.bot-reply-bar-header {
+  display: flex;
   align-items: center;
-  gap: 10px;
-}
-
-.bot-reply-anchors .bot-reply-bar-label {
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  width: 100%;
+  min-width: 0;
   color: var(--graphite-soft);
+  font-size: var(--ui-font-meta);
   font-weight: 400;
+  line-height: var(--ui-line-control);
 }
 
-.bot-reply-anchors > .bot-reply-bar:is(:hover, :focus-visible) {
-  background: color-mix(in srgb, var(--graphite-base) 5%, transparent);
+.bot-reply-bar-source {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.bot-reply-source .bot-reply-bar-label {
+  flex-shrink: 1;
+  color: var(--graphite-soft);
+  font-size: inherit;
+  font-weight: 400;
+  line-height: inherit;
+}
+
+.bot-reply-bar-source time {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.bot-reply-bar-action {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--space-1);
+  margin-inline-start: auto;
+  white-space: nowrap;
+}
+
+.bot-reply-source .bot-reply-bar-excerpt {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--graphite-base);
+  font-size: var(--ui-font-control);
+  font-weight: 400;
+  line-height: var(--ui-line-body);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .bot-reply-body > .bot-reply-anchors {
-  margin-bottom: 10px;
-  padding-bottom: 7px;
-  border-bottom: 1px solid var(--chrome-hairline);
+  margin-bottom: var(--space-4);
 }
 
 .bot-reply > .bot-reply-body:has(> .bot-reply-anchors) {
@@ -762,6 +819,10 @@
   opacity: 1;
 }
 
+.bot-question .bot-card-actions button:focus-visible {
+  outline-offset: -2px;
+}
+
 .bot-question .bot-card-actions button:hover {
   background: var(--control-fill-hover);
 }
@@ -787,6 +848,20 @@
   align-self: center;
 }
 
+.bot-convo > .bot-draft-status {
+  align-self: center;
+  box-sizing: border-box;
+  width: var(--bot-column-width);
+  margin: 8px var(--bot-column-gutter) 0;
+  color: var(--graphite-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.bot-convo > .bot-draft-status + .bot-composer {
+  margin-top: 6px;
+}
+
 .bot-composer {
   display: flex;
   flex-direction: column;
@@ -795,8 +870,8 @@
   padding: 14px 14px 10px;
   border: 1px solid var(--composer-edge);
   border-radius: var(--ui-radius-composer);
-  background: var(--composer-surface);
-  box-shadow: none;
+  background: var(--control-composer);
+  box-shadow: var(--shadow-composer);
   transition: border-color var(--za-motion-fast) var(--za-ease-standard);
 }
 
@@ -867,6 +942,10 @@
 }
 
 .bot-composer textarea {
+  field-sizing: content;
+  height: auto;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
   width: 100%;
   min-width: 0;
   min-height: 36px;
@@ -950,10 +1029,14 @@
   animation: bot-thinking-hop 1.05s ease-in-out infinite;
 }
 
-.bot-agent-activity[data-agent-state='queued'] .bot-agent-marker,
-.bot-agent-activity[data-agent-state='started'] .bot-agent-marker,
-.bot-agent-activity[data-agent-state='verifying'] .bot-agent-marker {
-  animation: bot-thinking-hop 1.05s ease-in-out infinite;
+@supports (mask-image: linear-gradient(100deg, transparent, currentColor)) {
+  .bot-agent-activity[data-agent-running='true'] .bot-agent-marker {
+    mask-image: linear-gradient(100deg, rgb(0 0 0 / .65) 36%, #000 50%, rgb(0 0 0 / .65) 64%);
+    mask-size: 220% 100%;
+    --motion-shimmer-from: 100%;
+    --motion-shimmer-x: -120%;
+    animation: motion-mask-shimmer 1.6s linear infinite;
+  }
 }
 
 .bot-thinking-status-label {
@@ -976,6 +1059,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .bot-agent-activity[data-agent-running='true'] .bot-agent-marker {
+    mask-image: none;
+  }
   .bot-thinking-status,
   .bot-thinking-status .bot-avatar,
   .bot-thinking-status .bot-avatar svg,
@@ -1053,7 +1139,7 @@
 }
 
 .bot-composer-bar button:disabled {
-  background: color-mix(in srgb, var(--graphite-base) 12%, var(--composer-surface));
+  background: color-mix(in srgb, var(--graphite-base) 12%, var(--control-composer));
   color: var(--graphite-soft);
   box-shadow: none;
   cursor: default;
@@ -1083,18 +1169,32 @@
 .bot-message-author {
   display: flex;
   align-items: center;
-  gap: 7px;
-  margin-bottom: 10px;
-  color: var(--graphite-soft);
-  font-size: .6875rem;
+  gap: var(--space-2);
+  min-width: 0;
+  margin-bottom: var(--space-2);
+  color: var(--graphite-base);
+  font-size: var(--ui-font-body);
+  font-weight: 500;
+  line-height: 1.4;
 }
-.bot-message-author .bot-avatar { width: 19px; height: 19px; flex-basis: 19px; }
-.bot-user-quote.bot-reply-bar { width: 100%; max-width: 100%; margin: 0; }
+.bot-message-author .bot-avatar { width: var(--space-8); height: var(--space-8); flex-basis: var(--space-8); }
+.bot-message-author > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+/* The user bubble is fit-content. A nowrap excerpt must not become that width:
+   cap the preview at the same column fraction as the bubble, then ellipsize. */
+.bot-user-quote.bot-reply-bar {
+  box-sizing: border-box;
+  width: auto;
+  max-width: min(100%, calc(var(--bot-column-width) * 0.8));
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+}
 .bot-reply-marks > button { min-height: 27px; padding: 5px 7px; border-color: transparent; background: transparent; font-size: .6875rem; }
 .bot-reply-marks > button:first-child { padding-left: 0; }
 .bot-reply-delivery { font-size: .6875rem; }
 @media (max-width: 1100px) {
   .bot-user { max-width: 88%; }
+  .bot-user-quote.bot-reply-bar { max-width: min(100%, calc(var(--bot-column-width) * 0.88)); }
 }
 
 @supports (corner-shape: superellipse(1.4)) {
@@ -1113,3 +1213,20 @@
   .bot-user.is-arriving .bot-user-content { animation: none; }
   .bot-composer { transition-duration: 1ms; }
 }
+
+.bot-attachment-preview { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 0; border: 0; color: inherit; background: transparent; text-align: start; cursor: pointer; }
+.bot-attachment-text-preview { width: min(720px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow: auto; padding: var(--space-5); background: var(--za-surface); color: var(--za-text); border: 1px solid var(--za-border); border-radius: var(--ui-radius-panel); }
+.bot-attachment-text-preview header { display: flex; align-items: start; justify-content: space-between; gap: var(--space-3); }
+.bot-attachment-text-preview h2 { overflow-wrap: anywhere; }
+.bot-attachment-text-preview pre { max-height: 65dvh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.bot-attachment-preview:focus-visible, .bot-attachment-image:focus-visible { outline: 2px solid var(--ui-focus-ring); outline-offset: 2px; }
+
+.bot-evidence-preview { width: min(640px, 95vw); overflow: auto; padding: var(--space-4); }
+.bot-resource-feedback-cards { display: flex; flex-direction: column; gap: var(--space-2); max-height: calc(var(--ui-control-height) * 6); overflow: auto; }
+.bot-resource-feedback-card { border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-panel); background: var(--paper-sheet); padding: var(--space-2); min-width: 0; }
+.bot-resource-feedback-card header { display: flex; align-items: center; gap: var(--space-2); }
+.bot-resource-feedback-card .resource-feedback-source { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ui-font-caption); }
+.bot-resource-feedback-card header span, .bot-resource-feedback-card p { color: var(--graphite-secondary); font-size: var(--ui-font-caption); margin: 0; }
+.bot-resource-feedback-card blockquote { margin: var(--space-1) 0 0; padding: 0; border: 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: calc(var(--ui-control-height) * 2); overflow: auto; font-size: var(--ui-font-caption); }
+
+.resource-feedback-source { color: inherit; text-align: start; background: transparent; border: 0; padding: 0; text-decoration: underline; text-underline-offset: 0.15em; }

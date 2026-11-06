@@ -2,6 +2,26 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createTurnActivity } from './turn-activity.mjs';
 
+test('live file hints come from successful structured results, are cloned, and reset on recovery', () => {
+  const activity = createTurnActivity();
+  activity.begin({ turnId: 't', visible: true });
+  const result = (id, value) => {
+    activity.accept('chat:stream:tool-call', { streamId: 't', toolCallId: id, tool: 'read_file' });
+    activity.accept('chat:stream:tool-result', { streamId: 't', toolCallId: id, result: value });
+  };
+  result('good', { ok: true, output: { kind: 'file_read_result', tool: 'read_file', path: '/project/real.md', status: 'success', content: 'private body' } });
+  assert.deepEqual(activity.snapshot().resourceReferences, [{ path: '/project/real.md', tool: 'read_file' }]);
+  const copy = activity.snapshot(); copy.resourceReferences[0].path = '/mutated';
+  assert.equal(activity.snapshot().resourceReferences[0].path, '/project/real.md');
+  result('failed', { ok: false, output: { kind: 'file_read_result', tool: 'read_file', path: '/project/denied.md', status: 'success' } });
+  result('prose', { ok: true, content: 'Read /project/imaginary.md' });
+  assert.equal(activity.snapshot().resourceReferences.length, 1);
+  assert.doesNotMatch(JSON.stringify(activity.snapshot().resourceReferences), /private body|denied|imaginary/);
+  activity.accept('chat:stream:connection-recovery', { streamId: 't' });
+  assert.equal(activity.snapshot().resourceReferences, undefined);
+  activity.dispose();
+});
+
 test('tool duration uses host timestamps even when both events reach activity together', () => {
   const a = createTurnActivity({ now: () => '2026-10-06T00:00:10Z' });
   a.begin({ turnId: 't', visible: true });

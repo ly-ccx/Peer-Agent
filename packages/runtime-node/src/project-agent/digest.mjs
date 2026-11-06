@@ -27,6 +27,7 @@ const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/;
 export function defaultProjectAgentSettings() {
   return {
     concurrency: 4,
+    interactiveResults: false,
     proactivity: 'standard',
     quietHours: { enabled: false, start: '22:00', end: '08:00' },
     digestTime: '09:00',
@@ -44,6 +45,7 @@ export function normalizeProjectAgentSettings(value) {
     : {};
   return {
     concurrency: normalizeConcurrency(source.concurrency),
+    interactiveResults: source.interactiveResults === true,
     proactivity: GLOBAL_LEVELS.includes(source.proactivity) ? source.proactivity : defaults.proactivity,
     quietHours: {
       enabled: hours.enabled === true,
@@ -120,6 +122,7 @@ export function createDigestQueue({ file = null } = {}) {
     const text = typeof item?.text === 'string' ? item.text.trim() : '';
     if (!id || !text) return 0;
     const list = Array.isArray(state.items[id]) ? state.items[id] : [];
+    if (item?.id && list.some(row => row.id === item.id)) return list.length;
     list.push({
       id: typeof item?.id === 'string' && item.id.trim() ? item.id.trim() : `digest-item-${list.length + 1}`,
       text,
@@ -192,7 +195,9 @@ function digestReferences(items) {
   const union = (key) => [...new Set(messages.flatMap((message) => message[key] || []))];
   const metaUnion = (key) => [...new Set(messages.flatMap((message) => message.meta?.[key] || []))];
   return { sources: union('sources'), replyTo: union('replyTo'), marks: messages.flatMap((message) => message.marks || []),
-    meta: { memoryUsed: metaUnion('memoryUsed'), memoryLearned: metaUnion('memoryLearned'), evidenceRefs: metaUnion('evidenceRefs') } };
+    meta: { memoryUsed: metaUnion('memoryUsed'), memoryLearned: metaUnion('memoryLearned'), evidenceRefs: metaUnion('evidenceRefs'),
+      digestReplyIds: messages.map(row => row.id),
+      sessionStates: [...new Map(messages.flatMap(row => row.meta?.sessionStates || []).map(row => [row.sessionId, row])).values()] } };
 }
 
 function mustDeliver(event, needsYouFlag) {

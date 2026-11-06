@@ -88,6 +88,8 @@ export interface TuiConversationPersistence {
   } | undefined;
   listResumable(): readonly TuiConversationSummary[];
   loadConversation(id: string): TuiConversationRestore | null;
+  /** Bind an existing stored session that has no renderable messages yet. */
+  adoptConversation(id: string): boolean;
   resumeConversation(conversation: TuiConversationRestore): void;
   subscribeExternalChanges(listener: (conversationId: string) => void): () => void;
   syncSnapshot(snapshot: ChatSnapshot): void;
@@ -694,6 +696,22 @@ export function createTuiConversationPersistence(options: {
       } catch (error) {
         reportError(error);
         return null;
+      }
+    },
+    adoptConversation(id) {
+      try {
+        const stored = store.getConversation(id);
+        if (!stored || typeof stored.id !== 'string' || !stored.id) return false;
+        conversationId = stored.id;
+        mode = normalizeTuiMode(stored.mode, mode);
+        fastMode = stored.fastMode === true;
+        const selection = restoredSelection(stored);
+        if (selection) model = selection;
+        persistedMessageIds = new Set();
+        return true;
+      } catch (error) {
+        reportError(error);
+        return false;
       }
     },
     resumeConversation(conversation) {

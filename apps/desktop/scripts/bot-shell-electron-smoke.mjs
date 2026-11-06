@@ -1,3 +1,5 @@
+import { BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
+import { seedHistoryRecovery, checkHistoryRecovery } from './bot-history-recovery-checks.mjs';
 import { checkBotWindowMaterial } from './bot-window-material-checks.mjs';
 import { checkBotVerification } from './bot-verification-checks.mjs';
 import {checkBotProgressiveLoading} from './bot-progressive-loading-checks.mjs';
@@ -19,6 +21,7 @@ import { checkBotTaskCancellation } from './bot-task-cancel-checks.mjs';
 import { checkBotHistoryMotion, instrumentHistoryReads, seedHistoryFixtures } from './bot-history-motion-checks.mjs';
 import { checkBotChatDetails } from './bot-shell-chat-detail-checks.mjs';
 import { checkModelSwitchOnly } from './bot-model-switch-checks.mjs';
+import { checkSurfaceMotion } from './bot-surface-motion-checks.mjs';
 import { checkBotCoordination } from './bot-coordination-checks.mjs';
 import { checkBotTaskDetails } from './bot-task-detail-checks.mjs';
 import { checkBotAgentActivity } from './bot-agent-activity-checks.mjs';
@@ -62,11 +65,13 @@ const startupOnly = process.argv.includes('--startup-only');
 const startupCommand = path.join(root, 'startup-command.json');
 if (startupOnly) writeFileSync(startupCommand, JSON.stringify({ release: false }));
 const sharedUiOnly = process.argv.includes('--shared-ui-only');
-const workSurfaces = process.argv.includes('--verification-only') || process.argv.includes('--lifecycle-only') || process.argv.includes('--access-policy-only') || process.argv.includes('--conversation-typography-only') || process.argv.includes('--reply-receipt-only') || process.argv.includes('--work-surfaces') || process.argv.includes('--work-surfaces-only') || process.argv.includes('--history-motion-only') || process.argv.includes('--agent-activity-only') || process.argv.includes('--task-cancel-only') || process.argv.includes('--image-permission-only');
+const workSurfaces = process.argv.includes('--task-detail-only') || process.argv.includes('--completion-review-only') || process.argv.includes('--verification-only') || process.argv.includes('--lifecycle-only') || process.argv.includes('--access-policy-only') || process.argv.includes('--conversation-typography-only') || process.argv.includes('--reply-receipt-only') || process.argv.includes('--work-surfaces') || process.argv.includes('--work-surfaces-only') || process.argv.includes('--history-motion-only') || process.argv.includes('--agent-activity-only') || process.argv.includes('--task-cancel-only') || process.argv.includes('--image-permission-only');
 const workCommand = path.join(root, 'work-command.json');
 const effortCommand = path.join(root, 'effort-command.json');
 writeFileSync(effortCommand, JSON.stringify({ failNext: false }));
-const fixture = seedBotShellHome({ home });
+const recoveryOnly = process.argv.includes('--recovery-only');
+const fixture = seedBotShellHome({ home, ...(recoveryOnly ? { scale: { bots: 2, messages: 10000, inboxEvents: 0, memories: 0 } } : {}) });
+const recoveryHistories = recoveryOnly ? await Promise.all(fixture.bots.map(bot => seedHistoryRecovery({ home, bot }))) : [];
 if (sharedUiOnly) seedUiAutomation({ home, workspacePath: fixture.bots[0].path });
 const classicUiFixture = sharedUiOnly ? seedClassicUiFixture({ home }) : null;
 const historyFixtures = workSurfaces ? seedHistoryFixtures({ home }) : [];
@@ -158,20 +163,20 @@ if (workSurfaces) {
   seededMessages.at(-1).meta.evidenceRefs = Array.from({length:20}, (_,i)=>'rc-evidence-'+i);
   seededMessages.at(-1).meta.sessionStates = [{sessionId:'rc-work-1', status:'running'}];
   const sourceAt = '2026-10-07T03:12:39.953Z';
-  const evidenceRows = Array.from({length:20}, (_,i) => ({ evidenceRef: `rc-evidence-${i}`, createdAt: sourceAt,
+  const evidenceRows = Array.from({length:20}, (_,i) => ({ evidenceRef: `rc-evidence-${i}`, createdAt: sourceAt, conversationId: fixture.bots[0].conversationId,
     toolName: 'read_file', capabilityId: 'local.file.read' }));
   evidenceRows[0].bodyPreview = {kind:'file', text:'README.md\n\nPeer 是本机任务委托系统。代理负责持续推进，并在交还前验证结果。', truncated:false};
   evidenceRows[1] = {...evidenceRows[1], toolName:'get_session', capabilityId:'local.delegation.get_session',
-    conversationId:fixture.bots[2].conversationId, streamId:'rc-evidence-history'};
+    conversationId:fixture.bots[0].conversationId, streamId:'rc-evidence-history'};
   evidenceRows[2] = {...evidenceRows[1], evidenceRef:'rc-evidence-2', streamId:'missing-historical-turn'};
   evidenceRows[4] = {...evidenceRows[4], toolName:'bash', capabilityId:'local.shell.exec',
     bodyPreview:{kind:'command',text:JSON.stringify({exitCode:0,stdout:'回归通过：5 项检查完成。',stderr:''}),truncated:false}};
   const evidenceHistory={id:'rc-evidence-history',kind:'agent_turn',role:'assistant',turnId:'rc-evidence-history',
     content:'',createdAt:sourceAt,rounds:[{text:'',toolCalls:[{name:'get_session',input:{sessionId:'historical-session'},
       result:{ok:true,title:'只读熟悉 Peer-Agent',statusLabel:'执行受阻',evidenceRefs:['rc-evidence-1']}}]}]};
-  const evidenceHistoryFile=path.join(home,'conversations',evidenceRows[1].conversationId+'.jsonl');
-  const existingEvidenceHistory=existsSync(evidenceHistoryFile)?readFileSync(evidenceHistoryFile,'utf8').trim():'';
-  writeFileSync(evidenceHistoryFile,(existingEvidenceHistory?existingEvidenceHistory+'\n':'')+JSON.stringify(evidenceHistory)+'\n');
+  // Scoped evidence belongs to this Bot's actual canonical history. Keep the
+  // 10,000-row corpus and chronology; never seed a cross-Bot read as success.
+  seededMessages[100] = { ...evidenceHistory, createdAt: seededMessages[100].createdAt };
   mkdirSync(path.join(home,'goal-plans'),{recursive:true});
   writeFileSync(path.join(home,'goal-plans','evidence-index.jsonl'),evidenceRows.filter((_,i)=>i!==3).map(row=>JSON.stringify(row)).join('\n')+'\n');
 }
@@ -224,7 +229,21 @@ const mainText = readFileSync(main, 'utf8');
 const seam = 'const agentTurnExecutor = createAgentTurnExecutor({ llmChatService });';
 assert.equal(mainText.split(seam).length, 2, 'exact production executor assembly seam required');
 let isolatedMain = mainText.replace(seam,
-  'const agentTurnExecutor = createAgentTurnExecutor({ llmChatService: globalThis.rcBotShellService });');
+  'const agentTurnExecutor = createAgentTurnExecutor({ llmChatService: { ...globalThis.rcBotShellService, readDelegationCapabilities: input => llmChatService.readDelegationCapabilities(input) } });');
+// Hosted macOS desktops can be shorter than the fixed smoke viewport. Keep
+// native capture geometry equal to that viewport in the isolated CI window;
+// the production window and the strict native-size assertion stay unchanged.
+const oversizedCiWindow = process.platform === 'darwin' && process.env.CI === 'true';
+if (oversizedCiWindow) {
+  const windowSeam = 'const mainWindow = new BrowserWindow({';
+  assert.equal(isolatedMain.split(windowSeam).length, 2, 'exact production main window assembly seam required');
+  isolatedMain = isolatedMain.replace(windowSeam, `${windowSeam}\n    enableLargerThanScreen: true,`);
+}
+// macOS CI can throttle paints on the product window. The effort sampler still
+// reads real layout; it needs the renderer timers to keep running while focused.
+const throttleSeam = 'webviewTag: true,';
+assert.equal(isolatedMain.split(throttleSeam).length, 2, 'exact main window webPreferences seam required');
+isolatedMain = isolatedMain.replace(throttleSeam, 'webviewTag: true,\n      backgroundThrottling: false,');
 if (botModelFixtures.length) {
   const catalogueSeam = 'listModels: () => llmConfigStore.listProviders(),';
   assert.equal(isolatedMain.split(catalogueSeam).length, 2, 'exact production catalogue assembly seam required');
@@ -237,12 +256,25 @@ writeFileSync(main, isolatedMain);
 // Observe production pagination without changing its results or admitting a new IPC.
 const applicationService = path.join(isolation.launch.desktopDir, 'electron/main/project-agent/project-agent-application-service.mjs');
 const serviceText = readFileSync(applicationService, 'utf8');
-const readSeam = 'const decorate = page => {\n      if (!page?.ok) return page;';
+const readSeam = '      if (!page?.ok) return { ...page, recovery };';
 assert.equal(serviceText.split(readSeam).length, 2, 'exact conversation read seam required');
 let observedService = serviceText.replace('function readConversation(payload = {}) {', `function readConversation(payload = {}) {
     if(payload.workspaceId===globalThis.rcBotWorkWorkspace && (globalThis.rcInteractionReadMode==='all'||globalThis.rcInteractionReadMode==='cards'&&payload.view==='cards'))return {ok:false,code:'CONTROLLED_READ_FAILURE'};`).replace(readSeam, `${readSeam}\n  const result = page;
+  if (payload.view === 'cards' && globalThis.rcBotWorkWorkspace === payload.workspaceId) {
+    const knownCards = new Set((result.cards || []).map(card => card.cardId));
+    result.cards = [...(result.cards || []), ...(globalThis.rcBotWorkMessages || []).flatMap(message => message.cards || []).filter(card => {
+      if (knownCards.has(card.cardId)) return false;
+      knownCards.add(card.cardId); return true;
+    })];
+  }
   if (payload.view !== 'cards' && !payload.processFor && globalThis.rcBotWorkWorkspace === payload.workspaceId && globalThis.rcBotWorkMessages?.length && !payload.before) {
-    result.messages = [...result.messages, ...globalThis.rcBotWorkMessages];
+    // Production already projects stored approvals. Fixture-only messages must
+    // not duplicate those factual rows or replace their current state.
+    const knownMessages = new Set(result.messages.map(message => message.id));
+    result.messages = [...result.messages, ...globalThis.rcBotWorkMessages.filter(message => {
+      if (knownMessages.has(message.id)) return false;
+      knownMessages.add(message.id); return true;
+    })];
     // The injected task-note facts include their current decision, matching the production page contract.
     const currentQuestion=globalThis.rcBotWorkMessages.flatMap(message=>(message.cards||[])
       .filter(card=>card.kind==='question'&&card.resolvedState!=='resolved'&&card.actions?.length)
@@ -272,7 +304,7 @@ if (process.argv.includes('--streaming')) {
     if (payload.text === 'RC_DETAIL_FAIL_ANSWER' && !globalThis.rcDetailFailedOnce) { globalThis.rcDetailFailedOnce = true; return {ok:false,code:'CONTROLLED_SUBMIT_FAILURE'}; }`);
 }
 if (process.argv.includes('--effort-stability') || workSurfaces) {
-  observedService = `import {readFileSync,writeFileSync} from 'node:fs';\n` + observedService;
+  observedService = `import {readFileSync,writeFileSync,renameSync} from 'node:fs';\n` + observedService;
 }
 if (process.argv.includes('--effort-stability')) {
   const updateSeam = 'async function updateProfile(payload = {}, sender = null) {';
@@ -300,9 +332,12 @@ if (workSurfaces) {
   observedService = observedService.replace(confirmationSeam, `${confirmationSeam}
     if (payload.sessionId === 'completion-fixture') {
       if (payload.stage !== 'manual_completion') return {ok:false,code:'session_not_completed'};
+      if (payload.reviewToken !== 'completion-fixture-token') return {ok:false,code:'stale_completion_review'};
       const file=${JSON.stringify(workCommand)}, state=JSON.parse(readFileSync(file,'utf8'));
-      writeFileSync(file,JSON.stringify({...state,confirmationPayload:payload}));
+      writeFileSync(file+'.next',JSON.stringify({...state,confirmationPayload:payload}));renameSync(file+'.next',file);
       if(state.failCompletionResume)return {ok:false,code:'completion_confirmation_failed'};
+      globalThis.rcBotWorkMessages=[];
+      queueChanged(payload.workspaceId);
       return {ok:true};
     }`);
   const workSeam = 'function listSessions(payload = {}) {';
@@ -363,7 +398,7 @@ writeFileSync(quickCommand, JSON.stringify({ seq: 0 }));
 writeFileSync(quickReceipt, JSON.stringify({ seq: 0 }));
 writeFileSync(updaterCommand, JSON.stringify({ seq: 0 }));
 writeFileSync(updaterReceipt, JSON.stringify({ seq: 0 }));
-writeFileSync(entry, `import {app,dialog,BrowserWindow,Menu,ipcMain} from 'electron';
+writeFileSync(entry, `import {app,dialog,BrowserWindow,Menu,ipcMain,screen} from 'electron';
 import {readFileSync,writeFileSync,renameSync} from 'node:fs';
 import {installQuickChatNativeFixture} from ${JSON.stringify(pathToFileURL(path.join(source, 'apps/desktop/scripts/quick-chat-native-fixture.mjs')).href)};
 installQuickChatNativeFixture({BrowserWindow,Menu,commandFile:${JSON.stringify(quickCommand)},receiptFile:${JSON.stringify(quickReceipt)}});
@@ -378,10 +413,12 @@ app.getVersion=()=>${JSON.stringify(JSON.parse(readFileSync(path.join(source, 'a
 ${process.argv.includes('--diagnostics') ? `dialog.showSaveDialog=async()=>({canceled:false,filePath:${JSON.stringify(diagnosticsFile)}});` : ''}
 globalThis.rcBotModelFixtures=${JSON.stringify(botModelFixtures)};
 const observations={reads:[],list:[],search:[],turns:[]};
-globalThis.rcBotShellRecord=(key,value)=>{
-  observations[key].push(value);
+const publishObservations=()=>{
   const file=${JSON.stringify(observedFile)};
   writeFileSync(file+'.next',JSON.stringify(observations));renameSync(file+'.next',file);
+};
+globalThis.rcBotShellRecord=(key,value)=>{
+  observations[key].push(value);publishObservations();
 };
 globalThis.rcBotShellService={
   resolveGoalRole(input){return resolveRoleRoute({...input,providers:[...globalThis.rcBotModelFixtures,{id:'rc-scripted',model:'scripted-fixture',enabled:true,apiKeyConfigured:true,supportsTools:true,supportsStructured:true,supportsVision:false,isDefault:true}]});},
@@ -393,7 +430,9 @@ globalThis.rcBotShellService={
   },abort(){}
 };
 ${process.argv.includes('--streaming') ? `const {createStreamingFixture}=await import(${JSON.stringify(pathToFileURL(path.join(source, 'scripts/rc-response-interaction-smoke.mjs')).href)});
-globalThis.rcBotShellService=createStreamingFixture({commandFile:${JSON.stringify(streamCommand)},record:globalThis.rcBotShellRecord,resolveGoalRole:globalThis.rcBotShellService.resolveGoalRole});` : ''}
+// The UI deliberately holds each stream phase while capturing multiple layouts.
+// Keep that fixture wait bounded separately from real interaction timing budgets.
+globalThis.rcBotShellService=createStreamingFixture({commandFile:${JSON.stringify(streamCommand)},record:globalThis.rcBotShellRecord,resolveGoalRole:globalThis.rcBotShellService.resolveGoalRole,phaseTimeoutMs:300_000});` : ''}
 const {withImagePermissionFixture}=await import(${JSON.stringify(pathToFileURL(path.join(source, 'apps/desktop/scripts/image-permission-fixture.mjs')).href)});
 globalThis.rcBotShellService=await withImagePermissionFixture(globalThis.rcBotShellService,{mainRoot:${JSON.stringify(path.dirname(main))},imageRoot:${JSON.stringify(path.join(root,'image-lifecycle'))},receiptFile:${JSON.stringify(imageReceipt)}});
 const fixtureSend=globalThis.rcBotShellService.sendMessage.bind(globalThis.rcBotShellService);
@@ -417,12 +456,13 @@ let updaterSequence=0;
 const updaterTimer=setInterval(()=>{
   const command=JSON.parse(readFileSync(${JSON.stringify(updaterCommand)},'utf8'));
   if(command.seq<=updaterSequence)return;
+  if(command.afterDownloadCall && (globalThis.rcUpdateDownloadCalls||0)<command.afterDownloadCall)return;
   let receipt;
   try {
     const windows=BrowserWindow.getAllWindows();
     if(!windows.length)return;
     for(const window of windows)window.webContents.send('updater:event',command.event);
-    receipt={seq:command.seq,ok:true,windows:windows.length};
+    receipt={seq:command.seq,ok:true,windows:windows.length,downloadCalls:globalThis.rcUpdateDownloadCalls||0};
   }catch(error){receipt={seq:command.seq,ok:false,error:error.message};}
   updaterSequence=command.seq;
   const file=${JSON.stringify(updaterReceipt)};
@@ -434,7 +474,11 @@ ipcMain.handle=(channel,handler)=>register(channel,channel==='bootstrap:get'?asy
   let state;while(!(state=JSON.parse(readFileSync(${JSON.stringify(startupCommand)},'utf8'))).release)await new Promise(resolve=>setTimeout(resolve,25));
   if(state.error)throw Error('RC_STARTUP_UNAVAILABLE');return result;
 }:handler);` : ''}
-app.whenReady().then(()=>import(${JSON.stringify(pathToFileURL(main).href)})).catch(error=>{console.error(error);app.exit(1)});
+app.whenReady().then(()=>{
+  const {bounds,workArea,scaleFactor}=screen.getPrimaryDisplay();
+  observations.nativeDisplay={bounds,workArea,scaleFactor};publishObservations();
+  return import(${JSON.stringify(pathToFileURL(main).href)});
+}).catch(error=>{console.error(error);app.exit(1)});
 `);
 const env = { ...process.env, PEER_AGENT_HOME: home, PEER_AGENT_DISABLE_LEGACY_MIGRATION: '1',
   PEER_WORKSPACE_ROOT: fixture.bots[0].path };
@@ -444,7 +488,7 @@ const report = { schemaVersion: 1, sourceHead: execFileSync('git', ['rev-parse',
   sourceDirty: Boolean(execFileSync('git', ['status', '--porcelain'], { cwd: source, encoding: 'utf8' }).trim()),
   synthetic: true, scale: fixture.scale, platform: process.platform, startedAt: new Date().toISOString(),
   checks: [], pageErrors: [], receiptSamples: [], scope: 'Real source Electron main/preload/renderer and durable input; scripted cognition only; not installed or real-model timing' };
-if (process.argv.includes('--streaming')) report.fixtureRoleIsolation = true;
+if (process.argv.includes('--streaming')) { report.fixtureRoleIsolation = true; report.controlledStreamPhaseTimeoutMs = 300_000; }
 let app, handle, page, tracing = false; const logs = [];
 const interaction = async phase => {
   report.interactionBefore = await page.evaluate(phase => ({ phase, frames: globalThis.rcShellFrameCount, at: Date.now(), hidden: document.hidden, focused: document.hasFocus() }), phase);
@@ -460,18 +504,19 @@ const tracePaging = async (phase) => {
 const until = async (read, predicate, timeout = 30000) => {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) { const value = await read(); if (predicate(value)) return value; await new Promise(resolve => setTimeout(resolve, 100)); }
-  throw Error('Shell acceptance timed out');
+  throw Error(`Shell acceptance timed out: ${String(read).slice(0, 220)}`);
 };
 const quickNative = createQuickChatNativeController({ commandFile: quickCommand, receiptFile: quickReceipt, until });
 const attentionNative = createAttentionNativeController({ commandFile: attentionCommand, receiptFile: attentionReceipt, until });
 let updaterSequence = 0;
-const emitUpdaterEvent = async event => {
+const emitUpdaterEvent = async (event, { afterDownloadCall } = {}) => {
   const seq = ++updaterSequence;
-  writeFileSync(updaterCommand + '.next', JSON.stringify({ seq, event }));
+  writeFileSync(updaterCommand + '.next', JSON.stringify({ seq, event, ...(afterDownloadCall ? { afterDownloadCall } : {}) }));
   renameSync(updaterCommand + '.next', updaterCommand);
   const receipt = await until(() => JSON.parse(readFileSync(updaterReceipt, 'utf8')), value => value.seq === seq, 5000);
   assert.equal(receipt.ok, true, receipt.error || 'isolated main must acknowledge synthetic event delivery');
   (report.updaterReceipts ??= []).push({ ...receipt, type: event.type });
+  return receipt;
 };
 try {
   app = await _electron.launch({ args: [entry], env, cwd: isolation.launch.desktopDir, timeout: 30000 });
@@ -479,17 +524,35 @@ try {
   await app.context().tracing.start({ screenshots: true, snapshots: true }); tracing = true;
   for (const stream of [app.process().stdout, app.process().stderr]) stream.on('data', data => logs.push(String(data)));
   page = await until(() => app.windows().find(window => window.url().includes('/dist/index.html') && !window.url().includes('window=')), Boolean, 120000);
+  report.nativeDisplay = await until(() => readObserved('nativeDisplay'), Boolean);
+  report.oversizedCiWindow = oversizedCiWindow;
   report.windowReadyMs = Date.now() - Date.parse(report.startedAt);
   page.setDefaultTimeout(15000); page.on('pageerror', error => report.pageErrors.push(error.message));
   if (startupOnly) {
     await checkStartupSurface({ page, until, report, captureDirectory: root, commandFile: startupCommand });
   } else {
-  await page.locator('.bot-shell').waitFor();
+  // Cold recovery prepares 200 isolated stores, including their durable writer
+  // fences. Keep this startup bound separate from interaction action timeouts.
+  await page.locator('.bot-shell').waitFor({ timeout: 120000 });
+  report.shellReadyMs = Date.now() - Date.parse(report.startedAt);
   await page.bringToFront();
   report.initialWindowState = await page.evaluate(() => ({ hidden: document.hidden, focused: document.hasFocus() }));
   await page.evaluate(() => { globalThis.rcShellFrameCount = 0; const tick = () => { globalThis.rcShellFrameCount++; requestAnimationFrame(tick); }; requestAnimationFrame(tick); });
   await until(() => page.locator('.bot-row').count(), count => sharedUiOnly ? count >= fixture.scale.bots : count === fixture.scale.bots);
-  if (process.argv.includes('--window-material-only')) {
+  if (recoveryOnly) {
+    await checkHistoryRecovery({ page, until, report, captureDirectory: root, bots: fixture.bots, histories: recoveryHistories, readTurns: () => readObserved('turns') });
+  } else if (process.argv.includes('--surface-motion-only')) {
+    assert.ok(process.argv.includes('--effort-stability'), '--surface-motion-only requires controlled save latency/failure');
+    await checkSurfaceMotion({ page, fixture, until, report, captureDirectory: root,
+      failNext: () => writeFileSync(effortCommand, JSON.stringify({ failNext: true })) });
+  } else if (process.argv.includes('--quick-chat-bots-only')) {
+    await quickNative('open');
+    const quick = await until(() => app.windows().find(window => new URL(window.url()).searchParams.get('window') === 'quick-chat'), Boolean);
+    await checkQuickChatBots({ app, quick, native: quickNative, fixture, until, report, captureDirectory: root,
+      failNext: process.argv.includes('--effort-stability') ? () => writeFileSync(effortCommand, JSON.stringify({ failNext: true })) : null });
+  } else if (process.argv.includes('--window-material-only') || process.argv.includes('--flat-window-material-only')) {
+    // Exercise the non-vibrancy layout on macOS without claiming native Linux coverage.
+    if (process.argv.includes('--flat-window-material-only')) await page.evaluate(() => { document.documentElement.dataset.vibrancy = 'false'; });
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
     await page.locator('.bot-composer textarea').waitFor();
     await checkBotWindowMaterial({ page, until, report, captureDirectory: root });
@@ -512,6 +575,10 @@ try {
     await page.getByRole('button', { name: '刷新诊断', exact: true }).click();
     await page.locator('.project-diagnostics__summary').waitFor();
     await checkSharedUiConventions({ page, app, report, captureDirectory: root, classicFixture: classicUiFixture });
+  } else if (process.argv.includes('--task-detail-only')) {
+    await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+    await page.locator('.bot-composer textarea').waitFor();
+    await checkBotTaskDetails({ page, until, report, captureDirectory: root, commandFile: workCommand, readTurns: () => readObserved('turns').length });
   } else if (process.argv.includes('--work-surfaces-only')) {
     await page.setViewportSize({ width: 1280, height: 860 });
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
@@ -533,6 +600,51 @@ try {
     await page.locator('.bot-composer textarea').waitFor();
     await checkBotYieldFeedback({ page, until, report, captureDirectory: root,
       advance: (scenario, phase) => writeStreamingCommand(streamCommand, scenario, phase), readFixtureTurns: () => readObserved('turns') });
+  } else if (process.argv.includes('--stop-resume-only')) {
+    assert.ok(process.argv.includes('--streaming'), '--stop-resume-only requires the isolated --streaming cognition fixture');
+    const bot = fixture.bots[0];
+    const readStore = createWorkCoordinationStore({ rootDir: path.join(home, 'project-runtime'), workspaceId: bot.workspaceId });
+    try {
+      await page.setViewportSize({ width: 1280, height: 780 });
+      await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+      const scenario = 'RC_STREAM_STOP', composer = page.locator('.bot-composer textarea');
+      await composer.fill(scenario); await composer.press('Enter');
+      const stop = page.getByRole('button', { name: '停止生成', exact: true });
+      await stop.waitFor();
+      writeStreamingCommand(streamCommand, scenario, 2);
+      await page.locator('.bot-live-reply').getByText('我先看看项目的整体情况，整理好后告诉你重点。', { exact: true }).waitFor();
+      const userRowId = await page.locator('.bot-user').filter({ hasText: scenario }).getAttribute('id');
+      const workId = coordinationWorkId(bot.conversationId, [userRowId.slice('bot-msg-input-'.length)]);
+      const original = await until(() => readStore.readWork(workId), work => Boolean(work?.attemptId));
+      const attempts = () => readObserved('turns').filter(turn => turn.role === 'project_agent' && turn.scenario === scenario);
+      assert.equal(attempts().length, 1);
+      await composer.fill('停止后保留这份草稿');
+      await stop.click();
+      const stopped = page.locator('.bot-stopped-reply');
+      await stopped.getByText('生成已停止，以上内容未完成', { exact: true }).waitFor();
+      const held = readStore.readWork(workId);
+      assert.equal(held.end, 'user_stopped'); assert.equal(held.attemptId, original.attemptId);
+      assert.equal(await composer.inputValue(), '停止后保留这份草稿');
+      await page.screenshot({ animations: 'disabled', path: path.join(root, 'stop-resume-stopped.png') });
+      // Let the old fixture become able to finish and re-open the conversation.
+      // It may only dispatch a second attempt after the explicit retry.
+      writeStreamingCommand(streamCommand, scenario, 3);
+      await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-001' }) }).click();
+      await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+      const resume = stopped.getByRole('button', { name: '继续尝试', exact: true });
+      await resume.waitFor();
+      assert.equal(attempts().length, 1);
+      assert.equal(readStore.readWork(workId).end, 'user_stopped');
+      await resume.click();
+      await page.locator('.bot-reply').filter({ hasText: '开始修改前，先核对项目规则。' }).waitFor();
+      const delivered = await until(() => readStore.readWork(workId), work => work?.state === 'delivered');
+      assert.equal(delivered.end, 'reply_committed');
+      assert.notEqual(delivered.attemptId, original.attemptId);
+      assert.equal(attempts().length, 2);
+      await page.screenshot({ animations: 'disabled', path: path.join(root, 'stop-resume-delivered.png') });
+      report.stopResume = { workId, before: original.attemptId, held: held.end, after: delivered.attemptId, end: delivered.end, attempts: attempts().length };
+      report.checks.push('stop via production IPC remains durable on conversation re-entry; explicit retry commits one reply on the original work');
+    } finally { readStore.close(); }
   } else if (process.argv.includes('--streaming-only')) {
     assert.ok(process.argv.includes('--streaming'), '--streaming-only requires the isolated --streaming cognition fixture');
     await page.setViewportSize({ width: 1280, height: 780 });
@@ -570,7 +682,12 @@ try {
       fixtureRows: historyFixtures, workspaceId: fixture.bots[0].workspaceId, home });
   } else if (process.argv.includes('--reply-quote-only')) {
     await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
-    await page.locator('#bot-msg-rc-message-9999 .bot-reply-bar').click();
+    await page.locator('#bot-msg-rc-message-9999 .bot-reply-source').click();
+    // This isolated scenario has not paged history like the full smoke. Each
+    // navigation reads at most four pages; continue through its recovery UI.
+    for (let batch = 0; batch < 2; batch++) {
+      await page.locator('.bot-thread-feedback button').click();
+    }
     await page.locator('#bot-msg-rc-message-9500.is-anchored').waitFor();
     await page.getByRole('button', { name: '回到最新消息', exact: true }).click();
     await checkBotShellReply({ page, until, report, captureDirectory: root });
@@ -587,6 +704,11 @@ try {
     await page.locator('.bot-row').filter({has:page.locator('.bot-row-name',{hasText:'project-000'})}).click();
     await page.locator('.bot-composer textarea').waitFor();
     await checkBotVerification({page,until,report,captureDirectory:root,commandFile:workCommand});
+  } else if (process.argv.includes('--completion-review-only')) {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await page.locator('.bot-row').filter({has:page.locator('.bot-row-name',{hasText:'project-000'})}).click();
+    await page.locator('.bot-composer textarea').waitFor();
+    await checkBotCompletionReview({page,until,report,captureDirectory:root,commandFile:workCommand});
   } else if (process.argv.includes('--lifecycle-only')) {
     await page.locator('.bot-row').filter({has:page.locator('.bot-row-name',{hasText:'project-000'})}).click();
     await page.locator('.bot-composer textarea').waitFor();
@@ -723,7 +845,7 @@ try {
   await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();
   report.checks.push('scrolling up loads older messages from a 10000-message conversation');
   await scrollToBotMessage(page, page.locator('#bot-msg-rc-message-9999'));
-  const unloadedQuote = page.locator('#bot-msg-rc-message-9999 .bot-reply-bar');
+  const unloadedQuote = page.locator('#bot-msg-rc-message-9999 .bot-reply-source');
   assert.equal(await unloadedQuote.locator('.bot-reply-bar-label').textContent(), '引用');
   assert.equal((await unloadedQuote.getAttribute('aria-label')).includes('rc-message-9500'), false);
   await unloadedQuote.click();
@@ -742,7 +864,7 @@ try {
   await page.getByRole('button', { name: '回到最新消息', exact: true }).click();
   await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();
   await scrollToBotMessage(page, page.locator('#bot-msg-rc-message-9999'));
-  await page.locator('#bot-msg-rc-message-9999 .bot-reply-bar').click();
+  await page.locator('#bot-msg-rc-message-9999 .bot-reply-source').click();
   await page.locator('#bot-msg-rc-message-9500.is-anchored').waitFor();
   await page.getByRole('button', { name: '回到最新消息', exact: true }).click();
   await page.locator('.bot-thread').getByText('RC scripted reply: RC_QUICK_INPUT', { exact: true }).waitFor();
@@ -783,10 +905,10 @@ try {
     await checkBotHistoryMotion({ page, until, report, captureDirectory: root, commandFile: workCommand,
       fixtureRows: historyFixtures, workspaceId: fixture.bots[0].workspaceId, home });
   }
-  await page.locator('.bot-profile').click(); await page.locator('.bot-drawer-dock.is-open').waitFor();
+  await page.getByRole('button', { name: '机器人设置', exact: true }).click(); await page.locator(BOT_DETAIL_SURFACE).waitFor();
   assert.equal(await page.getByRole('tab', { name: '设置', exact: true }).getAttribute('aria-selected'), 'true');
   await page.screenshot({ path: path.join(root, 'bot-profile.png') });
-  await page.getByRole('button', { name: '关闭', exact: true }).click();
+  await page.locator(BOT_DETAIL_CLOSE).click();
   report.checks.push('Bot settings opens configuration directly');
   await page.locator('.bot-app-menu-button').click(); await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   if (process.argv.includes('--accessibility')) await checkFallbackVisionLayout({ page, until, report, captureDirectory: root });
@@ -808,12 +930,15 @@ try {
   await page.getByRole('option', { name: '机器人列表', exact: true }).click();
   await page.locator('.settings-nav').getByRole('button', { name: '设置', exact: true }).click();
   await page.locator('.bot-shell').waitFor();
+  // Shell mount precedes its asynchronous visible-list projection after settings.
+  // Keyboard checks must target the complete real rows, not the loading shell.
+  await until(() => page.locator('.bot-row').count(), count => count === fixture.scale.bots);
   assert.equal((await page.evaluate(() => window.peerAgent.projectAgentList())).items.length, fixture.scale.bots);
   report.checks.push('bot shell returns with all persisted identities');
   if (process.argv.includes('--accessibility')) await checkBotShellAccessibility({ page, app, quickNative, until, report, captureDirectory: root, effortCommandFile: process.argv.includes('--effort-stability') ? effortCommand : null });
   }
   if (process.argv.includes('--work-surfaces')) await checkBotUserReceipt({ page, until, report, captureDirectory: root, home, bot: fixture.bots[0], commandFile: workCommand });
-  if (!process.argv.includes('--verification-only') && !process.argv.includes('--conversation-typography-only') && !process.argv.includes('--reply-receipt-only') && !process.argv.includes('--attention-only') && workSurfaces) await checkBotAttention({ page, attentionNative, until, report, captureDirectory: root, home, bots: fixture.bots });
+  if (!process.argv.includes('--completion-review-only') && !process.argv.includes('--verification-only') && !process.argv.includes('--conversation-typography-only') && !process.argv.includes('--reply-receipt-only') && !process.argv.includes('--attention-only') && workSurfaces) await checkBotAttention({ page, attentionNative, until, report, captureDirectory: root, home, bots: fixture.bots });
   if (process.argv.includes('--diagnostics')) await checkBotShellDiagnostics({ page, report, exportFile: diagnosticsFile, fixture });
   }
   assert.deepEqual(report.pageErrors, []);

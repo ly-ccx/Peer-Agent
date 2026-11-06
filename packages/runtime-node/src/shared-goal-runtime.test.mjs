@@ -127,7 +127,9 @@ test('runtime-node source has no Desktop dependency and Desktop files are compat
     const desktopSource = readFileSync(path.join(desktopCompatDir, file), 'utf8');
 
     assert.doesNotMatch(sharedSource, /apps\/desktop|desktop\/electron\/main/);
-    assert.match(desktopSource, /from '@peer-agent\/runtime-node'/);
+    assert.match(desktopSource, ['data-store.mjs', 'goal-plan-store.mjs'].includes(file)
+      ? /from ['"]@peer-agent\/runtime-node\/storage['"]/
+      : /from ['"]@peer-agent\/runtime-node\/project-agent['"]/);
   }
 });
 

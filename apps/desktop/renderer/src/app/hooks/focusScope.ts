@@ -6,3 +6,9 @@ export function focusBoundary<T>(items: readonly T[], active: T | null, backward
   if (!backwards && active === items.at(-1)) return items[0]!;
   return null;
 }
+
+export function collectFocusable(root: HTMLElement): HTMLElement[] {
+  return [...root.querySelectorAll<HTMLElement>('button,input,textarea,select,a[href],[tabindex]')].filter(item =>
+    item.tabIndex >= 0 && !item.matches(':disabled') && !item.closest('[inert],[hidden],[aria-hidden="true"]')
+    && item.getClientRects().length > 0 && getComputedStyle(item).visibility !== 'hidden');
+}

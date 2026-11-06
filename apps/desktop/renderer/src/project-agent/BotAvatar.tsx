@@ -1,3 +1,4 @@
+import { motionAllowed } from '../app/state/motionEnvironment';
 import { generateAvatar, type BotAvatar as BotAvatarModel } from '@peer-agent/protocol';
 import { useEffect, useState, type PointerEvent } from 'react';
 import { clientApi } from '../clientApi';
@@ -59,6 +60,7 @@ function legacyVariant(workspaceId: string): number {
 }
 
 function moveEyes(event: PointerEvent<HTMLSpanElement>) {
+  if (!motionAllowed()) return;
   const rect = event.currentTarget.getBoundingClientRect();
   const x = ((event.clientX - rect.left) / rect.width - 0.5) * 2;
   const y = ((event.clientY - rect.top) / rect.height - 0.5) * 2;

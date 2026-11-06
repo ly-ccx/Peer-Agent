@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { sourceFingerprint, verifyReview, continuousReplyPresencePassed } from './product-regression.mjs';
+import { sourceFingerprint, verifyReview, continuousReplyPresencePassed, completedReplyActionsPassed } from './product-regression.mjs';
 
 function fixture(t) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'peer-product-gate-'));
@@ -77,4 +77,19 @@ test('continuous reply acceptance requires quiet prose states and every reply la
     assert.equal(continuousReplyPresencePassed({ cases: cases.map(row => ({ ...row, [flag]: false })) }), false);
   }
   assert.equal(continuousReplyPresencePassed(), false);
+});
+
+test('completed reply actions stay hidden until hover in both themes', () => {
+  const themes = ['dark', 'light'].map(theme => ({ theme, visibleAtRest: false, afterCapture: { opacity: '1' } }));
+  assert.equal(completedReplyActionsPassed({ themes }), true);
+  assert.equal(completedReplyActionsPassed(), false);
+  for (const theme of ['dark', 'light']) {
+    assert.equal(completedReplyActionsPassed({ themes: themes.filter(row => row.theme !== theme) }), false);
+    assert.equal(completedReplyActionsPassed({ themes: themes.map(row => row.theme === theme
+      ? { theme, visibleAtRest: true, afterCapture: { opacity: '1' } } : row) }), false);
+    assert.equal(completedReplyActionsPassed({ themes: themes.map(row => row.theme === theme
+      ? { ...row, visibleAtRest: true } : row) }), false);
+    assert.equal(completedReplyActionsPassed({ themes: themes.map(row => row.theme === theme
+      ? { ...row, afterCapture: { opacity: '0' } } : row) }), false);
+  }
 });

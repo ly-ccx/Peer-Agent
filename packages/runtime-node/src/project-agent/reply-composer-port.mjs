@@ -2,13 +2,37 @@
  * 把 post_reply 交给 ReplyComposer，并用当前设置覆盖档位和安静时段。
  * 模型参数里没有送达事实；没有这些设置时按标准档、不在安静时段计算。
  */
+import { projectReplyQuestions } from './question-lifecycle.mjs';
+import { workBudgetBinding } from './work-budget.mjs';
 import { composeReply } from './reply-composer.mjs';
 import { prepareReplyReport } from './reply-report-facts.mjs';
+import { parseInteractiveArtifactRef } from '@peer-agent/protocol';
+import { resolveDelegationAnchors, userAnchorCandidates } from './user-anchor.mjs';
 
-export function createDesktopReplyComposer({ readDelivery = null } = {}) {
+export function createDesktopReplyComposer({ readDelivery = null, readResultReferences = null } = {}) {
   return {
     postReply(input, view) {
+      const anchors = resolveDelegationAnchors('post_reply', input, view.messages);
+      if (!anchors.ok) return { ...anchors, availableReplyAnchors: userAnchorCandidates(view.messages,
+        row => row.kind === 'user_input' || !row.kind && row.role === 'user') };
+      input = anchors.input;
       const delivery = typeof readDelivery === 'function' ? (readDelivery(view) || {}) : {};
+      let previousUserRequestRef;
+      if (input?.question?.agentRequestId) {
+        const journal = workBudgetBinding(view.workspaceId)?.store;
+        const request = journal?.readSupervision('agentRequests', input.question.agentRequestId);
+        if (!request || request.status !== 'open' || !['parent', 'user'].includes(request.responder)
+          || request.parentConversationId !== view.conversationId
+          || request.revision !== input.question.expectedRequestRevision) return { error: 'agent_request_stale' };
+        if (request.responder === 'user') {
+          const prefix = 'card:question:reply:';
+          const id = request.userRequestRef?.startsWith(prefix) ? request.userRequestRef.slice(prefix.length) : null;
+          const state = id && projectReplyQuestions(view.messages || []).get(id)?.state;
+          if (!state || state === 'open') return { error: 'native_user_question_pending' };
+          previousUserRequestRef = request.userRequestRef;
+        }
+        journal.enableSupervision();
+      }
       const replyTo = Array.isArray(input?.replyTo) ? input.replyTo : [];
       const objectiveWake = view?.objectiveWakeIds?.length > 0 && !view?.currentInputAnchors?.length;
       if (objectiveWake && replyTo.some(id=>!delivery.objectiveAnchorIds?.includes(id))) return {error:'current_user_required',message:'An objective wake may cite only the actual objective origin.'};
@@ -45,13 +69,25 @@ export function createDesktopReplyComposer({ readDelivery = null } = {}) {
         ...(composed.messageIds ? { messageIds: composed.messageIds } : {}),
         ...(composed.availableReplyAnchors ? { availableReplyAnchors: composed.availableReplyAnchors } : {}),
         ...(composed.sessionStates ? { sessionStates: composed.sessionStates } : {}) };
-      const report = prepareReplyReport({ workspaceId: view?.workspaceId, message: composed.message,
+      if (typeof readResultReferences === 'function') {
+        let refs;
+        try { refs = readResultReferences({ workspaceId: view?.workspaceId, conversationId: view?.conversationId, sessionIds: composed.meta.sources }); }
+        catch { return { error: 'result_references_unavailable', message: 'The cited task result references could not be confirmed. Read the current task state and retry.' }; }
+        if (!Array.isArray(refs) || refs.length > 20 || refs.some(ref => {
+          const fixed = parseInteractiveArtifactRef(ref);
+          return !fixed || fixed.owner.workspaceId !== view?.workspaceId || fixed.owner.conversationId !== view?.conversationId;
+        })) return { error: 'result_references_unavailable', message: 'The host result references do not match the current Bot.' };
+        if (refs.length) composed.meta.evidenceRefs = [...new Set([...(composed.meta.evidenceRefs ?? []), ...refs])].slice(0, 20);
+      }
+      if (previousUserRequestRef && composed.message.question) composed.message.question.previousUserRequestRef = previousUserRequestRef;
+      const report = prepareReplyReport({ workspaceId: view?.workspaceId, workId: view?.workId, message: composed.message,
         currentInputAnchors: view?.currentInputAnchors || [],
         reportedMessages: delivery.reportedMessages || view?.messages || [], toolCalls: view?.turnToolCalls || [] });
       if (report.suppressed) return { ok: true, suppressed: true, reason: 'facts_already_reported',
         reportedReplyIds: report.reportedReplyIds, sessionStates: composed.meta.sessionStates, question: composed.message.question };
       if (report.keys.length) composed.meta.reportFactKeys = report.keys;
       return {
+        anchorResolutions: anchors.anchorResolutions,
         messageId: composed.message.id,
         message: composed.message,
         meta: composed.meta,

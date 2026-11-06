@@ -1,6 +1,5 @@
 import os from 'node:os';
 
-import { qodercliAuth, query } from '@qoder-ai/qoder-agent-sdk';
 
 import { resolveQoderCliBinary, resolveQoderConfigDir } from './qoder-local-auth.mjs';
 
@@ -59,7 +58,6 @@ async function withQoderControlSession(options = {}, run) {
   const timeoutMs = catalogTimeoutMs(options.qoderCatalogTimeoutMs ?? options.qoderUsageTimeoutMs);
   const abortController = new AbortController();
   const prompt = idlePrompt();
-  const queryFactory = options.qoderCatalogQueryFactory ?? options.qoderUsageQueryFactory ?? query;
   let timedOut = false;
   let session = null;
   const timeout = setTimeout(() => {
@@ -68,10 +66,13 @@ async function withQoderControlSession(options = {}, run) {
   }, timeoutMs);
 
   try {
+    const sdk = await import('@qoder-ai/qoder-agent-sdk');
+    if (abortController.signal.aborted) throw createCatalogError('qoder_catalog_timeout');
+    const queryFactory = options.qoderCatalogQueryFactory ?? options.qoderUsageQueryFactory ?? sdk.query;
     session = queryFactory({
       prompt: prompt.stream,
       options: {
-        auth: qodercliAuth(),
+        auth: sdk.qodercliAuth(),
         abortController,
         pathToQoderCLIExecutable: cliPath,
         cwd: options.cwd || options.homeDir || os.homedir(),

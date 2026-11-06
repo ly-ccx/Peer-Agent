@@ -9,6 +9,10 @@ function unavailableMethod<T extends (...args: never[]) => unknown>(method: stri
 }
 
 const unavailableApi: ClientApi = {
+  inputPredictionRequest: unavailableMethod('inputPredictionRequest'),
+  inputPredictionCancel: unavailableMethod('inputPredictionCancel'),
+  inputPredictionValidate: unavailableMethod('inputPredictionValidate'),
+  inputPredictionStatus: unavailableMethod('inputPredictionStatus'),
   getBootstrap: unavailableMethod('getBootstrap'),
   automationsBootstrap: unavailableMethod('automationsBootstrap'),
   automationsList: unavailableMethod('automationsList'),
@@ -127,6 +131,8 @@ const unavailableApi: ClientApi = {
   projectAgentUpdateProfile: unavailableMethod('projectAgentUpdateProfile'),
   projectAgentDelete: unavailableMethod('projectAgentDelete'),
   projectAgentSubmitInput: unavailableMethod('projectAgentSubmitInput'),
+  projectAgentReadInputDraft: unavailableMethod('projectAgentReadInputDraft'),
+  projectAgentWriteInputDraft: unavailableMethod('projectAgentWriteInputDraft'),
   projectAgentReadConversation: unavailableMethod('projectAgentReadConversation'),
   projectAgentReadEvidence: unavailableMethod('projectAgentReadEvidence'),
   projectAgentListSessions: unavailableMethod('projectAgentListSessions'),
@@ -143,6 +149,7 @@ const unavailableApi: ClientApi = {
   projectAgentConfirmResult: unavailableMethod('projectAgentConfirmResult'),
   projectAgentAcceptReadme: unavailableMethod('projectAgentAcceptReadme'),
   projectAgentTakeoverHost: unavailableMethod('projectAgentTakeoverHost'),
+  projectAgentRecovery: unavailableMethod('projectAgentRecovery'),
   projectAgentDiagnostics: unavailableMethod('projectAgentDiagnostics'),
   projectAgentRetry: unavailableMethod('projectAgentRetry'),
   projectAgentStopResponse: unavailableMethod('projectAgentStopResponse'),

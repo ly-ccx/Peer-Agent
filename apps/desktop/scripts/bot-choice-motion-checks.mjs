@@ -21,20 +21,28 @@ export async function checkBotChoiceMotion({ page, ask, canonical, report, captu
         const known = new Set([...thread.querySelectorAll('.bot-user')].map(item => item.dataset.inputId));
         window.rcChoiceFrames = null;
         node.addEventListener('click', () => {
-          const frames = [], started = performance.now(); let firstInput = null, continuous = true;
+          const frames = [], started = performance.now(); let firstInput = null, continuous = true, resolvedAt = null;
           const sample = () => {
+            const elapsed = performance.now() - started;
+            const resolved = !card.isConnected || card.hasAttribute('inert');
+            if (resolved && resolvedAt === null) resolvedAt = elapsed;
             const input = [...thread.querySelectorAll('.bot-user')].find(item => !known.has(item.dataset.inputId)
               && item.querySelector('.bot-user-text')?.textContent === node.textContent);
             if (input && !firstInput) firstInput = input;
             if (firstInput && firstInput !== input) continuous = false;
             const bubble = input?.querySelector('.bot-user-content'), style = bubble && getComputedStyle(bubble);
-            frames.push({ time: performance.now() - started, height: card.isConnected ? card.getBoundingClientRect().height : 0,
+            frames.push({ time: elapsed, resolved, height: card.isConnected ? card.getBoundingClientRect().height : 0,
               inputId: input?.dataset.inputId, opacity: style ? Number(style.opacity) : null,
               inputAnimation: Boolean(bubble?.getAnimations().some(animation => animation.playState === 'running')),
               cardAnimation: card.isConnected && card.getAnimations().some(animation => animation.playState === 'running'),
+              cardOwnsFocus: card.contains(document.activeElement), documentFocused: document.hasFocus(),
               scrollTop: thread.scrollTop });
-            if (performance.now() - started < 650) requestAnimationFrame(sample);
-            else window.rcChoiceFrames = { frames, continuous };
+            // Host receipt latency is separate from the existing 650ms close
+            // observation. Keep the click-to-receipt frames and a bounded wait;
+            // only the rendered resolved fact starts the close window.
+            if (elapsed < 12_000 && (resolvedAt === null || elapsed - resolvedAt < 650)) requestAnimationFrame(sample);
+            else window.rcChoiceFrames = { frames, continuous, resolvedAt,
+              timedOut: resolvedAt === null || elapsed - resolvedAt < 650 };
           };
           sample();
         }, { once: true });
@@ -42,8 +50,10 @@ export async function checkBotChoiceMotion({ page, ask, canonical, report, captu
       await button.click();
       const result = await page.waitForFunction(() => window.rcChoiceFrames).then(handle => handle.jsonValue());
       const frames = result.frames;
-      cases.push({ width, theme: appearance, reduced, continuous: result.continuous, oneReceipt: false, frames });
+      cases.push({ width, theme: appearance, reduced, continuous: result.continuous, resolvedAtMs: result.resolvedAt,
+        closeWindowMs: 650, timedOut: result.timedOut, oneReceipt: false, frames });
       report.choiceSendMotion = { cases, focusRestored: false };
+      assert.equal(result.timedOut, false, 'a real resolution and the complete close window must arrive within the bound');
       assert.ok(result.continuous, 'provisional input must not remount at durable receipt');
       assert.ok(frames.some(frame => frame.inputId));
       assert.equal(frames.at(-1).height, 0);
@@ -62,7 +72,12 @@ export async function checkBotChoiceMotion({ page, ask, canonical, report, captu
         assert.ok(Math.max(...deltas) < 80, `send must not jump by a large frame: ${Math.max(...deltas)}`);
         await page.screenshot({ path: path.join(captureDirectory, `choice-send-${width}-${appearance}-after.png`), animations: 'disabled' });
       }
-      assert.equal(await page.locator('.bot-composer textarea').evaluate(node => node === document.activeElement), true);
+      const focusReturn = await page.locator('.bot-composer textarea').evaluate(node => ({
+        composer: node === document.activeElement, tag: document.activeElement?.tagName,
+        className: document.activeElement?.className, documentFocused: document.hasFocus(), hidden: document.hidden,
+      }));
+      cases.at(-1).focusReturn = focusReturn;
+      assert.equal(focusReturn.composer, true, `question focus handoff: ${JSON.stringify(focusReturn)}`);
       cases.at(-1).oneReceipt = true;
     }
     report.choiceSendMotion = { cases, focusRestored: true };

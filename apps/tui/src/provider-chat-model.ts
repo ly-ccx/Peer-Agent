@@ -21,8 +21,9 @@ import type {
   ModelToolCall,
   ModelToolDefinition,
 } from '@peer-agent/runtime-node';
-import { encodeProviderToolResult, evaluateWorkSessionWrite, agentCommunicationExcludedPrefixes, spillOversizedToolResultsForProvider } from '@peer-agent/runtime-node';
-import type { RuntimeSdkProviderExecution } from '@peer-agent/runtime-sdk';
+import { modelAssistantMessage } from './provider-continuation.ts';
+import { encodeProviderToolResult, readOnlyWorkCapabilityAllowed, agentCommunicationExcludedPrefixes, admitInteractiveToolSet, sessionWaitProjected, spillOversizedToolResultsForProvider } from '@peer-agent/runtime-node';
+import type { RuntimeSdkProviderExecution, RuntimeSdkStreamDiscardEvent } from '@peer-agent/runtime-sdk';
 
 import type {
   ChatMessage,
@@ -64,6 +65,7 @@ export interface CreateProviderChatModelOptions {
   readonly provider: ModelProvider;
   readonly getProvider?: () => ModelProvider;
   readonly model: string;
+  readonly toolArtifactBaseDir?: string;
   readonly toolDefinitions?: readonly RuntimeToolDefinition[];
   readonly toolDefinitionsForMode?: (mode: TuiRuntimeMode) => readonly RuntimeToolDefinition[];
   readonly systemPrompt?: string;
@@ -134,7 +136,7 @@ function parseArguments(call: ModelToolCall): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
-function executionContent(execution: RuntimeSdkProviderExecution, conversationId?: string): string {
+function executionContent(execution: RuntimeSdkProviderExecution, conversationId?: string, baseDir?: string): string {
   const result = execution.result;
   const evidenceRefs = collectToolEvidenceRefs({
     toolCallId: result.toolCallId,
@@ -148,6 +150,7 @@ function executionContent(execution: RuntimeSdkProviderExecution, conversationId
       result,
       execution,
       conversationId,
+      baseDir,
       toolCallId: result.toolCallId,
       evidenceRefs,
     }).content;
@@ -171,12 +174,7 @@ const DEFAULT_STREAM_RETRY_DELAYS_MS = [500, 1_500] as const;
 
 export const STREAM_CONNECTION_CLOSED = 'peer.connection_closed';
 
-export interface StreamDraftDiscard {
-  readonly type: 'stream.discard';
-  readonly streamId: string;
-  readonly textChars: number;
-  readonly reasoningChars: number;
-}
+export type StreamDraftDiscard = Pick<RuntimeSdkStreamDiscardEvent, 'type' | 'streamId' | 'textChars' | 'reasoningChars'>;
 
 export function streamDraftDiscardFrom(
   event: { readonly type: string },
@@ -318,11 +316,16 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
   const defaultToolDefinitions = options.toolDefinitions ?? [];
   const toolDefinitionsForMode = (mode: TuiRuntimeMode) =>
     options.toolDefinitionsForMode?.(mode) ?? defaultToolDefinitions;
-  const toolsForTurn = (mode: TuiRuntimeMode, input: ChatModelInput) => toolDefinitionsForMode(mode).filter(tool =>
-    !agentCommunicationExcludedPrefixes(input.systemContextInput).some((prefix: string) => tool.capabilityId.startsWith(prefix))
-    && evaluateWorkSessionWrite({ delegationOrigin: { readOnly: (input.systemContextInput?.workSessionOrigin as { readOnly?: boolean } | undefined)?.readOnly === true } }, tool).allowed);
-  const systemMessagesFor = (context: ProviderSystemPromptContext): readonly ModelMessage[] => {
-    const content = options.getSystemPrompt?.(context) ?? options.systemPrompt;
+  const toolsForTurn = (mode: TuiRuntimeMode, input: Pick<ChatModelInput, 'systemContextInput'>) => admitInteractiveToolSet(toolDefinitionsForMode(mode).filter(tool =>
+    (tool.capabilityId !== 'local.delegation.wait_for_sessions' || sessionWaitProjected(input.systemContextInput))
+    && !agentCommunicationExcludedPrefixes(input.systemContextInput).some((prefix: string) => tool.capabilityId.startsWith(prefix))
+    && ((input.systemContextInput?.workSessionOrigin as { readOnly?: boolean } | undefined)?.readOnly !== true
+      || readOnlyWorkCapabilityAllowed({ ...tool, turnProfile: input.systemContextInput }))));
+  const systemMessagesFor = (context: ProviderSystemPromptContext, projectedTools: readonly RuntimeToolDefinition[]): readonly ModelMessage[] => {
+    const content = options.getSystemPrompt?.({ ...context, systemContextInput: { ...context.systemContextInput,
+      interactiveResultCapabilities: projectedTools
+        .map(tool => tool.capabilityId).filter(id => id.startsWith('local.interactive.')),
+    } }) ?? options.systemPrompt;
     return content ? [{ role: 'system', content }] : [];
   };
 
@@ -393,22 +396,24 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
 
   return {
     projectSystemMessages(context) {
+      const mode = normalizeTuiRuntimeMode(context.mode);
       return systemMessagesFor({
-        mode: normalizeTuiRuntimeMode(context.mode),
+        mode,
         ...(context.conversationId ? { conversationId: context.conversationId } : {}),
         systemContextBlocks: context.systemContextBlocks,
         systemContextInput: context.systemContextInput,
-      });
+      }, toolsForTurn(mode, { systemContextInput: context.systemContextInput }));
     },
     summarizeCompaction,
     initialize(input, context) {
       const mode = normalizeTuiRuntimeMode(context.run.mode);
+      const projectedTools = toolsForTurn(mode, input.input);
       const systemMessages = systemMessagesFor({
         mode,
         ...(context.run.conversationId ? { conversationId: context.run.conversationId } : {}),
         systemContextBlocks: input.input.systemContextBlocks,
         systemContextInput: input.input.systemContextInput,
-      });
+      }, projectedTools);
       const userContent = toUserModelContent(input.input.content, input.input.images);
       // System Context is assembled from current host facts at UserTurn start,
       // then pinned for inner ModelSteps. Never accumulate duplicate system messages.
@@ -420,7 +425,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
         ...historyWithoutSystem,
         ...(input.input.omitCurrentUser ? [] : [{ role: 'user' as const, content: userContent }]),
       ];
-      const pinnedTools = toolsForTurn(mode, input.input).map(toModelTool);
+      const pinnedTools = projectedTools.map(toModelTool);
       return {
         messages: [
           ...input.input.history,
@@ -464,7 +469,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
               ...(context.run.conversationId ? { conversationId: context.run.conversationId } : {}),
               systemContextBlocks: context.run.input.systemContextBlocks,
               systemContextInput: context.run.input.systemContextInput,
-            }),
+            }, projectedToolDefinitions),
             tools: projectedToolDefinitions.map(toModelTool),
           };
       const tools = pinnedPrefix.tools;
@@ -524,7 +529,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
             model,
             messages: microcompactMessagesForContext(spillOversizedToolResultsForProvider(pipelineState.messages, {
               conversationId: state.conversationId ?? context.run.conversationId,
-            })).messages,
+            }), { preserveLatestUserTurn: true }).messages,
             tools,
             ...(!reasoningEffort || reasoningEffort === 'default' ? {} : { reasoningEffort }),
             ...(options.getFastMode?.() === true ? { fastMode: true } : {}),
@@ -600,7 +605,6 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
           return { compacted: true, state: { messages: nextMessages } };
         },
         send(request) {
-          const emitDiscard = context.emit as (event: StreamDraftDiscard) => void;
           return streamWithSafeRetry(activeProvider, {
             ...request,
             signal: context.signal,
@@ -617,7 +621,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
             waitImpl: options.streamRetryWait,
             onDiscardDraft(draft) {
               if (draft.textChars <= 0 && draft.reasoningChars <= 0) return;
-              emitDiscard({ type: 'stream.discard', streamId, ...draft });
+              context.emit({ type: 'stream.discard', streamId, ...draft });
             },
           });
         },
@@ -660,7 +664,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
             pinnedProviderPrefix: pinnedPrefix,
             modelMessages: [
               ...workingMessages,
-              { role: 'assistant', content: result.content || null, toolCalls: result.toolCalls },
+              modelAssistantMessage(result),
             ],
             pendingToolCalls: result.toolCalls,
             usageAccounting,
@@ -676,7 +680,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
 
       const completedModelMessages: readonly ModelMessage[] = [
         ...workingMessages,
-        { role: 'assistant', content: result.content },
+        modelAssistantMessage(result),
       ];
       return {
         kind: 'completed',
@@ -702,7 +706,7 @@ export function createProviderChatModel(options: CreateProviderChatModelOptions)
           ...executions.map((execution) => ({
             role: 'tool' as const,
             toolCallId: execution.call.toolCallId,
-            content: executionContent(execution.result, state.conversationId),
+            content: executionContent(execution.result, state.conversationId, options.toolArtifactBaseDir),
           })),
         ],
         toolExecutions: [

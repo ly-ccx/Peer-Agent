@@ -4,20 +4,23 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createCoordinationLifecycle } from './coordination-lifecycle.mjs';
+import { createEmptyResourceWaitPort } from './resource-wait.ts';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
 import { registerWorkBudget, createWorkBudgetGuard } from './work-budget.mjs';
+import { createDelegationProvider } from './delegation-provider.mjs';
 
-function fixture(t) {
+async function fixture(t) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'coordination-effects-'));
-  const options = { rootDir: root, workspaceId: 'w', holdsLease: () => true, leaseEpoch: () => 'one' };
+  const options = { rootDir: root, workspaceId: 'w', holdsLease: () => true, leaseEpoch: () => 'one', formatVersion: 2, fenceLegacyWrites: true };
   const store = createWorkCoordinationStore(options);
+  await store.prepare();
   store.saveWork({ workId: 'goal', parentConversationId: 'parent', state: 'waiting_children' });
   const release = registerWorkBudget('w', store);
   t.after(() => { release(); rmSync(root, { recursive: true, force: true }); });
   const sessions = new Map(), spawns = [], cancellations = [], messages = [];
   const users = ['u1','u2','u3'].map(id => ({ id, inputId: id, role: 'user', kind: 'user_input' }));
   let unknown = false, enabled = true;
-  const ports = { readMessages: () => users, readSession: ({ sessionId }) => sessions.get(sessionId), holdsLease: () => true,
+  const ports = { resourceWaits: createEmptyResourceWaitPort(), readMessages: () => users, readSession: ({ sessionId }) => sessions.get(sessionId), holdsLease: () => true,
     isEnabled: () => enabled,
     spawn: async (task, context) => {
       const existing = spawns.find(row => row.operationId === context.coordinationOperationId);
@@ -42,8 +45,50 @@ function fixture(t) {
   return { store, ports, lifecycle, context, task, sessions, spawns, cancellations, messages, enabled: value => { enabled=value; }, unknown: () => { unknown=true; }, reopen: () => createWorkCoordinationStore(options) };
 }
 
+test('a current user can cancel a returned result; an ordinary wake cannot abandon it', async t => {
+ const f=await fixture(t);
+ const opened=await f.lifecycle.coordinate({action:'parallel',reason:'original',task:f.task('u1')},f.context('u1','original'));
+ f.sessions.get(opened.sessionId).status='result_ready';
+ const event={eventId:'result',sessionId:opened.sessionId,kind:'result_ready'};f.store.transfer([event]);
+ const cancel={action:'cancel',sessionId:opened.sessionId,expectedRevision:1,reason:'no longer needed'};
+ const wake=await f.lifecycle.coordinate(cancel,f.context('','wake',{currentInputAnchors:[],events:[event]}));
+ assert.equal(wake.error,'current_user_required');assert.deepEqual(f.cancellations,[]);
+ const result=await f.lifecycle.coordinate(cancel,f.context('u2','user-cancel'));
+ assert.equal(result.ok,true);assert.equal(result.phase,'completed');
+ assert.equal(f.sessions.get(opened.sessionId).status,'cancelled');assert.deepEqual(f.cancellations,[opened.sessionId]);
+ await f.lifecycle.recover('w');assert.deepEqual(f.cancellations,[opened.sessionId]);
+});
+
+test('a returned legacy session is adopted only from current user input before repair',async t=>{
+  const f=await fixture(t);
+  f.sessions.set('legacy',{sessionId:'legacy',planId:'old-plan',workspaceId:'w',status:'result_ready',origin:{parentConversationId:'parent'}});
+  const lifecycle=createCoordinationLifecycle({...f.ports,takeover:async()=>({ok:true})});
+  const input={action:'resume',sessionId:'legacy',expectedRevision:0,reason:'Correct the missing analysis'};
+  assert.equal((await lifecycle.coordinate(input,f.context('','wake',{currentInputAnchors:[]}))).error,'current_user_required');
+  assert.equal(f.store.read().mandates?.goal,undefined);
+  const receipt=await lifecycle.coordinate(input,f.context('u1','adopt'));
+  assert.equal(receipt.ok,true,JSON.stringify(receipt));
+  assert.equal(receipt.phase,'completed');
+  assert.deepEqual(f.store.read().mandates.goal.sessionIds,['legacy']);
+  assert.deepEqual(f.store.read().mandates.goal.rootInputIds,['u1']);
+  assert.equal(f.store.read().transitions.adopt.minimumExecutorVersion,3);
+  assert.equal(f.spawns.length,0);
+});
+
+test('current user can finish cancellation on stopped work without reopening admission', async t => {
+ const f=await fixture(t);
+ const opened=await f.lifecycle.coordinate({action:'parallel',reason:'original',task:f.task('u1')},f.context('u1','original'));
+ f.store.saveWork({workId:'goal',state:'cancelled',stopScope:'work'});
+ const cancelled=await f.lifecycle.coordinate({action:'cancel',sessionId:opened.sessionId,expectedRevision:1,reason:'withdraw'},f.context('u2','cancel-stopped'));
+ assert.equal(cancelled.ok,true);assert.equal(cancelled.phase,'completed');
+ assert.equal(f.store.read().works.goal.stopScope,'work');assert.equal(f.store.read().works.goal.state,'cancelled');
+ const repeated=await f.lifecycle.coordinate({action:'cancel',sessionId:opened.sessionId,expectedRevision:2,reason:'already withdrawn'},f.context('u3','cancel-again'));
+ assert.equal(repeated.ok,true);assert.deepEqual(f.cancellations,[opened.sessionId]);
+  assert.equal((await f.lifecycle.coordinate({action:'replace',sessionId:opened.sessionId,expectedRevision:3,reason:'revive',task:f.task('u3')},f.context('u3','replace-stopped'))).error,'work_execution_stopped');
+});
+
 test('parallel work survives a sibling cancellation and cancellation events cannot revive it', async t => {
-  const f = fixture(t);
+  const f = await fixture(t);
   const a = await f.lifecycle.coordinate({ action:'parallel', reason:'A', task:f.task('u1') },f.context('u1','a'));
   const b = await f.lifecycle.coordinate({ action:'parallel', reason:'B', task:f.task('u1') },f.context('u1','b'));
   const profile = id => ({ workspaceId:'w', workId:'goal', coordinationBinding:f.sessions.get(id).origin.coordinationBinding });
@@ -60,7 +105,7 @@ test('parallel work survives a sibling cancellation and cancellation events cann
 });
 
 test('one synchronous coordination decision reads its current parent messages once', async t => {
-  const f = fixture(t); let reads = 0;
+  const f = await fixture(t); let reads = 0;
   const lifecycle = createCoordinationLifecycle({ ...f.ports, readMessages: id => { reads++; return f.ports.readMessages(id); } });
   const result = await lifecycle.coordinate({ action: 'parallel', reason: 'inspect', task: f.task('u1') }, f.context('u1', 'once'));
   assert.equal(result.ok, true); assert.equal(reads, 1);
@@ -68,7 +113,7 @@ test('one synchronous coordination decision reads its current parent messages on
 });
 
 test('query discovers an owned legacy session without a revision, mutation, mandate or execution', async t => {
-  const f = fixture(t);
+  const f = await fixture(t);
   f.sessions.set('legacy', { sessionId: 'legacy', workspaceId: 'w', status: 'waiting_agent', origin: { parentConversationId: 'parent' } });
   const before = f.store.read();
   const result = await f.lifecycle.coordinate({ action: 'query', sessionId: 'legacy', reason: 'discover current state' }, f.context('', 'query', { currentInputAnchors: [] }));
@@ -79,8 +124,42 @@ test('query discovers an owned legacy session without a revision, mutation, mand
   assert.equal((await f.lifecycle.coordinate({ action: 'query', sessionId: 'legacy' }, f.context('', 'q', { scopedSessionIds: ['unrelated'] }))).error, 'out_of_scope');
 });
 
+test('a wake corrects a string revision and user-only entry point, then hands off under the original mandate', async t => {
+  const f = await fixture(t);
+  const started = await f.lifecycle.coordinate({ action: 'parallel', reason: 'original', task: f.task('u1') }, f.context('u1', 'original'));
+  f.sessions.get(started.sessionId).status = 'waiting_agent';
+  const event = { eventId: 'interrupted', sessionId: started.sessionId, kind: 'interrupted' };
+  f.store.transfer([event]);
+  let takeovers = 0;
+  const lifecycle = createCoordinationLifecycle({ ...f.ports, takeover: async () => { takeovers++; return { ok: true }; } });
+  const provider = createDelegationProvider({ supervisor: { get: f.ports.readSession,
+    coordinateWork: (input, context) => lifecycle.coordinate(input, context) } });
+  const context = { mode: 'project_agent', role: 'project_agent', workspaceId: 'w', conversationId: 'parent',
+    turnId: 'wake', currentInputAnchors: [], messages: f.ports.readMessages(),
+    turnProfile: { workId: 'goal', context: { turnKind: 'wake', events: [event] } } };
+  let ordinal = 0;
+  const execute = async (tool, input) => (await provider.executeCapability({ call: {
+    toolCallId: `call-${ordinal}`, capabilityId: `local.delegation.${tool}`, arguments: input,
+  } }, { ...context, toolCallOrdinal: ordinal++ })).result.output;
+  const input = { action: 'handoff', sessionId: started.sessionId, reason: 'recover retained work', expectedRevision: '1.0' };
+  const bad = await execute('coordinate_work', input);
+  assert.equal(bad.error, 'invalid_input'); assert.match(bad.message, /integer, not a string/);
+  assert.equal(takeovers, 0);
+  const direct = await execute('resume_session', { sessionId: started.sessionId, anchorMessageId: 'u1' });
+  assert.equal(direct.error, 'current_user_required');
+  assert.equal(direct.suggestedCall.tool, 'coordinate_work');
+  const query = await execute(direct.suggestedCall.tool, direct.suggestedCall.arguments);
+  assert.equal(query.goalRevision, 1);
+  assert.ok(JSON.stringify(query).indexOf('goalRevision') < JSON.stringify(query).indexOf('session'));
+  const recovered = await execute('coordinate_work', { ...input, expectedRevision: query.goalRevision, workId: query.workId });
+  assert.equal(recovered.ok, true); assert.equal(recovered.phase, 'completed');
+  assert.equal(takeovers, 1); assert.equal(f.spawns.length, 1);
+  const foreign = await execute('coordinate_work', { action: 'query', sessionId: 'unrelated', reason: 'inspect' });
+  assert.equal(foreign.error, 'out_of_scope'); assert.equal(takeovers, 1);
+});
+
 test('capability failure precedes replacement revision and cancellation of existing work', async t => {
-  const f = fixture(t);
+  const f = await fixture(t);
   const original = await f.lifecycle.coordinate({ action: 'parallel', reason: 'original', task: f.task('u1') }, f.context('u1', 'original'));
   const before = f.store.read();
   const diagnostic = { stage: 'delegation_admission', reason: 'delegation_capability_unavailable', missing: ['local.shell.exec'], retryable: false, userActionRequired: false };
@@ -93,7 +172,7 @@ test('capability failure precedes replacement revision and cancellation of exist
 });
 
 test('replacement replay and consecutive corrections follow durable lineage without duplicate tasks', async t => {
-  const f=fixture(t), a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
+  const f=await fixture(t), a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
   const replace={action:'replace',reason:'correct direction',sessionId:a.sessionId,expectedRevision:1,task:f.task('u2')};
   const b=await f.lifecycle.coordinate(replace,f.context('u2','replace'));
   assert.equal(b.phase,'completed'); assert.equal(f.spawns.length,2);
@@ -108,14 +187,47 @@ test('replacement replay and consecutive corrections follow durable lineage with
 });
 
 test('unknown external outcome preserves the old task and does not dispatch a replacement', async t => {
-  const f=fixture(t), a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
+  const f=await fixture(t), a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
   f.unknown(); const result=await f.lifecycle.coordinate({action:'replace',reason:'correct',sessionId:a.sessionId,expectedRevision:1,task:f.task('u2')},f.context('u2','replace'));
   assert.equal(result.phase,'awaiting_outcome'); assert.equal(result.error,'execution_outcome_unknown');
   await f.lifecycle.recover('w'); assert.equal(f.spawns.length,1);
 });
 
+test('retained takeover recovers from its current stop proof regardless of completed-history enumeration order', async t => {
+  const f = await fixture(t);
+  f.store.saveWork({ ...f.store.readWork('goal'), workspaceId: 'w' });
+  const opened = await f.lifecycle.coordinate({ action: 'parallel', reason: 'original', task: f.task('u1') }, f.context('u1', 'original'));
+  await f.lifecycle.coordinate({ action: 'augment', sessionId: opened.sessionId, expectedRevision: 1,
+    reason: 'historical context', text: 'retained facts' }, f.context('u2', 'historical'));
+  let calls = 0;
+  const lifecycle = createCoordinationLifecycle({ ...f.ports, takeover: async ({ operationId }) => {
+    calls++;
+    if (calls > 1) return { ok: true };
+    const session = f.sessions.get(opened.sessionId), execution = { planId: 'plan', sessionId: opened.sessionId,
+      executionEpoch: session.origin.coordinationBinding.executionEpoch, goalRevision: 1 };
+    Object.assign(session, { planId: 'plan', origin: { ...session.origin, workspaceId: 'w', sessionId: opened.sessionId,
+      takeover: { operationId, phase: 'stopping' }, executionControl: { kind: 'takeover', operationId,
+        workspaceId: 'w', parentConversationId: 'parent', phase: 'settled', outcome: 'applied', expectedExecution: execution,
+        stopReceipt: { operationId, receiptId: 'stop:retained', execution, scope: 'managed_execution',
+          admissionClosed: true, runnerIdle: true, schedulerIdle: true, unknownCalls: [], completedAt: '2026-11-03T02:03:00Z' } } } });
+    return { error: 'execution_outcome_unknown' };
+  } });
+  const result = await lifecycle.coordinate({ action: 'resume', sessionId: opened.sessionId, expectedRevision: 1,
+    reason: 'continue retained task' }, f.context('u3', 'retained'));
+  assert.equal(result.phase, 'awaiting_outcome');
+  const read = f.store.read.bind(f.store);
+  f.store.read = () => {
+    const state = read(), { historical, ...others } = state.transitions;
+    return { ...state, transitions: { ...others, historical } };
+  };
+  await lifecycle.recover('w');
+  assert.equal(f.store.read().transitions.retained.phase, 'completed');
+  assert.equal(calls, 2);
+  assert.equal(f.spawns.length, 1, 'recovery preserves the original task');
+});
+
 test('session projection keeps replacement lineage after an update and a progress query',async t=>{
-  const f=fixture(t), a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
+  const f=await fixture(t), a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
   const b=await f.lifecycle.coordinate({action:'replace',reason:'correct A',sessionId:a.sessionId,expectedRevision:1,task:f.task('u2')},f.context('u2','replace'));
   await f.lifecycle.coordinate({action:'augment',reason:'extra context',text:'inspect the rounded corners',sessionId:b.sessionId,expectedRevision:2},f.context('u3','update'));
   await f.lifecycle.coordinate({action:'query',reason:'progress',sessionId:b.sessionId,expectedRevision:2},f.context('u3','query'));
@@ -128,7 +240,7 @@ test('session projection keeps replacement lineage after an update and a progres
 });
 
 test('parallel work referencing another session does not claim replacement lineage',async t=>{
-  const f=fixture(t), a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
+  const f=await fixture(t), a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
   const b=await f.lifecycle.coordinate({action:'parallel',reason:'B alongside A',sessionId:a.sessionId,expectedRevision:1,task:f.task('u2')},f.context('u2','b'));
   const facts=f.lifecycle.forSession('w',b.sessionId);
   assert.equal(facts.action,'parallel');
@@ -137,7 +249,7 @@ test('parallel work referencing another session does not claim replacement linea
 });
 
 test('started-step recovery finishes its receipt without redispatching a persisted task', async t => {
-  const f=fixture(t);
+  const f=await fixture(t);
   f.store.decide({operationId:'crash',workId:'goal',expectedRevision:0,action:'parallel',reason:'A',sourceInputIds:['u1'],sourceEventIds:[],payload:{task:f.task('u1'),context:{workspaceId:'w',parentConversationId:'parent'}}},
     {parentConversationId:'parent',currentInputIds:['u1']});
   f.store.advanceTransition('crash','recorded',{phase:'ready'});
@@ -146,7 +258,7 @@ test('started-step recovery finishes its receipt without redispatching a persist
 });
 
 test('rollback settles registered cancellation without dispatching its replacement or reviving the old task',async t=>{
-  const f=fixture(t), a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
+  const f=await fixture(t), a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
   const result=f.store.decide({operationId:'replace',workId:'goal',expectedRevision:1,action:'replace',sessionId:a.sessionId,reason:'correct A',sourceInputIds:['u2'],sourceEventIds:[],
     payload:{task:f.task('u2'),context:f.context('u2','replace')}},{parentConversationId:'parent',currentInputIds:['u2']});
   assert.equal(result.ok,true);
@@ -160,7 +272,7 @@ test('rollback settles registered cancellation without dispatching its replaceme
 });
 
 test('legacy adoption requires this turn canonical human input; human approval remains pending',async t=>{
-  const f=fixture(t);
+  const f=await fixture(t);
   f.sessions.set('legacy',{sessionId:'legacy',workspaceId:'w',status:'running',origin:{parentConversationId:'parent'}});
   const input={action:'handoff',reason:'take over',sessionId:'legacy',expectedRevision:0};
   const wake=await f.lifecycle.coordinate(input,f.context('', 'wake',{currentInputAnchors:[],events:[{eventId:'file-instruction',sessionId:'legacy'}]}));
@@ -170,28 +282,37 @@ test('legacy adoption requires this turn canonical human input; human approval r
   assert.deepEqual(f.store.read().mandates.goal.rootInputIds,['u2']);
 });
 
-test('a fulfilled mandate cannot create work from a late event; a fresh human correction preserves the accepted result',async t=>{
-  const f=fixture(t), a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
+test('accepted stages retain new root responsibility and a human correction preserves the accepted stage',async t=>{
+  const f=await fixture(t), a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
   f.sessions.get(a.sessionId).status='accepted';
   f.store.transfer([{eventId:'done',sessionId:a.sessionId,kind:'result_ready'}]);
-  assert.equal(f.lifecycle.facts('w','parent')[0].lifecycle,'fulfilled');
-  const wake=await f.lifecycle.coordinate({action:'parallel',reason:'repeat',task:f.task('u1')},f.context('','wake',{currentInputAnchors:[],events:[{eventId:'done',sessionId:a.sessionId}]}));
-  assert.equal(wake.error,'mandate_inactive');
+  assert.equal(f.lifecycle.facts('w','parent')[0].lifecycle,'active');
   const corrected=await f.lifecycle.coordinate({action:'replace',reason:'new requirement',sessionId:a.sessionId,expectedRevision:1,task:f.task('u2')},f.context('u2','correct'));
   assert.equal(corrected.phase,'completed'); assert.equal(f.sessions.get(a.sessionId).status,'accepted');
   assert.equal(f.cancellations.length,0); assert.equal(f.spawns.length,2);
 });
 
 test('session lifecycle queries do not clone execution history or authorize from compact facts', async t => {
-  const f=fixture(t);
+  const f=await fixture(t);
   const a=await f.lifecycle.coordinate({action:'parallel',reason:'A',task:f.task('u1')},f.context('u1','a'));
   f.sessions.get(a.sessionId).status='accepted';
   const original=f.store.read;f.store.read=()=>{throw Error('full-state probe');};
   try {
     assert.equal(f.lifecycle.forSession('w',a.sessionId).phase,'completed');
-    assert.equal(f.lifecycle.facts('w','parent')[0].lifecycle,'fulfilled');
+    assert.equal(f.lifecycle.facts('w','parent')[0].lifecycle,'active');
     f.store.saveWork({workId:'goal',state:'cancelled',stopScope:'work'});
     assert.equal(f.lifecycle.facts('w','parent')[0].lifecycle,'cancelled');
     await assert.rejects(f.lifecycle.coordinate({action:'parallel',reason:'B',task:f.task('u2')},f.context('u2','b')),/full-state probe/);
   } finally {f.store.read=original;}
+});
+
+test('legacy mandates keep child-based historical closure and cannot be restarted by a late event', async t => {
+  const f = await fixture(t);
+  const decision = { operationId: 'legacy', workId: 'goal', expectedRevision: 0, action: 'parallel', sourceInputIds: ['u1'], sourceEventIds: [], reason: 'Legacy goal',
+    payload: { task: f.task('u1'), context: { workspaceId: 'w', parentConversationId: 'parent' } } };
+  assert.equal(f.store.decide(decision, { parentConversationId: 'parent', currentInputIds: ['u1'] }).ok, true);
+  await f.lifecycle.recover('w'); f.sessions.get('s1').status = 'accepted';
+  assert.equal(f.lifecycle.facts('w', 'parent')[0].lifecycle, 'fulfilled');
+  const event = { eventId: 'late', sessionId: 's1' }; f.store.transfer([event]);
+  assert.equal((await f.lifecycle.coordinate({ action: 'parallel', task: f.task('u1'), reason: 'Repeat' }, f.context('', 'late', { currentInputAnchors: [], events: [event] }))).error, 'mandate_inactive');
 });

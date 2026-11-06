@@ -37,9 +37,11 @@ test('the dialog never renders an isolation sentinel as a branch name', () => {
   assert.match(source, /请先选择源头分支/);
 });
 
+const environment = readFileSync(new URL('../hooks/useConversationGitEnvironment.ts', import.meta.url), 'utf8');
+
 test('ChatSurface opens the dialog without passing any list-row value', () => {
   // The entry point takes no arguments at all, so the hovered row cannot reach the source.
-  assert.match(surface, /const handleOpenCreateBranchDialog = useCallback\(\(\) => \{/);
+  assert.match(environment, /const handleOpenCreateBranchDialog = useCallback\(\(\) => \{/);
   assert.match(surface, /onCreateBranch=\{handleOpenCreateBranchDialog\}/);
   assert.doesNotMatch(surface, /handleOpenCreateBranchDialog\(highlightedValue\)/);
   // And the dialog is rendered from the extracted module with the branch-only option list.
@@ -51,14 +53,14 @@ test('ChatSurface opens the dialog without passing any list-row value', () => {
 test('the create-branch entry is independent of the capsule branch-switch affordance', () => {
   // Branch options for the dialog must not be gated on the capsule's own selectable flag,
   // otherwise the picker would come up empty exactly when the user wants to fork.
-  assert.match(surface, /const composerBranchOptions = useMemo<readonly DropdownOption\[\]>/);
+  assert.match(environment, /const composerBranchOptions = useMemo<readonly DropdownOption\[\]>/);
   assert.match(surface, /sourceOptions=\{composerBranchOptions\}/);
   assert.match(surface, /onCreateBranch=\{handleOpenCreateBranchDialog\}/);
   assert.doesNotMatch(surface, /\[\.\.\.isolationOptions, \.\.\.composerBranchOptions\]/);
 });
 
 test('creating a branch cannot reach git with a sentinel or an empty start point', () => {
-  assert.match(surface, /const source = request\.source\.trim\(\);/);
-  assert.match(surface, /if \(!source \|\| isComposerEnvSentinel\(source\)\) return;/);
-  assert.match(surface, /startPoint: source,/);
+  assert.match(environment, /const source = request\.source\.trim\(\);/);
+  assert.match(environment, /if \(!source \|\| isComposerEnvSentinel\(source\)\) return;/);
+  assert.match(environment, /startPoint: source,/);
 });

@@ -1,14 +1,27 @@
 import { randomUUID } from 'node:crypto';
 import {
-  createBotAccessPolicyAuthority, resolveRoleRoute, readSnapshots, createExecutionScheduler, createWorkBudgetGuard,
-  runBoundedVerification, isVerificationTurn, verificationExecutionBudget,
-  createFailedClientToolResult,
-  createGoalPlanStore,
-  encodeProviderToolResult,
-  evaluateWorkSessionWrite,
+  createBotAccessPolicyAuthority,
+  readSnapshots,
+  createExecutionScheduler,
+  createWorkBudgetGuard,
+  runBoundedVerification,
+  isVerificationTurn,
+  verificationExecutionBudget,
+  readOnlyWorkCapabilityAllowed,
+  agentCommunicationExcludedPrefixes
+} from "@peer-agent/runtime-node/project-agent";
+import {
+  resolveRoleRoute,
   loadSharedModelMetadataList,
-  type ModelMessage,
-} from '@peer-agent/runtime-node';
+  type ModelMessage
+} from "@peer-agent/runtime-node/models";
+import {
+  createFailedClientToolResult,
+  encodeProviderToolResult
+} from "@peer-agent/runtime-node/providers";
+import {
+  createGoalPlanStore
+} from "@peer-agent/runtime-node/storage";
 import { createRuntimePipeline, type RuntimeSdkProviderExecution, type RuntimePipelineToolExecution } from '@peer-agent/runtime-sdk';
 import { collectToolEvidenceRefs, projectConversationHistory } from '@peer-agent/runtime-core';
 import type { ChatModelInput, ChatModelState, ChatModelToolCall } from '../chat-controller.ts';
@@ -76,6 +89,8 @@ export function createTuiTurnExecutor(options: {
   readMemory(workspaceId: string): readonly any[];
   memoryEnabled(workspaceId: string): boolean;
   getProviders(): readonly TuiCapabilityProvider[];
+  captureExecution?: import('../tui-host.ts').CreateTuiHostOptions['captureExecution'];
+  userMaterialNotices?: (toolContext: Record<string, unknown>) => readonly unknown[];
   onApproval?(approval: PendingApproval | null, streamId: string): void;
   oneTimeApprovals?: { match(input: object): boolean };
   goalPlanStore?: ReturnType<typeof createGoalPlanStore>;
@@ -95,8 +110,10 @@ export function createTuiTurnExecutor(options: {
     const settings = options.getSettings();
     const providers = loadSharedModelMetadataList({ userDataPath: options.dataHome }).map(model => ({
       id: model.entryId ?? model.credentialId, groupId: model.credentialId, model: model.model,
-      providerType: model.providerId, apiKeyConfigured: model.credentialStored, supportsTools: model.supportsTools,
+      providerType: model.providerId, authMethod: model.authMethod, apiKeyConfigured: model.credentialStored, supportsTools: model.supportsTools,
       supportsVision: model.supportsVision, supportsStructured: model.supportsStructured, contextWindow: model.contextWindow,
+      supportsReasoning: model.supportsReasoning, reasoningEffortLevels: model.supportedReasoningEfforts,
+      defaultEffort: model.defaultReasoningEffort,
     }));
     return resolveRoleRoute({ providers, routing: settings.modelRouting, ...input });
   }
@@ -108,8 +125,9 @@ export function createTuiTurnExecutor(options: {
     const mode = (input.mode ?? (profile.role === 'project_agent' ? 'project_agent' : 'chat')) as TuiRuntimeMode;
     const streamId = input.streamId || randomUUID();
     const runtime: TuiRuntime = runtimeFactory({ workspaceRoot: workspacePath, userDataPath: options.dataHome,
-      accessLevel: options.getSettings().localAccessLevel ?? 'restricted_local', providers: options.getProviders(), oneTimeApprovals: options.oneTimeApprovals, goalPlanStore: options.goalPlanStore, sessionApprovals });
+      accessLevel: options.getSettings().localAccessLevel ?? 'restricted_local', providers: options.getProviders(), oneTimeApprovals: options.oneTimeApprovals, goalPlanStore: options.goalPlanStore, sessionApprovals, captureExecution: options.captureExecution });
     const selectedId = input.modelProviderId || profile.modelSelection?.modelProviderId;
+    runtime.setSessionFastMode(profile.modelSelection?.fastMode === true);
     if (selectedId) {
       const selected = resolvePersistedModelSelection(runtime.modelSelection, {
         providerId: selectedId, modelId: profile.modelSelection?.modelId ?? '', reasoningEffort: profile.modelSelection?.reasoningEffort ?? 'default',
@@ -119,6 +137,8 @@ export function createTuiTurnExecutor(options: {
     }
     const unsubscribeApproval = runtime.host.subscribeApproval(approval => options.onApproval?.(approval, streamId));
     const calls: any[] = [];
+    const checkpointIdentity = { provider: 'tui', modelProviderId: input.modelProviderId, providerId: input.modelProviderId,
+      model: profile.modelSelection?.modelId, modelFamily: profile.modelSelection?.family };
     let toolReservations = 0, streamedText = '';
     if (profile.providerCheckpoint && (profile.providerCheckpoint.provider !== 'tui' || profile.providerCheckpoint.modelProviderId !== input.modelProviderId)) throw new Error('continuity_model_changed');
     const saved = profile.role === 'project_agent' && profile.providerCheckpoint?.provider === 'tui'
@@ -130,6 +150,8 @@ export function createTuiTurnExecutor(options: {
     const content = !saved && last?.role === 'user' && typeof last.content === 'string' ? last.content : '';
     const history = content ? messages.slice(0, -1) : messages;
     const useMemory = options.memoryEnabled(workspaceId);
+    const planReminder = profile.role === 'project_agent' ? input.plan?.reminder : null;
+    const runtimeReminders = planReminder ? [...(input.runtimeReminders ?? []), planReminder] : input.runtimeReminders;
     const toolContext: Record<string, any> = { workspaceId, workspacePath, conversationId: input.conversationId,
       permissionPolicy: input.permissionPolicy,
       mode, role: profile.role, turnRole: profile.role, planId: profile.planId, turnProfile: profile, surface: 'tui', turnId: streamId, messages: publicFacts ?? options.readMessages(input.conversationId ?? ''),
@@ -141,7 +163,7 @@ export function createTuiTurnExecutor(options: {
     };
     const model = { ...runtime.model,
       checkpoint(state: ChatModelState, executions: readonly RuntimePipelineToolExecution<ChatModelToolCall, RuntimeSdkProviderExecution>[]) {
-        input.budgetGuard?.checkpoint({ provider: 'tui', modelProviderId: input.modelProviderId, messages: state.modelMessages }, executions);
+        input.budgetGuard?.checkpoint({ ...checkpointIdentity, messages: state.modelMessages }, executions);
       },
       runTurn(state: ChatModelState, context: any) {
       input.budgetGuard?.beforeRequest();
@@ -204,8 +226,9 @@ export function createTuiTurnExecutor(options: {
           maxTurns: 2, maxToolCalls: input.hardRemainingToolCalls, sliceToolCalls: Math.min(4, input.remainingToolCalls ?? input.limits?.maxToolCalls ?? 4),
           yieldAtTurnLimit: true, shouldYield: input.shouldYield, maxToolBatchCalls: 32,
         } : {}), input: { content, omitCurrentUser: !content, history: [], modelMessages: history, turnId: streamId, turnIndex: 0,
-          systemContextInput: { role: profile.role, workspaceId, sessionId: profile.sessionId, planId: profile.planId,
-            turnContext: {...profile.context, agentKind: profile.agentKind}, runtimeReminders: input.runtimeReminders, continuityContext: input.continuityContext,
+          systemContextInput: { role: profile.role, workspaceId, workId: profile.workId, sessionId: profile.sessionId, planId: profile.planId,
+            interactiveMaterials: options.userMaterialNotices?.(toolContext),
+            turnContext: {...profile.context, agentKind: profile.agentKind}, runtimeReminders, continuityContext: input.continuityContext,
             ...(profile.role === 'project_agent' && useMemory ? { projectMemory: options.readMemory(workspaceId) } : {}),
             ...(profile.role === 'work_session' ? { workSessionExecution: { phase: input.plan?.delegationOrigin?.phase, goalRevision: input.plan?.delegationOrigin?.coordinationBinding?.goalRevision, takeover: input.plan?.delegationOrigin?.takeover?.text }, workSessionOrigin: { ...profile.context?.workSessionOrigin,
               readOnly: input.plan?.delegationOrigin?.readOnly === true,
@@ -215,14 +238,15 @@ export function createTuiTurnExecutor(options: {
           },
         } }, { signal: controller.signal });
       const requestedUserInput = result.reason === 'requested_user_input';
-      const replied = result.status === 'stopped' && result.reason === 'project_agent_reply';
-      const ok = result.status === 'completed' || result.status === 'yielded' || requestedUserInput || replied;
+      const projectTurnCompleted = result.status === 'stopped'
+        && (result.reason === 'project_agent_reply' || result.reason === 'project_agent_wait');
+      const ok = result.status === 'completed' || result.status === 'yielded' || requestedUserInput || projectTurnCompleted;
       const text = !ok && streamedText ? streamedText : result.output ?? '';
       input.sink.send(ok ? 'chat:stream:done' : 'chat:stream:error', { streamId, error: result.reason });
       if (!input.ephemeral) options.persistTurn?.(input, { text, calls, usage: result.state?.usage,
         interrupted: !ok });
       return { ok, text, toolCalls: calls, toolCallCount: calls.length,
-        ...(result.status === 'yielded' ? { turnEnd: 'yielded', providerCheckpoint: { provider: 'tui', modelProviderId: input.modelProviderId, messages: result.state?.modelMessages } } : {}),
+        ...(result.status === 'yielded' ? { turnEnd: 'yielded', providerCheckpoint: { ...checkpointIdentity, messages: result.state?.modelMessages } } : {}),
         ...(requestedUserInput ? { requestedUserInput: true } : {}),
         continued: result.status === 'exhausted', terminalStatus: controller.signal.aborted ? 'aborted' : ok ? 'completed' : 'error',
         usage: result.state?.usage, ...(ok ? {} : { error: result.reason || result.status, failureReason: result.reason || result.status, retryable: false }) };
@@ -268,12 +292,15 @@ export function createTuiTurnExecutor(options: {
     return done;
   }
   return { runTurn, resolveGoalRole, executionScheduler,
-    async readDelegationCapabilities({ readOnly, workspaceId }: { readOnly: boolean; workspaceId: string }) {
+    async readDelegationCapabilities({ readOnly, workspaceId, agentKind = 'worker' }: { readOnly: boolean; workspaceId: string; agentKind?: string }) {
       const host = createTuiHost({ workspaceRoot: options.resolveWorkspacePath(workspaceId), userDataPath: options.dataHome,
         accessLevel: options.getSettings().localAccessLevel, providers: options.getProviders(), goalPlanStore: options.goalPlanStore });
       try {
+        const turnProfile = { role: 'work_session', agentKind, workspaceId };
+        const excluded = agentCommunicationExcludedPrefixes(turnProfile);
         return (host.toolDefinitionsForMode?.('goal') || []).filter(tool => !tool.capabilityId.startsWith('local.web.control.')
-          && evaluateWorkSessionWrite({ delegationOrigin: { readOnly } }, { capabilityId: tool.capabilityId, riskLevel: tool.metadata?.riskLevel }).allowed)
+          && !excluded.some((prefix: string) => tool.capabilityId.startsWith(prefix))
+          && (!readOnly || readOnlyWorkCapabilityAllowed({ capabilityId: tool.capabilityId, riskLevel: tool.metadata?.riskLevel, turnProfile })))
           .map(tool => tool.capabilityId);
       } finally { await host.dispose(); }
     },

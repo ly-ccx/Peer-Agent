@@ -5,7 +5,13 @@ export function verificationContentHash(plan, report = '') {
   return createHash('sha256').update(JSON.stringify([
     plan?.planId, plan?.goal, plan?.tasks, plan?.successCriteria, plan?.criterionResults,
     plan?.manualConfirmations, plan?.deliveryBinding, report,
+    ...(plan?.delegationOrigin?.takeover?.repair === true ? [plan.delegationOrigin.takeover.binding?.executionEpoch] : []),
   ])).digest('hex');
+}
+
+/** A root review must never resume a child-stage review's native Provider checkpoint. */
+export function verificationRequestRevision(contentRevision, goalReview) {
+  return goalReview ? createHash('sha256').update(JSON.stringify([contentRevision, goalReview])).digest('hex') : contentRevision;
 }
 
 /** Resolve an unchanged idle verification blocker, never replay its completed worker. */

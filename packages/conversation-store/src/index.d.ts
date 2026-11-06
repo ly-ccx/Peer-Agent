@@ -17,6 +17,8 @@ export interface ConversationUsage {
 }
 
 export type ConversationContextSnapshot = ContextAccountingSnapshot;
+export type ImmutableHistoryValue<T> = T extends object
+  ? { readonly [K in keyof T]: ImmutableHistoryValue<T[K]> } : T;
 
 export interface ConversationMeta {
   readonly id: string;
@@ -45,6 +47,9 @@ export interface ConversationMeta {
   /** Durable source for automation Fresh Conversations; rename-safe badge signal. */
   readonly automationOrigin?: ConversationAutomationOrigin | null;
   readonly messageCount?: number;
+  /** Materialized list preview. Missing or revision-mismatched reads are rebuilding. */
+  readonly preview?: SessionPreview;
+  readonly availability?: SessionAvailability;
   /** Missing or any other value is an ordinary conversation. */
   readonly role?: 'project_agent' | 'work_session';
   readonly parentConversationId?: string;
@@ -181,11 +186,22 @@ export interface ConversationStore {
   /** Persisted records before any streaming sidecar target; still requires runtime liveness checks. */
   getPersistedConversationHistory?(id: string): PersistedConversationHistory | null;
   /** Compact presentation cache; does not attest permissions, runtime liveness or acceptance.
-   * immutableInput opts a pure callback into deeply frozen shared input; results remain isolated. */
+   * immutableInput opts a pure callback into deeply frozen shared input.
+   * immutableOutput shares deeply frozen plain derived facts; default results remain isolated copies. */
   createHistoryProjection?<T>(project: (history: PersistedConversationHistory & { createdAt?: string }) => T,
-    options?: { maxEntries?: number; maxBytes?: number; immutableInput?: boolean }): (id: string) => T | null;
+    options: { maxEntries?: number; maxBytes?: number; immutableInput?: boolean; immutableOutput: true }): (id: string) => ImmutableHistoryValue<T> | null;
+  createHistoryProjection?<T>(project: (history: PersistedConversationHistory & { createdAt?: string }) => T,
+    options?: { maxEntries?: number; maxBytes?: number; immutableInput?: boolean; immutableOutput?: false }): (id: string) => T | null;
   /** Current index batch; no cross-file transaction or permission/liveness attestation. */
   getPersistedConversationHistories?(ids: readonly string[]): Map<string, PersistedConversationHistory | null>;
+  /** Internal canonical message guard. The host attests Bot ownership and releases after commit. */
+  acquireMessageRetentionGuard?(scope: readonly string[] | { conversationId: string; workspaceId: string }): {
+    histories: ReadonlyMap<string, readonly Record<string, unknown>[]>;
+    delegatedSessions: ReadonlyMap<string, string> | null;
+    revision: string;
+    assertCurrent(): boolean;
+    release(): void;
+  };
   listConversations(params?: ConversationListParams): ConversationMeta[] | ConversationListPage;
   listConversationsByWorkspace?(workspacePath: string | null | undefined, params?: ConversationListParams): ConversationMeta[] | ConversationListPage;
   deleteConversationsByWorkspace?(workspacePath: string | null | undefined): ConversationMeta[];
@@ -200,6 +216,30 @@ export interface ConversationStore {
     roles?: readonly ConversationRoleFilter[];
   }): ConversationMeta[];
   getConversation(id: string): StoredConversation | null;
+  /** Index preview only. Does not read the conversation JSONL. */
+  readSessionPreview?(id: string): SessionPreview | null;
+  /** Index meta plus coerced preview. Does not read the conversation JSONL. */
+  readSessionMeta?(id: string): ConversationMeta | null;
+  /**
+   * Tail window for the product get path. `full: true` reads every message and
+   * is reserved for diagnostics and migration scripts.
+   */
+  readConversationWindow?(id: string, options?: {
+    limit?: number;
+    before?: string | null;
+    full?: boolean;
+    chunkBytes?: number;
+  }): {
+    meta: ConversationMeta;
+    window: Record<string, unknown>[];
+    cursor: string | null;
+    hasMore: boolean;
+  } | null;
+  /** Full history for background projection. Yields between parse batches. */
+  readConversationYielding?(id: string, options?: {
+    yieldEvery?: number;
+    yield?: () => Promise<void>;
+  }): Promise<StoredConversation | null>;
   getLatestContextObservation(
     id: string,
     options?: { modelKey?: string | null },
@@ -262,6 +302,81 @@ export function createConversationStore(options?: {
   storeDir?: string;
   usageLogFile?: string;
 }): ConversationStore;
+
+export type SessionAvailability = 'ready' | 'rebuilding' | 'version_changed' | 'damaged';
+
+export interface SessionPreview {
+  readonly conversationId: string;
+  readonly title: string;
+  readonly excerpt: string;
+  readonly updatedAt: string;
+  readonly contentRevision: number;
+  readonly availability: SessionAvailability;
+  readonly messageId?: string;
+  readonly role?: 'user' | 'assistant';
+  readonly kind?: string;
+  readonly at?: string;
+  readonly question?: Readonly<Record<string, unknown>>;
+  readonly attachmentNames?: readonly string[];
+  readonly countUnread?: boolean;
+  readonly surfacing?: string;
+}
+
+export interface SessionWindowPage {
+  readonly meta: ConversationMeta;
+  readonly window: readonly Record<string, unknown>[];
+  readonly cursor: string | null;
+  readonly hasMore: boolean;
+  readonly diagnostic?: boolean;
+  readonly sourceVersion?: string;
+}
+
+export interface SessionRevisionEvent {
+  readonly conversationId: string;
+  readonly contentRevision: number;
+  readonly reason: 'append' | 'replace' | 'sidecar' | 'external';
+  readonly workspacePath?: string | null;
+  readonly writerPid?: number;
+  readonly changeType?: ConversationChangeEvent['changeType'];
+  readonly revision?: string;
+}
+
+export interface SessionAdapter {
+  readonly kind?: string;
+  listMeta(query?: ConversationListParams): ConversationMeta[] | ConversationListPage;
+  getWindow(query: {
+    conversationId: string;
+    limit?: number;
+    before?: string | null;
+    full?: boolean;
+  }): SessionWindowPage | null | Promise<SessionWindowPage | null>;
+  append(input: { conversationId: string; message: object }): {
+    meta: ConversationMeta;
+    preview: SessionPreview | null;
+  } | null;
+  subscribeRevision(
+    scope: { conversationId?: string; interval?: number },
+    onRevision: (event: SessionRevisionEvent) => void,
+  ): () => void;
+}
+
+export interface SessionService extends SessionAdapter {
+  listMeta(query?: ConversationListParams): Promise<ConversationMeta[] | ConversationListPage>;
+  getWindow(query: {
+    conversationId: string;
+    limit?: number;
+    before?: string | null;
+    full?: boolean;
+  }): Promise<SessionWindowPage | null>;
+  append(input: { conversationId: string; message: object }): Promise<{
+    meta: ConversationMeta;
+    preview: SessionPreview | null;
+  } | null>;
+}
+
+export function createClassicJsonlAdapter(store: ConversationStore): SessionAdapter;
+export function createBotSqliteAdapter(store: ConversationStore): SessionAdapter;
+export function createSessionService(adapter: SessionAdapter): SessionService;
 
 export function rankConversationMatch(
   meta: Pick<ConversationMeta, 'title' | 'workspacePath'> | null | undefined,

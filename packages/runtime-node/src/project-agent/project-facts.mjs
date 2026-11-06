@@ -48,12 +48,17 @@ export function createDesktopProjectFacts({ supervisor, approvalStore, profileSt
       sessionIds: rows.map((row) => row.sessionId),
       sessionStates: rows.map((row) => ({ sessionId: row.sessionId, status: row.status, sourceRevision: row.sourceRevision,
         ...(row.observationRevision ? { observationRevision: row.observationRevision } : {}) })),
-      unreportedResults: rows.filter(row => row.status === 'result_ready'
-        && !messages.some(message => message.kind === 'agent_reply' && message.sources?.includes(row.sessionId)
+      unreportedResults: rows.flatMap(row => {
+        const withdrawal = row.origin?.cancellation?.withdrawal;
+        const cancellationAnchor = withdrawal && withdrawal.workspaceId === workspaceId && withdrawal.sessionId === row.sessionId
+          && withdrawal.parentConversationId === profile?.agentConversationId ? withdrawal.anchorMessageId : undefined;
+        if (!cancellationAnchor && row.status !== 'result_ready') return [];
+        const reported = messages.some(message => message.kind === 'agent_reply' && message.sources?.includes(row.sessionId)
           && message.meta?.sessionStates?.some(state => state.sessionId === row.sessionId
             && state.sourceRevision === row.sourceRevision && state.observationRevision === row.observationRevision
-            && ['result_ready', 'accepted'].includes(state.status))))
-        .map(row => ({sessionId:row.sessionId,anchorMessageId:row.origin?.anchorMessageId})),
+            && (cancellationAnchor ? state.status === row.status : ['result_ready', 'accepted'].includes(state.status))));
+        return reported ? [] : [{ sessionId: row.sessionId, anchorMessageId: cancellationAnchor || row.origin?.anchorMessageId }];
+      }),
       verdicts: rows.flatMap((row) => {
         const decision = supervisor.acceptance(row.sessionId);
         return decision ? [{ sessionId: row.sessionId, ...decision.verdict,

@@ -33,6 +33,7 @@
 .bot-app-menu,
 .bot-column-footer,
 .bot-new,
+.bot-upgrade,
 .bot-upgrade-banner,
 .bot-column-resizer {
   -webkit-app-region: no-drag;
@@ -51,8 +52,64 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+
+.bot-brand-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  gap: 1px;
+}
+
+.bot-brand-name {
+  overflow: hidden;
   font-size: 14px;
   font-weight: 600;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bot-version-subtitle {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  overflow: hidden;
+  color: var(--graphite-fade);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+.bot-version-subtitle .sidebar-version-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bot-version-subtitle .sidebar-version-stage,
+.bot-version-subtitle .sidebar-version-dev-tag {
+  flex: none;
+}
+
+.bot-version-subtitle .sidebar-version-stage {
+  color: var(--graphite-soft);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.bot-version-subtitle .sidebar-version-dev-tag {
+  height: 13px;
+  font-size: 8px;
 }
 
 .bot-brand-mark {
@@ -122,6 +179,88 @@
 }
 
 .bot-new:active {
+  transform: scale(0.96);
+}
+
+.bot-upgrade {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  font: inherit;
+  line-height: 1;
+  color: var(--azure-seal);
+  background: var(--chrome-canvas);
+  border: 1px solid color-mix(in srgb, var(--azure-seal) 35%, var(--chrome-hairline));
+  border-radius: var(--ui-radius-circle);
+  appearance: none;
+  cursor: pointer;
+  transform-origin: center;
+  transition:
+    color var(--za-motion-fast) var(--za-ease-standard),
+    background var(--za-motion-fast) var(--za-ease-standard),
+    border-color var(--za-motion-fast) var(--za-ease-standard),
+    transform var(--za-motion-medium) var(--za-ease-standard);
+}
+
+.bot-upgrade:hover {
+  background: var(--chrome-hover);
+}
+
+.bot-upgrade:active {
+  transform: scale(0.96);
+}
+
+.bot-upgrade.is-progress,
+.bot-upgrade.is-progress:hover {
+  /*
+    下载进度圈：30px 盒子里画 27px 正圆——1.5px 透明边框把绘制面收进 padding-box，
+    按圆角内缩规则 15px − 1.5px = 13.5px，即半径 27/2。布局盒、点击范围与相邻控件位置不变。
+    常态不再 transform 缩放：0.9 缩放会把 3.5px 环压成半像素台阶，内外边缘形状对不上。
+    --peer-corner 抵消全局 superellipse(1.4)（同 .peer-switch 的局部例外），让外轮廓与
+    radial-gradient 内孔同为真圆；不支持 corner-shape 时该变量不生效，行为不变。
+  */
+  --peer-corner: round;
+  color: var(--graphite-base);
+  background:
+    radial-gradient(circle at center, var(--chrome-raised) 0 9.9px, transparent 10.4px),
+    conic-gradient(from -90deg, var(--azure-seal) var(--progress, 0%), color-mix(in srgb, var(--graphite-base) 16%, var(--chrome-raised)) 0);
+  border: 1.5px solid transparent;
+  background-clip: padding-box;
+}
+
+.bot-upgrade-value {
+  /* 去掉常态 0.9 缩放后，字号按 11px × 0.9 校准回原观感，不因取消缩放而变大。 */
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+.bot-upgrade-value[data-digits='3'] {
+  /* 三位数（100%）沿用 8px × 0.9 ≈ 7px，仍在约 20.8px 的内孔里单行居中。 */
+  font-size: 7px;
+}
+
+.bot-upgrade.is-install,
+.bot-upgrade.is-install:hover {
+  width: auto;
+  height: 30px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: var(--ui-radius-pill);
+  background: var(--azure-seal);
+  color: var(--za-accent-ink);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  transform: none;
+}
+
+.bot-upgrade.is-install:active {
   transform: scale(0.96);
 }
 
@@ -313,7 +452,7 @@
   align-items: center;
   padding: 9px 8px;
   border: 1px solid transparent;
-  border-radius: var(--ui-radius-row);
+  border-radius: var(--ui-radius-panel);
   cursor: pointer;
   transition:
     background var(--za-motion-fast) var(--za-ease-standard),
@@ -331,6 +470,11 @@
   background: var(--chrome-canvas);
   border-color: var(--chrome-hairline);
   box-shadow: 0 1px 2px color-mix(in srgb, var(--graphite-base) 6%, transparent);
+}
+
+[data-theme="dark"] .bot-row.is-open {
+  /* Lift the selected surface above both the glass sidebar and its hover fill. */
+  background: color-mix(in srgb, var(--graphite-base) 14%, var(--chrome-active));
 }
 
 .bot-row-copy {
@@ -370,6 +514,11 @@
 .bot-row-time {
   font-size: 11px;
   color: var(--graphite-soft);
+}
+
+[data-theme="dark"] .bot-row.is-open .bot-row-preview,
+[data-theme="dark"] .bot-row.is-open .bot-row-time {
+  color: var(--graphite-base);
 }
 
 [data-palette="catppuccin"][data-theme="light"] .bot-row-preview,
@@ -582,104 +731,6 @@
   padding: 12px 14px 0;
 }
 
-.bot-column-footer .sidebar-version-badge {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 4px;
-  margin: 0;
-  padding: 0;
-  color: var(--graphite-fade);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-
-.bot-column-footer .sidebar-version-text-btn {
-  min-width: 0;
-  min-height: 28px;
-  padding: 0 5px;
-  gap: 6px;
-  border-radius: var(--ui-radius-control);
-  font: inherit;
-}
-
-.bot-column-footer .sidebar-version-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.bot-column-footer .sidebar-version-stage {
-  flex: none;
-  padding: 3px 5px;
-  border-radius: var(--ui-radius-chip);
-  background: var(--chrome-hover);
-  color: var(--graphite-soft);
-  font-size: 9px;
-  font-weight: 600;
-  line-height: 1;
-  letter-spacing: 0.03em;
-  white-space: nowrap;
-}
-
-.bot-column-footer .sidebar-version-text-btn:hover,
-.bot-column-footer .sidebar-version-badge.has-update .sidebar-version-text-btn {
-  color: var(--graphite-soft);
-}
-
-.bot-column-footer .sidebar-version-update-icon {
-  color: var(--azure-seal);
-  animation: none;
-}
-
-.bot-column-footer .sidebar-version-progress {
-  min-height: 14px;
-  gap: 5px;
-  padding-inline: 5px;
-  color: var(--graphite-soft);
-  font-size: 10px;
-}
-
-.bot-column-footer .sidebar-version-badge.is-progress { display: grid; gap: 0; }
-.bot-column-footer .sidebar-version-progress-track {
-  flex: 1;
-  min-width: 36px;
-  height: 3px;
-  overflow: hidden;
-  background: var(--chrome-hairline);
-  border-radius: var(--ui-radius-pill);
-}
-.bot-column-footer .sidebar-version-progress-fill {
-  display: block;
-  width: 100%;
-  height: 100%;
-  background: var(--azure-seal);
-  transform-origin: left;
-  transform: scaleX(var(--progress-ratio, 0));
-  transition: transform var(--za-motion-medium) var(--za-ease-standard);
-}
-.bot-column-footer .sidebar-version-progress-text { min-width: 24px; text-align: right; }
-
-.bot-column-footer .sidebar-version-progress-ring {
-  width: 12px;
-  height: 12px;
-  border-radius: var(--ui-radius-circle);
-  background: conic-gradient(var(--azure-seal) var(--progress), var(--chrome-hairline) 0);
-  mask-image: radial-gradient(circle, transparent 48%, black 54%);
-}
-
-.bot-column-footer .sidebar-version-install-btn {
-  min-height: 28px;
-  padding: 0 8px;
-  border-radius: var(--ui-radius-control);
-  background: var(--graphite-base);
-  color: var(--chrome-canvas);
-  animation: none;
-  font-family: inherit;
-}
-
-.bot-column-footer .sidebar-version-text-btn:focus-visible,
-.bot-column-footer .sidebar-version-install-btn:focus-visible,
 .bot-app-menu-button:focus-visible,
 .bot-app-menu-menu button:focus-visible {
   outline: 2px solid var(--azure-seal);
@@ -785,6 +836,11 @@
   font-size: 11px;
 }
 
+/* ── 跨栏拖拽条（左栏右缘，镜像 .bot-drawer-resizer）──
+ * 6px 透明命中区只负责手感，可见指示条由 ::after 表达：常态透明不画线
+ * （分界线本身由 .bot-column 的 border-right 或毛玻璃下 .bot-main 的描边提供），
+ * 只有 hover / 聚焦 / 拖拽中才浮出 2px 强调色。
+ * resizer 相对 .bot-column 定位，right 值按各模式下「缝」的位置反推。 */
 .bot-column-resizer {
   position: absolute;
   top: 0;
@@ -795,9 +851,28 @@
   cursor: col-resize;
 }
 
+.bot-column-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 2px;
+  width: 2px;
+  pointer-events: none;
+  background: transparent;
+  transition: background var(--za-motion-fast) var(--za-ease-standard);
+}
+
+.bot-column-resizer:hover::after,
+.bot-column-resizer:focus-visible::after,
+.bot-column-resizer[data-active='true']::after {
+  background: var(--za-accent, #4c8dff);
+}
+
 .bot-column-resizer:focus-visible,
 .bot-row:focus-visible,
 .bot-new:focus-visible,
+.bot-upgrade:focus-visible,
 .bot-need-filter:focus-visible {
   outline: 2px solid var(--azure-seal);
   outline-offset: 1px;
@@ -894,11 +969,18 @@
   padding: 6px 10px;
   border-radius: var(--ui-radius-control-compact);
   border-color: transparent;
-  background: var(--control-fill);
+  background: transparent;
   font-weight: 500;
   line-height: 18px;
   box-shadow: none;
   user-select: none;
+}
+
+.bot-profile.is-icon {
+  width: var(--space-8, 32px);
+  min-width: var(--space-8, 32px);
+  height: var(--space-8, 32px);
+  padding: 0;
 }
 
 .bot-profile:hover {
@@ -971,7 +1053,7 @@
   text-align: left;
   background: var(--chrome-canvas);
   border: 1px solid var(--chrome-hairline);
-  border-radius: var(--ui-radius-row);
+  border-radius: var(--ui-radius-panel);
   cursor: pointer;
   transition: background var(--za-motion-fast) var(--za-ease-standard), border-color var(--za-motion-fast) var(--za-ease-standard);
 }
@@ -1160,7 +1242,7 @@
 /* 标题用 600。浏览器默认粗体（700）会让中文离开界面字栈，看起来像另一套字体。 */
 .bot-new-sheet {
   font-family: var(--font-sans);
-  font-size: 14px;
+  font-size: var(--ui-font-body);
   font-weight: 400;
   line-height: 1.5;
   letter-spacing: 0;
@@ -1171,7 +1253,7 @@
 }
 
 .bot-new-sheet .bot-sheet-head h2 {
-  font-size: 1.0625rem;
+  font-size: var(--ui-font-heading-sm);
   font-weight: 600;
   line-height: 1.4;
   letter-spacing: -0.011em;
@@ -1181,8 +1263,8 @@
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  width: 32px;
-  height: 32px;
+  width: var(--ui-control-height-compact);
+  height: auto; min-height: var(--ui-control-height-compact);
   padding: 0;
   border-radius: var(--ui-radius-control);
 }
@@ -1208,7 +1290,7 @@
 
 .bot-new-sheet .bot-sheet-label {
   color: var(--graphite-base);
-  font-size: 14px;
+  font-size: var(--ui-font-body);
   font-weight: 600;
   line-height: 1.4;
   letter-spacing: -0.011em;
@@ -1217,13 +1299,13 @@
 .bot-new-sheet .bot-sheet-name {
   margin-top: 6px;
   padding: 9px 12px;
-  font-size: 14px;
+  font-size: var(--ui-font-body);
   font-weight: 400;
   line-height: 1.4;
 }
 
 .bot-new-sheet .bot-sheet-name::placeholder {
-  color: var(--graphite-mute);
+  color: var(--graphite-soft);
   font-weight: 400;
 }
 
@@ -1233,10 +1315,10 @@
 }
 
 .bot-new-sheet .bot-sheet-submit {
-  min-height: 32px;
+  min-height: var(--ui-control-height);
   margin-top: 10px;
   padding: 6px 14px;
-  font-size: 13px;
+  font-size: var(--ui-font-control);
   font-weight: 500;
   line-height: 1.3;
   border-radius: var(--ui-radius-control);
@@ -1256,8 +1338,8 @@
 .bot-new-sheet .bot-sheet-close:focus-visible,
 .bot-new-sheet .bot-sheet-name:focus-visible,
 .bot-new-sheet .bot-sheet-submit:focus-visible {
-  outline: 2px solid var(--azure-seal);
-  outline-offset: 2px;
+  outline: var(--ui-focus-width) solid var(--ui-focus-color);
+  outline-offset: var(--ui-focus-offset);
 }
 
 .bot-avatar[data-avatar-animated="false"],
@@ -1271,8 +1353,11 @@
  * 各自成悬浮纸面（黑牌），四周留出玻璃缝。纸面/描边/阴影全部取自
  * 主题 token（--paper-sheet / --chrome-hairline / --shadow-card），
  * 深浅主题与自定义色板自动跟随。非 macOS 无标记，保持原平铺实色布局。 */
-html[data-vibrancy='true'] .bot-shell {
+html[data-vibrancy='true'] {
   --bot-float-gap: 10px;
+}
+
+html[data-vibrancy='true'] .bot-shell {
   padding: var(--bot-float-gap);
   background: var(--window-chrome-fill);
 }
@@ -1288,8 +1373,20 @@ html[data-vibrancy='true'] .bot-column {
 /* 主面板：悬浮黑牌。实色纸面沿用 .bot-main 的 --paper-sheet。 */
 html[data-vibrancy='true'] .bot-main {
   margin-left: var(--bot-float-gap);
+}
+
+/* Conversation and resource views are peers in the same floating shell. */
+html[data-vibrancy='true'] :is(.bot-main, .resource-workspace) {
+  background: var(--paper-sheet);
   overflow: hidden;
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-panel);
   box-shadow: var(--glass-edge-highlight), var(--shadow-card);
+}
+
+/* 毛玻璃下可见分界线改由 .bot-main 的 1px 描边表达（在玻璃缝右侧），
+ * .bot-column 的 border-right 被置 0。命中区要落在缝里并居中：
+ * 缝 = [column 右缘, column 右缘 + gap)，6px 居中 → 右缘需再外扩 (gap+6)/2。 */
+html[data-vibrancy='true'] .bot-column-resizer {
+  right: calc(-1 * (var(--bot-float-gap) + 6px) / 2);
 }

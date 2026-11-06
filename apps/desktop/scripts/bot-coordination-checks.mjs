@@ -1,3 +1,4 @@
+import { openFullTask, BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync,renameSync} from 'node:fs';
 import path from 'node:path';
@@ -11,7 +12,7 @@ export async function checkBotCoordination({page,until,report,captureDirectory,c
   const replacement={...base,sessionId:'rc-coordination-corrected',title:'检查引用卡片圆角',status:'running'};
   const update=patch=>{writeFileSync(commandFile+'.next',JSON.stringify({...initial,...patch,seq:++seq}));renameSync(commandFile+'.next',commandFile);};
   const cases=[];
-  await until(()=>page.locator('.bot-drawer-dock').count(),count=>count===0);
+  await until(()=>page.locator(BOT_DETAIL_SURFACE).count(),count=>count===0);
   for (const [width,appearance] of [[1280,'dark'],[760,'light']]) {
     await page.setViewportSize({width,height:850}); await page.evaluate(value=>{document.documentElement.dataset.theme=value;},appearance);
     for (const state of ['stopping','awaiting_outcome','cancelled','handoff']) {
@@ -19,14 +20,15 @@ export async function checkBotCoordination({page,until,report,captureDirectory,c
         reason:'根据补充说明，检查对象改为引用卡片，保留已经做过的检查。',goalRevision:2,priorSessionId:base.sessionId,
         ...(state==='cancelled'?{replacementSessionId:replacement.sessionId,replacementTitle:replacement.title}:{})};
       update({sessions:[{...base,status:state==='handoff'?'starting':state,coordination},replacement]});
-      await page.locator('.bot-profile').click();
+      await page.getByRole('button', { name: '机器人设置', exact: true }).click();
       await page.getByRole('tab',{name:'任务',exact:true}).click();
-      if (await page.locator('.bot-task-detail').count()) await page.getByRole('button',{name:'任务列表',exact:true}).click();
+      if (await page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail').count()) await page.getByRole('button',{name:'任务列表',exact:true}).click();
       await until(()=>page.locator('.bot-task-row').filter({hasText:base.title}).count(),count=>count===1);
       await page.locator('.bot-task-row').filter({hasText:base.title}).click();
-      const detail=page.locator('.bot-task-detail');
+      const detail=page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail');
       const label=state==='handoff'?'正在接手':state==='stopping'?'正在停止':state==='cancelled'?'已取消':'执行结果待核实';
       await until(()=>detail.locator('.bot-task-status').innerText(),text=>text===label);
+      await openFullTask(page);
       const info=detail.locator('.bot-task-information');
       if (await info.getAttribute('open')===null) await info.locator(':scope > summary').click();
       await until(()=>info.getAttribute('open'),value=>value!==null);
@@ -42,8 +44,8 @@ export async function checkBotCoordination({page,until,report,captureDirectory,c
         await until(()=>detail.locator('h2').innerText(),text=>text===replacement.title);
       }
       cases.push({state,width,appearance,truthful:true,relationship:state==='cancelled',humanQuestionAbsent:true});
-      await page.getByRole('button',{name:'关闭',exact:true}).click();
-      await until(()=>page.locator('.bot-drawer-dock').count(),count=>count===0);
+      await page.locator(BOT_DETAIL_CLOSE).click();
+      await until(()=>page.locator(BOT_DETAIL_SURFACE).count(),count=>count===0);
     }
   }
   update({sessions:initial.sessions}); await page.setViewportSize(viewport); await page.evaluate(value=>{document.documentElement.dataset.theme=value;},theme);

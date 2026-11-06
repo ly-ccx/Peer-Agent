@@ -1,8 +1,7 @@
 import { useLayoutEffect, type RefObject } from 'react';
 import { ACCEPTANCE_EXIT_MS, type AcceptancePhase } from '../state/acceptanceTransition';
-
-/** 与 particle-shatter.css 的 max-height 过渡保持同一条曲线。 */
-const COLLAPSE_EASING = 'cubic-bezier(0.33, 0, 0.2, 1)';
+import { animateVisual } from '../state/visualMotion';
+import { motionAllowed } from '../state/motionEnvironment';
 
 /**
  * 退场高度塌缩（配合 particle-shatter.css 的 `.is-exiting { max-height: 0 }`）。
@@ -29,20 +28,16 @@ export function useShatterExitCollapse(
     if (phase !== 'exiting') return;
     const host = hostRef.current;
     if (!host) return;
-    if (
-      typeof host.animate !== 'function' ||
-      typeof window.matchMedia !== 'function' ||
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    ) {
-      return;
-    }
-    host.style.maxHeight = 'none';
-    const height = host.offsetHeight;
-    host.style.maxHeight = '';
+    if (!motionAllowed() || typeof host.animate !== 'function') return;
+    const previousMaxHeight = host.style.maxHeight;
+    let height: number;
+    try { host.style.maxHeight = 'none'; height = host.offsetHeight; }
+    finally { host.style.maxHeight = previousMaxHeight; }
     if (height <= 0) return;
-    host.animate(
+    const motion = animateVisual(host,
       [{ maxHeight: `${height}px` }, { maxHeight: '0px' }],
-      { duration: ACCEPTANCE_EXIT_MS, easing: COLLAPSE_EASING },
+      { duration: ACCEPTANCE_EXIT_MS, easing: getComputedStyle(host).getPropertyValue('--za-ease-standard').trim() || 'ease' },
     );
+    return motion.cancel;
   }, [phase, hostRef]);
 }

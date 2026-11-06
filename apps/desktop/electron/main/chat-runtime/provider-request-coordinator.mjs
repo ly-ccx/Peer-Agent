@@ -121,7 +121,8 @@ export async function executeDesktopProviderRequest({
     countRequest: request?.countRequest,
     onSnapshot: request?.onContextAccounting,
     buildRequest(state) {
-      const projectedMessages = applyMicrocompaction(state.messages, { log: () => {} }).messages;
+      const projectedMessages = applyMicrocompaction(state.messages, { log: () => {},
+        preserveLatestUserTurn: request?.preserveLatestUserTurn ?? true }).messages;
       return buildCanonicalRequest({
         messages: projectSelectionRequestMessages(projectedMessages, request?.conversationId),
         systemPrompt: state.systemPrompt,
@@ -150,16 +151,23 @@ export async function executeDesktopProviderRequest({
         },
       };
     },
-    send: (...args) => {
-      const fingerprint = fingerprintCanonicalRequest(args[0]);
+    send: (canonicalRequest) => {
+      // The accounting pipeline already fingerprinted this object. Reuse that digest
+      // for the first physical send, and recompute only if a retry might observe a mutation.
+      const fingerprint = fingerprintCanonicalRequest(canonicalRequest);
+      let dispatched = false;
       return visualScope.send(() => runProviderRequestWithRecovery(
         () => {
-          if (fingerprintCanonicalRequest(args[0]) !== fingerprint) {
+          if (
+            dispatched
+            && fingerprintCanonicalRequest(canonicalRequest, { refresh: true }) !== fingerprint
+          ) {
             const error = new Error('context_request_fingerprint_mismatch: canonical request changed before retry');
             error.providerRecovery = { kind: 'invalid_request', phase: 'request', retryable: false };
             throw error;
           }
-          return send(...args);
+          dispatched = true;
+          return send(canonicalRequest);
         }, {
           signal: request?.signal,
           budgetGuard: request?.budgetGuard,

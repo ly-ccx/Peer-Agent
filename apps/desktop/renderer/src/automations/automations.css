@@ -7,6 +7,10 @@
 .automation-list-row{border-radius:var(--ui-radius-row)}
 .automation-review-surface .automation-review-card{border-radius:var(--ui-radius-panel)}
 .automation-list-toolbar input{border-radius:var(--ui-radius-control)}
+.automation-list-toolbar input::placeholder {
+  color: var(--za-text);
+  opacity: 1;
+}
 
 
 
@@ -21,7 +25,7 @@
 
 
 
-@media(max-width:900px){}
+
 
 .automation-form-single{display:grid;gap:14px;max-width:760px}
 .automation-bound-workspace.top-meta{display:flex;align-items:center;gap:8px;margin:0 0 14px;padding:0;border:0;border-radius:0;background:transparent;min-width:0}.automation-bound-workspace.top-meta span{font-size:12px;font-weight:600;color:var(--za-text-muted);flex:0 0 auto}.automation-bound-workspace.top-meta strong{font-size:12px;font-weight:500;line-height:1.35;color:var(--za-text-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
@@ -43,3 +47,5 @@
 .automation-field > .automation-select { font: inherit; color: inherit; }
 .automation-select > select { appearance: none; padding-right: 32px; }
 .automation-select > svg { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); pointer-events: none; }
+
+.automation-editor-fields { min-width: 0; margin: 0; padding: 0; border: 0; }

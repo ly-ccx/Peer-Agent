@@ -159,6 +159,9 @@ test('用户回答后：能消费等待态并续跑，把剩下的活干完', wi
   const store = createGoalPlanStore();
   const planId = setupPlan(store, { scan: 'completed', confirm: 'pending' });
 
+  store.recordEvidenceRefs({ conversationId: 'wait-user-park', evidenceRefs: ['tool-result://scan'] });
+  store.recordTaskEvidence(planId, 'scan', { status: 'completed', evidenceRefs: ['tool-result://scan'] });
+
   let calls = 0;
   const runner = createGoalRunner({
     goalPlanStore: store,
@@ -201,6 +204,7 @@ test('用户回答后：能消费等待态并续跑，把剩下的活干完', wi
   await runner.resume(planId, { awaitIdle: true, reason: 'user_decision' });
 
   const final = store.getPlan(planId);
+  assert.equal(final.runner.status, 'completed', '恢复后仍须通过真实叶子证据门');
   assert.equal(calls, 2, '用户回答后应能续跑一轮');
   const confirmLeaf = final.tasks.find((t) => t.taskId === 'confirm');
   assert.equal(confirmLeaf.status, 'completed');

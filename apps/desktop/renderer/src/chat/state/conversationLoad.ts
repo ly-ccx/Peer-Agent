@@ -58,22 +58,28 @@ export function usageFromLifetime(lifetime: {
  *   才回退到遍历消息累加（此路径会被压缩低估，属兼容降级）。
  * - 剥离空 assistant 占位（isEmptyAssistantPlaceholder），以及无附件的空 user 消息（isEmptyUserMessage），避免历史里残留空泡。
  */
-export async function loadConversationMessages(conversationId: string): Promise<{
+export async function loadConversationMessages(conversationId: string, options?: {
+  readonly before?: string | null;
+}): Promise<{
   messages: ChatMsg[];
   tokenUsage: { input: number; output: number; cacheWrite: number; cacheRead: number } | null;
   mode: ChatMode;
   contextAccounting: ContextAccountingSnapshot | null;
+  cursor: string | null;
+  hasMore: boolean;
 }> {
-  const conv = await clientApi.conversationsGet({ id: conversationId });
-  if (!conv?.messages) {
-    return { messages: [], tokenUsage: null, mode: 'chat', contextAccounting: null };
+  const page = await clientApi.conversationsGet({
+    id: conversationId,
+    ...(options?.before ? { before: options.before } : {}),
+  });
+  const meta = page?.meta;
+  if (!page || !meta) {
+    return { messages: [], tokenUsage: null, mode: 'chat', contextAccounting: null, cursor: null, hasMore: false };
   }
   // 对话模式按会话持久化在会话 meta 上;老会话无该字段时回退 'chat'，历史 'goal' 归一化为 'plan'。
-  const convMode: ChatMode = normalizeChatMode(conv.mode);
+  const convMode: ChatMode = normalizeChatMode(meta.mode);
   let totalInput = 0, totalOutput = 0, totalCacheWrite = 0, totalCacheRead = 0;
-  const folded = foldCliToolMessagesForDesktop(
-    (conv.messages as readonly Record<string, unknown>[]) ?? [],
-  );
+  const folded = foldCliToolMessagesForDesktop(page.window ?? []);
   const mapped = await mapInChunks(
     folded,
     (m: Record<string, unknown>) => {
@@ -116,6 +122,12 @@ export async function loadConversationMessages(conversationId: string): Promise<
       // (b) 长流中断保留：连接中断未自然收尾的 assistant 消息标记，重启后仍可见。
       if (m.interrupted === true) {
         msg.interrupted = true;
+        const failure = m.streamFailure as ChatMsg['streamFailure'];
+        if (failure && typeof failure.code === 'string') msg.streamFailure = {
+          code: failure.code,
+          ...(typeof failure.causeCode === 'string' ? { causeCode: failure.causeCode } : {}),
+          ...(typeof failure.precedingCode === 'string' ? { precedingCode: failure.precedingCode } : {}),
+        };
       }
       return msg;
     },
@@ -123,10 +135,10 @@ export async function loadConversationMessages(conversationId: string): Promise<
   );
   const loaded = mapped.filter((message) => !isEmptyAssistantPlaceholder(message) && !isEmptyUserMessage(message));
   const contextAccounting: ContextAccountingSnapshot | null =
-    conv.contextSnapshot?.version === 1 ? conv.contextSnapshot : null;
+    meta.contextSnapshot?.version === 1 ? meta.contextSnapshot : null;
   // ADR 23: 计费优先读 index meta 的权威累计 lifetimeUsage(不受压缩影响)。
   // 仅当老会话尚无该字段时,才回退到遍历消息累加(此路径会被压缩低估,属兼容降级)。
-  const lifetime = conv.lifetimeUsage as
+  const lifetime = meta.lifetimeUsage as
     | { inputTokens?: number; outputTokens?: number; cacheWriteTokens?: number; cacheReadTokens?: number }
     | undefined;
   if (
@@ -141,6 +153,8 @@ export async function loadConversationMessages(conversationId: string): Promise<
       tokenUsage: usageFromLifetime(lifetime),
       mode: convMode,
       contextAccounting,
+      cursor: page.cursor ?? null,
+      hasMore: page.hasMore === true,
     };
   }
   return {
@@ -150,5 +164,7 @@ export async function loadConversationMessages(conversationId: string): Promise<
       : null,
     mode: convMode,
     contextAccounting,
+    cursor: page.cursor ?? null,
+    hasMore: page.hasMore === true,
   };
 }

@@ -12,6 +12,10 @@ export async function checkBotCompletionReview({ page, until, report, captureDir
     renameSync(commandFile + '.next', commandFile);
   };
   const asMessage = card => ({ id: card.cardId, role: 'assistant', kind: 'system_card', cards: [card] });
+  // Earlier work-surface checks leave the reader in history, where appended rows
+  // stay outside the virtual window until the reader returns to the latest.
+  const latest = page.getByRole('button', { name: '回到最新消息', exact: true });
+  if (await latest.isVisible()) await latest.click();
   const obsolete = projectCards(initial.workspaceId, { confirmations: [{ sessionId: 'completion-fixture', summary: '核对项目' }] })[0];
   send([asMessage(obsolete)]);
   const old = page.locator('[data-card-id="card:confirm_result:completion-fixture"]');
@@ -32,9 +36,11 @@ export async function checkBotCompletionReview({ page, until, report, captureDir
   await current.getByRole('button', { name: '查看报告', exact: true }).focus(); await page.keyboard.press('Enter');
   const drawer = page.getByRole('dialog', { name: '查看报告', exact: true });
   await drawer.waitFor(); assert.match(await drawer.innerText(), /REPORT_COMPLETE_END/);
-  await drawer.evaluate(async node => {
-    await Promise.all([...node.getAnimations(), ...node.parentElement.getAnimations()].map(animation => animation.finished));
-  });
+  // Overlay releases entrance fill by cancelling its Animation objects when settled.
+  // Re-read live motion instead of awaiting a captured promise that can reject on that valid cleanup.
+  await until(() => drawer.evaluate(node => node.classList.contains('is-settled')
+    && [...node.getAnimations(), ...node.parentElement.getAnimations()]
+      .every(animation => animation.playState !== 'running' && !animation.pending)), Boolean);
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'completion-review-report.png') });
   await drawer.getByRole('button', { name: '关闭', exact: true }).click();
   await drawer.waitFor({ state: 'detached' });

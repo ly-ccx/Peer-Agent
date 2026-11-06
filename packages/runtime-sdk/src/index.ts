@@ -16,6 +16,7 @@ export type {
   RuntimeSdkSessionStartedEvent,
   RuntimeSdkMessageDeltaEvent,
   RuntimeSdkReasoningDeltaEvent,
+  RuntimeSdkStreamDiscardEvent,
   RuntimeSdkCompactionProgressEvent,
   RuntimeSdkContextAccountingEvent,
   RuntimeSdkMessageCompletedEvent,

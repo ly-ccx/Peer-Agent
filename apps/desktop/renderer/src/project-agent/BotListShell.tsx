@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { clientApi } from '../clientApi';
 import { PeerIcon } from '../ui/icons';
-import { AutomationCenter } from '../automations/AutomationCenter';
-import { CapabilitiesPanel } from '../app/components/CapabilitiesPanel';
+import { usePointerResize } from '../app/hooks/usePointerResize';
+import { AutomationCenter, CapabilitiesPanel } from '../app/components/deferredPanels';
 import { VersionBadge } from '../app/components/VersionBadge';
 import { AttentionSheet } from './AttentionSheet';
 import { HistorySheet } from './HistorySheet';
@@ -16,6 +16,8 @@ import { useBotWorkSessions } from './state/useBotWorkSessions';
 import { TaskCancellationProvider } from './state/TaskCancellation';
 import { useBotModels } from './state/useBotModels';
 import { BotConversation } from './conversation/BotConversation';
+import { BotDocumentPreview } from './conversation/BotDocumentPreview';
+import { BotResourceButton, useResourceWorkspace, useBotResourceOwner, type BotResourceOwner } from '../workbench/ResourceWorkspaceContext';
 import { BotProfileDrawer } from './drawer/BotProfileDrawer';
 import type { BotInspect } from './drawer/agentProcess';
 import type { TaskConversationContext, TaskConversationRequest } from './state/taskConversationState';
@@ -48,6 +50,7 @@ import './styles/bot-list.css';
 type BotPage = 'chat' | 'home' | 'automations' | 'tools' | 'settings';
 
 export interface BotListShellProps {
+  readonly onResourceOwnerChange?: (owner: BotResourceOwner | null) => void;
   readonly i18n: I18nRuntime;
   readonly isZh: boolean;
   readonly activePage: BotPage;
@@ -59,7 +62,6 @@ export interface BotListShellProps {
   readonly onOpenAutomations: () => void;
   readonly onOpenCapabilities: () => void;
   readonly onOpenConversation: (conversationId: string | number) => void;
-  readonly onCreateAutomation: () => void;
   readonly onClosePage: () => void;
   readonly notificationFocus?: {
     readonly workspaceId: string;
@@ -78,7 +80,10 @@ function typingTarget(target: EventTarget | null): boolean {
   return target.getAttribute('type') !== 'search';
 }
 
+const ignoreResourceOwner = (_owner: BotResourceOwner | null) => {};
+
 export function BotListShell({
+  onResourceOwnerChange = ignoreResourceOwner,
   i18n,
   isZh,
   activePage,
@@ -90,16 +95,20 @@ export function BotListShell({
   onOpenAutomations,
   onOpenCapabilities,
   onOpenConversation,
-  onCreateAutomation,
   onClosePage,
   notificationFocus = null,
 }: BotListShellProps) {
-  const list = useBotList();
+  const list = useBotList(activePage !== 'settings');
+  const resources = useResourceWorkspace();
+  const showDetails = resources?.showDetails;
+  const revealPrimary = resources?.revealPrimary;
+  const resizeGesture = usePointerResize();
   const searchRef = useRef<HTMLInputElement | null>(null);
   const profileButtonRef = useRef<HTMLButtonElement | null>(null);
   const drawerTriggerRef = useRef<HTMLElement | null>(null);
   const [replyDetailsTarget, setReplyDetailsTarget] = useState<HTMLDivElement | null>(null);
-  const drawerLoadedFor = useRef<string | null>(null);
+  const [workPanelTarget, setWorkPanelTarget] = useState<HTMLSpanElement | null>(null);
+  const [drawerLoadedFor, setDrawerLoadedFor] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [errorCode, setErrorCode] = useState('');
   const [locateSessionId, setLocateSessionId] = useState<string | null>(null);
@@ -113,6 +122,7 @@ export function BotListShell({
   }, []);
   const replyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [attention, setAttention] = useState<{ workspaceId?: string } | null>(null);
+  const openBotAttention = useCallback((workspaceId: string) => { setAttention({ workspaceId }); }, []);
   const attentionRequestRef = useRef(0);
   const [attentionFocus, setAttentionFocus] = useState<{ workspaceId: string; messageId: string; requestId: number; notificationRequestId: number | null } | null>(null);
   const focusTarget = resolveBotMessageFocus(notificationFocus, attentionFocus);
@@ -120,16 +130,19 @@ export function BotListShell({
   const [drawerMemory, setDrawerMemory] = useState<DrawerMemory>({ open: false, tab: 'overview', sessionId: null });
   const drawerEntered = useRef(false);
   const replayDrawerEntrance = drawerMemory.open && !drawerEntered.current;
-  drawerEntered.current = drawerMemory.open;
+  useEffect(() => { drawerEntered.current = drawerMemory.open; }, [drawerMemory.open]);
   const pageOverride = activePage === 'automations' || activePage === 'tools';
   const opened = list.catalog.find((item) => item.workspaceId === list.openedId) ?? null;
+  useBotResourceOwner(opened?.workspaceId ?? null, onResourceOwnerChange, opened?.profile.agentConversationId);
+  const currentDrawerMemory = drawerLoadedFor === opened?.workspaceId ? drawerMemory : closeDrawer(drawerMemory);
+  const detailsVisible = inspect && resources ? resources.detailsVisible : currentDrawerMemory.open;
   const avatarMoods = useMemo(() => new Map(list.catalog.map(item => {
     const mood = botAvatarMood(item.state, replyFlash === item.workspaceId);
     return [item.workspaceId, replyFlash !== item.workspaceId && mood !== 'needs_you' && (mood !== 'error' || replyPresence?.mood !== 'idle') && item.workspaceId === opened?.workspaceId
       && replyPresence?.workspaceId === item.workspaceId && replyPresence.mood ? replyPresence.mood : mood] as const;
   })), [list.catalog, replyFlash, opened?.workspaceId, replyPresence]);
   const openedAvatarMood = opened ? avatarMoods.get(opened.workspaceId) ?? botAvatarMood(opened.state) : 'idle';
-  const work = useBotWorkSessions(opened?.workspaceId ?? null);
+  const work = useBotWorkSessions(opened?.workspaceId ?? null, activePage === 'chat');
   const modelControls = useBotModels(opened?.workspaceId ?? null, opened?.profile ?? null, list.updateProfile);
   const openedIdRef = useRef(list.openedId);
   const firstVisibleIdRef = useRef(list.visible[0]?.workspaceId ?? '');
@@ -148,7 +161,7 @@ export function BotListShell({
     setTaskContext(null);
     setTaskRequest(null);
     setReplyFlash(null);
-    drawerLoadedFor.current = null;
+    setDrawerLoadedFor(null);
   }, [opened?.workspaceId]);
 
   useEffect(() => () => {
@@ -168,17 +181,17 @@ export function BotListShell({
       get: (key) => localStorage.getItem(key),
       set: (key, value) => localStorage.setItem(key, value),
     }));
-    drawerLoadedFor.current = workspaceId;
+    setDrawerLoadedFor(workspaceId);
   }, [opened?.workspaceId]);
 
   useEffect(() => {
     const workspaceId = opened?.workspaceId;
-    if (!workspaceId || drawerLoadedFor.current !== workspaceId) return;
+    if (!workspaceId || drawerLoadedFor !== workspaceId) return;
     writeDrawerMemory(workspaceId, drawerMemory, {
       get: (key) => localStorage.getItem(key),
       set: (key, value) => localStorage.setItem(key, value),
     });
-  }, [drawerMemory, opened?.workspaceId]);
+  }, [drawerMemory, drawerLoadedFor, opened?.workspaceId]);
 
   useEffect(() => {
     const workspaceId = notificationFocus?.workspaceId
@@ -196,6 +209,20 @@ export function BotListShell({
     }
   }, [list.openBot, notificationFocus]);
 
+  useEffect(() => window.peerAgent?.onResourceWindowReturn?.(request => {
+    if (!request?.context || !Number.isFinite(request.expiresAt) || request.expiresAt <= Date.now()) return;
+    const { context } = request;
+    // This event is emitted only for an explicit return from the captured native view.
+    setInspect(null);
+    list.openBot(context.owner.workspaceId);
+    onClosePage();
+  }), [list.openBot, onClosePage]);
+
+  useEffect(() => window.peerAgent?.onBrowserWindowReturn?.(request => {
+    if (!request?.workspaceId || !Number.isFinite(request.expiresAt) || request.expiresAt <= Date.now()) return;
+    setInspect(null); list.openBot(request.workspaceId); onClosePage();
+  }), [list.openBot, onClosePage]);
+
   const lookingAtBot = Boolean(opened?.workspaceId) && !pageOverride && activePage !== 'settings';
   useEffect(() => {
     const workspaceId = lookingAtBot ? opened?.workspaceId : '';
@@ -208,10 +235,11 @@ export function BotListShell({
 
   useEffect(() => {
     if (!locateSessionId) return;
+    revealPrimary?.();
     setInspect(null);
     setDrawerMemory((current) => locateDrawerSession(current, locateSessionId));
     setLocateSessionId(null);
-  }, [locateSessionId]);
+  }, [locateSessionId, revealPrimary]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -244,11 +272,12 @@ export function BotListShell({
         return;
       }
       if (shortcut?.action === 'toggle-profile') {
+        revealPrimary?.();
         setInspect(null);
         if (!opened?.workspaceId) return;
         event.preventDefault();
         event.stopPropagation();
-        setDrawerMemory((current) => (current.open ? closeDrawer(current) : openDrawer(current)));
+        setDrawerMemory((current) => (current.open && detailsVisible ? closeDrawer(current) : openDrawer(current)));
         return;
       }
       if (shortcut?.action === 'switch-bot') {
@@ -279,7 +308,7 @@ export function BotListShell({
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [list, opened?.workspaceId, pageOverride]);
+  }, [list, opened?.workspaceId, pageOverride, detailsVisible, revealPrimary]);
 
   const emptyLabel = list.status === 'loading'
     ? i18n.t('projectAgent.list.loading')
@@ -294,20 +323,15 @@ export function BotListShell({
             : i18n.t('projectAgent.list.empty');
 
   const onResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
-    event.preventDefault();
+    const handle = event.currentTarget;
     const startX = event.clientX;
     const startWidth = list.width;
-    document.body.style.cursor = 'col-resize';
-    const move = (ev: PointerEvent) => {
-      list.setWidth(clampBotListWidth(startWidth + ev.clientX - startX));
-    };
-    const up = () => {
-      document.body.style.cursor = '';
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
+    // 拖拽全程保持高亮：:hover 在指针移出 6px 命中区（含快速外甩）时会丢掉，
+    // 只有 data-active 能让整段拖拽稳定显示强调色。与 SidebarResizer 同写法。
+    if (resizeGesture.start(event, {
+      onMove: x => list.setWidth(clampBotListWidth(startWidth + x - startX)),
+      onEnd: committed => { if (!committed) list.setWidth(startWidth); handle.removeAttribute('data-active'); },
+    })) handle.setAttribute('data-active', 'true');
   };
 
   return (
@@ -321,8 +345,12 @@ export function BotListShell({
               <img className="bot-brand-icon light" src="./logo-light.png" alt="" />
               <img className="bot-brand-icon dark" src="./logo-dark.png" alt="" />
             </span>
-            <span>{i18n.t('projectAgent.list.brand')}</span>
+            <span className="bot-brand-copy">
+              <span className="bot-brand-name">{i18n.t('projectAgent.list.brand')}</span>
+              <VersionBadge i18n={i18n} variant="bot-subtitle" />
+            </span>
           </div>
+          <VersionBadge i18n={i18n} variant="bot-upgrade" />
           <button
             type="button"
             className="bot-new"
@@ -372,7 +400,7 @@ export function BotListShell({
           i18n={i18n}
           onHighlight={list.setHighlightedId}
           onOpen={list.openBot}
-          onAttention={workspaceId => setAttention({ workspaceId })}
+          onAttention={openBotAttention}
         />
         {list.catalog.length === 0 && list.status === 'ready' && !list.searching ? (
           <p className="bot-list-hint">{i18n.t('projectAgent.list.emptyHint')}</p>
@@ -399,7 +427,6 @@ export function BotListShell({
               list.setMenuOpen(false);
               onOpenCapabilities();
             }}
-            metadata={<VersionBadge i18n={i18n} variant="bot-footer" />}
           />
         </footer>
         <div
@@ -433,7 +460,6 @@ export function BotListShell({
                 defaultWorkspace={workspacePath}
                 initialRunTarget={automationRunTarget}
                 onOpenConversation={onOpenConversation}
-                onCreateNew={onCreateAutomation}
               />
             ) : (
               <CapabilitiesPanel />
@@ -448,26 +474,32 @@ export function BotListShell({
               <button
                 ref={profileButtonRef}
                 type="button"
-                className="bot-profile"
+                className="bot-profile is-icon"
+                title={i18n.t('projectAgent.list.profile')}
+                aria-label={i18n.t('projectAgent.list.profile')}
                 data-profile-drawer="b2-16"
                 data-seam="b2-16"
-                data-session-id={locateSessionId ?? drawerMemory.sessionId ?? undefined}
-                aria-expanded={drawerMemory.open && drawerMemory.tab === 'settings' && !inspect}
+                data-session-id={locateSessionId ?? currentDrawerMemory.sessionId ?? undefined}
+                aria-expanded={currentDrawerMemory.open && !inspect}
                 onClick={() => {
                   drawerTriggerRef.current = profileButtonRef.current;
                   setInspect(null);
                   setDrawerMemory((current) => (
-                    current.open && current.tab === 'settings' && !inspect
+                    current.open && current.tab === 'settings' && !inspect && detailsVisible
                       ? closeDrawer(current) : openDrawer(current, 'settings')
                   ));
                 }}
               >
                 <PeerIcon name="settings" size={16} strokeWidth={1.75} />
-                <span>{i18n.t('projectAgent.list.profile')}</span>
               </button>
+              <BotResourceButton isZh={isZh} />
+              <span className="bot-work-panel-header-slot" ref={setWorkPanelTarget} />
             </header>
+            <BotDocumentPreview key={opened.workspaceId} workspaceId={opened.workspaceId} i18n={i18n}>
             <BotConversation
               workIndex={work.index}
+              onRefreshWork={work.reload}
+              workPanelTarget={workPanelTarget}
               key={opened.workspaceId}
               workspaceId={opened.workspaceId}
               profile={opened.profile}
@@ -478,13 +510,14 @@ export function BotListShell({
               i18n={i18n}
               onReplyArrived={announceReply}
               onReplyPresenceChange={updateReplyPresence}
-              onLocateSession={setLocateSessionId}
-              contextSessionId={drawerMemory.open && drawerMemory.tab === 'tasks' ? drawerMemory.sessionId : null}
+              onLocateSession={sessionId => setLocateSessionId(sessionId)}
+              contextSessionId={currentDrawerMemory.open && currentDrawerMemory.tab === 'tasks' ? currentDrawerMemory.sessionId : null}
               onTaskContext={setTaskContext}
               taskRequest={taskRequest?.workspaceId === opened.workspaceId ? taskRequest : null}
               replyDetailsId={inspect?.replyId ?? null}
               replyDetailsTarget={replyDetailsTarget}
               onInspect={(next) => {
+                showDetails?.();
                 const trigger = document.activeElement;
                 if (trigger instanceof HTMLButtonElement && !trigger.closest('.bot-drawer-body')) drawerTriggerRef.current = trigger;
                 setInspect(next);
@@ -493,6 +526,7 @@ export function BotListShell({
               focusMessageId={focusTarget?.workspaceId === opened.workspaceId ? focusTarget.messageId : null}
               focusRequestId={focusTarget?.workspaceId === opened.workspaceId ? focusTarget.requestId : 0}
             />
+            </BotDocumentPreview>
           </div>
         ) : onboarding ? (
           <BotOnboarding
@@ -542,7 +576,7 @@ export function BotListShell({
           profile={opened.profile}
           replayEntrance={replayDrawerEntrance}
           modelControls={modelControls}
-          memory={drawerMemory}
+          memory={currentDrawerMemory}
           locateSessionId={locateSessionId}
           inspect={inspect}
           onReplyDetailsTarget={setReplyDetailsTarget}
@@ -550,17 +584,21 @@ export function BotListShell({
           sessionsAvailable={work.available}
           taskContext={taskContext?.workspaceId === opened.workspaceId ? taskContext : null}
           onTaskConversation={request => {
+            revealPrimary?.();
             setInspect(null);
             setDrawerMemory(current => closeDrawer(current));
             setTaskRequest(current => ({ ...request, workspaceId: opened.workspaceId, id: (current?.id ?? 0) + 1 }));
           }}
           onRefreshSessions={work.reload}
-          onCloseInspect={() => setInspect(current => current?.evidence && current.replyId
-            ? { replyId: current.replyId, evidence: null, rounds: null } : null)}
+          onCloseInspect={() => {
+            if (!inspect?.evidence || !inspect.replyId) revealPrimary?.();
+            setInspect(current => current?.evidence && current.replyId
+              ? { replyId: current.replyId, evidence: null, rounds: null } : null);
+          }}
           triggerRef={drawerTriggerRef}
           i18n={i18n}
           isZh={isZh}
-          onMemory={next => { if (next.open) setInspect(null); setDrawerMemory(next); }}
+          onMemory={next => { if (next.open) { revealPrimary?.(); setInspect(null); } else if (inspect) resources?.close(); setDrawerMemory(next); }}
           onProfile={list.updateProfile}
           onOpenConversation={onOpenConversation}
           onOpenAutomations={onOpenAutomations}
@@ -608,7 +646,7 @@ export function BotListShell({
         onBind={() => {
           setErrorCode('');
           void list.createBind().then((result) => {
-            if (!result.ok && result.code !== 'CANCELLED') setErrorCode(result.code || 'FAILED');
+            if (!result.ok && result.code !== 'CANCELLED' && result.code !== 'BUSY') setErrorCode(result.code || 'FAILED');
           });
         }}
         onCreate={() => {
@@ -619,8 +657,8 @@ export function BotListShell({
           }
           setErrorCode('');
           void list.createManaged(checked.name).then((result) => {
-            if (!result.ok && result.code !== 'CANCELLED') setErrorCode(result.code || 'FAILED');
-            else setName('');
+            if (!result.ok && result.code !== 'CANCELLED' && result.code !== 'BUSY') setErrorCode(result.code || 'FAILED');
+            else if (result.ok) setName('');
           });
         }}
         onClose={() => {

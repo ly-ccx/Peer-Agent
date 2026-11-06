@@ -22,8 +22,12 @@ function collectArchives(targetPath) {
   });
 }
 
+function readArchiveFile(archivePath, filePath) {
+  return extractFile(archivePath, path.normalize(filePath));
+}
+
 function readArchiveJson(archivePath, filePath) {
-  return JSON.parse(extractFile(archivePath, filePath).toString('utf8'));
+  return JSON.parse(readArchiveFile(archivePath, filePath).toString('utf8'));
 }
 
 function runtimeExportTarget(packageJson) {
@@ -41,11 +45,12 @@ function mainProcessWorkspaceImports(archivePath) {
   const imports = new Set();
   const importPattern = /(?:from\s*|import\s*\()\s*['"](@peer-agent\/[^/'"]+)/g;
 
-  for (const archiveEntry of listPackage(archivePath)) {
+  for (const nativeEntry of listPackage(archivePath)) {
+    const archiveEntry = nativeEntry.replaceAll('\\', '/');
     if (!archiveEntry.startsWith('/electron/') || !archiveEntry.endsWith('.mjs')) continue;
     if (archiveEntry.includes('.test.')) continue;
 
-    const source = extractFile(archivePath, archiveEntry.slice(1)).toString('utf8');
+    const source = readArchiveFile(archivePath, archiveEntry.slice(1)).toString('utf8');
     for (const match of source.matchAll(importPattern)) imports.add(match[1]);
   }
 
@@ -63,7 +68,7 @@ function assertArchiveRuntime(archivePath) {
 
     const targetPath = path.posix.join(packageDirectory, target);
     try {
-      extractFile(archivePath, targetPath);
+      readArchiveFile(archivePath, targetPath);
     } catch (error) {
       throw new Error(
         `${archivePath}: runtime entry for ${packageName} is missing: ${targetPath}`,
@@ -73,6 +78,22 @@ function assertArchiveRuntime(archivePath) {
   }
 
   console.log(`[packaged-runtime] verified ${workspaceDependencies.length} main-process workspace imports in ${archivePath}`);
+}
+
+function assertInteractiveContentExports(archivePath) {
+  const directory = 'node_modules/@peer-agent/interactive-content';
+  const { exports } = readArchiveJson(archivePath, `${directory}/package.json`);
+  for (const [name, declaration] of Object.entries(exports)) {
+    const target = runtimeExportTarget({ exports: declaration });
+    if (!target) throw new Error(`Missing runtime target for @peer-agent/interactive-content export ${name}`);
+    const targetPath = path.posix.join(directory, target);
+    try {
+      readArchiveFile(archivePath, targetPath);
+    } catch (error) {
+      throw new Error(`${archivePath}: interactive-content export ${name} is missing: ${targetPath}`, { cause: error });
+    }
+  }
+  console.log(`[packaged-runtime] verified ${Object.keys(exports).length} interactive-content exports in ${archivePath}`);
 }
 
 function assertPackagedDockIcons(archivePath) {
@@ -97,5 +118,6 @@ if (archives.length === 0) {
 
 for (const archivePath of archives) {
   assertArchiveRuntime(archivePath);
+  assertInteractiveContentExports(archivePath);
   assertPackagedDockIcons(archivePath);
 }

@@ -61,6 +61,10 @@ export function registerBrowserWebContents(entry = {}) {
 
   const convKey = conversationKey(entry.conversationId);
   const key = entryKey(entry.conversationId, browserTabId);
+  const previous = entriesByKey.get(key);
+  if (previous?.surface === 'native' && (entry.surface !== 'native' || previous.webContentsId !== webContentsId || previous.windowId !== entry.windowId || previous.generation !== entry.generation)) {
+    return { ok: false, error: 'browser_owner_mismatch' };
+  }
   const registered = {
     webContentsId,
     conversationId: convKey === FALLBACK_CONVERSATION_KEY ? null : convKey,
@@ -71,9 +75,17 @@ export function registerBrowserWebContents(entry = {}) {
     title: typeof entry.title === 'string' ? entry.title : '',
     registeredAt: new Date().toISOString(),
   };
+  if (entry.surface === 'native') {
+    if (![entry.windowId, entry.generation].every(value => typeof value === 'string' && value)) return { ok: false, error: 'invalid_native_identity' };
+    Object.assign(registered, { surface: 'native', windowId: entry.windowId, generation: entry.generation, available: entry.available !== false });
+  }
+  const activeKey = activeEntryKeyByConversation.get(convKey);
+  if (entry.metadataOnly === true && activeKey && activeKey !== key) registered.active = false;
   entriesByKey.set(key, registered);
 
   if (registered.active) {
+    const previousActive = activeEntryKeyByConversation.get(convKey);
+    if (previousActive !== key && entriesByKey.get(previousActive)?.surface === 'native' && entriesByKey.get(previousActive)?.available === false) entriesByKey.delete(previousActive);
     activeEntryKeyByConversation.set(convKey, key);
     if (entry.claimForeground !== false) {
       foregroundEntryKey = key;
@@ -119,6 +131,10 @@ export function unregisterBrowserWebContents(input) {
 /**
  * 传 conversationId 时只解析该会话的活跃标签；无参数时返回前台窗口活跃标签。
  */
+export function getBrowserEntry(conversationId, browserTabId) {
+  return entriesByKey.get(entryKey(conversationId, browserTabId)) ?? null;
+}
+
 export function getActiveBrowserEntry(conversationId) {
   const key = arguments.length > 0
     ? activeEntryKeyByConversation.get(conversationKey(conversationId))

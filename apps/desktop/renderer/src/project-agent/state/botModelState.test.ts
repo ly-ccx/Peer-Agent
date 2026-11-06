@@ -84,3 +84,22 @@ test('another click during a pending write cannot start a competing policy save'
   f.write.reject(Error('offline')); await saving;
   assert.equal(f.errors.at(-1), 'FAILED'); f.state.stop();
 });
+
+test('retry reapplies only the intended role and keeps newer unrelated roles and scope', async () => {
+  const { rebaseBotModelPolicy } = await import('./botModelState.ts');
+  const base: ProjectModelPolicy = { overrides: { project_agent: { mode: 'fixed', modelProviderId: 'a' } }, scope: { localOnly: true } };
+  const desired: ProjectModelPolicy = { ...base, overrides: { project_agent: { mode: 'fixed', modelProviderId: 'b' } } };
+  const current: ProjectModelPolicy = { overrides: { ...base.overrides, verifier: { mode: 'fixed', modelProviderId: 'c' } }, scope: { localOnly: true, families: ['local'], modelProviderIds: ['a', 'b', 'c'] } };
+  const next = rebaseBotModelPolicy(base, desired, current);
+  assert.deepEqual(next.overrides?.project_agent, desired.overrides?.project_agent);
+  assert.deepEqual(next.overrides?.verifier, current.overrides?.verifier);
+  assert.deepEqual(next.scope, current.scope);
+});
+
+test('a fresh retry baseline overrides an older renderer no-op comparison', async () => {
+  const f = fixture();
+  const saving = f.state.save(policy, next);
+  assert.equal(f.counts().writes, 1);
+  f.write.resolve({ ok: true, profile: profile(policy) });
+  assert.equal(await saving, true); f.state.stop();
+});

@@ -21,13 +21,19 @@ concurrency:
 
 jobs:
   test:
-    name: ci-${{ matrix.os }}
+    name: ${{ matrix.check_name }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, ubuntu-latest]
+        # Required-check IDs are a branch-protection contract, independent of
+        # the runner image. Keep the legacy macOS ID while retiring macos-14.
+        include:
+          - os: macos-15
+            check_name: ci-macos-14
+          - os: ubuntu-latest
+            check_name: ci-ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -79,12 +85,18 @@ jobs:
         run: pnpm architecture:check
 
       - name: Test
+        timeout-minutes: 15
         shell: bash
         run: |
           set -o pipefail
+          # Desktop tests and retries include real Electron windows.
+          display=()
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            display=(xvfb-run -a)
+          fi
           log="${RUNNER_TEMP}/peer-test.log"
           set +e
-          pnpm test 2>&1 | tee "$log"
+          "${display[@]}" pnpm test 2>&1 | tee "$log"
           code=${PIPESTATUS[0]}
           set -e
           if [ "$code" -eq 0 ]; then
@@ -105,7 +117,7 @@ jobs:
             if [[ "$file" == apps/tui/* ]]; then
               bun test "$file" || retry_failed=1
             else
-              node --test --test-reporter=tap "$file" || retry_failed=1
+              "${display[@]}" node --test --test-reporter=tap "$file" || retry_failed=1
             fi
             echo "::endgroup::"
           done < "$RUNNER_TEMP/retry-files.txt"

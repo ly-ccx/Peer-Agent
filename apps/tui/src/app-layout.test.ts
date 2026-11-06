@@ -205,7 +205,7 @@ describe('TUI app layout', () => {
     expect(appSource).toContain('onMouseDown={() => onResume(row)}');
     expect(appSource).toContain('onResume={handleResumeConversationSummary}');
     expect(keyboardSource).toContain("key.name === 'escape'");
-    expect(keyboardSource).toContain("key.name === 'return' || key.name === 'enter'");
+    expect(keyboardSource).toContain('if (isEnterKeyName(key.name)) {');
   });
 
 
@@ -609,6 +609,10 @@ describe('TUI app layout', () => {
   });
 
   test('renders YOU/PEER lanes and a real tool activity timeline', () => {
+    const historySource = appSource.slice(
+      appSource.indexOf('function ChatHistory'),
+      appSource.indexOf('function ErrorBanner'),
+    );
     // Wide terminals use the available conversation width; responsive outer padding
     // remains the single safety margin when space is scarce.
     expect(appSource).not.toContain('terminal.width - 112');
@@ -623,6 +627,9 @@ describe('TUI app layout', () => {
     expect(appSource).toContain('<strong>PEER</strong>');
     // Cyan bar sits on the user body column, not before the YOU label.
     expect(appSource).toContain('<text fg={COLOR.user}>{APP_CHROME.userRailBar}</text>');
+    expect(historySource).toContain('width="100%"');
+    expect(appSource).toContain('<box flexDirection="row" flexGrow={1} minWidth={0} justifyContent="space-between">');
+    expect(appSource).toContain('{message.timestamp ? <text fg={COLOR.muted} wrapMode="none">{formatMessageTime(message.timestamp)}</text> : null}');
     expect(appSource).toContain('function ToolActivityTimeline');
     // Tool kind is content-sized with a modest gap (not a fixed 12-col pad).
     expect(appSource).toContain('flexShrink={0} marginRight={2} wrapMode="none">{presentation.toolName}');
@@ -656,7 +663,7 @@ describe('TUI app layout', () => {
     expect(historySource).toContain('formatUserMessageBody');
     expect(historySource).toContain('message.images');
     expect(historySource).toContain('imageLabel');
-    expect(appSource).toContain("attachment.images.length > 0 ? '' : attachment.displayContent");
+    expect(appSource).toContain('submission.current.submit({ value, locale, controller, imagePathRegistry');
   });
 
   test('uses the shared theme module for chrome colors and picker selection', () => {

@@ -23,6 +23,25 @@ function harness(executeTurn = async () => ({ text: 'reply' }), extra = {}) {
     remove: id => { ids = ids.filter(value => value !== id); } };
 }
 
+test('maintenance drains a startup already in flight and rejects incidental restarts until explicit release', async () => {
+  let release, entered;
+  const gate = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { entered = resolve; });
+  let executions = 0;
+  const h = harness(async () => { executions++; return { text: 'reply' }; }, {
+    recoverTasks: async () => { entered(); await gate; },
+  });
+  try {
+    const pending = h.host.sync(['a']); await started;
+    h.host.beginMaintenance('a');
+    await assert.rejects(h.host.restart('a'), /coordination_maintenance_pending/);
+    let drained = false; const idle = h.host.waitForIdle('a').then(() => { drained = true; });
+    await Promise.resolve(); assert.equal(drained, false);
+    release(); await pending; await idle;
+    assert.equal(h.host.isReady('a'), false); assert.equal(h.host.runnerFor('a'), null); assert.equal(executions, 0);
+    h.host.endMaintenance('a'); await h.host.restart('a'); assert.equal(h.host.isReady('a'), true);
+  } finally { release(); h.close(); }
+});
+
 test('targeted wake keeps other bot runners and their in-flight turns alive', async () => {
   let release, entered;
   const gate = new Promise(resolve => { release = resolve; });
@@ -130,7 +149,7 @@ test('new input preempts a background model request after delivery without waiti
     if (plan.kind === 'user') { seen.push(plan.userInputs[0].inputId); assert.equal(plan.events.length, 0); return { text: '已接手新问题。' }; }
     return { text: '' };
   });
-  let background, foreground;
+  let background, foreground, watchdog;
   try {
     await h.host.sync(['a']);
     h.host.inbox.append('a', [{ eventId: 'completed-event', kind: 'report_available', sessionId: 'old-session', at: new Date().toISOString(), payload: {} }]);
@@ -138,10 +157,14 @@ test('new input preempts a background model request after delivery without waiti
     await started;
     h.host.inputQueue.submitInput({ workspaceId: 'a', inputId: 'new-priority', text: '新的问题', surface: 'desktop' });
     foreground = h.host.sync(['a']);
-    await Promise.race([foreground, new Promise(resolve => setTimeout(resolve, 150))]);
+    // Keep the background response blocked until foreground sync has settled.
+    // The deadline detects a deadlock rather than benchmarking loaded CI.
+    await Promise.race([foreground, new Promise((_, reject) => {
+      watchdog = setTimeout(() => reject(new Error('foreground did not preempt background')), 5000);
+    })]);
     assert.deepEqual(seen, ['new-priority']);
     assert.equal(h.messages.some(row => row.card === 'agent_unavailable'), false);
-  } finally { release(); await Promise.allSettled([background, foreground]); h.close(); }
+  } finally { clearTimeout(watchdog); release(); await Promise.allSettled([background, foreground]); h.close(); }
 });
 
 test('idle maintenance with no pending input never loads full conversation bodies', async () => {
@@ -151,6 +174,25 @@ test('idle maintenance with no pending input never loads full conversation bodie
     await h.host.sync(); reads = 0;
     await h.host.sync();
     assert.equal(reads, 0);
+  } finally { h.close(); }
+});
+
+test('an idle sync makes one continuation decision, while a kicked turn is rechecked after await', async () => {
+  const h = harness();
+  try {
+    await h.host.sync(['a']);
+    const runner = h.host.runnerFor('a'), original = runner.hasContinuation;
+    let reads = 0;
+    runner.hasContinuation = () => { reads++; return original(); };
+    await h.host.sync(['a']);
+    assert.equal(reads, 1, 'an idle synchronous branch cannot create a new continuation itself');
+    reads = 0;
+    runner.hasContinuation = () => { reads++; return reads === 1; };
+    let kicked = false;
+    runner.kick = async () => { await Promise.resolve(); kicked = true; };
+    await h.host.sync(['a']);
+    assert.equal(kicked, true);
+    assert.equal(reads, 2, 'a turn may change durable facts across await');
   } finally { h.close(); }
 });
 

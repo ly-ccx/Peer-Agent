@@ -3,11 +3,25 @@ import { describe, it } from 'node:test';
 import {
   collectDirPathsToRefresh,
   collectWatchDirPaths,
+  createDirectoryReadRequests,
   isDescendantPath,
   mergePendingRefreshPaths,
   pathKey,
   pruneAfterDirReload,
 } from './filesTreeRefresh.ts';
+
+it('directory responses cannot replace newer reads, survive root reset, or re-create a removed subtree', () => {
+  const reads = createDirectoryReadRequests();
+  const old = reads.begin('/a/src'), fresh = reads.begin('/a/src');
+  assert.equal(reads.current(old), false); assert.equal(reads.current(fresh), true);
+  const sibling = reads.begin('/b/src');
+  reads.prune('/a', new Set());
+  assert.equal(reads.current(fresh), false); assert.equal(reads.current(sibling), true);
+  reads.reset(); const reused = reads.begin('/a/src');
+  assert.equal(reads.current(old), false); assert.equal(reads.current(reused), true);
+  const windows = reads.begin('C:\\repo\\gone'); reads.prune('C:\\repo', new Set());
+  assert.equal(reads.current(windows), false);
+});
 
 describe('filesTreeRefresh path helpers', () => {
   it('normalizes path keys across separators', () => {

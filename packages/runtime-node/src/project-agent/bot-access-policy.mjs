@@ -130,21 +130,28 @@ export function createBotAccessPolicyAuthority({ dataHome = getDataHome(), profi
       if (!root && !delegated && meta?.role !== 'project_agent' && identity.role !== 'project_agent') return null;
       if (!profile || identity.workspaceId && identity.workspaceId !== workspaceId) return fail('OUT_OF_SCOPE');
       if (root) return read(workspaceId);
+      let conversationId = identity.conversationId;
       if (!presentation) {
         if (!plan?.delegationOrigin || stopped(plan)) return fail('OUT_OF_SCOPE');
         const principal = resolvePermissionPrincipal({ workspaceId, conversationId: identity.conversationId,
           planId: plan.planId, sessionId: identity.sessionId ?? plan.delegationOrigin.sessionId, goalPlanStore });
         if (principal?.conversationId !== profile.agentConversationId) return fail('OUT_OF_SCOPE');
+        // Ephemeral worker roles have no separate Conversation. Resolve only an
+        // explicit host-bound plan/session, then check its real persisted ancestry.
+        if (conversationId == null && identity.role === 'work_session'
+          && identity.planId === plan.planId && identity.sessionId === plan.delegationOrigin.sessionId) {
+          conversationId = plan.conversationId;
+        }
       }
       // Persisted conversation ancestry is also checked; presentation never grants execution.
-      let cursor = identity.conversationId;
+      let cursor = conversationId;
       const seen = new Set();
       for (let depth = 0; cursor !== profile.agentConversationId && depth < 4; depth++) {
         if (!cursor || seen.has(cursor)) return fail('OUT_OF_SCOPE');
         seen.add(cursor);
         const row = metadata(cursor);
         if (row && (row.workspaceId !== workspaceId || row.role !== 'work_session')) return fail('OUT_OF_SCOPE');
-        cursor = row?.parentConversationId ?? (cursor === identity.conversationId ? plan : goalPlanStore?.getActivePlanByConversation?.(cursor))?.delegationOrigin?.parentConversationId;
+        cursor = row?.parentConversationId ?? (cursor === conversationId ? plan : goalPlanStore?.getActivePlanByConversation?.(cursor))?.delegationOrigin?.parentConversationId;
       }
       if (cursor !== profile.agentConversationId) return fail('OUT_OF_SCOPE');
       const result = read(workspaceId);

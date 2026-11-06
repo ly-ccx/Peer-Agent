@@ -216,6 +216,7 @@ export function PasswordManagerPanel({
       backdropClassName="session-import-overlay"
       panelClassName="session-import-modal password-manager-modal"
     >
+      {({ requestClose }) => <>
         <header className="session-import-header">
           <div>
             <h2 className="session-import-title">{t.title}</h2>
@@ -226,7 +227,7 @@ export function PasswordManagerPanel({
               </p>
             ) : null}
           </div>
-          <button type="button" className="session-import-close" onClick={onClose}>
+          <button type="button" className="session-import-close" onClick={requestClose}>
             {t.close}
           </button>
         </header>
@@ -318,6 +319,7 @@ export function PasswordManagerPanel({
             </ul>
           )}
         </section>
+      </>}
     </Overlay>
   );
 }

@@ -366,16 +366,16 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
                         disabled={!hasWorkspace}
                         onClick={() => chooseInstallScope('workspace')}
                       >
-                        工作区
+                        机器人
                       </button>
                     </div>
                     {installScope === 'workspace' ? (
                       <div className="skill-marketplace-workspace-picker">
                         <Dropdown
-                          ariaLabel="选择安装工作区"
+                          ariaLabel="选择安装机器人"
                           value={workspaceTarget?.path ?? ''}
                           options={workspaceOptions}
-                          placeholder="选择工作区"
+                          placeholder="选择机器人"
                           disabled={!hasWorkspace}
                           onChange={(value) => setWorkspaceTarget(workspaceTargets.find((target) => target.path === value) ?? null)}
                         />
@@ -392,7 +392,7 @@ export function SkillMarketplacePanel({ onInstalled }: { readonly onInstalled?: 
                   {installing === selected.catalogId
                     ? '正在校验并安装…'
                     : installScope === 'workspace'
-                      ? '验证并安装到工作区'
+                      ? '验证并安装到机器人'
                       : '验证并安装到全局'}
                 </button>
                 {installError ? (

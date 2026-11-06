@@ -19,6 +19,19 @@ export function indexBotWork(sessions: readonly DrawerSession[], available: bool
   return { byId, byAnchor, available };
 }
 export interface BotWorkRow { readonly id: string; readonly session?: DrawerSession; readonly status: WorkSessionStatus | null }
+/** Public task references retain the host state recorded with the reply, even after later task changes. */
+export function replyTaskReferences(messages: readonly Pick<BotChatMessage, 'kind' | 'sources' | 'meta'>[], index: BotWorkIndex): BotWorkRow[] {
+  const references = new Map<string, BotWorkRow>();
+  for (const message of messages) {
+    if (message.kind !== 'agent_reply') continue;
+    for (const id of message.sources) {
+      const state = message.meta.sessionStates?.find(state => state.sessionId === id);
+      const status = state && WORK_SESSION_STATUSES.some(status => status === state.status) ? state.status : null;
+      references.set(id, { id, session: index.byId.get(id), status });
+    }
+  }
+  return [...references.values()].slice(0, 100);
+}
 export function canCancelTask(status: string | null, cancelable?: boolean): boolean {
   // 生命周期决策给出的 cancelable 优先；缺字段时才退回状态表，避免出现第二套规则。
   if (typeof cancelable === 'boolean') return cancelable;
@@ -37,8 +50,14 @@ const FOLLOW_UP = ['waiting_user', 'waiting_agent', 'result_ready', 'running', '
 /** Attention first; the compact surface is bounded while its count stays factual. */
 export function backgroundWork(index: BotWorkIndex): { count: number; rows: BotWorkRow[] } {
   if (!index.available) return { count: 0, rows: [] };
-  const sessions = [...index.byId.values()].filter(session => FOLLOW_UP.some(status => status === session.status));
-  const rank = (status: string) => FOLLOW_UP.findIndex(value => value === status);
+  const sessions = [...index.byId.values()].filter(session =>
+    session.followUp ? session.followUp.inCurrentList : FOLLOW_UP.some(status => status === session.status));
+  // 未列入兜底表的状态（如 failed / 事实缺失）仍可能按宿主判定进列表：排在已知状态之后，
+  // 不能因 findIndex 返回 -1 反而顶到最前，破坏「attention first」。
+  const rank = (status: string) => {
+    const position = FOLLOW_UP.findIndex(value => value === status);
+    return position < 0 ? FOLLOW_UP.length : position;
+  };
   sessions.sort((a, b) => rank(a.status) - rank(b.status));
   return { count: sessions.length, rows: sessions.slice(0, 100).map(session => ({ id: session.sessionId, session, status: session.status as WorkSessionStatus })) };
 }

@@ -8,4 +8,4 @@ export {
   listEntries,
   migrateFromLegacy,
   pathOf,
-} from '@peer-agent/runtime-node';
+} from '@peer-agent/runtime-node/storage';

@@ -143,7 +143,7 @@ export interface CompactionSummaryCascadeOptions<TMessage extends CompactionMess
   readonly fallbackSummary?: string;
 }
 
-function contentBlocks(message: CompactionMessage): readonly Record<string, unknown>[] {
+function contentBlocks(message: Pick<CompactionMessage, 'content'>): readonly Record<string, unknown>[] {
   return Array.isArray(message.content)
     ? message.content.filter((block): block is Record<string, unknown> => Boolean(block && typeof block === 'object'))
     : [];
@@ -173,7 +173,7 @@ function hasToolResult(message: CompactionMessage): boolean {
   return message.role === 'tool' || toolResultIds(message).length > 0;
 }
 
-function isHumanUserMessage(message: CompactionMessage): boolean {
+export function isHumanUserMessage(message: Partial<Pick<CompactionMessage, 'role' | 'content' | '_compaction'>>): boolean {
   if (message.role !== 'user' || message._compaction) return false;
   const blocks = contentBlocks(message);
   return blocks.length === 0 || blocks.some((block) => block.type !== 'tool_result');

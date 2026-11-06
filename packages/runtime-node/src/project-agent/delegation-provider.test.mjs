@@ -11,7 +11,7 @@ import {
   PROJECT_AGENT_ALLOWED_CAPABILITIES,
   evaluateProjectAgentTurn,
 } from './mode-policy.mjs';
-import { DELEGATION_CAPABILITY_IDS } from './tool-specs.mjs';
+import { DELEGATION_CAPABILITY_IDS, validateDelegationInput } from './tool-specs.mjs';
 
 const USER = { id: 'u1', role: 'user', kind: 'user_input' };
 const ASSISTANT = { id: 'a1', role: 'assistant' };
@@ -48,6 +48,24 @@ function agentContext(overrides = {}) {
 function outputOf(result) {
   return JSON.parse(result.result.outputPreview.legacyResult.output);
 }
+
+test('a returned readonly report exception produces a failed Tool Result; mutations still propagate', async () => {
+  const provider = createDelegationProvider({ supervisor: {
+    get(input) {
+      if (input.detail === 'report') throw new TypeError('SQLite parameter cannot be bound');
+      return { sessionId: input.sessionId, workspaceId: 'w' };
+    },
+    cancel() { throw new Error('control outcome unknown'); },
+  } });
+  const failed = await provider.executeCapability(call('local.delegation.get_session', { sessionId: 's', detail: 'report' }),
+    agentContext({ workspaceId: 'w' }));
+  assert.equal(failed.result.status, 'failed');
+  assert.equal(failed.result.evidence.toolCallId, 'tool-1');
+  assert.equal(outputOf(failed).error, 'supervision_query_failed');
+  assert.match(outputOf(failed).message, /SQLite parameter/);
+  await assert.rejects(provider.executeCapability(call('local.delegation.cancel_session', { sessionId: 's', reason: 'user stopped' }, 'cancel'),
+    agentContext({ workspaceId: 'w', toolCallOrdinal: 1 })), /control outcome unknown/);
+});
 
 test('successful post_reply ends the provider loop, including suppression and idempotent replay', async () => {
   for (const suppressed of [false, true]) {
@@ -549,6 +567,31 @@ test('复核返回结构化事件与详情，期间任务是 verifying，不生�
   assert.notEqual(verdicts[0].verdictRef, verdicts[1].verdictRef);
 });
 
+test('a missing post-review task state leaves the recorded verdict available', async () => {
+  for (const failRead of [true, false]) {
+    let settled = false;
+    const provider = createDelegationProvider({
+      supervisor: { get() {
+        if (!settled) return { sessionId: 's-keep', workspaceId: 'workspace' };
+        if (failRead) throw Error('task state temporarily unavailable');
+        return { sessionId: 's-keep', workspaceId: 'other', status: 'result_ready' };
+      } },
+      verification: {
+        async run() { return { ok: true, facts: { plan: hostPlan('ev-real'),
+          evidenceIndex: ['ev-real'], independentVerifier: 'passed' } }; },
+        async record() { return { ok: true }; },
+        async finish() { settled = true; },
+      },
+    });
+    const result = await provider.executeCapability(
+      call('local.delegation.verify_session', { sessionId: 's-keep' }), agentContext({ workspaceId: 'workspace' }));
+    assert.equal(result.result.status, 'success');
+    const output = outputOf(result);
+    assert.equal(output.event.outcome, 'passed');
+    assert.equal(Object.hasOwn(output, 'sessionState'), false);
+  }
+});
+
 test('引用限定范围内，verify_session 越界被拒绝，读取细节不受限', async () => {
   let runs = 0;
   const provider = createDelegationProvider({
@@ -716,6 +759,10 @@ test('spawn preserves structured Goal criteria and rejects incomplete or forged 
     const failed = await provider.executeCapability(call('local.delegation.spawn_session', spawnInput({ successCriteria: criteria })), agentContext());
     assert.equal(outputOf(failed).error, 'invalid_input');
   }
+  const tooLong = await provider.executeCapability(call('local.delegation.spawn_session',
+    spawnInput({ successCriteria: [{ kind: 'model_review', description: 'x'.repeat(501) }] })), agentContext());
+  assert.equal(outputOf(tooLong).error, 'invalid_input');
+  assert.match(outputOf(tooLong).message, /description of at most 500 characters/);
   assert.equal(seen.length, 1);
 });
 
@@ -817,4 +864,48 @@ test('a current user turn cannot use an unrelated historical anchor to create wo
  const provider=createDelegationProvider({supervisor:{spawn:()=>({sessionId:'bad'})}});
  const result=await provider.executeCapability(call('local.delegation.spawn_session',spawnInput()),agentContext({currentInputAnchors:['u2'],messages:[USER,{id:'u2',role:'user',kind:'user_input'}]}));
  assert.equal(outputOf(result).error,'current_user_required');
+});
+
+test('pure task queries read fresh facts without opening or rewriting the effect ledger', async () => {
+  let revision = 0;
+  const provider = createDelegationProvider({
+    ledger() { throw new Error('read-only query opened the effect ledger'); },
+    supervisor: { list() { return [{ sessionId: 's', sourceRevision: String(++revision) }]; } },
+  });
+  const context = agentContext();
+  const first = await provider.executeCapability(call('local.delegation.list_sessions', {}, 'query'), context);
+  const second = await provider.executeCapability(call('local.delegation.list_sessions', {}, 'query'), context);
+  assert.equal(first.result.status, 'success');
+  assert.equal(outputOf(first).sessions[0].sourceRevision, '1');
+  assert.equal(outputOf(second).sessions[0].sourceRevision, '2');
+  assert.ok(first.result.evidence);
+});
+
+
+test('assessment input errors identify the nested shape and missing fields without accepting them', () => {
+  const assessment = { workId: 'w', expectedWorkRevision: 0, expectedGoalRevision: 1,
+    sourceInputIds: [], sourceEventIds: [], inputs: [], coverage: [],
+    disposition: { kind: 'wait', waitFor: [{ kind: 'session', id: 's', revision: 'obs:s' }] } };
+  const call = { action: 'assess', reason: 'Record current responsibility' };
+  const flattened = validateDelegationInput('coordinate_work', { ...call, ...assessment });
+  assert.equal(flattened.ok, false);
+  assert.match(flattened.message, /nested assessment object/);
+  const missing = validateDelegationInput('coordinate_work', { ...call, assessment });
+  assert.equal(missing.ok, false);
+  assert.match(missing.message, /assessment\.reason/);
+  assert.equal(validateDelegationInput('coordinate_work', { ...call,
+    assessment: { ...assessment, reason: 'Session is still running' } }).ok, true);
+  const unsupported = validateDelegationInput('coordinate_work', { ...call, assessment: {
+    ...assessment, reason: 'Ready to return', disposition: { kind: 'return', replyRef: 'turn-reply-1' },
+    coverage: [{ requirementId: 'delivery', status: 'covered', explanation: 'Reply will be posted next',
+      sources: [{ sessionId: 's', sourceRevision: 'rev:s', evidenceRefs: [] }] }],
+  } });
+  assert.equal(unsupported.ok, false);
+  assert.match(unsupported.message, /assessment\.coverage\[0\].*without persisted evidence/);
+  assert.match(unsupported.message, /currentReplyRef/);
+  const missingSources = validateDelegationInput('coordinate_work', { ...call, assessment: {
+    ...assessment, reason: 'Waiting', coverage: [{ requirementId: 'check', status: 'remaining', explanation: 'Worker is running' }],
+  } });
+  assert.equal(missingSources.ok, false);
+  assert.match(missingSources.message, /assessment\.coverage\[0\]\.sources must be an array/);
 });

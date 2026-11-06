@@ -7,6 +7,18 @@ import {
   planAgentTurn,
 } from './agent-turn-plan.mjs';
 
+test('pending task turns cannot deliver source-free final-text fallback; ordinary questions still can', () => {
+  const plan = planAgentTurn({ kind: 'user', userInputs: [{ inputId: 'q', text: '?' }],
+    roster: [{ sessionId: 's', status: 'waiting_agent', followUp: { owner: 'bot', inCurrentList: true, reason: 'technical_block' } }] });
+  assert.equal(plan.requiresStructuredReply, true);
+  assert.equal(plan.reminder.layer, 'L6_MODE_REMINDER');
+  const failed = finishAgentTurn({ turnId: 't', plan, rounds: [{ text: '已经看完了' }] });
+  assert.equal(failed.failed, true);
+  assert.equal(failed.messages.some(row => row.kind === 'agent_reply'), false);
+  const ordinary = finishAgentTurn({ turnId: 'ordinary', plan: planAgentTurn({ kind: 'user' }), rounds: [{ text: '普通答复' }] });
+  assert.equal(ordinary.messages.some(row => row.kind === 'agent_reply'), true);
+});
+
 test('persisted objective reply retains its host observation refs alongside later task evidence',()=>{
  const observation='objective-probe:ws:actual';
  const finished=finishAgentTurn({turnId:'watch-turn',plan:planAgentTurn({kind:'wake'}),rounds:[{toolCalls:[
@@ -81,7 +93,9 @@ test('用户回合带上预算和上下文槽，唤醒回合只注入提醒', ()
   assert.equal(wake.reminder.layer, 'L6_MODE_REMINDER');
   assert.equal(wake.reminder.kind, 'project-agent-wake');
   assert.match(wake.reminder.content, /not a new user message/);
-  assert.match(wake.reminder.content, /only confirm acknowledged work need no tool queries or status reply/);
+  assert.match(wake.reminder.content, /Routine progress needs no status query or repeated reply/);
+  assert.match(wake.reminder.content, /resolve the current disposition before posting/);
+  assert.match(wake.reminder.content, /Do not reopen the historical request or spawn the same work again/);
   assert.match(wake.reminder.content, /Review a new result or exception for the affected session/);
   assert.match(wake.reminder.content, /do not reopen unrelated past work or poll a running session/);
   assert.doesNotMatch(wake.reminder.content, /Roster:/);

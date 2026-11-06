@@ -395,7 +395,9 @@ function applyResolution(card, stored) {
   // Keep that receipt, but require the subsequent canonical turn to back it.
   const unsupportedRetry = stored?.resolution === 'retried' && !card.factResolved
     && ['agent_unavailable', 'agent_stopped'].includes(card.kind);
-  const storeResolved = stored?.resolvedState === 'resolved' && !unsupportedRetry && !card.failureStatus;
+  // Authority-bearing cards follow current host facts, never an old presentation resolution.
+  const factOwned = ['approval', 'plan_approval', 'confirm_result', 'completion_review'].includes(card.kind);
+  const storeResolved = !factOwned && stored?.resolvedState === 'resolved' && !unsupportedRetry && !card.failureStatus;
   const resolved = card.factResolved || storeResolved;
   const resolution = card.factResolved
     ? { source: 'fact', state: card.factState }

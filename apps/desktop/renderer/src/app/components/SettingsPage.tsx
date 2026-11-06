@@ -1,18 +1,22 @@
+import './settings-controls.css';
+import '../../styles/settings-page.css';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { LocaleCode } from '@peer-agent/protocol';
 import { useState } from 'react';
-import { AppearancePanel } from '../../appearance/AppearancePanel';
-import { ArchivedConversationsPanel } from './ArchivedConversationsPanel';
-import { GeneralPanel } from './GeneralPanel';
-import { GitPanel } from './GitPanel';
-import { LlmSettingsPanel } from './LlmSettingsPanel';
-import { SystemInstructionsPanel } from './SystemInstructionsPanel';
-import { ShortcutsPanel } from './ShortcutsPanel';
-import { UpdatesPanel } from './UpdatesPanel';
-import { RemoteAccessPanel } from './RemoteAccessPanel';
-import { UsageStatsPanel } from '../../settings/UsageStatsPanel';
-import { ModelRoutingPanel } from './settings/ModelRoutingPanel';
-import { DeveloperPanel } from './settings/DeveloperPanel';
+import { UnsavedChangesProvider, useGuardedNavigation } from '../../ui/forms/UnsavedChanges';
+import { deferPanel } from './deferPanel';
+const AppearancePanel = deferPanel(() => import('../../appearance/AppearancePanel').then(module => ({ default: module.AppearancePanel })));
+const ArchivedConversationsPanel = deferPanel(() => import('./ArchivedConversationsPanel').then(module => ({ default: module.ArchivedConversationsPanel })));
+const GeneralPanel = deferPanel(() => import('./GeneralPanel').then(module => ({ default: module.GeneralPanel })));
+const GitPanel = deferPanel(() => import('./GitPanel').then(module => ({ default: module.GitPanel })));
+const LlmSettingsPanel = deferPanel(() => import('./LlmSettingsPanel').then(module => ({ default: module.LlmSettingsPanel })));
+const SystemInstructionsPanel = deferPanel(() => import('./SystemInstructionsPanel').then(module => ({ default: module.SystemInstructionsPanel })));
+const ShortcutsPanel = deferPanel(() => import('./ShortcutsPanel').then(module => ({ default: module.ShortcutsPanel })));
+const UpdatesPanel = deferPanel(() => import('./UpdatesPanel').then(module => ({ default: module.UpdatesPanel })));
+const RemoteAccessPanel = deferPanel(() => import('./RemoteAccessPanel').then(module => ({ default: module.RemoteAccessPanel })));
+const UsageStatsPanel = deferPanel(() => import('../../settings/UsageStatsPanel').then(module => ({ default: module.UsageStatsPanel })));
+const ModelRoutingPanel = deferPanel(() => import('./settings/ModelRoutingPanel').then(module => ({ default: module.ModelRoutingPanel })));
+const DeveloperPanel = deferPanel(() => import('./settings/DeveloperPanel').then(module => ({ default: module.DeveloperPanel })));
 
 export type SettingsSection = 'general' | 'providers' | 'routing' | 'model' | 'instructions' | 'git' | 'developer' | 'shortcuts' | 'appearance' | 'updates' | 'archived' | 'usage' | 'remote';
 // 注：model 仅为 deep-link 兼容别名，导航只展示「服务商」。
@@ -60,7 +64,7 @@ function resolveSettingsSection(value: string | null | undefined): SettingsSecti
  * 系统指令属于 System Context 输入,与模型 Provider 连接配置职责不同,
  * 因此独立成分区,不再内嵌于服务商面板。
  */
-export function SettingsPage({
+function SettingsPageContent({
   availableLocales,
   i18n,
   initialSection = 'general',
@@ -84,6 +88,7 @@ export function SettingsPage({
   readonly workspacePath: string | null;
   readonly onArchivedConversationsChanged?: () => Promise<void> | void;
 }) {
+  const navigate = useGuardedNavigation();
   const [section, setSection] = useState<SettingsSection>(() => resolveSettingsSection(initialSection));
   const [query, setQuery] = useState('');
   const isZh = i18n.locale === 'zh-CN';
@@ -130,7 +135,7 @@ export function SettingsPage({
     <div className="settings-page">
       <aside className="settings-nav" aria-label={i18n.t('app.settings')}>
         <header className="settings-nav-header">
-          <button type="button" onClick={onBack} aria-label={i18n.t('app.settings')}>
+          <button type="button" onClick={() => navigate(onBack)} aria-label={i18n.t('app.settings')}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M19 12H5" />
               <path d="m12 19-7-7 7-7" />
@@ -164,7 +169,7 @@ export function SettingsPage({
                     type="button"
                     className={`settings-nav-item ${section === item.key ? 'active' : ''}`}
                     aria-current={section === item.key ? 'page' : undefined}
-                    onClick={() => setSection(item.key)}
+                    onClick={() => { if (section !== item.key) navigate(() => setSection(item.key)); }}
                   >
                     {item.label}
                   </button>
@@ -175,8 +180,7 @@ export function SettingsPage({
         </nav>
       </aside>
 
-      {/* key={section} 让每次切换分区时内容重新挂载,触发 .settings-content > *
-          的 za-content-reveal 入场动画(动效约定见 settings-page.css)。 */}
+      {/* Draft ownership is explicit; remounting a section is not a save or discard. */}
       <section className="settings-content" aria-live="polite" key={section}>
         {section === 'general' ? (
           <GeneralPanel
@@ -224,4 +228,8 @@ export function SettingsPage({
       </section>
     </div>
   );
+}
+
+export function SettingsPage(props: Parameters<typeof SettingsPageContent>[0]) {
+  return <UnsavedChangesProvider i18n={props.i18n}><SettingsPageContent {...props} /></UnsavedChangesProvider>;
 }

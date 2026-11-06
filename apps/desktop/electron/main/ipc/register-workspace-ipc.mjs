@@ -9,7 +9,7 @@ function owner(ownerName, register) {
   return Object.freeze({ owner: ownerName, register });
 }
 
-export function createWorkspaceIpcRegistrations({ workspace } = {}) {
+export function createWorkspaceIpcRegistrations({ workspace, searchFiles } = {}) {
   const ports = {
     list: assertFunction(workspace?.listWorkspaces, 'workspace.listWorkspaces'),
     ensureDefault: assertFunction(
@@ -46,10 +46,11 @@ export function createWorkspaceIpcRegistrations({ workspace } = {}) {
       ipc.handle('workspace:remove-linked-folder', (_event, payload = {}) => ports.removeLinkedFolder(payload));
       ipc.handle('workspace:set-primary', (_event, payload = {}) => ports.setPrimary(payload));
       ipc.handle('workspace:info', (_event, { path } = {}) => ports.getInfo(path));
-      ipc.handle('workspace:search-files', (_event, payload = {}) => searchWorkspaceFiles(
-        payload.workspacePath,
-        { query: payload.query, limit: payload.limit },
-      ));
+      ipc.handle('workspace:search-files', (_event, payload = {}) => {
+        if (typeof searchFiles === 'function') return searchFiles(payload);
+        if (payload.documentReference !== undefined) return { ok: false, status: 'workspace_unavailable', scoped: true, files: [] };
+        return searchWorkspaceFiles(payload.workspacePath, { query: payload.query, limit: payload.limit });
+      });
     }),
   ]);
 }

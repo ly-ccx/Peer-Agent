@@ -43,3 +43,15 @@ test('a consumed or expired retry reservation cannot promise another automatic r
   work.waitFor = [];
   assert.equal(status('2026-10-18T00:01:00Z').phase, 'current');
 });
+
+test('a composite digest proves recovery only through its delivered current-goal binding', () => {
+  const error = { turnId: 'failed', meta: { workId: 'g' } }, reply = { id: 'digest', kind: 'agent_reply', meta: {
+    intentBindings: [{ workId: 'g' }], intentScopes: [{ workId: 'g', goalRevision: 1 }] } };
+  const work = { workId: 'g', state: 'blocked_system', sessionIds: [], intentCoordination: { goalRevision: 2, lifecycle: 'active' } };
+  const messages = [error, reply], deliveries = { digest: { state: 'delivered' } };
+  const status = () => replyFailureStatus(error, messages, [work], deliveries, []);
+  assert.equal(status().phase, 'current'); reply.meta.intentScopes[0].goalRevision = 2;
+  deliveries.digest.state = 'prepared'; assert.equal(status().phase, 'current');
+  deliveries.digest.state = 'delivered'; assert.equal(status().phase, 'recovered');
+  work.intentCoordination.lifecycle = 'cancelled'; assert.equal(status().phase, 'cancelled');
+});

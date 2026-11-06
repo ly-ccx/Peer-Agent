@@ -1,3 +1,4 @@
+import { MotionSurface } from '../app/components/MotionSurface';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { PeerIcon } from '../ui/icons/PeerIcon';
 import { resolveEditorIconDataUrl } from './editorBrandIcons';
@@ -114,7 +115,7 @@ export function OpenTargetSplitButton({
       >
         <PeerIcon name="chevronDown" size={12} />
       </button>
-      {open ? (
+      <MotionSurface>{open ? (
         <div id={menuId} className="workbench-open-split-menu" role="menu" aria-label={menuLabel}>
           {items.map((item, index) => {
             if (item.kind === 'separator') {
@@ -136,7 +137,7 @@ export function OpenTargetSplitButton({
             );
           })}
         </div>
-      ) : null}
+      ) : null}</MotionSurface>
     </div>
   );
 }

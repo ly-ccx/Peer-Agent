@@ -1,8 +1,12 @@
+import { CONTINUITY_TOOL_DEFINITIONS } from './continuity-tool-definitions.mjs';
 import { AUTOMATION_TOOL_DEFINITIONS } from './automation-tool-definitions.mjs';
 import { GOAL_TOOL_DEFINITIONS } from './goal-tool-definitions.mjs';
 import { INTERACTION_TOOL_DEFINITIONS } from './interaction-tool-definitions.mjs';
 import { LEGACY_LOCAL_TOOL_DEFINITIONS } from './legacy-local-tool-definitions.mjs';
-import { LOCAL_IMAGE_TOOL_DEFINITIONS, LOCAL_GIT_TOOL_DEFINITIONS } from '@peer-agent/runtime-node';
+import {
+  LOCAL_IMAGE_TOOL_DEFINITIONS,
+  LOCAL_GIT_TOOL_DEFINITIONS
+} from "@peer-agent/runtime-node/providers";
 import { createMcpToolDefinitionsFromRegistry } from './mcp-tool-definitions.mjs';
 import { createSkillToolDefinitionsFromStore } from './skill-tool-definitions.mjs';
 import { DELEGATION_TOOL_DEFINITIONS } from './delegation-tool-definitions.mjs';
@@ -27,6 +31,8 @@ import {
   createRuntimeProjectionFromToolRegistry,
 } from './runtime-projection-tool-materializer.mjs';
 import { createToolRegistry } from './tool-registry.mjs';
+import { desktopInteractiveToolDefinitions } from '../interactive-results/runtime-port.mjs';
+import { admitInteractiveToolSet } from '@peer-agent/runtime-node/interactive-results';
 
 export { TOOL_NAMES } from './legacy-local-tool-definitions.mjs';
 export { createToolRegistry } from './tool-registry.mjs';
@@ -53,7 +59,7 @@ export function createDefaultToolRegistry() {
   });
 }
 
-export function createRuntimeToolRegistry({ mcpRegistry, skillStore } = {}) {
+export function createRuntimeToolRegistry({ mcpRegistry, skillStore, turnProfile } = {}) {
   return createToolRegistry({
     tools: [
       ...LEGACY_LOCAL_TOOL_DEFINITIONS,
@@ -62,6 +68,7 @@ export function createRuntimeToolRegistry({ mcpRegistry, skillStore } = {}) {
       ...SEARCH_TOOL_DEFINITIONS,
       ...DELEGATION_TOOL_DEFINITIONS,
       ...MEMORY_TOOL_DEFINITIONS,
+      ...CONTINUITY_TOOL_DEFINITIONS,
       ...GOAL_TOOL_DEFINITIONS,
       ...INTERACTION_TOOL_DEFINITIONS,
       ...AUTOMATION_TOOL_DEFINITIONS,
@@ -69,6 +76,7 @@ export function createRuntimeToolRegistry({ mcpRegistry, skillStore } = {}) {
       ...BROWSER_TOOL_DEFINITIONS,
       ...EXTERNAL_BROWSER_TOOL_DEFINITIONS,
       ...(isDesktopPreviewAvailable() ? DESKTOP_PREVIEW_TOOL_DEFINITIONS : []),
+      ...desktopInteractiveToolDefinitions(turnProfile),
       ...createMcpToolDefinitionsFromRegistry(mcpRegistry),
       ...createSkillToolDefinitionsFromStore(skillStore),
     ],
@@ -76,7 +84,9 @@ export function createRuntimeToolRegistry({ mcpRegistry, skillStore } = {}) {
 }
 
 import { isSelectionDiscussion } from '../selection-background-context.mjs';
-import { evaluateWorkSessionWrite } from '@peer-agent/runtime-node';
+import {
+  readOnlyWorkCapabilityAllowed
+} from "@peer-agent/runtime-node/project-agent";
 
 function excludeCapabilityPrefixes(value) {
   if (!Array.isArray(value)) return [];
@@ -86,9 +96,10 @@ function excludeCapabilityPrefixes(value) {
 export function createRuntimeToolProjection({
   mcpRegistry,
   skillStore,
-  registry = createRuntimeToolRegistry({ mcpRegistry, skillStore }),
+  registry,
   projectionOptions = {},
 } = {}) {
+  registry ??= createRuntimeToolRegistry({ mcpRegistry, skillStore, turnProfile: projectionOptions.turnProfile });
   if (isSelectionDiscussion()) registry = createToolRegistry({ tools: [] });
   const prefixes = excludeCapabilityPrefixes(projectionOptions.excludeCapabilityPrefixes);
   if (prefixes.length > 0) {
@@ -99,11 +110,12 @@ export function createRuntimeToolProjection({
       }),
     });
   }
+  registry = createToolRegistry({ tools: admitInteractiveToolSet(registry.listTools()) });
   const projection = createRuntimeProjectionFromToolRegistry(registry, projectionOptions);
   if (projectionOptions.readOnlyWorkSession === true) {
-    const allowed = new Set(projection.capabilities.filter(capability => evaluateWorkSessionWrite(
-      { delegationOrigin: { readOnly: true } }, capability,
-    ).allowed).map(capability => capability.capabilityId));
+    const allowed = new Set(projection.capabilities.filter(capability => readOnlyWorkCapabilityAllowed(
+      { ...capability, turnProfile: projectionOptions.turnProfile },
+    )).map(capability => capability.capabilityId));
     registry = createToolRegistry({ tools: registry.listTools().filter(tool => allowed.has(tool.runtime?.executorCapabilityId || tool.capabilityId)) });
     return createRuntimeToolProjection({ registry, projectionOptions: { ...projectionOptions, readOnlyWorkSession: false } });
   }

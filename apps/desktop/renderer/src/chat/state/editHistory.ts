@@ -23,7 +23,7 @@ export function clearInterruptedMarkers(messages: readonly ChatMsg[]): {
   const next = messages.map((message) => {
     if (message.interrupted !== true) return message;
     changed = true;
-    const { interrupted: _removed, ...rest } = message;
+    const { interrupted: _removed, streamFailure: _failure, ...rest } = message;
     return rest;
   });
   return { messages: changed ? next : (messages as ChatMsg[]), changed };
@@ -41,5 +41,6 @@ export function serializeConversationMessages(messages: readonly ChatMsg[]): Rec
     _compaction: message.compaction,
     attachments: message.attachments,
     ...(message.interrupted === true ? { interrupted: true } : {}),
+    ...(message.interrupted === true && message.streamFailure ? { streamFailure: message.streamFailure } : {}),
   }));
 }

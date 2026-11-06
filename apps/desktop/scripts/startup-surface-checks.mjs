@@ -31,7 +31,7 @@ export async function checkStartupSurface({ page, until, report, captureDirector
         fits: surface.scrollWidth <= surface.clientWidth && surface.scrollHeight <= surface.clientHeight };
     });
     assert.deepEqual(actual.surface, { x: 0, y: 0, ...actual.viewport });
-    assert.deepEqual(actual.loader, actual.surface, 'the startup wash reaches every window edge');
+    assert.deepEqual(actual.loader, actual.surface, 'the startup loader owns the full window without a second loading row');
     assert.deepEqual(actual.padding, ['0px', '0px', '0px', '0px']);
     assert.deepEqual(actual.border, ['0px', '0px', '0px', '0px']);
     assert.ok(actual.oldThreadAbsent && actual.fits); assert.equal(actual.shellMotion, 'none');
@@ -47,10 +47,17 @@ export async function checkStartupSurface({ page, until, report, captureDirector
   // Reload only this isolated fixture, exercising the real bootstrap error path.
   writeFileSync(commandFile, JSON.stringify({ release: true, error: true }));
   await page.reload();
-  await page.locator('.startup-surface .running-note').waitFor();
-  assert.match(await page.locator('.startup-surface .running-note').textContent(), /RC_STARTUP_UNAVAILABLE/);
+  const failure = page.locator('.startup-surface [role="alert"]');
+  await failure.waitFor();
+  assert.match(await failure.textContent(), /读取失败/);
+  assert.doesNotMatch(await failure.textContent(), /RC_STARTUP_UNAVAILABLE/);
+  assert.equal(await failure.getByRole('button', { name: '重新读取', exact: true }).isEnabled(), true);
   assert.equal(await page.locator('.brand-startup-loader').count(), 0);
   await page.screenshot({ path: path.join(captureDirectory, 'startup-error-760-light.png'), animations: 'disabled' });
+  writeFileSync(commandFile, JSON.stringify({ release: true }));
+  await failure.getByRole('button', { name: '重新读取', exact: true }).click();
+  await page.locator('.bot-shell').waitFor();
+  assert.equal(await page.locator('.startup-surface').count(), 0);
   report.startupSurface = { passed: true, realBootstrap: true, realMainApp: true, cases,
-    reducedMotion: true, entersBotShell: true, failureExplained: true, installedAppTouched: false };
+    reducedMotion: true, entersBotShell: true, failureExplained: true, retryRecovers: true, installedAppTouched: false };
 }

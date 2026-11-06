@@ -1,21 +1,19 @@
+
+import { executionView, text } from "./execution-context.mjs";
 import { OBJECTIVE_TOOL_SPECS } from './objective-tool-specs.mjs';
 import { admitSessionWait } from './wake-wait.mjs';
 import { createHash } from 'node:crypto';
-
 import { createEvidenceBundle } from '@peer-agent/runtime-core';
 import { createDurableGoalIdempotencyLedger } from '@peer-agent/runtime-core/goal-idempotency-durable';
-
 import { createPermissionGrant } from '../tool-result-factory.mjs';
 import { resolveAnchorScope } from './anchor-scope.mjs';
+import { resolveDelegationAnchors, userAnchorCandidates } from './user-anchor.mjs';
+import { isCanonicalUserInput } from './user-priority.mjs';
 import { verdictRefFor } from './acceptance.mjs';
 import { isProjectAgentTurn } from './mode-policy.mjs';
 import { buildVerificationDetail } from './verification-detail.mjs';
 export { buildVerificationDetail } from './verification-detail.mjs';
-import {
-  DELEGATION_CAPABILITY_IDS,
-  delegationSpecByCapability,
-  validateDelegationInput,
-} from './tool-specs.mjs';
+import { DELEGATION_CAPABILITY_IDS, delegationSpecByCapability, validateDelegationInput } from './tool-specs.mjs';
 
 const RESULT_PREFIX = 'delegation-result:';
 
@@ -61,8 +59,11 @@ export function createDelegationProvider({
     const item = delegationSpecByCapability(capabilityId);
     const view = executionView(context);
     const locale = context.locale === 'en-US' ? 'en-US' : 'zh-CN';
+    let anchorResolutions = [];
+    const complete = args => finish({ ...args, output: anchorResolutions.length
+      ? { ...args.output, anchorResolutions } : args.output });
     if (!item) {
-      return finish({
+      return complete({
         call,
         capabilityId: capabilityId || 'local.delegation',
         name: 'delegation',
@@ -75,7 +76,7 @@ export function createDelegationProvider({
       mode: view.mode ?? request?.mode,
       role: view.role ?? request?.turnProfile?.role,
     })) {
-      return finish({
+      return complete({
         call,
         capabilityId,
         name: item.name,
@@ -93,7 +94,7 @@ export function createDelegationProvider({
 
     const validated = validateDelegationInput(item.name, parseArgs(call));
     if (!validated.ok) {
-      return finish({
+      return complete({
         call,
         capabilityId,
         name: item.name,
@@ -106,23 +107,25 @@ export function createDelegationProvider({
     let input = validated.value;
     const coordinationFacts = typeof supervisor?.coordinationFacts === 'function' ? await supervisor.coordinationFacts(view.workspaceId, view.conversationId) : [];
     const wakeMandate = Array.isArray(coordinationFacts) && coordinationFacts.find(row => row.workId === view.workId && row.lifecycle === 'active'
-      && view.events.some(event => row.sessionIds.includes(event.sessionId)));
+      && (view.events.some(event => row.sessionIds.includes(event.sessionId))
+        || view.sourceDecisionRef && (row.intent?.decision?.operationId === view.sourceDecisionRef && row.intent.decision.disposition.kind === 'continue'
+          || row.intent?.decisionTurnId === view.turnId)));
     if (item.name === 'spawn_session' && !view.currentInputAnchors.length && !view.objectiveWakeIds.length && !wakeMandate) {
-      return finish({ call, capabilityId, name: item.name, locale, status: 'failed',
+      return complete({ call, capabilityId, name: item.name, locale, status: 'failed',
         output: { ok: false, error: 'current_user_required', message: 'Historical user messages cannot authorize new tasks during an ordinary wake.' } });
     }
     if (['spawn_session', 'coordinate_work', 'resume_session', 'message_session', 'control_work', 'cancel_session', 'reprioritize_session', 'set_proactivity'].includes(item.name)
-      && onlyHandoffAnswers(view)) return finish({ call, capabilityId, name: item.name, locale, status: 'failed',
+      && onlyHandoffAnswers(view)) return complete({ call, capabilityId, name: item.name, locale, status: 'failed',
       output: { ok: false, error: 'host_decision_already_handled', message: 'The host handles this merge decision. A separate current user instruction is required for new work.' } });
-    if(view.objectiveWakeIds.length&&!view.currentInputAnchors.length&&item.name==='spawn_session'&&typeof objectives?.prepareSpawn!=='function')return finish({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,error:'objective_user_confirmation_required'}});
+    if(view.objectiveWakeIds.length&&!view.currentInputAnchors.length&&item.name==='spawn_session'&&typeof objectives?.prepareSpawn!=='function')return complete({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,error:'objective_user_confirmation_required'}});
     if(view.objectiveWakeIds.length&& !view.currentInputAnchors.length && ['control_work','resume_session','message_session','reprioritize_session','cancel_session','set_proactivity'].includes(item.name)){
-      return finish({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,error:'objective_user_confirmation_required'}});
+      return complete({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,error:'objective_user_confirmation_required'}});
     }
     if (item.name === 'verify_session' && view.objectiveWakeIds.length && !view.currentInputAnchors.length) {
       const session = await supervisor?.get?.({ sessionId: input.sessionId });
       if (!session || session.workspaceId !== view.workspaceId
         || !view.objectiveWakeIds.includes(session.origin?.objectiveId) && !view.sessionWakeIds.includes(input.sessionId)) {
-        return finish({ call, capabilityId, name: item.name, locale, status: 'failed', output: { ok: false, error: 'objective_verification_out_of_scope' } });
+        return complete({ call, capabilityId, name: item.name, locale, status: 'failed', output: { ok: false, error: 'objective_verification_out_of_scope' } });
       }
     }
     if (['coordinate_work', 'control_work', 'message_session', 'cancel_session', 'verify_session', 'resume_session', 'reprioritize_session'].includes(item.name) && input.sessionId || item.name === 'spawn_session' && input.supersedes) {
@@ -132,7 +135,7 @@ export function createDelegationProvider({
         replyTo: view.replyTo,
       });
       if (scope.scoped && !scope.sessionIds.includes(input.sessionId || input.supersedes)) {
-        return finish({
+        return complete({
           call,
           capabilityId,
           name: item.name,
@@ -151,13 +154,25 @@ export function createDelegationProvider({
       }
     }
     if (!view.currentInputAnchors.length && ['resume_session', 'message_session', 'control_work', 'cancel_session', 'reprioritize_session', 'set_proactivity'].includes(item.name)) {
-      return finish({ call, capabilityId, name: item.name, locale, status: 'failed', output: { ok: false,
-        error: 'current_user_required', message: 'Use coordinate_work with an active mandate for autonomous task changes.' } });
+      return complete({ call, capabilityId, name: item.name, locale, status: 'failed', output: { ok: false,
+        error: 'current_user_required',
+        message: 'This direct tool requires current user input. For already authorized work, use coordinate_work query, then the matching coordination action with its numeric goalRevision and an active mandate. This entry-point rejection does not establish a need for new user confirmation.',
+        ...(input.sessionId ? { nextAction: 'query_coordination', suggestedCall: { tool: 'coordinate_work',
+          arguments: { action: 'query', sessionId: input.sessionId, reason: 'Read current task facts before autonomous recovery' } } } : {}) } });
     }
+    const resolved = resolveDelegationAnchors(item.name, input, view.messages);
+    if (!resolved.ok) {
+      const candidates = item.name === 'post_reply'
+        ? { availableReplyAnchors: userAnchorCandidates(view.messages, isUserInput) }
+        : { availableAnchors: userAnchorCandidates(view.messages, isCanonicalUserInput, view.currentInputAnchors) };
+      return complete({ call, capabilityId, name: item.name, locale, status: 'failed', output: { ...resolved, ...candidates } });
+    }
+    input = resolved.input;
+    anchorResolutions = resolved.anchorResolutions;
     if (item.name === 'set_proactivity' || item.name === 'resume_session') {
       const anchorError = validateAnchors([input.anchorMessageId], view.messages);
       if (anchorError) {
-        return finish({
+        return complete({
           call,
           capabilityId,
           name: item.name,
@@ -168,9 +183,9 @@ export function createDelegationProvider({
       }
     }
     if (item.name === 'spawn_session') {
-      const anchorError = validateAnchors(input.anchorMessageIds, view.messages);
+      const anchorError = validateAnchors(input.anchorMessageIds, view.messages, isCanonicalUserInput);
       if (anchorError) {
-        return finish({
+        return complete({
           call,
           capabilityId,
           name: item.name,
@@ -182,12 +197,12 @@ export function createDelegationProvider({
       if (view.currentInputAnchors.length && !input.objectiveId
         && !view.messages.some(message => view.currentInputAnchors.includes(message.id) && message.answerTo?.startsWith('card:question:objective:'))
         && !input.anchorMessageIds.some(id => view.currentInputAnchors.includes(id))) {
-        return finish({ call, capabilityId, name: item.name, locale, status: 'failed', output: { ok: false, error: 'current_user_required' } });
+        return complete({ call, capabilityId, name: item.name, locale, status: 'failed', output: { ok: false, error: 'current_user_required' } });
       }
       if (input.modelPreference?.modelProviderId && typeof checkModel === 'function') {
         const checked = await checkModel({ modelProviderId: input.modelPreference.modelProviderId });
         if (checked && checked.ok === false) {
-          return finish({
+          return complete({
             call,
             capabilityId,
             name: item.name,
@@ -207,14 +222,14 @@ export function createDelegationProvider({
     if (input.sessionId && typeof supervisor?.get === 'function') {
       const session = await supervisor.get({ sessionId: input.sessionId });
       if (session?.workspaceId && view.workspaceId && session.workspaceId !== view.workspaceId) {
-        return finish({ call, capabilityId, name: item.name, locale, status: 'failed', output: { ok: false, error: 'out_of_scope' } });
+        return complete({ call, capabilityId, name: item.name, locale, status: 'failed', output: { ok: false, error: 'out_of_scope' } });
       }
     }
 
     if(item.name==='spawn_session'&&(input.objectiveId||view.objectiveWakeIds.length&&!view.currentInputAnchors.length||view.messages.some(message=>view.currentInputAnchors.includes(message.id)&&message.answerTo?.startsWith('card:question:objective:')))){
-      if(typeof objectives?.prepareSpawn!=='function')return finish({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,error:'objectives_unavailable'}});
+      if(typeof objectives?.prepareSpawn!=='function')return complete({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,error:'objectives_unavailable'}});
       const authorized=await objectives.prepareSpawn(input,spawnContext(view));
-      if(!authorized?.ok)return finish({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,...authorized}});
+      if(!authorized?.ok)return complete({call,capabilityId,name:item.name,locale,status:'failed',output:{ok:false,...authorized}});
       input=authorized.input||input;
     }
     const key = idempotencyKey({
@@ -223,10 +238,14 @@ export function createDelegationProvider({
       name: item.name,
       input,
     });
-    const book = ledgerFor({ ...context, workspaceId: view.workspaceId, conversationId: view.conversationId });
+    // Queries have no effect to deduplicate; communication owns its durable outbox.
+    const readOnly = ['list_sessions', 'get_session', 'get_verification_detail'].includes(item.name)
+      || item.name === 'coordinate_work' && input.action === 'query';
+    const book = readOnly || item.name === 'send_agent_message' ? null
+      : ledgerFor({ ...context, workspaceId: view.workspaceId, conversationId: view.conversationId });
     const previous = item.name === 'wait_for_sessions' ? null : readResult(book?.get?.(key));
     if (previous && item.name !== 'send_agent_message') {
-      return finish({
+      return complete({
         call,
         capabilityId,
         name: item.name,
@@ -236,9 +255,18 @@ export function createDelegationProvider({
       });
     }
 
-    const dispatched = await dispatch(item.name, input, { ...view, deliveryKey: key });
+    let dispatched;
+    try {
+      dispatched = await dispatch(item.name, input, { ...view, deliveryKey: key });
+    } catch (error) {
+      // A returned query exception is a failed observation, not an unknown
+      // mutation. Control/write exceptions retain the normal recovery path.
+      if (!readOnly) throw error;
+      dispatched = { ok: false, output: { ok: false, error: 'supervision_query_failed',
+        message: String(error?.message || error).slice(0, OUTPUT_LIMIT) } };
+    }
     if (!dispatched.ok) {
-      return finish({
+      return complete({
         call,
         capabilityId,
         name: item.name,
@@ -254,7 +282,7 @@ export function createDelegationProvider({
       toolName: item.name,
       evidenceRefs: [`${RESULT_PREFIX}${encodeURIComponent(JSON.stringify(dispatched.output))}`],
     });
-    return finish({
+    return complete({
       call,
       capabilityId,
       name: item.name,
@@ -307,7 +335,7 @@ export function createDelegationProvider({
     if (name === 'resume_session') return sessionOrMissing(await callPort(supervisor?.resume, input, 'supervisor_unavailable', spawnContext(view)));
     if (name === 'reprioritize_session') return sessionOrMissing(await callPort(supervisor?.reprioritize, input, 'supervisor_unavailable', spawnContext(view)));
     if (name === 'get_session') return sessionOrMissing(await callPort(supervisor?.get, input, 'supervisor_unavailable'));
-    if (name === 'cancel_session') return sessionOrMissing(await callPort(supervisor?.cancel, input, 'supervisor_unavailable'));
+    if (name === 'cancel_session') return sessionOrMissing(await callPort(supervisor?.cancel, input, 'supervisor_unavailable', spawnContext(view)));
     if (name === 'message_session') return sessionOrMissing(await callPort(supervisor?.message, input, 'supervisor_unavailable', view));
     if (name === 'get_verification_detail') return readVerification(input);
     if (name === 'verify_session') return verifySession(input, view);
@@ -344,9 +372,9 @@ export function createDelegationProvider({
     if (!verificationAvailable() || typeof verification?.run !== 'function') {
       return { ok: false, output: { ok: false, error: 'verifier_unavailable', message: 'verifier_unavailable' } };
     }
-    if (typeof verification.markVerifying === 'function') {
-      await verification.markVerifying(input.sessionId);
-    }
+    const admission = await verification.markVerifying?.(input.sessionId);
+    if (admission?.ok === false) return { ok: false, output: admission };
+    let verdict;
     try {
       const reviewed = await verification.run({
         sessionId: input.sessionId,
@@ -361,7 +389,8 @@ export function createDelegationProvider({
             ...(reviewed?.nextAction ? { nextAction: reviewed.nextAction } : {}) },
         };
       }
-      const detail = buildVerificationDetail({ ...reviewed.facts, sessionId: input.sessionId });
+      // The new verdict below has its own event. A previous persisted review cannot describe it.
+      const detail = buildVerificationDetail({ ...reviewed.facts, explicitVerification: undefined, sessionId: input.sessionId });
       const event = {
         kind: 'verdict',
         sessionId: input.sessionId,
@@ -374,10 +403,22 @@ export function createDelegationProvider({
         if (recorded?.ok === false) return { ok: false,
           output: { ok: false, error: recorded.error || 'verification_persistence_failed' } };
       }
-      return { ok: true, output: { ok: true, status: detail.outcome, event, detail } };
+      verdict = { status: detail.outcome, event, detail };
     } finally {
       await verification.finish?.(input.sessionId);
     }
+    let sessionState;
+    try {
+      const current = await supervisor?.get?.({ sessionId: input.sessionId });
+      if (current?.sessionId === input.sessionId && typeof current.status === 'string'
+        && (!view.workspaceId || current.workspaceId === view.workspaceId)) {
+        const { sessionId, status, sourceRevision, observationRevision } = current;
+        sessionState = { sessionId, status, sourceRevision, observationRevision };
+      }
+    } catch {
+      // A status read can fail after the verdict is durably recorded.
+    }
+    return { ok: true, output: { ok: true, status: verdict.status, ...(sessionState ? { sessionState } : {}), event: verdict.event, detail: verdict.detail } };
   }
 
   async function setProactivity(input, view) {
@@ -418,58 +459,12 @@ export function createDelegationProvider({
   };
 }
 
-function executionView(context) {
-  const nested = context?.toolContext && typeof context.toolContext === 'object' && !Array.isArray(context.toolContext)
-    ? context.toolContext
-    : {};
-  return {
-    workId: text(context?.turnProfile?.workId) || text(nested.turnProfile?.workId),
-    sessionId: text(context?.turnProfile?.sessionId) || text(nested.turnProfile?.sessionId),
-    planId: text(context?.turnProfile?.planId) || text(nested.turnProfile?.planId),
-    agentKind: context?.turnProfile?.agentKind ?? nested.turnProfile?.agentKind,
-    turnKind: context?.turnProfile?.context?.turnKind ?? nested.turnProfile?.context?.turnKind,
-    manualCriterionAuthorities: context?.manualCriterionAuthorities ?? nested.manualCriterionAuthorities,
-    mode: context?.mode ?? nested.mode,
-    role: context?.role ?? context?.turnProfile?.role ?? nested.role ?? nested.turnRole ?? nested.turnProfile?.role,
-    messages: Array.isArray(context?.messages) ? context.messages : nested.messages,
-    quoteRefs: context?.quoteRefs ?? nested.quoteRefs,
-    replyTo: context?.replyTo ?? nested.replyTo,
-    turnId: text(context?.turnId) || text(nested.turnId) || '',
-    toolCallOrdinal: context?.toolCallOrdinal ?? nested.toolCallOrdinal ?? '',
-    workspaceId: text(context?.workspaceId) || text(nested.workspaceId),
-    workspacePath: text(context?.workspacePath) || text(nested.workspacePath) || '',
-    surface: context?.surface ?? nested.surface,
-    conversationId: text(context?.conversationId) || text(nested.conversationId),
-    memoryIds: idList(context?.turnMemoryIds ?? nested.turnMemoryIds),
-    currentInputAnchors: idList(context?.currentInputAnchors ?? nested.currentInputAnchors),
-    objectiveWakeIds: idList(context?.objectiveWakeIds ?? nested.objectiveWakeIds),
-    sessionWakeIds: idList(context?.sessionWakeIds ?? nested.sessionWakeIds),
-    objectiveWakeEvents: Array.isArray(context?.objectiveWakeEvents ?? nested.objectiveWakeEvents) ? structuredClone(context?.objectiveWakeEvents ?? nested.objectiveWakeEvents) : [],
-    events: context?.turnProfile?.context?.events ?? nested.turnProfile?.context?.events ?? [],
-    turnToolCalls: Array.isArray(context?.turnToolCalls)
-      ? context.turnToolCalls.slice()
-      : (Array.isArray(nested.turnToolCalls) ? nested.turnToolCalls.slice() : []),
-  };
-}
-
 function onlyHandoffAnswers(view) {
   if (!view.currentInputAnchors.length) return false;
   return view.currentInputAnchors.every(id => {
     const message = view.messages?.find(item => item.id === id && item.role === 'user');
     return typeof message?.answerTo === 'string' && /^card:question:[^:]+:handoff(?:_conflict)?-[a-f0-9]{16}$/.test(message.answerTo);
   });
-}
-
-function idList(value) {
-  if (!Array.isArray(value)) return [];
-  const ids = [];
-  for (const item of value) {
-    const id = text(item);
-    if (!id || id.length > 200 || ids.includes(id)) continue;
-    ids.push(id);
-    if (ids.length >= 200) break;
-  }
-  return ids;
 }
 
 function parseArgs(call) {
@@ -485,10 +480,6 @@ function parseArgs(call) {
   return {};
 }
 
-function text(value) {
-  return typeof value === 'string' && value.trim() ? value.trim() : null;
-}
-
 function canonical(value) {
   if (value === null || typeof value !== 'object') return JSON.stringify(value ?? null);
   if (Array.isArray(value)) return `[${value.map((item) => canonical(item)).join(',')}]`;
@@ -501,7 +492,7 @@ function idempotencyKey({ turnId, toolCallOrdinal, name, input }) {
   return createHash('sha256').update(material).digest('hex');
 }
 
-function validateAnchors(ids, messages) {
+function validateAnchors(ids, messages, isAllowedUser = isUserInput) {
   const byId = new Map();
   for (const message of Array.isArray(messages) ? messages : []) {
     const id = text(message?.id) || text(message?.messageId);
@@ -516,7 +507,7 @@ function validateAnchors(ids, messages) {
       message: 'Anchor message was not found in this conversation.',
     };
   }
-  const rejected = ids.filter((id) => !isUserInput(byId.get(id)));
+  const rejected = ids.filter((id) => !isAllowedUser(byId.get(id)));
   if (rejected.length > 0) {
     return {
       ok: false,
@@ -559,6 +550,9 @@ async function callPort(fn, input, unavailable, context) {
         error: result.error,
         ...(Array.isArray(result.messageIds) ? { messageIds: result.messageIds } : {}),
         ...(Array.isArray(result.availableReplyAnchors) ? { availableReplyAnchors: result.availableReplyAnchors } : {}),
+        ...(Array.isArray(result.availableAnchors) ? { availableAnchors: result.availableAnchors } : {}),
+        ...(Array.isArray(result.anchorResolutions) ? { anchorResolutions: result.anchorResolutions } : {}),
+        ...(typeof result.operationId === 'string' ? { operationId: result.operationId, phase: result.phase, goalRevision: result.goalRevision } : {}),
         ...(Array.isArray(result.sessionStates) ? { sessionStates: result.sessionStates } : {}),
         ...(result.missing ? { missing: result.missing, message: result.missing } : {}),
         ...(result.message ? { message: result.message } : {}),

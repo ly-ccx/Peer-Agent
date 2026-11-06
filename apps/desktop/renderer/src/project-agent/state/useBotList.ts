@@ -3,6 +3,7 @@ import { filterBotList, type BotListItem, type BotProfile } from '@peer-agent/pr
 import { clientApi } from '../../clientApi';
 import { readBotDetails } from './botDetails';
 import { createConversationRefresh } from './conversationRefresh';
+import { reconcileFacts } from './reconcileFacts';
 import { PROJECT_AGENT_SHELL_EVENT, projectAgentShellOf } from '../onboarding/botShell';
 import {
   applyBotRefresh,
@@ -63,7 +64,10 @@ export function useBotListShell() {
   return { active };
 }
 
-export function useBotList() {
+export function useBotList(active = true) {
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const refreshRef = useRef<ReturnType<typeof createConversationRefresh> | null>(null);
   const [catalog, setCatalog] = useState<readonly BotListItem[]>([]);
   const [searchHits, setSearchHits] = useState<{ query: string; items: readonly BotListItem[] } | null>(null);
   const [query, setQuery] = useState('');
@@ -75,16 +79,17 @@ export function useBotList() {
   const [status, setStatus] = useState<BotListStatus>('loading');
   const [width, setWidthState] = useState(readStoredWidth);
   const [creating, setCreating] = useState(false);
+  const creatingRef = useRef(false);
   const catalogRef = useRef<readonly BotListItem[]>([]);
 
   const replaceCatalog = useCallback((next: readonly BotListItem[]) => {
-    const sorted = sortReadyCatalog(next);
-    // 思考强度保存后目录会再读一遍。事实没变就不要换列表引用，否则右侧档案会整棵重绘。
-    if (JSON.stringify(catalogRef.current) === JSON.stringify(sorted)) return;
-    catalogRef.current = sorted;
-    setCatalog(sorted);
+    const sorted = reconcileFacts(catalogRef.current, sortReadyCatalog(next), row => row.workspaceId);
     setOpenedId((current) => retainSelectedId(current, sorted));
     setHighlightedId((current) => retainSelectedId(current, sorted));
+    // 思考强度保存后目录会再读一遍。事实没变就不要换列表引用，否则右侧档案会整棵重绘。
+    if (catalogRef.current === sorted) return;
+    catalogRef.current = sorted;
+    setCatalog(sorted);
   }, []);
 
   const reload = useCallback(async () => {
@@ -100,16 +105,6 @@ export function useBotList() {
   const updateProfile = useCallback((profile: BotProfile) => {
     replaceCatalog(catalogRef.current.map(item => item.workspaceId === profile.workspaceId ? { ...item, profile } : item));
   }, [replaceCatalog]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void reload().catch(() => {
-      if (!cancelled) setStatus('error');
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [reload]);
 
   const refreshIds = useCallback(async (workspaceIds: readonly string[]) => {
     if (workspaceIds.length === 0) {
@@ -128,12 +123,13 @@ export function useBotList() {
 
   useEffect(() => {
     const pending = new Set<string>();
-    let all = false;
+    let all = true;
     const refresh = createConversationRefresh(async () => {
       const ids = all ? [] : [...pending];
       pending.clear(); all = false;
-      await refreshIds(ids).catch(() => {});
-    }, { delayMs: 80 });
+      await refreshIds(ids).catch(() => setStatus('error'));
+    }, { delayMs: 80, active: activeRef.current });
+    refreshRef.current = refresh;
     const onChange = (event: { workspaceIds?: readonly string[] }) => {
       if (!event?.workspaceIds?.length) all = true;
       else event.workspaceIds.forEach(id => pending.add(id));
@@ -142,14 +138,19 @@ export function useBotList() {
     const offChanged = clientApi.onProjectAgentChanged(onChange);
     // 新消息只发 conversation-changed。预览和未读靠同一条局部刷新跟上。
     const offConversation = clientApi.onProjectAgentConversationChanged(onChange);
+    void refresh.request();
     return () => {
+      refreshRef.current = null;
       refresh.stop();
       offChanged?.();
       offConversation?.();
     };
   }, [refreshIds]);
 
+  useEffect(() => { refreshRef.current?.setActive(active); }, [active]);
+
   useEffect(() => {
+    if (!active) return;
     const text = query.trim();
     if (!text) {
       setSearchHits(null);
@@ -164,7 +165,7 @@ export function useBotList() {
     return () => {
       cancelled = true;
     };
-  }, [query, catalog]);
+  }, [query, catalog, active]);
 
   const trimmedQuery = query.trim();
   const searched = trimmedQuery
@@ -205,21 +206,27 @@ export function useBotList() {
     return { ok: true, workspaceId: result.workspaceId };
   }, [reload]);
 
-  const createBind = useCallback(async () => {
-    setCreating(true);
+  const createBind = useCallback(async (): Promise<BotCreateResult> => {
+    if (creatingRef.current) return { ok: false, code: 'BUSY' };
+    creatingRef.current = true; setCreating(true);
     try {
       return await finishCreate(await clientApi.projectAgentCreate({ kind: 'bind' }));
+    } catch {
+      return { ok: false, code: 'UNCONFIRMED' };
     } finally {
-      setCreating(false);
+      creatingRef.current = false; setCreating(false);
     }
   }, [finishCreate]);
 
-  const createManaged = useCallback(async (name: string) => {
-    setCreating(true);
+  const createManaged = useCallback(async (name: string): Promise<BotCreateResult> => {
+    if (creatingRef.current) return { ok: false, code: 'BUSY' };
+    creatingRef.current = true; setCreating(true);
     try {
       return await finishCreate(await clientApi.projectAgentCreate({ kind: 'managed', name }));
+    } catch {
+      return { ok: false, code: 'UNCONFIRMED' };
     } finally {
-      setCreating(false);
+      creatingRef.current = false; setCreating(false);
     }
   }, [finishCreate]);
 

@@ -1,6 +1,6 @@
 {
   "name": "peer-agent",
-  "version": "0.1.0-rc.26",
+  "version": "0.1.0-rc.37",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.22.0",
@@ -52,8 +52,14 @@
     ],
     "ignoredBuiltDependencies": [
       "@qoder-ai/qoder-agent-sdk",
-      "electron-winstaller"
-    ]
+      "electron-winstaller",
+      "@openuidev/lang-core"
+    ],
+    "overrides": {
+      "@openuidev/lang-core": "1.0.0",
+      "@openuidev/devtools": "0.3.0",
+      "@openuidev/observability": "0.0.4"
+    }
   },
   "dependencies": {
     "adm-zip": "^0.5.17"

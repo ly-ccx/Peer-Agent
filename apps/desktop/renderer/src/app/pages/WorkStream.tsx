@@ -1,22 +1,14 @@
 import type { TaskOverviewItem } from '@peer-agent/protocol';
 import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useMotionAllowed } from '../hooks/useMotionAllowed';
+import { animateVisual, motionDurationMs } from '../state/visualMotion';
+import { motionAllowed } from '../state/motionEnvironment';
 import {
   packWorkStreamColumns,
   shouldPackWorkStream,
   workStreamColumnCount,
   workStreamItemWeight,
 } from './workStreamLayout';
-
-/** FLIP 重排时长与缓动：与 particle-shatter 退场塌缩（280ms）同族，归位稍慢半拍。 */
-const FLIP_MS = 320;
-const FLIP_EASING = 'cubic-bezier(0.33, 0, 0.2, 1)';
-
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  );
-}
 
 type FlipEntry = { top: number; left: number; el: HTMLElement };
 type FlipOffsets = Map<string, FlipEntry>;
@@ -36,6 +28,7 @@ export function WorkStream<T = TaskOverviewItem>({
   readonly className?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const allowed = useMotionAllowed();
   const [columnCount, setColumnCount] = useState<1 | 2>(1);
   const resolveWeight = weightOf ?? (workStreamItemWeight as (item: T) => number);
   const resolveKey = keyOf ?? ((item: T) => (item as TaskOverviewItem).taskId);
@@ -58,6 +51,10 @@ export function WorkStream<T = TaskOverviewItem>({
       setColumnCount(workStreamColumnCount(width, remPx));
     };
     update(node.clientWidth);
+    if (typeof ResizeObserver !== 'function') {
+      const resize = () => update(node.clientWidth); window.addEventListener('resize', resize);
+      return () => window.removeEventListener('resize', resize);
+    }
     const observer = new ResizeObserver((entries) => {
       update(entries[0]?.contentRect.width ?? node.clientWidth);
     });
@@ -110,6 +107,10 @@ export function WorkStream<T = TaskOverviewItem>({
   useLayoutEffect(() => {
     const node = ref.current;
     if (!node) return;
+    const motions: ReturnType<typeof animateVisual>[] = [];
+    const style = getComputedStyle(node);
+    const duration = motionDurationMs(style.getPropertyValue('--za-motion-slow'), 320);
+    const easing = style.getPropertyValue('--za-ease-standard').trim() || 'ease';
     const prev = offsetsRef.current;
     // 退场塌缩进行中：宿主 max-height 过渡本身在推动同列卡片平滑上移，
     // 此刻的位移已由布局动画覆盖，再叠 FLIP 会双重补偿。
@@ -118,7 +119,7 @@ export function WorkStream<T = TaskOverviewItem>({
     // 直接跳过 FLIP，只更新快照，避免卡片在拖拽中滞后跟手。
     const widthChanged = widthRef.current !== 0 && widthRef.current !== node.clientWidth;
     widthRef.current = node.clientWidth;
-    if (prev && !collapseInProgress && !widthChanged && !prefersReducedMotion()) {
+    if (prev && !collapseInProgress && !widthChanged && allowed) {
       const current = measureOffsets(node);
       for (const [key, after] of current) {
         const before = prev.get(key);
@@ -126,29 +127,32 @@ export function WorkStream<T = TaskOverviewItem>({
         const dx = before.left - after.left;
         const dy = before.top - after.top;
         if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
-        after.el.animate(
+        motions.push(animateVisual(after.el,
           [
             { transform: `translate(${dx}px, ${dy}px)` },
             { transform: 'translate(0, 0)' },
           ],
-          { duration: FLIP_MS, easing: FLIP_EASING },
-        );
+          { duration, easing },
+        ));
       }
     }
     offsetsRef.current = measureOffsets(node);
-    if (collapseInProgress && !prefersReducedMotion()) {
+    if (collapseInProgress && allowed && typeof requestAnimationFrame === 'function') {
       // 塌缩期间宿主高度逐帧在变，快照要跟着刷新；否则移除瞬间会拿塌缩前的
       // 旧位置做反向补偿，出现「先跳回再滑一次」的双重动画。
       const tick = () => {
         const current = ref.current;
-        if (!current || current.querySelector('.is-exiting') === null) return;
+        if (!current || !motionAllowed() || current.querySelector('.is-exiting') === null) return;
         offsetsRef.current = measureOffsets(current);
         rafRef.current = requestAnimationFrame(tick);
       };
       rafRef.current = requestAnimationFrame(tick);
     }
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [columnCount, layoutKey, measureOffsets]);
+    return () => {
+      if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(rafRef.current);
+      motions.forEach(motion => motion.cancel());
+    };
+  }, [columnCount, layoutKey, measureOffsets, allowed]);
 
   if (!columns) {
     return (

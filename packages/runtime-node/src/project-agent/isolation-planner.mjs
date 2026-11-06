@@ -1,3 +1,5 @@
+import { executionProtection } from './execution-resources.mjs';
+
 export const MIN_WORKTREE_FREE_BYTES = 2 * 1024 ** 3;
 export const FAILED_WORKTREE_RETENTION_MS = 7 * 24 * 60 * 60_000;
 const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
@@ -9,10 +11,10 @@ export function decideIsolation(plan, facts = {}, plans = []) {
   if (facts.ok === false) return { isolation: 'wait', reason: 'isolation_failed' };
   if (facts.git !== true) return { isolation: 'none', reason: null };
   const requested = origin.isolation || 'auto';
-  const otherWriter = plans.some(other => other.planId !== plan.planId
+  const otherWriter = facts.resourceBusy === true || plans.some(other => other.planId !== plan.planId
     && other.delegationOrigin?.workspaceId === origin.workspaceId
     && other.delegationOrigin?.readOnly !== true
-    && other.delegationOrigin?.phase === 'running' && !TERMINAL.has(other.status));
+    && executionProtection(other) !== 'released');
   if (requested === 'none') return { isolation: 'none', reason: otherWriter ? 'write_slot' : null };
   if (facts.existingWorktree === true) return { isolation: 'worktree', reason: null };
   if (requested !== 'worktree' && !otherWriter && !facts.dirty) return { isolation: 'none', reason: null };
@@ -21,7 +23,7 @@ export function decideIsolation(plan, facts = {}, plans = []) {
   return { isolation: 'worktree', reason: null };
 }
 
-export function createIsolationPlanner({ readFacts, isolatePlan, recordIsolation, discardLine,
+export function createIsolationPlanner({ readFacts, inspectResources = () => ({ allowed: true }), isolatePlan, recordIsolation, discardLine,
   recordOrigin, now = () => new Date().toISOString() } = {}) {
   const inFlight = new Map();
   async function prepare(plan, plans = []) {
@@ -31,6 +33,8 @@ export function createIsolationPlanner({ readFacts, isolatePlan, recordIsolation
       let facts;
       try { facts = plan.delegationOrigin.readOnly === true ? {} : await readFacts(plan); }
       catch { facts = { ok: false }; }
+      const resources = inspectResources(plan);
+      facts = { ...facts, resourceBusy: resources.allowed === false && ['owner', 'protection'].includes(resources.blocker?.kind) };
       const decision = decideIsolation(plan, facts, plans);
       let next = plan;
       let reason = decision.isolation === 'wait' ? decision.reason : null;
@@ -56,6 +60,8 @@ export function createIsolationPlanner({ readFacts, isolatePlan, recordIsolation
   }
   async function cleanup(plan) {
     if (!plan?.deliveryBinding?.worktreePath) return plan;
+    if (executionProtection(plan) !== 'released') return plan;
+    if (plan.delegationOrigin?.cancellation?.preserveArtifacts === true || plan.delegationOrigin?.retainedForRecovery === true) return plan;
     if (plan.deliveryHandoff?.status === 'delivered' || plan.status === 'cancelled') {
       const result = await discardLine(plan, { deleteBranch: false });
       return result?.ok ? result.plan : plan;

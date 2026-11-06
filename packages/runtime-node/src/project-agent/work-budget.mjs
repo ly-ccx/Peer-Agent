@@ -1,5 +1,6 @@
 import { verificationDispatchTarget } from './verification-dispatch-recovery.mjs';
 import { randomUUID } from 'node:crypto';
+import { runtimeWorkHeld } from './runtime-disposition.ts';
 import { executionBindingCurrent } from './coordination-kernel.mjs';
 import { resolveWorkBudgetPolicy, effectiveWorkLimits, budgetBoundary, budgetReservationBoundary, legacyBudgetMigration } from './work-budget-policy.mjs';
 export { DEFAULT_WORK_BUDGET } from './work-budget-policy.mjs';
@@ -37,7 +38,7 @@ export function createWorkBudgetGuard(profile) {
   function change(update, requireActive = true) {
     store.assertOwner();
     const work = readWork();
-    const stopped = work && ['paused', 'cancelled', 'budget_limited', 'blocked_system', 'coalesced'].includes(work.state);
+    const stopped = work && (runtimeWorkHeld(work) || ['paused', 'cancelled', 'budget_limited', 'blocked_system', 'coalesced'].includes(work.state));
     const stopsExecutor = profile.role === 'project_agent' || work?.stopScope !== 'reply' || ['budget_limited', 'coalesced'].includes(work?.state);
     if (!work || requireActive && stopped && stopsExecutor) throw new Error('work_execution_stopped');
     if (requireActive && profile.coordinationBinding) {
@@ -45,6 +46,10 @@ export function createWorkBudgetGuard(profile) {
       const mandate = state.mandates?.[profile.coordinationBinding.workId];
       const transition = Object.values(state.transitions || {}).find(row => row.executionEpoch === profile.coordinationBinding.executionEpoch);
       if (!executionBindingCurrent(mandate, transition, profile.coordinationBinding)) throw new Error('execution_revision_stale');
+    }
+    if (requireActive && profile.sessionId) {
+      const control = store.readSessionControl?.(profile.sessionId);
+      if (control && (control.phase !== 'settled' || control.kind === 'cancel')) throw new Error('work_execution_stopped');
     }
     const limits = effectiveWorkLimits(work.budget, binding.limits);
     const budget = { modelRequests: 0, toolCalls: 0, tokens: 0, costUsd: 0, unknownUsage: false, unknownCost: false, attempts: {},

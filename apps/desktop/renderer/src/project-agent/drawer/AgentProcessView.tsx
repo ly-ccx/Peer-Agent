@@ -1,3 +1,4 @@
+import { MotionDetails } from '../../app/components/MotionDetails';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { BotToolRound } from '../state/botConversationState';
 import { agentProcessEntries, toolPreviewText, toolStepStatus } from './agentProcess';
@@ -24,12 +25,12 @@ export function AgentProcessView({
           </div>
           {entry.summary ? <p className="bot-process-summary">{entry.summary}</p> : null}
           {entry.count !== undefined ? <p className="bot-process-summary">{i18n.t('projectAgent.process.count', { count: entry.count })}</p> : null}
-          <details className="bot-process-technical">
+          <MotionDetails className="bot-process-technical">
             <summary><PeerIcon name="chevronRight" size={12} />{i18n.t('projectAgent.process.technical')}</summary>
             <p>{entry.name}</p>
             <span>{i18n.t('projectAgent.process.input')}{entry.inputPreview.redacted ? ` · ${i18n.t('projectAgent.process.redacted')}` : ''}{entry.inputPreview.truncated ? ` · ${i18n.t('projectAgent.process.truncated')}` : ''}</span><pre tabIndex={0}>{toolPreviewText(entry.inputPreview, { empty: i18n.t('projectAgent.process.noOutput'), limit: i18n.t('projectAgent.process.previewLimit') })}</pre>
             <span>{i18n.t('projectAgent.process.result')}{entry.resultPreview.redacted ? ` · ${i18n.t('projectAgent.process.redacted')}` : ''}{entry.resultPreview.truncated ? ` · ${i18n.t('projectAgent.process.truncated')}` : ''}</span><pre tabIndex={0}>{toolPreviewText(entry.resultPreview, { empty: i18n.t('projectAgent.process.noOutput'), limit: i18n.t('projectAgent.process.previewLimit') })}</pre>
-          </details>
+          </MotionDetails>
         </div>
       ))}
     </section>

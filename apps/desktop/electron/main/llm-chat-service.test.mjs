@@ -3420,9 +3420,36 @@ describe('force-complete final persist', () => {
 
 // Exercise the actual chat adapter, rather than only the terminal seam in isolation.
 describe('asynchronous terminal commit barrier', () => {
+  it('does not swallow a synchronous terminal persistence failure or publish completion', async () => {
+    const { createLlmChatService } = await loadService();
+    const previousFetch = globalThis.fetch, events = [], patches = [];
+    globalThis.fetch = async () => new Response(sse([
+      { choices: [{ delta: { content: 'retained answer' } }] }, '[DONE]',
+    ]), { status: 200 });
+    try {
+      const service = createLlmChatService({ llmConfigStore: {
+        listProviders: () => [{ id: 'p1', provider: 'openai', baseUrl: 'https://example.test/v1', model: 'test-model', isDefault: true, apiKeyConfigured: true }],
+        getDecryptedApiKey: () => 'test-key',
+      }, conversationStore: { addUsage: () => null, updateMessageById() {},
+        patchStreamingMessage(id, messageId, patch) { patches.push(patch); },
+        commitStreamingMessage() { throw Object.assign(Error('write failed'), { code: 'EIO' }); },
+      } });
+      const outcome = await service.sendMessage({ messages: [{ role: 'user', content: 'hi' }],
+        conversationId: 'sync-terminal', assistantMessageId: 'answer', streamId: 'sync-terminal',
+        webContents: { send: channel => events.push(channel) },
+      });
+      assert.equal(outcome.terminalStatus, 'error');
+      assert.equal(outcome.failureReason, 'conversation_persistence_failed: EIO');
+      assert.equal(outcome.recoverable, false);
+      assert.equal(patches.at(-1).content, 'retained answer');
+      assert.deepEqual(patches.at(-1).streamFailure, { code: 'conversation_persistence_failed', causeCode: 'EIO' });
+      assert.equal(events.includes('chat:stream:done'), false);
+      assert.ok(events.includes('chat:stream:error'));
+    } finally { globalThis.fetch = previousFetch; }
+  });
   for (const fail of [false, true]) it(`waits for storage before SDK/UI completion (${fail ? 'disk failure' : 'success'})`, async () => {
     const { createLlmChatService } = await loadService();
-    const previousFetch = globalThis.fetch, events = [];
+    const previousFetch = globalThis.fetch, events = [], failedPatches = [];
     let finish, admitted;
     const admission = new Promise(resolve => { admitted = resolve; });
     const pending = new Promise((resolve, reject) => { finish = fail ? () => reject(Object.assign(Error('disk full'), { code: 'ENOSPC' })) : resolve; });
@@ -3432,7 +3459,7 @@ describe('asynchronous terminal commit barrier', () => {
     try {
       const service = createLlmChatService({ llmConfigStore: { listProviders: () => [{ id: 'p1', provider: 'openai', baseUrl: 'https://example.test/v1', model: 'test-model', isDefault: true, apiKeyConfigured: true }], getDecryptedApiKey: () => 'test-key' },
         emitRuntimeEvent: event => events.push(event.type),
-        conversationStore: { addUsage: () => null, updateMessageById() {}, patchStreamingMessage() {},
+        conversationStore: { addUsage: () => null, updateMessageById() {}, patchStreamingMessage(id, messageId, patch) { if (patch.streamFailure) failedPatches.push(patch); },
           commitStreamingMessage(id, messageId, patch) { assert.equal(patch.content, 'durable answer'); admitted(); return pending; } },
       });
       let released = false;
@@ -3448,6 +3475,10 @@ describe('asynchronous terminal commit barrier', () => {
       assert.equal(released, true);
       if (fail) {
         assert.equal(outcome.terminalStatus, 'error');
+        assert.equal(outcome.failureReason, 'conversation_persistence_failed: ENOSPC');
+        assert.equal(outcome.recoverable, false);
+        assert.equal(failedPatches.at(-1).content, 'durable answer');
+        assert.equal(failedPatches.at(-1).streamFailure.causeCode, 'ENOSPC');
         assert.equal(events.includes('message.completed'), false);
         assert.equal(events.includes('chat:stream:done'), false);
         assert.ok(events.includes('chat:stream:error'));

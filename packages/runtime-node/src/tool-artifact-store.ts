@@ -12,6 +12,7 @@ import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs
 import { join } from 'node:path';
 import { MICROCOMPACTION_CONFIG, boundProviderToolResultContent } from '@peer-agent/runtime-core';
 import { pathOf } from './data-store.mjs';
+import { projectDelegationContinuation } from './project-agent/model-tool-result.ts';
 
 /** 与共享 microcompact triggerChars 同阈值:小结果 inline,大结果材料化。 */
 export const TOOL_RESULT_MATERIALIZE_CONFIG = Object.freeze({
@@ -147,6 +148,7 @@ export function materializeToolResultContent(options: {
   readonly isError?: boolean;
   readonly baseDir?: string;
   readonly inlineMaxChars?: number;
+  readonly execution?: unknown;
 }): MaterializedToolResult {
   const content = String(options.content ?? '');
   const inlineMax = options.inlineMaxChars ?? TOOL_RESULT_MATERIALIZE_CONFIG.inlineMaxChars;
@@ -174,14 +176,27 @@ export function materializeToolResultContent(options: {
   const multiplier = options.isError ? TOOL_RESULT_MATERIALIZE_CONFIG.errorPreviewMultiplier : 1;
   const headChars = TOOL_RESULT_MATERIALIZE_CONFIG.previewHeadChars * multiplier;
   const tailChars = TOOL_RESULT_MATERIALIZE_CONFIG.previewTailChars * multiplier;
-  const ref = {
+  const continuation = projectDelegationContinuation(options.execution);
+  const baseRef = {
     kind: 'local_tool_result_ref',
-    tool: options.tool ?? undefined,
+    tool: continuation?.tool ?? options.tool ?? undefined,
     status: options.isError ? 'error' : 'ok',
     artifactRef: artifact.artifactPath,
     originalChars: content.length,
     originalLines: artifact.lineCount,
+    ...(continuation ? { structuredPreview: continuation.facts } : {}),
     stdoutPreview: `${content.slice(0, headChars)}\n...[full output preserved at artifact; middle omitted]...\n${content.slice(-tailChars)}`,
+  };
+  if (continuation) {
+    return {
+      content: JSON.stringify({ ...baseRef, note: continuation.note }),
+      materialized: true,
+      artifactPath: artifact.artifactPath,
+    };
+  }
+
+  const ref = {
+    ...baseRef,
     ...(extractKeyFindings(content, TOOL_RESULT_MATERIALIZE_CONFIG.maxKeyFindings).length > 0
       ? { keyFindings: extractKeyFindings(content, TOOL_RESULT_MATERIALIZE_CONFIG.maxKeyFindings) }
       : {}),

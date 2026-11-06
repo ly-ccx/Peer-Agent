@@ -29,7 +29,12 @@ function fail(code) {
 }
 
 function clip(value, limit = PREVIEW_MAX) {
-  return Array.from(String(value ?? '').replace(/\s+/g, ' ').trim()).slice(0, limit).join('');
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  if (!Number.isInteger(limit) || limit < 0) return Array.from(text).slice(0, limit).join('');
+  if (text.length <= limit) return text;
+  let clipped = '', length = 0;
+  for (const character of text) { if (length++ === limit) break; clipped += character; }
+  return clipped;
 }
 
 function messageKind(message) {
@@ -358,6 +363,11 @@ export function createBotDirectory({
 
   return {
     list,
+    /** Identity-only lookup for local intent; never project history or task state. */
+    hasActiveBot(workspaceId) {
+      const profile = profiles.read(workspaceId);
+      return Boolean(profile && profile.status !== 'archived');
+    },
     attention: workspaceId => {
       if (workspaceId) {
         const profile = profiles.read(workspaceId);

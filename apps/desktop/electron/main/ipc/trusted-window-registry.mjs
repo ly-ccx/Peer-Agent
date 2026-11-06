@@ -1,5 +1,7 @@
 const TRUSTED_WINDOW_ROLES = new Set([
   'main',
+  'resource',
+  'browser-resource',
   'quick-chat',
   'quick-chat-popover',
   'permission-drag-float',

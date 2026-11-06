@@ -7,7 +7,10 @@ import {
   checkForCliUpdate,
   compareVersions,
   createCliUpdateController,
+  lookupCliUpdate,
   resolveInstallSource,
+  resolveReleaseInstallTarget,
+  runPeerUpdate,
   shouldCheckForUpdates,
   updateChannel,
 } from '../../../apps/tui/src/cli-update.ts';
@@ -33,7 +36,12 @@ describe('CLI update versions', () => {
     assert.equal(compareVersions('0.0.2-beta.1', '0.0.2-beta.2'), -1);
     assert.equal(compareVersions('0.0.2-beta.9', '0.0.2'), -1);
     assert.equal(compareVersions('0.0.3', '0.0.2'), 1);
+    assert.equal(compareVersions('0.1.0-beta.5', '0.1.0-rc.1'), -1);
+    assert.equal(compareVersions('0.1.0-rc.9', '0.1.0-rc.10'), -1);
+    assert.equal(compareVersions('0.1.0-rc.36', '0.1.0'), -1);
+    assert.equal(compareVersions('0.0.18', '0.1.0-rc.26'), -1);
     assert.equal(updateChannel('0.0.2-beta.1'), 'beta');
+    assert.equal(updateChannel('0.1.0-rc.26'), 'rc');
     assert.equal(updateChannel('0.0.2'), 'stable');
   });
 });
@@ -115,6 +123,49 @@ describe('CLI update discovery', () => {
     assert.equal(stable?.source, 'release');
   });
 
+  it('keeps rc releases on the rc channel', async () => {
+    const releases = [
+      { tag_name: 'v0.1.0-rc.36', prerelease: true, draft: false },
+      { tag_name: 'v0.1.0-rc.26', prerelease: true, draft: false },
+      { tag_name: 'v0.1.0-beta.5', prerelease: true, draft: false },
+      { tag_name: 'v0.0.18', prerelease: false, draft: false },
+    ];
+    const rc = await checkForCliUpdate({
+      currentVersion: '0.1.0-rc.26', force: true, statePath: statePath(),
+      fetchImpl: async () => response(releases),
+      env: { PEER_AGENT_INSTALL_SOURCE: 'npm' },
+    });
+    assert.equal(rc?.latestVersion, '0.1.0-rc.36');
+    assert.equal(rc?.source, 'npm');
+
+    const beta = await checkForCliUpdate({
+      currentVersion: '0.1.0-beta.1', force: true, statePath: statePath(),
+      fetchImpl: async () => response(releases),
+      env: {},
+    });
+    assert.equal(beta?.latestVersion, '0.1.0-beta.5');
+    assert.equal(beta?.source, 'release');
+  });
+
+  it('reports lookup failures without treating them as up to date', async () => {
+    const failed = await lookupCliUpdate({
+      currentVersion: '0.1.0-rc.26', force: true, statePath: statePath(),
+      fetchImpl: async () => { throw new Error('offline'); },
+      env: {},
+    });
+    assert.equal(failed.outcome, 'failed');
+    assert.match(failed.message, /offline/);
+
+    const skipped = await lookupCliUpdate({
+      currentVersion: '0.0.0-dev', force: true, statePath: statePath(),
+      fetchImpl: async () => { throw new Error('should not fetch'); },
+      env: {},
+    });
+    assert.deepEqual(skipped, {
+      outcome: 'skipped', reason: 'unrecognized-version', currentVersion: '0.0.0-dev',
+    });
+  });
+
   it('limits background checks using the persisted timestamp', async () => {
     let calls = 0;
     const path = statePath();
@@ -135,5 +186,54 @@ describe('CLI update discovery', () => {
       env: {},
     });
     assert.equal(result, null);
+  });
+});
+
+describe('peer update command', () => {
+  const update = {
+    currentVersion: '0.1.0-rc.26',
+    latestVersion: '0.1.0-rc.36',
+    source: 'npm',
+    releaseUrl: 'https://example.test/rc.36',
+  };
+
+  it('checks without installing, then installs only when requested', async () => {
+    let installs = 0;
+    const lines = [];
+    const checked = await runPeerUpdate({ checkOnly: true }, {
+      lookup: async () => ({ outcome: 'available', update }),
+      install: async () => { installs += 1; },
+      stdout: (line) => lines.push(line),
+      stderr: (line) => lines.push(line),
+    });
+    assert.equal(checked, 0);
+    assert.equal(installs, 0);
+    assert.match(lines.join('\n'), /0\.1\.0-rc\.26 → 0\.1\.0-rc\.36 \(rc, npm\)/);
+
+    lines.length = 0;
+    const installed = await runPeerUpdate({ checkOnly: false }, {
+      lookup: async () => ({ outcome: 'available', update }),
+      install: async () => { installs += 1; },
+      stdout: (line) => lines.push(line),
+      stderr: (line) => lines.push(line),
+    });
+    assert.equal(installed, 0);
+    assert.equal(installs, 1);
+    assert.match(lines.join('\n'), /Restart peer/);
+  });
+
+  it('keeps the current version when install fails and refuses foreign executables', async () => {
+    const lines = [];
+    const failed = await runPeerUpdate({ checkOnly: false }, {
+      lookup: async () => ({ outcome: 'available', update }),
+      install: async () => { throw new Error('permission denied'); },
+      stdout: (line) => lines.push(line),
+      stderr: (line) => lines.push(line),
+    });
+    assert.equal(failed, 1);
+    assert.match(lines.join('\n'), /permission denied/);
+
+    assert.equal(resolveReleaseInstallTarget('/usr/local/bin/peer'), '/usr/local/bin/peer');
+    assert.throws(() => resolveReleaseInstallTarget('/usr/local/bin/bun'), /refusing to replace/);
   });
 });

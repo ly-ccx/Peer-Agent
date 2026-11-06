@@ -3,11 +3,22 @@
  * 设置写入由调用方只经已有 IPC 发出。
  */
 
-import type { CoordinationSessionFacts, SessionVerificationDetail, VerificationProgress } from '@peer-agent/protocol';
+import type { ExecutionResourceBlocker, CoordinationSessionFacts, SessionVerificationDetail, VerificationProgress } from '@peer-agent/protocol';
 import type { I18nRuntime } from '@peer-agent/i18n';
 
 export const DRAWER_WIDTH = 380;
 export const DRAWER_PUSH_MIN_WIDTH = 960;
+
+/** 档案抽屉可拖拽宽度的上下限。
+ *  下限保证设置/任务表单不被挤成两行；上限在 960 最小 push 窗口下仍给中间
+ *  会话区留下可用宽度（960 - 520 = 440px），不把会话压没。 */
+export const DRAWER_MIN_WIDTH = 320;
+export const DRAWER_MAX_WIDTH = 520;
+
+export function clampDrawerWidth(width: number): number {
+  if (!Number.isFinite(width)) return DRAWER_WIDTH;
+  return Math.min(DRAWER_MAX_WIDTH, Math.max(DRAWER_MIN_WIDTH, Math.round(width)));
+}
 
 export type DrawerTab = 'overview' | 'tasks' | 'objectives' | 'memory' | 'settings';
 export type DrawerLayout = 'push' | 'cover';
@@ -18,6 +29,8 @@ export interface DrawerMemory {
   readonly tab: DrawerTab;
   readonly sessionId: string | null;
   readonly objectiveId?: string;
+  /** 用户拖拽后的面板宽度。缺省表示从未拖过，回落到 CSS 的 --pa-drawer-width。 */
+  readonly width?: number;
 }
 
 export interface DrawerStore {
@@ -26,11 +39,15 @@ export interface DrawerStore {
 }
 
 export interface DrawerSession {
+  readonly parentSessionId?: string;
+  readonly followUp?: import('@peer-agent/protocol').FollowUpProjection;
+  readonly planId?: string;
   readonly sourceRevision?: string;
   readonly observationRevision?: string;
   readonly verification?: SessionVerificationDetail;
   readonly verificationProgress?: VerificationProgress;
   readonly coordination?: CoordinationSessionFacts;
+  readonly withdrawalUnknownCallIds?: readonly string[];
   readonly sessionId: string;
   readonly title: string;
   readonly status: string;
@@ -45,6 +62,7 @@ export interface DrawerSession {
   readonly summary: string;
   readonly evidenceRefs: readonly string[];
   readonly progress: string;
+  readonly resourceBlocker?: ExecutionResourceBlocker;
   readonly queuedBehind?: readonly { readonly sessionId: string; readonly title: string }[];
   readonly queueReason?: string;
   readonly supersededBy?: string;
@@ -127,6 +145,12 @@ export function selectDrawerTab(memory: DrawerMemory, tab: DrawerTab): DrawerMem
   return { ...memory, open: true, tab };
 }
 
+/** 拖拽落定宽度。只写合法值，避免把 NaN / 越界宽度带进持久化。 */
+export function resizeDrawer(memory: DrawerMemory, width: number): DrawerMemory {
+  if (!Number.isFinite(width)) return memory;
+  return { ...memory, width: clampDrawerWidth(width) };
+}
+
 /** 点「来源」时打开档案，停在任务页并选中这条任务。 */
 export function locateDrawerSession(memory: DrawerMemory, sessionId: string): DrawerMemory {
   const id = sessionId.trim();
@@ -139,20 +163,44 @@ export function readDrawerMemory(workspaceId: string, store: DrawerStore): Drawe
   try {
     const parsed = JSON.parse(raw) as Partial<DrawerMemory>;
     const tab = TABS.has(parsed.tab as DrawerTab) ? parsed.tab as DrawerTab : 'overview';
-    const sessionId = typeof parsed.sessionId === 'string' && parsed.sessionId.trim()
-      ? parsed.sessionId.trim()
-      : null;
-    return { open: parsed.open === true, tab, sessionId, ...(typeof parsed.objectiveId==='string'&&parsed.objectiveId ? {objectiveId:parsed.objectiveId} : {}) };
+    const rawWidth = (parsed as { width?: unknown }).width;
+    const width = typeof rawWidth === 'number' && Number.isFinite(rawWidth)
+      ? clampDrawerWidth(rawWidth)
+      : undefined;
+    return {
+      open: false,
+      tab,
+      sessionId: null,
+      ...(width === undefined ? {} : {width}),
+    };
   } catch {
     return closedDrawer();
   }
 }
 
 export function writeDrawerMemory(workspaceId: string, memory: DrawerMemory, store: DrawerStore): void {
-  store.set(drawerStorageKey(workspaceId), JSON.stringify(memory));
+  // Opening and task/objective navigation belong to the current interaction.
+  store.set(drawerStorageKey(workspaceId), JSON.stringify({
+    tab: memory.tab,
+    ...(memory.width === undefined ? {} : { width: memory.width }),
+  }));
 }
 
-export function taskGroup(status: string): TaskGroup {
+export function taskGroup(
+  status: string,
+  followUp?: import('@peer-agent/protocol').FollowUpProjection,
+): TaskGroup {
+  // 宿主唯一判定优先（ADR 110）：分组不再按 status 各自过滤。
+  // 只有真实人工门槛进「需要你」；技术跟进/核验/停止回执未决留在「进行中」；
+  // 已签收与已确认停止进「已完成」；暂停、被完成替换承接仍单列，不用完成态遮盖承接关系。
+  if (followUp) {
+    if (followUp.inCurrentList) {
+      if (followUp.owner === 'user') return 'needsYou';
+      return QUEUED.has(status) ? 'queued' : 'running';
+    }
+    return followUp.reason === 'paused' || followUp.reason === 'superseded' ? 'paused' : 'done';
+  }
+  // 旧记录（宿主未下发 followUp）：保持既有状态表兜底，不新造终态。
   if (NEEDS_YOU.has(status)) return 'needsYou';
   if (RUNNING.has(status)) return 'running';
   if (QUEUED.has(status)) return 'queued';
@@ -168,13 +216,17 @@ export function groupDrawerSessions(sessions: readonly DrawerSession[]): Record<
     paused: [],
     done: [],
   };
-  for (const session of sessions) groups[taskGroup(session.status)].push(session);
+  for (const session of sessions) groups[taskGroup(session.status, session.followUp)].push(session);
   return groups;
 }
 
 export function formatDrawerSessionStatus(session: DrawerSession, i18n: Pick<I18nRuntime, 't'>): string {
+  if (session.status === 'result_ready' && session.followUp?.owner === 'bot') return i18n.t('projectAgent.chat.work.resultSettling');
   if (['stopping','awaiting_outcome'].includes(session.status)) return i18n.t(`projectAgent.chat.sessionState.${session.status}` as 'projectAgent.chat.sessionState.stopping' | 'projectAgent.chat.sessionState.awaiting_outcome');
   if (session.coordination?.action === 'handoff' && session.coordination.phase === 'stopping') return i18n.t('projectAgent.task.coordination.handoff');
+  if (session.resourceBlocker?.kind === 'protection') return i18n.t(session.resourceBlocker.code === 'execution_outcome_unknown'
+    ? 'projectAgent.drawer.resourceOutcomeUnknown' : 'projectAgent.drawer.resourceStopUnconfirmed');
+  if (session.resourceBlocker?.kind === 'recovery') return i18n.t('projectAgent.drawer.resourceRecovery');
   if (session.queueReason === 'dependency_missing') return i18n.t('projectAgent.drawer.dependencyMissing');
   if (session.queueReason === 'disk_space') return i18n.t('projectAgent.drawer.diskSpace');
   if (session.queueReason === 'isolation_failed') return i18n.t('projectAgent.drawer.isolationFailed');
@@ -193,6 +245,10 @@ export function readDrawerSession(raw: unknown): DrawerSession | null {
   const origin = record.origin && typeof record.origin === 'object'
     ? record.origin as Record<string, unknown>
     : {};
+  const cancellation = origin.cancellation && typeof origin.cancellation === 'object'
+    ? origin.cancellation as Record<string, unknown> : {};
+  const withdrawalUnknownCallIds = record.status === 'cancelled' && cancellation.phase === 'completed'
+    && cancellation.disposition === 'user_withdrawn' ? readStringList(cancellation.evidenceCalls) : [];
   const report = record.report && typeof record.report === 'object'
     ? record.report as Record<string, unknown>
     : {};
@@ -204,11 +260,15 @@ export function readDrawerSession(raw: unknown): DrawerSession | null {
     && ['ready', 'requesting', 'tools', 'completed'].includes(progress.phase);
   return {
     sessionId,
+    ...(readString(origin.parentSessionId) ? { parentSessionId: readString(origin.parentSessionId) } : {}),
+    ...(readString(report.planId) || readString(record.planId) ? { planId: readString(report.planId) || readString(record.planId) } : {}),
     sourceRevision: readString(record.sourceRevision),
     observationRevision: readString(record.observationRevision),
     ...(verification ? { verification } : {}),
     ...(validProgress ? { verificationProgress: progress } : {}),
+    ...(readFollowUpProjection(record.followUp) ? { followUp: readFollowUpProjection(record.followUp) } : {}),
     ...(readCoordination(record.coordination) ? {coordination:readCoordination(record.coordination)} : {}),
+    ...(withdrawalUnknownCallIds.length ? { withdrawalUnknownCallIds } : {}),
     title: readString(record.title) || sessionId,
     status: readString(record.status),
     statusLabel: readString(record.statusLabel),
@@ -224,6 +284,7 @@ export function readDrawerSession(raw: unknown): DrawerSession | null {
     evidenceRefs: readStringList(report.evidenceRefs),
     progress: readString(record.statusLabel),
     queueReason: readString(record.queueReason),
+    ...(readResourceBlocker(record.resourceBlocker) ? { resourceBlocker: readResourceBlocker(record.resourceBlocker) } : {}),
     supersededBy: readString(record.supersededBy),
     queuedBehind: Array.isArray(record.queuedBehind) ? record.queuedBehind.flatMap(item => {
       if (!item || typeof item !== 'object') return [];
@@ -338,10 +399,48 @@ function readVerification(value: unknown, sessionId: string): SessionVerificatio
 function readCoordination(value: unknown): CoordinationSessionFacts | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const row=value as Record<string,unknown>;
-  const action=['parallel','augment','revise','query','answer','cancel','replace','handoff'].find(item=>item===row.action);
+  const action=['parallel','augment','revise','query','answer','cancel','replace','handoff','resume'].find(item=>item===row.action);
   const phase=['recorded','stopping','awaiting_outcome','ready','started','completed','blocked'].find(item=>item===row.phase);
   if (!action || !phase || !readString(row.operationId) || !Number.isSafeInteger(row.goalRevision)) return undefined;
   return {operationId:readString(row.operationId), action:action as CoordinationSessionFacts['action'], phase:phase as CoordinationSessionFacts['phase'],
+    executionAdmission: ['queued', 'admitted', 'rejected'].includes(String(row.executionAdmission)) ? row.executionAdmission as CoordinationSessionFacts['executionAdmission'] : undefined,
+    executionEffect: ['pending', 'applied', 'unknown', 'rejected'].includes(String(row.executionEffect)) ? row.executionEffect as CoordinationSessionFacts['executionEffect'] : undefined,
+    executionAttemptRef: readString(row.executionAttemptRef),
     goalRevision:row.goalRevision as number, reason:readString(row.reason), priorSessionId:readString(row.priorSessionId),
     replacementSessionId:readString(row.replacementSessionId), replacementTitle:readString(row.replacementTitle)};
+}
+
+
+
+/**
+ * 宿主下发的跟进责任（ADR 110）。`inCurrentList` 是宿主派生事实：与 `owner` 不一致时按
+ * `owner` 纠正，renderer 不能据此伪造“退出列表”或“留在列表”。字段残缺返回 undefined，
+ * 由消费端 fail closed。`reason` 只作诊断。
+ */
+function readFollowUpProjection(value: unknown): import('@peer-agent/protocol').FollowUpProjection | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const record = value as Record<string, unknown>;
+  const owner = record.owner;
+  const reason = readString(record.reason);
+  if ((owner !== 'bot' && owner !== 'user' && owner !== 'none') || !reason) return undefined;
+  return {
+    owner,
+    inCurrentList: owner !== 'none',
+    reason: reason as import('@peer-agent/protocol').FollowUpProjection['reason'],
+  };
+}
+
+function readResourceBlocker(raw: unknown): ExecutionResourceBlocker | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const row = raw as Record<string, unknown>;
+  if (row.kind === 'recovery' && readString(row.code)) return { kind: 'recovery', code: readString(row.code), nextAction: 'inspect_resource_recovery', resourceRef: readString(row.resourceRef) || undefined };
+  const resourceRef = readString(row.resourceRef), claimId = readString(row.claimId);
+  if (!resourceRef || !claimId) return undefined;
+  if (row.kind === 'owner' && row.code === 'resource_busy' && readString(row.sessionId)) return {
+    kind: 'owner', code: 'resource_busy', resourceRef, claimId, sessionId: readString(row.sessionId), title: readString(row.title) };
+  if (row.kind === 'protection' && (row.code === 'execution_outcome_unknown' || row.code === 'execution_stop_unconfirmed')) return {
+    kind: 'protection', code: row.code, resourceRef, claimId, sessionId: readString(row.sessionId) || undefined,
+    nextAction: row.code === 'execution_outcome_unknown' ? 'reconcile_execution_outcome' : 'confirm_execution_stopped',
+    operationId: readString(row.operationId) || undefined, evidenceCalls: readStringList(row.evidenceCalls) };
+  return undefined;
 }

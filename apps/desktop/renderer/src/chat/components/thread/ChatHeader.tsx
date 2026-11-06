@@ -1,3 +1,4 @@
+import { MotionSurface } from '../../../app/components/MotionSurface';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type { LocalAccessLevel } from '@peer-agent/protocol';
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
@@ -227,7 +228,7 @@ export function ChatHeader({
               <circle cx="12" cy="19" r="1" />
             </svg>
           </button>
-          {menuOpen ? (
+          <MotionSurface>{menuOpen ? (
             <div className="chat-header-menu" role="menu">
               {menuActions.map((action) => (
                 <button
@@ -245,7 +246,7 @@ export function ChatHeader({
                 </button>
               ))}
             </div>
-          ) : null}
+          ) : null}</MotionSurface>
         </div>
       </div>
 

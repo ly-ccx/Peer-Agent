@@ -58,7 +58,7 @@ test('running and blocked tasks never get a result-signoff card; manual review h
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('RC5 已保存的手输回答关闭对话选择，而引用其它消息和任务批准不会被推断', () => {
+test('继续对话关闭旧选择，但不推断选项、任务批准或改写历史', () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'peer-reply-question-'));
   const messages = [{ id: 'r', kind: 'agent_reply', question: { options: ['A', 'B'] } }];
   try {
@@ -69,7 +69,9 @@ test('RC5 已保存的手输回答关闭对话选择，而引用其它消息和�
     const question = () => facts.cards('w').find(card => card.cardId === 'card:question:reply:r');
     assert.equal(question().resolvedState, 'open');
     messages.push({ kind: 'user_input', content: '手输答案', quoteRefs: ['other', '其它消息'] });
-    assert.equal(question().resolvedState, 'open');
+    assert.equal(question().resolvedState, 'resolved');
+    assert.deepEqual(question().actions, []);
+    assert.equal(messages[0].question.answered, undefined);
     messages.pop(); messages.push({ kind: 'user_input', content: '手输答案' });
     assert.equal(question().resolvedState, 'resolved');
     assert.equal(facts.cards('w').find(card => card.kind === 'approval').resolvedState, 'open');
@@ -97,6 +99,39 @@ test('a started-task reply does not count as delivery of its completed result', 
     assert.deepEqual(facts.delivery('w1').unreportedResults, []);
     status = 'accepted';
     assert.deepEqual(facts.delivery('w1').unreportedResults, []);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('cancellation sources follow the actual user withdrawal and require a fresh report for each host state', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'peer-cancellation-references-'));
+  const messages = [];
+  const rows = ['s1', 's2'].map(sessionId => ({ sessionId, status: 'stopping', sourceRevision: `source-${sessionId}`,
+    origin: { anchorMessageId: 'original-task', cancellation: { withdrawal: {
+      workspaceId: 'w', parentConversationId: 'parent', sessionId, anchorMessageId: 'cancel-all',
+    } } } }));
+  const expected = rows.map(row => ({ sessionId: row.sessionId, anchorMessageId: 'cancel-all' }));
+  try {
+    const facts = createDesktopProjectFacts({ runtimeRoot: root,
+      supervisor: { sessionsForProject: () => rows, acceptance: () => null },
+      profileStore: { read: () => ({ agentConversationId: 'parent' }) },
+      conversationStore: { getPersistedConversationHistory: () => ({ messages }) },
+      readCoordination: () => { throw Error('Reply references must not scan the coordination journal'); } });
+    assert.deepEqual(facts.delivery('w').unreportedResults, expected);
+    messages.push({ kind: 'agent_reply', sources: ['s1'], meta: { sessionStates: [
+      { sessionId: 's1', status: 'stopping', sourceRevision: 'source-s1' },
+    ] } });
+    assert.deepEqual(facts.delivery('w').unreportedResults, [expected[1]]);
+    rows[0].status = 'cancelled';
+    assert.deepEqual(facts.delivery('w').unreportedResults, expected);
+    messages.push({ kind: 'agent_reply', sources: ['s1', 's2'], meta: {
+      sessionStates: rows.map(row => ({ sessionId: row.sessionId, status: row.status, sourceRevision: row.sourceRevision })),
+    } });
+    assert.deepEqual(facts.delivery('w').unreportedResults, []);
+    rows[0].origin.cancellation.withdrawal.parentConversationId = 'other-parent';
+    messages.length = 0;
+    assert.deepEqual(facts.delivery('w').unreportedResults, [expected[1]]);
+    rows[1].origin.cancellation.withdrawal.sessionId = 'other-session';
+    assert.deepEqual(facts.delivery('w').unreportedResults, []);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

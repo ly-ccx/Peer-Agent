@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, renameSync, statSync, utimesSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import os from 'node:os';
 import path from 'node:path';
@@ -25,6 +25,28 @@ function event(kind, extra = {}) {
     payload: extra.payload ?? null,
   };
 }
+
+test('an empty batch never hides an external append, replacement or cursor rewind', () => {
+  const root = tempRoot();
+  try {
+    const inbox = createProjectInbox({ rootDir: root });
+    inbox.append('ws-1', [event('progress', { version: 'old' })]);
+    inbox.commitBatch('ws-1', { throughSeq: 1, ok: true });
+    assert.deepEqual(inbox.takeBatch('ws-1'), { events: [], throughSeq: 1 });
+    createProjectInbox({ rootDir: root }).append('ws-1', [event('progress', { version: 'new' })]);
+    assert.equal(inbox.takeBatch('ws-1').events[0].seq, 2);
+    inbox.commitBatch('ws-1', { throughSeq: 2, ok: true });
+    assert.deepEqual(inbox.takeBatch('ws-1'), { events: [], throughSeq: 2 });
+    const file = path.join(root, 'ws-1/inbox.jsonl'), before = statSync(file);
+    writeFileSync(file + '.replacement', JSON.stringify({ ...event('progress', { version: 'replaced' }), seq: 3 }) + '\n');
+    utimesSync(file + '.replacement', before.atime, before.mtime); renameSync(file + '.replacement', file);
+    assert.equal(inbox.takeBatch('ws-1').events[0].seq, 3);
+    inbox.commitBatch('ws-1', { throughSeq: 3, ok: true });
+    assert.deepEqual(inbox.takeBatch('ws-1'), { events: [], throughSeq: 3 });
+    writeFileSync(path.join(root, 'ws-1/inbox-cursor.json'), JSON.stringify({ seq: 0 }));
+    assert.equal(inbox.takeBatch('ws-1').events[0].seq, 3);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 test('重复 eventId 丢弃，重启后仍然只保留一条', () => {
   const root = tempRoot();

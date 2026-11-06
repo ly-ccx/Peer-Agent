@@ -1,0 +1,59 @@
+.pa-overflow {
+  position: relative;
+  display: inline-flex;
+}
+.pa-overflow-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 26px;
+  padding: 0 var(--space-2);
+  border-radius: var(--ui-radius-control);
+  border: 1px solid var(--chrome-hairline);
+  background: var(--paper-sheet);
+  color: var(--graphite-base);
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.pa-overflow-trigger:hover {
+  background: var(--chrome-hairline);
+}
+.pa-overflow-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 30;
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid var(--chrome-hairline);
+  border-radius: var(--ui-radius-control);
+  background: var(--paper-sheet);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+}
+.pa-overflow-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: var(--ui-radius-control);
+  background: none;
+  color: var(--graphite-base);
+  font-size: 0.78rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pa-overflow-menu button:hover:not(:disabled) {
+  background: var(--chrome-hairline);
+}
+.pa-overflow-menu button.danger {
+  color: var(--state-danger);
+}
+.pa-overflow-menu button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

@@ -1,3 +1,11 @@
+import './settings-section-header.css';
+import '../../styles/llm-settings.css';
+import { MotionSurface } from './MotionSurface';
+import { useFallbackVisionSetting } from '../hooks/useFallbackVisionSetting';
+import { useProviderCollection } from '../hooks/useProviderCollection';
+import { useProviderFormGuard } from '../hooks/useProviderFormGuard';
+import { FormFeedback } from '../../ui/forms/FormFeedback';
+import { useGuardedNavigation } from '../../ui/forms/UnsavedChanges';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import type {
   LlmAuthMethod,
@@ -13,10 +21,9 @@ import type {
 } from '@peer-agent/protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clientApi } from '../../clientApi';
-import { getProviderDisplayName } from '../../chat/state/providerDisplay';
 import { Switch } from '../../ui/boolean-controls';
 import { PeerIcon } from '../../ui/icons';
-import type { CascadingMenuGroup } from './CascadingMenu';
+import { groupProviderModels, type SelectionProviderGroup } from '../../ui/model-picker/modelSelection';
 import { FallbackVisionSetting } from './FallbackVisionSetting';
 import { SettingsDisclosureContent } from './SettingsDisclosureContent';
 import './provider-settings.css';
@@ -595,15 +602,15 @@ export function LlmSettingsPanel({
   readonly onBack?: () => void;
 }) {
   const confirm = useConfirm();
-  const [providers, setProviders] = useState<readonly LlmProviderConfigView[]>([]);
-  const [fallbackVisionProviderId, setFallbackVisionProviderId] = useState<string>('');
-  const [fallbackVisionSaving, setFallbackVisionSaving] = useState(false);
-  const fallbackVisionRevision = useRef(0);
+  const { providers, setProviders, refresh, loading: providersLoading, error: providersError } = useProviderCollection(list => {
+    setTestResults(prev => Object.fromEntries(Object.entries(prev).filter(([id]) => !list.some(provider => provider.id === id && isOAuthMethod(provider.authMethod) && provider.oauthStatus?.status === 'connected'))));
+  });
+  const navigate = useGuardedNavigation();
+  const fallbackVision = useFallbackVisionSetting();
+  const fallbackVisionProviderId = fallbackVision.draft, fallbackVisionSaving = !fallbackVision.loaded || fallbackVision.saving;
   const [channels, setChannels] = useState<readonly LlmChannelDescriptor[]>(FALLBACK_CHANNELS);
   const [serviceTemplates, setServiceTemplates] = useState<readonly LlmServiceTemplateDescriptor[]>([]);
   const [catalogOpen, setCatalogOpen] = useState(false);
-  const [catalogClosing, setCatalogClosing] = useState(false);
-  const catalogCloseTimer = useRef<number | null>(null);
   const [catalogQuery, setCatalogQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -612,6 +619,7 @@ export function LlmSettingsPanel({
   const [showAdvancedFields, setShowAdvancedFields] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm());
   const [saving, setSaving] = useState(false);
+  const saveLock = useRef(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, LlmProviderTestResult>>({});
   const [quotaResults, setQuotaResults] = useState<Record<string, LlmSubscriptionQuota>>({});
@@ -649,98 +657,14 @@ export function LlmSettingsPanel({
     });
   }, []);
 
-  const refresh = useCallback(async () => {
-    try {
-      const list = await clientApi.llmListProviderGroups();
-      setProviders(list);
-      setTestResults((prev) => {
-        let next: Record<string, LlmProviderTestResult> | null = null;
-        for (const provider of list) {
-          if (!isOAuthMethod(provider.authMethod) || provider.oauthStatus?.status !== 'connected' || !prev[provider.id]) continue;
-          next ??= { ...prev };
-          delete next[provider.id];
-        }
-        return next ?? prev;
-      });
-      return list;
-    } catch { /* silent */ }
-    return [];
-  }, []);
-
-  useEffect(() => { void refresh(); }, [refresh]);
-
-  useEffect(() => {
-    let active = true;
-    const revision = fallbackVisionRevision.current;
-    // initialSettings is a startup snapshot; revisit the host's persisted value on every mount.
-    void clientApi.getSettings().then(settings => {
-      if (!active || revision !== fallbackVisionRevision.current) return;
-      const raw = settings.fallbackVision;
-      setFallbackVisionProviderId(typeof raw === 'string' ? raw.trim()
-        : raw && typeof raw === 'object' && typeof (raw as { providerId?: unknown }).providerId === 'string'
-          ? String((raw as { providerId: string }).providerId).trim() : '');
-    }).catch(() => { /* Existing selection remains available when settings cannot be read. */ });
-    return () => { active = false; };
-  }, []);
-
   // 与底部模型选择器一致：一级 provider（groupId），二级 vision 模型；未配 Key 的模型置灰。
-  const fallbackVisionMenuGroups: readonly CascadingMenuGroup[] = useMemo(() => {
-    const isZh = i18n.locale === 'zh-CN';
-    // Model choices retain their service group; the empty choice uses a compact trigger label.
-    const noneGroupLabel = isZh ? '不使用' : 'None';
-    const noneItemLabel = i18n.t('settings.fallbackVision.none');
-    const order: string[] = [];
-    const byGroup = new Map<string, { label: string; items: { id: string; label: string; disabled: boolean }[] }>();
-    for (const prov of providers) {
-      if (!prov.supportsVision) continue;
-      const key = prov.groupId || prov.id;
-      let bucket = byGroup.get(key);
-      if (!bucket) {
-        bucket = { label: getProviderDisplayName(prov, isZh), items: [] };
-        byGroup.set(key, bucket);
-        order.push(key);
-      }
-      bucket.items.push({
-        id: prov.id,
-        label: prov.modelLabel || prov.model,
-        disabled: !prov.apiKeyConfigured,
-      });
-    }
-    const providerGroups = order.map((key) => {
-      const bucket = byGroup.get(key)!;
-      return {
-        id: key,
-        label: bucket.label,
-        items: bucket.items,
-        disabled: bucket.items.every((it) => it.disabled),
-      };
-    });
-    return [
-      {
-        id: '__none__',
-        label: noneGroupLabel,
-        items: [{ id: '__none__', label: noneItemLabel }],
-      },
-      ...providerGroups,
-    ];
-  }, [providers, i18n]);
+  const fallbackVisionMenuGroups: readonly SelectionProviderGroup[] = useMemo(() => [
+    { id: '__none__', label: i18n.locale.startsWith('zh') ? '不使用' : 'None', disabled: false,
+      models: [{ id: '__none__', label: i18n.t('settings.fallbackVision.none'), disabled: false,
+        supportsVision: false, authMethod: '', supportsReasoning: false }] },
+    ...groupProviderModels(providers.filter(provider => provider.supportsVision), i18n.locale.startsWith('zh')),
+  ], [providers, i18n]);
 
-  const handleFallbackVisionChange = async (nextId: string) => {
-    fallbackVisionRevision.current += 1;
-    const normalized = nextId === '__none__' ? '' : nextId;
-    const previous = fallbackVisionProviderId;
-    setFallbackVisionProviderId(normalized);
-    setFallbackVisionSaving(true);
-    try {
-      await clientApi.updateSettings({
-        fallbackVision: normalized ? { providerId: normalized } : null,
-      });
-    } catch {
-      setFallbackVisionProviderId(previous);
-    } finally {
-      setFallbackVisionSaving(false);
-    }
-  };
 
   useEffect(() => clientApi.onLlmOAuthPending((pending) => {
     setOauthPending(pending);
@@ -828,27 +752,8 @@ export function LlmSettingsPanel({
     }));
   };
 
-  const openAdd = () => {
-    if (catalogCloseTimer.current !== null) {
-      window.clearTimeout(catalogCloseTimer.current);
-      catalogCloseTimer.current = null;
-    }
-    setCatalogQuery('');
-    setCatalogClosing(false);
-    setCatalogOpen(true);
-  };
-
-  const closeCatalog = () => {
-    setCatalogClosing(true);
-    if (catalogCloseTimer.current !== null) {
-      window.clearTimeout(catalogCloseTimer.current);
-    }
-    catalogCloseTimer.current = window.setTimeout(() => {
-      catalogCloseTimer.current = null;
-      setCatalogOpen(false);
-      setCatalogClosing(false);
-    }, 170);
-  };
+  const openAdd = () => { setCatalogQuery(''); setCatalogOpen(true); };
+  const closeCatalog = () => setCatalogOpen(false);
 
   const clearLocalCliFlow = useCallback(() => {
     setLocalCliDetectSteps([]);
@@ -868,7 +773,7 @@ export function LlmSettingsPanel({
     const tryScroll = (attempt: number) => {
       const el = document.querySelector(`[data-llm-group-id="${groupId}"]`);
       if (el instanceof HTMLElement) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        el.scrollIntoView({ behavior: 'auto', block: 'nearest' });
         return;
       }
       if (attempt < 12) {
@@ -976,8 +881,16 @@ export function LlmSettingsPanel({
     setShowForm(true);
   };
 
+  const closeProviderForm = () => {
+    setShowForm(false); setEditingId(null); setAddModelGroupId(null);
+    setFormLockSource('manual'); setShowAdvancedFields(false); clearLocalCliFlow();
+    setForm(emptyForm(channels));
+  };
+  const guardProviderClose = useProviderFormGuard(form, showForm, saving || Boolean(oauthBusyId), closeProviderForm);
+
   const handleSave = async () => {
-    setSaving(true);
+    if (saveLock.current) return;
+    saveLock.current = true; setSaving(true);
     setFormError(null);
     try {
       const localCli = isLocalCliMethod(form.authMethod);
@@ -1172,7 +1085,7 @@ export function LlmSettingsPanel({
     } catch (err: unknown) {
       setFormError(err instanceof Error ? err.message : 'Save failed');
     } finally {
-      setSaving(false);
+      saveLock.current = false; setSaving(false);
     }
   };
 
@@ -1281,6 +1194,12 @@ export function LlmSettingsPanel({
     const configuredModels = providers.filter(
       (provider) => (provider.groupId ?? provider.id) === groupId,
     );
+    if (sourceOverride === 'manual') {
+      for (const patch of patches) {
+        if (!configuredModels.some(model => model.model === patch.model)) await clientApi.llmAddModel({ groupId, name: target.name, ...patch });
+      }
+      return (await refresh()).filter(provider => (provider.groupId ?? provider.id) === groupId);
+    }
     const changes = calculateModelSelectionChanges(models, configuredModels);
     if (changes.additions.length === 0 && changes.removals.length === configuredModels.length) {
       throw new Error('provider_requires_at_least_one_model');
@@ -1466,13 +1385,14 @@ export function LlmSettingsPanel({
     <div className="llm-settings-panel">
       {onBack ? (
         <header className="llm-settings-header">
-          <button type="button" onClick={onBack} aria-label="Back">
+          <button type="button" onClick={() => navigate(onBack)} aria-label="Back">
             <PeerIcon name="back" size={18} />
           </button>
           <strong>{i18n.locale === 'zh-CN' ? '服务商' : 'Providers'}</strong>
         </header>
       ) : null}
 
+      <FormFeedback i18n={i18n} loading={providersLoading} readError={providersError} onReload={refresh} />
       <header className="frost-page-heading llm-page-heading">
         <div>
           <h1>{i18n.locale === 'zh-CN' ? '服务商' : 'Providers'}</h1>
@@ -1484,9 +1404,9 @@ export function LlmSettingsPanel({
         </button> : null}
       </header>
 
-            {catalogOpen ? (
+            <MotionSurface kind="fade">{catalogOpen ? (
 
-        <div className={`llm-service-catalog${catalogClosing ? ' is-closing' : ''}`} role="dialog" aria-label={i18n.locale === 'zh-CN' ? '添加服务' : 'Add service'}>
+        <div className="llm-service-catalog" role="dialog" aria-label={i18n.locale === 'zh-CN' ? '添加服务' : 'Add service'}>
           <div className="llm-service-catalog-header">
             <div>
               <strong>{i18n.locale === 'zh-CN' ? '添加服务' : 'Add service'}</strong>
@@ -1693,22 +1613,18 @@ export function LlmSettingsPanel({
         })}
           </div>
         </section>
-      )}
+      )}</MotionSurface>
 
+      {!catalogOpen ? <FormFeedback i18n={i18n} {...fallbackVision} onReload={fallbackVision.reload} onRetry={fallbackVision.save} /> : null}
       {!catalogOpen ? <FallbackVisionSetting i18n={i18n} value={fallbackVisionProviderId}
         groups={fallbackVisionMenuGroups} saving={fallbackVisionSaving}
-        onChange={nextId => { void handleFallbackVisionChange(nextId); }} /> : null}
+        onChange={nextId => { void fallbackVision.change(nextId); }} /> : null}
 
 {showForm ? (
         <Overlay
-          onClose={() => {
-            setShowForm(false);
-            setEditingId(null);
-            setAddModelGroupId(null);
-            setFormLockSource('manual');
-            setShowAdvancedFields(false);
-            clearLocalCliFlow();
-          }}
+          onClose={closeProviderForm}
+          onRequestClose={guardProviderClose}
+          onEscape={() => saving || Boolean(oauthBusyId)}
           closeOnBackdrop={!saving && !oauthBusyId}
           ariaLabel={editingId
             ? (i18n.locale === 'zh-CN' ? '编辑连接' : 'Edit Connection')
@@ -1755,7 +1671,7 @@ export function LlmSettingsPanel({
                 <PeerIcon name="close" size={14} />
               </button>
             </header>
-            <div className="llm-form llm-modal-body">
+            <fieldset className="llm-form llm-modal-body ui-form-fields" disabled={saving || Boolean(oauthBusyId)}>
 
           {!isAddModel && (
           <>
@@ -2082,15 +1998,15 @@ export function LlmSettingsPanel({
           </>
           ) : null}
 
-          {formError ? <p className="llm-form-error">{(isLocalCliAuth ? friendlyLocalCliError(formError, i18n.locale) : friendlyTestError(formError, i18n.locale))}</p> : null}
-            </div>
+          {formError ? <p className="llm-form-error" role="alert">{(isLocalCliAuth ? friendlyLocalCliError(formError, i18n.locale) : friendlyTestError(formError, i18n.locale))}</p> : null}
+            </fieldset>
             <div className="llm-modal-footer">
-            <button type="button" className="llm-modal-cancel" onClick={requestClose}>
+            <button type="button" className="llm-modal-cancel ui-button" onClick={requestClose}>
               {i18n.locale === 'zh-CN' ? '取消' : 'Cancel'}
             </button>
             <button
               type="button"
-              className="primary"
+              className="primary ui-button is-primary"
               onClick={() => {
                 if (formValidationError) {
                   setFormError(formValidationError);
@@ -2120,6 +2036,7 @@ export function LlmSettingsPanel({
 
       {pendingProviderDraft ? (
         <ModelCatalogDialog
+          pendingCreation
           i18n={i18n}
           providerName={pendingProviderDraft.name}
           channelId={pendingProviderDraft.channelId}
@@ -2179,7 +2096,6 @@ export function LlmSettingsPanel({
 
       {oauthPending ? (
         <Overlay
-          onClose={() => undefined}
           closeOnBackdrop={false}
           ariaLabel={i18n.locale === 'zh-CN' ? 'Grok 登录授权码' : 'Grok sign-in authorization code'}
           panelClassName="llm-oauth-code-dialog"

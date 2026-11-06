@@ -1,3 +1,4 @@
+import { openFullTask, BOT_DETAIL_SURFACE, BOT_DETAIL_CLOSE } from './bot-detail-surface-selectors.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
@@ -23,16 +24,17 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
     writeFileSync(commandFile + '.next', JSON.stringify(command)); renameSync(commandFile + '.next', commandFile);
   };
   const open = async (reset = false) => {
-    await page.locator('.bot-profile').click();
+    await page.getByRole('button', { name: '机器人设置', exact: true }).click();
     await page.getByRole('tab', { name: '任务', exact: true }).click();
-    if (reset && await page.locator('.bot-task-detail').count()) await page.getByRole('button', { name: '任务列表', exact: true }).click();
-    if (!await page.locator('.bot-task-detail').count()) await page.locator('.bot-task-row').filter({ hasText: task.title }).click();
+    if (reset && await page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail').count()) await page.getByRole('button', { name: '任务列表', exact: true }).click();
+    if (!await page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail').count()) await page.locator('.bot-task-row').filter({ hasText: task.title }).click();
+    await openFullTask(page);
     const pendingQuestion = conversationMessages.at(-1).cards?.find(card => card.kind === 'question' && card.resolvedState !== 'resolved');
     if (pendingQuestion) await until(() => page.locator('.bot-task-question').innerText(), text => text === pendingQuestion.content);
     else await until(() => page.locator('.bot-task-update-preview').innerText(), text => text.includes(noteHeadline));
   };
   change('running', false, 'unavailable'); await open(true);
-  const detail = page.locator('.bot-task-detail');
+  const detail = page.locator(BOT_DETAIL_SURFACE).locator('.bot-task-detail');
   const reportFeedback = detail.locator('.bot-task-report-read');
   const reportInfo = detail.locator('.bot-task-information');
   const captureReport = async name => {
@@ -83,6 +85,16 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
       .locator('.bot-tasks-heading h2').innerText(), expectedGroup, `task classification: ${status}`);
     await page.locator('.bot-task-row').filter({ hasText: task.title }).click();
     await until(() => detail.locator('.bot-task-instructions').textContent(), text => text.includes(instructions));
+    const full = detail.locator('.bot-task-full');
+    assert.equal(await full.isVisible(), false, 'task selection starts with compact progress');
+    assert.equal(await detail.locator('.bot-task-full-toggle').getAttribute('aria-expanded'), 'false');
+    assert.equal(await detail.locator('.bot-task-scene').isVisible(), true, 'full conversation is available before expanding details');
+    const compact = await detail.innerText();
+    assert.doesNotMatch(compact, /取消任务|核验结果|下一步由|继续追问|任务信息|创建于|internal-/);
+    assert.match(compact, /打开完整会话/);
+    assert.equal(await detail.locator('.bot-task-cancel button').isVisible(), false);
+    if (['running', 'waiting_user', 'accepted', 'failed'].includes(status)) await detail.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `task-detail-${status}.png`) });
+    await openFullTask(page);
     const visible = await detail.innerText();
     if (status === 'waiting_user' || status === 'result_ready') {
       assert.match(await detail.locator('.bot-task-status').innerText(), status === 'waiting_user' ? /等待跟进/ : /结果待确认/);
@@ -102,7 +114,6 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
     assert.ok(previewSize.height <= previewSize.lineHeight * 3 + 1, 'a long multi-paragraph Markdown reply stays a three-line preview');
     assert.equal(await detail.locator('.bot-task-update-preview button').count(), 0, 'the preview never creates hidden Markdown actions');
     assert.equal(await detail.locator('.bot-task-information').getAttribute('open'), null);
-    if (['running', 'waiting_user', 'accepted', 'failed'].includes(status)) await detail.screenshot({ animations: 'disabled', path: path.join(captureDirectory, `task-detail-${status}.png`) });
   }
   const beforeEndedFollowUp = readTurns();
   await detail.getByRole('button', { name: `向 ${botName} 追问`, exact: true }).click();
@@ -128,11 +139,25 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
   await page.keyboard.press('Enter'); assert.equal(await information.getAttribute('open'), null);
   await information.locator(':scope > summary').click();
   await detail.locator('.bot-task-scene').click();
-  const nestedScene = page.locator('.conversation-chat-drawer--nested');
+  const nestedScene = page.locator('.resource-workspace.workbench-panel--open:not([inert]) .resource-conversation-view[data-active="true"] .bot-inline-scene');
   await nestedScene.waitFor();
-  await page.keyboard.press('Escape');
+  const sceneIdentity = await nestedScene.elementHandle();
+  assert.equal(await nestedScene.getAttribute('role'), null, 'the task scene is part of the nonmodal reading area');
+  assert.equal(await nestedScene.evaluate(node => Boolean(node.closest('.resource-workspace')) && !node.closest('.bot-drawer-dock')), true,
+    'child conversation is in the independent fourth pane, outside Bot settings');
+  await nestedScene.locator('.bot-inline-scene-heading').getByRole('button', { name: '关闭', exact: true }).click();
   await nestedScene.waitFor({ state: 'detached' });
-  assert.equal(await detail.isVisible(), true, 'Escape dismisses the nested scene and keeps the task detail open');
+  assert.equal(await sceneIdentity.evaluate(node => node.isConnected && Boolean(node.closest('[inert]'))), true,
+    'collapsing the fourth pane preserves its mounted conversation');
+  assert.equal(await detail.isVisible(), true, 'closing the fourth pane preserves the task detail');
+  await detail.locator('.bot-task-scene').click();
+  await nestedScene.waitFor();
+  assert.equal(await nestedScene.evaluate((node, previous) => node === previous, sceneIdentity), true);
+  assert.equal(await page.locator('.resource-tabs').getByRole('tab', { name: task.title, exact: true }).count(), 1,
+    'opening the same child reuses its tab');
+  await nestedScene.locator('.bot-inline-scene-heading button').click();
+  await nestedScene.waitFor({ state: 'detached' });
+  await sceneIdentity.dispose();
   await information.locator(':scope > summary').click();
   task.title = '逐条核对本项目跨月份的历史 AI 任务、交付结果与验证依据，并整理可追溯的完成情况';
   change('waiting_user'); await until(() => detail.locator('h2').innerText(), title => title === task.title);
@@ -151,13 +176,16 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
   await page.setViewportSize(viewport); await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
   const beforeNavigation = readTurns();
   await detail.getByRole('button', { name: '查看对话中的完整说明', exact: true }).click();
-  await until(() => page.locator('.bot-drawer-dock.is-open').count(), count => count === 0);
+  await until(() => page.locator(BOT_DETAIL_SURFACE).count(), count => count === 0);
   const noteRow = page.locator('#bot-msg-rc-task-note'); await noteRow.waitFor();
   await until(() => noteRow.evaluate(node => document.activeElement === node), Boolean);
-  await until(() => page.locator('.bot-drawer-dock').count(), count => count === 0);
+  await until(() => page.locator(BOT_DETAIL_SURFACE).count(), count => count === 0);
   assert.equal(await noteRow.isVisible(), true);
   assert.equal(await noteRow.locator('.markdown-content').getAttribute('data-selection-source'), note.content, 'the full related reply remains available in the main conversation');
   assert.equal(readTurns(), beforeNavigation, 'reading the related bot note does not execute anything');
+  const workRows = page.locator('.bot-work-panel-session');
+  assert.ok(await workRows.count(), 'default work rows are visible beside the main note');
+  assert.doesNotMatch((await workRows.allTextContents()).join(' '), /waiting_user|internal-execution-model-id/);
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'task-main-note.png') });
   await open();
   const composer = page.locator('.bot-composer textarea');
@@ -166,7 +194,7 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
   assert.equal(await composer.evaluate(node => document.activeElement === node), true);
   assert.equal(readTurns(), beforeNavigation, 'follow-up is a draft, never automatically submitted');
   assert.match(await page.locator('.bot-composer').innerText(), /逐条核对本项目/);
-  await until(() => page.locator('.bot-drawer-dock').count(), count => count === 0);
+  await until(() => page.locator(BOT_DETAIL_SURFACE).count(), count => count === 0);
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'task-follow-up-draft.png') });
   await page.getByRole('button', { name: '取消引用', exact: true }).click();
   await composer.fill('保留我正在写的消息');
@@ -183,14 +211,20 @@ export async function checkBotTaskDetails({ page, until, report, captureDirector
   await detail.getByRole('button', { name: '在对话中回答', exact: true }).focus(); await page.keyboard.press('Enter');
   const answer = page.locator('#bot-msg-rc-task-question .bot-question button').first();
   await until(() => answer.evaluate(node => document.activeElement === node), Boolean);
-  await until(() => page.locator('.bot-drawer-dock').count(), count => count === 0);
+  await until(() => page.locator(BOT_DETAIL_SURFACE).count(), count => count === 0);
   assert.equal(await answer.isVisible(), true);
+  const answerFocus = await answer.evaluate(node => {
+    const style = getComputedStyle(node);
+    return { visible: node.matches(':focus-visible'), width: style.outlineWidth, offset: style.outlineOffset };
+  });
+  assert.deepEqual(answerFocus, { visible: true, width: '2px', offset: '-2px' },
+    'keyboard focus remains inside the clipped question card');
   assert.equal(readTurns(), beforeNavigation, 'locating a decision does not answer, confirm or resume the task');
   await page.screenshot({ animations: 'disabled', path: path.join(captureDirectory, 'task-main-question.png') });
   conversationMessages = [note, { ...question, cards: question.cards.map(card => ({ ...card, resolvedState: 'resolved' })) }];
-  change('waiting_user'); await page.locator('.bot-profile').click();
+  change('waiting_user'); await page.getByRole('button', { name: '机器人设置', exact: true }).click();
   await until(() => detail.locator('.bot-task-question').count(), count => count === 0);
-  await page.getByRole('button', { name: '关闭', exact: true }).click();
+  await page.locator(BOT_DETAIL_CLOSE).click();
   writeFileSync(commandFile + '.next', JSON.stringify({ ...initial, seq: ++seq, conversationMessages })); renameSync(commandFile + '.next', commandFile);
   report.taskDetails = { states: [...states, 'unavailable'], dimensions, reportFromDetail: true, metadataCollapsed: true,
     reportReadFailureExplained: true, reportLoadingVisible: true, staleReportPreserved: true, reportRetryRecovers: true,

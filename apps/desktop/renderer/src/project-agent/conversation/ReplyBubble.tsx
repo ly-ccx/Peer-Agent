@@ -1,3 +1,4 @@
+import { ReplyResourceContext } from './ReplyResourceContext';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { useRef } from 'react';
 import { MarkdownMessage } from '../../chat/components/markdown/MarkdownMessage';
@@ -9,6 +10,8 @@ import { ReplyAnchors } from './ReplyAnchors';
 import type { ReplyAnchor } from '../state/replyReferenceState';
 import { BotNarration } from './BotNarration';
 import type { BotNarrationSegment } from '../state/botNarrationState';
+import { ReplyTaskReferences } from './ReplyTaskReferences';
+import type { BotWorkIndex } from '../state/botWorkState';
 
 export function ReplyBubble({
   workspaceId,
@@ -20,6 +23,8 @@ export function ReplyBubble({
   onJump,
   onQuote,
   onOpenDetails,
+  workIndex,
+  onOpenWork,
   narration = [],
 }: {
   readonly workspaceId: string;
@@ -31,6 +36,8 @@ export function ReplyBubble({
   readonly onJump: (messageId: string) => void;
   readonly onQuote: (excerpt: string) => void;
   readonly onOpenDetails?: () => void;
+  readonly workIndex: BotWorkIndex;
+  readonly onOpenWork: (sessionId: string) => void;
   readonly narration?: readonly BotNarrationSegment[];
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -40,16 +47,18 @@ export function ReplyBubble({
       id={`bot-msg-${message.id}`}
       data-kind="agent_reply"
     >
-      <BotNarration segments={narration} />
+      <ReplyResourceContext references={message.resourceReferences}><BotNarration segments={narration} /></ReplyResourceContext>
       <div className="bot-reply-body">
         <ReplyAnchors ids={referenceIds} anchors={anchors} i18n={i18n} onJump={onJump} />
         <div ref={bodyRef} className="bot-reply-text">
-          <MarkdownMessage content={message.content} />
+          <ReplyResourceContext references={message.resourceReferences}><MarkdownMessage content={message.content} /></ReplyResourceContext>
         </div>
       </div>
+      <ReplyTaskReferences messages={[message]} workIndex={workIndex} i18n={i18n} onOpen={onOpenWork} />
       <CardView workspaceId={workspaceId} cards={message.cards} i18n={i18n} />
       <BotSelectionQuote root={bodyRef} label={i18n.t('projectAgent.chat.quote')} onQuote={onQuote} />
-      <ReplyContext i18n={i18n} onOpenDetails={onOpenDetails} />
+      <ReplyContext i18n={i18n} onOpenDetails={onOpenDetails}
+        onQuote={message.content.trim() ? () => onQuote(message.content) : undefined} />
     </article>
   );
 }

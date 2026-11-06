@@ -96,7 +96,7 @@ export function HistorySheet({
     setPreviewState('loading');
     void clientApi.conversationsGet({ id: selectedId }).then((result) => {
       if (cancelled) return;
-      setLines(historyLines(result?.messages));
+      setLines(historyLines(result?.window));
       setPreviewState(result ? 'ready' : 'unavailable');
     }).catch(() => {
       if (!cancelled) { setLines([]); setPreviewState('unavailable'); }

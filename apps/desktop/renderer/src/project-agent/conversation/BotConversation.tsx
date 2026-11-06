@@ -1,28 +1,24 @@
 import type { I18nRuntime } from '@peer-agent/i18n';
-import { generateAvatar, type BotProfile, type BotAvatar as BotAvatarModel } from '@peer-agent/protocol';
+import { generateAvatar, type BotProfile, type BotAvatar as BotAvatarModel, type InputDraftValue } from '@peer-agent/protocol';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
-import { clientApi } from '../../clientApi';
 import type { BotInspect } from '../drawer/agentProcess';
 import type { BotAvatarMood } from '../state/botAvatarState';
 import { replyRowContains, replyRowMood, replyRowRunning } from '../state/botReplyContinuity';
 import { quoteRefsFor } from '../state/botConversationState';
 import { replyDetailsRow } from '../state/botActivityState';
 import { useReplyDetailsRow } from '../state/useReplyDetailsRow';
-import { replyAnchorsForMessages } from '../state/replyReferenceState';
 import { ReplyDetails } from './ReplyDetails';
 import { useBotConversation } from '../state/useBotConversation';
-import { BotModelControls } from '../BotModelControls';
-import { BotAccessControl } from '../BotAccessControl';
 import type { BotModelsControlState } from '../state/useBotModels';
-import { DelegatedWork } from './DelegatedWork';
-import { backgroundWork, type BotWorkIndex } from '../state/botWorkState';
-import { BotComposer } from './BotComposer';
+import type { BotWorkIndex } from '../state/botWorkState';
+import { BotWorkPanel } from './BotWorkPanel';
+import { BotConversationComposer } from './BotConversationComposer';
 import { BotMessageList } from './BotMessageList';
+import { BotRecoveryControl } from './BotRecoveryControl';
 import { botAvatarDisplayColor } from '../BotAvatar';
 import { BotInputContext } from './BotInputContext';
 import '../styles/bot-conversation.css';
-import { PeerIcon } from '../../ui/icons';
 import { taskConversationContext, type TaskConversationContext, type TaskConversationRequest } from '../state/taskConversationState';
 
 export function BotConversation({
@@ -45,6 +41,8 @@ export function BotConversation({
   taskRequest = null,
   replyDetailsId = null,
   replyDetailsTarget = null,
+  workPanelTarget = null,
+  onRefreshWork,
 }: {
   readonly workspaceId: string;
   readonly workIndex: BotWorkIndex;
@@ -65,6 +63,8 @@ export function BotConversation({
   readonly taskRequest?: TaskConversationRequest | null;
   readonly replyDetailsId?: string | null;
   readonly replyDetailsTarget?: HTMLElement | null;
+  readonly workPanelTarget?: HTMLElement | null;
+  readonly onRefreshWork: () => Promise<void>;
 }) {
   const conversation = useBotConversation(workspaceId);
   const activeReply = [...conversation.viewRows].reverse().find(row => row.type === 'reply' && replyRowRunning(row));
@@ -82,19 +82,12 @@ export function BotConversation({
     }
     lastReplyRef.current = lastId;
   }, [conversation.status, conversation.messages, onReplyArrived, workspaceId]);
-  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const [highlightedId, setHighlightedId] = useState<string | null>(focusMessageId ?? null);
   const [highlightRequestId, setHighlightRequestId] = useState(0);
-  useEffect(() => {
-    if (highlightedId) void conversation.locateMessage(highlightedId);
-  }, [highlightedId, conversation.locateMessage]);
   useEffect(() => {
     if (focusMessageId) { setHighlightedId(focusMessageId); setHighlightRequestId(value => value + 1); }
   }, [focusMessageId, focusRequestId]);
-  const [quote, setQuote] = useState<{ messageId: string; text: string } | null>(null);
-  const quotedMessage = quote ? conversation.messages.find(message => message.id === quote.messageId) : undefined;
-  const quoteSource = quotedMessage ? replyAnchorsForMessages([quotedMessage], {
-    user: i18n.t('projectAgent.chat.you'), bot: label,
-  }).get(quotedMessage.id)?.author : null;
+  const setQuote = (quote: InputDraftValue['quote']) => conversation.recovery.session.edit({ quote });
   const context = useMemo(() => taskConversationContext(workspaceId, contextSessionId, conversation.messages, workIndex),
     [workspaceId, contextSessionId, conversation.messages, workIndex]);
   const publishedContext = useRef<string | undefined>(undefined);
@@ -112,7 +105,11 @@ export function BotConversation({
     }
   }, [taskRequest]);
 
-  const background = useMemo(() => backgroundWork(workIndex), [workIndex]);
+  const recoveryNeeded = conversation.status === 'ready' && Boolean(conversation.runtimeRecovery || conversation.recoveryAttention);
+  const [recoveryShown, setRecoveryShown] = useState(recoveryNeeded);
+  // Facts open the entry; it stays mounted while its exit closes the footprint.
+  if (recoveryNeeded && !recoveryShown) setRecoveryShown(true);
+
   const detailsRow = useMemo(() => replyDetailsRow(replyDetailsId, conversation.rows, conversation.messages),
     [replyDetailsId, conversation.rows, conversation.messages]);
   const details = useReplyDetailsRow(workspaceId, replyDetailsId, detailsRow);
@@ -129,18 +126,14 @@ export function BotConversation({
       [detailsKey]: { main: true, ...current[detailsKey], [key]: value },
     });
   } };
-  const openEvidence = (evidenceRef: string) => {
-    void clientApi.projectAgentReadEvidence({ evidenceRef }).then(result => onInspect?.({
-      replyId: replyDetailsId ?? undefined,
-      evidence: { ...result, ok: result?.ok === true, evidenceRef: result?.evidenceRef || evidenceRef,
-        kind: result?.kind || 'command', summary: result?.summary || '', truncated: result?.truncated === true, code: result?.code || '' },
-      rounds: null,
-    })).catch(() => onInspect?.({ replyId: replyDetailsId ?? undefined,
-      evidence: { ok: false, evidenceRef, kind: 'command', summary: '', truncated: false, availability: 'unavailable', code: 'READ_FAILED' }, rounds: null }));
-  };
+  const openEvidence = (evidenceRef: string) => onInspect?.({ replyId: replyDetailsId ?? undefined,
+    evidence: { ok: false, evidenceRef, kind: 'observation', summary: '', truncated: false, code: '' }, rounds: null });
 
   return (
     <BotInputContext.Provider value={conversation.answer}>
+    <BotWorkPanel workspaceId={workspaceId} workIndex={workIndex} rows={conversation.rows} messages={conversation.messages}
+      recovering={Boolean(conversation.runtimeRecovery)} headerTarget={workPanelTarget} i18n={i18n}
+      onOpenTask={onLocateSession} onInspect={onInspect} onRefreshWork={onRefreshWork}>
     <div className="bot-convo" style={{
       '--bot-message-accent': botAvatarDisplayColor(avatar.kind === 'generated' ? avatar.color : generateAvatar(workspaceId).color),
     } as CSSProperties}>
@@ -149,21 +142,25 @@ export function BotConversation({
         disclosure={detailsDisclosure}
         relatedTurns={relatedTurns} onOpenRelatedReply={id => onInspect?.({ replyId: id, evidence: null, rounds: null })}
         onOpenEvidence={openEvidence} onOpenWork={onLocateSession} />, replyDetailsTarget) : null}
-      {conversation.status === 'ready' && (conversation.cardsError || conversation.refreshError) ? <div className="bot-thread-feedback" role="status">
+      {recoveryShown ? <BotRecoveryControl key={workspaceId} workspaceId={workspaceId} status={conversation.runtimeRecovery} settled={!recoveryNeeded}
+        i18n={i18n} onRetry={conversation.reload} onClosed={() => setRecoveryShown(false)} /> : null}
+      {conversation.status === 'ready' && (conversation.cardsError && !conversation.runtimeRecovery || conversation.refreshError || conversation.catchUpRequired) ? <div className="bot-thread-feedback" role="status">
         <div>
-          {conversation.cardsError ? <p>{i18n.t('projectAgent.chat.cardsUnavailable')}</p> : null}
-          {conversation.refreshError && conversation.status === 'ready' ? <p>{i18n.t('projectAgent.chat.refreshFailed')}</p> : null}
+          {conversation.catchUpRequired ? <p>{i18n.t('resources.catchUp')}</p> : null}
+          {conversation.cardsError && !conversation.runtimeRecovery ? <p>{i18n.t('projectAgent.chat.cardsUnavailable')}</p> : null}
+          {conversation.refreshError ? <p>{i18n.t('projectAgent.chat.refreshFailed')}</p> : null}
         </div>
-        <button type="button" onClick={conversation.reload}>{i18n.t('projectAgent.history.retry')}</button>
+        <button type="button" onClick={conversation.reload}>{i18n.t(conversation.catchUpRequired ? 'resources.continueRead' : 'projectAgent.history.retry')}</button>
       </div> : null}
       {conversation.status === 'error' ? (
         <div className="bot-thread-failed" role="status">
           <p className="bot-thread-error">{i18n.t('projectAgent.chat.loadFailed')}</p>
-          <button type="button" onClick={conversation.reload}>{i18n.t('projectAgent.history.retry')}</button>
+          <button type="button" onClick={conversation.reload}>{i18n.t(conversation.catchUpRequired ? 'resources.continueRead' : 'projectAgent.history.retry')}</button>
         </div>
       ) : (
-        <BotMessageList
+        <BotMessageList key={`thread:${workspaceId}`} ready={conversation.status === 'ready'} locateMessage={conversation.locateMessage}
           workspaceId={workspaceId}
+          workIndex={workIndex}
           avatar={avatar}
           label={label}
           avatarMood={avatarMood}
@@ -178,7 +175,10 @@ export function BotConversation({
           focusTaskRequest={taskRequest?.draft ? null : taskRequest}
           i18n={i18n}
           onJump={(messageId) => { setHighlightedId(messageId); setHighlightRequestId(value => value + 1); }}
-          onQuote={(messageId, excerpt) => setQuote({ messageId, text: excerpt })}
+          onQuote={(messageId, excerpt) => {
+            const [sourceId, text] = quoteRefsFor(messageId, excerpt);
+            if (sourceId && text) setQuote({ messageId: sourceId, text });
+          }}
           onRetry={(inputId) => {
             void conversation.retry(inputId);
           }}
@@ -193,43 +193,11 @@ export function BotConversation({
         />
       )}
       {conversation.stopError ? <p className="bot-thread-error" role="alert">{i18n.t('projectAgent.chat.stopFailed')}</p> : null}
-      {modelControls.error ? <p className="bot-model-error" role="alert">{i18n.t('projectAgent.model.saveFailed')}</p> : null}
-      {background.count ? <details className="bot-background-work">
-        <summary>
-          <span>{i18n.t('projectAgent.chat.work.background', { count: background.count })}</span>
-          <PeerIcon name="chevronDown" size={12} />
-        </summary>
-        <DelegatedWork rows={background.rows} botName={label} i18n={i18n} onOpen={onLocateSession} />
-      </details> : null}
-      <BotComposer
-        key={workspaceId}
-        i18n={i18n}
-        botName={label}
-        permissionControls={onSavingChange => <BotAccessControl key={workspaceId} workspaceId={workspaceId} i18n={i18n} onSavingChange={onSavingChange} />}
-        modelUpdating={modelControls.busy}
-        draftRequest={taskRequest?.draft ? { id: taskRequest.id, text: taskRequest.draft } : null}
-        onDraftPrepared={id => {
-          if (taskRequest?.id === id && taskRequest.messageId && taskRequest.taskTitle) {
-            setQuote({ messageId: taskRequest.messageId, text: taskRequest.taskTitle });
-          }
-        }}
-        modelControls={<div className="bot-model-toolbar"><BotModelControls role="project_agent" compact
-          policy={profile.modelPolicy} models={modelControls.models} view={modelControls.views.project_agent}
-          activeSelection={conversation.activeModelSelection} busy={modelControls.busy || conversation.generating}
-          i18n={i18n} onChange={policy => modelControls.save(policy)} /></div>}
-        quote={quote?.text ?? ''}
-        quoteSource={quoteSource}
-        generating={conversation.generating}
-        stopping={conversation.stopping}
-        onStop={() => void conversation.stop()}
-        onQuoteRemove={() => setQuote(null)}
-        onSend={(text, attachments) => {
-          const refs = quote ? quoteRefsFor(quote.messageId, quote.text) : [];
-          setQuote(null);
-          void conversation.send(text, refs, attachments);
-        }}
-      />
+      <BotConversationComposer key={`composer:${workspaceId}`} workspaceId={workspaceId}
+        conversation={conversation} profile={profile} modelControls={modelControls} label={label} i18n={i18n} taskRequest={taskRequest}
+        onJump={messageId => { setHighlightedId(messageId); setHighlightRequestId(value => value + 1); }} />
     </div>
+    </BotWorkPanel>
     </BotInputContext.Provider>
   );
 }

@@ -8,7 +8,7 @@ function fixture(owner=true) {
       handleHandoffAnswer:async(input:any)=>{calls.push(['handoff',input]);return {ok:true};},confirmResult:async(id:string)=>{calls.push(['confirm',id]);return {ok:true};}},
     lifecycle:{startFamiliarize:async(id:string)=>{calls.push(['familiarize',id]);return {ok:true};},acceptReadme:async()=>({ok:true})},
     memory:{resolveConflict:(input:any)=>{calls.push(['memory',input]);return {ok:true};}}};
-  const client={submit:(text:string,input:any)=>{calls.push(['submit',text,input]);return {inputId:'receipt'};},
+  const client={recovery:()=>({send:async({text,answerTo}:any)=>{calls.push(['submit',text,{answerTo}]);return {ok:true,input:{inputId:'receipt'}};}}),
     decide:async(...args:any[])=>{calls.push(['approval',...args]);return {ok:true};}};
   return {host:host as any,client:client as any,calls};
 }
@@ -40,4 +40,11 @@ test('owner action ports preserve task approval scope and reject foreign task co
   expect(await runProjectCardAction(f.host,f.client,{channel:'project-memory:restore',payload:{id:'item',resolveConflict:true}})).toEqual({ok:true});
   expect(f.calls.slice(1)).toEqual([['confirm','local'],['familiarize','workspace'],['memory',{workspaceId:'workspace',id:'item'}]]);
   expect(await runProjectCardAction(f.host,f.client,{channel:'unknown'})).toEqual({ok:false,error:'invalid_action'});
+});
+
+
+test('cancel-read is a cancellation decision, never a denial or grant',async()=>{
+  const f=fixture();
+  await runProjectCardAction(f.host,f.client,{channel:'project-agent:decide-approval',payload:{approvalId:'image',decision:'cancel'}});
+  expect(f.calls).toEqual([['approval','image','cancel','once']]);
 });

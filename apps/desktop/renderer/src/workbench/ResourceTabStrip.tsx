@@ -1,12 +1,21 @@
-import type { ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { selectionNavigation } from '../app/components/selectionNavigation';
+import { isImeKey } from '../chat/state/compositionGuard';
 
 export interface ResourceTabItem {
   readonly id: string;
   readonly label: string;
   readonly icon: ReactNode;
+  readonly controls?: string;
+  readonly title?: string;
 }
 
+export const resourceTabIds = (prefix: string, id: string) => ({ tab: `${prefix}-tab-${encodeURIComponent(id)}`, panel: `${prefix}-panel-${encodeURIComponent(id)}` });
+
 interface ResourceTabStripProps {
+  readonly hidden?: boolean;
+  readonly ensureActiveVisible?: boolean;
+  readonly idPrefix: string;
   readonly ariaLabel: string;
   readonly items: readonly ResourceTabItem[];
   readonly activeId: string | null;
@@ -38,19 +47,56 @@ function CloseIcon() {
 
 export function ResourceTabStrip({
   ariaLabel,
+  idPrefix,
   items,
   activeId,
   closeLabel,
   onActivate,
   onClose,
   action,
+  hidden = false,
+  ensureActiveVisible = false,
 }: ResourceTabStripProps) {
-  if (items.length === 0) {
+  const root = useRef<HTMLDivElement>(null), pendingFocus = useRef<{ id: string | null; from: HTMLElement } | null>(null);
+  const [focused, setFocused] = useState<string | null>(null);
+  const close = (id: string, from: HTMLElement) => {
+    const index = items.findIndex(item => item.id === id);
+    if (from.closest('.resource-tab')?.contains(document.activeElement)) pendingFocus.current = { id: items[index + 1]?.id ?? items[index - 1]?.id ?? null, from };
+    onClose(id);
+  };
+  useLayoutEffect(() => {
+    const request = pendingFocus.current;
+    if (!request || request.from.isConnected) return;
+    pendingFocus.current = null;
+    if (document.activeElement !== document.body) return;
+    const next = request.id ? document.getElementById(resourceTabIds(idPrefix, request.id).tab) : null;
+    (next ?? root.current?.querySelector<HTMLElement>('.resource-tab-action') ?? root.current)?.focus({ preventScroll: true });
+  }, [items, idPrefix]);
+  useLayoutEffect(() => {
+    if (!ensureActiveVisible || hidden || !activeId) return;
+    const viewport = root.current?.querySelector<HTMLElement>('.resource-tabs');
+    if (!viewport) return;
+    const reveal = () => {
+      const selected = document.getElementById(resourceTabIds(idPrefix, activeId).tab);
+      if (!selected || !viewport.contains(selected)) return;
+      const bounds = viewport.getBoundingClientRect(), item = selected.getBoundingClientRect();
+      if (bounds.width <= 0) return;
+      // Only the horizontal tab viewport moves. Focus and conversation reading position stay put.
+      if (item.left < bounds.left) viewport.scrollLeft += item.left - bounds.left;
+      else if (item.right > bounds.right) viewport.scrollLeft += item.right - bounds.right;
+    };
+    reveal();
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(reveal) : null;
+    observer?.observe(viewport);
+    return () => observer?.disconnect();
+  }, [ensureActiveVisible, hidden, activeId, idPrefix]);
+  const selectedId = items.some(item => item.id === activeId) ? activeId : items[0]?.id;
+  if (items.length === 0 && !action) {
     return null;
   }
   return (
-    <div className="resource-tab-strip">
-      <div className="resource-tabs" role="tablist" aria-label={ariaLabel}>
+    <div className="resource-tab-strip" hidden={hidden} style={hidden ? { display: 'none' } : undefined} ref={root} tabIndex={-1}>
+      <div className="resource-tabs" role="tablist" aria-label={ariaLabel} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(null); }}>
         {items.map((item) => {
           const selected = item.id === activeId;
           return (
@@ -63,9 +109,19 @@ export function ResourceTabStrip({
                 type="button"
                 className="resource-tab-select"
                 role="tab"
+                id={resourceTabIds(idPrefix, item.id).tab} aria-controls={item.controls ?? resourceTabIds(idPrefix, item.id).panel}
+                onFocus={() => setFocused(item.id)}
+                onKeyDown={event => {
+                  if (isImeKey(event.nativeEvent)) return;
+                  if (event.key === 'Delete') { event.preventDefault(); close(item.id, event.currentTarget); return; }
+                  const next = selectionNavigation(items.map(() => ({})), items.findIndex(row => row.id === item.id), event.key, 'horizontal', getComputedStyle(event.currentTarget).direction === 'rtl');
+                  if (next === null) return; event.preventDefault();
+                  const target = items[next]!; onActivate(target.id);
+                  document.getElementById(resourceTabIds(idPrefix, target.id).tab)?.focus({ preventScroll: true });
+                }}
                 aria-selected={selected}
-                tabIndex={selected ? 0 : -1}
-                title={item.label}
+                tabIndex={item.id === (focused && items.some(row => row.id === focused) ? focused : selectedId) ? 0 : -1}
+                title={item.title ?? item.label}
                 onClick={() => onActivate(item.id)}
               >
                 <span className="resource-tab-icon" aria-hidden="true">{item.icon}</span>
@@ -78,7 +134,7 @@ export function ResourceTabStrip({
                 title={closeLabel}
                 onClick={(event) => {
                   event.stopPropagation();
-                  onClose(item.id);
+                  close(item.id, event.currentTarget);
                 }}
               >
                 <CloseIcon />

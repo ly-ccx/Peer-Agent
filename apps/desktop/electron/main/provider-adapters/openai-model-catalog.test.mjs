@@ -103,6 +103,27 @@ test('GPT-6.1 Sol is selectable with supported reasoning and subscription contex
   assert.equal(DEFAULT_SUBSCRIPTION_MODEL, 'gpt-6-astra');
 });
 
+test('GPT-6.1 Terra is selectable independently of Sol with subscription reasoning and pricing', () => {
+  const model = getSubscriptionModelMetadata('gpt-6.1-terra');
+  assert.ok(isSubscriptionUsableModel(model?.id));
+  assert.equal(model.label, 'GPT-6.1 Terra');
+  assert.equal(model.contextWindow, 400_000);
+  assert.equal(model.maxOutputTokens, 128_000);
+  assert.deepEqual(model.reasoningEffortLevels, ['low', 'medium', 'high', 'xhigh', 'max']);
+  assert.equal(model.supportsVision, true);
+  assert.equal(model.supportsReasoning, true);
+  assert.equal(model.supportsPromptCaching, true);
+  assert.equal(model.inputPrice, 1);
+  assert.equal(model.cacheReadPrice, 0.05);
+  assert.equal(model.outputPrice, 5);
+  assert.equal(model.longContextInputThreshold, 272_000);
+  assert.equal(model.longContextInputPrice, 2);
+  assert.equal(model.longContextCacheReadPrice, 0.1);
+  assert.equal(model.longContextOutputPrice, 7.5);
+  assert.equal(getSubscriptionModelMetadata('gpt-6.1-sol').inputPrice, 2);
+  assert.equal(DEFAULT_SUBSCRIPTION_MODEL, 'gpt-6-astra');
+});
+
 test('GPT-5.6 subscription models expose cache pricing and max reasoning', () => {
   const expected = new Map([
     ['gpt-5.6-sol', { inputPrice: 5, cacheReadPrice: 0.5, outputPrice: 30 }],
@@ -143,6 +164,7 @@ test('subscription models expose 400K and 1M context tiers', () => {
 test('subscription model id set covers the catalog, excludes API-only ids', () => {
   assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.5'), false);
   assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-6-astra'), true);
+  assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-6.1-terra'), true);
   assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-6-sol'), true);
   assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-6-luna'), true);
   assert.equal(SUBSCRIPTION_MODEL_IDS.has('gpt-5.6-sol'), true);
@@ -169,6 +191,7 @@ test('listSubscriptionModels returns built-in authoritative catalog (no network)
     [
       'gpt-6-astra',
       'gpt-6.1-sol',
+      'gpt-6.1-terra',
       'gpt-6-sol',
       'gpt-6-luna',
       'gpt-5.6-sol',
@@ -184,7 +207,7 @@ test('listSubscriptionModels returns built-in authoritative catalog (no network)
 test('listSubscriptionModels returns a copy (caller cannot mutate catalog)', async () => {
   const res = await listSubscriptionModels({});
   res.models.push({ id: 'x', label: 'x' });
-  assert.equal(SUBSCRIPTION_CATALOG.length, 10);
+  assert.equal(SUBSCRIPTION_CATALOG.length, 11);
 });
 
 test('isSubscriptionUsableModel keeps catalog models, drops API-only models', () => {

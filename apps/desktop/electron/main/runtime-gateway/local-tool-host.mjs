@@ -1,4 +1,8 @@
-import { createNodeRuntimeHostAdapter, createLocalGitProvider } from '@peer-agent/runtime-node';
+import { createWorkingContextProvider } from '@peer-agent/runtime-node/project-agent';
+import {
+  createNodeRuntimeHostAdapter,
+  createLocalGitProvider
+} from "@peer-agent/runtime-node/providers";
 import { createRuntimeSdk } from '@peer-agent/runtime-sdk';
 import { createCapabilityProviderRegistry } from './capability-provider-registry.mjs';
 import { createLocalAutomationProposalProvider } from './local-automation-proposal-provider.mjs';
@@ -26,6 +30,7 @@ import { createLocalExternalBrowserProvider } from './local-external-browser-pro
 import { createConfiguredHookRunner } from './hook-config.mjs';
 import { appendHookEvidence } from './hook-evidence.mjs';
 import { createFailedClientToolResult, createPermissionGrant } from './tool-result-factory.mjs';
+import { createDesktopInteractiveProvider } from '../interactive-results/runtime-port.mjs';
 
 export function createLocalToolHost({
   workspaceRoot,
@@ -74,6 +79,7 @@ export function createLocalToolHost({
     proactivity: liveProjectProactivity(),
     replyComposer: createDesktopReplyComposer({
       readDelivery: (view) => liveDeliveryFacts().read(view),
+      readResultReferences: input => liveDeliveryFacts().readResultReferences(input),
     }),
   });
   const activeHookRunner = hookRunner ?? createConfiguredHookRunner({ userDataPath, workspaceRoot });
@@ -95,7 +101,9 @@ export function createLocalToolHost({
       activeShellProvider,
       goalProvider,
       activeDelegationProvider,
+      createDesktopInteractiveProvider(),
       activeMemoryProvider,
+      createWorkingContextProvider({ supervisor: liveDelegationSupervisor() }),
       interactionProvider,
       automationProposalProvider,
       webProvider,

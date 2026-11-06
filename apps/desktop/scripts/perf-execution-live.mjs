@@ -163,7 +163,7 @@ try {
     if (finished && !await page.locator('.bot-live-reply').count() && (!largeHistory || Date.now()-start >= 120000)) break;
     await sampleInteraction();
     if (!drawerOpened) {
-      for (const selector of ['.bot-background-work:not([open]) > summary','.bot-work-row:not([open]) > summary']) { const trigger=page.locator(selector).first(); if(await trigger.isVisible()) await trigger.click(); }
+      for (const selector of ['.bot-work-panel-toggle[aria-expanded=false]','.bot-work-row:not([open]) > summary']) { const trigger=page.locator(selector).first(); if(await trigger.isVisible()) await trigger.click(); }
     }
     if (!drawerOpened && await page.getByRole('button', { name: /查看任务详情/ }).count()) {
       await page.getByRole('button', { name: /查看任务详情/ }).last().click(); drawerOpened = true;
@@ -179,9 +179,9 @@ try {
   report.sessions=doneSessions.sessions?.map(s=>({sessionId:s.sessionId,status:s.status,conversationId:s.conversationId}));
   for(const session of doneSessions.sessions||[]) {
     if (report.historyScale?.sessions.some(row => row.sessionId === session.sessionId)) continue;
-    const view=await page.evaluate(id=>window.peerAgent.conversationsGet({id}),session.conversationId);
-    report.frozenEffort={worker:session.origin?.modelSelection?.worker?.reasoningEffort,conversation:view.effort};
-    assert.equal(view.effort,session.origin.modelSelection.worker.reasoningEffort);
+    const view=await page.evaluate(id=>window.peerAgent.conversationsGet({id, full:true}),session.conversationId);
+    report.frozenEffort={worker:session.origin?.modelSelection?.worker?.reasoningEffort,conversation:view.meta.effort};
+    assert.equal(view.meta.effort,session.origin.modelSelection.worker.reasoningEffort);
   }
   if(finished) {
     if (largeHistory) {

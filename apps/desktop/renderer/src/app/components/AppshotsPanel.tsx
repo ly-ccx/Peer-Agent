@@ -1,3 +1,4 @@
+import './settings-controls.css';
 import { useEffect, useState } from 'react';
 import { clientApi } from '../../clientApi';
 import { Switch } from '../../ui/boolean-controls';

@@ -280,7 +280,7 @@ describe('Mode-scoped tool projection (ADR 35)', () => {
 
   it('projects only explicitly allowed readonly tools in explorer mode', () => {
     const names = materializedNames('explorer');
-    assert.deepEqual(names, ['list_files', 'read_file', 'search_files', 'view_image', 'batch_search']);
+    assert.deepEqual(names, ['list_files', 'read_file', 'search_files', 'view_image', 'git_query', 'batch_search']);
   });
 
   it('keeps the public model projection aligned with the host capability projection', () => {
@@ -323,10 +323,11 @@ describe('Mode-scoped tool projection (ADR 35)', () => {
   it('projects the read and delegation whitelist in project_agent mode', () => {
     const names = materializedNames('project_agent');
     assert.deepEqual(names, [
-      'list_files', 'read_file', 'search_files', 'view_image', 'batch_search',
+      'list_files', 'read_file', 'search_files', 'view_image', 'git_query', 'batch_search',
       'create_objective', 'update_objective', 'pause_objective', 'resume_objective', 'list_objectives', 'get_objective', 'close_objective',
       'coordinate_work', 'send_agent_message', 'spawn_session', 'resume_session', 'reprioritize_session', 'control_work', 'list_sessions', 'get_session', 'cancel_session', 'message_session', 'get_verification_detail', 'verify_session', 'set_proactivity', 'wait_for_sessions', 'post_reply',
       'memory_search', 'memory_remember', 'memory_forget',
+      'read_work_notes', 'write_work_note', 'search_work_history', 'prepare_context_handoff',
     ]);
   });
 
@@ -339,7 +340,7 @@ describe('Mode-scoped tool projection (ADR 35)', () => {
     for (const goalTool of GOAL_TOOL_NAMES) {
       assert.ok(chat.includes(goalTool));
     }
-    assert.deepEqual(materializedNames('explorer'), ['list_files', 'read_file', 'search_files', 'view_image', 'batch_search']);
+    assert.deepEqual(materializedNames('explorer'), ['list_files', 'read_file', 'search_files', 'view_image', 'git_query', 'batch_search']);
     const registry = createRuntimeToolRegistry();
     const chatProjection = createRuntimeProjectionFromToolRegistry(registry, { mode: 'chat' });
     assert.equal(chatProjection.accessLevel, 'ask_before_local');
@@ -347,10 +348,11 @@ describe('Mode-scoped tool projection (ADR 35)', () => {
     assert.deepEqual(
       scoped.map((tool) => tool.name),
       [
-        'list_files', 'read_file', 'search_files', 'view_image', 'batch_search',
+        'list_files', 'read_file', 'search_files', 'view_image', 'git_query', 'batch_search',
         'create_objective', 'update_objective', 'pause_objective', 'resume_objective', 'list_objectives', 'get_objective', 'close_objective',
         'coordinate_work', 'send_agent_message', 'spawn_session', 'resume_session', 'reprioritize_session', 'control_work', 'list_sessions', 'get_session', 'cancel_session', 'message_session', 'get_verification_detail', 'verify_session', 'set_proactivity', 'wait_for_sessions', 'post_reply',
         'memory_search', 'memory_remember', 'memory_forget',
+      'read_work_notes', 'write_work_note', 'search_work_history', 'prepare_context_handoff',
       ],
     );
   });
@@ -378,10 +380,11 @@ describe('Mode-scoped tool projection (ADR 35)', () => {
       (tool) => tool.function.name,
     );
     assert.deepEqual(names, [
-      'list_files', 'read_file', 'search_files', 'view_image', 'batch_search',
+      'list_files', 'read_file', 'search_files', 'view_image', 'git_query', 'batch_search',
       'create_objective', 'update_objective', 'pause_objective', 'resume_objective', 'list_objectives', 'get_objective', 'close_objective',
       'coordinate_work', 'send_agent_message', 'spawn_session', 'resume_session', 'reprioritize_session', 'control_work', 'list_sessions', 'get_session', 'cancel_session', 'message_session', 'get_verification_detail', 'verify_session', 'set_proactivity', 'wait_for_sessions', 'post_reply',
       'memory_search', 'memory_remember', 'memory_forget',
+      'read_work_notes', 'write_work_note', 'search_work_history', 'prepare_context_handoff',
     ]);
     const byName = new Map(projection.capabilities.map((capability) => [capability.name, capability]));
     for (const hidden of ['bash', 'edit_file', 'write_file', 'web_fetch', 'mcp__demo', 'skill__weather-plus']) {

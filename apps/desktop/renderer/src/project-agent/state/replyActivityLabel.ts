@@ -40,7 +40,7 @@ export function replyActivityLabel(activity: ProjectAgentActivity | undefined, i
     return i18n.t('projectAgent.chat.activity.thinking');
   }
   switch (activity.phase) {
-    case 'waiting': return i18n.t('projectAgent.chat.activity.preparing');
+    case 'waiting': return i18n.t('projectAgent.chat.reply.waitingModel');
     case 'thinking': return i18n.t('projectAgent.chat.activity.thinking');
     case 'settling': return i18n.t('projectAgent.chat.activity.settling');
     default: return i18n.t('projectAgent.chat.activity.responding');
