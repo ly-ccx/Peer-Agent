@@ -11,7 +11,7 @@ Peer 是面向代码、文档与研究工作的本地工作委托系统。把目
 
 你保留重要判断和授权。任务、计划与成功标准在项目对话背后组织执行。
 
-> **先选择对应版本。** 项目 Bot 体验属于 **0.1 预览版**，本源码准备发布到 beta 通道 **`0.1.0-rc.36`**（npm `rc`）；当前正式版：**`0.0.18`**（npm `latest`）使用经典界面。可下载版本及升级说明以[已发布版本](https://github.com/ly-ccx/Peer-Agent/releases)为准，源码版本号不表示安装包已经发布。
+> **先选择对应版本。** 项目 Bot 体验属于 **0.1 预览版**，本源码准备发布到 beta 通道 **`0.1.0-rc.37`**（npm `rc`）；当前正式版：**`0.0.18`**（npm `latest`）使用经典界面。可下载版本及升级说明以[已发布版本](https://github.com/ly-ccx/Peer-Agent/releases)为准，源码版本号不表示安装包已经发布。
 
 ![真实项目 Bot 界面，使用虚构的官网、文档与研究项目](docs/screenshots/project-bot-showcase-light.jpg)
 
@@ -85,7 +85,7 @@ Linux x64 选择 `Peer-Agent-<ver>-x64.AppImage`（推荐）或 `.deb`。两者�
 
     npm install -g @peer-agent/cli
 
-npm 包安装对应平台的二进制及 helper；可用平台与安装包以对应发布页为准。npm beta 标签属于较早的 beta 通道，不是当前 RC。`peer update` 安装当前通道（正式版、beta 或 rc）的最新版本。`peer update --check` 只报告，不安装。模式与脚本用法见 [CLI 文档](https://ly-ccx.github.io/Peer-Agent/docs.html#cli)。
+npm 包安装对应平台的二进制及 helper；可用平台与安装包以对应发布页为准。npm beta 标签属于较早的 beta 通道，不是当前 RC。`peer update` 安装当前通道（正式版、beta 或 rc）的最新版本。`peer update --check` 只报告，不安装。`peer sessions`、`peer models`、`peer doctor`、`peer completions` 与 `peer export` 是并列的基础 shell 命令。`peer sessions delete` 同时移除该会话的目标计划；非交互删除必须带 `--yes`。模式与脚本用法见 [CLI 文档](https://ly-ccx.github.io/Peer-Agent/docs.html#cli)。
 
 ### 从 0.1 源码启动
 

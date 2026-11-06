@@ -144,6 +144,19 @@ peer</code></pre>
           <p data-ref-key="cli.startBody">
             If version works but credentials fail after moving files, check that <code>peer-credential-helper</code> is still beside <code>peer</code>.
           </p>
+          <h3 id="cli-shell" data-ref-key="cli.shellTitle">Shell commands</h3>
+          <pre><code>peer update
+peer update --check
+peer sessions
+peer models
+peer doctor
+peer completions bash
+peer export &lt;id&gt;</code></pre>
+          <p data-ref-key="cli.shellBody">
+            <code>peer update</code> installs the newest release on the channel already installed. <code>--check</code> only reports it.
+            <code>peer sessions delete</code> also removes that session's goal plans and asks first unless <code>--yes</code> is passed.
+            <code>peer export</code> writes a reading copy, not Evidence.
+          </p>
 
           <h3 id="cli-status" data-ref-key="cli.statusTitle">Status bar (what to read)</h3>
           <p data-ref-key="cli.statusBody">
