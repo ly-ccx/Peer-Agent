@@ -418,6 +418,103 @@ test('checkpoint_created coordinates survive a sidecar reopen', async () => {
   }
 });
 
+test('settled large plans do not full-rewrite on changeKind persist', async () => {
+  const { dir, store } = createTempStore({ runnerProgressFullRewriteBytes: 32 });
+  try {
+    const cases = [
+      {
+        name: 'completed-executing',
+        setup(planId) {
+          store.setPlanStatus(planId, 'completed');
+          store.setRunnerState(planId, { enabled: false, status: 'completed', intent: 'synthesize', phase: 'synthesize' });
+        },
+        tick(planId) {
+          store.setPlanStatus(planId, 'executing');
+        },
+        diskStatus: 'completed',
+      },
+      {
+        name: 'paused',
+        setup(planId) {
+          store.setPlanStatus(planId, 'paused');
+          store.setRunnerState(planId, { enabled: true, status: 'paused', intent: 'block', phase: 'blocked' });
+        },
+        tick(planId) {
+          const current = store.getPlan(planId);
+          store.setPlanStatus(planId, 'paused');
+          store.appendRunEvent(planId, {
+            type: 'checkpoint_created',
+            nodeId: 'node-paused',
+            summary: 'paused tick',
+          });
+          store.revisePlan(planId, { status: 'paused', title: current.title }, {
+            reason: 'scheduler admitted session',
+            changedBy: 'session-supervisor',
+          });
+        },
+        diskStatus: 'paused',
+      },
+      {
+        name: 'waiting-user-interrupted',
+        setup(planId) {
+          store.setPlanStatus(planId, 'interrupted');
+          store.setRunnerState(planId, {
+            enabled: true,
+            status: 'waiting_user',
+            intent: 'block',
+            phase: 'waiting_user',
+            waitingOnUser: true,
+          });
+        },
+        tick(planId) {
+          store.setPlanStatus(planId, 'interrupted');
+          store.appendRunEvent(planId, {
+            type: 'checkpoint_created',
+            nodeId: 'node-interrupted',
+            summary: 'interrupted tick',
+          });
+        },
+        diskStatus: 'interrupted',
+      },
+    ];
+    const files = [];
+    for (const entry of cases) {
+      const plan = store.createPlan({ title: entry.name, goal: 'x'.repeat(400) });
+      entry.setup(plan.planId);
+      const file = path.join(dir, `${plan.planId}.json`);
+      files.push({ ...entry, planId: plan.planId, file, body: fileStamp(file) });
+    }
+    const changes = path.join(dir, '.changes.jsonl');
+    const journal = fileStamp(changes);
+    for (const entry of files) entry.tick(entry.planId);
+    assert.equal(fileStamp(changes), journal, 'settled persist appended .changes.jsonl');
+    for (const entry of files) {
+      assert.equal(fileStamp(entry.file), entry.body, `${entry.name} persist rewrote the plan body`);
+      assert.equal(JSON.parse(fs.readFileSync(entry.file, 'utf8')).status, entry.diskStatus);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    assert.equal(fileStamp(changes), journal, 'sidecar flush appended .changes.jsonl');
+    for (const entry of files) {
+      assert.equal(fileStamp(entry.file), entry.body, `${entry.name} sidecar flush rewrote the plan body`);
+      const sidecarPath = path.join(dir, 'runner-progress', `${entry.planId}.json`);
+      assert.equal(fs.existsSync(sidecarPath), true, `${entry.name} did not use the sidecar`);
+      const sidecar = JSON.parse(fs.readFileSync(sidecarPath, 'utf8'));
+      if (entry.name === 'completed-executing') assert.equal(sidecar.status, 'executing');
+      if (entry.name !== 'completed-executing') {
+        assert.ok(sidecar.runEvents.some((event) => event.type === 'checkpoint_created'));
+      }
+    }
+    const other = createGoalPlanStore({ storeDir: dir, runnerProgressFullRewriteBytes: 32 });
+    assert.equal(other.getPlan(files[0].planId).status, 'executing');
+    assert.equal(other.getPlan(files[1].planId).runTrace.lastCheckpointNodeId, 'node-paused');
+    assert.equal(other.getPlan(files[2].planId).runner.status, 'waiting_user');
+    assert.equal(other.getPlan(files[2].planId).runTrace.lastCheckpointNodeId, 'node-interrupted');
+    assert.equal(JSON.parse(fs.readFileSync(files[0].file, 'utf8')).status, 'completed');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('runner progress on a large plan does not rewrite the plan document', async () => {
   const { dir, store } = createTempStore({ runnerProgressFullRewriteBytes: 32 });
   const plan = store.createPlan({ title: 'big', goal: 'x'.repeat(400) });
