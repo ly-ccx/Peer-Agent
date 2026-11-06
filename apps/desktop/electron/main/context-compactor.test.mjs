@@ -615,10 +615,13 @@ describe('context compactor', () => {
   });
 
   it('compacts closed tool rounds inside the latest human turn while preserving the raw user request', async () => {
+    // The closed tool body is spilled before the trigger. Older prose, not that
+    // body, is what still crosses the window and must be summarized.
+    const hugeToolResult = `tool output ${'x'.repeat(360_000)}`;
     const messages = [
       { role: 'system', content: 'system prompt' },
-      { role: 'user', content: 'old question' },
-      { role: 'assistant', content: 'old answer' },
+      { role: 'user', content: `old question ${'a'.repeat(200_000)}` },
+      { role: 'assistant', content: `old answer ${'b'.repeat(200_000)}` },
       { role: 'user', content: 'current task' },
       {
         role: 'assistant',
@@ -627,28 +630,35 @@ describe('context compactor', () => {
           { id: 'tool-9', type: 'function', function: { name: 'bash', arguments: '{}' } },
         ],
       },
-      { role: 'tool', tool_call_id: 'tool-9', content: `tool output ${'x'.repeat(360_000)}` },
+      { role: 'tool', tool_call_id: 'tool-9', content: hugeToolResult },
     ];
 
-    const result = await compactIfNeeded({
-      messages,
-      systemPrompt: 'system prompt',
-      contextWindow: 100_000,
-      providerConfig: null,
-      preserveLatestUserTurn: true,
-      preserveRecentTurns: 1,
-    });
+    const spillDir = mkdtempSync(join(tmpdir(), 'peer-tool-spill-'));
+    try {
+      const result = await compactIfNeeded({
+        messages,
+        systemPrompt: 'system prompt',
+        contextWindow: 100_000,
+        providerConfig: null,
+        preserveLatestUserTurn: true,
+        preserveRecentTurns: 1,
+        baseDir: spillDir,
+      });
 
-    assert.equal(result.compacted, true);
-    assert.equal(result.notification.oldMessageCount, 4);
-    assert.equal(result.notification.keptMessageCount, 1);
-    assert.equal(result.messages.length, 3);
-    assert.equal(result.messages.at(-1).role, 'user');
-    assert.equal(result.messages.at(-1).content, 'current task');
-    assert.ok(
-      result.notification.afterTokens < result.notification.beforeTokens,
-      'an automatic compaction must actually reduce the context',
-    );
+      assert.equal(result.compacted, true);
+      assert.equal(result.notification.oldMessageCount, 4);
+      assert.equal(result.notification.keptMessageCount, 1);
+      assert.equal(result.messages.length, 3);
+      assert.equal(result.messages.at(-1).role, 'user');
+      assert.equal(result.messages.at(-1).content, 'current task');
+      assert.equal(JSON.stringify(result.messages).includes('x'.repeat(1_000)), false);
+      assert.ok(
+        result.notification.afterTokens < result.notification.beforeTokens,
+        'an automatic compaction must actually reduce the context',
+      );
+    } finally {
+      rmSync(spillDir, { recursive: true, force: true });
+    }
   });
 
   it('keeps an unclosed tool call with the latest user request for provider validity', async () => {
@@ -1794,10 +1804,12 @@ describe('degradeKeepMessagesForBudget', () => {
 
 describe('goalKeepPolicy (Milestone A bounded keep)', () => {
   it('accepts goalKeepPolicy and keeps oversized current-turn tool tails within budget', async () => {
-    // Goal 模式不再无限保留当前工具尾：即便 unclosed tool chain 很大，
-    // goalKeepPolicy 也应通过有界 keep / recovery degrade 过线。
+    // The current tool tail is spilled before keep budgeting. An earlier turn
+    // stays outside the bounded window so Layer 2 still has a real old slice.
     const hugeToolResult = 'tool-output-' + 'x'.repeat(40_000);
     const messages = [
+      { role: 'user', content: `earlier task ${'c'.repeat(20_000)}` },
+      { role: 'assistant', content: 'noted the earlier task' },
       { role: 'user', content: 'old task ' + 'a'.repeat(4_000) },
       { role: 'assistant', content: 'old answer ' + 'b'.repeat(4_000) },
       { role: 'user', content: 'current task please inspect' },
@@ -1824,6 +1836,8 @@ describe('goalKeepPolicy (Milestone A bounded keep)', () => {
       },
     ];
 
+    const spillDir = mkdtempSync(join(tmpdir(), 'peer-tool-spill-'));
+    try {
     const result = await compactIfNeeded({
       messages,
       systemPrompt: 'system prompt',
@@ -1833,6 +1847,7 @@ describe('goalKeepPolicy (Milestone A bounded keep)', () => {
       force: true,
       preserveLatestUserTurn: true,
       goalKeepPolicy: true,
+      baseDir: spillDir,
     });
 
     assert.equal(result.compacted, true);
@@ -1846,6 +1861,7 @@ describe('goalKeepPolicy (Milestone A bounded keep)', () => {
     // 只要压缩成功且 after < before 即可；不允许再炸 insufficient_reduction。
     assert.notEqual(result.notification.fallbackReason, 'insufficient_reduction');
 
+    assert.equal(JSON.stringify(result.messages).includes('x'.repeat(1_000)), false);
     const keptTool = result.messages.find(
       (message) => message.role === 'tool' && message.tool_call_id === 'call-keep-huge',
     );
@@ -1854,6 +1870,10 @@ describe('goalKeepPolicy (Milestone A bounded keep)', () => {
         ? keptTool.content
         : JSON.stringify(keptTool.content);
       assert.ok(keptContent.length < hugeToolResult.length, 'goal keep must not retain full tool tail');
+      assert.match(keptContent, /suggestedRetrieval/);
+    }
+    } finally {
+      rmSync(spillDir, { recursive: true, force: true });
     }
   });
 
