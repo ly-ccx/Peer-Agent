@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { beforeEach, describe, it } from 'node:test';
 import {
@@ -217,11 +219,9 @@ describe('compactIfNeeded（触发口径含工具 schema）', () => {
     );
   });
 
-  it('degrades oversized keep tool tails when summary-only candidates cannot pass triggerLimit', async () => {
-    // Auto path: preserveLatestUserTurn keeps the unclosed tool tail, including a huge
-    // tool_result that default microcompact leaves alone (recent window). A second open
-    // tool_call keeps that result in keep (closed-only results would be summarized into old).
-    // Summary fallbacks cannot shrink keep; keep_budget_degrade must microcompact keep.
+  it('bounds an oversized recent tool result before keep budgeting', async () => {
+    // The recent window used to leave this tail intact, so only keep_budget_degrade
+    // could shrink it. Provider send now caps every tool result, including the latest.
     const hugeToolResult = 'tool-output-' + 'x'.repeat(40_000);
     const messages = [
       { role: 'user', content: 'old task ' + 'a'.repeat(4_000) },
@@ -251,6 +251,8 @@ describe('compactIfNeeded（触发口径含工具 schema）', () => {
       // call-keep-open intentionally has no result yet → unclosed tail stays in keep
     ];
 
+    const spillDir = mkdtempSync(join(tmpdir(), 'peer-tool-spill-'));
+    try {
     const result = await compactIfNeeded({
       messages,
       systemPrompt: 'system prompt',
@@ -260,10 +262,10 @@ describe('compactIfNeeded（触发口径含工具 schema）', () => {
       providerConfig: null,
       force: true,
       preserveLatestUserTurn: true,
+      baseDir: spillDir,
     });
 
     assert.equal(result.compacted, true);
-    assert.equal(result.notification.fallbackReason, 'keep_budget_degrade');
     assert.ok(result.notification.afterTokens < result.notification.beforeTokens);
 
     const keptTool = result.messages.find((message) => message.role === 'tool' && message.tool_call_id === 'call-keep-huge');
@@ -271,6 +273,11 @@ describe('compactIfNeeded（触发口径含工具 schema）', () => {
     const keptContent = typeof keptTool.content === 'string' ? keptTool.content : JSON.stringify(keptTool.content);
     assert.ok(keptContent.length < hugeToolResult.length, 'keep tool_result must be microcompacted');
     assert.ok(!keptContent.includes('x'.repeat(1_000)), 'long raw tool tail must not remain intact');
+    assert.match(keptContent, /suggestedRetrieval/);
+    assert.match(keptContent, /rg -n/);
+    } finally {
+      rmSync(spillDir, { recursive: true, force: true });
+    }
   });
 });
 
