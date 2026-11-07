@@ -17,7 +17,6 @@
 import { appendFileSync, mkdirSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { setJsonWriteObserver } from '../../../../packages/runtime-node/src/goal-plan-files.mjs';
 
 const DEFAULT_THRESHOLD_MS = 100;
 const RATE_LIMIT_MS = 10_000;
@@ -168,10 +167,12 @@ export function installConsoleSlowProbe({
     const original = consoleObject[method];
     if (typeof original !== 'function' || original.__peerConsoleSlow) continue;
     originals.set(method, original);
+    const bound = original.bind(consoleObject);
     function wrapped(...args) {
       const started = now();
       try {
-        return original.apply(this, args);
+        // 拆出来调用时仍绑定原来的 console，避免原生方法因 this 丢失抛出。
+        return bound(...args);
       } finally {
         try {
           const elapsed = now() - started;
@@ -304,11 +305,15 @@ function watchEventLoop(log) {
     const histogram = monitorEventLoopDelay({ resolution: 20 });
     histogram.enable();
     const timer = setInterval(() => {
-      const sample = { maxMs: histogram.max / 1e6, meanMs: histogram.mean / 1e6 };
-      histogram.reset();
-      flushMainSegments();
-      if (!shouldReportEventLoop(sample)) return;
-      log(formatEventLoopWindow(sample));
+      try {
+        const sample = { maxMs: histogram.max / 1e6, meanMs: histogram.mean / 1e6 };
+        histogram.reset();
+        flushMainSegments();
+        if (!shouldReportEventLoop(sample)) return;
+        log(formatEventLoopWindow(sample));
+      } catch {
+        // 事件循环采样失败不能变成未捕获异常。
+      }
     }, SEGMENT_WINDOW_MS);
     timer.unref?.();
     return () => {
@@ -330,10 +335,18 @@ function installForElectron() {
   installConsoleSlowProbe({ log });
   watchEventLoop(log);
   import('electron').then(({ app }) => hookRendererLongTaskConsole(app, write)).catch(() => {});
-  // 每次 stringify / write 都记实际字节和耗时，不用文件增量推断是不是全文。
-  setJsonWriteObserver((sample) => {
-    log(formatPlanWrite(sample));
-  });
+  // 每次 stringify / write 都记实际字节和耗时。导入失败不能阻止主进程启动。
+  import(new URL('../../../../packages/runtime-node/src/goal-plan-files.mjs', import.meta.url).href)
+    .then(({ setJsonWriteObserver }) => {
+      setJsonWriteObserver((sample) => {
+        log(formatPlanWrite(sample));
+      });
+    })
+    .catch(() => {});
 }
 
-installForElectron();
+try {
+  installForElectron();
+} catch {
+  // 诊断安装失败不能阻止主进程启动。
+}

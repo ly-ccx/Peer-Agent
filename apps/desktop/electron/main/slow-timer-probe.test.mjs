@@ -305,6 +305,22 @@ test('event loop, plan write, and slow console lines keep only durations', () =>
   });
   assert.equal(keeping.info(secret), 'kept');
   removeKeep();
+  const owner = {
+    tag: 'owner',
+    info(...args) {
+      if (this !== owner) throw new Error('illegal-invocation');
+      return args[0];
+    },
+  };
+  const removeOwner = installConsoleSlowProbe({
+    consoleObject: owner,
+    thresholdMs: 10_000,
+    log() {},
+    now: () => 0,
+  });
+  const detached = owner.info;
+  assert.equal(detached(secret), secret);
+  removeOwner();
 });
 
 test('stream send keeps its return value and exception when segment logging fails', async () => {
