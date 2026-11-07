@@ -1,3 +1,4 @@
+import './slow-timer-probe.mjs';
 import { createDesktopInputPrediction } from './input-prediction/desktop-service.mjs';
 import { createInputPredictionIpcRegistrations } from './ipc/register-input-prediction-ipc.mjs';
 import { createResourceEditApplicationService } from './resource-edit-application-service.mjs';

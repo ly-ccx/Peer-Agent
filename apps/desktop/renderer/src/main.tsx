@@ -1,5 +1,6 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import { observeRendererLongTasks } from './diagnostics/longTaskProbe';
 import { AppearanceProvider } from './appearance/AppearanceProvider';
 import { AppErrorBoundary } from './app/components/AppErrorBoundary';
 import { ConfirmProvider } from './app/components/ConfirmProvider';
@@ -17,6 +18,8 @@ if (/Macintosh|Mac OS X/.test(navigator.userAgent)) {
 // 平台标记：CSS 用它门控 macOS 交通灯专属的窗口留白（侧栏顶部、折叠页头左缘）。
 // 非 darwin 平台上 hiddenInset 窗口没有系统交通灯，保留这些预留只会得到一段死空白。
 document.documentElement.dataset.os = detectRendererOs(navigator.userAgent);
+
+if (typeof PerformanceObserver === 'function') observeRendererLongTasks(PerformanceObserver);
 
 createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
