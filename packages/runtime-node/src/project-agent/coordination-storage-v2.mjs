@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
+import { noteDiagnosticPhase } from '../diagnostic-phase.mjs';
 import { DatabaseSync } from '../sqlite/connection.mjs';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import { copyFile, truncate } from 'node:fs/promises';
@@ -271,7 +273,8 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
   const headFile = path.join(dir, 'head.json');
   const indexDirectory = path.join(directory, '.read-models'), pointerFile = path.join(indexDirectory, 'coordination-current.json');
   const originalLegacyFile = legacyFile;
-  let db, dbIdentity, indexFile, manifest, cached, cachedRevision, preparing;
+  let db, dbIdentity, indexFile, manifest, cached, cachedRevision, receiptCache, receiptRevision, preparing;
+  function clearSnapshots() { cached = undefined; receiptCache = undefined; }
   const metadata = new Map();
   function readMetadata(file) {
     const version = token(file), previous = metadata.get(file);
@@ -294,7 +297,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
       if (next.frozenLegacyFile !== 'baseline.jsonl' || !lstatSync(originalLegacyFile).isDirectory() || lstatSync(originalLegacyFile).isSymbolicLink() || !lstatSync(path.join(dir, 'baseline.jsonl')).isFile() || lstatSync(path.join(dir, 'baseline.jsonl')).isSymbolicLink()) throw fail('coordination_writer_fence_missing');
       legacyFile = path.join(dir, next.frozenLegacyFile);
     } else legacyFile = originalLegacyFile;
-    if (manifest && next.generation !== manifest.generation) { db?.close(); db = undefined; cached = undefined; }
+    if (manifest && next.generation !== manifest.generation) { db?.close(); db = undefined; clearSnapshots(); }
     manifest = next;
     if (!existsSync(headFile)) throw fail('coordination_head_missing');
     if (!existsSync(pointerFile)) throw fail('coordination_recovery_pending');
@@ -302,10 +305,10 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
     try { pointer = readMetadata(pointerFile); } catch { throw fail('coordination_index_corrupt'); }
     if (pointer.schemaVersion !== 1 || pointer.generation !== manifest.generation || !/^coordination-[a-f0-9-]{36}\.sqlite$/.test(pointer.file || '')) throw fail('coordination_index_corrupt');
     const nextFile = path.join(indexDirectory, pointer.file);
-    if (indexFile !== nextFile) { db?.close(); db = undefined; cached = undefined; indexFile = nextFile; }
+    if (indexFile !== nextFile) { db?.close(); db = undefined; clearSnapshots(); indexFile = nextFile; }
     if (!existsSync(indexFile)) throw fail('coordination_recovery_pending');
     const identity = token(indexFile).split(':').slice(0, 2).join(':');
-    if (db && identity !== dbIdentity) { db.close(); db = undefined; cached = undefined; }
+    if (db && identity !== dbIdentity) { db.close(); db = undefined; clearSnapshots(); }
     if (!db) {
       // The journal and durable head are the receipts; an atomic cache commit
       // may be lost on power failure and is caught up from its source offset.
@@ -481,8 +484,13 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
       const sources = getMeta(db, 'sources') || {}; sources[file] = token(file);
       putMeta(db, 'sources', sources); putMeta(db, `offset:${file}`, statSync(file).size);
       putMeta(db, `anchor:${file}`, anchor(file, statSync(file).size)); assertOwner(); db.exec('COMMIT');
-      cached = undefined;
-      return returnState ? snapshot(db, true) : undefined;
+      clearSnapshots();
+      if (!returnState) return undefined;
+      const started = performance.now();
+      receiptCache = freeze(snapshot(db, true));
+      receiptRevision = record.revision;
+      noteDiagnosticPhase('watch.ledger', { hit: 0, ms: performance.now() - started });
+      return receiptCache;
     } catch (error) {
       try { db.exec('ROLLBACK'); } catch {}
       if (persisted) throw Object.assign(fail('durable_pending_projection'), { operationId: raw.operationId, cause: error });
@@ -529,7 +537,19 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
         .all(...args).map(row => JSON.parse(row.value));
     },
     revision() { load(); return Number(getMeta(db, 'revision') || 0); },
-    read() { load(); return snapshot(db, true); },
+    read() {
+      load();
+      const revision = getMeta(db, 'revision') || 0;
+      if (receiptCache && receiptRevision === revision) {
+        noteDiagnosticPhase('watch.ledger', { hit: 1, ms: 0 });
+        return receiptCache;
+      }
+      const started = performance.now();
+      receiptCache = freeze(snapshot(db, true));
+      receiptRevision = revision;
+      noteDiagnosticPhase('watch.ledger', { hit: 0, ms: performance.now() - started });
+      return receiptCache;
+    },
     readSnapshot() { load(); const revision = getMeta(db, 'revision') || 0; if (!cached || cachedRevision !== revision) { cached = freeze(snapshot(db)); cachedRevision = revision; } return cached; },
     readWork(id) { load(); return head(db, id); },
     readLifecycleFacts() { load(); const state = { revision: getMeta(db, 'revision') || 0 }; for (const key of ['mandates', 'transitions', 'decisions']) state[key] = all(db, key);
