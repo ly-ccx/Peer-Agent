@@ -123,3 +123,13 @@ for (const [message, requestedTokens, maximumTokens] of [
   assert.equal(evidence.maximumTokens,maximumTokens);
   assert.doesNotMatch(JSON.stringify(result),/PRIVATE_ECHO/);
 });
+
+test('context-window category retains its identity and parseable token evidence', async () => {
+  const result = await readProviderHttpError(new Response(JSON.stringify({error:{code:'context_window_exceeded',message:'requested 1200 tokens; 1000 token limit PRIVATE_ECHO'}}),{status:400}));
+  assert.equal(result.diagnostic.code,'context_window_exceeded');
+  const evidence = parseContextOverflowEvidence({status:400,message:result.detail});
+  assert.ok(evidence);
+  assert.equal(evidence.requestedTokens,1200);
+  assert.equal(evidence.maximumTokens,1000);
+  assert.doesNotMatch(JSON.stringify(result),/PRIVATE_ECHO/);
+});

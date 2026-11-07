@@ -227,8 +227,9 @@ test('compatible chat HTTP failures preserve authoritative counts through the th
 });
 
 test('four-argument errors preserve partial validated counts without inventing missing facts', () => {
+  for (const code of ['context_length_exceeded','context_window_exceeded'])
   for (const [actual,limit] of [[1200,1000],[1200,undefined],[undefined,1000]] as const) {
-    const error = new ModelProviderHttpError('fixture',400,'PRIVATE_ECHO',{status:400,source:'provider',code:'context_length_exceeded',actual,limit});
+    const error = new ModelProviderHttpError('fixture',400,'PRIVATE_ECHO',{status:400,source:'provider',code,actual,limit});
     const evidence = parseContextOverflowEvidence(error);
     assert.ok(evidence);
     assert.equal(evidence.requestedTokens,actual);

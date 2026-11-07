@@ -12,7 +12,7 @@ const LABELS = {
   peer_request_tools_exceeded: 'Peer tool definitions exceed the gateway limit', peer_request_invalid: 'Invalid Peer model request', peer_provider_context_exceeded: 'Provider context length exceeded',
 };
 export function safeProviderErrorLabel(code, actual, limit) {
-  if (code === 'context_length_exceeded') {
+  if (code === 'context_length_exceeded' || code === 'context_window_exceeded') {
     const hasActual = Number.isSafeInteger(actual) && actual > 0;
     const hasLimit = Number.isSafeInteger(limit) && limit > 0;
     if (hasActual && hasLimit)
@@ -155,7 +155,7 @@ export function parseProviderHttpErrorText(raw, options = {}) {
     diagnostic.upstreamStatus = value.upstream_status;
   safeRequestId(value.request_id);
   let detail = safeProviderErrorLabel(diagnostic.code, diagnostic.actual, diagnostic.limit);
-  if (!gateway && diagnostic.code === 'context_length_exceeded') {
+  if (!gateway && ['context_length_exceeded', 'context_window_exceeded'].includes(diagnostic.code)) {
     const evidence = candidates.filter(text => typeof text === 'string')
       .map(message => parseContextOverflowEvidence({ status: options.status, message: `context_length_exceeded: ${message}` }))
       .find(value => value?.requestedTokens || value?.maximumTokens);
