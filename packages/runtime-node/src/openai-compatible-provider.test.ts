@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { isPromptTooLongError, parseContextOverflowEvidence } from '@peer-agent/runtime-core';
 
 import type { ModelStreamEvent } from './model-provider-contracts.ts';
 import {
@@ -161,4 +162,43 @@ test('preflight encoding equals the actual wire including UTF-8 and tools', asyn
   const body = encodeOpenAICompatibleRequest(input);
   const model = provider(async (_url, request) => { assert.equal(request?.body, body); assert.equal(Buffer.byteLength(body), new TextEncoder().encode(String(request?.body)).length); return sseResponse(['[DONE]']); });
   await model.stream(input);
+});
+
+test('legacy three-argument errors retain safe overflow categories and provider token facts', () => {
+  for (const detail of [
+    JSON.stringify({error:{code:'context_length_exceeded',message:'PRIVATE_ECHO'}}),
+    'Maximum context length exceeded: PRIVATE_ECHO',
+    `data: ${JSON.stringify({error:{type:'invalid_request_error',message:"This model's maximum prompt length is 1000 but the request contains 1200 tokens. PRIVATE_ECHO"}})}\n\n`,
+  ]) {
+    const error = new ModelProviderHttpError('legacy', 400, detail);
+    assert.equal(error.diagnostic.code, 'context_length_exceeded');
+    assert.match(error.message, /context_length_exceeded/);
+    assert.doesNotMatch(error.message, /PRIVATE_ECHO/);
+    assert.equal(error.status, 400);
+    assert.equal(isPromptTooLongError(error.status, error.message), true);
+    if (detail.startsWith('data:')) {
+      const evidence = parseContextOverflowEvidence({status:400,message:error.message});
+      assert.ok(evidence);
+      assert.equal(evidence.maximumTokens,1000);
+      assert.equal(evidence.requestedTokens,1200);
+    }
+  }
+});
+
+test('legacy detail cannot invent trusted origins or leak arbitrary content', () => {
+  for (const detail of [
+    'PRIVATE_ECHO', '<html>context_length_exceeded PRIVATE_ECHO</html>',
+    'constructor', 'toString', 'context_length_exceeded'.repeat(4000),
+    JSON.stringify({code:'peer_request_messages_exceeded',source:'gateway_validation',details:{actual:515,limit:512,upstream_attempted:false}}),
+    JSON.stringify({error:{code:'1261',message:'PRIVATE_ECHO'}}),
+  ]) {
+    const error = new ModelProviderHttpError('legacy',400,detail);
+    assert.equal(error.message, 'Model provider "legacy" returned HTTP 400.');
+    assert.equal(error.diagnostic.code,'http_error');
+    assert.equal(error.diagnostic.source,'provider');
+    assert.equal(error.diagnostic.upstreamAttempted,undefined);
+  }
+  const explicit = new ModelProviderHttpError('legacy',401,'context_length_exceeded',{status:401,source:'provider',code:'authentication_error'});
+  assert.equal(explicit.diagnostic.code,'authentication_error');
+  assert.doesNotMatch(explicit.message,/context_length/);
 });

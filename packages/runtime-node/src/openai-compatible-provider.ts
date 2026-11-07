@@ -1,4 +1,4 @@
-import { readProviderHttpError, safeProviderErrorLabel } from './provider-http-error.mjs';
+import { parseProviderHttpErrorText, readProviderHttpError, safeProviderErrorLabel } from './provider-http-error.mjs';
 import { stripOpenAIMessageName } from './provider-encoders/request-encoder.mjs';
 import type {
   ModelMessage,
@@ -24,7 +24,9 @@ export class ModelProviderHttpError extends Error {
   readonly diagnostic: Readonly<Record<string, unknown>>;
 
   constructor(providerId: string, status: number, detail?: string, diagnostic?: Readonly<Record<string, unknown>>) {
-    detail = safeProviderErrorLabel(diagnostic?.code ?? detail, diagnostic?.actual, diagnostic?.limit);
+    const parsed = diagnostic ? undefined : parseProviderHttpErrorText(detail, { status });
+    diagnostic ??= parsed?.diagnostic;
+    detail = parsed?.detail ?? safeProviderErrorLabel(diagnostic?.code, diagnostic?.actual, diagnostic?.limit);
     const upstream = Number.isInteger(diagnostic?.upstreamStatus) && Number(diagnostic?.upstreamStatus) >= 100 && Number(diagnostic?.upstreamStatus) <= 599 ? ` (upstream HTTP ${diagnostic!.upstreamStatus})` : '';
     const requestId = typeof diagnostic?.requestId === 'string' && /^(?:[a-f0-9-]{8,64}|req_[a-zA-Z0-9]{1,64})$/.test(diagnostic.requestId) ? ` [request_id=${diagnostic.requestId}]` : '';
     super(`Model provider "${providerId}" returned HTTP ${status}${upstream}${detail ? `: ${detail}` : '.'}${requestId}`);

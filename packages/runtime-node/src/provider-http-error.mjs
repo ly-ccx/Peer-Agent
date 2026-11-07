@@ -10,7 +10,7 @@ const LABELS = {
   peer_request_tools_exceeded: 'Peer tool definitions exceed the gateway limit', peer_request_invalid: 'Invalid Peer model request', peer_provider_context_exceeded: 'Provider context length exceeded',
 };
 export function safeProviderErrorLabel(code, actual, limit) {
-  const label = LABELS[code];
+  const label = typeof code === 'string' && Object.hasOwn(LABELS, code) ? LABELS[code] : undefined;
   return label && Number.isSafeInteger(actual) && actual >= 0 && Number.isSafeInteger(limit) && limit >= 0
     ? `${label} (${actual}; limit ${limit})` : label;
 }
@@ -84,7 +84,20 @@ export async function readProviderHttpError(response, options = {}) {
       throw error;
     return { diagnostic };
   }
-  if (!raw || /<\s*(?:!doctype|html|body|head)\b/i.test(raw))
+  const parsed = parseProviderHttpErrorText(raw, { ...options, status: response.status, url: response.url });
+  if (parsed.diagnostic.requestId === undefined && diagnostic.requestId !== undefined)
+    parsed.diagnostic.requestId = diagnostic.requestId;
+  return parsed;
+}
+
+/** Synchronous compatibility entrance; never trusts body-provided origin or retry authority. */
+export function parseProviderHttpErrorText(raw, options = {}) {
+  const diagnostic = { status: options.status, source: 'provider', code: 'http_error' };
+  const safeRequestId = (requestId) => {
+    if (typeof requestId === 'string' && /^(?:[a-f0-9-]{8,64}|req_[a-zA-Z0-9]{1,64})$/.test(requestId)
+        && !(options.secrets ?? []).some((secret) => secret && requestId.includes(secret))) diagnostic.requestId = requestId;
+  };
+  if (typeof raw !== 'string' || Buffer.byteLength(raw) > BODY_LIMIT || !raw || /<\s*(?:!doctype|html|body|head)\b/i.test(raw))
     return { diagnostic };
   let value;
   try {
@@ -108,7 +121,7 @@ export async function readProviderHttpError(response, options = {}) {
   const candidates = [nested.code, nested.type, value.code, value.type, nested.message, typeof value.error === 'string' ? value.error : undefined, value.message];
   const gateway = options.trustGatewayErrors === true && value.source === 'gateway_validation' && GATEWAY_CODES.has(value.code);
   let upstreamHost;
-  try { upstreamHost = new URL(response.url).hostname; } catch { /* Synthetic/opaque responses have no trusted origin. */ }
+  try { upstreamHost = new URL(options.url).hostname; } catch { /* Synthetic/opaque responses have no trusted origin. */ }
   const zhipuCodes = upstreamHost === 'open.bigmodel.cn'
     ? new Map([['1113', 'insufficient_quota'], ['1261', 'context_length_exceeded']]) : new Map();
   const numericCode = [nested.code, value.code].map(code => zhipuCodes.get(code)).find(Boolean);
@@ -129,7 +142,7 @@ export async function readProviderHttpError(response, options = {}) {
   }
   if (options.trustGatewayErrors === true && value.source === 'provider' && Number.isInteger(value.upstream_status) && value.upstream_status >= 100 && value.upstream_status <= 599)
     diagnostic.upstreamStatus = value.upstream_status;
-  safeRequestId(value.request_id ?? response.headers.get('x-request-id'));
+  safeRequestId(value.request_id);
   let detail = safeProviderErrorLabel(diagnostic.code, diagnostic.actual, diagnostic.limit);
   if (!gateway && diagnostic.code === 'context_length_exceeded') {
     const assertion = candidates.filter(text => typeof text === 'string').map(text => text.match(/^this model's maximum (?:prompt|context) length is ([\d,]+) (?:but|and) the request contains ([\d,]+) tokens?\./i)).find(Boolean);
