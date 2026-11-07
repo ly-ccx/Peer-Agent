@@ -604,8 +604,10 @@ test('cancellation after a known tool result commits its native checkpoint befor
   assert.deepEqual(order, ['applied', 'durable', 'cancelled']);
 });
 
-test('preserves safe structured HTTP diagnostics through the pipeline', async () => {
-  const diagnostic = { code: 'peer_request_messages_exceeded', source: 'gateway_validation', status: 400, actual: 515, limit: 512, upstreamAttempted: false };
+for (const diagnostic of [
+  { code: 'peer_request_messages_exceeded', source: 'gateway_validation', status: 400, actual: 515, limit: 512, upstreamAttempted: false },
+  { code: 'domain_blocked', source: 'provider', status: 403 },
+]) test(`preserves safe structured HTTP diagnostics through the pipeline: ${diagnostic.code}`, async () => {
   const events: RuntimeSdkEvent[] = [];
   const pipeline = createRuntimePipeline({
     events: createEventSink(events),

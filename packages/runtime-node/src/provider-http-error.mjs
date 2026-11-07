@@ -2,9 +2,11 @@ import { isPromptTooLongError, parseContextOverflowEvidence } from '@peer-agent/
 
 /** HTTP diagnostics are bounded metadata, never arbitrary upstream output. */
 const BODY_LIMIT = 64 * 1024;
+const DOMAIN_BLOCKED = /Domain Blocking|域名拦截|not allowed by the default security policy|不在安全策略默认允许的范围内/i;
 const PROVIDER_CODES = new Set(['context_length_exceeded', 'context_window_exceeded', 'model_not_found', 'invalid_api_key', 'authentication_error', 'rate_limit_exceeded', 'insufficient_quota', 'invalid_request_error', 'configuration_error', 'server_error']);
 const GATEWAY_CODES = new Set(['peer_request_messages_exceeded', 'peer_request_body_exceeded', 'peer_request_tools_exceeded', 'peer_request_invalid', 'peer_provider_context_exceeded']);
 const LABELS = {
+  domain_blocked: 'Domain Blocking.',
   context_length_exceeded: 'context_length_exceeded: Context length exceeded', context_window_exceeded: 'Context window exceeded',
   model_not_found: 'The requested model does not exist', invalid_api_key: 'Authentication failed', authentication_error: 'Authentication failed',
   rate_limit_exceeded: 'Rate limit exceeded', insufficient_quota: 'Provider quota exhausted', invalid_request_error: 'Invalid request', configuration_error: 'Workspace model configuration is required', server_error: 'Provider server error',
@@ -108,8 +110,15 @@ export function parseProviderHttpErrorText(raw, options = {}) {
     if (typeof requestId === 'string' && /^(?:[a-f0-9-]{8,64}|req_[a-zA-Z0-9]{1,64})$/.test(requestId)
         && !(options.secrets ?? []).some((secret) => secret && requestId.includes(secret))) diagnostic.requestId = requestId;
   };
-  if (typeof raw !== 'string' || Buffer.byteLength(raw) > BODY_LIMIT || !raw || /<\s*(?:!doctype|html|body|head)\b/i.test(raw))
+  if (typeof raw !== 'string' || Buffer.byteLength(raw) > BODY_LIMIT || !raw)
     return { diagnostic };
+  if (/<\s*(?:!doctype|html|body|head)\b/i.test(raw)) {
+    if (options.status === 403 && DOMAIN_BLOCKED.test(raw)) {
+      diagnostic.code = 'domain_blocked';
+      return { diagnostic, detail: safeProviderErrorLabel(diagnostic.code) };
+    }
+    return { diagnostic };
+  }
   let value;
   try {
     value = JSON.parse(raw);
@@ -139,6 +148,7 @@ export function parseProviderHttpErrorText(raw, options = {}) {
   const recognized = [numericCode, ...candidates.map(recognizedCode)].filter(Boolean);
   // Generic OpenAI error types must not hide an explicit context assertion.
   diagnostic.code = gateway ? value.code
+    : options.status === 403 && candidates.some(text => typeof text === 'string' && DOMAIN_BLOCKED.test(text)) ? 'domain_blocked'
     : recognized.find(code => code !== 'invalid_request_error') ?? recognized[0] ?? 'http_error';
   if (gateway) {
     diagnostic.source = 'gateway_validation';

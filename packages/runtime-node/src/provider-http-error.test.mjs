@@ -133,3 +133,14 @@ test('context-window category retains its identity and parseable token evidence'
   assert.equal(evidence.maximumTokens,1000);
   assert.doesNotMatch(JSON.stringify(result),/PRIVATE_ECHO/);
 });
+
+for (const text of ['Domain Blocking. PRIVATE_ECHO','域名拦截 PRIVATE_ECHO','not allowed by the default security policy PRIVATE_ECHO','不在安全策略默认允许的范围内 PRIVATE_ECHO']) test(`retains established 403 route denial: ${text.slice(0,20)}`, async () => {
+  for (const raw of [text,JSON.stringify({error:{message:text}}),`<html><body>${text}</body></html>`]) {
+    const result = await readProviderHttpError(new Response(raw,{status:403}));
+    assert.equal(result.diagnostic.code,'domain_blocked');
+    assert.equal(result.detail,'Domain Blocking.');
+    assert.doesNotMatch(JSON.stringify(result),/PRIVATE_ECHO|html/);
+  }
+  const wrongStatus = await readProviderHttpError(new Response(text,{status:400}));
+  assert.equal(wrongStatus.diagnostic.code,'http_error');
+});
