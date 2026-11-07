@@ -5,6 +5,12 @@
 
 const MAX_FIELD = 120;
 
+function attributionToken(value: string): string {
+  const withoutQuery = value.split('?')[0]?.split('#')[0] ?? '';
+  const base = withoutQuery.split(/[/\\]/).pop() || 'script';
+  return base.replace(/['"`]/g, '').slice(0, 80);
+}
+
 export interface LongTaskAttribution {
   name?: string;
   containerName?: string;
@@ -18,7 +24,10 @@ export interface LongTaskEntry {
 
 export function formatRendererLongTask(entry: LongTaskEntry): string {
   const via = (entry.attribution ?? [])
-    .map((item) => [item.containerName, item.name].filter((part) => typeof part === 'string' && part).join(':'))
+    .map((item) => [item.containerName, item.name]
+      .filter((part): part is string => typeof part === 'string' && part.length > 0)
+      .map(attributionToken)
+      .join(':'))
     .filter(Boolean)
     .join(',')
     .slice(0, MAX_FIELD);

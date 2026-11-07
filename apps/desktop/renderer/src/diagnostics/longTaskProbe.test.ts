@@ -10,6 +10,13 @@ test('renderer long task line keeps attribution names and drops unrelated body t
     attribution: [{ containerName: 'iframe', name: 'app.js' }],
   });
   assert.equal(line, '[renderer-longtask] ms=88 name=self via=iframe:app.js');
+  const leaked = formatRendererLongTask({
+    duration: 50,
+    name: 'self',
+    attribution: [{ name: `https://cdn.example/app.js?token=${secret}` }],
+  });
+  assert.equal(leaked.includes(secret), false);
+  assert.match(leaked, /via=app\.js$/);
   const unrelated = { duration: 40, name: 'self', body: secret };
   assert.equal(formatRendererLongTask(unrelated).includes(secret), false);
 });
