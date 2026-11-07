@@ -145,6 +145,9 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
         resourceClaims, unknownCalls, scope: 'managed_execution', completedAt: now() };
       const current = read(fresh);
       if (current?.operationId !== operation.operationId) throw new Error('session_control_superseded');
+      // A concurrent barrier may already have settled this same operation. Replaying
+      // that receipt is idempotent. A settled control with no receipt is not a stop.
+      if (current.phase === 'settled') return current.stopReceipt || Promise.reject(new Error('session_control_superseded'));
       change(fresh, current, { stopReceipt: receipt, nextAction: undefined, recoveryFactsDigest: undefined });
       // The deadline reports a pending stop; it must not discard a later real idle receipt.
       if (timedOut) void Promise.resolve().then(() => onStopReceipt(fresh.delegationOrigin.workspaceId)).catch(() => {});
