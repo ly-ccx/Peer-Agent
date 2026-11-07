@@ -1,3 +1,5 @@
+import { performance } from 'node:perf_hooks';
+import { noteDiagnosticPhase } from '../diagnostic-phase.mjs';
 import { createVerificationDispatchRecovery } from './verification-dispatch-recovery.mjs';
 import { createDelegationDispatchRecovery } from './delegation-dispatch-recovery.mjs';
 import { createRunnerReplyLifecycle } from './runner-reply-lifecycle.mjs';
@@ -26,6 +28,8 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
   const dispatchRecovery = createVerificationDispatchRecovery({ store, readMessages, reconcileVerification, now,
     activeAttempts: () => workBudgetBinding(workspaceId)?.activeAttempts });
   const readSnapshot = () => typeof store.readSnapshot === 'function' ? store.readSnapshot() : store.read();
+  let continuationRevision;
+  let continuationValue = false;
   const reconcileDispatches = () => {
     const inventory = readSnapshot();
     delegationRecovery.reconcileAll(inventory);
@@ -147,7 +151,9 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
   // A synchronous selection shares preparation only until control returns to its
   // caller. All writes invalidate the decision; no snapshot crosses an await.
   function recoverySelection() {
+    const snapshotStarted = performance.now();
     const inventory = readSnapshot();
+    noteDiagnosticPhase('watch.snapshot', { ms: performance.now() - snapshotStarted });
     // These repair passes only transform existing work. An empty authoritative
     // inventory needs no repair; events and prepared deliveries keep their own
     // admission paths. This snapshot never survives a later selection call.
@@ -156,6 +162,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       pending: () => pendingFrom(inventory),
       deliveryPending: () => delivery.pending(inventory),
     };
+    const repairStarted = performance.now();
     reconcileDispatches();
     expireReservations();
     let snapshot, decisionSnapshot;
@@ -187,6 +194,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     }
     reconcileRepairCustody({store,conversationId,sessions:roster});
     decisionSnapshot = undefined;
+    noteDiagnosticPhase('watch.repair', { ms: performance.now() - repairStarted });
     return {
       choose(userOnly) {
         const candidates = Object.values(decision().works).filter(work => work.parentConversationId === conversationId && !historyExecutionHeld(work) && !runtimeWorkHeld(work) && (!userOnly || work.anchorInputIds?.length)
@@ -303,8 +311,17 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     recoverUserJob() { return this.recoverJob({ userOnly: true }); },
     recoverJob({ userOnly = false } = {}) { return recoverySelection().choose(userOnly); },
     hasContinuation() {
+      const started = performance.now();
+      const revision = typeof store.revision === 'function' ? store.revision() : null;
+      if (revision !== null && continuationRevision === revision) {
+        noteDiagnosticPhase('watch.continuation', { hit: 1, ms: performance.now() - started });
+        return continuationValue;
+      }
       const selection = recoverySelection();
-      return Boolean(selection.choose(false) || selection.deliveryPending());
+      continuationValue = Boolean(selection.choose(false) || selection.deliveryPending());
+      if (revision !== null) continuationRevision = typeof store.revision === 'function' ? store.revision() : revision;
+      noteDiagnosticPhase('watch.continuation', { hit: 0, ms: performance.now() - started });
+      return continuationValue;
     },
     selectNext() {
       const selection = recoverySelection();

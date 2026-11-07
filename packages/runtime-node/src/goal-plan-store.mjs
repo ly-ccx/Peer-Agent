@@ -1,6 +1,8 @@
+import { performance } from 'node:perf_hooks';
 import { createGoalPlanCheckpoints } from "./goal-plan-checkpoints.mjs";
 import { createGoalPlanEvidence } from "./goal-plan-evidence.mjs";
 import { createGoalPlanEvents } from "./goal-plan-events.mjs";
+import { noteDiagnosticPhase } from './diagnostic-phase.mjs';
 import { goalFileVersion as fileVersion } from './goal-plan-files.mjs';
 
 import {
@@ -640,6 +642,7 @@ export function createGoalPlanStore({
         });
       }
       // 不重写计划正文，也不追加 .changes.jsonl。本进程 UI 仍走 100ms notify。
+      bumpPlanWriteEpoch();
       rememberRunnerProgress(planId, next);
       syncIndex(next);
       return next;
@@ -928,6 +931,7 @@ export function createGoalPlanStore({
     // 完整写盘优先：清掉 runner-progress 节流状态，避免旧计数回写覆盖。
     clearRunnerProgressState(next.planId);
     writeJsonAtomic(planFile(next.planId), next);
+    bumpPlanWriteEpoch();
     removeRunnerProgressPatch(next.planId);
     syncIndex(next);
     publishPersistedChange('persist', next.planId, {
@@ -1256,13 +1260,50 @@ export function createGoalPlanStore({
     }
     scheduleRunnerProgressPersist(planId);
     scheduleRunnerProgressNotify(next.planId, next.conversationId ?? null);
+    bumpPlanWriteEpoch();
     return next;
   }
 
+  // 正文对象和进度补丁都没变时，归一化结果可以复用。
+  // 30 秒巡检的 reconcile 不走事实缓存，仍会反复 getPlan。
+  // 运行中的内存进度不进这张表，避免把尚未落盘的状态冻住。
+  const normalizedPlanReads = new WeakMap();
+  let planWriteEpochValue = 0;
+  function bumpPlanWriteEpoch() { planWriteEpochValue += 1; }
+  function planWriteEpoch() { return planWriteEpochValue; }
+
   function getPlan(planId) {
     const overlay = currentRunnerProgress(planId);
-    if (overlay) return guardUiCompletion(normalizePlan(overlay));
-    return applyRunnerProgressPatch(guardUiCompletion(normalizePlan(readJson(planFile(planId)))));
+    if (overlay) {
+      const started = performance.now();
+      const value = guardUiCompletion(normalizePlan(overlay));
+      noteDiagnosticPhase('plan.normalize', { hit: 0, ms: performance.now() - started });
+      return value;
+    }
+    const raw = readJson(planFile(planId));
+    if (!raw || typeof raw !== 'object') return null;
+    const patch = readRunnerProgressPatch(planId);
+    const cached = normalizedPlanReads.get(raw);
+    let normalized = cached && cached.patch === patch ? cached.value : null;
+    if (normalized) {
+      const started = performance.now();
+      const value = applyRunnerProgressPatch(guardUiCompletion({ ...normalized }));
+      noteDiagnosticPhase('plan.normalize', { hit: 1, ms: performance.now() - started });
+      return value;
+    }
+    const started = performance.now();
+    normalized = normalizePlan(raw);
+    noteDiagnosticPhase('plan.normalize', { hit: 0, ms: performance.now() - started });
+    if (normalized && typeof normalized === 'object') normalizedPlanReads.set(raw, { patch, value: normalized });
+    if (!normalized || typeof normalized !== 'object') return null;
+    return applyRunnerProgressPatch(guardUiCompletion({ ...normalized }));
+  }
+
+  /** 正文和进度补丁的文件戳。给 30 秒巡检判断「没变就别再整篇解析」。 */
+  function planReadStamp(planId) {
+    if (typeof planId !== 'string' || !planId) return '';
+    const side = runnerProgressPatchFile(planId);
+    return `${fileVersion(planFile(planId))}|${side ? fileVersion(side) : ''}`;
   }
 
   /**
@@ -2690,6 +2731,7 @@ export function createGoalPlanStore({
     try {
       if (existsSync(planFile(planId))) unlinkSync(planFile(planId));
     } catch {}
+    bumpPlanWriteEpoch();
     publishPersistedChange('delete', planId, {
       conversationId,
       changeKind: 'delete',
@@ -2758,6 +2800,7 @@ export function createGoalPlanStore({
     }
     // 批量删除只广播一次，避免抖动；planId 传 null 表示非单一计划变更。
     for (const meta of removed) clearRunnerProgressState(meta.planId);
+    bumpPlanWriteEpoch();
     publishPersistedChange('delete', null, {
       conversationId: normalizedConversationId,
       changeKind: 'delete',
@@ -2777,6 +2820,8 @@ export function createGoalPlanStore({
     getActivePlanByConversation,
     getUnacceptedCompletedPlanByConversation,
     getPlan,
+    planReadStamp,
+    planWriteEpoch,
     createPlan,
     createGoalContract,
     createIntakeContract,

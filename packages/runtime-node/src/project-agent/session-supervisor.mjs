@@ -227,8 +227,17 @@ export function createSessionSupervisor({
     send: (input, context) => exclusive(() => communication.send(input, context)), takeover: takeover.request,
     holdsLease: canManageWorkspace, canExecute: workspaceId => executionScheduler.isWorkspaceReady(workspaceId), isEnabled: autonomousCoordinationEnabled, now });
 
+  /** @type {{ epoch: number, plans: any[] } | null} */
+  let reconcilePlans = null;
+  let reconcileDepth = 0;
   function delegatedPlans() {
-    return readQuery.memo('delegated-plans', () => planCatalog.read());
+    return readQuery.memo('delegated-plans', () => {
+      const epoch = typeof goalPlanStore.planWriteEpoch === 'function' ? goalPlanStore.planWriteEpoch() : null;
+      if (reconcileDepth > 0 && reconcilePlans && epoch !== null && reconcilePlans.epoch === epoch) return reconcilePlans.plans;
+      const plans = planCatalog.read();
+      if (reconcileDepth > 0 && epoch !== null) reconcilePlans = { epoch, plans };
+      return plans;
+    });
   }
 
   function findBySession(sessionId) {
@@ -947,9 +956,14 @@ export function createSessionSupervisor({
     }, { reason: acceptedBy === 'policy' ? 'policy acceptance' : 'user acceptance', changedBy: 'session-supervisor' });
   }
 
-  async function settleLocked(sessionId) {
-    const plan = findBySession(text(sessionId));
-    if (!plan) return null;
+  async function settleLocked(sessionId, knownPlan = null) {
+    const wanted = text(sessionId);
+    // 同一轮里每个已完成计划再全表 findBySession，会把目录读取放大成计划数的平方。
+    // 调用方已经拿着这份计划时，只按 planId 读当前正文。
+    const plan = knownPlan?.planId
+      ? goalPlanStore.getPlan(knownPlan.planId)
+      : findBySession(wanted);
+    if (!plan || plan.delegationOrigin?.sessionId !== wanted) return null;
     if (recoveryHeld(plan)) return { ok: false, error: 'coordination_reconciliation_required' };
     if (!sessionExecutionCurrent(plan)) return { ok: false, error: 'execution_revision_stale' };
     if (plan.resultAcceptance?.acceptedAt) {
@@ -1195,7 +1209,7 @@ export function createSessionSupervisor({
         && plan.deliveryHandoff?.status !== 'delivered' && plan.deliveryHandoff?.status !== 'stopped'
         && typeof goalRunner?.handoffDelegatedPlan === 'function') await handoff.afterAcceptance(plan);
       if (TERMINAL.has(plan.status) && executionScheduler.hasResourceClaim(plan)) await sessionControl.settleEnded(plan);
-      if (plan.status === 'completed' && !plan.resultAcceptance?.acceptedAt) await settleLocked(plan.delegationOrigin.sessionId);
+      if (plan.status === 'completed' && !plan.resultAcceptance?.acceptedAt) await settleLocked(plan.delegationOrigin.sessionId, plan);
     }
     communication.recover({ includeLegacy: false, recoveringStarted: false });
     await promote();
@@ -1223,8 +1237,16 @@ export function createSessionSupervisor({
       await coordination.recover(workspaceId);
     }
   }
-  function reconcileSessions() { return reconcileControls().then(() => recoverStops()).then(() => resourceContention.reconcile(delegatedPlans()))
-    .then(() => reconcileExpired()).then(() => exclusive(() => reconcilePersistedQueues())); }
+  function reconcileSessions() {
+    reconcileDepth += 1;
+    if (reconcileDepth === 1) reconcilePlans = null;
+    return reconcileControls().then(() => recoverStops()).then(() => resourceContention.reconcile(delegatedPlans()))
+      .then(() => reconcileExpired()).then(() => exclusive(() => reconcilePersistedQueues()))
+      .finally(() => {
+        reconcileDepth -= 1;
+        if (reconcileDepth === 0) reconcilePlans = null;
+      });
+  }
   const reconciled = deferRecovery ? Promise.resolve() : reconcileControls().then(() => reconcileExpired()).then(() => exclusive(() => reconcilePersistedQueues()));
 
   return {
