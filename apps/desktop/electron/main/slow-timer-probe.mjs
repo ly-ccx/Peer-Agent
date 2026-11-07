@@ -39,7 +39,14 @@ const STREAM_CHANNELS = new Set([
 ]);
 const PHASE_NAMES = new Set([
   'watch.sync',
+  'watch.inventory',
   'watch.recover',
+  'watch.runner',
+  'watch.inputs',
+  'watch.digest',
+  'watch.publish',
+  'watch.kick',
+  'watch.continuation',
   'watch.readFacts',
   'watch.reconcile',
   'plan.normalize',
