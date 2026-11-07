@@ -37,9 +37,11 @@ test('streaming the tail keeps one full projection while history and chunk count
     let projection: ConversationProjection | null = null;
     let full = 0;
     let tail = 0;
+    let identityComparisons = 0;
     const started = performance.now();
     for (let index = 0; index <= chunks; index += 1) {
       const projected = projectConversationRows(messages, projection);
+      identityComparisons += projected.identityComparisons;
       if (projected.projection === 'full') full += 1;
       else tail += 1;
       projection = projected;
@@ -52,9 +54,10 @@ test('streaming the tail keeps one full projection while history and chunk count
     const elapsed = performance.now() - started;
     const rows = projection!.rows;
     const windowed = windowConversationRows(rows, rows.length - 1, 80);
-    console.info(`tail-projection history=${count} chunks=${chunks} full=${full} tail=${tail} window=${windowed.rows.length} ms=${elapsed.toFixed(1)}`);
+    console.info(`tail-projection history=${count} chunks=${chunks} full=${full} tail=${tail} identityComparisons=${identityComparisons} perChunk=${count - 1} window=${windowed.rows.length} ms=${elapsed.toFixed(1)}`);
     assert.equal(full, 1, `history ${count} rescanned`);
     assert.equal(tail, chunks);
+    assert.equal(identityComparisons, chunks * (count - 1), 'each chunk still compares every prefix object');
     assert.equal(windowed.rows.length, count <= 200 ? count : 80);
     assert.deepEqual(rows, conversationRows(messages));
     const tailRow = rows.at(-1);
@@ -65,6 +68,36 @@ test('streaming the tail keeps one full projection while history and chunk count
     assert.equal(again.projection, 'tail');
     assert.equal(again.rows[0], prefix, 'unchanged rows keep their identity');
   }
+});
+
+test('tool source, folded activity and an intermediate edit each return to a full projection', () => {
+  const activity = { eventId: 'evt-1', sessionId: 'session-a', name: '核对', state: 'started' };
+  const messages = [
+    normalizeBotMessage({ id: 'u', kind: 'user_input', role: 'user', content: '开始', createdAt: '2026-11-07T03:00:00.000Z' })!,
+    normalizeBotMessage({ id: 'act', kind: 'agent_activity', role: 'assistant', content: '', createdAt: '2026-11-07T03:00:00.000Z', agentActivity: activity })!,
+    normalizeBotMessage({ id: 'turn', kind: 'agent_turn', role: 'assistant', content: '', createdAt: '2026-11-07T03:00:00.000Z', rounds: [{ toolCalls: [{ name: 'read_file', input: { path: 'README.md' }, result: { ok: true } }] }] })!,
+    normalizeBotMessage({ id: 'reply', kind: 'agent_reply', role: 'assistant', content: '正在写', createdAt: '2026-11-07T03:00:00.000Z', sources: ['session-a'] })!,
+  ];
+  const first = projectConversationRows(messages, null);
+  assert.equal(first.projection, 'full');
+  assert.deepEqual(first.rows, conversationRows(messages));
+  const sourced = messages.slice();
+  sourced[3] = { ...sourced[3]!, sources: ['session-b'] };
+  const sourceChange = projectConversationRows(sourced, first);
+  assert.equal(sourceChange.projection, 'full');
+  assert.deepEqual(sourceChange.rows, conversationRows(sourced));
+  const folded = messages.slice();
+  folded[1] = { ...folded[1]!, agentActivity: { ...activity, state: 'reported' } };
+  const foldChange = projectConversationRows(folded, first);
+  assert.equal(foldChange.projection, 'full');
+  assert.equal(foldChange.identityComparisons, 2);
+  assert.deepEqual(foldChange.rows, conversationRows(folded));
+  const middle = messages.slice();
+  middle[2] = { ...middle[2]!, rounds: [{ text: '', toolCalls: [{ name: 'search_files', input: { query: '规则' }, result: { ok: true } }] }] };
+  const toolChange = projectConversationRows(middle, first);
+  assert.equal(toolChange.projection, 'full');
+  assert.equal(toolChange.identityComparisons, 3);
+  assert.deepEqual(toolChange.rows, conversationRows(middle));
 });
 
 test('a tail that changes projection inputs, or a copied prefix, scans again and keeps order', () => {

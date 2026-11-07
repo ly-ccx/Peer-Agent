@@ -36,6 +36,7 @@ import { checkQuickChatBots } from './quick-chat-bot-checks.mjs';
 import { createQuickChatNativeController } from './quick-chat-native-fixture.mjs';
 import { createAttentionNativeController } from './bot-attention-native-fixture.mjs';
 import { checkResponseInteraction, checkManualWakeRetry, createStreamingFixture, writeStreamingCommand } from '../../../scripts/rc-response-interaction-smoke.mjs';
+import { checkLongHistoryRender } from './long-history-render-checks.mjs';
 import { checkBotYieldFeedback } from './bot-yield-feedback-checks.mjs';
 import { checkRetryRetirement } from './bot-retry-retirement-checks.mjs';
 // RC-01: production main/preload/renderer, synthetic cognition at the executor seam.
@@ -70,7 +71,8 @@ const workCommand = path.join(root, 'work-command.json');
 const effortCommand = path.join(root, 'effort-command.json');
 writeFileSync(effortCommand, JSON.stringify({ failNext: false }));
 const recoveryOnly = process.argv.includes('--recovery-only');
-const fixture = seedBotShellHome({ home, ...(recoveryOnly ? { scale: { bots: 2, messages: 10000, inboxEvents: 0, memories: 0 } } : {}) });
+const longHistoryRender = process.argv.includes('--long-history-render-only');
+const fixture = seedBotShellHome({ home, ...(longHistoryRender ? { scale: { bots: 2, messages: 4000, inboxEvents: 0, memories: 0 } } : recoveryOnly ? { scale: { bots: 2, messages: 10000, inboxEvents: 0, memories: 0 } } : {}) });
 const recoveryHistories = recoveryOnly ? await Promise.all(fixture.bots.map(bot => seedHistoryRecovery({ home, bot }))) : [];
 if (sharedUiOnly) seedUiAutomation({ home, workspacePath: fixture.bots[0].path });
 const classicUiFixture = sharedUiOnly ? seedClassicUiFixture({ home }) : null;
@@ -127,7 +129,7 @@ const recoveryCases = [
   { key: 'cancelled', index: 9967, failureKind: 'fatal', retryable: false, recoveryWorkState: 'cancelled', reason: 'empty_model_response', phase: 'cancelled' },
   { key: 'no-progress', index: 9979, failureKind: 'fatal', retryable: false, recoveryWorkState: 'blocked_system', reason: 'agent_no_progress' },
 ];
-for (const [offset, entry] of recoveryCases.entries()) {
+if (!longHistoryRender) for (const [offset, entry] of recoveryCases.entries()) {
   const { key, index, reason, recoveryWorkState, resolvedState, phase, activeSessionIds = [], ...recovery } = entry;
   const turnId = key === 'scheduled' ? 'rc-recovery-progress-turn' : `rc-recovery-${key}-turn`;
   const content = `代理暂时不可用：${reason}`;
@@ -137,10 +139,11 @@ for (const [offset, entry] of recoveryCases.entries()) {
       recovery: { ...recovery, autoAttempts: 2, failedTurnId: turnId, deadlineAt: '2026-10-10T03:05:00.000Z' },
       actions: [{ id: 'retry', channel: 'project-agent:retry', payload: { workspaceId: fixture.bots[0].workspaceId, turnId } }] }] };
 }
-seededMessages[9990] = { ...seededMessages[9990], id: 'rc-recovery-progress-turn', turnId: 'rc-recovery-progress-turn',
+if (!longHistoryRender) seededMessages[9990] = { ...seededMessages[9990], id: 'rc-recovery-progress-turn', turnId: 'rc-recovery-progress-turn',
   kind: 'agent_turn', role: 'assistant', content: '', turnKind: 'user', outcome: 'error',
   publicUpdates: [{ id: 'rc-recovery-public-progress', text: '我已经看过项目结构，正在核对实现位置。' }],
   rounds: [{ text: '', toolCalls: [{ name: 'read_file', input: { path: 'README.md' }, result: { ok: true, content: 'RC_RECOVERY_READ_RESULT' } }] }] };
+if (!longHistoryRender) {
 seededMessages.at(-1).replyTo = ['rc-message-9500'];
 seededMessages[9500].content = '请帮我梳理项目现状，说明已经完成的功能、当前问题和下一步计划。' + '需要逐项核对实际实现和依据。'.repeat(8) + '原文结束标记';
 seededMessages.at(-1).content = '回复交互验收：引用保留上下文，过程按需查看。\n\n- **理解项目**：阅读代码与文档。\n- **讨论方案**：比较方案与取舍。';
@@ -152,6 +155,7 @@ seededMessages[9996] = { ...seededMessages[9996], role: 'assistant', kind: 'agen
     + '2. 开发规则：按已有规则修改，界面只负责呈现。\n'
     + '3. 常用脚本：启动、构建、测试及产品回归都有对应入口。\n'
     + '4. 最近提交：已核对当前分支与提交记录。\n\n要把这些确认过的事实写入项目记忆吗？' };
+}
 // Historical questions keep their body available for quoting after their controls retire.
 if (process.argv.includes('--selection-quote-only')) seededMessages[9996] = { ...seededMessages[9996], role: 'assistant', kind: 'agent_reply',
   content: '仓库只读熟悉已经完成，工作区没有改动。叶子证据和独立校验都通过了；项目记忆里目前还没有对应条目。\n\n'
@@ -645,6 +649,12 @@ try {
       report.stopResume = { workId, before: original.attemptId, held: held.end, after: delivered.attemptId, end: delivered.end, attempts: attempts().length };
       report.checks.push('stop via production IPC remains durable on conversation re-entry; explicit retry commits one reply on the original work');
     } finally { readStore.close(); }
+  } else if (longHistoryRender) {
+    assert.ok(process.argv.includes('--streaming'), '--long-history-render-only requires the isolated --streaming cognition fixture');
+    await page.setViewportSize({ width: 1280, height: 780 });
+    await page.locator('.bot-row').filter({ has: page.locator('.bot-row-name', { hasText: 'project-000' }) }).click();
+    await page.locator('.bot-composer textarea').waitFor();
+    await checkLongHistoryRender({ page, until, report, commandFile: streamCommand });
   } else if (process.argv.includes('--streaming-only')) {
     assert.ok(process.argv.includes('--streaming'), '--streaming-only requires the isolated --streaming cognition fixture');
     await page.setViewportSize({ width: 1280, height: 780 });

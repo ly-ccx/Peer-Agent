@@ -499,10 +499,10 @@ export interface ConversationProjection {
 export function projectConversationRows(
   messages: readonly BotChatMessage[],
   previous: ConversationProjection | null = null,
-): ConversationProjection & { readonly projection: 'full' | 'tail' } {
-  const reused = previous ? reuseTailRows(previous, messages) : null;
-  if (reused) return { messages, rows: reused, projection: 'tail' };
-  return { messages, rows: conversationRows(messages), projection: 'full' };
+): ConversationProjection & { readonly projection: 'full' | 'tail'; readonly identityComparisons: number } {
+  const reused = previous ? reuseTailRows(previous, messages) : { rows: null, identityComparisons: 0 };
+  if (reused.rows) return { messages, rows: reused.rows, projection: 'tail', identityComparisons: reused.identityComparisons };
+  return { messages, rows: conversationRows(messages), projection: 'full', identityComparisons: reused.identityComparisons };
 }
 
 function contentOnlyChange(previous: BotChatMessage, next: BotChatMessage): boolean {
@@ -513,29 +513,31 @@ function contentOnlyChange(previous: BotChatMessage, next: BotChatMessage): bool
   return conversationValuesEqual(previousRest, nextRest);
 }
 
-function reuseTailRows(previous: ConversationProjection, messages: readonly BotChatMessage[]): ConversationRow[] | null {
-  if (previous.messages.length !== messages.length || messages.length === 0) return null;
+function reuseTailRows(previous: ConversationProjection, messages: readonly BotChatMessage[]): { rows: ConversationRow[] | null; identityComparisons: number } {
+  let identityComparisons = 0;
+  if (previous.messages.length !== messages.length || messages.length === 0) return { rows: null, identityComparisons };
   for (let index = 0; index < messages.length - 1; index += 1) {
-    if (messages[index] !== previous.messages[index]) return null;
+    identityComparisons += 1;
+    if (messages[index] !== previous.messages[index]) return { rows: null, identityComparisons };
   }
   const before = previous.messages[messages.length - 1]!;
   const next = messages[messages.length - 1]!;
-  if (!contentOnlyChange(before, next)) return null;
+  if (!contentOnlyChange(before, next)) return { rows: null, identityComparisons };
   let rowIndex = -1;
   for (let index = previous.rows.length - 1; index >= 0; index -= 1) {
     const row = previous.rows[index]!;
     if (row.type === 'message' && row.message.id === next.id) { rowIndex = index; break; }
   }
-  if (rowIndex < 0) return [...previous.rows];
+  if (rowIndex < 0) return { rows: [...previous.rows], identityComparisons };
   for (let index = rowIndex + 1; index < previous.rows.length; index += 1) {
-    if (previous.rows[index]!.type === 'message') return null;
+    if (previous.rows[index]!.type === 'message') return { rows: null, identityComparisons };
   }
   const row = previous.rows[rowIndex]!;
-  if (row.type !== 'message') return null;
-  if (row.message.content === next.content) return [...previous.rows];
+  if (row.type !== 'message') return { rows: null, identityComparisons };
+  if (row.message.content === next.content) return { rows: [...previous.rows], identityComparisons };
   const rows = previous.rows.slice();
   rows[rowIndex] = { ...row, message: { ...row.message, content: next.content } };
-  return rows;
+  return { rows, identityComparisons };
 }
 
 export function windowConversationRows<T>(
