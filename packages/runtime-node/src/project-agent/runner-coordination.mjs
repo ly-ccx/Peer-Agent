@@ -251,7 +251,9 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
           ...(work.state === 'retry_wait' ? { recoveryReservationId: work.recovery.reservationId, recoveryRevision: work.revision } : {}) };
         // A settled pause already closed this execution. Its result stays visible,
         // but host recovery must not open a model turn to rediscover it.
-        if (settledPauseResult(next.events, roster())) return null;
+        // Only result wakes read the roster; other selections must not.
+        if (Array.isArray(next.events) && next.events.length > 0 && next.events.every(event => event?.kind === 'result_ready')
+          && settledPauseResult(next.events, roster())) return null;
         return next;
       },
       pending: () => pendingFrom(decision()),
@@ -340,8 +342,10 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       const selection = recoverySelection();
       const user = selection.choose(true);
       if (user) return { job: user };
-      const sessions = rows();
-      const events = selection.pending().filter(event => !settledPauseResult([event], sessions));
+      const pending = selection.pending();
+      const events = pending.some(event => event?.kind === 'result_ready')
+        ? pending.filter(event => !settledPauseResult([event], rows()))
+        : pending;
       return events.length ? { events } : { job: selection.choose(false) };
     },
     retryJob(turnId) {
