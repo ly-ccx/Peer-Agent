@@ -35,57 +35,86 @@ export async function checkLongHistoryRender({ page, until, report, commandFile 
   assert.ok(geometry.rows >= 1 && geometry.rows <= 80, `visible rows ${geometry.rows}`);
   assert.ok(geometry.scrollHeight > 8000, `scroll height ${geometry.scrollHeight} does not cover a long history`);
   assert.ok(geometry.spacers.some(height => height > geometry.clientHeight), 'unmounted history keeps its scroll extent');
+  const latest = page.getByRole('button', { name: '回到最新消息', exact: true });
+  if (await latest.count()) await latest.click();
   await page.evaluate(() => {
     globalThis.rcFrameGaps = [];
+    globalThis.rcFrameMarks = {};
     let last = performance.now();
     const tick = (now) => {
-      globalThis.rcFrameGaps.push(Math.round((now - last) * 10) / 10);
+      globalThis.rcFrameGaps.push({ gap: Math.round((now - last) * 10) / 10, at: now });
       last = now;
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
   });
+  const mark = name => page.evaluate(name => { globalThis.rcFrameMarks[name] = performance.now(); }, name);
   const composer = page.locator('.bot-composer textarea');
-  const rowsBeforeInput = geometry.rows;
+  const chunks = 40;
+  const chunkIntervalMs = 50;
+  const keyDelayMs = 16;
+  const draft = '测'.repeat(40);
   await composer.click();
-  const typed = '合成长历史';
-  const inputStarted = Date.now();
-  await composer.pressSequentially(typed, { delay: 16 });
-  const inputMs = Date.now() - inputStarted;
-  assert.equal(await composer.inputValue(), typed);
-  assert.equal(await page.locator('.bot-thread [data-conversation-row]').count(), rowsBeforeInput, 'typing must not append a message');
-  const inputFrames = await page.evaluate(() => globalThis.rcFrameGaps.splice(0));
-  const latest = page.getByRole('button', { name: '回到最新消息', exact: true });
-  if (await latest.count()) await latest.click();
-  await composer.fill('');
-  await composer.pressSequentially('RC_STREAM_TEXT');
-  assert.equal(await composer.inputValue(), 'RC_STREAM_TEXT');
-  writeStreamingCommand(commandFile, 'RC_STREAM_TEXT', 1);
+  await mark('operationStart');
+  await composer.pressSequentially('RC_STREAM_LONG');
+  assert.equal(await composer.inputValue(), 'RC_STREAM_LONG');
+  writeStreamingCommand(commandFile, 'RC_STREAM_LONG', 0, { chunks });
   await composer.press('Enter');
-  await page.locator('.bot-thread').getByText('我先看看项目的整体情况', { exact: false }).first().waitFor();
-  const chunkFrames = [];
-  for (const phase of [1.5]) {
-    writeStreamingCommand(commandFile, 'RC_STREAM_TEXT', phase);
-    await page.locator('.bot-thread').getByText('我再确认它们如何连接', { exact: false }).first().waitFor();
-    const sample = await page.locator('.bot-thread').evaluate(node => ({
-      rows: node.querySelectorAll('[data-conversation-row]').length,
-      scrollHeight: node.scrollHeight,
-      clientHeight: node.clientHeight,
-      scrollTop: node.scrollTop,
-    }));
-    const frames = await page.evaluate(() => globalThis.rcFrameGaps.splice(0));
-    chunkFrames.push({ phase, ...sample, maxFrameMs: Math.max(0, ...frames) });
-    assert.ok(sample.rows <= 80, `chunk rows ${sample.rows}`);
-    assert.ok(sample.scrollHeight > sample.clientHeight);
+  await until(() => composer.inputValue(), value => value === '', 10000);
+  const typingStarted = Date.now();
+  let inputWallMs = 0;
+  const typing = composer.pressSequentially(draft, { delay: keyDelayMs }).then(() => { inputWallMs = Date.now() - typingStarted; });
+  const chunkStarted = Date.now();
+  for (let index = 1; index <= chunks; index += 1) {
+    const stepStarted = Date.now();
+    writeStreamingCommand(commandFile, 'RC_STREAM_LONG', index, { chunks });
+    const token = `〔${String(index).padStart(2, '0')}〕`;
+    await page.locator('.bot-thread').getByText(token, { exact: false }).first().waitFor({ timeout: 10000 });
+    const remaining = chunkIntervalMs - (Date.now() - stepStarted);
+    if (remaining > 0) await page.waitForTimeout(remaining);
   }
-  const maxInputFrame = Math.max(0, ...inputFrames);
+  const chunkWallMs = Date.now() - chunkStarted;
+  await typing;
+  await page.locator('.bot-thread').getByText('〔40〕', { exact: false }).first().waitFor();
+  await mark('operationEnd');
+  await page.waitForTimeout(500);
+  await mark('paintEnd');
+  const tail = await page.locator('.bot-thread').evaluate(node => ({
+    rows: node.querySelectorAll('[data-conversation-row]').length,
+    scrollTop: node.scrollTop,
+    scrollHeight: node.scrollHeight,
+    clientHeight: node.clientHeight,
+    fromBottom: node.scrollHeight - node.clientHeight - node.scrollTop,
+    text: node.innerText,
+  }));
+  const frames = await page.evaluate(() => ({ gaps: globalThis.rcFrameGaps, marks: globalThis.rcFrameMarks }));
+  const between = (start, end) => frames.gaps.filter(sample => sample.at >= start && sample.at < end).map(sample => sample.gap);
+  const during = between(frames.marks.operationStart, frames.marks.operationEnd);
+  const after = between(frames.marks.operationEnd, frames.marks.paintEnd);
+  const stats = samples => {
+    const sorted = [...samples].sort((left, right) => left - right);
+    const pick = ratio => sorted.length ? sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(ratio * sorted.length) - 1))] : 0;
+    return { count: samples.length, p50: pick(0.5), p95: pick(0.95), max: sorted.at(-1) ?? 0,
+      over50: samples.filter(gap => gap > 50).length, over100: samples.filter(gap => gap > 100).length };
+  };
+  assert.equal(await composer.inputValue(), draft, 'draft typed during the stream must stay unsent');
+  for (let index = 1; index <= chunks; index += 1) assert.equal(tail.text.includes(`〔${String(index).padStart(2, '0')}〕`), true, `missing chunk ${index}`);
+  assert.ok(tail.rows >= 1 && tail.rows <= 80, `visible rows ${tail.rows}`);
+  assert.ok(tail.scrollHeight > tail.clientHeight);
+  assert.ok(tail.fromBottom < 80, `not following the tail: ${tail.fromBottom}`);
   report.longHistoryRender = {
     geometry,
-    inputMs,
-    typed,
-    submittedByTyping: false,
-    maxInputFrameMs: maxInputFrame,
-    chunks: chunkFrames,
+    chunks,
+    chunkIntervalMs,
+    chunkWallMs,
+    draftChars: draft.length,
+    keyDelayMs,
+    scheduledKeyDelayMs: (draft.length - 1) * keyDelayMs,
+    inputWallMs,
+    inputWallIncludesScheduledDelay: true,
+    during: stats(during),
+    afterPaint: stats(after),
+    tail: { rows: tail.rows, scrollTop: tail.scrollTop, scrollHeight: tail.scrollHeight, clientHeight: tail.clientHeight, fromBottom: tail.fromBottom },
     blocked,
     ime: 'not-covered',
   };
