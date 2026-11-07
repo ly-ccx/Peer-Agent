@@ -13,6 +13,7 @@ import { createPortableInteractiveSummaryReader } from './portable-summary.mjs';
 import { createDelegationRetention } from './delegation-retention.mjs';
 import { createInteractiveRetentionRoots } from './retention-roots.mjs';
 import { createInteractiveRetention } from './retention.mjs';
+import { localRecorderIdentity, proveRecorder } from '../project-agent/execution-recorder.mjs';
 import { executionIdentity, sameExecution } from '../project-agent/session-control-kernel.mjs';
 import { sessionFactsFromPlan } from '../project-agent/session-facts.mjs';
 import { workBudgetBinding } from '../project-agent/work-budget.mjs';
@@ -102,10 +103,10 @@ export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationS
       if (currentExecution && sessionFactsFromPlan(plan).executionOwnership === 'live') return false;
       const control = currentExecution ? journal.readSessionControl(source.sessionId) : journal.readStoppedExecution?.(source);
       const receipt = control?.stopReceipt;
-      // The writer that just recorded this stop is still this process. A later host,
-      // with a new lease epoch, is the one that may retire the uncommitted draft.
-      const writerEpoch = journal.writerEpoch?.();
-      if (writerEpoch && control?.hostEpoch === writerEpoch) return false;
+      // The process that recorded this stop may keep the draft until it exits.
+      // A later process retires it even when it adopts the same lease epoch.
+      const recorder = control?.recorder;
+      if (recorder && recorder.pid === process.pid && proveRecorder(recorder, localRecorderIdentity()) === 'alive') return false;
       return control?.workspaceId === owner.workspaceId && control.parentConversationId === owner.conversationId
         && control.planId === source.planId && control.sessionId === source.sessionId && ['pause', 'cancel', 'takeover'].includes(control.kind)
         && sameExecution(source, control.expectedExecution) && sameExecution(source, receipt?.execution)
