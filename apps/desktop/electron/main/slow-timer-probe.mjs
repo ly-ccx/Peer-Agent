@@ -17,6 +17,7 @@
 import { appendFileSync, mkdirSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { setJsonWriteObserver } from '../../../../packages/runtime-node/src/goal-plan-files.mjs';
 
 const DEFAULT_THRESHOLD_MS = 100;
 const RATE_LIMIT_MS = 10_000;
@@ -27,8 +28,6 @@ const SEGMENT_SUMMARY_TOTAL_MS = 50;
 const SEGMENT_SUMMARY_MAX_MS = 30;
 const EVENT_LOOP_MAX_MS = 50;
 const EVENT_LOOP_MEAN_MS = 10;
-const PLAN_WRITE_MS = 50;
-const PLAN_WRITE_BYTES = 1_000_000;
 const PROMISIFY = Symbol.for('nodejs.util.promisify.custom');
 const STREAM_CHANNELS = new Set([
   'chat:stream:delta',
@@ -107,10 +106,6 @@ export function formatPlanWrite({ at = diagnosticStamp(), phase = 'write', ms = 
   return `[plan-write] at=${at} phase=${kind} ms=${Math.round(ms)} bytes=${Math.max(0, Math.round(bytes))}`;
 }
 
-export function shouldReportPlanWrite({ ms = 0, bytes = 0 } = {}) {
-  return ms >= PLAN_WRITE_MS || bytes >= PLAN_WRITE_BYTES;
-}
-
 export function formatConsoleSlow({ at = diagnosticStamp(), method = 'log', ms = 0, argc = 0 } = {}) {
   const name = ['log', 'info', 'warn', 'error', 'debug'].includes(method) ? method : 'log';
   return `[console] at=${at} method=${name} ms=${Math.round(ms)} argc=${Math.max(0, Math.round(argc))}`;
@@ -178,12 +173,15 @@ export function installConsoleSlowProbe({
       try {
         return original.apply(this, args);
       } finally {
-        const elapsed = now() - started;
-        if (!noting && elapsed >= thresholdMs) {
-          noting = true;
-          try { log(formatConsoleSlow({ method, ms: elapsed, argc: args.length })); }
-          catch { /* 诊断不能替换原来的输出。 */ }
-          finally { noting = false; }
+        try {
+          const elapsed = now() - started;
+          if (!noting && elapsed >= thresholdMs) {
+            noting = true;
+            try { log(formatConsoleSlow({ method, ms: elapsed, argc: args.length })); }
+            finally { noting = false; }
+          }
+        } catch {
+          // 计时或记日志失败不能替换原来的返回值或异常。
         }
       }
     }
@@ -332,12 +330,10 @@ function installForElectron() {
   installConsoleSlowProbe({ log });
   watchEventLoop(log);
   import('electron').then(({ app }) => hookRendererLongTaskConsole(app, write)).catch(() => {});
-  import('../../../../packages/runtime-node/src/goal-plan-files.mjs').then(({ setJsonWriteObserver }) => {
-    setJsonWriteObserver((sample) => {
-      if (!shouldReportPlanWrite(sample)) return;
-      log(formatPlanWrite(sample));
-    });
-  }).catch(() => {});
+  // 每次 stringify / write 都记实际字节和耗时，不用文件增量推断是不是全文。
+  setJsonWriteObserver((sample) => {
+    log(formatPlanWrite(sample));
+  });
 }
 
 installForElectron();

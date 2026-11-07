@@ -81,31 +81,69 @@ export function formatRendererFrame(summary: FrameGapSummary, at = diagnosticSta
   return `[renderer-frame] at=${at} windowMs=${FRAME_WINDOW_MS} frames=${summary.frames} busy=${summary.busy} max=${summary.maxMs} mean=${summary.meanMs}`;
 }
 
+/**
+ * 空闲时每秒只排一帧，用来探测主线程是否被拖住。
+ * 只有这一帧已经偏慢时，才连续采样一秒；采样窗口安静后回到每秒一帧。
+ * 不在空闲时连着 requestAnimationFrame，避免探针自己把渲染进程留在 60fps。
+ */
 export function observeRendererFrames(
   requestFrame: typeof requestAnimationFrame,
   log: (line: string) => void = (line) => console.info(line),
   now: () => number = () => performance.now(),
+  scheduleLater: (callback: () => void, delayMs: number) => number = (callback, delayMs) => (
+    setTimeout(callback, delayMs) as unknown as number
+  ),
 ): { disconnect(): void } {
   if (typeof requestFrame !== 'function') return { disconnect() {} };
   let stopped = false;
-  let last = now();
-  let windowStart = last;
-  let gaps: number[] = [];
-  const frame = () => {
+  let timer: number | null = null;
+  const clearTimer = () => {
+    if (timer == null) return;
+    clearTimeout(timer);
+    timer = null;
+  };
+  const armProbe = () => {
     if (stopped) return;
-    const at = now();
-    gaps.push(at - last);
-    last = at;
-    if (at - windowStart >= FRAME_WINDOW_MS) {
+    clearTimer();
+    timer = scheduleLater(() => {
+      timer = null;
+      if (stopped) return;
+      const started = now();
+      requestFrame(() => {
+        if (stopped) return;
+        const gap = now() - started;
+        if (gap < FRAME_BUSY_MS) armProbe();
+        else sample(started, [gap]);
+      });
+    }, FRAME_WINDOW_MS);
+  };
+  const sample = (windowStart: number, gaps: number[]) => {
+    let last = now();
+    const frame = () => {
+      if (stopped) return;
+      const at = now();
+      gaps.push(at - last);
+      last = at;
+      if (at - windowStart < FRAME_WINDOW_MS) {
+        requestFrame(frame);
+        return;
+      }
       const summary = summarizeFrameGaps(gaps);
-      gaps = [];
-      windowStart = at;
-      if (summary) log(formatRendererFrame(summary));
-    }
+      if (summary) {
+        try { log(formatRendererFrame(summary)); } catch { /* 诊断不能影响下一帧。 */ }
+      }
+      if (summary) sample(at, []);
+      else armProbe();
+    };
     requestFrame(frame);
   };
-  requestFrame(frame);
-  return { disconnect() { stopped = true; } };
+  armProbe();
+  return {
+    disconnect() {
+      stopped = true;
+      clearTimer();
+    },
+  };
 }
 
 export function observeRendererLongTasks(

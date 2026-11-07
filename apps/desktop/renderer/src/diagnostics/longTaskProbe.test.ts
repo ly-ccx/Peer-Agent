@@ -54,28 +54,46 @@ test('frame summary names sustained sub-longtask gaps and stays quiet when frame
     formatRendererFrame(summary!, at),
     '[renderer-frame] at=2026-11-07T10:45:37.123 windowMs=1000 frames=5 busy=3 max=40 mean=28',
   );
+});
+
+test('idle frame probe schedules one frame per second and samples only after a slow frame', () => {
   const lines: string[] = [];
   let clock = 0;
   const frames: Array<() => void> = [];
+  const later: Array<() => void> = [];
   const request = (callback: FrameRequestCallback) => {
     frames.push(() => callback(clock));
     return 1;
   };
-  const observer = observeRendererFrames(request, (line) => lines.push(line), () => clock);
+  const scheduleLater = (callback: () => void) => {
+    later.push(callback);
+    return 1;
+  };
+  const observer = observeRendererFrames(request, (line) => lines.push(line), () => clock, scheduleLater);
+  assert.equal(frames.length, 0);
+  assert.equal(later.length, 1);
+  later.shift()?.();
+  assert.equal(frames.length, 1);
+  clock += 16;
   frames.shift()?.();
-  for (const gap of [16, 30, 34, 18]) {
-    clock += gap;
-    frames.shift()?.();
-  }
-  clock += 1000;
+  assert.equal(lines.length, 0);
+  assert.equal(frames.length, 0);
+  assert.equal(later.length, 1);
+  later.shift()?.();
+  clock += 40;
+  frames.shift()?.();
+  assert.equal(frames.length, 1);
+  clock = 2000;
   frames.shift()?.();
   assert.equal(lines.length, 1);
-  assert.match(lines[0] ?? '', /\[renderer-frame\] at=\d{4}-\d{2}-\d{2}T.* busy=3 max=1000/);
+  assert.match(lines[0] ?? '', /\[renderer-frame\] at=.* busy=2 max=1944/);
   assert.equal(lines[0]?.includes('super-secret'), false);
   observer.disconnect();
-  const pending = frames.length;
-  clock += 50;
+  const queuedFrames = frames.length;
+  const queuedLater = later.length;
+  later.shift()?.();
   frames.shift()?.();
-  assert.equal(frames.length, pending - 1);
+  assert.equal(frames.length, Math.max(0, queuedFrames - 1));
+  assert.equal(later.length, Math.max(0, queuedLater - 1));
   assert.equal(lines.length, 1);
 });

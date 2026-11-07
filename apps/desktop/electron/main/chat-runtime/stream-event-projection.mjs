@@ -544,7 +544,11 @@ export function wrapWebContentsForRuntimeEvents(
           finishReason: typeof payload?.finishReason === 'string' ? payload.finishReason : undefined,
         }) : undefined) : realWebContents.send(channel, routedPayload);
       } finally {
-        recordMainSegment(diagnosticStreamSegment(channel), performance.now() - segmentStarted);
+        try {
+          recordMainSegment(diagnosticStreamSegment(channel), performance.now() - segmentStarted);
+        } catch {
+          // 分段计时失败不能改 send 的返回值或异常。
+        }
       }
     },
   };
