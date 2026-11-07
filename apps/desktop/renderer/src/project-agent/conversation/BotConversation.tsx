@@ -135,11 +135,15 @@ export function BotConversation({
     const list = window.peerAgent?.projectAgentListObligationGrants;
     if (!list) return undefined;
     let closed = false;
-    void list({ workspaceId }).then(result => {
-      const grant = result && 'grants' in result ? result.grants?.find(item => item.status === 'pending') : null;
-      if (!closed) setObligationGrant(grant ? { grantId: grant.grantId, items: grant.items } : null);
-    }).catch(() => {});
-    return () => { closed = true; };
+    const load = () => {
+      void list({ workspaceId }).then(result => {
+        const grant = result && 'grants' in result ? result.grants?.find(item => item.status === 'pending') : null;
+        if (!closed) setObligationGrant(grant ? { grantId: grant.grantId, items: grant.items } : null);
+      }).catch(() => {});
+    };
+    load();
+    const timer = window.setInterval(load, 2000);
+    return () => { closed = true; window.clearInterval(timer); };
   }, [workspaceId, workIndex]);
   return (
     <BotInputContext.Provider value={conversation.answer}>

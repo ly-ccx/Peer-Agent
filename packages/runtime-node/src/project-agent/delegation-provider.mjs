@@ -14,6 +14,7 @@ import { isProjectAgentTurn } from './mode-policy.mjs';
 import { buildVerificationDetail } from './verification-detail.mjs';
 export { buildVerificationDetail } from './verification-detail.mjs';
 import { DELEGATION_CAPABILITY_IDS, delegationSpecByCapability, validateDelegationInput } from './tool-specs.mjs';
+import { appendObligationLog } from './obligation-log.mjs';
 
 const RESULT_PREFIX = 'delegation-result:';
 
@@ -336,12 +337,21 @@ export function createDelegationProvider({
     if (name === 'reprioritize_session') return sessionOrMissing(await callPort(supervisor?.reprioritize, input, 'supervisor_unavailable', spawnContext(view)));
     if (name === 'get_session') return sessionOrMissing(await callPort(supervisor?.get, input, 'supervisor_unavailable'));
     if (name === 'inspect_execution_obligation' || name === 'request_obligation_authorization' || name === 'resolve_execution_obligation') {
-      if (view.role !== 'project_agent') return complete({ call, capabilityId, name: item.name, locale, status: 'failed', output: { ok: false, error: 'not_main_bot' } });
+      const mainBot = isProjectAgentTurn({ mode: view.mode, role: view.role });
+      if (!mainBot) {
+        appendObligationLog({ event: 'tool', tool: name, role: view.role, mode: view.mode, ok: false, code: 'not_main_bot' });
+        return { ok: false, output: { ok: false, error: 'not_main_bot' } };
+      }
       const method = name === 'inspect_execution_obligation' ? supervisor?.inspectExecutionObligations
         : name === 'request_obligation_authorization' ? supervisor?.requestObligationAuthorization
           : supervisor?.resolveExecutionObligation;
-      return callPort(method, { ...input, workspaceId: view.workspaceId, parentConversationId: view.conversationId,
-        agentConversationId: view.conversationId, role: view.role, toolCallId: call.toolCallId }, 'supervisor_unavailable');
+      const port = await callPort(method, { ...input, workspaceId: view.workspaceId, parentConversationId: view.conversationId,
+        agentConversationId: view.conversationId, role: view.role || 'project_agent' }, 'supervisor_unavailable');
+      const output = port.output ?? { ok: false, error: 'supervisor_unavailable' };
+      const ok = output.ok !== false && port.ok !== false;
+      appendObligationLog({ event: 'tool', tool: name, role: view.role || 'project_agent', mode: view.mode,
+        ok, code: output.error || null, grantId: output.grantId || null, status: output.status || null });
+      return { ok, output };
     }
     if (name === 'cancel_session') return sessionOrMissing(await callPort(supervisor?.cancel, input, 'supervisor_unavailable', spawnContext(view)));
     if (name === 'message_session') return sessionOrMissing(await callPort(supervisor?.message, input, 'supervisor_unavailable', view));
@@ -564,6 +574,7 @@ async function callPort(fn, input, unavailable, context) {
         ...(Array.isArray(result.sessionStates) ? { sessionStates: result.sessionStates } : {}),
         ...(result.missing ? { missing: result.missing, message: result.missing } : {}),
         ...(result.message ? { message: result.message } : {}),
+        ...(typeof result.nextTool === 'string' ? { nextTool: result.nextTool, sessionId: result.sessionId } : {}),
       },
     };
   }

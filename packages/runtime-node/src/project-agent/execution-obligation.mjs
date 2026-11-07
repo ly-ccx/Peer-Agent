@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { canonicalGrantKey, obligationIdFor, OBLIGATION_FORMAT_VERSION } from './execution-obligation-kernel.mjs';
 import { proveRecorder, recorderComplete } from './execution-recorder.mjs';
+import { appendObligationLog } from './obligation-log.mjs';
 import { unsettledExecution } from './execution-resources.mjs';
 import { sessionFactsFromPlan } from './session-facts.mjs';
 import { executionIdentity, sameExecution } from './session-control-kernel.mjs';
@@ -147,9 +148,19 @@ export function createExecutionObligationService({ plans, readControl, scheduler
       return grants.filter(grant => grant.status === 'pending');
     },
     inspect(input) {
-      if (input.role && input.role !== 'project_agent' && input.actor !== 'user_panel') return { ok: false, error: 'not_main_bot' };
+      if (input.role && input.role !== 'project_agent' && input.actor !== 'user_panel') {
+        appendObligationLog({ event: 'inspect', role: input.role || null, actor: input.actor || null, ok: false, code: 'not_main_bot' });
+        return { ok: false, error: 'not_main_bot' };
+      }
       const found = scoped(input);
-      if (found.error) return { ok: false, error: found.error };
+      if (found.error) {
+        appendObligationLog({ event: 'inspect', role: input.role || null, actor: input.actor || null, ok: false, code: found.error });
+        return { ok: false, error: found.error };
+      }
+      appendObligationLog({ event: 'inspect', role: input.role || null, actor: input.actor || null, ok: true,
+        obligationId: found.items.map(item => item.obligationId || item.id).filter(Boolean).join(','),
+        code: found.items.map(item => item.error).find(Boolean) || null,
+        disposition: found.items.map(item => item.disposition || 'none').join(',') });
       return { ok: true, observedAt: now(), items: found.items };
     },
     requestAuthorization(input) {
@@ -171,6 +182,10 @@ export function createExecutionObligationService({ plans, readControl, scheduler
         if (row.refusalPreview.length || item.actions.some(action => !row.allowedActions.includes(action))) {
           rejected.push({ sessionId: item.sessionId, error: row.refusalPreview[0] || 'action_unavailable' }); continue;
         }
+        if (row.gaps.some(gap => ['unknown_calls', 'open_handles', 'dispatch_registration_absent', 'no_recorder_tuple'].includes(gap))
+          && item.actions.includes('retire_follow_up') && !item.actions.includes('acknowledge_unknown')) {
+          rejected.push({ sessionId: item.sessionId, error: 'unknown_not_acknowledged' }); continue;
+        }
         if (item.actions.includes('restore_follow_up') && row.disposition !== 'indexed') { rejected.push({ sessionId: item.sessionId, error: 'not_indexed' }); continue; }
         card.push({ ...row, actions: [...item.actions] });
       }
@@ -182,6 +197,8 @@ export function createExecutionObligationService({ plans, readControl, scheduler
       })), principal: { workspaceId: input.workspaceId, parentConversationId: input.parentConversationId },
         audience: input.agentConversationId || null, revision: 1, updatedAt: now() };
       write(input.workspaceId, { kind: 'obligation_grant', minimumExecutorVersion: OBLIGATION_FORMAT_VERSION, grant: stored });
+      appendObligationLog({ event: 'authorize', role: input.role || null, grantId, status: 'pending',
+        obligationId: card.map(item => item.obligationId).join(','), disposition: card.map(item => item.disposition || 'none').join(',') });
       return { ok: true, grantId, status: 'pending', items: card, rejected, consequences: {
         willBeMarkedCancelled: false, resourceWillRemain: true, requiresAcknowledge: true,
       } };
@@ -200,6 +217,7 @@ export function createExecutionObligationService({ plans, readControl, scheduler
       }
       const confirmed = { ...grant, status: 'confirmed', confirmedAt: now(), expiresAt: new Date(clock() + GRANT_MS).toISOString(), revision: grant.revision + 1, updatedAt: now() };
       write(input.workspaceId, { kind: 'obligation_grant', minimumExecutorVersion: OBLIGATION_FORMAT_VERSION, grant: confirmed });
+      appendObligationLog({ event: 'confirm', actor: input.actor || null, grantId: grant.grantId, status: 'confirmed' });
       return { ok: true, grant: confirmed };
     },
     revoke(input) {
@@ -252,6 +270,10 @@ export function createExecutionObligationService({ plans, readControl, scheduler
       }
       const saved = store(input.workspaceId).read().obligationGrants[grant.grantId];
       if (saved && !saved.results?.[key]) write(input.workspaceId, { kind: 'obligation_grant', minimumExecutorVersion: OBLIGATION_FORMAT_VERSION, grant: { ...saved, canonicalKey: key, results: { ...saved.results, [key]: results }, revision: saved.revision + 1, updatedAt: now() } });
+      appendObligationLog({ event: 'resolve', actor: input.actor || null, role: input.role || null, grantId: grant.grantId,
+        obligationId: results.map(item => item.obligationId).filter(Boolean).join(','),
+        disposition: results.map(item => item.disposition || item.code || item.result).join(','),
+        code: results.map(item => item.code).find(Boolean) || null, ok: results.every(item => item.result === 'applied' || item.result === 'replayed') });
       return { ok: true, grantId: grant.grantId, items: results };
     },
     suspendLive(plans) {

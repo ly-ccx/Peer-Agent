@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { workBudgetBinding } from './work-budget.mjs';
 import { isCanonicalUserInput } from './user-priority.mjs';
 import { unsettledExecution } from './execution-resources.mjs';
+import { appendObligationLog } from './obligation-log.mjs';
 import { sessionFactsFromPlan } from './session-facts.mjs';
 
 /** Execution return is not cancellation settlement; accepted results stay immutable. */
@@ -123,7 +124,15 @@ export function createSessionCancellation({ findBySession, goalPlanStore, goalRu
           cancellation: { ...plan.delegationOrigin.cancellation, phase: 'awaiting_outcome', ...(evidenceCalls.length ? { evidenceCalls } : {}) } } },
           { reason: 'cancellation outcome unconfirmed', changedBy: 'session-cancellation' });
       });
-      return { error: error?.message || 'cancellation_failed', cancellationPending: true };
+      const code = error?.message || 'cancellation_failed';
+      if (code === 'execution_stop_unconfirmed' || code === 'execution_outcome_unknown' || code === 'reconcile_execution_outcome') {
+        appendObligationLog({ event: 'cancel_refused', code, sessionId: registration.sessionId,
+          operationId: registration.receipt?.operationId || null, nextTool: 'inspect_execution_obligation' });
+        return { error: code, cancellationPending: true, sessionId: registration.sessionId,
+          nextTool: 'inspect_execution_obligation',
+          message: 'Stop is unconfirmed. Call inspect_execution_obligation, then request_obligation_authorization with retire_follow_up and acknowledge_unknown. Do not repeat cancel_session for the same fact.' };
+      }
+      return { error: code, cancellationPending: true };
     }
   }
   async function request(input, wait = false, context = {}) {
