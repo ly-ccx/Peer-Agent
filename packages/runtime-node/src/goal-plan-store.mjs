@@ -642,6 +642,7 @@ export function createGoalPlanStore({
         });
       }
       // 不重写计划正文，也不追加 .changes.jsonl。本进程 UI 仍走 100ms notify。
+      bumpPlanWriteEpoch();
       rememberRunnerProgress(planId, next);
       syncIndex(next);
       return next;
@@ -930,6 +931,7 @@ export function createGoalPlanStore({
     // 完整写盘优先：清掉 runner-progress 节流状态，避免旧计数回写覆盖。
     clearRunnerProgressState(next.planId);
     writeJsonAtomic(planFile(next.planId), next);
+    bumpPlanWriteEpoch();
     removeRunnerProgressPatch(next.planId);
     syncIndex(next);
     publishPersistedChange('persist', next.planId, {
@@ -1258,6 +1260,7 @@ export function createGoalPlanStore({
     }
     scheduleRunnerProgressPersist(planId);
     scheduleRunnerProgressNotify(next.planId, next.conversationId ?? null);
+    bumpPlanWriteEpoch();
     return next;
   }
 
@@ -1265,6 +1268,9 @@ export function createGoalPlanStore({
   // 30 秒巡检的 reconcile 不走事实缓存，仍会反复 getPlan。
   // 运行中的内存进度不进这张表，避免把尚未落盘的状态冻住。
   const normalizedPlanReads = new WeakMap();
+  let planWriteEpochValue = 0;
+  function bumpPlanWriteEpoch() { planWriteEpochValue += 1; }
+  function planWriteEpoch() { return planWriteEpochValue; }
 
   function getPlan(planId) {
     const overlay = currentRunnerProgress(planId);
@@ -2725,6 +2731,7 @@ export function createGoalPlanStore({
     try {
       if (existsSync(planFile(planId))) unlinkSync(planFile(planId));
     } catch {}
+    bumpPlanWriteEpoch();
     publishPersistedChange('delete', planId, {
       conversationId,
       changeKind: 'delete',
@@ -2793,6 +2800,7 @@ export function createGoalPlanStore({
     }
     // 批量删除只广播一次，避免抖动；planId 传 null 表示非单一计划变更。
     for (const meta of removed) clearRunnerProgressState(meta.planId);
+    bumpPlanWriteEpoch();
     publishPersistedChange('delete', null, {
       conversationId: normalizedConversationId,
       changeKind: 'delete',
@@ -2813,6 +2821,7 @@ export function createGoalPlanStore({
     getUnacceptedCompletedPlanByConversation,
     getPlan,
     planReadStamp,
+    planWriteEpoch,
     createPlan,
     createGoalContract,
     createIntakeContract,
