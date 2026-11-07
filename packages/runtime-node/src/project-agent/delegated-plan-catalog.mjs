@@ -1,5 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { performance } from 'node:perf_hooks';
+import { noteDiagnosticPhase } from '../diagnostic-phase.mjs';
 import { createPlanDiscoveryJournal } from './plan-discovery-journal.mjs';
 
 const version = info => `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`;
@@ -25,7 +27,9 @@ export function createDelegatedPlanCatalog({ directory, readPlan, maxEntries = 4
           const inspect = !invalidation || invalidation.full || invalidation.changed.has(name.slice(0, -5)) || !cached;
           const token = inspect ? version(statSync(file, { bigint: true })) : cached.token;
           if (!cached || cached.token !== token) {
+            const started = performance.now();
             const value = JSON.parse(readFileSync(file, 'utf8'));
+            noteDiagnosticPhase('plan.catalog', { hit: 0, ms: performance.now() - started });
             // Do not publish discovery from a file changed during this read.
             if (version(statSync(file, { bigint: true })) !== token) throw new Error('plan_discovery_changed');
             cached = { token, delegated: Boolean(value?.delegationOrigin?.sessionId) };

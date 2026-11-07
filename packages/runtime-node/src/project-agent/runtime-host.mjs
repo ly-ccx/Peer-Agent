@@ -1,3 +1,5 @@
+import { performance } from 'node:perf_hooks';
+import { noteDiagnosticPhase } from '../diagnostic-phase.mjs';
 import { registerWorkBudget } from './work-budget.mjs';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
 import { pathOf } from '../data-store.mjs';
@@ -261,7 +263,9 @@ export function createProjectAgentHost({
     const outcomes = await Promise.all(wanted.map(workspaceId => {
       const pending = (async () => {
         if (!holdsLease(workspaceId) && typeof acquireLease !== 'function') return { workspaceId, skipped: 'not-host' };
+        const recoverStarted = performance.now();
         const recovered = await recovery.recover(workspaceId);
+        noteDiagnosticPhase('watch.recover', { hit: recovered.reused === true ? 1 : 0, ms: performance.now() - recoverStarted });
         if (!recovered.ok) return { workspaceId, ...recovered };
         try {
           if (stoppedWorkspaces.has(workspaceId)) throw new Error('coordination_maintenance_pending');
@@ -385,8 +389,14 @@ export function createProjectAgentHost({
 
   async function sweepWatch() {
     if (!watch || hostDisposed) return 30_000;
+    const syncStarted = performance.now();
     await sync();
-    if (typeof reconcileSessions === 'function') await reconcileSessions();
+    noteDiagnosticPhase('watch.sync', { ms: performance.now() - syncStarted });
+    if (typeof reconcileSessions === 'function') {
+      const reconcileStarted = performance.now();
+      await reconcileSessions();
+      noteDiagnosticPhase('watch.reconcile', { ms: performance.now() - reconcileStarted });
+    }
     const at = typeof now === 'function' ? now() : new Date();
     const atIso = at instanceof Date ? at.toISOString() : (typeof at === 'string' ? at : new Date().toISOString());
     let delay = 30_000;

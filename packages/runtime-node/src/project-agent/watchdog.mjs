@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
+import { noteDiagnosticPhase } from '../diagnostic-phase.mjs';
 import { sessionFactsFromPlan } from './session-facts.mjs';
 import { verificationProgressFromPlan } from './verification-progress.mjs';
 import { stableFailureClass, normalizeProgressMaterial } from './progress-policy.mjs';
@@ -174,7 +176,7 @@ export function watchFactsFromPlan(plan) {
     leaves,
     ...(verificationProgress ? { verificationProgress } : {}),
     ...(reportStable && leaves.length && leaves.every(leaf => leaf.status === 'completed') ? { reportRevision:
-      createHash('sha256').update(JSON.stringify(reportMaterial(plan.tasks))).digest('hex') } : {}),
+      createHash('sha256').update(reportRevisionJson(plan.tasks)).digest('hex') } : {}),
     ...(needsUser.length ? { needsUser } : {}),
     runner: {
       ...(text(plan?.runner?.lastError) ? { lastError: text(plan.runner.lastError) } : {}),
@@ -317,4 +319,21 @@ function text(value) {
 
 function reportMaterial(nodes) {
   return (nodes || []).map(node => ({ result: node.result || '', status: node.status, children: reportMaterial(node.subtasks) }));
+}
+
+const reportRevisionText = new WeakMap();
+
+function reportRevisionJson(tasks) {
+  if (tasks && typeof tasks === 'object') {
+    const cached = reportRevisionText.get(tasks);
+    if (cached) {
+      noteDiagnosticPhase('plan.reportRevision', { hit: 1, ms: 0 });
+      return cached;
+    }
+  }
+  const started = performance.now();
+  const text = JSON.stringify(reportMaterial(tasks));
+  noteDiagnosticPhase('plan.reportRevision', { hit: 0, ms: performance.now() - started });
+  if (tasks && typeof tasks === 'object') reportRevisionText.set(tasks, text);
+  return text;
 }
