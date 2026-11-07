@@ -10,9 +10,12 @@ import {
   flushMainSegments,
   formatCallSite,
   formatConsoleSlow,
+  flushDiagnosticPhases,
+  formatDiagnosticPhase,
   formatEventLoopWindow,
   formatPlanWrite,
   formatSlowTimer,
+  recordDiagnosticPhase,
   hookRendererLongTaskConsole,
   installConsoleSlowProbe,
   installSlowTimerProbe,
@@ -354,4 +357,26 @@ test('diagnostic file stores one sanitized line under ~/.peer-agent and stops pa
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+test('watch phase lines keep hit, miss, and duration, never plan text', () => {
+  const secret = 'plan-body-should-not-appear';
+  flushDiagnosticPhases(null);
+  assert.equal(formatDiagnosticPhase('chat:stream:delta', { ms: 10 }), '');
+  const leaked = formatDiagnosticPhase('plan.normalize', {
+    calls: 22, hit: 20, miss: 2, sawCache: true, ms: 2310, plans: 2,
+    planId: secret, path: secret, body: secret,
+  }, '2026-11-07T12:21:52.204');
+  assert.equal(leaked.includes(secret), false);
+  assert.match(leaked, /\[phase\] at=2026-11-07T12:21:52.204 name=plan.normalize calls=22 hit=20 miss=2 ms=2310 plans=2/);
+  recordDiagnosticPhase('plan.normalize', { hit: 1, ms: 1, planId: secret });
+  recordDiagnosticPhase('watch.reconcile', { ms: 3, planId: secret });
+  recordDiagnosticPhase('watch.readFacts', { hit: 1, ms: 4, plans: 2, body: secret });
+  const lines = [];
+  flushDiagnosticPhases((line) => lines.push(line), '2026-11-07T12:22:24.814');
+  const text = lines.join('\n');
+  assert.equal(text.includes(secret), false);
+  assert.equal(text.includes('plan.normalize'), false);
+  assert.match(text, /name=watch.reconcile calls=1 ms=3/);
+  assert.match(text, /name=watch.readFacts calls=1 hit=1 miss=0 ms=4 plans=2/);
 });

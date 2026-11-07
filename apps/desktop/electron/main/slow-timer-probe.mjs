@@ -37,6 +37,16 @@ const STREAM_CHANNELS = new Set([
   'chat:stream:error',
   'chat:stream:aborted',
 ]);
+const PHASE_NAMES = new Set([
+  'watch.sync',
+  'watch.recover',
+  'watch.readFacts',
+  'watch.reconcile',
+  'plan.normalize',
+  'plan.reportRevision',
+  'plan.catalog',
+]);
+const phaseBuckets = new Map();
 
 /** 进程本地时间，用来和采样钟对齐。不含时区名以外的环境信息。 */
 export function diagnosticStamp(date = new Date()) {
@@ -300,6 +310,49 @@ export function hookRendererLongTaskConsole(app, write) {
   else app.once?.('ready', attach);
 }
 
+export function recordDiagnosticPhase(name, fields) {
+  if (!PHASE_NAMES.has(name) || !fields || typeof fields !== 'object') return;
+  const bucket = phaseBuckets.get(name) || { calls: 0, hit: 0, miss: 0, sawCache: false, ms: 0 };
+  bucket.calls += 1;
+  if (fields.hit === 1 || fields.hit === 0) {
+    bucket.sawCache = true;
+    if (fields.hit === 1) bucket.hit += 1;
+    else bucket.miss += 1;
+  }
+  if (Number.isFinite(fields.ms) && fields.ms > 0) bucket.ms += fields.ms;
+  if (Number.isFinite(fields.plans) && fields.plans >= 0) {
+    bucket.plans = Math.max(bucket.plans || 0, Math.round(fields.plans));
+  }
+  phaseBuckets.set(name, bucket);
+}
+
+export function formatDiagnosticPhase(name, fields = {}, at = diagnosticStamp()) {
+  if (!PHASE_NAMES.has(name)) return '';
+  const parts = [`[phase] at=${at}`, `name=${name}`];
+  if (Number.isFinite(fields.calls)) parts.push(`calls=${Math.round(fields.calls)}`);
+  if (fields.sawCache === true) {
+    parts.push(`hit=${Math.round(Number(fields.hit) || 0)}`);
+    parts.push(`miss=${Math.round(Number(fields.miss) || 0)}`);
+  }
+  if (Number.isFinite(fields.ms)) parts.push(`ms=${Math.round(fields.ms)}`);
+  if (Number.isFinite(fields.plans)) parts.push(`plans=${Math.round(fields.plans)}`);
+  return parts.join(' ');
+}
+
+export function flushDiagnosticPhases(log, at = diagnosticStamp()) {
+  if (typeof log !== 'function') {
+    phaseBuckets.clear();
+    return;
+  }
+  for (const [name, bucket] of phaseBuckets) {
+    const watch = name.startsWith('watch.');
+    if (!watch && bucket.ms < 20 && bucket.miss === 0) continue;
+    const line = formatDiagnosticPhase(name, bucket, at);
+    if (line) log(line);
+  }
+  phaseBuckets.clear();
+}
+
 function watchEventLoop(log) {
   return import('node:perf_hooks').then(({ monitorEventLoopDelay }) => {
     const histogram = monitorEventLoopDelay({ resolution: 20 });
@@ -309,6 +362,7 @@ function watchEventLoop(log) {
         const sample = { maxMs: histogram.max / 1e6, meanMs: histogram.mean / 1e6 };
         histogram.reset();
         flushMainSegments();
+        flushDiagnosticPhases(log);
         if (!shouldReportEventLoop(sample)) return;
         log(formatEventLoopWindow(sample));
       } catch {
@@ -343,6 +397,14 @@ function installForElectron() {
       });
     })
     .catch(() => {});
+  // 运行中的 store 在 dist，单测走 src。两份都装上，实际执行的那份才会记下 hit/miss。
+  for (const relative of ['dist/diagnostic-phase.mjs', 'src/diagnostic-phase.mjs']) {
+    import(new URL(`../../../../packages/runtime-node/${relative}`, import.meta.url).href)
+      .then(({ setDiagnosticPhaseObserver }) => {
+        setDiagnosticPhaseObserver((name, fields) => recordDiagnosticPhase(name, fields));
+      })
+      .catch(() => {});
+  }
 }
 
 try {
