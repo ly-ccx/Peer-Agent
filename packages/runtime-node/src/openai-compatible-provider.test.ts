@@ -202,3 +202,14 @@ test('legacy detail cannot invent trusted origins or leak arbitrary content', ()
   assert.equal(explicit.diagnostic.code,'authentication_error');
   assert.doesNotMatch(explicit.message,/context_length/);
 });
+
+test('legacy constructor shares the complete established core overflow vocabulary', () => {
+  for (const message of ['prompt_too_long','context_length_exceeded','maximum context length exceeded',
+    'maximum prompt length exceeded','context window is full','context too long',
+    'input is too long for this model','exceeds model context window','too many tokens','token limit exceeded']) {
+    const error = new ModelProviderHttpError('legacy',400,JSON.stringify({error:{message:message+': PRIVATE_ECHO'}}));
+    assert.equal(isPromptTooLongError(error.status,error.message),true,message);
+    assert.equal(error.diagnostic.code,'context_length_exceeded');
+    assert.doesNotMatch(error.message,/PRIVATE_ECHO/);
+  }
+});

@@ -1,3 +1,5 @@
+import { isPromptTooLongError } from '@peer-agent/runtime-core';
+
 /** HTTP diagnostics are bounded metadata, never arbitrary upstream output. */
 const BODY_LIMIT = 64 * 1024;
 const PROVIDER_CODES = new Set(['context_length_exceeded', 'context_window_exceeded', 'model_not_found', 'invalid_api_key', 'authentication_error', 'rate_limit_exceeded', 'insufficient_quota', 'invalid_request_error', 'configuration_error', 'server_error']);
@@ -20,10 +22,8 @@ function recognizedCode(value) {
     return text;
   if (/^(?:bad request|invalid (?:peer model )?request)[.!]?$/.test(text)) return 'invalid_request_error';
   if (/^(?:configure a workspace model credential in settings|workspace model (?:credential storage|configuration) is unavailable)[.!]?$/.test(text)) return 'configuration_error';
-  // Wording is used only for diagnostics, never to authorize replay.
-  if (text.length < 1024 && /^(?:error: )?(?:context (?:length|window).*(?:exceed|limit|full)|maximum context length|prompt is too long)/i.test(text))
-    return 'context_length_exceeded';
-  if (/^this model's maximum (?:prompt|context) length is [\d,]+ (?:but|and) the request contains [\d,]+ tokens?\./i.test(text))
+  // Preserve the core's existing category vocabulary; this grants no replay authority.
+  if (isPromptTooLongError(undefined, text))
     return 'context_length_exceeded';
   if (/model.*(?:does not exist|not found)/i.test(text))
     return 'model_not_found';

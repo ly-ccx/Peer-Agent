@@ -95,3 +95,18 @@ test('HTTP-error SSE keeps only a recognized overflow assertion', async () => {
   assert.equal(unknown.diagnostic.code,'http_error');
   assert.doesNotMatch(JSON.stringify(unknown), /PRIVATE_ECHO/);
 });
+
+const supportedOverflowMessages = [
+  'prompt_too_long', 'context_length_exceeded', 'maximum context length exceeded',
+  'maximum prompt length exceeded', 'context window is full', 'context too long',
+  'input is too long for this model', 'exceeds model context window',
+  'too many tokens', 'token limit exceeded',
+];
+for (const message of supportedOverflowMessages) test(`retains existing core overflow spelling: ${message}`, async () => {
+  for (const raw of [message + ': PRIVATE_ECHO', JSON.stringify({error:{type:'invalid_request_error',message:message + ': PRIVATE_ECHO'}})]) {
+    const result = await readProviderHttpError(new Response(raw,{status:400}));
+    assert.equal(result.diagnostic.code,'context_length_exceeded');
+    assert.match(result.detail,/context_length_exceeded/);
+    assert.doesNotMatch(JSON.stringify(result),/PRIVATE_ECHO/);
+  }
+});
