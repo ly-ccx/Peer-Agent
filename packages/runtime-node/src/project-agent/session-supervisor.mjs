@@ -227,13 +227,12 @@ export function createSessionSupervisor({
     send: (input, context) => exclusive(() => communication.send(input, context)), takeover: takeover.request,
     holdsLease: canManageWorkspace, canExecute: workspaceId => executionScheduler.isWorkspaceReady(workspaceId), isEnabled: autonomousCoordinationEnabled, now });
 
+  /** @type {{ epoch: number, plans: any[] } | null} */
   let reconcilePlans = null;
   function delegatedPlans() {
     return readQuery.memo('delegated-plans', () => {
       const epoch = typeof goalPlanStore.planWriteEpoch === 'function' ? goalPlanStore.planWriteEpoch() : null;
-      if (reconcilePlans && epoch !== null && reconcilePlans.epoch === epoch) {
-        return reconcilePlans.plans.map(plan => ({ ...plan }));
-      }
+      if (reconcilePlans && epoch !== null && reconcilePlans.epoch === epoch) return reconcilePlans.plans;
       const plans = planCatalog.read();
       if (epoch !== null) reconcilePlans = { epoch, plans };
       return plans;
