@@ -249,3 +249,10 @@ test('ChatGPT Responses provider normalizes dotted historical tool names for wir
   const toolOutput = body.input.find((item: any) => item?.type === 'function_call_output');
   assert.equal(toolOutput?.call_id, 'call_hist_1');
 });
+
+test('Responses HTTP failure omits arbitrary HTML and echoed prompts', async () => {
+ const provider=createChatGptResponsesProvider({baseUrl:'https://fixture.invalid/codex',tokens:{access:'fixture-secret'},fetch:async()=>new Response('<html>fixture-secret PRIVATE_PROMPT_ECHO</html>',{status:503})});
+ await assert.rejects(provider.stream({model:'fixture',messages:[]}), (error:any)=>{
+  assert.equal(error.status,503);assert.doesNotMatch(error.message,/fixture-secret|PRIVATE_PROMPT|html/);return true;
+ });
+});

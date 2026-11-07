@@ -603,3 +603,20 @@ test('cancellation after a known tool result commits its native checkpoint befor
   assert.equal(requests, 1);
   assert.deepEqual(order, ['applied', 'durable', 'cancelled']);
 });
+
+test('preserves safe structured HTTP diagnostics through the pipeline', async () => {
+  const diagnostic = { code: 'peer_request_messages_exceeded', source: 'gateway_validation', status: 400, actual: 515, limit: 512, upstreamAttempted: false };
+  const events: RuntimeSdkEvent[] = [];
+  const pipeline = createRuntimePipeline({
+    events: createEventSink(events),
+    model: { initialize: () => ({ messages: ['committed'] }), runTurn: () => { throw Object.assign(new Error('request rejected'), { diagnostic }); }, applyToolResults: (state) => state },
+    tools: { execute: async (call) => ({ call, result: null }) },
+  });
+  const result = await pipeline.run({ sessionId: 'diagnostic', input: null });
+  assert.equal(result.reason, 'request rejected');
+  assert.deepEqual(result.state, { messages: ['committed'] });
+  assert.deepEqual(result.diagnostic, diagnostic);
+  const event = events.at(-1);
+  assert.equal(event?.type, 'runtime.error');
+  if (event?.type === 'runtime.error') assert.deepEqual(event.details, diagnostic);
+});

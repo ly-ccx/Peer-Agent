@@ -4,6 +4,7 @@ import test from 'node:test';
 import type { ModelStreamEvent } from './model-provider-contracts.ts';
 import {
   createOpenAICompatibleProvider,
+  encodeOpenAICompatibleRequest,
   ModelProviderHttpError,
   ModelProviderStreamError,
 } from './openai-compatible-provider.ts';
@@ -139,4 +140,25 @@ test('returns typed HTTP and malformed SSE errors without credentials', async ()
 
   const streamModel = provider(async () => sseResponse(['not-json']));
   await assert.rejects(streamModel.stream({ model: 'gpt-test', messages: [] }), ModelProviderStreamError);
+});
+
+test('preserves gateway string errors and bounded budget facts', async () => {
+  const model = createOpenAICompatibleProvider({
+    config: { providerId: 'company', apiKey: 'secret-key', baseUrl: 'https://example.test/v1' },
+    trustGatewayErrors: true,
+    fetch: async () => new Response(JSON.stringify({ error: 'Invalid Peer model request', code: 'peer_request_messages_exceeded', source: 'gateway_validation', details: { actual: 515, limit: 512, upstream_attempted: false } }), { status: 400 }),
+  });
+  await assert.rejects(model.stream({ model: 'fixture', messages: [] }), (error: any) => {
+    assert.equal(error.diagnostic?.code, 'peer_request_messages_exceeded');
+    assert.equal(error.diagnostic?.actual, 515);
+    assert.match(error.message, /515.*512/);
+    return true;
+  });
+});
+
+test('preflight encoding equals the actual wire including UTF-8 and tools', async () => {
+  const input = { model: 'fixture', messages: [{ role: 'user' as const, content: '中文 body' }], tools: [{ name: 'read_file', parameters: { type: 'object' } }], maxOutputTokens: 4096, reasoningEffort: 'high' as const };
+  const body = encodeOpenAICompatibleRequest(input);
+  const model = provider(async (_url, request) => { assert.equal(request?.body, body); assert.equal(Buffer.byteLength(body), new TextEncoder().encode(String(request?.body)).length); return sseResponse(['[DONE]']); });
+  await model.stream(input);
 });

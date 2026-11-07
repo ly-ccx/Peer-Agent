@@ -1,3 +1,4 @@
+import { readProviderHttpError } from '../provider-http-error.mjs';
 import { emitProviderEvent } from './event-sink.mjs';
 import { consumeOpenAIChatStream } from '../openai-chat-stream.js';
 
@@ -452,7 +453,8 @@ export async function sendOpenAIChatStream({
   trace.recordResponse(res);
 
   if (!res.ok) {
-    const errorText = await res.text().catch(() => '');
+    const { detail, diagnostic } = await readProviderHttpError(res, { signal, secrets: [apiKey] });
+    const errorText = `HTTP ${res.status}${detail ? `: ${detail}` : ''}`;
     const tracePath = await trace.finish({
       anomaly: 'http_error',
       httpError: errorText,
@@ -462,6 +464,7 @@ export async function sendOpenAIChatStream({
     return {
       ok: false,
       status: res.status,
+      diagnostic,
       errorText,
       messages: body.messages,
       providerTracePath: tracePath,
@@ -536,6 +539,7 @@ export async function sendOpenAIChatStream({
     return {
       ok: false,
       status: res.status,
+      diagnostic,
       errorText,
       providerError: true,
       messages: body.messages,

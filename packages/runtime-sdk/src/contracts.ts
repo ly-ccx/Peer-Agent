@@ -258,3 +258,15 @@ export interface RuntimeSdk {
   emit(event: RuntimeSdkEventInput): RuntimeSdkEvent;
   subscribe(listener: RuntimeSdkEventListener): () => void;
 }
+
+/** Safe failure facts; this object does not grant retry or execution permission. */
+export interface RuntimeFailureDiagnostic {
+  readonly code: string;
+  readonly source: 'provider' | 'gateway_validation' | 'host';
+  readonly status?: number;
+  readonly upstreamStatus?: number;
+  readonly requestId?: string;
+  readonly actual?: number;
+  readonly limit?: number;
+  readonly upstreamAttempted?: false;
+}
