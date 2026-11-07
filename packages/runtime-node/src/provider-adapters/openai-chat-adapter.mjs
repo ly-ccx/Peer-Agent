@@ -539,7 +539,6 @@ export async function sendOpenAIChatStream({
     return {
       ok: false,
       status: res.status,
-      diagnostic,
       errorText,
       providerError: true,
       messages: body.messages,
