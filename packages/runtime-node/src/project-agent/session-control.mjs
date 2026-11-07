@@ -13,6 +13,31 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
   readMessages = () => [], onStopReceipt = () => {}, stopTimeoutMs = 30_000, now = () => new Date().toISOString() }) {
   const drains = new Map();
   const readPlan = id => goalPlanStore.getPlan(id);
+  // ESRCH is the same recorder-death proof the resource editor uses. A missing pid, a live pid,
+  // an empty token map, a provider status, or a timeout does not prove the old execution ended.
+  function recordedHostPid(operation) {
+    if (Number.isSafeInteger(operation?.hostPid) && operation.hostPid > 0) return operation.hostPid;
+    const match = /^legacy-host:(\d+)$/.exec(typeof operation?.hostEpoch === 'string' ? operation.hostEpoch : '');
+    if (!match) return 0;
+    const pid = Number(match[1]);
+    return Number.isSafeInteger(pid) && pid > 0 ? pid : 0;
+  }
+  function hostProcessDead(pid) {
+    if (!Number.isSafeInteger(pid) || pid < 1) return false;
+    try { process.kill(pid, 0); return false; }
+    catch (error) { return error?.code === 'ESRCH'; }
+  }
+  function observedUnknown(plan) {
+    const claims = (executionScheduler.resourceSnapshot?.() || []).filter(row => sameExecution(row.execution, executionIdentity(plan)));
+    const ids = [...unsettledExecution(plan), ...claims.flatMap(claim => [
+      ...(claim.evidenceCalls || []),
+      ...Object.values(claim.handles || {}).filter(handle => handle.state !== 'ended').map(handle => handle.toolCallId),
+    ])].filter(id => typeof id === 'string' && id);
+    return [...new Set(ids)].sort();
+  }
+  function deadRecordingHost(operation, plan) {
+    return hostProcessDead(recordedHostPid(operation)) && sessionFactsFromPlan(plan).executionOwnership !== 'live';
+  }
   const journal = plan => workBudgetBinding(plan.delegationOrigin.workspaceId)?.store;
   function read(plan) { return journal(plan)?.readSessionControl?.(plan.delegationOrigin.sessionId) || plan.delegationOrigin.executionControl; }
   function withdrawalValid(plan) {
@@ -70,7 +95,7 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
     executionScheduler.prepareResources?.();
     const operation = persist(plan, { ...identity, reason, requestDigest: controlDigest(identity), revision: 1,
       workspaceId: plan.delegationOrigin.workspaceId, parentConversationId: plan.delegationOrigin.parentConversationId,
-      sessionId: execution.sessionId, planId: execution.planId, expectedExecution: execution, hostEpoch, unproven, priorStopReceiptId, phase: 'recorded', updatedAt: now() });
+      sessionId: execution.sessionId, planId: execution.planId, expectedExecution: execution, hostEpoch, hostPid: process.pid, unproven, priorStopReceiptId, phase: 'recorded', updatedAt: now() });
     if (kind !== 'resume') executionScheduler.protectResources?.(plan, { operationId, state: 'draining' });
     return change(plan, operation, { phase: 'draining' });
   }
@@ -81,6 +106,8 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
     if (operation.stopReceipt && JSON.stringify(operation.stopReceipt.unknownCalls) === JSON.stringify(unsettledExecution(plan))
       && sessionFactsFromPlan(plan).executionOwnership !== 'live' && !executionScheduler.hasUnsettledHandles?.(plan)
       && (operation.phase === 'settled' || (executionScheduler.resourceClaimsFor?.(plan) || []).every(ref => operation.stopReceipt.resourceClaims.some(old => old.claimId === ref.claimId && old.revision === ref.revision)))) return operation.stopReceipt;
+    if (operation.stopReceipt && deadRecordingHost(operation, plan)
+      && JSON.stringify([...operation.stopReceipt.unknownCalls].sort()) === JSON.stringify(observedUnknown(plan))) return operation.stopReceipt;
     const factsDigest = recoveryFacts(plan);
     if (operation.nextAction && operation.recoveryFactsDigest === factsDigest) throw new Error(operation.nextAction);
     const hostEpoch = journal(plan)?.writerEpoch?.() || `legacy-host:${process.pid}`;
@@ -91,7 +118,8 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
       const ended = sessionFactsFromPlan(readPlan(plan.planId)).executionOwnership === 'ended';
       const retainedFence = operation.kind === 'pause' && operation.authorityRef?.startsWith('coordination-recovery:')
         && fencedResumeProof(readPlan(plan.planId))?.operationId === operation.operationId;
-      if ((operation.hostEpoch && operation.hostEpoch !== hostEpoch && !operation.stopReceipt || operation.unproven) && !ended
+      const recordingHostDead = deadRecordingHost(operation, readPlan(plan.planId));
+      if ((operation.hostEpoch && operation.hostEpoch !== hostEpoch && !operation.stopReceipt || operation.unproven) && !ended && !recordingHostDead
         && !legacyCancellationStopped(readPlan(plan.planId)) && !legacyTakeoverIdle(readPlan(plan.planId)) && !retainedFence)
         throw new Error('execution_stop_unconfirmed');
       const registration = { sessionId: operation.sessionId, planId: plan.planId, workspaceId: operation.workspaceId, conversationId: plan.conversationId };
@@ -108,8 +136,9 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
       const work = typeof workId === 'string' && workId ? binding?.store.readWork?.(workId) : undefined;
       const activeUnknown = work?.budget?.uncertainDispatches?.some(row => (!row.planId || row.planId === plan.planId) && binding.activeAttempts?.has(row.attemptId));
       if (activeUnknown) throw new Error('execution_still_running');
-      if (executionScheduler.hasUnsettledHandles?.(fresh)) throw new Error('execution_stop_unconfirmed');
-      const unknownCalls = unsettledExecution(fresh);
+      const hostDead = deadRecordingHost(operation, fresh);
+      if (!hostDead && executionScheduler.hasUnsettledHandles?.(fresh)) throw new Error('execution_stop_unconfirmed');
+      const unknownCalls = hostDead ? observedUnknown(fresh) : unsettledExecution(fresh);
       const resourceClaims = executionScheduler.resourceClaimsFor?.(fresh) || [];
       const receipt = { receiptId: `stop:${operation.operationId}:${controlDigest([unknownCalls, resourceClaims])}`, operationId: operation.operationId,
         execution: operation.expectedExecution, admissionClosed: true, runnerIdle: true, schedulerIdle: true,
@@ -137,6 +166,8 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
     if (current?.operationId !== operation.operationId) throw new Error('session_control_superseded');
     if (current.phase === 'settled') return current;
     if (!sameExecution(receipt?.execution, operation.expectedExecution)) throw new Error('session_control_receipt_invalid');
+    if (receipt.unknownCalls.length && current.phase === 'reconciling' && current.stopReceipt?.receiptId === receipt.receiptId
+      && JSON.stringify(current.stopReceipt.unknownCalls) === JSON.stringify(receipt.unknownCalls)) return current;
     executionScheduler.settleResources?.(plan, receipt);
     if (receipt.unknownCalls.length && !withdrawal && current.phase === 'reconciling' && current.stopReceipt?.receiptId === receipt.receiptId) return current;
     if (receipt.unknownCalls.length && !withdrawal) return change(plan, current, { phase: 'reconciling', stopReceipt: receipt, nextAction: 'reconcile_execution_outcome' });

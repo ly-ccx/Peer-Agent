@@ -33,6 +33,15 @@ test('control application requires a receipt bound to the exact stopped executio
   assert.throws(() => commit(state, { ...a, revision: 2, phase: 'settled', outcome: 'applied', stopReceipt }), /receipt_invalid/);
 });
 
+test('the recorder pid is immutable and a non-pid cannot enter the journal', () => {
+  const a = { ...operation('cancel', 'cancel'), hostPid: 4242 };
+  const state = commit({}, a);
+  assert.equal(state.sessionControls.cancel.hostPid, 4242);
+  assert.throws(() => commit(state, { ...a, revision: 2, phase: 'draining', hostPid: 4343 }), /conflict/);
+  assert.throws(() => commit({}, { ...operation('cancel-2', 'cancel'), hostPid: 0 }), /conflict/);
+  assert.equal(commit(state, { ...a, revision: 2, phase: 'draining' }).sessionControls.cancel.hostPid, 4242);
+});
+
 test('request revisions, parameters and scope are immutable across replay', () => {
   const a = operation('takeover'), state = commit({}, a);
   assert.throws(() => commit(state, { ...a, revision: 2, phase: 'draining', workspaceId: 'unrelated' }), /conflict/);

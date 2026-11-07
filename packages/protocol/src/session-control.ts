@@ -42,6 +42,8 @@ export interface SessionControlOperation {
   readonly kind: 'pause' | 'cancel' | 'takeover' | 'resume';
   readonly authorityRef: string;
   readonly hostEpoch?: string;
+  /** Pid of the process that recorded the operation. ESRCH is the only proof that this recorder is gone. */
+  readonly hostPid?: number;
   readonly unproven?: boolean;
   readonly recoveryFactsDigest?: string;
   readonly priorStopReceiptId?: string;

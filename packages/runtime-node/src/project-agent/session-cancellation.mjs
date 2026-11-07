@@ -129,6 +129,6 @@ export function createSessionCancellation({ findBySession, goalPlanStore, goalRu
       if (!origin?.cancellation || plan.status === 'cancelled' && !origin.cancellation.cleanupPending) continue;
       if (origin.cancellation.phase === 'awaiting_outcome'
         && JSON.stringify(origin.cancellation.evidenceCalls || []) === JSON.stringify(unsettledExecution(plan))) continue;
-      await request({ sessionId: origin.sessionId }, false);
+      await request({ sessionId: origin.sessionId }, true);
     } } };
 }
