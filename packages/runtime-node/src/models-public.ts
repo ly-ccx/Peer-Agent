@@ -57,6 +57,7 @@ export {
 } from './openai-chat-stream.ts';
 export {
   createOpenAICompatibleProvider,
+  encodeOpenAICompatibleRequest,
   ModelProviderHttpError,
 } from './openai-compatible-provider.ts';
 export type {

@@ -1,4 +1,5 @@
 import type {
+  RuntimeFailureDiagnostic,
   RuntimeSdkEvent,
   RuntimeSdkEventInput,
   RuntimeSdkToolResult,
@@ -195,6 +196,7 @@ export interface RuntimePipelineRunResult<
   readonly turns: number;
   readonly toolCalls: number;
   readonly reason?: string;
+  readonly diagnostic?: RuntimeFailureDiagnostic;
 }
 
 export interface RuntimePipeline<
