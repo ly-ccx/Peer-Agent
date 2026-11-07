@@ -528,6 +528,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
       return db.prepare(`SELECT o.value FROM supervision_index i JOIN objects o ON o.bucket=i.bucket AND o.id=i.id WHERE i.bucket=? AND i.${field}=? AND i.sequence>=? ${pendingOnly ? 'AND i.pending=1' : ''} ${scope} ORDER BY i.sequence ${order},i.id ${order} LIMIT ?`)
         .all(...args).map(row => JSON.parse(row.value));
     },
+    revision() { load(); return Number(getMeta(db, 'revision') || 0); },
     read() { load(); return snapshot(db, true); },
     readSnapshot() { load(); const revision = getMeta(db, 'revision') || 0; if (!cached || cachedRevision !== revision) { cached = freeze(snapshot(db)); cachedRevision = revision; } return cached; },
     readWork(id) { load(); return head(db, id); },

@@ -251,6 +251,7 @@ export function createProjectAgentHost({
   }
 
   async function sync(workspaceIds) {
+    const inventoryStarted = performance.now();
     const listed = Array.isArray(workspaceIds) ? workspaceIds : listWorkspaceIds();
     const wanted = [...new Set(listed)].filter(workspaceId => typeof workspaceId === 'string' && !stoppedWorkspaces.has(workspaceId) && resolveConversationId(workspaceId));
     // A targeted wake is not a replacement for the complete project inventory.
@@ -259,6 +260,7 @@ export function createProjectAgentHost({
     // One fresh cleanup snapshot avoids repeatedly loading global eligibility.
     // Execution/recovery still use holdsLease at their original authority gates.
     const ownedIds = typeof readOwnedWorkspaceIds === 'function' ? new Set(readOwnedWorkspaceIds([...registeredIds])) : null;
+    noteDiagnosticPhase('watch.inventory', { ms: performance.now() - inventoryStarted });
     for (const workspaceId of runners.keys()) if (!registeredIds.has(workspaceId) || (ownedIds ? !ownedIds.has(workspaceId) : !holdsLease(workspaceId))) drop(workspaceId);
     const outcomes = await Promise.all(wanted.map(workspaceId => {
       const pending = (async () => {
@@ -270,19 +272,31 @@ export function createProjectAgentHost({
         try {
           if (stoppedWorkspaces.has(workspaceId)) throw new Error('coordination_maintenance_pending');
           if (!recovered.reused && typeof activateSessions === 'function') await activateSessions(workspaceId);
-          const conversationId = resolveConversationId(workspaceId), runner = await ensureRunner(workspaceId, conversationId);
+          const conversationId = resolveConversationId(workspaceId);
+          const runnerStarted = performance.now();
+          const runner = await ensureRunner(workspaceId, conversationId);
+          noteDiagnosticPhase('watch.runner', { ms: performance.now() - runnerStarted });
+          const inputStarted = performance.now();
           const consumed = [...(stagedInputs.get(workspaceId) || []), ...await consumeInputs(workspaceId)];
           if (stoppedWorkspaces.has(workspaceId)) throw new Error('coordination_maintenance_pending');
           stagedInputs.delete(workspaceId);
           const pending = pendingInputs(workspaceId, conversationId, consumed);
+          noteDiagnosticPhase('watch.inputs', { ms: performance.now() - inputStarted });
+          const digestStarted = performance.now();
           const due = armDigest(runner, workspaceId);
+          noteDiagnosticPhase('watch.digest', { ms: performance.now() - digestStarted });
+          const publishStarted = performance.now();
           publishWatch(workspaceId);
+          noteDiagnosticPhase('watch.publish', { ms: performance.now() - publishStarted });
           let advanced = false;
-          if (pending.length) { await runner.enqueueUserInputs(pending); advanced = true; }
+          const kickStarted = performance.now();
+          let kicked = 0;
+          if (pending.length) { await runner.enqueueUserInputs(pending); advanced = true; kicked = 1; }
           else if (due || runner.parked() || runner.hasContinuation() || inboxStore.takeBatch(workspaceId).events.length > 0) {
             await runner.kick();
-            advanced = true;
+            advanced = true; kicked = 1;
           }
+          noteDiagnosticPhase('watch.kick', { hit: kicked ? 0 : 1, ms: performance.now() - kickStarted });
           // Recheck after a turn crossed await. The entirely idle branch has
           // already decided there is no continuation and changed no work.
           if (advanced && runner.hasContinuation()) scheduleSweepSoon();

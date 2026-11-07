@@ -1,3 +1,5 @@
+import { performance } from 'node:perf_hooks';
+import { noteDiagnosticPhase } from '../diagnostic-phase.mjs';
 import { createVerificationDispatchRecovery } from './verification-dispatch-recovery.mjs';
 import { createDelegationDispatchRecovery } from './delegation-dispatch-recovery.mjs';
 import { createRunnerReplyLifecycle } from './runner-reply-lifecycle.mjs';
@@ -26,6 +28,8 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
   const dispatchRecovery = createVerificationDispatchRecovery({ store, readMessages, reconcileVerification, now,
     activeAttempts: () => workBudgetBinding(workspaceId)?.activeAttempts });
   const readSnapshot = () => typeof store.readSnapshot === 'function' ? store.readSnapshot() : store.read();
+  let continuationRevision;
+  let continuationValue = false;
   const reconcileDispatches = () => {
     const inventory = readSnapshot();
     delegationRecovery.reconcileAll(inventory);
@@ -303,8 +307,17 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     recoverUserJob() { return this.recoverJob({ userOnly: true }); },
     recoverJob({ userOnly = false } = {}) { return recoverySelection().choose(userOnly); },
     hasContinuation() {
+      const started = performance.now();
+      const revision = typeof store.revision === 'function' ? store.revision() : null;
+      if (revision !== null && continuationRevision === revision) {
+        noteDiagnosticPhase('watch.continuation', { hit: 1, ms: performance.now() - started });
+        return continuationValue;
+      }
       const selection = recoverySelection();
-      return Boolean(selection.choose(false) || selection.deliveryPending());
+      continuationValue = Boolean(selection.choose(false) || selection.deliveryPending());
+      if (revision !== null) continuationRevision = typeof store.revision === 'function' ? store.revision() : revision;
+      noteDiagnosticPhase('watch.continuation', { hit: 0, ms: performance.now() - started });
+      return continuationValue;
     },
     selectNext() {
       const selection = recoverySelection();
