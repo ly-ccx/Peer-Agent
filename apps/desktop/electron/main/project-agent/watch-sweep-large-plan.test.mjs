@@ -9,6 +9,7 @@ import { createGoalPlanStore } from '../../../../../packages/runtime-node/src/go
 import { createProjectAgentHost } from '../../../../../packages/runtime-node/src/project-agent/runtime-host.mjs';
 import { createSessionSupervisor } from '../../../../../packages/runtime-node/src/project-agent/session-supervisor.mjs';
 import { setDiagnosticPhaseObserver } from '../../../../../packages/runtime-node/src/diagnostic-phase.mjs';
+import { pathToFileURL } from 'node:url';
 import { createDelegationFactsReader } from './delegation-facts-reader.mjs';
 
 const WORKSPACE_ID = 'ws-1';
@@ -23,7 +24,16 @@ test('one host sweep normalizes both large plans once, then the same instances s
   const workspacePath = path.join(dir, 'workspace');
   mkdirSync(workspacePath);
   const phases = [];
-  const previous = setDiagnosticPhaseObserver((name, fields) => phases.push({ name, ...fields }));
+  const observe = (name, fields) => phases.push({ name, ...fields });
+  const previous = setDiagnosticPhaseObserver(observe);
+  let restoreBuilt = () => {};
+  try {
+    const built = await import(pathToFileURL(path.join(
+      import.meta.dirname, '../../../../../packages/runtime-node/dist/diagnostic-phase.mjs',
+    )).href);
+    const prior = built.setDiagnosticPhaseObserver(observe);
+    restoreBuilt = () => built.setDiagnosticPhaseObserver(prior);
+  } catch { /* 未构建时只观察源码模块。 */ }
   const timers = new Map();
   let nextId = 1;
   try {
@@ -127,6 +137,7 @@ test('one host sweep normalizes both large plans once, then the same instances s
     assert.ok(second.ms < 1000, detail);
   } finally {
     setDiagnosticPhaseObserver(previous);
+    restoreBuilt();
     rmSync(dir, { recursive: true, force: true });
   }
 });

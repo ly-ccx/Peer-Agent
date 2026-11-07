@@ -1,6 +1,6 @@
 import { performance } from 'node:perf_hooks';
+import { delegationFactsForWorkspace } from '@peer-agent/runtime-node';
 import { noteDiagnosticPhase } from '../../../../../packages/runtime-node/src/diagnostic-phase.mjs';
-import { delegationFactsForWorkspace } from '../../../../../packages/runtime-node/src/project-agent/watchdog.mjs';
 
 /** Read current ownership metadata once; task watches never need chat bodies. */
 export function createDelegationFactsReader({ conversationStore, goalPlanStore }) {
