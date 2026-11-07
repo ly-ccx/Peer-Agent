@@ -49,6 +49,7 @@ const PHASE_NAMES = new Set([
   'watch.continuation',
   'watch.snapshot',
   'watch.repair',
+  'watch.ledger',
   'watch.readFacts',
   'watch.reconcile',
   'plan.normalize',
@@ -355,7 +356,7 @@ export function flushDiagnosticPhases(log, at = diagnosticStamp()) {
   }
   for (const [name, bucket] of phaseBuckets) {
     const watch = name.startsWith('watch.');
-    if (!watch && bucket.ms < 20 && bucket.miss === 0) continue;
+    if ((!watch || name === 'watch.ledger') && bucket.ms < 20 && bucket.miss === 0) continue;
     const line = formatDiagnosticPhase(name, bucket, at);
     if (line) log(line);
   }
