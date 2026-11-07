@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, statSync, readdirSync, appendFileSync, writeFileSync, utimesSync, renameSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, statSync, readdirSync, appendFileSync, writeFileSync, utimesSync, renameSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
@@ -125,12 +125,15 @@ test('process death after journal fsync and before SQL commit replays exactly on
   const w=world();
   try {
     const store=w.store({formatVersion:2}); await store.prepare(); store.saveWork({workId:'g',state:'runnable',budget:{tokens:0,observations:{},attempts:{a:{pendingTools:[{toolCallId:'unknown-write'}]}}}}); store.close();
+    const marker=path.join(w.rootDir,'killed-after-journal-fsync');
     const code=`import {createWorkCoordinationStore} from ${JSON.stringify(new URL('./work-coordination-store.mjs',import.meta.url).href)};
+import {writeFileSync} from 'node:fs';
 let count=0,armed=false;
-const s=createWorkCoordinationStore({rootDir:${JSON.stringify(w.rootDir)},workspaceId:'w',formatVersion:2,leaseEpoch:()=> 'child',holdsLease:()=>{if(armed&&++count===5)process.kill(process.pid,'SIGKILL');return true;}});
+const s=createWorkCoordinationStore({rootDir:${JSON.stringify(w.rootDir)},workspaceId:'w',formatVersion:2,leaseEpoch:()=> 'child',holdsLease:()=>{if(armed&&++count===5){writeFileSync(${JSON.stringify(marker)},'SIGKILL');process.kill(process.pid,'SIGKILL');}return true;}});
 await s.prepare(); armed=true; s.observeUsage('g','request-once',{totalTokens:7,estimatedCostUsd:0});`;
     const result=spawnSync(process.execPath,['--input-type=module','-e',code],{encoding:'utf8'});
-    assert.equal(result.signal,'SIGKILL',result.stderr);
+    assert.equal(existsSync(marker),true,result.stderr);
+    assert.ok(result.signal==='SIGKILL'||(process.platform==='win32'&&result.status!==0),result.stderr);
     const restored=w.store({formatVersion:2}); await restored.prepare();
     assert.equal(restored.readWork('g').budget.tokens,7);
     assert.equal(restored.observeUsage('g','request-once',{totalTokens:7,estimatedCostUsd:0}),false);
