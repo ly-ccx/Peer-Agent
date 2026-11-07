@@ -229,12 +229,13 @@ export function createSessionSupervisor({
 
   /** @type {{ epoch: number, plans: any[] } | null} */
   let reconcilePlans = null;
+  let reconcileDepth = 0;
   function delegatedPlans() {
     return readQuery.memo('delegated-plans', () => {
       const epoch = typeof goalPlanStore.planWriteEpoch === 'function' ? goalPlanStore.planWriteEpoch() : null;
-      if (reconcilePlans && epoch !== null && reconcilePlans.epoch === epoch) return reconcilePlans.plans;
+      if (reconcileDepth > 0 && reconcilePlans && epoch !== null && reconcilePlans.epoch === epoch) return reconcilePlans.plans;
       const plans = planCatalog.read();
-      if (epoch !== null) reconcilePlans = { epoch, plans };
+      if (reconcileDepth > 0 && epoch !== null) reconcilePlans = { epoch, plans };
       return plans;
     });
   }
@@ -1237,9 +1238,15 @@ export function createSessionSupervisor({
     }
   }
   function reconcileSessions() {
-    reconcilePlans = null;
+    reconcileDepth += 1;
+    if (reconcileDepth === 1) reconcilePlans = null;
     return reconcileControls().then(() => recoverStops()).then(() => resourceContention.reconcile(delegatedPlans()))
-    .then(() => reconcileExpired()).then(() => exclusive(() => reconcilePersistedQueues())); }
+      .then(() => reconcileExpired()).then(() => exclusive(() => reconcilePersistedQueues()))
+      .finally(() => {
+        reconcileDepth -= 1;
+        if (reconcileDepth === 0) reconcilePlans = null;
+      });
+  }
   const reconciled = deferRecovery ? Promise.resolve() : reconcileControls().then(() => reconcileExpired()).then(() => exclusive(() => reconcilePersistedQueues()));
 
   return {
