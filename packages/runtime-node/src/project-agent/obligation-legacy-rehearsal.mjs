@@ -34,10 +34,11 @@ function toolOutput(result) {
 
 /**
  * Three rc38-shaped records: no recorder tuple, only a lease epoch, ownership unknown.
- * Drives the main-bot tools, then the host card confirmation. Does not touch a real home
- * unless the caller points PEER_AGENT_HOME there.
+ * The direct supervisor is the kernel path. Desktop passes bridgeSupervisor plus
+ * executeTool so the call goes through liveDelegationSupervisor and the local tool host.
+ * Does not touch a real home unless the caller points PEER_AGENT_HOME there.
  */
-export async function rehearseLegacyObligations({ rootDir }) {
+export async function rehearseLegacyObligations({ rootDir, bridgeSupervisor = null, executeTool = null, confirmGrant = null } = {}) {
   const directory = path.join(rootDir, 'workspace');
   mkdirSync(directory, { recursive: true });
   const plans = new Map(['a', 'b', 'c'].map(id => {
@@ -64,31 +65,42 @@ export async function rehearseLegacyObligations({ rootDir }) {
     identity: () => ({ bootId: null, pid: 1, pidStart: null, lookup: () => null }),
     writerEpochFor: () => epoch, now: () => '2026-11-07T10:00:00.000Z',
   });
-  const provider = createDelegationProvider({ supervisor: {
+  const raw = {
     inspectExecutionObligations: input => service.inspect(input),
     requestObligationAuthorization: input => service.requestAuthorization(input),
     resolveExecutionObligation: input => service.resolve(input),
-  } });
+    listPendingObligationGrants: workspaceId => ({ ok: true, grants: service.pendingGrants(workspaceId) }),
+    confirmObligationGrant: input => service.confirm(input),
+    revokeObligationGrant: input => service.revoke(input),
+  };
+  const supervisor = typeof bridgeSupervisor === 'function' ? bridgeSupervisor(raw) : raw;
+  const provider = createDelegationProvider({ supervisor });
   const context = { mode: 'project_agent', role: 'project_agent', workspaceId: 'workspace', conversationId: 'parent', turnId: 'turn-legacy', toolCallOrdinal: 1 };
+  const callTool = async (capabilityId, args, toolCallId) => toolOutput(typeof executeTool === 'function'
+    ? await executeTool({ capabilityId, args, toolCallId, raw })
+    : await provider.executeCapability({ call: { toolCallId, capabilityId, arguments: args } }, context));
   const steps = [];
   try {
-    const inspected = toolOutput(await provider.executeCapability({ call: { toolCallId: 'inspect-legacy', capabilityId: 'local.delegation.inspect_execution_obligation', arguments: { sessionIds: ['a', 'b', 'c'] } } }, context));
-    steps.push({ step: 'inspect', ok: inspected?.ok === true, classes: inspected?.items?.map(item => item.classes), allowed: inspected?.items?.map(item => item.allowedActions), error: inspected?.error || null });
+    const inspected = await callTool('local.delegation.inspect_execution_obligation', { sessionIds: ['a', 'b', 'c'] }, 'inspect-legacy');
+    steps.push({ step: 'inspect', ok: inspected?.ok === true, classes: inspected?.items?.map(item => item.classes), missing: inspected?.items?.map(item => item.missingFields), allowed: inspected?.items?.map(item => item.allowedActions), error: inspected?.error || null, message: inspected?.message || null });
     if (inspected?.ok !== true) return { ok: false, steps, logPath: obligationLogPath() };
     const evidenceRevision = createHash('sha256').update(JSON.stringify(inspected.items.map(item => item.evidenceRevision).sort())).digest('hex');
-    const requested = toolOutput(await provider.executeCapability({ call: { toolCallId: 'request-legacy', capabilityId: 'local.delegation.request_obligation_authorization', arguments: {
+    const requested = await callTool('local.delegation.request_obligation_authorization', {
       evidenceRevision, items: inspected.items.map(item => ({ sessionId: item.sessionId, operationId: item.operationId, actions: ['acknowledge_unknown', 'retire_follow_up'] })),
-    } } }, context));
+    }, 'request-legacy');
     steps.push({ step: 'card', ok: requested?.ok === true, grantId: requested?.grantId || null, status: requested?.status || null, error: requested?.error || null });
     if (requested?.ok !== true) return { ok: false, steps, logPath: obligationLogPath() };
-    const confirmed = service.confirm({ actor: 'user_panel', workspaceId: 'workspace', parentConversationId: 'parent', grantId: requested.grantId });
-    steps.push({ step: 'confirm', ok: confirmed.ok === true, status: confirmed.grant?.status || null, error: confirmed.error || null });
+    const confirmed = typeof confirmGrant === 'function'
+      ? await confirmGrant({ raw, grantId: requested.grantId, workspaceId: 'workspace', parentConversationId: 'parent' })
+      : service.confirm({ actor: 'user_panel', workspaceId: 'workspace', parentConversationId: 'parent', grantId: requested.grantId });
+    steps.push({ step: 'confirm', ok: confirmed.ok === true, status: confirmed.status || confirmed.grant?.status || null, grants: confirmed.grants || null, resolution: confirmed.resolution || null, error: confirmed.error || null });
     if (confirmed.ok !== true) return { ok: false, steps, logPath: obligationLogPath() };
-    const resolved = toolOutput(await provider.executeCapability({ call: { toolCallId: 'resolve-legacy', capabilityId: 'local.delegation.resolve_execution_obligation', arguments: {
+    const grantItems = confirmed.grant?.items || requested.items;
+    const resolved = await callTool('local.delegation.resolve_execution_obligation', {
       grantId: requested.grantId, idempotencyKey: 'panel-legacy-rehearsal',
-      items: confirmed.grant.items.map(item => ({ sessionId: item.sessionId, operationId: item.operationId, actions: item.actions })),
-    } } }, context));
-    steps.push({ step: 'resolve', ok: resolved?.ok === true, results: resolved?.items?.map(item => item.result), error: resolved?.error || resolved?.items?.find(item => item.code)?.code || null });
+      items: grantItems.map(item => ({ sessionId: item.sessionId, operationId: item.operationId, actions: item.actions })),
+    }, 'resolve-legacy');
+    steps.push({ step: 'resolve', ok: resolved?.ok === true, replayed: resolved?.replayed === true, results: resolved?.items?.map(item => item.result), error: resolved?.error || resolved?.items?.find(item => item.code)?.code || null });
     const lists = ['a', 'b', 'c'].map(id => {
       const row = plans.get(`plan-${id}`);
       const session = projectWorkSession({ planId: row.planId, status: row.status, title: id, delegated: true, runnerStatus: 'running' }, {

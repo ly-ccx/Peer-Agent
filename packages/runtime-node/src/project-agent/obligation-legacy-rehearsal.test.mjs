@@ -18,6 +18,8 @@ test('main bot tools, host card, and list projection retire three legacy stoppin
     assert.equal(lists.claimsReleased, false);
     const log = readFileSync(report.logPath, 'utf8');
     assert.match(log, /"event":"inspect"/);
+    assert.match(log, /legacy_recorder_unproven/);
+    assert.match(log, /"missing":\["bootId","pid","pidStart","hostId","acquiredAt"\]/);
     assert.match(log, /"event":"authorize"/);
     assert.match(log, /"event":"confirm"/);
     assert.match(log, /"event":"resolve"/);

@@ -19,6 +19,15 @@ function claimsFor(scheduler, plan) {
 function openHandles(claims) {
   return claims.flatMap(claim => Object.values(claim.handles || {}).filter(handle => handle.state !== 'ended').map(handle => handle.handleId || handle.toolCallId)).filter(Boolean).sort();
 }
+const RECORDER_FIELDS = ['bootId', 'pid', 'pidStart', 'hostId', 'acquiredAt'];
+function missingRecorderFields(recorder) {
+  if (!recorder || typeof recorder !== 'object') return [...RECORDER_FIELDS];
+  return RECORDER_FIELDS.filter(name => {
+    const value = recorder[name];
+    if (name === 'pid') return !Number.isSafeInteger(value) || value <= 0;
+    return typeof value !== 'string' || !value;
+  });
+}
 
 export function classifyExecutionObligation({ plan, control, claims = [], identity, writerEpoch, disposition }) {
   const ownership = sessionFactsFromPlan(plan).executionOwnership;
@@ -58,7 +67,7 @@ export function classifyExecutionObligation({ plan, control, claims = [], identi
   }
   const unique = [...new Set(classes)];
   const allowed = allowedActions({ classes: unique, disposition, ownership, proof, barrier });
-  return { classes: unique, gaps: [...new Set(gaps)], unknownCallIds, openHandleIds, ownership, proof, allowed, registrationAbsent, stableRefusal, barrier };
+  return { classes: unique, gaps: [...new Set(gaps)], missingFields: missingRecorderFields(control?.recorder), unknownCallIds, openHandleIds, ownership, proof, allowed, registrationAbsent, stableRefusal, barrier };
 }
 
 function allowedActions({ classes, disposition, ownership, proof, barrier }) {
@@ -111,6 +120,7 @@ export function createExecutionObligationService({ plans, readControl, scheduler
       outcome: { registration: classification.registrationAbsent ? 'registration_absent' : 'registered', unknownCallIds: classification.unknownCallIds, openHandleIds: classification.openHandleIds },
       resource: claim ? { claimId: claim.claimId, revision: claim.revision, state: claim.state, resourceKind: 'directory' } : null,
       gaps: classification.gaps,
+      missingFields: classification.missingFields,
       evidenceRevision, observedAt: now(),
       allowedActions: classification.allowed,
       refusalPreview: classification.barrier ? ['barrier_in_progress'] : classification.proof === 'alive' || classification.ownership === 'live' ? ['recorder_alive'] : [],
@@ -157,10 +167,12 @@ export function createExecutionObligationService({ plans, readControl, scheduler
         appendObligationLog({ event: 'inspect', role: input.role || null, actor: input.actor || null, ok: false, code: found.error });
         return { ok: false, error: found.error };
       }
-      appendObligationLog({ event: 'inspect', role: input.role || null, actor: input.actor || null, ok: true,
-        obligationId: found.items.map(item => item.obligationId || item.id).filter(Boolean).join(','),
-        code: found.items.map(item => item.error).find(Boolean) || null,
-        disposition: found.items.map(item => item.disposition || 'none').join(',') });
+      for (const item of found.items) {
+        appendObligationLog({ event: 'inspect', role: input.role || null, actor: input.actor || null, ok: !item.error,
+          obligationId: item.obligationId || item.id || null, code: item.error || null,
+          classes: item.classes || [], gaps: item.gaps || [], missing: item.missingFields || [],
+          disposition: item.disposition || (item.error ? null : 'none') });
+      }
       return { ok: true, observedAt: now(), items: found.items };
     },
     requestAuthorization(input) {
