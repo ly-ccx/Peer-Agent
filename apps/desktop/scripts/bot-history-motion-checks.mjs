@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { createConversationStore } from '@peer-agent/conversation-store';
+import { disclosureHeightSnapped } from './disclosure-height-sample.mjs';
 
 /** Only disposable fixture history is written; production readers and continuation remain real. */
 export function seedHistoryFixtures({ home, now = new Date() }) {
@@ -241,7 +242,7 @@ async function recordDisclosure(locator, open, reverse = false, observed) {
   const heights = samples.map(sample => sample.height), min = Math.min(...heights), max = Math.max(...heights);
   assert.ok(max - min > 8, 'native disclosure has a real size change');
   assert.ok(heights.some(height => height > min + 1 && height < max - 1), 'height transition contains intermediate frames');
-  assert.ok(heights.slice(1).every((height, index) => Math.abs(height - heights[index]) < (max - min) * .8), 'reversal and collapse never jump the entire content height');
+  assert.equal(disclosureHeightSnapped(samples), false, 'reversal and collapse never jump the entire content height in one frame');
   assert.equal(samples.at(-1).open, reverse ? false : open);
   if (!open || reverse) assert.equal(samples.at(-1).visibility, 'hidden');
   return samples;
