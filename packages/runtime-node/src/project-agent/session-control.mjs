@@ -166,7 +166,7 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
     if (current?.operationId !== operation.operationId) throw new Error('session_control_superseded');
     if (current.phase === 'settled') return current;
     if (!sameExecution(receipt?.execution, operation.expectedExecution)) throw new Error('session_control_receipt_invalid');
-    if (receipt.unknownCalls.length && current.phase === 'reconciling' && current.stopReceipt?.receiptId === receipt.receiptId
+    if (!withdrawal && receipt.unknownCalls.length && current.phase === 'reconciling' && current.stopReceipt?.receiptId === receipt.receiptId
       && JSON.stringify(current.stopReceipt.unknownCalls) === JSON.stringify(receipt.unknownCalls)) return current;
     executionScheduler.settleResources?.(plan, receipt);
     if (receipt.unknownCalls.length && !withdrawal && current.phase === 'reconciling' && current.stopReceipt?.receiptId === receipt.receiptId) return current;
