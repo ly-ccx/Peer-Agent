@@ -62,6 +62,41 @@ test('missing plans are omitted and current failure/dependency facts retain the 
   assert.deepEqual(read(''), { sessions: [] });
 });
 
+test('an unchanged large plan is not parsed again on the next 30s watch read', () => {
+  const result = 'x'.repeat(4_000_000);
+  const body = {
+    ...plan('big', 'owned'), status: 'completed', updatedAt: '2026-11-07T03:00:00.000Z',
+    timing: { completedAt: '2026-11-07T03:00:00.000Z' },
+    runner: { status: 'idle' },
+    tasks: [{ taskId: 't', status: 'completed', updatedAt: '2026-11-07T03:00:00.000Z', result, subtasks: [] }],
+  };
+  let hydrations = 0;
+  let stamp = 'body-v1';
+  const read = createDelegationFactsReader({
+    conversationStore: { listConversations: () => [{ id: 'owned', workspaceId: 'ws' }] },
+    goalPlanStore: {
+      listPlanMetadata: () => [body],
+      planReadStamp: () => stamp,
+      getPlan() { hydrations += 1; return body; },
+    },
+  });
+  const firstStart = performance.now();
+  const first = read('ws');
+  const firstMs = performance.now() - firstStart;
+  const secondStart = performance.now();
+  const second = read('ws');
+  const secondMs = performance.now() - secondStart;
+  assert.equal(hydrations, 1);
+  assert.equal(second.sessions[0].reportRevision, first.sessions[0].reportRevision);
+  assert.ok(secondMs < 20, `cached watch read took ${secondMs}ms after a ${firstMs}ms hydration`);
+  assert.ok(firstMs > secondMs * 5, `expected the full read (${firstMs}ms) to dwarf the cached read (${secondMs}ms)`);
+  stamp = 'body-v2';
+  body.tasks = [{ ...body.tasks[0], result: `${result}y` }];
+  const changed = read('ws');
+  assert.equal(hydrations, 2);
+  assert.notEqual(changed.sessions[0].reportRevision, first.sessions[0].reportRevision);
+});
+
 test('watch discovery uses raw metadata before UI completion hydration', () => {
   const rows = [...Array.from({length:400},(_,i)=>plan(`foreign-${i}`,'other','other')),plan('owned','owned')];
   const hydrated=[];

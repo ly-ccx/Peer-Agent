@@ -130,3 +130,20 @@ test('pending input ownership is read once for the batch and does not imply comp
   assert.deepEqual(coordination.ownedInputIds(),['i1','i2','i3']);assert.equal(reads,1);
   works.a.anchorInputIds.push('new');assert.ok(coordination.ownedInputIds().includes('new'));assert.equal(reads,2);
 });
+
+test('an unchanged coordination revision does not rescan continuations', () => {
+  let reads = 0;
+  let revision = 3;
+  const state = { works: { w: { workId: 'w', parentConversationId: 'c', state: 'delivered', sessionIds: [] } }, deliveries: {} };
+  const coordination = createRunnerCoordination({ workspaceId: 'ws', conversationId: 'c',
+    store: { readSnapshot() { reads += 1; return state; }, revision: () => revision },
+  });
+  assert.equal(coordination.hasContinuation(), false);
+  const first = reads;
+  assert.ok(first >= 1);
+  assert.equal(coordination.hasContinuation(), false);
+  assert.equal(reads, first);
+  revision = 4;
+  assert.equal(coordination.hasContinuation(), false);
+  assert.ok(reads > first);
+});
