@@ -1,7 +1,6 @@
 import { createRunnerCoordination } from './runner-coordination.mjs';
 import { projectFailureScope, isHostCoordinationFailure } from './failure-scope.mjs';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync } from 'node:fs';
 import { setTimeout as yieldToEventLoop } from 'node:timers/promises';
 import { classifyProjectAgentFailure, projectAgentFailureKind } from '@peer-agent/protocol';
 import { acceptedReplyResult, agentTurnMessage, finishAgentTurn, planAgentTurn, unavailableCard } from './agent-turn-plan.mjs';
@@ -274,13 +273,6 @@ export function createProjectAgentRunner({
       }
       drained = false;
       let outcome;
-      if (process.env.PEER_DEBUG_RECOVERY_TURN === '1') {
-        try { appendFileSync(process.env.PEER_DEBUG_RECOVERY_TURN_FILE || '/tmp/peer-recovery-turn.log', JSON.stringify({
-          job: job.kind, workId: job.workId || null,
-          events: (job.events || []).map(event => event.kind),
-          inputs: (job.userInputs || []).map(input => input.inputId || input.id),
-        }) + '\n'); } catch { /* diagnostic only */ }
-      }
       try { outcome = await runJob(job); } catch (error) {
         if (isHostCoordinationFailure(error)) throw error;
         if (!coordination || projectFailureScope(error?.message, error) === 'provider') circuitBreaker?.failure({ turnId: job.turnId || `failed-${randomUUID()}`, reason: error?.message || String(error), retry: { kind: job.kind, userInputs: job.userInputs } });

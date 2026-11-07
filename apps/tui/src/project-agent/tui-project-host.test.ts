@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createConversationStore } from '@peer-agent/conversation-store';
@@ -101,40 +101,23 @@ test('a new TUI process recovers an uncommitted preparation from its prior host 
       let turns = 0;
       const host = createTuiProjectHost({ ...f, autoStart: false,
         getSettings: () => ({ projectAgent: { interactiveResults: true }, memory: { enabled: false } }),
-        executeTurn: async () => {
-          turns++;
-          const { writeFileSync } = await import('node:fs');
-          writeFileSync(f.dataHome + '/turn-stack.txt', new Error('turn').stack || '');
-          throw Error('recovery must not run cognition');
-        },
+        executeTurn: async () => { turns++; throw Error('recovery must not run cognition'); },
       });
       try {
         await host.tick();
-        const plans = host.plans.listPlans().map((row) => {
-          const plan = host.plans.getPlan(row.planId);
-          return { status: plan?.status, phase: plan?.delegationOrigin?.phase, runner: plan?.runner?.status || null,
-            control: plan?.delegationOrigin?.executionControl?.phase || null, kind: plan?.delegationOrigin?.executionControl?.kind || null };
-        });
         console.log('recovery-result ' + JSON.stringify({
           turns, held: host.holdsLease(f.workspaceId), attempt: host.interactive.resultStore.getAttempt(callRef),
-          operation: host.interactive.resultStore.getOperation(callRef), plans,
+          operation: host.interactive.resultStore.getOperation(callRef),
         }));
       } finally { await host.close(); }
     `);
     await host.close();
     closed = true;
-    const turnLog = path.join(f.dataHome, 'recovery-turn.log');
-    const processResult = spawnSync(process.execPath, [helper, JSON.stringify({ f, callRef })], {
-      encoding: 'utf8', timeout: 12_000,
-      env: { ...process.env, PEER_DEBUG_RECOVERY_TURN: '1', PEER_DEBUG_RECOVERY_TURN_FILE: turnLog },
-    });
+    const processResult = spawnSync(process.execPath, [helper, JSON.stringify({ f, callRef })], { encoding: 'utf8', timeout: 12_000 });
     expect(processResult.status, processResult.error?.message || processResult.stderr).toBe(0);
     const line = processResult.stdout.split('\n').find(row => row.startsWith('recovery-result '));
     expect(line).toBeDefined();
-    let turnDump = '';
-    try { turnDump = readFileSync(turnLog, 'utf8'); } catch { /* no runner job was admitted */ }
-    try { turnDump += readFileSync(path.join(f.dataHome, 'turn-stack.txt'), 'utf8'); } catch { /* no cognition */ }
-    expect(JSON.parse(line!.slice('recovery-result '.length)), turnDump).toMatchObject({
+    expect(JSON.parse(line!.slice('recovery-result '.length))).toMatchObject({
       turns: 0, held: true, attempt: { phase: 'failed', code: 'publication_interrupted' }, operation: null,
     });
   } finally {
