@@ -18,6 +18,7 @@ import { randomUUID } from "node:crypto";
 import { normalizeInteractiveUserArtifact, parseInteractiveArtifactRef, normalizeInteractiveInspectionReceipt,
   isInteractiveInspectionEvidenceRef, interactiveInspectionEvidenceRef } from '@peer-agent/protocol';
 import path from "node:path";
+import { syncDirectory } from './fsync-path.mjs';
 
 export function readJsonl(filePath) {
   if (!existsSync(filePath)) return [];
@@ -136,8 +137,7 @@ export function appendJsonl(filePath, obj, { durable = false } = {}) {
     let folder = path.dirname(filePath);
     const stop = created ? path.dirname(created) : folder;
     while (true) {
-      const directory = openSync(folder, 'r');
-      try { fsyncSync(directory); } finally { closeSync(directory); }
+      syncDirectory(folder);
       if (folder === stop || path.dirname(folder) === folder) break;
       folder = path.dirname(folder);
     }
@@ -145,14 +145,14 @@ export function appendJsonl(filePath, obj, { durable = false } = {}) {
 }
 
 export function syncJsonl(filePath) {
-  const fd = openSync(filePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  const access = process.platform === 'win32' ? constants.O_RDWR : constants.O_RDONLY;
+  const fd = openSync(filePath, access | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const stat = fstatSync(fd);
     if (!stat.isFile() || stat.nlink !== 1) throw new Error('evidence_append_target_invalid');
     fsyncSync(fd);
   } finally { closeSync(fd); }
-  const directory = openSync(path.dirname(filePath), 'r');
-  try { fsyncSync(directory); } finally { closeSync(directory); }
+  syncDirectory(path.dirname(filePath));
 }
 
 export function writeGoalChangeEvent(storeDir, event) {

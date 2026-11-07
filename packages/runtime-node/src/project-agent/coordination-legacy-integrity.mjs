@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { statSync, openSync, closeSync, readFileSync, existsSync, realpathSync, linkSync, unlinkSync, writeFileSync, fsyncSync } from 'node:fs';
+import { statSync, readFileSync, existsSync, realpathSync, linkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { open as legacyOpen } from 'node:fs/promises';
 import path from 'node:path';
+import { syncDirectory, syncFile } from '../fsync-path.mjs';
 
 const legacyError = code => Object.assign(new Error(code), { code });
 const legacyStatToken = s => `${s.dev}:${s.ino}:${s.size}:${s.mtimeNs}:${s.ctimeNs}`;
@@ -51,13 +52,13 @@ function publishLegacySeal(directory, baseline, content, assertOwner) {
   assertOwner();
   writeFileSync(temporary, JSON.stringify(seal), { flag: 'wx', mode: 0o600 });
   try {
-    const fd = openSync(temporary, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); }
+    syncFile(temporary);
     assertOwner();
     try { linkSync(temporary, file); }
     catch (error) {
       if (error.code !== 'EEXIST' || readLegacySeal(directory, baseline)?.digest !== legacySealDigest(seal)) throw legacyError('coordination_legacy_seal_conflict');
     }
-    const parent = openSync(path.dirname(file), 'r'); try { fsyncSync(parent); } finally { closeSync(parent); }
+    syncDirectory(path.dirname(file));
     return { seal, digest: legacySealDigest(seal) };
   } finally { unlinkSync(temporary); }
 }
