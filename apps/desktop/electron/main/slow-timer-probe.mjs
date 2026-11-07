@@ -47,6 +47,8 @@ const PHASE_NAMES = new Set([
   'watch.publish',
   'watch.kick',
   'watch.continuation',
+  'watch.snapshot',
+  'watch.repair',
   'watch.readFacts',
   'watch.reconcile',
   'plan.normalize',
