@@ -1,15 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { projectWorkSession } from '@peer-agent/protocol';
+import { projectWorkSession, type DelegationOrigin, type GoalRunnerStatus } from '@peer-agent/protocol';
 import { readDrawerSession, taskGroup } from './drawerState.ts';
 import { indexBotWork } from './botWorkState.ts';
 import { workPanelSessions } from './botWorkPanelState.ts';
 
-function listed(id: string, origin: Record<string, unknown>, runnerStatus = 'running') {
+function listed(id: string, origin: Record<string, unknown>, runnerStatus: GoalRunnerStatus = 'running') {
   const session = readDrawerSession(projectWorkSession({
     planId: id, status: 'paused', title: id, delegated: true, runnerStatus, conversationId: id,
   }, {
-    sessionId: id, workspaceId: 'workspace', spawnedAt: '2026-11-07T00:00:00.000Z', origin, executionOwnership: 'unknown',
+    sessionId: id, workspaceId: 'workspace', spawnedAt: '2026-11-07T00:00:00.000Z',
+    origin: origin as unknown as DelegationOrigin, executionOwnership: 'unknown',
   }));
   assert.ok(session);
   return session;
@@ -30,7 +31,7 @@ test('task list and collaboration agents follow the same stop settlement', () =>
     parentConversationId: 'parent',
     cancellation: { phase: 'completed' },
     executionControl: { kind: 'cancel', phase: 'settled', outcome: 'applied', stopReceipt: { unknownCalls: [] } },
-  }, 'cancelled');
+  }, 'paused');
   const child = listed('child', {
     parentSessionId: 'stopping', parentConversationId: 'parent',
     cancellation: { phase: 'stopping' },
