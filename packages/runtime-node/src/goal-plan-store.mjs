@@ -1,6 +1,8 @@
+import { performance } from 'node:perf_hooks';
 import { createGoalPlanCheckpoints } from "./goal-plan-checkpoints.mjs";
 import { createGoalPlanEvidence } from "./goal-plan-evidence.mjs";
 import { createGoalPlanEvents } from "./goal-plan-events.mjs";
+import { noteDiagnosticPhase } from './diagnostic-phase.mjs';
 import { goalFileVersion as fileVersion } from './goal-plan-files.mjs';
 
 import {
@@ -1259,10 +1261,43 @@ export function createGoalPlanStore({
     return next;
   }
 
+  // 正文对象和进度补丁都没变时，归一化结果可以复用。
+  // 30 秒巡检的 reconcile 不走事实缓存，仍会反复 getPlan。
+  // 运行中的内存进度不进这张表，避免把尚未落盘的状态冻住。
+  const normalizedPlanReads = new WeakMap();
+
   function getPlan(planId) {
     const overlay = currentRunnerProgress(planId);
-    if (overlay) return guardUiCompletion(normalizePlan(overlay));
-    return applyRunnerProgressPatch(guardUiCompletion(normalizePlan(readJson(planFile(planId)))));
+    if (overlay) {
+      const started = performance.now();
+      const value = guardUiCompletion(normalizePlan(overlay));
+      noteDiagnosticPhase('plan.normalize', { hit: 0, ms: performance.now() - started });
+      return value;
+    }
+    const raw = readJson(planFile(planId));
+    if (!raw || typeof raw !== 'object') return null;
+    const patch = readRunnerProgressPatch(planId);
+    const cached = normalizedPlanReads.get(raw);
+    let normalized = cached && cached.patch === patch ? cached.value : null;
+    if (normalized) {
+      const started = performance.now();
+      const value = applyRunnerProgressPatch(guardUiCompletion({ ...normalized }));
+      noteDiagnosticPhase('plan.normalize', { hit: 1, ms: performance.now() - started });
+      return value;
+    }
+    const started = performance.now();
+    normalized = normalizePlan(raw);
+    noteDiagnosticPhase('plan.normalize', { hit: 0, ms: performance.now() - started });
+    if (normalized && typeof normalized === 'object') normalizedPlanReads.set(raw, { patch, value: normalized });
+    if (!normalized || typeof normalized !== 'object') return null;
+    return applyRunnerProgressPatch(guardUiCompletion({ ...normalized }));
+  }
+
+  /** 正文和进度补丁的文件戳。给 30 秒巡检判断「没变就别再整篇解析」。 */
+  function planReadStamp(planId) {
+    if (typeof planId !== 'string' || !planId) return '';
+    const side = runnerProgressPatchFile(planId);
+    return `${fileVersion(planFile(planId))}|${side ? fileVersion(side) : ''}`;
   }
 
   /**
@@ -2777,6 +2812,7 @@ export function createGoalPlanStore({
     getActivePlanByConversation,
     getUnacceptedCompletedPlanByConversation,
     getPlan,
+    planReadStamp,
     createPlan,
     createGoalContract,
     createIntakeContract,
