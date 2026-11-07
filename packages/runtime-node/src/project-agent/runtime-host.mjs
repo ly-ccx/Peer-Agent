@@ -3,7 +3,7 @@ import { noteDiagnosticPhase } from '../diagnostic-phase.mjs';
 import { registerWorkBudget } from './work-budget.mjs';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
 import { pathOf } from '../data-store.mjs';
-import { readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createProjectInbox } from './project-inbox.mjs';
 import { createInputQueue } from './input-queue.mjs';
@@ -292,9 +292,20 @@ export function createProjectAgentHost({
           const kickStarted = performance.now();
           let kicked = 0;
           if (pending.length) { await runner.enqueueUserInputs(pending); advanced = true; kicked = 1; }
-          else if (due || runner.parked() || runner.hasContinuation() || inboxStore.takeBatch(workspaceId).events.length > 0) {
-            await runner.kick();
-            advanced = true; kicked = 1;
+          else {
+            const parked = runner.parked();
+            const continuation = runner.hasContinuation();
+            const inboxBatch = inboxStore.takeBatch(workspaceId);
+            if (process.env.PEER_DEBUG_RECOVERY_TURN === '1') {
+              try { appendFileSync(process.env.PEER_DEBUG_RECOVERY_TURN_FILE || '/tmp/peer-recovery-turn.log', JSON.stringify({
+                pending: pending.map(input => input.inputId), due: Boolean(due), parked, continuation,
+                inbox: (inboxBatch.events || []).map(event => event.kind),
+              }) + '\n'); } catch { /* diagnostic only */ }
+            }
+            if (due || parked || continuation || inboxBatch.events.length > 0) {
+              await runner.kick();
+              advanced = true; kicked = 1;
+            }
           }
           noteDiagnosticPhase('watch.kick', { hit: kicked ? 0 : 1, ms: performance.now() - kickStarted });
           // Recheck after a turn crossed await. The entirely idle branch has
