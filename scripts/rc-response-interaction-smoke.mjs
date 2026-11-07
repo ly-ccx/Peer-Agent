@@ -15,8 +15,8 @@ import { emitToolArgProgress } from '../packages/runtime-node/dist/index.js';
 
 // Electron polls from another process. Replacing the complete file prevents a
 // truncated JSON read from becoming a provider error and replaying the stream.
-export function writeStreamingCommand(commandFile, scenario, phase) {
-  writeFileSync(commandFile + '.next', JSON.stringify({ scenario, phase }));
+export function writeStreamingCommand(commandFile, scenario, phase, extra = {}) {
+  writeFileSync(commandFile + '.next', JSON.stringify({ scenario, phase, ...extra }));
   renameSync(commandFile + '.next', commandFile);
 }
 
@@ -84,6 +84,36 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole, p
         } });
         send('chat:stream:tool-result', { toolCallId: 'question', result: JSON.stringify({ ok: true }) });
         return { terminalStatus: 'done' };
+      }
+      if (interactive && text === 'RC_STREAM_LONG') {
+        const turn = { aborted: false, text: '' }; active.set(input.streamId, turn);
+        const sink = input.webContents, streamId = input.streamId;
+        const send = (channel, payload) => { if (!turn.aborted) {
+          if (channel === 'chat:stream:delta') turn.text += payload.content;
+          sink.send(channel, { streamId, ...payload });
+        } };
+        const wait = async phase => {
+          const deadline = Date.now() + phaseTimeoutMs;
+          while (!turn.aborted && Date.now() < deadline) {
+            const command = JSON.parse(readFileSync(commandFile, 'utf8'));
+            if (command.scenario === text && command.phase >= phase) return command;
+            await new Promise(resolve => setTimeout(resolve, 25));
+          }
+          if (!turn.aborted) throw Error(`Controlled stream ${text} phase ${phase} was not advanced within ${phaseTimeoutMs}ms`);
+          return null;
+        };
+        try {
+          send('chat:stream:thinking', { content: 'PRIVATE_LONG_STREAM' });
+          const planned = await wait(0);
+          const total = planned?.chunks;
+          if (!Number.isInteger(total) || total < 40 || total > 80) throw Error('RC_STREAM_LONG chunk count must be 40..80');
+          for (let index = 1; index <= total; index += 1) {
+            if (!await wait(index)) return { terminalStatus: 'aborted', text: turn.text, toolCalls: [] };
+            send('chat:stream:delta', { content: `〔${String(index).padStart(2, '0')}〕` });
+          }
+          record('turns', { kind: 'long-stream', scenario: text, streamId: input.streamId, chunks: total });
+          return { terminalStatus: 'done', text: turn.text };
+        } finally { active.delete(input.streamId); }
       }
       if (!interactive || !text.includes('RC_STREAM_')) {
         await new Promise(resolve => setTimeout(resolve, 120));
