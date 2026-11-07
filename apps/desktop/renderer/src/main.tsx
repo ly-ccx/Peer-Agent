@@ -1,6 +1,6 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { observeRendererLongTasks } from './diagnostics/longTaskProbe';
+import { observeRendererFrames, observeRendererLongTasks } from './diagnostics/longTaskProbe';
 import { AppearanceProvider } from './appearance/AppearanceProvider';
 import { AppErrorBoundary } from './app/components/AppErrorBoundary';
 import { ConfirmProvider } from './app/components/ConfirmProvider';
@@ -20,6 +20,7 @@ if (/Macintosh|Mac OS X/.test(navigator.userAgent)) {
 document.documentElement.dataset.os = detectRendererOs(navigator.userAgent);
 
 if (typeof PerformanceObserver === 'function') observeRendererLongTasks(PerformanceObserver);
+if (typeof requestAnimationFrame === 'function') observeRendererFrames(requestAnimationFrame);
 
 createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>

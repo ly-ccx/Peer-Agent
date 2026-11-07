@@ -7,6 +7,7 @@ import { recordDetachedTurnUsage } from "../background-turn-usage.mjs";
 import { estimateUsageCostUsd } from "../usage-pricing.mjs";
 import { persistContextAccounting } from "./persist-context-accounting.mjs";
 import { createStreamTerminalDelivery } from "./stream-terminal-delivery.mjs";
+import { diagnosticStreamSegment, recordMainSegment } from "../slow-timer-probe.mjs";
 
 export const usageRequestLog = createUsageRequestLog();
 
@@ -355,6 +356,8 @@ export function wrapWebContentsForRuntimeEvents(
 
   return {
     send(channel, payload) {
+      const segmentStarted = performance.now();
+      try {
       const terminal = ['chat:stream:done', 'chat:stream:error', 'chat:stream:aborted'].includes(channel);
       if (terminal && streamRecord.terminalNotificationRegistered) return false;
       let terminalPersistence;
@@ -540,6 +543,9 @@ export function wrapWebContentsForRuntimeEvents(
           usage: payload?.usage, lifetimeUsage: payload?.lifetimeUsage,
           finishReason: typeof payload?.finishReason === 'string' ? payload.finishReason : undefined,
         }) : undefined) : realWebContents.send(channel, routedPayload);
+      } finally {
+        recordMainSegment(diagnosticStreamSegment(channel), performance.now() - segmentStarted);
+      }
     },
   };
 }

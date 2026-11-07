@@ -1,15 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { formatRendererLongTask, observeRendererLongTasks } from './longTaskProbe.ts';
+import { formatRendererFrame, formatRendererLongTask, observeRendererFrames, observeRendererLongTasks, summarizeFrameGaps } from './longTaskProbe.ts';
 
 test('renderer long task line keeps attribution names and drops unrelated body text', () => {
   const secret = 'super-secret-plan-body';
+  const at = '2026-11-07T10:45:37.123';
   const line = formatRendererLongTask({
     duration: 87.6,
     name: 'self',
     attribution: [{ containerName: 'iframe', name: 'app.js' }],
-  });
-  assert.equal(line, '[renderer-longtask] ms=88 name=self via=iframe:app.js');
+  }, at);
+  assert.equal(line, '[renderer-longtask] at=2026-11-07T10:45:37.123 ms=88 name=self via=iframe:app.js');
   const leaked = formatRendererLongTask({
     duration: 50,
     name: 'self',
@@ -40,6 +41,41 @@ test('observeRendererLongTasks reports formatted entries and ignores unsupported
   const observer = observeRendererLongTasks(FakeObserver as unknown as typeof PerformanceObserver, (line) => lines.push(line));
   assert.equal(observed, true);
   (observer as unknown as { emit(): void }).emit();
-  assert.deepEqual(lines, ['[renderer-longtask] ms=60 name=self']);
+  assert.match(lines[0] ?? '', /^\[renderer-longtask\] at=\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3} ms=60 name=self$/);
   assert.equal(typeof observeRendererLongTasks(undefined as unknown as typeof PerformanceObserver).disconnect, 'function');
+});
+
+test('frame summary names sustained sub-longtask gaps and stays quiet when frames are on time', () => {
+  const at = '2026-11-07T10:45:37.123';
+  assert.equal(summarizeFrameGaps([16, 16, 17, 15]), null);
+  const summary = summarizeFrameGaps([16, 28, 40, 18, 36]);
+  assert.deepEqual(summary, { frames: 5, busy: 3, maxMs: 40, meanMs: 28 });
+  assert.equal(
+    formatRendererFrame(summary!, at),
+    '[renderer-frame] at=2026-11-07T10:45:37.123 windowMs=1000 frames=5 busy=3 max=40 mean=28',
+  );
+  const lines: string[] = [];
+  let clock = 0;
+  const frames: Array<() => void> = [];
+  const request = (callback: FrameRequestCallback) => {
+    frames.push(() => callback(clock));
+    return 1;
+  };
+  const observer = observeRendererFrames(request, (line) => lines.push(line), () => clock);
+  frames.shift()?.();
+  for (const gap of [16, 30, 34, 18]) {
+    clock += gap;
+    frames.shift()?.();
+  }
+  clock += 1000;
+  frames.shift()?.();
+  assert.equal(lines.length, 1);
+  assert.match(lines[0] ?? '', /\[renderer-frame\] at=\d{4}-\d{2}-\d{2}T.* busy=3 max=1000/);
+  assert.equal(lines[0]?.includes('super-secret'), false);
+  observer.disconnect();
+  const pending = frames.length;
+  clock += 50;
+  frames.shift()?.();
+  assert.equal(frames.length, pending - 1);
+  assert.equal(lines.length, 1);
 });

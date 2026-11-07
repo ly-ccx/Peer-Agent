@@ -7,8 +7,11 @@
  * 回调的 this、参数、返回值和异常照原样传播。探针自己的失败不能盖住回调异常。
  *
  * 默认 100ms。PEER_AGENT_SLOW_TIMER_MS=0 关闭，设为正数则改阈值。
- * 日志同时进启动该进程的终端，并追加到 ~/.peer-agent/diagnostics/slow-timer.log。
- * 只在 Electron 主进程自动安装。node:timers 的具名导入不经过这里。
+ * 定时器回调之外的阻塞记在事件循环延迟、流式 send 分段、计划正文
+ * stringify/write 的字节数，以及慢的 console 调用上。这些行只有时间、
+ * 次数和字节数。日志进启动进程的终端，并追加到
+ * ~/.peer-agent/diagnostics/slow-timer.log。
+ * 只在 Electron 主进程自动安装。node:timers 的具名导入不经过定时器包装。
  */
 
 import { appendFileSync, mkdirSync, statSync } from 'node:fs';
@@ -17,9 +20,31 @@ import path from 'node:path';
 
 const DEFAULT_THRESHOLD_MS = 100;
 const RATE_LIMIT_MS = 10_000;
-const MAX_LABEL = 160;
+const MAX_LABEL = 320;
 const MAX_LOG_BYTES = 256 * 1024;
+const SEGMENT_WINDOW_MS = 1000;
+const SEGMENT_SUMMARY_TOTAL_MS = 50;
+const SEGMENT_SUMMARY_MAX_MS = 30;
+const EVENT_LOOP_MAX_MS = 50;
+const EVENT_LOOP_MEAN_MS = 10;
+const PLAN_WRITE_MS = 50;
+const PLAN_WRITE_BYTES = 1_000_000;
 const PROMISIFY = Symbol.for('nodejs.util.promisify.custom');
+const STREAM_CHANNELS = new Set([
+  'chat:stream:delta',
+  'chat:stream:thinking',
+  'chat:stream:tool-call',
+  'chat:stream:tool-result',
+  'chat:stream:done',
+  'chat:stream:error',
+  'chat:stream:aborted',
+]);
+
+/** 进程本地时间，用来和采样钟对齐。不含时区名以外的环境信息。 */
+export function diagnosticStamp(date = new Date()) {
+  const pad = (value, width = 2) => String(value).padStart(width, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`;
+}
 
 export function slowTimerThresholdMs(env = process.env) {
   const raw = env.PEER_AGENT_SLOW_TIMER_MS;
@@ -56,10 +81,120 @@ export function formatCallSite(stack) {
   return 'unknown';
 }
 
-export function formatSlowTimer(elapsedMs, callbackName, site) {
+export function formatSlowTimer(elapsedMs, callbackName, site, at = diagnosticStamp()) {
   const name = String(callbackName || 'anonymous').slice(0, 80);
   const where = String(site || 'unknown').slice(0, 80);
-  return `[slow-timer] ms=${Math.round(elapsedMs)} callback=${name} site=${where}`.slice(0, MAX_LABEL);
+  return `[slow-timer] at=${at} ms=${Math.round(elapsedMs)} callback=${name} site=${where}`.slice(0, MAX_LABEL);
+}
+
+export function diagnosticStreamSegment(channel) {
+  return STREAM_CHANNELS.has(channel) ? channel : 'chat:stream:other';
+}
+
+export function shouldReportEventLoop({ maxMs = 0, meanMs = 0 } = {}, {
+  maxThreshold = EVENT_LOOP_MAX_MS,
+  meanThreshold = EVENT_LOOP_MEAN_MS,
+} = {}) {
+  return maxMs >= maxThreshold || meanMs >= meanThreshold;
+}
+
+export function formatEventLoopWindow({ at = diagnosticStamp(), maxMs = 0, meanMs = 0 } = {}) {
+  return `[event-loop] at=${at} windowMs=1000 max=${Math.round(maxMs)} mean=${Math.round(meanMs)}`;
+}
+
+export function formatPlanWrite({ at = diagnosticStamp(), phase = 'write', ms = 0, bytes = 0 } = {}) {
+  const kind = phase === 'stringify' ? 'stringify' : 'write';
+  return `[plan-write] at=${at} phase=${kind} ms=${Math.round(ms)} bytes=${Math.max(0, Math.round(bytes))}`;
+}
+
+export function shouldReportPlanWrite({ ms = 0, bytes = 0 } = {}) {
+  return ms >= PLAN_WRITE_MS || bytes >= PLAN_WRITE_BYTES;
+}
+
+export function formatConsoleSlow({ at = diagnosticStamp(), method = 'log', ms = 0, argc = 0 } = {}) {
+  const name = ['log', 'info', 'warn', 'error', 'debug'].includes(method) ? method : 'log';
+  return `[console] at=${at} method=${name} ms=${Math.round(ms)} argc=${Math.max(0, Math.round(argc))}`;
+}
+
+const segmentBuckets = new Map();
+let segmentWindowStart = 0;
+let segmentSink = null;
+let segmentThreshold = DEFAULT_THRESHOLD_MS;
+
+export function setMainSegmentSink(sink, { thresholdMs = slowTimerThresholdMs(), now = performance.now() } = {}) {
+  segmentSink = typeof sink === 'function' ? sink : null;
+  segmentThreshold = thresholdMs;
+  segmentWindowStart = now;
+  segmentBuckets.clear();
+}
+
+export function recordMainSegment(name, elapsedMs, now = performance.now()) {
+  if (!segmentSink) return;
+  const safe = STREAM_CHANNELS.has(name) || name === 'chat:stream:other' ? name : 'chat:stream:other';
+  const elapsed = Number(elapsedMs);
+  if (!Number.isFinite(elapsed) || elapsed < 0) return;
+  if (elapsed >= segmentThreshold) {
+    try {
+      segmentSink(`[main-block] at=${diagnosticStamp()} name=${safe} ms=${Math.round(elapsed)}`);
+    } catch { /* 诊断不能影响发送。 */ }
+  }
+  const bucket = segmentBuckets.get(safe) ?? { total: 0, max: 0, calls: 0 };
+  bucket.total += elapsed;
+  bucket.max = Math.max(bucket.max, elapsed);
+  bucket.calls += 1;
+  segmentBuckets.set(safe, bucket);
+  if (now - segmentWindowStart >= SEGMENT_WINDOW_MS) flushMainSegments(now);
+}
+
+export function flushMainSegments(now = performance.now()) {
+  if (!segmentSink) return;
+  const windowMs = Math.max(0, Math.round(now - segmentWindowStart));
+  segmentWindowStart = now;
+  const at = diagnosticStamp();
+  for (const [name, bucket] of segmentBuckets) {
+    if (bucket.max < SEGMENT_SUMMARY_MAX_MS && bucket.total < SEGMENT_SUMMARY_TOTAL_MS) continue;
+    try {
+      segmentSink(`[main-segment] at=${at} name=${name} totalMs=${Math.round(bucket.total)} maxMs=${Math.round(bucket.max)} calls=${bucket.calls} windowMs=${windowMs}`);
+    } catch { /* 诊断不能影响发送。 */ }
+  }
+  segmentBuckets.clear();
+}
+
+export function installConsoleSlowProbe({
+  consoleObject = console,
+  thresholdMs = slowTimerThresholdMs(),
+  log = (line) => console.info(line),
+  now = () => performance.now(),
+} = {}) {
+  if (!(thresholdMs > 0)) return () => {};
+  const originals = new Map();
+  let noting = false;
+  for (const method of ['log', 'info', 'warn', 'error', 'debug']) {
+    const original = consoleObject[method];
+    if (typeof original !== 'function' || original.__peerConsoleSlow) continue;
+    originals.set(method, original);
+    function wrapped(...args) {
+      const started = now();
+      try {
+        return original.apply(this, args);
+      } finally {
+        const elapsed = now() - started;
+        if (!noting && elapsed >= thresholdMs) {
+          noting = true;
+          try { log(formatConsoleSlow({ method, ms: elapsed, argc: args.length })); }
+          catch { /* 诊断不能替换原来的输出。 */ }
+          finally { noting = false; }
+        }
+      }
+    }
+    wrapped.__peerConsoleSlow = true;
+    consoleObject[method] = wrapped;
+  }
+  return function uninstall() {
+    for (const [method, original] of originals) {
+      if (consoleObject[method]?.__peerConsoleSlow) consoleObject[method] = original;
+    }
+  };
 }
 
 export function createDiagnosticWriter({
@@ -158,7 +293,7 @@ export function hookRendererLongTaskConsole(app, write) {
         const text = typeof event?.message === 'string'
           ? event.message
           : (typeof message === 'string' ? message : '');
-        if (text.startsWith('[renderer-longtask] ')) write(text);
+        if (text.startsWith('[renderer-longtask] ') || text.startsWith('[renderer-frame] ')) write(text);
       });
     });
   };
@@ -166,16 +301,43 @@ export function hookRendererLongTaskConsole(app, write) {
   else app.once?.('ready', attach);
 }
 
+function watchEventLoop(log) {
+  return import('node:perf_hooks').then(({ monitorEventLoopDelay }) => {
+    const histogram = monitorEventLoopDelay({ resolution: 20 });
+    histogram.enable();
+    const timer = setInterval(() => {
+      const sample = { maxMs: histogram.max / 1e6, meanMs: histogram.mean / 1e6 };
+      histogram.reset();
+      flushMainSegments();
+      if (!shouldReportEventLoop(sample)) return;
+      log(formatEventLoopWindow(sample));
+    }, SEGMENT_WINDOW_MS);
+    timer.unref?.();
+    return () => {
+      clearInterval(timer);
+      histogram.disable();
+    };
+  }).catch(() => {});
+}
+
 function installForElectron() {
   if (!process.versions.electron || !(slowTimerThresholdMs() > 0)) return;
   const write = createDiagnosticWriter();
-  installSlowTimerProbe({
-    log(line) {
-      console.info(line);
-      write(line);
-    },
-  });
+  const log = (line) => {
+    console.info(line);
+    write(line);
+  };
+  installSlowTimerProbe({ log });
+  setMainSegmentSink(log);
+  installConsoleSlowProbe({ log });
+  watchEventLoop(log);
   import('electron').then(({ app }) => hookRendererLongTaskConsole(app, write)).catch(() => {});
+  import('../../../../packages/runtime-node/src/goal-plan-files.mjs').then(({ setJsonWriteObserver }) => {
+    setJsonWriteObserver((sample) => {
+      if (!shouldReportPlanWrite(sample)) return;
+      log(formatPlanWrite(sample));
+    });
+  }).catch(() => {});
 }
 
 installForElectron();
