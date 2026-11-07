@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readProviderHttpError } from './provider-http-error.mjs';
+import { parseContextOverflowEvidence } from '@peer-agent/runtime-core';
 for (const payload of [
   { error: { code: 'context_length_exceeded', message: 'secret-key PROMPT_ECHO' } },
   { code: 'context_length_exceeded', error: 'secret-key PROMPT_ECHO' },
@@ -67,4 +68,30 @@ for (const [host, code, expected] of [
   const result=await readProviderHttpError(response);
   assert.equal(result.diagnostic.code,expected);
   assert.doesNotMatch(JSON.stringify(result),/PRIVATE_ECHO/);
+});
+
+test('the known maximum-prompt assertion retains the shared overflow marker without echoing its body', async () => {
+  const response = new Response("This model's maximum prompt length is 1000000 but the request contains 1000100 tokens. PRIVATE_ECHO", {status:400});
+  const result = await readProviderHttpError(response);
+  assert.equal(result.diagnostic.code, 'context_length_exceeded');
+  assert.match(result.detail, /context_length_exceeded/);
+  const evidence = parseContextOverflowEvidence({status:400,message:result.detail});
+  assert.equal(evidence.maximumTokens,1000000);
+  assert.equal(evidence.requestedTokens,1000100);
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE_ECHO/);
+});
+
+test('HTTP-error SSE keeps only a recognized overflow assertion', async () => {
+  const content = "This model's maximum prompt length is 1000000 but the request contains 1000100 tokens. PRIVATE_ECHO";
+  const body = `data: ${JSON.stringify({choices:[{delta:{content}}]})}\n\ndata: [DONE]\n\n`;
+  const result = await readProviderHttpError(new Response(body,{status:400}));
+  assert.equal(result.diagnostic.code, 'context_length_exceeded');
+  assert.match(result.detail, /context_length_exceeded/);
+  const evidence = parseContextOverflowEvidence({status:400,message:result.detail});
+  assert.equal(evidence.maximumTokens,1000000);
+  assert.equal(evidence.requestedTokens,1000100);
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE_ECHO/);
+  const unknown = await readProviderHttpError(new Response('data: {"choices":[{"delta":{"content":"PRIVATE_ECHO"}}]}\n\n',{status:400}));
+  assert.equal(unknown.diagnostic.code,'http_error');
+  assert.doesNotMatch(JSON.stringify(unknown), /PRIVATE_ECHO/);
 });

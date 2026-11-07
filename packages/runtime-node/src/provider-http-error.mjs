@@ -3,7 +3,7 @@ const BODY_LIMIT = 64 * 1024;
 const PROVIDER_CODES = new Set(['context_length_exceeded', 'context_window_exceeded', 'model_not_found', 'invalid_api_key', 'authentication_error', 'rate_limit_exceeded', 'insufficient_quota', 'invalid_request_error', 'configuration_error', 'server_error']);
 const GATEWAY_CODES = new Set(['peer_request_messages_exceeded', 'peer_request_body_exceeded', 'peer_request_tools_exceeded', 'peer_request_invalid', 'peer_provider_context_exceeded']);
 const LABELS = {
-  context_length_exceeded: 'Context length exceeded', context_window_exceeded: 'Context window exceeded',
+  context_length_exceeded: 'context_length_exceeded: Context length exceeded', context_window_exceeded: 'Context window exceeded',
   model_not_found: 'The requested model does not exist', invalid_api_key: 'Authentication failed', authentication_error: 'Authentication failed',
   rate_limit_exceeded: 'Rate limit exceeded', insufficient_quota: 'Provider quota exhausted', invalid_request_error: 'Invalid request', configuration_error: 'Workspace model configuration is required', server_error: 'Provider server error',
   peer_request_messages_exceeded: 'Peer message count exceeds the gateway limit', peer_request_body_exceeded: 'Peer request body exceeds the gateway limit',
@@ -22,6 +22,8 @@ function recognizedCode(value) {
   if (/^(?:configure a workspace model credential in settings|workspace model (?:credential storage|configuration) is unavailable)[.!]?$/.test(text)) return 'configuration_error';
   // Wording is used only for diagnostics, never to authorize replay.
   if (text.length < 1024 && /^(?:error: )?(?:context (?:length|window).*(?:exceed|limit|full)|maximum context length|prompt is too long)/i.test(text))
+    return 'context_length_exceeded';
+  if (/^this model's maximum (?:prompt|context) length is [\d,]+ (?:but|and) the request contains [\d,]+ tokens?\./i.test(text))
     return 'context_length_exceeded';
   if (/model.*(?:does not exist|not found)/i.test(text))
     return 'model_not_found';
@@ -89,7 +91,16 @@ export async function readProviderHttpError(response, options = {}) {
     value = JSON.parse(raw);
   }
   catch {
-    value = { message: raw };
+    if (raw.trimStart().startsWith('data:')) {
+      try {
+        const frames = raw.split(/\r?\n/).filter(line => line.startsWith('data:'))
+          .map(line => line.slice(5).trim()).filter(data => data && data !== '[DONE]').map(data => JSON.parse(data));
+        value = frames.find(frame => frame && typeof frame === 'object' && frame.error)
+          ?? { message: frames.flatMap(frame => frame?.choices ?? []).map(choice => choice?.delta?.content ?? choice?.text ?? '').filter(text => typeof text === 'string').join('') };
+      } catch { value = {}; }
+    } else {
+      value = { message: raw };
+    }
   }
   if (!value || typeof value !== 'object')
     return { diagnostic };
@@ -119,6 +130,18 @@ export async function readProviderHttpError(response, options = {}) {
   if (options.trustGatewayErrors === true && value.source === 'provider' && Number.isInteger(value.upstream_status) && value.upstream_status >= 100 && value.upstream_status <= 599)
     diagnostic.upstreamStatus = value.upstream_status;
   safeRequestId(value.request_id ?? response.headers.get('x-request-id'));
-  const detail = safeProviderErrorLabel(diagnostic.code, diagnostic.actual, diagnostic.limit);
+  let detail = safeProviderErrorLabel(diagnostic.code, diagnostic.actual, diagnostic.limit);
+  if (!gateway && diagnostic.code === 'context_length_exceeded') {
+    const assertion = candidates.filter(text => typeof text === 'string').map(text => text.match(/^this model's maximum (?:prompt|context) length is ([\d,]+) (?:but|and) the request contains ([\d,]+) tokens?\./i)).find(Boolean);
+    if (assertion) {
+      const limit = Number(assertion[1].replaceAll(',', ''));
+      const actual = Number(assertion[2].replaceAll(',', ''));
+      if (Number.isSafeInteger(limit) && limit > 0 && Number.isSafeInteger(actual) && actual > 0) {
+        diagnostic.actual = actual;
+        diagnostic.limit = limit;
+        detail = `context_length_exceeded: maximum prompt length is ${limit} but the request contains ${actual} tokens.`;
+      }
+    }
+  }
   return { diagnostic, ...(detail ? { detail } : {}) };
 }
