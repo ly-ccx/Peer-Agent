@@ -86,6 +86,7 @@ export interface WorkSessionConversationMeta extends SessionQueueFacts {
   readonly phase?: 'starting' | 'verifying' | 'paused';
   /** 进程内执行所有权（runtime 采集）；缺省表示该入口尚未接入所有权事实。 */
   readonly executionOwnership?: ExecutionOwnership;
+  readonly obligationDisposition?: 'indexed' | 'suspended' | 'current';
 }
 
 export interface WorkSession extends SessionQueueFacts {
@@ -515,6 +516,7 @@ export function projectWorkSession(
     interrupted: plan.interrupted,
     interruptionOrigin: plan.interruptionOrigin,
     ...controlPhasesForOrigin(conversationMeta.origin),
+    ...(conversationMeta.obligationDisposition ? { obligationDisposition: conversationMeta.obligationDisposition } : {}),
     ...(conversationMeta.origin.cancellation?.disposition ? { cancellationDisposition: conversationMeta.origin.cancellation.disposition } : {}),
     ...(!conversationMeta.origin.executionControl && conversationMeta.coordination?.phase === 'awaiting_outcome'
       ? { takeoverPhase: 'awaiting_outcome' }

@@ -291,6 +291,8 @@ const INVOKE_CHANNELS = Object.freeze([
   'permission:deny',
   'projects:list',
   'project-agent:cancel-session',
+  'project-agent:list-obligation-grants',
+  'project-agent:decide-obligation',
   'project-agent:resume-session',
   'project-agent:continue-history',
   'project-agent:create',

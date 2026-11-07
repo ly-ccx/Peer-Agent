@@ -1,0 +1,1 @@
+Apply an authorization the host has already confirmed. Pass only the grantId from that card and the same items. This retires follow-up display or restores it. It does not write a stop receipt, mark the plan cancelled, release a claim, or replay a tool. If the grant is still pending, ask the user to confirm the card instead of retrying with a guessed id.

@@ -213,11 +213,14 @@ export function createExecutionResources({ rootDir, now = () => new Date().toISO
           if (!sameExecution(claim.execution, receipt.execution) || claim.revision !== ref.revision) throw new Error('execution_resource_receipt_stale');
           return [claim];
         });
-        if (claims.some(claim => Object.values(claim.handles || {}).some(handle => handle.state !== 'ended'))) throw new Error('execution_stop_unconfirmed');
+        const unknown = [...new Set(receipt.unknownCalls || [])];
+        // An open handle can stay recorded only as an unknown outcome. It is never marked ended here,
+        // and a receipt that omits its tool id still cannot release or settle the claim.
+        const open = claims.flatMap(claim => Object.values(claim.handles || {}).filter(handle => handle.state !== 'ended'));
+        if (open.some(handle => typeof handle.toolCallId !== 'string' || !unknown.includes(handle.toolCallId))) throw new Error('execution_stop_unconfirmed');
         for (const claim of claims) {
           // The caller rechecks the current project writer. The matching durable stop
           // receipt, rather than the expired host's PID, authorizes an ownership handoff.
-          const unknown = [...new Set(receipt.unknownCalls || [])];
           if (unknown.length && claim.state === 'reconciling' && claim.operationId === receipt.operationId
             && JSON.stringify(claim.evidenceCalls) === JSON.stringify(unknown)) continue;
           put(connection, { ...claim, state: unknown.length ? 'reconciling' : 'released', evidenceCalls: unknown,

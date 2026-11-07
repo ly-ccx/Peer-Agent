@@ -23,6 +23,7 @@
       "types": "./dist/providers-public.d.ts",
       "default": "./dist/providers-public.js"
     },
+    "./obligation-log": "./src/project-agent/obligation-log.mjs",
     "./project-agent": {
       "types": "./dist/project-agent-public.d.ts",
       "default": "./dist/project-agent-public.js"

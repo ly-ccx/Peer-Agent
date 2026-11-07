@@ -1,0 +1,1 @@
+Ask the host to show an authorization card for named sessions. This does not confirm anything and does not retire follow-up. Pass the evidenceRevision from inspect_execution_obligation. Allowed actions are retire_follow_up, acknowledge_unknown, and restore_follow_up. Never pass release_resource or force. A chat sentence is not authorization.

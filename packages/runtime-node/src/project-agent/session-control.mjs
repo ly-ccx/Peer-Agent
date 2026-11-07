@@ -7,12 +7,33 @@ import { unsettledExecution } from './execution-resources.mjs';
 import { isCanonicalUserInput } from './user-priority.mjs';
 import { controlDigest, executionIdentity, sameExecution, reduceSessionControl } from './session-control-kernel.mjs';
 import { fencedResumeStop } from './takeover-stop-recovery.mjs';
+import { localRecorderIdentity, proveRecorder, recorderAllowsSettlement, recorderComplete } from './execution-recorder.mjs';
 
 /** One stop barrier shared by cancellation, takeover and reversible suspension. */
 export function createSessionControl({ goalPlanStore, goalRunner, executionScheduler, canManageWorkspace, abortStream,
-  readMessages = () => [], onStopReceipt = () => {}, stopTimeoutMs = 30_000, now = () => new Date().toISOString() }) {
+  readMessages = () => [], onStopReceipt = () => {}, stopTimeoutMs = 30_000, now = () => new Date().toISOString(),
+  recorderIdentity = localRecorderIdentity }) {
   const drains = new Map();
   const readPlan = id => goalPlanStore.getPlan(id);
+  // A complete recorder tuple is the only local death proof. A bare pid, ESRCH alone,
+  // or a number inside hostEpoch does not prove the recording process has exited.
+  function observedUnknown(plan) {
+    const claims = (executionScheduler.resourceSnapshot?.() || []).filter(row => sameExecution(row.execution, executionIdentity(plan)));
+    const ids = [...unsettledExecution(plan), ...claims.flatMap(claim => [
+      ...(claim.evidenceCalls || []),
+      ...Object.values(claim.handles || {}).filter(handle => handle.state !== 'ended').map(handle => handle.toolCallId),
+    ])].filter(id => typeof id === 'string' && id);
+    return [...new Set(ids)].sort();
+  }
+  function deadRecordingHost(operation, plan) {
+    return recorderAllowsSettlement(proveRecorder(operation?.recorder, recorderIdentity()))
+      && sessionFactsFromPlan(plan).executionOwnership !== 'live';
+  }
+  function leaseParts(epoch) {
+    if (typeof epoch !== 'string' || !epoch.includes(':') || epoch.startsWith('legacy-host:')) return {};
+    const split = epoch.indexOf(':');
+    return { hostId: epoch.slice(0, split), acquiredAt: epoch.slice(split + 1) };
+  }
   const journal = plan => workBudgetBinding(plan.delegationOrigin.workspaceId)?.store;
   function read(plan) { return journal(plan)?.readSessionControl?.(plan.delegationOrigin.sessionId) || plan.delegationOrigin.executionControl; }
   function withdrawalValid(plan) {
@@ -59,6 +80,10 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
     const unproven = Boolean(mayHaveDispatched && sessionFactsFromPlan(plan).executionOwnership === 'unknown'
       && !legacyStop && !legacyTakeoverIdle(plan) && !(current?.stopReceipt && sameExecution(current.expectedExecution, execution)) && !executionScheduler.currentExecutionKnown?.(plan));
     const hostEpoch = journal(plan)?.writerEpoch?.() || `legacy-host:${process.pid}`;
+    const observed = recorderIdentity();
+    const lease = leaseParts(hostEpoch);
+    const recorder = recorderComplete({ bootId: observed.bootId, pid: observed.pid, pidStart: observed.pidStart, ...lease })
+      ? { bootId: observed.bootId, pid: observed.pid, pidStart: observed.pidStart, hostId: lease.hostId, acquiredAt: lease.acquiredAt } : undefined;
     const identity = { kind, operationId, authorityRef, execution };
     if (current?.operationId === operationId) {
       if (current.requestDigest !== controlDigest(identity)) throw new Error('operation_identity_conflict');
@@ -70,7 +95,7 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
     executionScheduler.prepareResources?.();
     const operation = persist(plan, { ...identity, reason, requestDigest: controlDigest(identity), revision: 1,
       workspaceId: plan.delegationOrigin.workspaceId, parentConversationId: plan.delegationOrigin.parentConversationId,
-      sessionId: execution.sessionId, planId: execution.planId, expectedExecution: execution, hostEpoch, unproven, priorStopReceiptId, phase: 'recorded', updatedAt: now() });
+      sessionId: execution.sessionId, planId: execution.planId, expectedExecution: execution, hostEpoch, ...(recorder ? { recorder } : {}), unproven, priorStopReceiptId, phase: 'recorded', updatedAt: now() });
     if (kind !== 'resume') executionScheduler.protectResources?.(plan, { operationId, state: 'draining' });
     return change(plan, operation, { phase: 'draining' });
   }
@@ -81,6 +106,8 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
     if (operation.stopReceipt && JSON.stringify(operation.stopReceipt.unknownCalls) === JSON.stringify(unsettledExecution(plan))
       && sessionFactsFromPlan(plan).executionOwnership !== 'live' && !executionScheduler.hasUnsettledHandles?.(plan)
       && (operation.phase === 'settled' || (executionScheduler.resourceClaimsFor?.(plan) || []).every(ref => operation.stopReceipt.resourceClaims.some(old => old.claimId === ref.claimId && old.revision === ref.revision)))) return operation.stopReceipt;
+    if (operation.stopReceipt && deadRecordingHost(operation, plan)
+      && JSON.stringify([...operation.stopReceipt.unknownCalls].sort()) === JSON.stringify(observedUnknown(plan))) return operation.stopReceipt;
     const factsDigest = recoveryFacts(plan);
     if (operation.nextAction && operation.recoveryFactsDigest === factsDigest) throw new Error(operation.nextAction);
     const hostEpoch = journal(plan)?.writerEpoch?.() || `legacy-host:${process.pid}`;
@@ -91,7 +118,8 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
       const ended = sessionFactsFromPlan(readPlan(plan.planId)).executionOwnership === 'ended';
       const retainedFence = operation.kind === 'pause' && operation.authorityRef?.startsWith('coordination-recovery:')
         && fencedResumeProof(readPlan(plan.planId))?.operationId === operation.operationId;
-      if ((operation.hostEpoch && operation.hostEpoch !== hostEpoch && !operation.stopReceipt || operation.unproven) && !ended
+      const recordingHostDead = deadRecordingHost(operation, readPlan(plan.planId));
+      if ((operation.hostEpoch && operation.hostEpoch !== hostEpoch && !operation.stopReceipt || operation.unproven) && !ended && !recordingHostDead
         && !legacyCancellationStopped(readPlan(plan.planId)) && !legacyTakeoverIdle(readPlan(plan.planId)) && !retainedFence)
         throw new Error('execution_stop_unconfirmed');
       const registration = { sessionId: operation.sessionId, planId: plan.planId, workspaceId: operation.workspaceId, conversationId: plan.conversationId };
@@ -108,14 +136,18 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
       const work = typeof workId === 'string' && workId ? binding?.store.readWork?.(workId) : undefined;
       const activeUnknown = work?.budget?.uncertainDispatches?.some(row => (!row.planId || row.planId === plan.planId) && binding.activeAttempts?.has(row.attemptId));
       if (activeUnknown) throw new Error('execution_still_running');
-      if (executionScheduler.hasUnsettledHandles?.(fresh)) throw new Error('execution_stop_unconfirmed');
-      const unknownCalls = unsettledExecution(fresh);
+      const hostDead = deadRecordingHost(operation, fresh);
+      if (!hostDead && executionScheduler.hasUnsettledHandles?.(fresh)) throw new Error('execution_stop_unconfirmed');
+      const unknownCalls = hostDead ? observedUnknown(fresh) : unsettledExecution(fresh);
       const resourceClaims = executionScheduler.resourceClaimsFor?.(fresh) || [];
       const receipt = { receiptId: `stop:${operation.operationId}:${controlDigest([unknownCalls, resourceClaims])}`, operationId: operation.operationId,
         execution: operation.expectedExecution, admissionClosed: true, runnerIdle: true, schedulerIdle: true,
         resourceClaims, unknownCalls, scope: 'managed_execution', completedAt: now() };
       const current = read(fresh);
       if (current?.operationId !== operation.operationId) throw new Error('session_control_superseded');
+      // A concurrent barrier may already have settled this same operation. Replaying
+      // that receipt is idempotent. A settled control with no receipt is not a stop.
+      if (current.phase === 'settled') return current.stopReceipt || Promise.reject(new Error('session_control_superseded'));
       change(fresh, current, { stopReceipt: receipt, nextAction: undefined, recoveryFactsDigest: undefined });
       // The deadline reports a pending stop; it must not discard a later real idle receipt.
       if (timedOut) void Promise.resolve().then(() => onStopReceipt(fresh.delegationOrigin.workspaceId)).catch(() => {});
@@ -137,6 +169,8 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
     if (current?.operationId !== operation.operationId) throw new Error('session_control_superseded');
     if (current.phase === 'settled') return current;
     if (!sameExecution(receipt?.execution, operation.expectedExecution)) throw new Error('session_control_receipt_invalid');
+    if (!withdrawal && receipt.unknownCalls.length && current.phase === 'reconciling' && current.stopReceipt?.receiptId === receipt.receiptId
+      && JSON.stringify(current.stopReceipt.unknownCalls) === JSON.stringify(receipt.unknownCalls)) return current;
     executionScheduler.settleResources?.(plan, receipt);
     if (receipt.unknownCalls.length && !withdrawal && current.phase === 'reconciling' && current.stopReceipt?.receiptId === receipt.receiptId) return current;
     if (receipt.unknownCalls.length && !withdrawal) return change(plan, current, { phase: 'reconciling', stopReceipt: receipt, nextAction: 'reconcile_execution_outcome' });
@@ -263,6 +297,12 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
       return resumed;
     },
     isCurrent(plan, operation) { return read(plan)?.operationId === operation.operationId; },
+    refusalStable(plan) {
+      const current = read(plan);
+      return Boolean(current && current.phase === 'reconciling' && current.recoveryFactsDigest
+        && current.recoveryFactsDigest === recoveryFacts(plan)
+        && ['execution_stop_unconfirmed', 'execution_outcome_unknown', 'reconcile_execution_outcome'].includes(current.nextAction));
+    },
     async reconcile(plans) {
       const failures = [];
       for (const plan of plans) {

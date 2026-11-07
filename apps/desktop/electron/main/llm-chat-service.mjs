@@ -1080,6 +1080,11 @@ export function createLlmChatService({
             ...(sessionWaitProjected(profile) ? [] : ['local.delegation.wait_for_sessions'])],
           readOnlyWorkSession: goalPlanStore?.getPlan?.(profile?.planId)?.delegationOrigin?.readOnly === true, turnProfile: profile,
         });
+        if (projectAgentTurn) {
+          const { appendObligationLog } = await import('@peer-agent/runtime-node/obligation-log');
+          const names = (runtimeTools.tools || []).map(tool => tool?.function?.name || tool?.name).filter(name => typeof name === 'string');
+          appendObligationLog({ event: 'model_tools', role: profile?.role || null, mode: runtimeMode, tools: names });
+        }
         const interactiveResultCapabilities = runtimeTools.runtimeProjection.capabilities
           .filter(capability => capability.capabilityId.startsWith('local.interactive.') && ['available', 'needs_permission'].includes(capability.health))
           .map(capability => capability.capabilityId);

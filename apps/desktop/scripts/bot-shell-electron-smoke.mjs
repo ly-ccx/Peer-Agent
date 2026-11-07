@@ -507,7 +507,18 @@ const tracePaging = async (phase) => {
 };
 const until = async (read, predicate, timeout = 30000) => {
   const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) { const value = await read(); if (predicate(value)) return value; await new Promise(resolve => setTimeout(resolve, 100)); }
+  while (Date.now() < deadline) {
+    let value;
+    try { value = await read(); }
+    catch (error) {
+      // Electron can drop one evaluate while a window is reopening. Retry until the deadline.
+      if (!String(error?.message || error).includes('garbage collected')) throw error;
+      await new Promise(resolve => setTimeout(resolve, 100));
+      continue;
+    }
+    if (predicate(value)) return value;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
   throw Error(`Shell acceptance timed out: ${String(read).slice(0, 220)}`);
 };
 const quickNative = createQuickChatNativeController({ commandFile: quickCommand, receiptFile: quickReceipt, until });

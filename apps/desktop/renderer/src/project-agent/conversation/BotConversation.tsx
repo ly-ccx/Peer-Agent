@@ -20,6 +20,7 @@ import { botAvatarDisplayColor } from '../BotAvatar';
 import { BotInputContext } from './BotInputContext';
 import '../styles/bot-conversation.css';
 import { taskConversationContext, type TaskConversationContext, type TaskConversationRequest } from '../state/taskConversationState';
+import { clientApi } from '../../clientApi';
 
 export function BotConversation({
   workspaceId,
@@ -129,10 +130,28 @@ export function BotConversation({
   const openEvidence = (evidenceRef: string) => onInspect?.({ replyId: replyDetailsId ?? undefined,
     evidence: { ok: false, evidenceRef, kind: 'observation', summary: '', truncated: false, code: '' }, rounds: null });
 
+  const [obligationGrant, setObligationGrant] = useState<{ grantId: string; items: readonly { sessionId: string }[] } | null>(null);
+  useEffect(() => {
+    const list = window.peerAgent?.projectAgentListObligationGrants;
+    if (!list) return undefined;
+    let closed = false;
+    const load = () => {
+      void list({ workspaceId }).then(result => {
+        const grant = result && 'grants' in result ? result.grants?.find(item => item.status === 'pending') : null;
+        if (!closed) setObligationGrant(grant ? { grantId: grant.grantId, items: grant.items } : null);
+      }).catch(() => {});
+    };
+    load();
+    const timer = window.setInterval(load, 2000);
+    return () => { closed = true; window.clearInterval(timer); };
+  }, [workspaceId, workIndex]);
   return (
     <BotInputContext.Provider value={conversation.answer}>
     <BotWorkPanel workspaceId={workspaceId} workIndex={workIndex} rows={conversation.rows} messages={conversation.messages}
       recovering={Boolean(conversation.runtimeRecovery)} headerTarget={workPanelTarget} i18n={i18n}
+      obligationGrant={obligationGrant}
+      onObligationConfirm={grantId => { void clientApi.projectAgentDecideObligation({ workspaceId, grantId, decision: 'confirm' }).then(() => onRefreshWork()); }}
+      onObligationRevoke={grantId => { void clientApi.projectAgentDecideObligation({ workspaceId, grantId, decision: 'revoke' }).then(() => setObligationGrant(null)); }}
       onOpenTask={onLocateSession} onInspect={onInspect} onRefreshWork={onRefreshWork}>
     <div className="bot-convo" style={{
       '--bot-message-accent': botAvatarDisplayColor(avatar.kind === 'generated' ? avatar.color : generateAvatar(workspaceId).color),
