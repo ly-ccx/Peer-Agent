@@ -33,7 +33,8 @@ function recognizedCode(value) {
   if (/^(?:bad request|invalid (?:peer model )?request)[.!]?$/.test(text)) return 'invalid_request_error';
   if (/^(?:configure a workspace model credential in settings|workspace model (?:credential storage|configuration) is unavailable)[.!]?$/.test(text)) return 'configuration_error';
   // Preserve the core's existing category vocabulary; this grants no replay authority.
-  if (isPromptTooLongError(undefined, text))
+  if (isPromptTooLongError(undefined, text)
+      || (text.length < 1024 && /^(?:error: )?(?:context length.*(?:exceed|limit|full)|prompt is too long)/i.test(text)))
     return 'context_length_exceeded';
   if (/model.*(?:does not exist|not found)/i.test(text))
     return 'model_not_found';
