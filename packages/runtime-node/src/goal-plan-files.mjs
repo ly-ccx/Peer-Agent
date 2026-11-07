@@ -172,12 +172,40 @@ export function writeJsonl(filePath, items) {
   jsonlReadCache.delete(filePath);
 }
 
+let jsonWriteObserver = null;
+
+/**
+ * 诊断用。观察者只收到阶段、耗时和字节数，不收到对象、路径或正文。
+ * 未注册时写盘行为与原来一致。
+ */
+export function setJsonWriteObserver(observer) {
+  const previous = jsonWriteObserver;
+  jsonWriteObserver = typeof observer === 'function' ? observer : null;
+  return previous;
+}
+
+function notifyJsonWrite(phase, ms, text) {
+  if (!jsonWriteObserver) return;
+  try {
+    jsonWriteObserver({ phase, ms, bytes: Buffer.byteLength(text) });
+  } catch {
+    // 诊断失败不能挡住计划落盘。
+  }
+}
+
 export function writeJsonAtomic(filePath, obj) {
   mkdirSync(path.dirname(filePath), { recursive: true });
   const tmp = `${filePath}.tmp`;
-  writeFileSync(tmp, JSON.stringify(obj, null, 2), 'utf8');
+  const stringifyStarted = performance.now();
+  const text = JSON.stringify(obj, null, 2);
+  const stringifyMs = performance.now() - stringifyStarted;
+  const writeStarted = performance.now();
+  writeFileSync(tmp, text, 'utf8');
   renameSync(tmp, filePath);
+  const writeMs = performance.now() - writeStarted;
   jsonReadCache.delete(filePath);
+  notifyJsonWrite('stringify', stringifyMs, text);
+  notifyJsonWrite('write', writeMs, text);
 }
 
 /** 单文件 JSON 读缓存（plan 详情热路径，避免 overview 反复 readFile+JSON.parse）。 */
