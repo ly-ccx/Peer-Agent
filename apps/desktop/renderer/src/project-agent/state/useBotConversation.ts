@@ -13,7 +13,7 @@ import { ConversationCatchUpRequired, createConversationPager } from './conversa
 import { mergeConversationCards, statusAfterRefreshFailure } from './conversationSections.ts';
 import {
   applyOptimistic,
-  conversationRows,
+  projectConversationRows,
   type BotChatMessage,
   type ConversationDisplayRow,
   type PendingBotInput,
@@ -88,6 +88,7 @@ export function useBotConversation(workspaceId: string) {
   const generationRef = useRef(0);
   const activityEventRef = useRef(0);
   const replyIdentitiesRef = useRef(new Map<string, string>());
+  const projectionRef = useRef<Parameters<typeof projectConversationRows>[1]>(null);
   const refreshRef = useRef<(() => void) | null>(null);
 
   const dropEchoed = useCallback((next: readonly BotChatMessage[]) => {
@@ -100,6 +101,7 @@ export function useBotConversation(workspaceId: string) {
   useEffect(() => {
     const ticket = generationRef.current + 1;
     generationRef.current = ticket;
+    projectionRef.current = null;
     setMessages([]);
     setFamiliarizeOffer(null);
     setAwaitingInputs([]);
@@ -231,7 +233,11 @@ export function useBotConversation(workspaceId: string) {
     ? [...decorated, familiarizeMessage(familiarizeOffer, decorated[decorated.length - 1]?.createdAt || '')]
     : decorated, [familiarizeOffer, decorated]);
   const shown = useMemo(() => hideAcknowledgedQuestions(applyOptimistic(offered, pending)), [offered, pending]);
-  const historyRows = useMemo(() => conversationRows(shown), [shown]);
+  const historyRows = useMemo(() => {
+    const projected = projectConversationRows(shown, projectionRef.current);
+    projectionRef.current = projected;
+    return projected.rows;
+  }, [shown]);
   const rows: ConversationDisplayRow[] = useMemo(() => {
     const next: ConversationDisplayRow[] = attachBotProcesses(historyRows, shown, activity);
     const current = visibleBotActivity(activity, shown);

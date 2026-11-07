@@ -24,6 +24,7 @@ import {
 } from '@peer-agent/protocol';
 
 import { coalesceAgentActivity, readAgentActivity, agentActivityPresentationId } from './agentActivityState.ts';
+import { conversationValuesEqual } from './conversationValueEquality.ts';
 import { readReplyRecoveryAction } from './replyRecoveryState.ts';
 
 export const CONVERSATION_PAGE_SIZE = 50;
@@ -482,6 +483,58 @@ export function conversationRows(messages: readonly BotChatMessage[]): Conversat
     if (separator) rows.push(separator);
     rows.push({ type: 'message', message });
   }
+  return rows;
+}
+
+export interface ConversationProjection {
+  readonly messages: readonly BotChatMessage[];
+  readonly rows: readonly ConversationRow[];
+}
+
+/**
+ * 流式只改最后一条的正文时，沿用上一份投影。
+ * 前缀必须仍是同一批消息对象；顺序、可见性和处置语义与全量 conversationRows 一致。
+ * 活动折叠、来源、工具调用或中间消息变化仍走全量扫描。
+ */
+export function projectConversationRows(
+  messages: readonly BotChatMessage[],
+  previous: ConversationProjection | null = null,
+): ConversationProjection & { readonly projection: 'full' | 'tail' } {
+  const reused = previous ? reuseTailRows(previous, messages) : null;
+  if (reused) return { messages, rows: reused, projection: 'tail' };
+  return { messages, rows: conversationRows(messages), projection: 'full' };
+}
+
+function contentOnlyChange(previous: BotChatMessage, next: BotChatMessage): boolean {
+  if (previous === next) return true;
+  if (previous.id !== next.id || previous.kind === 'agent_activity' || next.kind === 'agent_activity') return false;
+  const { content: _previousContent, ...previousRest } = previous;
+  const { content: _nextContent, ...nextRest } = next;
+  return conversationValuesEqual(previousRest, nextRest);
+}
+
+function reuseTailRows(previous: ConversationProjection, messages: readonly BotChatMessage[]): ConversationRow[] | null {
+  if (previous.messages.length !== messages.length || messages.length === 0) return null;
+  for (let index = 0; index < messages.length - 1; index += 1) {
+    if (messages[index] !== previous.messages[index]) return null;
+  }
+  const before = previous.messages[messages.length - 1]!;
+  const next = messages[messages.length - 1]!;
+  if (!contentOnlyChange(before, next)) return null;
+  let rowIndex = -1;
+  for (let index = previous.rows.length - 1; index >= 0; index -= 1) {
+    const row = previous.rows[index]!;
+    if (row.type === 'message' && row.message.id === next.id) { rowIndex = index; break; }
+  }
+  if (rowIndex < 0) return [...previous.rows];
+  for (let index = rowIndex + 1; index < previous.rows.length; index += 1) {
+    if (previous.rows[index]!.type === 'message') return null;
+  }
+  const row = previous.rows[rowIndex]!;
+  if (row.type !== 'message') return null;
+  if (row.message.content === next.content) return [...previous.rows];
+  const rows = previous.rows.slice();
+  rows[rowIndex] = { ...row, message: { ...row.message, content: next.content } };
   return rows;
 }
 
