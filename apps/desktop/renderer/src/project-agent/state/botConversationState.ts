@@ -24,6 +24,7 @@ import {
 } from '@peer-agent/protocol';
 
 import { coalesceAgentActivity, readAgentActivity, agentActivityPresentationId } from './agentActivityState.ts';
+import { conversationValuesEqual } from './conversationValueEquality.ts';
 import { readReplyRecoveryAction } from './replyRecoveryState.ts';
 
 export const CONVERSATION_PAGE_SIZE = 50;
@@ -483,6 +484,60 @@ export function conversationRows(messages: readonly BotChatMessage[]): Conversat
     rows.push({ type: 'message', message });
   }
   return rows;
+}
+
+export interface ConversationProjection {
+  readonly messages: readonly BotChatMessage[];
+  readonly rows: readonly ConversationRow[];
+}
+
+/**
+ * 流式只改最后一条的正文时，沿用上一份投影。
+ * 前缀必须仍是同一批消息对象；顺序、可见性和处置语义与全量 conversationRows 一致。
+ * 活动折叠、来源、工具调用或中间消息变化仍走全量扫描。
+ */
+export function projectConversationRows(
+  messages: readonly BotChatMessage[],
+  previous: ConversationProjection | null = null,
+): ConversationProjection & { readonly projection: 'full' | 'tail'; readonly identityComparisons: number } {
+  const reused = previous ? reuseTailRows(previous, messages) : { rows: null, identityComparisons: 0 };
+  if (reused.rows) return { messages, rows: reused.rows, projection: 'tail', identityComparisons: reused.identityComparisons };
+  return { messages, rows: conversationRows(messages), projection: 'full', identityComparisons: reused.identityComparisons };
+}
+
+function contentOnlyChange(previous: BotChatMessage, next: BotChatMessage): boolean {
+  if (previous === next) return true;
+  if (previous.id !== next.id || previous.kind === 'agent_activity' || next.kind === 'agent_activity') return false;
+  const { content: _previousContent, ...previousRest } = previous;
+  const { content: _nextContent, ...nextRest } = next;
+  return conversationValuesEqual(previousRest, nextRest);
+}
+
+function reuseTailRows(previous: ConversationProjection, messages: readonly BotChatMessage[]): { rows: ConversationRow[] | null; identityComparisons: number } {
+  let identityComparisons = 0;
+  if (previous.messages.length !== messages.length || messages.length === 0) return { rows: null, identityComparisons };
+  for (let index = 0; index < messages.length - 1; index += 1) {
+    identityComparisons += 1;
+    if (messages[index] !== previous.messages[index]) return { rows: null, identityComparisons };
+  }
+  const before = previous.messages[messages.length - 1]!;
+  const next = messages[messages.length - 1]!;
+  if (!contentOnlyChange(before, next)) return { rows: null, identityComparisons };
+  let rowIndex = -1;
+  for (let index = previous.rows.length - 1; index >= 0; index -= 1) {
+    const row = previous.rows[index]!;
+    if (row.type === 'message' && row.message.id === next.id) { rowIndex = index; break; }
+  }
+  if (rowIndex < 0) return { rows: [...previous.rows], identityComparisons };
+  for (let index = rowIndex + 1; index < previous.rows.length; index += 1) {
+    if (previous.rows[index]!.type === 'message') return { rows: null, identityComparisons };
+  }
+  const row = previous.rows[rowIndex]!;
+  if (row.type !== 'message') return { rows: null, identityComparisons };
+  if (row.message.content === next.content) return { rows: [...previous.rows], identityComparisons };
+  const rows = previous.rows.slice();
+  rows[rowIndex] = { ...row, message: { ...row.message, content: next.content } };
+  return { rows, identityComparisons };
 }
 
 export function windowConversationRows<T>(
