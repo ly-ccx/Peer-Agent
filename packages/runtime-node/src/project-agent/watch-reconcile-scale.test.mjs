@@ -56,7 +56,7 @@ test('reconcile settles many completed plans without rereading the whole catalog
     await supervisor.reconcile();
     const elapsed = performance.now() - started;
     // 48 completed plans used to reread the whole catalog once per plan: about (n + 9) * n reads.
-    assert.ok(gets < count * 12, `${gets} getPlan calls for ${count} plans in ${Math.round(elapsed)}ms`);
+    assert.ok(gets <= count * 4, `${gets} getPlan calls for ${count} plans in ${Math.round(elapsed)}ms`);
     assert.ok(elapsed < 500, `reconcile took ${Math.round(elapsed)}ms with ${gets} getPlan calls`);
   } finally {
     rmSync(dir, { recursive: true, force: true });

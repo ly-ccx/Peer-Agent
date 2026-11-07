@@ -151,7 +151,9 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
   // A synchronous selection shares preparation only until control returns to its
   // caller. All writes invalidate the decision; no snapshot crosses an await.
   function recoverySelection() {
+    const snapshotStarted = performance.now();
     const inventory = readSnapshot();
+    noteDiagnosticPhase('watch.snapshot', { ms: performance.now() - snapshotStarted });
     // These repair passes only transform existing work. An empty authoritative
     // inventory needs no repair; events and prepared deliveries keep their own
     // admission paths. This snapshot never survives a later selection call.
@@ -160,6 +162,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       pending: () => pendingFrom(inventory),
       deliveryPending: () => delivery.pending(inventory),
     };
+    const repairStarted = performance.now();
     reconcileDispatches();
     expireReservations();
     let snapshot, decisionSnapshot;
@@ -191,6 +194,7 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
     }
     reconcileRepairCustody({store,conversationId,sessions:roster});
     decisionSnapshot = undefined;
+    noteDiagnosticPhase('watch.repair', { ms: performance.now() - repairStarted });
     return {
       choose(userOnly) {
         const candidates = Object.values(decision().works).filter(work => work.parentConversationId === conversationId && !historyExecutionHeld(work) && !runtimeWorkHeld(work) && (!userOnly || work.anchorInputIds?.length)

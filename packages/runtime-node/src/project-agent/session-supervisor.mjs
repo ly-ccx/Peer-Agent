@@ -227,8 +227,17 @@ export function createSessionSupervisor({
     send: (input, context) => exclusive(() => communication.send(input, context)), takeover: takeover.request,
     holdsLease: canManageWorkspace, canExecute: workspaceId => executionScheduler.isWorkspaceReady(workspaceId), isEnabled: autonomousCoordinationEnabled, now });
 
+  let reconcilePlans = null;
   function delegatedPlans() {
-    return readQuery.memo('delegated-plans', () => planCatalog.read());
+    return readQuery.memo('delegated-plans', () => {
+      const epoch = typeof goalPlanStore.planWriteEpoch === 'function' ? goalPlanStore.planWriteEpoch() : null;
+      if (reconcilePlans && epoch !== null && reconcilePlans.epoch === epoch) {
+        return reconcilePlans.plans.map(plan => ({ ...plan }));
+      }
+      const plans = planCatalog.read();
+      if (epoch !== null) reconcilePlans = { epoch, plans };
+      return plans;
+    });
   }
 
   function findBySession(sessionId) {
@@ -1228,7 +1237,9 @@ export function createSessionSupervisor({
       await coordination.recover(workspaceId);
     }
   }
-  function reconcileSessions() { return reconcileControls().then(() => recoverStops()).then(() => resourceContention.reconcile(delegatedPlans()))
+  function reconcileSessions() {
+    reconcilePlans = null;
+    return reconcileControls().then(() => recoverStops()).then(() => resourceContention.reconcile(delegatedPlans()))
     .then(() => reconcileExpired()).then(() => exclusive(() => reconcilePersistedQueues())); }
   const reconciled = deferRecovery ? Promise.resolve() : reconcileControls().then(() => reconcileExpired()).then(() => exclusive(() => reconcilePersistedQueues()));
 

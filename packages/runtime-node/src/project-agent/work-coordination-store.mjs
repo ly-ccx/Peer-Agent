@@ -102,6 +102,7 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
   }
   return {
     read, readSnapshot: reader.readSnapshot, readWork: reader.readWork, readLifecycleFacts: reader.readLifecycleFacts,
+    revision: () => useV2() ? storage.revision() : null,
     append, assertOwner, recover, prepare: async () => {
       if (!useV2()) return;
       // Finish an interrupted owned fence before trying to load mismatched head/manifest.
