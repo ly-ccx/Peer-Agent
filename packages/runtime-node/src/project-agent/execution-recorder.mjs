@@ -32,9 +32,14 @@ export function localPidStart(pid) {
   return null;
 }
 
+let selfIdentity;
 export function localRecorderIdentity() {
-  const pid = process.pid;
-  return { bootId: localBootId(), pid, pidStart: localPidStart(pid), lookup: target => localPidStart(target) };
+  if (!selfIdentity) {
+    const pid = process.pid;
+    selfIdentity = { bootId: localBootId(), pid, pidStart: localPidStart(pid) };
+  }
+  // This process cannot observe its own later death. Other pids are looked up live.
+  return { ...selfIdentity, lookup: target => target === selfIdentity.pid ? selfIdentity.pidStart : localPidStart(target) };
 }
 
 export function recorderComplete(recorder) {

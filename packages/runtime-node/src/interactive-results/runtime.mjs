@@ -102,6 +102,10 @@ export function createInteractiveRuntime({ rootDir, goalPlanStore, conversationS
       if (currentExecution && sessionFactsFromPlan(plan).executionOwnership === 'live') return false;
       const control = currentExecution ? journal.readSessionControl(source.sessionId) : journal.readStoppedExecution?.(source);
       const receipt = control?.stopReceipt;
+      // The writer that just recorded this stop is still this process. A later host,
+      // with a new lease epoch, is the one that may retire the uncommitted draft.
+      const writerEpoch = journal.writerEpoch?.();
+      if (writerEpoch && control?.hostEpoch === writerEpoch) return false;
       return control?.workspaceId === owner.workspaceId && control.parentConversationId === owner.conversationId
         && control.planId === source.planId && control.sessionId === source.sessionId && ['pause', 'cancel', 'takeover'].includes(control.kind)
         && sameExecution(source, control.expectedExecution) && sameExecution(source, receipt?.execution)
