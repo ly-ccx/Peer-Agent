@@ -15,6 +15,7 @@ import {
   statSync,
 } from 'node:fs';
 import path from 'node:path';
+import { syncDirectory, syncFile } from '../fsync-path.mjs';
 import { pathOf } from '../data-store.mjs';
 import { reduceCoordination } from './work-coordination.mjs';
 import { admitCoordinationDecision } from './coordination-kernel.mjs';
@@ -78,10 +79,10 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
     if (damagedAt !== null) {
       const backup = `coordination-damaged-${randomUUID()}.jsonl`, repaired = `${file}.repair-${randomUUID()}`;
       copyFileSync(file, path.join(dir, backup)); copyFileSync(path.join(dir, backup), repaired); truncateSync(repaired, damagedAt);
-      for (const target of [path.join(dir, backup), repaired]) { const handle = openSync(target, 'r'); try { fsyncSync(handle); } finally { closeSync(handle); } }
+      for (const target of [path.join(dir, backup), repaired]) syncFile(target);
       const current = statSync(file, { bigint: true }); assertOwner();
       if (['ino', 'size', 'mtimeNs', 'ctimeNs'].some(key => current[key] !== source[key])) throw new Error('coordination_read_changed');
-      renameSync(repaired, file); const handle = openSync(dir, 'r'); try { fsyncSync(handle); } finally { closeSync(handle); }
+      renameSync(repaired, file); syncDirectory(dir);
       append({ kind: 'journal_recovered', backup }); return;
     }
     read(); // Validate a complete final record before merely adding its missing separator.
@@ -96,8 +97,7 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
       assertOwner();
       const fd = openSync(file, 'a', 0o600);
       try { writeSync(fd, JSON.stringify(record) + '\n'); fsyncSync(fd); } finally { closeSync(fd); }
-      const directory = openSync(dir, 'r');
-      try { fsyncSync(directory); } finally { closeSync(directory); }
+      syncDirectory(dir);
     }, options);
   }
   return {
@@ -235,6 +235,5 @@ function durableFile(target, body) {
   const fd = openSync(temp, 'w', 0o600);
   try { writeSync(fd, body); fsyncSync(fd); } finally { closeSync(fd); }
   renameSync(temp, target);
-  const directory = openSync(path.dirname(target), 'r');
-  try { fsyncSync(directory); } finally { closeSync(directory); }
+  syncDirectory(path.dirname(target));
 }
