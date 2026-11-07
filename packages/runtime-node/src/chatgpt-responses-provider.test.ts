@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { parseContextOverflowEvidence } from '@peer-agent/runtime-core';
 
 import { createChatGptResponsesProvider } from './chatgpt-responses-provider.ts';
 import { DELEGATION_TOOL_SPECS } from './project-agent/tool-specs.mjs';
@@ -255,4 +256,19 @@ test('Responses HTTP failure omits arbitrary HTML and echoed prompts', async () 
  await assert.rejects(provider.stream({model:'fixture',messages:[]}), (error:any)=>{
   assert.equal(error.status,503);assert.doesNotMatch(error.message,/fixture-secret|PRIVATE_PROMPT|html/);return true;
  });
+});
+
+test('Responses HTTP failures preserve authoritative counts through the thrown error', async () => {
+  const provider = createChatGptResponsesProvider({
+    baseUrl:'https://fixture.invalid/codex',tokens:{access:'fixture-secret'},
+    fetch:async()=>new Response(JSON.stringify({error:{code:'context_length_exceeded',message:"This model's maximum prompt length is 1000 but the request contains 1200 tokens. PRIVATE_ECHO"}}),{status:400}),
+  });
+  await assert.rejects(provider.stream({model:'fixture',messages:[]}), (error: any) => {
+    const evidence = parseContextOverflowEvidence({status:error.status,message:error.message});
+    assert.ok(evidence);
+    assert.equal(evidence.maximumTokens,1000);
+    assert.equal(evidence.requestedTokens,1200);
+    assert.doesNotMatch(error.message,/PRIVATE_ECHO/);
+    return true;
+  });
 });

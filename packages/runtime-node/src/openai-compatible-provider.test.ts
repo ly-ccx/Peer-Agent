@@ -213,3 +213,26 @@ test('legacy constructor shares the complete established core overflow vocabular
     assert.doesNotMatch(error.message,/PRIVATE_ECHO/);
   }
 });
+
+test('compatible chat HTTP failures preserve authoritative counts through the thrown error', async () => {
+  const model = provider(async () => new Response(JSON.stringify({error:{type:'invalid_request_error',message:"This model's maximum prompt length is 1000 but the request contains 1200 tokens. PRIVATE_ECHO"}}),{status:400}));
+  await assert.rejects(model.stream({model:'fixture',messages:[]}), (error: any) => {
+    const evidence = parseContextOverflowEvidence({status:error.status,message:error.message});
+    assert.ok(evidence);
+    assert.equal(evidence.maximumTokens,1000);
+    assert.equal(evidence.requestedTokens,1200);
+    assert.doesNotMatch(error.message,/PRIVATE_ECHO/);
+    return true;
+  });
+});
+
+test('four-argument errors preserve partial validated counts without inventing missing facts', () => {
+  for (const [actual,limit] of [[1200,1000],[1200,undefined],[undefined,1000]] as const) {
+    const error = new ModelProviderHttpError('fixture',400,'PRIVATE_ECHO',{status:400,source:'provider',code:'context_length_exceeded',actual,limit});
+    const evidence = parseContextOverflowEvidence(error);
+    assert.ok(evidence);
+    assert.equal(evidence.requestedTokens,actual);
+    assert.equal(evidence.maximumTokens,limit);
+    assert.doesNotMatch(error.message,/PRIVATE_ECHO/);
+  }
+});

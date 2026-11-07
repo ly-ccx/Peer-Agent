@@ -1,4 +1,4 @@
-import { isPromptTooLongError } from '@peer-agent/runtime-core';
+import { isPromptTooLongError, parseContextOverflowEvidence } from '@peer-agent/runtime-core';
 
 /** HTTP diagnostics are bounded metadata, never arbitrary upstream output. */
 const BODY_LIMIT = 64 * 1024;
@@ -12,6 +12,16 @@ const LABELS = {
   peer_request_tools_exceeded: 'Peer tool definitions exceed the gateway limit', peer_request_invalid: 'Invalid Peer model request', peer_provider_context_exceeded: 'Provider context length exceeded',
 };
 export function safeProviderErrorLabel(code, actual, limit) {
+  if (code === 'context_length_exceeded') {
+    const hasActual = Number.isSafeInteger(actual) && actual > 0;
+    const hasLimit = Number.isSafeInteger(limit) && limit > 0;
+    if (hasActual && hasLimit)
+      return `context_length_exceeded: maximum prompt length is ${limit} but the request contains ${actual} tokens.`;
+    if (hasActual)
+      return `context_length_exceeded: requested ${actual} tokens.`;
+    if (hasLimit)
+      return `context_length_exceeded: maximum context length is ${limit}.`;
+  }
   const label = typeof code === 'string' && Object.hasOwn(LABELS, code) ? LABELS[code] : undefined;
   return label && Number.isSafeInteger(actual) && actual >= 0 && Number.isSafeInteger(limit) && limit >= 0
     ? `${label} (${actual}; limit ${limit})` : label;
@@ -145,16 +155,12 @@ export function parseProviderHttpErrorText(raw, options = {}) {
   safeRequestId(value.request_id);
   let detail = safeProviderErrorLabel(diagnostic.code, diagnostic.actual, diagnostic.limit);
   if (!gateway && diagnostic.code === 'context_length_exceeded') {
-    const assertion = candidates.filter(text => typeof text === 'string').map(text => text.match(/^this model's maximum (?:prompt|context) length is ([\d,]+) (?:but|and) the request contains ([\d,]+) tokens?\./i)).find(Boolean);
-    if (assertion) {
-      const limit = Number(assertion[1].replaceAll(',', ''));
-      const actual = Number(assertion[2].replaceAll(',', ''));
-      if (Number.isSafeInteger(limit) && limit > 0 && Number.isSafeInteger(actual) && actual > 0) {
-        diagnostic.actual = actual;
-        diagnostic.limit = limit;
-        detail = `context_length_exceeded: maximum prompt length is ${limit} but the request contains ${actual} tokens.`;
-      }
-    }
+    const evidence = candidates.filter(text => typeof text === 'string')
+      .map(message => parseContextOverflowEvidence({ status: options.status, message: `context_length_exceeded: ${message}` }))
+      .find(value => value?.requestedTokens || value?.maximumTokens);
+    for (const [key, value] of [['actual', evidence?.requestedTokens], ['limit', evidence?.maximumTokens]])
+      if (Number.isSafeInteger(value) && value > 0) diagnostic[key] = value;
+    detail = safeProviderErrorLabel(diagnostic.code, diagnostic.actual, diagnostic.limit);
   }
   return { diagnostic, ...(detail ? { detail } : {}) };
 }

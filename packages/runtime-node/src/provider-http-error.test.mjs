@@ -110,3 +110,16 @@ for (const message of supportedOverflowMessages) test(`retains existing core ove
     assert.doesNotMatch(JSON.stringify(result),/PRIVATE_ECHO/);
   }
 });
+
+for (const [message, requestedTokens, maximumTokens] of [
+  ['maximum context length of 1000 tokens; requested 1200 tokens PRIVATE_ECHO',1200,1000],
+  ['input is too long; requested 1200 tokens PRIVATE_ECHO',1200,undefined],
+  ['maximum context length is 1000 PRIVATE_ECHO',undefined,1000],
+]) test(`retains existing partial token evidence: ${requestedTokens}/${maximumTokens}`, async () => {
+  const result = await readProviderHttpError(new Response(JSON.stringify({error:{message}}),{status:400}));
+  const evidence = parseContextOverflowEvidence({status:400,message:result.detail});
+  assert.ok(evidence);
+  assert.equal(evidence.requestedTokens,requestedTokens);
+  assert.equal(evidence.maximumTokens,maximumTokens);
+  assert.doesNotMatch(JSON.stringify(result),/PRIVATE_ECHO/);
+});
