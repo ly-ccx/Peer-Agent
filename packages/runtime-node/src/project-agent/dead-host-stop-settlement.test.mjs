@@ -29,7 +29,7 @@ function livePid(t) {
   t.after(() => child.kill('SIGKILL'));
   return child.pid;
 }
-function world(t, { epoch = 'host-now', work = null, waitForIdle = async () => {} } = {}) {
+function world(t, { epoch = 'host-now', work = null, waitForIdle = async () => {}, recorderIdentity } = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'peer-dead-host-stop-'));
   const directory = path.join(root, 'workspace');
   mkdirSync(directory);
@@ -59,7 +59,7 @@ function world(t, { epoch = 'host-now', work = null, waitForIdle = async () => {
   };
   const goalRunner = { start(id) { starts.push(id); }, resume(id) { starts.push(id); }, pause() {}, waitForIdle };
   const sessionControl = createSessionControl({ goalPlanStore, goalRunner, executionScheduler: scheduler, canManageWorkspace: () => true,
-    async abortStream() { aborts.push('abort'); }, readMessages: () => [] });
+    async abortStream() { aborts.push('abort'); }, readMessages: () => [], ...(recorderIdentity ? { recorderIdentity } : {}) });
   function project(plan) {
     const origin = { ...plan.delegationOrigin, executionControl: store.readSessionControl() || plan.delegationOrigin.executionControl };
     return projectWorkSession({ planId: plan.planId, status: plan.status, title: plan.title || 'task', delegated: true,
@@ -109,7 +109,7 @@ test('a live execution on the recording host still stops only after the barrier 
   assert.equal(settled.followUp.inCurrentList, false);
   assert.equal(settled.followUp.reason, 'stop_confirmed');
   assert.equal(env.control.phase, 'settled');
-  assert.equal(env.control.hostPid, process.pid);
+  assert.ok(env.control.stopReceipt);
   assert.deepEqual(env.control.stopReceipt.unknownCalls, []);
   assert.deepEqual(env.starts, []);
   const again = await env.cancellation.cancel({ sessionId: 'session' });
@@ -121,10 +121,12 @@ test('a live execution on the recording host still stops only after the barrier 
 });
 
 test('a dead recorder with no live execution and no unknown calls settles on recovery and does not replay', async t => {
-  const env = world(t);
-  const pid = await exitedPid();
+  const pid = 424242;
+  const env = world(t, { recorderIdentity: () => ({ bootId: 'boot-a', pid: 7, pidStart: 'linux:2', lookup: () => null }) });
   const plan = stoppingPlan(env.directory);
-  remember(env, plan, stoppingOperation(plan, { hostPid: pid }));
+  const operation = stoppingOperation(plan, { hostEpoch: 'old-host:2026-11-07T00:00:00.000Z' });
+  operation.recorder = { bootId: 'boot-a', pid, pidStart: 'linux:1', hostId: 'old-host', acquiredAt: '2026-11-07T00:00:00.000Z' };
+  remember(env, plan, operation);
   env.scheduler.protectResources(plan, { operationId: 'cancel-1', state: 'draining' });
   const next = sibling(env.directory);
   assert.equal(env.scheduler.inspectResources(next).allowed, false);
@@ -146,14 +148,16 @@ test('a dead recorder with no live execution and no unknown calls settles on rec
   assert.deepEqual(env.starts, []);
 });
 
-test('a legacy-host epoch can use its recorded pid after that process is gone', async t => {
+test('a legacy-host epoch number is not a process id and does not settle', async t => {
   const env = world(t);
   const pid = await exitedPid();
   const plan = stoppingPlan(env.directory);
   remember(env, plan, stoppingOperation(plan, { hostEpoch: `legacy-host:${pid}` }));
   await env.cancellation.recover([plan]);
-  assert.equal(env.plans.get(plan.planId).status, 'cancelled');
-  assert.equal(env.project(env.plans.get(plan.planId)).followUp.inCurrentList, false);
+  assert.notEqual(env.plans.get(plan.planId).status, 'cancelled');
+  assert.equal(env.project(env.plans.get(plan.planId)).status, 'awaiting_outcome');
+  assert.equal(env.project(env.plans.get(plan.planId)).followUp.inCurrentList, true);
+  assert.equal(env.control.stopReceipt, undefined);
   assert.deepEqual(env.starts, []);
 });
 
@@ -204,11 +208,13 @@ test('a provider 401 without a terminal runner status is not a stop proof', asyn
 });
 
 test('a dead recorder with an unknown external call or open handle stays awaiting outcome and keeps the claim', async t => {
-  const pid = await exitedPid();
+  const pid = 434343;
   const work = { budget: { uncertainDispatches: [{ toolCallId: 'remote-call', planId: 'plan' }] } };
-  const env = world(t, { work });
+  const env = world(t, { work, recorderIdentity: () => ({ bootId: 'boot-a', pid: 7, pidStart: 'linux:2', lookup: () => null }) });
   const plan = stoppingPlan(env.directory, { workId: 'work' });
-  remember(env, plan, stoppingOperation(plan, { hostPid: pid }));
+  const operation = stoppingOperation(plan, { hostEpoch: 'old-host:2026-11-07T00:00:00.000Z' });
+  operation.recorder = { bootId: 'boot-a', pid, pidStart: 'linux:1', hostId: 'old-host', acquiredAt: '2026-11-07T00:00:00.000Z' };
+  remember(env, plan, operation);
   env.scheduler.protectResources(plan, { operationId: 'cancel-1', state: 'draining', evidenceCalls: ['remote-call'] });
   const resources = createExecutionResources({ rootDir: path.join(env.root, 'runtime') });
   resources.markHandle(plan, { handleId: 'native', toolCallId: 'shell', state: 'active' });

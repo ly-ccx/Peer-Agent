@@ -42,8 +42,9 @@ export interface SessionControlOperation {
   readonly kind: 'pause' | 'cancel' | 'takeover' | 'resume';
   readonly authorityRef: string;
   readonly hostEpoch?: string;
-  /** Pid of the process that recorded the operation. ESRCH is the only proof that this recorder is gone. */
+  /** Pid of the process that recorded the operation. By itself this is not a death proof. */
   readonly hostPid?: number;
+  readonly recorder?: { readonly bootId: string; readonly pid: number; readonly pidStart: string; readonly hostId: string; readonly acquiredAt: string };
   readonly unproven?: boolean;
   readonly recoveryFactsDigest?: string;
   readonly priorStopReceiptId?: string;

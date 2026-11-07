@@ -7,26 +7,16 @@ import { unsettledExecution } from './execution-resources.mjs';
 import { isCanonicalUserInput } from './user-priority.mjs';
 import { controlDigest, executionIdentity, sameExecution, reduceSessionControl } from './session-control-kernel.mjs';
 import { fencedResumeStop } from './takeover-stop-recovery.mjs';
+import { localRecorderIdentity, proveRecorder, recorderAllowsSettlement, recorderComplete } from './execution-recorder.mjs';
 
 /** One stop barrier shared by cancellation, takeover and reversible suspension. */
 export function createSessionControl({ goalPlanStore, goalRunner, executionScheduler, canManageWorkspace, abortStream,
-  readMessages = () => [], onStopReceipt = () => {}, stopTimeoutMs = 30_000, now = () => new Date().toISOString() }) {
+  readMessages = () => [], onStopReceipt = () => {}, stopTimeoutMs = 30_000, now = () => new Date().toISOString(),
+  recorderIdentity = localRecorderIdentity }) {
   const drains = new Map();
   const readPlan = id => goalPlanStore.getPlan(id);
-  // ESRCH is the same recorder-death proof the resource editor uses. A missing pid, a live pid,
-  // an empty token map, a provider status, or a timeout does not prove the old execution ended.
-  function recordedHostPid(operation) {
-    if (Number.isSafeInteger(operation?.hostPid) && operation.hostPid > 0) return operation.hostPid;
-    const match = /^legacy-host:(\d+)$/.exec(typeof operation?.hostEpoch === 'string' ? operation.hostEpoch : '');
-    if (!match) return 0;
-    const pid = Number(match[1]);
-    return Number.isSafeInteger(pid) && pid > 0 ? pid : 0;
-  }
-  function hostProcessDead(pid) {
-    if (!Number.isSafeInteger(pid) || pid < 1) return false;
-    try { process.kill(pid, 0); return false; }
-    catch (error) { return error?.code === 'ESRCH'; }
-  }
+  // A complete recorder tuple is the only local death proof. A bare pid, ESRCH alone,
+  // or a number inside hostEpoch does not prove the recording process has exited.
   function observedUnknown(plan) {
     const claims = (executionScheduler.resourceSnapshot?.() || []).filter(row => sameExecution(row.execution, executionIdentity(plan)));
     const ids = [...unsettledExecution(plan), ...claims.flatMap(claim => [
@@ -36,7 +26,13 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
     return [...new Set(ids)].sort();
   }
   function deadRecordingHost(operation, plan) {
-    return hostProcessDead(recordedHostPid(operation)) && sessionFactsFromPlan(plan).executionOwnership !== 'live';
+    return recorderAllowsSettlement(proveRecorder(operation?.recorder, recorderIdentity()))
+      && sessionFactsFromPlan(plan).executionOwnership !== 'live';
+  }
+  function leaseParts(epoch) {
+    if (typeof epoch !== 'string' || !epoch.includes(':') || epoch.startsWith('legacy-host:')) return {};
+    const split = epoch.indexOf(':');
+    return { hostId: epoch.slice(0, split), acquiredAt: epoch.slice(split + 1) };
   }
   const journal = plan => workBudgetBinding(plan.delegationOrigin.workspaceId)?.store;
   function read(plan) { return journal(plan)?.readSessionControl?.(plan.delegationOrigin.sessionId) || plan.delegationOrigin.executionControl; }
@@ -84,6 +80,10 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
     const unproven = Boolean(mayHaveDispatched && sessionFactsFromPlan(plan).executionOwnership === 'unknown'
       && !legacyStop && !legacyTakeoverIdle(plan) && !(current?.stopReceipt && sameExecution(current.expectedExecution, execution)) && !executionScheduler.currentExecutionKnown?.(plan));
     const hostEpoch = journal(plan)?.writerEpoch?.() || `legacy-host:${process.pid}`;
+    const observed = recorderIdentity();
+    const lease = leaseParts(hostEpoch);
+    const recorder = recorderComplete({ bootId: observed.bootId, pid: observed.pid, pidStart: observed.pidStart, ...lease })
+      ? { bootId: observed.bootId, pid: observed.pid, pidStart: observed.pidStart, hostId: lease.hostId, acquiredAt: lease.acquiredAt } : undefined;
     const identity = { kind, operationId, authorityRef, execution };
     if (current?.operationId === operationId) {
       if (current.requestDigest !== controlDigest(identity)) throw new Error('operation_identity_conflict');
@@ -95,7 +95,7 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
     executionScheduler.prepareResources?.();
     const operation = persist(plan, { ...identity, reason, requestDigest: controlDigest(identity), revision: 1,
       workspaceId: plan.delegationOrigin.workspaceId, parentConversationId: plan.delegationOrigin.parentConversationId,
-      sessionId: execution.sessionId, planId: execution.planId, expectedExecution: execution, hostEpoch, hostPid: process.pid, unproven, priorStopReceiptId, phase: 'recorded', updatedAt: now() });
+      sessionId: execution.sessionId, planId: execution.planId, expectedExecution: execution, hostEpoch, ...(recorder ? { recorder } : {}), unproven, priorStopReceiptId, phase: 'recorded', updatedAt: now() });
     if (kind !== 'resume') executionScheduler.protectResources?.(plan, { operationId, state: 'draining' });
     return change(plan, operation, { phase: 'draining' });
   }

@@ -31,7 +31,7 @@ export function reduceSessionControl(state, entry) {
   if (old) {
     if (['requestDigest', 'workspaceId', 'parentConversationId', 'sessionId', 'planId', 'kind', 'authorityRef'].some(key => old[key] !== operation[key])
       || !sameExecution(old.expectedExecution, operation.expectedExecution) || old.hostEpoch !== operation.hostEpoch
-      || old.hostPid !== operation.hostPid || old.unproven !== operation.unproven
+      || old.hostPid !== operation.hostPid || JSON.stringify(old.recorder ?? null) !== JSON.stringify(operation.recorder ?? null) || old.unproven !== operation.unproven
       || old.priorStopReceiptId !== operation.priorStopReceiptId
       || old.phase === 'settled' || operation.phase !== old.phase && !controlPhases[old.phase].includes(operation.phase)) throw new Error('session_control_conflict');
     if (heads[operation.sessionId]?.operationId !== operation.operationId) throw new Error('session_control_superseded');

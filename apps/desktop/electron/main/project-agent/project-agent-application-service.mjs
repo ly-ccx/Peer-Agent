@@ -380,6 +380,25 @@ export function createProjectAgentApplicationService({
     return { ok: true, session };
   }
 
+  async function listObligationGrants(payload = {}) {
+    if (!open()) return disabled();
+    if (typeof sessions?.inspectExecutionObligations !== 'function') return { ok: false, code: 'UNAVAILABLE' };
+    if (typeof sessions?.listPendingObligationGrants === 'function') return sessions.listPendingObligationGrants(payload.workspaceId);
+    return sessions.inspectExecutionObligations({ ...payload, actor: 'user_panel' });
+  }
+
+  async function decideObligation(payload = {}) {
+    if (!open()) return disabled();
+    if (typeof sessions?.confirmObligationGrant !== 'function') return { ok: false, code: 'UNAVAILABLE' };
+    const actor = { ...payload, actor: 'user_panel' };
+    if (payload.decision === 'revoke') return sessions.revokeObligationGrant(actor);
+    const confirmed = await sessions.confirmObligationGrant(actor);
+    if (!confirmed?.ok) return confirmed;
+    return sessions.resolveExecutionObligation({ ...actor, items: confirmed.grant.items.map(item => ({
+      sessionId: item.sessionId, operationId: item.operationId, actions: item.actions,
+    })), evidenceRevision: confirmed.grant.items[0]?.evidenceRevision, idempotencyKey: `panel-${payload.grantId}` });
+  }
+
   async function cancelSession(payload = {}) {
     if (!open()) return disabled();
     const session = await sessions.cancel(payload);
@@ -787,6 +806,8 @@ export function createProjectAgentApplicationService({
     listSessions,
     getSession,
     cancelSession,
+    listObligationGrants,
+    decideObligation,
     resumeSession,
     listApprovals,
     decideApproval,

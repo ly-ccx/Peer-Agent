@@ -146,6 +146,41 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
     required: ['sessionId'],
     additionalProperties: false,
   }),
+  spec('inspect_execution_obligation', 'local.delegation.inspect_execution_obligation', {
+    type: 'object',
+    properties: {
+      sessionIds: { type: 'array', minItems: 1, maxItems: 20, uniqueItems: true, items: { type: 'string' } },
+      obligationIds: { type: 'array', minItems: 1, maxItems: 20, uniqueItems: true, items: { type: 'string' } },
+      detail: { type: 'string', enum: ['summary', 'evidence'] },
+    },
+    additionalProperties: false,
+  }),
+  spec('request_obligation_authorization', 'local.delegation.request_obligation_authorization', {
+    type: 'object',
+    properties: {
+      evidenceRevision: { type: 'string' },
+      items: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'object', properties: {
+        sessionId: { type: 'string' }, operationId: { type: 'string' },
+        actions: { type: 'array', minItems: 1, items: { type: 'string' } },
+      }, required: ['sessionId', 'operationId', 'actions'], additionalProperties: false } },
+    },
+    required: ['evidenceRevision', 'items'],
+    additionalProperties: false,
+  }),
+  spec('resolve_execution_obligation', 'local.delegation.resolve_execution_obligation', {
+    type: 'object',
+    properties: {
+      grantId: { type: 'string' },
+      idempotencyKey: { type: 'string', minLength: 16, maxLength: 128 },
+      evidenceRevision: { type: 'string' },
+      items: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'object', properties: {
+        sessionId: { type: 'string' }, operationId: { type: 'string' },
+        actions: { type: 'array', minItems: 1, items: { type: 'string' } },
+      }, required: ['sessionId', 'operationId', 'actions'], additionalProperties: false } },
+    },
+    required: ['grantId', 'idempotencyKey', 'items'],
+    additionalProperties: false,
+  }),
   spec('cancel_session', 'local.delegation.cancel_session', {
     type: 'object',
     properties: {

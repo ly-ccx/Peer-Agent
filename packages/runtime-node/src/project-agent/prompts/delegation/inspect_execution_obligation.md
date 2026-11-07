@@ -1,0 +1,1 @@
+Read execution-obligation evidence for sessions in this bot's workspace. Returns classes, gaps, claim state, and whether follow-up can be retired. It does not change plans, claims, or authorization. Do not describe a session as cancelled or stopped unless the result says the host already has a stop receipt.

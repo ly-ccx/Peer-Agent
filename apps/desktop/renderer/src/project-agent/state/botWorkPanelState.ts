@@ -32,7 +32,8 @@ export function workPanelSessions(index: BotWorkIndex) {
   const agents = index.available ? [...new Map([...current, ...[...index.byId.values()]
     .filter(session => session.parentSessionId && currentIds.has(session.parentSessionId))]
     .map(session => [session.sessionId, session])).values()] : [];
-  return { tasks: roots, agents };
+  const obligations = index.available ? [...index.byId.values()].filter(session => session.followUp?.reason === 'obligation_indexed') : [];
+  return { tasks: roots, agents, obligations };
 }
 
 export function workPanelNeedsUser(session: DrawerSession): boolean {

@@ -138,6 +138,8 @@ const unavailableApi: ClientApi = {
   projectAgentListSessions: unavailableMethod('projectAgentListSessions'),
   projectAgentGetSession: unavailableMethod('projectAgentGetSession'),
   projectAgentCancelSession: unavailableMethod('projectAgentCancelSession'),
+  projectAgentListObligationGrants: unavailableMethod('projectAgentListObligationGrants'),
+  projectAgentDecideObligation: unavailableMethod('projectAgentDecideObligation'),
   projectAgentResumeSession: unavailableMethod('projectAgentResumeSession'),
   projectAgentListApprovals: unavailableMethod('projectAgentListApprovals'),
   projectAgentDecideApproval: unavailableMethod('projectAgentDecideApproval'),

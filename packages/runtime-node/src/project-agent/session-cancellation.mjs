@@ -43,6 +43,10 @@ export function createSessionCancellation({ findBySession, goalPlanStore, goalRu
     const parent = context.parentConversationId || context.conversationId;
     if (context.workspaceId && context.workspaceId !== origin.workspaceId || parent && parent !== origin.parentConversationId) return { error: 'out_of_scope' };
     if (!canManageWorkspace(origin.workspaceId)) return { error: 'lease_unavailable' };
+    const indexedState = workBudgetBinding(origin.workspaceId)?.store?.read?.();
+    const indexed = indexedState?.obligationHeads?.[origin.sessionId];
+    const indexedPhase = indexed && indexedState.obligationDispositions?.[indexed]?.phase;
+    if (indexedPhase === 'indexed') return { replayed: true, completed: project(plan) };
     if (plan.resultAcceptance?.acceptedAt) return { error: 'session_not_running' };
     if (plan.status === 'cancelled' && origin.takeover?.phase !== 'stopping' && !sessionNeedsCancellation(project(plan))) return { completed: project(plan) };
     const withdrawal = withdrawalFor(plan, input, context);

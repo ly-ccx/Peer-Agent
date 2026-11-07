@@ -1108,6 +1108,8 @@ export interface BootstrapPreloadApi {
   readonly projectAgentListSessions: (params?: { workspaceId?: string; status?: string; limit?: number }) => Promise<{ ok: boolean; code?: string; sessions?: readonly unknown[] }>;
   readonly projectAgentGetSession: (params: { sessionId: string; detail?: 'report' }) => Promise<{ ok: boolean; code?: string; session?: unknown }>;
   readonly projectAgentCancelSession: (params: { sessionId: string; workspaceId?: string; reason?: string }) => Promise<{ ok: boolean; code?: string; session?: unknown }>;
+  readonly projectAgentListObligationGrants: (params: { workspaceId: string }) => Promise<{ ok: boolean; code?: string; grants?: readonly { grantId: string; status: string; items: readonly { sessionId: string }[] }[] }>;
+  readonly projectAgentDecideObligation: (params: { workspaceId: string; grantId: string; decision: 'confirm' | 'revoke' }) => Promise<{ ok: boolean; code?: string; error?: string }>;
   readonly projectAgentResumeSession: (params: { sessionId: string; workspaceId: string; requestId: string }) => Promise<{ ok: boolean; code?: string; session?: unknown }>;
   readonly projectAgentListApprovals: (params?: { workspaceId?: string }) => Promise<{ ok: boolean; code?: string; approvals?: readonly unknown[] }>;
   readonly projectAgentDecideApproval: (params: {

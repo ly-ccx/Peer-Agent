@@ -335,6 +335,14 @@ export function createDelegationProvider({
     if (name === 'resume_session') return sessionOrMissing(await callPort(supervisor?.resume, input, 'supervisor_unavailable', spawnContext(view)));
     if (name === 'reprioritize_session') return sessionOrMissing(await callPort(supervisor?.reprioritize, input, 'supervisor_unavailable', spawnContext(view)));
     if (name === 'get_session') return sessionOrMissing(await callPort(supervisor?.get, input, 'supervisor_unavailable'));
+    if (name === 'inspect_execution_obligation' || name === 'request_obligation_authorization' || name === 'resolve_execution_obligation') {
+      if (view.role !== 'project_agent') return complete({ call, capabilityId, name: item.name, locale, status: 'failed', output: { ok: false, error: 'not_main_bot' } });
+      const method = name === 'inspect_execution_obligation' ? supervisor?.inspectExecutionObligations
+        : name === 'request_obligation_authorization' ? supervisor?.requestObligationAuthorization
+          : supervisor?.resolveExecutionObligation;
+      return callPort(method, { ...input, workspaceId: view.workspaceId, parentConversationId: view.conversationId,
+        agentConversationId: view.conversationId, role: view.role, toolCallId: call.toolCallId }, 'supervisor_unavailable');
+    }
     if (name === 'cancel_session') return sessionOrMissing(await callPort(supervisor?.cancel, input, 'supervisor_unavailable', spawnContext(view)));
     if (name === 'message_session') return sessionOrMissing(await callPort(supervisor?.message, input, 'supervisor_unavailable', view));
     if (name === 'get_verification_detail') return readVerification(input);

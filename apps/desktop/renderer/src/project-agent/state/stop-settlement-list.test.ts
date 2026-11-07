@@ -54,7 +54,10 @@ test('task list and collaboration agents follow the same stop settlement', () =>
   assert.equal(taskGroup(awaiting.status, awaiting.followUp), 'running');
   assert.equal(taskGroup(legacy.status, legacy.followUp), 'running');
   assert.equal(taskGroup(cancelled.status, cancelled.followUp), 'done');
-  const panel = workPanelSessions(indexBotWork([stopping, awaiting, legacy, cancelled, child], true));
+  const indexed = readDrawerSession({ ...legacy, sessionId: 'indexed', followUp: { owner: 'none', inCurrentList: false, reason: 'obligation_indexed' }, status: 'awaiting_outcome', statusLabel: '执行结果待核实' });
+  assert.ok(indexed);
+  const panel = workPanelSessions(indexBotWork([stopping, awaiting, legacy, cancelled, child, indexed], true));
   assert.deepEqual(panel.tasks.map(session => session.sessionId).sort(), ['awaiting', 'legacy', 'stopping']);
   assert.deepEqual(panel.agents.map(session => session.sessionId).sort(), ['awaiting', 'child', 'legacy', 'stopping']);
+  assert.deepEqual(panel.obligations.map(session => session.sessionId), ['indexed']);
 });
