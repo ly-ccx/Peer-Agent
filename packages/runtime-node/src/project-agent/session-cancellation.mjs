@@ -109,6 +109,16 @@ export function createSessionCancellation({ findBySession, goalPlanStore, goalRu
         return project(goalPlanStore.getPlan(plan.planId));
       });
     } catch (error) {
+      await exclusive(() => {
+        const plan = goalPlanStore.getPlan(registration.planId);
+        const control = plan && sessionControl.read(plan);
+        const refused = control?.phase === 'reconciling' && ['execution_stop_unconfirmed', 'execution_outcome_unknown', 'reconcile_execution_outcome'].includes(control.nextAction);
+        if (!plan?.delegationOrigin?.cancellation || !refused || plan.delegationOrigin.cancellation.phase === 'awaiting_outcome') return;
+        const evidenceCalls = unsettledExecution(plan);
+        goalPlanStore.revisePlan(plan.planId, { delegationOrigin: { ...goalPlanStore.getPlan(plan.planId).delegationOrigin,
+          cancellation: { ...plan.delegationOrigin.cancellation, phase: 'awaiting_outcome', ...(evidenceCalls.length ? { evidenceCalls } : {}) } } },
+          { reason: 'cancellation outcome unconfirmed', changedBy: 'session-cancellation' });
+      });
       return { error: error?.message || 'cancellation_failed', cancellationPending: true };
     }
   }
@@ -127,6 +137,7 @@ export function createSessionCancellation({ findBySession, goalPlanStore, goalRu
     async recover(plans) { for (const plan of plans) {
       const origin = plan.delegationOrigin;
       if (!origin?.cancellation || plan.status === 'cancelled' && !origin.cancellation.cleanupPending) continue;
+      if (origin.cancellation.phase === 'awaiting_outcome' && sessionControl.refusalStable?.(plan)) continue;
       if (origin.cancellation.phase === 'awaiting_outcome'
         && JSON.stringify(origin.cancellation.evidenceCalls || []) === JSON.stringify(unsettledExecution(plan))) continue;
       await request({ sessionId: origin.sessionId }, true);

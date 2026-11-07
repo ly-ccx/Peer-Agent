@@ -294,6 +294,12 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
       return resumed;
     },
     isCurrent(plan, operation) { return read(plan)?.operationId === operation.operationId; },
+    refusalStable(plan) {
+      const current = read(plan);
+      return Boolean(current && current.phase === 'reconciling' && current.recoveryFactsDigest
+        && current.recoveryFactsDigest === recoveryFacts(plan)
+        && ['execution_stop_unconfirmed', 'execution_outcome_unknown', 'reconcile_execution_outcome'].includes(current.nextAction));
+    },
     async reconcile(plans) {
       const failures = [];
       for (const plan of plans) {

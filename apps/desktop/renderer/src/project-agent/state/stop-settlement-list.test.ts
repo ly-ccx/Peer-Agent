@@ -27,6 +27,11 @@ test('task list and collaboration agents follow the same stop settlement', () =>
     cancellation: { phase: 'awaiting_outcome', evidenceCalls: ['remote-call'] },
     executionControl: { kind: 'cancel', phase: 'reconciling', stopReceipt: { unknownCalls: ['remote-call'] } },
   });
+  const legacy = listed('legacy', {
+    parentConversationId: 'parent',
+    cancellation: { phase: 'awaiting_outcome' },
+    executionControl: { kind: 'cancel', phase: 'reconciling', nextAction: 'execution_stop_unconfirmed' },
+  });
   const cancelled = listed('cancelled', {
     parentConversationId: 'parent',
     cancellation: { phase: 'completed' },
@@ -39,14 +44,17 @@ test('task list and collaboration agents follow the same stop settlement', () =>
   });
   assert.equal(stopping.statusLabel, '正在停止');
   assert.equal(awaiting.statusLabel, '执行结果待核实');
+  assert.equal(legacy.statusLabel, '执行结果待核实');
   assert.equal(cancelled.statusLabel, '已取消');
   assert.equal(stopping.followUp?.inCurrentList, true);
   assert.equal(awaiting.followUp?.inCurrentList, true);
+  assert.equal(legacy.followUp?.inCurrentList, true);
   assert.equal(cancelled.followUp?.inCurrentList, false);
   assert.equal(taskGroup(stopping.status, stopping.followUp), 'running');
   assert.equal(taskGroup(awaiting.status, awaiting.followUp), 'running');
+  assert.equal(taskGroup(legacy.status, legacy.followUp), 'running');
   assert.equal(taskGroup(cancelled.status, cancelled.followUp), 'done');
-  const panel = workPanelSessions(indexBotWork([stopping, awaiting, cancelled, child], true));
-  assert.deepEqual(panel.tasks.map(session => session.sessionId).sort(), ['awaiting', 'stopping']);
-  assert.deepEqual(panel.agents.map(session => session.sessionId).sort(), ['awaiting', 'child', 'stopping']);
+  const panel = workPanelSessions(indexBotWork([stopping, awaiting, legacy, cancelled, child], true));
+  assert.deepEqual(panel.tasks.map(session => session.sessionId).sort(), ['awaiting', 'legacy', 'stopping']);
+  assert.deepEqual(panel.agents.map(session => session.sessionId).sort(), ['awaiting', 'child', 'legacy', 'stopping']);
 });

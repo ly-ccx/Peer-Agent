@@ -157,17 +157,18 @@ test('a legacy-host epoch can use its recorded pid after that process is gone', 
   assert.deepEqual(env.starts, []);
 });
 
-test('a recorder that may still be alive stays stopping and does not release its claim', async t => {
+test('a recorder that may still be alive is not cancelled and does not release its claim', async t => {
   const env = world(t);
   const plan = stoppingPlan(env.directory);
   remember(env, plan, stoppingOperation(plan, { hostPid: livePid(t) }));
   env.scheduler.protectResources(plan, { operationId: 'cancel-1', state: 'draining', evidenceCalls: ['maybe-live'] });
   await env.cancellation.recover([plan]);
   const visible = env.project(env.plans.get(plan.planId));
-  assert.equal(visible.status, 'stopping');
-  assert.equal(visible.statusLabel, '正在停止');
+  assert.equal(visible.status, 'awaiting_outcome');
+  assert.equal(visible.statusLabel, '执行结果待核实');
   assert.equal(visible.followUp.reason, 'stop_unconfirmed');
   assert.equal(visible.followUp.inCurrentList, true);
+  assert.notEqual(env.plans.get(plan.planId).status, 'cancelled');
   assert.equal(env.control.stopReceipt, undefined);
   assert.equal(env.scheduler.resourceSnapshot().find(row => row.execution.planId === 'plan').state, 'draining');
   assert.equal(env.scheduler.inspectResources(sibling(env.directory)).allowed, false);
@@ -175,7 +176,7 @@ test('a recorder that may still be alive stays stopping and does not release its
   const aborts = env.aborts.length;
   await env.cancellation.recover([env.plans.get(plan.planId)]);
   assert.equal(env.aborts.length, aborts);
-  assert.equal(env.project(env.plans.get(plan.planId)).status, 'stopping');
+  assert.equal(env.project(env.plans.get(plan.planId)).status, 'awaiting_outcome');
   assert.deepEqual(env.starts, []);
 });
 
@@ -188,15 +189,15 @@ test('a provider 401 without a terminal runner status is not a stop proof', asyn
     const result = await env.cancellation.cancel({ sessionId: 'session', reason: 'cancelled' });
     assert.equal(result.error, 'execution_stop_unconfirmed');
     const visible = env.project(env.plans.get(plan.planId));
-    assert.equal(visible.status, 'stopping');
-    assert.equal(visible.statusLabel, '正在停止');
+    assert.equal(visible.status, 'awaiting_outcome');
+    assert.equal(visible.statusLabel, '执行结果待核实');
     assert.equal(visible.followUp.inCurrentList, true);
     assert.equal(env.plans.get(plan.planId).runner.status, 'running');
     assert.equal(env.plans.get(plan.planId).runner.lastError, lastError);
     assert.equal(env.control.stopReceipt, undefined);
     assert.notEqual(env.plans.get(plan.planId).status, 'cancelled');
     await env.cancellation.recover([env.plans.get(plan.planId)]);
-    assert.equal(env.project(env.plans.get(plan.planId)).status, 'stopping');
+    assert.equal(env.project(env.plans.get(plan.planId)).status, 'awaiting_outcome');
     assert.equal(env.aborts.length, 0);
     assert.deepEqual(env.starts, []);
   }
@@ -238,19 +239,44 @@ test('a dead recorder with an unknown external call or open handle stays awaitin
   assert.deepEqual(env.starts, []);
 });
 
-test('a stopping record with no recorder pid is not settled by restart', async t => {
-  const env = world(t);
-  const plan = stoppingPlan(env.directory);
-  remember(env, plan, stoppingOperation(plan, { hostEpoch: 'lease-host:2026-11-01T00:00:00.000Z' }));
-  env.scheduler.protectResources(plan, { operationId: 'cancel-1', state: 'draining' });
-  await env.cancellation.recover([plan]);
-  await env.sessionControl.reconcile([env.plans.get(plan.planId)]);
-  const visible = env.project(env.plans.get(plan.planId));
-  assert.equal(visible.status, 'stopping');
-  assert.equal(visible.followUp.inCurrentList, true);
-  assert.equal(env.control.stopReceipt, undefined);
-  assert.notEqual(env.scheduler.resourceSnapshot().find(row => row.execution.planId === 'plan').state, 'released');
-  assert.deepEqual(env.starts, []);
+test('an rc38 stopping record without a pid converges without being forged cancelled', async t => {
+  const epoch = '6f0c2a8e-1b4d-4e6a-9c11-0a1b2c3d4e5f:2026-11-07T08:00:00.000Z';
+  for (const unknown of [false, true]) {
+    const work = unknown ? { budget: { uncertainDispatches: [{ toolCallId: 'remote-call', planId: 'plan' }] } } : null;
+    const env = world(t, { epoch: 'new-host:2026-11-07T09:40:00.000Z', work });
+    const plan = stoppingPlan(env.directory, unknown ? { workId: 'work' } : {});
+    const operation = stoppingOperation(plan, { hostEpoch: epoch });
+    delete operation.hostPid;
+    remember(env, plan, operation);
+    env.scheduler.protectResources(plan, { operationId: 'cancel-1', state: 'draining', ...(unknown ? { evidenceCalls: ['remote-call'] } : {}) });
+    assert.equal(Object.hasOwn(env.control, 'hostPid'), false);
+    await env.cancellation.recover([env.plans.get(plan.planId)]);
+    await env.sessionControl.reconcile([env.plans.get(plan.planId)]);
+    const visible = env.project(env.plans.get(plan.planId));
+    assert.equal(visible.status, 'awaiting_outcome', unknown ? 'unknown call' : 'no recorded call');
+    assert.equal(visible.statusLabel, '执行结果待核实');
+    assert.equal(visible.followUp.inCurrentList, true);
+    assert.equal(visible.followUp.reason, 'stop_unconfirmed');
+    assert.notEqual(env.plans.get(plan.planId).status, 'cancelled');
+    assert.equal(env.plans.get(plan.planId).delegationOrigin.cancellation.phase, 'awaiting_outcome');
+    assert.equal(Object.hasOwn(env.control, 'hostPid'), false);
+    assert.equal(env.control.stopReceipt, undefined);
+    assert.equal(env.control.nextAction, 'execution_stop_unconfirmed');
+    const claim = env.scheduler.resourceSnapshot().find(row => row.execution.planId === 'plan');
+    assert.equal(claim.state, 'draining');
+    assert.equal(env.scheduler.inspectResources(sibling(env.directory)).allowed, false);
+    await assert.rejects(env.sessionControl.prepareResume(env.plans.get(plan.planId), 'again', async task => task()), /work_execution_stopped/);
+    const aborts = env.aborts.length;
+    const revision = claim.revision;
+    await env.cancellation.recover([env.plans.get(plan.planId)]);
+    await env.cancellation.cancel({ sessionId: 'session', reason: 'cancelled' });
+    await env.sessionControl.reconcile([env.plans.get(plan.planId)]);
+    assert.equal(env.aborts.length, aborts);
+    assert.equal(env.scheduler.resourceSnapshot().find(row => row.execution.planId === 'plan').revision, revision);
+    assert.equal(env.project(env.plans.get(plan.planId)).status, 'awaiting_outcome');
+    assert.equal(env.project(env.plans.get(plan.planId)).followUp.inCurrentList, true);
+    assert.deepEqual(env.starts, []);
+  }
 });
 
 test('an already terminal cancellation does not return to stopping or start again', async t => {

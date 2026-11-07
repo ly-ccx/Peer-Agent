@@ -79,7 +79,15 @@ export function controlPhasesForOrigin(origin: {
 }): { cancellationPhase?: string; takeoverPhase?: string } {
   const control = origin.executionControl;
   if (!control) return { cancellationPhase: origin.cancellation?.phase, takeoverPhase: origin.takeover?.phase };
-  const stopping = control.phase === 'reconciling' && control.stopReceipt?.unknownCalls.length ? 'awaiting_outcome' : 'stopping';
+  // A barrier that has already recorded why it cannot confirm the stop is not still stopping.
+  // Draining remains the in-progress label. This does not turn the refusal into a completed stop.
+  const refused = control.phase === 'reconciling' && (
+    Boolean(control.stopReceipt?.unknownCalls.length)
+    || control.nextAction === 'execution_stop_unconfirmed'
+    || control.nextAction === 'execution_outcome_unknown'
+    || control.nextAction === 'reconcile_execution_outcome'
+  );
+  const stopping = refused ? 'awaiting_outcome' : 'stopping';
   return {
     cancellationPhase: control.kind === 'cancel'
       ? control.phase === 'settled' && control.outcome === 'applied' ? 'completed' : stopping
