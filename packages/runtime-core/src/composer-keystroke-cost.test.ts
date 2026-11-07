@@ -10,7 +10,7 @@ import { emptyInputDraft, type ProjectInputDraftSnapshot, type ProjectInputRecov
  * 它只证明按键处理本身不读取会话历史或计划正文，也不等待草稿 IPC 返回。
  */
 test('keystrokes publish the draft locally and do not wait for a slow draft write', async () => {
-  let release: (() => void) | null = null;
+  let resume = () => {};
   let block = true;
   const writes: string[] = [];
   let stored: ProjectInputDraftSnapshot = { revision: 0, draft: emptyInputDraft(), pending: [] };
@@ -19,7 +19,7 @@ test('keystrokes publish the draft locally and do not wait for a slow draft writ
     write: async request => {
       writes.push(request.draft.text);
       assert.equal('messages' in request, false);
-      if (block) await new Promise<void>(resolve => { release = resolve; });
+      if (block) await new Promise<void>(resolve => { resume = () => resolve(); });
       stored = { ...stored, revision: stored.revision + 1, draft: { ...emptyInputDraft(), text: request.draft.text } };
       return { ok: true, revision: stored.revision };
     },
@@ -37,16 +37,21 @@ test('keystrokes publish the draft locally and do not wait for a slow draft writ
   assert.equal(session.getSnapshot().draft.text, '字'.repeat(40));
   assert.equal(writes.length, 1);
   block = false;
-  release?.();
+  resume();
   await session.flush();
   assert.equal(writes.at(-1), '字'.repeat(40));
 });
 
 test('prediction requests stay debounced and carry the draft, not a transcript', async () => {
-  const requests: Array<Record<string, unknown>> = [];
+  const requests: string[] = [];
+  let sawMessages = false;
   const controller = createInputPredictionController({
     port: {
-      request: async request => { requests.push(request); return { kind: 'unavailable' }; },
+      request: async request => {
+        requests.push(request.draftText);
+        sawMessages = 'messages' in request;
+        return { kind: 'unavailable', reason: 'synthetic' };
+      },
       cancel: async () => {},
       validate: async () => ({ kind: 'unavailable' }),
     },
@@ -65,8 +70,7 @@ test('prediction requests stay debounced and carry the draft, not a transcript',
     controller.update({ ...base, text, selectionStart: text.length, selectionEnd: text.length });
   }
   await new Promise(resolve => setTimeout(resolve, 20));
-  assert.equal(requests.length, 1);
-  assert.equal(requests[0]?.draftText, '请'.repeat(25));
-  assert.equal('messages' in (requests[0] ?? {}), false);
+  assert.deepEqual(requests, ['请'.repeat(25)]);
+  assert.equal(sawMessages, false);
   controller.dispose();
 });
