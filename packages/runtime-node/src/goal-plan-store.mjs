@@ -1265,6 +1265,13 @@ export function createGoalPlanStore({
     return applyRunnerProgressPatch(guardUiCompletion(normalizePlan(readJson(planFile(planId)))));
   }
 
+  /** 正文和进度补丁的文件戳。给 30 秒巡检判断「没变就别再整篇解析」。 */
+  function planReadStamp(planId) {
+    if (typeof planId !== 'string' || !planId) return '';
+    const side = runnerProgressPatchFile(planId);
+    return `${fileVersion(planFile(planId))}|${side ? fileVersion(side) : ''}`;
+  }
+
   /**
    * 同会话「单活跃计划」约束：新建计划落库前，把同一会话下其它仍处于活跃态
    * （drafting / awaiting_approval / approved / executing / paused）的旧计划做收尾或作废，
@@ -2777,6 +2784,7 @@ export function createGoalPlanStore({
     getActivePlanByConversation,
     getUnacceptedCompletedPlanByConversation,
     getPlan,
+    planReadStamp,
     createPlan,
     createGoalContract,
     createIntakeContract,
