@@ -23,6 +23,9 @@ test('项目代理规则只在 project_agent 角色进入 L1', () => {
   assert.match(section.content, /For changes use the expectedRevision from host facts/);
   assert.match(section.content, /a progress reply does not discharge that responsibility/);
   assert.match(section.content, /No second cancel confirmation/);
+  assert.match(section.content, /inspect_execution_obligation/);
+  assert.match(section.content, /acknowledge_unknown/);
+  assert.match(section.content, /evidence_stale/);
   assert.match(section.content, /no progress event arrived for 10 minutes/);
   assert.match(section.content, /not waiting on an approval or a question/);
   assert.match(section.content, /GoalPlan interruption reason and the last error/);

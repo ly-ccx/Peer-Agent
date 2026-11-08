@@ -5,8 +5,15 @@ export function installDelegation(port) {
   return () => { if (current === port) current = null; };
 }
 export function delegationStoreDir() { return current?.storeDir || ''; }
+/** Every method the delegation and working-context providers call on the live supervisor. */
+export const DELEGATION_SUPERVISOR_METHODS = [
+  'spawn', 'list', 'get', 'cancel', 'message', 'resume', 'reprioritize', 'controlWork',
+  'coordinateWork', 'coordinationFacts', 'sendAgentMessage', 'readWorkHistory',
+  'inspectExecutionObligations', 'requestObligationAuthorization', 'resolveExecutionObligation',
+];
+
 export function liveDelegationSupervisor() {
-  return Object.fromEntries(['spawn', 'list', 'get', 'cancel', 'message', 'resume', 'reprioritize', 'controlWork', 'coordinateWork', 'coordinationFacts', 'sendAgentMessage', 'readWorkHistory'].map((name) => [name, (...args) => (
+  return Object.fromEntries(DELEGATION_SUPERVISOR_METHODS.map((name) => [name, (...args) => (
     typeof current?.supervisor?.[name] === 'function' ? current.supervisor[name](...args) : { error: 'supervisor_unavailable' }
   )]));
 }

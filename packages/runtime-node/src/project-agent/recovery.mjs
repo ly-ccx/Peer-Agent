@@ -5,6 +5,13 @@ import { pathOf } from '../data-store.mjs';
 
 export const RECOVERY_PHASES = Object.freeze(['lease', 'inputs', 'inbox', 'queue', 'tasks', 'watch', 'digest']);
 const WORKSPACE_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
+function legacyFact(error) {
+  const row = error?.legacy;
+  if (!row || typeof row !== 'object') return undefined;
+  const pick = key => typeof row[key] === 'string' && /^[a-z_]{1,40}$/.test(row[key]) ? row[key] : undefined;
+  const legacy = { check: pick('check'), seal: pick('seal'), change: pick('change'), file: pick('file') };
+  return Object.values(legacy).every(Boolean) ? legacy : undefined;
+}
 
 /** Per-project recovery is a barrier: stores can replay before any execution is admitted. */
 export function createProjectRecovery({ rootDir = null, ports = {}, holdsLease = () => false,
@@ -36,7 +43,8 @@ export function createProjectRecovery({ rootDir = null, ports = {}, holdsLease =
       return { ok: true };
     } catch (error) {
       ready.delete(workspaceId);
-      const result = { ok: false, phase, error: error?.message || String(error) };
+      const legacy = legacyFact(error);
+      const result = { ok: false, phase, error: error?.message || String(error), ...(legacy ? { legacy } : {}) };
       try { diagnostic(workspaceId, { ...result, status: 'failed' }); } catch { /* The caller still receives a project-local failure. */ }
       return result;
     }

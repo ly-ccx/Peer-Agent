@@ -91,6 +91,9 @@ test('a real idle result after the diagnostic deadline persists a receipt and wa
   assert.ok(current.stopReceipt);
   const receipt = await control.drain(goalPlanStore.getPlan(), current);
   assert.equal(control.settle(goalPlanStore.getPlan(), current, receipt).phase, 'settled');
+  const replayed = await control.drain(goalPlanStore.getPlan(), operation);
+  assert.equal(replayed.receiptId, receipt.receiptId);
+  assert.equal(control.read(goalPlanStore.getPlan()).phase, 'settled');
 });
 
 test('an audited automatic legacy cancellation recovers an existing unproven operation', async () => {

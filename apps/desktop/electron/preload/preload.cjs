@@ -281,6 +281,8 @@ contextBridge.exposeInMainWorld('peerAgent', {
   projectAgentListSessions: (params) => ipcRenderer.invoke('project-agent:list-sessions', params),
   projectAgentGetSession: (params) => ipcRenderer.invoke('project-agent:get-session', params),
   projectAgentCancelSession: (params) => ipcRenderer.invoke('project-agent:cancel-session', params),
+  projectAgentListObligationGrants: (params) => ipcRenderer.invoke('project-agent:list-obligation-grants', params),
+  projectAgentDecideObligation: (params) => ipcRenderer.invoke('project-agent:decide-obligation', params),
   projectAgentResumeSession: (params) => ipcRenderer.invoke('project-agent:resume-session', params),
   projectAgentListApprovals: (params) => ipcRenderer.invoke('project-agent:list-approvals', params),
   projectAgentDecideApproval: (params) => ipcRenderer.invoke('project-agent:decide-approval', params),
@@ -312,6 +314,11 @@ contextBridge.exposeInMainWorld('peerAgent', {
     const handler = (_event, payload) => listener(payload);
     ipcRenderer.on('project-agent:changed', handler);
     return () => ipcRenderer.removeListener('project-agent:changed', handler);
+  },
+  onProjectAgentObligationGrants: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('project-agent:obligation-grants', handler);
+    return () => ipcRenderer.removeListener('project-agent:obligation-grants', handler);
   },
   onProjectAgentConversationChanged: (listener) => {
     const handler = (_event, payload) => listener(payload);

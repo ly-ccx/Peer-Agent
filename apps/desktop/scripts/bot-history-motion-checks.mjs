@@ -194,7 +194,7 @@ export async function checkBotHistoryMotion({ page, until, report, captureDirect
     errorRecovery: true, continuation: true, animations: true, reducedMotion: true };
 }
 
-async function recordDisclosure(locator, open, reverse = false, observed) {
+async function recordDisclosure(locator, open, reverse = false, observed, attempt = 0) {
   // Earlier scenarios can leave this same task open. Start from the opposite
   // state so this capture measures the requested action rather than toggling it away.
   const summary = locator.locator(':scope > summary');
@@ -241,6 +241,8 @@ async function recordDisclosure(locator, open, reverse = false, observed) {
   const samples = capture.samples;
   const heights = samples.map(sample => sample.height), min = Math.min(...heights), max = Math.max(...heights);
   assert.ok(max - min > 8, 'native disclosure has a real size change');
+  // A busy runner can sample only the endpoints of one transition. Measure that action again.
+  if (attempt < 1 && !heights.some(height => height > min + 1 && height < max - 1)) return recordDisclosure(locator, open, reverse, observed, attempt + 1);
   assert.ok(heights.some(height => height > min + 1 && height < max - 1), 'height transition contains intermediate frames');
   assert.equal(disclosureHeightSnapped(samples), false, 'reversal and collapse never jump the entire content height in one frame');
   assert.equal(samples.at(-1).open, reverse ? false : open);

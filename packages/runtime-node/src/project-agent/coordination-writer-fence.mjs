@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, lstatSync, realpathSync, readFileSync, writeFileSync, copyFileSync, renameSync, mkdirSync, openSync, closeSync, fsyncSync } from 'node:fs';
 import path from 'node:path';
-import { hashLegacyFile, legacyFileToken, readLegacySeal } from './coordination-legacy-integrity.mjs';
+import { explainLegacyIntegrity, hashLegacyFile, legacyFileToken, readLegacySeal } from './coordination-legacy-integrity.mjs';
 
 const fail = code => Object.assign(new Error(code), { code });
 function sync(file) { const fd = openSync(file, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); } }
@@ -31,14 +31,23 @@ export async function protectCoordinationWriter({ directory, assertOwner, onStep
     if (intent.status === 'complete') return false;
   } else {
     const manifest = JSON.parse(readFileSync(manifestFile));
+    // Formats 3–9 were already fenced. A later obligation write raises the floor to 11
+    // without rewriting the baseline. Re-running the version-2 promotion compares the
+    // fenced directory with the frozen baseline token and reports a false legacy change.
+    if (manifest.frozenLegacyFile === 'baseline.jsonl' && Number(manifest.minimumReaderVersion) >= 3) return false;
     if ([3, 4, 5, 6, 7, 8, 9].includes(manifest.minimumReaderVersion)) return false;
     const head = JSON.parse(readFileSync(headFile)), legacy = inside(directory, 'coordination.jsonl');
     if (manifest.minimumReaderVersion !== 2 || manifest.minimumWriterVersion !== 2 || head.generation !== manifest.generation
-      || head.legacyVersion !== manifest.legacyVersion || legacyFileToken(legacy) !== manifest.legacyVersion) throw fail('coordination_legacy_changed');
+      || head.legacyVersion !== manifest.legacyVersion || legacyFileToken(legacy) !== manifest.legacyVersion) {
+      const fenced = existsSync(legacy) && lstatSync(legacy).isDirectory();
+      throw Object.assign(fail('coordination_legacy_changed'), { legacy: explainLegacyIntegrity(directory, legacy, manifest, null) || {
+        check: fenced ? 'writer_fence_unrecognized' : 'legacy_token', seal: 'unknown', change: fenced ? 'metadata' : 'unknown', file: fenced ? 'writer_fence' : 'legacy_journal',
+      } });
+    }
     const original = manifest.legacyVersion === 'missing'
       ? { version: 'missing', bytes: 0, sha256: createHash('sha256').update('').digest('hex') } : await hashLegacyFile(legacy);
     const proof = readLegacySeal(directory, manifest);
-    if (proof && (proof.seal.sha256 !== original.sha256 || proof.seal.bytes !== original.bytes)) throw fail('coordination_legacy_changed');
+    if (proof && (proof.seal.sha256 !== original.sha256 || proof.seal.bytes !== original.bytes)) throw Object.assign(fail('coordination_legacy_changed'), { legacy: { check: 'seal_content_mismatch', seal: 'present', change: 'content', file: 'legacy_journal' } });
     assertOwner(); if (legacyFileToken(legacy) !== original.version) throw fail('coordination_read_changed');
     const id = randomUUID(), archive = `.coordination-fence/${id}`, saved = inside(directory, archive);
     mkdirSync(saved, { recursive: true, mode: 0o700 });

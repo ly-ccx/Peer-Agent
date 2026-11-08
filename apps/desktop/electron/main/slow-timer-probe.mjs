@@ -14,7 +14,7 @@
  * 只在 Electron 主进程自动安装。node:timers 的具名导入不经过定时器包装。
  */
 
-import { appendFileSync, mkdirSync, statSync } from 'node:fs';
+import { appendFileSync, mkdirSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -227,10 +227,13 @@ export function createDiagnosticWriter({
     const safe = String(line).replace(/[\r\n]/g, ' ').slice(0, 500);
     try {
       mkdir(path.dirname(file), { recursive: true });
-      try {
-        if (stat(file).size > maxBytes) return;
-      } catch (error) {
-        if (error?.code !== 'ENOENT') return;
+      let size = 0;
+      try { size = stat(file).size; }
+      catch (error) { if (error?.code !== 'ENOENT') return; }
+      if (size > 0 && size + safe.length + 1 > maxBytes) {
+        try { unlinkSync(`${file}.2`); } catch (error) { if (error?.code !== 'ENOENT') return; }
+        try { renameSync(`${file}.1`, `${file}.2`); } catch (error) { if (error?.code !== 'ENOENT') return; }
+        try { renameSync(file, `${file}.1`); } catch (error) { if (error?.code !== 'ENOENT') return; }
       }
       append(file, `${safe}\n`, 'utf8');
     } catch {

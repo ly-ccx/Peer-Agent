@@ -21,6 +21,15 @@ import { createEmptyResourceWaitPort, resourceWaitScope, readResourceWaitFacts }
 import { reconcileResourceWait } from './resource-wait-recovery.mjs';
 
 const ROUTINE = new Set(['session_started', 'progress', 'session_spawned', 'session_progress']);
+
+function settledPauseResult(events, sessions) {
+  return Array.isArray(events) && events.length > 0 && events.every(event => event?.kind === 'result_ready')
+    && events.every(event => {
+      const session = sessions.find(row => row.sessionId === event.sessionId);
+      const control = session?.origin?.executionControl;
+      return control?.kind === 'pause' && control.phase === 'settled' && control.outcome === 'applied';
+    });
+}
 export function createRunnerCoordination({ store, inbox, workspaceId, conversationId, readMessages, remember, onReplied, onDeferred, onDeliveryChanged, resolveRoster, reconcileVerification = null, findEvidenceRecords = null, readResourceClaims, resourceWaits = null, now = () => new Date().toISOString() }) {
   const resourceWaitPort = resourceWaits || createEmptyResourceWaitPort();
   const delegationRecovery = createDelegationDispatchRecovery({ store, readMessages, findEvidenceRecords, readResourceClaims, now,
@@ -236,10 +245,16 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
         const semanticNext = work.intentCoordination?.lifecycle === 'active' && !checkpoint.outcome?.yielded && !work.recovery;
         const resourceEvents = (work.pendingEventIds || []).filter(id => !work.consumedEventIds?.includes(id) && !decision().events?.[id]?.handled)
           .map(id => decision().events?.[id]?.event).filter(event => event?.payload?.reason === 'resource_available');
-        return { ...checkpoint.job, ...(semanticNext ? { kind: 'wake', userInputs: [], events: [],
+        const next = { ...checkpoint.job, ...(semanticNext ? { kind: 'wake', userInputs: [], events: [],
           sourceDecisionRef: work.intentCoordination.decision.operationId } : {}), workId: work.workId, continuation: true,
           ...(resourceEvents.length ? { kind: 'wake', userInputs: [], events: resourceEvents, sourceDecisionRef: undefined } : {}),
           ...(work.state === 'retry_wait' ? { recoveryReservationId: work.recovery.reservationId, recoveryRevision: work.revision } : {}) };
+        // A settled pause already closed this execution. Its result stays visible,
+        // but host recovery must not open a model turn to rediscover it.
+        // Only result wakes read the roster; other selections must not.
+        if (Array.isArray(next.events) && next.events.length > 0 && next.events.every(event => event?.kind === 'result_ready')
+          && settledPauseResult(next.events, roster())) return null;
+        return next;
       },
       pending: () => pendingFrom(decision()),
       deliveryPending: () => delivery.pending(decision()),
@@ -327,7 +342,10 @@ export function createRunnerCoordination({ store, inbox, workspaceId, conversati
       const selection = recoverySelection();
       const user = selection.choose(true);
       if (user) return { job: user };
-      const events = selection.pending();
+      const pending = selection.pending();
+      const events = pending.some(event => event?.kind === 'result_ready')
+        ? pending.filter(event => !settledPauseResult([event], rows()))
+        : pending;
       return events.length ? { events } : { job: selection.choose(false) };
     },
     retryJob(turnId) {

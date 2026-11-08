@@ -8,6 +8,8 @@ import { createResourceWaitPort } from './resource-wait.ts';
 import { createSessionResourceContention } from './session-resource-contention.mjs';
 import { executionIdentity, sameExecution } from './session-control-kernel.mjs';
 import { createSessionCancellation } from './session-cancellation.mjs';
+import { createExecutionObligationService } from './execution-obligation.mjs';
+import { localRecorderIdentity } from './execution-recorder.mjs';
 import { createSessionTakeover } from './session-takeover.mjs';
 import { takeoverBlocker } from './session-repair.mjs';
 import { supervisionRecovery } from './supervision-recovery.mjs';
@@ -145,6 +147,7 @@ export function createSessionSupervisor({
   readManualCriterionAuthorities = null,
   readLegacyCriterionProvenance = () => null,
   readDelegationCapabilities = null,
+  onObligationChanged = null,
   readResourceFeedback = null,
   projectReportEvidence = null,
   recoverStoppedPublications = null,
@@ -240,6 +243,14 @@ export function createSessionSupervisor({
     });
   }
 
+  const obligations = createExecutionObligationService({
+    plans: delegatedPlans, readControl: plan => sessionControl.read(plan), scheduler: executionScheduler, canManage: canManageWorkspace,
+    storeFor: workspaceId => workBudgetBinding(workspaceId)?.store, identity: localRecorderIdentity,
+    writerEpochFor: workspaceId => workBudgetBinding(workspaceId)?.store?.writerEpoch?.(),
+    onChanged: onObligationChanged,
+    now,
+  });
+
   function findBySession(sessionId) {
     if (!sessionId) return null;
     return delegatedPlans().find((plan) => plan.delegationOrigin.sessionId === sessionId) ?? null;
@@ -329,6 +340,7 @@ export function createSessionSupervisor({
       ...(typeof plan.conversationId === 'string' && plan.conversationId ? { conversationId: plan.conversationId } : {}),
       ...(sessionFactsFromPlan(plan).verificationActive ? { verifying: true } : {}),
       origin,
+      ...(obligations.dispositionFor(origin.workspaceId, origin.sessionId) ? { obligationDisposition: obligations.dispositionFor(origin.workspaceId, origin.sessionId) } : {}),
       ...(coordinationFacts ? { coordination: coordinationFacts } : {}),
       ...(origin.supersededBy ? { supersededBy: origin.supersededBy } : {}),
       ...(origin.phase === 'paused' ? { phase: 'paused' } : {}),
@@ -1233,6 +1245,7 @@ export function createSessionSupervisor({
   async function recoverStops() {
     const workspaces = new Set(delegatedPlans().map(plan => plan.delegationOrigin.workspaceId));
     for (const workspaceId of workspaces) if (canManageWorkspace(workspaceId)) {
+      obligations.suspendLive(delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId));
       await cancellation.recover(delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId));
       await coordination.recover(workspaceId);
     }
@@ -1291,7 +1304,7 @@ export function createSessionSupervisor({
     },
     resumeRecovered(workspaceId) {
       return reconcileControls(workspaceId).then(() => resourceContention.reconcile(delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)))
-        .then(() => cancellation.recover(delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId))).then(() => coordination.recover(workspaceId)).then(async () => {
+        .then(() => { obligations.suspendLive(delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)); return cancellation.recover(delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)); }).then(() => coordination.recover(workspaceId)).then(async () => {
         for (const plan of delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId && isHostHandoffPause(plan))) {
           if (canManageWorkspace(workspaceId) && executionScheduler.isWorkspaceReady(workspaceId))
             await sessionControl.prepareResume(plan, `host-handoff:${plan.planId}:${plan.delegationOrigin.pausedRunnerIntent || plan.runner?.intent || 'execute'}`, exclusive);
@@ -1410,12 +1423,18 @@ export function createSessionSupervisor({
     },
     deliveryFacts: id => readQuery.run(() => handoff.facts(id)),
     handleHandoffAnswer(input) { return exclusive(() => handoff.answer(input || {})); },
+    inspectExecutionObligations: input => obligations.inspect(input || {}),
+    listPendingObligationGrants: (workspaceId, parentConversationId) => ({ ok: true, grants: obligations.pendingGrants(workspaceId, parentConversationId) }),
+    requestObligationAuthorization: input => obligations.requestAuthorization(input || {}),
+    confirmObligationGrant: input => obligations.confirm(input || {}),
+    revokeObligationGrant: input => obligations.revoke(input || {}),
+    resolveExecutionObligation: input => obligations.resolve(input || {}),
     cancel(input, context = {}) {
       return cancellation.cancel(input || {}, context);
     },
     waitForCoordinationIdle: workspaceId => coordination.waitForIdle(workspaceId),
     requestCancel: input => cancellation.request(input || {}),
-    recoverCancellations: workspaceId => cancellation.recover(delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)),
+    recoverCancellations: workspaceId => { obligations.suspendLive(delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)); return cancellation.recover(delegatedPlans().filter(plan => plan.delegationOrigin.workspaceId === workspaceId)); },
     message(input, context) {
       return exclusive(() => messageLocked(input || {}, context));
     },

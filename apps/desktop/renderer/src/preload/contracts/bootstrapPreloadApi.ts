@@ -1108,6 +1108,8 @@ export interface BootstrapPreloadApi {
   readonly projectAgentListSessions: (params?: { workspaceId?: string; status?: string; limit?: number }) => Promise<{ ok: boolean; code?: string; sessions?: readonly unknown[] }>;
   readonly projectAgentGetSession: (params: { sessionId: string; detail?: 'report' }) => Promise<{ ok: boolean; code?: string; session?: unknown }>;
   readonly projectAgentCancelSession: (params: { sessionId: string; workspaceId?: string; reason?: string }) => Promise<{ ok: boolean; code?: string; session?: unknown }>;
+  readonly projectAgentListObligationGrants: (params: { workspaceId: string; parentConversationId?: string }) => Promise<{ ok: boolean; code?: string; grants?: readonly { grantId: string; status: string; items: readonly { sessionId: string; title?: string; displayTitle?: string | null; shortId?: string | null; gaps?: readonly string[] }[] }[]; writer?: { ok: boolean; code?: string | null; check?: string | null; seal?: string | null; change?: string | null; file?: string | null } }>;
+  readonly projectAgentDecideObligation: (params: { workspaceId: string; grantId: string; decision: 'confirm' | 'revoke'; parentConversationId?: string }) => Promise<{ ok: boolean; code?: string; error?: string; legacy?: { check?: string | null; seal?: string | null; change?: string | null; file?: string | null } }>;
   readonly projectAgentResumeSession: (params: { sessionId: string; workspaceId: string; requestId: string }) => Promise<{ ok: boolean; code?: string; session?: unknown }>;
   readonly projectAgentListApprovals: (params?: { workspaceId?: string }) => Promise<{ ok: boolean; code?: string; approvals?: readonly unknown[] }>;
   readonly projectAgentDecideApproval: (params: {
@@ -1161,6 +1163,7 @@ export interface BootstrapPreloadApi {
   readonly projectMemoryExport: (params: ProjectMemoryExportRequest) => Promise<ProjectMemoryExportResult>;
   readonly projectMemorySetSwitches: (params: ProjectMemorySetSwitchesRequest) => Promise<ProjectMemorySetSwitchesResult>;
   readonly onProjectAgentChanged: (listener: (event: { workspaceIds: readonly string[] }) => void) => () => void;
+  readonly onProjectAgentObligationGrants: (listener: (event: { workspaceId?: string; grantId?: string | null; status?: string | null }) => void) => () => void;
   readonly onProjectAgentConversationChanged: (listener: (event: { workspaceIds: readonly string[] }) => void) => () => void;
   readonly onProjectAgentActivity: (listener: (event: ProjectAgentActivity) => void) => () => void;
   readonly workspaceList: () => Promise<{

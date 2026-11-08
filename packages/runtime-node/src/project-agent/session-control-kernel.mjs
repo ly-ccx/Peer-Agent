@@ -24,12 +24,14 @@ export function reduceSessionControl(state, entry) {
       .every(key => typeof operation[key] === 'string' && operation[key])
     || !sameExecution(operation.expectedExecution, { ...operation.expectedExecution, planId: operation.planId, sessionId: operation.sessionId })
     || !operation.expectedExecution.executionEpoch || !controlPhases[operation.phase]
+    || operation.hostPid !== undefined && (!Number.isSafeInteger(operation.hostPid) || operation.hostPid < 1)
     || !Number.isFinite(Date.parse(operation.updatedAt))
     || operation.requestDigest !== controlDigest({ kind: operation.kind, operationId: operation.operationId, authorityRef: operation.authorityRef, execution: operation.expectedExecution })
     || operation.revision !== (old?.revision || 0) + 1 || entry.expectedRevision !== (old?.revision || 0)) throw new Error('session_control_conflict');
   if (old) {
     if (['requestDigest', 'workspaceId', 'parentConversationId', 'sessionId', 'planId', 'kind', 'authorityRef'].some(key => old[key] !== operation[key])
-      || !sameExecution(old.expectedExecution, operation.expectedExecution) || old.hostEpoch !== operation.hostEpoch || old.unproven !== operation.unproven
+      || !sameExecution(old.expectedExecution, operation.expectedExecution) || old.hostEpoch !== operation.hostEpoch
+      || old.hostPid !== operation.hostPid || JSON.stringify(old.recorder ?? null) !== JSON.stringify(operation.recorder ?? null) || old.unproven !== operation.unproven
       || old.priorStopReceiptId !== operation.priorStopReceiptId
       || old.phase === 'settled' || operation.phase !== old.phase && !controlPhases[old.phase].includes(operation.phase)) throw new Error('session_control_conflict');
     if (heads[operation.sessionId]?.operationId !== operation.operationId) throw new Error('session_control_superseded');

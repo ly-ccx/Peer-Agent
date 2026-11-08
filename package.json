@@ -6,6 +6,7 @@
   "packageManager": "pnpm@10.22.0",
   "scripts": {
     "dev": "pnpm --filter @peer-agent/desktop dev",
+    "obligation:rehearse": "node scripts/obligation-legacy-rehearsal.mjs",
     "build": "pnpm -r --workspace-concurrency=1 build",
     "ui:check": "node scripts/check-ui-conventions.mjs",
     "ui:test": "node --test scripts/check-ui-conventions.test.mjs apps/desktop/scripts/shared-ui-convention-checks.test.mjs",

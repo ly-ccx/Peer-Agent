@@ -344,16 +344,18 @@ test('stream send keeps its return value and exception when segment logging fail
   }
 });
 
-test('diagnostic file stores one sanitized line under ~/.peer-agent and stops past the cap', () => {
+test('diagnostic file stores one sanitized line under ~/.peer-agent and rotates past the cap', () => {
   const home = mkdtempSync(path.join(tmpdir(), 'slow-timer-'));
   const file = diagnosticLogPath(home);
   try {
-    const write = createDiagnosticWriter({ file, maxBytes: 20 });
+    const write = createDiagnosticWriter({ file, maxBytes: 80 });
     write('[slow-timer] ms=10 callback=burn site=main.mjs:1\nnext-line');
     const text = readFileSync(file, 'utf8');
     assert.equal(text, '[slow-timer] ms=10 callback=burn site=main.mjs:1 next-line\n');
     write('[slow-timer] ms=11 callback=again site=main.mjs:2');
-    assert.equal(readFileSync(file, 'utf8'), text);
+    assert.match(readFileSync(`${file}.1`, 'utf8'), /callback=burn/);
+    assert.match(readFileSync(file, 'utf8'), /callback=again/);
+    assert.equal(readFileSync(file, 'utf8').includes('callback=burn'), false);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
