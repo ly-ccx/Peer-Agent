@@ -50,6 +50,10 @@ test('整组投影：同一批会话按宿主判定分组', () => {
   assert.deepEqual(groups.running.map(row => row.sessionId), ['bot-1']);
   assert.deepEqual(groups.needsYou.map(row => row.sessionId), ['user-1']);
   assert.deepEqual(groups.done.map(row => row.sessionId), ['done-1']);
+  const hidden = groupDrawerSessions([
+    session('indexed-1', 'awaiting_outcome', { owner: 'none', inCurrentList: false, reason: 'obligation_indexed' }),
+  ]);
+  assert.deepEqual(Object.values(hidden).flat(), []);
 });
 
 test('旧记录缺 followUp 时维持既有分组，不新造终态', () => {

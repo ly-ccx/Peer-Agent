@@ -18,7 +18,7 @@ import {BotConversationView} from './BotConversationView.tsx';
 import {CardLine} from './CardLine.tsx';
 import {cardAction,createCardNumbers,parseProjectCommand,terminalText} from './commands.ts';
 import {runProjectCardAction} from './card-actions.ts';
-import {projectCopy,projectStatus,projectSessionStatus} from './project-copy.ts';
+import {everydaySessions,projectCopy,projectStatus,projectSessionStatus} from './project-copy.ts';
 import {isRecoveryCard} from './card-presentation.ts';
 import {isEnterKeyName} from '../runtime-controls.ts';
 
@@ -90,7 +90,7 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
     if(command.kind==='latest'){inputDraft.session.edit({text:''});void client.latest().then(setSnapshot);setEarlier(false);setView('conversation');return;}
     if(command.kind==='help'){inputDraft.session.edit({text:''});setView('help');return;}
     if(command.kind==='task'){
-      const session=snapshot.sessions[command.number-1];if(!session){setNotice(copy('invalid'));return;}
+      const session=everydaySessions(snapshot.sessions)[command.number-1];if(!session){setNotice(copy('invalid'));return;}
       inputDraft.session.edit({text:''});setDetail(host.supervisor.get({sessionId:session.sessionId,detail:'report'}));setView('task');return;
     }
     if(command.kind==='result'){
@@ -174,7 +174,7 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
   const recordReader=useMemo(()=>createProjectReadState(),[snapshot.workspaceId]);
   const records=view==='objectives'?recordReader.read<any>('objectives',()=>host.objectives.list({}, {workspaceId:snapshot.workspaceId,conversationId:host.profiles.read(snapshot.workspaceId)?.agentConversationId} as never) as any)
     :view==='memory'?recordReader.read<any>('memory',()=>host.memory.list({workspaceId:snapshot.workspaceId})):null;
-  const rows:string[]=view==='tasks'?snapshot.sessions.map((row,index)=>`${index+1}. ${terminalText(row.title)} · ${projectSessionStatus(locale,row)} · /task ${index+1}`)
+  const rows:string[]=view==='tasks'?everydaySessions(snapshot.sessions).map((row,index)=>`${index+1}. ${terminalText(row.title)} · ${projectSessionStatus(locale,row)} · /task ${index+1}`)
     :view==='diagnostics'?snapshot.messages.flatMap(message=>(message.cards??[]).filter(isRecoveryCard).map((card:any)=>`${terminalText(card.cardId)}\n${terminalText(card.content)}`))
     :view==='memory'?(records?.rows??[]).map((row:any)=>`${projectStatus(locale,row.kind)} · ${projectStatus(locale,row.trust)} · ${projectStatus(locale,row.status)}\n${terminalText(row.text)}`)
     :view==='objectives'?(records?.rows??[]).map((row:any)=>`${terminalText(row.title)} · ${projectStatus(locale,row.status)}\n${terminalText(row.outcome??row.description??row.brief??'')}`)

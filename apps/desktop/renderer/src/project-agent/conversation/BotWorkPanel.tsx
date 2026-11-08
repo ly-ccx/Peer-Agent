@@ -156,13 +156,6 @@ export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recoverin
               : <p className="bot-work-panel-empty">{i18n.t('projectAgent.workPanel.emptyAgents')}</p>}
             {sessions.agents.length > agentLimit ? <button type="button" className="bot-work-panel-text-button" onClick={() => setAgentLimit(value => value + 10)}>{i18n.t('projectAgent.workPanel.showMore')}</button> : null}
           </section>
-          <section className="bot-work-panel-section" aria-labelledby={`${id}-obligations`}>
-            <header><h3 id={`${id}-obligations`}>{i18n.t('projectAgent.workPanel.obligations')}<span>{sessions.obligations.length}</span></h3></header>
-            <p className="bot-work-panel-note">{i18n.t('projectAgent.workPanel.obligationNote')}</p>
-            {sessions.obligations.length ? sessions.obligations.map(session => <BotWorkSessionRow key={session.sessionId} session={session}
-              question={questions.get(session.sessionId)} overview={data.error ? undefined : byPlan.get(session.planId ?? '')} variant="task" i18n={i18n} onOpen={onOpenTask} />)
-              : <p className="bot-work-panel-empty">{i18n.t('projectAgent.workPanel.emptyObligations')}</p>}
-          </section>
         </>}
         <section className="bot-work-panel-section" aria-labelledby={`${id}-materials`}>
           <header><h3 id={`${id}-materials`}>{i18n.t('projectAgent.workPanel.materials')}<span>{materials.length}</span></h3>

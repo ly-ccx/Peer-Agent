@@ -216,7 +216,11 @@ export function groupDrawerSessions(sessions: readonly DrawerSession[]): Record<
     paused: [],
     done: [],
   };
-  for (const session of sessions) groups[taskGroup(session.status, session.followUp)].push(session);
+  for (const session of sessions) {
+    // The audit index is not a user-facing list. Retired follow-up simply leaves the drawer.
+    if (session.followUp?.reason === 'obligation_indexed') continue;
+    groups[taskGroup(session.status, session.followUp)].push(session);
+  }
   return groups;
 }
 

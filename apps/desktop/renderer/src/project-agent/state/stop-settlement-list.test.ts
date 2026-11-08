@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { projectWorkSession, type DelegationOrigin, type GoalRunnerStatus } from '@peer-agent/protocol';
-import { readDrawerSession, taskGroup } from './drawerState.ts';
+import { groupDrawerSessions, readDrawerSession, taskGroup } from './drawerState.ts';
 import { indexBotWork } from './botWorkState.ts';
 import { workPanelSessions } from './botWorkPanelState.ts';
 
@@ -59,5 +59,6 @@ test('task list and collaboration agents follow the same stop settlement', () =>
   const panel = workPanelSessions(indexBotWork([stopping, awaiting, legacy, cancelled, child, indexed], true));
   assert.deepEqual(panel.tasks.map(session => session.sessionId).sort(), ['awaiting', 'legacy', 'stopping']);
   assert.deepEqual(panel.agents.map(session => session.sessionId).sort(), ['awaiting', 'child', 'legacy', 'stopping']);
-  assert.deepEqual(panel.obligations.map(session => session.sessionId), ['indexed']);
+  assert.equal([...panel.tasks, ...panel.agents].some(session => session.sessionId === 'indexed'), false);
+  assert.deepEqual(Object.values(groupDrawerSessions([indexed!])).flat(), []);
 });

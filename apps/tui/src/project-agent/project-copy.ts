@@ -63,6 +63,11 @@ export function projectCopy(locale:TuiLocale,key:keyof typeof english) { return 
 export function projectStatus(locale:TuiLocale,value:string) {return value in english ? projectCopy(locale,value as keyof typeof english):value;}
 export function actionLabel(locale:TuiLocale,action:any) {return action.payload?.text || projectStatus(locale,action.id);}
 
+/** Everyday task rows. The obligation index stays readable on the session, but it is not a list. */
+export function everydaySessions<T extends { followUp?: { reason?: string } }>(sessions: readonly T[]): T[] {
+  return sessions.filter(session => session.followUp?.reason !== 'obligation_indexed');
+}
+
 export function projectSessionStatus(locale: TuiLocale, session: { status?: string; followUp?: { owner: string }; resourceBlocker?: import('@peer-agent/protocol').ExecutionResourceBlocker }) {
   if (session.resourceBlocker?.kind === 'protection') return locale === 'en-US'
     ? session.resourceBlocker.code === 'execution_outcome_unknown' ? 'Write blocked: previous outcome unknown' : 'Confirming previous execution has stopped'

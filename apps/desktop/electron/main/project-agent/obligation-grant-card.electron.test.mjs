@@ -33,6 +33,8 @@ test('the authorization card is in the bot chat and survives a closed or materia
   }
   assert.match(await four.innerText(), /确认只停止跟进/);
   assert.match(await four.innerText(), /不会写入停止回执/);
+  assert.match(await four.innerText(), /不会再出现在日常任务列表/);
+  assert.equal(await page.getByText('待核实', { exact: false }).count(), 0);
   assert.equal(await page.locator('.bot-work-panel-toggle').getAttribute('data-needs-user'), 'true');
   await page.screenshot({ path: path.join(shots, 'chat-card.png') });
   const artifact = '/opt/cursor/artifacts';

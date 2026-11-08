@@ -22,7 +22,7 @@ test('tasks and returned child Agents retain their explicit parent relation', ()
   assert.equal(child.parentSessionId, 'parent');
   assert.deepEqual(workPanelSessions(index).tasks.map(row => row.sessionId), ['parent']);
   assert.deepEqual(workPanelSessions(index).agents.map(row => row.sessionId), ['parent', 'child', 'returned']);
-  assert.deepEqual(workPanelSessions({ ...index, available: false }), { tasks: [], agents: [], obligations: [] });
+  assert.deepEqual(workPanelSessions({ ...index, available: false }), { tasks: [], agents: [] });
 });
 
 test('only the host follow-up owner can turn a technical result into a human request', () => {
