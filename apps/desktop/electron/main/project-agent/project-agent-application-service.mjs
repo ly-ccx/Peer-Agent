@@ -21,7 +21,7 @@ import {
 } from '@peer-agent/runtime-node';
 import { projectBotRecoveryStatus, projectModelRoutingMenuOption } from '@peer-agent/protocol';
 import { appendObligationLog } from '@peer-agent/runtime-node/obligation-log';
-import { selectPendingGrants } from '../../../../../packages/runtime-node/src/project-agent/execution-obligation.mjs';
+import { selectPendingGrants } from '@peer-agent/runtime-node/execution-obligation';
 import { settleActivePermissionRequest, sharedOneTimeApprovals } from '../chat-runtime/permission-gate.mjs';
 import { projectBotModelViews } from './model-controls.mjs';
 import { profilePolicyPatch } from './profile-policy.mjs';

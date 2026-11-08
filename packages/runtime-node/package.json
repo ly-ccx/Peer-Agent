@@ -24,6 +24,8 @@
       "default": "./dist/providers-public.js"
     },
     "./obligation-log": "./src/project-agent/obligation-log.mjs",
+    "./execution-obligation": "./src/project-agent/execution-obligation.mjs",
+    "./work-budget": "./src/project-agent/work-budget.mjs",
     "./project-agent": {
       "types": "./dist/project-agent-public.d.ts",
       "default": "./dist/project-agent-public.js"
