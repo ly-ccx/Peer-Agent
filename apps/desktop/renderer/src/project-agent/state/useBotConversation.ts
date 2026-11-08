@@ -4,9 +4,9 @@ import { useInputRecoverySession, useInputRecoveryState } from './useInputRecove
 import { conversationInputKeys } from './inputRecoveryProjection';
 import { projectBotRecoveryStatus, projectInputWasReceived, type ProjectAgentSubmitInputResult } from '@peer-agent/protocol';
 import type { ProjectAgentActivity } from '@peer-agent/protocol';
-import { answeredInputIds, attachBotProcesses, isActivityRunning, mergeBotActivity, visibleBotActivity, activityFromConversationSnapshot } from './botActivityState';
+import { attachBotProcesses, isActivityRunning, mergeBotActivity, visibleBotActivity, activityFromConversationSnapshot } from './botActivityState';
 import { recoveryConversationRows } from './recoveryConversationRows.ts';
-import { continuousReplyRows, type AwaitingBotInput } from './botReplyContinuity';
+import { awaitingInputAnswered, continuousReplyRows, type AwaitingBotInput } from './botReplyContinuity';
 import { questionForInput, hideAcknowledgedQuestions } from './botQuestionState';
 import { createConversationRefresh } from './conversationRefresh.ts';
 import { ConversationCatchUpRequired, createConversationPager } from './conversationPager.ts';
@@ -198,9 +198,8 @@ export function useBotConversation(workspaceId: string) {
   }, []);
 
   useEffect(() => {
-    const answered = answeredInputIds(messages);
-    setAwaitingInputs(current => current.some(input => answered.has(`input-${input.inputId}`))
-      ? current.filter(input => !answered.has(`input-${input.inputId}`)) : current);
+    setAwaitingInputs(current => current.some(input => awaitingInputAnswered(messages, input.inputId))
+      ? current.filter(input => !awaitingInputAnswered(messages, input.inputId)) : current);
   }, [messages]);
 
   const decorated = useMemo(() => mergeConversationCards(messages, cardsError ? [] : cards), [messages, cards, cardsError]);
