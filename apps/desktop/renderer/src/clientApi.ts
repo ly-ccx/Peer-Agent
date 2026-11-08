@@ -168,6 +168,7 @@ const unavailableApi: ClientApi = {
   projectMemoryExport: unavailableMethod('projectMemoryExport'),
   projectMemorySetSwitches: unavailableMethod('projectMemorySetSwitches'),
   onProjectAgentChanged: unavailableMethod('onProjectAgentChanged'),
+  onProjectAgentObligationGrants: unavailableMethod('onProjectAgentObligationGrants'),
   onProjectAgentConversationChanged: unavailableMethod('onProjectAgentConversationChanged'),
   onProjectAgentActivity: unavailableMethod('onProjectAgentActivity'),
   workspaceList: unavailableMethod('workspaceList'),

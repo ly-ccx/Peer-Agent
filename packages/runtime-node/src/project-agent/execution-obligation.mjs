@@ -116,7 +116,7 @@ function evidenceBody({ control, claims, classification, writerEpoch }) {
   };
 }
 
-export function createExecutionObligationService({ plans, readControl, scheduler, canManage, storeFor, identity, writerEpochFor, now = () => new Date().toISOString() }) {
+export function createExecutionObligationService({ plans, readControl, scheduler, canManage, storeFor, identity, writerEpochFor, onChanged = null, now = () => new Date().toISOString() }) {
   const clock = () => Date.parse(now());
   function store(workspaceId) { return storeFor(workspaceId); }
   function dispositionFor(workspaceId, sessionId) {
@@ -136,6 +136,7 @@ export function createExecutionObligationService({ plans, readControl, scheduler
     const obligationId = obligationIdFor({ workspaceId: origin.workspaceId, sessionId: origin.sessionId, planId: plan.planId, operationId: control?.operationId || origin.cancellation?.operationId || '' });
     return {
       sessionId: origin.sessionId, planId: plan.planId, operationId: control?.operationId || null, obligationId,
+      title: typeof plan.title === 'string' && plan.title.trim() ? plan.title.trim().slice(0, 200) : origin.sessionId,
       classes: classification.classes,
       cancelIntent: { state: control?.phase === 'settled' && control.outcome === 'applied' ? 'settled' : 'open', phase: control?.phase || null, revision: control?.revision || 0 },
       liveness: classification.proof === 'alive' ? 'recorder_alive' : classification.proof === 'dead' || classification.proof === 'reused' ? 'recorder_dead' : classification.ownership === 'live' ? 'live' : classification.ownership === 'ended' ? 'ended' : 'recorder_unproven',
@@ -174,11 +175,16 @@ export function createExecutionObligationService({ plans, readControl, scheduler
     if (typeof target?.writeObligation !== 'function') throw new Error('obligation_storage_unavailable');
     target.writeObligation(entry);
   }
+  function notify(workspaceId, grantId, status) {
+    try { onChanged?.({ workspaceId, grantId: grantId || null, status: status || null }); }
+    catch { /* A renderer event must not change the grant result. */ }
+  }
   return {
     dispositionFor: (workspaceId, sessionId) => dispositionFor(workspaceId, sessionId)?.phase,
-    pendingGrants(workspaceId) {
+    pendingGrants(workspaceId, parentConversationId) {
       const grants = Object.values(store(workspaceId)?.read?.()?.obligationGrants || {});
-      return grants.filter(grant => grant.status === 'pending');
+      return grants.filter(grant => grant.status === 'pending'
+        && (!parentConversationId || grant.principal?.parentConversationId === parentConversationId));
     },
     inspect(input) {
       if (input.role && input.role !== 'project_agent' && input.actor !== 'user_panel') {
@@ -238,11 +244,15 @@ export function createExecutionObligationService({ plans, readControl, scheduler
       const stored = { grantId, status: 'pending', canonicalKey: null, items: card.map(item => ({
         sessionId: item.sessionId, operationId: item.operationId, actions: item.actions, evidenceRevision: item.evidenceRevision,
         controlRevision: item.controlRevision, claimRevision: item.claimRevision,
-      })), principal: { workspaceId: input.workspaceId, parentConversationId: input.parentConversationId },
+        title: typeof item.title === 'string' ? item.title.slice(0, 200) : item.sessionId,
+        gaps: Array.isArray(item.gaps) ? item.gaps.filter(gap => typeof gap === 'string').slice(0, 12) : [],
+      })), consequences: { willBeMarkedCancelled: false, resourceWillRemain: true, requiresAcknowledge: true },
+        principal: { workspaceId: input.workspaceId, parentConversationId: input.parentConversationId },
         audience: input.agentConversationId || null, revision: 1, updatedAt: now() };
       write(input.workspaceId, { kind: 'obligation_grant', minimumExecutorVersion: OBLIGATION_FORMAT_VERSION, grant: stored });
       appendObligationLog({ event: 'authorize', role: input.role || null, grantId, status: 'pending',
         obligationId: card.map(item => item.obligationId).join(','), disposition: card.map(item => item.disposition || 'none').join(',') });
+      notify(input.workspaceId, grantId, 'pending');
       return { ok: true, grantId, status: 'pending', idempotencyKey: `panel-${grantId}`, items: card, rejected, consequences: {
         willBeMarkedCancelled: false, resourceWillRemain: true, requiresAcknowledge: true,
       } };
@@ -262,6 +272,7 @@ export function createExecutionObligationService({ plans, readControl, scheduler
       const confirmed = { ...grant, status: 'confirmed', confirmedAt: now(), expiresAt: new Date(clock() + GRANT_MS).toISOString(), revision: grant.revision + 1, updatedAt: now() };
       write(input.workspaceId, { kind: 'obligation_grant', minimumExecutorVersion: OBLIGATION_FORMAT_VERSION, grant: confirmed });
       appendObligationLog({ event: 'confirm', actor: input.actor || null, grantId: grant.grantId, status: 'confirmed' });
+      notify(input.workspaceId, grant.grantId, 'confirmed');
       return { ok: true, grant: confirmed };
     },
     revoke(input) {
@@ -269,6 +280,7 @@ export function createExecutionObligationService({ plans, readControl, scheduler
       const grant = snap.obligationGrants?.[input.grantId];
       if (!grant || grant.status !== 'pending') return { ok: false, error: grant ? `grant_${grant.status}` : 'grant_not_found' };
       write(input.workspaceId, { kind: 'obligation_grant', minimumExecutorVersion: OBLIGATION_FORMAT_VERSION, grant: { ...grant, status: 'revoked', revokedAt: now(), revision: grant.revision + 1, updatedAt: now() } });
+      notify(input.workspaceId, grant.grantId, 'revoked');
       return { ok: true, status: 'revoked' };
     },
     resolve(input) {
@@ -318,6 +330,7 @@ export function createExecutionObligationService({ plans, readControl, scheduler
         obligationId: results.map(item => item.obligationId).filter(Boolean).join(','),
         disposition: results.map(item => item.disposition || item.code || item.result).join(','),
         code: results.map(item => item.code).find(Boolean) || null, ok: results.every(item => item.result === 'applied' || item.result === 'replayed') });
+      notify(input.workspaceId, grant.grantId, 'resolved');
       return { ok: true, grantId: grant.grantId, items: results };
     },
     suspendLive(plans) {

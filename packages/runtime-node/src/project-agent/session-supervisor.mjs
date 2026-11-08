@@ -147,6 +147,7 @@ export function createSessionSupervisor({
   readManualCriterionAuthorities = null,
   readLegacyCriterionProvenance = () => null,
   readDelegationCapabilities = null,
+  onObligationChanged = null,
   readResourceFeedback = null,
   projectReportEvidence = null,
   recoverStoppedPublications = null,
@@ -246,6 +247,7 @@ export function createSessionSupervisor({
     plans: delegatedPlans, readControl: plan => sessionControl.read(plan), scheduler: executionScheduler, canManage: canManageWorkspace,
     storeFor: workspaceId => workBudgetBinding(workspaceId)?.store, identity: localRecorderIdentity,
     writerEpochFor: workspaceId => workBudgetBinding(workspaceId)?.store?.writerEpoch?.(),
+    onChanged: onObligationChanged,
     now,
   });
 
@@ -1422,7 +1424,7 @@ export function createSessionSupervisor({
     deliveryFacts: id => readQuery.run(() => handoff.facts(id)),
     handleHandoffAnswer(input) { return exclusive(() => handoff.answer(input || {})); },
     inspectExecutionObligations: input => obligations.inspect(input || {}),
-    listPendingObligationGrants: workspaceId => ({ ok: true, grants: obligations.pendingGrants(workspaceId) }),
+    listPendingObligationGrants: (workspaceId, parentConversationId) => ({ ok: true, grants: obligations.pendingGrants(workspaceId, parentConversationId) }),
     requestObligationAuthorization: input => obligations.requestAuthorization(input || {}),
     confirmObligationGrant: input => obligations.confirm(input || {}),
     revokeObligationGrant: input => obligations.revoke(input || {}),

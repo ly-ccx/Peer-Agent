@@ -315,6 +315,11 @@ contextBridge.exposeInMainWorld('peerAgent', {
     ipcRenderer.on('project-agent:changed', handler);
     return () => ipcRenderer.removeListener('project-agent:changed', handler);
   },
+  onProjectAgentObligationGrants: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('project-agent:obligation-grants', handler);
+    return () => ipcRenderer.removeListener('project-agent:obligation-grants', handler);
+  },
   onProjectAgentConversationChanged: (listener) => {
     const handler = (_event, payload) => listener(payload);
     ipcRenderer.on('project-agent:conversation-changed', handler);

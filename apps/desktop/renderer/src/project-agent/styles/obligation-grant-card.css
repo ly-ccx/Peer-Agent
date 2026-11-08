@@ -1,0 +1,8 @@
+.obligation-grant-list { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; }
+.obligation-grant-card { border: 1px solid var(--line-subtle, rgba(0, 0, 0, 0.12)); border-radius: 10px; padding: 12px; background: var(--paper-raised, transparent); }
+.obligation-grant-card h3 { margin: 0 0 8px; font-size: 0.95rem; }
+.obligation-grant-card ul { margin: 0 0 8px; padding-left: 1.2em; }
+.obligation-grant-card li { margin: 4px 0; }
+.obligation-grant-gaps { display: block; color: var(--ink-muted, #666); font-size: 0.85rem; }
+.obligation-grant-actions { display: flex; gap: 8px; }
+.obligation-grant-error { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

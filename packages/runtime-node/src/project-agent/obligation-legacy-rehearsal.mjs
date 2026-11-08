@@ -72,7 +72,7 @@ export async function rehearseLegacyObligations({ rootDir, bridgeSupervisor = nu
     inspectExecutionObligations: input => service.inspect(input),
     requestObligationAuthorization: input => service.requestAuthorization(input),
     resolveExecutionObligation: input => service.resolve(input),
-    listPendingObligationGrants: workspaceId => ({ ok: true, grants: service.pendingGrants(workspaceId) }),
+    listPendingObligationGrants: (workspaceId, parentConversationId) => ({ ok: true, grants: service.pendingGrants(workspaceId, parentConversationId) }),
     confirmObligationGrant: input => service.confirm(input),
     revokeObligationGrant: input => service.revoke(input),
   };

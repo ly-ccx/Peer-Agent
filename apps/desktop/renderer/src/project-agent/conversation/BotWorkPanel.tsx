@@ -14,12 +14,14 @@ import { replyActivityLabel } from '../state/replyActivityLabel';
 import { useBotWorkPanelData } from '../state/useBotWorkPanelData';
 import { taskConversationContext } from '../state/taskConversationState';
 import { BotWorkSessionRow } from './BotWorkSessionRow';
+import { ObligationGrantList, type ObligationGrantView } from './ObligationGrantCard';
 import { BotWorkMaterials } from './BotWorkMaterials';
 import '../styles/bot-work-panel.css';
 
 /** A stable conversation container; panel visibility never remounts the thread or Composer. */
 export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recovering, headerTarget, i18n,
-  onOpenTask, onInspect, onRefreshWork, obligationGrant, onObligationConfirm, onObligationRevoke, children }: {
+  onOpenTask, onInspect, onRefreshWork, obligationGrants = [], obligationError = null, obligationSubmittingId = null,
+  onObligationConfirm, onObligationReject, onObligationRetry, children }: {
   readonly workspaceId: string;
   readonly workIndex: BotWorkIndex;
   readonly rows: readonly ConversationDisplayRow[];
@@ -30,9 +32,12 @@ export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recoverin
   readonly onOpenTask: (id: string) => void;
   readonly onInspect?: (inspect: BotInspect) => void;
   readonly onRefreshWork: () => Promise<void>;
-  readonly obligationGrant?: { readonly grantId: string; readonly items: readonly { readonly sessionId: string }[] } | null;
+  readonly obligationGrants?: readonly ObligationGrantView[];
+  readonly obligationError?: string | null;
+  readonly obligationSubmittingId?: string | null;
   readonly onObligationConfirm?: (grantId: string) => void;
-  readonly onObligationRevoke?: (grantId: string) => void;
+  readonly onObligationReject?: (grantId: string) => void;
+  readonly onObligationRetry?: () => void;
   readonly children: ReactNode;
 }) {
   const id = useId();
@@ -95,7 +100,7 @@ export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recoverin
   const byPlan = useMemo(() => new Map(data.items.map(item => [item.taskId, item])), [data.items]);
   const blockers = sessions.agents.filter(session => workPanelNeedsUser(session)
     || ['technical_block', 'local_persistence_failed'].includes(session.followUp?.reason || '') || session.followUp?.reason === 'verification_failed').length;
-  const needsYou = sessions.agents.some(workPanelNeedsUser);
+  const needsYou = sessions.agents.some(workPanelNeedsUser) || obligationGrants.length > 0;
   const setMaterialsView = (next: 'overview' | 'materials') => {
     viewFocus.current = true;
     setView(next);
@@ -106,7 +111,7 @@ export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recoverin
     aria-expanded={open} aria-controls={id} data-needs-user={needsYou} onClick={() => {
       if (open) close();
       else { explicitFocus.current = true; setChoices(current => ({ ...current, [wide ? 'wide' : 'compact']: true })); }
-    }}><PeerIcon name="blocks" size={16} />{needsYou ? <span className="bot-work-panel-notice" aria-hidden="true" /> : null}
+    }} data-obligation-count={obligationGrants.length}><PeerIcon name="blocks" size={16} />{needsYou ? <span className="bot-work-panel-notice" aria-hidden="true" /> : null}
   </button>;
   return <div ref={root} className="bot-work-layout" data-work-panel-open={open} data-work-panel-wide={wide}
     style={{ '--bot-work-panel-min-width': `${BOT_WORK_PANEL_MIN_WIDTH / 16}rem` } as CSSProperties}>
@@ -121,6 +126,8 @@ export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recoverin
       <header className="bot-work-panel-head"><h2 id={`${id}-title`}><PeerIcon name="blocks" size={16} />{i18n.t('projectAgent.workPanel.title')}</h2>
         <button ref={closeButton} type="button" className="ui-button is-icon" aria-label={i18n.t('projectAgent.workPanel.close')} onClick={close}><PeerIcon name="panelRight" size={16} /></button>
       </header>
+      <ObligationGrantList grants={obligationGrants} error={obligationError} submittingId={obligationSubmittingId}
+        i18n={i18n} onConfirm={onObligationConfirm || (() => {})} onReject={onObligationReject || (() => {})} onRetry={onObligationRetry || (() => {})} />
       <div className="bot-work-panel-scroll motion-enter-fade" hidden={view !== 'overview'}>
         <section className="bot-work-panel-attention" aria-label={i18n.t('projectAgent.workPanel.attention')}>
           <h3><PeerIcon name="circle" size={13} />{i18n.t('projectAgent.workPanel.attention')}</h3>
@@ -154,13 +161,6 @@ export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recoverin
             {sessions.obligations.length ? sessions.obligations.map(session => <BotWorkSessionRow key={session.sessionId} session={session}
               question={questions.get(session.sessionId)} overview={data.error ? undefined : byPlan.get(session.planId ?? '')} variant="task" i18n={i18n} onOpen={onOpenTask} />)
               : <p className="bot-work-panel-empty">{i18n.t('projectAgent.workPanel.emptyObligations')}</p>}
-            {obligationGrant ? <div className="bot-work-panel-feedback" role="dialog" aria-label={i18n.t('projectAgent.workPanel.obligations')}
-              onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); onObligationRevoke?.(obligationGrant.grantId); } }}>
-              <p>{i18n.t('projectAgent.workPanel.obligationNote')}</p>
-              <ul>{obligationGrant.items.map(item => <li key={item.sessionId}>{item.sessionId}</li>)}</ul>
-              <button type="button" className="ui-button is-compact" onClick={() => onObligationConfirm?.(obligationGrant.grantId)}>{i18n.t('projectAgent.workPanel.obligationConfirm')}</button>
-              <button type="button" className="ui-button is-compact" onClick={() => onObligationRevoke?.(obligationGrant.grantId)}>{i18n.t('projectAgent.workPanel.obligationDismiss')}</button>
-            </div> : null}
           </section>
         </>}
         <section className="bot-work-panel-section" aria-labelledby={`${id}-materials`}>

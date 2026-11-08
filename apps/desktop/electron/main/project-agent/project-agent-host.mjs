@@ -254,6 +254,7 @@ export function registerDesktopProjectAgent({
     } }),
     emitEvent: (event) => inbox.append(event.workspaceId, [{ ...event, eventId: event.eventId || supervisorEventId(event) }]),
     readPlanApproval: (workspaceId) => profileStore.read(workspaceId)?.planApproval,
+    onObligationChanged: fact => broadcast?.('project-agent:obligation-grants', fact),
   });
   objectiveService = createObjectiveService({store:objectiveStore,actions:objectiveActions,readSessions:workspaceId=>supervisor.sessionsForProject(workspaceId),canManageWorkspace:ownsProject,resolveConversationId,
     readConversation: readCanonicalMessages,

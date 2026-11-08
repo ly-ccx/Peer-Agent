@@ -15,12 +15,13 @@ import type { BotWorkIndex } from '../state/botWorkState';
 import { BotWorkPanel } from './BotWorkPanel';
 import { BotConversationComposer } from './BotConversationComposer';
 import { BotMessageList } from './BotMessageList';
+import { ObligationGrantList } from './ObligationGrantCard';
+import { useObligationGrants } from '../state/useObligationGrants';
 import { BotRecoveryControl } from './BotRecoveryControl';
 import { botAvatarDisplayColor } from '../BotAvatar';
 import { BotInputContext } from './BotInputContext';
 import '../styles/bot-conversation.css';
 import { taskConversationContext, type TaskConversationContext, type TaskConversationRequest } from '../state/taskConversationState';
-import { clientApi } from '../../clientApi';
 
 export function BotConversation({
   workspaceId,
@@ -130,28 +131,17 @@ export function BotConversation({
   const openEvidence = (evidenceRef: string) => onInspect?.({ replyId: replyDetailsId ?? undefined,
     evidence: { ok: false, evidenceRef, kind: 'observation', summary: '', truncated: false, code: '' }, rounds: null });
 
-  const [obligationGrant, setObligationGrant] = useState<{ grantId: string; items: readonly { sessionId: string }[] } | null>(null);
-  useEffect(() => {
-    const list = window.peerAgent?.projectAgentListObligationGrants;
-    if (!list) return undefined;
-    let closed = false;
-    const load = () => {
-      void list({ workspaceId }).then(result => {
-        const grant = result && 'grants' in result ? result.grants?.find(item => item.status === 'pending') : null;
-        if (!closed) setObligationGrant(grant ? { grantId: grant.grantId, items: grant.items } : null);
-      }).catch(() => {});
-    };
-    load();
-    const timer = window.setInterval(load, 2000);
-    return () => { closed = true; window.clearInterval(timer); };
-  }, [workspaceId, workIndex]);
+  const obligations = useObligationGrants(workspaceId, profile.agentConversationId, onRefreshWork);
   return (
     <BotInputContext.Provider value={conversation.answer}>
     <BotWorkPanel workspaceId={workspaceId} workIndex={workIndex} rows={conversation.rows} messages={conversation.messages}
       recovering={Boolean(conversation.runtimeRecovery)} headerTarget={workPanelTarget} i18n={i18n}
-      obligationGrant={obligationGrant}
-      onObligationConfirm={grantId => { void clientApi.projectAgentDecideObligation({ workspaceId, grantId, decision: 'confirm' }).then(() => onRefreshWork()); }}
-      onObligationRevoke={grantId => { void clientApi.projectAgentDecideObligation({ workspaceId, grantId, decision: 'revoke' }).then(() => setObligationGrant(null)); }}
+      obligationGrants={obligations.grants}
+      obligationError={obligations.error}
+      obligationSubmittingId={obligations.submittingId}
+      onObligationConfirm={obligations.confirm}
+      onObligationReject={obligations.reject}
+      onObligationRetry={obligations.retry}
       onOpenTask={onLocateSession} onInspect={onInspect} onRefreshWork={onRefreshWork}>
     <div className="bot-convo" style={{
       '--bot-message-accent': botAvatarDisplayColor(avatar.kind === 'generated' ? avatar.color : generateAvatar(workspaceId).color),
@@ -212,6 +202,8 @@ export function BotConversation({
         />
       )}
       {conversation.stopError ? <p className="bot-thread-error" role="alert">{i18n.t('projectAgent.chat.stopFailed')}</p> : null}
+      <ObligationGrantList grants={obligations.grants} error={obligations.error} submittingId={obligations.submittingId}
+        i18n={i18n} onConfirm={obligations.confirm} onReject={obligations.reject} onRetry={obligations.retry} />
       <BotConversationComposer key={`composer:${workspaceId}`} workspaceId={workspaceId}
         conversation={conversation} profile={profile} modelControls={modelControls} label={label} i18n={i18n} taskRequest={taskRequest}
         onJump={messageId => { setHighlightedId(messageId); setHighlightRequestId(value => value + 1); }} />

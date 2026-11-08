@@ -20,6 +20,7 @@ import {
   projectHistory,
 } from '@peer-agent/runtime-node';
 import { projectBotRecoveryStatus, projectModelRoutingMenuOption } from '@peer-agent/protocol';
+import { appendObligationLog } from '@peer-agent/runtime-node/obligation-log';
 import { settleActivePermissionRequest, sharedOneTimeApprovals } from '../chat-runtime/permission-gate.mjs';
 import { projectBotModelViews } from './model-controls.mjs';
 import { profilePolicyPatch } from './profile-policy.mjs';
@@ -382,21 +383,36 @@ export function createProjectAgentApplicationService({
 
   async function listObligationGrants(payload = {}) {
     if (!open()) return disabled();
-    if (typeof sessions?.inspectExecutionObligations !== 'function') return { ok: false, code: 'UNAVAILABLE' };
-    if (typeof sessions?.listPendingObligationGrants === 'function') return sessions.listPendingObligationGrants(payload.workspaceId);
-    return sessions.inspectExecutionObligations({ ...payload, actor: 'user_panel' });
+    const workspaceId = typeof payload.workspaceId === 'string' ? payload.workspaceId : null;
+    const parentConversationId = typeof payload.parentConversationId === 'string' ? payload.parentConversationId : undefined;
+    let result;
+    if (typeof sessions?.listPendingObligationGrants === 'function') result = await sessions.listPendingObligationGrants(workspaceId, parentConversationId);
+    else if (typeof sessions?.inspectExecutionObligations === 'function') result = await sessions.inspectExecutionObligations({ ...payload, actor: 'user_panel' });
+    else result = { ok: false, code: 'UNAVAILABLE' };
+    appendObligationLog({ event: 'list', workspaceId, count: Array.isArray(result?.grants) ? result.grants.length : 0,
+      code: result?.ok === false ? (result.code || result.error || 'failed') : null });
+    return result;
   }
 
   async function decideObligation(payload = {}) {
     if (!open()) return disabled();
-    if (typeof sessions?.confirmObligationGrant !== 'function') return { ok: false, code: 'UNAVAILABLE' };
+    const workspaceId = typeof payload.workspaceId === 'string' ? payload.workspaceId : null;
+    const grantId = typeof payload.grantId === 'string' ? payload.grantId : null;
+    if (typeof sessions?.confirmObligationGrant !== 'function') {
+      appendObligationLog({ event: 'decide', workspaceId, grantId, ok: false, code: 'UNAVAILABLE' });
+      return { ok: false, code: 'UNAVAILABLE' };
+    }
     const actor = { ...payload, actor: 'user_panel' };
-    if (payload.decision === 'revoke') return sessions.revokeObligationGrant(actor);
-    const confirmed = await sessions.confirmObligationGrant(actor);
-    if (!confirmed?.ok) return confirmed;
-    return sessions.resolveExecutionObligation({ ...actor, items: confirmed.grant.items.map(item => ({
-      sessionId: item.sessionId, operationId: item.operationId, actions: item.actions,
-    })), evidenceRevision: confirmed.grant.items[0]?.evidenceRevision, idempotencyKey: `panel-${payload.grantId}` });
+    const result = payload.decision === 'revoke' ? await sessions.revokeObligationGrant(actor) : await (async () => {
+      const confirmed = await sessions.confirmObligationGrant(actor);
+      if (!confirmed?.ok) return confirmed;
+      return sessions.resolveExecutionObligation({ ...actor, items: confirmed.grant.items.map(item => ({
+        sessionId: item.sessionId, operationId: item.operationId, actions: item.actions,
+      })), evidenceRevision: confirmed.grant.items[0]?.evidenceRevision, idempotencyKey: `panel-${payload.grantId}` });
+    })();
+    appendObligationLog({ event: 'decide', workspaceId, grantId, ok: result?.ok === true,
+      code: result?.ok === false ? (result.error || result.code || 'failed') : null });
+    return result;
   }
 
   async function cancelSession(payload = {}) {

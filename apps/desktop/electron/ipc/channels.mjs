@@ -464,6 +464,7 @@ const EVENT_CHANNELS = Object.freeze([
   'llm:oauth:pending',
   'llm:oauth:refreshed',
   'project-agent:changed',
+  'project-agent:obligation-grants',
   'project-agent:conversation-changed',
   'project-agent:activity',
   'quick-chat-popover:state',
