@@ -1,3 +1,4 @@
+import { failureDiagnostic } from './failure-diagnostic.ts';
 import { isParallelSafeLocalToolBatch } from '@peer-agent/runtime-core';
 
 import type {
@@ -222,11 +223,13 @@ export function createRuntimePipeline<
         }
 
         const detail = errorMessage(error);
+        const diagnostic = failureDiagnostic(error);
         emit({
           type: 'runtime.error',
           ...eventBase,
           code: 'runtime_pipeline_error',
           message: detail,
+          ...(diagnostic ? { details: diagnostic } : {}),
         });
         // Preserve partial state (already-executed tools / model messages) so
         // hosts can recover instead of discarding progress on provider stream errors.
@@ -236,6 +239,7 @@ export function createRuntimePipeline<
           turns,
           toolCalls,
           reason: detail,
+          ...(diagnostic ? { diagnostic } : {}),
         };
       }
     },

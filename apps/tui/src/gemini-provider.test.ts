@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { isPromptTooLongError } from '@peer-agent/runtime-core';
 
 import {
   createGeminiProvider,
@@ -167,4 +168,17 @@ describe('createGeminiProvider', () => {
       }),
     ).rejects.toMatchObject({ status: 401 });
   });
+});
+
+// Exercise the legacy constructor through the real provider entrance.
+test('HTTP context errors remain recognizable without forwarding upstream text', async () => {
+  const provider = createGeminiProvider({
+    providerId: 'legacy-fixture', authMethod: 'api_key', getApiKey: async () => 'fixture-key',
+    sendStream: async () => ({ok:false,status:400,errorText:JSON.stringify({error:{code:'context_length_exceeded',message:'PRIVATE_ECHO'}})}),
+  });
+  const error = await provider.stream({model:'fixture',messages:[]}).catch(error => error);
+  expect(error.status).toBe(400);
+  expect(error.diagnostic.code).toBe('context_length_exceeded');
+  expect(isPromptTooLongError(error.status, error.message)).toBe(true);
+  expect(error.message).not.toContain('PRIVATE_ECHO');
 });

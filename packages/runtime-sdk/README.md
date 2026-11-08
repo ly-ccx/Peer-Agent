@@ -50,3 +50,9 @@ These are parallel product surfaces, not dependency chains.
 ## Version policy
 
 During beta, protocol / runtime-core / runtime-sdk follow the repository root `VERSION` and publish with the same npm dist-tag as CLI/Desktop releases.
+
+## Structured failure diagnostics
+
+Failed pipeline results may include `diagnostic: RuntimeFailureDiagnostic`; the corresponding `runtime.error` event carries the same safe facts in `details`. Existing `reason`, `message`, `status` and event `code` behavior is retained. The diagnostic admits only bounded categories, source, HTTP status, optional upstream status, safe request ID and numeric budget facts. Arbitrary error properties and raw provider bodies are not forwarded. State remains available for the host to reconcile committed progress.
+
+The diagnostic is descriptive. It does not grant retry permission or prove that no external effect occurred. Hosts must keep their existing permission, replay-safety and durable checkpoint rules.

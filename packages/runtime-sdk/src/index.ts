@@ -21,6 +21,7 @@ export type {
   RuntimeSdkContextAccountingEvent,
   RuntimeSdkMessageCompletedEvent,
   RuntimeSdkRuntimeErrorEvent,
+  RuntimeFailureDiagnostic,
   RuntimeSdkHookCompletedEvent,
   RuntimeSdkPermissionRequestedEvent,
   RuntimeSdkPermissionResolvedEvent,
