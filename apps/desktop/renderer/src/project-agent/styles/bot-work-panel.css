@@ -47,6 +47,10 @@
 .bot-work-layout[data-work-panel-wide="false"] > .bot-work-panel {
   width: max(var(--bot-work-panel-width), 21.5rem);
 }
+/* Compact panel floats over the column. Keep the reading placeholder in the visible area. */
+.bot-work-layout[data-work-panel-open="true"][data-work-panel-wide="false"] .bot-thread[data-reading="true"] {
+  padding-inline-end: calc(min(max(var(--bot-work-panel-width), 21.5rem), 100% - var(--space-8)) + var(--space-4));
+}
 .bot-work-panel [hidden] { display: none; }
 .bot-work-panel-head { display: flex; flex: none; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-3) var(--space-3) var(--space-2) var(--space-5); }
 .bot-work-panel-head h2 { display: flex; align-items: center; gap: var(--space-2); min-width: 0; margin: 0; font-size: var(--ui-font-body); font-weight: 500; }

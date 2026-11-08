@@ -174,6 +174,19 @@
   margin: 0;
 }
 
+/* The reading placeholder fills the column above the composer, so avatar and
+   label stay centered as the window or work panel changes the column size. */
+.bot-thread[data-reading="true"] {
+  justify-content: center;
+  padding-block: 0;
+}
+
+.bot-thread[data-reading="true"] > .bot-thread-empty {
+  flex-grow: 1;
+  justify-content: center;
+  width: 100%;
+}
+
 .bot-system:has(.bot-stopped-reply) {
   display: flex;
   flex-direction: column;
@@ -1058,6 +1071,50 @@
   animation: motion-shimmer 1.6s linear infinite;
 }
 
+/* Reading copy uses one sweep. The hero scales type; compact notes keep their own size.
+   background-position percentages place that point of a 220% image on the same point of
+   the text box. 110% parks the band just off the leading edge and -10% parks it just off
+   the trailing edge, so one linear pass crosses the glyphs and both ends rest on the ink. */
+.bot-reading-shimmer {
+  --reading-ink: var(--graphite-soft);
+  --reading-sheen: color-mix(in srgb, var(--graphite-base) 72%, black);
+  display: inline-block;
+  max-width: 100%;
+  background-color: var(--reading-ink);
+  background-image: linear-gradient(
+    100deg,
+    transparent 0 30%,
+    var(--reading-sheen) 44%,
+    var(--reading-sheen) 56%,
+    transparent 70% 100%
+  );
+  background-repeat: no-repeat;
+  background-size: 220% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: var(--reading-ink);
+  --motion-shimmer-from: 110%;
+  --motion-shimmer-x: -10%;
+  animation: motion-shimmer 2.2s linear infinite;
+}
+
+[data-theme="dark"] .bot-reading-shimmer {
+  --reading-sheen: color-mix(in srgb, var(--graphite-base) 30%, white);
+}
+
+.bot-thread-empty.is-reading .bot-reading-shimmer {
+  --reading-ink: var(--graphite-soft);
+  font-size: var(--ui-font-heading-md);
+  font-weight: 600;
+  line-height: var(--ui-line-tight);
+  text-align: center;
+}
+
+[data-theme="dark"] .bot-thread-empty.is-reading .bot-reading-shimmer {
+  --reading-ink: var(--graphite-fade);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .bot-agent-activity[data-agent-running='true'] .bot-agent-marker {
     mask-image: none;
@@ -1069,6 +1126,7 @@
   .bot-reply-context .bot-avatar svg,
   .bot-agent-marker,
   .bot-thinking-status-label,
+  .bot-reading-shimmer,
   .bot-process-current.is-running,
   .bot-tool-step-label.is-running,
   .bot-work-status.is-running {
@@ -1082,6 +1140,21 @@
     background: none;
     -webkit-text-fill-color: currentColor;
     color: var(--graphite-soft);
+  }
+
+  .bot-reading-shimmer {
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    color: var(--reading-ink, var(--graphite-soft));
+  }
+}
+
+@media (forced-colors: active) {
+  .bot-reading-shimmer {
+    background: none;
+    -webkit-text-fill-color: CanvasText;
+    color: CanvasText;
+    animation: none;
   }
 }
 
