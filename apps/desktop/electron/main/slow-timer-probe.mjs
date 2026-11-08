@@ -402,22 +402,20 @@ function installForElectron() {
   installConsoleSlowProbe({ log });
   watchEventLoop(log);
   import('electron').then(({ app }) => hookRendererLongTaskConsole(app, write)).catch(() => {});
-  // 每次 stringify / write 都记实际字节和耗时。导入失败不能阻止主进程启动。
-  import(new URL('../../../../packages/runtime-node/src/goal-plan-files.mjs', import.meta.url).href)
+  // 计划写盘和诊断相位都走 runtime-node 的 dist 子路径。打包后的 asar 只保留这份 dist，
+  // 而且和主进程实际执行的是同一个模块实例。导入失败不能阻止主进程启动。
+  import('@peer-agent/runtime-node/goal-plan-files')
     .then(({ setJsonWriteObserver }) => {
       setJsonWriteObserver((sample) => {
         log(formatPlanWrite(sample));
       });
     })
     .catch(() => {});
-  // 运行中的 store 在 dist，单测走 src。两份都装上，实际执行的那份才会记下 hit/miss。
-  for (const relative of ['dist/diagnostic-phase.mjs', 'src/diagnostic-phase.mjs']) {
-    import(new URL(`../../../../packages/runtime-node/${relative}`, import.meta.url).href)
-      .then(({ setDiagnosticPhaseObserver }) => {
-        setDiagnosticPhaseObserver((name, fields) => recordDiagnosticPhase(name, fields));
-      })
-      .catch(() => {});
-  }
+  import('@peer-agent/runtime-node/diagnostic-phase')
+    .then(({ setDiagnosticPhaseObserver }) => {
+      setDiagnosticPhaseObserver((name, fields) => recordDiagnosticPhase(name, fields));
+    })
+    .catch(() => {});
 }
 
 try {

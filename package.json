@@ -16,6 +16,7 @@
     "typecheck": "pnpm -r typecheck",
     "context:parity-check": "node scripts/check-architecture-governance.mjs",
     "architecture:check": "node scripts/check-architecture-governance.mjs && pnpm ui:check",
+    "check:packaged-main": "node scripts/check-packaged-main-imports.mjs",
     "marketplace:build": "node marketplace/build-catalog.mjs",
     "marketplace:test": "node --test marketplace/*.test.mjs",
     "changelog:test": "node --test scripts/build-changelog.test.mjs scripts/check-release-readiness.test.mjs scripts/package-cli-archive.test.mjs scripts/check-desktop-release-matrix.test.mjs",
