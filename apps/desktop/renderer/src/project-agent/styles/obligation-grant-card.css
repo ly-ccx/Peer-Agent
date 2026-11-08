@@ -22,7 +22,8 @@
 .obligation-grant-card li { padding: var(--space-1) 0; font-size: var(--ui-font-control); line-height: var(--ui-line-body); overflow-wrap: anywhere; }
 .obligation-grant-consequence { margin: var(--space-2) 0 0; color: var(--graphite-soft); font-size: var(--ui-font-meta); line-height: var(--ui-line-body); }
 .obligation-grant-details { margin-top: var(--space-2); }
-.obligation-grant-details summary { cursor: pointer; color: var(--graphite-soft); font-size: var(--ui-font-meta); }
+.obligation-grant-details summary { display: flex; align-items: center; gap: var(--space-1); cursor: pointer; color: var(--graphite-soft); font-size: var(--ui-font-meta); list-style: none; }
+.obligation-grant-details summary::-webkit-details-marker { display: none; }
 .obligation-grant-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
 .obligation-grant-blocked { margin: var(--space-2) 0 0; color: var(--state-danger); font-size: var(--ui-font-meta); line-height: var(--ui-line-body); }
 .obligation-grant-code { display: block; color: var(--graphite-soft); font-size: var(--ui-font-caption); }

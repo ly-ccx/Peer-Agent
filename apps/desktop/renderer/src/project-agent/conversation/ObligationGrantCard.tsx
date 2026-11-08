@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
+import { PeerIcon } from '../../ui/icons';
 import '../styles/obligation-grant-card.css';
 
 export interface ObligationGrantItem {
@@ -62,7 +63,7 @@ export function ObligationGrantCard({ grant, submitting, blocked, i18n, onConfir
     {collapsed ? null : <ul>{grant.items.map(item => <li key={item.sessionId}>{itemLabel(item, i18n)}</li>)}</ul>}
     <p className="obligation-grant-consequence">{i18n.t('projectAgent.workPanel.obligationConsequence')}</p>
     {gaps.length ? <details className="obligation-grant-details">
-      <summary>{i18n.t('projectAgent.workPanel.obligationDetails')}</summary>
+      <summary><PeerIcon name="chevronRight" size={12} />{i18n.t('projectAgent.workPanel.obligationDetails')}</summary>
       <ul>{gaps.map(item => <li key={`${item.sessionId}:${item.gap}`}>{gapLabel(item.gap, i18n)}</li>)}</ul>
     </details> : null}
     {blocked ? <p className="obligation-grant-blocked" role="status">{i18n.t('projectAgent.workPanel.obligationBlocked')}<span className="obligation-grant-code">{blocked.code}</span></p> : null}
