@@ -111,6 +111,18 @@ export function selectPendingGrants(grants, { parentConversationId, ownsSession 
   return { grants: kept, decisions };
 }
 
+const GRANT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Display-only label. It is not written back onto the grant or its evidence. */
+export function obligationDisplayTitle(item, projectedTitle) {
+  const stored = typeof item?.title === 'string' ? item.title.trim() : '';
+  const projected = typeof projectedTitle === 'string' ? projectedTitle.trim() : '';
+  const usable = value => Boolean(value) && value !== item?.sessionId && !GRANT_UUID.test(value);
+  if (usable(stored)) return { title: stored, shortId: null };
+  if (usable(projected)) return { title: projected, shortId: null };
+  const compact = String(item?.sessionId || '').replace(/[^0-9a-f]/gi, '');
+  return { title: null, shortId: (compact || 'unknown').slice(0, 8) };
+}
+
 export function classifyExecutionObligation({ plan, control, claims = [], identity, writerEpoch, disposition }) {
   const ownership = sessionFactsFromPlan(plan).executionOwnership;
   const proof = proveRecorder(control?.recorder, identity);
@@ -231,10 +243,16 @@ export function createExecutionObligationService({ plans, readControl, scheduler
     }
     return { items };
   }
-  function write(workspaceId, entry) {
+  function writable(workspaceId) {
     const target = store(workspaceId);
-    if (typeof target?.writeObligation !== 'function') throw new Error('obligation_storage_unavailable');
-    target.writeObligation(entry);
+    if (typeof target?.read !== 'function' || typeof target?.writeObligation !== 'function') throw new Error('obligation_storage_unavailable');
+    return target;
+  }
+  function write(workspaceId, entry) {
+    writable(workspaceId).writeObligation(entry);
+  }
+  function grantsOf(workspaceId) {
+    return writable(workspaceId).read()?.obligationGrants || {};
   }
   function notify(workspaceId, grantId, status) {
     try { onChanged?.({ workspaceId, grantId: grantId || null, status: status || null }); }
@@ -320,8 +338,7 @@ export function createExecutionObligationService({ plans, readControl, scheduler
     },
     confirm(input) {
       if (input.actor !== 'user_panel') return { ok: false, error: 'authorization_required' };
-      const snap = store(input.workspaceId)?.read?.() || {};
-      const grant = snap.obligationGrants?.[input.grantId];
+      const grant = grantsOf(input.workspaceId)[input.grantId];
       if (!grant) return { ok: false, error: 'grant_not_found' };
       if (grant.status !== 'pending') return { ok: false, error: `grant_${grant.status}` };
       if (grant.principal.workspaceId !== input.workspaceId || input.parentConversationId && grant.principal.parentConversationId !== input.parentConversationId) return { ok: false, error: 'authorization_scope_mismatch' };
@@ -337,8 +354,7 @@ export function createExecutionObligationService({ plans, readControl, scheduler
       return { ok: true, grant: confirmed };
     },
     revoke(input) {
-      const snap = store(input.workspaceId)?.read?.() || {};
-      const grant = snap.obligationGrants?.[input.grantId];
+      const grant = grantsOf(input.workspaceId)[input.grantId];
       if (!grant || grant.status !== 'pending') return { ok: false, error: grant ? `grant_${grant.status}` : 'grant_not_found' };
       write(input.workspaceId, { kind: 'obligation_grant', minimumExecutorVersion: OBLIGATION_FORMAT_VERSION, grant: { ...grant, status: 'revoked', revokedAt: now(), revision: grant.revision + 1, updatedAt: now() } });
       notify(input.workspaceId, grant.grantId, 'revoked');
@@ -346,8 +362,7 @@ export function createExecutionObligationService({ plans, readControl, scheduler
     },
     resolve(input) {
       if (input.role && input.role !== 'project_agent' && input.actor !== 'user_panel') return { ok: false, error: 'not_main_bot' };
-      const snap = store(input.workspaceId)?.read?.() || {};
-      const grant = snap.obligationGrants?.[input.grantId];
+      const grant = grantsOf(input.workspaceId)[input.grantId];
       if (!grant) return { ok: false, error: 'grant_not_found' };
       if (grant.principal.workspaceId !== input.workspaceId || input.parentConversationId && grant.principal.parentConversationId !== input.parentConversationId) return { ok: false, error: 'authorization_scope_mismatch' };
       const key = canonicalGrantKey(grant.grantId, input.items || [], input.evidenceRevision || grant.items[0]?.evidenceRevision);

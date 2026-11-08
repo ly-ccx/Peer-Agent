@@ -576,7 +576,10 @@ export function registerDesktopProjectAgent({
     openObligationRuntime: async workspaceId => {
       const synced = await host?.sync?.([workspaceId]);
       const failed = synced?.outcomes?.find(row => row.workspaceId === workspaceId && row.ok === false);
-      if (failed) throw Object.assign(new Error(failed.error || 'obligation_writer_unavailable'), { code: failed.error || 'obligation_writer_unavailable' });
+      if (failed) {
+        const status = host.recovery.status(workspaceId);
+        throw Object.assign(new Error(failed.error || 'obligation_writer_unavailable'), { code: failed.error || 'obligation_writer_unavailable', legacy: status?.legacy || null });
+      }
     },
     stopResponseTurn: ({ workspaceId, turnId }) => {
       if (!ownsProject(workspaceId)) return { ok: false, code: 'HOST_OFFLINE' };

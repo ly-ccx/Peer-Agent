@@ -20,7 +20,8 @@ const { build } = createRequire(require.resolve('vite'))('esbuild');
 const epoch = 'syn-host-now:2026-11-08T04:00:00.000Z';
 const oldEpoch = 'syn-host-old:2026-11-07T08:00:00.000Z';
 const recorder = { bootId: 'boot-now', pid: 4242, pidStart: 'linux:100', hostId: 'host-old', acquiredAt: '2026-11-07T08:00:00.000Z' };
-const titles = { 'legacy-a': '旧记录甲', 'legacy-b': '旧记录乙', 'dead-a': '死亡记录甲', 'dead-b': '死亡记录乙', 'reject-me': '单独拒绝', 'legacy-open': '无归属旧授权', 'foreign': '其他机器人' };
+const untitled = '07ed2604-1111-4111-8111-111111111111';
+const titles = { 'legacy-a': '旧记录甲', 'legacy-b': '旧记录乙', 'dead-a': '死亡记录甲', 'dead-b': '死亡记录乙', 'reject-me': '单独拒绝', 'legacy-open': '无归属旧授权', 'foreign': '其他机器人', [untitled]: '' };
 
 function plan(id) {
   return { planId: `plan-${id}`, conversationId: `child-${id}`, title: titles[id], status: 'paused', targetWorkspacePath: home,
@@ -59,15 +60,21 @@ const runtimeRoot = path.join(home, 'runtime');
 const application = createProjectAgentApplicationService({
   enabled: () => true,
   sessions: {
-    list: () => [...plans.values()].map(row => ({ sessionId: row.delegationOrigin.sessionId, workspaceId: 'workspace', origin: row.delegationOrigin })),
+    list: () => [...plans.values()].map(row => ({ sessionId: row.delegationOrigin.sessionId, workspaceId: 'workspace', title: row.title, origin: row.delegationOrigin })),
     listPendingObligationGrants: () => ({ ok: false, code: 'obligation_store_unreadable' }),
     confirmObligationGrant: input => service.confirm(input),
     revokeObligationGrant: input => service.revoke(input),
     resolveExecutionObligation: input => service.resolve(input),
   },
   readPersistedObligationGrants: workspaceId => readPersistedObligationGrants({ rootDir: runtimeRoot, workspaceId }),
-  obligationBinding: () => mode === 'broken' ? 'absent' : 'registered',
-  readRecovery: () => mode === 'broken' ? { status: 'failed', phase: 'execution', error: 'coordination_schema_unsupported' } : null,
+  obligationBinding: () => mode === 'broken' || mode === 'blocked' ? 'absent' : 'registered',
+  readRecovery: () => mode === 'blocked'
+    ? { status: 'failed', phase: 'inputs', error: 'coordination_legacy_changed', legacy: { check: 'writer_fence_unrecognized', seal: 'present', change: 'metadata', file: 'writer_fence' } }
+    : mode === 'broken' ? { status: 'failed', phase: 'execution', error: 'coordination_schema_unsupported' } : null,
+  openObligationRuntime: async () => {
+    if (mode !== 'blocked') return;
+    throw Object.assign(new Error('coordination_legacy_changed'), { code: 'coordination_legacy_changed', legacy: { check: 'writer_fence_unrecognized', seal: 'present', change: 'metadata', file: 'writer_fence' } });
+  },
 });
 
 function outputOf(result) {
@@ -95,6 +102,11 @@ ipcMain.handle('project-agent:decide-obligation', async (_event, payload) => app
 globalThis.peerObligationCard = {
   failList(value) { failList = value === true; },
   notify() { for (const win of windows) win.webContents.send('project-agent:obligation-grants', { workspaceId: 'workspace' }); },
+  async decide() {
+    const snap = store.read();
+    const grant = Object.values(snap.obligationGrants || {}).find(row => row.items?.some(item => item.sessionId === untitled));
+    return application.decideObligation({ workspaceId: 'workspace', grantId: grant?.grantId, decision: 'confirm', parentConversationId: 'parent' });
+  },
   snapshot() {
     const snap = store.read();
     return {
@@ -114,10 +126,11 @@ app.whenReady().then(async () => {
     const four = await tool('request_obligation_authorization', 'local.delegation.request_obligation_authorization', requestFrom(inspected, ['legacy-a', 'legacy-b', 'dead-a', 'dead-b']));
     const one = await tool('request_obligation_authorization', 'local.delegation.request_obligation_authorization', requestFrom(inspected, ['reject-me']));
     const legacy = await service.requestAuthorization({ workspaceId: 'workspace', role: 'project_agent', items: requestFrom(inspected, ['legacy-open']).items });
+    const unnamed = await tool('request_obligation_authorization', 'local.delegation.request_obligation_authorization', requestFrom(inspected, [untitled]));
     const other = { ...context, conversationId: 'other-bot' };
     const foreignInspect = outputOf(await provider.executeCapability({ call: { toolCallId: 'inspect-foreign', capabilityId: 'local.delegation.inspect_execution_obligation', arguments: { sessionIds: ['foreign'] } } }, other));
     const foreign = outputOf(await provider.executeCapability({ call: { toolCallId: 'foreign', capabilityId: 'local.delegation.request_obligation_authorization', arguments: requestFrom(foreignInspect, ['foreign']) } }, other));
-    const failed = [['four', four], ['one', one], ['legacy', legacy], ['foreign', foreign]].find(([, result]) => result?.ok !== true);
+    const failed = [['four', four], ['one', one], ['legacy', legacy], ['unnamed', unnamed], ['foreign', foreign]].find(([, result]) => result?.ok !== true);
     if (failed) throw new Error(`${failed[0]}:${failed[1]?.error || 'request failed'}`);
   }
   if (mode === 'broken') {
@@ -139,8 +152,10 @@ app.whenReady().then(async () => {
     preload: path.join(desktop, 'electron/preload/preload.cjs'), contextIsolation: true, nodeIntegration: false,
   } });
   windows = [win];
+  const tokens = readFileSync(path.join(desktop, 'renderer/src/styles/tokens.css'), 'utf8');
+  const forms = readFileSync(path.join(desktop, 'renderer/src/ui/forms/forms.css'), 'utf8');
   const cardCss = readFileSync(path.join(desktop, 'renderer/src/project-agent/styles/obligation-grant-card.css'), 'utf8');
-  const html = `<html data-theme="light"><meta charset="utf-8"><style>${cardCss} body{font-family:sans-serif;margin:16px}</style><body><div id="root"></div><script>${result.outputFiles[0].text.replaceAll('</script', '<\\/script')}</script></body></html>`;
+  const html = `<html data-theme="light"><meta charset="utf-8"><style>${tokens}${forms}${cardCss} body{margin:0;background:var(--paper-base);color:var(--graphite-base);font-family:sans-serif} .bot-convo{--bot-column-width:min(50rem,calc(100% - 3rem));--bot-column-gutter:1.5rem;display:flex;flex-direction:column;min-height:100vh}</style><body><div id="root"></div><script>${result.outputFiles[0].text.replaceAll('</script', '<\\/script')}</script></body></html>`;
   const pageFile = path.join(home, 'obligation-card.html');
   writeFileSync(pageFile, html);
   await win.loadFile(pageFile);

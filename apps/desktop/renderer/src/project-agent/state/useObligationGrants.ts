@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { clientApi } from '../../clientApi';
-import type { ObligationGrantView } from '../conversation/ObligationGrantCard';
+import type { ObligationGrantView, ObligationWriterState } from '../conversation/ObligationGrantCard';
 
 const POLL_MS = 15_000;
 
@@ -8,6 +8,7 @@ const POLL_MS = 15_000;
 export function useObligationGrants(workspaceId: string, parentConversationId: string | undefined, onRefreshWork?: () => Promise<void>) {
   const [grants, setGrants] = useState<readonly ObligationGrantView[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [writer, setWriter] = useState<ObligationWriterState | null>(null);
   const [submittingId, setSubmittingId] = useState<string | null>(null);
   const load = useCallback(async () => {
     const list = clientApi.projectAgentListObligationGrants;
@@ -19,8 +20,11 @@ export function useObligationGrants(workspaceId: string, parentConversationId: s
         return;
       }
       setError(null);
+      setWriter(result.writer?.ok === false ? result.writer : null);
       setGrants((result.grants || []).filter(grant => grant.status === 'pending').map(grant => ({
-        grantId: grant.grantId, status: grant.status, items: grant.items || [],
+        grantId: grant.grantId, status: grant.status, items: (grant.items || []).map(item => ({
+          sessionId: item.sessionId, title: item.displayTitle || undefined, shortId: item.shortId || undefined, gaps: item.gaps || [],
+        })),
       })));
     } catch {
       setError('UNAVAILABLE');
@@ -42,7 +46,9 @@ export function useObligationGrants(workspaceId: string, parentConversationId: s
         workspaceId, grantId, decision, ...(parentConversationId ? { parentConversationId } : {}),
       });
       if (!result?.ok) {
-        setError(result?.code || result?.error || 'UNAVAILABLE');
+        const code = result?.code || result?.error || 'UNAVAILABLE';
+        if (typeof code === 'string' && code.startsWith('coordination_')) setWriter({ ok: false, code, ...(result.legacy || {}) });
+        else setError(code);
         return;
       }
       setError(null);
@@ -55,7 +61,7 @@ export function useObligationGrants(workspaceId: string, parentConversationId: s
     }
   }, [workspaceId, parentConversationId, load, onRefreshWork]);
   return {
-    grants, error, submittingId, retry: () => { void load(); },
+    grants, error, writer, submittingId, retry: () => { void load(); },
     confirm: (grantId: string) => { void decide(grantId, 'confirm'); },
     reject: (grantId: string) => { void decide(grantId, 'revoke'); },
   };

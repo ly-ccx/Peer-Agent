@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createExecutionObligationService, readPersistedObligationGrants, selectPendingGrants } from './execution-obligation.mjs';
+import { createExecutionObligationService, obligationDisplayTitle, readPersistedObligationGrants, selectPendingGrants } from './execution-obligation.mjs';
 import { createExecutionScheduler } from './execution-scheduler.mjs';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
 
@@ -66,6 +66,51 @@ test('legacy grants stay visible only for the owning bot', () => {
   });
   assert.deepEqual(selected.grants.map(grant => grant.grantId), ['legacy', 'mine']);
   assert.deepEqual(selected.decisions.map(item => item.reason), ['legacy_session_owner', 'parent_mismatch', 'parent_match']);
+});
+
+test('raising the ledger to format 11 does not reject an already fenced baseline', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'peer-obligation-fence-'));
+  const opt = { rootDir: root, workspaceId: 'w', holdsLease: () => true, leaseEpoch: () => 'host:1', formatVersion: 2, fenceLegacyWrites: true };
+  const legacy = createWorkCoordinationStore({ ...opt, formatVersion: 1, fenceLegacyWrites: false });
+  legacy.saveWork({ workId: 'goal', state: 'runnable' });
+  legacy.close();
+  const first = createWorkCoordinationStore(opt);
+  await first.prepare();
+  unlinkSync(path.join(root, 'w', 'coordination-fence.json'));
+  first.writeObligation({ kind: 'obligation_grant', minimumExecutorVersion: 11, grant: {
+    grantId: 'g1', status: 'pending', revision: 1, principal: { workspaceId: 'w' },
+    items: [{ sessionId: 's', operationId: 'o', actions: ['retire_follow_up'], evidenceRevision: 'r' }],
+  } });
+  const sealPath = path.join(root, 'w', 'coordination-v2/legacy-seal.json');
+  const seal = readFileSync(sealPath);
+  first.close();
+  const second = createWorkCoordinationStore(opt);
+  await second.prepare();
+  assert.equal(second.read().obligationGrants.g1.status, 'pending');
+  assert.deepEqual(readFileSync(sealPath), seal);
+  second.close();
+  appendFileSync(path.join(root, 'w', 'coordination-v2/baseline.jsonl'), '\n');
+  const third = createWorkCoordinationStore(opt);
+  await assert.rejects(third.prepare(), error => {
+    assert.equal(error.code, 'coordination_legacy_changed');
+    assert.equal(error.legacy.seal, 'present');
+    assert.equal(error.legacy.change, 'content');
+    assert.equal(error.legacy.file, 'baseline');
+    return true;
+  });
+  assert.deepEqual(readFileSync(sealPath), seal);
+  third.close();
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('a missing writer is not reported as a missing grant', () => {
+  const service = createExecutionObligationService({
+    plans: () => [], readControl: () => null, scheduler: {}, canManage: () => true, storeFor: () => undefined,
+    identity: () => ({}), writerEpochFor: () => 'epoch',
+  });
+  assert.throws(() => service.confirm({ actor: 'user_panel', workspaceId: 'w', grantId: 'g', parentConversationId: 'parent' }), /obligation_storage_unavailable/);
+  assert.equal(obligationDisplayTitle({ sessionId: '07ed2604-1111-4111-8111-111111111111', title: '07ed2604-1111-4111-8111-111111111111' }, '').shortId, '07ed2604');
+  assert.equal(obligationDisplayTitle({ sessionId: 's', title: 's' }, '旧记录甲').title, '旧记录甲');
 });
 
 test('a missing coordination index is an error, not an empty grant list', () => {

@@ -3,7 +3,34 @@ import { statSync, openSync, closeSync, readFileSync, existsSync, realpathSync, 
 import { open as legacyOpen } from 'node:fs/promises';
 import path from 'node:path';
 
-const legacyError = code => Object.assign(new Error(code), { code });
+const legacyError = (code, legacy) => Object.assign(new Error(code), { code, ...(legacy ? { legacy } : {}) });
+const legacyKind = file => file.endsWith(`${path.sep}baseline.jsonl`) ? 'baseline' : file.endsWith(`${path.sep}coordination.jsonl`) ? 'legacy_journal' : 'journal';
+function sealFact(directory, baseline) {
+  try {
+    const proof = readLegacySeal(directory, baseline);
+    return { seal: proof ? 'present' : 'absent', proof };
+  } catch { return { seal: 'invalid', proof: null }; }
+}
+function changeFact(file, proof) {
+  if (!proof) return 'unknown';
+  try { return statSync(file).size === proof.seal.bytes ? 'metadata' : 'content'; }
+  catch { return 'unknown'; }
+}
+/** Redacted integrity failure. No paths, hashes, or file bytes. */
+export function explainLegacyIntegrity(directory, legacyFile, baseline, receipt) {
+  const version = legacyFileToken(legacyFile);
+  if (version === baseline?.legacyVersion) return null;
+  const { seal, proof } = baseline ? sealFact(directory, baseline) : { seal: 'unknown', proof: null };
+  const file = legacyKind(legacyFile);
+  const change = changeFact(legacyFile, proof);
+  if (version === 'missing') return { check: 'baseline_missing', seal, change: 'content', file };
+  if (baseline?.legacyVersion === 'missing') return { check: 'baseline_appeared', seal, change: 'content', file };
+  if (!proof) return { check: 'token_without_seal', seal: 'absent', change: 'unknown', file };
+  if (change === 'content') return { check: 'seal_content_mismatch', seal, change, file };
+  if (!receipt || receipt.version !== version) return { check: 'index_receipt', seal, change, file: 'index' };
+  if (proof.digest !== receipt.sealDigest) return { check: 'seal_digest', seal, change: 'metadata', file: 'seal' };
+  return null;
+}
 const legacyStatToken = s => `${s.dev}:${s.ino}:${s.size}:${s.mtimeNs}:${s.ctimeNs}`;
 export function legacyFileToken(file) {
   try { return legacyStatToken(statSync(file, { bigint: true })); }
@@ -66,15 +93,15 @@ function publishLegacySeal(directory, baseline, content, assertOwner) {
 export async function prepareLegacyIntegrity({ directory, legacyFile, baseline, assertOwner, onRead }) {
   const version = legacyFileToken(legacyFile);
   if (baseline.legacyVersion === 'missing') {
-    if (version !== 'missing') throw legacyError('coordination_legacy_changed');
+    if (version !== 'missing') throw legacyError('coordination_legacy_changed', explainLegacyIntegrity(directory, legacyFile, baseline, null));
     return null;
   }
   let proof = readLegacySeal(directory, baseline);
   if (version === baseline.legacyVersion && proof) return null;
-  if (!proof && version !== baseline.legacyVersion) throw legacyError('coordination_legacy_changed');
+  if (!proof && version !== baseline.legacyVersion) throw legacyError('coordination_legacy_changed', explainLegacyIntegrity(directory, legacyFile, baseline, null));
   const content = await hashLegacyFile(legacyFile, onRead);
   assertOwner();
-  if (proof && (content.bytes !== proof.seal.bytes || content.sha256 !== proof.seal.sha256)) throw legacyError('coordination_legacy_changed');
+  if (proof && (content.bytes !== proof.seal.bytes || content.sha256 !== proof.seal.sha256)) throw legacyError('coordination_legacy_changed', { check: 'seal_content_mismatch', seal: 'present', change: 'content', file: legacyKind(legacyFile) });
   if (!proof) proof = publishLegacySeal(directory, baseline, content, () => {
     assertOwner(); if (legacyFileToken(legacyFile) !== content.version) throw legacyError('coordination_read_changed');
   });

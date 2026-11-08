@@ -14,13 +14,13 @@ import { replyActivityLabel } from '../state/replyActivityLabel';
 import { useBotWorkPanelData } from '../state/useBotWorkPanelData';
 import { taskConversationContext } from '../state/taskConversationState';
 import { BotWorkSessionRow } from './BotWorkSessionRow';
-import { ObligationGrantList, type ObligationGrantView } from './ObligationGrantCard';
+import { ObligationGrantList, type ObligationGrantView, type ObligationWriterState } from './ObligationGrantCard';
 import { BotWorkMaterials } from './BotWorkMaterials';
 import '../styles/bot-work-panel.css';
 
 /** A stable conversation container; panel visibility never remounts the thread or Composer. */
 export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recovering, headerTarget, i18n,
-  onOpenTask, onInspect, onRefreshWork, obligationGrants = [], obligationError = null, obligationSubmittingId = null,
+  onOpenTask, onInspect, onRefreshWork, obligationGrants = [], obligationError = null, obligationWriter = null, obligationSubmittingId = null,
   onObligationConfirm, onObligationReject, onObligationRetry, children }: {
   readonly workspaceId: string;
   readonly workIndex: BotWorkIndex;
@@ -34,6 +34,7 @@ export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recoverin
   readonly onRefreshWork: () => Promise<void>;
   readonly obligationGrants?: readonly ObligationGrantView[];
   readonly obligationError?: string | null;
+  readonly obligationWriter?: ObligationWriterState | null;
   readonly obligationSubmittingId?: string | null;
   readonly onObligationConfirm?: (grantId: string) => void;
   readonly onObligationReject?: (grantId: string) => void;
@@ -126,7 +127,7 @@ export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recoverin
       <header className="bot-work-panel-head"><h2 id={`${id}-title`}><PeerIcon name="blocks" size={16} />{i18n.t('projectAgent.workPanel.title')}</h2>
         <button ref={closeButton} type="button" className="ui-button is-icon" aria-label={i18n.t('projectAgent.workPanel.close')} onClick={close}><PeerIcon name="panelRight" size={16} /></button>
       </header>
-      <ObligationGrantList grants={obligationGrants} error={obligationError} submittingId={obligationSubmittingId}
+      <ObligationGrantList variant="panel" grants={obligationGrants} error={obligationError} writer={obligationWriter} submittingId={obligationSubmittingId}
         i18n={i18n} onConfirm={onObligationConfirm || (() => {})} onReject={onObligationReject || (() => {})} onRetry={onObligationRetry || (() => {})} />
       <div className="bot-work-panel-scroll motion-enter-fade" hidden={view !== 'overview'}>
         <section className="bot-work-panel-attention" aria-label={i18n.t('projectAgent.workPanel.attention')}>

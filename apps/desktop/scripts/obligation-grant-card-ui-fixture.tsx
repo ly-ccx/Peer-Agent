@@ -10,10 +10,11 @@ function Fixture() {
   const obligations = useObligationGrants('workspace', 'parent', async () => {});
   return <BotWorkPanel workspaceId="workspace" workIndex={indexBotWork([], true)} rows={[]} messages={[]}
     recovering={false} headerTarget={null} i18n={i18n} onOpenTask={() => {}} onRefreshWork={async () => {}}
-    obligationGrants={obligations.grants} obligationError={obligations.error} obligationSubmittingId={obligations.submittingId}
+    obligationGrants={obligations.grants} obligationError={obligations.error} obligationWriter={obligations.writer} obligationSubmittingId={obligations.submittingId}
     onObligationConfirm={obligations.confirm} onObligationReject={obligations.reject} onObligationRetry={obligations.retry}>
     <div className="bot-convo">
-      <ObligationGrantList grants={obligations.grants} error={obligations.error} submittingId={obligations.submittingId}
+      <div className="bot-thread"><p className="bot-thread-row">刚才的对话还在这里。</p></div>
+      <ObligationGrantList grants={obligations.grants} error={obligations.error} writer={obligations.writer} submittingId={obligations.submittingId}
         i18n={i18n} onConfirm={obligations.confirm} onReject={obligations.reject} onRetry={obligations.retry} />
     </div>
   </BotWorkPanel>;

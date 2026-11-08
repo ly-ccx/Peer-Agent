@@ -138,6 +138,7 @@ export function BotConversation({
       recovering={Boolean(conversation.runtimeRecovery)} headerTarget={workPanelTarget} i18n={i18n}
       obligationGrants={obligations.grants}
       obligationError={obligations.error}
+      obligationWriter={obligations.writer}
       obligationSubmittingId={obligations.submittingId}
       onObligationConfirm={obligations.confirm}
       onObligationReject={obligations.reject}
@@ -202,7 +203,7 @@ export function BotConversation({
         />
       )}
       {conversation.stopError ? <p className="bot-thread-error" role="alert">{i18n.t('projectAgent.chat.stopFailed')}</p> : null}
-      <ObligationGrantList grants={obligations.grants} error={obligations.error} submittingId={obligations.submittingId}
+      <ObligationGrantList grants={obligations.grants} error={obligations.error} writer={obligations.writer} submittingId={obligations.submittingId}
         i18n={i18n} onConfirm={obligations.confirm} onReject={obligations.reject} onRetry={obligations.retry} />
       <BotConversationComposer key={`composer:${workspaceId}`} workspaceId={workspaceId}
         conversation={conversation} profile={profile} modelControls={modelControls} label={label} i18n={i18n} taskRequest={taskRequest}
