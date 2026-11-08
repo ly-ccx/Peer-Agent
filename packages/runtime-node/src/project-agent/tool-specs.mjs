@@ -158,13 +158,13 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
   spec('request_obligation_authorization', 'local.delegation.request_obligation_authorization', {
     type: 'object',
     properties: {
-      evidenceRevision: { type: 'string' },
       items: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'object', properties: {
-        sessionId: { type: 'string' }, operationId: { type: 'string' },
+        obligationId: { type: 'string' }, sessionId: { type: 'string' }, operationId: { type: 'string' },
+        evidenceRevision: { type: 'string' },
         actions: { type: 'array', minItems: 1, items: { type: 'string' } },
-      }, required: ['sessionId', 'operationId', 'actions'], additionalProperties: false } },
+      }, required: ['obligationId', 'sessionId', 'operationId', 'evidenceRevision', 'actions'], additionalProperties: false } },
     },
-    required: ['evidenceRevision', 'items'],
+    required: ['items'],
     additionalProperties: false,
   }),
   spec('resolve_execution_obligation', 'local.delegation.resolve_execution_obligation', {
@@ -172,7 +172,6 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
     properties: {
       grantId: { type: 'string' },
       idempotencyKey: { type: 'string', minLength: 16, maxLength: 128 },
-      evidenceRevision: { type: 'string' },
       items: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'object', properties: {
         sessionId: { type: 'string' }, operationId: { type: 'string' },
         actions: { type: 'array', minItems: 1, items: { type: 'string' } },
@@ -389,25 +388,26 @@ function validateInspectObligation(input) {
 }
 
 function validateObligationAuthorization(input, { resolve }) {
-  const allowed = resolve ? ['grantId', 'idempotencyKey', 'evidenceRevision', 'items'] : ['evidenceRevision', 'items'];
+  const allowed = resolve ? ['grantId', 'idempotencyKey', 'items'] : ['items'];
   if (Object.keys(input).some(key => !allowed.includes(key))) return invalid('Unknown obligation field.');
-  const evidenceRevision = input.evidenceRevision === undefined ? undefined : text(input.evidenceRevision, 200);
-  if (input.evidenceRevision !== undefined && !evidenceRevision) return invalid('evidenceRevision must be a short string.');
-  if (!resolve && !evidenceRevision) return invalid('evidenceRevision is required.');
   const grantId = resolve ? text(input.grantId, 200) : undefined;
   const idempotencyKey = resolve ? text(input.idempotencyKey, 128) : undefined;
   if (resolve && (!grantId || !idempotencyKey || idempotencyKey.length < 16)) return invalid('grantId and an idempotencyKey of 16 to 128 characters are required.');
   if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > 20) return invalid('items must contain 1 to 20 sessions.');
+  const itemFields = resolve ? ['sessionId', 'operationId', 'actions'] : ['obligationId', 'sessionId', 'operationId', 'evidenceRevision', 'actions'];
   const items = [];
   for (const item of input.items) {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) return invalid('Each item needs sessionId, operationId, and actions.');
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return invalid('Each item needs the fields named by the tool.');
+    if (Object.keys(item).some(key => !itemFields.includes(key))) return invalid('Unknown obligation item field.');
     const sessionId = text(item.sessionId, 200);
     const operationId = text(item.operationId, 200);
     const actions = stringList(item.actions, { min: 1, max: 4, itemMax: 80 });
-    if (!sessionId || !operationId || !actions) return invalid('Each item needs sessionId, operationId, and actions.');
-    items.push({ sessionId, operationId, actions });
+    const obligationId = resolve ? undefined : text(item.obligationId, 200);
+    const evidenceRevision = resolve ? undefined : text(item.evidenceRevision, 200);
+    if (!sessionId || !operationId || !actions || (!resolve && (!obligationId || !evidenceRevision))) return invalid('Each item needs obligationId, sessionId, operationId, evidenceRevision, and actions.');
+    items.push({ sessionId, operationId, actions, ...(obligationId ? { obligationId } : {}), ...(evidenceRevision ? { evidenceRevision } : {}) });
   }
-  return { ok: true, value: { ...(evidenceRevision ? { evidenceRevision } : {}), ...(grantId ? { grantId } : {}), ...(idempotencyKey ? { idempotencyKey } : {}), items } };
+  return { ok: true, value: { ...(grantId ? { grantId } : {}), ...(idempotencyKey ? { idempotencyKey } : {}), items } };
 }
 
 function spec(name, capabilityId, inputSchema) {

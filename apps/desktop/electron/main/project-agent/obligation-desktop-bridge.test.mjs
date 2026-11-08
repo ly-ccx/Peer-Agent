@@ -64,11 +64,12 @@ test('legacy records retire through the live supervisor and local tool host', as
   try {
     const report = await rehearseLegacyObligationsOnDesktop({ rootDir: root });
     assert.equal(report.ok, true, JSON.stringify(report));
-    const confirm = report.steps.find(step => step.step === 'confirm');
-    assert.equal(confirm.grants?.length, 1);
-    assert.equal(confirm.grants[0].items, 3);
-    assert.deepEqual(confirm.resolution, ['applied', 'applied', 'applied']);
-    assert.equal(report.steps.find(step => step.step === 'resolve').replayed, true);
+    assert.equal(report.steps.find(step => step.step === 'request-one').count, 1);
+    assert.equal(report.steps.find(step => step.step === 'request-three').count, 3);
+    const confirms = report.steps.filter(step => step.step === 'confirm');
+    assert.equal(confirms.length, 2);
+    assert.equal(confirms.every(step => step.ok === true && step.grants?.some(grant => grant.grantId === step.grantId)), true);
+    assert.equal(report.steps.filter(step => step.step === 'resolve').every(step => step.replayed === true), true);
     const log = readFileSync(report.logPath, 'utf8');
     assert.match(log, /"event":"inspect"/);
     assert.match(log, /legacy_recorder_unproven/);

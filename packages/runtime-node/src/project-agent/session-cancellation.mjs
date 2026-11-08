@@ -130,7 +130,7 @@ export function createSessionCancellation({ findBySession, goalPlanStore, goalRu
           operationId: registration.receipt?.operationId || null, nextTool: 'inspect_execution_obligation' });
         return { error: code, cancellationPending: true, sessionId: registration.sessionId,
           nextTool: 'inspect_execution_obligation',
-          message: 'Stop is unconfirmed. Call inspect_execution_obligation, then request_obligation_authorization with retire_follow_up and acknowledge_unknown. Do not repeat cancel_session for the same fact.' };
+          message: 'Stop is unconfirmed. Call inspect_execution_obligation, then request_obligation_authorization by copying each item obligationId, evidenceRevision, and allowedActions. Do not repeat cancel_session. If authorization returns evidence_stale, inspect again; do not cancel.' };
       }
       return { error: code, cancellationPending: true };
     }

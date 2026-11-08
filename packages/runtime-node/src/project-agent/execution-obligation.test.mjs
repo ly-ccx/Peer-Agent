@@ -7,7 +7,7 @@ import { projectWorkSession } from '@peer-agent/protocol';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
 import { registerWorkBudget } from './work-budget.mjs';
 import { createExecutionScheduler } from './execution-scheduler.mjs';
-import { createExecutionObligationService } from './execution-obligation.mjs';
+import { classifyExecutionObligation, createExecutionObligationService } from './execution-obligation.mjs';
 
 const epoch = 'syn-host-now:2026-11-07T09:40:00.000Z';
 const oldEpoch = 'syn-host-old:2026-11-07T08:00:00.000Z';
@@ -70,22 +70,30 @@ test('three rc38-shaped records leave the current lists only after a host card c
   assert.equal(inspected.items.find(item => item.sessionId === 'b').outcome.unknownCallIds.includes('syn-call-b'), true);
   assert.equal(inspected.items.find(item => item.sessionId === 'c').outcome.openHandleIds.includes('syn-handle-c'), true);
   assert.equal(inspected.items.find(item => item.sessionId === 'a').gaps.includes('dispatch_registration_absent'), true);
-  const evidenceRevision = (await import('node:crypto')).createHash('sha256').update(JSON.stringify(inspected.items.map(item => item.evidenceRevision).sort())).digest('hex');
+  const copied = inspected.items.map(item => ({ obligationId: item.obligationId, sessionId: item.sessionId, operationId: item.operationId, evidenceRevision: item.evidenceRevision, actions: [...item.allowedActions] }));
+  plans.get('plan-a').delegationOrigin.executionControl.revision += 1;
+  const stale = service.requestAuthorization({ workspaceId: 'workspace', parentConversationId: 'parent', role: 'project_agent', items: copied.filter(item => item.sessionId === 'a') });
+  assert.equal(stale.error, 'evidence_stale');
+  assert.equal(stale.nextTool, 'inspect_execution_obligation');
+  assert.equal(stale.stale[0].reason, 'evidence_revision');
+  plans.get('plan-a').delegationOrigin.executionControl.revision -= 1;
+  const fresh = service.inspect({ workspaceId: 'workspace', parentConversationId: 'parent', sessionIds: ['a', 'b', 'c'], role: 'project_agent' });
   const denied = service.resolve({ workspaceId: 'workspace', parentConversationId: 'parent', role: 'project_agent', grantId: 'missing', items: [], idempotencyKey: '1234567890123456' });
   assert.equal(denied.error, 'grant_not_found');
-  const requested = service.requestAuthorization({ workspaceId: 'workspace', parentConversationId: 'parent', role: 'project_agent', evidenceRevision,
-    items: inspected.items.map(item => ({ sessionId: item.sessionId, operationId: item.operationId, actions: ['acknowledge_unknown', 'retire_follow_up'] })) });
+  const requested = service.requestAuthorization({ workspaceId: 'workspace', parentConversationId: 'parent', role: 'project_agent',
+    items: fresh.items.map(item => ({ obligationId: item.obligationId, sessionId: item.sessionId, operationId: item.operationId, evidenceRevision: item.evidenceRevision, actions: [...item.allowedActions] })) });
   assert.equal(requested.ok, true, JSON.stringify(requested));
   assert.equal(requested.status, 'pending');
+  assert.equal(requested.idempotencyKey, `panel-${requested.grantId}`);
   const pending = service.resolve({ workspaceId: 'workspace', parentConversationId: 'parent', role: 'project_agent', grantId: requested.grantId,
-    evidenceRevision, idempotencyKey: 'panel-key-1234567890', items: requested.items.map(item => ({ sessionId: item.sessionId, operationId: item.operationId, actions: item.actions })) });
+    idempotencyKey: requested.idempotencyKey, items: requested.items.map(item => ({ sessionId: item.sessionId, operationId: item.operationId, actions: item.actions })) });
   assert.equal(pending.error, 'grant_pending');
   const foreign = service.confirm({ actor: 'main_bot', workspaceId: 'workspace', grantId: requested.grantId });
   assert.equal(foreign.error, 'authorization_required');
   const confirmed = service.confirm({ actor: 'user_panel', workspaceId: 'workspace', parentConversationId: 'parent', grantId: requested.grantId });
   assert.equal(confirmed.ok, true);
   const resolved = service.resolve({ workspaceId: 'workspace', parentConversationId: 'parent', actor: 'user_panel', grantId: requested.grantId,
-    evidenceRevision, idempotencyKey: 'panel-key-1234567890', items: confirmed.grant.items.map(item => ({ sessionId: item.sessionId, operationId: item.operationId, actions: item.actions })) });
+    idempotencyKey: requested.idempotencyKey, items: confirmed.grant.items.map(item => ({ sessionId: item.sessionId, operationId: item.operationId, actions: item.actions })) });
   assert.equal(resolved.ok, true, JSON.stringify(resolved));
   assert.equal(resolved.items.every(item => item.result === 'applied'), true, JSON.stringify(resolved.items));
   for (const id of ['a', 'b', 'c']) {
@@ -104,8 +112,34 @@ test('three rc38-shaped records leave the current lists only after a host card c
   assert.equal(claims.find(claim => claim.execution.planId === 'plan-b').state, 'reconciling');
   assert.equal(scheduler.inspectResources(plans.get('plan-a')).allowed, false);
   const again = service.resolve({ workspaceId: 'workspace', parentConversationId: 'parent', actor: 'user_panel', grantId: requested.grantId,
-    evidenceRevision, idempotencyKey: 'panel-key-1234567890', items: confirmed.grant.items.map(item => ({ sessionId: item.sessionId, operationId: item.operationId, actions: item.actions })) });
+    idempotencyKey: requested.idempotencyKey, items: confirmed.grant.items.map(item => ({ sessionId: item.sessionId, operationId: item.operationId, actions: item.actions })) });
   assert.equal(again.replayed, true);
   assert.equal(store.read().obligationDispositions[resolved.items[0].obligationId].phase, 'indexed');
   assert.equal(mark.length >= 0, true);
+});
+
+test('a dead recorder with a missing dispatch registration can be retired and a receipted one cannot', () => {
+  const identity = { bootId: 'boot-now', pid: 7, pidStart: 'linux:7', lookup: () => null };
+  const recorder = { bootId: 'boot-now', pid: 4242, pidStart: 'linux:100', hostId: 'host-old', acquiredAt: '2026-11-07T08:00:00.000Z' };
+  const plan = { planId: 'plan-dead', status: 'paused', runner: { status: 'running' }, delegationOrigin: { sessionId: 'dead' } };
+  const dead = classifyExecutionObligation({
+    plan, identity, writerEpoch: epoch,
+    control: { phase: 'reconciling', nextAction: 'execution_stop_unconfirmed', revision: 4, hostEpoch: oldEpoch, operationId: 'cancel-dead', recorder },
+  });
+  assert.equal(dead.classes.includes('recorder_dead_clear'), false);
+  assert.equal(dead.classes.includes('recorder_dead_with_unknown'), true);
+  assert.equal(dead.classes.includes('cross_host_unproven'), true);
+  assert.equal(dead.classes.includes('external_effect_unknown'), true);
+  assert.equal(dead.gaps.includes('host_epoch_mismatch'), true);
+  assert.equal(dead.gaps.includes('ownership_unknown'), true);
+  assert.equal(dead.gaps.includes('dispatch_registration_absent'), true);
+  assert.deepEqual(dead.missingFields, []);
+  assert.deepEqual(dead.allowed, ['retire_follow_up', 'acknowledge_unknown']);
+  const clear = classifyExecutionObligation({
+    plan: { ...plan, planId: 'plan-clear' }, identity, writerEpoch: epoch,
+    control: { phase: 'reconciling', nextAction: 'execution_stop_unconfirmed', revision: 4, hostEpoch: epoch, operationId: 'cancel-clear', stopReceipt: { operationId: 'cancel-clear' }, recorder },
+  });
+  assert.equal(clear.classes.includes('recorder_dead_clear'), true);
+  assert.equal(clear.classes.includes('external_effect_unknown'), false);
+  assert.deepEqual(clear.allowed, []);
 });

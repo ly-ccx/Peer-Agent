@@ -10,6 +10,27 @@ const REFUSALS = new Set(['execution_stop_unconfirmed', 'execution_outcome_unkno
 const GRANT_MS = 15 * 60 * 1000;
 const ACTIONS = new Set(['retire_follow_up', 'acknowledge_unknown', 'restore_follow_up']);
 
+function revisionPrefix(value) {
+  return typeof value === 'string' && value ? value.slice(0, 12) : null;
+}
+function staleItems(requested, present) {
+  const stale = [];
+  for (const item of requested) {
+    const row = present.find(candidate => candidate.sessionId === item.sessionId);
+    if (!row) {
+      stale.push({ obligationId: item.obligationId || null, sessionId: item.sessionId || null, reason: 'item_missing', revision: null });
+      continue;
+    }
+    if (item.obligationId !== row.obligationId) {
+      stale.push({ obligationId: row.obligationId, sessionId: row.sessionId, reason: 'obligation_mismatch', revision: revisionPrefix(row.evidenceRevision) });
+      continue;
+    }
+    if (item.evidenceRevision !== row.evidenceRevision) {
+      stale.push({ obligationId: row.obligationId, sessionId: row.sessionId, reason: 'evidence_revision', revision: revisionPrefix(row.evidenceRevision) });
+    }
+  }
+  return stale;
+}
 function digest(value) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
@@ -52,7 +73,9 @@ export function classifyExecutionObligation({ plan, control, claims = [], identi
   if (ownership === 'unknown') gaps.push('ownership_unknown');
   if (proof === 'alive' || ownership === 'live') classes.push(ownership === 'live' ? 'execution_still_running' : 'recorder_alive');
   if (proof === 'dead' || proof === 'reused' || proof === 'different_boot') {
-    classes.push(unknownCallIds.length || openHandleIds.length ? 'recorder_dead_with_unknown' : 'recorder_dead_clear');
+    // A missing dispatch registration is an unknown effect. Death alone is not "clear".
+    const effectUnknown = unknownCallIds.length > 0 || openHandleIds.length > 0 || registrationAbsent;
+    classes.push(effectUnknown ? 'recorder_dead_with_unknown' : 'recorder_dead_clear');
   }
   if (unknownCallIds.length || openHandleIds.length || registrationAbsent && !control?.stopReceipt) {
     if (unknownCallIds.length || openHandleIds.length || registrationAbsent) classes.push('external_effect_unknown');
@@ -181,10 +204,19 @@ export function createExecutionObligationService({ plans, readControl, scheduler
       if (!requested.length) return { ok: false, error: 'obligation_scope_empty' };
       if (requested.length > 20) return { ok: false, error: 'too_many_items' };
       if (requested.some(item => !item.actions?.every(action => ACTIONS.has(action)) || item.actions.includes('release_resource'))) return { ok: false, error: 'action_unavailable' };
-      const fresh = this.inspect({ ...input, sessionIds: requested.map(item => item.sessionId) });
+      const fresh = this.inspect({ ...input, sessionIds: [...new Set(requested.map(item => item.sessionId))] });
       if (!fresh.ok) return fresh;
       const present = fresh.items.filter(item => !item.error);
-      if (input.evidenceRevision !== digest(present.map(item => item.evidenceRevision).sort())) return { ok: false, error: 'evidence_stale', items: fresh.items };
+      const stale = staleItems(requested, present);
+      if (stale.length) {
+        appendObligationLog({ event: 'authorize', role: input.role || null, ok: false, code: 'evidence_stale',
+          obligationId: stale.map(item => item.obligationId).filter(Boolean),
+          reason: stale.map(item => item.reason),
+          revision: stale.map(item => item.revision).filter(Boolean) });
+        return { ok: false, error: 'evidence_stale', nextTool: 'inspect_execution_obligation',
+          message: 'Evidence changed. Call inspect_execution_obligation again and copy each item obligationId, sessionId, operationId, evidenceRevision, and allowedActions. Do not call cancel_session.',
+          stale: stale.map(({ obligationId, sessionId, reason }) => ({ obligationId, sessionId, reason })) };
+      }
       const card = [];
       const rejected = [];
       for (const item of requested) {
@@ -211,7 +243,7 @@ export function createExecutionObligationService({ plans, readControl, scheduler
       write(input.workspaceId, { kind: 'obligation_grant', minimumExecutorVersion: OBLIGATION_FORMAT_VERSION, grant: stored });
       appendObligationLog({ event: 'authorize', role: input.role || null, grantId, status: 'pending',
         obligationId: card.map(item => item.obligationId).join(','), disposition: card.map(item => item.disposition || 'none').join(',') });
-      return { ok: true, grantId, status: 'pending', items: card, rejected, consequences: {
+      return { ok: true, grantId, status: 'pending', idempotencyKey: `panel-${grantId}`, items: card, rejected, consequences: {
         willBeMarkedCancelled: false, resourceWillRemain: true, requiresAcknowledge: true,
       } };
     },

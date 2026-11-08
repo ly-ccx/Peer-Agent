@@ -574,6 +574,7 @@ async function callPort(fn, input, unavailable, context) {
         ...(Array.isArray(result.sessionStates) ? { sessionStates: result.sessionStates } : {}),
         ...(result.missing ? { missing: result.missing, message: result.missing } : {}),
         ...(result.message ? { message: result.message } : {}),
+        ...(Array.isArray(result.stale) ? { stale: result.stale } : {}),
         ...(typeof result.nextTool === 'string' ? { nextTool: result.nextTool, sessionId: result.sessionId } : {}),
       },
     };
