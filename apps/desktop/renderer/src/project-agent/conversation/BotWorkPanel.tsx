@@ -189,6 +189,6 @@ function MaterialReadFeedback({ data, workspacePath, i18n }: {
   if (!workspacePath) return <p className="bot-work-panel-note" role="status">{i18n.t('projectAgent.workPanel.scopeUnavailable')}</p>;
   if (data.error) return <div className="bot-work-panel-feedback" role="status"><p>{i18n.t('resources.readFailed')}</p>
     <button type="button" className="ui-button is-compact" disabled={data.loading} onClick={data.reload}>{i18n.t('resources.retryRead')}</button></div>;
-  if (!data.loaded && data.loading) return <p className="bot-work-panel-note" role="status">{i18n.t('resources.loading')}</p>;
+  if (!data.loaded && data.loading) return <p className="bot-work-panel-note bot-reading-shimmer" role="status">{i18n.t('resources.loading')}</p>;
   return null;
 }

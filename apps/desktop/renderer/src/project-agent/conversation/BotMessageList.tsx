@@ -133,6 +133,7 @@ export function BotMessageList({
     </div> : null}
     <div
       className="bot-thread"
+      data-reading={rows.length === 0 && !ready ? 'true' : undefined}
       data-single-system={rows.length === 1 && rows[0]?.type === 'message' && rows[0].message.kind === 'system_card'
         && !rows[0].message.cards.some(card => card.kind === 'familiarize') ? 'true' : undefined}
       ref={scroll.scrollerRef}
@@ -157,9 +158,9 @@ export function BotMessageList({
       ) : null}
       <div className="bot-thread-origin" ref={scroll.originRef} />
       {rows.length === 0 ? (
-        <div className="bot-thread-empty" role="status" aria-busy={!ready || undefined}>
+        <div className={`bot-thread-empty${ready ? '' : ' is-reading'}`} role="status" aria-busy={!ready || undefined}>
           <BotAvatar avatar={avatar} label={label} workspaceId={workspaceId} mood={avatarMood} />
-          <p className={ready ? undefined : 'bot-thinking-status-label'}>{i18n.t(ready ? 'projectAgent.chat.empty' : 'projectAgent.chat.loading')}</p>
+          <p className={ready ? undefined : 'bot-reading-shimmer'}>{i18n.t(ready ? 'projectAgent.chat.empty' : 'projectAgent.chat.loading')}</p>
         </div>
       ) : null}
       {scroll.view.before > 0 ? <div className="bot-thread-spacer" style={{ height: scroll.view.before }} /> : null}
