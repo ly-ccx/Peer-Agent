@@ -2,6 +2,18 @@
 
 All notable changes to Peer Agent are tracked here.
 
+## 0.1.0-rc.40 - 2026-11-08
+
+### 修复与改进
+
+- #303：修复 rc.39 打包应用启动崩溃。主进程子路径改为 dist，不再指向被排除的 `src`；PR CI 检查主进程导入都在打包文件列表里。
+- 若数据已经是协调格式 11，不要降回 rc.38。rc.40 仍可读格式 11 和格式 9。更新前完整备份。正式版仍为 0.0.18。
+
+### Fixes and improvements (English)
+
+- #303: fix the rc.39 packaged launch crash. Main-process subpaths now point at dist instead of excluded `src`, and PR CI checks that every main-process import is in the package file list.
+- If data is already coordination format 11, do not downgrade to rc.38. rc.40 can still read format 11 and format 9. Keep a complete backup before updating. Stable remains 0.0.18.
+
 ## 0.1.0-rc.39 - 2026-11-08
 
 ### 修复与改进
