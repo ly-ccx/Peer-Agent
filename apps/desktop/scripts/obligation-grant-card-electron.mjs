@@ -94,6 +94,7 @@ globalThis.peerObligationCard = {
   },
 };
 
+app.on('window-all-closed', () => { app.quit(); });
 app.whenReady().then(async () => {
   mkdirSync(path.join(home, 'runtime'), { recursive: true });
   await store.prepare();
