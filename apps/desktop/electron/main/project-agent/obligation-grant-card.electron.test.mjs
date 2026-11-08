@@ -22,7 +22,9 @@ test('the authorization card is in the bot chat and survives a closed or materia
   page.setDefaultTimeout(15_000);
   const chat = page.locator('.bot-convo .obligation-grant-card');
   await chat.first().waitFor();
-  assert.equal(await chat.count(), 2);
+  assert.equal(await chat.count(), 3);
+  assert.equal(await page.locator('.bot-convo').getByText('无归属旧授权', { exact: true }).count(), 1);
+  assert.equal(await page.locator('.bot-convo').getByText('其他机器人', { exact: true }).count(), 0);
   const four = chat.filter({ hasText: '旧记录甲' });
   for (const title of ['旧记录甲', '旧记录乙', '死亡记录甲', '死亡记录乙']) {
     assert.equal(await four.getByText(title, { exact: true }).count(), 1);
@@ -44,10 +46,11 @@ test('the authorization card is in the bot chat and survives a closed or materia
 
   await chat.filter({ hasText: '单独拒绝' }).getByRole('button', { name: '拒绝', exact: true }).click();
   await four.getByRole('button', { name: '确认', exact: true }).click();
-  await page.locator('.bot-convo .obligation-grant-card').waitFor({ state: 'detached' });
+  await page.locator('.bot-convo').getByText('旧记录甲', { exact: true }).waitFor({ state: 'detached' });
+  await page.locator('.bot-convo').getByText('单独拒绝', { exact: true }).waitFor({ state: 'detached' });
   const after = await app.evaluate(() => globalThis.peerObligationCard.snapshot());
   assert.deepEqual(after.indexed, ['dead-a', 'dead-b', 'legacy-a', 'legacy-b']);
-  assert.equal(after.grants.find(grant => grant.count === 1)?.status, 'revoked');
+  assert.equal(after.grants.some(grant => grant.status === 'revoked'), true);
   assert.equal(after.grants.find(grant => grant.count === 4)?.status, 'confirmed');
   const log = readFileSync(path.join(home, 'logs', 'obligation.log'), 'utf8');
   assert.match(log, /"event":"list"/);
@@ -65,4 +68,36 @@ test('the authorization card is in the bot chat and survives a closed or materia
   await page.locator('.bot-convo').getByRole('button', { name: '重试', exact: true }).click();
   await page.locator('.bot-convo [role=alert]').waitFor({ state: 'detached' });
   console.log(`Obligation card screenshots: ${shots}`);
+});
+
+async function launch(home, mode) {
+  const env = { ...process.env, PEER_AGENT_HOME: home, PEER_OBLIGATION_CARD_MODE: mode };
+  delete env.ELECTRON_RUN_AS_NODE;
+  return electron.launch({
+    args: [fileURLToPath(new URL('../../../scripts/obligation-grant-card-electron.mjs', import.meta.url))],
+    env, timeout: 30_000,
+  });
+}
+
+test('a restarted process still shows the persisted grant, and a broken index is an error', { timeout: 90_000 }, async (t) => {
+  const home = mkdtempSync(path.join(os.tmpdir(), 'peer-obligation-restart-'));
+  mkdirSync(home, { recursive: true });
+  let app = await launch(home, 'seed');
+  t.after(async () => { try { await app?.close(); } finally { rmSync(home, { recursive: true, force: true }); } });
+  let page = await app.firstWindow();
+  page.setDefaultTimeout(15_000);
+  await page.locator('.bot-convo .obligation-grant-card').first().waitFor();
+  await app.close();
+  app = await launch(home, 'restart');
+  page = await app.firstWindow();
+  page.setDefaultTimeout(15_000);
+  await page.locator('.bot-convo').getByText('旧记录甲', { exact: true }).waitFor();
+  assert.equal(await page.getByText('其他机器人', { exact: true }).count(), 0);
+  await app.close();
+  app = await launch(home, 'broken');
+  page = await app.firstWindow();
+  page.setDefaultTimeout(15_000);
+  await page.locator('.bot-convo [role=alert]').waitFor();
+  assert.match(await page.locator('.bot-convo [role=alert]').innerText(), /obligation_store_unreadable/);
+  assert.equal(await page.locator('.bot-convo .obligation-grant-card').count(), 0);
 });

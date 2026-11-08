@@ -437,7 +437,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
         let floor;
         try { floor = Math.max(current.minimumWriterVersion, priorHead?.minimumWriterVersion || 2, getMeta(candidate, 'minimumFormatVersion') || 2); }
         finally { candidate.close(); }
-        if (![2,3,4,5,6,7,8,9].includes(floor)) throw fail('coordination_schema_unsupported');
+        if (![2,3,4,5,6,7,8,9,11].includes(floor)) throw fail('coordination_schema_unsupported');
         if (floor > current.minimumWriterVersion) {
           durable(headFile, JSON.stringify({ ...readHead(headFile, generation), minimumWriterVersion: floor }));
           durable(manifestFile, JSON.stringify({ ...current, minimumReaderVersion: floor, minimumWriterVersion: floor }));

@@ -73,6 +73,8 @@ import { liveMemoryIndex } from './memory-index-port.mjs';
 import { createProjectMemoryService } from './project-memory-service.mjs';
 import { resolveArtifactOpenPath } from '../task-overview-aggregator.mjs';
 import { installDelegation } from './delegation-port.mjs';
+import { readPersistedObligationGrants } from '../../../../../packages/runtime-node/src/project-agent/execution-obligation.mjs';
+import { workBudgetBinding } from '../../../../../packages/runtime-node/src/project-agent/work-budget.mjs';
 import { createDesktopProjectFacts } from './project-facts.mjs';
 import { createProjectLifecycleEffects } from './project-lifecycle-effects.mjs';
 import { createDiagnosticsExport } from './diagnostics-export.mjs';
@@ -569,6 +571,13 @@ export function registerDesktopProjectAgent({
     readModelRouting: () => readRuntimePolicy()?.modelRouting,
     readActivity: workspaceId => host.runnerFor(workspaceId)?.activity() || null,
     readRecovery: workspaceId => host.recovery.status(workspaceId),
+    readPersistedObligationGrants: workspaceId => readPersistedObligationGrants({ rootDir: runtimeRoot, workspaceId }),
+    obligationBinding: workspaceId => workBudgetBinding(workspaceId) ? 'registered' : 'absent',
+    openObligationRuntime: async workspaceId => {
+      const synced = await host?.sync?.([workspaceId]);
+      const failed = synced?.outcomes?.find(row => row.workspaceId === workspaceId && row.ok === false);
+      if (failed) throw Object.assign(new Error(failed.error || 'obligation_writer_unavailable'), { code: failed.error || 'obligation_writer_unavailable' });
+    },
     stopResponseTurn: ({ workspaceId, turnId }) => {
       if (!ownsProject(workspaceId)) return { ok: false, code: 'HOST_OFFLINE' };
       return host.runnerFor(workspaceId)?.stopResponse(turnId) || { ok: false, code: 'STALE_TURN' };

@@ -7,7 +7,7 @@ import { createBotModelSelectionUpdater } from './bot-model-selection.mjs';
  * 变化事件按 100ms 合并，带上这段时间里变化的 workspaceId。
  * 历史对话是旧会话的只读投影。继续时只给新任务拍继承背景，不改旧会话文件。
  */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   BOT_LEVELS,
   cleanDisplayName,
@@ -21,6 +21,7 @@ import {
 } from '@peer-agent/runtime-node';
 import { projectBotRecoveryStatus, projectModelRoutingMenuOption } from '@peer-agent/protocol';
 import { appendObligationLog } from '@peer-agent/runtime-node/obligation-log';
+import { selectPendingGrants } from '../../../../../packages/runtime-node/src/project-agent/execution-obligation.mjs';
 import { settleActivePermissionRequest, sharedOneTimeApprovals } from '../chat-runtime/permission-gate.mjs';
 import { projectBotModelViews } from './model-controls.mjs';
 import { profilePolicyPatch } from './profile-policy.mjs';
@@ -98,6 +99,9 @@ export function createProjectAgentApplicationService({
   retryTurn = null,
   readActivity = () => null,
   readRecovery = () => null,
+  readPersistedObligationGrants = null,
+  obligationBinding = () => 'unknown',
+  openObligationRuntime = null,
   recoveryControl = null,
   stopResponseTurn = null,
   requestTakeover = null,
@@ -381,17 +385,61 @@ export function createProjectAgentApplicationService({
     return { ok: true, session };
   }
 
+  function parentHash(value) {
+    return typeof value === 'string' && value ? createHash('sha256').update(value).digest('hex').slice(0, 12) : null;
+  }
+  function recoveryCode(workspaceId) {
+    const status = readRecovery?.(workspaceId);
+    const code = status?.error || status?.code;
+    return typeof code === 'string' && /^[a-zA-Z0-9_:-]{1,120}$/.test(code) ? code : null;
+  }
+  function ownsGrantSession(workspaceId, parentConversationId, grant) {
+    let rows = [];
+    try { rows = sessions?.list?.({ workspaceId }) || []; }
+    catch { return false; }
+    const ids = new Set((grant.items || []).map(item => item.sessionId).filter(id => typeof id === 'string'));
+    return rows.some(session => ids.has(session.sessionId) && session.workspaceId === workspaceId
+      && session.origin?.parentConversationId === parentConversationId);
+  }
+
   async function listObligationGrants(payload = {}) {
     if (!open()) return disabled();
     const workspaceId = typeof payload.workspaceId === 'string' ? payload.workspaceId : null;
     const parentConversationId = typeof payload.parentConversationId === 'string' ? payload.parentConversationId : undefined;
-    let result;
-    if (typeof sessions?.listPendingObligationGrants === 'function') result = await sessions.listPendingObligationGrants(workspaceId, parentConversationId);
-    else if (typeof sessions?.inspectExecutionObligations === 'function') result = await sessions.inspectExecutionObligations({ ...payload, actor: 'user_panel' });
-    else result = { ok: false, code: 'UNAVAILABLE' };
-    appendObligationLog({ event: 'list', workspaceId, count: Array.isArray(result?.grants) ? result.grants.length : 0,
-      code: result?.ok === false ? (result.code || result.error || 'failed') : null });
-    return result;
+    const recovery = recoveryCode(workspaceId);
+    const binding = obligationBinding(workspaceId);
+    if (recovery) appendObligationLog({ event: 'recovery', workspaceId, code: recovery, phase: readRecovery?.(workspaceId)?.phase || null });
+    const persisted = typeof readPersistedObligationGrants === 'function' ? readPersistedObligationGrants(workspaceId) : null;
+    if (persisted && persisted.ok === false) {
+      appendObligationLog({ event: 'list', workspaceId, runtime: recovery || 'ready', binding, raw: 0, count: 0,
+        parent: parentHash(parentConversationId), code: persisted.code, reason: [persisted.cause || persisted.code] });
+      return { ok: false, code: persisted.code };
+    }
+    let raw = persisted?.grants;
+    if (!raw && typeof sessions?.listPendingObligationGrants === 'function') {
+      const listed = await sessions.listPendingObligationGrants(workspaceId);
+      if (listed?.ok === false) {
+        appendObligationLog({ event: 'list', workspaceId, runtime: recovery || 'ready', binding, raw: 0, count: 0,
+          parent: parentHash(parentConversationId), code: listed.code || listed.error || 'failed' });
+        return listed;
+      }
+      raw = listed?.grants || [];
+      if (!persisted && !listed) raw = null;
+    }
+    if (!Array.isArray(raw)) {
+      appendObligationLog({ event: 'list', workspaceId, runtime: recovery || 'unknown', binding, raw: 0, count: 0,
+        parent: parentHash(parentConversationId), code: 'obligation_store_unreadable' });
+      return { ok: false, code: 'obligation_store_unreadable' };
+    }
+    const selected = selectPendingGrants(raw, {
+      parentConversationId,
+      ownsSession: grant => ownsGrantSession(workspaceId, parentConversationId, grant),
+    });
+    appendObligationLog({ event: 'list', workspaceId, runtime: recovery || 'ready', binding, raw: raw.length, count: selected.grants.length,
+      parent: parentHash(parentConversationId),
+      reason: selected.decisions.filter(item => item.reason !== 'parent_match' && item.reason !== 'unscoped').map(item => `${item.reason}:${item.grantId || ''}`),
+      code: null });
+    return { ok: true, grants: selected.grants };
   }
 
   async function decideObligation(payload = {}) {
@@ -403,13 +451,24 @@ export function createProjectAgentApplicationService({
       return { ok: false, code: 'UNAVAILABLE' };
     }
     const actor = { ...payload, actor: 'user_panel' };
-    const result = payload.decision === 'revoke' ? await sessions.revokeObligationGrant(actor) : await (async () => {
+    const decideOnce = async () => {
+      if (payload.decision === 'revoke') return sessions.revokeObligationGrant(actor);
       const confirmed = await sessions.confirmObligationGrant(actor);
       if (!confirmed?.ok) return confirmed;
       return sessions.resolveExecutionObligation({ ...actor, items: confirmed.grant.items.map(item => ({
         sessionId: item.sessionId, operationId: item.operationId, actions: item.actions,
       })), evidenceRevision: confirmed.grant.items[0]?.evidenceRevision, idempotencyKey: `panel-${payload.grantId}` });
-    })();
+    };
+    let result;
+    try { result = await decideOnce(); }
+    catch (error) {
+      if (error?.message === 'obligation_storage_unavailable' && typeof openObligationRuntime === 'function') {
+        try { await openObligationRuntime(workspaceId); result = await decideOnce(); }
+        catch (openError) {
+          result = { ok: false, code: openError?.code || openError?.message || 'obligation_writer_unavailable' };
+        }
+      } else result = { ok: false, code: error?.code || error?.message || 'obligation_writer_unavailable' };
+    }
     appendObligationLog({ event: 'decide', workspaceId, grantId, ok: result?.ok === true,
       code: result?.ok === false ? (result.error || result.code || 'failed') : null });
     return result;

@@ -61,6 +61,7 @@ export function ObligationGrantList({ grants, error, submittingId, i18n, onConfi
   return <div className="obligation-grant-list" data-obligation-count={grants.length}>
     {error ? <div className="obligation-grant-error" role="alert">
       <p>{i18n.t('projectAgent.workPanel.obligationError')}</p>
+      <p className="obligation-grant-code">{error}</p>
       <button type="button" className="ui-button is-compact" onClick={onRetry}>{i18n.t('projectAgent.workPanel.obligationRetry')}</button>
     </div> : null}
     {grants.map(grant => <ObligationGrantCard key={grant.grantId} grant={grant} submitting={submittingId === grant.grantId}

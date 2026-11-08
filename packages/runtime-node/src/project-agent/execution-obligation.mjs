@@ -1,4 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { DatabaseSync } from '../sqlite/connection.mjs';
 import { canonicalGrantKey, obligationIdFor, OBLIGATION_FORMAT_VERSION } from './execution-obligation-kernel.mjs';
 import { proveRecorder, recorderComplete } from './execution-recorder.mjs';
 import { appendObligationLog } from './obligation-log.mjs';
@@ -48,6 +51,64 @@ function missingRecorderFields(recorder) {
     if (name === 'pid') return !Number.isSafeInteger(value) || value <= 0;
     return typeof value !== 'string' || !value;
   });
+}
+
+function obligationDirectory(rootDir, workspaceId) {
+  return rootDir && workspaceId ? path.join(rootDir, workspaceId) : '';
+}
+
+/** Read pending grants from the durable index. A missing runtime binding is not an empty list. */
+export function readPersistedObligationGrants({ rootDir, workspaceId }) {
+  const directory = obligationDirectory(rootDir, workspaceId);
+  if (!directory) return { ok: false, code: 'obligation_store_unreadable', cause: 'obligation_store_unreadable' };
+  if (!existsSync(directory)) return { ok: true, grants: [], source: 'absent' };
+  const pointerFile = path.join(directory, '.read-models', 'coordination-current.json');
+  const ledger = existsSync(path.join(directory, 'coordination-v2')) || existsSync(path.join(directory, 'coordination.jsonl'));
+  if (!existsSync(pointerFile)) {
+    return ledger
+      ? { ok: false, code: 'obligation_store_unreadable', cause: 'coordination_index_missing' }
+      : { ok: true, grants: [], source: 'absent' };
+  }
+  let pointer;
+  try { pointer = JSON.parse(readFileSync(pointerFile, 'utf8')); }
+  catch { return { ok: false, code: 'obligation_store_unreadable', cause: 'coordination_index_corrupt' }; }
+  if (pointer?.schemaVersion !== 1 || !/^coordination-[a-f0-9-]{36}\.sqlite$/.test(pointer.file || '')) {
+    return { ok: false, code: 'obligation_store_unreadable', cause: 'coordination_index_corrupt' };
+  }
+  const file = path.join(directory, '.read-models', pointer.file);
+  if (!existsSync(file)) return { ok: false, code: 'obligation_store_unreadable', cause: 'coordination_index_missing' };
+  let db;
+  try {
+    db = new DatabaseSync(file, { readOnly: true });
+    const rows = db.prepare("SELECT value FROM objects WHERE bucket = 'obligationGrants'").all();
+    const grants = rows.map(row => JSON.parse(row.value)).filter(grant => grant?.status === 'pending');
+    return { ok: true, grants, source: 'persisted' };
+  } catch (error) {
+    return { ok: false, code: 'obligation_store_unreadable', cause: error?.code || 'obligation_store_unreadable' };
+  } finally {
+    try { db?.close(); } catch { /* closing a failed read must not hide the error */ }
+  }
+}
+
+/** Another bot's grant stays hidden. A legacy grant with no parent is visible only when this bot owns a listed session. */
+export function selectPendingGrants(grants, { parentConversationId, ownsSession } = {}) {
+  const kept = [];
+  const decisions = [];
+  for (const grant of grants || []) {
+    const parent = typeof grant?.principal?.parentConversationId === 'string' ? grant.principal.parentConversationId : '';
+    if (!parentConversationId || parent === parentConversationId) {
+      kept.push(grant);
+      decisions.push({ grantId: grant.grantId, reason: parent ? 'parent_match' : 'unscoped' });
+      continue;
+    }
+    if (!parent && ownsSession?.(grant) === true) {
+      kept.push(grant);
+      decisions.push({ grantId: grant.grantId, reason: 'legacy_session_owner' });
+      continue;
+    }
+    decisions.push({ grantId: grant.grantId || null, reason: parent ? 'parent_mismatch' : 'legacy_unverified' });
+  }
+  return { grants: kept, decisions };
 }
 
 export function classifyExecutionObligation({ plan, control, claims = [], identity, writerEpoch, disposition }) {

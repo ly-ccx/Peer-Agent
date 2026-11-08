@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { createRequire } from 'node:module';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createDelegationProvider } from '../../../packages/runtime-node/src/project-agent/delegation-provider.mjs';
@@ -9,6 +9,7 @@ import { createExecutionScheduler } from '../../../packages/runtime-node/src/pro
 import { createWorkCoordinationStore } from '../../../packages/runtime-node/src/project-agent/work-coordination-store.mjs';
 import { validateDelegationInput } from '../../../packages/runtime-node/src/project-agent/tool-specs.mjs';
 import { createProjectAgentApplicationService } from '../electron/main/project-agent/project-agent-application-service.mjs';
+import { readPersistedObligationGrants } from '../../../packages/runtime-node/src/project-agent/execution-obligation.mjs';
 
 const home = process.env.PEER_AGENT_HOME;
 if (!home) throw new Error('Isolated test home required');
@@ -19,12 +20,12 @@ const { build } = createRequire(require.resolve('vite'))('esbuild');
 const epoch = 'syn-host-now:2026-11-08T04:00:00.000Z';
 const oldEpoch = 'syn-host-old:2026-11-07T08:00:00.000Z';
 const recorder = { bootId: 'boot-now', pid: 4242, pidStart: 'linux:100', hostId: 'host-old', acquiredAt: '2026-11-07T08:00:00.000Z' };
-const titles = { 'legacy-a': '旧记录甲', 'legacy-b': '旧记录乙', 'dead-a': '死亡记录甲', 'dead-b': '死亡记录乙', 'reject-me': '单独拒绝' };
+const titles = { 'legacy-a': '旧记录甲', 'legacy-b': '旧记录乙', 'dead-a': '死亡记录甲', 'dead-b': '死亡记录乙', 'reject-me': '单独拒绝', 'legacy-open': '无归属旧授权', 'foreign': '其他机器人' };
 
 function plan(id) {
   return { planId: `plan-${id}`, conversationId: `child-${id}`, title: titles[id], status: 'paused', targetWorkspacePath: home,
     createdAt: '2026-11-07T08:00:00.000Z', runner: { status: 'running' },
-    delegationOrigin: { sessionId: id, workspaceId: 'workspace', parentConversationId: 'parent', phase: 'paused',
+    delegationOrigin: { sessionId: id, workspaceId: 'workspace', parentConversationId: id === 'foreign' ? 'other-bot' : 'parent', phase: 'paused',
       cancellation: { operationId: `cancel-${id}`, phase: 'awaiting_outcome' },
       executionControl: { kind: 'cancel', operationId: `cancel-${id}`, phase: 'reconciling', nextAction: 'execution_stop_unconfirmed',
         revision: 4, hostEpoch: oldEpoch, sessionId: id, planId: `plan-${id}`,
@@ -53,12 +54,21 @@ const provider = createDelegationProvider({ supervisor: {
 } });
 const context = { mode: 'project_agent', role: 'project_agent', workspaceId: 'workspace', conversationId: 'parent', turnId: 'turn-card', toolCallOrdinal: 1 };
 let failList = false;
-const application = createProjectAgentApplicationService({ enabled: () => true, sessions: provider && {
-  listPendingObligationGrants: (workspaceId, parentConversationId) => ({ ok: true, grants: service.pendingGrants(workspaceId, parentConversationId) }),
-  confirmObligationGrant: input => service.confirm(input),
-  revokeObligationGrant: input => service.revoke(input),
-  resolveExecutionObligation: input => service.resolve(input),
-} });
+const mode = process.env.PEER_OBLIGATION_CARD_MODE || 'seed';
+const runtimeRoot = path.join(home, 'runtime');
+const application = createProjectAgentApplicationService({
+  enabled: () => true,
+  sessions: {
+    list: () => [...plans.values()].map(row => ({ sessionId: row.delegationOrigin.sessionId, workspaceId: 'workspace', origin: row.delegationOrigin })),
+    listPendingObligationGrants: () => ({ ok: false, code: 'obligation_store_unreadable' }),
+    confirmObligationGrant: input => service.confirm(input),
+    revokeObligationGrant: input => service.revoke(input),
+    resolveExecutionObligation: input => service.resolve(input),
+  },
+  readPersistedObligationGrants: workspaceId => readPersistedObligationGrants({ rootDir: runtimeRoot, workspaceId }),
+  obligationBinding: () => mode === 'broken' ? 'absent' : 'registered',
+  readRecovery: () => mode === 'broken' ? { status: 'failed', phase: 'execution', error: 'coordination_schema_unsupported' } : null,
+});
 
 function outputOf(result) {
   return result?.result?.output;
@@ -96,13 +106,24 @@ globalThis.peerObligationCard = {
 
 app.on('window-all-closed', () => { app.quit(); });
 app.whenReady().then(async () => {
-  mkdirSync(path.join(home, 'runtime'), { recursive: true });
+  mkdirSync(runtimeRoot, { recursive: true });
   await store.prepare();
-  const inspected = await tool('inspect_execution_obligation', 'local.delegation.inspect_execution_obligation', { sessionIds: Object.keys(titles) });
-  if (inspected?.ok !== true) throw new Error(inspected?.error || 'inspect failed');
-  const four = await tool('request_obligation_authorization', 'local.delegation.request_obligation_authorization', requestFrom(inspected, ['legacy-a', 'legacy-b', 'dead-a', 'dead-b']));
-  const one = await tool('request_obligation_authorization', 'local.delegation.request_obligation_authorization', requestFrom(inspected, ['reject-me']));
-  if (four?.ok !== true || one?.ok !== true) throw new Error(four?.error || one?.error || 'request failed');
+  if (mode === 'seed') {
+    const inspected = await tool('inspect_execution_obligation', 'local.delegation.inspect_execution_obligation', { sessionIds: Object.keys(titles) });
+    if (inspected?.ok !== true) throw new Error(inspected?.error || 'inspect failed');
+    const four = await tool('request_obligation_authorization', 'local.delegation.request_obligation_authorization', requestFrom(inspected, ['legacy-a', 'legacy-b', 'dead-a', 'dead-b']));
+    const one = await tool('request_obligation_authorization', 'local.delegation.request_obligation_authorization', requestFrom(inspected, ['reject-me']));
+    const legacy = await service.requestAuthorization({ workspaceId: 'workspace', role: 'project_agent', items: requestFrom(inspected, ['legacy-open']).items });
+    const other = { ...context, conversationId: 'other-bot' };
+    const foreignInspect = outputOf(await provider.executeCapability({ call: { toolCallId: 'inspect-foreign', capabilityId: 'local.delegation.inspect_execution_obligation', arguments: { sessionIds: ['foreign'] } } }, other));
+    const foreign = outputOf(await provider.executeCapability({ call: { toolCallId: 'foreign', capabilityId: 'local.delegation.request_obligation_authorization', arguments: requestFrom(foreignInspect, ['foreign']) } }, other));
+    const failed = [['four', four], ['one', one], ['legacy', legacy], ['foreign', foreign]].find(([, result]) => result?.ok !== true);
+    if (failed) throw new Error(`${failed[0]}:${failed[1]?.error || 'request failed'}`);
+  }
+  if (mode === 'broken') {
+    const pointer = path.join(runtimeRoot, 'workspace', '.read-models', 'coordination-current.json');
+    if (existsSync(pointer)) renameSync(pointer, `${pointer}.hidden`);
+  }
   const result = await build({
     stdin: { contents: "import '../../scripts/obligation-grant-card-ui-fixture';", loader: 'tsx', resolveDir: path.join(desktop, 'renderer/src') },
     bundle: true, write: false, format: 'iife', platform: 'browser', jsx: 'automatic',
