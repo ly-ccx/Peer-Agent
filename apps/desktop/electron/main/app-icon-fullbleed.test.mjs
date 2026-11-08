@@ -19,6 +19,10 @@ function paeth(a, b, c) {
 
 function readPngRgba(filePath) {
   const data = readFileSync(filePath);
+  return readPngRgbaBuffer(data, filePath);
+}
+
+function readPngRgbaBuffer(data, filePath) {
   assert.equal(data.subarray(0, 8).toString('binary'), '\x89PNG\r\n\x1a\n', `${filePath} is not a PNG`);
 
   const idat = [];
@@ -180,5 +184,71 @@ describe('macOS app icon canvases', () => {
   it('keeps Dock light and dark icons slightly inset with rounded corners', () => {
     assertDockOpticalSizePng(path.join(BUILD_DIR, 'icon-macos-dock.png'));
     assertDockOpticalSizePng(path.join(BUILD_DIR, 'icon-macos-dock-dark.png'));
+  });
+});
+
+describe('Windows app icon (icon.ico)', () => {
+  const ICO_PATH = path.join(BUILD_DIR, 'icon.ico');
+  const ICO_SIZES = [16, 24, 32, 48, 64, 128, 256];
+
+  function readIcoEntries(filePath) {
+    const data = readFileSync(filePath);
+    assert.equal(data.readUInt16LE(0), 0, `${filePath} reserved word`);
+    assert.equal(data.readUInt16LE(2), 1, `${filePath} must be an icon resource`);
+    const count = data.readUInt16LE(4);
+    const entries = [];
+    for (let i = 0; i < count; i += 1) {
+      const at = 6 + i * 16;
+      const width = data[at] === 0 ? 256 : data[at];
+      const height = data[at + 1] === 0 ? 256 : data[at + 1];
+      const size = data.readUInt32LE(at + 8);
+      const offset = data.readUInt32LE(at + 12);
+      entries.push({ width, height, size, offset, data: data.subarray(offset, offset + size) });
+    }
+    return entries;
+  }
+
+  it('ships the same size ladder as the release ico, each entry PNG-encoded', () => {
+    const entries = readIcoEntries(ICO_PATH);
+    assert.deepEqual(
+      entries.map((entry) => entry.width),
+      ICO_SIZES,
+      'ico size ladder must stay 16–256; Windows taskbar and Explorer pick from these',
+    );
+    for (const entry of entries) {
+      assert.equal(entry.height, entry.width, 'ico entries must be square');
+      assert.equal(
+        entry.data.subarray(0, 8).toString('binary'),
+        '\x89PNG\r\n\x1a\n',
+        `ico ${entry.width}px entry must be PNG-compressed`,
+      );
+    }
+  });
+
+  it('carries the rounded mask itself so taskbar icons match the macOS look', () => {
+    const entries = readIcoEntries(ICO_PATH);
+    const largest = entries[entries.length - 1];
+    assert.equal(largest.width, 256, 'largest ico entry must be 256px');
+    const { width, height, rows } = readPngRgbaBuffer(largest.data, `${ICO_PATH} 256px entry`);
+    assert.equal(width, 256);
+    assert.equal(height, 256);
+
+    const corners = [
+      [0, 0],
+      [width - 1, 0],
+      [0, height - 1],
+      [width - 1, height - 1],
+    ];
+    for (const [x, y] of corners) {
+      assert.equal(alpha(rows, x, y), 0, `${ICO_PATH} corner (${x},${y}) must be transparent — Windows renders the ico as-is with no system squircle`);
+    }
+    assert.ok(alpha(rows, width / 2, height / 2) >= 200, `${ICO_PATH} center must stay opaque`);
+
+    const pads = edgePads(rows, width, height);
+    for (const name of ['left', 'right', 'top', 'bottom']) {
+      assert.equal(pads[name], 0, `${ICO_PATH} ${name} pad must be 0 — the rounded shape fills the canvas like other Windows taskbar icons`);
+    }
+    assert.ok(pads.diag >= 12, `${ICO_PATH} diagonal becomes opaque at ${pads.diag}px — corners are not rounded (square corners reach it at 0)`);
+    assert.ok(pads.diag <= 60, `${ICO_PATH} diagonal padding ${pads.diag}px is over-rounded for the brand mask`);
   });
 });
