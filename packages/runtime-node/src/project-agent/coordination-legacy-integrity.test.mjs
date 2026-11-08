@@ -21,7 +21,7 @@ function canonical(directory) {
   const out = {};
   function walk(dir) { for (const e of readdirSync(dir, { withFileTypes: true })) {
     if (e.name === '.read-models') continue;
-    const file = path.join(dir, e.name); if (e.isDirectory()) walk(file); else out[path.relative(directory, file)] = readFileSync(file).toString('hex');
+    const file = path.join(dir, e.name); if (e.isDirectory()) walk(file); else out[path.relative(directory, file).split(path.sep).join('/')] = readFileSync(file).toString('hex');
   } } walk(directory); return out;
 }
 

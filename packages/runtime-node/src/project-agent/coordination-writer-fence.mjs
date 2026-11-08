@@ -1,13 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, lstatSync, realpathSync, readFileSync, writeFileSync, copyFileSync, renameSync, mkdirSync, openSync, closeSync, fsyncSync } from 'node:fs';
+import { existsSync, lstatSync, realpathSync, readFileSync, writeFileSync, copyFileSync, renameSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
+import { syncDirectory, syncFile } from '../fsync-path.mjs';
 import { explainLegacyIntegrity, hashLegacyFile, legacyFileToken, readLegacySeal } from './coordination-legacy-integrity.mjs';
 
 const fail = code => Object.assign(new Error(code), { code });
-function sync(file) { const fd = openSync(file, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); } }
 function durable(file, bytes) {
   const tmp = `${file}.${randomUUID()}.tmp`; writeFileSync(tmp, bytes, { mode: 0o600, flag: 'wx' });
-  sync(tmp); renameSync(tmp, file); sync(path.dirname(file));
+  syncFile(tmp); renameSync(tmp, file); syncDirectory(path.dirname(file));
 }
 function inside(directory, relative) {
   let file = directory;
@@ -52,7 +52,7 @@ export async function protectCoordinationWriter({ directory, assertOwner, onStep
     const id = randomUUID(), archive = `.coordination-fence/${id}`, saved = inside(directory, archive);
     mkdirSync(saved, { recursive: true, mode: 0o700 });
     for (const name of ['manifest.json', 'head.json', 'legacy-seal.json']) if (existsSync(path.join(dir, name))) {
-      copyFileSync(path.join(dir, name), path.join(saved, name)); sync(path.join(saved, name));
+      copyFileSync(path.join(dir, name), path.join(saved, name)); syncFile(path.join(saved, name));
     }
     intent = { schemaVersion: 1, id, archive, status: 'prepared', original, manifest, head };
     durable(marker, JSON.stringify(intent)); onStep('prepared');
@@ -64,7 +64,7 @@ export async function protectCoordinationWriter({ directory, assertOwner, onStep
       const temporary = baseline + '.' + randomUUID() + '.tmp';
       if (intent.original.version === 'missing') writeFileSync(temporary, '', { mode: 0o600, flag: 'wx' });
       else copyFileSync(legacy, temporary);
-      sync(temporary); renameSync(temporary, baseline); sync(dir);
+      syncFile(temporary); renameSync(temporary, baseline); syncDirectory(dir);
     }
     const frozen = await hashLegacyFile(baseline);
     if (frozen.sha256 !== intent.original.sha256 || frozen.bytes !== intent.original.bytes) throw fail('coordination_read_changed');
@@ -80,7 +80,7 @@ export async function protectCoordinationWriter({ directory, assertOwner, onStep
   } else {
     if (!existsSync(moved)) {
       if (legacyFileToken(legacy) !== intent.original.version) throw fail('coordination_read_changed');
-      renameSync(legacy, moved); sync(saved); onStep('legacy-archived');
+      renameSync(legacy, moved); syncDirectory(saved); onStep('legacy-archived');
     }
     const old = await hashLegacyFile(moved);
     if (old.sha256 !== intent.original.sha256 || old.bytes !== intent.original.bytes) throw fail('coordination_read_changed');
@@ -88,7 +88,7 @@ export async function protectCoordinationWriter({ directory, assertOwner, onStep
   assertOwner();
   if (!existsSync(legacy)) mkdirSync(legacy, { mode: 0o700 });
   if (!lstatSync(legacy).isDirectory()) throw fail('coordination_writer_fence_missing');
-  sync(directory); onStep('writer-fenced'); assertOwner();
+  syncDirectory(directory); onStep('writer-fenced'); assertOwner();
   const { generation } = intent.manifest, legacyVersion = content.version;
   durable(path.join(dir, 'legacy-seal.json'), JSON.stringify({ schemaVersion: 1, generation, legacyVersion, bytes: content.bytes, sha256: content.sha256 }));
   durable(headFile, JSON.stringify({ ...intent.head, legacyVersion })); onStep('head-published'); assertOwner();

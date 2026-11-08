@@ -1,8 +1,9 @@
 import { SESSION_CONTROL_BUCKETS } from './session-control-kernel.mjs';
 import { SUPERVISION_BUCKETS } from './agent-supervision-state.mjs';
 import { createHash, randomUUID } from 'node:crypto';
-import { openSync, closeSync, fstatSync, readSync, readFileSync, writeFileSync, fsyncSync, mkdirSync, readdirSync, lstatSync, realpathSync, existsSync, renameSync, copyFileSync } from 'node:fs';
+import { openSync, closeSync, fstatSync, readSync, readFileSync, writeFileSync, mkdirSync, readdirSync, lstatSync, realpathSync, existsSync, renameSync, copyFileSync } from 'node:fs';
 import path from 'node:path';
+import { syncDirectory, syncFile } from '../fsync-path.mjs';
 import { journalLines } from './journal-lines.mjs';
 import { readLegacySeal } from './coordination-legacy-integrity.mjs';
 import { reduceCoordination } from './work-coordination.mjs';
@@ -46,7 +47,7 @@ function inventory(directory, additional = []) {
     const dir = path.join(directory, relative);
     if (!lstatSync(dir).isDirectory() || lstatSync(dir).isSymbolicLink()) throw failure('coordination_repair_path_invalid');
     for (const name of readdirSync(dir).sort()) {
-      const rel = path.join(relative, name), info = lstatSync(path.join(directory, rel));
+      const rel = path.posix.join(relative, name), info = lstatSync(path.join(directory, rel));
       if (info.isSymbolicLink()) throw failure('coordination_repair_path_invalid');
       if (info.isDirectory()) walk(rel); else if (info.isFile()) files.push(rel); else throw failure('coordination_repair_path_invalid');
     }
@@ -172,8 +173,8 @@ export function readRecoveredCoordination(directory, generation, { includeProof 
 }
 function durable(file, bytes) {
   const tmp = file + '.' + randomUUID() + '.tmp'; writeFileSync(tmp, bytes, { mode: 0o600, flag: 'wx' });
-  const fd = openSync(tmp, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); }
-  renameSync(tmp, file); const parent = openSync(path.dirname(file), 'r'); try { fsyncSync(parent); } finally { closeSync(parent); }
+  syncFile(tmp);
+  renameSync(tmp, file); syncDirectory(path.dirname(file));
 }
 function assertOffline(directory) {
   if (existsSync(path.join(directory, 'host.lease'))) throw failure('coordination_repair_active');
@@ -207,10 +208,10 @@ export function recoverCoordinationForkBackup({ directory, sourceFingerprint, re
       mkdirSync(path.dirname(p), { recursive: true, mode: 0o700 });
       if (!existsSync(p)) {
         const tmp = p + '.' + randomUUID() + '.tmp'; copyFileSync(path.join(directory, file), tmp);
-        const fd = openSync(tmp, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); } renameSync(tmp, p);
+        syncFile(tmp); renameSync(tmp, p);
       }
       if (stable(hashFile(p)) !== stable(plan.sources[file])) throw failure('coordination_read_changed');
-      const parent = openSync(path.dirname(p), 'r'); try { fsyncSync(parent); } finally { closeSync(parent); }
+      syncDirectory(path.dirname(p));
     }
     const generation = randomUUID(), candidateName = 'candidate-' + generation, candidate = path.join(root, candidateName); mkdirSync(path.join(candidate, 'segments'), { recursive: true });
     const recovery = { sourceFingerprint, archive, executionBlocked: true, heldWorkIds: plan.heldWorkIds,
@@ -284,7 +285,7 @@ export function recoverCoordinationForkBackup({ directory, sourceFingerprint, re
   validateCandidate(canonical);
   const manifest = JSON.parse(readFileSync(path.join(canonical, 'manifest.json')));
   if (manifest.generation !== intent.generation) throw failure('coordination_repair_plan_changed');
-  const parent = openSync(directory, 'r'); try { fsyncSync(parent); } finally { closeSync(parent); }
+  syncDirectory(directory);
   onStep('published'); durable(intentFile, JSON.stringify({ ...intent, status: 'complete' }));
   return { ok: true, executionBlocked: true, archive: intent.archive, heldWorkIds: plan.heldWorkIds };
 }

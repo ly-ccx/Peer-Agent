@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { noteDiagnosticPhase } from '../diagnostic-phase.mjs';
+import { syncDirectory, syncFile } from '../fsync-path.mjs';
 import { DatabaseSync } from '../sqlite/connection.mjs';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import { copyFile, truncate } from 'node:fs/promises';
@@ -34,7 +35,6 @@ function writeAll(fd, value) {
     if (!count) throw fail('coordination_write_incomplete'); offset += count;
   }
 }
-function syncPath(file) { const fd = openSync(file, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); } }
 function readHead(file, generation, read = file => JSON.parse(readFileSync(file, 'utf8'))) {
   let proof; try { proof = read(file); } catch (error) { throw fail(error.code === 'ENOENT' ? 'coordination_head_missing' : 'coordination_head_invalid'); }
   if (!proof || typeof proof.generation !== 'string' || !proof.generation || !Number.isSafeInteger(proof.revision) || proof.revision < 0
@@ -261,7 +261,7 @@ function rebuild({ dir, legacy, target, generation, requireHead = false, legacyI
     for (const file of sourceFiles(dir, legacy)) {
       const size = replay(db, file, 0, undefined, file !== legacy, options); versions[file] = token(file);
       putMeta(db, `offset:${file}`, size); putMeta(db, `anchor:${file}`, anchor(file, size));
-      if (existsSync(file)) syncPath(file);
+      if (existsSync(file)) syncFile(file);
     }
     const headFile = path.join(dir, 'head.json');
     if (requireHead && !existsSync(headFile)) throw fail('coordination_head_missing');
@@ -277,7 +277,7 @@ function rebuild({ dir, legacy, target, generation, requireHead = false, legacyI
     }
     putMeta(db, 'generation', generation); putMeta(db, 'sources', versions); db.exec('COMMIT');
     db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
-    for (const directory of new Set([path.dirname(dir), path.dirname(path.dirname(dir)), ...Object.keys(versions).filter(existsSync).map(file => path.dirname(file))])) syncPath(directory);
+    for (const directory of new Set([path.dirname(dir), path.dirname(path.dirname(dir)), ...Object.keys(versions).filter(existsSync).map(file => path.dirname(file))])) syncDirectory(directory);
   } catch (error) { try { db.exec('ROLLBACK'); } catch {} throw error; }
   finally { db.close(); }
 }
@@ -402,12 +402,12 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
         assertOwner();
         const backup = `${error.file}.damaged-${randomUUID()}`, repaired = `${error.file}.repair-${randomUUID()}`;
         await copyFile(error.file, backup); await copyFile(backup, repaired); await truncate(repaired, error.validEnd);
-        for (const file of [backup, repaired]) { const fd = openSync(file, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); } }
+        for (const file of [backup, repaired]) syncFile(file);
         mkdirSync(dir, { recursive: true });
         durable(path.join(dir, 'recovery.json'), JSON.stringify({ backup: path.relative(directory, backup), source: path.relative(directory, error.file), validEnd: error.validEnd, sourceToken: error.sourceToken }));
         assertOwner(); if (token(error.file) !== error.sourceToken) throw fail('coordination_read_changed');
         renameSync(repaired, error.file);
-        const parent = openSync(path.dirname(error.file), 'r'); try { fsyncSync(parent); } finally { closeSync(parent); }
+        syncDirectory(path.dirname(error.file));
         // A new build has no accepted rows from the failed candidate transaction.
         await build();
       }
@@ -433,7 +433,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
         finally { candidate.close(); }
         const value = { schemaVersion: 2, minimumReaderVersion: version, minimumWriterVersion: version, generation, legacyFile: path.basename(originalLegacyFile), legacyVersion, ...(fenced ? { frozenLegacyFile: 'baseline.jsonl' } : {}) };
         durable(manifestFile, JSON.stringify(value));
-        syncPath(directory); syncPath(path.dirname(directory));
+        syncDirectory(directory); syncDirectory(path.dirname(directory));
       }
       if (existsSync(manifestFile)) {
         const current = JSON.parse(readFileSync(manifestFile, 'utf8'));
@@ -494,7 +494,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
           if (tail[0] !== 10) writeAll(fd, '\n'); }
         writeAll(fd, bytes); fsyncSync(fd); persisted = true;
       } finally { closeSync(fd); }
-      const directoryFd = openSync(path.dirname(file), 'r'); try { fsyncSync(directoryFd); } finally { closeSync(directoryFd); }
+      syncDirectory(path.dirname(file));
       durable(headFile, JSON.stringify({ generation: manifest.generation, legacyVersion: manifest.legacyVersion, minimumWriterVersion: manifest.minimumWriterVersion, revision: record.revision, hash: record.hash }));
       const sources = getMeta(db, 'sources') || {}; sources[file] = token(file);
       putMeta(db, 'sources', sources); putMeta(db, `offset:${file}`, statSync(file).size);
@@ -579,7 +579,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
 function durable(file, text) {
   const temporary = `${file}.${randomUUID()}.tmp`, fd = openSync(temporary, 'w', 0o600);
   try { writeAll(fd, text); fsyncSync(fd); } finally { closeSync(fd); }
-  renameSync(temporary, file); const dir = openSync(path.dirname(file), 'r'); try { fsyncSync(dir); } finally { closeSync(dir); }
+  renameSync(temporary, file); syncDirectory(path.dirname(file));
 }
 
 if (!isMainThread && workerData?.coordinationRebuild) {

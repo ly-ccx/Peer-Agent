@@ -248,7 +248,8 @@ test('journal truncated tail has an audited recovery; protected checkpoints are 
     const old = env.store.checkpoint('work', { native: 'first' });
     const fresh = env.store.checkpoint('work', { native: 'second' });
     assert.notEqual(old, fresh); assert.equal(env.store.readCheckpoint(old).native, 'first');
-    assert.equal(statSync(path.join(env.root, 'w', 'checkpoints', old)).mode & 0o777, 0o600);
+    // Windows exposes no POSIX permission bits, so the creation mode is not observable there.
+    if (process.platform !== 'win32') assert.equal(statSync(path.join(env.root, 'w', 'checkpoints', old)).mode & 0o777, 0o600);
     appendFileSync(path.join(env.root, 'w', 'coordination.jsonl'), '{"kind":');
     assert.throws(() => env.store.read()); env.store.recover();
     assert.equal(env.store.pendingEvents()[0].eventId, 'a');

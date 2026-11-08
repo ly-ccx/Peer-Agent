@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, lstatSync, realpathSync, readFileSync, writeFileSync, mkdirSync, renameSync, openSync, closeSync, fsyncSync } from 'node:fs';
+import { existsSync, lstatSync, realpathSync, readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
 import path from 'node:path';
+import { syncDirectory, syncFile } from '../fsync-path.mjs';
 import { inspectCoordinationFork, recoverCoordinationForkBackup, readRecoveredCoordination } from './coordination-fork-recovery.mjs';
 import { createWorkCoordinationStore } from './work-coordination-store.mjs';
 import { historyTerminal, historyWorkHeld, historyCheckpointBindings, planHistoryResumption, recoveryHash } from './history-resumption.mjs';
@@ -14,9 +15,9 @@ function json(file) {
 function durable(file, value) {
   const temporary = `${file}.${randomUUID()}.tmp`;
   writeFileSync(temporary, JSON.stringify(value), { mode: 0o600, flag: 'wx' });
-  const fd = openSync(temporary, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); }
+  syncFile(temporary);
   renameSync(temporary, file);
-  const parent = openSync(path.dirname(file), 'r'); try { fsyncSync(parent); } finally { closeSync(parent); }
+  syncDirectory(path.dirname(file));
 }
 
 /** Local host maintenance. No model execution, permission grants, queue consumption or source-path input. */
