@@ -2,6 +2,32 @@
 
 All notable changes to Peer Agent are tracked here.
 
+## 0.1.0-rc.39 - 2026-11-08
+
+### 修复与改进
+
+- #294：主进程慢定时器、渲染长任务、流式 send、计划写盘和 30 秒巡检留下不含正文的诊断。诊断安装失败不能拖垮启动。
+- #295：30 秒巡检复用未变化计划的归一化结果，按 planId 读取，不再按计划数平方重读目录。
+- #296：流式只改正文且前缀不变时复用上一份行，不再重扫整段历史。
+- #297（与 Knowledge #127 / ADR 124 成对）：已死执行实例按本机身份元组收尾。授权卡确认后从当前列表退出；内部索引不向日常界面展示「待核实」。不写 `stopReceipt`，不释放 claim。
+- #298（与 Knowledge #128 / ADR 30 成对）：聊天、Responses 与 chat adapter 共用受限的安全诊断，不发出原始响应体或提示回显。
+- #299：Windows 存储 worker 使用带工作目录的绝对 require 基址；文件和目录 fsync 在 Windows 用可写句柄。
+- #300：Windows exe、任务栏和安装器图标改为圆角遮罩。macOS icns 与 Linux 图标未改。
+- #301：读取对话的占位放到对话列正中，并加强扫光；减少动效时停掉扫光。
+- 同步双语发布说明与站点更新日志。义务跟进写入把协调格式下限抬到 11；本版仍可读格式 9。更新前完整备份。正式版仍为 0.0.18。本版不宣称 P3、内网 Gateway、远程配对或真实打包 Electron 手感已经交付。
+
+### Fixes and improvements (English)
+
+- #294: diagnostics for slow main-process timers, renderer long tasks, streaming send, plan writes, and the 30-second inspection omit bodies. Installing them cannot take down startup.
+- #295: the 30-second inspection reuses normalization for an unchanged plan and reads by planId, instead of rereading the directory once per plan per plan.
+- #296: a stream that only changes the body reuses the previous row when the prefix is unchanged, instead of rescanning the whole history.
+- #297 (paired with Knowledge #127 / ADR 124): a dead execution instance settles from the local identity tuple. After the authorization card is confirmed, it leaves the current lists. The internal index is not shown as 待核实 in everyday UI. No `stopReceipt` is written and the claim is not released.
+- #298 (paired with Knowledge #128 / ADR 30): chat, Responses, and the chat adapter share a bounded safe diagnostic reader and do not emit raw bodies or prompt echoes.
+- #299: the Windows storage worker resolves its require base from an absolute path under the working directory. File and directory fsync use a writable handle on Windows.
+- #300: the Windows exe, taskbar, and installer icon use a rounded mask. The macOS icns and the Linux icon are unchanged.
+- #301: the conversation-loading placeholder sits in the center of the conversation column, with a stronger sweep that stops under reduced motion.
+- Update bilingual release notes and the website changelog. An obligation follow-up write raises the coordination format floor to 11. This build can still read format 9. Keep a complete backup before updating. Stable remains 0.0.18. This release does not establish P3, an intranet Gateway, remote pairing, or a real packaged Electron feel.
+
 ## 0.1.0-rc.38 - 2026-11-06
 
 ### 修复与改进
