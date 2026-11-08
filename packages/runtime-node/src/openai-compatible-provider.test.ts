@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { isPromptTooLongError, parseContextOverflowEvidence } from '@peer-agent/runtime-core';
 
 import type { ModelStreamEvent } from './model-provider-contracts.ts';
 import {
   createOpenAICompatibleProvider,
+  encodeOpenAICompatibleRequest,
   ModelProviderHttpError,
   ModelProviderStreamError,
 } from './openai-compatible-provider.ts';
@@ -139,4 +141,99 @@ test('returns typed HTTP and malformed SSE errors without credentials', async ()
 
   const streamModel = provider(async () => sseResponse(['not-json']));
   await assert.rejects(streamModel.stream({ model: 'gpt-test', messages: [] }), ModelProviderStreamError);
+});
+
+test('preserves gateway string errors and bounded budget facts', async () => {
+  const model = createOpenAICompatibleProvider({
+    config: { providerId: 'company', apiKey: 'secret-key', baseUrl: 'https://example.test/v1' },
+    trustGatewayErrors: true,
+    fetch: async () => new Response(JSON.stringify({ error: 'Invalid Peer model request', code: 'peer_request_messages_exceeded', source: 'gateway_validation', details: { actual: 515, limit: 512, upstream_attempted: false } }), { status: 400 }),
+  });
+  await assert.rejects(model.stream({ model: 'fixture', messages: [] }), (error: any) => {
+    assert.equal(error.diagnostic?.code, 'peer_request_messages_exceeded');
+    assert.equal(error.diagnostic?.actual, 515);
+    assert.match(error.message, /515.*512/);
+    return true;
+  });
+});
+
+test('preflight encoding equals the actual wire including UTF-8 and tools', async () => {
+  const input = { model: 'fixture', messages: [{ role: 'user' as const, content: '中文 body' }], tools: [{ name: 'read_file', parameters: { type: 'object' } }], maxOutputTokens: 4096, reasoningEffort: 'high' as const };
+  const body = encodeOpenAICompatibleRequest(input);
+  const model = provider(async (_url, request) => { assert.equal(request?.body, body); assert.equal(Buffer.byteLength(body), new TextEncoder().encode(String(request?.body)).length); return sseResponse(['[DONE]']); });
+  await model.stream(input);
+});
+
+test('legacy three-argument errors retain safe overflow categories and provider token facts', () => {
+  for (const detail of [
+    JSON.stringify({error:{code:'context_length_exceeded',message:'PRIVATE_ECHO'}}),
+    'Maximum context length exceeded: PRIVATE_ECHO',
+    `data: ${JSON.stringify({error:{type:'invalid_request_error',message:"This model's maximum prompt length is 1000 but the request contains 1200 tokens. PRIVATE_ECHO"}})}\n\n`,
+  ]) {
+    const error = new ModelProviderHttpError('legacy', 400, detail);
+    assert.equal(error.diagnostic.code, 'context_length_exceeded');
+    assert.match(error.message, /context_length_exceeded/);
+    assert.doesNotMatch(error.message, /PRIVATE_ECHO/);
+    assert.equal(error.status, 400);
+    assert.equal(isPromptTooLongError(error.status, error.message), true);
+    if (detail.startsWith('data:')) {
+      const evidence = parseContextOverflowEvidence({status:400,message:error.message});
+      assert.ok(evidence);
+      assert.equal(evidence.maximumTokens,1000);
+      assert.equal(evidence.requestedTokens,1200);
+    }
+  }
+});
+
+test('legacy detail cannot invent trusted origins or leak arbitrary content', () => {
+  for (const detail of [
+    'PRIVATE_ECHO', '<html>context_length_exceeded PRIVATE_ECHO</html>',
+    'constructor', 'toString', 'context_length_exceeded'.repeat(4000),
+    JSON.stringify({code:'peer_request_messages_exceeded',source:'gateway_validation',details:{actual:515,limit:512,upstream_attempted:false}}),
+    JSON.stringify({error:{code:'1261',message:'PRIVATE_ECHO'}}),
+  ]) {
+    const error = new ModelProviderHttpError('legacy',400,detail);
+    assert.equal(error.message, 'Model provider "legacy" returned HTTP 400.');
+    assert.equal(error.diagnostic.code,'http_error');
+    assert.equal(error.diagnostic.source,'provider');
+    assert.equal(error.diagnostic.upstreamAttempted,undefined);
+  }
+  const explicit = new ModelProviderHttpError('legacy',401,'context_length_exceeded',{status:401,source:'provider',code:'authentication_error'});
+  assert.equal(explicit.diagnostic.code,'authentication_error');
+  assert.doesNotMatch(explicit.message,/context_length/);
+});
+
+test('legacy constructor shares the complete established core overflow vocabulary', () => {
+  for (const message of ['prompt_too_long','context_length_exceeded','maximum context length exceeded',
+    'maximum prompt length exceeded','context window is full','context too long',
+    'input is too long for this model','exceeds model context window','too many tokens','token limit exceeded']) {
+    const error = new ModelProviderHttpError('legacy',400,JSON.stringify({error:{message:message+': PRIVATE_ECHO'}}));
+    assert.equal(isPromptTooLongError(error.status,error.message),true,message);
+    assert.equal(error.diagnostic.code,'context_length_exceeded');
+    assert.doesNotMatch(error.message,/PRIVATE_ECHO/);
+  }
+});
+
+test('compatible chat HTTP failures preserve authoritative counts through the thrown error', async () => {
+  const model = provider(async () => new Response(JSON.stringify({error:{type:'invalid_request_error',message:"This model's maximum prompt length is 1000 but the request contains 1200 tokens. PRIVATE_ECHO"}}),{status:400}));
+  await assert.rejects(model.stream({model:'fixture',messages:[]}), (error: any) => {
+    const evidence = parseContextOverflowEvidence({status:error.status,message:error.message});
+    assert.ok(evidence);
+    assert.equal(evidence.maximumTokens,1000);
+    assert.equal(evidence.requestedTokens,1200);
+    assert.doesNotMatch(error.message,/PRIVATE_ECHO/);
+    return true;
+  });
+});
+
+test('four-argument errors preserve partial validated counts without inventing missing facts', () => {
+  for (const code of ['context_length_exceeded','context_window_exceeded'])
+  for (const [actual,limit] of [[1200,1000],[1200,undefined],[undefined,1000]] as const) {
+    const error = new ModelProviderHttpError('fixture',400,'PRIVATE_ECHO',{status:400,source:'provider',code,actual,limit});
+    const evidence = parseContextOverflowEvidence(error);
+    assert.ok(evidence);
+    assert.equal(evidence.requestedTokens,actual);
+    assert.equal(evidence.maximumTokens,limit);
+    assert.doesNotMatch(error.message,/PRIVATE_ECHO/);
+  }
 });

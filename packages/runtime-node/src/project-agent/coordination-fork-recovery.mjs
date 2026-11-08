@@ -227,7 +227,7 @@ export function recoverCoordinationForkBackup({ directory, sourceFingerprint, re
       ? 9 : closure ? 6 : SUPERVISION_BUCKETS.some(bucket => Object.keys(plan.state[bucket] || {}).length) ? 5 : 3;
     const sourceFloors = ['manifest.json', 'head.json'].map(file => JSON.parse(readFileSync(containedTree(directory, 'coordination-v2/' + file))).minimumWriterVersion || 2);
     const minimumVersion = Math.max(semanticFloor, ...sourceFloors);
-    if (![2,3,4,5,6,7,8,9].includes(minimumVersion)) throw failure('coordination_schema_unsupported');
+    if (![2,3,4,5,6,7,8,9,11].includes(minimumVersion)) throw failure('coordination_schema_unsupported');
     durable(path.join(candidate, 'head.json'), JSON.stringify({ generation, legacyVersion, revision: 1, hash: '', minimumWriterVersion: minimumVersion }));
     durable(path.join(candidate, 'manifest.json'), JSON.stringify({ schemaVersion: 2, minimumReaderVersion: minimumVersion, minimumWriterVersion: minimumVersion,
       generation, legacyFile: 'coordination.jsonl', frozenLegacyFile: 'baseline.jsonl', legacyVersion }));

@@ -199,7 +199,7 @@ describe('project agent mode gate', () => {
     assert.deepEqual(agentNames, [
       'list_files', 'read_file', 'search_files', 'view_image', 'git_query', 'batch_search',
       'create_objective', 'update_objective', 'pause_objective', 'resume_objective', 'list_objectives', 'get_objective', 'close_objective',
-      'coordinate_work', 'send_agent_message', 'spawn_session', 'resume_session', 'reprioritize_session', 'control_work', 'list_sessions', 'get_session', 'cancel_session', 'message_session', 'get_verification_detail', 'verify_session', 'set_proactivity', 'wait_for_sessions', 'post_reply',
+      'coordinate_work', 'send_agent_message', 'spawn_session', 'resume_session', 'reprioritize_session', 'control_work', 'list_sessions', 'get_session', 'inspect_execution_obligation', 'request_obligation_authorization', 'resolve_execution_obligation', 'cancel_session', 'message_session', 'get_verification_detail', 'verify_session', 'set_proactivity', 'wait_for_sessions', 'post_reply',
       'memory_search', 'memory_remember', 'memory_forget',
       'read_work_notes', 'write_work_note', 'search_work_history', 'prepare_context_handoff',
     ]);

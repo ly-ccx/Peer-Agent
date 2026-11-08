@@ -149,6 +149,17 @@ test('a refused expansion survives release and requeue as a complete resource re
   assert.equal(first.claimsFor(resumed).length,2);
 });
 
+test('an open handle named by the receipt stays reconciling and is not marked ended', t => {
+  const { directory, first } = fixture(t), a = plan('a', directory), b = plan('b', directory);
+  first.reserve(a, 'a');
+  first.markHandle(a, { handleId: 'native', toolCallId: 'call', state: 'active' });
+  first.settle(a, stopped(first, a, 'unknown-handle', ['call']), 'a');
+  const claim = first.snapshot().find(row => row.execution.planId === 'a');
+  assert.equal(claim.state, 'reconciling');
+  assert.equal(claim.handles.native.state, 'active');
+  assert.equal(first.reserve(b, 'b').allowed, false);
+});
+
 test('a durable native handle prevents release until its actual completion is recorded', t => {
   const { directory, first } = fixture(t), a=plan('a',directory); first.reserve(a,'a');
   first.markHandle(a,{handleId:'native',toolCallId:'call',state:'active'});

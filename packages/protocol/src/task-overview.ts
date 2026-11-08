@@ -471,6 +471,7 @@ export interface LifecycleFacts {
   readonly blockedReason?: string;
   readonly cancellationPhase?: string;
   readonly cancellationDisposition?: 'user_withdrawn';
+  readonly obligationDisposition?: 'indexed' | 'suspended' | 'current';
   readonly takeoverPhase?: string;
   readonly coordinationPhase?: string;
 }
@@ -504,7 +505,8 @@ export type FollowUpReason =
   | 'verification_failed'
   | 'live_execution'
   | 'paused'
-  | 'unknown_facts';
+  | 'unknown_facts'
+  | 'obligation_indexed';
 
 export interface FollowUpProjection {
   readonly owner: FollowUpOwner;
@@ -547,6 +549,8 @@ export function decideFollowUp(
       : followUpOf('user', 'human_request');
   }
   if (live) return followUpOf('bot', 'live_execution');
+  // An authorized follow-up retirement leaves the current list without claiming the stop succeeded.
+  if (facts.obligationDisposition === 'indexed') return followUpOf('none', 'obligation_indexed');
   if (stopPending) return followUpOf('bot', 'stop_unconfirmed');
   if (stopStatus && facts.cancellationDisposition === 'user_withdrawn') return followUpOf('none', 'user_withdrawn');
 

@@ -7,7 +7,7 @@ import { Worker, isMainThread, parentPort, workerData } from 'node:worker_thread
 import { copyFile, truncate } from 'node:fs/promises';
 import { mkdirSync, readFileSync, renameSync, existsSync, statSync, lstatSync, openSync, closeSync, fsyncSync, writeSync, fstatSync, readSync, readdirSync } from 'node:fs';
 import path from 'node:path';
-import { prepareLegacyIntegrity, acceptsLegacyIntegrity } from './coordination-legacy-integrity.mjs';
+import { prepareLegacyIntegrity, acceptsLegacyIntegrity, explainLegacyIntegrity } from './coordination-legacy-integrity.mjs';
 import { journalLines } from './journal-lines.mjs';
 import { reduceCoordination } from './work-coordination.mjs';
 import { encodeWorkUpdate } from './work-delta.mjs';
@@ -16,11 +16,16 @@ import { withCoordinationRebuild } from './coordination-rebuild-queue.mjs';
 import { SUPERVISION_BUCKETS } from './agent-supervision-state.mjs';
 
 import { SESSION_CONTROL_BUCKETS } from './session-control-kernel.mjs';
+import { OBLIGATION_BUCKETS } from './execution-obligation-kernel.mjs';
 
-const buckets = [...SESSION_CONTROL_BUCKETS, 'events', 'works', 'deliveries', 'mandates', 'decisions', 'transitions', 'inputBindings', 'intentDecisions', ...SUPERVISION_BUCKETS];
+const buckets = [...SESSION_CONTROL_BUCKETS, ...OBLIGATION_BUCKETS, 'events', 'works', 'deliveries', 'mandates', 'decisions', 'transitions', 'inputBindings', 'intentDecisions', ...SUPERVISION_BUCKETS];
 const empty = () => ({ revision: 0, events: {}, works: {}, deliveries: {} });
 const token = file => { try { const s = statSync(file, { bigint: true }); return `${s.dev}:${s.ino}:${s.size}:${s.mtimeNs}:${s.ctimeNs}`; } catch (e) { if (e.code === 'ENOENT') return 'missing'; throw e; } };
 const fail = code => Object.assign(new Error(code), { code });
+function rejectLegacy(directory, legacyFile, baseline, receipt) {
+  if (acceptsLegacyIntegrity(directory, legacyFile, baseline, receipt)) return;
+  throw Object.assign(fail('coordination_legacy_changed'), { legacy: explainLegacyIntegrity(directory, legacyFile, baseline, receipt) || { check: 'legacy_rejected', seal: 'unknown', change: 'unknown', file: 'journal' } });
+}
 const corruptIndex = error => error.code === 'coordination_index_corrupt' || [11, 26].includes(Number(error.errcode) & 255);
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 function writeAll(fd, value) {
@@ -148,6 +153,15 @@ function apply(db, record, { blobs, receiptCache } = {}) {
   if (record.kind === 'usage_observed' && db.prepare('SELECT 1 FROM observations WHERE workId=? AND id=?').get(record.workId, record.observationId)) {
     const work = before.works[record.workId]; if (work?.budget) work.budget.observations = { [record.observationId]: true };
   }
+  if (record.kind === 'obligation_grant' || record.kind === 'execution_obligation') {
+    before.obligationGrants = {}; before.obligationDispositions = {}; before.obligationHeads = {}; before.obligationResults = {};
+    const grantId = record.grant?.grantId;
+    if (grantId && get(db, 'obligationGrants', grantId)) before.obligationGrants[grantId] = get(db, 'obligationGrants', grantId);
+    const obligationId = record.disposition?.obligationId;
+    if (obligationId && get(db, 'obligationDispositions', obligationId)) before.obligationDispositions[obligationId] = get(db, 'obligationDispositions', obligationId);
+    const sessionId = record.disposition?.sessionId;
+    if (sessionId && get(db, 'obligationHeads', sessionId)) before.obligationHeads[sessionId] = get(db, 'obligationHeads', sessionId);
+  }
   if (record.kind === 'session_control' || record.patch?.controlOperationRef) {
     before.sessionControls = {}; before.sessionControlHeads = {};
     const sessionId = record.operation?.sessionId, current = sessionId && get(db, 'sessionControlHeads', sessionId);
@@ -164,7 +178,8 @@ function apply(db, record, { blobs, receiptCache } = {}) {
     || Object.values(next.agentCommands || {}).some(row => row.completionRecorded === true);
   const intent = record.kind.startsWith('intent_') || record.mandate?.intentSchemaVersion === 1
     || ['reply_committed', 'reply_settlement_started', 'reply_settlement_failed', 'reply_settled', 'reply_deferred', 'reply_held', 'reply_aggregated'].includes(record.kind);
-  const semanticFloor = record.kind === 'session_control' ? (record.minimumExecutorVersion >= 9 ? 9 : 7)
+  const semanticFloor = record.kind === 'obligation_grant' || record.kind === 'execution_obligation' ? 11
+    : record.kind === 'session_control' ? (record.minimumExecutorVersion >= 9 ? 9 : 7)
     : intent ? (record.minimumExecutorVersion >= 9 ? 9 : 8) : closure ? 6 : supervision ? 5 : record.kind.startsWith('history_') ? 4 : 2;
   putMeta(db, 'minimumFormatVersion', Math.max(getMeta(db, 'minimumFormatVersion') || 2, semanticFloor));
   for (const bucket of buckets) for (const [id, original] of Object.entries(next[bucket] || {})) {
@@ -252,7 +267,7 @@ function rebuild({ dir, legacy, target, generation, requireHead = false, legacyI
     if (requireHead && !existsSync(headFile)) throw fail('coordination_head_missing');
     if (existsSync(headFile)) {
       const expected = readHead(headFile, generation);
-      if (!acceptsLegacyIntegrity(path.dirname(dir), legacy, expected, legacyIntegrity)) throw fail('coordination_legacy_changed');
+      rejectLegacy(path.dirname(dir), legacy, expected, legacyIntegrity);
       if ((getMeta(db, 'revision') || 0) < expected.revision
         || (getMeta(db, 'revision') || 0) === expected.revision && (getMeta(db, 'eventHash') || '') !== expected.hash) throw fail('coordination_journal_missing');
     }
@@ -292,7 +307,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
     if (existsSync(path.join(directory, 'coordination-fence.json')) && readMetadata(path.join(directory, 'coordination-fence.json')).status !== 'complete') throw fail('coordination_fence_incomplete');
     if (!existsSync(manifestFile)) throw fail(existsSync(path.join(directory, 'coordination-recovery.json')) ? 'coordination_repair_incomplete' : 'coordination_recovery_pending');
     const next = readMetadata(manifestFile);
-    if (next.schemaVersion !== 2 || ![2, 3, 4, 5, 6, 7, 8, 9].includes(next.minimumReaderVersion) || next.minimumWriterVersion !== next.minimumReaderVersion) throw fail('coordination_schema_unsupported');
+    if (next.schemaVersion !== 2 || ![2, 3, 4, 5, 6, 7, 8, 9, 11].includes(next.minimumReaderVersion) || next.minimumWriterVersion !== next.minimumReaderVersion) throw fail('coordination_schema_unsupported');
     if (next.minimumReaderVersion >= 3) {
       if (next.frozenLegacyFile !== 'baseline.jsonl' || !lstatSync(originalLegacyFile).isDirectory() || lstatSync(originalLegacyFile).isSymbolicLink() || !lstatSync(path.join(dir, 'baseline.jsonl')).isFile() || lstatSync(path.join(dir, 'baseline.jsonl')).isSymbolicLink()) throw fail('coordination_writer_fence_missing');
       legacyFile = path.join(dir, next.frozenLegacyFile);
@@ -315,7 +330,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
       db = database(indexFile, { derived: true }); dbIdentity = identity;
       if (db.prepare('PRAGMA quick_check(1)').get().quick_check !== 'ok') throw fail('coordination_index_corrupt');
     }
-    if (!acceptsLegacyIntegrity(directory, legacyFile, manifest, getMeta(db, 'legacyIntegrity'))) throw fail('coordination_legacy_changed');
+    rejectLegacy(directory, legacyFile, manifest, getMeta(db, 'legacyIntegrity'));
     if (getMeta(db, 'generation') !== manifest.generation) throw fail('coordination_recovery_pending');
     const previous = getMeta(db, 'sources') || {}, files = sourceFiles(dir, legacyFile);
     if (Object.keys(previous).some(file => !files.includes(file))) throw fail('coordination_read_changed');
@@ -337,7 +352,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
     {
       const expected = readHead(headFile, manifest.generation, readMetadata);
       if ((expected.minimumWriterVersion || 2) > manifest.minimumWriterVersion || (getMeta(db, 'minimumFormatVersion') || 2) > manifest.minimumWriterVersion) throw fail('coordination_recovery_pending');
-      if (expected.legacyVersion !== manifest.legacyVersion) throw fail('coordination_legacy_changed');
+      if (expected.legacyVersion !== manifest.legacyVersion) throw Object.assign(fail('coordination_legacy_changed'), { legacy: { check: 'head_baseline', seal: 'unknown', change: 'metadata', file: 'head' } });
       if ((getMeta(db, 'revision') || 0) < expected.revision
         || (getMeta(db, 'revision') || 0) === expected.revision && (getMeta(db, 'eventHash') || '') !== expected.hash) throw fail('coordination_journal_missing');
     }
@@ -407,7 +422,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
         let legacyVersion, version;
         try {
           legacyVersion = getMeta(candidate, 'sources')?.[legacyFile] || 'missing';
-          if (!priorHead && legacyVersion !== token(legacyFile)) throw fail('coordination_legacy_changed');
+          if (!priorHead && legacyVersion !== token(legacyFile)) throw Object.assign(fail('coordination_legacy_changed'), { legacy: explainLegacyIntegrity(directory, legacyFile, { generation, legacyVersion }, null) || { check: 'source_token', seal: 'unknown', change: 'unknown', file: 'legacy_journal' } });
           // Preserve an earlier activation marker when only its manifest was lost.
           legacyVersion = priorHead?.legacyVersion ?? legacyVersion;
           await prepareLegacyIntegrity({ directory, legacyFile, baseline: { generation, legacyVersion }, assertOwner, onRead });
@@ -426,7 +441,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
         let floor;
         try { floor = Math.max(current.minimumWriterVersion, priorHead?.minimumWriterVersion || 2, getMeta(candidate, 'minimumFormatVersion') || 2); }
         finally { candidate.close(); }
-        if (![2,3,4,5,6,7,8,9].includes(floor)) throw fail('coordination_schema_unsupported');
+        if (![2,3,4,5,6,7,8,9,11].includes(floor)) throw fail('coordination_schema_unsupported');
         if (floor > current.minimumWriterVersion) {
           durable(headFile, JSON.stringify({ ...readHead(headFile, generation), minimumWriterVersion: floor }));
           durable(manifestFile, JSON.stringify({ ...current, minimumReaderVersion: floor, minimumWriterVersion: floor }));
@@ -501,7 +516,7 @@ export function createCoordinationStorageV2({ directory, legacyFile, assertOwner
     supportsProtectedReceipts() { load(); return manifest.minimumWriterVersion >= 3 && manifest.frozenLegacyFile === 'baseline.jsonl'; },
     enableSupervision(minimumVersion = 5) {
       assertOwner(); load();
-      if (![5,6,7,8,9].includes(minimumVersion)) throw fail('coordination_schema_unsupported');
+      if (![5,6,7,8,9,11].includes(minimumVersion)) throw fail('coordination_schema_unsupported');
       if (manifest.minimumWriterVersion >= minimumVersion) return;
       if (manifest.minimumWriterVersion < 3 || manifest.frozenLegacyFile !== 'baseline.jsonl') throw fail('coordination_writer_fence_required');
       const next = { ...manifest, minimumReaderVersion: minimumVersion, minimumWriterVersion: minimumVersion };
@@ -569,5 +584,9 @@ function durable(file, text) {
 
 if (!isMainThread && workerData?.coordinationRebuild) {
   try { rebuild(workerData.coordinationRebuild); parentPort.postMessage({ ok: true }); }
-  catch (error) { parentPort.postMessage({ ok: false, code: error.code, message: error.message, file: error.file, validEnd: error.validEnd, sourceToken: error.sourceToken }); }
+  catch (error) {
+    const payload = { ok: false, code: error.code, message: error.message, file: error.file, validEnd: error.validEnd, sourceToken: error.sourceToken };
+    if (error.legacy && typeof error.legacy === 'object') payload.legacy = error.legacy;
+    parentPort.postMessage(payload);
+  }
 }

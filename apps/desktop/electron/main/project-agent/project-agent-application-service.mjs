@@ -7,7 +7,7 @@ import { createBotModelSelectionUpdater } from './bot-model-selection.mjs';
  * 变化事件按 100ms 合并，带上这段时间里变化的 workspaceId。
  * 历史对话是旧会话的只读投影。继续时只给新任务拍继承背景，不改旧会话文件。
  */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   BOT_LEVELS,
   cleanDisplayName,
@@ -20,6 +20,8 @@ import {
   projectHistory,
 } from '@peer-agent/runtime-node';
 import { projectBotRecoveryStatus, projectModelRoutingMenuOption } from '@peer-agent/protocol';
+import { appendObligationLog } from '@peer-agent/runtime-node/obligation-log';
+import { obligationDisplayTitle, selectPendingGrants } from '@peer-agent/runtime-node/execution-obligation';
 import { settleActivePermissionRequest, sharedOneTimeApprovals } from '../chat-runtime/permission-gate.mjs';
 import { projectBotModelViews } from './model-controls.mjs';
 import { profilePolicyPatch } from './profile-policy.mjs';
@@ -97,6 +99,9 @@ export function createProjectAgentApplicationService({
   retryTurn = null,
   readActivity = () => null,
   readRecovery = () => null,
+  readPersistedObligationGrants = null,
+  obligationBinding = () => 'unknown',
+  openObligationRuntime = null,
   recoveryControl = null,
   stopResponseTurn = null,
   requestTakeover = null,
@@ -378,6 +383,119 @@ export function createProjectAgentApplicationService({
     const session = await sessions.get(payload);
     if (!session) return { ok: false, code: 'NOT_FOUND' };
     return { ok: true, session };
+  }
+
+  function parentHash(value) {
+    return typeof value === 'string' && value ? createHash('sha256').update(value).digest('hex').slice(0, 12) : null;
+  }
+  function recoveryFact(workspaceId) {
+    const status = readRecovery?.(workspaceId);
+    const code = status?.error || status?.code;
+    const safe = value => typeof value === 'string' && /^[a-z_]{1,40}$/.test(value) ? value : null;
+    const legacy = status?.legacy && typeof status.legacy === 'object' ? {
+      check: safe(status.legacy.check), seal: safe(status.legacy.seal), change: safe(status.legacy.change), file: safe(status.legacy.file),
+    } : null;
+    return {
+      code: typeof code === 'string' && /^[a-zA-Z0-9_:-]{1,120}$/.test(code) ? code : null,
+      phase: typeof status?.phase === 'string' ? status.phase : null,
+      ...(legacy?.check ? { check: legacy.check, seal: legacy.seal, change: legacy.change, file: legacy.file } : {}),
+    };
+  }
+  function sessionRows(workspaceId) {
+    try { return sessions?.list?.({ workspaceId }) || []; }
+    catch { return []; }
+  }
+  function ownsGrantSession(workspaceId, parentConversationId, grant) {
+    const rows = sessionRows(workspaceId);
+    const ids = new Set((grant.items || []).map(item => item.sessionId).filter(id => typeof id === 'string'));
+    return rows.some(session => ids.has(session.sessionId) && session.workspaceId === workspaceId
+      && session.origin?.parentConversationId === parentConversationId);
+  }
+
+  async function listObligationGrants(payload = {}) {
+    if (!open()) return disabled();
+    const workspaceId = typeof payload.workspaceId === 'string' ? payload.workspaceId : null;
+    const parentConversationId = typeof payload.parentConversationId === 'string' ? payload.parentConversationId : undefined;
+    const recovery = recoveryFact(workspaceId);
+    const binding = obligationBinding(workspaceId);
+    if (recovery.code) appendObligationLog({ event: 'recovery', workspaceId, code: recovery.code, phase: recovery.phase, check: recovery.check || null, seal: recovery.seal || null, change: recovery.change || null, file: recovery.file || null });
+    const persisted = typeof readPersistedObligationGrants === 'function' ? readPersistedObligationGrants(workspaceId) : null;
+    if (persisted && persisted.ok === false) {
+      appendObligationLog({ event: 'list', workspaceId, runtime: recovery.code || 'ready', binding, raw: 0, count: 0,
+        parent: parentHash(parentConversationId), code: persisted.code, reason: [persisted.cause || persisted.code] });
+      return { ok: false, code: persisted.code };
+    }
+    let raw = persisted?.grants;
+    if (!raw && typeof sessions?.listPendingObligationGrants === 'function') {
+      const listed = await sessions.listPendingObligationGrants(workspaceId);
+      if (listed?.ok === false) {
+        appendObligationLog({ event: 'list', workspaceId, runtime: recovery.code || 'ready', binding, raw: 0, count: 0,
+          parent: parentHash(parentConversationId), code: listed.code || listed.error || 'failed' });
+        return listed;
+      }
+      raw = listed?.grants || [];
+      if (!persisted && !listed) raw = null;
+    }
+    if (!Array.isArray(raw)) {
+      appendObligationLog({ event: 'list', workspaceId, runtime: recovery.code || 'unknown', binding, raw: 0, count: 0,
+        parent: parentHash(parentConversationId), code: 'obligation_store_unreadable' });
+      return { ok: false, code: 'obligation_store_unreadable' };
+    }
+    const selected = selectPendingGrants(raw, {
+      parentConversationId,
+      ownsSession: grant => ownsGrantSession(workspaceId, parentConversationId, grant),
+    });
+    const rows = sessionRows(workspaceId);
+    const grants = selected.grants.map(grant => ({ ...grant, items: (grant.items || []).map(item => {
+      const projected = rows.find(session => session.sessionId === item.sessionId);
+      const display = obligationDisplayTitle(item, projected?.title);
+      return { ...item, displayTitle: display.title, shortId: display.shortId };
+    }) }));
+    appendObligationLog({ event: 'list', workspaceId, runtime: recovery.code || 'ready', binding, raw: raw.length, count: grants.length,
+      parent: parentHash(parentConversationId),
+      reason: selected.decisions.filter(item => item.reason !== 'parent_match' && item.reason !== 'unscoped').map(item => `${item.reason}:${item.grantId || ''}`),
+      code: null });
+    return { ok: true, grants, writer: recovery.code ? { ok: false, code: recovery.code, check: recovery.check || null, seal: recovery.seal || null, change: recovery.change || null, file: recovery.file || null } : { ok: true } };
+  }
+
+  async function decideObligation(payload = {}) {
+    if (!open()) return disabled();
+    const workspaceId = typeof payload.workspaceId === 'string' ? payload.workspaceId : null;
+    const grantId = typeof payload.grantId === 'string' ? payload.grantId : null;
+    if (typeof sessions?.confirmObligationGrant !== 'function') {
+      appendObligationLog({ event: 'decide', workspaceId, grantId, ok: false, code: 'UNAVAILABLE' });
+      return { ok: false, code: 'UNAVAILABLE' };
+    }
+    const actor = { ...payload, actor: 'user_panel' };
+    const decideOnce = async () => {
+      if (payload.decision === 'revoke') return sessions.revokeObligationGrant(actor);
+      const confirmed = await sessions.confirmObligationGrant(actor);
+      if (!confirmed?.ok) return confirmed;
+      return sessions.resolveExecutionObligation({ ...actor, items: confirmed.grant.items.map(item => ({
+        sessionId: item.sessionId, operationId: item.operationId, actions: item.actions,
+      })), evidenceRevision: confirmed.grant.items[0]?.evidenceRevision, idempotencyKey: `panel-${payload.grantId}` });
+    };
+    const blocked = error => {
+      const code = error?.code || error?.message || 'obligation_writer_unavailable';
+      const legacy = error?.legacy && typeof error.legacy === 'object' ? error.legacy : null;
+      return { ok: false, code, ...(legacy ? { legacy } : {}) };
+    };
+    let result;
+    try {
+      if (obligationBinding(workspaceId) !== 'registered' && typeof openObligationRuntime === 'function') await openObligationRuntime(workspaceId);
+      result = await decideOnce();
+    }
+    catch (error) {
+      if (error?.message === 'obligation_storage_unavailable' && typeof openObligationRuntime === 'function') {
+        try { await openObligationRuntime(workspaceId); result = await decideOnce(); }
+        catch (openError) { result = blocked(openError); }
+      } else result = blocked(error);
+    }
+    const legacy = result?.legacy && typeof result.legacy === 'object' ? result.legacy : null;
+    appendObligationLog({ event: 'decide', workspaceId, grantId, ok: result?.ok === true,
+      code: result?.ok === false ? (result.error || result.code || 'failed') : null,
+      check: legacy?.check || null, seal: legacy?.seal || null, change: legacy?.change || null, file: legacy?.file || null });
+    return result;
   }
 
   async function cancelSession(payload = {}) {
@@ -787,6 +905,8 @@ export function createProjectAgentApplicationService({
     listSessions,
     getSession,
     cancelSession,
+    listObligationGrants,
+    decideObligation,
     resumeSession,
     listApprovals,
     decideApproval,

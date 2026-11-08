@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { workBudgetBinding } from './work-budget.mjs';
 import { isCanonicalUserInput } from './user-priority.mjs';
 import { unsettledExecution } from './execution-resources.mjs';
+import { appendObligationLog } from './obligation-log.mjs';
 import { sessionFactsFromPlan } from './session-facts.mjs';
 
 /** Execution return is not cancellation settlement; accepted results stay immutable. */
@@ -43,6 +44,10 @@ export function createSessionCancellation({ findBySession, goalPlanStore, goalRu
     const parent = context.parentConversationId || context.conversationId;
     if (context.workspaceId && context.workspaceId !== origin.workspaceId || parent && parent !== origin.parentConversationId) return { error: 'out_of_scope' };
     if (!canManageWorkspace(origin.workspaceId)) return { error: 'lease_unavailable' };
+    const indexedState = workBudgetBinding(origin.workspaceId)?.store?.read?.();
+    const indexed = indexedState?.obligationHeads?.[origin.sessionId];
+    const indexedPhase = indexed && indexedState.obligationDispositions?.[indexed]?.phase;
+    if (indexedPhase === 'indexed') return { replayed: true, completed: project(plan) };
     if (plan.resultAcceptance?.acceptedAt) return { error: 'session_not_running' };
     if (plan.status === 'cancelled' && origin.takeover?.phase !== 'stopping' && !sessionNeedsCancellation(project(plan))) return { completed: project(plan) };
     const withdrawal = withdrawalFor(plan, input, context);
@@ -109,7 +114,25 @@ export function createSessionCancellation({ findBySession, goalPlanStore, goalRu
         return project(goalPlanStore.getPlan(plan.planId));
       });
     } catch (error) {
-      return { error: error?.message || 'cancellation_failed', cancellationPending: true };
+      await exclusive(() => {
+        const plan = goalPlanStore.getPlan(registration.planId);
+        const control = plan && sessionControl.read(plan);
+        const refused = control?.phase === 'reconciling' && ['execution_stop_unconfirmed', 'execution_outcome_unknown', 'reconcile_execution_outcome'].includes(control.nextAction);
+        if (!plan?.delegationOrigin?.cancellation || !refused || plan.delegationOrigin.cancellation.phase === 'awaiting_outcome') return;
+        const evidenceCalls = unsettledExecution(plan);
+        goalPlanStore.revisePlan(plan.planId, { delegationOrigin: { ...goalPlanStore.getPlan(plan.planId).delegationOrigin,
+          cancellation: { ...plan.delegationOrigin.cancellation, phase: 'awaiting_outcome', ...(evidenceCalls.length ? { evidenceCalls } : {}) } } },
+          { reason: 'cancellation outcome unconfirmed', changedBy: 'session-cancellation' });
+      });
+      const code = error?.message || 'cancellation_failed';
+      if (code === 'execution_stop_unconfirmed' || code === 'execution_outcome_unknown' || code === 'reconcile_execution_outcome') {
+        appendObligationLog({ event: 'cancel_refused', code, sessionId: registration.sessionId,
+          operationId: registration.receipt?.operationId || null, nextTool: 'inspect_execution_obligation' });
+        return { error: code, cancellationPending: true, sessionId: registration.sessionId,
+          nextTool: 'inspect_execution_obligation',
+          message: 'Stop is unconfirmed. Call inspect_execution_obligation, then request_obligation_authorization by copying each item obligationId, evidenceRevision, and allowedActions. Do not repeat cancel_session. If authorization returns evidence_stale, inspect again; do not cancel.' };
+      }
+      return { error: code, cancellationPending: true };
     }
   }
   async function request(input, wait = false, context = {}) {
@@ -127,8 +150,9 @@ export function createSessionCancellation({ findBySession, goalPlanStore, goalRu
     async recover(plans) { for (const plan of plans) {
       const origin = plan.delegationOrigin;
       if (!origin?.cancellation || plan.status === 'cancelled' && !origin.cancellation.cleanupPending) continue;
+      if (origin.cancellation.phase === 'awaiting_outcome' && sessionControl.refusalStable?.(plan)) continue;
       if (origin.cancellation.phase === 'awaiting_outcome'
         && JSON.stringify(origin.cancellation.evidenceCalls || []) === JSON.stringify(unsettledExecution(plan))) continue;
-      await request({ sessionId: origin.sessionId }, false);
+      await request({ sessionId: origin.sessionId }, true);
     } } };
 }

@@ -1,3 +1,4 @@
+import { readProviderHttpError } from './provider-http-error.mjs';
 import type {
   ModelMessage,
   ModelProvider,
@@ -249,8 +250,8 @@ export function createChatGptResponsesProvider(options: CreateChatGptResponsesPr
         signal: request.signal,
       });
       if (!response.ok) {
-        const detail = await response.text();
-        throw new ModelProviderHttpError('openai', response.status, detail);
+        const { detail, diagnostic } = await readProviderHttpError(response, { signal: request.signal, secrets: [tokens.access] });
+        throw new ModelProviderHttpError('openai', response.status, detail, diagnostic);
       }
       return consumeResponsesStream(response, request);
     },

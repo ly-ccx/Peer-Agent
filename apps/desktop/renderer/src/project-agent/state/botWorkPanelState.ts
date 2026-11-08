@@ -29,8 +29,9 @@ export function workPanelSessions(index: BotWorkIndex) {
   const currentIds = new Set(current.map(session => session.sessionId));
   const roots = current.filter(session => !session.parentSessionId || !currentIds.has(session.parentSessionId));
   // A direct task worker is itself an Agent. Include returned children while their parent is followed up.
+  // An indexed retirement stays in the audit ledger and leaves the everyday lists.
   const agents = index.available ? [...new Map([...current, ...[...index.byId.values()]
-    .filter(session => session.parentSessionId && currentIds.has(session.parentSessionId))]
+    .filter(session => session.followUp?.reason !== 'obligation_indexed' && session.parentSessionId && currentIds.has(session.parentSessionId))]
     .map(session => [session.sessionId, session])).values()] : [];
   return { tasks: roots, agents };
 }

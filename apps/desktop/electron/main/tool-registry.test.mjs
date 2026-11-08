@@ -325,7 +325,7 @@ describe('Mode-scoped tool projection (ADR 35)', () => {
     assert.deepEqual(names, [
       'list_files', 'read_file', 'search_files', 'view_image', 'git_query', 'batch_search',
       'create_objective', 'update_objective', 'pause_objective', 'resume_objective', 'list_objectives', 'get_objective', 'close_objective',
-      'coordinate_work', 'send_agent_message', 'spawn_session', 'resume_session', 'reprioritize_session', 'control_work', 'list_sessions', 'get_session', 'cancel_session', 'message_session', 'get_verification_detail', 'verify_session', 'set_proactivity', 'wait_for_sessions', 'post_reply',
+      'coordinate_work', 'send_agent_message', 'spawn_session', 'resume_session', 'reprioritize_session', 'control_work', 'list_sessions', 'get_session', 'inspect_execution_obligation', 'request_obligation_authorization', 'resolve_execution_obligation', 'cancel_session', 'message_session', 'get_verification_detail', 'verify_session', 'set_proactivity', 'wait_for_sessions', 'post_reply',
       'memory_search', 'memory_remember', 'memory_forget',
       'read_work_notes', 'write_work_note', 'search_work_history', 'prepare_context_handoff',
     ]);
@@ -341,6 +341,12 @@ describe('Mode-scoped tool projection (ADR 35)', () => {
       assert.ok(chat.includes(goalTool));
     }
     assert.deepEqual(materializedNames('explorer'), ['list_files', 'read_file', 'search_files', 'view_image', 'git_query', 'batch_search']);
+    for (const mode of ['chat', 'plan', 'goal', 'explorer']) {
+      const names = materializedNames(mode);
+      for (const obligationTool of ['inspect_execution_obligation', 'request_obligation_authorization', 'resolve_execution_obligation']) {
+        assert.equal(names.includes(obligationTool), false, `${obligationTool} stays off ${mode}`);
+      }
+    }
     const registry = createRuntimeToolRegistry();
     const chatProjection = createRuntimeProjectionFromToolRegistry(registry, { mode: 'chat' });
     assert.equal(chatProjection.accessLevel, 'ask_before_local');
@@ -350,7 +356,7 @@ describe('Mode-scoped tool projection (ADR 35)', () => {
       [
         'list_files', 'read_file', 'search_files', 'view_image', 'git_query', 'batch_search',
         'create_objective', 'update_objective', 'pause_objective', 'resume_objective', 'list_objectives', 'get_objective', 'close_objective',
-        'coordinate_work', 'send_agent_message', 'spawn_session', 'resume_session', 'reprioritize_session', 'control_work', 'list_sessions', 'get_session', 'cancel_session', 'message_session', 'get_verification_detail', 'verify_session', 'set_proactivity', 'wait_for_sessions', 'post_reply',
+        'coordinate_work', 'send_agent_message', 'spawn_session', 'resume_session', 'reprioritize_session', 'control_work', 'list_sessions', 'get_session', 'inspect_execution_obligation', 'request_obligation_authorization', 'resolve_execution_obligation', 'cancel_session', 'message_session', 'get_verification_detail', 'verify_session', 'set_proactivity', 'wait_for_sessions', 'post_reply',
         'memory_search', 'memory_remember', 'memory_forget',
       'read_work_notes', 'write_work_note', 'search_work_history', 'prepare_context_handoff',
       ],
@@ -382,7 +388,7 @@ describe('Mode-scoped tool projection (ADR 35)', () => {
     assert.deepEqual(names, [
       'list_files', 'read_file', 'search_files', 'view_image', 'git_query', 'batch_search',
       'create_objective', 'update_objective', 'pause_objective', 'resume_objective', 'list_objectives', 'get_objective', 'close_objective',
-      'coordinate_work', 'send_agent_message', 'spawn_session', 'resume_session', 'reprioritize_session', 'control_work', 'list_sessions', 'get_session', 'cancel_session', 'message_session', 'get_verification_detail', 'verify_session', 'set_proactivity', 'wait_for_sessions', 'post_reply',
+      'coordinate_work', 'send_agent_message', 'spawn_session', 'resume_session', 'reprioritize_session', 'control_work', 'list_sessions', 'get_session', 'inspect_execution_obligation', 'request_obligation_authorization', 'resolve_execution_obligation', 'cancel_session', 'message_session', 'get_verification_detail', 'verify_session', 'set_proactivity', 'wait_for_sessions', 'post_reply',
       'memory_search', 'memory_remember', 'memory_forget',
       'read_work_notes', 'write_work_note', 'search_work_history', 'prepare_context_handoff',
     ]);

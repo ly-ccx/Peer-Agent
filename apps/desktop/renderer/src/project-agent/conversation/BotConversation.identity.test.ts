@@ -23,6 +23,7 @@ test('conversation siblings keep distinct identities while loading, recovering a
     },
     'react/jsx-runtime': jsxRuntime,
     '../state/useBotConversation': { useBotConversation: () => conversation },
+    '../state/useObligationGrants': { useObligationGrants: () => ({ grants: [], error: null, submittingId: null, confirm() {}, reject() {}, retry() {} }) },
     '../state/botActivityState': { replyDetailsRow: () => null },
     '../state/useReplyDetailsRow': { useReplyDetailsRow: () => ({ row: null, loading: false }) },
     '../state/taskConversationState': { taskConversationContext: () => null },

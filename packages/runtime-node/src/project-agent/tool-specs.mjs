@@ -146,6 +146,40 @@ export const DELEGATION_TOOL_SPECS = Object.freeze([
     required: ['sessionId'],
     additionalProperties: false,
   }),
+  spec('inspect_execution_obligation', 'local.delegation.inspect_execution_obligation', {
+    type: 'object',
+    properties: {
+      sessionIds: { type: 'array', minItems: 1, maxItems: 20, uniqueItems: true, items: { type: 'string' } },
+      obligationIds: { type: 'array', minItems: 1, maxItems: 20, uniqueItems: true, items: { type: 'string' } },
+      detail: { type: 'string', enum: ['summary', 'evidence'] },
+    },
+    additionalProperties: false,
+  }),
+  spec('request_obligation_authorization', 'local.delegation.request_obligation_authorization', {
+    type: 'object',
+    properties: {
+      items: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'object', properties: {
+        obligationId: { type: 'string' }, sessionId: { type: 'string' }, operationId: { type: 'string' },
+        evidenceRevision: { type: 'string' },
+        actions: { type: 'array', minItems: 1, items: { type: 'string' } },
+      }, required: ['obligationId', 'sessionId', 'operationId', 'evidenceRevision', 'actions'], additionalProperties: false } },
+    },
+    required: ['items'],
+    additionalProperties: false,
+  }),
+  spec('resolve_execution_obligation', 'local.delegation.resolve_execution_obligation', {
+    type: 'object',
+    properties: {
+      grantId: { type: 'string' },
+      idempotencyKey: { type: 'string', minLength: 16, maxLength: 128 },
+      items: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'object', properties: {
+        sessionId: { type: 'string' }, operationId: { type: 'string' },
+        actions: { type: 'array', minItems: 1, items: { type: 'string' } },
+      }, required: ['sessionId', 'operationId', 'actions'], additionalProperties: false } },
+    },
+    required: ['grantId', 'idempotencyKey', 'items'],
+    additionalProperties: false,
+  }),
   spec('cancel_session', 'local.delegation.cancel_session', {
     type: 'object',
     properties: {
@@ -328,7 +362,52 @@ export function validateDelegationInput(name, raw) {
     return Object.keys(input).length === 1 && sessionIds && new Set(sessionIds).size === sessionIds.length
       ? { ok: true, value: { sessionIds } } : invalid('Select 1 to 20 distinct running sessions.');
   }
+  if (name === 'inspect_execution_obligation') return validateInspectObligation(input);
+  if (name === 'request_obligation_authorization') return validateObligationAuthorization(input, { resolve: false });
+  if (name === 'resolve_execution_obligation') return validateObligationAuthorization(input, { resolve: true });
   return validateReply(input);
+}
+
+function idList(value, { min = 1, max = 20 } = {}) {
+  const ids = stringList(value, { min, max, itemMax: 200 });
+  if (!ids || new Set(ids).size !== ids.length) return null;
+  return ids;
+}
+
+function validateInspectObligation(input) {
+  const keys = Object.keys(input);
+  if (keys.some(key => !['sessionIds', 'obligationIds', 'detail'].includes(key))) return invalid('Unknown inspect field.');
+  const sessionIds = input.sessionIds === undefined ? undefined : idList(input.sessionIds);
+  const obligationIds = input.obligationIds === undefined ? undefined : idList(input.obligationIds);
+  if (input.sessionIds !== undefined && !sessionIds) return invalid('sessionIds must be 1 to 20 distinct ids.');
+  if (input.obligationIds !== undefined && !obligationIds) return invalid('obligationIds must be 1 to 20 distinct ids.');
+  if (!sessionIds && !obligationIds) return invalid('sessionIds or obligationIds is required.');
+  const detail = input.detail === undefined ? undefined : input.detail;
+  if (detail !== undefined && detail !== 'summary' && detail !== 'evidence') return invalid('detail must be summary or evidence.');
+  return { ok: true, value: { ...(sessionIds ? { sessionIds } : {}), ...(obligationIds ? { obligationIds } : {}), ...(detail ? { detail } : {}) } };
+}
+
+function validateObligationAuthorization(input, { resolve }) {
+  const allowed = resolve ? ['grantId', 'idempotencyKey', 'items'] : ['items'];
+  if (Object.keys(input).some(key => !allowed.includes(key))) return invalid('Unknown obligation field.');
+  const grantId = resolve ? text(input.grantId, 200) : undefined;
+  const idempotencyKey = resolve ? text(input.idempotencyKey, 128) : undefined;
+  if (resolve && (!grantId || !idempotencyKey || idempotencyKey.length < 16)) return invalid('grantId and an idempotencyKey of 16 to 128 characters are required.');
+  if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > 20) return invalid('items must contain 1 to 20 sessions.');
+  const itemFields = resolve ? ['sessionId', 'operationId', 'actions'] : ['obligationId', 'sessionId', 'operationId', 'evidenceRevision', 'actions'];
+  const items = [];
+  for (const item of input.items) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return invalid('Each item needs the fields named by the tool.');
+    if (Object.keys(item).some(key => !itemFields.includes(key))) return invalid('Unknown obligation item field.');
+    const sessionId = text(item.sessionId, 200);
+    const operationId = text(item.operationId, 200);
+    const actions = stringList(item.actions, { min: 1, max: 4, itemMax: 80 });
+    const obligationId = resolve ? undefined : text(item.obligationId, 200);
+    const evidenceRevision = resolve ? undefined : text(item.evidenceRevision, 200);
+    if (!sessionId || !operationId || !actions || (!resolve && (!obligationId || !evidenceRevision))) return invalid('Each item needs obligationId, sessionId, operationId, evidenceRevision, and actions.');
+    items.push({ sessionId, operationId, actions, ...(obligationId ? { obligationId } : {}), ...(evidenceRevision ? { evidenceRevision } : {}) });
+  }
+  return { ok: true, value: { ...(grantId ? { grantId } : {}), ...(idempotencyKey ? { idempotencyKey } : {}), items } };
 }
 
 function spec(name, capabilityId, inputSchema) {

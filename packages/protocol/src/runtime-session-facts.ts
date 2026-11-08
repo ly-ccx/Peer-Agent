@@ -23,7 +23,7 @@ const ownerships: ReadonlySet<unknown> = new Set(['live', 'ended', 'unknown']);
 const owners: ReadonlySet<unknown> = new Set(['bot', 'user', 'none']);
 const reasons: ReadonlySet<unknown> = new Set<FollowUpReason>(['settled', 'superseded', 'stop_confirmed', 'user_withdrawn',
   'stop_unconfirmed', 'human_request', 'awaiting_human_gate', 'technical_block', 'local_persistence_failed', 'awaiting_acceptance_technical',
-  'verification_failed', 'live_execution', 'paused', 'unknown_facts']);
+  'verification_failed', 'live_execution', 'paused', 'unknown_facts', 'obligation_indexed']);
 const hostReasons = new Set(['live_execution', 'stop_unconfirmed', 'unknown_facts', 'local_persistence_failed']);
 
 export function runtimeSessionFacts(value: unknown): RuntimeSessionFacts {
@@ -47,13 +47,13 @@ export function runtimeSessionFacts(value: unknown): RuntimeSessionFacts {
   }, executionOwnership);
   const owner: FollowUpOwner = declared && owners.has(declared.owner) ? declared.owner as FollowUpOwner : fallback?.owner || 'bot';
   const reason = text(declared?.reason) || fallback?.reason || 'unknown_facts';
-  const stopping = ['stopping', 'awaiting_outcome'].includes(status)
-    || status === 'cancelled' && owner !== 'none';
+  const stopping = reason !== 'obligation_indexed' && (['stopping', 'awaiting_outcome'].includes(status)
+    || status === 'cancelled' && owner !== 'none');
   const handling: RuntimeHandling = !valid ? 'host' : human || owner === 'user' ? 'user'
     : executionOwnership === 'live' || stopping || owner === 'bot' && hostReasons.has(reason) ? 'host'
     : owner === 'none' ? 'none' : 'model';
   return { sessionId, status, valid, executionOwnership, owner, reason, handling,
-    pendingManaged: handling === 'host' || handling === 'user' || !['accepted', 'cancelled'].includes(status) };
+    pendingManaged: reason === 'obligation_indexed' ? false : handling === 'host' || handling === 'user' || !['accepted', 'cancelled'].includes(status) };
 }
 
 /** Missing/invalid facts remain obligations; a valid public terminal does not invent live ownership. */

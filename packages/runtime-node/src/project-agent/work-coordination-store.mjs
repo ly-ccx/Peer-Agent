@@ -121,6 +121,12 @@ export function createWorkCoordinationStore({ rootDir, workspaceId, holdsLease =
     readStoppedExecution(execution) {
       return useV2() ? storage.readStoppedExecution(execution) : undefined;
     },
+    writeObligation(entry) {
+      assertOwner();
+      if (!useV2()) throw new Error('coordination_writer_upgrade_required');
+      enableCoordination(11);
+      return append(entry);
+    },
     writeSessionControl(operation, expectedRevision, expectedCurrentOperationId) {
       assertOwner();
       if (!useV2()) throw new Error('coordination_writer_upgrade_required');

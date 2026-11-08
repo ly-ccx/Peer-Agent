@@ -43,6 +43,9 @@ export function describeFetchFailure(error) {
   if (modelMatch) {
     return `模型 ${modelMatch[1]} 不存在或当前账号无权使用，可能已被服务商下线。请在设置中重新选择该渠道的模型。`;
   }
+  if (/The requested model does not exist/i.test(base)) {
+    return '所选模型不存在或当前账号无权使用，可能已被服务商下线。请在设置中重新选择该渠道的模型。';
+  }
   const cause = error?.cause;
   if (!cause) return base;
   const code = cause.code ? String(cause.code) : '';

@@ -1,3 +1,5 @@
+import { ModelProviderHttpError } from '@peer-agent/runtime-node/models';
+import { readProviderHttpError } from '../../../../../packages/runtime-node/src/provider-http-error.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -211,4 +213,34 @@ test('resolveConversationModelBindingPatch seeds unbound conversation with actua
   });
   assert.equal(patch.modelProviderId, 'uuid-default');
   assert.equal(patch.model, 'grok-3');
+});
+
+test('sanitized HTTP routing categories retain the complete replay-safety boundary', async () => {
+  const { detail, diagnostic } = await readProviderHttpError(new Response('Domain Blocking. PRIVATE_ECHO',{status:403}));
+  const error = new ModelProviderHttpError('fixture',403,detail,diagnostic);
+  const failure = {error:error.message,providerRecovery:{requestId:'fixture',kind:'authentication',replaySafe:true,retryable:false}};
+  const create = options => createProviderAttemptStream({streamId:'fixture',webContents:{send(){}},...options});
+  const safe = create(); safe.webContents.send('chat:stream:error',failure);
+  assert.equal(safe.getResult().replayable,true);
+  assert.equal(safe.getResult().sameProviderRetryable,false);
+  for (const channel of ['chat:stream:delta','chat:stream:thinking','chat:stream:tool-call','chat:stream:tool-progress','chat:stream:tool-result','chat:stream:permission-request','chat:stream:permission-settled','chat:stream:usage']) {
+    const attempt = create(); attempt.webContents.send(channel,{}); attempt.webContents.send('chat:stream:error',failure);
+    assert.equal(attempt.getResult().replayable,false,channel);
+  }
+  for (const [options,payload] of [[{protectedNativeRecovery:true},failure],[{},{...failure,providerRecovery:{...failure.providerRecovery,replaySafe:false}}]]) {
+    const attempt=create(options);attempt.webContents.send('chat:stream:error',payload);
+    assert.equal(attempt.getResult().replayable,false);
+  }
+  const auth = await readProviderHttpError(new Response('{"error":{"code":"authentication_error","message":"PRIVATE_ECHO"}}',{status:403}));
+  const ordinary = create();ordinary.webContents.send('chat:stream:error',{...failure,error:`HTTP 403: ${auth.detail}`});
+  assert.equal(ordinary.getResult().replayable,false);
+  assert.doesNotMatch(JSON.stringify(failure),/PRIVATE_ECHO/);
+});
+
+test('sanitized model-not-found category retains actionable guidance without a made-up model name', async () => {
+  const { detail } = await readProviderHttpError(new Response('{"error":{"code":"model_not_found","message":"PRIVATE_ECHO"}}',{status:404}));
+  const text=describeFetchFailure(new Error(`HTTP 404: ${detail}`));
+  assert.match(text,/所选模型.*不存在/);
+  assert.match(text,/重新选择/);
+  assert.doesNotMatch(text,/PRIVATE_ECHO|requested model/);
 });
