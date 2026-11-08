@@ -23,9 +23,11 @@
       "types": "./dist/providers-public.d.ts",
       "default": "./dist/providers-public.js"
     },
-    "./obligation-log": "./src/project-agent/obligation-log.mjs",
-    "./execution-obligation": "./src/project-agent/execution-obligation.mjs",
-    "./work-budget": "./src/project-agent/work-budget.mjs",
+    "./obligation-log": "./dist/project-agent/obligation-log.mjs",
+    "./execution-obligation": "./dist/project-agent/execution-obligation.mjs",
+    "./work-budget": "./dist/project-agent/work-budget.mjs",
+    "./diagnostic-phase": "./dist/diagnostic-phase.mjs",
+    "./goal-plan-files": "./dist/goal-plan-files.mjs",
     "./project-agent": {
       "types": "./dist/project-agent-public.d.ts",
       "default": "./dist/project-agent-public.js"

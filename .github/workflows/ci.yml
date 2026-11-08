@@ -78,6 +78,11 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Check packaged main-process imports
+        run: |
+          node --test scripts/check-packaged-main-imports.test.mjs
+          node scripts/check-packaged-main-imports.mjs
+
       - name: Typecheck
         run: pnpm typecheck
 
