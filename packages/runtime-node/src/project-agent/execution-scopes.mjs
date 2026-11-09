@@ -56,7 +56,7 @@ export function fileResource(file, { allowMissing = false } = {}) {
     suffix.unshift(path.basename(existing)); existing = path.dirname(existing);
   }
   const canonical = realpathSync(existing), stat = statSync(canonical);
-  if (suffix.length === 1 && stat.isDirectory()) return { resourceRef: `file:${path.join(canonical, ...suffix)}`, identity: 'missing' };
+  if (suffix.length >= 1 && stat.isDirectory()) return { resourceRef: `file:${path.join(canonical, ...suffix)}`, identity: 'missing' };
   if (!suffix.length && stat.isFile()) return { resourceRef: `file:${canonical}`, identity: `${stat.dev}:${stat.ino}` };
   throw new Error('execution_resource_scope_unknown');
 }

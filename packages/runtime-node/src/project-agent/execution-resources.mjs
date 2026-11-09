@@ -103,7 +103,7 @@ function scopedNarrowing(plan, unknown) {
   try {
     resolved = [...files.entries()].map(([file, ids]) => ({ resource: fileResource(file, { allowMissing: true }), ids: [...new Set(ids)].sort() }));
   } catch { return null; }
-  if (!resolved.every(entry => conflicts(`file:${entry.resource.resourceRef.slice('file:'.length)}`, primary.resourceRef))) return null;
+  if (!resolved.every(entry => conflicts(entry.resource.resourceRef, primary.resourceRef))) return null;
   return { primary, files: resolved };
 }
 

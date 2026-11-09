@@ -345,15 +345,17 @@ test('unknown dispatches with declared file scopes narrow protection to those fi
   assert.equal(claims[0].resourceRef.startsWith('file:'), true);
   assert.deepEqual(claims[0].evidenceCalls, ['tool-1']);
   assert.deepEqual(claims[0].scope, { kind: 'file', path: claims[0].resourceRef.slice('file:'.length) });
-  // A directory-wide follower still sees a scoped protection blocker that names the file.
-  const decision = second.reserve(plan('follower', directory), 'host-b');
-  assert.equal(decision.allowed, false);
-  assert.equal(decision.blocker.code, 'execution_outcome_unknown');
-  assert.equal(decision.blocker.scope.kind, 'file');
+  // Directory-wide followers pass plan admission (UO-05b); the protection gates per file instead.
+  const follower = plan('follower', directory, 'workspace');
+  assert.equal(second.reserve(follower, 'host-b').allowed, true);
+  const gated = second.reserve(follower, 'host-b', [{ kind: 'file', path: file }]);
+  assert.equal(gated.allowed, false);
+  assert.equal(gated.blocker.code, 'execution_outcome_unknown');
+  assert.equal(gated.blocker.scope.kind, 'file');
   // Answering the one file claim frees the whole directory again.
   first.closeClaim(a, { claimId: claims[0].claimId, claimRevision: claims[0].revision,
     authorityRef: 'grant-narrow', unknownCalls: ['tool-1'], proof: 'legacy_user_confirmed' });
-  assert.equal(second.reserve(plan('follower2', directory), 'host-b').allowed, true);
+  assert.equal(second.reserve(follower, 'host-b', [{ kind: 'file', path: file }]).allowed, true, 'the follower may now write the answered file');
 });
 
 test('mixed or undeclared unknowns keep whole-directory protection', t => {
@@ -387,6 +389,7 @@ test('a protection file claim relaxes plan admission and file dispatches, never 
     { toolCallId: 'tool-1', capabilityId: 'local.file.write', declaredScopes: [{ kind: 'file', path: a }] }] } }) });
   t.after(release);
   const owner = plan('owner', directory, 'workspace');
+  owner.delegationOrigin.workId = 'work-narrow';
   first.reserve(owner, 'host-a');
   first.settle(owner, stopped(first, owner, 'withdraw', ['tool-1']), 'host-a');
   assert.equal(first.claimsFor(owner)[0].resourceRef.startsWith('file:'), true, 'narrowed to a file claim');
