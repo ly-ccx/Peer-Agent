@@ -110,6 +110,12 @@ test('three rc38-shaped records leave the current lists only after a host card c
     assert.equal(session.followUp.reason, 'obligation_indexed');
     assert.equal(session.followUp.inCurrentList, false);
   }
+  // Retiring follow-up does not remove the release action while the claim still exists.
+  const indexedAgain = service.inspect({ workspaceId: 'workspace', parentConversationId: 'parent', sessionIds: ['a', 'b', 'c'], role: 'project_agent' });
+  assert.deepEqual(indexedAgain.items.find(item => item.sessionId === 'a').allowedActions,
+    ['restore_follow_up', 'acknowledge_unknown', 'close_claim']);
+  assert.deepEqual(indexedAgain.items.find(item => item.sessionId === 'c').allowedActions,
+    ['restore_follow_up'], 'an open handle still blocks closure');
   const claims = scheduler.resourceSnapshot();
   assert.equal(claims.some(claim => claim.state === 'released'), false);
   assert.equal(claims.find(claim => claim.execution.planId === 'plan-b').state, 'reconciling');

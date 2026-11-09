@@ -175,7 +175,7 @@ export function classifyExecutionObligation({ plan, control, claims = [], identi
 function allowedActions({ classes, disposition, ownership, proof, barrier, closeable }) {
   if (barrier || classes.includes('managed_stop_settled') || classes.includes('recorder_dead_clear')) return [];
   if (ownership === 'live' || proof === 'alive' || classes.includes('recorder_alive') || classes.includes('execution_still_running')) return [];
-  if (disposition === 'indexed') return ['restore_follow_up'];
+  if (disposition === 'indexed') return closeable ? ['restore_follow_up', 'acknowledge_unknown', 'close_claim'] : ['restore_follow_up'];
   return closeable ? ['retire_follow_up', 'acknowledge_unknown', 'close_claim'] : ['retire_follow_up', 'acknowledge_unknown'];
 }
 
