@@ -81,9 +81,9 @@ function live(extra: Partial<ProjectAgentActivity> = {}): ProjectAgentActivity {
   return activity({ phase: 'waiting', replyText: '', segments: [], ...extra });
 }
 function project(messages: BotChatMessage[], current: ProjectAgentActivity | null, cache = new Map<string, string>()) {
-  const rows = attachBotProcesses(conversationRows(messages), messages, current);
+  const history = attachBotProcesses(conversationRows(messages), messages, current);
   const visible = current ? visibleBotActivity(current, messages) : null;
-  if (visible) rows.push({ type: 'activity', activity: visible });
+  const rows: ConversationDisplayRow[] = visible ? [...history, { type: 'activity', activity: visible }] : history;
   return continuousReplyRows(rows, messages, awaiting, received, cache);
 }
 const authors = (rows: ReturnType<typeof project>) => rows.filter(conversationRowShowsAuthor);
@@ -148,8 +148,12 @@ test('an empty assistant body does not render a header, including beside a live 
   const folded = replies(continuousReplyRows([row(blank)], [blank], [], []))[0]!;
   assert.equal(conversationRowShowsAuthor(folded), false);
   const rows = project([user, blank], live({ replyTo: [] }));
-  assert.equal(authors(rows).length, 1);
-  assert.equal(authors(rows)[0]?.type === 'reply' && replyRowRunning(authors(rows)[0]), true);
+  const shown = authors(rows);
+  assert.equal(shown.length, 1);
+  const liveRow = shown[0];
+  assert.ok(liveRow?.type === 'reply');
+  if (liveRow?.type !== 'reply') return;
+  assert.equal(replyRowRunning(liveRow), true);
 });
 
 test('a delivered reply clears the awaited input whichever anchor spelling was stored', () => {
