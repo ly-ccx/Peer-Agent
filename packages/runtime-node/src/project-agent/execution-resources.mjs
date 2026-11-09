@@ -322,6 +322,25 @@ export function createExecutionResources({ rootDir, now = () => new Date().toISO
       return open().prepare('SELECT value FROM reconciliation_evidence WHERE claimId=? ORDER BY id').all(claimId)
         .map(row => JSON.parse(row.value));
     },
+    /** ADR 127 UO-03 host writer. The digest is the identity: same evidence replays, different evidence gets its own row. */
+    recordReconciliation(evidence) {
+      const verdicts = new Set(['no_effect_observed', 'effect_observed', 'inconclusive', 'unfenced_external']);
+      const kinds = new Set(['process', 'handle', 'workspace', 'git', 'receipt']);
+      if (!evidence || typeof evidence !== 'object' || typeof evidence.claimId !== 'string' || !evidence.claimId
+        || !Number.isSafeInteger(evidence.claimRevision) || evidence.claimRevision < 1
+        || !verdicts.has(evidence.verdict) || !Array.isArray(evidence.probes) || evidence.probes.length > 64
+        || evidence.probes.some(probe => !probe || typeof probe !== 'object' || !kinds.has(probe.kind)
+          || typeof probe.ref !== 'string' || !probe.ref || typeof probe.result !== 'string'
+          || typeof probe.observedAt !== 'string' || typeof probe.digest !== 'string' || !probe.digest)
+        || typeof evidence.evidenceDigest !== 'string' || !evidence.evidenceDigest) throw new Error('reconciliation_evidence_invalid');
+      const record = JSON.stringify(evidence);
+      return transaction(connection => {
+        const row = connection.prepare('SELECT value FROM reconciliation_evidence WHERE id=?').get(`recon-${evidence.evidenceDigest}`);
+        if (row) return JSON.parse(row.value);
+        connection.prepare('INSERT INTO reconciliation_evidence VALUES (?,?,?)').run(`recon-${evidence.evidenceDigest}`, evidence.claimId, record);
+        return evidence;
+      });
+    },
     markHandle(plan, handle) {
       if (plan.delegationOrigin?.readOnly === true) return;
       return transaction(connection => {
