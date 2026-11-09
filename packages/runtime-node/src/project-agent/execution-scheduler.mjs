@@ -273,6 +273,8 @@ export function createExecutionScheduler({ rootDir = null, getConcurrency = () =
     rebindResourceRequirements(from, to, receiptId) { resourceStore()?.rebindRequirements(from, to, receiptId); },
     resourceSnapshot() { return resourceStore()?.snapshot() || []; },
     resourceClaimsFor(plan) { return (resourceStore()?.claimsFor(plan) || []).map(({ claimId, revision }) => ({ claimId, revision })); },
+    reconciliationEvidenceFor(claimId) { return resourceStore()?.reconciliationEvidenceFor(claimId) || []; },
+    recordReconciliation(evidence) { const store = resourceStore(); if (!store) throw new Error('lease_unavailable'); return store.recordReconciliation(evidence); },
     hasUnsettledHandles(plan) { return Boolean(resourceStore()?.unsettledHandles(plan).length); },
     hasResourceClaim(plan) { return resourceStore()?.hasClaim(plan) || false; },
     close() { resources?.close(); for (const release of admissionPorts.values()) release(); admissionPorts.clear(); },
