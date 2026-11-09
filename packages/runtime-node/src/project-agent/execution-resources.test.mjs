@@ -325,5 +325,6 @@ test('a ledger written by a newer schema is refused instead of partially read', 
   const future = new DatabaseSync(path.join(runtime, 'execution-resources.sqlite'));
   future.exec('PRAGMA user_version=4;');
   future.close();
-  assert.throws(() => createExecutionResources({ rootDir: runtime }), /execution_resource_schema_unsupported/);
+  // The store opens lazily; reading any fact must hit the schema gate first.
+  assert.throws(() => createExecutionResources({ rootDir: runtime }).revision(), /execution_resource_schema_unsupported/);
 });

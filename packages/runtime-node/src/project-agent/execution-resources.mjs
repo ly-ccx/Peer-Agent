@@ -319,7 +319,7 @@ export function createExecutionResources({ rootDir, now = () => new Date().toISO
     },
     reconciliationEvidenceFor(claimId) {
       if (typeof claimId !== 'string' || !claimId) return [];
-      return open().prepare('SELECT value FROM reconciliation_evidence WHERE claimId=? ORDER BY id').all()
+      return open().prepare('SELECT value FROM reconciliation_evidence WHERE claimId=? ORDER BY id').all(claimId)
         .map(row => JSON.parse(row.value));
     },
     markHandle(plan, handle) {

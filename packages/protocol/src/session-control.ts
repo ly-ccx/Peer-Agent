@@ -8,10 +8,11 @@ export type ExecutionResourceScope =
 export function normalizeExecutionResourceScope(raw: unknown): ExecutionResourceScope | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw) || ![Object.prototype, null].includes(Object.getPrototypeOf(raw))) return;
   const value = raw as Record<string, unknown>;
-  const scopePath = typeof value.path === 'string' && value.path.length > 0 && value.path.length <= 2048 && !/[\u0000-\u001f]/.test(value.path);
-  const scopeRef = typeof value.ref === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,511}$/.test(value.ref) && !value.ref.includes('..');
-  if ((value.kind === 'directory' || value.kind === 'file') && scopePath && Object.keys(value).length === 2) return { kind: value.kind, path: value.path };
-  if ((value.kind === 'git_ref' || value.kind === 'remote_object') && scopeRef && Object.keys(value).length === 2) return { kind: value.kind, ref: value.ref };
+  if (Object.keys(value).length !== 2) return;
+  if ((value.kind === 'directory' || value.kind === 'file') && typeof value.path === 'string'
+    && value.path.length > 0 && value.path.length <= 2048 && !/[\u0000-\u001f]/.test(value.path)) return { kind: value.kind, path: value.path };
+  if ((value.kind === 'git_ref' || value.kind === 'remote_object') && typeof value.ref === 'string'
+    && /^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,511}$/.test(value.ref) && !value.ref.includes('..')) return { kind: value.kind, ref: value.ref };
   return;
 }
 export interface SessionExecutionIdentity {

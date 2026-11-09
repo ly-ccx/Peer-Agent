@@ -210,7 +210,7 @@ test('未知结果收口策略：缺省 ask，委托盖 delegatedAt，撤销保�
 
     const again = store.setUnknownOutcomePolicy(workspaceId, { tier: 'bot_verified' });
     assert.equal(again.policy.revision, 3);
-    assert.equal(again.policy.delegatedAt, '2026-11-09T00:03:00.000Z', '再次委托盖新的 delegatedAt');
+    assert.equal(again.policy.delegatedAt, '2026-11-09T00:05:00.000Z', '再次委托盖新的 delegatedAt（save 另计一刻）');
 
     assert.equal(store.setUnknownOutcomePolicy(workspaceId, { tier: 'auto' }).code, 'INVALID_UNKNOWN_OUTCOME_TIER');
     assert.equal(store.readUnknownOutcomePolicy('missing').code, 'NOT_FOUND');
