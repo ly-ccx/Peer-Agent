@@ -124,18 +124,21 @@ export function continuousReplyRows(rows: readonly ConversationDisplayRow[], mes
       const spelled = recognized.flatMap(namesOf);
       // An anchor that names no loaded user message cannot open a second speaker.
       const anchored = spelled.length ? spelled : [...local.keys()].filter(id => !answeredId(id));
+      // replyTo is what the quote projection renders. Alias spellings only join and claim the same receipt.
+      const displayed = spelled.length ? explicit : anchored;
       const explicitKey = anchorKey(explicit);
       const anchors = anchorKey(anchored);
       const group = byTurn.get(activity.turnId) ?? open.get(work)
         ?? (explicitKey ? openAnchors.get(explicitKey) : undefined)
         ?? (anchors ? openAnchors.get(anchors) : undefined)
-        ?? create(activity.turnId, anchored);
+        ?? create(activity.turnId, displayed);
       if (group.message?.kind === 'system_card' && group.message.turnId !== activity.turnId) group.message = undefined;
       group.activity = activity;
       group.stopping = stoppingTurnId === activity.turnId;
       if (!identityCache.has(activity.turnId)) identityCache.set(activity.turnId, group.id);
       if (!group.aliases.includes(activity.turnId)) group.aliases.push(activity.turnId);
-      associate(group, anchored);
+      const covered = (id: string) => group.replyTo.some(existing => existing === id || aliases.get(existing)?.has(id));
+      associate(group, displayed.filter(id => !covered(id)));
       byTurn.set(activity.turnId, group); open.set(work, group);
       if (explicitKey) openAnchors.set(explicitKey, group);
       if (anchors) openAnchors.set(anchors, group);

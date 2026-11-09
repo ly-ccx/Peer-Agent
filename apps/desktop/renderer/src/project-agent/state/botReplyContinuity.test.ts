@@ -4,6 +4,7 @@ import type { ProjectAgentActivity } from '@peer-agent/protocol';
 import { conversationRows, normalizeBotMessage, type BotChatMessage, type ConversationDisplayRow } from './botConversationState.ts';
 import { attachBotProcesses, visibleBotActivity } from './botActivityState.ts';
 import { awaitingInputAnswered, continuousReplyRows, conversationRowShowsAuthor, replyRowContains, replyRowMood, replyRowRunning, type BotReplyRow } from './botReplyContinuity.ts';
+import { replyReferencesForRows } from './replyReferenceState.ts';
 const at = '2026-10-22T00:00:00Z';
 function message(id: string, kind: string, extra: Record<string, unknown> = {}) {
   return normalizeBotMessage({ id, kind, role: kind === 'user_input' ? 'user' : 'assistant', createdAt: at, ...extra })!;
@@ -154,6 +155,18 @@ test('an empty assistant body does not render a header, including beside a live 
   assert.ok(liveRow?.type === 'reply');
   if (liveRow?.type !== 'reply') return;
   assert.equal(replyRowRunning(liveRow), true);
+});
+
+test('alias spellings claim the same receipt without becoming extra quote anchors', () => {
+  const rows = continuousReplyRows([row(user), { type: 'activity', activity: activity() }], [user], [{ inputId: 'u', createdAt: at }], []);
+  const reply = replies(rows)[0]!;
+  assert.equal(replies(rows).length, 1);
+  assert.deepEqual(reply.replyTo, [user.id]);
+  assert.deepEqual(replyReferencesForRows(rows).get(reply), []);
+  const raw = continuousReplyRows([row(user), { type: 'activity', activity: activity({ replyTo: ['u'] }) }], [user], [{ inputId: 'u', createdAt: at }], []);
+  const folded = replies(raw)[0]!;
+  assert.equal(replies(raw).length, 1);
+  assert.deepEqual(folded.replyTo, ['u']);
 });
 
 test('a delivered reply clears the awaited input whichever anchor spelling was stored', () => {
