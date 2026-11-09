@@ -658,6 +658,7 @@ export { shouldPauseForHostHandoff, isHostHandoffPause } from './project-agent/s
 export { createWorkBudgetGuard, registerWorkBudget, DEFAULT_WORK_BUDGET } from './project-agent/work-budget.mjs';
 export { createUnknownOutcomeReconciler } from './project-agent/unknown-outcome-reconciliation.mjs';
 export { createUnknownOutcomeResolver } from './project-agent/unknown-outcome-resolution.mjs';
+export { unknownOutcomeDiagnostics, diagnosticsDigest } from './project-agent/unknown-outcome-diagnostics.mjs';
 export { createLegacyCriterionRecovery } from './project-agent/criterion-recovery.mjs';
 
 export { agentMessagesForContext, createAgentCommunication } from './project-agent/agent-communication.mjs';
