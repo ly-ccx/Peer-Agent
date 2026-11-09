@@ -469,6 +469,7 @@ function readResourceBlocker(raw: unknown): ExecutionResourceBlocker | undefined
   if (row.kind === 'protection' && (row.code === 'execution_outcome_unknown' || row.code === 'execution_stop_unconfirmed')) return {
     kind: 'protection', code: row.code, resourceRef, claimId, sessionId: readString(row.sessionId) || undefined,
     nextAction: row.code === 'execution_outcome_unknown' ? 'reconcile_execution_outcome' : 'confirm_execution_stopped',
-    operationId: readString(row.operationId) || undefined, evidenceCalls: readStringList(row.evidenceCalls) };
+    operationId: readString(row.operationId) || undefined, evidenceCalls: readStringList(row.evidenceCalls),
+    closeClaimAvailable: row.closeClaimAvailable === true };
   return undefined;
 }

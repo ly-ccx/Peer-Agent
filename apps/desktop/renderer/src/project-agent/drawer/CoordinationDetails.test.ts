@@ -40,12 +40,15 @@ test('a closed claim renders the retained unknown without a blocker', () => {
 test('the claim owner gets a release request action while a foreign blocker only links back', () => {
   const { CoordinationDetails } = load('./CoordinationDetails.tsx');
   const owner = CoordinationDetails({ session: { sessionId: 's', resourceBlocker: { kind: 'protection', code: 'execution_outcome_unknown',
-    resourceRef: 'directory:/project', claimId: 'claim', sessionId: 's', evidenceCalls: ['call'] } }, i18n, workspaceId: 'w' });
+    resourceRef: 'directory:/project', claimId: 'claim', sessionId: 's', evidenceCalls: ['call'], closeClaimAvailable: true } }, i18n, workspaceId: 'w' });
   assert.ok(text(owner).includes('projectAgent.drawer.resourceReleaseAction'));
   const foreign = CoordinationDetails({ session: { sessionId: 's', resourceBlocker: { kind: 'protection', code: 'execution_outcome_unknown',
-    resourceRef: 'directory:/project', claimId: 'claim', sessionId: 'other', evidenceCalls: ['call'] } }, i18n, workspaceId: 'w', onSelect: () => {} });
+    resourceRef: 'directory:/project', claimId: 'claim', sessionId: 'other', evidenceCalls: ['call'], closeClaimAvailable: true } }, i18n, workspaceId: 'w', onSelect: () => {} });
   assert.equal(text(foreign).includes('projectAgent.drawer.resourceReleaseAction'), false);
   assert.ok(text(foreign).includes('projectAgent.drawer.resourceSource'));
+  const openHandles = CoordinationDetails({ session: { sessionId: 's', resourceBlocker: { kind: 'protection', code: 'execution_outcome_unknown',
+    resourceRef: 'directory:/project', claimId: 'claim', sessionId: 's', evidenceCalls: ['call'], closeClaimAvailable: false } }, i18n, workspaceId: 'w' });
+  assert.equal(text(openHandles).includes('projectAgent.drawer.resourceReleaseAction'), false);
 });
 
 test('a live blocker still renders its own state without a closure block', () => {

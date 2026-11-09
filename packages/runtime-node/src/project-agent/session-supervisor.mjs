@@ -247,11 +247,14 @@ export function createSessionSupervisor({
   function claimClosureFacts(plan) {
     const closure = plan.delegationOrigin?.executionClaimClosure;
     if (!closure || !sameExecution(closure.execution, executionIdentity(plan))) return {};
-    const retained = (executionScheduler.retainedUnknowns?.(plan) || []).map(row => ({
+    const recorded = (executionScheduler.retainedUnknowns?.(plan) || []).map(row => ({
       closureId: row.closureId, unknownCalls: Array.isArray(row.unknownCalls) ? row.unknownCalls : [], at: row.at,
       proof: row.proof === 'verified_dead' ? 'verified_dead' : 'legacy_user_confirmed',
     }));
-    return { executionClaimClosure: closure, ...(retained.length ? { retainedUnknowns: retained } : {}) };
+    // The closure receipt is the durable fallback after a device ledger rebuild.
+    const retained = recorded.length ? recorded : [{ closureId: closure.closureId, unknownCalls: closure.unknownCalls,
+      at: closure.at, proof: closure.proof }];
+    return { executionClaimClosure: closure, retainedUnknowns: retained };
   }
 
   const obligations = createExecutionObligationService({

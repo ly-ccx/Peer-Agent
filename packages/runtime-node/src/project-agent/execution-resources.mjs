@@ -119,7 +119,8 @@ export function createExecutionResources({ rootDir, now = () => new Date().toISO
   function blocker(claim) {
     return ['draining', 'reconciling'].includes(claim.state)
       ? { kind: 'protection', nextAction: claim.evidenceCalls.length ? 'reconcile_execution_outcome' : 'confirm_execution_stopped', code: claim.evidenceCalls.length ? 'execution_outcome_unknown' : 'execution_stop_unconfirmed',
-        resourceRef: claim.resourceRef, claimId: claim.claimId, sessionId: claim.execution.sessionId, operationId: claim.operationId, evidenceCalls: claim.evidenceCalls }
+        resourceRef: claim.resourceRef, claimId: claim.claimId, sessionId: claim.execution.sessionId, operationId: claim.operationId, evidenceCalls: claim.evidenceCalls,
+        closeClaimAvailable: !Object.values(claim.handles || {}).some(handle => handle.state !== 'ended') }
       : { kind: 'owner', code: 'resource_busy', resourceRef: claim.resourceRef, claimId: claim.claimId,
         sessionId: claim.execution.sessionId, title: claim.title };
   }

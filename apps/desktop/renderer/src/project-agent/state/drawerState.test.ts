@@ -64,6 +64,18 @@ test('会话事实里的 cancelable 必须原样带到抽屉，缺字段时不�
   assert.equal(legacy.cancelable, undefined);
 });
 
+test('blocker carries whether the host can close the claim', () => {
+  const closeable = readDrawerSession({ sessionId: 's', status: 'queued', resourceBlocker: {
+    kind: 'protection', code: 'execution_outcome_unknown', resourceRef: 'directory:/project', claimId: 'claim',
+    sessionId: 's', evidenceCalls: ['call'], closeClaimAvailable: true } });
+  assert.equal(closeable?.resourceBlocker?.kind, 'protection');
+  assert.equal(closeable?.resourceBlocker?.kind === 'protection' && closeable.resourceBlocker.closeClaimAvailable, true);
+  const held = readDrawerSession({ sessionId: 's', status: 'queued', resourceBlocker: {
+    kind: 'protection', code: 'execution_outcome_unknown', resourceRef: 'directory:/project', claimId: 'claim',
+    sessionId: 's', evidenceCalls: ['call'], closeClaimAvailable: false } });
+  assert.equal(held?.resourceBlocker?.kind === 'protection' && held.resourceBlocker.closeClaimAvailable, false);
+});
+
 test('释放后的写锁与保留未知调用进入抽屉，不伪造 blocker', () => {
   const closure = { closureId: 'closure-1', claimId: 'claim-1', claimRevision: 2,
     execution: { planId: 'plan-1', sessionId: 'session-1', executionEpoch: 'epoch-1' },

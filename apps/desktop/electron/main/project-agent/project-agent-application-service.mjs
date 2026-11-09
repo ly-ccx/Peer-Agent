@@ -468,18 +468,29 @@ export function createProjectAgentApplicationService({
       return { ok: false, code: 'obligation_unavailable' };
     }
     const inspected = await sessions.inspectExecutionObligations({ workspaceId, sessionIds: [sessionId], actor: 'user_panel' });
-    if (!inspected?.ok) return { ok: false, code: inspected?.error || inspected?.code || 'obligation_unavailable' };
+    if (!inspected?.ok) {
+      const code = inspected?.error || inspected?.code || 'obligation_unavailable';
+      appendObligationLog({ event: 'request_claim_closure', workspaceId, sessionId, ok: false, code });
+      return { ok: false, code };
+    }
     const item = (inspected.items || []).find(row => row?.sessionId === sessionId && !row.error);
-    if (!item) return { ok: false, code: 'claim_not_found' };
+    if (!item) {
+      appendObligationLog({ event: 'request_claim_closure', workspaceId, sessionId, ok: false, code: 'claim_not_found' });
+      return { ok: false, code: 'claim_not_found' };
+    }
     if (!item.closeClaimAvailable || !Array.isArray(item.allowedActions) || !item.allowedActions.includes('close_claim')) {
+      appendObligationLog({ event: 'request_claim_closure', workspaceId, sessionId, ok: false, code: 'claim_not_closeable' });
       return { ok: false, code: 'claim_not_closeable' };
     }
     const actions = ['close_claim', ...(item.allowedActions.includes('acknowledge_unknown') ? ['acknowledge_unknown'] : [])];
     // Keep the grant on the same bot conversation the card list and confirm use.
     const parentConversationId = typeof item.parentConversationId === 'string' && item.parentConversationId ? item.parentConversationId : undefined;
-    return sessions.requestObligationAuthorization({ workspaceId, ...(parentConversationId ? { parentConversationId } : {}), items: [{
+    const requested = await sessions.requestObligationAuthorization({ workspaceId, ...(parentConversationId ? { parentConversationId } : {}), items: [{
       obligationId: item.obligationId, sessionId, operationId: item.operationId, evidenceRevision: item.evidenceRevision, actions,
     }] });
+    appendObligationLog({ event: 'request_claim_closure', workspaceId, sessionId, ok: requested?.ok === true,
+      code: requested?.ok === true ? null : requested?.error || requested?.code || 'request_failed', grantId: requested?.grantId || null });
+    return requested;
   }
 
   async function decideObligation(payload = {}) {

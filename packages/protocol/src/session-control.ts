@@ -58,7 +58,7 @@ export interface SessionControlOperation {
 }
 export type ExecutionResourceBlocker =
   | { readonly kind: 'owner'; readonly code: 'resource_busy'; readonly resourceRef: string; readonly claimId: string; readonly sessionId: string; readonly title: string }
-  | { readonly kind: 'protection'; readonly nextAction?: 'reconcile_execution_outcome' | 'confirm_execution_stopped' | 'close_execution_claim'; readonly code: 'execution_outcome_unknown' | 'execution_stop_unconfirmed'; readonly resourceRef: string; readonly claimId: string; readonly sessionId?: string; readonly operationId?: string; readonly evidenceCalls: readonly string[] }
+  | { readonly kind: 'protection'; readonly nextAction?: 'reconcile_execution_outcome' | 'confirm_execution_stopped' | 'close_execution_claim'; readonly code: 'execution_outcome_unknown' | 'execution_stop_unconfirmed'; readonly resourceRef: string; readonly claimId: string; readonly sessionId?: string; readonly operationId?: string; readonly evidenceCalls: readonly string[]; readonly closeClaimAvailable?: boolean }
   | { readonly kind: 'recovery'; readonly nextAction?: 'inspect_resource_recovery'; readonly code: string; readonly resourceRef?: string };
 /** A user-authorized end to one resource claim. It is not a stop receipt or a tool result. */
 export interface ExecutionClaimClosure {

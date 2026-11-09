@@ -12,7 +12,8 @@ export function CoordinationDetails({session,i18n,onSelect,workspaceId}: {readon
   const blocker = session.resourceBlocker;
   const closure = session.executionClaimClosure;
   const retainedUnknownCalls = session.retainedUnknownCalls || [];
-  const canRequestRelease = Boolean(workspaceId && blocker?.kind === 'protection' && blocker.sessionId === session.sessionId && !closure);
+  const canRequestRelease = Boolean(workspaceId && blocker?.kind === 'protection' && blocker.closeClaimAvailable === true
+    && blocker.sessionId === session.sessionId && !closure);
   async function requestRelease() {
     if (!workspaceId || !canRequestRelease) return;
     setRelease('pending');
