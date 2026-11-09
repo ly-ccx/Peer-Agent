@@ -42,3 +42,26 @@ export function providerFileScopes(file) {
   while (!existsSync(directory) && path.dirname(directory) !== directory) directory = path.dirname(directory);
   return [{ kind: 'directory', path: realpathSync(directory) }];
 }
+/** ADR 127 §5.7: a file's own claim identity, not its parent directory's. */
+export function fileResource(file, { allowMissing = false } = {}) {
+  if (typeof file !== 'string' || !path.isAbsolute(file)) throw new Error('execution_resource_scope_unknown');
+  let existing = file, suffix = [];
+  if (allowMissing) while (!existsSync(existing) && path.dirname(existing) !== existing) {
+    suffix.unshift(path.basename(existing)); existing = path.dirname(existing);
+  }
+  const canonical = realpathSync(existing), stat = statSync(canonical);
+  if (suffix.length === 1 && stat.isDirectory()) return { resourceRef: `file:${path.join(canonical, ...suffix)}`, identity: 'missing' };
+  if (!suffix.length && stat.isFile()) return { resourceRef: `file:${canonical}`, identity: `${stat.dev}:${stat.ino}` };
+  throw new Error('execution_resource_scope_unknown');
+}
+/** Host-side derivation of one dispatch's declared effect scope. Only absolute file targets of
+ * host-local file capabilities declare; anything unresolvable stays undeclared and conservative. */
+export function declaredDispatchScopes(call) {
+  const capabilityId = call?.capabilityId || call?.name || call?.tool || '';
+  const args = call?.arguments || call?.args || null;
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return [];
+  if (!['local.file.write', 'local.file.edit', 'local.file.read'].includes(capabilityId)) return [];
+  const file = typeof args.path === 'string' && path.isAbsolute(args.path) ? args.path
+    : typeof args.filePath === 'string' && path.isAbsolute(args.filePath) ? args.filePath : null;
+  return file ? [{ kind: 'file', path: file }] : [];
+}
