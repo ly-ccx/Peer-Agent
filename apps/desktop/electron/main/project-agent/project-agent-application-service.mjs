@@ -475,7 +475,9 @@ export function createProjectAgentApplicationService({
       return { ok: false, code: 'claim_not_closeable' };
     }
     const actions = ['close_claim', ...(item.allowedActions.includes('acknowledge_unknown') ? ['acknowledge_unknown'] : [])];
-    return sessions.requestObligationAuthorization({ workspaceId, items: [{
+    // Keep the grant on the same bot conversation the card list and confirm use.
+    const parentConversationId = typeof item.parentConversationId === 'string' && item.parentConversationId ? item.parentConversationId : undefined;
+    return sessions.requestObligationAuthorization({ workspaceId, ...(parentConversationId ? { parentConversationId } : {}), items: [{
       obligationId: item.obligationId, sessionId, operationId: item.operationId, evidenceRevision: item.evidenceRevision, actions,
     }] });
   }
