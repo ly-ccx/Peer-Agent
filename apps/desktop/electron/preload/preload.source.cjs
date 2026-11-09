@@ -284,6 +284,8 @@ contextBridge.exposeInMainWorld('peerAgent', {
   projectAgentListObligationGrants: (params) => ipcRenderer.invoke('project-agent:list-obligation-grants', params),
   projectAgentDecideObligation: (params) => ipcRenderer.invoke('project-agent:decide-obligation', params),
   projectAgentRequestClaimClosure: (params) => ipcRenderer.invoke('project-agent:request-claim-closure', params),
+  projectAgentReadUnknownOutcomePolicy: (params) => ipcRenderer.invoke('project-agent:read-unknown-outcome-policy', params),
+  projectAgentSetUnknownOutcomePolicy: (params) => ipcRenderer.invoke('project-agent:set-unknown-outcome-policy', params),
   projectAgentResumeSession: (params) => ipcRenderer.invoke('project-agent:resume-session', params),
   projectAgentListApprovals: (params) => ipcRenderer.invoke('project-agent:list-approvals', params),
   projectAgentDecideApproval: (params) => ipcRenderer.invoke('project-agent:decide-approval', params),

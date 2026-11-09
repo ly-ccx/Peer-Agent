@@ -31,6 +31,8 @@ export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
     listObligationGrants: assertFunction(projectAgent?.listObligationGrants, 'projectAgent.listObligationGrants'),
     decideObligation: assertFunction(projectAgent?.decideObligation, 'projectAgent.decideObligation'),
     requestClaimClosure: assertFunction(projectAgent?.requestClaimClosure, 'projectAgent.requestClaimClosure'),
+    readUnknownOutcomePolicy: assertFunction(projectAgent?.readUnknownOutcomePolicy, 'projectAgent.readUnknownOutcomePolicy'),
+    setUnknownOutcomePolicy: assertFunction(projectAgent?.setUnknownOutcomePolicy, 'projectAgent.setUnknownOutcomePolicy'),
     resumeSession: assertFunction(projectAgent?.resumeSession, 'projectAgent.resumeSession'),
     listApprovals: assertFunction(projectAgent?.listApprovals, 'projectAgent.listApprovals'),
     decideApproval: assertFunction(projectAgent?.decideApproval, 'projectAgent.decideApproval'),
@@ -71,6 +73,8 @@ export function createProjectAgentIpcRegistrations({ projectAgent } = {}) {
       ipc.handle('project-agent:list-obligation-grants', (_event, payload) => ports.listObligationGrants(payload));
       ipc.handle('project-agent:decide-obligation', (_event, payload) => ports.decideObligation(payload));
       ipc.handle('project-agent:request-claim-closure', (_event, payload) => ports.requestClaimClosure(payload));
+      ipc.handle('project-agent:read-unknown-outcome-policy', (_event, payload) => ports.readUnknownOutcomePolicy(payload));
+      ipc.handle('project-agent:set-unknown-outcome-policy', (_event, payload) => ports.setUnknownOutcomePolicy(payload));
       ipc.handle('project-agent:resume-session', (_event, payload) => ports.resumeSession(payload));
       ipc.handle('project-agent:list-approvals', (_event, payload) => ports.listApprovals(payload));
       ipc.handle('project-agent:decide-approval', (_event, payload) => ports.decideApproval(payload));
