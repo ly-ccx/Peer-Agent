@@ -17,7 +17,7 @@ import { UserBubble } from './UserBubble';
 import { ConversationRow as ConversationRowView } from './ConversationRow';
 import { conversationRowKey, useConversationWindow } from './useConversationWindow';
 import { ContinuousReply } from './ContinuousReply';
-import { replyRowContains, replyRowRunning, replyRowMood, type BotConversationViewRow } from '../state/botReplyContinuity';
+import { conversationRowShowsAuthor, replyRowContains, replyRowRunning, replyRowMood, type BotConversationViewRow } from '../state/botReplyContinuity';
 import { ReplyAnchors } from './ReplyAnchors';
 import { PeerIcon } from '../../ui/icons';
 import type { ProjectAgentActivity } from '@peer-agent/protocol';
@@ -170,9 +170,7 @@ export function BotMessageList({
             ? Boolean(row.pending && !row.pending.restored && !row.pending.deliveryIssue)
             : row.type === 'message' && row.message.kind === 'user_input' && (['sending', 'received'].includes(row.message.pending ?? '') || followingNewInput))}
           className={`bot-thread-row${row.type === 'message' && isRetiredRecovery(row.message.cards) && !row.narration?.length ? ' is-recovery-history' : ''}`}>
-        {row.type === 'reply' || row.type === 'message' && (['agent_reply', 'agent_turn'].includes(row.message.kind)
-          || row.message.cards.some(card => card.kind === 'agent_stopped' || card.kind === 'agent_unavailable')
-            && (!isRetiredRecovery(row.message.cards) || Boolean(row.narration?.length))) ? (
+        {conversationRowShowsAuthor(row) ? (
           <div className="bot-message-author"><BotAvatar avatar={avatar} label={label} workspaceId={workspaceId}
             animate={row.type === 'reply' && replyRowRunning(row)} mood={row.type === 'reply' ? replyRowMood(row) : 'idle'} /><span>{label}</span></div>
         ) : null}

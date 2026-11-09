@@ -3,6 +3,7 @@ import type { BotChatMessage, ConversationDisplayRow, ConversationRow, PendingBo
 import { answeredInputIds, isActivityRunning } from './botActivityState.ts';
 import { isRetiredRecovery } from './recoveryPresentation.ts';
 import type { BotAvatarMood } from './botAvatarState';
+import type { BotNarrationSegment } from './botNarrationState';
 
 export interface AwaitingBotInput { readonly inputId: string; readonly createdAt: string; readonly deliveryIssue?: boolean }
 export interface ReplyParagraph { readonly id: string; readonly text: string }
@@ -22,11 +23,61 @@ export interface BotReplyRow {
 }
 export type BotConversationViewRow = ConversationRow | BotReplyRow;
 
+/**
+ * One user send is one anchor, whichever spelling the host used.
+ * Message id, raw input id and `input-${inputId}` name the same receipt.
+ */
+export function anchorAliases(messages: readonly BotChatMessage[]): Map<string, Set<string>> {
+  const map = new Map<string, Set<string>>();
+  const ensure = (id: string) => {
+    let set = map.get(id);
+    if (!set) { set = new Set([id]); map.set(id, set); }
+    return set;
+  };
+  const link = (leftId: string, rightId: string) => {
+    if (!leftId || !rightId) return;
+    const left = ensure(leftId);
+    const right = ensure(rightId);
+    if (left === right) return;
+    for (const id of right) left.add(id);
+    for (const id of left) map.set(id, left);
+  };
+  for (const message of messages) {
+    if (message.kind !== 'user_input' || !message.inputId) continue;
+    link(message.id, message.inputId);
+    link(message.id, `input-${message.inputId}`);
+  }
+  return map;
+}
+
+export function anchorAnswered(answered: ReadonlySet<string>, aliases: ReadonlyMap<string, ReadonlySet<string>>, id: string): boolean {
+  if (answered.has(id)) return true;
+  const set = aliases.get(id);
+  if (!set) return false;
+  for (const alias of set) if (answered.has(alias)) return true;
+  return false;
+}
+
+/** A received input is answered once any spelling of its anchor is on a reply. */
+export function awaitingInputAnswered(messages: readonly BotChatMessage[], inputId: string): boolean {
+  const answered = answeredInputIds(messages);
+  const aliases = anchorAliases(messages);
+  return anchorAnswered(answered, aliases, inputId) || anchorAnswered(answered, aliases, `input-${inputId}`);
+}
+
 /** Display identity only. Original messages, execution attempts and detail records stay intact. */
 export function continuousReplyRows(rows: readonly ConversationDisplayRow[], messages: readonly BotChatMessage[],
   awaiting: readonly AwaitingBotInput[], pending: readonly PendingBotInput[], identityCache = new Map<string, string>(), stoppingTurnId?: string): BotConversationViewRow[] {
   const turns = new Map(messages.filter(message => message.kind === 'agent_turn').map(message => [message.id, message]));
   const answered = answeredInputIds(messages);
+  const aliases = anchorAliases(messages);
+  const claimed = new Set<string>();
+  const answeredId = (id: string) => anchorAnswered(answered, aliases, id);
+  const claim = (id: string) => {
+    claimed.add(id);
+    const set = aliases.get(id);
+    if (set) for (const alias of set) claimed.add(alias);
+  };
   const local = new Map(awaiting.map(input => [`input-${input.inputId}`, input]));
   for (const input of pending) {
     if (input.state === 'failed' || input.state === 'unknown') local.delete(`input-${input.inputId}`);
@@ -36,7 +87,7 @@ export function continuousReplyRows(rows: readonly ConversationDisplayRow[], mes
   const restored = new Map<string, AwaitingBotInput>();
   for (const message of [...messages].reverse()) {
     if (message.kind !== 'user_input' || !message.inputId) continue;
-    if (answered.has(message.id) || message.dispositions.some(mark => ['stopped', 'superseded', 'out_of_scope'].includes(mark.kind))) break;
+    if (answeredId(message.id) || message.dispositions.some(mark => ['stopped', 'superseded', 'out_of_scope'].includes(mark.kind))) break;
     if (message.pending !== 'failed' && message.pending !== 'unknown') restored.set(message.id, { inputId: message.inputId, createdAt: message.createdAt });
   }
   const result: BotConversationViewRow[] = [];
@@ -45,7 +96,6 @@ export function continuousReplyRows(rows: readonly ConversationDisplayRow[], mes
   const byTurn = new Map<string, MutableReply>();
   const used = new Set<string>();
   const inputOrder = new Map(messages.filter(message => message.kind === 'user_input').map((message, index) => [message.id, index]));
-  const claimed = new Set<string>();
   const groups: MutableReply[] = [];
   const create = (identity: string, replyTo: readonly string[]) => {
     const anchor = [...replyTo].filter(id => id.startsWith('input-')).sort((a, b) =>
@@ -66,15 +116,31 @@ export function continuousReplyRows(rows: readonly ConversationDisplayRow[], mes
     if (row.type === 'activity') {
       const activity = row.activity;
       const work = activity.workId || activity.turnId;
-      const anchors = anchorKey(activity.replyTo);
-      const group = byTurn.get(activity.turnId) ?? open.get(work) ?? (anchors ? openAnchors.get(anchors) : undefined) ?? create(activity.turnId, activity.replyTo);
+      // Empty or differently spelled anchors still belong to the receipt that is waiting.
+      // The activity fact itself is not rewritten.
+      const explicit = activity.replyTo.filter(id => id);
+      const namesOf = (id: string) => aliases.get(id) ? [...aliases.get(id)!] : [id];
+      const recognized = explicit.filter(id => messages.some(message => message.kind === 'user_input' && namesOf(id).includes(message.id)));
+      const spelled = recognized.flatMap(namesOf);
+      // An anchor that names no loaded user message cannot open a second speaker.
+      const anchored = spelled.length ? spelled : [...local.keys()].filter(id => !answeredId(id));
+      // replyTo is what the quote projection renders. Alias spellings only join and claim the same receipt.
+      const displayed = spelled.length ? explicit : anchored;
+      const explicitKey = anchorKey(explicit);
+      const anchors = anchorKey(anchored);
+      const group = byTurn.get(activity.turnId) ?? open.get(work)
+        ?? (explicitKey ? openAnchors.get(explicitKey) : undefined)
+        ?? (anchors ? openAnchors.get(anchors) : undefined)
+        ?? create(activity.turnId, displayed);
       if (group.message?.kind === 'system_card' && group.message.turnId !== activity.turnId) group.message = undefined;
       group.activity = activity;
       group.stopping = stoppingTurnId === activity.turnId;
       if (!identityCache.has(activity.turnId)) identityCache.set(activity.turnId, group.id);
       if (!group.aliases.includes(activity.turnId)) group.aliases.push(activity.turnId);
-      associate(group, activity.replyTo);
+      const covered = (id: string) => group.replyTo.some(existing => existing === id || aliases.get(existing)?.has(id));
+      associate(group, displayed.filter(id => !covered(id)));
       byTurn.set(activity.turnId, group); open.set(work, group);
+      if (explicitKey) openAnchors.set(explicitKey, group);
       if (anchors) openAnchors.set(anchors, group);
       appendUpdates(group, activity.turnId, activity.segments.flatMap(segment => segment.kind === 'text' ? [segment] : []));
       if (activity.replyText) appendConclusion(group, activity.turnId, activity.replyText);
@@ -117,8 +183,8 @@ export function continuousReplyRows(rows: readonly ConversationDisplayRow[], mes
     }
   }
   // Active rows claim only their own anchors; another input keeps its own pending response.
-  for (const group of groups) if (group.message?.kind !== 'agent_reply') for (const id of group.replyTo) claimed.add(id);
-  const unclaimed = [...new Map([...restored, ...local])].filter(([id]) => !answered.has(id) && !claimed.has(id));
+  for (const group of groups) if (group.message?.kind !== 'agent_reply') for (const id of group.replyTo) claim(id);
+  const unclaimed = [...new Map([...restored, ...local])].filter(([id]) => !answeredId(id) && !claimed.has(id));
   if (unclaimed.length) {
     unclaimed.sort((a, b) => (inputOrder.get(a[0]) ?? Number.MAX_SAFE_INTEGER) - (inputOrder.get(b[0]) ?? Number.MAX_SAFE_INTEGER)
       || a[1].createdAt.localeCompare(b[1].createdAt));
@@ -170,6 +236,30 @@ export function replyRowContains(row: BotConversationViewRow, id: string | null 
 
 export function replyRowRunning(row: BotReplyRow): boolean {
   return isActivityRunning(row.activity ?? null) || Boolean(row.pending && !row.pending.restored && !row.pending.deliveryIssue);
+}
+
+function messageBodyVisible(message: BotChatMessage, narration: readonly Pick<BotNarrationSegment, 'text'>[] | undefined): boolean {
+  if (message.content.trim()) return true;
+  if (narration?.some(segment => segment.text.trim())) return true;
+  return message.cards.some(card => card.content.trim()
+    || ['question', 'familiarize', 'agent_stopped', 'agent_unavailable', 'confirm_result'].includes(card.kind));
+}
+
+/** An empty assistant shell is not a second speaker. The pending carrier and any visible body still are. */
+export function conversationRowShowsAuthor(row: BotConversationViewRow): boolean {
+  if (row.type === 'reply') {
+    if (row.pending || row.stopping) return true;
+    if (row.activity && (isActivityRunning(row.activity) || row.activity.replyText.trim()
+      || row.activity.segments.some(segment => segment.kind === 'text' ? Boolean(segment.text.trim()) : segment.kind === 'tool'))) return true;
+    if (row.paragraphs.some(paragraph => paragraph.text.trim())) return true;
+    return Boolean(row.message && messageBodyVisible(row.message, undefined));
+  }
+  if (row.type !== 'message') return false;
+  const failure = row.message.cards.some(card => card.kind === 'agent_stopped' || card.kind === 'agent_unavailable');
+  const eligible = ['agent_reply', 'agent_turn'].includes(row.message.kind)
+    || (failure && (!isRetiredRecovery(row.message.cards) || Boolean(row.narration?.length)));
+  if (!eligible) return false;
+  return messageBodyVisible(row.message, row.narration);
 }
 
 export function replyRowMood(row: BotReplyRow): BotAvatarMood {

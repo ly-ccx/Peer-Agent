@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { ProjectAgentActivity } from '@peer-agent/protocol';
-import { normalizeBotMessage, type ConversationDisplayRow } from './botConversationState.ts';
-import { continuousReplyRows, replyRowContains, replyRowMood, replyRowRunning, type BotReplyRow } from './botReplyContinuity.ts';
+import { conversationRows, normalizeBotMessage, type BotChatMessage, type ConversationDisplayRow } from './botConversationState.ts';
+import { attachBotProcesses, visibleBotActivity } from './botActivityState.ts';
+import { awaitingInputAnswered, continuousReplyRows, conversationRowShowsAuthor, replyRowContains, replyRowMood, replyRowRunning, type BotReplyRow } from './botReplyContinuity.ts';
+import { replyReferencesForRows } from './replyReferenceState.ts';
 const at = '2026-10-22T00:00:00Z';
 function message(id: string, kind: string, extra: Record<string, unknown> = {}) {
   return normalizeBotMessage({ id, kind, role: kind === 'user_input' ? 'user' : 'assistant', createdAt: at, ...extra })!;
@@ -72,4 +74,103 @@ test('an unknown local input has no invented reply or active execution placehold
   const pending = [{ inputId: 'u', text: 'pending', quoteRefs: [], attachments: [], createdAt: at, state: 'unknown' as const }];
   const result = continuousReplyRows([row(unknown)], [unknown], [{ inputId: 'u', createdAt: at }], pending);
   assert.equal(replies(result).length, 0);
+});
+
+const received = [{ inputId: 'u', text: '你不知道 rc 40 是哪个分支打的包吗？', quoteRefs: [], attachments: [], createdAt: at, state: 'received' as const }];
+const awaiting = [{ inputId: 'u', createdAt: at }];
+function live(extra: Partial<ProjectAgentActivity> = {}): ProjectAgentActivity {
+  return activity({ phase: 'waiting', replyText: '', segments: [], ...extra });
+}
+function project(messages: BotChatMessage[], current: ProjectAgentActivity | null, cache = new Map<string, string>()) {
+  const history = attachBotProcesses(conversationRows(messages), messages, current);
+  const visible = current ? visibleBotActivity(current, messages) : null;
+  const rows: ConversationDisplayRow[] = visible ? [...history, { type: 'activity', activity: visible }] : history;
+  return continuousReplyRows(rows, messages, awaiting, received, cache);
+}
+const authors = (rows: ReturnType<typeof project>) => rows.filter(conversationRowShowsAuthor);
+
+test('send, pending, first token, streaming and done stay one bot row', () => {
+  const prior = message('input-old', 'user_input', { inputId: 'old' });
+  const earlier = message('old-reply', 'agent_reply', { replyTo: [prior.id], content: '上一轮已经回答过。' });
+  const messages = [prior, earlier, user];
+  const cache = new Map<string, string>();
+  const pending = project(messages, null, cache);
+  const waiting = project(messages, live(), cache);
+  const thinking = project(messages, live({ phase: 'thinking' }), cache);
+  const tool = project(messages, live({ phase: 'tool', segments: [{ kind: 'tool', id: 'read', name: 'read_file', status: 'running', summary: 'README.md' }] }), cache);
+  const first = project(messages, live({ phase: 'responding', segments: [{ kind: 'text', id: 'text-1', text: '我先核对打包记录。' }] }), cache);
+  const streaming = project(messages, live({ phase: 'responding', segments: [{ kind: 'text', id: 'text-1', text: '我先核对打包记录。rc.40 来自 PeerAgent/dev/0.1.0。' }] }), cache);
+  const turn = message('turn', 'agent_turn', { replyTo: [user.id], publicUpdates: [{ id: 'text-1', text: '我先核对打包记录。rc.40 来自 PeerAgent/dev/0.1.0。' }] });
+  const final = message('final', 'agent_reply', { turnId: 'turn', replyTo: [user.id], content: 'rc.40 是 PeerAgent/dev/0.1.0 打出来的。' });
+  const done = continuousReplyRows(
+    attachBotProcesses(conversationRows([prior, earlier, user, turn, final]), [prior, earlier, user, turn, final], null),
+    [prior, earlier, user, turn, final], [], [], cache);
+  for (const rows of [pending, waiting, thinking, tool, first, streaming, done]) {
+    const fresh = authors(rows).filter(row => row.type === 'reply' && row.replyTo.includes(user.id));
+    assert.equal(fresh.length, 1, rows.map(row => row.type === 'reply' ? row.id : row.type).join(','));
+  }
+  const id = authors(pending).filter(row => row.type === 'reply' && row.replyTo.includes(user.id))[0];
+  assert.ok(id?.type === 'reply');
+  for (const rows of [waiting, thinking, tool, first, streaming, done]) {
+    const same = authors(rows).find(row => row.type === 'reply' && row.replyTo.includes(user.id));
+    assert.equal(same?.type === 'reply' && same.id, id.id);
+  }
+  assert.equal(authors(done).find(row => row.type === 'reply' && row.id === id.id)?.type === 'reply'
+    && authors(done).find(row => row.type === 'reply' && row.id === id.id) && true, true);
+});
+
+test('a long model wait, tool-only work, and reasoning with no text never stack a second avatar', () => {
+  const messages = [user];
+  const cases = [
+    live({ replyTo: [] }),
+    live({ replyTo: ['u'], phase: 'tool', segments: [{ kind: 'tool', id: 'read', name: 'read_file', status: 'running' }] }),
+    live({ replyTo: ['input-other'], phase: 'thinking' }),
+    live({ replyTo: [user.id], phase: 'waiting' }),
+  ];
+  for (const current of cases) {
+    const rows = project(messages, current);
+    assert.equal(authors(rows).length, 1, JSON.stringify(current.replyTo));
+    assert.equal(rows.filter(row => row.type === 'reply').length, 1);
+    const reply = rows.find(row => row.type === 'reply');
+    assert.equal(reply?.type === 'reply' && replyRowRunning(reply), true);
+  }
+});
+
+test('a user message id that is not input-${inputId} still shares the live row', () => {
+  const custom = message('uuid-user', 'user_input', { inputId: 'u' });
+  const rows = project([custom], live({ replyTo: [custom.id] }));
+  assert.equal(authors(rows).length, 1);
+  assert.equal(rows.filter(row => row.type === 'reply').length, 1);
+});
+
+test('an empty assistant body does not render a header, including beside a live reply', () => {
+  const blank = message('blank', 'agent_reply', { content: '', replyTo: [] });
+  assert.equal(conversationRowShowsAuthor({ type: 'message', message: blank }), false);
+  const folded = replies(continuousReplyRows([row(blank)], [blank], [], []))[0]!;
+  assert.equal(conversationRowShowsAuthor(folded), false);
+  const rows = project([user, blank], live({ replyTo: [] }));
+  const shown = authors(rows);
+  assert.equal(shown.length, 1);
+  const liveRow = shown[0];
+  assert.ok(liveRow?.type === 'reply');
+  if (liveRow?.type !== 'reply') return;
+  assert.equal(replyRowRunning(liveRow), true);
+});
+
+test('alias spellings claim the same receipt without becoming extra quote anchors', () => {
+  const rows = continuousReplyRows([row(user), { type: 'activity', activity: activity() }], [user], [{ inputId: 'u', createdAt: at }], []);
+  const reply = replies(rows)[0]!;
+  assert.equal(replies(rows).length, 1);
+  assert.deepEqual(reply.replyTo, [user.id]);
+  assert.deepEqual(replyReferencesForRows(rows).get(reply), []);
+  const raw = continuousReplyRows([row(user), { type: 'activity', activity: activity({ replyTo: ['u'] }) }], [user], [{ inputId: 'u', createdAt: at }], []);
+  const folded = replies(raw)[0]!;
+  assert.equal(replies(raw).length, 1);
+  assert.deepEqual(folded.replyTo, ['u']);
+});
+
+test('a delivered reply clears the awaited input whichever anchor spelling was stored', () => {
+  const delivered = message('final', 'agent_reply', { replyTo: ['u'], content: '好' });
+  assert.equal(awaitingInputAnswered([user, delivered], 'u'), true);
+  assert.equal(awaitingInputAnswered([user], 'u'), false);
 });
