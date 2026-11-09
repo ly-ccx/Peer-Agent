@@ -1,11 +1,12 @@
-export type WorkbenchTabId = 'plan' | 'browser' | 'files' | 'documents' | 'launcher' | 'changes' | 'details' | 'conversations' | 'interactive';
+export type WorkbenchTabId = 'plan' | 'browser' | 'files' | 'documents' | 'directories' | 'launcher' | 'changes' | 'details' | 'conversations' | 'interactive';
 
 function isWorkbenchTab(value: unknown): value is WorkbenchTabId {
   return (
     value === 'plan' || value === 'launcher' || value === 'changes' || value === 'details' || value === 'conversations' ||
     value === 'browser' ||
     value === 'files' ||
-    value === 'documents'
+    value === 'documents' ||
+    value === 'directories'
   );
 }
 

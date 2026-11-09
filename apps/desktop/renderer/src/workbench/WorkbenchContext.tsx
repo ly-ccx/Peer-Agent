@@ -12,6 +12,16 @@ import {
 import { clientApi } from '../clientApi';
 import { normalizeDirectorySession, normalizeDirectorySessionMap, EMPTY_DIRECTORY_SESSION, type DirectorySession, type DirectorySessionMap } from './directorySessionState';
 import {
+  createDirectoryTabId,
+  createDirectoryTabState,
+  normalizeDirectoryTabSessionMap,
+  normalizeDirectoryTabState,
+  openDirectoryTabState,
+  type DirectoryTabSession,
+  type DirectoryTabSessionMap,
+  type DirectoryTabState,
+} from './directoryTabSessionState';
+import {
   createBrowserSessionState,
   isBlankBrowserSession,
   normalizeBrowserSessionMap,
@@ -96,6 +106,7 @@ interface WorkbenchSettingsShape {
   browserSessions?: BrowserSessionMap;
   documentSessions?: DocumentSessionMap;
   directorySessions?: DirectorySessionMap;
+  directoryTabSessions?: DirectoryTabSessionMap;
   sidebarOpen?: boolean;
   sidebarWidth?: number;
 }
@@ -119,6 +130,8 @@ interface WorkbenchState {
   browserSession: BrowserSessionState;
   documentSession: DocumentSessionState;
   directorySessions: DirectorySessionMap;
+  /** ADR 125：资源窗口目录标签会话（引用元数据持久化，运行时状态走 DirectorySession.readings）。 */
+  directoryTabs: DirectoryTabState;
   /** 根工作台才承担全局 Browser 调度；会话抽屉只表达当前会话。 */
   layoutHost: 'root' | 'local';
   /** 后台 Task 已拉起、需要继续挂着 WebContents 的会话（不含当前前台会话）。 */
@@ -163,6 +176,9 @@ interface WorkbenchActions {
   resolveBrowserSession: (targetConversationId: string | null) => BrowserSessionState;
   setDocumentSession: (next: DocumentSessionUpdater) => void;
   setDirectorySession: (workspaceId: string, update: (current: DirectorySession) => DirectorySession) => void;
+  setDirectoryTabSession: (next: ((current: DirectoryTabState) => DirectoryTabState)) => void;
+  /** 打开（或激活既有）目录标签并切到 directories 视图；引用去重见 directoryTabKey。 */
+  openDirectoryTab: (reference: import('./directoryTabSessionState').BotDirectoryReference) => void;
 }
 
 type WorkbenchContextValue = WorkbenchState & WorkbenchActions & { conversationId: string | null };
@@ -224,6 +240,8 @@ export function WorkbenchProvider({
     normalizeDocumentSessionMap(initial.documentSessions),
   );
   const [directorySessions, setDirectorySessions] = useState(() => normalizeDirectorySessionMap(initial.directorySessions));
+  const [directoryTabSessions, setDirectoryTabSessions] = useState(() => normalizeDirectoryTabSessionMap(initial.directoryTabSessions));
+  const defaultDirectoryTabSessionsRef = useRef<DirectoryTabSessionMap>({});
   const defaultDocumentSessionsRef = useRef<DocumentSessionMap>({});
   const [goalSlot, setGoalSlotState] = useState<HTMLElement | null>(null);
   const [hasGoalPlan, setHasGoalPlanState] = useState<boolean>(false);
@@ -276,6 +294,7 @@ export function WorkbenchProvider({
     browserSessionMap,
     documentSessionMap,
     directorySessions,
+    directoryTabSessions,
     sidebarOpen,
     sidebarWidth,
   });
@@ -287,6 +306,7 @@ export function WorkbenchProvider({
     browserSessionMap,
     documentSessionMap,
     directorySessions,
+    directoryTabSessions,
     sidebarOpen,
     sidebarWidth,
   };
@@ -312,10 +332,11 @@ export function WorkbenchProvider({
             openByConversation: o,
             width: w,
             activeTab: m,
-            browserSessions: b,
-            documentSessions: d,
-            directorySessions: directories,
-            sidebarOpen: so,
+        browserSessions: b,
+        documentSessions: d,
+        directorySessions: directories,
+        directoryTabSessions: latestRef.current.directoryTabSessions,
+        sidebarOpen: so,
             sidebarWidth: sw,
           },
         })
@@ -410,7 +431,7 @@ export function WorkbenchProvider({
       hostBrowserActive: latestRef.current.interactiveTabOwner !== currentSessionKey && latestRef.current.activeTabMap[currentSessionKey] === 'browser',
       requestSessionExists: existing != null,
       preserveAttention: resourceMode && (!isPageActive || (openRef.current
-        && (latestRef.current.interactiveTabOwner === currentSessionKey || ['documents', 'files', 'changes', 'details', 'conversations'].includes(latestRef.current.activeTabMap[currentSessionKey] ?? '')))),
+        && (latestRef.current.interactiveTabOwner === currentSessionKey || ['documents', 'directories', 'files', 'changes', 'details', 'conversations'].includes(latestRef.current.activeTabMap[currentSessionKey] ?? '')))),
     });
     if (!decision.accept) {
       if (decision.error === 'attention_preserved') void clientApi.acknowledgeBrowserPanelReveal({
@@ -464,6 +485,32 @@ export function WorkbenchProvider({
     });
     schedulePersist();
   }, [schedulePersist]);
+
+  const setDirectoryTabSession = useCallback((next: (current: DirectoryTabState) => DirectoryTabState) => {
+    const key = workbenchSessionKey(conversationId);
+    setDirectoryTabSessions((prev) => {
+      const current = prev[key]
+        ?? defaultDirectoryTabSessionsRef.current[key]
+        ?? createDirectoryTabState();
+      defaultDirectoryTabSessionsRef.current[key] = current;
+      const resolved = normalizeDirectoryTabState(next(current));
+      if (resolved === current) return prev;
+      return { ...prev, [key]: resolved };
+    });
+    schedulePersist();
+  }, [conversationId, schedulePersist]);
+
+  const openDirectoryTab = useCallback((reference: import('./directoryTabSessionState').BotDirectoryReference) => {
+    const tab: DirectoryTabSession = { id: createDirectoryTabId(), reference };
+    setDirectoryTabSession((current) => openDirectoryTabState(current, tab));
+    const key = workbenchSessionKey(conversationId);
+    setInteractiveTabOwner(null);
+    setActiveTabMap((prev) => (
+      prev[key] === 'directories' ? prev : { ...prev, [key]: 'directories' }
+    ));
+    setOpenByConversation((prev) => updateWorkbenchOpen(prev, conversationId, true));
+    schedulePersist();
+  }, [conversationId, schedulePersist, setDirectoryTabSession]);
 
   const openFile = useCallback((
     absPath: string,
@@ -637,10 +684,26 @@ export function WorkbenchProvider({
       if (!session || isBlankBrowserSession(session)) return resourceMode ? 'browser' : 'plan';
       return 'browser';
     }
+    // 目录标签全部关闭后不恢复 directories 视图，避免空占位。
+    if (stored === 'directories') {
+      const session = directoryTabSessions[key] ?? defaultDirectoryTabSessionsRef.current[key];
+      if (!session || session.tabs.length === 0) return resourceMode ? 'launcher' : 'plan';
+      return 'directories';
+    }
     if (stored) return stored;
     // 兜底默认 Plan：从未手动切过 tab 的会话停在 Plan 视图。
     return resourceMode ? 'launcher' : 'plan';
-  }, [conversationId, activeTabMap, browserSessionMap, resourceMode, interactiveTabOwner]);
+  }, [conversationId, activeTabMap, browserSessionMap, directoryTabSessions, resourceMode, interactiveTabOwner]);
+
+  const directoryTabs = useMemo(() => {
+    const stored = directoryTabSessions[currentSessionKey];
+    if (stored) return stored;
+    const existing = defaultDirectoryTabSessionsRef.current[currentSessionKey];
+    if (existing) return existing;
+    const created = createDirectoryTabState();
+    defaultDirectoryTabSessionsRef.current[currentSessionKey] = created;
+    return created;
+  }, [directoryTabSessions, currentSessionKey]);
 
   const browserSession = useMemo(() => {
     const stored = browserSessionMap[currentSessionKey];
@@ -681,7 +744,10 @@ export function WorkbenchProvider({
     browserSession,
     documentSession,
     directorySessions,
+    directoryTabs,
     setDirectorySession,
+    setDirectoryTabSession,
+    openDirectoryTab,
     layoutHost,
     preparedBrowserConversations: livePreparedBrowserConversations,
     requestedBrowserConversations,
@@ -706,7 +772,8 @@ export function WorkbenchProvider({
     setDocumentSession,
   }), [
     open, width, maximized, activeTab, goalSlot, hasGoalPlan, sidebarAutoCollapsed, sidebarOpen, sidebarWidth, sidebarCollapsed,
-    filesTarget, browserSession, documentSession, directorySessions, setDirectorySession, layoutHost, livePreparedBrowserConversations, requestedBrowserConversations, conversationId,
+    filesTarget, browserSession, documentSession, directorySessions, directoryTabs, setDirectorySession, setDirectoryTabSession, openDirectoryTab,
+    layoutHost, livePreparedBrowserConversations, requestedBrowserConversations, conversationId,
     setOpen, toggleOpen, setActiveTab, setWidth, setMaximized, registerGoalSlot, setHasGoalPlan, setSidebarAutoCollapsed,
     setSidebarOpen, toggleSidebar, setSidebarWidth, openFile, openDiff, openDocumentReference, revealInFiles,
     setBrowserSession, setBrowserSessionFor, resolveBrowserSession, setDocumentSession,

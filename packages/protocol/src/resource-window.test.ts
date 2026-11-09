@@ -67,8 +67,9 @@ test('mixed layout retains bounded domain references, document/Diff/browser rece
   const tab = { id: 'tab-a', reference, title: 'Trial', navigation: { top: 120, left: 0 } }, interactive = { tabs: [tab], activeTabId: 'tab-a' };
   const recents = [{ kind: 'document', path: '/repo/a.md', task: { sessionId: 'session', planId: 'plan' } },
     { kind: 'comparison', path: '/repo', comparison: { fromRef: 'HEAD', comparison: 'staged' } },
+    { kind: 'directory', path: 'kxt/branch-snapshots', task: { sessionId: 'session', planId: 'plan' } },
     { kind: 'browser', url: 'https://example.com/facts' }, { kind: 'interactive', reference, title: 'Trial' }];
-  const layout = { order: ['document:a', 'comparison:workspace', 'browser:b', 'interactive:tab-a'], recent: recents.map(value => JSON.stringify(value)), interactive };
+  const layout = { order: ['document:a', 'comparison:workspace', 'browser:b', 'interactive:tab-a', 'directory:tab-d'], recent: recents.map(value => JSON.stringify(value)), interactive };
   assert.deepEqual(normalizeResourceLayout(layout), layout);
   assert.equal(normalizeResourceLayout({ ...layout, order: ['document:a'] }), undefined, 'the active result must remain open');
   assert.deepEqual(normalizeResourceLayout({ ...layout, order: ['document:a'], interactive: { tabs: [tab], activeTabId: null } })?.interactive.tabs, [tab], 'closed readings retain only presentation hints');
@@ -87,6 +88,9 @@ test('mixed layout retains bounded domain references, document/Diff/browser rece
   assert.equal(normalizeResourceRecentReference({ kind: 'document', path: '/repo/a.md', permission: 'full' }), undefined);
   assert.equal(normalizeResourceRecentReference({ kind: 'comparison', path: '/repo', comparison: { fromRef: 'HEAD' } }), undefined);
   assert.equal(normalizeResourceRecentReference({ kind: 'browser', url: 'https://secret@example.com/' }), undefined);
+  assert.equal(normalizeResourceRecentReference({ kind: 'directory', path: '/repo', revision: { kind: 'git', commit: 'a'.repeat(40) } }), undefined, 'a directory recent never carries a revision');
+  assert.deepEqual(normalizeResourceRecentReference({ kind: 'directory', path: 'kxt/runs', relativeTo: '/vault' }),
+    { kind: 'directory', path: 'kxt/runs', relativeTo: '/vault' });
   assert.equal(normalizeResourceLayout({ ...layout, recent: [JSON.stringify({ kind: 'interactive', reference, values: { $x: 2 } })] }), undefined);
   assert.equal(normalizeResourceLayout({ ...layout, recent: [JSON.stringify({ kind: 'browser', url: 'https://example.com/' + '中'.repeat(1000) })] }), undefined, 'URL canonicalization must not expand a saved descriptor beyond its own readable budget');
 });

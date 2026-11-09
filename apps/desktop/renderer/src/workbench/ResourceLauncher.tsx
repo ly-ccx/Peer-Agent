@@ -34,6 +34,15 @@ function RecentResource({ raw, active, isZh }: { readonly raw: string; readonly 
     return <button className="resource-recent" type="button" onClick={() => workspace.openInteractive(descriptor.reference, descriptor.title)}>
       <PeerIcon name="fileText" size={18} /><span>{descriptor.title || (isZh ? '交互结果' : 'Interactive result')}</span></button>;
   }
+  // 目录最近项是事实描述符：标签身份就是引用本身，来源核对由标签内容完成（ADR 125）。
+  if (descriptor.kind === 'directory') {
+    if (!owner) return null;
+    const label = descriptor.path.replace(/[/\\]+$/, '').split(/[/\\]/).filter(Boolean).at(-1) || (isZh ? '当前项目' : 'Project');
+    return <button className="resource-recent" type="button" title={descriptor.path} onClick={() => workspace.openReference({ kind: 'directory', workspaceId: owner.workspaceId, path: descriptor.path,
+      ...(descriptor.task ? { task: descriptor.task } : {}), ...(descriptor.relativeTo ? { relativeTo: descriptor.relativeTo } : {}) })}>
+      <PeerIcon name="folder" size={18} /><span>{label}</span>
+    </button>;
+  }
   if (descriptor.kind !== 'browser' && (!metadata.value?.ok || !metadata.value.metadataOnly || !metadata.value.resolvedPath)) return null;
   const path = metadata.value?.resolvedPath;
   return <button className="resource-recent" type="button" onClick={() => descriptor.kind === 'browser'
@@ -45,8 +54,9 @@ function RecentResource({ raw, active, isZh }: { readonly raw: string; readonly 
   </button>;
 }
 
-export function ResourceLauncher({ isZh, active, recent, onChanges }: {
+export function ResourceLauncher({ isZh, active, recent, onChanges, onBrowseFiles }: {
   readonly isZh: boolean; readonly active: boolean; readonly recent: readonly string[]; readonly onChanges: () => void;
+  readonly onBrowseFiles: () => void;
 }) {
   const workspace = useResourceWorkspace();
   const workbench = useWorkbench();
@@ -79,7 +89,7 @@ export function ResourceLauncher({ isZh, active, recent, onChanges }: {
     <h2>{isZh ? '工具' : 'Tools'}</h2>
     <div className="resource-launcher-tools">
       <button type="button" className="resource-tool" onClick={() => { workbench.setActiveTab('browser'); setNotice(''); }}><PeerIcon name="globe" size={18} /><span>{isZh ? '网页' : 'Browser'}</span><PeerIcon name="chevronRight" size={14} /></button>
-      <button type="button" className="resource-tool" onClick={() => { workbench.setActiveTab('files'); setNotice(''); }}><PeerIcon name="folder" size={18} /><span>{isZh ? '文件与目录' : 'Files and folders'}</span><PeerIcon name="chevronRight" size={14} /></button>
+      <button type="button" className="resource-tool" onClick={() => { setNotice(''); onBrowseFiles(); }}><PeerIcon name="folder" size={18} /><span>{isZh ? '文件与目录' : 'Files and folders'}</span><PeerIcon name="chevronRight" size={14} /></button>
       <button type="button" className="resource-tool" onClick={() => { setNotice(''); onChanges(); }}><PeerIcon name="fileText" size={18} /><span>{isZh ? '查看更改' : 'View changes'}</span><PeerIcon name="chevronRight" size={14} /></button>
     </div>
     {notice ? <p className="resource-launcher-notice" role="status">{notice}</p> : null}
