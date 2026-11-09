@@ -12,6 +12,9 @@ export function ResourceWorkspaceHeader({ isZh, presentation, idPrefix, navigati
 }) {
   const workbench = useWorkbench();
   const workspace = useResourceWorkspace();
+  // ADR125 决策五：launcher 是激活标签且没有任何辅助面板打开时，头部不渲染网页/目录/变更入口；
+  // launcher 页内「工具」区已承载同组入口。任一辅助面板打开即恢复渲染，保住按下态、切换关闭与焦点回退。
+  const bareLauncher = workbench.activeTab === 'launcher' && !navigation.mode;
   const items = presentation.resources.map(item => ({ id: item.key, label: item.label, title: item.title,
     controls: `${idPrefix}-content`, icon: <PeerIcon name={item.kind === 'browser' ? 'globe' : item.kind === 'conversation' ? 'terminal' : 'fileText'} size={14} /> }));
   if (workbench.activeTab === 'launcher' || items.length === 0) items.push({ id: LAUNCHER_TAB,
@@ -32,10 +35,12 @@ export function ResourceWorkspaceHeader({ isZh, presentation, idPrefix, navigati
       <PeerIcon name="back" size={14} /><span>{resourceDetailReturnLabel(workspace.returnDetail, isZh)}</span>
     </button> : null}
     <div className="resource-workspace-controls">
-      <button type="button" className="ui-button" onClick={() => { workspace?.rememberDetailSource(); workbench.setActiveTab('browser'); }} title={isZh ? '网页' : 'Browser'} aria-label={isZh ? '打开网页视图' : 'Open browser view'}><PeerIcon name="globe" size={16} /></button>
-      <button type="button" className="ui-button" onClick={() => { workspace?.rememberDetailSource(); navigation.toggle('files'); }} data-navigator="files" aria-pressed={navigation.mode === 'files' || workbench.activeTab === 'files'} title={isZh ? '目录' : 'Files'} aria-label={isZh ? '浏览目录' : 'Browse files'}><PeerIcon name="folder" size={16} /></button>
-      <button type="button" className="ui-button" data-navigator="changes" aria-pressed={navigation.mode === 'changes' || workbench.activeTab === 'changes'}
-        onClick={() => { workspace?.rememberDetailSource(); navigation.toggle('changes'); }} title={isZh ? '变更导航' : 'Changes navigation'} aria-label={isZh ? '浏览变更' : 'Browse changes'}><PeerIcon name="fileText" size={16} /></button>
+      {!bareLauncher ? <>
+        <button type="button" className="ui-button" onClick={() => { workspace?.rememberDetailSource(); workbench.setActiveTab('browser'); }} title={isZh ? '网页' : 'Browser'} aria-label={isZh ? '打开网页视图' : 'Open browser view'}><PeerIcon name="globe" size={16} /></button>
+        <button type="button" className="ui-button" onClick={() => { workspace?.rememberDetailSource(); navigation.toggle('files'); }} data-navigator="files" aria-pressed={navigation.mode === 'files' || workbench.activeTab === 'files'} title={isZh ? '目录' : 'Files'} aria-label={isZh ? '浏览目录' : 'Browse files'}><PeerIcon name="folder" size={16} /></button>
+        <button type="button" className="ui-button" data-navigator="changes" aria-pressed={navigation.mode === 'changes' || workbench.activeTab === 'changes'}
+          onClick={() => { workspace?.rememberDetailSource(); navigation.toggle('changes'); }} title={isZh ? '变更导航' : 'Changes navigation'} aria-label={isZh ? '浏览变更' : 'Browse changes'}><PeerIcon name="fileText" size={16} /></button>
+      </> : null}
       <button type="button" className="ui-button" onClick={() => workbench.setMaximized(!workbench.maximized)} aria-pressed={workbench.maximized}
         title={workbench.maximized ? (isZh ? '恢复工作区' : 'Restore workspace') : (isZh ? '展开工作区' : 'Expand workspace')}
         aria-label={workbench.maximized ? (isZh ? '恢复工作区' : 'Restore workspace') : (isZh ? '展开工作区' : 'Expand workspace')}>
