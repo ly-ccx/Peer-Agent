@@ -196,7 +196,13 @@ test('new invocations retain a minimal target for reconciliation, never model su
     guard.beforeRequest();
     guard.beforeTool({ toolCallId: 'new', capabilityId: 'local.delegation.verify_session', arguments: { sessionId: 's', passed: true, full_local: true } });
     const pending = Object.values(env.work().budget.attempts)[0].pendingTools[0];
-    assert.deepEqual(pending, { toolCallId: 'new', capabilityId: 'local.delegation.verify_session', verificationSessionId: 's' });
+    // Host-generated identity fields (dispatchId/registeredAt, ADR 127 UO-02) belong on the
+    // target; model arguments must never become policy on it.
+    assert.deepEqual({ toolCallId: pending.toolCallId, capabilityId: pending.capabilityId, verificationSessionId: pending.verificationSessionId },
+      { toolCallId: 'new', capabilityId: 'local.delegation.verify_session', verificationSessionId: 's' });
+    assert.match(pending.dispatchId, /^dispatch-[0-9a-f]{32}$/);
+    assert.equal(typeof pending.registeredAt, 'string');
+    assert.equal('passed' in pending || 'full_local' in pending, false);
     guard.finish();
   } finally { release(); env.close(); }
 });

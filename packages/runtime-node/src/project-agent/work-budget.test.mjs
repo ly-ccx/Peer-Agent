@@ -84,3 +84,75 @@ test('budget changes read only the owned work when the host provides an isolated
     assert.equal(store.read().works.goal.budget.tokens, 2);
   } finally { release(); rmSync(root, { recursive: true, force: true }); }
 });
+
+test('dispatches register durable receipts and settle with classified outcomes (ADR 127 UO-02)', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'uo-dispatch-receipts-'));
+  const store = createWorkCoordinationStore({ rootDir: root, workspaceId: 'w', holdsLease: () => true, leaseEpoch: () => 'one' });
+  let clock = 0;
+  const release = registerWorkBudget('w', store, {}, () => `2026-11-09T00:00:${String(clock++).padStart(2, '0')}Z`);
+  store.saveWork({ workId: 'goal', state: 'runnable' });
+  const profile = { workspaceId: 'w', workId: 'goal', role: 'work_session', planId: 'A' };
+  try {
+    const guard = createWorkBudgetGuard(profile);
+    guard.beforeRequest();
+    const context = { streamId: 'stream-1', conversationId: 'conv-1' };
+    guard.beforeTool({ toolCallId: 'write', capabilityId: 'local.file.write' }, context);
+    guard.beforeTool({ toolCallId: 'shell', capabilityId: 'local.shell' }, context);
+    guard.beforeTool({ toolCallId: 'perm', capabilityId: 'local.shell' }, context);
+    guard.beforeTool({ toolCallId: 'lost', capabilityId: 'local.shell' }, context);
+
+    const attempt = Object.values(store.read().works.goal.budget.attempts)[0];
+    assert.deepEqual(attempt.pendingTools.map(row => row.toolCallId), ['write', 'shell', 'perm', 'lost']);
+    attempt.pendingTools.forEach((row, index) => {
+      assert.match(row.dispatchId, /^dispatch-[0-9a-f]{32}$/);
+      assert.equal(row.registeredAt, `2026-11-09T00:00:${String(index).padStart(2, '0')}Z`);
+      assert.equal(row.streamId, 'stream-1');
+      assert.equal(row.conversationId, 'conv-1');
+    });
+
+    guard.checkpoint({}, [
+      { call: { toolCallId: 'write' }, result: { ok: true, evidenceRefs: ['tool-result://write'] } },
+      { call: { toolCallId: 'shell' }, result: { taskId: 'task-9', status: 'cancelled', interrupted: true, stopReason: 'user_stopped', exitCode: null } },
+      { call: { toolCallId: 'perm' }, result: { status: 'denied' } },
+    ]);
+    const settled = Object.values(store.read().works.goal.budget.attempts)[0];
+    assert.deepEqual(settled.pendingTools.map(row => row.toolCallId), ['lost']);
+    const outcomes = Object.fromEntries(settled.settledTools.map(row => [row.toolCallId, row.outcome]));
+    assert.deepEqual(outcomes, { write: 'resulted', shell: 'terminated', perm: 'not_dispatched' });
+    assert.deepEqual(settled.settledTools.find(row => row.toolCallId === 'write').evidenceRefs, ['tool-result://write']);
+
+    guard.finish({ totalTokens: 1, estimatedCostUsd: 0 });
+    const budget = store.read().works.goal.budget;
+    assert.equal(budget.uncertainDispatches.length, 1);
+    assert.equal(budget.uncertainDispatches[0].toolCallId, 'lost');
+    assert.match(budget.uncertainDispatches[0].dispatchId, /^dispatch-[0-9a-f]{32}$/);
+    assert.equal(budget.uncertainDispatches[0].streamId, 'stream-1');
+    const receipts = Object.values(budget.dispatchReceipts);
+    assert.equal(receipts.length, 3);
+    assert.deepEqual(receipts.map(row => row.outcome).sort(), ['not_dispatched', 'resulted', 'terminated']);
+    assert.equal(receipts.every(row => typeof row.settledAt === 'string'), true);
+  } finally { release(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a cancelled receipt without a task never dispatched, and a not_executed output is not a side effect', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'uo-dispatch-classify-'));
+  const store = createWorkCoordinationStore({ rootDir: root, workspaceId: 'w', holdsLease: () => true, leaseEpoch: () => 'one' });
+  const release = registerWorkBudget('w', store);
+  store.saveWork({ workId: 'goal', state: 'runnable' });
+  const profile = { workspaceId: 'w', workId: 'goal', role: 'work_session', planId: 'A' };
+  try {
+    const guard = createWorkBudgetGuard(profile);
+    guard.beforeRequest();
+    guard.beforeTool({ toolCallId: 'pre-abort', capabilityId: 'local.shell' }, { streamId: 's' });
+    guard.beforeTool({ toolCallId: 'skipped', capabilityId: 'local.shell' }, { streamId: 's' });
+    guard.checkpoint({}, [
+      { call: { toolCallId: 'pre-abort' }, result: { taskId: null, status: 'cancelled', exitCode: null } },
+      { call: { toolCallId: 'skipped' }, result: { output: JSON.stringify({ ok: false, status: 'not_executed', error: 'work_execution_stopped' }), isError: true }, terminalReason: 'work_execution_stopped' },
+    ]);
+    guard.finish({ totalTokens: 0, estimatedCostUsd: 0 });
+    const receipts = Object.values(store.read().works.goal.budget.dispatchReceipts);
+    assert.deepEqual(Object.fromEntries(receipts.map(row => [row.toolCallId, row.outcome])),
+      { 'pre-abort': 'not_dispatched', skipped: 'not_dispatched' });
+    assert.equal((store.read().works.goal.budget.uncertainDispatches || []).length, 0);
+  } finally { release(); rmSync(root, { recursive: true, force: true }); }
+});
