@@ -820,6 +820,7 @@ export function FilesView({ isZh, workspacePath, botWorkspaceId, task, active = 
           className="workbench-files-toolbar-btn"
           onClick={() => { void refreshAllExpanded(); }}
           disabled={refreshing}
+          aria-busy={refreshing}
           aria-label={isZh ? '刷新' : 'Refresh'}
           title={isZh ? '刷新' : 'Refresh'}
         >

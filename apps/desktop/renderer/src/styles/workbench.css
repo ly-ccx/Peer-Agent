@@ -1878,11 +1878,20 @@
     box-shadow: 0 0 0 2px var(--ui-focus-ring, var(--za-focus));
   }
   .workbench-files-toolbar-btn:disabled {
-    cursor: progress;
+    cursor: not-allowed;
     opacity: 0.45;
   }
-  .workbench-files-toolbar-btn:disabled svg {
+  /* 旋转与进度光标只表达真实刷新中的按钮；只读禁用（如 Bot 工作区）不是执行态。 */
+  .workbench-files-toolbar-btn[aria-busy='true'] {
+    cursor: progress;
+  }
+  .workbench-files-toolbar-btn[aria-busy='true'] svg {
     animation: motion-spin 0.8s linear infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .workbench-files-toolbar-btn[aria-busy='true'] svg {
+      animation: none;
+    }
   }
   .workbench-files-filter {
     position: relative;
@@ -2060,49 +2069,6 @@
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
-  }
-  .workbench-tree-actions {
-    display: inline-flex;
-    flex: 0 0 auto;
-    margin-left: auto;
-  }
-  .workbench-tree-action {
-    display: inline-flex;
-    width: 26px;
-    height: 26px;
-    padding: 0;
-    align-items: center;
-    justify-content: center;
-    border: 0;
-    border-radius: var(--ui-radius-control-compact);
-    background: transparent;
-    color: var(--za-text-faint);
-    cursor: pointer;
-    opacity: 0.62;
-    transition: background var(--za-motion-fast), color var(--za-motion-fast), opacity var(--za-motion-fast);
-  }
-  .workbench-tree-action svg {
-    width: 16px;
-    height: 16px;
-  }
-  .workbench-tree-row:hover .workbench-tree-action,
-  .workbench-tree-action:focus-visible {
-    opacity: 1;
-  }
-  .workbench-tree-action:hover {
-    background: var(--ui-surface-hover, var(--chrome-hover));
-    color: var(--za-text);
-  }
-  .workbench-tree-action:focus-visible {
-    outline: none;
-    box-shadow: 0 0 0 2px var(--ui-focus-ring, var(--za-focus));
-  }
-  .workbench-tree-action:disabled {
-    cursor: progress;
-    opacity: 0.4;
-  }
-  .workbench-tree-action:disabled svg {
-    animation: motion-spin 0.8s linear infinite;
   }
   .workbench-tree-hint {
     min-height: 22px;
