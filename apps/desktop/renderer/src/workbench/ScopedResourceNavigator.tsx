@@ -1,7 +1,8 @@
 import { OpenResourceWindowButton } from './OpenResourceWindowButton';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useWorkbench } from './WorkbenchContext';
 import { EMPTY_DIRECTORY_SESSION, directoryReadingKey, rememberDirectoryReading, type DirectoryReading } from './directorySessionState';
+import { updateDirectoryTabReference } from './directoryTabSessionState';
 import { clientApi } from '../clientApi';
 import { useResourceRead } from '../ui/resources/useResourceState';
 import { useResourceWorkspace } from './ResourceWorkspaceContext';
@@ -20,33 +21,44 @@ function sourceReadError(status: string | undefined, isZh: boolean): string {
   return messages[status ?? '']?.[isZh ? 0 : 1] ?? (isZh ? '暂时无法读取此来源，请重试。' : 'Unable to read this source. Please retry.');
 }
 
-export function ScopedResourceNavigator({ isZh, changes = false, active }: { readonly isZh: boolean; readonly changes?: boolean; readonly active: boolean }) {
+/**
+ * tabbed=false：辅助导航面板（单例，按 workspace 记忆 source 与阅读位置；ADR 125 后不再接收目录意图）。
+ * tabbed=true（ADR 125）：目录标签内容，根跟随活跃目录标签的引用，标签内导航改写该标签引用。
+ */
+export function ScopedResourceNavigator({ isZh, changes = false, tabbed = false, active }: { readonly isZh: boolean; readonly changes?: boolean; readonly tabbed?: boolean; readonly active: boolean }) {
   const workspace = useResourceWorkspace();
-  const { directorySessions, setDirectorySession } = useWorkbench();
+  const { directorySessions, setDirectorySession, directoryTabs, setDirectoryTabSession } = useWorkbench();
   const capture = useRef<(() => DirectoryReading | undefined) | null>(null);
   const bindCapture = useCallback((next: () => DirectoryReading | undefined) => { capture.current = next; return () => { if (capture.current === next) capture.current = null; }; }, []);
   const workspaceId = workspace?.owner?.workspaceId ?? '';
   const session = directorySessions[workspaceId] ?? EMPTY_DIRECTORY_SESSION;
   const [changesSource, setChangesSource] = useState('.');
-  const directory = workspace?.directoryIntent;
-  const task = changes ? undefined : directory ? directory.task : session.task;
-  const invalidSource = !changes && !directory && session.invalidSource;
-  const relativeTo = changes ? undefined : directory ? directory.relativeTo : session.relativeTo;
-  const source = changes ? changesSource : directory?.path ?? session.source;
+  const directoryTab = tabbed ? directoryTabs.tabs.find(tab => tab.id === directoryTabs.activeTabId) ?? null : null;
+  const task = changes ? undefined : tabbed ? directoryTab?.reference.task : session.task;
+  const invalidSource = !changes && !tabbed && session.invalidSource;
+  const relativeTo = changes ? undefined : tabbed ? directoryTab?.reference.relativeTo : session.relativeTo;
+  const source = changes ? changesSource : tabbed ? directoryTab?.reference.path ?? '.' : session.source;
   const setSource = useCallback((path: string, resetTask = false) => {
     if (changes) setChangesSource(path);
+    else if (tabbed) {
+      const tab = directoryTab;
+      if (!tab) return;
+      setDirectoryTabSession(current => updateDirectoryTabReference(current, tab.id, { kind: 'directory', workspaceId: tab.reference.workspaceId, path,
+        ...(resetTask ? {} : tab.reference.task ? { task: tab.reference.task } : {}),
+        ...(resetTask ? {} : tab.reference.relativeTo ? { relativeTo: tab.reference.relativeTo } : {}) }));
+    }
     else setDirectorySession(workspaceId, current => ({ ...current, source: path, relativeTo: undefined, ...(resetTask ? { task: undefined, invalidSource: undefined } : {}) }));
-  }, [changes, workspaceId, setDirectorySession]);
+  }, [changes, tabbed, directoryTab, setDirectoryTabSession, workspaceId, setDirectorySession]);
   const rememberReading = useCallback((reading: DirectoryReading) => {
     setDirectorySession(workspaceId, current => rememberDirectoryReading(current, reading));
   }, [workspaceId, setDirectorySession]);
-  useEffect(() => { if (!changes && directory) { setDirectorySession(workspaceId, current => ({ ...current, source: directory.path, task: directory.task, relativeTo: directory.relativeTo, invalidSource: undefined })); workspace?.consumeDirectoryIntent(directory.id); } }, [changes, directory?.id, directory?.path, directory?.task?.sessionId, directory?.task?.planId, directory?.relativeTo, setDirectorySession, workspaceId]);
   const reference = { workspaceId, path: source, ...(task ? { task } : {}), ...(relativeTo ? { relativeTo } : {}), kind: 'directory' as const, metadataOnly: true };
   const metadata = useResourceRead(JSON.stringify(reference), () => clientApi.readFile('', undefined, undefined, reference), active && !!workspace?.ready && !invalidSource);
   const ready = !invalidSource && !!workspace?.ready && !metadata.error && metadata.value?.ok && metadata.value.metadataOnly && metadata.value.resolvedPath;
   const allowedRoot = metadata.value?.ok ? metadata.value.resolvedFrom : undefined;
   const relative = ready && allowedRoot && ready.replace(/\\/g, '/').startsWith(`${allowedRoot.replace(/\\/g, '/').replace(/\/$/, '')}/`)
     ? ready.replace(/\\/g, '/').slice(allowedRoot.replace(/\\/g, '/').replace(/\/$/, '').length + 1).split('/') : [];
+  if (tabbed && !directoryTab) return null;
   return <div className="resource-navigator">
     <div className="resource-source-picker">
       <button className="ui-button" type="button" aria-pressed={source === '.' && !task} onClick={() => setSource('.', true)}>{isZh ? '当前项目' : 'Project'}</button>

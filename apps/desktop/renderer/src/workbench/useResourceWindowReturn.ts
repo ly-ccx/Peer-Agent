@@ -56,10 +56,15 @@ export function useResourceWindowReturn({ owner, ready, active, workbench, revea
   useEffect(() => {
     if (!receipt || !request || pending.current?.requestId !== receipt.requestId || request.expiresAt <= Date.now()) return;
     const applied = receipt.status === 'source_tab_closed' ? !workbench.open : workbench.open
-      && (request.context.resource.kind === 'directory' ? workbench.activeTab === 'files' && workbench.directorySessions[request.context.owner.workspaceId]?.source === request.context.resource.reference.path
+      && (request.context.resource.kind === 'directory' ? workbench.activeTab === 'directories' && (() => {
+        const tab = workbench.directoryTabs.tabs.find(item => item.id === workbench.directoryTabs.activeTabId);
+        const expected = request.context.resource.kind === 'directory' ? request.context.resource.reference : null;
+        return !!tab && !!expected && tab.reference.workspaceId === expected.workspaceId && tab.reference.path === expected.path
+          && JSON.stringify(tab.reference.task) === JSON.stringify(expected.task) && tab.reference.relativeTo === expected.relativeTo;
+      })()
         : request.context.resource.kind === 'interactive' ? workbench.activeTab === 'interactive' && interactive?.activeInteractiveId === receipt.targetId
           : workbench.activeTab === 'documents' && workbench.documentSession.activeTabId === receipt.targetId);
     if (!applied) return;
     acknowledge(request, receipt.status); pending.current = null; setRequest(null); setReceipt(null);
-  }, [receipt, request, workbench.open, workbench.activeTab, workbench.documentSession.activeTabId, workbench.directorySessions, interactive?.activeInteractiveId]);
+  }, [receipt, request, workbench.open, workbench.activeTab, workbench.documentSession.activeTabId, workbench.directoryTabs, interactive?.activeInteractiveId]);
 }

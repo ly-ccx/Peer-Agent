@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useWorkbench } from './WorkbenchContext';
 import { activateBrowserTab, closeBrowserTab, createBrowserTabSession } from './browserSessionState';
 import { activateDocumentTab, closeDocumentTab, documentComparisonLabel } from './documentSessionState';
+import { activateDirectoryTabState, closeDirectoryTabState, type BotDirectoryReference } from './directoryTabSessionState';
 import { documentFileLabel } from './documentRevisionState';
 import { LAUNCHER_TAB, reconcileResourceOrder, resourceKey, resourceNeighbor } from './resourceWorkspaceState';
 import type { useResourceConversations } from './useResourceConversations';
@@ -13,9 +14,22 @@ function read(owner: string | null) {
   return readLegacyResourcePreferences(owner).value;
 }
 
+function directoryTabLabel(reference: BotDirectoryReference, isZh: boolean): string {
+  const trimmed = reference.path.replace(/[/\\]+$/, '');
+  if (!trimmed || trimmed === '.') return isZh ? '当前项目' : 'Project';
+  if (/^(?:Peer-Knowledge|peer-knowledge)$/i.test(trimmed)) return isZh ? '知识库' : 'Knowledge';
+  const segment = trimmed.split(/[/\\]/).filter(Boolean).at(-1);
+  return segment || (isZh ? '当前项目' : 'Project');
+}
+
+function directoryRecentDescriptor(reference: BotDirectoryReference): string {
+  return JSON.stringify({ kind: 'directory', path: reference.path,
+    ...(reference.relativeTo ? { relativeTo: reference.relativeTo } : {}), ...(reference.task ? { task: reference.task } : {}) });
+}
+
 export function useResourcePresentation(enabled = true, isZh = false, scenes?: (ReturnType<typeof useResourceConversations> & Partial<ReturnType<typeof useInteractiveResources>>) | null) {
   const workbench = useWorkbench();
-  const { conversationId: owner, browserSession, documentSession, activeTab } = workbench;
+  const { conversationId: owner, browserSession, documentSession, directoryTabs, activeTab } = workbench;
   const [stored, setStored] = useState(() => ({ owner, value: read(enabled ? owner : null) }));
   let preferences = stored.value;
   if (stored.owner !== owner) {
@@ -33,13 +47,16 @@ export function useResourcePresentation(enabled = true, isZh = false, scenes?: (
         tab.reference?.revision?.commit, tab.reference?.relativeTo, tab.absPath].filter(Boolean).join('; ') })),
     ...browserSession.tabs.filter(tab => tab.url !== 'about:blank' || !!tab.title || (activeTab === 'browser' && tab.id === browserSession.activeTabId)).map(tab => ({ key: resourceKey('browser', tab.id),
       kind: 'browser' as const, id: tab.id, label: tab.title || tab.url, title: tab.url })),
+    ...directoryTabs.tabs.map(tab => ({ key: resourceKey('directory', tab.id), kind: 'directory' as const, id: tab.id,
+      label: directoryTabLabel(tab.reference, isZh), title: [tab.reference.path, tab.reference.relativeTo,
+        tab.reference.task ? `${tab.reference.task.sessionId}/${tab.reference.task.planId}` : null].filter(Boolean).join('; ') })),
     ...(activeTab === 'changes' || preferences.order.includes('comparison:workspace')
       ? [{ key: 'comparison:workspace', kind: 'comparison' as const, id: 'workspace', label: 'Diff', title: 'Diff' }] : []),
     ...(scenes?.conversations ?? []).map(tab => ({ key: resourceKey('conversation', tab.conversationId),
       kind: 'conversation' as const, id: tab.conversationId, label: tab.title, title: tab.title })),
     ...(scenes?.interactiveTabs ?? []).map(tab => ({ key: resourceKey('interactive', tab.id), kind: 'interactive' as const, id: tab.id,
       label: tab.title || (isZh ? '交互结果' : 'Interactive result'), title: `${tab.title || (isZh ? '交互结果' : 'Interactive result')} · ${tab.reference.contentVersion}` })),
-  ], [documentSession.tabs, browserSession.tabs, browserSession.activeTabId, activeTab, preferences.order, isZh, scenes?.conversations, scenes?.interactiveTabs]);
+  ], [documentSession.tabs, browserSession.tabs, browserSession.activeTabId, directoryTabs.tabs, activeTab, preferences.order, isZh, scenes?.conversations, scenes?.interactiveTabs]);
   const order = reconcileResourceOrder(preferences.order, resources.map(item => item.key));
   const ordered = order.flatMap(key => { const item = resources.find(item => item.key === key);
     if (!item) return [];
@@ -49,6 +66,7 @@ export function useResourcePresentation(enabled = true, isZh = false, scenes?: (
   });
   const active = activeTab === 'documents' ? resourceKey('document', documentSession.activeTabId ?? '')
     : activeTab === 'browser' ? resourceKey('browser', browserSession.activeTabId)
+    : activeTab === 'directories' ? resourceKey('directory', directoryTabs.activeTabId ?? '')
     : activeTab === 'conversations' ? resourceKey('conversation', scenes?.activeConversationId ?? '')
     : activeTab === 'interactive' ? resourceKey('interactive', scenes?.activeInteractiveId ?? '')
     : activeTab === 'changes' ? 'comparison:workspace' : activeTab === 'launcher' ? LAUNCHER_TAB : null;
@@ -65,12 +83,14 @@ export function useResourcePresentation(enabled = true, isZh = false, scenes?: (
 
   const currentDocument = documentSession.tabs.find(tab => resourceKey('document', tab.id) === active);
   const currentWeb = browserSession.tabs.find(tab => resourceKey('browser', tab.id) === active);
+  const currentDirectory = directoryTabs.tabs.find(tab => resourceKey('directory', tab.id) === active);
   const currentInteractive = scenes?.interactiveTabs?.find(tab => resourceKey('interactive', tab.id) === active);
   const visited = currentDocument && !currentDocument.draftId && (!currentDocument.reference?.revision || !!currentDocument.observation) ? JSON.stringify({ kind: currentDocument.comparison ? 'comparison' : 'document', path: currentDocument.absPath,
     relativeTo: currentDocument.reference?.relativeTo, task: currentDocument.reference?.task, comparison: currentDocument.comparison,
     ...(currentDocument.reference?.revision ? { revision: { ...currentDocument.reference.revision, repositoryId: currentDocument.observation?.sourceId } } : {}) })
     : currentWeb && currentWeb.url !== 'about:blank' ? JSON.stringify({ kind: 'browser', url: currentWeb.url })
-      : currentInteractive ? JSON.stringify({ kind: 'interactive', reference: currentInteractive.reference, ...(currentInteractive.title ? { title: currentInteractive.title } : {}) }) : null;
+      : currentDirectory ? directoryRecentDescriptor(currentDirectory.reference)
+        : currentInteractive ? JSON.stringify({ kind: 'interactive', reference: currentInteractive.reference, ...(currentInteractive.title ? { title: currentInteractive.title } : {}) }) : null;
   useEffect(() => {
     if (!enabled || !owner || !visited) return;
     if (protectedLayout && layoutSession) {
@@ -85,10 +105,13 @@ export function useResourcePresentation(enabled = true, isZh = false, scenes?: (
   const remember = (key: string) => {
     const doc = documentSession.tabs.find(tab => resourceKey('document', tab.id) === key);
     const web = browserSession.tabs.find(tab => resourceKey('browser', tab.id) === key);
+    const directory = directoryTabs.tabs.find(tab => resourceKey('directory', tab.id) === key);
     const interactive = scenes?.interactiveTabs?.find(tab => resourceKey('interactive', tab.id) === key);
     const descriptor = doc && !doc.draftId && (!doc.reference?.revision || !!doc.observation) ? JSON.stringify({ kind: doc.comparison ? 'comparison' : 'document', path: doc.absPath, relativeTo: doc.reference?.relativeTo, task: doc.reference?.task, comparison: doc.comparison,
       ...(doc.reference?.revision ? { revision: { ...doc.reference.revision, repositoryId: doc.observation?.sourceId } } : {}) })
-      : web ? JSON.stringify({ kind: 'browser', url: web.url }) : interactive ? JSON.stringify({ kind: 'interactive', reference: interactive.reference, ...(interactive.title ? { title: interactive.title } : {}) }) : null;
+      : web ? JSON.stringify({ kind: 'browser', url: web.url })
+        : directory ? directoryRecentDescriptor(directory.reference)
+          : interactive ? JSON.stringify({ kind: 'interactive', reference: interactive.reference, ...(interactive.title ? { title: interactive.title } : {}) }) : null;
     if (protectedLayout && layoutSession) {
       const current = layoutSession.snapshot().layout;
       if (descriptor) layoutSession.presentation(current.order, [descriptor, ...current.recent.filter(value => value !== descriptor)].slice(0, 16)); return;
@@ -105,6 +128,8 @@ export function useResourcePresentation(enabled = true, isZh = false, scenes?: (
       workbench.setDocumentSession(current => activateDocumentTab(current, item.id)); workbench.setActiveTab('documents');
     } else if (item.kind === 'browser') {
       workbench.setBrowserSession(current => activateBrowserTab(current, item.id)); workbench.setActiveTab('browser');
+    } else if (item.kind === 'directory') {
+      workbench.setDirectoryTabSession(current => activateDirectoryTabState(current, item.id)); workbench.setActiveTab('directories');
     } else if (item.kind === 'conversation') scenes?.activateConversation(item.id);
     else if (item.kind === 'interactive') scenes?.activateInteractive?.(item.id);
     else workbench.setActiveTab('changes');
@@ -125,6 +150,7 @@ export function useResourcePresentation(enabled = true, isZh = false, scenes?: (
       const next = resourceNeighbor(latest.current.owner === owner ? latest.current.order : order, key);
       if (item.kind === 'document') workbench.setDocumentSession(current => closeDocumentTab(current, item.id));
       else if (item.kind === 'browser') workbench.setBrowserSession(current => closeBrowserTab(current, item.id, createBrowserTabSession()));
+      else if (item.kind === 'directory') workbench.setDirectoryTabSession(current => closeDirectoryTabState(current, item.id));
       else if (item.kind === 'conversation') scenes?.closeConversation(item.id);
       if (protectedLayout && layoutSession) {
         const current = layoutSession.snapshot().layout;
