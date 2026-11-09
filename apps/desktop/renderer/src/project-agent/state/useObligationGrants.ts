@@ -24,6 +24,7 @@ export function useObligationGrants(workspaceId: string, parentConversationId: s
       setGrants((result.grants || []).filter(grant => grant.status === 'pending').map(grant => ({
         grantId: grant.grantId, status: grant.status, items: (grant.items || []).map(item => ({
           sessionId: item.sessionId, title: item.displayTitle || undefined, shortId: item.shortId || undefined, gaps: item.gaps || [],
+          actions: Array.isArray(item.actions) ? item.actions.filter((action): action is string => typeof action === 'string') : [],
         })),
       })));
     } catch {
