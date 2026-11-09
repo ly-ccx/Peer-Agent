@@ -51,7 +51,7 @@ test('记忆页动作和回复芯片都经记忆 IPC', () => {
 test('设置项只经 IPC 写入', () => {
   const settings = source('project-agent/drawer/BotSettingsTab.tsx');
   const calls = [...settings.matchAll(/clientApi\.(\w+)/g)].map((match) => match[1]);
-  assert.deepEqual([...new Set(calls)].sort(), ['getSettings', 'projectAgentDelete', 'projectAgentUpdateProfile', 'updateSettings']);
+  assert.deepEqual([...new Set(calls)].sort(), ['getSettings', 'projectAgentDelete', 'projectAgentSetUnknownOutcomePolicy', 'projectAgentUpdateProfile', 'updateSettings']);
   assert.equal(settings.includes('localStorage'), false);
   assert.equal(settings.includes('child_process'), false);
   assert.equal(settings.includes('modelRoutingUpdate'), false);
