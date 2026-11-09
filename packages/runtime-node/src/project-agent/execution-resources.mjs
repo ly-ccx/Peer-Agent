@@ -261,12 +261,22 @@ export function createExecutionResources({ rootDir, now = () => new Date().toISO
       });
     },
     /** A user-authorized end to one claim. Unknown calls stay as evidence and are never replayed. */
-    closeClaim(plan, { claimId, claimRevision, authorityRef, unknownCalls = [], proof = 'legacy_user_confirmed', at = now() } = {}) {
+    closeClaim(plan, { claimId, claimRevision, authorityRef, unknownCalls = [], proof = 'legacy_user_confirmed', at = now(), resolution = null } = {}) {
       if (plan.delegationOrigin?.readOnly === true) throw new Error('execution_resource_read_only');
       if (typeof claimId !== 'string' || !claimId || !Number.isSafeInteger(claimRevision) || claimRevision < 1
         || typeof authorityRef !== 'string' || !authorityRef
         || !['verified_dead', 'legacy_user_confirmed'].includes(proof)
         || !Array.isArray(unknownCalls)) throw new Error('execution_resource_closure_invalid');
+      // ADR 127 §5.6: a delegated closure must carry its evidence digest and policy reference.
+      if (resolution !== null && resolution !== undefined) {
+        if (!resolution || typeof resolution !== 'object'
+          || !['user_confirmed', 'bot_verified'].includes(resolution.tier)
+          || !['no_effect_observed', 'effect_observed'].includes(resolution.verdict)
+          || typeof resolution.evidenceDigest !== 'string' || !resolution.evidenceDigest
+          || resolution.policyRef !== undefined && typeof resolution.policyRef !== 'string') throw new Error('execution_resource_closure_invalid');
+        // A delegated closure draws its authority from a saved policy; both references are mandatory.
+        if (resolution.tier === 'bot_verified' && (typeof resolution.policyRef !== 'string' || !resolution.policyRef)) throw new Error('execution_resource_closure_invalid');
+      }
       return transaction(connection => {
         const row = connection.prepare('SELECT value FROM claims WHERE id=?').get(claimId);
         if (!row) throw new Error('execution_resource_claim_missing');
@@ -282,13 +292,26 @@ export function createExecutionResources({ rootDir, now = () => new Date().toISO
         if (claim.revision !== claimRevision) throw new Error('execution_resource_closure_stale');
         if (Object.values(claim.handles || {}).some(handle => handle.state !== 'ended')) throw new Error('execution_stop_unconfirmed');
         if (JSON.stringify(unknown) !== JSON.stringify(evidence)) throw new Error('execution_resource_closure_unknown_mismatch');
+        let resolutionRecord = null;
+        if (resolution) {
+          const resolutionId = `resolution-${digest([claim.claimId, claim.revision, resolution.evidenceDigest, authorityRef])}`;
+          resolutionRecord = { resolutionId, claimId: claim.claimId, claimRevision: claim.revision, execution: claim.execution,
+            scope: claim.scope || claimScope(claim), verdict: resolution.verdict, evidenceDigest: resolution.evidenceDigest,
+            tier: resolution.tier, ...(resolution.policyRef ? { policyRef: resolution.policyRef } : {}),
+            authorityRef, unknownCalls: unknown, at };
+        }
         const receipt = { closureId, claimId: claim.claimId, claimRevision: claim.revision, execution: claim.execution,
-          resourceRef: claim.resourceRef, unknownCalls: unknown, authorityRef, proof, scope: 'managed_execution', at };
+          resourceRef: claim.resourceRef, unknownCalls: unknown, authorityRef, proof, scope: 'managed_execution',
+          ...(resolutionRecord ? { resolution: { resolutionId: resolutionRecord.resolutionId, tier: resolutionRecord.tier,
+            verdict: resolutionRecord.verdict, evidenceDigest: resolutionRecord.evidenceDigest,
+            ...(resolutionRecord.policyRef ? { policyRef: resolutionRecord.policyRef } : {}) } } : {}), at };
         const released = { ...claim, state: 'released', revision: claim.revision + 1, closureId,
           releasedUnknownCalls: unknown, releaseAuthorityRef: authorityRef, releaseProof: proof, releasedAt: at, updatedAt: at };
         connection.prepare("UPDATE claims SET state='released', revision=?, value=? WHERE id=?").run(released.revision, JSON.stringify(released), claim.claimId);
         connection.prepare('INSERT INTO closures VALUES (?,?,?,?,?,?)').run(closureId, claim.execution.planId, claim.execution.sessionId,
           claim.execution.executionEpoch, claim.resourceRef, JSON.stringify(receipt));
+        if (resolutionRecord) connection.prepare('INSERT INTO resolutions VALUES (?,?,?)')
+          .run(resolutionRecord.resolutionId, claim.claimId, JSON.stringify(resolutionRecord));
         connection.prepare('INSERT INTO retained_unknowns VALUES (?,?)').run(closureId, JSON.stringify({ ...receipt, planId: claim.execution.planId,
           sessionId: claim.execution.sessionId, title: claim.title || '' }));
         connection.prepare('INSERT INTO resource_events(resource,operationId) VALUES (?,?)').run(claim.resourceRef, `claim-closure:${closureId}`);
