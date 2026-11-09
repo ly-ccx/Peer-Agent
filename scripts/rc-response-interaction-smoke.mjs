@@ -112,7 +112,8 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole, p
             send('chat:stream:delta', { content: `〔${String(index).padStart(2, '0')}〕` });
           }
           record('turns', { kind: 'long-stream', scenario: text, streamId: input.streamId, chunks: total });
-          return { terminalStatus: 'done', text: turn.text };
+          const longReplyTo = (input.plan?.userInputs ?? []).map(row => row.messageId ?? `input-${row.inputId}`);
+          return { terminalStatus: 'done', toolCalls: [{ name: 'post_reply', input: { text: turn.text, replyTo: longReplyTo }, result: { ok: true } }] };
         } finally { active.delete(input.streamId); }
       }
       if (!interactive || !text.includes('RC_STREAM_')) {
