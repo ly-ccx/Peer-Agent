@@ -78,12 +78,16 @@ export function createExecutionResources({ rootDir, now = () => new Date().toISO
     try {
       connection.exec('PRAGMA busy_timeout=100; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
       const version = connection.prepare('PRAGMA user_version').get().user_version;
-      if (version > 1) throw new Error('execution_resource_schema_unsupported');
+      if (version > 2) throw new Error('execution_resource_schema_unsupported');
       connection.exec('CREATE TABLE IF NOT EXISTS claims (id TEXT PRIMARY KEY, planId TEXT NOT NULL, sessionId TEXT NOT NULL, workspaceId TEXT NOT NULL, resource TEXT NOT NULL, epoch TEXT NOT NULL, state TEXT NOT NULL, revision INTEGER NOT NULL, value TEXT NOT NULL);'
         + 'CREATE INDEX IF NOT EXISTS claims_resource ON claims(resource,state);'
         + 'CREATE TABLE IF NOT EXISTS receipts (id TEXT PRIMARY KEY,value TEXT NOT NULL);'
         + 'CREATE TABLE IF NOT EXISTS requirements (planId TEXT PRIMARY KEY,value TEXT NOT NULL);'
-        + 'CREATE TABLE IF NOT EXISTS resource_events (revision INTEGER PRIMARY KEY AUTOINCREMENT,resource TEXT NOT NULL,operationId TEXT NOT NULL); PRAGMA user_version=1;');
+        + 'CREATE TABLE IF NOT EXISTS closures (id TEXT PRIMARY KEY, planId TEXT NOT NULL, sessionId TEXT NOT NULL, epoch TEXT NOT NULL, resource TEXT NOT NULL, value TEXT NOT NULL);'
+        + 'CREATE INDEX IF NOT EXISTS closures_execution ON closures(planId,sessionId,epoch);'
+        + 'CREATE TABLE IF NOT EXISTS retained_unknowns (id TEXT PRIMARY KEY, value TEXT NOT NULL);'
+        + 'CREATE TABLE IF NOT EXISTS resource_events (revision INTEGER PRIMARY KEY AUTOINCREMENT,resource TEXT NOT NULL,operationId TEXT NOT NULL);');
+      if (version < 2) connection.exec('PRAGMA user_version=2;');
       db = connection; if (rootDir) fileIdentity = statSync(file).ino;
       return db;
     } catch (error) { connection.close(); throw error; }
@@ -94,6 +98,12 @@ export function createExecutionResources({ rootDir, now = () => new Date().toISO
     catch (error) { connection.exec('ROLLBACK'); throw error; }
   }
   const rows = connection => connection.prepare("SELECT value FROM claims WHERE state!='released'").all().map(row => JSON.parse(row.value));
+  function closed(connection, plan) {
+    const execution = executionIdentity(plan);
+    return connection.prepare('SELECT value FROM closures WHERE planId=? AND sessionId=? AND epoch=?')
+      .all(execution.planId, execution.sessionId, execution.executionEpoch)
+      .some(row => sameExecution(JSON.parse(row.value).execution, execution));
+  }
   function put(connection, claim) {
     connection.prepare('INSERT OR REPLACE INTO claims VALUES (?,?,?,?,?,?,?,?,?)').run(claim.claimId, claim.execution.planId,
       claim.execution.sessionId, claim.workspaceId, claim.resourceRef, claim.execution.executionEpoch, claim.state, claim.revision, JSON.stringify(claim));
@@ -149,6 +159,8 @@ export function createExecutionResources({ rootDir, now = () => new Date().toISO
           const claim = owned(plan, resource, hostEpoch), old = connection.prepare('SELECT value FROM claims WHERE id=?').get(claim.claimId);
           if (old) {
             const previous = JSON.parse(old.value);
+            // A closure ends this exact execution. A new epoch has a different claim id.
+            if (previous.closureId) throw new Error('execution_resource_claim_closed');
             if (previous.state !== 'released') { claims.push(previous); continue; }
             claim.revision = previous.revision + 1;
           }
@@ -183,6 +195,9 @@ export function createExecutionResources({ rootDir, now = () => new Date().toISO
     protect(plan, { hostEpoch, operationId, state = 'draining', evidenceCalls = [] } = {}) {
       if (plan.delegationOrigin?.readOnly === true) return;
       return transaction(connection => {
+        // A user-authorized closure is an end state. Reconcilers and late barriers
+        // must not recreate the same execution claim from stale plan mirrors.
+        if (closed(connection, plan)) return;
         const resource = executionResource(plan, { allowMissing: true }), next = owned(plan, resource, hostEpoch);
         const claims = rows(connection).filter(row => sameExecution(row.execution, next.execution));
         if (!claims.some(claim => claim.claimId === next.claimId)) {
@@ -231,6 +246,52 @@ export function createExecutionResources({ rootDir, now = () => new Date().toISO
         connection.prepare('INSERT INTO receipts VALUES (?,?)').run(id, JSON.stringify(result)); return result;
       });
     },
+    /** A user-authorized end to one claim. Unknown calls stay as evidence and are never replayed. */
+    closeClaim(plan, { claimId, claimRevision, authorityRef, unknownCalls = [], proof = 'legacy_user_confirmed', at = now() } = {}) {
+      if (plan.delegationOrigin?.readOnly === true) throw new Error('execution_resource_read_only');
+      if (typeof claimId !== 'string' || !claimId || !Number.isSafeInteger(claimRevision) || claimRevision < 1
+        || typeof authorityRef !== 'string' || !authorityRef
+        || !['verified_dead', 'legacy_user_confirmed'].includes(proof)
+        || !Array.isArray(unknownCalls)) throw new Error('execution_resource_closure_invalid');
+      return transaction(connection => {
+        const row = connection.prepare('SELECT value FROM claims WHERE id=?').get(claimId);
+        if (!row) throw new Error('execution_resource_claim_missing');
+        const claim = JSON.parse(row.value);
+        if (!sameExecution(claim.execution, executionIdentity(plan))) throw new Error('execution_resource_claim_scope');
+        const unknown = [...new Set(unknownCalls)].sort();
+        const evidence = [...new Set(claim.evidenceCalls || [])].sort();
+        // Replaying the same authorized closure is idempotent even after release.
+        const closureId = `closure-${digest([claimId, claimRevision, authorityRef, unknown])}`;
+        const previous = connection.prepare('SELECT value FROM closures WHERE id=?').get(closureId);
+        if (previous) return JSON.parse(previous.value);
+        if (!['draining', 'reconciling'].includes(claim.state)) throw new Error('execution_resource_claim_active');
+        if (claim.revision !== claimRevision) throw new Error('execution_resource_closure_stale');
+        if (Object.values(claim.handles || {}).some(handle => handle.state !== 'ended')) throw new Error('execution_stop_unconfirmed');
+        if (JSON.stringify(unknown) !== JSON.stringify(evidence)) throw new Error('execution_resource_closure_unknown_mismatch');
+        const receipt = { closureId, claimId: claim.claimId, claimRevision: claim.revision, execution: claim.execution,
+          resourceRef: claim.resourceRef, unknownCalls: unknown, authorityRef, proof, scope: 'managed_execution', at };
+        const released = { ...claim, state: 'released', revision: claim.revision + 1, closureId,
+          releasedUnknownCalls: unknown, releaseAuthorityRef: authorityRef, releaseProof: proof, releasedAt: at, updatedAt: at };
+        connection.prepare("UPDATE claims SET state='released', revision=?, value=? WHERE id=?").run(released.revision, JSON.stringify(released), claim.claimId);
+        connection.prepare('INSERT INTO closures VALUES (?,?,?,?,?,?)').run(closureId, claim.execution.planId, claim.execution.sessionId,
+          claim.execution.executionEpoch, claim.resourceRef, JSON.stringify(receipt));
+        connection.prepare('INSERT INTO retained_unknowns VALUES (?,?)').run(closureId, JSON.stringify({ ...receipt, planId: claim.execution.planId,
+          sessionId: claim.execution.sessionId, title: claim.title || '' }));
+        connection.prepare('INSERT INTO resource_events(resource,operationId) VALUES (?,?)').run(claim.resourceRef, `claim-closure:${closureId}`);
+        return receipt;
+      });
+    },
+    hasClosure(plan) {
+      const execution = executionIdentity(plan);
+      return open().prepare('SELECT value FROM closures WHERE planId=? AND sessionId=? AND epoch=?')
+        .all(execution.planId, execution.sessionId, execution.executionEpoch)
+        .some(row => sameExecution(JSON.parse(row.value).execution, execution));
+    },
+    retainedUnknowns(plan) {
+      const execution = executionIdentity(plan);
+      return open().prepare('SELECT value FROM retained_unknowns ORDER BY id').all()
+        .map(row => JSON.parse(row.value)).filter(row => sameExecution(row.execution, execution));
+    },
     markHandle(plan, handle) {
       if (plan.delegationOrigin?.readOnly === true) return;
       return transaction(connection => {
@@ -248,6 +309,7 @@ export function createExecutionResources({ rootDir, now = () => new Date().toISO
     reconcile(plans, hostEpochFor, ownsWorkspace) {
       for (const plan of plans) {
         if (plan.delegationOrigin?.readOnly === true) continue;
+        if (this.hasClosure(plan)) continue;
         if (!ownsWorkspace(plan.delegationOrigin?.workspaceId)) {
           // A foreign workspace may alias an owned directory. Import only protection;
           // releasing it still requires its actual writer and a matching stop receipt.

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 export const OBLIGATION_BUCKETS = ['obligationDispositions', 'obligationGrants', 'obligationHeads', 'obligationResults'];
 export const OBLIGATION_FORMAT_VERSION = 11;
-const ACTIONS = new Set(['retire_follow_up', 'acknowledge_unknown', 'restore_follow_up']);
+const ACTIONS = new Set(['retire_follow_up', 'acknowledge_unknown', 'restore_follow_up', 'close_claim']);
 const PHASES = new Set(['indexed', 'suspended', 'current']);
 
 function clone(value) { return value === undefined ? undefined : structuredClone(value); }

@@ -11,7 +11,7 @@ import { executionIdentity, sameExecution } from './session-control-kernel.mjs';
 
 const REFUSALS = new Set(['execution_stop_unconfirmed', 'execution_outcome_unknown', 'reconcile_execution_outcome']);
 const GRANT_MS = 15 * 60 * 1000;
-const ACTIONS = new Set(['retire_follow_up', 'acknowledge_unknown', 'restore_follow_up']);
+const ACTIONS = new Set(['retire_follow_up', 'acknowledge_unknown', 'restore_follow_up', 'close_claim']);
 
 function revisionPrefix(value) {
   return typeof value === 'string' && value ? value.slice(0, 12) : null;
@@ -162,15 +162,21 @@ export function classifyExecutionObligation({ plan, control, claims = [], identi
     gaps.push('remote_signal_not_death');
   }
   const unique = [...new Set(classes)];
-  const allowed = allowedActions({ classes: unique, disposition, ownership, proof, barrier });
-  return { classes: unique, gaps: [...new Set(gaps)], missingFields: missingRecorderFields(control?.recorder), unknownCallIds, openHandleIds, ownership, proof, allowed, registrationAbsent, stableRefusal, barrier };
+  const claim = claims[0];
+  // A closure ends one claim, not a live execution and not a remote-unfenced effect.
+  const closeable = Boolean(claim && ['draining', 'reconciling'].includes(claim.state)
+    && ownership !== 'live' && proof !== 'alive' && !barrier
+    && !unique.includes('managed_stop_settled') && !unique.includes('recorder_dead_clear')
+    && !unique.includes('remote_unobserved') && !openHandleIds.length);
+  const allowed = allowedActions({ classes: unique, disposition, ownership, proof, barrier, closeable });
+  return { classes: unique, gaps: [...new Set(gaps)], missingFields: missingRecorderFields(control?.recorder), unknownCallIds, openHandleIds, ownership, proof, allowed, closeable, registrationAbsent, stableRefusal, barrier };
 }
 
-function allowedActions({ classes, disposition, ownership, proof, barrier }) {
+function allowedActions({ classes, disposition, ownership, proof, barrier, closeable }) {
   if (barrier || classes.includes('managed_stop_settled') || classes.includes('recorder_dead_clear')) return [];
   if (ownership === 'live' || proof === 'alive' || classes.includes('recorder_alive') || classes.includes('execution_still_running')) return [];
   if (disposition === 'indexed') return ['restore_follow_up'];
-  return ['retire_follow_up', 'acknowledge_unknown'];
+  return closeable ? ['retire_follow_up', 'acknowledge_unknown', 'close_claim'] : ['retire_follow_up', 'acknowledge_unknown'];
 }
 
 function evidenceBody({ control, claims, classification, writerEpoch }) {
@@ -222,6 +228,8 @@ export function createExecutionObligationService({ plans, readControl, scheduler
       allowedActions: classification.allowed,
       refusalPreview: classification.barrier ? ['barrier_in_progress'] : classification.proof === 'alive' || classification.ownership === 'live' ? ['recorder_alive'] : [],
       planStatus: plan.status,
+      closeClaimAvailable: classification.closeable,
+      recorderProof: classification.proof,
       display: { willBeMarkedCancelled: false, resourceWillRemain: true },
       parentConversationId: origin.parentConversationId, workspaceId: origin.workspaceId,
       audience, disposition: disposition || null,
@@ -312,7 +320,7 @@ export function createExecutionObligationService({ plans, readControl, scheduler
           rejected.push({ sessionId: item.sessionId, error: row.refusalPreview[0] || 'action_unavailable' }); continue;
         }
         if (row.gaps.some(gap => ['unknown_calls', 'open_handles', 'dispatch_registration_absent', 'no_recorder_tuple'].includes(gap))
-          && item.actions.includes('retire_follow_up') && !item.actions.includes('acknowledge_unknown')) {
+          && (item.actions.includes('retire_follow_up') || item.actions.includes('close_claim')) && !item.actions.includes('acknowledge_unknown')) {
           rejected.push({ sessionId: item.sessionId, error: 'unknown_not_acknowledged' }); continue;
         }
         if (item.actions.includes('restore_follow_up') && row.disposition !== 'indexed') { rejected.push({ sessionId: item.sessionId, error: 'not_indexed' }); continue; }
@@ -320,12 +328,13 @@ export function createExecutionObligationService({ plans, readControl, scheduler
       }
       if (!card.length) return { ok: false, error: rejected[0]?.error || 'action_unavailable', items: rejected };
       const grantId = randomUUID();
+      const closes = card.some(item => item.actions.includes('close_claim'));
       const stored = { grantId, status: 'pending', canonicalKey: null, items: card.map(item => ({
         sessionId: item.sessionId, operationId: item.operationId, actions: item.actions, evidenceRevision: item.evidenceRevision,
         controlRevision: item.controlRevision, claimRevision: item.claimRevision,
         title: typeof item.title === 'string' ? item.title.slice(0, 200) : item.sessionId,
         gaps: Array.isArray(item.gaps) ? item.gaps.filter(gap => typeof gap === 'string').slice(0, 12) : [],
-      })), consequences: { willBeMarkedCancelled: false, resourceWillRemain: true, requiresAcknowledge: true },
+      })), consequences: { willBeMarkedCancelled: false, resourceWillRemain: !closes, requiresAcknowledge: true, retainsUnknown: closes },
         principal: { workspaceId: input.workspaceId, parentConversationId: input.parentConversationId },
         audience: input.agentConversationId || null, revision: 1, updatedAt: now() };
       write(input.workspaceId, { kind: 'obligation_grant', minimumExecutorVersion: OBLIGATION_FORMAT_VERSION, grant: stored });
@@ -333,7 +342,7 @@ export function createExecutionObligationService({ plans, readControl, scheduler
         obligationId: card.map(item => item.obligationId).join(','), disposition: card.map(item => item.disposition || 'none').join(',') });
       notify(input.workspaceId, grantId, 'pending');
       return { ok: true, grantId, status: 'pending', idempotencyKey: `panel-${grantId}`, items: card, rejected, consequences: {
-        willBeMarkedCancelled: false, resourceWillRemain: true, requiresAcknowledge: true,
+        willBeMarkedCancelled: false, resourceWillRemain: !closes, requiresAcknowledge: true, retainsUnknown: closes,
       } };
     },
     confirm(input) {
@@ -384,18 +393,34 @@ export function createExecutionObligationService({ plans, readControl, scheduler
         const current = view(plan, input.agentConversationId);
         if (current.evidenceRevision !== bound.evidenceRevision) { results.push({ ...current, result: 'rejected', code: current.claimRevision !== bound.claimRevision || current.controlRevision !== bound.controlRevision ? 'revision_conflict' : 'evidence_stale' }); continue; }
         const needsAck = current.gaps.some(gap => ['unknown_calls', 'open_handles', 'dispatch_registration_absent', 'no_recorder_tuple'].includes(gap));
-        if (needsAck && item.actions.includes('retire_follow_up') && !item.actions.includes('acknowledge_unknown')) { results.push({ sessionId: item.sessionId, result: 'rejected', code: 'unknown_not_acknowledged' }); continue; }
+        if (needsAck && (item.actions.includes('retire_follow_up') || item.actions.includes('close_claim')) && !item.actions.includes('acknowledge_unknown')) { results.push({ sessionId: item.sessionId, result: 'rejected', code: 'unknown_not_acknowledged' }); continue; }
         if (current.classes.includes('managed_stop_settled')) { results.push({ sessionId: item.sessionId, result: 'rejected', code: 'already_settled' }); continue; }
+        if (item.actions.includes('restore_follow_up') && item.actions.includes('close_claim')) { results.push({ sessionId: item.sessionId, result: 'rejected', code: 'action_unavailable' }); continue; }
         if (item.actions.includes('restore_follow_up') && current.disposition !== 'indexed') { results.push({ sessionId: item.sessionId, result: 'rejected', code: 'not_indexed' }); continue; }
+        let closure = null;
+        if (item.actions.includes('close_claim')) {
+          if (!current.closeClaimAvailable || !current.resource) { results.push({ sessionId: item.sessionId, result: 'rejected', code: 'claim_not_closeable' }); continue; }
+          if (typeof scheduler.closeClaim !== 'function') { results.push({ sessionId: item.sessionId, result: 'rejected', code: 'claim_closure_unavailable' }); continue; }
+          try {
+            closure = scheduler.closeClaim(plan, { claimId: current.resource.claimId, claimRevision: current.resource.revision,
+              authorityRef: grant.grantId, unknownCalls: current.outcome.unknownCallIds,
+              proof: ['dead', 'reused', 'different_boot'].includes(current.recorderProof) ? 'verified_dead' : 'legacy_user_confirmed' });
+          } catch (error) {
+            results.push({ sessionId: item.sessionId, result: 'rejected', code: error.message || 'claim_closure_failed' });
+            continue;
+          }
+        }
         const phase = item.actions.includes('restore_follow_up') ? 'current' : 'indexed';
         const previous = dispositionFor(input.workspaceId, item.sessionId);
-        if (previous?.phase === phase) { results.push({ sessionId: item.sessionId, operationId: item.operationId, result: 'replayed', disposition: phase, obligationId: current.obligationId, planStatus: plan.status, stopReceipt: null, claim: current.resource, replayedTools: [] }); continue; }
+        if (!closure && previous?.phase === phase) { results.push({ sessionId: item.sessionId, operationId: item.operationId, result: 'replayed', disposition: phase, obligationId: current.obligationId, planStatus: plan.status, stopReceipt: null, claim: current.resource, replayedTools: [] }); continue; }
         const row = { obligationId: current.obligationId, sessionId: item.sessionId, planId: current.planId, operationId: item.operationId, phase, evidenceRevision: current.evidenceRevision, revision: (previous?.revision || 0) + 1, updatedAt: now() };
         try {
           write(input.workspaceId, { kind: 'execution_obligation', minimumExecutorVersion: OBLIGATION_FORMAT_VERSION, disposition: row,
             audit: { auditId: `${grant.grantId}:${item.sessionId}:${phase}:${row.revision}`, actor: input.actor || 'main_bot', toolCallId: input.toolCallId || null,
-              workspaceId: input.workspaceId, parentConversationId: input.parentConversationId, gaps: current.gaps, claim: current.resource, beforeRevision: previous?.revision || 0 } });
-          results.push({ sessionId: item.sessionId, operationId: item.operationId, result: 'applied', disposition: phase, obligationId: current.obligationId, planStatus: plan.status, stopReceipt: null, claim: current.resource, replayedTools: [] });
+              workspaceId: input.workspaceId, parentConversationId: input.parentConversationId, gaps: current.gaps, claim: current.resource, beforeRevision: previous?.revision || 0,
+              ...(closure ? { closure } : {}) } });
+          results.push({ sessionId: item.sessionId, operationId: item.operationId, result: 'applied', disposition: phase, obligationId: current.obligationId, planStatus: plan.status, stopReceipt: null,
+            claim: closure ? { ...current.resource, state: 'released' } : current.resource, ...(closure ? { closure } : {}), replayedTools: [] });
         } catch (error) {
           results.push({ sessionId: item.sessionId, result: 'rejected', code: error.message || 'obligation_failed' });
         }

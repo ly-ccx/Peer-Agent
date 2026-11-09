@@ -109,7 +109,11 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
     if (operation.stopReceipt && deadRecordingHost(operation, plan)
       && JSON.stringify([...operation.stopReceipt.unknownCalls].sort()) === JSON.stringify(observedUnknown(plan))) return operation.stopReceipt;
     const factsDigest = recoveryFacts(plan);
-    if (operation.nextAction && operation.recoveryFactsDigest === factsDigest) throw new Error(operation.nextAction);
+    // A dead recorder with no remaining unknown work has nothing left to wait for.
+    // Its nextAction is history, not a reason to preserve the claim forever.
+    const deadClear = deadRecordingHost(operation, plan) && !observedUnknown(plan).length
+      && !executionScheduler.hasUnsettledHandles?.(plan);
+    if (!deadClear && operation.nextAction && operation.recoveryFactsDigest === factsDigest) throw new Error(operation.nextAction);
     const hostEpoch = journal(plan)?.writerEpoch?.() || `legacy-host:${process.pid}`;
     const key = `${operation.operationId}:${operation.expectedExecution.executionEpoch}`;
     if (drains.has(key)) return drains.get(key);
@@ -297,6 +301,12 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
       return resumed;
     },
     isCurrent(plan, operation) { return read(plan)?.operationId === operation.operationId; },
+    /** A dead recorder with no remaining unknown work can settle without a user card. */
+    clearable(plan) {
+      const current = read(plan);
+      return Boolean(current && current.phase !== 'settled' && deadRecordingHost(current, plan)
+        && !observedUnknown(plan).length && !executionScheduler.hasUnsettledHandles?.(plan));
+    },
     refusalStable(plan) {
       const current = read(plan);
       return Boolean(current && current.phase === 'reconciling' && current.recoveryFactsDigest
@@ -337,7 +347,9 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
         // A completed legacy cancellation is the host's existing abort/idle receipt. Re-enter
         // the barrier to confirm this process and import its identity; never infer tool success.
         const factsDigest = recoveryFacts(plan);
-        if (current?.phase === 'reconciling' && current.recoveryFactsDigest === factsDigest) continue;
+        const deadClear = current?.phase === 'reconciling' && deadRecordingHost(current, plan)
+          && !observedUnknown(plan).length && !executionScheduler.hasUnsettledHandles?.(plan);
+        if (!deadClear && current?.phase === 'reconciling' && current.recoveryFactsDigest === factsDigest) continue;
         if (origin.takeover?.phase !== 'stopping' && (!current && sessionFactsFromPlan(plan).executionOwnership !== 'unknown' || current?.phase === 'settled'
           && JSON.stringify(current.stopReceipt?.unknownCalls || []) === JSON.stringify(unsettledExecution(plan)))) continue;
         try {

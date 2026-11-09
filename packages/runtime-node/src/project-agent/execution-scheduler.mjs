@@ -259,6 +259,10 @@ export function createExecutionScheduler({ rootDir = null, getConcurrency = () =
       resourceStore()?.protect(plan, { ...options, hostEpoch: hostEpochFor(plan.delegationOrigin.workspaceId) }); },
     settleResources(plan, receipt) { if (!ownsWorkspace(plan.delegationOrigin.workspaceId)) throw new Error('lease_unavailable');
       return resourceStore()?.settle(plan, receipt, hostEpochFor(plan.delegationOrigin.workspaceId)); },
+    closeClaim(plan, closure) { if (!ownsWorkspace(plan.delegationOrigin.workspaceId)) throw new Error('lease_unavailable');
+      return resourceStore()?.closeClaim(plan, closure); },
+    hasClosedClaim(plan) { return resourceStore()?.hasClosure(plan) || false; },
+    retainedUnknowns(plan) { return resourceStore()?.retainedUnknowns(plan) || []; },
     activateResources(plan) {
       const admitted = ownsWorkspace(plan.delegationOrigin.workspaceId) && (resourceStore()?.activate(plan, hostEpochFor(plan.delegationOrigin.workspaceId)) ?? true);
       if (admitted) admittedExecutions.set(plan.planId, executionIdentity(plan).executionEpoch);

@@ -150,9 +150,14 @@ export function createSessionCancellation({ findBySession, goalPlanStore, goalRu
     async recover(plans) { for (const plan of plans) {
       const origin = plan.delegationOrigin;
       if (!origin?.cancellation || plan.status === 'cancelled' && !origin.cancellation.cleanupPending) continue;
-      if (origin.cancellation.phase === 'awaiting_outcome' && sessionControl.refusalStable?.(plan)) continue;
-      if (origin.cancellation.phase === 'awaiting_outcome'
-        && JSON.stringify(origin.cancellation.evidenceCalls || []) === JSON.stringify(unsettledExecution(plan))) continue;
+      // An empty unknown set is a clearable obligation, not a stable refusal. Only
+      // repeated refusals that still carry unknown work are skipped.
+      const unsettled = unsettledExecution(plan);
+      const clearable = sessionControl.clearable?.(plan) === true;
+      if (origin.cancellation.phase === 'awaiting_outcome' && sessionControl.refusalStable?.(plan)
+        && (unsettled.length || !clearable)) continue;
+      if (unsettled.length && origin.cancellation.phase === 'awaiting_outcome'
+        && JSON.stringify(origin.cancellation.evidenceCalls || []) === JSON.stringify(unsettled)) continue;
       await request({ sessionId: origin.sessionId }, true);
     } } };
 }

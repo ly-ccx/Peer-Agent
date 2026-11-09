@@ -73,6 +73,49 @@ test('withdrawal releases execution responsibility while an unknown call still p
   assert.equal(first.revision(), 1, 'same receipt does not publish a second release');
 });
 
+test('a user-authorized closure releases the claim and keeps the unknown call as evidence', t => {
+  const { directory, first, second } = fixture(t), a = plan('a', directory);
+  first.reserve(a, 'a');
+  first.settle(a, stopped(first, a, 'withdraw', ['actual-tool-call']), 'a');
+  const claim = first.claimsFor(a)[0];
+  assert.equal(claim.state, 'reconciling');
+  assert.equal(first.hasClosure(a), false);
+  assert.equal(second.reserve(plan('b', directory), 'b').allowed, false);
+
+  const receipt = first.closeClaim(a, { claimId: claim.claimId, claimRevision: claim.revision,
+    authorityRef: 'grant-1', unknownCalls: ['actual-tool-call'], proof: 'legacy_user_confirmed', at: '2026-11-09T00:00:00.000Z' });
+  assert.equal(receipt.claimId, claim.claimId);
+  assert.equal(receipt.unknownCalls[0], 'actual-tool-call');
+  assert.equal(receipt.proof, 'legacy_user_confirmed');
+  assert.equal(first.hasClosure(a), true);
+  assert.deepEqual(first.claimsFor(a), []);
+  assert.deepEqual(first.retainedUnknowns(a).map(row => row.unknownCalls), [['actual-tool-call']]);
+
+  // A stale plan mirror or reconciler must not recreate the closed execution.
+  first.protect(a, { hostEpoch: 'a', state: 'reconciling', evidenceCalls: ['actual-tool-call'] });
+  first.reconcile([a], () => 'a', () => true);
+  assert.deepEqual(first.claimsFor(a), []);
+  assert.equal(second.reserve(plan('b', directory), 'b').allowed, true);
+});
+
+test('a closure is revision-bound and still refuses an active claim or a changed unknown set', t => {
+  const { directory, first } = fixture(t), a = plan('a', directory);
+  first.reserve(a, 'a');
+  const active = first.claimsFor(a)[0];
+  assert.throws(() => first.closeClaim(a, { claimId: active.claimId, claimRevision: active.revision,
+    authorityRef: 'grant-1', unknownCalls: [] }), /execution_resource_claim_active/);
+  first.settle(a, stopped(first, a, 'withdraw', ['actual-tool-call']), 'a');
+  const claim = first.claimsFor(a)[0];
+  assert.throws(() => first.closeClaim(a, { claimId: claim.claimId, claimRevision: claim.revision - 1,
+    authorityRef: 'grant-1', unknownCalls: ['actual-tool-call'] }), /execution_resource_closure_stale/);
+  assert.throws(() => first.closeClaim(a, { claimId: claim.claimId, claimRevision: claim.revision,
+    authorityRef: 'grant-1', unknownCalls: ['other-call'] }), /execution_resource_closure_unknown_mismatch/);
+  const closed = first.closeClaim(a, { claimId: claim.claimId, claimRevision: claim.revision,
+    authorityRef: 'grant-1', unknownCalls: ['actual-tool-call'] });
+  assert.deepEqual(first.closeClaim(a, { claimId: claim.claimId, claimRevision: claim.revision,
+    authorityRef: 'grant-1', unknownCalls: ['actual-tool-call'] }), closed);
+});
+
 test('a late old-epoch receipt cannot release the replacement executor claim', t => {
   const { directory, first, second } = fixture(t), a = plan('a', directory);
   first.reserve(a, 'a'); const receipt = stopped(first, a); first.settle(a, receipt, 'a');
