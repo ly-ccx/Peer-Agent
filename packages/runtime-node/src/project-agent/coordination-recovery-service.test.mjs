@@ -214,7 +214,7 @@ test('continuation uses the original native results and work, while every histor
     executeTurn: async input => {
       calls.push(input.turnProfile.workId);
       assert.equal(input.turnProfile.providerCheckpoint.messages[0].content, 'already finished');
-      return { text: 'Completed from preserved results.' };
+      return { toolCalls: [{ name: 'post_reply', input: { text: 'Completed from preserved results.', replyTo: ['input-finished-input'] }, result: { ok: true } }] };
     } });
   try {
     await runner.enqueueUserInputs([{ inputId: 'legacy-input', text: 'must not replay' }, { inputId: 'finished-input', text: 'must not replay' }]);

@@ -38,7 +38,7 @@ test('a production runner crosses 256 requests and 2048 paired tools, restarts a
     try {
       if (requests) assert.equal(turnProfile.providerCheckpoint.index, requests);
       guard.beforeRequest({ accounting: 'physical_dispatch' }); requests++;
-      if (requests > 300) return { text: '核对完成，全部结果已保留。' };
+      if (requests > 300) return { toolCalls: [{ name: 'post_reply', input: { text: '核对完成，全部结果已保留。', replyTo: ['input-i'] }, result: { ok: true } }] };
       const calls = Array.from({ length: 7 }, (_, i) => {
         const id = `read-${requests}-${i}`;
         assert.equal(executed.has(id), false); executed.add(id);
@@ -80,7 +80,7 @@ test('an obsolete system stop automatically resumes its safe native checkpoint a
     if (++calls === 1) return yielded;
     assert.equal(turnProfile.providerCheckpoint.messages[0].content, 'already read');
     const guard = createWorkBudgetGuard(turnProfile);
-    try { guard.beforeRequest(); return { text: '已有结果已核对并交付。' }; } finally { guard.finish(); }
+    try { guard.beforeRequest(); return { toolCalls: [{ name: 'post_reply', input: { text: '已有结果已核对并交付。', replyTo: ['input-i'] }, result: { ok: true } }] }; } finally { guard.finish(); }
   });
   try {
     await seedStopped(env); env.restart(); await env.runner.kick();
@@ -134,7 +134,7 @@ test('query artifact wrappers stop the real parent loop across restart without b
   let calls = 0, fresh = false;
   const env = world(async () => {
     calls++;
-    if (fresh) return { text: 'The new question is answered.' };
+    if (fresh) return { toolCalls: [{ name: 'post_reply', input: { text: 'The new question is answered.', replyTo: ['input-new'] }, result: { ok: true } }] };
     return { turnEnd: 'yielded', toolCalls: [{ name: 'read_file',
       input: { path: `/tmp/artifacts/get_session-call_generated${calls}.txt` },
       result: { kind: 'local_file_ref', tool: 'read_file', truncated: true,

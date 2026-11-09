@@ -51,7 +51,7 @@ test('targeted wake keeps other bot runners and their in-flight turns alive', as
   const h = harness(async input => {
     calls.push(input.turnProfile.workspaceId);
     if (input.turnProfile.workspaceId === 'a') { signal = input.signal; entered(); await gate; }
-    return { text: 'reply' };
+    return { toolCalls: [{ name: 'post_reply', input: { text: 'reply', replyTo: [input.turnProfile.workspaceId === 'a' ? 'input-a' : 'input-b'] }, result: { ok: true } }] };
   });
   try {
     await h.host.sync();
@@ -80,7 +80,7 @@ test('host restart leaves failed anchors with coordination and admits only genui
     if (calls === 1) return { ok: false, error: 'ConnectTimeoutError', providerRecovery: { kind: 'network', retryable: true } };
     assert.equal(plan.userInputs[0].inputId, 'new');
     assert.equal(plan.turnProfile.providerCheckpoint, undefined);
-    return { text: '新的问题已回复。' };
+    return { toolCalls: [{ name: 'post_reply', input: { text: '新的问题已回复。', replyTo: ['input-new'] }, result: { ok: true } }] };
   }, { now: () => '2026-10-10T06:00:00Z', schedule: () => 1, clearSchedule: () => {} });
   try {
     h.host.inputQueue.submitInput({ workspaceId: 'a', inputId: 'old', text: '原目标', surface: 'desktop' });
@@ -146,7 +146,7 @@ test('new input preempts a background model request after delivery without waiti
       await Promise.race([blocked, new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }))]);
       return signal.aborted ? { preempted: true } : { text: '' };
     }
-    if (plan.kind === 'user') { seen.push(plan.userInputs[0].inputId); assert.equal(plan.events.length, 0); return { text: '已接手新问题。' }; }
+    if (plan.kind === 'user') { seen.push(plan.userInputs[0].inputId); assert.equal(plan.events.length, 0); return { toolCalls: [{ name: 'post_reply', input: { text: '已接手新问题。', replyTo: ['input-new-priority'] }, result: { ok: true } }] }; }
     return { text: '' };
   });
   let background, foreground, watchdog;
