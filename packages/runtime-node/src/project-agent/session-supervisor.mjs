@@ -248,6 +248,11 @@ export function createSessionSupervisor({
     storeFor: workspaceId => workBudgetBinding(workspaceId)?.store, identity: localRecorderIdentity,
     writerEpochFor: workspaceId => workBudgetBinding(workspaceId)?.store?.writerEpoch?.(),
     onChanged: onObligationChanged,
+    recordClosure: (plan, closure) => {
+      const fresh = goalPlanStore.getPlan(plan.planId);
+      goalPlanStore.revisePlan(plan.planId, { delegationOrigin: { ...fresh.delegationOrigin, executionClaimClosure: closure } },
+        { reason: 'execution claim closed', changedBy: 'execution-obligation' });
+    },
     now,
   });
 

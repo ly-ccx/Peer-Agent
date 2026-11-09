@@ -105,6 +105,17 @@ test('real execution facts flow through the public projection into root closure 
   assert.equal(observed.pendingObligations, true);
 });
 
+test('a withdraw that cannot close yet stays reversible instead of becoming fatal', () => {
+  const work = { workId: 'work', intentCoordination: { lifecycle: 'active', revision: 1, goalRevision: 1,
+    decision: { operationId: 'decision', disposition: { kind: 'withdraw', controlRef: 'control' } }, review: {} } };
+  const state = { mandates: { work: { goalRevision: 1, sessionIds: ['child'] } } };
+  const result = intentWorkDisposition({ work, state, sessions: [{ sessionId: 'child', status: 'queued' }], parentConversationId: 'p',
+    sourcesCurrent: () => true, store: { closeIntent: () => ({ ok: false, error: 'pending_managed_sessions' }) } });
+  assert.equal(result.state, 'blocked_system');
+  assert.equal(result.end, 'awaiting_children');
+  assert.equal(result.blockedCode, 'pending_managed_sessions');
+});
+
 test('normal completion, delivered-reply recovery and repair custody agree on the same technical obligation', async () => {
   const sessions = [{ sessionId: 'child', status: 'failed', executionOwnership: 'ended', origin: { workId: 'work' } }];
   const results = [];

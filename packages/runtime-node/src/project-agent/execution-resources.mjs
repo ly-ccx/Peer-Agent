@@ -24,6 +24,9 @@ export function unsettledExecution(plan) {
 export function executionProtection(plan) {
   const origin = plan?.delegationOrigin;
   if (!origin) return 'released';
+  // A host-receipted closure ends this execution even after a ledger rebuild
+  // restores protection from the plan mirror.
+  if (origin.executionClaimClosure && sameExecution(origin.executionClaimClosure.execution, executionIdentity(plan))) return 'released';
   if (sessionFactsFromPlan(plan).executionOwnership === 'live') return 'active';
   const control = workBudgetBinding(origin.workspaceId)?.store.readSessionControl?.(origin.sessionId) || origin.executionControl;
   if (control && sameExecution(control.expectedExecution, executionIdentity(plan))) {

@@ -37,6 +37,8 @@ export interface DelegationOrigin {
   readonly capabilityAdmission?: import('./capability-admission.ts').DelegationCapabilityAdmission;
   readonly executionGeneration?: string;
   readonly executionControl?: import('./session-control.ts').SessionControlOperation;
+  /** Host receipt for a user-authorized claim closure. It is not a stop receipt. */
+  readonly executionClaimClosure?: import('./session-control.ts').ExecutionClaimClosure;
   readonly takeover?: { operationId: string; phase: 'stopping' | 'completed' | 'superseded' | 'rejected'; supersededBy?: string; text: string; binding: import('./delegation-coordination.ts').CoordinationExecutionBinding; requestedAt: string; completedAt?: string; repair?: boolean };
   readonly coordinationBinding?: import('./delegation-coordination.ts').CoordinationExecutionBinding;
   readonly cancellation?: { readonly operationId: string; readonly reason: string; readonly phase: 'stopping' | 'awaiting_outcome' | 'completed'; readonly requestedAt: string; readonly completedAt?: string; readonly evidenceCalls?: readonly string[]; readonly preserveArtifacts?: boolean;

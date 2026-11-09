@@ -318,6 +318,7 @@ export function createSessionControl({ goalPlanStore, goalRunner, executionSched
       for (const plan of plans) {
         const origin = plan.delegationOrigin;
         if (!canManageWorkspace(origin.workspaceId)) continue;
+        if (origin.executionClaimClosure && sameExecution(origin.executionClaimClosure.execution, executionIdentity(plan))) continue;
         let current = read(plan);
         if (origin.cancellation?.phase !== 'completed') {
           try { await settleFencedResume(plan); }

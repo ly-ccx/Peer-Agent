@@ -195,7 +195,7 @@ function evidenceBody({ control, claims, classification, writerEpoch }) {
   };
 }
 
-export function createExecutionObligationService({ plans, readControl, scheduler, canManage, storeFor, identity, writerEpochFor, onChanged = null, now = () => new Date().toISOString() }) {
+export function createExecutionObligationService({ plans, readControl, scheduler, canManage, storeFor, identity, writerEpochFor, onChanged = null, recordClosure = null, now = () => new Date().toISOString() }) {
   const clock = () => Date.parse(now());
   function store(workspaceId) { return storeFor(workspaceId); }
   function dispositionFor(workspaceId, sessionId) {
@@ -405,6 +405,8 @@ export function createExecutionObligationService({ plans, readControl, scheduler
             closure = scheduler.closeClaim(plan, { claimId: current.resource.claimId, claimRevision: current.resource.revision,
               authorityRef: grant.grantId, unknownCalls: current.outcome.unknownCallIds,
               proof: ['dead', 'reused', 'different_boot'].includes(current.recorderProof) ? 'verified_dead' : 'legacy_user_confirmed' });
+            // Keep the GoalPlan mirror consistent so a ledger rebuild does not re-protect.
+            try { recordClosure?.(plan, closure); } catch { /* the ledger closure is the authority; mirror repair follows */ }
           } catch (error) {
             results.push({ sessionId: item.sessionId, result: 'rejected', code: error.message || 'claim_closure_failed' });
             continue;

@@ -95,6 +95,14 @@ test('a user-authorized closure releases the claim and keeps the unknown call as
   first.protect(a, { hostEpoch: 'a', state: 'reconciling', evidenceCalls: ['actual-tool-call'] });
   first.reconcile([a], () => 'a', () => true);
   assert.deepEqual(first.claimsFor(a), []);
+
+  // A rebuilt ledger reads the GoalPlan mirror and stays released.
+  const mirrored = { ...a, delegationOrigin: { ...a.delegationOrigin, executionClaimClosure: receipt } };
+  const rebuilt = createExecutionResources({ rootDir: mkdtempSync(path.join(os.tmpdir(), 'peer-rebuilt-ledger-')) });
+  t.after(() => rebuilt.close());
+  rebuilt.reconcile([mirrored], () => 'a', () => true);
+  assert.deepEqual(rebuilt.snapshot(), []);
+  assert.equal(executionProtection(mirrored), 'released');
   assert.equal(second.reserve(plan('b', directory), 'b').allowed, true);
 });
 

@@ -166,6 +166,7 @@ test('a user-confirmed close_claim releases the directory and retains the unknow
     scheduler, canManage: () => true, storeFor: () => store,
     identity: () => ({ bootId: null, pid: 1, pidStart: null, lookup: () => null }),
     writerEpochFor: () => epoch, now: () => '2026-11-09T00:00:00.000Z',
+    recordClosure: (target, closure) => { target.delegationOrigin.executionClaimClosure = closure; },
   });
   t.after(() => { scheduler.close(); release(); store.close(); rmSync(root, { recursive: true, force: true }); });
 
@@ -196,4 +197,5 @@ test('a user-confirmed close_claim releases the directory and retains the unknow
   assert.equal(scheduler.resourceSnapshot().length, 0);
   assert.equal(scheduler.retainedUnknowns(row).length, 1);
   assert.equal(service.dispositionFor('workspace', 'x'), 'indexed');
+  assert.equal(row.delegationOrigin.executionClaimClosure.closureId, applied.closure.closureId);
 });

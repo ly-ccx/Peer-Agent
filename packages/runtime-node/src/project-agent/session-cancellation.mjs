@@ -5,6 +5,7 @@ import { isCanonicalUserInput } from './user-priority.mjs';
 import { unsettledExecution } from './execution-resources.mjs';
 import { appendObligationLog } from './obligation-log.mjs';
 import { sessionFactsFromPlan } from './session-facts.mjs';
+import { executionIdentity, sameExecution } from './session-control-kernel.mjs';
 
 /** Execution return is not cancellation settlement; accepted results stay immutable. */
 export function sessionNeedsCancellation(session) {
@@ -150,6 +151,7 @@ export function createSessionCancellation({ findBySession, goalPlanStore, goalRu
     async recover(plans) { for (const plan of plans) {
       const origin = plan.delegationOrigin;
       if (!origin?.cancellation || plan.status === 'cancelled' && !origin.cancellation.cleanupPending) continue;
+      if (origin.executionClaimClosure && sameExecution(origin.executionClaimClosure.execution, executionIdentity(plan))) continue;
       // An empty unknown set is a clearable obligation, not a stable refusal. Only
       // repeated refusals that still carry unknown work are skipped.
       const unsettled = unsettledExecution(plan);
