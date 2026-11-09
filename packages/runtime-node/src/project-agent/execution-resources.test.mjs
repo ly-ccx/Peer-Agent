@@ -198,7 +198,7 @@ test('worktree shell scopes include the actual shared Git directory', t => {
   first.reserve(a,'a'); first.settle(a,stopped(first,a,'unknown',['call']),'a');
   assert.equal(second.reserve(b,'b').allowed,true,'isolated file work can be admitted');
   assert.equal(second.reserve(b,'b',providerExecutionScopes(worktree)).allowed,false,'shell must not pretend shared refs are isolated');
-  assert.deepEqual(providerFileScopes(path.join(worktree,'new-file')), [{kind:'directory',path:realpathSync(worktree)}]);
+  assert.deepEqual(providerFileScopes(path.join(worktree,'new-file')), [{kind:'file',path:path.join(realpathSync(worktree),'new-file')}]);
 });
 
 test('a refused expansion survives release and requeue as a complete resource request', t => {
@@ -377,4 +377,32 @@ test('declaredDispatchScopes derives file scopes only from absolute local file t
   assert.deepEqual(declaredDispatchScopes({ capabilityId: 'local.shell.exec', arguments: { command: 'x' } }), []);
   assert.deepEqual(declaredDispatchScopes({ capabilityId: 'local.file.write', arguments: { path: 'rel/a.ts' } }), []);
   assert.deepEqual(declaredDispatchScopes({ capabilityId: 'local.file.write', arguments: null }), []);
+});
+
+test('a protection file claim relaxes plan admission and file dispatches, never directory-scoped shell (ADR 127 UO-05b)', t => {
+  const { directory, first, second } = fixture(t);
+  const a = path.join(directory, 'a.ts'), b = path.join(directory, 'b.ts');
+  writeFileSync(a, 'x'); writeFileSync(b, 'x');
+  const release = registerWorkBudget('workspace', { readWork: () => ({ budget: { uncertainDispatches: [
+    { toolCallId: 'tool-1', capabilityId: 'local.file.write', declaredScopes: [{ kind: 'file', path: a }] }] } }) });
+  t.after(release);
+  const owner = plan('owner', directory, 'workspace');
+  first.reserve(owner, 'host-a');
+  first.settle(owner, stopped(first, owner, 'withdraw', ['tool-1']), 'host-a');
+  assert.equal(first.claimsFor(owner)[0].resourceRef.startsWith('file:'), true, 'narrowed to a file claim');
+
+  // A directory-scoped shell dispatch stays blocked by the protected file.
+  const shellDecision = second.reserve(plan('shell', directory, 'workspace'), 'host-c', [{ kind: 'directory', path: directory }]);
+  assert.equal(shellDecision.allowed, false);
+  assert.equal(shellDecision.blocker.code, 'execution_outcome_unknown');
+  assert.equal(shellDecision.blocker.scope.kind, 'file');
+
+  // Plan admission (no scopes) may start a sibling task in the same directory.
+  const follower = plan('follower', directory, 'workspace');
+  assert.equal(second.reserve(follower, 'host-b').allowed, true);
+  // Its file dispatches are checked at file granularity: the protected file denies, a sibling passes.
+  assert.equal(second.reserve(follower, 'host-b', [{ kind: 'file', path: a }]).allowed, false);
+  assert.equal(second.reserve(follower, 'host-b', [{ kind: 'file', path: b }]).allowed, true);
+  // A missing target still declares a usable file scope instead of throwing.
+  assert.equal(second.reserve(follower, 'host-b', [{ kind: 'file', path: path.join(directory, 'new', 'c.ts') }]).allowed, true);
 });
