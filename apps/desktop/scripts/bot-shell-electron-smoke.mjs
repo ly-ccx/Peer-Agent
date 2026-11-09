@@ -430,7 +430,8 @@ globalThis.rcBotShellService={
     globalThis.rcBotShellRecord('turns',{role:input.turnProfile?.role,workspaceId:input.turnProfile?.workspaceId});
     await new Promise(resolve=>setTimeout(resolve,120));
     const text=input.messages?.findLast(message=>message.role==='user')?.content || '';
-    return {terminalStatus:'done',text:'RC scripted reply: '+text};
+    const replyTo=(input.plan?.userInputs ?? []).map(row=>row.messageId ?? 'input-'+row.inputId);
+    return {terminalStatus:'done',toolCalls:[{name:'post_reply',input:{text:'RC scripted reply: '+text,replyTo},result:{ok:true}}]};
   },abort(){}
 };
 ${process.argv.includes('--streaming') ? `const {createStreamingFixture}=await import(${JSON.stringify(pathToFileURL(path.join(source, 'scripts/rc-response-interaction-smoke.mjs')).href)});

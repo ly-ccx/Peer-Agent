@@ -117,7 +117,9 @@ export function createStreamingFixture({ commandFile, record, resolveGoalRole, p
       }
       if (!interactive || !text.includes('RC_STREAM_')) {
         await new Promise(resolve => setTimeout(resolve, 120));
-        return { terminalStatus: 'done', text: 'RC scripted reply: ' + text };
+        // ADR87 D5: the visible answer is delivered through post_reply, never implicit text fallback.
+        const replyTo = (input.plan?.userInputs ?? []).map(row => row.messageId ?? `input-${row.inputId}`);
+        return { terminalStatus: 'done', toolCalls: [{ name: 'post_reply', input: { text: 'RC scripted reply: ' + text, replyTo }, result: { ok: true } }] };
       }
       const attempt = (attempts.get(text) || 0) + 1; attempts.set(text, attempt);
       const recoveryFixture = text === 'RC_STREAM_FAIL' || text === 'RC_STREAM_FAIL_AGAIN';
