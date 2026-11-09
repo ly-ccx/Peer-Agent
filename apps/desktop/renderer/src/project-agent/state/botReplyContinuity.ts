@@ -157,10 +157,29 @@ function appendUpdates(group: MutableReply, turnId: string, updates: readonly Re
 }
 function appendConclusion(group: MutableReply, turnId: string, text: string) {
   if (!text.trim()) return;
-  const last = group.paragraphs.at(-1);
+  const normalized = text.trim().replace(/\s+/g, ' ');
   // Reusing an actual opening as the final reply must retain its paragraph node.
-  if (last && last.text.trim().replace(/\s+/g, ' ') === text.trim().replace(/\s+/g, ' ')) return;
+  if (group.paragraphs.some(p => p.text.trim().replace(/\s+/g, ' ') === normalized)) return;
+  const last = group.paragraphs.at(-1);
+  if (last) {
+    const current = last.text.trim().replace(/\s+/g, ' ');
+    // A restatement that keeps the streamed text plus an inserted clause replaces it so the statement is displayed once.
+    if (refinesText(current, normalized)) group.paragraphs[group.paragraphs.length - 1] = { id: last.id, text };
+    // The streamed text already shows everything the reply adds; do not repeat it.
+    else if (current.includes(normalized)) return;
+    else group.paragraphs.push({ id: `${turnId}:conclusion`, text });
+    return;
+  }
   group.paragraphs.push({ id: `${turnId}:conclusion`, text });
+}
+/** Whether `conclusion` re-delivers all of `existing` with at most one inserted clause; display identity only. */
+function refinesText(existing: string, conclusion: string): boolean {
+  if (!existing || !conclusion) return false;
+  if (conclusion.includes(existing)) return true;
+  let prefix = 0;
+  while (prefix < existing.length && prefix < conclusion.length && existing[prefix] === conclusion[prefix]) prefix += 1;
+  if (prefix >= conclusion.length) return false;
+  return conclusion.endsWith(existing.slice(prefix));
 }
 
 export function replyRowContains(row: BotConversationViewRow, id: string | null | undefined): boolean {
