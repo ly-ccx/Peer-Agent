@@ -94,6 +94,8 @@ export function attachBotProcesses(rows: readonly ConversationRow[], messages: r
     const first = row.message.turnId && !narrated.has(row.message.turnId);
     if (first) narrated.add(row.message.turnId!);
     return { ...row, processRounds, ...(live ? { activity: live } : {}),
+      // Raw public updates stay available to the process view even when narration leaves the reading column (ADR87 D6).
+      processUpdates: updates,
       narration: eligible && first ? botNarration(updates, row.message.content) : [] };
   });
 }

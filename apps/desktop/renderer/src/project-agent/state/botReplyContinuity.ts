@@ -105,8 +105,16 @@ export function continuousReplyRows(rows: readonly ConversationDisplayRow[], mes
     if (!additionalReply) byTurn.set(turnId, group);
     appendUpdates(group, turnId, turn?.publicUpdates ?? message.publicUpdates
       ?? row.activity?.segments.flatMap(segment => segment.kind === 'text' ? [segment] : []) ?? row.narration ?? []);
+    if (turn?.displayContract === 2 || message.displayContract === 2) group.segmented = true;
     if (message.kind === 'agent_reply') {
       appendConclusion(group, turnId, message.content);
+      // The delivered canonical reply is the reading-column body; streamed public text
+      // becomes process (ADR87 D6; legacy delivered records collapse the same way, D7.3).
+      if (group.paragraphs.length > 1) {
+        const answer = group.paragraphs.at(-1)!;
+        group.paragraphs = [answer];
+        group.paragraphIndex = new Map([[answer.id, 0]]);
+      }
       group.message = message;
       for (const [key, value] of open) if (value === group) open.delete(key);
       for (const [key, value] of openAnchors) if (value === group) openAnchors.delete(key);
@@ -142,13 +150,18 @@ interface MutableReply {
   replyTo: string[]; aliases: string[]; messages: BotChatMessage[]; paragraphs: ReplyParagraph[];
   message?: BotChatMessage; activity?: ProjectAgentActivity; pending?: BotReplyRow['pending']; stopping?: boolean;
   paragraphIndex: Map<string, number>;
+  /** Any host-classified public text or contract marker reached this group (ADR87 D4). */
+  segmented?: boolean;
 }
 
 const anchorKey = (ids: readonly string[]) => ids.length ? JSON.stringify([...ids].sort()) : '';
 
-function appendUpdates(group: MutableReply, turnId: string, updates: readonly ReplyParagraph[]) {
+function appendUpdates(group: MutableReply, turnId: string, updates: readonly (ReplyParagraph & { role?: 'opening' | 'narration' })[]) {
   for (const update of updates) {
     if (!update.text.trim()) continue;
+    if (update.role) group.segmented = true;
+    // Host-classified narration renders in the process, never as a reading-column bubble (ADR87 D6).
+    if (update.role === 'narration') continue;
     const id = `${turnId}:${update.id}`;
     const index = group.paragraphIndex.get(id);
     if (index === undefined) { group.paragraphIndex.set(id, group.paragraphs.length); group.paragraphs.push({ id, text: update.text }); }

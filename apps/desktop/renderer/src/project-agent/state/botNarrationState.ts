@@ -2,9 +2,11 @@ import type { ProjectAgentPublicUpdate } from '@peer-agent/protocol';
 
 export type BotNarrationSegment = ProjectAgentPublicUpdate;
 
-/** Public assistant text only. Thinking events never enter either input. */
+/** Public assistant text only. Thinking events never enter either input.
+ * Host-classified narration (ADR87 D4) stays in the process, out of the reading column;
+ * legacy segments without a role keep their current inline display. */
 export function botNarration(updates: readonly BotNarrationSegment[], finalText = ''): readonly BotNarrationSegment[] {
-  const segments = updates.filter(segment => segment.text.trim());
+  const segments = updates.filter(segment => segment.text.trim() && segment.role !== 'narration');
   // A fallback reply (or stopped card) can repeat the last public text segment.
   // Keep earlier updates and avoid displaying that last segment twice.
   const last = segments.at(-1);

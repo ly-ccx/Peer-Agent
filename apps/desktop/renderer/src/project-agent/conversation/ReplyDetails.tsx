@@ -38,6 +38,7 @@ export function ReplyDetails({ row, loading = false, workspaceId, botName, workI
         </button>)}
       </details> : null}
       <BotProcess activity={row.activity} rounds={row.type === 'message' ? row.processRounds : undefined}
+        narration={row.type === 'message' ? row.processUpdates : undefined}
         i18n={i18n} disclosure={disclosure} outcome={outcome} />
       {work.length ? <section className="bot-reply-work-section" aria-label={i18n.t('projectAgent.chat.work.heading')}>
         <h3>{i18n.t('projectAgent.chat.work.heading')}</h3>

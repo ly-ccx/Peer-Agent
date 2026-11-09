@@ -157,7 +157,7 @@ test('manual wake retry is visible before completion and stoppable without chang
     assert.equal(runner.activity().phase, 'stopped');
     const turn = box.messages.find(message => message.id === turnId);
     assert.equal(turn.turnKind, 'wake');
-    assert.deepEqual(turn.publicUpdates, [{ id: 'text-1', text: '正在重试。' }]);
+    assert.deepEqual(turn.publicUpdates, [{ id: 'text-1', text: '正在重试。', role: 'opening' }]);
     await runner.retryStopped(turnId);
     assert.equal(attempts, 3, 'stopped wake retry retains events despite empty user inputs');
     assert.equal(runner.status(), 'idle');
@@ -246,7 +246,7 @@ test('user turn persists only public Activity text across tool boundaries, separ
   try {
     await runner.enqueueUserInputs([input('update', '核对')]);
     const turn = box.messages.find(message => message.kind === 'agent_turn');
-    assert.deepEqual(turn.publicUpdates, [{ id: 'text-1', text: '我先核对。' }, { id: 'text-2', text: '核对后有一个发现。' }]);
+    assert.deepEqual(turn.publicUpdates, [{ id: 'text-1', text: '我先核对。', role: 'opening' }, { id: 'text-2', text: '核对后有一个发现。', role: 'narration' }]);
     assert.equal(turn.rounds[0].text, 'INTERNAL_AGGREGATE');
     assert.doesNotMatch(JSON.stringify(turn.publicUpdates), /PRIVATE_REASONING|INTERNAL_AGGREGATE/);
     assert.equal(box.messages.find(message => message.kind === 'agent_reply').content, '结论');
@@ -259,7 +259,7 @@ test('a real text delta is observable while the provider is still pending', asyn
     sink.send('chat:stream:delta', { streamId, content: 'First chunk' });
     started.open();
     await finish.ready;
-    return { text: 'First chunk and final', toolCalls: [] };
+    return { text: 'First chunk and final', toolCalls: [{ name: 'post_reply', input: { text: 'First chunk and final', replyTo: ['input-live'] }, result: { ok: true } }] };
   });
   try {
     const done = runner.enqueueUserInputs([input('live', 'hello')]);
@@ -294,7 +294,7 @@ test('stopping an exact user turn keeps partial text and real tools, completes i
     assert.equal(completed[0].inputId, 'stop');
     assert.equal(box.messages.find(message => message.kind === 'agent_turn').rounds[0].toolCalls[0].name, 'read_file');
     assert.equal(box.messages.find(message => message.card === 'agent_stopped').content, 'Partial answer');
-    assert.deepEqual(box.messages.find(message => message.kind === 'agent_turn').publicUpdates, [{ id: 'text-1', text: 'Partial answer' }]);
+    assert.deepEqual(box.messages.find(message => message.kind === 'agent_turn').publicUpdates, [{ id: 'text-1', text: 'Partial answer', role: 'opening' }]);
     assert.equal(box.messages.some(message => message.kind === 'agent_reply'), false);
     assert.equal(runner.stopResponse(turnId).code, 'STALE_TURN');
     assert.equal(call, 1);
@@ -325,7 +325,7 @@ test('post_reply argument deltas remain provisional until the governed result is
 
 test('a late stop cannot overwrite an already persisted reply while its acknowledgement is pending', async () => {
   const box = world(), saving = gate('ack not entered'), ack = gate('ack not released');
-  const runner = runnerFor(box, async () => ({ text: 'Complete reply' }), {
+  const runner = runnerFor(box, async () => ({ toolCalls: [{ name: 'post_reply', input: { text: 'Complete reply', replyTo: ['input-completed'] }, result: { ok: true } }] }), {
     async onReplied() { saving.open(); await ack.ready; },
   });
   try {
@@ -452,13 +452,13 @@ test('用户回合开任务后，事件回流触发唤醒并 post_reply', async 
     assert.equal(turns.length, 2);
     assert.equal(turns[0].rounds[0].toolCalls[0].name, 'spawn_session');
     const replies = box.messages.filter((message) => message.kind === 'agent_reply');
-    assert.equal(replies.length, 2);
-    assert.equal(replies[0].fallback, true);
-    assert.equal(replies[0].content, '已开工');
+    assert.equal(replies.length, 1);
+    assert.equal(replies[0].fallback, false);
+    assert.equal(replies[0].content, '任务做完了');
     assert.deepEqual(replies[0].replyTo, [inputMessageId(inputId)]);
-    assert.equal(replies[1].fallback, false);
-    assert.equal(replies[1].content, '任务做完了');
-    assert.deepEqual(replies[1].sources, ['sess-1']);
+    assert.deepEqual(replies[0].sources, ['sess-1']);
+    // The user turn ended in plain text without post_reply: explicitly not delivered (ADR87 D5).
+    assert.equal(box.messages.some(row => row.kind === 'system_card'), true);
     assert.equal(box.inbox.cursor(box.workspaceId).seq, 1);
     assert.equal(runner.status(), 'idle');
     assert.ok(statuses.includes('thinking'));
@@ -507,8 +507,8 @@ test('用户输入在安全点抢占唤醒，游标留到用户回合成功后�
     await queued;
     assert.equal(cursorDuringUser, 0);
     assert.equal(box.inbox.cursor(box.workspaceId).seq, 1);
-    assert.equal(box.messages.filter((message) => message.kind === 'agent_reply').length, 1);
-    assert.equal(box.messages.find((message) => message.kind === 'agent_reply').fallback, true);
+    assert.equal(box.messages.filter((message) => message.kind === 'agent_reply').length, 0);
+    assert.equal(box.messages.some((message) => message.kind === 'system_card'), true);
     assert.equal(box.messages.find((message) => message.turnKind === 'wake').rounds[0].toolCalls[0].name, 'list_sessions');
     assert.equal(runner.mailbox().events.length, 0);
     assert.equal(runner.status(), 'idle');
@@ -517,7 +517,7 @@ test('用户输入在安全点抢占唤醒，游标留到用户回合成功后�
   }
 });
 
-test('用户回合没有 post_reply 时，兜底回复盖住本回合的全部输入', async () => {
+test('用户回合没有 post_reply 时明确未交付，不构造文本兜底回复', async () => {
   const box = world('ws-fallback');
   try {
     const play = scriptedTurn([
@@ -531,23 +531,21 @@ test('用户回合没有 post_reply 时，兜底回复盖住本回合的全部�
     });
     await runner.enqueueUserInputs([input('left', '左边'), input('right', '右边')]);
     assert.deepEqual(seen, [['left', 'right']]);
-    const reply = box.messages.find((message) => message.kind === 'agent_reply');
-    assert.equal(reply.fallback, true);
-    assert.equal(reply.content, '两件一起看');
-    assert.deepEqual(reply.replyTo, ['input-left', 'input-right']);
-    assert.equal(box.messages.some((message) => message.kind === 'system_card'), false);
+    assert.equal(box.messages.some((message) => message.kind === 'agent_reply'), false);
+    const card = box.messages.find((message) => message.kind === 'system_card');
+    assert.equal(card.card, 'agent_unavailable');
   } finally {
     box.cleanup();
   }
 });
 
-test('回合带回的记忆 id 写进兜底回复和 post_reply', async () => {
+test('回合带回的记忆 id 写进 post_reply；纯文本回合不再产生兜底回复', async () => {
   const box = world('ws-memory');
   try {
-    const runner = runnerFor(box, async () => ({ text: '记下了', memoryIds: ['mem-1'] }));
+    const runner = runnerFor(box, async () => ({ text: '记下了', memoryIds: ['mem-1'], toolCalls: [{ name: 'post_reply', input: { text: '记下了', replyTo: ['input-m1'] }, result: { ok: true } }] }));
     await runner.enqueueUserInputs([input('m1', '记住')]);
-    const fallback = box.messages.find((message) => message.kind === 'agent_reply');
-    assert.deepEqual(fallback.meta.memoryUsed, ['mem-1']);
+    const reply = box.messages.find((message) => message.kind === 'agent_reply');
+    assert.deepEqual(reply.meta.memoryUsed, ['mem-1']);
   } finally {
     box.cleanup();
   }
@@ -583,7 +581,7 @@ test('可重试错误按 ADR 30 再试三次，第四次成功不写卡片', asy
     const runner = runnerFor(box, async () => {
       calls += 1;
       if (calls < 4) return { ok: false, retryable: true, error: '临时中断' };
-      return { text: '恢复了' };
+      return { toolCalls: [{ name: 'post_reply', input: { text: '恢复了', replyTo: ['input-once'] }, result: { ok: true } }] };
     });
     await runner.enqueueUserInputs([input('once', '再试')]);
     assert.equal(calls, 4);
@@ -603,7 +601,7 @@ test('重试耗尽后写入不可用卡片，retry 先重跑失败回合', async
     const runner = runnerFor(box, async ({ plan }) => {
       seen.push(plan.userInputs[0].inputId);
       if (fail) return { ok: false, retryable: true, error: '连接中断' };
-      return { text: `好了:${plan.userInputs[0].inputId}` };
+      return { toolCalls: [{ name: 'post_reply', input: { text: `好了:${plan.userInputs[0].inputId}`, replyTo: [inputMessageId(plan.userInputs[0].inputId)] }, result: { ok: true } }] };
     });
     await runner.enqueueUserInputs([input('first', '第一句')]);
     assert.equal(seen.length, 4);
@@ -626,7 +624,7 @@ test('重试耗尽后写入不可用卡片，retry 先重跑失败回合', async
     assert.equal(runner.parked(), null);
     const replies = box.messages.filter((message) => message.kind === 'agent_reply');
     assert.deepEqual(replies.map((message) => message.content), ['好了:first', '好了:second']);
-    assert.ok(replies.every((message) => message.fallback === true));
+    assert.ok(replies.every((message) => message.fallback !== true));
   } finally {
     box.cleanup();
   }
@@ -649,7 +647,7 @@ test('不可重试的失败只打一次，停住的唤醒会被用户输入接�
       if (plan.kind === 'wake') return { ok: false, retryable: false, error: '拒绝' };
       cursorDuringUser = box.inbox.cursor(box.workspaceId).seq;
       assert.equal(plan.events[0].eventId, 'evt-fail');
-      return { text: '用户来了' };
+      return { toolCalls: [{ name: 'post_reply', input: { text: '用户来了', replyTo: ['input-after'] }, result: { ok: true } }] };
     });
     await runner.kick();
     assert.deepEqual(kinds, ['wake']);
@@ -780,7 +778,8 @@ test('计时器只入邮箱，轮次和工具上限会停住循环', async () =>
     });
     await capped.enqueueUserInputs([input('cap', '测上限')]);
     assert.equal(userRounds, 7);
-    assert.equal(capped.status(), 'error');
+    // The loop was capped and never delivered; that is undelivered, not a provider failure (ADR87 D5).
+    assert.equal(capped.status(), 'idle');
     assert.ok(box.messages.some(message => message.card === 'agent_unavailable'));
     assert.equal(box.messages.some(message => message.kind === 'agent_reply' && !message.content), false);
     const userTurn = box.messages.find((message) => message.turnKind === 'user');
@@ -961,7 +960,7 @@ test('回合结束后触发整理，学到的 id 出现在下一条回复', asyn
   const box = world('ws-curator');
   const seen = [];
   try {
-    const runner = runnerFor(box, async () => ({ text: '好' }), {
+    const runner = runnerFor(box, async ({ plan }) => ({ toolCalls: [{ name: 'post_reply', input: { text: '好', ...(plan.userInputs.length ? { replyTo: [inputMessageId(plan.userInputs[0].inputId)] } : {}) }, result: { ok: true } }] }), {
       onCurator: async (info) => {
         seen.push({
           kind: info.kind,
@@ -1000,7 +999,7 @@ test('被频率挡住的整理到点后自己再跑，学到的 id 出现在下�
   const box = world('ws-curator-due');
   const seen = [];
   try {
-    const runner = runnerFor(box, async () => ({ text: '好' }), {
+    const runner = runnerFor(box, async ({ plan }) => ({ toolCalls: [{ name: 'post_reply', input: { text: '好', replyTo: [inputMessageId(plan.userInputs[0].inputId)] }, result: { ok: true } }] }), {
       onCurator: async (info) => {
         seen.push(info.kind);
         if (info.kind === 'user') return { retryAt: new Date(Date.now() + 30).toISOString() };

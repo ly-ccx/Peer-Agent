@@ -105,6 +105,8 @@ export interface BotChatMessage {
   readonly turnId?: string;
   readonly turnKind?: 'user' | 'wake';
   readonly publicUpdates?: readonly import('@peer-agent/protocol').ProjectAgentPublicUpdate[];
+  /** ADR87 D4 display contract version persisted on the agent_turn record; absent means legacy. */
+  readonly displayContract?: number;
   readonly answerTo?: string;
   readonly replyTo: readonly string[];
   readonly sources: readonly string[];
@@ -142,7 +144,7 @@ export function acknowledgeInput(pending: readonly PendingBotInput[], inputId: s
 
 export type ConversationRow =
   | { readonly type: 'separator'; readonly id: string; readonly at: string; readonly proactive: boolean; readonly label: string }
-  | { readonly type: 'message'; readonly message: BotChatMessage; readonly activity?: import('@peer-agent/protocol').ProjectAgentActivity; readonly processRounds?: readonly BotToolRound[]; readonly narration?: readonly import('./botNarrationState').BotNarrationSegment[] };
+  | { readonly type: 'message'; readonly message: BotChatMessage; readonly activity?: import('@peer-agent/protocol').ProjectAgentActivity; readonly processRounds?: readonly BotToolRound[]; readonly processUpdates?: readonly import('./botNarrationState').BotNarrationSegment[]; readonly narration?: readonly import('./botNarrationState').BotNarrationSegment[] };
 
 export type ConversationDisplayRow = ConversationRow | { readonly type: 'activity'; readonly activity: import('@peer-agent/protocol').ProjectAgentActivity };
 
@@ -177,6 +179,7 @@ export function normalizeBotMessage(raw: Readonly<Record<string, unknown>> | nul
     ...(readString(raw.turnId) ? { turnId: readString(raw.turnId) } : {}),
     ...(raw.turnKind === 'user' || raw.turnKind === 'wake' ? { turnKind: raw.turnKind } : {}),
     ...(Array.isArray(raw.publicUpdates) ? { publicUpdates: readPublicUpdates(raw.publicUpdates) } : {}),
+    ...(typeof raw.displayContract === 'number' ? { displayContract: raw.displayContract } : {}),
     ...(readString(raw.answerTo) ? { answerTo: readString(raw.answerTo) } : {}),
     ...(readString(raw.inputId) ? { inputId: readString(raw.inputId) } : {}),
     replyTo,
@@ -776,7 +779,8 @@ function readPublicUpdates(value: readonly unknown[]): import('@peer-agent/proto
     if (!id || ids.has(id) || typeof raw.text !== 'string' || !raw.text.trim()) return [];
     ids.add(id);
     const text = raw.text.slice(0, remaining); remaining -= text.length;
-    return [{ id, text }];
+    const role = raw.role === 'opening' || raw.role === 'narration' ? raw.role : undefined;
+    return [{ id, text, ...(role ? { role } : {}) }];
   });
 }
 

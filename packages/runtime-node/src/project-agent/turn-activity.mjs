@@ -48,7 +48,9 @@ export function createTurnActivity({ workspaceId, conversationId, publish = null
         let segment = state.segments.find(item => item.kind === 'text' && item.id === textSegmentId);
         if (!segment && state.segments.length < 100) {
           textSegmentId = `text-${++textSequence}`;
-          segment = { kind: 'text', id: textSegmentId, text: '' }; state.segments.push(segment);
+          // ADR87 D4: the first public text before any tool activity is the opening; every later public text is narration. post_reply progress never creates a tool segment, so the delivery path does not close the opening window.
+          const role = state.segments.length ? 'narration' : 'opening';
+          segment = { kind: 'text', id: textSegmentId, text: '', role }; state.segments.push(segment);
         }
         const used = state.segments.reduce((sum, item) => sum + (item.kind === 'text' ? item.text.length : 0), 0);
         if (segment) segment.text += payload.content.slice(0, Math.max(0, LIMIT - used));

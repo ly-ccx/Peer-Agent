@@ -14,9 +14,11 @@ export interface ProcessDisclosure {
 }
 
 /** Presentation of actual TurnSink events or persisted rounds; no execution or retrieval. */
-export function BotProcess({ activity, rounds = [], i18n, disclosure, outcome }: {
+export function BotProcess({ activity, rounds = [], narration = [], i18n, disclosure, outcome }: {
   readonly activity?: ProjectAgentActivity;
   readonly rounds?: readonly BotToolRound[];
+  /** Persisted public updates shown in the process when narration leaves the reading column (ADR87 D6). */
+  readonly narration?: readonly import('@peer-agent/protocol').ProjectAgentPublicUpdate[];
   readonly i18n: I18nRuntime;
   readonly disclosure?: ProcessDisclosure;
   readonly outcome?: 'stopped' | 'error';
@@ -29,6 +31,8 @@ export function BotProcess({ activity, rounds = [], i18n, disclosure, outcome }:
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [running, activity?.turnId]);
+  const publicText = (activity ? activity.segments.flatMap(segment => segment.kind === 'text' ? [segment] : []) : narration)
+    .filter(segment => segment.text.trim());
   const entries = activity ? activity.segments.flatMap(segment => segment.kind === 'tool' ? [{
     ...segment, ...toolPresentation(segment.name), input: segment.input, result: segment.result,
   }] : []) : agentProcessEntries(rounds).filter(entry => entry.name !== 'post_reply').map((entry, index) => ({
@@ -38,8 +42,7 @@ export function BotProcess({ activity, rounds = [], i18n, disclosure, outcome }:
   }));
   const current = [...entries].reverse().find(entry => ['preparing', 'running', 'awaiting_permission'].includes(entry.status));
   const elapsed = activity ? processSeconds(activity.startedAt, activity.finishedAt, now) : null;
-  if (!entries.length && !running) return null;
-  const label = current ? i18n.t(current.status === 'awaiting_permission' ? 'projectAgent.process.permissionTitle' : current.status === 'preparing' ? 'projectAgent.process.preparingTitle' : 'projectAgent.process.runningTitle', { tool: i18n.t(current.labelKey) }) : i18n.t(running
+  if (!entries.length && !running && !publicText.length) return null;  const label = current ? i18n.t(current.status === 'awaiting_permission' ? 'projectAgent.process.permissionTitle' : current.status === 'preparing' ? 'projectAgent.process.preparingTitle' : 'projectAgent.process.runningTitle', { tool: i18n.t(current.labelKey) }) : i18n.t(running
     ? entries.length ? 'projectAgent.process.organizing' : 'projectAgent.process.preparingReply'
     : (activity?.phase ?? outcome) === 'stopped' ? 'projectAgent.process.stopped'
       : (activity?.phase ?? outcome) === 'error' ? 'projectAgent.process.failed' : 'projectAgent.process.done');
@@ -57,6 +60,7 @@ export function BotProcess({ activity, rounds = [], i18n, disclosure, outcome }:
       <PeerIcon name="chevronDown" size={12} />
     </summary>
     <div className="bot-turn-process-content">
+      {publicText.map(segment => <p className="bot-process-narration-text" key={segment.id}>{segment.text}</p>)}
       {!entries.length ? <p className="bot-process-note">{i18n.t('projectAgent.process.awaitingContent')}</p> : null}
       {entries.map((entry, index) => ({ entry, index })).reverse().map(({ entry, index }) => {
         const active = ['preparing', 'running', 'awaiting_permission'].includes(entry.status);

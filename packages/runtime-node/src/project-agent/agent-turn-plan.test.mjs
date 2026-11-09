@@ -7,7 +7,7 @@ import {
   planAgentTurn,
 } from './agent-turn-plan.mjs';
 
-test('pending task turns cannot deliver source-free final-text fallback; ordinary questions still can', () => {
+test('a user turn without post_reply is explicitly not delivered, for pending tasks and ordinary questions alike', () => {
   const plan = planAgentTurn({ kind: 'user', userInputs: [{ inputId: 'q', text: '?' }],
     roster: [{ sessionId: 's', status: 'waiting_agent', followUp: { owner: 'bot', inCurrentList: true, reason: 'technical_block' } }] });
   assert.equal(plan.requiresStructuredReply, true);
@@ -16,7 +16,11 @@ test('pending task turns cannot deliver source-free final-text fallback; ordinar
   assert.equal(failed.failed, true);
   assert.equal(failed.messages.some(row => row.kind === 'agent_reply'), false);
   const ordinary = finishAgentTurn({ turnId: 'ordinary', plan: planAgentTurn({ kind: 'user' }), rounds: [{ text: '普通答复' }] });
-  assert.equal(ordinary.messages.some(row => row.kind === 'agent_reply'), true);
+  assert.equal(ordinary.messages.some(row => row.kind === 'agent_reply'), false);
+  assert.equal(ordinary.messages[1].kind, 'system_card');
+  assert.equal(ordinary.replied, false);
+  assert.equal(ordinary.undelivered, true);
+  assert.equal(ordinary.failed, undefined);
 });
 
 test('persisted objective reply retains its host observation refs alongside later task evidence',()=>{
@@ -28,15 +32,22 @@ test('persisted objective reply retains its host observation refs alongside late
  assert.deepEqual(finished.messages[1].meta.evidenceRefs,[observation,'tool-result://actual-task']);
 });
 
-test('only explicit public updates persist; wake and legacy round text stay internal; updates are bounded', () => {
-  const updates = [{ id: 'one', text: '公开计划' }, { id: 'two', text: '公开发现' }];
+test('only explicit public updates persist with host roles; wake stays internal; updates are bounded', () => {
+  const updates = [{ id: 'one', text: '公开计划', role: 'opening' }, { id: 'two', text: '公开发现', role: 'narration' }, { id: 'bad', text: '脏角色', role: 'conclusion' }];
   const args = { turnId: 't', rounds: [{ text: 'INTERNAL_ROUND_TEXT', toolCalls: [] }], publicUpdates: updates };
   const user = finishAgentTurn({ ...args, plan: planAgentTurn({ kind: 'user' }) });
-  assert.deepEqual(user.messages[0].publicUpdates, updates);
+  assert.deepEqual(user.messages[0].publicUpdates, [
+    { id: 'one', text: '公开计划', role: 'opening' },
+    { id: 'two', text: '公开发现', role: 'narration' },
+    { id: 'bad', text: '脏角色' },
+  ]);
+  assert.equal(user.messages[0].displayContract, 2);
   assert.equal(user.messages[0].rounds[0].text, 'INTERNAL_ROUND_TEXT');
-  assert.equal(user.messages[1].content, 'INTERNAL_ROUND_TEXT');
+  assert.equal(user.messages[1].kind, 'system_card');
+  assert.equal(user.messages.some(row => row.kind === 'agent_reply'), false);
   const wake = finishAgentTurn({ ...args, plan: planAgentTurn({ kind: 'wake' }) });
   assert.equal(wake.messages[0].publicUpdates, undefined);
+  assert.equal(wake.messages[0].displayContract, undefined);
   updates[0].text = 'changed';
   assert.equal(user.messages[0].publicUpdates[0].text, '公开计划');
   const bounded = finishAgentTurn({ ...args, plan: planAgentTurn({ kind: 'user' }),
@@ -46,13 +57,15 @@ test('only explicit public updates persist; wake and legacy round text stay inte
   assert.deepEqual(legacy.messages[0].publicUpdates, []);
 });
 
-test('concatenated public fallback text displays the last update as the conclusion, without dropping unstreamed final content', () => {
-  const publicUpdates = [{ id: '1', text: '计划。' }, { id: '2', text: '结论。' }];
+test('no fallback reply is built from concatenated or unstreamed final text', () => {
+  const publicUpdates = [{ id: '1', text: '计划。', role: 'narration' }, { id: '2', text: '结论。', role: 'narration' }];
   const run = text => finishAgentTurn({ turnId: 't', plan: planAgentTurn({ kind: 'user' }), publicUpdates,
-    rounds: [{ text, toolCalls: [] }] }).messages[1].content;
-  assert.equal(run('计划。结论。'), '结论。');
-  assert.equal(run('结论。'), '结论。');
-  assert.equal(run('结论和未流出的内容。'), '结论和未流出的内容。');
+    rounds: [{ text, toolCalls: [] }] });
+  for (const text of ['计划。结论。', '结论。', '结论和未流出的内容。']) {
+    const result = run(text);
+    assert.equal(result.messages.some(row => row.kind === 'agent_reply'), false, text);
+    assert.equal(result.messages[1].kind, 'system_card');
+  }
 });
 
 test('用户回合带上预算和上下文槽，唤醒回合只注入提醒', () => {
@@ -102,12 +115,12 @@ test('用户回合带上预算和上下文槽，唤醒回合只注入提醒', ()
   assert.deepEqual(wake.turnProfile.context, { turnKind: 'wake', events: [{eventId:'evt-1',seq:1,kind:'session_verified'}], roster: {sessions:['sess-1']} });
 });
 
-test('没有 post_reply 的用户回合兜底挂到全部输入，唤醒沉默不写回复', () => {
+test('没有 post_reply 的用户回合明确未交付，唤醒沉默不写回复', () => {
   const user = planAgentTurn({
     kind: 'user',
     userInputs: [{ inputId: 'in1' }, { inputId: 'in2', messageId: 'input-custom' }],
   });
-  const fallback = finishAgentTurn({
+  const undelivered = finishAgentTurn({
     turnId: 'turn-1',
     plan: user,
     rounds: [
@@ -115,15 +128,15 @@ test('没有 post_reply 的用户回合兜底挂到全部输入，唤醒沉默�
       { text: '一起处理', toolCalls: [] },
     ],
   });
-  assert.equal(fallback.replied, true);
-  assert.equal(fallback.messages[0].kind, 'agent_turn');
-  assert.equal(fallback.messages[0].content, '');
-  assert.equal(fallback.messages[0].rounds[0].toolCalls[0].name, 'list_sessions');
-  const reply = fallback.messages[1];
-  assert.equal(reply.kind, 'agent_reply');
-  assert.equal(reply.fallback, true);
-  assert.equal(reply.content, '一起处理');
-  assert.deepEqual(reply.replyTo, ['input-in1', 'input-custom']);
+  assert.equal(undelivered.replied, false);
+  assert.equal(undelivered.undelivered, true);
+  assert.equal(undelivered.failed, undefined);
+  assert.equal(undelivered.messages[0].kind, 'agent_turn');
+  assert.equal(undelivered.messages[0].content, '');
+  assert.equal(undelivered.messages[0].rounds[0].toolCalls[0].name, 'list_sessions');
+  assert.equal(undelivered.messages.some(row => row.kind === 'agent_reply'), false);
+  assert.equal(undelivered.messages[1].kind, 'system_card');
+  assert.equal(undelivered.messages[1].card, 'agent_unavailable');
 
   const spoken = finishAgentTurn({
     turnId: 'turn-2',
@@ -233,8 +246,8 @@ test('回复上的记忆 id 来自宿主结果，模型参数里的 id 不进入
   assert.equal(spoken.messages[1].meta.surfacing, 'silent');
   assert.equal(spoken.messages[1].meta.unread, false);
 
-  const fallback = finishAgentTurn({
-    turnId: 'turn-fallback',
+  const learned = finishAgentTurn({
+    turnId: 'turn-undelivered-memory',
     plan: user,
     memoryUsed: ['mem-turn'],
     rounds: [
@@ -242,9 +255,8 @@ test('回复上的记忆 id 来自宿主结果，模型参数里的 id 不进入
       { text: '一起处理', toolCalls: [] },
     ],
   });
-  assert.equal(fallback.messages[1].fallback, true);
-  assert.deepEqual(fallback.messages[1].meta.memoryUsed, ['mem-turn']);
-  assert.deepEqual(fallback.messages[1].meta.memoryLearned, ['mem-nested']);
+  assert.equal(learned.messages.some(row => row.kind === 'agent_reply'), false);
+  assert.equal(learned.messages[1].kind, 'system_card');
 });
 
 

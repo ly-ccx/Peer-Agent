@@ -126,11 +126,22 @@ export interface ProjectAgentToolActivity {
 /** Public conversation update, never hidden reasoning, Tool Result or Evidence.
  * User agent_turn records may persist these as publicUpdates (100 / 32000 chars).
  * Legacy rounds[].text is not a public-update source.
+ * role is the host-assigned display identity (ADR87 D4): opening = the first public
+ * text before any tool activity in the visible reply; every other public text is
+ * narration. Absent role means a pre-2026-11-09 legacy record; do not guess one.
  */
 export interface ProjectAgentPublicUpdate {
   readonly id: string;
   readonly text: string;
+  readonly role?: 'opening' | 'narration';
 }
+
+/** Display contract version for persisted agent_turn records (ADR87 D4).
+ * Version 2: public text carries role, the canonical agent_reply is the only
+ * answer body, and the implicit pure-text fallback reply is closed. Absent
+ * version means a legacy record and must keep legacy presentation.
+ */
+export const AGENT_TURN_DISPLAY_CONTRACT = 2 as const;
 
 /** Ephemeral interactive-turn presentation, including explicit wake retries. No hidden reasoning or Evidence. */
 export interface ProjectAgentActivity {
