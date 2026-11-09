@@ -293,6 +293,7 @@ const INVOKE_CHANNELS = Object.freeze([
   'project-agent:cancel-session',
   'project-agent:list-obligation-grants',
   'project-agent:decide-obligation',
+  'project-agent:request-claim-closure',
   'project-agent:resume-session',
   'project-agent:continue-history',
   'project-agent:create',

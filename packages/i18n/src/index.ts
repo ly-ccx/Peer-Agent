@@ -771,6 +771,12 @@ export type TranslationKey =
   | 'projectAgent.drawer.queuedBehind'
   | 'projectAgent.drawer.dependencyFailed'
   | 'projectAgent.drawer.dependencyMissing'
+  | 'projectAgent.drawer.resourceReleaseAction'
+  | 'projectAgent.drawer.resourceReleaseRequested'
+  | 'projectAgent.drawer.resourceReleaseFailed'
+  | 'projectAgent.drawer.claimClosed'
+  | 'projectAgent.drawer.claimClosedUnknown'
+  | 'projectAgent.drawer.claimClosedHint'
   | 'projectAgent.drawer.resourceOutcomeUnknown'
   | 'projectAgent.drawer.resourceStopUnconfirmed'
   | 'projectAgent.drawer.resourceRecovery'
@@ -2496,6 +2502,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.queuedBehind': '等待 {tasks}',
     'projectAgent.drawer.dependencyFailed': '前置任务需要处理：{tasks}',
     'projectAgent.drawer.dependencyMissing': '前置任务已缺失，请重新安排',
+    'projectAgent.drawer.resourceReleaseAction': '已核对，请求释放写锁',
+    'projectAgent.drawer.resourceReleaseRequested': '已生成授权卡，请在卡片确认后释放。',
+    'projectAgent.drawer.resourceReleaseFailed': '暂时不能请求释放：',
+    'projectAgent.drawer.claimClosed': '写锁已释放',
+    'projectAgent.drawer.claimClosedUnknown': '此前调用的结果仍未确认：{calls}',
+    'projectAgent.drawer.claimClosedHint': '未知结果只作记录，不会重放，也不会被标成成功。',
     'projectAgent.drawer.resourceOutcomeUnknown': '暂不能写入：此前操作结果未确认',
     'projectAgent.drawer.resourceStopUnconfirmed': '排队中：正在确认此前执行已停止',
     'projectAgent.drawer.resourceRecovery': '排队中：正在核对本机资源状态',
@@ -3961,6 +3973,12 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.queuedBehind': 'Waiting for {tasks}',
     'projectAgent.drawer.dependencyFailed': 'Dependency needs attention: {tasks}',
     'projectAgent.drawer.dependencyMissing': 'Dependency is missing; please replan',
+    'projectAgent.drawer.resourceReleaseAction': 'I checked; request release',
+    'projectAgent.drawer.resourceReleaseRequested': 'An authorization card is ready. Confirm it to release.',
+    'projectAgent.drawer.resourceReleaseFailed': 'Release cannot be requested yet:',
+    'projectAgent.drawer.claimClosed': 'Write lock released',
+    'projectAgent.drawer.claimClosedUnknown': 'Previous results remain unconfirmed: {calls}',
+    'projectAgent.drawer.claimClosedHint': 'The unknown result is retained as a record; it is not replayed and never marked successful.',
     'projectAgent.drawer.resourceOutcomeUnknown': 'Write blocked: a previous operation has an unknown outcome',
     'projectAgent.drawer.resourceStopUnconfirmed': 'Queued: confirming the previous execution has stopped',
     'projectAgent.drawer.resourceRecovery': 'Queued: reconciling local execution resources',

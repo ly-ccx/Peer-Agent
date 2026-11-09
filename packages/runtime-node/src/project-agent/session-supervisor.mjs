@@ -243,6 +243,17 @@ export function createSessionSupervisor({
     });
   }
 
+  /** A closed claim stays visible with its retained unknown calls; it is never a live blocker. */
+  function claimClosureFacts(plan) {
+    const closure = plan.delegationOrigin?.executionClaimClosure;
+    if (!closure || !sameExecution(closure.execution, executionIdentity(plan))) return {};
+    const retained = (executionScheduler.retainedUnknowns?.(plan) || []).map(row => ({
+      closureId: row.closureId, unknownCalls: Array.isArray(row.unknownCalls) ? row.unknownCalls : [], at: row.at,
+      proof: row.proof === 'verified_dead' ? 'verified_dead' : 'legacy_user_confirmed',
+    }));
+    return { executionClaimClosure: closure, ...(retained.length ? { retainedUnknowns: retained } : {}) };
+  }
+
   const obligations = createExecutionObligationService({
     plans: delegatedPlans, readControl: plan => sessionControl.read(plan), scheduler: executionScheduler, canManage: canManageWorkspace,
     storeFor: workspaceId => workBudgetBinding(workspaceId)?.store, identity: localRecorderIdentity,
@@ -345,6 +356,7 @@ export function createSessionSupervisor({
       ...(typeof plan.conversationId === 'string' && plan.conversationId ? { conversationId: plan.conversationId } : {}),
       ...(sessionFactsFromPlan(plan).verificationActive ? { verifying: true } : {}),
       origin,
+      ...claimClosureFacts(plan),
       ...(obligations.dispositionFor(origin.workspaceId, origin.sessionId) ? { obligationDisposition: obligations.dispositionFor(origin.workspaceId, origin.sessionId) } : {}),
       ...(coordinationFacts ? { coordination: coordinationFacts } : {}),
       ...(origin.supersededBy ? { supersededBy: origin.supersededBy } : {}),
@@ -793,6 +805,7 @@ export function createSessionSupervisor({
         const summary = { ...projectWorkSession(snapshotOf(plan), { sessionId: origin.sessionId, workspaceId: origin.workspaceId,
           acceptance: 'confirm', accepted: Boolean(plan.resultAcceptance?.acceptedAt), resultConfirmationRequired: humanGateOf(plan), spawnedAt: plan.createdAt || '',
           conversationId: plan.conversationId, origin, ...(sessionFactsFromPlan(plan).verificationActive ? { verifying: true } : {}),
+          ...claimClosureFacts(plan),
           ...(origin.supersededBy ? { supersededBy: origin.supersededBy } : {}),
           ...(origin.phase === 'paused' ? { phase: 'paused' } : {}),
           ...(origin.phase === 'queued' ? (({ queuedBehind, reason, blocker }) => ({ queuedBehind, queueReason: reason, resourceBlocker: blocker }))(executionScheduler.inspect(plan)) : {}) }),

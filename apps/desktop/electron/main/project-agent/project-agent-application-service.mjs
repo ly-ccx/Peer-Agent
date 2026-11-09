@@ -458,6 +458,28 @@ export function createProjectAgentApplicationService({
     return { ok: true, grants, writer: recovery.code ? { ok: false, code: recovery.code, check: recovery.check || null, seal: recovery.seal || null, change: recovery.change || null, file: recovery.file || null } : { ok: true } };
   }
 
+  /** A user-initiated release request. It creates the same host card; it never releases by itself. */
+  async function requestClaimClosure(payload = {}) {
+    if (!open()) return disabled();
+    const workspaceId = typeof payload.workspaceId === 'string' ? payload.workspaceId : null;
+    const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : null;
+    if (!workspaceId || !sessionId) return { ok: false, code: 'invalid_input' };
+    if (typeof sessions?.inspectExecutionObligations !== 'function' || typeof sessions?.requestObligationAuthorization !== 'function') {
+      return { ok: false, code: 'obligation_unavailable' };
+    }
+    const inspected = await sessions.inspectExecutionObligations({ workspaceId, sessionIds: [sessionId], actor: 'user_panel' });
+    if (!inspected?.ok) return { ok: false, code: inspected?.error || inspected?.code || 'obligation_unavailable' };
+    const item = (inspected.items || []).find(row => row?.sessionId === sessionId && !row.error);
+    if (!item) return { ok: false, code: 'claim_not_found' };
+    if (!item.closeClaimAvailable || !Array.isArray(item.allowedActions) || !item.allowedActions.includes('close_claim')) {
+      return { ok: false, code: 'claim_not_closeable' };
+    }
+    const actions = ['close_claim', ...(item.allowedActions.includes('acknowledge_unknown') ? ['acknowledge_unknown'] : [])];
+    return sessions.requestObligationAuthorization({ workspaceId, items: [{
+      obligationId: item.obligationId, sessionId, operationId: item.operationId, evidenceRevision: item.evidenceRevision, actions,
+    }] });
+  }
+
   async function decideObligation(payload = {}) {
     if (!open()) return disabled();
     const workspaceId = typeof payload.workspaceId === 'string' ? payload.workspaceId : null;
@@ -907,6 +929,7 @@ export function createProjectAgentApplicationService({
     cancelSession,
     listObligationGrants,
     decideObligation,
+    requestClaimClosure,
     resumeSession,
     listApprovals,
     decideApproval,
