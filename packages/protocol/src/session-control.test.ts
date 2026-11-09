@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { controlPhasesForOrigin, type SessionControlOperation } from './session-control.ts';
+import { controlPhasesForOrigin, normalizeExecutionResourceScope, type SessionControlOperation } from './session-control.ts';
 
 const operation: SessionControlOperation = {
   operationId: 'cancel', requestDigest: 'digest', revision: 3, kind: 'cancel', authorityRef: 'input',
@@ -27,4 +27,15 @@ test('a refused reconciling stop is awaiting outcome, while a drain still in pro
 test('an incomplete canonical stop cannot inherit success from a stale cancellation mirror', () => {
   const facts = controlPhasesForOrigin({ executionControl: { ...operation, phase: 'draining', outcome: undefined, stopReceipt: undefined }, cancellation: { phase: 'completed' } });
   assert.equal(facts.cancellationPhase, 'stopping');
+});
+
+test('resource scopes keep their discriminated shape and reject unknown or padded variants', () => {
+  assert.deepEqual(normalizeExecutionResourceScope({ kind: 'directory', path: '/repo' }), { kind: 'directory', path: '/repo' });
+  assert.deepEqual(normalizeExecutionResourceScope({ kind: 'file', path: '/repo/a.ts' }), { kind: 'file', path: '/repo/a.ts' });
+  assert.deepEqual(normalizeExecutionResourceScope({ kind: 'git_ref', ref: 'refs/heads/main' }), { kind: 'git_ref', ref: 'refs/heads/main' });
+  assert.deepEqual(normalizeExecutionResourceScope({ kind: 'remote_object', ref: 'pr:123' }), { kind: 'remote_object', ref: 'pr:123' });
+  assert.equal(normalizeExecutionResourceScope({ kind: 'auto', path: '/repo' }), undefined);
+  assert.equal(normalizeExecutionResourceScope({ kind: 'directory', path: '/repo', extra: 1 }), undefined);
+  assert.equal(normalizeExecutionResourceScope({ kind: 'git_ref', ref: '../etc/passwd' }), undefined);
+  assert.equal(normalizeExecutionResourceScope('directory:/repo'), undefined);
 });
