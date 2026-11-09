@@ -106,6 +106,21 @@ test('a user-authorized closure releases the claim and keeps the unknown call as
   assert.equal(second.reserve(plan('b', directory), 'b').allowed, true);
 });
 
+test('a plan mirror closure settles a claim left behind by a crash window', t => {
+  const { directory, first } = fixture(t), a = plan('a', directory);
+  first.protect(a, { hostEpoch: 'a', state: 'reconciling', evidenceCalls: ['actual-tool-call'] });
+  const claim = first.claimsFor(a)[0];
+  assert.equal(claim.state, 'reconciling');
+  a.delegationOrigin.executionClaimClosure = {
+    closureId: 'closure-mirror', claimId: claim.claimId, claimRevision: claim.revision,
+    execution: claim.execution, resourceRef: claim.resourceRef, unknownCalls: ['actual-tool-call'],
+    authorityRef: 'grant-mirror', proof: 'legacy_user_confirmed', scope: 'managed_execution', at: '2026-11-09T00:00:00.000Z',
+  };
+  first.reconcile([a], () => 'a', () => true);
+  assert.deepEqual(first.claimsFor(a), []);
+  assert.deepEqual(first.retainedUnknowns(a).map(row => row.unknownCalls), [['actual-tool-call']]);
+});
+
 test('a closure is revision-bound and still refuses an active claim or a changed unknown set', t => {
   const { directory, first } = fixture(t), a = plan('a', directory);
   first.reserve(a, 'a');

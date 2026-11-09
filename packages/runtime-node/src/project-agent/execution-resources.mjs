@@ -313,6 +313,18 @@ export function createExecutionResources({ rootDir, now = () => new Date().toISO
     reconcile(plans, hostEpochFor, ownsWorkspace) {
       for (const plan of plans) {
         if (plan.delegationOrigin?.readOnly === true) continue;
+        const mirror = plan.delegationOrigin?.executionClaimClosure;
+        if (mirror && sameExecution(mirror.execution, executionIdentity(plan))) {
+          // A durable closure may reach the plan mirror before the ledger settles.
+          // Close any surviving claim instead of leaving it as a stale blocker.
+          for (const claim of this.claimsFor(plan)) {
+            try {
+              this.closeClaim(plan, { claimId: claim.claimId, claimRevision: claim.revision,
+                authorityRef: mirror.authorityRef, unknownCalls: mirror.unknownCalls, proof: mirror.proof, at: mirror.at });
+            } catch { /* a changed unknown set stays protected; startup must not guess */ }
+          }
+          continue;
+        }
         if (this.hasClosure(plan)) continue;
         if (!ownsWorkspace(plan.delegationOrigin?.workspaceId)) {
           // A foreign workspace may alias an owned directory. Import only protection;
