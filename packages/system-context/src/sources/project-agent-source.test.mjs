@@ -86,7 +86,9 @@ test('主 Bot 的表达规则覆盖委托、结果和受阻，不让内部状态
   assert.match(content, /one short opening acknowledgment/);
   assert.match(content, /speak only when there is a useful new finding/);
   assert.match(content, /let its later result event bring you back/);
-  assert.match(content, /reuse that acknowledgment as post_reply text so it is displayed once/);
+  // ADR87 D8: the interface keeps the opening as process; no verbatim-reuse requirement remains.
+  assert.match(content, /the interface keeps the opening as process, so the answer is not shown twice/);
+  assert.doesNotMatch(content, /reuse that acknowledgment as post_reply text so it is displayed once/);
   assert.match(content, /queued or blocked start must be explained truthfully/);
   assert.match(content, /result reply should lead with what you learned or accomplished/);
   assert.match(content, /the reason you actually know/);
