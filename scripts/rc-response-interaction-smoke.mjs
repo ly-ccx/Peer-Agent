@@ -505,7 +505,12 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   assert.equal(normalTurns.length, 1, 'the controlled successful stream must not silently retry');
   report.streamingFixtureTurns = normalTurns;
   const completed = page.locator('.bot-reply').filter({ hasText: '开始修改前，先核对项目规则。' });
-  assert.equal(await completed.evaluate(node => { const saved = globalThis.rcContinuousNodes; return node === saved.reply && node.closest('.bot-thread-row').querySelector('.bot-message-author') === saved.author && node.querySelector('[data-narration-id]') === saved.paragraph && node.querySelector('.bot-reply-context > button') === saved.footer; }), true, 'canonical delivery preserves reply, avatar, public paragraph and details nodes');
+  // ADR87 D6: delivery keeps the reply carrier, avatar and details entry, while the
+  // canonical answer takes over the reading column and the streamed paragraph moves to the process.
+  assert.equal(await completed.evaluate(node => { const saved = globalThis.rcContinuousNodes;
+    return node === saved.reply && node.closest('.bot-thread-row').querySelector('.bot-message-author') === saved.author
+      && node.querySelector('.bot-reply-context > button') === saved.footer
+      && (!saved.paragraph || !node.contains(saved.paragraph)); }), true, 'canonical delivery preserves reply, avatar and details nodes while the answer replaces the streamed paragraph');
   await checkReplyPresence({ page, reply: completed, report, until, state: 'completed' });
   assert.equal(await completed.locator('.bot-context-running').count(), 0);
   assert.equal(await detail.locator('.bot-turn-process').evaluate(node => node.open), true);
@@ -514,14 +519,12 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   assert.equal(await detail.locator('.bot-tool-metadata').evaluate(node => node.open), true);
   assert.equal(await completed.locator('.is-running').count(), 0);
   assert.equal(await completed.locator('.bot-reply-bar').count(), 0);
-  assert.deepEqual(await completed.locator('.bot-narration p').allTextContents(), [
-    '我先看看项目的整体情况，整理好后告诉你重点。',
-    '项目把界面和本地执行分开了，我再确认它们如何连接。',
-    '本地执行的结果会交回界面。修改前还需要遵循项目里的开发规则。',
-    '项目概况看清楚了。',
-  ]);
-  assert.equal(await completed.locator('.bot-narration-segment').count(), 3);
+  assert.equal(await completed.locator('.bot-narration-segment').count(), 1);
+  assert.match(await completed.locator('.bot-narration-segment').first().textContent(), /项目概况看清楚了/, 'the delivered answer is the only reading-column paragraph');
   assert.doesNotMatch(await completed.textContent(), /PRIVATE_/);
+  const processText = await detail.textContent();
+  assert.match(processText, /我先看看项目的整体情况/, 'streamed opening stays readable in the process view');
+  assert.match(processText, /本地执行的结果会交回界面/, 'tool-time narration stays readable in the process view');
   if (workCommandFile) {
     assert.equal(await detail.locator('.bot-work-row').evaluate(node => node.open), true);
     checks.push('delegated work retains its expanded progress when the streamed reply becomes canonical');
@@ -565,7 +568,7 @@ export async function checkResponseInteraction({ page, until, report, captureDir
   assert.ok(Math.abs(afterDrawer.delta - beforeDrawer.delta) < 2, `drawer round trip restores the reading offset: ${JSON.stringify(report.replyDrawerReading)}`);
 
   await start('RC_STREAM_STOP');
-  assert.equal(await completed.locator('.bot-narration p').count(), 4);
+  assert.equal(await completed.locator('.bot-narration p').count(), 1);
   assert.equal(await completed.locator('.bot-narration').getAttribute('data-live'), 'false');
   report.conversationFlow = { incrementalParagraphs: true, stableParagraphs: true, stableReplyCarrier: true, stableAvatar: true, stableDetailsTrigger: true, narrationOutsideProcess: true,
     retainedAfterCompletion: true, retainedFromHistory: true, separateToolUpdates: true, noPrivateThinking: true, reducedMotion: true,
@@ -662,18 +665,20 @@ export async function checkManualWakeRetry({ page, until, report, captureDirecto
   await live.waitFor({ state: 'detached' });
   const wakeReply = page.locator('.bot-reply').filter({ hasText: '重试完成，已有进展已保留。' });
   await wakeReply.waitFor();
-  assert.equal(await wakeReply.locator('.bot-narration p').first().textContent(), '正在重试，我会接着核对已有进展。');
+  // ADR87 D6: the delivered answer is the only reading-column paragraph; the retry
+  // opening stays available through the process view.
+  assert.equal(await wakeReply.locator('.bot-narration p').first().textContent(), '重试完成，已有进展已保留。');
   await until(() => page.locator('.bot-stop-response').count(), count => count === 0);
   await until(() => wakeFailure.getByRole('button', { name: '继续尝试', exact: true }).count(), count => count === 0);
   const recovery = readFixtureTurns().filter(turn => turn.kind === 'manual-wake-recovery');
   assert.deepEqual(recovery.map(turn => ({ nativeLoaded: turn.nativeLoaded, eventIds: turn.eventIds })),
     [{ nativeLoaded: true, eventIds: ['rc-manual-retry-event'] }]);
-  report.manualWakeRetry = { progressBeforeCompletion: true, stopVisible: true, completed: true, narrationRetained: true,
+  report.manualWakeRetry = { progressBeforeCompletion: true, stopVisible: true, completed: true, narrationInProcess: true,
     noPrivateThinking: true, narrowFits: true, nativeLoaded: true, guardedCognitionDispatches: 1, persistedEventBatch: true };
   await page.setViewportSize(viewport);
   await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, originalTheme);
   await selectBotByName(page, 'project-000');
-  checks.push('manual retry of persisted wake shows progress while pending, ends in one reply and retains public paragraphs');
+  checks.push('manual retry of persisted wake shows progress while pending, ends in one reply and keeps the opening in the process');
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

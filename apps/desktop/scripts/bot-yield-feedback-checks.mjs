@@ -81,7 +81,9 @@ export async function checkBotYieldFeedback({ page, until, report, captureDirect
   advance(SCENARIO, 1);
   await page.locator('.bot-thread').getByText(ANSWER, { exact: true }).waitFor();
   await until(() => page.locator('.bot-stop-response').count(), count => count === 0);
-  assert.equal(await opening.count(), 1, 'final answer does not drop or duplicate the earlier public paragraph');
+  // ADR87 D6: the delivered answer is the reading-column body; the streamed opening
+  // moves to the process view instead of stacking above the answer.
+  assert.equal(await opening.count(), 0, 'the delivered answer replaces the streamed opening in the reading column');
   await page.setViewportSize(viewport);
   await page.evaluate(value => { if (value === undefined) delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = value; }, theme);
   report.yieldFeedback = { passed: true, source: 'real Runner cooperative yield and persisted publicUpdates',
