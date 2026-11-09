@@ -26,6 +26,7 @@ const WORKSPACE_DIR = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 const NAME_MAX = 40;
 const AVATAR_BYTES = 1024 * 1024;
 const IMAGE_EXT = new Set(['png', 'jpg', 'webp']);
+const UNKNOWN_OUTCOME_TIERS = new Set(['ask', 'bot_verified']);
 
 function fail(code) {
   return { ok: false, code };
@@ -183,6 +184,7 @@ export function createBotProfileStore({
       status: 'active',
       readmeOffer: null,
       familiarize: null,
+      unknownOutcomePolicy: null,
       createdAt: at,
       updatedAt: at,
     };
@@ -290,6 +292,41 @@ export function createBotProfileStore({
     }
   }
 
+  /** ADR 127: absent policy means ask. A stored tier this build does not know is refused, not silently downgraded. */
+  function readUnknownOutcomePolicy(workspaceId) {
+    const profile = read(workspaceId);
+    if (!profile) return fail('NOT_FOUND');
+    const stored = profile.unknownOutcomePolicy;
+    const binding = { workspaceId, agentConversationId: profile.agentConversationId };
+    if (stored === null || stored === undefined) return { ok: true, policy: { ...binding, tier: 'ask' } };
+    if (!stored || typeof stored !== 'object' || !UNKNOWN_OUTCOME_TIERS.has(stored.tier)
+      || typeof stored.policyId !== 'string' || !stored.policyId
+      || !Number.isSafeInteger(stored.revision) || stored.revision < 1
+      || typeof stored.updatedAt !== 'string' || !stored.updatedAt) return fail('UNKNOWN_OUTCOME_POLICY_UNSUPPORTED');
+    return { ok: true, policy: { ...binding, tier: stored.tier, policyId: stored.policyId, revision: stored.revision,
+      ...(typeof stored.delegatedAt === 'string' && stored.delegatedAt ? { delegatedAt: stored.delegatedAt } : {}), updatedAt: stored.updatedAt } };
+  }
+
+  /** ADR 127 host-only setter. Delegation (ask → bot_verified) stamps delegatedAt once; revocation keeps the policy identity. */
+  function setUnknownOutcomePolicy(workspaceId, { tier } = {}) {
+    if (!UNKNOWN_OUTCOME_TIERS.has(tier)) return fail('INVALID_UNKNOWN_OUTCOME_TIER');
+    const current = read(workspaceId);
+    if (!current) return fail('NOT_FOUND');
+    const stored = current.unknownOutcomePolicy && typeof current.unknownOutcomePolicy === 'object' ? current.unknownOutcomePolicy : null;
+    if (stored && !UNKNOWN_OUTCOME_TIERS.has(stored.tier)) return fail('UNKNOWN_OUTCOME_POLICY_UNSUPPORTED');
+    const at = stamp(now);
+    const delegatedAt = stored?.tier !== 'bot_verified' && tier === 'bot_verified' ? at : stored?.delegatedAt;
+    const policy = {
+      tier,
+      policyId: stored?.policyId || `policy-${randomUUID()}`,
+      revision: (stored?.revision || 0) + 1,
+      ...(delegatedAt ? { delegatedAt } : {}),
+      updatedAt: at,
+    };
+    const saved = save({ ...current, unknownOutcomePolicy: policy });
+    return saved.ok ? { ok: true, policy: saved.profile.unknownOutcomePolicy } : saved;
+  }
+
   return {
     file,
     read,
@@ -300,6 +337,8 @@ export function createBotProfileStore({
     installAvatar,
     readAvatar,
     generatedAvatar,
+    readUnknownOutcomePolicy,
+    setUnknownOutcomePolicy,
   };
 }
 

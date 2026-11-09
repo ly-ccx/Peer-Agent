@@ -179,3 +179,58 @@ test('上传只接受 png、jpg、webp，并且不超过 1 MB', () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('未知结果收口策略：缺省 ask，委托盖 delegatedAt，撤销保留身份，未知档位拒绝', () => {
+  const root = tempRoot();
+  try {
+    const workspaceId = '22222222-2222-4222-8222-222222222222';
+    let clock = 0;
+    const store = createBotProfileStore({
+      rootDir: root,
+      now: () => new Date(`2026-11-09T00:0${clock++}:00.000Z`),
+    });
+    store.create({ workspaceId, displayName: '演示', agentConversationId: 'conv-1' });
+    const initial = store.readUnknownOutcomePolicy(workspaceId);
+    assert.equal(initial.ok, true);
+    assert.equal(initial.policy.tier, 'ask');
+    assert.equal(initial.policy.agentConversationId, 'conv-1');
+
+    const delegated = store.setUnknownOutcomePolicy(workspaceId, { tier: 'bot_verified' });
+    assert.equal(delegated.ok, true);
+    assert.equal(delegated.policy.tier, 'bot_verified');
+    assert.equal(delegated.policy.revision, 1);
+    assert.equal(delegated.policy.delegatedAt, '2026-11-09T00:01:00.000Z');
+    const policyId = delegated.policy.policyId;
+
+    const revoked = store.setUnknownOutcomePolicy(workspaceId, { tier: 'ask' });
+    assert.equal(revoked.policy.tier, 'ask');
+    assert.equal(revoked.policy.revision, 2);
+    assert.equal(revoked.policy.policyId, policyId);
+    assert.equal(revoked.policy.delegatedAt, '2026-11-09T00:01:00.000Z', '撤销保留首次委托时间');
+
+    const again = store.setUnknownOutcomePolicy(workspaceId, { tier: 'bot_verified' });
+    assert.equal(again.policy.revision, 3);
+    assert.equal(again.policy.delegatedAt, '2026-11-09T00:03:00.000Z', '再次委托盖新的 delegatedAt');
+
+    assert.equal(store.setUnknownOutcomePolicy(workspaceId, { tier: 'auto' }).code, 'INVALID_UNKNOWN_OUTCOME_TIER');
+    assert.equal(store.readUnknownOutcomePolicy('missing').code, 'NOT_FOUND');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('档案里无法识别的策略档位被拒绝，而不是静默降级为 ask', () => {
+  const root = tempRoot();
+  try {
+    const workspaceId = '33333333-3333-4333-8333-333333333333';
+    const store = createBotProfileStore({ rootDir: root, now: () => new Date('2026-11-09T00:00:00.000Z') });
+    store.create({ workspaceId, displayName: '演示', agentConversationId: 'conv-1' });
+    const file = path.join(root, 'projects', workspaceId, 'profile.json');
+    const profile = JSON.parse(readFileSync(file, 'utf8'));
+    writeFileSync(file, JSON.stringify({ ...profile, unknownOutcomePolicy: { tier: 'auto', policyId: 'policy-x', revision: 1, updatedAt: '2026-11-09T00:00:00.000Z' } }, null, 2));
+    assert.equal(store.readUnknownOutcomePolicy(workspaceId).code, 'UNKNOWN_OUTCOME_POLICY_UNSUPPORTED');
+    assert.equal(store.setUnknownOutcomePolicy(workspaceId, { tier: 'ask' }).code, 'UNKNOWN_OUTCOME_POLICY_UNSUPPORTED');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
