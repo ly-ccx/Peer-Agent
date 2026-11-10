@@ -191,16 +191,23 @@ export function createExecutionResources({ rootDir, now = () => new Date().toISO
     // Plan admission (no scopes) and file-granular dispatches pass it; directory-scoped
     // dispatches (shell) stay strict because their effects are not bounded to files.
     const relaxFileClaims = requested.length === 0 || requested.some(scope => scope?.kind === 'file');
-    let primary = null;
-    try { primary = executionResource(plan, { allowMissing: true })?.resourceRef || null; } catch { primary = null; }
+    // Resolve the primary lazily: high-frequency admission loops without file claims pay nothing.
+    let primary = null, primaryResolved = false;
+    const primaryRef = () => {
+      if (!primaryResolved) {
+        primaryResolved = true;
+        try { primary = executionResource(plan, { allowMissing: true })?.resourceRef || null; } catch { primary = null; }
+      }
+      return primary;
+    };
     for (const resource of resourceSet(plan, requested)) for (const claim of current) {
       if (!conflicts(claim.resourceRef, resource.resourceRef)) continue;
       if (sameExecution(claim.execution, execution) && hostEpoch && claim.hostEpoch !== hostEpoch) return { allowed: false,
         blocker: { kind: 'recovery', code: 'execution_resource_owner_changed', resourceRef: resource.resourceRef } };
       if (sameExecution(claim.execution, execution) && !['draining', 'reconciling'].includes(claim.state)
         && (claim.resourceRef !== resource.resourceRef || claim.identity === resource.identity)) continue;
-      if (relaxFileClaims && primary && resource.resourceRef === primary
-        && ['draining', 'reconciling'].includes(claim.state) && claim.resourceRef.startsWith('file:')) continue;
+      if (relaxFileClaims && ['draining', 'reconciling'].includes(claim.state) && claim.resourceRef.startsWith('file:')
+        && resource.resourceRef === primaryRef()) continue;
       return { allowed: false, blocker: blocker(claim) };
     }
     return { allowed: true };
