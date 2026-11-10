@@ -446,16 +446,51 @@ export function createProjectAgentApplicationService({
       ownsSession: grant => ownsGrantSession(workspaceId, parentConversationId, grant),
     });
     const rows = sessionRows(workspaceId);
+    // ADR 127 UO-06b: advisory unknown-outcome facts are read fresh per list; they never
+    // freeze onto the grant and never enter its authorization digest.
+    const outcomeFacts = new Map();
+    const closableSessions = [...new Set(selected.grants.flatMap(grant => grant.items || [])
+      .filter(item => (item.actions || []).includes('close_claim')).map(item => item.sessionId))];
+    if (closableSessions.length && typeof sessions?.inspectExecutionObligations === 'function') {
+      try {
+        const inspected = await sessions.inspectExecutionObligations({ workspaceId, sessionIds: closableSessions, actor: 'user_panel' });
+        for (const row of inspected?.items || []) if (row?.sessionId && row.unknownOutcome) outcomeFacts.set(row.sessionId, row.unknownOutcome);
+      } catch { /* unreadable advisory facts leave the card without them */ }
+    }
     const grants = selected.grants.map(grant => ({ ...grant, items: (grant.items || []).map(item => {
       const projected = rows.find(session => session.sessionId === item.sessionId);
       const display = obligationDisplayTitle(item, projected?.title);
-      return { ...item, displayTitle: display.title, shortId: display.shortId };
+      return { ...item, displayTitle: display.title, shortId: display.shortId,
+        ...(outcomeFacts.has(item.sessionId) ? { unknownOutcome: outcomeFacts.get(item.sessionId) } : {}) };
     }) }));
     appendObligationLog({ event: 'list', workspaceId, runtime: recovery.code || 'ready', binding, raw: raw.length, count: grants.length,
       parent: parentHash(parentConversationId),
       reason: selected.decisions.filter(item => item.reason !== 'parent_match' && item.reason !== 'unscoped').map(item => `${item.reason}:${item.grantId || ''}`),
       code: null });
     return { ok: true, grants, writer: recovery.code ? { ok: false, code: recovery.code, check: recovery.check || null, seal: recovery.seal || null, change: recovery.change || null, file: recovery.file || null } : { ok: true } };
+  }
+
+  /** ADR 127: read the per-bot unknown-outcome policy. Absent means ask; unsupported tiers surface, never downgrade. */
+  function readUnknownOutcomePolicy(payload = {}) {
+    if (!open()) return disabled();
+    const workspaceId = typeof payload.workspaceId === 'string' ? payload.workspaceId : null;
+    if (!workspaceId || typeof profileStore?.readUnknownOutcomePolicy !== 'function') return { ok: false, code: 'invalid_input' };
+    const result = profileStore.readUnknownOutcomePolicy(workspaceId);
+    if (result.ok) return { ok: true, policy: result.policy };
+    return result.code === 'NOT_FOUND' ? { ok: false, code: 'workspace_not_found' } : { ok: false, code: 'unknown_outcome_policy_unsupported' };
+  }
+
+  /** ADR 127: the user delegates or revokes closure authority. The saved policy is the sole authority. */
+  function setUnknownOutcomePolicy(payload = {}) {
+    if (!open()) return disabled();
+    const workspaceId = typeof payload.workspaceId === 'string' ? payload.workspaceId : null;
+    if (!workspaceId || !['ask', 'bot_verified'].includes(payload.tier) || typeof profileStore?.setUnknownOutcomePolicy !== 'function') {
+      return { ok: false, code: 'invalid_input' };
+    }
+    const result = profileStore.setUnknownOutcomePolicy(workspaceId, { tier: payload.tier });
+    appendObligationLog({ event: 'set_unknown_outcome_policy', workspaceId, tier: payload.tier, ok: result.ok === true,
+      code: result.ok === true ? null : result.code || 'failed', policyId: result.policy?.policyId || null, revision: result.policy?.revision ?? null });
+    return result.ok === true ? { ok: true, policy: result.policy } : { ok: false, code: result.code || 'failed' };
   }
 
   /** A user-initiated release request. It creates the same host card; it never releases by itself. */
@@ -943,6 +978,8 @@ export function createProjectAgentApplicationService({
     listObligationGrants,
     decideObligation,
     requestClaimClosure,
+    readUnknownOutcomePolicy,
+    setUnknownOutcomePolicy,
     resumeSession,
     listApprovals,
     decideApproval,

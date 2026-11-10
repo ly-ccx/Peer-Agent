@@ -141,6 +141,8 @@ const unavailableApi: ClientApi = {
   projectAgentListObligationGrants: unavailableMethod('projectAgentListObligationGrants'),
   projectAgentDecideObligation: unavailableMethod('projectAgentDecideObligation'),
   projectAgentRequestClaimClosure: unavailableMethod('projectAgentRequestClaimClosure'),
+  projectAgentReadUnknownOutcomePolicy: unavailableMethod('projectAgentReadUnknownOutcomePolicy'),
+  projectAgentSetUnknownOutcomePolicy: unavailableMethod('projectAgentSetUnknownOutcomePolicy'),
   projectAgentResumeSession: unavailableMethod('projectAgentResumeSession'),
   projectAgentListApprovals: unavailableMethod('projectAgentListApprovals'),
   projectAgentDecideApproval: unavailableMethod('projectAgentDecideApproval'),

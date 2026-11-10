@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { I18nRuntime } from '@peer-agent/i18n';
 import { PeerIcon } from '../../ui/icons';
+import { clientApi } from '../../clientApi';
 import '../styles/obligation-grant-card.css';
 
 export interface ObligationGrantItem {
@@ -9,6 +10,11 @@ export interface ObligationGrantItem {
   readonly shortId?: string;
   readonly gaps?: readonly string[];
   readonly actions?: readonly string[];
+  /** ADR 127: advisory host reconciliation facts, read fresh per list; never authorization. */
+  readonly unknownOutcome?: {
+    readonly policyTier: string;
+    readonly reconciliation: { readonly eligible: boolean; readonly verdict?: string; readonly evidenceDigest?: string; readonly reason?: string };
+  };
 }
 
 export interface ObligationGrantView {
@@ -45,18 +51,33 @@ function itemLabel(item: ObligationGrantItem, i18n: I18nRuntime) {
   return i18n.t('projectAgent.workPanel.obligationShort', { id: item.shortId || item.sessionId.slice(0, 8) });
 }
 
-export function ObligationGrantCard({ grant, submitting, blocked, i18n, onConfirm, onReject }: {
+export function ObligationGrantCard({ grant, submitting, blocked, i18n, onConfirm, onReject, workspaceId }: {
   readonly grant: ObligationGrantView;
   readonly submitting: boolean;
   readonly blocked: ObligationWriterState | null;
   readonly i18n: I18nRuntime;
   readonly onConfirm: (grantId: string) => void;
   readonly onReject: (grantId: string) => void;
+  readonly workspaceId?: string;
 }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [delegation, setDelegation] = useState<'idle' | 'pending' | 'done' | { error: string }>('idle');
   const gaps = grant.items.flatMap(item => (item.gaps || []).map(gap => ({ sessionId: item.sessionId, gap })));
   const releases = grant.items.some(item => (item.actions || []).includes('close_claim'));
   const disabled = submitting || blocked != null;
+  // ADR 127 §5.4: the in-card delegation entry appears only where host evidence is complete.
+  const reconciled = grant.items.find(item => (item.actions || []).includes('close_claim')
+    && item.unknownOutcome?.reconciliation?.eligible === true) || null;
+  const delegated = delegation === 'done' || grant.items.some(item => item.unknownOutcome?.policyTier === 'bot_verified');
+  async function delegate() {
+    if (!workspaceId || delegation === 'pending') return;
+    setDelegation('pending');
+    try {
+      const result = await clientApi.projectAgentSetUnknownOutcomePolicy({ workspaceId, tier: 'bot_verified' });
+      if (!result?.ok) { setDelegation({ error: result?.code || 'UNAVAILABLE' }); return; }
+      setDelegation('done');
+    } catch { setDelegation({ error: 'UNAVAILABLE' }); }
+  }
   return <article id={`obligation-grant-${grant.grantId}`} tabIndex={-1} className="obligation-grant-card" data-grant-id={grant.grantId} data-blocked={blocked ? 'true' : 'false'} aria-busy={submitting} aria-label={i18n.t('projectAgent.workPanel.obligationTitle', { count: grant.items.length })}>
     <header>
       <h3>{i18n.t('projectAgent.workPanel.obligationTitle', { count: grant.items.length })}</h3>
@@ -68,6 +89,16 @@ export function ObligationGrantCard({ grant, submitting, blocked, i18n, onConfir
     <p className="obligation-grant-consequence">{i18n.t(releases
       ? 'projectAgent.workPanel.obligationConsequenceRelease'
       : 'projectAgent.workPanel.obligationConsequence')}</p>
+    {reconciled ? <p className="obligation-grant-reconciliation" role="status">{i18n.t(reconciled.unknownOutcome!.reconciliation!.verdict === 'no_effect_observed'
+      ? 'projectAgent.workPanel.obligationVerdictNoEffect'
+      : 'projectAgent.workPanel.obligationVerdictObserved')}</p> : null}
+    {delegated ? <p className="obligation-grant-delegated" role="status">{i18n.t('projectAgent.workPanel.obligationDelegationDone')}</p>
+      : reconciled && workspaceId ? <div className="obligation-grant-delegation">
+        <button type="button" className="ui-button is-compact" disabled={delegation === 'pending'} onClick={() => { void delegate(); }}>
+          {i18n.t('projectAgent.workPanel.obligationDelegationAction')}
+        </button>
+        {typeof delegation === 'object' ? <p role="alert">{i18n.t('projectAgent.workPanel.obligationDelegationFailed')}<span className="obligation-grant-code">{delegation.error}</span></p> : null}
+      </div> : null}
     {gaps.length ? <details className="obligation-grant-details">
       <summary><PeerIcon name="chevronRight" size={12} />{i18n.t('projectAgent.workPanel.obligationDetails')}</summary>
       <ul>{gaps.map(item => <li key={`${item.sessionId}:${item.gap}`}>{gapLabel(item.gap, i18n)}</li>)}</ul>
@@ -82,7 +113,7 @@ export function ObligationGrantCard({ grant, submitting, blocked, i18n, onConfir
   </article>;
 }
 
-export function ObligationGrantList({ grants, error, writer = null, submittingId, i18n, onConfirm, onReject, onRetry, variant = 'chat' }: {
+export function ObligationGrantList({ grants, error, writer = null, submittingId, i18n, onConfirm, onReject, onRetry, variant = 'chat', workspaceId }: {
   readonly grants: readonly ObligationGrantView[];
   readonly error: string | null;
   readonly writer?: ObligationWriterState | null;
@@ -92,6 +123,7 @@ export function ObligationGrantList({ grants, error, writer = null, submittingId
   readonly onReject: (grantId: string) => void;
   readonly onRetry: () => void;
   readonly variant?: 'chat' | 'panel';
+  readonly workspaceId?: string;
 }) {
   if (!grants.length && !error) return null;
   const blocked = writer && writer.ok === false ? writer : null;
@@ -112,6 +144,6 @@ export function ObligationGrantList({ grants, error, writer = null, submittingId
       <button type="button" className="ui-button is-compact" onClick={onRetry}>{i18n.t('projectAgent.workPanel.obligationRetry')}</button>
     </div> : null}
     {grants.map(grant => <ObligationGrantCard key={grant.grantId} grant={grant} submitting={submittingId === grant.grantId} blocked={blocked}
-      i18n={i18n} onConfirm={onConfirm} onReject={onReject} />)}
+      i18n={i18n} onConfirm={onConfirm} onReject={onReject} workspaceId={workspaceId} />)}
   </div>;
 }
