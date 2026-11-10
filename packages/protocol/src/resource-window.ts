@@ -72,6 +72,7 @@ export interface ResourceInteractiveSession {
 export type ResourceRecentReference =
   | { readonly kind: 'document'; readonly path: string; readonly relativeTo?: string; readonly task?: BotDocumentReference['task']; readonly revision?: BotDocumentReference['revision'] }
   | { readonly kind: 'comparison'; readonly path: string; readonly relativeTo?: string; readonly task?: BotDocumentReference['task']; readonly comparison: { readonly fromRef: string; readonly toRef?: string; readonly comparison?: 'working' | 'staged' } }
+  | { readonly kind: 'directory'; readonly path: string; readonly relativeTo?: string; readonly task?: BotDocumentReference['task'] }
   | { readonly kind: 'browser'; readonly url: string }
   | { readonly kind: 'interactive'; readonly reference: InteractiveResultReference; readonly title?: string };
 export interface ResourcePresentationApi {
@@ -230,10 +231,16 @@ export function normalizeResourceRecentReference(raw: unknown): ResourceRecentRe
       return { kind: 'browser', url: url.href };
     } catch { return; }
   }
-  if (!['document', 'comparison'].includes(String(raw.kind)) || !keys(raw, raw.kind === 'document' ? ['kind', 'path', 'relativeTo', 'task', 'revision'] : ['kind', 'path', 'relativeTo', 'task', 'comparison'])) return;
+  if (!['document', 'comparison', 'directory'].includes(String(raw.kind)) || !keys(raw, raw.kind === 'document' ? ['kind', 'path', 'relativeTo', 'task', 'revision'] : raw.kind === 'directory' ? ['kind', 'path', 'relativeTo', 'task'] : ['kind', 'path', 'relativeTo', 'task', 'comparison'])) return;
   // A recent descriptor is a hint scoped by its containing owner. It never supplies a workspace or an access grant.
   const ref = { workspaceId: 'presentation', path: raw.path, ...(raw.relativeTo !== undefined ? { relativeTo: raw.relativeTo } : {}),
     ...(raw.task !== undefined ? { task: raw.task } : {}), ...(raw.revision !== undefined ? { revision: raw.revision } : {}) };
+  if (raw.kind === 'directory') {
+    const request = normalizeResourceWindowRequest({ resource: { kind: 'directory', reference: ref } });
+    if (request?.resource.kind !== 'directory') return;
+    const fixed = request.resource.reference;
+    return { kind: 'directory', path: fixed.path, ...(fixed.relativeTo ? { relativeTo: fixed.relativeTo } : {}), ...(fixed.task ? { task: fixed.task } : {}) };
+  }
   if (raw.kind === 'document') {
     const request = normalizeResourceWindowRequest({ resource: { kind: 'document', reference: ref, mode: 'preview' } });
     if (request?.resource.kind !== 'document') return;
@@ -252,7 +259,7 @@ export function normalizeResourceLayout(raw: unknown): Pick<ResourceLayoutSnapsh
   const interactive = normalizeResourceInteractiveSession(raw.interactive); if (!interactive) return;
   const list = (value: unknown, limit: number): value is string[] => Array.isArray(value) && value.length <= limit
     && value.every(key => typeof key === 'string' && key.length <= 8192 && !/[\u0000-\u001f]/.test(key)
-      && (key === 'launcher' || /^(?:document|browser|conversation|interactive):.+$/.test(key) || key === 'comparison:workspace')) && new Set(value).size === value.length;
+      && (key === 'launcher' || /^(?:document|browser|conversation|interactive|directory):.+$/.test(key) || key === 'comparison:workspace')) && new Set(value).size === value.length;
   if (!list(raw.order, 200) || !Array.isArray(raw.recent) || raw.recent.length > 16 || new TextEncoder().encode(JSON.stringify(raw)).byteLength > 256 * 1024) return;
   const mapped = new Set(interactive.tabs.map(tab => `interactive:${tab.id}`));
   if (raw.order.some(key => key.startsWith('interactive:') && !mapped.has(key))

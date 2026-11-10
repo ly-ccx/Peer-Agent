@@ -34,8 +34,6 @@ interface ResourceWorkspaceAdapter extends ReturnType<typeof useResourceDetails>
   readonly reserveProfileWidth: (width: number) => void;
   readonly revealPrimary: () => void;
   readonly searchIntent: { readonly query: string; readonly candidates: readonly string[]; readonly id: number } | null;
-  readonly directoryIntent: { readonly path: string; readonly id: number; readonly task?: BotDocumentReference['task']; readonly relativeTo?: string } | null;
-  readonly consumeDirectoryIntent: (id: number) => void;
   readonly locate: (query: string, candidates?: readonly string[]) => void;
   readonly openReference: (reference: BotDocumentReference) => void;
   readonly openDraft: (draft: Pick<ResourceEditDraftInfo, 'id' | 'target'>) => void;
@@ -101,7 +99,6 @@ export function BotResourceLayout({ owner, active, isZh, children }: {
   }, [setMaximized]);
   const [profileWidth, reserveProfileWidth] = useState(0);
   const [search, setSearch] = useState<{ owner: string; query: string; candidates: readonly string[]; id: number } | null>(null);
-  const [directory, setDirectory] = useState<{ owner: string; path: string; id: number; task?: BotDocumentReference['task']; relativeTo?: string } | null>(null);
   const ready = !!owner?.path && !!owner.conversationId && owner.conversationId === workbench.conversationId;
   const closing = presence.exiting && !!exitLayout && exitLayout.owner === owner?.conversationId && ready && active && !workbench.open;
   useLayoutEffect(() => {
@@ -168,8 +165,6 @@ export function BotResourceLayout({ owner, active, isZh, children }: {
     owner, ready, reserveProfileWidth, revealPrimary, open: ready && active && workbench.open,
     navigationCollapsed: ready && active && workbench.open && navigationCollapsed,
     searchIntent: search?.owner === owner?.conversationId ? search : null,
-    directoryIntent: directory?.owner === owner?.conversationId ? directory : null,
-    consumeDirectoryIntent: id => setDirectory(previous => previous?.id === id ? null : previous),
     locate: (query, candidates = []) => {
       if (!ready || !owner?.conversationId || !query.trim()) return;
       details.rememberDetailSource();
@@ -197,8 +192,9 @@ export function BotResourceLayout({ owner, active, isZh, children }: {
       if (ready && reference.workspaceId === owner?.workspaceId) {
         details.rememberDetailSource();
         if (reference.kind === 'directory') {
-          setDirectory(previous => ({ owner: owner.conversationId!, path: reference.path, task: reference.task, relativeTo: reference.relativeTo, id: (previous?.id ?? 0) + 1 }));
-          workbench.setActiveTab('files');
+          // ADR 125：聊天目录引用打开目录标签，不再顶替辅助导航面板。
+          workbench.openDirectoryTab({ kind: 'directory', workspaceId: reference.workspaceId, path: reference.path,
+            ...(reference.task ? { task: reference.task } : {}), ...(reference.relativeTo ? { relativeTo: reference.relativeTo } : {}) });
         } else {
           const location = documentReferenceLocation(reference.path);
           workbench.openDocumentReference({ ...reference, path: location?.path ?? reference.path }, location?.line);
