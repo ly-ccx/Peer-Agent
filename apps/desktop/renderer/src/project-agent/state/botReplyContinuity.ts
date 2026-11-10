@@ -176,7 +176,9 @@ export function continuousReplyRows(rows: readonly ConversationDisplayRow[], mes
       appendConclusion(group, turnId, message.content);
       // The delivered canonical reply is the reading-column body; streamed public text
       // becomes process (ADR87 D6; legacy delivered records collapse the same way, D7.3).
-      if (group.paragraphs.length > 1) {
+      // Collapse only host-classified or host-registered turns — a plain observed stream
+      // keeps its refined-variant paragraphs (#307) instead of losing distinct content.
+      if (group.paragraphs.length > 1 && (group.segmented || turn?.meta?.workId || message.meta?.workId)) {
         const answer = group.paragraphs.at(-1)!;
         group.paragraphs = [answer];
         group.paragraphIndex = new Map([[answer.id, 0]]);
