@@ -73,7 +73,7 @@ export async function runDesktopRuntimePipeline({
     } },
     tools: { ...tools,
       async execute(call, context) {
-        try { budgetGuard?.beforeTool(call); } catch (error) { return (tools.notExecuted || notExecuted)(call, error.message); }
+        try { budgetGuard?.beforeTool(call, context); } catch (error) { return (tools.notExecuted || notExecuted)(call, error.message); }
         return tools.execute(call, context);
       },
       notExecuted: tools.notExecuted || notExecuted,
