@@ -285,7 +285,7 @@ test('closing a terminal host blocks new input while its old turn drains', async
 
 test('terminal composition consumes a durable input once and projects its shared reply', async () => {
   const f = fixture(), calls: any[] = [];
-  const host = start(f, async input => { calls.push(input); return { ok: true, text: 'received', toolCalls: [] }; });
+  const host = start(f, async input => { calls.push(input); return { ok: true, toolCalls: [{ name: 'post_reply', input: { text: 'received', replyTo: ['input-same-input'] }, result: { ok: true } }] }; });
   const client = createTuiProjectClient({ dataHome: f.dataHome, host, autoStart: false });
   cleanups.push(() => client.close());
   const receipt = client.submit('hello', { inputId: 'same-input' });
@@ -367,7 +367,7 @@ test('a client input is consumed once by a host in a different process',async()=
 import {createTuiProjectHost} from ${JSON.stringify(new URL('./tui-project-host.ts',import.meta.url).href)};
 const host=createTuiProjectHost({dataHome:process.argv[2],workspacePath:process.argv[3],autoStart:false,
   getSettings:()=>({providers:[${JSON.stringify(provider)}],memory:{enabled:false}}),
-  executeTurn:async()=>({ok:true,text:'child process received',toolCalls:[]})});
+  executeTurn:async()=>({ok:true,toolCalls:[{name:'post_reply',input:{text:'child process received',replyTo:['input-cross-process']},result:{ok:true}}]})});
 await host.tick();console.log('child-ready');
 for await(const line of createInterface({input:process.stdin})){
  if(line==='close'){await host.close();break;}
@@ -513,7 +513,7 @@ test('shared terminal composition completes delegation, real file evidence, inde
 },15000);
 
 test('terminal public messages survive optional card failure and a failed refresh without a full conversation read',async()=>{
-  const f=fixture(),host=start(f,async()=>({ok:true,text:'public reply',toolCalls:[]}));
+  const f=fixture(),host=start(f,async()=>({ok:true,toolCalls:[{name:'post_reply',input:{text:'public reply',replyTo:['input-isolated-public']},result:{ok:true}}]}));
   const client=createTuiProjectClient({dataHome:f.dataHome,host,autoStart:false});cleanups.push(()=>client.close());
   client.submit('public question',{inputId:'isolated-public'});await host.tick();
   const before=await client.poll(true);expect(before.messages.some(row=>row.content==='public reply')).toBe(true);

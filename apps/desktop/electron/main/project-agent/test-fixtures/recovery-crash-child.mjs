@@ -63,6 +63,8 @@ host = createProjectAgentHost({ rootDir: runtimeRoot, holdsLease: id => lease.ho
       { type: 'delta', content: 'Task arranged once.' }, { type: 'terminal', channel: 'done' },
     ]);
     const outcome = await player.runTurn({ sink: input.sink, turnProfile: input.turnProfile });
+    // ADR87 D5: the visible answer must come from post_reply, not plain turn text.
+    recorded.push({ name: 'post_reply', input: { text: 'Task arranged once.', replyTo: ['input-input-one'] }, result: { ok: true } });
     return { ...outcome, toolCalls: recorded };
   },
 });

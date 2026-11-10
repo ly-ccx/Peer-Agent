@@ -60,3 +60,18 @@ test('multiple canonical replies cannot repeat the same turn narration', () => {
   assert.equal(rows[0].narration?.length, 2);
   assert.deepEqual(rows[1].narration, []);
 });
+test('host-classified narration stays in the process and out of the reading column (ADR87 D6)', () => {
+  const segmented = [
+    { id: 'a', text: '开场确认。', role: 'opening' as const },
+    { id: 'b', text: '工具后的重复确认。', role: 'narration' as const },
+  ];
+  assert.deepEqual(botNarration(segmented, '正式回复。').map(segment => segment.text), ['开场确认。']);
+  const turn = message({ id: 'seg', kind: 'agent_turn', turnId: 'seg', turnKind: 'user', rounds,
+    displayContract: 2, publicUpdates: segmented });
+  assert.equal(turn.displayContract, 2);
+  assert.deepEqual(turn.publicUpdates?.map(update => update.role), ['opening', 'narration']);
+  const row = attachBotProcesses(conversationRows([turn]), [turn], null).find(row => row.type === 'message');
+  if (row?.type !== 'message') throw Error('turn missing');
+  assert.deepEqual(row.narration?.map(segment => segment.text), ['开场确认。']);
+  assert.deepEqual(row.processUpdates?.map(segment => segment.id), ['a', 'b']);
+});

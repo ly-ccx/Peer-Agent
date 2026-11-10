@@ -75,7 +75,8 @@ export async function withImagePermissionFixture(service, { mainRoot, imageRoot,
           }
           save({ scenario, stage: 'finished', streamId: input.streamId, toolCallId: id, images: 4,
             status: 'success', pixels: true, evidence: true, pending: gate.listPendingPermissions().length });
-          return { terminalStatus: 'done', text: '四张图片已经连续读取，我会接着核对结果。' };
+          const fullReplyTo = (input.plan?.userInputs ?? []).map(row => row.messageId ?? `input-${row.inputId}`);
+          return { terminalStatus: 'done', toolCalls: [{ name: 'post_reply', input: { text: '四张图片已经连续读取，我会接着核对结果。', replyTo: fullReplyTo }, result: { ok: true } }] };
         }
         const result = await read(id);
         const pixels = result.visualObservations?.[0];
@@ -96,9 +97,11 @@ export async function withImagePermissionFixture(service, { mainRoot, imageRoot,
           save({ scenario, stage: 'inherited', pixels: true, grantId: execution.grant.grantId, pending: gate.listPendingPermissions().length });
         }
         if (controller.signal.aborted) return { terminalStatus: 'aborted', text: '' };
-        return { terminalStatus: 'done', text: pixels ? '图片已经读取并解码，像素已送入当前回合的视觉上下文。'
+        const outcomeText = pixels ? '图片已经读取并解码，像素已送入当前回合的视觉上下文。'
           : scenario === 'TIMEOUT' ? '等待授权已超时，本次没有读取图片。'
-            : scenario === 'DENY' ? '已拒绝本次图片读取。' : '本次图片读取已取消。' };
+            : scenario === 'DENY' ? '已拒绝本次图片读取。' : '本次图片读取已取消。';
+        const replyTo = (input.plan?.userInputs ?? []).map(row => row.messageId ?? `input-${row.inputId}`);
+        return { terminalStatus: 'done', toolCalls: [{ name: 'post_reply', input: { text: outcomeText, replyTo }, result: { ok: true } }] };
       } finally {
         gate.settleStreamPermissionRequests(input.streamId, { granted: false });
         authority.close();

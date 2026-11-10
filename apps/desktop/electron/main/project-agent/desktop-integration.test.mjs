@@ -43,7 +43,7 @@ function harness({ blank = false, send = null, folder = null, dataHome = null, c
       return runtimeProjection.capabilities.filter(item => ['available', 'needs_permission'].includes(item.health)).map(item => item.capabilityId);
     },
     resolveGoalRole(input) { routes.push(input); return resolveRoleRoute({ ...input, providers: configured ? [modelProvider] : [] }); },
-    async sendMessage(input) { calls.push(input); return send ? send(input, { plans, conversations, api }) : { terminalStatus: 'done', text: 'hello' }; },
+    async sendMessage(input) { calls.push(input); return send ? send(input, { plans, conversations, api }) : { terminalStatus: 'done', toolCalls: [{ name: 'post_reply', input: { text: 'hello', replyTo: (input.plan?.userInputs ?? []).map(row => row.messageId ?? `input-${row.inputId}`) }, result: { ok: true } }] }; },
   } });
   const registrations = registerDesktopProjectAgent({ readLeaseEpoch: () => 'test-owner', enabled: () => true, dataHome: home,
     conversationStore: conversations, goalPlanStore: plans, goalRunner: { async start(id) { starts.push(id); }, pause() {}, setOnPlanTerminal() {},
@@ -481,7 +481,7 @@ test('profile policies persist, reject invalid patches before writes, and feed l
 
 test('error retries reuse parked inputs, repeated clicks are idempotent, and recovery works across restart', async () => {
   let fail = true;
-  const env = harness({ send: async () => fail ? { terminalStatus: 'error', error: 'offline' } : { terminalStatus: 'done', text: 'recovered' } });
+  const env = harness({ send: async () => fail ? { terminalStatus: 'error', error: 'offline' } : { terminalStatus: 'done', toolCalls: [{ name: 'post_reply', input: { text: 'recovered', replyTo: ['input-recover'] }, result: { ok: true } }] } });
   let resumed;
   try {
     await env.submit('recover', 'recover me');
@@ -489,7 +489,7 @@ test('error retries reuse parked inputs, repeated clicks are idempotent, and rec
     const card = env.history().find(message => message.card === 'agent_unavailable'); assert.ok(card);
     assert.equal(env.history().some(message => message.kind === 'agent_reply'), false);
     env.dispose(); fail = false;
-    resumed = harness({ dataHome: env.home, folder: env.project, send: async () => ({ terminalStatus: 'done', text: 'recovered' }) });
+    resumed = harness({ dataHome: env.home, folder: env.project, send: async () => ({ terminalStatus: 'done', toolCalls: [{ name: 'post_reply', input: { text: 'recovered', replyTo: ['input-recover'] }, result: { ok: true } }] }) });
     const [a, b] = await Promise.all([resumed.invoke('retry', { turnId: card.turnId }), resumed.invoke('retry', { turnId: card.turnId })]);
     assert.equal(a.ok, true); assert.equal(b.ok, true);
     assert.equal(resumed.history().filter(message => message.kind === 'agent_reply' && message.content === 'recovered').length, 1);

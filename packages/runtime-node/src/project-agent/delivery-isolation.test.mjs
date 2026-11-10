@@ -72,7 +72,7 @@ test('a new independent user input reaches the real Runner while another work se
   await assert.rejects(createReplyDelivery({ ...f.ports, accept }).deliver(reply('old-reply', 'old')));
   const runner = createProjectAgentRunner({ workspaceId: 'w', conversationId: 'p', coordinationStore: f.store, now: f.now,
     inbox: createProjectInbox({ rootDir: f.rootDir }), readMessages: () => f.messages, appendMessage: (_id, message) => f.messages.push(message),
-    executeTurn: async () => { requests++; return { text: 'Independent answer' }; }, resolveModel: () => ({ modelProviderId: 'm' }),
+    executeTurn: async ({ plan }) => { requests++; return { toolCalls: [{ name: 'post_reply', input: { text: 'Independent answer', replyTo: [plan.userInputs[0] ? `input-${plan.userInputs[0].inputId}` : ''] }, result: { ok: true } }] }; }, resolveModel: () => ({ modelProviderId: 'm' }),
     onReplied: accept, retryDelays: [], schedule: () => ({ unref() {} }), clearSchedule() {} });
   t.after(() => runner.dispose());
   await runner.enqueueUserInputs([{ inputId: 'new', text: 'Independent question' }]);
@@ -87,7 +87,7 @@ test('an unresolved settlement does not hold the Bot execution lane or start ano
   createReplyDelivery(f.ports).prepare([reply('old-pending', 'old')]);
   const runner = createProjectAgentRunner({ workspaceId: 'w', conversationId: 'p', coordinationStore: f.store, now: f.now,
     inbox: createProjectInbox({ rootDir: f.rootDir }), readMessages: () => f.messages, appendMessage: (_id, message) => f.messages.push(message),
-    executeTurn: async () => { requests++; return { text: 'Independent answer' }; }, resolveModel: () => ({ modelProviderId: 'm' }),
+    executeTurn: async ({ plan }) => { requests++; return { toolCalls: [{ name: 'post_reply', input: { text: 'Independent answer', replyTo: [plan.userInputs[0] ? `input-${plan.userInputs[0].inputId}` : ''] }, result: { ok: true } }] }; }, resolveModel: () => ({ modelProviderId: 'm' }),
     onReplied: async message => { if (message.meta.workId === 'old') { attempts++; await gate; } }, retryDelays: [],
     schedule: () => ({ unref() {} }), clearSchedule() {} });
   t.after(() => runner.dispose());

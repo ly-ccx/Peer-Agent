@@ -54,3 +54,12 @@
 @supports (corner-shape: superellipse(1.4)) {
   .bot-turn-process, .bot-turn-process-heading, .bot-tool-step > summary, .bot-tool-step-icon, .bot-tool-step-content, .bot-tool-preview pre { corner-shape: var(--control-corner); }
 }
+
+/* ADR87 D6: public narration text inside the process view. */
+.bot-process-narration-text {
+  margin: 0;
+  padding: 2px 0;
+  color: var(--ui-text-secondary, inherit);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

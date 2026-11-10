@@ -1,5 +1,6 @@
 import { inputMessageId } from './input-queue.mjs';
 import { learnedMemoryIds, memoryListsFromResult, normalizeMemoryIds } from './reply-composer.mjs';
+import { AGENT_TURN_DISPLAY_CONTRACT } from '@peer-agent/protocol';
 
 /** 用户调度切片；真实累计预算由宿主工作账本管理。 */
 export const USER_TURN_LIMITS = Object.freeze({ maxRounds: 10, maxToolCalls: 20 });
@@ -50,8 +51,8 @@ export function planAgentTurn({
 }
 
 /**
- * 回合结束后要写入对话的消息。可见回复只有 post_reply；
- * 用户回合没有任何 post_reply 时，用最终文本兜底挂到本回合全部输入上。
+ * 回合结束后要写入对话的消息。可见回复只有 post_reply（ADR87 D5）；
+ * 用户回合没有任何 post_reply 时明确未交付，不从公开文本或 rounds 构造正式回复。
  */
 export function finishAgentTurn({
   turnId,
@@ -86,27 +87,16 @@ export function finishAgentTurn({
     messages.push(unavailableCard(turnId, '回复未通过宿主校验', plan?.turnProfile?.workspaceId));
     return { messages, replied: false, failed: true };
   }
-  const fallbackText = publicFallbackText(finalText(storedRounds), messages[0].publicUpdates ?? []);
   if (plan?.requiresStructuredReply) {
     messages.push(unavailableCard(turnId, 'reply_delivery_required', plan?.turnProfile?.workspaceId));
     return { messages, replied: false, failed: true };
   }
-  if (plan?.kind === 'user' && fallbackText.trim()) {
-    messages.push(attachEvidence(applyMemoryMeta({
-      id: `${turnId}-reply`,
-      role: 'assistant',
-      kind: 'agent_reply',
-      content: fallbackText,
-      replyTo: replyTargets(plan.userInputs),
-      sources: [],
-      fallback: true,
-      turnId,
-    }, memoryUsed, learned), evidenceRefs));
-    return { messages, replied: true };
-  }
+  // ADR87 D5: a user turn that never called post_reply is explicitly not delivered;
+  // no implicit pure-text fallback reply may be built from public text or rounds.
+  // `undelivered` is not a provider failure: no circuit accounting, no automatic retry.
   if (plan?.kind === 'user') {
     messages.push(unavailableCard(turnId, '未收到有效回复', plan?.turnProfile?.workspaceId));
-    return { messages, replied: false, failed: true };
+    return { messages, replied: false, undelivered: true };
   }
   return { messages, replied: false };
 }
@@ -122,7 +112,7 @@ export function agentTurnMessage({ turnId, plan, rounds = [], publicUpdates = []
     replyTo: replyTargets(plan?.userInputs),
     content: '',
     rounds: normalizeRounds(rounds),
-    ...(plan?.kind === 'user' || plan?.interactive === true ? { publicUpdates: boundedPublicUpdates(publicUpdates) } : {}),
+    ...(plan?.kind === 'user' || plan?.interactive === true ? { publicUpdates: boundedPublicUpdates(publicUpdates), displayContract: AGENT_TURN_DISPLAY_CONTRACT } : {}),
   };
 }
 
@@ -135,21 +125,9 @@ function boundedPublicUpdates(updates) {
     if (!id || ids.has(id)) return [];
     ids.add(id);
     const text = update.text.slice(0, remaining); remaining -= text.length;
-    return [{ id, text }];
+    const role = update.role === 'opening' || update.role === 'narration' ? update.role : undefined;
+    return [{ id, text, ...(role ? { role } : {}) }];
   });
-}
-
-// Some provider loops concatenate all public messages from one round. Only
-// remove that prefix when its complete content matches an actual update suffix.
-function publicFallbackText(raw, updates) {
-  const normalized = raw.replace(/\s+/g, '');
-  let suffix = '';
-  for (let index = updates.length - 1; index >= 0; index--) {
-    suffix = updates[index].text.replace(/\s+/g, '') + suffix;
-    if (suffix === normalized) return updates.at(-1).text;
-    if (suffix.length > normalized.length) break;
-  }
-  return raw;
 }
 
 function wakeReminder(events, roster) {
@@ -325,14 +303,6 @@ function messageIdFor(input) {
   } catch {
     return '';
   }
-}
-
-function finalText(rounds) {
-  for (let index = rounds.length - 1; index >= 0; index -= 1) {
-    const text = rounds[index]?.text;
-    if (typeof text === 'string' && text.trim()) return text;
-  }
-  return '';
 }
 
 function normalizeRounds(rounds) {

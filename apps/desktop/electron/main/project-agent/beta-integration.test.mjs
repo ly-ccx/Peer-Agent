@@ -36,7 +36,7 @@ test('service terminal errors stay errors, not successful empty replies',async()
 
 test('a restarted runner uses distinct turn and reply identities',async()=>{
   const messages=[];for(let index=0;index<2;index++){
-    const r=runner(messages,async()=>({text:'hello'}));try{await r.enqueueUserInputs([{inputId:`i${index}`,text:'hello'}])}finally{r.dispose()}
+    const r=runner(messages,async()=>({toolCalls:[{name:'post_reply',input:{text:'hello',replyTo:[`input-i${index}`]},result:{ok:true}}]}));try{await r.enqueueUserInputs([{inputId:`i${index}`,text:'hello'}])}finally{r.dispose()}
   }
   const ids=messages.filter(m=>m.kind==='agent_reply').map(m=>m.id);assert.equal(new Set(ids).size,2);
 });

@@ -208,3 +208,36 @@ test('stop and failure retain actual tool steps, end running states and reject l
     a.dispose(); assert.equal(a.snapshot(), null);
   }
 });
+
+test('public text is classified at stream time: opening before tools, narration after (ADR87 D4)', () => {
+  const a = createTurnActivity();
+  a.begin({ turnId: 'turn-9fbcf0ba', visible: true });
+  a.accept('chat:stream:delta', { streamId: 'turn-9fbcf0ba', content: '记下了：你的开发主分支就是' });
+  a.accept('chat:stream:delta', { streamId: 'turn-9fbcf0ba', content: ' kxt-ai-lab-initial-import。' });
+  a.accept('chat:stream:tool-call', { streamId: 'turn-9fbcf0ba', toolCallId: 'm1', tool: 'memory_remember', args: {} });
+  a.accept('chat:stream:delta', { streamId: 'turn-9fbcf0ba', content: '记下了。后面按这条分支理解。' });
+  a.accept('chat:stream:tool-progress', { streamId: 'turn-9fbcf0ba', tool: 'post_reply', toolCallId: 'p1', replyText: '记下了。' });
+  a.accept('chat:stream:delta', { streamId: 'turn-9fbcf0ba', content: '交付后又续写。' });
+  const texts = a.snapshot().segments.filter(segment => segment.kind === 'text');
+  assert.deepEqual(texts.map(segment => [segment.role, segment.text]), [
+    ['opening', '记下了：你的开发主分支就是 kxt-ai-lab-initial-import。'],
+    ['narration', '记下了。后面按这条分支理解。'],
+    ['narration', '交付后又续写。'],
+  ]);
+  assert.equal(a.snapshot().replyText, '记下了。');
+  a.dispose();
+});
+
+test('a second pre-tool text is narration, tool-progress preparation closes the opening window, and rounds keep it closed', () => {
+  const a = createTurnActivity();
+  a.begin({ turnId: 't', visible: true });
+  a.accept('chat:stream:delta', { streamId: 't', content: '开场。' });
+  a.round();
+  a.accept('chat:stream:delta', { streamId: 't', content: '新一轮的叙述。' });
+  assert.deepEqual(a.snapshot().segments.map(segment => segment.role), ['opening', 'narration']);
+  a.round();
+  a.accept('chat:stream:tool-progress', { streamId: 't', toolCallId: 'q1', tool: 'search_files', path: 'src' });
+  a.accept('chat:stream:delta', { streamId: 't', content: '工具后的段落。' });
+  assert.equal(a.snapshot().segments.at(-1).role, 'narration');
+  a.dispose();
+});

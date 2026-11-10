@@ -9,7 +9,7 @@ import {createTuiProjectHost} from './tui-project-host.ts';import {createTuiProj
 async function harness(initialView:'bind'|'bots'|'conversation'='bind') {
   const root=mkdtempSync(path.join(os.tmpdir(),'peer-terminal-surface-')),workspace=path.join(root,'project');mkdirSync(workspace);
   writeFileSync(path.join(root,'llm-providers.json'),JSON.stringify([{id:'configured',provider:'openai',model:'fixture',enabled:true,apiKeyConfigured:true,supportsTools:true,supportsStructured:true,isDefault:true}]));
-  const host=createTuiProjectHost({dataHome:root,workspacePath:workspace,autoStart:false,getSettings:()=>({memory:{enabled:false}}),executeTurn:async()=>({ok:true,text:'scripted UI reply',toolCalls:[]})});
+  const host=createTuiProjectHost({dataHome:root,workspacePath:workspace,autoStart:false,getSettings:()=>({memory:{enabled:false}}),executeTurn:async({plan}:{plan:any})=>({ok:true,toolCalls:[{name:'post_reply',input:{text:'scripted UI reply',...(plan.userInputs?.length?{replyTo:[`input-${plan.userInputs[0].inputId}`]}:{proactive:true})},result:{ok:true}}]})});
   const client=createTuiProjectClient({dataHome:root,host,autoStart:false});let classic=0;
   if(initialView!=='bind'){
     const entry=host.registry.ensureForPath(workspace);

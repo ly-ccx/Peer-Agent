@@ -25,10 +25,40 @@ test('pending, public stream and final retain one carrier and original anchors',
   const final = message('final', 'agent_reply', { turnId: 'turn', replyTo: [user.id], content: '已完成。' });
   const finished = replies(continuousReplyRows([row(user), row(turn), row(final)], [user, turn, final], [], [], cache))[0]!;
   assert.equal(waiting.id, streaming.id); assert.equal(streaming.id, finished.id);
-  assert.equal(streaming.paragraphs[0]!.id, finished.paragraphs[0]!.id);
-  assert.deepEqual(finished.paragraphs.map(p => p.text), ['先核对事实。', '已完成。']);
+  // Delivered legacy records collapse to the canonical answer; the streamed text becomes process (ADR87 D7.3).
+  assert.deepEqual(finished.paragraphs.map(p => p.text), ['已完成。']);
   assert.ok(replyRowContains(finished, 'turn')); assert.ok(replyRowContains(finished, 'final'));
   assert.equal(replyRowRunning(finished), false); assert.equal(replyRowMood(finished), 'idle');
+});
+test('incident shape: opening stays visible live, narration never bubbles, delivery shows the answer once (ADR87)', () => {
+  const cache = new Map<string, string>();
+  const opening = { kind: 'text' as const, id: 'text-1', role: 'opening' as const,
+    text: '记下了：你的开发主分支就是 `kxt-ai-lab-initial-import`。我先把这件事记进项目事实，避免后面再把它当成普通功能分支。' };
+  const narration = { kind: 'text' as const, id: 'text-2', role: 'narration' as const,
+    text: '记下了。你的开发主分支就是 `kxt-ai-lab-initial-import`，后面按这条分支理解。' };
+  const answer = '记下了。你的开发主分支就是 `kxt-ai-lab-initial-import`，仓库里对应的完整名字是 `feat/kxt-ai-lab-initial-import`。后面按这条分支理解。';
+  const live = activity({ segments: [opening, narration] });
+  const streaming = replies(continuousReplyRows([row(user), { type: 'activity', activity: live }], [user], [], [], cache))[0]!;
+  assert.deepEqual(streaming.paragraphs.map(p => p.text), [opening.text]);
+  const turn = message('turn', 'agent_turn', { replyTo: [user.id], meta: { workId: 'work' }, displayContract: 2,
+    publicUpdates: [{ id: 'text-1', text: opening.text, role: 'opening' }, { id: 'text-2', text: narration.text, role: 'narration' }] });
+  const final = message('final', 'agent_reply', { turnId: 'turn', replyTo: [user.id], content: answer });
+  const finished = replies(continuousReplyRows([row(user), row(turn), row(final)], [user, turn, final], [], [], cache))[0]!;
+  assert.deepEqual(finished.paragraphs.map(p => p.text), [answer]);
+  assert.equal(finished.paragraphs[0]!.id, 'turn:conclusion');
+});
+test('legacy incident records collapse to the answer without guessing roles or comparing text (ADR87 D7.3)', () => {
+  const turn = message('turn-9fbcf0ba', 'agent_turn', { replyTo: [user.id], meta: { workId: 'work' },
+    publicUpdates: [
+      { id: 'text-1', text: '记下了：你的开发主分支就是 `kxt-ai-lab-initial-import`。我先把这件事记进项目事实，避免后面再把它当成普通功能分支。' },
+      { id: 'text-2', text: '记下了。你的开发主分支就是 `kxt-ai-lab-initial-import`，后面按这条分支理解。' },
+    ] });
+  const final = message('reply-2', 'agent_reply', { turnId: 'turn-9fbcf0ba', replyTo: [user.id],
+    content: '记下了。你的开发主分支就是 `kxt-ai-lab-initial-import`，仓库里对应的完整名字是 `feat/kxt-ai-lab-initial-import`。后面按这条分支理解。' });
+  const finished = replies(continuousReplyRows([row(user), row(turn), row(final)], [user, turn, final], [], []))[0]!;
+  assert.deepEqual(finished.paragraphs.map(p => p.text), [final.content]);
+  // The persisted updates stay reachable for the process view; nothing is erased.
+  assert.equal(finished.messages.length, 2);
 });
 test('restored unanswered input is unconfirmed rather than invented running work', () => {
   const restored = replies(continuousReplyRows([row(user)], [user], [], []))[0]!;

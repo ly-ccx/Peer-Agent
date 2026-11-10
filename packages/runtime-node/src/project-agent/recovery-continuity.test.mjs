@@ -55,7 +55,7 @@ test('a timeout after nineteen completed tools automatically resumes native resu
         return { ...timeout, toolCalls: results.map((row, n) => ({ name: 'read_file', input: { path: `${n}` }, result: row.content })) };
       }
       assert.equal(turnProfile.providerCheckpoint.messages.length, 19);
-      return { text: '已完成。' };
+      return { toolCalls: [{ name: 'post_reply', input: { text: '已完成。', replyTo: ['input-one'] }, result: { ok: true } }] };
     } finally { guard.finish(); }
   });
   try {
@@ -533,14 +533,14 @@ for (const interruptedHost of [false, true]) {
           assert.equal(signal.aborted, true);
           return { text: 'late output that must never be delivered' };
         }
-        if (plan.userInputs.some(row => row.inputId === 'independent')) return { text: '独立任务已完成。' };
+        if (plan.userInputs.some(row => row.inputId === 'independent')) return { toolCalls: [{ name: 'post_reply', input: { text: '独立任务已完成。', replyTo: ['input-independent'] }, result: { ok: true } }] };
         const first = turnProfile.providerCheckpoint?.messages[0];
         assert.equal(first?.content, '19');
         assert.ok(plan.events.some(event => event.eventId === 'child-done'), 'the original recovery observes its queued child result');
         assert.equal(roster[0].status, 'accepted');
         const second = await readInput(guard, 'second.txt', 'remaining-read');
         guard.checkpoint({ provider: 'openai', messages: [first, second] }, executions);
-        return { text: `两个文件的合计是 ${Number(first.content) + Number(second.content)}。` };
+        return { toolCalls: [{ name: 'post_reply', input: { text: `两个文件的合计是 ${Number(first.content) + Number(second.content)}。`, replyTo: ['input-one'] }, result: { ok: true } }] };
       } finally { guard.finish(); }
     }, { resolveRoster: () => roster });
     try {
@@ -626,7 +626,7 @@ test('changing the configured model continues the same work from completed facts
       assert.equal(turnProfile.providerCheckpoint, undefined);
       assert.equal(turnProfile.modelSelection.modelProviderId, 'new');
       assert.match(turnProfile.context.retryContinuity.tools[0].resultPreview, /already done/);
-      return { text: '新模型根据已完成的真实结果继续。' };
+      return { toolCalls: [{ name: 'post_reply', input: { text: '新模型根据已完成的真实结果继续。', replyTo: ['input-switch'] }, result: { ok: true } }] };
     } finally { guard.finish(); }
   }, { resolveModel: () => ({ modelProviderId: selection.modelProviderId, selection }) });
   try {
@@ -698,7 +698,7 @@ test('fresh input preempts an automatically resumed user request and preserves i
   const env = world(async ({ plan, signal, turnProfile }) => {
     const id = plan.userInputs[0]?.inputId;
     seen.push(id);
-    if (id !== 'old') return { text: 'new input answered' };
+    if (id !== 'old') return { toolCalls: [{ name: 'post_reply', input: { text: 'new input answered', replyTo: ['input-new'] }, result: { ok: true } }] };
     if (++oldCalls === 1) {
       const guard = createWorkBudgetGuard(turnProfile);
       try {
@@ -713,7 +713,7 @@ test('fresh input preempts an automatically resumed user request and preserves i
       await Promise.race([blocked, new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }))]);
       if (signal.aborted) throw Object.assign(new Error('request aborted'), { name: 'AbortError' });
     }
-    return { text: 'old work delivered from saved facts' };
+    return { toolCalls: [{ name: 'post_reply', input: { text: 'old work delivered from saved facts', replyTo: ['input-old'] }, result: { ok: true } }] };
   });
   let background, foreground;
   try {

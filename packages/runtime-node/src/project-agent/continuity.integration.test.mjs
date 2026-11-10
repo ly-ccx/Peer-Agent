@@ -157,7 +157,7 @@ test('user progress survives a cooperative yield, a quiet wake and restart until
   try {
     await env.runner.enqueueUserInputs([{ inputId: 'i', text: '现在进展如何？' }]);
     const yielded = env.messages.find(row => row.kind === 'agent_turn');
-    assert.deepEqual(yielded.publicUpdates, [{ id: 'text-1', text: '我先核对最新进展。' }]);
+    assert.deepEqual(yielded.publicUpdates, [{ id: 'text-1', text: '我先核对最新进展。', role: 'opening' }]);
     assert.deepEqual(yielded.replyTo, ['input-i']);
     assert.equal(yielded.meta.diagnosticTiming.outcome, 'yielded');
     assert.equal(env.messages.some(row => row.kind === 'agent_reply'), false, 'a scheduling yield cannot deliver an answer');
@@ -192,7 +192,7 @@ test('more than twenty useful tools continue across slices and restart; native h
     const index = ++slice;
     if (index > 1) assert.equal(input.turnProfile.providerCheckpoint.messages[0].thinking, 'private');
     return index <= 3 ? { turnEnd: 'yielded', toolCalls: Array.from({ length: 9 }, (_, n) => ({ name: 'read_file', input: { path: `file-${index}-${n}` }, result: { content: `finding-${index}-${n}` } })),
-      providerCheckpoint: { messages: [{ thinking: 'private' }] } } : { text: '看完了，共核对了 27 项。' };
+      providerCheckpoint: { messages: [{ thinking: 'private' }] } } : { toolCalls: [{ name: 'post_reply', input: { text: '看完了，共核对了 27 项。', replyTo: ['input-i'] }, result: { ok: true } }] };
   });
   try {
     await env.runner.enqueueUserInputs([{ inputId: 'i', text: '检查项目' }]);
@@ -284,7 +284,7 @@ test('shared hard request/tool budgets survive restart, charge roles and keep un
 
 test('runner restarts only a prepared acceptance, with no new model request or duplicate reply', async () => {
   let requested=0,accepted=0;
-  const env=world(async()=>{requested++;return{text:'已经看完了。'};},{onReplied:()=>{if(++accepted===1)throw Error('disk temporarily unavailable');}});
+  const env=world(async()=>{requested++;return{toolCalls:[{name:'post_reply',input:{text:'已经看完了。',replyTo:['input-i']},result:{ok:true}}]};},{onReplied:()=>{if(++accepted===1)throw Error('disk temporarily unavailable');}});
   try{
     await env.runner.enqueueUserInputs([{inputId:'i',text:'看项目'}]);
     assert.equal(requested,1);assert.equal(env.runner.hasContinuation(),true);
@@ -299,7 +299,7 @@ test('runner restarts only a prepared acceptance, with no new model request or d
 
 test('a crash after delivered but before handled/work receipts never repeats cognition', async () => {
   let requests = 0;
-  const env = world(async () => { requests++; return { text: '完成了。' }; });
+  const env = world(async () => { requests++; return { toolCalls: [{ name: 'post_reply', input: { text: '完成了。', replyTo: ['input-i'] }, result: { ok: true } }] }; });
   try {
     const save = env.store.saveWork;
     env.store.saveWork = work => {
