@@ -176,12 +176,14 @@ export function continuousReplyRows(rows: readonly ConversationDisplayRow[], mes
       appendConclusion(group, turnId, message.content);
       // The delivered canonical reply is the reading-column body; streamed public text
       // becomes process (ADR87 D6; legacy delivered records collapse the same way, D7.3).
-      // Collapse only host-classified or host-registered turns — a plain observed stream
-      // keeps its refined-variant paragraphs (#307) instead of losing distinct content.
-      if (group.paragraphs.length > 1 && (group.segmented || turn?.meta?.workId || message.meta?.workId)) {
-        const answer = group.paragraphs.at(-1)!;
-        group.paragraphs = [answer];
-        group.paragraphIndex = new Map([[answer.id, 0]]);
+      // Keep the paragraph that carries the answer — a reused opening node keeps its
+      // anchor identity — so the reading column never repeats or drops the delivered text.
+      if (group.paragraphs.length > 1) {
+        const normalized = message.content.trim().replace(/\s+/g, ' ');
+        const carrier = group.paragraphs.find(p => p.text.trim().replace(/\s+/g, ' ') === normalized)
+          ?? group.paragraphs.at(-1)!;
+        group.paragraphs = [{ id: carrier.id, text: message.content }];
+        group.paragraphIndex = new Map([[carrier.id, 0]]);
       }
       group.message = message;
       for (const [key, value] of open) if (value === group) open.delete(key);

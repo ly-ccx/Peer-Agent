@@ -94,11 +94,13 @@ test('a refined variant of the streamed text replaces it instead of repeating', 
   const final = message('final', 'agent_reply', { turnId: 'turn', replyTo: [user.id],
     content: '记下了。你的开发主分支就是 `kxt-ai-lab-initial-import`，仓库里对应的完整名字是 `feat/kxt-ai-lab-initial-import`。后面按这条分支理解。' });
   const result = replies(continuousReplyRows([row(turn), row(final)], [user, turn, final], [], []))[0]!;
+  // ADR87 D6: the delivered answer is the reading-column body and each statement shows
+  // once; the refined variant's node identity survives and the streamed text stays in process.
   assert.deepEqual(result.paragraphs.map(p => p.text), [
-    '记下了：你的开发主分支就是 `kxt-ai-lab-initial-import`。我先把这件事记进项目事实，避免后面再把它当成普通功能分支。',
     '记下了。你的开发主分支就是 `kxt-ai-lab-initial-import`，仓库里对应的完整名字是 `feat/kxt-ai-lab-initial-import`。后面按这条分支理解。',
   ]);
-  assert.equal(result.paragraphs[1]!.id, 'turn:text-2');
+  assert.equal(result.paragraphs[0]!.id, 'turn:text-2');
+  assert.equal(result.messages.length, 2, 'streamed updates stay reachable for the process view');
 });
 test('a narrower final reply does not duplicate the fuller streamed text', () => {
   const turn = message('turn', 'agent_turn', { replyTo: [user.id],
@@ -111,7 +113,8 @@ test('exact reuse of an earlier paragraph is not repeated after newer text', () 
   const turn = message('turn', 'agent_turn', { replyTo: [user.id], publicUpdates: [{ id: 'a', text: '记下了。' }, { id: 'b', text: '去核对分支了。' }] });
   const final = message('final', 'agent_reply', { turnId: 'turn', replyTo: [user.id], content: '记下了。' });
   const result = replies(continuousReplyRows([row(turn), row(final)], [user, turn, final], [], []))[0]!;
-  assert.deepEqual(result.paragraphs.map(p => p.text), ['记下了。', '去核对分支了。']);
+  assert.deepEqual(result.paragraphs.map(p => p.text), ['记下了。']);
+  assert.equal(result.messages.length, 2, 'the distinct streamed text stays reachable');
 });
 test('delivery uncertainty keeps receipt without declaring active execution', () => {
   const result = replies(continuousReplyRows([row(user)], [user], [{ inputId: 'u', createdAt: at, deliveryIssue: true }], []))[0]!;

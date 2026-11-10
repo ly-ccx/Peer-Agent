@@ -202,7 +202,9 @@ export async function checkSharedUiConventions({ page, app, report, captureDirec
   if (await group.getAttribute('aria-expanded') === 'false') await group.locator('.sidebar-workspace-chevron-btn').click();
   const conversation = page.locator(`[data-conversation-id="${classicFixture.conversationId}"]`).first();
   await conversation.click();
-  await page.getByText('文件已改名为', { exact: false }).waitFor();
+  // Scope to the reading column's rendered message body: the sidebar conversation
+  // preview legitimately repeats the excerpt and breaks page-scope strict matching.
+  await page.locator('span[data-source-offsets]', { hasText: '文件已改名为' }).first().waitFor();
   const image = page.locator('.markdown-local-image-thumb');
   await image.waitFor();
   await page.waitForFunction(() => document.querySelector('.markdown-local-image-thumb img')?.naturalWidth === 320);
