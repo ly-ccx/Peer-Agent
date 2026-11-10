@@ -85,6 +85,8 @@ export interface ExecutionClaimClosure {
   readonly unknownCalls: readonly string[];
   readonly authorityRef: string;
   readonly proof: 'verified_dead' | 'legacy_user_confirmed';
+  /** ADR 127: present when reconciliation evidence, not a user card, authorized this closure. */
+  readonly resolution?: { readonly resolutionId: string; readonly tier: 'user_confirmed' | 'bot_verified'; readonly verdict: 'no_effect_observed' | 'effect_observed'; readonly evidenceDigest: string; readonly policyRef?: string };
   readonly scope: 'managed_execution';
   readonly at: string;
 }
