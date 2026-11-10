@@ -238,6 +238,13 @@ export function registerDesktopProjectAgent({
     executionScheduler,
     canManageWorkspace: ownsProject,
     deferRecovery: true,
+    // ADR 127 UO-06: the delegated-closure policy comes from the bot profile (UO-01 seam).
+    // An unrecognized stored tier reads as a closed gate, never a silent downgrade to ask.
+    unknownOutcomePolicy: workspaceId => {
+      const result = profileStore.readUnknownOutcomePolicy(workspaceId);
+      if (result.ok) return result.policy;
+      return result.code === 'NOT_FOUND' ? null : { tier: result.code };
+    },
     readDelegationCapabilities: input => agentTurnExecutor.readDelegationCapabilities?.(input),
     readResourceFeedback: interactive.feedback.restore,
     projectReportEvidence: interactive.publications.projectReportEvidence,

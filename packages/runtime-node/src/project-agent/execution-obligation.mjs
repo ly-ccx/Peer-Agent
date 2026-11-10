@@ -195,7 +195,7 @@ function evidenceBody({ control, claims, classification, writerEpoch }) {
   };
 }
 
-export function createExecutionObligationService({ plans, readControl, scheduler, canManage, storeFor, identity, writerEpochFor, onChanged = null, recordClosure = null, now = () => new Date().toISOString() }) {
+export function createExecutionObligationService({ plans, readControl, scheduler, canManage, storeFor, identity, writerEpochFor, onChanged = null, recordClosure = null, unknownOutcome = null, now = () => new Date().toISOString() }) {
   const clock = () => Date.parse(now());
   function store(workspaceId) { return storeFor(workspaceId); }
   function dispositionFor(workspaceId, sessionId) {
@@ -212,6 +212,11 @@ export function createExecutionObligationService({ plans, readControl, scheduler
     const classification = classifyExecutionObligation({ plan, control, claims, identity: identity(), writerEpoch, disposition });
     const evidenceRevision = digest(evidenceBody({ control, claims, classification, writerEpoch }));
     const claim = claims[0];
+    // ADR 127 UO-06: advisory unknown-outcome facts for the ask card and task detail.
+    // They describe evidence and policy; they are never part of the authorization digest.
+    const outcomeFacts = claim && unknownOutcome?.inspect ? (() => {
+      try { const row = unknownOutcome.inspect(plan, { claimId: claim.claimId }); return row?.ok ? row : null; } catch { return null; }
+    })() : null;
     const obligationId = obligationIdFor({ workspaceId: origin.workspaceId, sessionId: origin.sessionId, planId: plan.planId, operationId: control?.operationId || origin.cancellation?.operationId || '' });
     return {
       sessionId: origin.sessionId, planId: plan.planId, operationId: control?.operationId || null, obligationId,
@@ -221,7 +226,11 @@ export function createExecutionObligationService({ plans, readControl, scheduler
       liveness: classification.proof === 'alive' ? 'recorder_alive' : classification.proof === 'dead' || classification.proof === 'reused' ? 'recorder_dead' : classification.ownership === 'live' ? 'live' : classification.ownership === 'ended' ? 'ended' : 'recorder_unproven',
       livenessFreshness: 'advisory',
       outcome: { registration: classification.registrationAbsent ? 'registration_absent' : 'registered', unknownCallIds: classification.unknownCallIds, openHandleIds: classification.openHandleIds },
-      resource: claim ? { claimId: claim.claimId, revision: claim.revision, state: claim.state, resourceKind: 'directory' } : null,
+      ...(outcomeFacts ? { unknownOutcome: { policyTier: outcomeFacts.policyTier, reconciliation: outcomeFacts.eligible
+        ? { eligible: true, verdict: outcomeFacts.verdict, evidenceDigest: outcomeFacts.evidenceDigest }
+        : { eligible: false, reason: outcomeFacts.reason } } } : {}),
+      resource: claim ? { claimId: claim.claimId, revision: claim.revision, state: claim.state,
+        resourceKind: claim.resourceRef?.startsWith('file:') ? 'file' : 'directory', ...(claim.scope ? { scope: claim.scope } : {}) } : null,
       gaps: classification.gaps,
       missingFields: classification.missingFields,
       evidenceRevision, observedAt: now(),

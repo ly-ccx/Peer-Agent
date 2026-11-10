@@ -9,6 +9,8 @@ import { createSessionResourceContention } from './session-resource-contention.m
 import { executionIdentity, sameExecution } from './session-control-kernel.mjs';
 import { createSessionCancellation } from './session-cancellation.mjs';
 import { createExecutionObligationService } from './execution-obligation.mjs';
+import { createUnknownOutcomeResolver } from './unknown-outcome-resolution.mjs';
+import { createUnknownOutcomeReconciler } from './unknown-outcome-reconciliation.mjs';
 import { localRecorderIdentity } from './execution-recorder.mjs';
 import { createSessionTakeover } from './session-takeover.mjs';
 import { takeoverBlocker } from './session-repair.mjs';
@@ -132,6 +134,7 @@ export function createSessionSupervisor({
   executionScheduler = goalRunner?.executionScheduler ?? null,
   isolationPlanner = goalRunner?.isolationPlanner ?? null,
   canManageWorkspace = () => true,
+  unknownOutcomePolicy = null,
   catalog = [],
   resolveModel = null,
   memoryStore = null,
@@ -257,8 +260,22 @@ export function createSessionSupervisor({
     return { executionClaimClosure: closure, retainedUnknowns: retained };
   }
 
+  // ADR 127 UO-06: the ask card and task detail see the policy tier and reconciliation verdict.
+  // These are advisory projections; they never enter evidenceRevision, a grant, or a receipt.
+  const unknownOutcomeResources = {
+    claimsFor: plan => (executionScheduler.resourceSnapshot() || []).filter(row => sameExecution(row.execution, executionIdentity(plan))),
+    reconciliationEvidenceFor: claimId => executionScheduler.reconciliationEvidenceFor(claimId),
+    closeClaim: (plan, closure) => executionScheduler.closeClaim(plan, closure),
+  };
+  const unknownOutcomeResolver = createUnknownOutcomeResolver({ resources: unknownOutcomeResources, readPolicy: unknownOutcomePolicy });
+  const unknownOutcomeReconciler = createUnknownOutcomeReconciler({
+    resources: { claimsFor: unknownOutcomeResources.claimsFor, recordReconciliation: evidence => executionScheduler.recordReconciliation(evidence) },
+    recorderIdentity: localRecorderIdentity,
+  });
+
   const obligations = createExecutionObligationService({
     plans: delegatedPlans, readControl: plan => sessionControl.read(plan), scheduler: executionScheduler, canManage: canManageWorkspace,
+    unknownOutcome: unknownOutcomeResolver,
     storeFor: workspaceId => workBudgetBinding(workspaceId)?.store, identity: localRecorderIdentity,
     writerEpochFor: workspaceId => workBudgetBinding(workspaceId)?.store?.writerEpoch?.(),
     onChanged: onObligationChanged,
@@ -1445,6 +1462,9 @@ export function createSessionSupervisor({
     deliveryFacts: id => readQuery.run(() => handoff.facts(id)),
     handleHandoffAnswer(input) { return exclusive(() => handoff.answer(input || {})); },
     inspectExecutionObligations: input => obligations.inspect(input || {}),
+    // ADR 127 UO-06 host seams: bounded probes and the policy-delegated gate, host-invoked only.
+    reconcileUnknownOutcome: (plan, input) => unknownOutcomeReconciler.reconcile(plan, input || {}),
+    resolveUnknownOutcomeBotVerified: (plan, input) => unknownOutcomeResolver.resolveBotVerified(plan, input || {}),
     listPendingObligationGrants: (workspaceId, parentConversationId) => ({ ok: true, grants: obligations.pendingGrants(workspaceId, parentConversationId) }),
     requestObligationAuthorization: input => obligations.requestAuthorization(input || {}),
     confirmObligationGrant: input => obligations.confirm(input || {}),
