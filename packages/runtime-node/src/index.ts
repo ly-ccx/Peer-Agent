@@ -656,6 +656,7 @@ export { resolveOpenCodeGoWire, resolveOpenCodeGoBaseUrl } from './model-channel
 export { shouldPauseForHostHandoff, isHostHandoffPause } from './project-agent/session-host-handoff.mjs';
 
 export { createWorkBudgetGuard, registerWorkBudget, DEFAULT_WORK_BUDGET } from './project-agent/work-budget.mjs';
+export { createUnknownOutcomeReconciler } from './project-agent/unknown-outcome-reconciliation.mjs';
 export { createLegacyCriterionRecovery } from './project-agent/criterion-recovery.mjs';
 
 export { agentMessagesForContext, createAgentCommunication } from './project-agent/agent-communication.mjs';
