@@ -1185,8 +1185,8 @@ export * from './resource-edit-execution.ts';
 
 export { decideFollowUp, type FollowUpOwner, type FollowUpReason, type FollowUpProjection } from './task-overview.ts';
 
-export type { SessionExecutionIdentity, StopBarrierReceipt, SessionControlOperation, ExecutionResourceBlocker, ExecutionClaimClosure, ExecutionResourceClaim, ExecutionResourceScope } from './session-control.ts';
-export { controlPhasesForOrigin, normalizeSessionExecutionIdentity } from './session-control.ts';
+export type { SessionExecutionIdentity, StopBarrierReceipt, SessionControlOperation, ExecutionResourceBlocker, ExecutionClaimClosure, ExecutionResourceClaim, ExecutionResourceScope, UnknownOutcomePolicy, UnknownOutcomePolicyTier, UnknownOutcomeResolution, UnknownOutcomeResolutionTier, ReconciliationEvidence, ReconciliationProbe, ReconciliationProbeKind, ReconciliationVerdict } from './session-control.ts';
+export { controlPhasesForOrigin, normalizeSessionExecutionIdentity, normalizeExecutionResourceScope } from './session-control.ts';
 export * from './input-prediction.ts';
 export * from './interactive-result.ts';
 export * from './interactive-verification.ts';

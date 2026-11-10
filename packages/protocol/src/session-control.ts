@@ -1,5 +1,20 @@
 /** Host-issued control and resource facts. None of these receipts grants tool permission. */
-export interface ExecutionResourceScope { readonly kind: 'directory'; readonly path: string }
+/** Dispatch-declared protection scopes (ADR 127). Only 'directory' is produced today; the narrower kinds arrive with claim scope convergence. */
+export type ExecutionResourceScope =
+  | { readonly kind: 'directory'; readonly path: string }
+  | { readonly kind: 'file'; readonly path: string }
+  | { readonly kind: 'git_ref'; readonly ref: string }
+  | { readonly kind: 'remote_object'; readonly ref: string };
+export function normalizeExecutionResourceScope(raw: unknown): ExecutionResourceScope | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw) || ![Object.prototype, null].includes(Object.getPrototypeOf(raw))) return;
+  const value = raw as Record<string, unknown>;
+  if (Object.keys(value).length !== 2) return;
+  if ((value.kind === 'directory' || value.kind === 'file') && typeof value.path === 'string'
+    && value.path.length > 0 && value.path.length <= 2048 && !/[\u0000-\u001f]/.test(value.path)) return { kind: value.kind, path: value.path };
+  if ((value.kind === 'git_ref' || value.kind === 'remote_object') && typeof value.ref === 'string'
+    && /^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,511}$/.test(value.ref) && !value.ref.includes('..')) return { kind: value.kind, ref: value.ref };
+  return;
+}
 export interface SessionExecutionIdentity {
   readonly planId: string;
   readonly sessionId: string;
@@ -58,7 +73,7 @@ export interface SessionControlOperation {
 }
 export type ExecutionResourceBlocker =
   | { readonly kind: 'owner'; readonly code: 'resource_busy'; readonly resourceRef: string; readonly claimId: string; readonly sessionId: string; readonly title: string }
-  | { readonly kind: 'protection'; readonly nextAction?: 'reconcile_execution_outcome' | 'confirm_execution_stopped' | 'close_execution_claim'; readonly code: 'execution_outcome_unknown' | 'execution_stop_unconfirmed'; readonly resourceRef: string; readonly claimId: string; readonly sessionId?: string; readonly operationId?: string; readonly evidenceCalls: readonly string[]; readonly closeClaimAvailable?: boolean }
+  | { readonly kind: 'protection'; readonly nextAction?: 'reconcile_execution_outcome' | 'confirm_execution_stopped' | 'close_execution_claim'; readonly code: 'execution_outcome_unknown' | 'execution_stop_unconfirmed'; readonly resourceRef: string; readonly claimId: string; readonly sessionId?: string; readonly operationId?: string; readonly evidenceCalls: readonly string[]; readonly closeClaimAvailable?: boolean; readonly scope?: ExecutionResourceScope; readonly unknownOutcomePolicy?: UnknownOutcomePolicyTier; readonly reconciliationAvailable?: boolean; readonly resolutionTier?: UnknownOutcomeResolutionTier }
   | { readonly kind: 'recovery'; readonly nextAction?: 'inspect_resource_recovery'; readonly code: string; readonly resourceRef?: string };
 /** A user-authorized end to one resource claim. It is not a stop receipt or a tool result. */
 export interface ExecutionClaimClosure {
@@ -73,6 +88,46 @@ export interface ExecutionClaimClosure {
   readonly scope: 'managed_execution';
   readonly at: string;
 }
+/** ADR 127: user-delegated closure policy for unknown outcomes. Bound to the bot subject (ADR 101); the model reads it but can never write it. */
+export type UnknownOutcomePolicyTier = 'ask' | 'bot_verified';
+export interface UnknownOutcomePolicy {
+  readonly workspaceId: string;
+  readonly agentConversationId: string;
+  readonly tier: UnknownOutcomePolicyTier;
+  readonly policyId: string;
+  readonly revision: number;
+  readonly delegatedAt?: string;
+  readonly updatedAt: string;
+}
+export type ReconciliationVerdict = 'no_effect_observed' | 'effect_observed' | 'inconclusive' | 'unfenced_external';
+export type ReconciliationProbeKind = 'process' | 'handle' | 'workspace' | 'git' | 'receipt';
+export interface ReconciliationProbe { readonly kind: ReconciliationProbeKind; readonly ref: string; readonly result: string; readonly observedAt: string; readonly digest: string }
+/** Host-computed probe bundle. Its verdict can end occupancy at most; it never turns an unknown call into a success. */
+export interface ReconciliationEvidence {
+  readonly execution: SessionExecutionIdentity;
+  readonly claimId: string;
+  readonly claimRevision: number;
+  readonly scope: ExecutionResourceScope;
+  readonly probes: readonly ReconciliationProbe[];
+  readonly verdict: ReconciliationVerdict;
+  readonly evidenceDigest: string;
+}
+export type UnknownOutcomeResolutionTier = 'user_confirmed' | 'bot_verified';
+/** Ends occupancy for one claim (ADR 127). Unknown calls stay retained; this is not a tool result, a stop receipt or a success claim. */
+export interface UnknownOutcomeResolution {
+  readonly resolutionId: string;
+  readonly claimId: string;
+  readonly claimRevision: number;
+  readonly execution: SessionExecutionIdentity;
+  readonly scope: ExecutionResourceScope;
+  readonly verdict: ReconciliationVerdict;
+  readonly evidenceDigest: string;
+  readonly tier: UnknownOutcomeResolutionTier;
+  readonly policyRef?: string;
+  readonly authorityRef: string;
+  readonly unknownCalls: readonly string[];
+  readonly at: string;
+}
 export interface ExecutionResourceClaim {
   readonly claimId: string;
   readonly resourceRef: string;
@@ -83,6 +138,8 @@ export interface ExecutionResourceClaim {
   readonly revision: number;
   readonly handles?: Readonly<Record<string, { readonly handleId: string; readonly toolCallId: string; readonly state: 'active' | 'ended' | 'unknown'; readonly completedAt?: string }>>;
   readonly evidenceCalls: readonly string[];
+  /** Absent means the legacy directory scope derived from resourceRef; dispatch-declared scopes arrive with claim scope convergence. */
+  readonly scope?: ExecutionResourceScope;
 }
 
 /** Feed the existing lifecycle projector; a stale compatibility mirror cannot revive an old stop. */

@@ -57,6 +57,10 @@ function resourceSet(plan, scopes = []) {
 }
 const conflicts = (a, b) => a === b || a.startsWith(b.endsWith(path.sep) ? b : `${b}${path.sep}`)
   || b.startsWith(a.endsWith(path.sep) ? a : `${a}${path.sep}`);
+function claimScope(claim) {
+  return typeof claim.resourceRef === 'string' && claim.resourceRef.startsWith('directory:')
+    ? { kind: 'directory', path: claim.resourceRef.slice('directory:'.length) } : undefined;
+}
 
 /** Device-local arbitration. A project lease alone cannot serialize directory aliases across projects. */
 export function createExecutionResources({ rootDir, now = () => new Date().toISOString() } = {}) {
@@ -81,7 +85,7 @@ export function createExecutionResources({ rootDir, now = () => new Date().toISO
     try {
       connection.exec('PRAGMA busy_timeout=100; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
       const version = connection.prepare('PRAGMA user_version').get().user_version;
-      if (version > 2) throw new Error('execution_resource_schema_unsupported');
+      if (version > 3) throw new Error('execution_resource_schema_unsupported');
       connection.exec('CREATE TABLE IF NOT EXISTS claims (id TEXT PRIMARY KEY, planId TEXT NOT NULL, sessionId TEXT NOT NULL, workspaceId TEXT NOT NULL, resource TEXT NOT NULL, epoch TEXT NOT NULL, state TEXT NOT NULL, revision INTEGER NOT NULL, value TEXT NOT NULL);'
         + 'CREATE INDEX IF NOT EXISTS claims_resource ON claims(resource,state);'
         + 'CREATE TABLE IF NOT EXISTS receipts (id TEXT PRIMARY KEY,value TEXT NOT NULL);'
@@ -89,8 +93,14 @@ export function createExecutionResources({ rootDir, now = () => new Date().toISO
         + 'CREATE TABLE IF NOT EXISTS closures (id TEXT PRIMARY KEY, planId TEXT NOT NULL, sessionId TEXT NOT NULL, epoch TEXT NOT NULL, resource TEXT NOT NULL, value TEXT NOT NULL);'
         + 'CREATE INDEX IF NOT EXISTS closures_execution ON closures(planId,sessionId,epoch);'
         + 'CREATE TABLE IF NOT EXISTS retained_unknowns (id TEXT PRIMARY KEY, value TEXT NOT NULL);'
-        + 'CREATE TABLE IF NOT EXISTS resource_events (revision INTEGER PRIMARY KEY AUTOINCREMENT,resource TEXT NOT NULL,operationId TEXT NOT NULL);');
-      if (version < 2) connection.exec('PRAGMA user_version=2;');
+        + 'CREATE TABLE IF NOT EXISTS resource_events (revision INTEGER PRIMARY KEY AUTOINCREMENT,resource TEXT NOT NULL,operationId TEXT NOT NULL);'
+        // ADR 127 UO-01: unknown-outcome reconciliation evidence and resolution receipts.
+        // Writers arrive with UO-03/UO-04; a schema-3 file must stay unreadable to older hosts.
+        + 'CREATE TABLE IF NOT EXISTS reconciliation_evidence (id TEXT PRIMARY KEY, claimId TEXT NOT NULL, value TEXT NOT NULL);'
+        + 'CREATE INDEX IF NOT EXISTS reconciliation_evidence_claim ON reconciliation_evidence(claimId);'
+        + 'CREATE TABLE IF NOT EXISTS resolutions (id TEXT PRIMARY KEY, claimId TEXT NOT NULL, value TEXT NOT NULL);'
+        + 'CREATE INDEX IF NOT EXISTS resolutions_claim ON resolutions(claimId);');
+      if (version < 3) connection.exec('PRAGMA user_version=3;');
       db = connection; if (rootDir) fileIdentity = statSync(file).ino;
       return db;
     } catch (error) { connection.close(); throw error; }
@@ -120,7 +130,7 @@ export function createExecutionResources({ rootDir, now = () => new Date().toISO
     return ['draining', 'reconciling'].includes(claim.state)
       ? { kind: 'protection', nextAction: claim.evidenceCalls.length ? 'reconcile_execution_outcome' : 'confirm_execution_stopped', code: claim.evidenceCalls.length ? 'execution_outcome_unknown' : 'execution_stop_unconfirmed',
         resourceRef: claim.resourceRef, claimId: claim.claimId, sessionId: claim.execution.sessionId, operationId: claim.operationId, evidenceCalls: claim.evidenceCalls,
-        closeClaimAvailable: !Object.values(claim.handles || {}).some(handle => handle.state !== 'ended') }
+        closeClaimAvailable: !Object.values(claim.handles || {}).some(handle => handle.state !== 'ended'), scope: claim.scope || claimScope(claim) }
       : { kind: 'owner', code: 'resource_busy', resourceRef: claim.resourceRef, claimId: claim.claimId,
         sessionId: claim.execution.sessionId, title: claim.title };
   }
@@ -295,6 +305,22 @@ export function createExecutionResources({ rootDir, now = () => new Date().toISO
       const execution = executionIdentity(plan);
       return open().prepare('SELECT value FROM retained_unknowns ORDER BY id').all()
         .map(row => JSON.parse(row.value)).filter(row => sameExecution(row.execution, execution));
+    },
+    /** ADR 127 UO-01 readers. Writers arrive with UO-03 (evidence) and UO-04 (resolutions). */
+    resolutionsFor(plan) {
+      const execution = executionIdentity(plan);
+      return open().prepare('SELECT value FROM resolutions ORDER BY id').all()
+        .map(row => JSON.parse(row.value)).filter(row => sameExecution(row.execution, execution));
+    },
+    resolutionFor(claimId) {
+      if (typeof claimId !== 'string' || !claimId) return undefined;
+      const row = open().prepare('SELECT value FROM resolutions WHERE claimId=? ORDER BY id').get(claimId);
+      return row ? JSON.parse(row.value) : undefined;
+    },
+    reconciliationEvidenceFor(claimId) {
+      if (typeof claimId !== 'string' || !claimId) return [];
+      return open().prepare('SELECT value FROM reconciliation_evidence WHERE claimId=? ORDER BY id').all(claimId)
+        .map(row => JSON.parse(row.value));
     },
     markHandle(plan, handle) {
       if (plan.delegationOrigin?.readOnly === true) return;

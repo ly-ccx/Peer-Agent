@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from '../sqlite/connection.mjs';
 import { createExecutionResources, executionProtection, unsettledExecution } from './execution-resources.mjs';
 import { executionIdentity } from './session-control-kernel.mjs';
 import { beginExecutionAttempt } from './session-facts.mjs';
@@ -296,4 +297,34 @@ test('a stop receipt predating a new unknown call cannot release its directory o
   first.reconcile([a], () => 'host', () => true);
   assert.equal(first.inspect(plan('next', directory)).allowed, false);
   assert.deepEqual(first.claimsFor(a)[0].evidenceCalls, ['new-unknown']);
+});
+
+test('the unknown-outcome readers start empty on the schema-3 ledger', t => {
+  const { directory, first } = fixture(t), a = plan('uo-reader', directory);
+  first.reserve(a, 'host-a');
+  const claim = first.claimsFor(a)[0];
+  assert.deepEqual(first.resolutionsFor(a), []);
+  assert.equal(first.resolutionFor(claim.claimId), undefined);
+  assert.deepEqual(first.reconciliationEvidenceFor(claim.claimId), []);
+});
+
+test('a protection blocker carries its directory scope for closure surfaces', t => {
+  const { directory, first } = fixture(t), a = plan('uo-scope', directory);
+  first.reserve(a, 'host-a');
+  first.settle(a, stopped(first, a, 'withdraw', ['tool-1']), 'host-a');
+  const decision = first.inspect(plan('uo-other', directory), 'host-b');
+  assert.equal(decision.blocker.code, 'execution_outcome_unknown');
+  assert.deepEqual(decision.blocker.scope, { kind: 'directory', path: decision.blocker.resourceRef.slice('directory:'.length) });
+});
+
+test('a ledger written by a newer schema is refused instead of partially read', t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'peer-resource-schema-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const runtime = path.join(root, 'runtime');
+  mkdirSync(runtime, { recursive: true });
+  const future = new DatabaseSync(path.join(runtime, 'execution-resources.sqlite'));
+  future.exec('PRAGMA user_version=4;');
+  future.close();
+  // The store opens lazily; reading any fact must hit the schema gate first.
+  assert.throws(() => createExecutionResources({ rootDir: runtime }).revision(), /execution_resource_schema_unsupported/);
 });

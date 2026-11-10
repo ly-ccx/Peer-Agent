@@ -39,6 +39,8 @@ export interface DelegationOrigin {
   readonly executionControl?: import('./session-control.ts').SessionControlOperation;
   /** Host receipt for a user-authorized claim closure. It is not a stop receipt. */
   readonly executionClaimClosure?: import('./session-control.ts').ExecutionClaimClosure;
+  /** Host receipt for an unknown-outcome resolution (ADR 127). It ends occupancy only; not a stop receipt or a tool result. */
+  readonly unknownOutcomeResolution?: import('./session-control.ts').UnknownOutcomeResolution;
   readonly takeover?: { operationId: string; phase: 'stopping' | 'completed' | 'superseded' | 'rejected'; supersededBy?: string; text: string; binding: import('./delegation-coordination.ts').CoordinationExecutionBinding; requestedAt: string; completedAt?: string; repair?: boolean };
   readonly coordinationBinding?: import('./delegation-coordination.ts').CoordinationExecutionBinding;
   readonly cancellation?: { readonly operationId: string; readonly reason: string; readonly phase: 'stopping' | 'awaiting_outcome' | 'completed'; readonly requestedAt: string; readonly completedAt?: string; readonly evidenceCalls?: readonly string[]; readonly preserveArtifacts?: boolean;
@@ -70,6 +72,8 @@ export interface DelegationOrigin {
 export interface SessionQueueFacts {
   readonly resourceBlocker?: import('./session-control.ts').ExecutionResourceBlocker;
   readonly executionClaimClosure?: import('./session-control.ts').ExecutionClaimClosure;
+  readonly unknownOutcomePolicy?: import('./session-control.ts').UnknownOutcomePolicyTier;
+  readonly unknownOutcomeResolution?: import('./session-control.ts').UnknownOutcomeResolution;
   readonly retainedUnknowns?: readonly { readonly closureId: string; readonly unknownCalls: readonly string[]; readonly at: string; readonly proof: 'verified_dead' | 'legacy_user_confirmed' }[];
   readonly queuedBehind?: readonly { readonly sessionId: string; readonly title: string }[];
   readonly queueReason?: 'dependencies' | 'dependency_missing' | 'dependency_failed' | 'read_slot' | 'write_slot' | 'disk_space' | 'isolation_failed' | 'resource_protection' | 'resource_recovery' | null;
@@ -547,6 +551,8 @@ export function projectWorkSession(
     origin: conversationMeta.origin,
     ...(conversationMeta.resourceBlocker ? { resourceBlocker: conversationMeta.resourceBlocker } : {}),
     ...(conversationMeta.executionClaimClosure ? { executionClaimClosure: conversationMeta.executionClaimClosure } : {}),
+    ...(conversationMeta.unknownOutcomePolicy ? { unknownOutcomePolicy: conversationMeta.unknownOutcomePolicy } : {}),
+    ...(conversationMeta.unknownOutcomeResolution ? { unknownOutcomeResolution: conversationMeta.unknownOutcomeResolution } : {}),
     ...(conversationMeta.retainedUnknowns?.length ? { retainedUnknowns: conversationMeta.retainedUnknowns } : {}),
     ...(conversationMeta.queuedBehind ? { queuedBehind: conversationMeta.queuedBehind.map(item => ({ ...item })) } : {}),
     ...(conversationMeta.queueReason ? { queueReason: conversationMeta.queueReason } : {}),
