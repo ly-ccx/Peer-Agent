@@ -782,6 +782,7 @@ export type TranslationKey =
   | 'projectAgent.drawer.resourceRecovery'
   | 'projectAgent.drawer.resourceBusy'
   | 'projectAgent.drawer.resourceScope'
+  | 'projectAgent.drawer.resourceScopeFile'
   | 'projectAgent.drawer.resourceSource'
   | 'projectAgent.drawer.diskSpace'
   | 'projectAgent.drawer.isolationFailed'
@@ -2513,6 +2514,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.resourceRecovery': '排队中：正在核对本机资源状态',
     'projectAgent.drawer.resourceBusy': '排队中：另一任务正在使用所需目录',
     'projectAgent.drawer.resourceScope': '涉及目录',
+    'projectAgent.drawer.resourceScopeFile': '涉及文件',
     'projectAgent.drawer.resourceSource': '查看此前任务',
     'projectAgent.drawer.diskSpace': '排队中：可用磁盘不足 2 GB',
     'projectAgent.drawer.isolationFailed': '排队中：隔离工作区暂不可用',
@@ -3984,6 +3986,7 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.resourceRecovery': 'Queued: reconciling local execution resources',
     'projectAgent.drawer.resourceBusy': 'Queued: another task is using the required directory',
     'projectAgent.drawer.resourceScope': 'Affected directory',
+    'projectAgent.drawer.resourceScopeFile': 'Affected file',
     'projectAgent.drawer.resourceSource': 'View previous task',
     'projectAgent.drawer.diskSpace': 'Queued: less than 2 GB of free disk space',
     'projectAgent.drawer.isolationFailed': 'Queued: isolated workspace is unavailable',

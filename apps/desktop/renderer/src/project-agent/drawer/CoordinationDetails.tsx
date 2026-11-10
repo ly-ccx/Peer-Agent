@@ -42,7 +42,7 @@ export function CoordinationDetails({session,i18n,onSelect,workspaceId}: {readon
       <p>{i18n.t(blocker.kind === 'protection' ? blocker.code === 'execution_outcome_unknown'
         ? 'projectAgent.drawer.resourceOutcomeUnknown' : 'projectAgent.drawer.resourceStopUnconfirmed'
         : blocker.kind === 'recovery' ? 'projectAgent.drawer.resourceRecovery' : 'projectAgent.drawer.resourceBusy')}</p>
-      {blocker.resourceRef ? <dl><div><dt>{i18n.t('projectAgent.drawer.resourceScope')}</dt><dd>{blocker.resourceRef.replace(/^directory:/, '')}</dd></div></dl> : null}
+      {blocker.resourceRef ? <dl><div><dt>{i18n.t(blocker.kind === 'protection' && blocker.scope?.kind === 'file' ? 'projectAgent.drawer.resourceScopeFile' : 'projectAgent.drawer.resourceScope')}</dt><dd>{blocker.resourceRef.replace(/^(directory|file):/, '')}</dd></div></dl> : null}
       {blocker.kind !== 'recovery' && blocker.sessionId && blocker.sessionId !== session.sessionId && onSelect
         ? <button type="button" className="bot-task-conversation" onClick={() => onSelect(blocker.sessionId!)}>
           {i18n.t('projectAgent.drawer.resourceSource')}<PeerIcon name="arrowUpRight" size={13} />

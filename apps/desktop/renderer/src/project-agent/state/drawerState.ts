@@ -4,6 +4,7 @@
  */
 
 import type { ExecutionClaimClosure, ExecutionResourceBlocker, CoordinationSessionFacts, SessionVerificationDetail, VerificationProgress } from '@peer-agent/protocol';
+import { normalizeExecutionResourceScope } from '@peer-agent/protocol';
 import type { I18nRuntime } from '@peer-agent/i18n';
 
 export const DRAWER_WIDTH = 380;
@@ -466,10 +467,15 @@ function readResourceBlocker(raw: unknown): ExecutionResourceBlocker | undefined
   if (!resourceRef || !claimId) return undefined;
   if (row.kind === 'owner' && row.code === 'resource_busy' && readString(row.sessionId)) return {
     kind: 'owner', code: 'resource_busy', resourceRef, claimId, sessionId: readString(row.sessionId), title: readString(row.title) };
-  if (row.kind === 'protection' && (row.code === 'execution_outcome_unknown' || row.code === 'execution_stop_unconfirmed')) return {
-    kind: 'protection', code: row.code, resourceRef, claimId, sessionId: readString(row.sessionId) || undefined,
-    nextAction: row.code === 'execution_outcome_unknown' ? 'reconcile_execution_outcome' : 'confirm_execution_stopped',
-    operationId: readString(row.operationId) || undefined, evidenceCalls: readStringList(row.evidenceCalls),
-    closeClaimAvailable: row.closeClaimAvailable === true };
+  if (row.kind === 'protection' && (row.code === 'execution_outcome_unknown' || row.code === 'execution_stop_unconfirmed')) {
+    // The declared scope names what an unknown outcome actually protects (ADR 127 §5.7).
+    // An unparseable scope is dropped, never guessed: the resourceRef still carries the raw identity.
+    const scope = normalizeExecutionResourceScope(row.scope);
+    return {
+      kind: 'protection', code: row.code, resourceRef, claimId, sessionId: readString(row.sessionId) || undefined,
+      nextAction: row.code === 'execution_outcome_unknown' ? 'reconcile_execution_outcome' : 'confirm_execution_stopped',
+      operationId: readString(row.operationId) || undefined, evidenceCalls: readStringList(row.evidenceCalls),
+      closeClaimAvailable: row.closeClaimAvailable === true, ...(scope ? { scope } : {}) };
+  }
   return undefined;
 }

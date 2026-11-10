@@ -59,3 +59,16 @@ test('a live blocker still renders its own state without a closure block', () =>
   assert.ok(body.includes('projectAgent.drawer.resourceOutcomeUnknown'), body);
   assert.equal(body.includes('projectAgent.drawer.claimClosed'), false);
 });
+
+test('a file-scoped protection blocker names the affected file, not the whole directory', () => {
+  const { CoordinationDetails } = load('./CoordinationDetails.tsx');
+  const blocker = { kind: 'protection', code: 'execution_outcome_unknown', resourceRef: 'file:/project/a.ts',
+    claimId: 'claim-1', sessionId: 's', evidenceCalls: ['call-1'], closeClaimAvailable: true,
+    scope: { kind: 'file', path: '/project/a.ts' } };
+  const tree = CoordinationDetails({ session: { resourceBlocker: blocker, sessionId: 's' }, i18n, workspaceId: 'w' });
+  const body = text(tree);
+  assert.ok(body.includes('projectAgent.drawer.resourceScopeFile'), body);
+  assert.ok(body.includes('/project/a.ts'), body);
+  assert.equal(body.includes('file:'), false, 'the raw prefix never reaches the reader');
+  assert.equal(body.includes('projectAgent.drawer.resourceScope'), true, 'no scope degrades to the directory label');
+});
