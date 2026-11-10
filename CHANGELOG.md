@@ -2,6 +2,25 @@
 
 All notable changes to Peer Agent are tracked here.
 
+## 0.1.0-rc.41 - 2026-11-10
+
+### 新功能
+
+- ADR 127 未知执行结果链路全量落地：派发回执（稳定 dispatch id + 分类结算）、宿主有界对账探针（进程死亡证明 / 句柄 / Git 可见变化）、`bot_verified` 委托收口策略与回执、文件级声明范围收敛（同目录新任务可开工、被保护文件仍拒绝写入）、存量诊断与指标；崩溃重启不重复、不复活已收口记录。
+- 询问卡显示宿主核对结论并提供「今后由主 Bot 核对后直接收口」一键委托；任务详情指名被保护的具体文件；Bot 设置新增「未知结果收口」两档策略行。
+- 资源工作区一级目录标签（ADR 125，#309）；叙述与交付答案分离（ADR 87，#308）。
+
+### 修复与改进
+
+- 同一轮回复不再叠出第二个空头像（#307）；重复改写的回复只显示一次；禁用工具栏按钮不再旋转；裸启动器标签隐藏头部导航（#310）。
+- 询问卡释放按钮仅在宿主可闭包时出现并展示后果；崩溃窗口遗留镜像闭包正确结算（#306）；跟进退役后释放仍可用。
+
+### New features and fixes (English)
+
+- Full ADR 127 unknown-outcome chain: durable dispatch receipts with classification, bounded host reconciliation probes, the bot-verified delegated closure policy and receipts, file-level declared-scope convergence, and legacy diagnostics; closures survive restarts exactly once.
+- Ask cards show the host reconciliation verdict with a one-click delegation entry; task details name the protected file; a per-bot unknown-outcome policy setting ships in bot settings.
+- Resource workspace directory tabs (ADR 125, #309); narration/delivery split (ADR 87, #308); reply avatar/restatement and toolbar fixes (#307, #310).
+
 ## 0.1.0-rc.40 - 2026-11-08
 
 ### 修复与改进
