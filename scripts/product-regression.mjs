@@ -107,79 +107,105 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
   if (!machine.startupSurface?.passed || machine.startupSurface.cases?.length !== 4 || !machine.startupSurface.entersBotShell || !machine.startupSurface.failureExplained || !machine.startupSurface.reducedMotion) throw new Error('Full-window startup regression failed');
   if (machine.windowMaterial?.settingsCases?.length !== 5 || !machine.windowMaterial.settingsCases.every(row => row.fits && row.viewportAligned && row.navVisible)) throw new Error('Floating settings regression failed');
   if (!machine.windowMaterial?.passed || machine.windowMaterial.cases?.length !== 4 || !machine.windowMaterial.reducedTransparency) throw new Error('Window material regression failed');
-  if (!machine.sharedUiConventions?.keyboardDisclosure || !machine.sharedUiConventions?.svgSelect
-    || !machine.sharedUiConventions?.rectangularPreviews || !machine.sharedUiConventions?.keyboardImagePreview
-    || !sharedUiShots.every(scene => machine.sharedUiConventions?.cases?.some(item => item.scene === scene))
-    || !machine.ok || machine.pageErrors?.length || machine.mainAuthorizationErrors?.length
-    || !machine.botMessageColors?.identitySwitch || !machine.botMessageColors?.savedColorApplied
-    || machine.botMessageColors?.cases?.length !== 32
-    || !machine.botMessageColors.cases.every(sample => sample.bodyContrast >= 4.5 && sample.quoteContrast >= 4.5 && sample.fits)
-    || !machine.choiceSendMotion?.focusRestored || machine.choiceSendMotion?.cases?.length !== 3
-    || !machine.choiceSendMotion.cases.every(sample => sample.continuous && sample.oneReceipt)
-    || !machine.updaterMinimize?.errorRecoverable || !machine.updaterMinimize?.fastCompletion
-    || machine.updaterMinimize?.cases?.length !== 3 || !machine.updaterMinimize.cases.every(sample => sample.passed)
-    || !['grouping', 'search', 'preview', 'keyboard', 'errorRecovery', 'continuation', 'animations', 'reducedMotion'].every(check => machine.historyRegression?.[check] === true)
-    || !['anchored', 'scrollTracking', 'offscreenDismissed', 'keyboard', 'mouseClick', 'draftPreserved', 'bodyBoundary', 'widthReflow', 'dockedFits'].every(check => machine.selectionQuote?.[check] === true)
-    || ![1280, 760].every(width => ['dark', 'light'].every(appearance => machine.shortReplyQuote?.some(item =>
-      item.width === width && item.appearance === appearance && item.inside && item.stacked && item.compact && item.fits)))
-    || !['multilineScroll', 'widthReflow', 'attachmentFits', 'keyboard'].every(check => machine.composerLayout?.[check] === true)
-    || ![1280, 760].every(width => ['dark', 'light'].every(appearance => machine.composerLayout?.cases?.some(item =>
-      item.width === width && item.appearance === appearance && item.fits && item.grouped && item.centered && item.distinctSurface && item.sendFilled)))
-    || !['incrementalParagraphs', 'stableParagraphs', 'narrationOutsideProcess', 'retainedAfterCompletion', 'retainedFromHistory', 'separateToolUpdates', 'noPrivateThinking', 'reducedMotion', 'messageBubbles', 'detailsAtEnd', 'detailsCollapsed', 'detailsKeyboard', 'detailsInDrawer', 'detailsFocusRestored', 'detailsReadingPosition']
-      .every(check => machine.conversationFlow?.[check] === true)
-    || !['staleActionExplained', 'disappearedCardRetired', 'separateCompletionStage', 'fullReportInDrawer', 'keyboard', 'narrowFits', 'retryAfterSavedReview'].every(check => machine.completionReview?.[check] === true)
-    || !['subsecond', 'seconds', 'persisted', 'unknownHidden', 'narrowFits'].every(check => machine.processTiming?.[check] === true)
-    || !['reasonVisible', 'diagnosticInDrawer', 'retrySuppressed', 'limitVisible', 'narrowFits'].every(check => machine.budgetFailure?.[check] === true)
-    || !['publicProgressRetained', 'bubbleSpacing', 'reservationTruth', 'resolvedReservationRetired', 'unknownHasNoReplay', 'checkpointHasNoReplay'].every(check => machine.replyRecovery?.[check] === true)
-    || !['missing-checkpoint', 'scheduled', 'exhausted', 'authentication', 'unknown', 'resolved', 'no-progress', 'child-running', 'historical', 'paused', 'cancelled', 'budget-unknown', 'budget-ready', 'budget-migrating', 'budget-reserved', 'budget-available'].every(state => [[1280, 'dark'], [760, 'light']].every(([width, appearance]) =>
+  const machineGateFailures = [];
+  if (!machine.sharedUiConventions?.keyboardDisclosure) machineGateFailures.push("!machine.sharedUiConventions?.keyboardDisclosure");
+  if (!machine.sharedUiConventions?.svgSelect) machineGateFailures.push("!machine.sharedUiConventions?.svgSelect");
+  if (!machine.sharedUiConventions?.rectangularPreviews) machineGateFailures.push("!machine.sharedUiConventions?.rectangularPreviews");
+  if (!machine.sharedUiConventions?.keyboardImagePreview) machineGateFailures.push("!machine.sharedUiConventions?.keyboardImagePreview");
+  if (!['diagnostics', 'appearance', 'automation-list', 'automation-receipt', 'automation-editor', 'classic-chat', 'classic-image-lightbox', 'classic-artifacts', 'classic-diff']
+      .every(scene => machine.sharedUiConventions?.cases?.some(item => item.scene === scene))) machineGateFailures.push("!sharedUiShots.every(scene => machine.sharedUiConventions?.cases?.some");
+  if (!machine.ok) machineGateFailures.push("!machine.ok");
+  if (machine.pageErrors?.length) machineGateFailures.push("machine.pageErrors?.length");
+  if (machine.mainAuthorizationErrors?.length) machineGateFailures.push("machine.mainAuthorizationErrors?.length");
+  if (!machine.botMessageColors?.identitySwitch) machineGateFailures.push("!machine.botMessageColors?.identitySwitch");
+  if (!machine.botMessageColors?.savedColorApplied) machineGateFailures.push("!machine.botMessageColors?.savedColorApplied");
+  if (machine.botMessageColors?.cases?.length !== 32) machineGateFailures.push("machine.botMessageColors?.cases?.length !== 32");
+  if (!machine.botMessageColors.cases.every(sample => sample.bodyContrast >= 4.5 && sample.quoteContrast >= 4.5 && sample.fits)) machineGateFailures.push("!machine.botMessageColors.cases.every(sample => sample.bodyContrast >=");
+  if (!machine.choiceSendMotion?.focusRestored) machineGateFailures.push("!machine.choiceSendMotion?.focusRestored");
+  if (machine.choiceSendMotion?.cases?.length !== 3) machineGateFailures.push("machine.choiceSendMotion?.cases?.length !== 3");
+  if (!machine.choiceSendMotion.cases.every(sample => sample.continuous && sample.oneReceipt)) machineGateFailures.push("!machine.choiceSendMotion.cases.every(sample => sample.continuous && s");
+  if (!machine.updaterMinimize?.errorRecoverable) machineGateFailures.push("!machine.updaterMinimize?.errorRecoverable");
+  if (!machine.updaterMinimize?.fastCompletion) machineGateFailures.push("!machine.updaterMinimize?.fastCompletion");
+  if (machine.updaterMinimize?.cases?.length !== 3) machineGateFailures.push("machine.updaterMinimize?.cases?.length !== 3");
+  if (!machine.updaterMinimize.cases.every(sample => sample.passed)) machineGateFailures.push("!machine.updaterMinimize.cases.every(sample => sample.passed)");
+  if (!['grouping', 'search', 'preview', 'keyboard', 'errorRecovery', 'continuation', 'animations', 'reducedMotion'].every(check => machine.historyRegression?.[check] === true)) machineGateFailures.push("!['grouping', 'search', 'preview', 'keyboard', 'errorRecovery', 'conti");
+  if (!['anchored', 'scrollTracking', 'offscreenDismissed', 'keyboard', 'mouseClick', 'draftPreserved', 'bodyBoundary', 'widthReflow', 'dockedFits'].every(check => machine.selectionQuote?.[check] === true)) machineGateFailures.push("!['anchored', 'scrollTracking', 'offscreenDismissed', 'keyboard', 'mou");
+  if (![1280, 760].every(width => ['dark', 'light'].every(appearance => machine.shortReplyQuote?.some(item =>
+      item.width === width && item.appearance === appearance && item.inside && item.stacked && item.compact && item.fits)))) machineGateFailures.push("![1280, 760].every(width => ['dark', 'light'].every(appearance => mach");
+  if (!['multilineScroll', 'widthReflow', 'attachmentFits', 'keyboard'].every(check => machine.composerLayout?.[check] === true)) machineGateFailures.push("!['multilineScroll', 'widthReflow', 'attachmentFits', 'keyboard'].ever");
+  if (![1280, 760].every(width => ['dark', 'light'].every(appearance => machine.composerLayout?.cases?.some(item =>
+      item.width === width && item.appearance === appearance && item.fits && item.grouped && item.centered && item.distinctSurface && item.sendFilled)))) machineGateFailures.push("![1280, 760].every(width => ['dark', 'light'].every(appearance => mach");
+  if (!['incrementalParagraphs', 'stableParagraphs', 'narrationOutsideProcess', 'retainedAfterCompletion', 'retainedFromHistory', 'separateToolUpdates', 'noPrivateThinking', 'reducedMotion', 'messageBubbles', 'detailsAtEnd', 'detailsCollapsed', 'detailsKeyboard', 'detailsInDrawer', 'detailsFocusRestored', 'detailsReadingPosition']
+      .every(check => machine.conversationFlow?.[check] === true)) machineGateFailures.push("!['incrementalParagraphs', 'stableParagraphs', 'narrationOutsideProces");
+  if (!['staleActionExplained', 'disappearedCardRetired', 'separateCompletionStage', 'fullReportInDrawer', 'keyboard', 'narrowFits', 'retryAfterSavedReview'].every(check => machine.completionReview?.[check] === true)) machineGateFailures.push("!['staleActionExplained', 'disappearedCardRetired', 'separateCompletio");
+  if (!['subsecond', 'seconds', 'persisted', 'unknownHidden', 'narrowFits'].every(check => machine.processTiming?.[check] === true)) machineGateFailures.push("!['subsecond', 'seconds', 'persisted', 'unknownHidden', 'narrowFits'].");
+  if (!['reasonVisible', 'diagnosticInDrawer', 'retrySuppressed', 'limitVisible', 'narrowFits'].every(check => machine.budgetFailure?.[check] === true)) machineGateFailures.push("!['reasonVisible', 'diagnosticInDrawer', 'retrySuppressed', 'limitVisi");
+  if (!['publicProgressRetained', 'bubbleSpacing', 'reservationTruth', 'resolvedReservationRetired', 'unknownHasNoReplay', 'checkpointHasNoReplay'].every(check => machine.replyRecovery?.[check] === true)) machineGateFailures.push("!['publicProgressRetained', 'bubbleSpacing', 'reservationTruth', 'reso");
+  if (!['missing-checkpoint', 'scheduled', 'exhausted', 'authentication', 'unknown', 'resolved', 'no-progress', 'child-running', 'historical', 'paused', 'cancelled', 'budget-unknown', 'budget-ready', 'budget-migrating', 'budget-reserved', 'budget-available'].every(state => [[1280, 'dark'], [760, 'light']].every(([width, appearance]) =>
       machine.replyRecovery?.cases?.some(item => item.state === state && item.width === width && item.appearance === appearance
-        && item.exactCopy && item.diagnosticsInDrawer && item.fits && item.retryVisible === ['exhausted', 'authentication', 'no-progress', 'child-running', 'budget-ready', 'budget-available'].includes(state))))
-    || !['progressBeforeCompletion', 'stopVisible', 'completed', 'narrationInProcess', 'noPrivateThinking', 'narrowFits', 'nativeLoaded', 'persistedEventBatch'].every(check => machine.manualWakeRetry?.[check] === true)
-    || ![[1280, 'dark'], [760, 'light']].every(([width, appearance]) => machine.agentActivity?.cases?.some(item => item.width === width && item.appearance === appearance && item.named && item.svg && item.stableIdentity && item.taskDestination && item.humanWaitDistinct && item.verificationProgress && item.fits))
-    || machine.manualWakeRetry?.guardedCognitionDispatches !== 1
-    || !['controlledCognition', 'realCheckpointPort', 'nativePairLoaded', 'noAutomaticReplay'].every(check => machine.streamingFailureRecovery?.[check] === true)
-    || machine.streamingFailureRecovery?.readFileDispatches !== 1 || machine.streamingFailureRecovery?.explicitRetryTurns !== 1
-    || ![1600, 1280, 760].every(width => ['dark', 'light'].every(appearance => (width === 1280 ? [false, true] : [false]).every(docked =>
-      machine.pendingReplyLayout?.some(item => item.width === width && item.appearance === appearance && item.docked === docked && item.aligned))))
-    || !machine.taskDetails?.reportFromDetail || !machine.taskDetails?.metadataCollapsed
-    || !['reportReadFailureExplained', 'reportLoadingVisible', 'staleReportPreserved', 'reportRetryRecovers', 'nestedEscapeRetainsTask'].every(check => machine.taskDetails?.[check] === true)
-    || !machine.taskDetails?.primaryActionReturnsToBot || !machine.taskDetails?.listClassification || !machine.modelSwitch?.rollbackVerified
-    || !['singleReceipt', 'noTaskDuplicates', 'sourcesRetained', 'keyboard'].every(key => machine.userReceipt?.[key] === true)
-    || ![[1280, 'dark'], [760, 'light']].every(([width, appearance]) => machine.userReceipt?.cases?.some(sample => sample.width === width && sample.appearance === appearance && sample.fits && sample.singleReceipt && sample.sourcesRetained && sample.keyboard))
-    || !machine.replyDetailsEntry?.keyboard || !machine.replyDetailsEntry?.leftAligned || !machine.replyDetailsEntry?.unifiedActivity || !machine.replyDetailsEntry?.collapsedHeight
-    || !continuousReplyPresencePassed(machine.replyPresence)
-    || !completedReplyActionsPassed(machine.replyDetailsEntry)
-    || !['legacyHidden', 'botExplanation', 'historyKeyboard', 'staleHidden', 'retry', 'activeProgressOnly'].every(key => machine.taskVerification?.[key] === true)
-    || !['passed', 'failed', 'partial', 'unverifiable'].every(outcome => machine.taskVerification?.outcomes?.includes(outcome))
-    || !machine.verificationPresentation?.currentPhaseWins || !machine.verificationPresentation?.exitsToFollowUp || !machine.verificationPresentation?.technicalOwnedByBot
-    || !['panelTaskAction', 'keyboard', 'detailAction', 'sharedPending', 'failureRetry', 'failureVisible', 'latestReceipt', 'noDuplicate', 'unrelatedPreserved', 'narrowFits', 'focusReturned', 'deferredStopReceipt', 'focusPreserved'].every(check => machine.taskCancellation?.[check] === true)
-    || !['internalInstructionsHidden', 'relatedNoteLocated', 'followUpDraftFocused', 'existingDraftPreserved', 'concreteQuestionLocated', 'noAutomaticExecution']
-      .every(check => machine.taskDetails?.[check] === true)
-    || !['compactControls','persistedModel','persistedEffort','perBot','failedSaveRetained','keyboardTrigger','aligned','sentSelection'].every(check => machine.quickChatBots?.[check] === true)
-    || !machine.replyEvidenceReturn?.sameReply || !machine.replyEvidenceReturn?.focusInDetails
-    || !['namedSources','savedFile','exactHistory','missingBodyExplained','unknownRefDistinct','diagnosticsCollapsed','commandReadable','narrowFits'].every(check=>machine.evidenceSources?.[check]===true)
-    || !['hostOwner', 'botFollowUp', 'userRequest'].every(key => machine.workPanelOwnership?.[key] === true)
-    || !machine.delegatedWorkHandoff?.reply || !machine.delegatedWorkHandoff?.workPanel
-    || !machine.delegatedWorkHandoff?.noDirectHandling || !machine.delegatedWorkHandoff?.detailReturnsToBot
-    || !['dark', 'light'].every(appearance => machine.delegatedWorkHandoff?.hintChecks?.some(item =>
-      item.appearance === appearance && item.contrast >= 4.5 && item.fits && item.hintSize < item.progressSize))
-    || !machine.messageLayout?.completeText || !machine.messageLayout?.fitBounds
-    || !machine.messageLayout?.diagnosticsCollapsed || !machine.messageLayout?.detailsKeyboard
-    || !machine.fallbackVision?.openingAnimated || !machine.fallbackVision?.closingAnimated
-    || !machine.fallbackVision?.persisted || !machine.fallbackVision?.serviceManagement || !machine.fallbackVision?.keyboard
-    || ![1600, 1280, 760].every(width => ['dark', 'light'].every(appearance => [false, true].every(expanded =>
+        && item.exactCopy && item.diagnosticsInDrawer && item.fits && item.retryVisible === ['exhausted', 'authentication', 'no-progress', 'child-running', 'budget-ready', 'budget-available'].includes(state))))) machineGateFailures.push("!['missing-checkpoint', 'scheduled', 'exhausted', 'authentication', 'u");
+  if (!['progressBeforeCompletion', 'stopVisible', 'completed', 'narrationInProcess', 'noPrivateThinking', 'narrowFits', 'nativeLoaded', 'persistedEventBatch'].every(check => machine.manualWakeRetry?.[check] === true)) machineGateFailures.push("!['progressBeforeCompletion', 'stopVisible', 'completed', 'narrationIn");
+  if (![[1280, 'dark'], [760, 'light']].every(([width, appearance]) => machine.agentActivity?.cases?.some(item => item.width === width && item.appearance === appearance && item.named && item.svg && item.stableIdentity && item.taskDestination && item.humanWaitDistinct && item.verificationProgress && item.fits))) machineGateFailures.push("![[1280, 'dark'], [760, 'light']].every(([width, appearance]) => machi");
+  if (machine.manualWakeRetry?.guardedCognitionDispatches !== 1) machineGateFailures.push("machine.manualWakeRetry?.guardedCognitionDispatches !== 1");
+  if (!['controlledCognition', 'realCheckpointPort', 'nativePairLoaded', 'noAutomaticReplay'].every(check => machine.streamingFailureRecovery?.[check] === true)) machineGateFailures.push("!['controlledCognition', 'realCheckpointPort', 'nativePairLoaded', 'no");
+  if (machine.streamingFailureRecovery?.readFileDispatches !== 1) machineGateFailures.push("machine.streamingFailureRecovery?.readFileDispatches !== 1");
+  if (machine.streamingFailureRecovery?.explicitRetryTurns !== 1) machineGateFailures.push("machine.streamingFailureRecovery?.explicitRetryTurns !== 1");
+  if (![1600, 1280, 760].every(width => ['dark', 'light'].every(appearance => (width === 1280 ? [false, true] : [false]).every(docked =>
+      machine.pendingReplyLayout?.some(item => item.width === width && item.appearance === appearance && item.docked === docked && item.aligned))))) machineGateFailures.push("![1600, 1280, 760].every(width => ['dark', 'light'].every(appearance =");
+  if (!machine.taskDetails?.reportFromDetail) machineGateFailures.push("!machine.taskDetails?.reportFromDetail");
+  if (!machine.taskDetails?.metadataCollapsed) machineGateFailures.push("!machine.taskDetails?.metadataCollapsed");
+  if (!['reportReadFailureExplained', 'reportLoadingVisible', 'staleReportPreserved', 'reportRetryRecovers', 'nestedEscapeRetainsTask'].every(check => machine.taskDetails?.[check] === true)) machineGateFailures.push("!['reportReadFailureExplained', 'reportLoadingVisible', 'staleReportPr");
+  if (!machine.taskDetails?.primaryActionReturnsToBot) machineGateFailures.push("!machine.taskDetails?.primaryActionReturnsToBot");
+  if (!machine.taskDetails?.listClassification) machineGateFailures.push("!machine.taskDetails?.listClassification");
+  if (!machine.modelSwitch?.rollbackVerified) machineGateFailures.push("!machine.modelSwitch?.rollbackVerified");
+  if (!['singleReceipt', 'noTaskDuplicates', 'sourcesRetained', 'keyboard'].every(key => machine.userReceipt?.[key] === true)) machineGateFailures.push("!['singleReceipt', 'noTaskDuplicates', 'sourcesRetained', 'keyboard'].");
+  if (![[1280, 'dark'], [760, 'light']].every(([width, appearance]) => machine.userReceipt?.cases?.some(sample => sample.width === width && sample.appearance === appearance && sample.fits && sample.singleReceipt && sample.sourcesRetained && sample.keyboard))) machineGateFailures.push("![[1280, 'dark'], [760, 'light']].every(([width, appearance]) => machi");
+  if (!machine.replyDetailsEntry?.keyboard) machineGateFailures.push("!machine.replyDetailsEntry?.keyboard");
+  if (!machine.replyDetailsEntry?.leftAligned) machineGateFailures.push("!machine.replyDetailsEntry?.leftAligned");
+  if (!machine.replyDetailsEntry?.unifiedActivity) machineGateFailures.push("!machine.replyDetailsEntry?.unifiedActivity");
+  if (!machine.replyDetailsEntry?.collapsedHeight) machineGateFailures.push("!machine.replyDetailsEntry?.collapsedHeight");
+  if (!continuousReplyPresencePassed(machine.replyPresence)) machineGateFailures.push("!continuousReplyPresencePassed(machine.replyPresence)");
+  if (!completedReplyActionsPassed(machine.replyDetailsEntry)) machineGateFailures.push("!completedReplyActionsPassed(machine.replyDetailsEntry)");
+  if (!['legacyHidden', 'botExplanation', 'historyKeyboard', 'staleHidden', 'retry', 'activeProgressOnly'].every(key => machine.taskVerification?.[key] === true)) machineGateFailures.push("!['legacyHidden', 'botExplanation', 'historyKeyboard', 'staleHidden', ");
+  if (!['passed', 'failed', 'partial', 'unverifiable'].every(outcome => machine.taskVerification?.outcomes?.includes(outcome))) machineGateFailures.push("!['passed', 'failed', 'partial', 'unverifiable'].every(outcome => mach");
+  if (!machine.verificationPresentation?.currentPhaseWins) machineGateFailures.push("!machine.verificationPresentation?.currentPhaseWins");
+  if (!machine.verificationPresentation?.exitsToFollowUp) machineGateFailures.push("!machine.verificationPresentation?.exitsToFollowUp");
+  if (!machine.verificationPresentation?.technicalOwnedByBot) machineGateFailures.push("!machine.verificationPresentation?.technicalOwnedByBot");
+  if (!['panelTaskAction', 'keyboard', 'detailAction', 'sharedPending', 'failureRetry', 'failureVisible', 'latestReceipt', 'noDuplicate', 'unrelatedPreserved', 'narrowFits', 'focusReturned', 'deferredStopReceipt', 'focusPreserved'].every(check => machine.taskCancellation?.[check] === true)) machineGateFailures.push("!['panelTaskAction', 'keyboard', 'detailAction', 'sharedPending', 'fai");
+  if (!['internalInstructionsHidden', 'relatedNoteLocated', 'followUpDraftFocused', 'existingDraftPreserved', 'concreteQuestionLocated', 'noAutomaticExecution']
+      .every(check => machine.taskDetails?.[check] === true)) machineGateFailures.push("!['internalInstructionsHidden', 'relatedNoteLocated', 'followUpDraftFo");
+  if (!['compactControls','persistedModel','persistedEffort','perBot','failedSaveRetained','keyboardTrigger','aligned','sentSelection'].every(check => machine.quickChatBots?.[check] === true)) machineGateFailures.push("!['compactControls','persistedModel','persistedEffort','perBot','faile");
+  if (!machine.replyEvidenceReturn?.sameReply) machineGateFailures.push("!machine.replyEvidenceReturn?.sameReply");
+  if (!machine.replyEvidenceReturn?.focusInDetails) machineGateFailures.push("!machine.replyEvidenceReturn?.focusInDetails");
+  if (!['namedSources','savedFile','exactHistory','missingBodyExplained','unknownRefDistinct','diagnosticsCollapsed','commandReadable','narrowFits'].every(check=>machine.evidenceSources?.[check]===true)) machineGateFailures.push("!['namedSources','savedFile','exactHistory','missingBodyExplained','un");
+  if (!['hostOwner', 'botFollowUp', 'userRequest'].every(key => machine.workPanelOwnership?.[key] === true)) machineGateFailures.push("!['hostOwner', 'botFollowUp', 'userRequest'].every(key => machine.work");
+  if (!machine.delegatedWorkHandoff?.reply) machineGateFailures.push("!machine.delegatedWorkHandoff?.reply");
+  if (!machine.delegatedWorkHandoff?.workPanel) machineGateFailures.push("!machine.delegatedWorkHandoff?.workPanel");
+  if (!machine.delegatedWorkHandoff?.noDirectHandling) machineGateFailures.push("!machine.delegatedWorkHandoff?.noDirectHandling");
+  if (!machine.delegatedWorkHandoff?.detailReturnsToBot) machineGateFailures.push("!machine.delegatedWorkHandoff?.detailReturnsToBot");
+  if (!['dark', 'light'].every(appearance => machine.delegatedWorkHandoff?.hintChecks?.some(item =>
+      item.appearance === appearance && item.contrast >= 4.5 && item.fits && item.hintSize < item.progressSize))) machineGateFailures.push("!['dark', 'light'].every(appearance => machine.delegatedWorkHandoff?.h");
+  if (!machine.messageLayout?.completeText) machineGateFailures.push("!machine.messageLayout?.completeText");
+  if (!machine.messageLayout?.fitBounds) machineGateFailures.push("!machine.messageLayout?.fitBounds");
+  if (!machine.messageLayout?.diagnosticsCollapsed) machineGateFailures.push("!machine.messageLayout?.diagnosticsCollapsed");
+  if (!machine.messageLayout?.detailsKeyboard) machineGateFailures.push("!machine.messageLayout?.detailsKeyboard");
+  if (!machine.fallbackVision?.openingAnimated) machineGateFailures.push("!machine.fallbackVision?.openingAnimated");
+  if (!machine.fallbackVision?.closingAnimated) machineGateFailures.push("!machine.fallbackVision?.closingAnimated");
+  if (!machine.fallbackVision?.persisted) machineGateFailures.push("!machine.fallbackVision?.persisted");
+  if (!machine.fallbackVision?.serviceManagement) machineGateFailures.push("!machine.fallbackVision?.serviceManagement");
+  if (!machine.fallbackVision?.keyboard) machineGateFailures.push("!machine.fallbackVision?.keyboard");
+  if (![1600, 1280, 760].every(width => ['dark', 'light'].every(appearance => [false, true].every(expanded =>
       machine.workPanelLayout?.some(item => item.width === width && item.appearance === appearance && item.expanded === expanded
-        && item.aligned && item.contentFits && item.panelFits && item.continuity))))
-    || ![1280, 760].every(width => ['dark', 'light'].every(appearance => machine.fallbackVision?.cases?.some(item =>
-      item.width === width && item.appearance === appearance && item.centered && item.fits && item.helpSize < item.labelSize)))
-    || !requiredErrorLayouts.every(expected => machine.messageLayout.cases?.some(item =>
+        && item.aligned && item.contentFits && item.panelFits && item.continuity))))) machineGateFailures.push("![1600, 1280, 760].every(width => ['dark', 'light'].every(appearance =");
+  if (![1280, 760].every(width => ['dark', 'light'].every(appearance => machine.fallbackVision?.cases?.some(item =>
+      item.width === width && item.appearance === appearance && item.centered && item.fits && item.helpSize < item.labelSize)))) machineGateFailures.push("![1280, 760].every(width => ['dark', 'light'].every(appearance => mach");
+  if (!requiredErrorLayouts.every(expected => machine.messageLayout.cases?.some(item =>
       item.viewportWidth === expected.width && item.docked === expected.docked && item.appearance === expected.appearance
-      && item.textFits && item.cardFits && item.conversationFits))
-    || !requiredStates.every(status => machine.taskDetails.states?.includes(status))
-    || machine.yieldFeedback?.passed !== true
-    || !['passed', 'realRetryIPC', 'realCheckpointPort', 'controlledCognition', 'failedReceiptRetired', 'historyCollapsed', 'keyboard', 'diagnosticsRetained', 'noReadReplay', 'canonicalReplyDelivered'].every(check => machine.retryRetirement?.[check] === true)) {
-    throw new Error('Machine regression failed or required product scenarios did not run');
-  }
+      && item.textFits && item.cardFits && item.conversationFits))) machineGateFailures.push("!requiredErrorLayouts.every(expected => machine.messageLayout.cases?.s");
+  if (!requiredStates.every(status => machine.taskDetails.states?.includes(status))) machineGateFailures.push("!requiredStates.every(status => machine.taskDetails.states?.includes(s");
+  if (machine.yieldFeedback?.passed !== true) machineGateFailures.push("machine.yieldFeedback?.passed !== true");
+  if (!['passed', 'realRetryIPC', 'realCheckpointPort', 'controlledCognition', 'failedReceiptRetired', 'historyCollapsed', 'keyboard', 'diagnosticsRetained', 'noReadReplay', 'canonicalReplyDelivered'].every(check => machine.retryRetirement?.[check] === true)) machineGateFailures.push("!['passed', 'realRetryIPC', 'realCheckpointPort', 'controlledCognition");
+  if (machineGateFailures.length) throw new Error('Machine regression failed: ' + machineGateFailures.join(' | '));
   mkdirSync(path.join(output, 'screenshots'), { recursive: true });
   const lifecycleShots = ['budget','question'].flatMap(key=>[[1280,'dark'],[760,'light']].flatMap(([width,theme])=>
     ['list','detail'].map(surface=>`lifecycle-${key}-${surface}-${width}-${theme}.png`)));
