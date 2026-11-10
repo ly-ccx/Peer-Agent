@@ -109,7 +109,7 @@ export function createReviewPacket({ root, output, artifactRoot, machine }) {
   if (!machine.windowMaterial?.passed || machine.windowMaterial.cases?.length !== 4 || !machine.windowMaterial.reducedTransparency) throw new Error('Window material regression failed');
   if (!machine.sharedUiConventions?.keyboardDisclosure || !machine.sharedUiConventions?.svgSelect
     || !machine.sharedUiConventions?.rectangularPreviews || !machine.sharedUiConventions?.keyboardImagePreview
-    || machine.sharedUiConventions?.cases?.length !== sharedUiShots.length
+    || !sharedUiShots.every(scene => machine.sharedUiConventions?.cases?.some(item => item.scene === scene))
     || !machine.ok || machine.pageErrors?.length || machine.mainAuthorizationErrors?.length
     || !machine.botMessageColors?.identitySwitch || !machine.botMessageColors?.savedColorApplied
     || machine.botMessageColors?.cases?.length !== 32
