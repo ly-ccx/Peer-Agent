@@ -5,7 +5,7 @@ import { DatabaseSync } from '../sqlite/connection.mjs';
 import { executionIdentity, sameExecution } from './session-control-kernel.mjs';
 import { sessionFactsFromPlan } from './session-facts.mjs';
 import { workBudgetBinding } from './work-budget.mjs';
-import { directoryResource } from './execution-scopes.mjs';
+import { directoryResource, fileResource } from './execution-scopes.mjs';
 
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const ended = new Set(['completed', 'failed', 'cancelled']);
@@ -51,15 +51,60 @@ export function executionResource(plan, { allowMissing = false } = {}) {
   return directoryResource(directory, { allowMissing });
 }
 function resourceSet(plan, scopes = []) {
-  if (!Array.isArray(scopes) || scopes.length > 32 || scopes.some(scope => scope?.kind !== 'directory')) throw new Error('execution_resource_scope_unknown');
-  const resources = [executionResource(plan), ...scopes.map(scope => directoryResource(scope.path))].filter(Boolean);
+  if (!Array.isArray(scopes) || scopes.length > 32 || scopes.some(scope => scope?.kind !== 'directory' && scope?.kind !== 'file')) throw new Error('execution_resource_scope_unknown');
+  const resources = [executionResource(plan), ...scopes.map(scope => scope.kind === 'file' ? fileResource(scope.path) : directoryResource(scope.path))].filter(Boolean);
   return [...new Map(resources.map(resource => [resource.resourceRef, resource])).values()].sort((a, b) => a.resourceRef.localeCompare(b.resourceRef));
 }
-const conflicts = (a, b) => a === b || a.startsWith(b.endsWith(path.sep) ? b : `${b}${path.sep}`)
-  || b.startsWith(a.endsWith(path.sep) ? a : `${a}${path.sep}`);
+/** Kind-aware overlap: directories nest by prefix, files collide only with themselves or their containing directory. */
+const conflicts = (a, b) => {
+  const parse = ref => typeof ref === 'string' && ref.startsWith('directory:')
+    ? { kind: 'directory', path: ref.slice('directory:'.length) }
+    : typeof ref === 'string' && ref.startsWith('file:') ? { kind: 'file', path: ref.slice('file:'.length) } : null;
+  const first = parse(a), second = parse(b);
+  if (!first || !second) return a === b;
+  if (first.kind === 'directory' && second.kind === 'directory') {
+    return first.path === second.path || first.path.startsWith(second.path.endsWith(path.sep) ? second.path : `${second.path}${path.sep}`)
+      || second.path.startsWith(first.path.endsWith(path.sep) ? first.path : `${first.path}${path.sep}`);
+  }
+  if (first.kind === 'file' && second.kind === 'file') return first.path === second.path;
+  const file = first.kind === 'file' ? first : second, directory = first.kind === 'file' ? second : first;
+  return file.path === directory.path || file.path.startsWith(directory.path.endsWith(path.sep) ? directory.path : `${directory.path}${path.sep}`);
+};
 function claimScope(claim) {
-  return typeof claim.resourceRef === 'string' && claim.resourceRef.startsWith('directory:')
-    ? { kind: 'directory', path: claim.resourceRef.slice('directory:'.length) } : undefined;
+  if (typeof claim.resourceRef !== 'string') return undefined;
+  if (claim.resourceRef.startsWith('directory:')) return { kind: 'directory', path: claim.resourceRef.slice('directory:'.length) };
+  if (claim.resourceRef.startsWith('file:')) return { kind: 'file', path: claim.resourceRef.slice('file:'.length) };
+  return undefined;
+}
+/** ADR 127 §5.7: narrow only when every unknown dispatch declared exactly one file scope inside the primary directory. */
+function scopedNarrowing(plan, unknown) {
+  const origin = plan?.delegationOrigin;
+  const binding = origin?.workspaceId ? workBudgetBinding(origin.workspaceId) : null;
+  let work = null;
+  if (binding && typeof origin.workId === 'string' && origin.workId) {
+    try { work = typeof binding.store.readWork === 'function' ? binding.store.readWork(origin.workId)
+      : binding.store.read().works[origin.workId]; } catch { work = null; }
+  }
+  const budget = work?.budget;
+  if (!budget) return null;
+  const rowsById = new Map([...(budget.uncertainDispatches || []), ...Object.values(budget.attempts || {})
+    .flatMap(attempt => attempt.pendingTools || [])].filter(row => row?.toolCallId).map(row => [row.toolCallId, row]));
+  const files = new Map();
+  for (const id of unknown) {
+    const scopes = rowsById.get(id)?.declaredScopes;
+    if (!Array.isArray(scopes) || scopes.length !== 1 || scopes[0]?.kind !== 'file'
+      || typeof scopes[0].path !== 'string' || !path.isAbsolute(scopes[0].path)) return null;
+    const ids = files.get(scopes[0].path) || []; ids.push(id); files.set(scopes[0].path, ids);
+  }
+  let primary = null;
+  try { primary = executionResource(plan, { allowMissing: true }); } catch { return null; }
+  if (!primary) return null;
+  let resolved;
+  try {
+    resolved = [...files.entries()].map(([file, ids]) => ({ resource: fileResource(file, { allowMissing: true }), ids: [...new Set(ids)].sort() }));
+  } catch { return null; }
+  if (!resolved.every(entry => conflicts(`file:${entry.resource.resourceRef.slice('file:'.length)}`, primary.resourceRef))) return null;
+  return { primary, files: resolved };
 }
 
 /** Device-local arbitration. A project lease alone cannot serialize directory aliases across projects. */
@@ -243,6 +288,8 @@ export function createExecutionResources({ rootDir, now = () => new Date().toISO
           return [claim];
         });
         const unknown = [...new Set(receipt.unknownCalls || [])];
+        // ADR 127 §5.7: fully declared file unknowns protect those files, not the whole directory.
+        const narrowing = unknown.length ? scopedNarrowing(plan, unknown) : null;
         // An open handle can stay recorded only as an unknown outcome. It is never marked ended here,
         // and a receipt that omits its tool id still cannot release or settle the claim.
         const open = claims.flatMap(claim => Object.values(claim.handles || {}).filter(handle => handle.state !== 'ended'));
@@ -252,6 +299,25 @@ export function createExecutionResources({ rootDir, now = () => new Date().toISO
           // receipt, rather than the expired host's PID, authorizes an ownership handoff.
           if (unknown.length && claim.state === 'reconciling' && claim.operationId === receipt.operationId
             && JSON.stringify(claim.evidenceCalls) === JSON.stringify(unknown)) continue;
+          if (narrowing && claim.resourceRef === narrowing.primary.resourceRef) {
+            put(connection, { ...claim, state: 'released', revision: claim.revision + 1,
+              releaseProof: 'scope_narrowed', releasedAt: now(), updatedAt: now() });
+            connection.prepare('INSERT INTO resource_events(resource,operationId) VALUES (?,?)').run(claim.resourceRef, `scope-narrow:${receipt.operationId}`);
+            for (const entry of narrowing.files) {
+              const claimId = `claim-${digest([entry.resource.resourceRef, claim.execution])}`;
+              const existing = connection.prepare('SELECT value FROM claims WHERE id=?').get(claimId);
+              const previous = existing ? JSON.parse(existing.value) : null;
+              if (previous?.closureId) continue;
+              put(connection, { claimId, ...entry.resource, execution: claim.execution, workspaceId: claim.workspaceId,
+                hostEpoch: claim.hostEpoch, title: claim.title, state: 'reconciling',
+                revision: previous ? previous.revision + 1 : 1,
+                evidenceCalls: [...new Set([...(previous?.evidenceCalls || []), ...entry.ids])],
+                operationId: receipt.operationId, scope: { kind: 'file', path: entry.resource.resourceRef.slice('file:'.length) },
+                updatedAt: now() });
+              connection.prepare('INSERT INTO resource_events(resource,operationId) VALUES (?,?)').run(entry.resource.resourceRef, receipt.operationId);
+            }
+            continue;
+          }
           put(connection, { ...claim, state: unknown.length ? 'reconciling' : 'released', evidenceCalls: unknown,
             operationId: receipt.operationId, revision: claim.revision + 1, updatedAt: now() });
           connection.prepare('INSERT INTO resource_events(resource,operationId) VALUES (?,?)').run(claim.resourceRef, receipt.operationId);

@@ -8,7 +8,7 @@ import { DatabaseSync } from '../sqlite/connection.mjs';
 import { createExecutionResources, executionProtection, unsettledExecution } from './execution-resources.mjs';
 import { executionIdentity } from './session-control-kernel.mjs';
 import { beginExecutionAttempt } from './session-facts.mjs';
-import { providerExecutionScopes, providerFileScopes } from './execution-scopes.mjs';
+import { providerExecutionScopes, providerFileScopes, declaredDispatchScopes } from './execution-scopes.mjs';
 
 function plan(id, directory, workspaceId = id) {
   return { planId: id, conversationId: `conversation-${id}`, title: id, status: 'executing', targetWorkspacePath: directory,
@@ -327,4 +327,54 @@ test('a ledger written by a newer schema is refused instead of partially read', 
   future.close();
   // The store opens lazily; reading any fact must hit the schema gate first.
   assert.throws(() => createExecutionResources({ rootDir: runtime }).revision(), /execution_resource_schema_unsupported/);
+});
+
+test('unknown dispatches with declared file scopes narrow protection to those files (ADR 127 UO-05)', t => {
+  const { directory, first, second } = fixture(t), a = plan('narrow', directory, 'workspace');
+  a.delegationOrigin.workId = 'work-narrow';
+  const file = path.join(directory, 'a.ts');
+  writeFileSync(file, 'x');
+  const release = registerWorkBudget('workspace', { readWork: () => ({ budget: { uncertainDispatches: [
+    { toolCallId: 'tool-1', capabilityId: 'local.file.write', dispatchId: 'dispatch-1', registeredAt: '2026-11-09T00:00:00.000Z',
+      declaredScopes: [{ kind: 'file', path: file }] }] } }) });
+  t.after(release);
+  first.reserve(a, 'host-a');
+  first.settle(a, stopped(first, a, 'withdraw', ['tool-1']), 'host-a');
+  const claims = first.claimsFor(a);
+  assert.deepEqual(claims.map(claim => claim.state), ['reconciling']);
+  assert.equal(claims[0].resourceRef.startsWith('file:'), true);
+  assert.deepEqual(claims[0].evidenceCalls, ['tool-1']);
+  assert.deepEqual(claims[0].scope, { kind: 'file', path: claims[0].resourceRef.slice('file:'.length) });
+  // A directory-wide follower still sees a scoped protection blocker that names the file.
+  const decision = second.reserve(plan('follower', directory), 'host-b');
+  assert.equal(decision.allowed, false);
+  assert.equal(decision.blocker.code, 'execution_outcome_unknown');
+  assert.equal(decision.blocker.scope.kind, 'file');
+  // Answering the one file claim frees the whole directory again.
+  first.closeClaim(a, { claimId: claims[0].claimId, claimRevision: claims[0].revision,
+    authorityRef: 'grant-narrow', unknownCalls: ['tool-1'], proof: 'legacy_user_confirmed' });
+  assert.equal(second.reserve(plan('follower2', directory), 'host-b').allowed, true);
+});
+
+test('mixed or undeclared unknowns keep whole-directory protection', t => {
+  const { directory, first } = fixture(t), a = plan('mixed', directory, 'workspace');
+  const release = registerWorkBudget('workspace', { readWork: () => ({ budget: { uncertainDispatches: [
+    { toolCallId: 'tool-1', capabilityId: 'local.file.write', declaredScopes: [{ kind: 'file', path: path.join(directory, 'a.ts') }] },
+    { toolCallId: 'tool-2', capabilityId: 'local.shell.exec' }] } }) });
+  t.after(release);
+  first.reserve(a, 'host-a');
+  first.settle(a, stopped(first, a, 'withdraw', ['tool-1', 'tool-2']), 'host-a');
+  const claims = first.claimsFor(a);
+  assert.equal(claims.length, 1);
+  assert.equal(claims[0].resourceRef.startsWith('directory:'), true);
+  assert.deepEqual(claims[0].evidenceCalls, ['tool-1', 'tool-2']);
+});
+
+test('declaredDispatchScopes derives file scopes only from absolute local file targets', () => {
+  assert.deepEqual(declaredDispatchScopes({ capabilityId: 'local.file.write', arguments: { path: '/w/a.ts' } }), [{ kind: 'file', path: '/w/a.ts' }]);
+  assert.deepEqual(declaredDispatchScopes({ name: 'local.file.edit', args: { filePath: '/w/b.ts' } }), [{ kind: 'file', path: '/w/b.ts' }]);
+  assert.deepEqual(declaredDispatchScopes({ capabilityId: 'local.file.read', arguments: { path: '/w/c.ts' } }), [{ kind: 'file', path: '/w/c.ts' }]);
+  assert.deepEqual(declaredDispatchScopes({ capabilityId: 'local.shell.exec', arguments: { command: 'x' } }), []);
+  assert.deepEqual(declaredDispatchScopes({ capabilityId: 'local.file.write', arguments: { path: 'rel/a.ts' } }), []);
+  assert.deepEqual(declaredDispatchScopes({ capabilityId: 'local.file.write', arguments: null }), []);
 });

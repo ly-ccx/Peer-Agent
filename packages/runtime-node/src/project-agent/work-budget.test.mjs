@@ -156,3 +156,26 @@ test('a cancelled receipt without a task never dispatched, and a not_executed ou
     assert.equal((store.read().works.goal.budget.uncertainDispatches || []).length, 0);
   } finally { release(); rmSync(root, { recursive: true, force: true }); }
 });
+
+test('declared dispatch scopes are recorded on registration and reject unresolvable shapes', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'uo-declared-scopes-'));
+  const store = createWorkCoordinationStore({ rootDir: root, workspaceId: 'w', holdsLease: () => true, leaseEpoch: () => 'one' });
+  const release = registerWorkBudget('w', store);
+  store.saveWork({ workId: 'goal', state: 'runnable' });
+  const profile = { workspaceId: 'w', workId: 'goal', role: 'work_session', planId: 'A' };
+  try {
+    const guard = createWorkBudgetGuard(profile);
+    guard.beforeRequest();
+    guard.beforeTool({ toolCallId: 'write', capabilityId: 'local.file.write' },
+      { streamId: 's', scopes: [{ kind: 'file', path: '/abs/a.ts' }] });
+    guard.beforeTool({ toolCallId: 'shell', capabilityId: 'local.shell.exec' },
+      { scopes: [{ kind: 'file', path: 'relative/a.ts' }, { kind: 'directory', path: '/abs' }] });
+    const attempt = Object.values(store.read().works.goal.budget.attempts)[0];
+    const write = attempt.pendingTools.find(row => row.toolCallId === 'write');
+    assert.deepEqual(write.declaredScopes, [{ kind: 'file', path: '/abs/a.ts' }]);
+    const shell = attempt.pendingTools.find(row => row.toolCallId === 'shell');
+    assert.equal('declaredScopes' in shell, false, 'unresolvable scopes stay undeclared and conservative');
+    guard.finish({ totalTokens: 0, estimatedCostUsd: 0 });
+    assert.deepEqual(store.read().works.goal.budget.uncertainDispatches[0].declaredScopes, [{ kind: 'file', path: '/abs/a.ts' }]);
+  } finally { release(); rmSync(root, { recursive: true, force: true }); }
+});

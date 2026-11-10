@@ -1,5 +1,6 @@
 import { verificationDispatchTarget } from './verification-dispatch-recovery.mjs';
 import { createHash, randomUUID } from 'node:crypto';
+import path from 'node:path';
 import { runtimeWorkHeld } from './runtime-disposition.ts';
 import { executionBindingCurrent } from './coordination-kernel.mjs';
 import { resolveWorkBudgetPolicy, effectiveWorkLimits, budgetBoundary, budgetReservationBoundary, legacyBudgetMigration } from './work-budget-policy.mjs';
@@ -92,6 +93,15 @@ export function createWorkBudgetGuard(profile) {
     }
     return 'resulted';
   }
+  /** ADR 127 §5.1: dispatch-declared scopes are host-derived facts. Unresolvable targets stay undeclared. */
+  function declaredScopes(context) {
+    const scopes = context?.scopes;
+    if (!Array.isArray(scopes) || !scopes.length || scopes.length > 16
+      || scopes.some(scope => !scope || typeof scope !== 'object' || !['file', 'git_ref', 'remote_object'].includes(scope.kind)
+        || (scope.kind === 'file' ? typeof scope.path !== 'string' || !path.isAbsolute(scope.path)
+          : typeof scope.ref !== 'string' || !scope.ref))) return {};
+    return { declaredScopes: scopes.map(scope => ({ ...scope })) };
+  }
   return {
     beforeRequest(metadata) {
       change(budget => {
@@ -123,6 +133,7 @@ export function createWorkBudgetGuard(profile) {
         ...(typeof context?.streamId === 'string' && context.streamId ? { streamId: context.streamId } : {}),
         ...(typeof context?.conversationId === 'string' && context.conversationId ? { conversationId: context.conversationId } : {}),
         ...(verificationDispatchTarget(call) ? { verificationSessionId: verificationDispatchTarget(call) } : {}),
+        ...declaredScopes(context),
       };
       budget.attempts[attemptId] = { ...attempt, pendingTools: [...(attempt.pendingTools || []), row] };
     }); },

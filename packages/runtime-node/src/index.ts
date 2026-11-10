@@ -710,5 +710,5 @@ export { readWorkingContext } from './project-agent/working-context.mjs';
 export { CONTINUITY_TOOL_SPECS, CONTINUITY_CAPABILITY_IDS, WORKING_CONTEXT_DESCRIPTION } from './project-agent/working-context-specs.mjs';
 
 export { trackExecutionHandle } from './project-agent/execution-handles.mjs';
-export { providerExecutionScopes, providerFileScopes } from './project-agent/execution-scopes.mjs';
+export { providerExecutionScopes, providerFileScopes, declaredDispatchScopes } from './project-agent/execution-scopes.mjs';
 export { admitInteractiveToolSet } from './interactive-results/role-policy.mjs';
