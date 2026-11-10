@@ -85,6 +85,15 @@ export function BotSettingsTab({
       onProfile(result.profile);
     });
   }
+  /** ADR 127: closure delegation uses its own audited seam, never the generic profile patch. */
+  const saveUnknownOutcomePolicy = async (next: string) => {
+    if (busy || (next !== 'ask' && next !== 'bot_verified')) return;
+    await action.run(async () => {
+      const result = await clientApi.projectAgentSetUnknownOutcomePolicy({ workspaceId, tier: next });
+      if (!result.ok) throw Error(result.code || 'FAILED');
+      onProfile({ ...profile, unknownOutcomePolicy: result.policy ?? null });
+    });
+  };
   async function regenerateAvatar() {
     if (busy) return;
     await action.run(async () => {
@@ -177,6 +186,20 @@ export function BotSettingsTab({
           onCheckedChange={value => { void savePolicy({ autoHandoffOnPolicyAccept: value }); }} />
       </div>
       <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.settings.autoHandoffHint')}</p>
+      <div className="bot-settings-row">
+        <span>{i18n.t('projectAgent.drawer.settings.unknownOutcomePolicy')}</span>
+        <Dropdown
+          value={profile.unknownOutcomePolicy?.tier || 'ask'}
+          disabled={busy}
+          ariaLabel={i18n.t('projectAgent.drawer.settings.unknownOutcomePolicy')}
+          options={[
+            { value: 'ask', label: i18n.t('projectAgent.drawer.settings.unknownOutcomePolicy.ask') },
+            { value: 'bot_verified', label: i18n.t('projectAgent.drawer.settings.unknownOutcomePolicy.botVerified') },
+          ]}
+          onChange={(next) => { void saveUnknownOutcomePolicy(next); }}
+        />
+      </div>
+      <p className="bot-drawer-note">{i18n.t('projectAgent.drawer.settings.unknownOutcomePolicyHint')}</p>
       </SettingsGroup>
       <MotionDetails className="bot-settings-disclosure bot-runtime-settings">
         <summary>{i18n.t('projectAgent.drawer.settings.runtime')}<PeerIcon name="chevronDown" size={14} /></summary>

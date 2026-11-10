@@ -74,6 +74,8 @@ export interface BotProfile {
   readonly acceptancePolicy?: 'auto' | 'confirm';
   /** Policy acceptance keeps a separate merge confirmation unless explicitly enabled. */
   readonly autoHandoffOnPolicyAccept?: boolean;
+  /** ADR 127: user-delegated unknown-outcome closure policy. Absent or null means ask; the model can never write it. */
+  readonly unknownOutcomePolicy?: { readonly tier: 'ask' | 'bot_verified'; readonly policyId: string; readonly revision: number; readonly delegatedAt?: string; readonly updatedAt: string } | null;
   /** Archived deletion intent, retained until each cleanup step is persisted. */
   readonly deletionCleanup?: { readonly folder: string; readonly trashPending: boolean; readonly removePending: boolean } | null;
   readonly modelPolicy?: ProjectModelPolicy | null;

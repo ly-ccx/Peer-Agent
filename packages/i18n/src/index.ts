@@ -788,6 +788,10 @@ export type TranslationKey =
   | 'projectAgent.drawer.isolationFailed'
   | 'projectAgent.drawer.settings.autoHandoff'
   | 'projectAgent.drawer.settings.autoHandoffHint'
+  | 'projectAgent.drawer.settings.unknownOutcomePolicy'
+  | 'projectAgent.drawer.settings.unknownOutcomePolicy.ask'
+  | 'projectAgent.drawer.settings.unknownOutcomePolicy.botVerified'
+  | 'projectAgent.drawer.settings.unknownOutcomePolicyHint'
   | 'projectAgent.drawer.settings.proactivity'
   | 'projectAgent.drawer.settings.proactivity.inherit'
   | 'projectAgent.drawer.settings.proactivity.quiet'
@@ -2519,6 +2523,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.diskSpace': '排队中：可用磁盘不足 2 GB',
     'projectAgent.drawer.isolationFailed': '排队中：隔离工作区暂不可用',
     'projectAgent.drawer.settings.autoHandoff': '策略签收后自动合回',
+    'projectAgent.drawer.settings.unknownOutcomePolicy': '未知结果收口',
+    'projectAgent.drawer.settings.unknownOutcomePolicy.ask': '每次询问我',
+    'projectAgent.drawer.settings.unknownOutcomePolicy.botVerified': '主 Bot 核对后直接收口',
+    'projectAgent.drawer.settings.unknownOutcomePolicyHint': '开启后，主 Bot 在宿主核对证据完整时可直接结束未知结果的占用，不再逐次询问；收口只结束占用，不会把结果标成成功。撤回后回到逐次询问，已收口的不重开。',
     'projectAgent.drawer.settings.autoHandoffHint': '默认关闭。开启后，已验证并签收的改动可自动合回本项目。',
     'projectAgent.drawer.settings.proactivity': '主动性',
     'projectAgent.drawer.settings.proactivity.inherit': '跟随全局',
@@ -3991,6 +3999,10 @@ const resources: Record<LocaleCode, Record<TranslationKey, string>> = {
     'projectAgent.drawer.diskSpace': 'Queued: less than 2 GB of free disk space',
     'projectAgent.drawer.isolationFailed': 'Queued: isolated workspace is unavailable',
     'projectAgent.drawer.settings.autoHandoff': 'Merge automatically after policy acceptance',
+    'projectAgent.drawer.settings.unknownOutcomePolicy': 'Unknown-outcome closure',
+    'projectAgent.drawer.settings.unknownOutcomePolicy.ask': 'Ask me every time',
+    'projectAgent.drawer.settings.unknownOutcomePolicy.botVerified': 'Main bot closes after reconciliation',
+    'projectAgent.drawer.settings.unknownOutcomePolicyHint': 'When enabled, the main bot can end unknown-outcome occupancy once host reconciliation evidence is complete, without asking each time. Closure ends occupancy only and never marks a result successful. Revoking returns to asking; already-closed claims stay closed.',
     'projectAgent.drawer.settings.autoHandoffHint': 'Off by default. Verified, accepted changes may merge into this project when enabled.',
     'projectAgent.drawer.settings.proactivity': 'How often to speak up',
     'projectAgent.drawer.settings.proactivity.inherit': 'Follow the global setting',
