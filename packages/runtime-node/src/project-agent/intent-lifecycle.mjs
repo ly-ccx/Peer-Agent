@@ -289,10 +289,14 @@ export function intentWorkDisposition({ work, state, sessions, store, parentConv
   }
   if (disposition.kind === 'blocked_system') return { state: 'blocked_system', end: 'no_progress', blockedCode: disposition.code };
   if (disposition.kind === 'withdraw') {
+    const pendingManaged = hasPendingRuntimeSessions(sessions, expected);
     const result = store.closeIntent({ operationId: `close:${intent.decision.operationId}`, workId: work.workId,
       expectedWorkRevision: intent.revision, expectedGoalRevision: intent.goalRevision, lifecycle: 'cancelled' },
-      { parentConversationId, appliedControlRef: disposition.controlRef, pendingManagedSessions: hasPendingRuntimeSessions(sessions, expected) });
-    return result.ok ? { state: 'cancelled', end: 'user_stopped' } : { state: 'blocked_system', end: 'fatal', blockedCode: result.error };
+      { parentConversationId, appliedControlRef: disposition.controlRef, pendingManagedSessions: pendingManaged });
+    if (result.ok) return { state: 'cancelled', end: 'user_stopped' };
+    // A stop that cannot close yet is an obligation, not a terminal work failure.
+    const unsettled = pendingManaged || hasUnsettledDispatch(work);
+    return { state: 'blocked_system', end: unsettled ? 'awaiting_children' : 'no_progress', blockedCode: result.error };
   }
   const pending = hasUnsettledDispatch(work) || hasPendingRuntimeSessions(sessions, expected)
     || Object.values(state.transitions || {}).some(row => row.workId === work.workId && !['completed', 'blocked'].includes(row.phase))

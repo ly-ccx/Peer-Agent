@@ -65,12 +65,15 @@ test('three rc38-shaped records leave the current lists only after a host card c
     assert.equal(item.planStatus, 'paused');
     assert.equal(item.liveness, 'recorder_unproven');
     assert.equal(Object.hasOwn(item, 'recorder'), false);
-    assert.deepEqual(item.allowedActions, ['retire_follow_up', 'acknowledge_unknown']);
+    assert.deepEqual(item.allowedActions, item.sessionId === 'c'
+      ? ['retire_follow_up', 'acknowledge_unknown']
+      : ['retire_follow_up', 'acknowledge_unknown', 'close_claim']);
   }
   assert.equal(inspected.items.find(item => item.sessionId === 'b').outcome.unknownCallIds.includes('syn-call-b'), true);
   assert.equal(inspected.items.find(item => item.sessionId === 'c').outcome.openHandleIds.includes('syn-handle-c'), true);
   assert.equal(inspected.items.find(item => item.sessionId === 'a').gaps.includes('dispatch_registration_absent'), true);
   const copied = inspected.items.map(item => ({ obligationId: item.obligationId, sessionId: item.sessionId, operationId: item.operationId, evidenceRevision: item.evidenceRevision, actions: [...item.allowedActions] }));
+  const retireOnly = item => item.allowedActions.filter(action => action !== 'close_claim');
   plans.get('plan-a').delegationOrigin.executionControl.revision += 1;
   const stale = service.requestAuthorization({ workspaceId: 'workspace', parentConversationId: 'parent', role: 'project_agent', items: copied.filter(item => item.sessionId === 'a') });
   assert.equal(stale.error, 'evidence_stale');
@@ -81,7 +84,7 @@ test('three rc38-shaped records leave the current lists only after a host card c
   const denied = service.resolve({ workspaceId: 'workspace', parentConversationId: 'parent', role: 'project_agent', grantId: 'missing', items: [], idempotencyKey: '1234567890123456' });
   assert.equal(denied.error, 'grant_not_found');
   const requested = service.requestAuthorization({ workspaceId: 'workspace', parentConversationId: 'parent', role: 'project_agent',
-    items: fresh.items.map(item => ({ obligationId: item.obligationId, sessionId: item.sessionId, operationId: item.operationId, evidenceRevision: item.evidenceRevision, actions: [...item.allowedActions] })) });
+    items: fresh.items.map(item => ({ obligationId: item.obligationId, sessionId: item.sessionId, operationId: item.operationId, evidenceRevision: item.evidenceRevision, actions: retireOnly(item) })) });
   assert.equal(requested.ok, true, JSON.stringify(requested));
   assert.equal(requested.status, 'pending');
   assert.equal(requested.idempotencyKey, `panel-${requested.grantId}`);
@@ -107,6 +110,12 @@ test('three rc38-shaped records leave the current lists only after a host card c
     assert.equal(session.followUp.reason, 'obligation_indexed');
     assert.equal(session.followUp.inCurrentList, false);
   }
+  // Retiring follow-up does not remove the release action while the claim still exists.
+  const indexedAgain = service.inspect({ workspaceId: 'workspace', parentConversationId: 'parent', sessionIds: ['a', 'b', 'c'], role: 'project_agent' });
+  assert.deepEqual(indexedAgain.items.find(item => item.sessionId === 'a').allowedActions,
+    ['restore_follow_up', 'acknowledge_unknown', 'close_claim']);
+  assert.deepEqual(indexedAgain.items.find(item => item.sessionId === 'c').allowedActions,
+    ['restore_follow_up'], 'an open handle still blocks closure');
   const claims = scheduler.resourceSnapshot();
   assert.equal(claims.some(claim => claim.state === 'released'), false);
   assert.equal(claims.find(claim => claim.execution.planId === 'plan-b').state, 'reconciling');
@@ -142,4 +151,57 @@ test('a dead recorder with a missing dispatch registration can be retired and a 
   assert.equal(clear.classes.includes('recorder_dead_clear'), true);
   assert.equal(clear.classes.includes('external_effect_unknown'), false);
   assert.deepEqual(clear.allowed, []);
+});
+
+test('a user-confirmed close_claim releases the directory and retains the unknown call', async t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'peer-obligation-close-'));
+  const directory = path.join(root, 'workspace');
+  mkdirSync(directory);
+  const row = plan('x', directory, { workId: 'work-x' });
+  const plans = new Map([[row.planId, row]]);
+  const store = createWorkCoordinationStore({ rootDir: path.join(root, 'runtime'), workspaceId: 'workspace', holdsLease: () => true, leaseEpoch: () => epoch, formatVersion: 2, fenceLegacyWrites: true });
+  await store.prepare();
+  store.saveWork({ workId: 'work-x', workspaceId: 'workspace', parentConversationId: 'parent', state: 'waiting_children',
+    budget: { uncertainDispatches: [{ toolCallId: 'call-x', planId: 'plan-x' }] } });
+  const release = registerWorkBudget('workspace', store);
+  const scheduler = createExecutionScheduler({ rootDir: path.join(root, 'runtime') });
+  scheduler.configure({ ownsWorkspace: () => true, currentPlan: item => plans.get(item.planId) || item });
+  scheduler.protectResources(row, { operationId: 'cancel-x', state: 'reconciling', evidenceCalls: ['call-x'] });
+  const service = createExecutionObligationService({
+    plans: () => [...plans.values()], readControl: item => item.delegationOrigin.executionControl,
+    scheduler, canManage: () => true, storeFor: () => store,
+    identity: () => ({ bootId: null, pid: 1, pidStart: null, lookup: () => null }),
+    writerEpochFor: () => epoch, now: () => '2026-11-09T00:00:00.000Z',
+    recordClosure: (target, closure) => { target.delegationOrigin.executionClaimClosure = closure; },
+  });
+  t.after(() => { scheduler.close(); release(); store.close(); rmSync(root, { recursive: true, force: true }); });
+
+  const inspected = service.inspect({ workspaceId: 'workspace', parentConversationId: 'parent', sessionIds: ['x'], role: 'project_agent' });
+  assert.equal(inspected.ok, true, JSON.stringify(inspected));
+  const item = inspected.items[0];
+  assert.equal(item.closeClaimAvailable, true);
+  assert.equal(item.allowedActions.includes('close_claim'), true);
+
+  const withoutAck = service.requestAuthorization({ workspaceId: 'workspace', parentConversationId: 'parent', role: 'project_agent',
+    items: [{ obligationId: item.obligationId, sessionId: 'x', operationId: item.operationId, evidenceRevision: item.evidenceRevision, actions: ['close_claim'] }] });
+  assert.equal(withoutAck.error, 'unknown_not_acknowledged');
+
+  const requested = service.requestAuthorization({ workspaceId: 'workspace', parentConversationId: 'parent', role: 'project_agent',
+    items: [{ obligationId: item.obligationId, sessionId: 'x', operationId: item.operationId, evidenceRevision: item.evidenceRevision, actions: ['acknowledge_unknown', 'close_claim'] }] });
+  assert.equal(requested.ok, true, JSON.stringify(requested));
+  assert.equal(requested.consequences.resourceWillRemain, false);
+  const confirmed = service.confirm({ actor: 'user_panel', workspaceId: 'workspace', parentConversationId: 'parent', grantId: requested.grantId });
+  assert.equal(confirmed.ok, true, JSON.stringify(confirmed));
+  const resolved = service.resolve({ workspaceId: 'workspace', parentConversationId: 'parent', actor: 'user_panel', grantId: requested.grantId,
+    idempotencyKey: requested.idempotencyKey,
+    items: confirmed.grant.items.map(entry => ({ sessionId: entry.sessionId, operationId: entry.operationId, actions: entry.actions })) });
+  assert.equal(resolved.ok, true, JSON.stringify(resolved));
+  const applied = resolved.items[0];
+  assert.equal(applied.result, 'applied', JSON.stringify(applied));
+  assert.equal(applied.closure.unknownCalls[0], 'call-x');
+  assert.equal(applied.claim.state, 'released');
+  assert.equal(scheduler.resourceSnapshot().length, 0);
+  assert.equal(scheduler.retainedUnknowns(row).length, 1);
+  assert.equal(service.dispositionFor('workspace', 'x'), 'indexed');
+  assert.equal(row.delegationOrigin.executionClaimClosure.closureId, applied.closure.closureId);
 });

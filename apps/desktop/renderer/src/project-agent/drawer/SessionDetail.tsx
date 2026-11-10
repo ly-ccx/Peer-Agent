@@ -117,7 +117,7 @@ export function SessionDetail({
           </section> : null}
           <MotionDetails className="bot-task-information" key={session.sessionId}>
             <summary><PeerIcon name="chevronRight" size={13} />{i18n.t('projectAgent.drawer.task.information')}</summary>
-            <CoordinationDetails session={session} i18n={i18n} onSelect={onSelect} />
+            <CoordinationDetails session={session} i18n={i18n} onSelect={onSelect} workspaceId={workspaceId} />
             <div className="bot-task-report-read" aria-busy={reportState === 'loading'}>
               {reportState !== 'ready' || !session.summary ? <p role="status">{i18n.t(reportState === 'loading'
                 ? 'projectAgent.drawer.task.readingReport' : reportState === 'unavailable'

@@ -64,6 +64,37 @@ test('会话事实里的 cancelable 必须原样带到抽屉，缺字段时不�
   assert.equal(legacy.cancelable, undefined);
 });
 
+test('blocker carries whether the host can close the claim', () => {
+  const closeable = readDrawerSession({ sessionId: 's', status: 'queued', resourceBlocker: {
+    kind: 'protection', code: 'execution_outcome_unknown', resourceRef: 'directory:/project', claimId: 'claim',
+    sessionId: 's', evidenceCalls: ['call'], closeClaimAvailable: true } });
+  assert.equal(closeable?.resourceBlocker?.kind, 'protection');
+  assert.equal(closeable?.resourceBlocker?.kind === 'protection' && closeable.resourceBlocker.closeClaimAvailable, true);
+  const held = readDrawerSession({ sessionId: 's', status: 'queued', resourceBlocker: {
+    kind: 'protection', code: 'execution_outcome_unknown', resourceRef: 'directory:/project', claimId: 'claim',
+    sessionId: 's', evidenceCalls: ['call'], closeClaimAvailable: false } });
+  assert.equal(held?.resourceBlocker?.kind === 'protection' && held.resourceBlocker.closeClaimAvailable, false);
+});
+
+test('释放后的写锁与保留未知调用进入抽屉，不伪造 blocker', () => {
+  const closure = { closureId: 'closure-1', claimId: 'claim-1', claimRevision: 2,
+    execution: { planId: 'plan-1', sessionId: 'session-1', executionEpoch: 'epoch-1' },
+    resourceRef: 'directory:/project', unknownCalls: ['call-1'], authorityRef: 'grant-1',
+    proof: 'legacy_user_confirmed' as const, scope: 'managed_execution' as const, at: '2026-11-09T00:00:00.000Z' };
+  const read = readDrawerSession({ sessionId: 'session-1', status: 'running', statusLabel: '',
+    executionClaimClosure: closure,
+    retainedUnknowns: [{ closureId: 'closure-1', unknownCalls: ['call-1'], at: '2026-11-09T00:00:00.000Z', proof: 'legacy_user_confirmed' }] });
+  assert.ok(read);
+  assert.equal(read.executionClaimClosure?.closureId, 'closure-1');
+  assert.deepEqual(read.retainedUnknownCalls, ['call-1']);
+  assert.equal(read.resourceBlocker, undefined);
+  const invalid = readDrawerSession({ sessionId: 'session-2', status: 'running', statusLabel: '',
+    executionClaimClosure: { closureId: 'broken' }, retainedUnknowns: [{ unknownCalls: [1, 'call-2', 'call-2'] }] });
+  assert.ok(invalid);
+  assert.equal(invalid.executionClaimClosure, undefined);
+  assert.deepEqual(invalid.retainedUnknownCalls, ['call-2']);
+});
+
 test('缺失前置任务没有 blocker 行时仍显示需要重新安排的原因', () => {
   const missing = readDrawerSession({ sessionId: 'blocked', status: 'waiting_user', statusLabel: '等待你',
     queueReason: 'dependency_missing', queuedBehind: [] });

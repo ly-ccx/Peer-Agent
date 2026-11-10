@@ -71,3 +71,10 @@
 .bot-task-detail .bot-task-full[hidden] { display: none; }
 .bot-task-full-content { display: flex; flex-direction: column; gap: 22px; }
 .bot-task-created { font-size: var(--ui-font-meta); color: var(--graphite-secondary); }
+
+.bot-task-claim-closure { margin-top: var(--space-2); color: var(--graphite-soft); font-size: var(--ui-font-meta); line-height: var(--ui-line-body); }
+.bot-task-claim-closure p { margin: var(--space-1) 0 0; }
+
+.bot-task-claim-release { margin-top: var(--space-2); }
+.bot-task-claim-release p { margin: var(--space-1) 0 0; color: var(--graphite-soft); font-size: var(--ui-font-meta); }
+.bot-task-claim-release-code { margin-inline-start: var(--space-1); color: var(--state-danger); }

@@ -8,6 +8,7 @@ export interface ObligationGrantItem {
   readonly title?: string;
   readonly shortId?: string;
   readonly gaps?: readonly string[];
+  readonly actions?: readonly string[];
 }
 
 export interface ObligationGrantView {
@@ -54,21 +55,28 @@ export function ObligationGrantCard({ grant, submitting, blocked, i18n, onConfir
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const gaps = grant.items.flatMap(item => (item.gaps || []).map(gap => ({ sessionId: item.sessionId, gap })));
+  const releases = grant.items.some(item => (item.actions || []).includes('close_claim'));
   const disabled = submitting || blocked != null;
   return <article id={`obligation-grant-${grant.grantId}`} tabIndex={-1} className="obligation-grant-card" data-grant-id={grant.grantId} data-blocked={blocked ? 'true' : 'false'} aria-busy={submitting} aria-label={i18n.t('projectAgent.workPanel.obligationTitle', { count: grant.items.length })}>
     <header>
       <h3>{i18n.t('projectAgent.workPanel.obligationTitle', { count: grant.items.length })}</h3>
       <button type="button" className="ui-button is-compact" aria-expanded={!collapsed} onClick={() => setCollapsed(value => !value)}>{i18n.t(collapsed ? 'projectAgent.workPanel.obligationExpand' : 'projectAgent.workPanel.obligationCollapse')}</button>
     </header>
-    {collapsed ? null : <ul>{grant.items.map(item => <li key={item.sessionId}>{itemLabel(item, i18n)}</li>)}</ul>}
-    <p className="obligation-grant-consequence">{i18n.t('projectAgent.workPanel.obligationConsequence')}</p>
+    {collapsed ? null : <ul>{grant.items.map(item => <li key={item.sessionId}>{itemLabel(item, i18n)}
+      {(item.actions || []).includes('close_claim') ? <span className="obligation-grant-release">{i18n.t('projectAgent.workPanel.obligationReleaseItem')}</span> : null}
+    </li>)}</ul>}
+    <p className="obligation-grant-consequence">{i18n.t(releases
+      ? 'projectAgent.workPanel.obligationConsequenceRelease'
+      : 'projectAgent.workPanel.obligationConsequence')}</p>
     {gaps.length ? <details className="obligation-grant-details">
       <summary><PeerIcon name="chevronRight" size={12} />{i18n.t('projectAgent.workPanel.obligationDetails')}</summary>
       <ul>{gaps.map(item => <li key={`${item.sessionId}:${item.gap}`}>{gapLabel(item.gap, i18n)}</li>)}</ul>
     </details> : null}
     {blocked ? <p className="obligation-grant-blocked" role="status">{i18n.t('projectAgent.workPanel.obligationBlocked')}<span className="obligation-grant-code">{blocked.code}</span></p> : null}
     <div className="obligation-grant-actions">
-      <button type="button" className="ui-button is-primary is-compact" disabled={disabled} onClick={() => onConfirm(grant.grantId)}>{i18n.t('projectAgent.workPanel.obligationConfirm')}</button>
+      <button type="button" className="ui-button is-primary is-compact" disabled={disabled} onClick={() => onConfirm(grant.grantId)}>{i18n.t(releases
+        ? 'projectAgent.workPanel.obligationConfirmRelease'
+        : 'projectAgent.workPanel.obligationConfirm')}</button>
       <button type="button" className="ui-button is-compact" disabled={disabled} onClick={() => onReject(grant.grantId)}>{i18n.t('projectAgent.workPanel.obligationReject')}</button>
     </div>
   </article>;

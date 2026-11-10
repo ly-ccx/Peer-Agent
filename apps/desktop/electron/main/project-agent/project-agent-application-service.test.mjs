@@ -947,3 +947,45 @@ test('conversation reads expose recovery failure independently of readable messa
   assert.equal(service.readConversation({ workspaceId: 'w', view: 'interactions' }).recovery, null);
   service.dispose?.();
 });
+
+test('task detail requests the same host card and scopes it to the bot conversation', async () => {
+  const calls = [];
+  const service = createProjectAgentApplicationService({
+    enabled: () => true,
+    directory: { list: () => [] },
+    sessions: {
+      async inspectExecutionObligations(input) {
+        calls.push(['inspect', input]);
+        return { ok: true, items: [{ sessionId: 's', obligationId: 'obligation', operationId: 'operation',
+          evidenceRevision: 'revision', closeClaimAvailable: true, parentConversationId: 'parent',
+          allowedActions: ['retire_follow_up', 'acknowledge_unknown', 'close_claim'] }] };
+      },
+      async requestObligationAuthorization(input) { calls.push(['request', input]); return { ok: true, grantId: 'grant' }; },
+    },
+  });
+  const result = await service.requestClaimClosure({ workspaceId: 'w', sessionId: 's' });
+  assert.equal(result.grantId, 'grant');
+  assert.equal(calls[0][0], 'inspect');
+  assert.equal(calls[1][0], 'request');
+  assert.equal(calls[1][1].parentConversationId, 'parent');
+  assert.deepEqual(calls[1][1].items[0].actions, ['close_claim', 'acknowledge_unknown']);
+});
+
+test('task detail refuses a claim the host cannot close without showing a card', async () => {
+  let requested = 0;
+  const service = createProjectAgentApplicationService({
+    enabled: () => true,
+    directory: { list: () => [] },
+    sessions: {
+      async inspectExecutionObligations() {
+        return { ok: true, items: [{ sessionId: 's', obligationId: 'obligation', operationId: 'operation',
+          evidenceRevision: 'revision', closeClaimAvailable: false, allowedActions: ['retire_follow_up', 'acknowledge_unknown'] }] };
+      },
+      async requestObligationAuthorization() { requested += 1; return { ok: true, grantId: 'grant' }; },
+    },
+  });
+  const result = await service.requestClaimClosure({ workspaceId: 'w', sessionId: 's' });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'claim_not_closeable');
+  assert.equal(requested, 0);
+});

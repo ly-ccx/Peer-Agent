@@ -243,11 +243,30 @@ export function createSessionSupervisor({
     });
   }
 
+  /** A closed claim stays visible with its retained unknown calls; it is never a live blocker. */
+  function claimClosureFacts(plan) {
+    const closure = plan.delegationOrigin?.executionClaimClosure;
+    if (!closure || !sameExecution(closure.execution, executionIdentity(plan))) return {};
+    const recorded = (executionScheduler.retainedUnknowns?.(plan) || []).map(row => ({
+      closureId: row.closureId, unknownCalls: Array.isArray(row.unknownCalls) ? row.unknownCalls : [], at: row.at,
+      proof: row.proof === 'verified_dead' ? 'verified_dead' : 'legacy_user_confirmed',
+    }));
+    // The closure receipt is the durable fallback after a device ledger rebuild.
+    const retained = recorded.length ? recorded : [{ closureId: closure.closureId, unknownCalls: closure.unknownCalls,
+      at: closure.at, proof: closure.proof }];
+    return { executionClaimClosure: closure, retainedUnknowns: retained };
+  }
+
   const obligations = createExecutionObligationService({
     plans: delegatedPlans, readControl: plan => sessionControl.read(plan), scheduler: executionScheduler, canManage: canManageWorkspace,
     storeFor: workspaceId => workBudgetBinding(workspaceId)?.store, identity: localRecorderIdentity,
     writerEpochFor: workspaceId => workBudgetBinding(workspaceId)?.store?.writerEpoch?.(),
     onChanged: onObligationChanged,
+    recordClosure: (plan, closure) => {
+      const fresh = goalPlanStore.getPlan(plan.planId);
+      goalPlanStore.revisePlan(plan.planId, { delegationOrigin: { ...fresh.delegationOrigin, executionClaimClosure: closure } },
+        { reason: 'execution claim closed', changedBy: 'execution-obligation' });
+    },
     now,
   });
 
@@ -340,6 +359,7 @@ export function createSessionSupervisor({
       ...(typeof plan.conversationId === 'string' && plan.conversationId ? { conversationId: plan.conversationId } : {}),
       ...(sessionFactsFromPlan(plan).verificationActive ? { verifying: true } : {}),
       origin,
+      ...claimClosureFacts(plan),
       ...(obligations.dispositionFor(origin.workspaceId, origin.sessionId) ? { obligationDisposition: obligations.dispositionFor(origin.workspaceId, origin.sessionId) } : {}),
       ...(coordinationFacts ? { coordination: coordinationFacts } : {}),
       ...(origin.supersededBy ? { supersededBy: origin.supersededBy } : {}),
@@ -788,6 +808,7 @@ export function createSessionSupervisor({
         const summary = { ...projectWorkSession(snapshotOf(plan), { sessionId: origin.sessionId, workspaceId: origin.workspaceId,
           acceptance: 'confirm', accepted: Boolean(plan.resultAcceptance?.acceptedAt), resultConfirmationRequired: humanGateOf(plan), spawnedAt: plan.createdAt || '',
           conversationId: plan.conversationId, origin, ...(sessionFactsFromPlan(plan).verificationActive ? { verifying: true } : {}),
+          ...claimClosureFacts(plan),
           ...(origin.supersededBy ? { supersededBy: origin.supersededBy } : {}),
           ...(origin.phase === 'paused' ? { phase: 'paused' } : {}),
           ...(origin.phase === 'queued' ? (({ queuedBehind, reason, blocker }) => ({ queuedBehind, queueReason: reason, resourceBlocker: blocker }))(executionScheduler.inspect(plan)) : {}) }),

@@ -3,7 +3,7 @@
  * 设置写入由调用方只经已有 IPC 发出。
  */
 
-import type { ExecutionResourceBlocker, CoordinationSessionFacts, SessionVerificationDetail, VerificationProgress } from '@peer-agent/protocol';
+import type { ExecutionClaimClosure, ExecutionResourceBlocker, CoordinationSessionFacts, SessionVerificationDetail, VerificationProgress } from '@peer-agent/protocol';
 import type { I18nRuntime } from '@peer-agent/i18n';
 
 export const DRAWER_WIDTH = 380;
@@ -63,6 +63,8 @@ export interface DrawerSession {
   readonly evidenceRefs: readonly string[];
   readonly progress: string;
   readonly resourceBlocker?: ExecutionResourceBlocker;
+  readonly executionClaimClosure?: ExecutionClaimClosure;
+  readonly retainedUnknownCalls?: readonly string[];
   readonly queuedBehind?: readonly { readonly sessionId: string; readonly title: string }[];
   readonly queueReason?: string;
   readonly supersededBy?: string;
@@ -289,6 +291,8 @@ export function readDrawerSession(raw: unknown): DrawerSession | null {
     progress: readString(record.statusLabel),
     queueReason: readString(record.queueReason),
     ...(readResourceBlocker(record.resourceBlocker) ? { resourceBlocker: readResourceBlocker(record.resourceBlocker) } : {}),
+    ...(readClaimClosure(record.executionClaimClosure) ? { executionClaimClosure: readClaimClosure(record.executionClaimClosure) } : {}),
+    ...(readRetainedUnknownCalls(record.retainedUnknowns).length ? { retainedUnknownCalls: readRetainedUnknownCalls(record.retainedUnknowns) } : {}),
     supersededBy: readString(record.supersededBy),
     queuedBehind: Array.isArray(record.queuedBehind) ? record.queuedBehind.flatMap(item => {
       if (!item || typeof item !== 'object') return [];
@@ -434,6 +438,26 @@ function readFollowUpProjection(value: unknown): import('@peer-agent/protocol').
   };
 }
 
+function readClaimClosure(raw: unknown): ExecutionClaimClosure | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const row = raw as Record<string, unknown>;
+  const execution = row.execution;
+  if (!execution || typeof execution !== 'object') return undefined;
+  const scope = execution as Record<string, unknown>;
+  if (typeof row.closureId !== 'string' || typeof row.claimId !== 'string' || typeof row.resourceRef !== 'string'
+    || typeof row.authorityRef !== 'string' || typeof row.at !== 'string' || !Array.isArray(row.unknownCalls)
+    || !['verified_dead', 'legacy_user_confirmed'].includes(String(row.proof))
+    || typeof scope.planId !== 'string' || typeof scope.sessionId !== 'string' || typeof scope.executionEpoch !== 'string') return undefined;
+  return { closureId: row.closureId, claimId: row.claimId, claimRevision: Number(row.claimRevision) || 0,
+    execution: { planId: scope.planId, sessionId: scope.sessionId, executionEpoch: scope.executionEpoch },
+    resourceRef: row.resourceRef, unknownCalls: row.unknownCalls.filter((id): id is string => typeof id === 'string'),
+    authorityRef: row.authorityRef, proof: row.proof as 'verified_dead' | 'legacy_user_confirmed', scope: 'managed_execution', at: row.at };
+}
+function readRetainedUnknownCalls(raw: unknown): readonly string[] {
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw.flatMap(row => row && typeof row === 'object' && Array.isArray((row as Record<string, unknown>).unknownCalls)
+    ? ((row as Record<string, unknown>).unknownCalls as unknown[]).filter((id): id is string => typeof id === 'string') : []))];
+}
 function readResourceBlocker(raw: unknown): ExecutionResourceBlocker | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const row = raw as Record<string, unknown>;
@@ -445,6 +469,7 @@ function readResourceBlocker(raw: unknown): ExecutionResourceBlocker | undefined
   if (row.kind === 'protection' && (row.code === 'execution_outcome_unknown' || row.code === 'execution_stop_unconfirmed')) return {
     kind: 'protection', code: row.code, resourceRef, claimId, sessionId: readString(row.sessionId) || undefined,
     nextAction: row.code === 'execution_outcome_unknown' ? 'reconcile_execution_outcome' : 'confirm_execution_stopped',
-    operationId: readString(row.operationId) || undefined, evidenceCalls: readStringList(row.evidenceCalls) };
+    operationId: readString(row.operationId) || undefined, evidenceCalls: readStringList(row.evidenceCalls),
+    closeClaimAvailable: row.closeClaimAvailable === true };
   return undefined;
 }

@@ -20,6 +20,11 @@
 .obligation-grant-card h3 { margin: 0; font-size: var(--ui-font-body); font-weight: 600; line-height: var(--ui-line-body); }
 .obligation-grant-card ul { margin: var(--space-2) 0 0; padding: 0; list-style: none; }
 .obligation-grant-card li { padding: var(--space-1) 0; font-size: var(--ui-font-control); line-height: var(--ui-line-body); overflow-wrap: anywhere; }
+.obligation-grant-release {
+  display: inline-block; margin-inline-start: var(--space-2); padding: 0 var(--space-2);
+  border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-control);
+  color: var(--graphite-soft); font-size: var(--ui-font-caption); line-height: var(--ui-line-body);
+}
 .obligation-grant-consequence { margin: var(--space-2) 0 0; color: var(--graphite-soft); font-size: var(--ui-font-meta); line-height: var(--ui-line-body); }
 .obligation-grant-details { margin-top: var(--space-2); }
 .obligation-grant-details summary { display: flex; align-items: center; gap: var(--space-1); cursor: pointer; color: var(--graphite-soft); font-size: var(--ui-font-meta); list-style: none; }
