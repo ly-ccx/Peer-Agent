@@ -9,6 +9,10 @@ import { workBudgetBinding } from './work-budget.mjs';
  * ADR 127 §5.3: bounded, read-only, host-executed probes over one unknown-outcome claim.
  * A verdict can end occupancy at most; it never turns an unknown call into a success.
  * The model may request and explain this evidence; it can never write it.
+ *
+ * The workspace verdict reads counted facts (changed + untracked, observed with filters
+ * disabled by gitRead), never the `clean` label: configured clean/process filters keep
+ * that label null on hosts that define them, while the counts stay the coverage statement.
  */
 export function createUnknownOutcomeReconciler({
   resources,
