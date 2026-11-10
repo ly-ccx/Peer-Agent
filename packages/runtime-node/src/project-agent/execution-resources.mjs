@@ -52,7 +52,7 @@ export function executionResource(plan, { allowMissing = false } = {}) {
 }
 function resourceSet(plan, scopes = []) {
   if (!Array.isArray(scopes) || scopes.length > 32 || scopes.some(scope => scope?.kind !== 'directory' && scope?.kind !== 'file')) throw new Error('execution_resource_scope_unknown');
-  const resources = [executionResource(plan), ...scopes.map(scope => scope.kind === 'file' ? fileResource(scope.path) : directoryResource(scope.path))].filter(Boolean);
+  const resources = [executionResource(plan), ...scopes.map(scope => scope.kind === 'file' ? fileResource(scope.path, { allowMissing: true }) : directoryResource(scope.path))].filter(Boolean);
   return [...new Map(resources.map(resource => [resource.resourceRef, resource])).values()].sort((a, b) => a.resourceRef.localeCompare(b.resourceRef));
 }
 /** Kind-aware overlap: directories nest by prefix, files collide only with themselves or their containing directory. */
@@ -103,7 +103,7 @@ function scopedNarrowing(plan, unknown) {
   try {
     resolved = [...files.entries()].map(([file, ids]) => ({ resource: fileResource(file, { allowMissing: true }), ids: [...new Set(ids)].sort() }));
   } catch { return null; }
-  if (!resolved.every(entry => conflicts(`file:${entry.resource.resourceRef.slice('file:'.length)}`, primary.resourceRef))) return null;
+  if (!resolved.every(entry => conflicts(entry.resource.resourceRef, primary.resourceRef))) return null;
   return { primary, files: resolved };
 }
 
@@ -186,13 +186,21 @@ export function createExecutionResources({ rootDir, now = () => new Date().toISO
   function inspect(plan, connection = open(), hostEpoch, scopes = []) {
     if (plan.delegationOrigin?.readOnly === true) return { allowed: true };
     const execution = executionIdentity(plan), current = rows(connection);
-    const requested = [...new Map([...requiredScopes(connection, plan), ...scopes].map(scope => [scope?.path, scope])).values()];
+    const requested = [...new Map([...requiredScopes(connection, plan), ...scopes].map(scope => [scope?.path ?? scope?.ref, scope])).values()];
+    // ADR 127 §5.7: a protection-state file claim holds its file, not the whole directory.
+    // Plan admission (no scopes) and file-granular dispatches pass it; directory-scoped
+    // dispatches (shell) stay strict because their effects are not bounded to files.
+    const relaxFileClaims = requested.length === 0 || requested.some(scope => scope?.kind === 'file');
+    let primary = null;
+    try { primary = executionResource(plan, { allowMissing: true })?.resourceRef || null; } catch { primary = null; }
     for (const resource of resourceSet(plan, requested)) for (const claim of current) {
       if (!conflicts(claim.resourceRef, resource.resourceRef)) continue;
       if (sameExecution(claim.execution, execution) && hostEpoch && claim.hostEpoch !== hostEpoch) return { allowed: false,
         blocker: { kind: 'recovery', code: 'execution_resource_owner_changed', resourceRef: resource.resourceRef } };
       if (sameExecution(claim.execution, execution) && !['draining', 'reconciling'].includes(claim.state)
         && (claim.resourceRef !== resource.resourceRef || claim.identity === resource.identity)) continue;
+      if (relaxFileClaims && primary && resource.resourceRef === primary
+        && ['draining', 'reconciling'].includes(claim.state) && claim.resourceRef.startsWith('file:')) continue;
       return { allowed: false, blocker: blocker(claim) };
     }
     return { allowed: true };

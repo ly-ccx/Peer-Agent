@@ -118,3 +118,34 @@ test('inspect projects the policy tier and the envelope verdict for card surface
   assert.equal(delegated.inspect(shell, { claimId: shellClaim.claimId }).reason, 'capability_not_confined');
   assert.equal(asking.inspect(p, { claimId: claim.claimId }).policyTier, 'ask');
 });
+
+test('a bot-verified resolution survives a restart exactly once across two hosts (ADR 127 UO-08)', t => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'peer-resolution-crash-'));
+  const directory = path.join(root, 'workspace');
+  mkdirSync(directory);
+  const runtime = path.join(root, 'runtime');
+  const policy = { tier: 'bot_verified', policyId: 'policy-1', revision: 2, workspaceId: 'workspace',
+    agentConversationId: 'conv-1', delegatedAt: '2026-11-09T00:00:00.000Z', updatedAt: '2026-11-09T00:00:00.000Z' };
+  const plan = { planId: 'crash', conversationId: 'c', title: 't', status: 'executing', targetWorkspacePath: directory,
+    delegationOrigin: { sessionId: 'session-crash', workspaceId: 'workspace', phase: 'running', coordinationBinding: { executionEpoch: 'epoch-crash' } } };
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const first = createExecutionResources({ rootDir: runtime });
+  first.protect(plan, { hostEpoch: 'host-a', operationId: 'stop-1', state: 'reconciling', evidenceCalls: ['tool-1'] });
+  const claim = first.claimsFor(plan)[0];
+  first.recordReconciliation(evidenceFor(claim));
+  const closed = createUnknownOutcomeResolver({ resources: first, readPolicy: () => policy })
+    .resolveBotVerified(plan, { claimId: claim.claimId });
+  assert.equal(closed.ok, true);
+  first.close();
+  // "Restart": a second host opens the same device ledger and must not revive or duplicate.
+  const second = createExecutionResources({ rootDir: runtime });
+  assert.deepEqual(second.claimsFor(plan), [], 'the released claim stays released');
+  assert.equal(second.resolutionsFor(plan).length, 1, 'exactly one resolution row');
+  assert.equal(second.reconciliationEvidenceFor(claim.claimId).length, 1, 'exactly one evidence row');
+  assert.deepEqual(second.retainedUnknowns(plan).map(row => row.unknownCalls), [['tool-1']]);
+  const replay = createUnknownOutcomeResolver({ resources: second, readPolicy: () => policy })
+    .resolveBotVerified(plan, { claimId: claim.claimId });
+  assert.equal(replay.code, 'resolution_claim_missing', 'a replay cannot create a second resolution');
+  assert.equal(second.resolutionsFor(plan).length, 1);
+  second.close();
+});

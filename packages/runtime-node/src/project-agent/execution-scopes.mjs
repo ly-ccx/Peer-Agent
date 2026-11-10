@@ -37,10 +37,16 @@ export function providerExecutionScopes(directory) {
     current = path.dirname(current);
   }
 }
+/** ADR 127 §5.7: file tools declare their own file scope so admission conflicts at file
+ * granularity; a missing target resolves through its nearest existing ancestor. */
 export function providerFileScopes(file) {
-  let directory = path.dirname(existsSync(file) ? realpathSync(file) : path.resolve(file));
-  while (!existsSync(directory) && path.dirname(directory) !== directory) directory = path.dirname(directory);
-  return [{ kind: 'directory', path: realpathSync(directory) }];
+  if (typeof file !== 'string' || !file.trim()) return [];
+  let resolved = path.resolve(file), suffix = [];
+  while (!existsSync(resolved) && path.dirname(resolved) !== resolved) {
+    suffix.unshift(path.basename(resolved)); resolved = path.dirname(resolved);
+  }
+  const canonical = realpathSync(resolved);
+  return [{ kind: 'file', path: suffix.length ? path.join(canonical, ...suffix) : canonical }];
 }
 /** ADR 127 §5.7: a file's own claim identity, not its parent directory's. */
 export function fileResource(file, { allowMissing = false } = {}) {
@@ -50,7 +56,7 @@ export function fileResource(file, { allowMissing = false } = {}) {
     suffix.unshift(path.basename(existing)); existing = path.dirname(existing);
   }
   const canonical = realpathSync(existing), stat = statSync(canonical);
-  if (suffix.length === 1 && stat.isDirectory()) return { resourceRef: `file:${path.join(canonical, ...suffix)}`, identity: 'missing' };
+  if (suffix.length >= 1 && stat.isDirectory()) return { resourceRef: `file:${path.join(canonical, ...suffix)}`, identity: 'missing' };
   if (!suffix.length && stat.isFile()) return { resourceRef: `file:${canonical}`, identity: `${stat.dev}:${stat.ino}` };
   throw new Error('execution_resource_scope_unknown');
 }
