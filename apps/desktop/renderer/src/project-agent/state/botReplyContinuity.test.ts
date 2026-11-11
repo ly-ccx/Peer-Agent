@@ -86,7 +86,7 @@ test('canonical reuse of a public paragraph retains its node without duplicating
   const result = replies(continuousReplyRows([row(turn), row(final)], [user, turn, final], [], []))[0]!;
   assert.deepEqual(result.paragraphs, [{ id: 'turn:a', text: '已完成。' }]);
 });
-test('a refined variant of the streamed text replaces it instead of repeating', () => {
+test('a refined legacy delivery collapses to the canonical answer without rewriting an earlier slot (ADR87 D7.3)', () => {
   const turn = message('turn', 'agent_turn', { replyTo: [user.id], publicUpdates: [
     { id: 'text-1', text: '记下了：你的开发主分支就是 `kxt-ai-lab-initial-import`。我先把这件事记进项目事实，避免后面再把它当成普通功能分支。' },
     { id: 'text-2', text: '记下了。你的开发主分支就是 `kxt-ai-lab-initial-import`，后面按这条分支理解。' },
@@ -94,24 +94,23 @@ test('a refined variant of the streamed text replaces it instead of repeating', 
   const final = message('final', 'agent_reply', { turnId: 'turn', replyTo: [user.id],
     content: '记下了。你的开发主分支就是 `kxt-ai-lab-initial-import`，仓库里对应的完整名字是 `feat/kxt-ai-lab-initial-import`。后面按这条分支理解。' });
   const result = replies(continuousReplyRows([row(turn), row(final)], [user, turn, final], [], []))[0]!;
-  assert.deepEqual(result.paragraphs.map(p => p.text), [
-    '记下了：你的开发主分支就是 `kxt-ai-lab-initial-import`。我先把这件事记进项目事实，避免后面再把它当成普通功能分支。',
-    '记下了。你的开发主分支就是 `kxt-ai-lab-initial-import`，仓库里对应的完整名字是 `feat/kxt-ai-lab-initial-import`。后面按这条分支理解。',
-  ]);
-  assert.equal(result.paragraphs[1]!.id, 'turn:text-2');
+  assert.deepEqual(result.paragraphs, [{ id: 'turn:conclusion', text: final.content }]);
+  assert.equal(result.messages.length, 2);
 });
-test('a narrower final reply does not duplicate the fuller streamed text', () => {
-  const turn = message('turn', 'agent_turn', { replyTo: [user.id],
-    publicUpdates: [{ id: 'a', text: '记下了。你的开发主分支就是 `kxt-ai-lab-initial-import`，后面按这条分支理解。' }] });
+test('a narrower delivered reply replaces the fuller streamed text in the reading column', () => {
+  const streamed = '记下了。你的开发主分支就是 `kxt-ai-lab-initial-import`，后面按这条分支理解。';
+  const turn = message('turn', 'agent_turn', { replyTo: [user.id], publicUpdates: [{ id: 'a', text: streamed }] });
   const final = message('final', 'agent_reply', { turnId: 'turn', replyTo: [user.id], content: '记下了。' });
   const result = replies(continuousReplyRows([row(turn), row(final)], [user, turn, final], [], []))[0]!;
-  assert.deepEqual(result.paragraphs.map(p => p.text), ['记下了。你的开发主分支就是 `kxt-ai-lab-initial-import`，后面按这条分支理解。']);
+  assert.deepEqual(result.paragraphs, [{ id: 'turn:conclusion', text: '记下了。' }]);
+  assert.equal(result.messages.find(item => item.kind === 'agent_turn')?.publicUpdates?.[0]?.text, streamed);
 });
-test('exact reuse of an earlier paragraph is not repeated after newer text', () => {
+test('exact reuse of an earlier paragraph does not leave a later streamed paragraph after delivery', () => {
   const turn = message('turn', 'agent_turn', { replyTo: [user.id], publicUpdates: [{ id: 'a', text: '记下了。' }, { id: 'b', text: '去核对分支了。' }] });
   const final = message('final', 'agent_reply', { turnId: 'turn', replyTo: [user.id], content: '记下了。' });
   const result = replies(continuousReplyRows([row(turn), row(final)], [user, turn, final], [], []))[0]!;
-  assert.deepEqual(result.paragraphs.map(p => p.text), ['记下了。', '去核对分支了。']);
+  assert.deepEqual(result.paragraphs, [{ id: 'turn:conclusion', text: '记下了。' }]);
+  assert.equal(result.messages.find(item => item.kind === 'agent_turn')?.publicUpdates?.[1]?.text, '去核对分支了。');
 });
 test('delivery uncertainty keeps receipt without declaring active execution', () => {
   const result = replies(continuousReplyRows([row(user)], [user], [{ inputId: 'u', createdAt: at, deliveryIssue: true }], []))[0]!;
