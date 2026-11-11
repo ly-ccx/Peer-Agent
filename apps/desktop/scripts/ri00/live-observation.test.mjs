@@ -51,6 +51,17 @@ test('live handler keeps original Promise identity and propagates rejection or s
   finally { assert.equal(second.stop().records[0].threw, true); }
 });
 
+test('stopping releases observation context from already-created asynchronous resources', async () => {
+  let storage, finish;
+  const later = new Promise(resolve => { finish = resolve; });
+  const f = fixture(() => { setImmediate(() => finish(storage.getStore())); return 42; });
+  f.deps.AsyncLocalStorage = class extends AsyncLocalStorage { constructor() { super(); storage = this; } };
+  const observation = installObservation(f.deps, { durationMs: 1000 });
+  f.ipcMain._invokeHandlers.get('catalog:query')();
+  observation.stop(); observation.stop();
+  assert.equal(await later, undefined);
+});
+
 test('adopted existing timer records only its synchronous callback and restores the same callback', () => {
   const f = fixture(), callback = function (value) { assert.equal(this, handle); f.advance(80); return value; };
   const handle = { _destroyed: false, _onTimeout: callback };

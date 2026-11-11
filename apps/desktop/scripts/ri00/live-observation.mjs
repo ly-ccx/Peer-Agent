@@ -82,7 +82,7 @@ export function installObservation(deps, options) {
     if (!state.stopped) {
       state.stopped = true; nativeClearInterval(heartbeat); nativeClearTimeout(watchdog);
       state.restored = restores.reverse().map(fn => { try { return fn(); } catch { return false; } });
-      restores.length = 0; syncExports(); state.finishedAt = wall(); state.finishedMono = now();
+      restores.length = 0; als.disable(); syncExports(); state.finishedAt = wall(); state.finishedMono = now();
       state.addedInvokeChannels = [...map.keys()].filter(key => !channels.includes(key)).length;
     }
     return state;
