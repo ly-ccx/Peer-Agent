@@ -51,10 +51,10 @@ test('live handler keeps original Promise identity and propagates rejection or s
   finally { assert.equal(second.stop().records[0].threw, true); }
 });
 
-test('stopping releases observation context from already-created asynchronous resources', async () => {
+test('stopping releases observation records from already-created asynchronous resources', async () => {
   let storage, finish;
   const later = new Promise(resolve => { finish = resolve; });
-  const f = fixture(() => { setImmediate(() => finish(storage.getStore())); return 42; });
+  const f = fixture(() => { assert.ok(storage.getStore().row); setImmediate(() => finish(storage.getStore()?.row)); return 42; });
   f.deps.AsyncLocalStorage = class extends AsyncLocalStorage { constructor() { super(); storage = this; } };
   const observation = installObservation(f.deps, { durationMs: 1000 });
   f.ipcMain._invokeHandlers.get('catalog:query')();

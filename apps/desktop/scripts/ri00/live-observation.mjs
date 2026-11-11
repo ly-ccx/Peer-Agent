@@ -2,6 +2,8 @@
 export function installObservation(deps, options) {
   const { ipcMain, fs, json, phase, stores, timerHosts, timers, syncExports, now, wall, AsyncLocalStorage } = deps;
   const als = new AsyncLocalStorage();
+  const contexts = new Set();
+  const currentRow = () => als.getStore()?.row;
   const state = { startedAt: wall(), startedMono: now(), records: [], gaps: [], phases: {},
     dropped: 0, droppedTimerWrappers: 0, stopped: false, detailed: options.detailed !== false };
   const restores = [], adopted = new WeakSet(), own = new Set();
@@ -17,7 +19,7 @@ export function installObservation(deps, options) {
     value.maxMs = Math.max(value.maxMs, duration);
   }
   function measure(name, callback) {
-    const row = als.getStore();
+    const row = currentRow();
     if (state.stopped || !state.detailed || !row || row.closed) return callback();
     const parent = row.stack.at(-1), frame = { started: now(), children: 0 };
     row.stack.push(frame);
@@ -36,12 +38,20 @@ export function installObservation(deps, options) {
   }
   function root(kind, name, fn, receiver, args, awaitResult = false, extra = {}) {
     if (state.stopped) return Reflect.apply(fn, receiver, args);
-    const parent = als.getStore();
-    const row = { id: ++sequence, parent: parent && !parent.closed ? parent.id : null,
+    const parent = currentRow();
+    let row = { id: ++sequence, parent: parent && !parent.closed ? parent.id : null,
       kind, name, at: wall(), entered: now(), detailed: state.detailed, phaseCapture, metrics: {}, phases: {}, stack: [],
       ...(kind === 'ipc-invoke' ? { scope: deps.scopeOf?.(args[1]) || {} } : {}), ...extra };
     row.moduleCapture = Object.fromEntries([...modules].map(([name, group]) => [name, group.enabled]));
-    return als.run(row, () => {
+    // Clear this small cell explicitly: disable() alone need not erase inherited frames.
+    const context = { row }; contexts.add(context);
+    const release = () => { context.row = undefined; contexts.delete(context); };
+    const settle = rejected => {
+      const active = context.row;
+      if (active && !state.stopped) { active.settled = now(); if (rejected) active.rejected = true; active.closed = true; retain(active); }
+      release();
+    };
+    try { return als.run(context, () => {
       let value, failed = false;
       try { value = Reflect.apply(fn, receiver, args); return value; }
       catch (error) { failed = true; throw error; }
@@ -49,11 +59,10 @@ export function installObservation(deps, options) {
         row.syncEnd = now(); row.synchronousMs = row.syncEnd - row.entered; row.threw = failed;
         if (awaitResult && !failed && value instanceof Promise) {
           // Return the original Promise. Observing settlement does not substitute its result or rejection.
-          value.then(() => { row.settled = now(); row.closed = true; retain(row); },
-            () => { row.settled = now(); row.rejected = true; row.closed = true; retain(row); });
-        } else { row.settled = row.syncEnd; row.closed = true; retain(row); }
+          value.then(() => settle(false), () => settle(true));
+        } else { row.settled = row.syncEnd; row.closed = true; retain(row); release(); }
       }
-    });
+    }); } finally { row = undefined; }
   }
   function replace(object, key, wrapped) {
     const original = object[key]; object[key] = wrapped(original);
@@ -82,6 +91,11 @@ export function installObservation(deps, options) {
     if (!state.stopped) {
       state.stopped = true; nativeClearInterval(heartbeat); nativeClearTimeout(watchdog);
       state.restored = restores.reverse().map(fn => { try { return fn(); } catch { return false; } });
+      for (const context of contexts) {
+        if (context.row) { context.row.observationEndedBeforeSettlement = true; context.row.closed = true; retain(context.row); }
+        context.row = undefined;
+      }
+      contexts.clear();
       restores.length = 0; als.disable(); syncExports(); state.finishedAt = wall(); state.finishedMono = now();
       state.addedInvokeChannels = [...map.keys()].filter(key => !channels.includes(key)).length;
     }
@@ -117,7 +131,7 @@ export function installObservation(deps, options) {
   if (phase) {
     let previous, active;
     const observer = (name, fields) => {
-      const row = als.getStore();
+      const row = currentRow();
       if (!state.stopped && state.detailed && row && !row.closed && /^(plan\.(normalize|catalog|reportRevision)|watch\.[a-zA-Z]+)$/.test(name)) {
         const item = row.phases[name] ||= { calls: 0, ms: 0, hit: 0, miss: 0 };
         item.calls++; item.ms += Number(fields?.ms) || 0;
@@ -171,7 +185,7 @@ export function installObservation(deps, options) {
         if (typeof object[key] !== 'function') throw new Error('read_port_method_missing');
         group.handles.push(replace(object, key, original => function (...args) {
           const result = measure(`${module}.${key}`, () => Reflect.apply(original, this, args));
-          const row = als.getStore(), metric = row?.metrics[`${module}.${key}`];
+          const row = currentRow(), metric = row?.metrics[`${module}.${key}`];
           if (metric && Array.isArray(result)) metric.resultRows = (metric.resultRows || 0) + result.length;
           return result;
         }));
