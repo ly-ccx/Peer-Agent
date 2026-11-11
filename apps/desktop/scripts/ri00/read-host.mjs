@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { syncBuiltinESMExports } from 'node:module';
 import { createCoordinationSnapshot } from './coordination-snapshot.mjs';
+import { createReadOnlyCoordination } from './readonly-coordination.mjs';
 
 export function installReadMetrics(trace, fixtureRoot) {
   const restores = [];
@@ -33,16 +34,34 @@ export function installReadMetrics(trace, fixtureRoot) {
 }
 
 /** Recreates the real read dependency; never constructs a runner or acquires a project lease. */
-export async function createReadHost({ moduleRoot, fixtureRoot, parentHash, bindings, coordinationSnapshot, trace }) {
+export async function createReadHost({ moduleRoot, fixtureRoot, parentHash, bindings, coordinationSnapshot, coordinationLiveRoot, sourcePlans, desktopDiagnostics, output, readOnlyGuard, trace }) {
   if (process.env.PEER_AGENT_HOME !== fixtureRoot) throw new Error('fixture_environment_not_set_before_import');
   const from = relative => import(pathToFileURL(path.join(moduleRoot, relative)).href);
+  let disposeDiagnostic = () => {};
+  if (desktopDiagnostics) {
+    // Import pure production diagnostic functions with their automatic OS-home sink disabled.
+    process.env.PEER_AGENT_SLOW_TIMER_MS = '0';
+    const [{ recordDiagnosticPhase, flushDiagnosticPhases, createDiagnosticWriter }, { setDiagnosticPhaseObserver }] = await Promise.all([
+      from('apps/desktop/electron/main/slow-timer-probe.mjs'), from('packages/runtime-node/dist/diagnostic-phase.mjs'),
+    ]);
+    const writer = createDiagnosticWriter({ file: path.join(output, 'desktop-diagnostic.log') });
+    const previous = setDiagnosticPhaseObserver((name, fields) => {
+      if (name === 'plan.normalize') { trace.count('planNormalizeCalls'); trace.count('planNormalizeMs', Number(fields.ms) || 0); }
+      return trace.sync('DesktopDiagnostic.phaseObserver', () => recordDiagnosticPhase(name, fields));
+    });
+    const timer = setInterval(() => flushDiagnosticPhases(writer), 1000); timer.unref();
+    disposeDiagnostic = () => { clearInterval(timer); setDiagnosticPhaseObserver(previous); flushDiagnosticPhases(writer); };
+  }
   const [{ createConversationStore }, { createGoalPlanStore }, { createSessionSupervisor },
-    { createSessionVerification }, { createBotProfileStore }, { createProjectAgentApplicationService }] = await Promise.all([
+    { createSessionVerification }, { createBotProfileStore }, { createProjectAgentApplicationService },
+    { createExecutionScheduler }, { readPersistedObligationGrants }] = await Promise.all([
     from('packages/conversation-store/dist/index.mjs'), from('packages/runtime-node/dist/goal-plan-store.mjs'),
     from('packages/runtime-node/dist/project-agent/session-supervisor.mjs'),
     from('packages/runtime-node/dist/project-agent/session-verification.mjs'),
     from('packages/runtime-node/dist/project-agent/bot-profile-store.mjs'),
     from('apps/desktop/electron/main/project-agent/project-agent-application-service.mjs'),
+    from('packages/runtime-node/dist/project-agent/execution-scheduler.mjs'),
+    from('packages/runtime-node/dist/project-agent/execution-obligation.mjs'),
   ]);
   const profiles = createBotProfileStore({ rootDir: fixtureRoot });
   const target = fs.readdirSync(path.join(fixtureRoot, 'projects')).flatMap(id => {
@@ -51,15 +70,23 @@ export async function createReadHost({ moduleRoot, fixtureRoot, parentHash, bind
     || createHash('sha256').update(profile.agentConversationId || '').digest('hex').startsWith(parentHash)));
   if (!target?.workspaceId || !target.agentConversationId) throw new Error('fixture_target_missing');
   const conversationStore = createConversationStore({ storeDir: path.join(fixtureRoot, 'conversations') });
-  const goalPlanStore = createGoalPlanStore({ storeDir: path.join(fixtureRoot, 'goal-plans') });
+  const goalPlanStore = createGoalPlanStore({ storeDir: path.join(sourcePlans ? path.dirname(coordinationLiveRoot) : fixtureRoot, 'goal-plans') });
   let coordination;
+  let coordinationFailures = 0;
   let unregister;
-  if (coordinationSnapshot) {
+  if (coordinationSnapshot || coordinationLiveRoot) {
     const [{ DatabaseSync }, { registerWorkBudget }] = await Promise.all([
       from('packages/runtime-node/dist/sqlite/connection.mjs'), from('packages/runtime-node/dist/project-agent/work-budget.mjs'),
     ]);
-    coordination = createCoordinationSnapshot(new DatabaseSync(coordinationSnapshot, { readOnly: true }));
-    for (const key of ['readLifecycleFacts', 'readSnapshot', 'readSessionControl', 'readWork']) trace.wrap(coordination, key, `Coordination.${key}`);
+    coordination = coordinationLiveRoot
+      ? await createReadOnlyCoordination({ moduleRoot, rootDir: coordinationLiveRoot, workspaceId: target.workspaceId, guard: readOnlyGuard })
+      : createCoordinationSnapshot(new DatabaseSync(coordinationSnapshot, { readOnly: true }));
+    for (const key of ['read', 'readLifecycleFacts', 'readSnapshot', 'readSessionControl', 'readWork']) trace.wrap(coordination, key, `Coordination.${key}`);
+    for (const key of ['read', 'readLifecycleFacts', 'readSnapshot', 'readSessionControl', 'readWork']) {
+      const original = coordination[key];
+      coordination[key] = function (...args) { try { return Reflect.apply(original, this, args); }
+        catch (error) { coordinationFailures++; throw error; } };
+    }
     unregister = registerWorkBudget(target.workspaceId, coordination);
   }
   for (const key of ['getPlan', 'listEvidenceIndex']) {
@@ -84,7 +111,8 @@ export async function createReadHost({ moduleRoot, fixtureRoot, parentHash, bind
     autoHandoffOnPolicyAccept: profiles.read(plan.delegationOrigin.workspaceId)?.autoHandoffOnPolicyAccept === true,
     hostAuthority: verification.facts(plan.delegationOrigin.sessionId) || {},
   }));
-  supervisor = createSessionSupervisor({ conversationStore, goalPlanStore, deferRecovery: true,
+  const scheduler = createExecutionScheduler(); // Desktop AgentTurnExecutor's default is rootless; no device writer is opened.
+  supervisor = createSessionSupervisor({ conversationStore, goalPlanStore, executionScheduler: scheduler, deferRecovery: true,
     canManageWorkspace: () => false, autonomousCoordinationEnabled: () => false,
     ...(bindings ? { readSessionFacts: hostFacts,
       resolveAcceptancePolicy: workspaceId => profiles.read(workspaceId)?.acceptancePolicy } : {}),
@@ -100,11 +128,18 @@ export async function createReadHost({ moduleRoot, fixtureRoot, parentHash, bind
     return result;
   };
   trace.wrap(supervisor, 'readReportSummary', 'SessionSupervisor.readReportSummary');
+  const grantRoot = coordinationLiveRoot || path.join(fixtureRoot, 'project-runtime');
+  const persistedGrants = Boolean(coordinationLiveRoot || fs.existsSync(path.join(grantRoot, target.workspaceId, '.read-models', 'coordination-current.json')));
   const service = createProjectAgentApplicationService({ enabled: () => true, sessions: supervisor,
-    readPersistedObligationGrants: () => ({ ok: true, grants: [], source: 'isolated-empty-fixture' }) });
+    readPersistedObligationGrants: persistedGrants
+      ? workspaceId => readPersistedObligationGrants({ rootDir: grantRoot, workspaceId })
+      : () => ({ ok: true, grants: [], source: 'isolated-empty-fixture' }) });
   const payload = { workspaceId: target.workspaceId, parentConversationId: target.agentConversationId };
-  return { service, payload, fixtureObservation, sessionFacts: () => supervisor.list({ workspaceId: target.workspaceId }),
-    close() { unregister?.(); coordination?.close(); }, async query() {
+  return { service, payload, fixtureObservation, sourceRevision: () => coordination?.revision?.(),
+    readFailures: () => coordinationFailures, dependencyBindings: { receiptRead: Boolean(coordination), persistedGrants, desktopDiagnostics: Boolean(desktopDiagnostics), scheduler: 'desktop-rootless',
+      sourceValidation: coordinationLiveRoot ? 'production-readonly-source' : coordination ? 'isolated-backup' : 'excluded' },
+    sessionFacts: () => supervisor.list({ workspaceId: target.workspaceId }),
+    close() { unregister?.(); coordination?.close(); scheduler.close(); disposeDiagnostic(); }, async query() {
     const result = await service.listObligationGrants(payload);
     if (result.ok !== true || result.grants?.length !== 0) throw new Error('empty_query_fixture_changed');
     return result;

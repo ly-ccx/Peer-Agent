@@ -25,13 +25,18 @@ if (args.includes('--expect-stall') === args.includes('--expect-responsive')) th
 if (!['bare', 'desktop'].includes(option('--bindings', 'desktop'))) throw new Error('invalid_bindings');
 const config = { moduleRoot, fixtureRoot, output, parentHash: option('--parent-hash', ''),
   bindings: option('--bindings', 'desktop') === 'desktop', instrumented: args.includes('--instrumented'),
-  coordinationSnapshot: option('--coordination-snapshot', null) };
+  coordinationSnapshot: option('--coordination-snapshot', null), coordinationLiveRoot: option('--readonly-coordination-root', null),
+  sourcePlans: args.includes('--readonly-source-plans'), desktopDiagnostics:args.includes('--desktop-diagnostics'),
+  deepBuiltins: !args.includes('--no-builtins'), instrumentPath: args.includes('--inspect-path') };
+if (config.instrumentPath && !config.instrumented) throw new Error('path_observation_requires_instrumentation');
+if (config.coordinationSnapshot && config.coordinationLiveRoot) throw new Error('choose_one_coordination_source');
+if (config.sourcePlans && !config.coordinationLiveRoot) throw new Error('source_plans_require_readonly_source_guard');
 const require = createRequire(path.join(moduleRoot, 'apps/desktop/package.json'));
 const { _electron } = require('playwright-core');
 const configFile = path.join(output, 'config.private.json');
 fs.writeFileSync(configFile, JSON.stringify(config), { mode: 0o600 });
 const sourceHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: moduleRoot, encoding: 'utf8' }).trim();
-const harnessIdentity = () => ['perf-runtime-baseline.mjs', 'ri00/trace.mjs', 'ri00/identity.mjs', 'ri00/read-host.mjs', 'ri00/coordination-snapshot.mjs', 'ri00/electron-main.mjs', 'ri00/preload.cjs'].map(relative => ({ relative,
+const harnessIdentity = () => ['perf-runtime-baseline.mjs', 'ri00/trace.mjs', 'ri00/identity.mjs', 'ri00/read-host.mjs', 'ri00/coordination-snapshot.mjs', 'ri00/readonly-coordination.mjs', 'ri00/gc-observation.mjs','ri00/electron-main.mjs', 'ri00/preload.cjs'].map(relative => ({ relative,
   sha256: createHash('sha256').update(fs.readFileSync(fileURLToPath(new URL(relative, import.meta.url)))).digest('hex') }));
 const report = { schemaVersion: 1, kind: 'ri00-failing-baseline-not-a-fix', sourceHead,
   harness: harnessIdentity(),
@@ -39,10 +44,14 @@ const report = { schemaVersion: 1, kind: 'ri00-failing-baseline-not-a-fix', sour
   snapshot: config.coordinationSnapshot ? contentIdentity(config.coordinationSnapshot) : null,
   bindings: config.bindings ? 'desktop-verification' : 'bare-supervisor', instrumented: config.instrumented,
   coordinationSnapshot: Boolean(config.coordinationSnapshot),
+  coordinationLiveReadOnly: Boolean(config.coordinationLiveRoot),
+  sourcePlans: config.sourcePlans,
+  deepBuiltins: config.deepBuiltins, instrumentPath: config.instrumentPath,
   pairedProbe: args.includes('--paired-probe'),
   startedAt: new Date().toISOString(), attempts: [], cases: {}, limitations: [
     'Read-only host assembly; no runner, lease, model, tools or live UI-delivery adapter.',
-    config.coordinationSnapshot ? 'WorkBudget read port uses a consistent SQLite backup; source-token validation/recovery are not measured.' : 'No WorkBudget binding; coordination cost is excluded.',
+    config.coordinationLiveRoot ? 'Production coordination reads use SQLite readOnly and a filesystem write guard; concurrent source revisions are recorded; no recovery/writer is admitted.'
+      : config.coordinationSnapshot ? 'WorkBudget read port uses a consistent SQLite backup; source-token validation/recovery are not measured.' : 'No WorkBudget binding; coordination cost is excluded.',
     'Real catalog/owner/frame/origin and IPC; fixture page is not the product UI or hardware input.',
     'Burst of eight is a controlled mechanism experiment, not proof of the historical incident trigger.',
     'Unsegmented request time includes async/microtask wait; CPU self time is not inferred from it.',
@@ -73,6 +82,7 @@ try {
       return rows;
     }, { payload: facts.payload, batches, concurrency, delay });
     const main = await app.evaluate(() => globalThis.ri00.take());
+    if (main.coordinationReadFailures) throw new Error('coordination_read_failure_was_swallowed_by_production_projection');
     if (client.length !== main.observations.length || client.some(row => !row.ok || row.grants !== 0)) throw new Error('request_identity_or_fixture_failed');
     if (args.includes('--expect-stall') && stage !== 'transport-control'
       && !(main.fixtureObservation.minSessions > 0)) throw new Error('fixture_session_projection_failed');
@@ -90,6 +100,13 @@ try {
       handlerSyncMs: distribution(rows.map(row => row.handlerSyncMs)), heartbeatGapMs: distribution(main.gaps),
       responseBytes: distribution(rows.map(row => row.responseBytes)), summaries: summarizeRequests(main.requests), rows, requests: main.requests };
     report.cases[stage].fixtureObservation = main.fixtureObservation;
+    report.cases[stage].sourceGuard = main.sourceGuard;
+    report.cases[stage].sourceRevision = main.sourceRevision;
+    report.cases[stage].sourceRevisionStart = main.sourceRevisionStart;
+    report.cases[stage].dependencyBindings = main.dependencyBindings;
+    report.cases[stage].gc = main.gc;
+    report.cases[stage].heap = {before:main.heapBefore,after:main.heapAfter,spaces:main.heapSpaces};
+    for(const row of rows) row.gcMs=main.gc.reduce((sum,entry)=>sum+Math.max(0,Math.min(entry.startMono+entry.durationMs,row.enteredMain+row.handlerSyncMs)-Math.max(entry.startMono,row.enteredMain)),0);
     console.log(JSON.stringify({ stage, ...report.cases[stage].roundTripMs, handler: report.cases[stage].handlerSyncMs, mainHeartbeat: report.cases[stage].heartbeatGapMs.max }));
   };
   await run('transport-control', 25, 1, 5);

@@ -3,16 +3,25 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { performance } from 'node:perf_hooks';
+import { PerformanceObserver } from 'node:perf_hooks';
+import * as timers from 'node:timers';
+import { getHeapSpaceStatistics, getHeapStatistics } from 'node:v8';
 import { createTrace } from './trace.mjs';
 import { createReadHost, installReadMetrics } from './read-host.mjs';
+import { guardReadOnlySource } from './readonly-coordination.mjs';
+import { observeGc } from './gc-observation.mjs';
 
 const configAt = process.argv.indexOf('--ri00-config');
 if (configAt < 0 || !process.argv[configAt + 1]) throw new Error('ri00_config_required');
 const config = JSON.parse(fs.readFileSync(process.argv[configAt + 1], 'utf8'));
 process.env.PEER_AGENT_HOME = config.fixtureRoot;
+process.env.PEER_AGENT_SLOW_TIMER_MS = '0';
+const readOnlyGuard = config.coordinationLiveRoot ? guardReadOnlySource(path.dirname(config.coordinationLiveRoot)) : null;
 app.setPath('userData', path.join(config.output, 'electron-user-data'));
 const trace = createTrace({ enabled: config.instrumented });
-const restoreReadMetrics = config.instrumented ? installReadMetrics(trace, config.fixtureRoot) : () => {};
+const gc = observeGc({PerformanceObserver,performance,timers,now:()=>performance.timeOrigin+performance.now(),wall:()=>new Date().toISOString()},180000);
+const restoreReadMetrics = config.instrumented && config.deepBuiltins !== false ? installReadMetrics(trace, config.fixtureRoot) : () => {};
+const restorePathMetrics = config.instrumentPath ? ['join','normalize','resolve'].map(method => trace.wrap(path, method, `Path.${method}`)) : [];
 async function start() {
 const load = relative => import(pathToFileURL(path.join(config.moduleRoot, relative)).href);
 const [{ createCatalogIpcMain }, { createTrustedWindowRegistry }, { createProjectAgentIpcRegistrations }] = await Promise.all([
@@ -20,9 +29,11 @@ const [{ createCatalogIpcMain }, { createTrustedWindowRegistry }, { createProjec
   load('apps/desktop/electron/main/ipc/trusted-window-registry.mjs'),
   load('apps/desktop/electron/main/ipc/register-project-agent-ipc.mjs'),
 ]);
-const host = await createReadHost({ ...config, trace });
+const host = await createReadHost({ ...config, trace, readOnlyGuard });
 let stage = 'transport-control';
 let observations = [], gaps = [], sequence = 0;
+let sourceRevisionStart;
+let stageStarted, heapBefore;
 const clock = () => performance.timeOrigin + performance.now();
 const registry = createTrustedWindowRegistry();
 const adapter = {
@@ -67,9 +78,15 @@ for (const registration of registrations) registration.register(catalog.createOw
     runtime: { electron: process.versions.electron, node: process.versions.node, platform: process.platform, arch: process.arch },
     setTrace(enabled) { if (!config.instrumented) throw new Error('trace_not_installed'); trace.setEnabled(enabled); },
     start(next) { stage = next; observations = []; gaps = []; trace.take(); last = performance.now();
+      sourceRevisionStart = host.sourceRevision?.();
+      stageStarted=clock(); heapBefore=getHeapStatistics();
       Object.assign(host.fixtureObservation, { listCalls: 0, minSessions: null, maxSessions: 0 }); },
-    take() { return { observations, gaps, requests: trace.take(), fixtureObservation: host.fixtureObservation }; },
+    take() { return { observations, gaps, requests: trace.take(), fixtureObservation: host.fixtureObservation,
+      sourceGuard: readOnlyGuard?.state, sourceRevisionStart, sourceRevision: host.sourceRevision?.(),
+      coordinationReadFailures: host.readFailures(), dependencyBindings: host.dependencyBindings,
+      gc:gc.peek().entries.filter(entry=>entry.startMono>=stageStarted),heapBefore,heapAfter:getHeapStatistics(),heapSpaces:getHeapSpaceStatistics() }; },
   };
-  app.on('will-quit', () => { clearInterval(heartbeat); catalog.dispose(); registry.dispose(); restoreReadMetrics(); host.close(); });
+  app.on('will-quit', () => { clearInterval(heartbeat); gc.stop(); catalog.dispose(); registry.dispose(); restoreReadMetrics();
+    for (const restore of restorePathMetrics.reverse()) restore(); host.close(); readOnlyGuard?.close(); });
 }
 app.whenReady().then(start).catch(error => { fs.writeFileSync(path.join(config.output, 'main-error.private.txt'), error.stack); app.exit(1); });

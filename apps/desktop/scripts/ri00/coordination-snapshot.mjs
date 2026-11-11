@@ -11,13 +11,22 @@ export function createCoordinationSnapshot(db) {
     .map(row => [row.id, JSON.parse(row.value)]));
   const get = (bucket, id) => { const row = statement('SELECT value FROM objects WHERE bucket=? AND id=?').get(bucket, id); return row ? JSON.parse(row.value) : undefined; };
   const meta = id => { const row = statement('SELECT value FROM meta WHERE id=?').get(id); return row ? JSON.parse(row.value) : undefined; };
-  let cached;
+  let cached, cachedReceipt;
   const freeze = value => {
     if (value && typeof value === 'object' && !Object.isFrozen(value)) {
       Object.freeze(value); for (const child of Object.values(value)) freeze(child);
     }
     return value;
   };
+  function snapshot(receipts = false) {
+    const state = { revision: meta('revision') || 0, works: {}, events: {}, deliveries: {} };
+    for (const { bucket } of db.prepare('SELECT DISTINCT bucket FROM objects').all()) state[bucket] = all(bucket);
+    if (receipts) for (const { workId, id } of db.prepare('SELECT workId,id FROM observations').all()) {
+      const work = state.works[workId]; if (work?.budget) (work.budget.observations ||= {})[id] = true;
+    }
+    const recovery = meta('lastRecovery'); if (recovery) state.lastRecovery = recovery;
+    return freeze(state);
+  }
   return {
     revision: () => meta('revision') || 0,
     readLifecycleFacts() {
@@ -28,14 +37,9 @@ export function createCoordinationSnapshot(db) {
       return state;
     },
     readSnapshot() {
-      if (!cached) {
-        cached = { revision: meta('revision') || 0, works: {}, events: {}, deliveries: {} };
-        for (const { bucket } of db.prepare('SELECT DISTINCT bucket FROM objects').all()) cached[bucket] = all(bucket);
-        const recovery = meta('lastRecovery'); if (recovery) cached.lastRecovery = recovery;
-        freeze(cached);
-      }
-      return cached;
+      return cached ||= snapshot();
     },
+    read() { return cachedReceipt ||= snapshot(true); },
     readWork: id => get('works', id),
     readSessionControl(id) { const head = get('sessionControlHeads', id); return head ? get('sessionControls', head.operationId) : undefined; },
     readSupervision: (bucket, id) => get(bucket, id),

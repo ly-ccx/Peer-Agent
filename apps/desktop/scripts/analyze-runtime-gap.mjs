@@ -1,0 +1,10 @@
+import fs from 'node:fs';
+import { analyzeGap } from './ri00/gap-analysis.mjs';
+const args=process.argv.slice(2),option=name=>args[args.indexOf(name)+1];
+for(const name of ['--report','--profile','--gap-at','--output'])if(!args.includes(name)||!option(name))throw new Error('explicit_analysis_inputs_required');
+if(fs.existsSync(option('--output')))throw new Error('analysis_output_must_be_new');
+const report=JSON.parse(fs.readFileSync(option('--report'),'utf8'));
+const profile=JSON.parse(fs.readFileSync(option('--profile'),'utf8'));
+const gap=report.observation.gaps.find(row=>row.at===option('--gap-at'));
+if(!gap||!report.profileClock)throw new Error('recorded_gap_and_profile_clock_required');
+fs.writeFileSync(option('--output'),JSON.stringify(analyzeGap(report.observation,profile,report.profileClock,gap),null,2),{mode:0o600,flag:'wx'});

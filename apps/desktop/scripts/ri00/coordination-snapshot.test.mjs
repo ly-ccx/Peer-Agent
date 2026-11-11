@@ -5,7 +5,7 @@ import { createCoordinationSnapshot } from './coordination-snapshot.mjs';
 
 function fixture() {
   const db = new DatabaseSync(':memory:');
-  db.exec('CREATE TABLE objects(bucket TEXT,id TEXT,value TEXT);CREATE TABLE meta(id TEXT,value TEXT)');
+  db.exec('CREATE TABLE objects(bucket TEXT,id TEXT,value TEXT);CREATE TABLE meta(id TEXT,value TEXT);CREATE TABLE observations(workId TEXT,id TEXT)');
   db.prepare('INSERT INTO meta VALUES (?,?)').run('revision', '14');
   const insert = (bucket, id, value) => db.prepare('INSERT INTO objects VALUES (?,?,?)').run(bucket, id, JSON.stringify(value));
   insert('works', 'w', { state: 'blocked_system', stopScope: 'work', intentCoordination: { lifecycle: 'active' }, body: 'private body' });
@@ -27,6 +27,21 @@ test('lifecycle facts preserve current source fields and decode fresh work state
     first.workStates.w.intentCoordination.lifecycle = 'changed';
     assert.equal(port.readLifecycleFacts().workStates.w.intentCoordination.lifecycle, 'active');
     assert.equal(JSON.stringify(first).includes('private body'), false);
+  } finally { port.close(); }
+});
+
+test('receipt reads retain obligations and observation facts without aliasing the normal snapshot', () => {
+  const { db, port } = fixture();
+  db.prepare('INSERT INTO objects VALUES (?,?,?)').run('obligationHeads', 's', JSON.stringify('head'));
+  db.prepare('INSERT INTO objects VALUES (?,?,?)').run('obligationDispositions', 'head', JSON.stringify({ phase: 'indexed' }));
+  db.prepare('UPDATE objects SET value=? WHERE bucket=?').run(JSON.stringify({ state: 'blocked_system', budget: {} }), 'works');
+  db.prepare('INSERT INTO observations VALUES (?,?)').run('w', 'observed');
+  try {
+    assert.equal(port.read().obligationDispositions[port.read().obligationHeads.s].phase, 'indexed');
+    assert.equal(port.read().works.w.budget.observations.observed, true);
+    assert.equal(port.readSnapshot().works.w.budget.observations, undefined);
+    assert.equal(port.read(), port.read());
+    assert.throws(() => { port.read().obligationHeads.s = 'changed'; }, TypeError);
   } finally { port.close(); }
 });
 
