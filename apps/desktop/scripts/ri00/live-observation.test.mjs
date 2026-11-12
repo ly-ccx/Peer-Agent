@@ -115,6 +115,27 @@ test('named read ports retain return identity and record array cardinality witho
   assert.equal(port.read, original);
 });
 
+test('unattributed synchronous read roots cover async callers without double-counting IPC or exposing paths', () => {
+  const records=[1],port={read(){assert.equal(this,port);f.advance(80);return records;}},original=port.read;
+  const f=fixture(()=>port.read()),observation=installObservation(f.deps,{durationMs:1000,deepBuiltins:false});
+  try{
+    observation.instrumentObject(port,'SessionSupervisor',['read'],{rootWhenUnattributed:true});
+    assert.equal(port.read(),records);
+    f.ipcMain._invokeHandlers.get('catalog:query')();
+    const rows=observation.peek().records;
+    assert.equal(rows.length,2);assert.equal(rows[0].kind,'read-port');assert.equal(rows[0].synchronousMs,80);
+    assert.equal(rows[0].metrics['SessionSupervisor.read'].resultRows,1);
+    assert.equal(rows[1].kind,'ipc-invoke');assert.ok(rows[0].sourceStack.length>0);
+    const previous=Error.prepareStackTrace;
+    try{Error.prepareStackTrace=()=>{throw new Error('private formatter failure')};assert.equal(port.read(),records);}
+    finally{Error.prepareStackTrace=previous;}
+    assert.deepEqual(rows[2].sourceStack,[]);
+    assert.equal(JSON.stringify(rows).includes('/private/'),false);
+    assert.equal(JSON.stringify(rows).includes('/Users/'),false);
+  }finally{assert.ok(observation.stop().restored.every(Boolean));}
+  assert.equal(port.read,original);
+});
+
 test('phase capture can restore the production observer during paired live measurement', () => {
   const f = fixture(() => f.store.readLifecycleFacts()), observation = installObservation(f.deps, { durationMs: 1000, deepBuiltins: false });
   try {

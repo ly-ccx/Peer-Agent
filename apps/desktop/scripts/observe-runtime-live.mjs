@@ -21,12 +21,14 @@ const workspaceIds = option('--workspace-file') ? JSON.parse(fs.readFileSync(opt
 if (!Array.isArray(workspaceIds) || workspaceIds.some(id => typeof id !== 'string')) throw new Error('invalid_workspace_file');
 const ownsInspector = args.includes('--close-inspector');
 if(args.includes('--paired-path')&&!args.includes('--inspect-path'))throw new Error('paired_path_requires_path_observation');
+if(args.includes('--unattributed-read-roots')&&!args.includes('--inspect-read-ports'))throw new Error('read_roots_require_read_ports');
 const harness = () => ['observe-runtime-live.mjs','ri00/live-observation.mjs','ri00/trace.mjs','ri00/profile-clock.mjs','ri00/gc-observation.mjs','ri00/inspector-read-ports.mjs'].map(relative => ({relative,
   sha256:createHash('sha256').update(fs.readFileSync(new URL(relative,import.meta.url))).digest('hex')}));
 const report = { kind: 'natural-live-observation-not-a-fix', startedAt: new Date().toISOString(),
   harnessSha256: createHash('sha256').update(fs.readFileSync(new URL('./ri00/live-observation.mjs', import.meta.url))).digest('hex'),
   harness: harness(), deepBuiltins: !args.includes('--no-builtins'),
   failures: [], ownsInspector, profileRequested: !args.includes('--no-profile') };
+report.unattributedReadRoots = args.includes('--unattributed-read-roots');
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 let socket, next = 0, pending = new Map(), installed = false, profiling = false, requestedStop = false, verifiedTarget = false;
 function post(method, params = {}) {
@@ -80,8 +82,8 @@ try {
   report.instrumentedReadMethods = 0;
   for(const port of readPorts) {
     report.instrumentedReadMethods += inspectorValue(await post('Runtime.callFunctionOn',{objectId:port.objectId,
-      functionDeclaration:'function(module,methods){return globalThis.__peerRi00Observation.instrumentObject(this,module,methods)}',
-      arguments:[{value:port.module},{value:port.methods}],returnByValue:true}));
+      functionDeclaration:'function(module,methods,options){return globalThis.__peerRi00Observation.instrumentObject(this,module,methods,options)}',
+      arguments:[{value:port.module},{value:port.methods},{value:{rootWhenUnattributed: report.unattributedReadRoots && port.module==='SessionSupervisor'}}],returnByValue:true}));
   }
   if(args.includes('--inspect-path')) {
     const pathObject=await post('Runtime.evaluate',{expression:'process.getBuiltinModule("path")',objectGroup:'ri00-path'});

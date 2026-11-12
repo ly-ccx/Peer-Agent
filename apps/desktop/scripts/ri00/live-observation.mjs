@@ -84,6 +84,18 @@ export function installObservation(deps, options) {
     if (file.includes('coordination') || file.includes('/runtime/')) return 'coordination';
     return 'other';
   }
+  function readStack() {
+    const previous = Error.stackTraceLimit;
+    try {
+      Error.stackTraceLimit = 24;
+      return String(new Error().stack).split('\n').slice(1).flatMap(line => {
+        const match = line.trim().match(/^at (?:async )?([^\n()]+?) \((?:.*[/\\])?([^/\\():]+):(\d+):\d+\)$/);
+        if (!match || !/\.(?:mjs|cjs|js|ts)$/.test(match[2])) return [];
+        return [{ function: match[1].slice(0,120), file: match[2], line: Number(match[3]) }];
+      }).slice(0,16);
+    } catch { return []; }
+    finally { Error.stackTraceLimit = previous; }
+  }
   const map = ipcMain._invokeHandlers;
   if (!(map instanceof Map)) throw new Error('invoke_handler_map_missing');
   const channels = [...map.keys()];
@@ -178,16 +190,24 @@ export function installObservation(deps, options) {
   watchdog = nativeTimeout(() => { stop(); options.onWatchdog?.(); }, options.durationMs + 30000);
   own.add(watchdog); watchdog.unref?.();
   return { stop, peek: () => state, adoptTimers(handles) { for (const handle of handles) adoptTimer(handle); return adoptedCount; },
-    instrumentObject(object, module, methods) {
+    instrumentObject(object, module, methods, portOptions = {}) {
       if(modules.has(module))throw new Error('read_port_already_observed');
       const group={enabled:true,handles:[]};modules.set(module,group);
       for (const key of methods) {
         if (typeof object[key] !== 'function') throw new Error('read_port_method_missing');
         group.handles.push(replace(object, key, original => function (...args) {
-          const result = measure(`${module}.${key}`, () => Reflect.apply(original, this, args));
-          const row = currentRow(), metric = row?.metrics[`${module}.${key}`];
-          if (metric && Array.isArray(result)) metric.resultRows = (metric.resultRows || 0) + result.length;
-          return result;
+          const observe = () => {
+            const result = measure(`${module}.${key}`, () => Reflect.apply(original, this, args));
+            const row = currentRow(), metric = row?.metrics[`${module}.${key}`];
+            if (metric && Array.isArray(result)) metric.resultRows = (metric.resultRows || 0) + result.length;
+            return result;
+          };
+          if (!state.stopped && portOptions.rootWhenUnattributed && !currentRow()) {
+            return root('read-port', `${module}.${key}`, () => {
+              currentRow().sourceStack = readStack(); return observe();
+            }, this, []);
+          }
+          return observe();
         }));
       }
       return methods.length;
