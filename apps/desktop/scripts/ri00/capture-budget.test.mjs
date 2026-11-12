@@ -18,5 +18,27 @@ test('another continuation subtracts from carried limits rather than resetting t
 });
 
 test('a failed observation can carry verified consumption after clean recovery, while unknown fields still reject',()=>{
- const o=options();o.previous.ok=false;o.previous.failures=['source_observer_watch_error:EIO'];assert.equal(captureBudget(o).prior.previousFailureCount,1);delete o.previous.restoration.main.probeCpuMs;assert.throws(()=>captureBudget(o),/invalid/);
+ const o=options();o.previous.ok=false;o.previous.failures=['source_observer_watch_error:EIO','source-observer:source_observer_watch_error:EIO:live=0'];
+ o.previous.sourceObserver={closed:true,liveWatchers:0,closeFailures:0,failed:'source_observer_watch_error:EIO'};
+ assert.equal(captureBudget(o).prior.previousFailureCount,2);delete o.previous.restoration.main.probeCpuMs;assert.throws(()=>captureBudget(o),/invalid/);
+});
+
+test('RPC timeout, disconnect, mixed and unknown failures cannot prove complete consumption even with zero ACK gap',()=>{
+ for(const failures of [['dense_rpc_timeout'],['Inspector disconnected'],['unknown'],['source_observer_watch_error:EIO','dense_rpc_timeout'],['source_observer_watch_error:EIO','cleanup-stop-main:timeout']]){
+  const o=options();o.previous.ok=false;o.previous.failures=failures;o.previous.sourceObserver={closed:true,liveWatchers:0,closeFailures:0,failed:'source_observer_watch_error:EIO'};
+  assert.equal(o.previous.acknowledgementGapCpuMs,0);assert.throws(()=>captureBudget(o),/capture_budget_previous_failure_cost_unknown/);
+ }
+});
+
+test('mechanics and failure outcomes must agree and source watcher recovery must be explicit',()=>{
+ for(const change of [o=>o.previous.ok=false,o=>delete o.previous.ok,o=>o.previous.failures=['source_observer_watch_error:EIO'],o=>{o.previous.ok=false;o.previous.failures=['source_observer_watch_error:EIO'];},...['closed','liveWatchers','closeFailures','failed'].map(k=>o=>{
+  o.previous.ok=false;o.previous.failures=['source_observer_watch_error:EIO'];o.previous.sourceObserver={closed:true,liveWatchers:0,closeFailures:0,failed:'source_observer_watch_error:EIO'};delete o.previous.sourceObserver[k];
+ }),...[null,false,{}].map(observer=>o=>o.previous.sourceObserver=observer),o=>{o.previous.sourceObserver={closed:false,liveWatchers:1,closeFailures:0,failed:null};}]){
+  const o=options();change(o);assert.throws(()=>captureBudget(o),/capture_budget_previous_(failure_cost_unknown|source_observer_required)/);
+ }
+ const o=options();o.previous.sourceObserver={closed:true,liveWatchers:0,closeFailures:0,failed:null};assert.equal(captureBudget(o).prior.previousMechanicsOk,true);
+});
+
+test('acknowledged main CPU must be finite and nonnegative before comparing consumption',()=>{
+ for(const value of [undefined,null,NaN,Infinity,-1,'12000']){const o=options();o.previous.mainCpuMs=value;assert.throws(()=>captureBudget(o),/capture_budget_(invalid|previous_cpu_gap)/);}
 });

@@ -10,6 +10,16 @@ export function captureBudget({previous,previousSha256,supplementalVm,pid}={}){
  }
  const p=previous;if(p.kind!=='persistent-dense-residual-formation-not-a-fix'||!p.longWatch||typeof p.longWatch!=='object'||p.ownedMain!==false||p.synthetic!==false
   ||!Array.isArray(p.failures)||p.closeCheck?.closed!==true||p.acknowledgementGapCpuMs!==0||p.mainRuntime?.pid!==pid||!/^[a-f0-9]{64}$/.test(previousSha256||''))throw Error('capture_budget_previous_receipt_rejected');
+ const observer=p.sourceObserver,observerClosed=observer?.closed===true&&observer.liveWatchers===0&&observer.closeFailures===0;
+ if(p.ok===true&&p.failures.length===0){
+  if(observer!==undefined&&(!observerClosed||observer.failed!==null))throw Error('capture_budget_previous_source_observer_required');
+ }else{
+  // RPC failures may leave an in-flight read beyond an early zero-gap stop snapshot.
+  // Only a known watcher failure after complete recovery has an admitted cost scope.
+  const reason=observer?.failed;
+  if(p.ok!==false||p.failures.length===0||!observerClosed||!/^source_observer_watch_error:[A-Z][A-Z0-9_]{0,31}$/.test(reason||'')
+   ||!p.failures.every(f=>f===reason||f===`source-observer:${reason}:live=0`))throw Error('capture_budget_previous_failure_cost_unknown');
+ }
  const birth=p.mainProcessBirth??p.epochs?.[0]?.mainA?.points?.[0]?.before?.values?.ri_proc_start_abstime;
  if(!/^\d+$/.test(String(birth||''))||!Array.isArray(p.production))throw Error('capture_budget_previous_identity_required');
  const wall=Date.parse(p.finishedAt)-Date.parse(p.startedAt),observed=Math.max(number(wall,'wall'),number(p.longWatch.finishedMs,'observed'));
@@ -20,7 +30,7 @@ export function captureBudget({previous,previousSha256,supplementalVm,pid}={}){
   if(supplementalVm){const vm=supplementalVm.hosts?.[host];if(vm?.pid!==p[host+'Runtime']?.pid||!/^[a-f0-9]{64}$/.test(supplementalVm.scriptSha256||''))throw Error('capture_budget_supplemental_identity_rejected');cost.probeCpuMs+=number(vm.threadUserMs,host+'.extraUser')+number(vm.threadSystemMs,host+'.extraSystem');}
   for(const k of Object.keys(cost))remaining.hosts[host][k]-=cost[k];
  }
- if(Math.abs(p.mainCpuMs-p.restoration.main.controlledCpuMs)>.001)throw Error('capture_budget_previous_cpu_gap');
+ if(Math.abs(number(p.mainCpuMs,'main.acknowledged')-p.restoration.main.controlledCpuMs)>.001)throw Error('capture_budget_previous_cpu_gap');
  remaining.durationMs=Math.floor(remaining.durationMs);
  if(remaining.durationMs<900000||remaining.controllerCpuMs<1000||remaining.archiveBytes<0||remaining.hosts.main.readCpuMs<40000
   ||Object.values(remaining.hosts).some(h=>h.readCpuMs<=0||h.nativeCpuMs<100||h.probeCpuMs<100))throw Error('capture_budget_remaining_insufficient');
