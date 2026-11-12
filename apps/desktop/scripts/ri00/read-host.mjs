@@ -138,6 +138,8 @@ export async function createReadHost({ moduleRoot, fixtureRoot, parentHash, bind
       : () => ({ ok: true, grants: [], source: 'isolated-empty-fixture' }) });
   const payload = { workspaceId: target.workspaceId, parentConversationId: target.agentConversationId };
   return { service, payload, fixtureObservation, sourceRevision: () => coordination?.revision?.(),
+    // Diagnostic references stay inside the isolated host; no product IPC or execution port is added.
+    readPorts: { goalPlanStore, supervisor, coordination },
     readFailures: () => coordinationFailures, dependencyBindings: { receiptRead: Boolean(coordination), persistedGrants, desktopDiagnostics: Boolean(desktopDiagnostics), scheduler: 'desktop-rootless',
       stores: sourceStores ? 'production-readonly-source' : sourcePlans ? 'source-plans-and-isolated-other-stores' : 'isolated-copy',
       sourceValidation: coordinationLiveRoot ? 'production-readonly-source' : coordination ? 'isolated-backup' : 'excluded' },

@@ -1,6 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createTrace, distribution, inspectorValue, synchronizeClocks, requestPhases, inspectClosure } from './trace.mjs';
+import http from 'node:http';
+import { createTrace, distribution, inspectorValue, synchronizeClocks, requestPhases, inspectClosure,inspectorEndpoint } from './trace.mjs';
+
+test('real closure probes use separate sockets and classify connection refusal after shutdown',async()=>{
+  const ports=[];
+  const server=http.createServer((request,response)=>{ports.push(request.socket.remotePort);assert.equal(request.headers.connection,'close');response.end('{}');});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const port=server.address().port;
+  try{
+    for(let i=0;i<5;i++)assert.equal((await inspectorEndpoint(`http://127.0.0.1:${port}/json/list`)).status,200);
+    assert.equal(new Set(ports).size,5);
+  }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
+  const result=await inspectClosure(port);assert.equal(result.closed,true);assert.equal(result.status,'closed');
+});
 
 test('owned inspector closure waits past an early open port and requires connection refusal',async()=>{
   let clock=0;

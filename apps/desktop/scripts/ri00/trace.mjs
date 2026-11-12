@@ -1,7 +1,19 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import http from 'node:http';
+
+/** A close probe never reuses a socket which the inspected server is shutting down. */
+export function inspectorEndpoint(url,{signal}={}){
+  return new Promise((resolve,reject)=>{
+    const request=http.get(url,{agent:false,signal},response=>{
+      // Headers prove the listener answered. Its body is not evidence of closure.
+      response.on('error',()=>{});response.resume();resolve({status:response.statusCode});
+    });
+    request.on('error',cause=>reject(new Error('inspector_endpoint_failed',{cause})));
+  });
+}
 
 /** Wait for an owned inspector's deferred close, without mistaking a timeout for refusal. */
-export async function inspectClosure(port, { required = true, timeoutMs = 15000, fetchImpl = fetch,
+export async function inspectClosure(port, { required = true, timeoutMs = 15000, fetchImpl = inspectorEndpoint,
   now = Date.now, wait = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
   const started = now(), deadline = started + timeoutMs;
   let status = 'uncertain', checks = 0;
