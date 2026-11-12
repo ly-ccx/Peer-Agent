@@ -28,7 +28,9 @@ const vmAfter=args.includes('--vm-after');
 if(vmAfter&&(!isolationOnly||mode!=='counters'))throw new Error('vm_after_requires_isolated_counters');
 if(args.includes('--vm-debug-print')&&!vmAfter)throw new Error('private_layout_requires_owned_vm_after');
 if(args.includes('--heap-layout')&&!vmAfter)throw new Error('heap_layout_requires_owned_vm_after');
-if(!['none','index-first','session-first'].includes(startupOrder)||((startupOrder!=='none'||hotOnly)&&(!isolationOnly||mode!=='counters'||counterTarget!=='session')))throw new Error('startup_control_requires_isolated_session');
+// Startup controls always affect the owned child. Main receives no prelude.
+const isolatedSessionCounters=isolationOnly&&mode==='counters'&&counterTarget==='session';
+if(!['none','index-first','session-first'].includes(startupOrder)||(startupOrder!=='none'&&!isolatedSessionCounters&&mode!=='session')||(hotOnly&&!isolatedSessionCounters))throw new Error('startup_control_requires_owned_session_child');
 if(startupOrder!=='none'&&retainedCopies!==null)throw new Error('startup_and_retention_controls_are_separate');
 const sessionRounds=Number(option('--session-rounds','3')),sessionDelayMs=Number(option('--session-delay-ms','250'));
 if(!Number.isInteger(sessionRounds)||sessionRounds<3||sessionRounds>9||!Number.isInteger(sessionDelayMs)||sessionDelayMs<100||sessionDelayMs>1000)throw new Error('unbounded_session_configuration');

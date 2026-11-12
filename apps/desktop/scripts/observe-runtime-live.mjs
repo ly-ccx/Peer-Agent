@@ -125,10 +125,10 @@ try {
   const deadline = Date.now() + durationMs;
   const captureStarted = Date.now(); let phaseStage = -1;
   while (!requestedStop && Date.now() < deadline) {
-    if(args.includes('--paired-phase')||args.includes('--paired-path')) {
+    if(args.includes('--paired-phase')||args.includes('--paired-path')||args.includes('--paired-detail')) {
       const nextStage = Math.min(3,Math.floor((Date.now()-captureStarted)/(durationMs/4)));
       if(nextStage!==phaseStage) {phaseStage=nextStage; const enabled=phaseStage===0||phaseStage===3;
-        await evaluate(args.includes('--paired-path')?`globalThis.__peerRi00Observation.setModuleCapture("Path",${enabled});true`:`globalThis.__peerRi00Observation.setPhaseCapture(${enabled});true`);}
+        await evaluate(args.includes('--paired-detail')?`globalThis.__peerRi00Observation.setDetailed(${enabled});globalThis.__peerRi00Observation.setPhaseCapture(${enabled});true`:args.includes('--paired-path')?`globalThis.__peerRi00Observation.setModuleCapture("Path",${enabled});true`:`globalThis.__peerRi00Observation.setPhaseCapture(${enabled});true`);}
     }
     await wait(Math.min(30000, deadline - Date.now()));
     if (option('--stop-file') && fs.existsSync(option('--stop-file'))) break;
