@@ -10,6 +10,7 @@ import { resolveDestination } from './ri00/identity.mjs';
 // This driver never launches, quits, restarts or installs an app. A separately
 // authorized launcher must supply a fresh process waiting at --inspect-brk.
 const args=process.argv.slice(2),option=(key,fallback)=>args.includes(key)?args[args.indexOf(key)+1]:fallback;
+const asyncRoot=args.includes('--async-root');
 for(const key of ['--pid','--port','--expected-executable','--store-root','--output'])if(!option(key))throw new Error('explicit_startup_identity_required');
 const pid=Number(option('--pid')),port=Number(option('--port')),durationMs=Number(option('--duration-ms','30000')),
   expectedExecutable=fs.realpathSync(option('--expected-executable')),storeRoot=path.resolve(option('--store-root')),canonicalStoreRoot=fs.realpathSync(storeRoot),output=resolveDestination(option('--output'));
@@ -40,30 +41,47 @@ try{
   const endpoint=targets[0]?.webSocketDebuggerUrl;if(!endpoint?.startsWith(`ws://127.0.0.1:${port}/`))throw new Error('loopback_startup_inspector_required');
   socket=new WebSocket(endpoint);await new Promise((resolve,reject)=>{socket.onopen=resolve;socket.onerror=reject;});
   socket.onmessage=event=>{const r=JSON.parse(event.data);if(r.method==='Debugger.paused'){paused=true;pausedResolve(r.params);}if(r.method==='Debugger.resumed')paused=false;
+    if(asyncRoot&&r.method==='Runtime.consoleAPICalled'&&r.params?.args?.[0]?.value==='ri00-first-index-entry'){
+      report.firstIndexRootTrace??=r.params.stackTrace;
+    }
     const p=pending.get(r.id);if(p){pending.delete(r.id);clearTimeout(p.timer);r.error?p.reject(new Error('startup_inspector_reply_failed')):p.resolve(r.result);}};
   socket.onclose=()=>{for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('startup_inspector_disconnected'));}pending.clear();};
-  await post('Debugger.enable');await post('Runtime.runIfWaitingForDebugger');waiting=false;
+  await post('Debugger.enable');
+  if(asyncRoot){await post('Runtime.enable');await post('Debugger.setAsyncCallStackDepth',{maxDepth:64});}
+  await post('Runtime.runIfWaitingForDebugger');waiting=false;
   let pauseTimer;const pause=await Promise.race([firstPause,new Promise((_,reject)=>{pauseTimer=setTimeout(()=>reject(new Error('fresh_break_on_start_required')),3000);})]);clearTimeout(pauseTimer);
   if(pause.reason!=='Break on start')throw new Error('fresh_break_on_start_required');report.breakOnStart=true;
   const identity=await evaluate('({pid:process.pid,executable:process.execPath,electron:process.versions.electron,v8:process.versions.v8,node:process.versions.node,uptime:process.uptime()})');
   if(identity.pid!==pid||identity.executable!==expectedExecutable||!identity.electron)throw new Error('startup_process_identity_mismatch');report.runtime=identity;
   report.install=await evaluate(`(()=>{if(globalThis.__peerRi00StartupProbe)throw Error('startup_probe_owner_exists');
-    const builtin=name=>process.getBuiltinModule(name),deps={fs:builtin('fs'),path:builtin('path'),timers:builtin('timers'),now:()=>Number(process.hrtime.bigint())/1e6,syncExports:()=>builtin('module').syncBuiltinESMExports()};
+    const builtin=name=>process.getBuiltinModule(name),deps={fs:builtin('fs'),path:builtin('path'),timers:builtin('timers'),now:()=>Number(process.hrtime.bigint())/1e6,syncExports:()=>builtin('module').syncBuiltinESMExports(),traceIndex:${asyncRoot?"label=>builtin('inspector').console.trace(label)":"null"}};
     const probe=(${installStartupReadOrder.toString()})(deps,{storeRoot:${JSON.stringify(storeRoot)},durationMs:${durationMs}});globalThis.__peerRi00StartupProbe=probe;
     globalThis.__peerRi00StartupCloseTimer=setTimeout(()=>{probe.stop();delete globalThis.__peerRi00StartupProbe;delete globalThis.__peerRi00StartupCloseTimer;builtin('inspector').close();},${durationMs+10000});globalThis.__peerRi00StartupCloseTimer.unref?.();return {installed:true};})()`);
-  installed=true;await post('Debugger.resume');paused=false;await post('Debugger.disable');
+  installed=true;await post('Debugger.resume');paused=false;if(!asyncRoot)await post('Debugger.disable');
   for(let elapsed=0;elapsed<durationMs;elapsed+=Math.min(1000,durationMs-elapsed))await wait(Math.min(1000,durationMs-elapsed));
   report.observation=await evaluate('globalThis.__peerRi00StartupProbe.stop()');
+  if(asyncRoot){
+    report.asyncRootRequested=true;report.rootAsyncParents=[];let trace=report.firstIndexRootTrace;
+    for(let depth=0;depth<16;depth++){
+      while(trace?.parent)trace=trace.parent;
+      if(!trace?.parentId)break;
+      const reply=await post('Debugger.getStackTrace',{stackTraceId:trace.parentId});trace=reply.stackTrace;report.rootAsyncParents.push(trace);
+    }
+    while(trace?.parent)trace=trace.parent;
+    report.rootTraceResolutionComplete=Boolean(report.firstIndexRootTrace)&&!trace?.parentId;
+    if(!report.rootTraceResolutionComplete)throw new Error('async_root_chain_missing_or_limited');
+  }
 }catch(error){report.failures.push({name:error.name,message:error.message});}
 finally{
   if(verified){
+    if(asyncRoot){await post('Debugger.setAsyncCallStackDepth',{maxDepth:0}).catch(()=>{});await post('Debugger.disable').catch(()=>{});}
     if(waiting)await post('Runtime.runIfWaitingForDebugger').catch(()=>{});
     if(paused)await post('Debugger.resume').catch(()=>{});
     if(installed)try{report.observation=await evaluate('(()=>{const result=globalThis.__peerRi00StartupProbe?.stop();clearTimeout(globalThis.__peerRi00StartupCloseTimer);delete globalThis.__peerRi00StartupProbe;delete globalThis.__peerRi00StartupCloseTimer;return result})()');}catch{report.failures.push({message:'startup_stop_not_acknowledged'});}
     await evaluate('setTimeout(()=>process.getBuiltinModule("inspector").close(),250);true').catch(()=>{report.failures.push({message:'startup_inspector_close_not_acknowledged'});});
   }
   socket?.close();report.closeCheck=await inspectClosure(port,{required:verified});report.harnessUnchanged=JSON.stringify(report.harness)===JSON.stringify(harness());
-  report.ok=report.failures.length===0&&report.breakOnStart&&report.observation?.stopped&&report.observation?.restored===true&&report.observation?.counts.index>0&&report.observation?.counts.plan>0&&report.observation?.classificationLimitHits===0&&report.closeCheck.closed&&report.harnessUnchanged;
+  report.ok=report.failures.length===0&&report.breakOnStart&&report.observation?.stopped&&report.observation?.restored===true&&report.observation?.counts.index>0&&report.observation?.counts.plan>0&&report.observation?.classificationLimitHits===0&&!(report.observation?.stackCaptureErrors)&&!(report.observation?.stackRestoreErrors)&&!(report.observation?.rootTraceErrors)&&(!asyncRoot||report.rootTraceResolutionComplete)&&report.closeCheck.closed&&report.harnessUnchanged;
   report.finishedAt=new Date().toISOString();fs.writeFileSync(path.join(output,'report.private.json'),JSON.stringify(report,null,2),{mode:0o600});
   console.log(JSON.stringify({ok:report.ok,counts:report.observation?.counts,closed:report.closeCheck.closed,failures:report.failures}));if(!report.ok)process.exitCode=1;
 }

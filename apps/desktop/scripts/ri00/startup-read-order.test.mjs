@@ -36,3 +36,12 @@ test('failed ESM synchronization rolls back an incomplete installation',t=>{
   assert.throws(()=>installStartupReadOrder({...deps,syncExports(){throw error;}},{storeRoot:root,durationMs:1000}),value=>value===error);
   assert.equal(fs.readFileSync,original);
 });
+test('deep startup caller survives a small global stack limit which is restored immediately',t=>{
+  const {root,deps}=fixture(t),descriptor=Object.getOwnPropertyDescriptor(Error,'stackTraceLimit');
+  const probe=installStartupReadOrder(deps,{storeRoot:root,durationMs:1000});
+  try{
+    Error.stackTraceLimit=2;
+    function startupTop(){function nested(n){if(n)return nested(n-1);fs.readFileSync(path.join(root,'evidence-index.jsonl'));}nested(22);}
+    startupTop();assert.equal(Error.stackTraceLimit,2);const row=probe.stop().events[0];assert.ok(row.stack.includes('startupTop'));assert.ok(row.stackFrames>20);assert.ok(row.stackFrames<64);
+  }finally{probe.stop();Object.defineProperty(Error,'stackTraceLimit',descriptor);}
+});

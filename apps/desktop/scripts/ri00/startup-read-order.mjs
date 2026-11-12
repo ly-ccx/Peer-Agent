@@ -5,6 +5,14 @@ export function installStartupReadOrder(deps,options){
   const state={kind:'startup-fs-order-not-normalization-call-count',started:now(),events:[],counts:{plan:0,index:0},dropped:0,classificationLimitHits:0,stopped:false,restored:null};
   const directories=new Map();
   const stacks={plan:0,index:0};
+  let tracedIndex=false;
+  function captureStack(){
+    const descriptor=Object.getOwnPropertyDescriptor(Error,'stackTraceLimit');
+    try{Object.defineProperty(Error,'stackTraceLimit',{configurable:true,writable:true,enumerable:descriptor?.enumerable??false,value:64});
+      const stack=new Error('ri00-startup-read').stack;return typeof stack==='string'?stack.slice(0,65536):null;
+    }catch{state.stackCaptureErrors=(state.stackCaptureErrors||0)+1;return null;}
+    finally{try{if(descriptor)Object.defineProperty(Error,'stackTraceLimit',descriptor);else delete Error.stackTraceLimit;}catch{state.stackRestoreErrors=(state.stackRestoreErrors||0)+1;}}
+  }
   const wrapped=function(file,...args){
     let kind;
     // Keep path conversion and observation failures out of the production result path.
@@ -21,7 +29,10 @@ export function installStartupReadOrder(deps,options){
     }}catch{}
     if(!kind||state.stopped)return Reflect.apply(original,this,[file,...args]);
     const row={sequence:state.counts.plan+state.counts.index+1,kind,start:now(),countsBefore:{...state.counts}};state.counts[kind]++;
-    if(stacks[kind]++<4)row.stack=new Error('ri00-startup-read').stack;
+    if(stacks[kind]++<4){row.stack=captureStack();row.stackLimit=64;row.stackFrames=typeof row.stack==='string'?row.stack.split('\n').filter(x=>/^\s+at /.test(x)).length:null;}
+    if(kind==='index'&&!tracedIndex&&typeof deps.traceIndex==='function'){
+      tracedIndex=true;try{deps.traceIndex('ri00-first-index-entry');}catch{state.rootTraceErrors=(state.rootTraceErrors||0)+1;}
+    }
     try{const value=Reflect.apply(original,this,[file,...args]);row.resultUnits=typeof value==='string'?value.length:Buffer.isBuffer(value)?value.length:null;return value;}
     catch(error){row.failed=true;throw error;}
     finally{row.end=now();if(state.events.length<256||stacks[kind]<=4)state.events.push(row);else state.dropped++;}

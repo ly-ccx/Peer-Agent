@@ -9,6 +9,8 @@ import { createInterface } from 'node:readline';
 import { controlledSessionRead } from './ri00/paired-read-cpu.mjs';
 import { controlledCacheRead } from './ri00/cache-read-cpu.mjs';
 import { createIndexCounterProbe } from './ri00/index-counter-probe.mjs';
+import { browserMainCounterDelta } from './ri00/thread-counter-delta.mjs';
+import { profileClock } from './ri00/profile-clock.mjs';
 import { readV8FunctionState } from './ri00/v8-read-state.mjs';
 import { captureFixtureLayout,summarizeFixtureLayout } from './ri00/heap-layout.mjs';
 import { readPortReferences } from './ri00/inspector-read-ports.mjs';
@@ -18,6 +20,12 @@ import { resolveDestination,productionIdentity,fixtureIdentity,contentIdentity }
 const args=process.argv.slice(2),option=(name,fallback)=>args.includes(name)?args[args.indexOf(name)+1]:fallback;
 const isolationOnly=args.includes('--isolation-only'),pid=Number(option('--pid','0')),port=Number(option('--port','9229'));
 const mode=option('--mode','session');if(!['session','cache','counters','ownership','vm-state'].includes(mode))throw new Error('invalid_comparison_mode');
+const mainOnly=args.includes('--main-only');
+if(mainOnly&&(isolationOnly||mode!=='counters'))throw new Error('main_only_requires_counter_mode');
+const mainPhases=args.includes('--main-probe-phases');
+if(mainPhases&&!mainOnly)throw new Error('main_probe_phases_require_main_only');
+const profileCounters=args.includes('--profile-counters');
+if(profileCounters&&mode!=='counters')throw new Error('counter_profile_requires_counter_mode');
 const profileSession=args.includes('--profile-session');
 if(profileSession&&mode!=='session')throw new Error('profile_requires_session_mode');
 if(isolationOnly&&!['counters','ownership','vm-state'].includes(mode))throw new Error('invalid_isolation_mode');
@@ -44,7 +52,13 @@ const engineFlags={default:'','trace-gc':'--trace-gc-nvp --trace-memory-reducer 
   'trace-fixed-growth':'--no-memory-reducer --heap-growing-percent=500 --trace-gc-nvp --trace-incremental-marking --trace-concurrent-marking',
   'trace-tiering':'--trace-opt --trace-deopt --trace-pretenuring --trace-pretenuring-statistics'};
 if(!Object.hasOwn(engineFlags,engineExperiment)||engineExperiment!=='default'&&!isolationOnly)throw new Error('engine_controls_require_isolation');
-if(!['index','session'].includes(counterTarget)||counterTarget==='session'&&!isolationOnly||!Number.isInteger(counterRounds)||counterRounds<3||counterRounds>9||!Number.isInteger(counterIdleMs)||counterIdleMs<20||counterIdleMs>15000)throw new Error('unbounded_counter_configuration');
+if(!['index','session'].includes(counterTarget)||counterTarget==='session'&&!isolationOnly&&!mainOnly||!Number.isInteger(counterRounds)||counterRounds<3||counterRounds>9||!Number.isInteger(counterIdleMs)||counterIdleMs<20||counterIdleMs>15000)throw new Error('unbounded_counter_configuration');
+let mainPayload;
+if(mainOnly&&counterTarget==='session'){
+  const file=option('--payload-file');if(!file||fs.statSync(file).size>4096)throw new Error('bounded_session_payload_required');
+  mainPayload=JSON.parse(fs.readFileSync(file,'utf8'));
+  if(typeof mainPayload?.workspaceId!=='string'||!mainPayload.workspaceId||mainPayload.workspaceId.length>512||Object.keys(mainPayload).some(key=>key!=='workspaceId'))throw new Error('invalid_session_payload');
+}
 if(args.includes('--clone-normalizers')&&mode!=='cache')throw new Error('clones_require_cache_comparison');
 if((!isolationOnly&&(!Number.isInteger(pid)||pid<1))||!Number.isInteger(port)||port<1024||port>65535)throw new Error('invalid_target');
 for(const name of ['--module-root','--fixture-root','--output','--parent-hash'])if(!option(name))throw new Error('explicit_source_configuration_required');
@@ -56,9 +70,9 @@ const personal=resolveDestination(path.join(os.homedir(),'.peer-agent'));
 if([fixtureRoot,output].some(root=>root===personal||root.startsWith(personal+path.sep))||output===fixtureRoot||output.startsWith(fixtureRoot+path.sep)
   ||fs.existsSync(output)&&fs.readdirSync(output).length)throw new Error('isolated_fixture_and_new_output_required');
 fs.mkdirSync(output,{recursive:true,mode:0o700});fs.chmodSync(output,0o700);
-const harness=()=>['compare-session-cpu.mjs','ri00/paired-read-cpu.mjs','ri00/cache-read-cpu.mjs','ri00/index-counter-probe.mjs','ri00/v8-read-state.mjs','ri00/heap-layout.mjs','ri00/darwin-process-counters.py','ri00/read-host.mjs','ri00/inspector-read-ports.mjs','ri00/readonly-coordination.mjs','ri00/identity.mjs','ri00/trace.mjs'].map(relative=>({relative,
+const harness=()=>['compare-session-cpu.mjs','ri00/paired-read-cpu.mjs','ri00/cache-read-cpu.mjs','ri00/index-counter-probe.mjs','ri00/thread-counter-delta.mjs','ri00/profile-clock.mjs','ri00/v8-read-state.mjs','ri00/heap-layout.mjs','ri00/darwin-process-counters.py','ri00/read-host.mjs','ri00/inspector-read-ports.mjs','ri00/readonly-coordination.mjs','ri00/identity.mjs','ri00/trace.mjs'].map(relative=>({relative,
   sha256:createHash('sha256').update(fs.readFileSync(new URL(relative,import.meta.url))).digest('hex')}));
-const report={kind:isolationOnly?'isolated-hot-idle-hot-cpu-counters-not-a-fix':'controlled-main-child-main-session-cpu-not-a-fix',mode,isolationOnly,counterTarget,startedAt:new Date().toISOString(),harness:harness(),production:productionIdentity(moduleRoot),
+const report={kind:mainOnly?'controlled-existing-main-cpu-counters-not-a-fix':isolationOnly?'isolated-hot-idle-hot-cpu-counters-not-a-fix':'controlled-main-child-main-session-cpu-not-a-fix',mode,isolationOnly,counterTarget,startedAt:new Date().toISOString(),harness:harness(),production:productionIdentity(moduleRoot),
   sourceHead:execFileSync('git',['rev-parse','HEAD'],{cwd:moduleRoot,encoding:'utf8'}).trim(),failures:[]};
 report.engineExperiment={kind:engineExperiment,flags:engineFlags[engineExperiment],productSettingChanged:false};
 report.retainedCopies=retainedCopies;
@@ -212,41 +226,67 @@ async function vmStateRead(session,store,debugLayout=false){
   result.ok=result.ok&&identity.ok;return result;
 }
 async function counterModeRead(session,store,pid,options={}){
+  if(profileCounters&&!options.profileActive){
+    let running=false;const markers=[];
+    const marker=async name=>(await evaluate(session,`(function ${name}(){const clock=()=>Number(process.hrtime.bigint())/1e6;const start=clock();let value=0;while(clock()-start<25)value+=Math.sqrt(value+1);return {name:${JSON.stringify(name)},start,end:clock()};})()`)).value;
+    await session.post('Profiler.enable');
+    try{
+      await session.post('Profiler.setSamplingInterval',{interval:500});await session.post('Profiler.start');running=true;
+      markers.push(await marker('ri00CounterStart'));
+      const calibration=(await evaluate(session,'({hrtimeMs:Number(process.hrtime.bigint())/1e6,performanceMs:process.getBuiltinModule("perf_hooks").performance.now()})')).value;
+      const result=await counterModeRead(session,store,pid,{...options,profileActive:true});
+      markers.push(await marker('ri00CounterStop'));
+      const {profile}=await session.post('Profiler.stop');running=false;
+      const label=options.label||'counter';
+      fs.writeFileSync(path.join(output,`${label}.cpuprofile.private.json`),JSON.stringify(profile),{mode:0o600});
+      result.profile={kind:'instrumented-500us-not-unprofiled-acceptance',clock:profileClock(profile,markers),calibration,samples:profile.samples?.length||0};
+      return result;
+    }finally{if(running)await session.post('Profiler.stop').catch(()=>{});await session.post('Profiler.disable');}
+  }
+  const phased=isolationOnly||options.phased===true;
   const directory=await session.post('Runtime.callFunctionOn',{objectId:store,functionDeclaration:'function(){return this.getStoreDir();}',returnByValue:true});
   if(directory.exceptionDetails)throw new Error('counter_store_directory_unavailable');
   const file=path.join(directory.result.value,'evidence-index.jsonl');
   const identity=()=>{const s=fs.statSync(file,{bigint:true});return {sha256:createHash('sha256').update(fs.readFileSync(file)).digest('hex'),stampSha256:createHash('sha256').update(JSON.stringify(
     ['dev','ino','size','mtimeNs','ctimeNs'].map(key=>String(s[key])))).digest('hex'),bytes:String(s.size)};};
-  const target=isolationOnly?counterTarget:'index';
+  const target=counterTarget;
   const result={kind:'native-process-counters-around-controlled-read',target,delayMs:options.delayMs??100,sourceBefore:identity(),points:[],failures:[]};
+  result.clockCalibration=(await evaluate(session,'({hrtimeMs:Number(process.hrtime.bigint())/1e6,performanceMs:process.getBuiltinModule("perf_hooks").performance.now()})')).value;
   const created=await session.post('Runtime.callFunctionOn',{objectId:store,functionDeclaration:createIndexCounterProbe.toString(),
-    arguments:target==='session'?[{objectId:options.supervisor},{value:options.payload}]:[]});
+    arguments:[target==='session'?{objectId:options.supervisor}:{value:null},{value:options.payload??null},
+      {value:{observeBackground:mainPhases,closeInspectorOnWatchdog:verified&&args.includes('--close-inspector')}}]});
   if(created.exceptionDetails||!created.result.objectId)throw new Error('counter_probe_creation_failed');const probe=created.result.objectId;
   const invoke=async kind=>{const reply=await session.post('Runtime.callFunctionOn',{objectId:probe,functionDeclaration:'function(kind){return this.read(kind);}',arguments:[{value:kind}],returnByValue:true});
     if(reply.exceptionDetails)throw new Error('counter_probe_read_failed');return reply.result.value;};
   try{
     result.prime=await invoke(target);await wait(100);
-    if(isolationOnly){result.warmReads=[];for(let i=0;i<6;i++){result.warmReads.push(await invoke(target));await wait(20);}}
+    if(phased){result.warmReads=[];for(let i=0;i<6;i++){result.warmReads.push(await invoke(target));await wait(20);}}
     for(let round=0;round<counterRounds;round++){
-      if(isolationOnly)await wait(result.delayMs);
-      for(const kind of (isolationOnly?[target,'native','noop']:['noop','index','native','index','native','index'])){
+      if(phased)await wait(result.delayMs);
+      for(const kind of (phased?[target,'native','noop']:['noop',target,'native',target,'native',target])){
       const before=await counterRead(pid),start=performance.now(),row=await invoke(kind),end=performance.now(),after=await counterRead(pid);
-      result.points.push({round,row,before,after,transportWallMs:end-start});if(!isolationOnly)await wait(100);
+      result.points.push({round,row,before,after,transportWallMs:end-start});if(!phased)await wait(100);
       }
-      if(isolationOnly&&result.delayMs>1000){const row=result.points.findLast(point=>point.round===round&&point.row.kind===target)?.row;
+      if(phased&&result.delayMs>1000){const row=result.points.findLast(point=>point.round===round&&point.row.kind===target)?.row;
         console.log(JSON.stringify({counterRound:round,delayMs:result.delayMs,target,wallMs:row.end-row.start,userMs:row.threadUserMs,evidenceUserMs:row.evidence.reduce((sum,span)=>sum+span.userMs,0)}));}
     }
     result.ok=true;
   }catch(error){result.ok=false;result.failures.push(error.message);}
   finally{
-    await wait(20);const stopped=await session.post('Runtime.callFunctionOn',{objectId:probe,functionDeclaration:'function(){return this.stop();}',returnByValue:true});
+    // GC PerformanceEntries are queued on Node's loop, while CDP calls can run
+    // through Chromium without draining that queue. A controller sleep is not
+    // an acknowledgement that the final entries have reached the observer.
+    const stopped=await session.post('Runtime.callFunctionOn',{objectId:probe,
+      functionDeclaration:'async function(){await new Promise(resolve=>setImmediate(()=>setImmediate(resolve)));return this.stop();}',awaitPromise:true,returnByValue:true});
     if(stopped.exceptionDetails)throw new Error('counter_probe_cleanup_failed');result.observation=stopped.result.value;
+    result.gcDeliveryDrain='two-owned-node-check-turns-before-stop; not proof of all VM GC events';
     for(let i=0;i<result.points.length;i++){result.points[i].row=result.observation.reads[i+1+(result.warmReads?.length||0)];
       const p=result.points[i],delta={};for(const key of ['ri_user_time','ri_system_time','ri_instructions','ri_cycles',...Object.keys(p.before.values).filter(key=>key.startsWith('ri_cpu_time_qos_'))]){
         delta[key]=String(BigInt(p.after.values[key])-BigInt(p.before.values[key]));}
       p.delta=delta;p.processIdentityStable=p.before.values.ri_proc_start_abstime===p.after.values.ri_proc_start_abstime;
       p.nativeCpuMs=(Number(delta.ri_user_time)+Number(delta.ri_system_time))*counterReady.timebase.numer/counterReady.timebase.denom/1e6;
       p.outsideMeasuredProcessCpuMs=p.nativeCpuMs-p.row.processUserMs-p.row.processSystemMs;
+      p.browserMain=browserMainCounterDelta(p.before,p.after,counterReady.timebase,p.row.threadUserMs+p.row.threadSystemMs);
     }
     result.sourceAfter=identity();result.sourceUnchanged=JSON.stringify(result.sourceBefore)===JSON.stringify(result.sourceAfter);
     result.readsValid=result.observation.reads.filter(row=>row.kind===target).every(row=>row.rows>0&&!row.readFailure
@@ -254,7 +294,7 @@ async function counterModeRead(session,store,pid,options={}){
     result.countersAvailable=result.points.filter(point=>point.row.kind!=='noop').every(point=>BigInt(point.delta.ri_cycles)>0&&BigInt(point.delta.ri_instructions)>0);
     if(target==='session'){result.projectionMatched=new Set(result.observation.reads.filter(row=>row.kind==='session').map(row=>row.projectionSha256)).size===1;
       if(!result.projectionMatched)result.ok=false;}
-    result.ok=result.ok&&result.readsValid&&result.countersAvailable&&result.sourceUnchanged&&result.observation.stopped&&result.observation.restored&&result.points.every(p=>p.processIdentityStable&&p.row.sourceStable&&p.row.sourceStamp===result.sourceBefore.stampSha256);
+    result.ok=result.ok&&result.readsValid&&result.countersAvailable&&result.sourceUnchanged&&result.observation.stopped&&result.observation.restored&&!result.observation.timedOut&&result.observation.backgroundDropped===0&&result.observation.background.every(row=>!row.metadataFailure)&&result.points.every(p=>p.processIdentityStable&&p.row.sourceStable&&p.row.sourceStamp===result.sourceBefore.stampSha256);
   }
   return result;
 }
@@ -268,6 +308,24 @@ try{
   store=ports.find(row=>row.module==='GoalPlanStore').objectId;
   report.readPortDiscovery=ports.discovery;
   }
+  if(mainOnly){
+    await startCounters();report.mainOnly=true;
+    if(mainPhases){
+      report.phases=[];report.applicationPollingSuspended=false;
+      for(const [name,delayMs]of [['dense-before',20],['probe-gap',counterIdleMs],['dense-after',20]]){
+        const phase=await counterModeRead(main,store,pid,{supervisor,payload:mainPayload,phased:true,delayMs,label:name});report.phases.push({name,...phase});
+      }
+      report.sourceMatched=report.phases.every(p=>p.ok&&p.sourceBefore.sha256===report.phases[0].sourceBefore.sha256&&p.sourceBefore.stampSha256===report.phases[0].sourceBefore.stampSha256);
+      report.ok=report.sourceMatched&&report.phases.every(p=>p.points.filter(x=>x.row.kind!=='noop').every(x=>x.browserMain.available));
+      if(counterTarget==='session'){
+        report.projectionMatched=new Set(report.phases.flatMap(p=>p.points.filter(x=>x.row.kind==='session').map(x=>x.row.projectionSha256))).size===1;
+        report.ok=report.ok&&report.projectionMatched;
+      }
+    }else{
+      report.main=await counterModeRead(main,store,pid,{supervisor,payload:mainPayload});
+      report.sourceMatched=report.main.sourceUnchanged;report.ok=report.main.ok&&report.main.points.filter(p=>p.row.kind!=='noop').every(p=>p.browserMain.available);
+    }
+  }else{
   const config={moduleRoot,fixtureRoot,coordinationLiveRoot,coordinationSnapshot,parentHash:option('--parent-hash'),output,sourceStores:Boolean(coordinationLiveRoot),bindings:true,desktopDiagnostics:false,retainedCopies,startupOrder};
   const ready=path.join(output,'ready'),file=path.join(output,'fixture.private.cjs');
   fs.writeFileSync(file,`const{app}=require('electron');const fs=require('node:fs');app.setPath('userData',${JSON.stringify(path.join(output,'user-data'))});
@@ -321,7 +379,7 @@ try{
       report.phases.push({name:'after-12-queries',...await inspect(fixture,childStore)});
     }else{
     for(const [name,delayMs]of (hotOnly?[['hot-before',20]]:[['hot-before',20],['idle',counterIdleMs],['hot-recovery',20]])){
-      const phase=await counterModeRead(fixture,childStore,fixturePid,{supervisor:childSupervisor,payload,delayMs});report.phases.push({name,...phase});
+      const phase=await counterModeRead(fixture,childStore,fixturePid,{supervisor:childSupervisor,payload,delayMs,label:name});report.phases.push({name,...phase});
       console.log(JSON.stringify({stage:name,ok:phase.ok,readWallMs:phase.points.filter(point=>point.row.kind===counterTarget).map(point=>point.row.end-point.row.start)}));
     }
     }
@@ -344,6 +402,7 @@ try{
   if(vmAfter){report.vmAfter=await vmStateRead(fixture,childStore,args.includes('--vm-debug-print'));if(!report.vmAfter.ok)throw new Error('post_query_vm_state_invalid');}
   report.fixtureReadFailures=(await evaluate(fixture,'globalThis.__ri00CpuHost.readFailures()')).value;
   report.ok=report.sourceMatched&&report.projectionMatched!==false&&report.fixtureReadFailures===0&&report.fixtureGuard.sourceWritesDenied===0;
+  }
 }catch(error){report.ok=false;report.failures.push({name:error.name,message:error.message});}
 finally{
   if(counterProcess){for(const pending of counterPending.values()){clearTimeout(pending.timer);pending.reject(new Error('counter_sidecar_closing'));}counterPending.clear();counterProcess.stdin.end();counterProcess.kill('SIGTERM');}

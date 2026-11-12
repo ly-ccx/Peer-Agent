@@ -31,3 +31,29 @@ test('counter cleanup preserves a late owner and flags incomplete restoration',(
     assert.equal(probe.stop().restored,false);assert.equal(store.listEvidenceIndex,replacement);
   }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
+test('application queries in probe gaps are retained separately with original results, errors and owners',t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'ri00-background-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  fs.writeFileSync(path.join(root,'evidence-index.jsonl'),'{}\n');const store={getStoreDir:()=>root,listEvidenceIndex:()=>[{}]};
+  const value=[{}],failure=new Error('expected'),supervisor={list(fail){store.listEvidenceIndex();if(fail===true)throw failure;return value;}};
+  const original=supervisor.list,probe=createIndexCounterProbe.call(store,supervisor,{workspaceId:'fixture'},{observeBackground:true});
+  assert.equal(supervisor.list(),value);assert.throws(()=>supervisor.list(true),error=>error===failure);store.listEvidenceIndex();probe.read('session');
+  const result=probe.stop();assert.equal(result.background.length,2);assert.equal(result.background[0].evidence.length,1);
+  assert.equal(result.background[1].readFailure,true);assert.equal(result.unattributed.length,1);assert.equal(result.reads.length,1);
+  assert.equal(result.restored,true);assert.equal(supervisor.list,original);
+});
+test('background metadata failure preserves the application result and a late list owner',t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'ri00-background-failure-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  fs.writeFileSync(path.join(root,'evidence-index.jsonl'),'{}\n');const store={getStoreDir:()=>root,listEvidenceIndex:()=>[{}]},value=[{}];value.push(value);
+  const supervisor={list:()=>value},probe=createIndexCounterProbe.call(store,supervisor,{},{observeBackground:true});
+  assert.equal(supervisor.list(),value);const replacement=()=>[];supervisor.list=replacement;
+  const result=probe.stop();assert.equal(result.background[0].metadataFailure,true);assert.equal(result.restored,false);assert.equal(supervisor.list,replacement);
+});
+test('counter watchdog restores application methods without a controller and rejects an unbounded lifetime',async t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'ri00-counter-watchdog-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  fs.writeFileSync(path.join(root,'evidence-index.jsonl'),'{}\n');const store={getStoreDir:()=>root,listEvidenceIndex:()=>[{}]},supervisor={list:()=>[]};
+  const originalIndex=store.listEvidenceIndex,originalList=supervisor.list;
+  assert.throws(()=>createIndexCounterProbe.call(store,supervisor,{},{durationMs:180001}),/bounded/);
+  const probe=createIndexCounterProbe.call(store,supervisor,{},{observeBackground:true,durationMs:100});
+  await new Promise(r=>setTimeout(r,150));assert.equal(store.listEvidenceIndex,originalIndex);assert.equal(supervisor.list,originalList);
+  const result=probe.stop();assert.equal(result.restored,true);assert.equal(result.timedOut,true);assert.throws(()=>probe.read('session'),/stopped/);
+});
