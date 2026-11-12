@@ -27,3 +27,15 @@ test('read-only source guard refuses SQLite and filesystem writes while permitti
   const check = new original(file); assert.equal(check.prepare('SELECT COUNT(*) AS n FROM facts').get().n, 1); check.close();
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+test('multiple canonical roots remain protected while a separate diagnostic sink stays writable',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'ri00-multi-readonly-'));
+  const stores=['plans','conversations','projects'].map(name=>{const dir=path.join(root,name);fs.mkdirSync(dir);fs.writeFileSync(path.join(dir,'fact'),'retained');return dir;});
+  const guard=guardReadOnlySource(stores);
+  try{
+    for(const dir of stores)assert.throws(()=>fs.appendFileSync(path.join(dir,'fact'),'forbidden'),/source_write_forbidden/);
+    fs.writeFileSync(path.join(root,'diagnostic.log'),'safe metadata');
+    assert.equal(fs.readFileSync(path.join(root,'diagnostic.log'),'utf8'),'safe metadata');
+    assert.equal(guard.state.sourceWritesDenied,3);
+  }finally{guard.close();fs.rmSync(root,{recursive:true,force:true});}
+});

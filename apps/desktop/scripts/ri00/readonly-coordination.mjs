@@ -6,13 +6,13 @@ import { fileURLToPath } from 'node:url';
 
 /** Diagnostic child only. Deny source writes before loading any production SQLite consumer. */
 export function guardReadOnlySource(root) {
-  const protectedRoot = fs.realpathSync(root);
+  const protectedRoots = (Array.isArray(root)?root:[root]).map(value=>fs.realpathSync(value));
   const within = value => {
     if (value instanceof URL) value = fileURLToPath(value);
     if (Buffer.isBuffer(value)) value = value.toString('utf8');
     if (typeof value !== 'string') return false;
     const canonical = resolveDestination(value);
-    return canonical === protectedRoot || canonical.startsWith(protectedRoot + path.sep);
+    return protectedRoots.some(protectedRoot=>canonical===protectedRoot||canonical.startsWith(protectedRoot+path.sep));
   };
   const sqlite = createRequire(import.meta.url)('node:sqlite'), Native = sqlite.DatabaseSync;
   const restores = [], state = { sourceWritesDenied: 0, sqliteConnections: 0, guardChecks: 0, guardCheckMs: 0 };
