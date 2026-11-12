@@ -29,7 +29,13 @@ function connect(url){return new Promise((resolve,reject)=>{const ws=new WebSock
 };});}
 function value(reply){if(reply.exceptionDetails)throw Error('dense_target_evaluation_failed');return reply.result.value;}
 const evaluate=async(s,expression)=>value(await s.post('Runtime.evaluate',{expression,returnByValue:true}));
-const invoke=async(s,method,values=[])=>value(await s.post('Runtime.callFunctionOn',{objectId:s.probe,functionDeclaration:'function(method,args){return this[method](...args);}',arguments:[{value:method},{value:values}],returnByValue:true,awaitPromise:true}));
+const invoke=async(s,method,values=[])=>{const result=value(await s.post('Runtime.callFunctionOn',{objectId:s.probe,functionDeclaration:'function(method,args){return this[method](...args);}',arguments:[{value:method},{value:values}],returnByValue:true,awaitPromise:method==='take'}));
+  if(method==='take'){
+    const journal=path.join(output,'batches.private.jsonl'),line=JSON.stringify({host:s===actual?'main':'reference',at:new Date().toISOString(),batch:result})+'\n';
+    if((fs.existsSync(journal)?fs.statSync(journal).size:0)+Buffer.byteLength(line)>134217728)throw Error('dense_batch_journal_cap');
+    fs.appendFileSync(journal,line,{mode:0o600});
+    if(value(await s.post('Runtime.callFunctionOn',{objectId:s.probe,functionDeclaration:'function(){return this.ack();}',returnByValue:true}))!==true)throw Error('dense_batch_ack_failed');
+  }return result;};
 function counterRead(id){return new Promise((resolve,reject)=>{const seq=++counterSeq,timer=setTimeout(()=>{counterPending.delete(seq);reject(Error('dense_counter_timeout'));},3000);counterPending.set(seq,{resolve,reject,timer});counterProcess.stdin.write(JSON.stringify({id:seq,pid:id})+'\n');});}
 async function counters(){counterProcess=spawn('python3',[new URL('./ri00/darwin-process-counters.py',import.meta.url).pathname],{stdio:['pipe','pipe','pipe']});
   let errors='';counterProcess.stderr.on('data',b=>{if(errors.length<16384)errors+=b;});counterProcess.once('close',()=>fs.writeFileSync(path.join(output,'counter-stderr.private.txt'),errors,{mode:0o600}));
@@ -136,8 +142,12 @@ try{
   report.sourceAfter={metadata:metadataIdentity(),indexSha256:hash(fs.readFileSync(actual.indexFile))};report.sourceUnchangedForWholeCapture=JSON.stringify(report.sourceBefore)===JSON.stringify(report.sourceAfter);report.gate=gate;
 }catch(error){report.failures.push(error.message);}
 finally{
-  for(const[label,s]of[['main',actual],['reference',reference]])if(s?.probe)try{report.stream.push({host:label,...await invoke(s,'take')});s.stopped=await invoke(s,'stop');}catch(e){report.failures.push('cleanup-'+label+':'+e.message);}
+  for(const[label,s]of[['main',actual],['reference',reference]])if(s?.probe){
+    try{report.stream.push({host:label,...await invoke(s,'take')});}catch(e){report.failures.push('cleanup-take-'+label+':'+e.message);}
+    try{s.stopped=await invoke(s,'stop');}catch(e){report.failures.push('cleanup-stop-'+label+':'+e.message);}
+  }
   report.restoration={main:actual?.stopped,reference:reference?.stopped};
+  if(actual?.stopped)report.acknowledgementGapCpuMs=actual.stopped.controlledCpuMs-(report.mainCpuMs||0);
   if(reference)try{report.referenceGuard=await evaluate(reference,'({...globalThis.__ri00DenseGuard.state,readFailures:globalThis.__ri00DenseHost.readFailures()})');}catch(e){report.failures.push('reference_guard:'+e.message);}
   if(actual?.owned)try{report.mainGuard=await evaluate(actual,'({...globalThis.__ri00DenseGuard.state,readFailures:globalThis.__ri00DenseHost.readFailures()})');}catch(e){report.failures.push('main_guard:'+e.message);}
   if(actual&&!actual.owned&&actualOwnedInspector)await evaluate(actual,'setTimeout(()=>process.getBuiltinModule("inspector").close(),250);true').catch(e=>report.failures.push('inspector_close:'+e.message));

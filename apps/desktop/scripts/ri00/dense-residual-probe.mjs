@@ -7,7 +7,7 @@ export function createDenseResidualProbe(supervisor,payload,options={}){
   const originalIndex=store.listEvidenceIndex,originalList=supervisor.list;
   if(typeof originalIndex!=='function'||typeof originalList!=='function')throw Error('dense_read_ports_required');
   const file=path.join(store.getStoreDir(),'evidence-index.jsonl'),rows=[],gc=[],bytes=Buffer.alloc(4*1024*1024,0x5a);
-  let current,stopped=false,timedOut=false,cursor=0,gcCursor=0,timer,restored=null,bare=false,lastOutsideEnd=-Infinity;
+  let current,stopped=false,timedOut=false,cursor=0,gcCursor=0,timer,restored=null,bare=false,lastOutsideEnd=-Infinity,pendingTake=null;
   const state={metadataErrors:0,dropped:0,gcDropped:0,controlledCpuMs:0,naturalRows:0,controlledRows:0,outsideRows:0};
   const stamp=()=>{const s=fs.statSync(file,{bigint:true});return crypto.createHash('sha256').update(JSON.stringify(
     ['dev','ino','size','mtimeNs','ctimeNs'].map(k=>String(s[k])))).digest('hex');};
@@ -64,9 +64,10 @@ export function createDenseResidualProbe(supervisor,payload,options={}){
     native(){if(stopped)throw Error('dense_probe_stopped');const before=process.threadCpuUsage(),start=performance.now();let value=0;
       for(let i=0;i<16;i++)value^=crypto.createHash('sha256').update(bytes).digest().readUInt32LE(0);
       const after=process.threadCpuUsage();return {start,end:performance.now(),userMs:(after.user-before.user)/1000,systemMs:(after.system-before.system)/1000,value};},
-    async take(){await new Promise(r=>setImmediate(()=>setImmediate(r)));const fresh=rows.slice(cursor).map(annotate),events=gc.slice(gcCursor);cursor=rows.length;gcCursor=gc.length;
-      return {rows:fresh,gc:events,state:{...state,stopped,timedOut,restored},heap:heap(),clock:{hrtimeMs:Number(process.hrtime.bigint())/1e6,performanceMs:performance.now()}};},
-    stop(reason='controller'){clearTimeout(timer);if(!stopped){stopped=true;
+    take(){if(pendingTake)throw Error('dense_take_ack_required');pendingTake=(async()=>{await new Promise(r=>setImmediate(()=>setImmediate(r)));const fresh=rows.slice(cursor).map(annotate),events=gc.slice(gcCursor);cursor=rows.length;gcCursor=gc.length;
+      return {rows:fresh,gc:events,state:{...state,stopped,timedOut,restored},heap:heap(),clock:{hrtimeMs:Number(process.hrtime.bigint())/1e6,performanceMs:performance.now()}};})();return pendingTake;},
+    ack(){pendingTake=null;return true;},
+    stop(reason='controller'){clearTimeout(timer);pendingTake=null;if(!stopped){stopped=true;
       for(const e of observer.takeRecords()){if(gc.length<16384)gc.push({start:e.startTime,duration:e.duration,kind:e.detail?.kind});else state.gcDropped++;}observer.disconnect();
       const a=store.listEvidenceIndex===index,b=supervisor.list===list;if(a)store.listEvidenceIndex=originalIndex;if(b)supervisor.list=originalList;
       restored=(a||store.listEvidenceIndex===originalIndex)&&(b||supervisor.list===originalList);state.stopReason=reason;}
