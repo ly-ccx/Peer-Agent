@@ -8,6 +8,14 @@ import { createTrace } from './trace.mjs';
 import { seedRi00 } from './seed.mjs';
 import { createReadHost } from './read-host.mjs';
 
+test('all source stores require the read-only source guard before any production assembly',async()=>{
+  const home=fs.mkdtempSync(path.join(os.tmpdir(),'peer-ri00-source-admission-')),previous=process.env.PEER_AGENT_HOME;
+  try{
+    process.env.PEER_AGENT_HOME=home;
+    await assert.rejects(createReadHost({fixtureRoot:home,sourceStores:true,coordinationLiveRoot:path.join(home,'project-runtime')}),/source_stores_require_readonly_source_guard/);
+  }finally{if(previous===undefined)delete process.env.PEER_AGENT_HOME;else process.env.PEER_AGENT_HOME=previous;fs.rmSync(home,{recursive:true,force:true});}
+});
+
 test('counter adapter observes real production detailed-session host dependencies', async () => {
   const require = createRequire(import.meta.url);
   const moduleRoot = path.resolve(path.dirname(require.resolve('@peer-agent/runtime-node')), '../../..');

@@ -34,8 +34,10 @@ export function installReadMetrics(trace, fixtureRoot) {
 }
 
 /** Recreates the real read dependency; never constructs a runner or acquires a project lease. */
-export async function createReadHost({ moduleRoot, fixtureRoot, parentHash, bindings, coordinationSnapshot, coordinationLiveRoot, sourcePlans, desktopDiagnostics, output, readOnlyGuard, trace }) {
+export async function createReadHost({ moduleRoot, fixtureRoot, parentHash, bindings, coordinationSnapshot, coordinationLiveRoot, sourcePlans, sourceStores, desktopDiagnostics, output, readOnlyGuard, trace }) {
   if (process.env.PEER_AGENT_HOME !== fixtureRoot) throw new Error('fixture_environment_not_set_before_import');
+  if(sourceStores&&(!coordinationLiveRoot||!readOnlyGuard))throw new Error('source_stores_require_readonly_source_guard');
+  const storeRoot=sourceStores?path.dirname(coordinationLiveRoot):fixtureRoot;
   const from = relative => import(pathToFileURL(path.join(moduleRoot, relative)).href);
   let disposeDiagnostic = () => {};
   if (desktopDiagnostics) {
@@ -63,14 +65,14 @@ export async function createReadHost({ moduleRoot, fixtureRoot, parentHash, bind
     from('packages/runtime-node/dist/project-agent/execution-scheduler.mjs'),
     from('packages/runtime-node/dist/project-agent/execution-obligation.mjs'),
   ]);
-  const profiles = createBotProfileStore({ rootDir: fixtureRoot });
-  const target = fs.readdirSync(path.join(fixtureRoot, 'projects')).flatMap(id => {
+  const profiles = createBotProfileStore({ rootDir: storeRoot });
+  const target = fs.readdirSync(path.join(storeRoot, 'projects')).flatMap(id => {
     try { return [profiles.read(id)]; } catch { return []; }
   }).find(profile => profile && profile.status !== 'archived' && (!parentHash
     || createHash('sha256').update(profile.agentConversationId || '').digest('hex').startsWith(parentHash)));
   if (!target?.workspaceId || !target.agentConversationId) throw new Error('fixture_target_missing');
-  const conversationStore = createConversationStore({ storeDir: path.join(fixtureRoot, 'conversations') });
-  const goalPlanStore = createGoalPlanStore({ storeDir: path.join(sourcePlans ? path.dirname(coordinationLiveRoot) : fixtureRoot, 'goal-plans') });
+  const conversationStore = createConversationStore({ storeDir: path.join(storeRoot, 'conversations') });
+  const goalPlanStore = createGoalPlanStore({ storeDir: path.join(sourcePlans ? path.dirname(coordinationLiveRoot) : storeRoot, 'goal-plans') });
   let coordination;
   let coordinationFailures = 0;
   let unregister;
@@ -137,6 +139,7 @@ export async function createReadHost({ moduleRoot, fixtureRoot, parentHash, bind
   const payload = { workspaceId: target.workspaceId, parentConversationId: target.agentConversationId };
   return { service, payload, fixtureObservation, sourceRevision: () => coordination?.revision?.(),
     readFailures: () => coordinationFailures, dependencyBindings: { receiptRead: Boolean(coordination), persistedGrants, desktopDiagnostics: Boolean(desktopDiagnostics), scheduler: 'desktop-rootless',
+      stores: sourceStores ? 'production-readonly-source' : sourcePlans ? 'source-plans-and-isolated-other-stores' : 'isolated-copy',
       sourceValidation: coordinationLiveRoot ? 'production-readonly-source' : coordination ? 'isolated-backup' : 'excluded' },
     sessionFacts: () => supervisor.list({ workspaceId: target.workspaceId }),
     close() { unregister?.(); coordination?.close(); scheduler.close(); disposeDiagnostic(); }, async query() {

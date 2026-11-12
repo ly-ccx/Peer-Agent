@@ -27,10 +27,12 @@ const config = { moduleRoot, fixtureRoot, output, parentHash: option('--parent-h
   bindings: option('--bindings', 'desktop') === 'desktop', instrumented: args.includes('--instrumented'),
   coordinationSnapshot: option('--coordination-snapshot', null), coordinationLiveRoot: option('--readonly-coordination-root', null),
   sourcePlans: args.includes('--readonly-source-plans'), desktopDiagnostics:args.includes('--desktop-diagnostics'),
+  sourceStores: args.includes('--readonly-source-stores'),
   deepBuiltins: !args.includes('--no-builtins'), instrumentPath: args.includes('--inspect-path') };
 if (config.instrumentPath && !config.instrumented) throw new Error('path_observation_requires_instrumentation');
 if (config.coordinationSnapshot && config.coordinationLiveRoot) throw new Error('choose_one_coordination_source');
 if (config.sourcePlans && !config.coordinationLiveRoot) throw new Error('source_plans_require_readonly_source_guard');
+if (config.sourceStores && !config.coordinationLiveRoot) throw new Error('source_stores_require_readonly_source_guard');
 const require = createRequire(path.join(moduleRoot, 'apps/desktop/package.json'));
 const { _electron } = require('playwright-core');
 const configFile = path.join(output, 'config.private.json');
@@ -46,6 +48,7 @@ const report = { schemaVersion: 1, kind: 'ri00-failing-baseline-not-a-fix', sour
   coordinationSnapshot: Boolean(config.coordinationSnapshot),
   coordinationLiveReadOnly: Boolean(config.coordinationLiveRoot),
   sourcePlans: config.sourcePlans,
+  sourceStores: config.sourceStores,
   deepBuiltins: config.deepBuiltins, instrumentPath: config.instrumentPath,
   pairedProbe: args.includes('--paired-probe'),
   startedAt: new Date().toISOString(), attempts: [], cases: {}, limitations: [
