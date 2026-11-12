@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readPortReferences } from './ri00/inspector-read-ports.mjs';
-import { readMicroprobe } from './ri00/read-microprobe.mjs';
+import { readMicroprobe, evidenceReadPoint } from './ri00/read-microprobe.mjs';
 import { inspectClosure } from './ri00/trace.mjs';
 import os from 'node:os';
 
@@ -42,6 +42,11 @@ async function call(session,id,fn){
   if(reply.exceptionDetails||reply.result?.subtype==='error')throw new Error('controlled_read_evaluation_failed');
   return reply.result.value;
 }
+async function evidencePoints(session,id){
+  const rows=[];
+  for(let i=0;i<4;i++){rows.push(await call(session,id,evidenceReadPoint));await wait(100);}
+  return rows;
+}
 try{
   // Attach to an already-open inspector; never signal, launch or restart the user's application.
   const targets=await(await fetch(`http://127.0.0.1:${port}/json/list`,{signal:AbortSignal.timeout(1000)})).json();
@@ -52,6 +57,7 @@ try{
   const ports=await readPortReferences(main.post.bind(main)),store=ports.find(row=>row.module==='GoalPlanStore').objectId;
   const sourceDir=await call(main,store,function(){return this.getStoreDir();});
   report.mainA=await call(main,store,readMicroprobe);
+  if(args.includes('--evidence-reads'))report.evidence={mainA:await evidencePoints(main,store)};
   const file=path.join(output,'fixture.private.cjs'),ready=path.join(output,'ready');
   fs.writeFileSync(file,`const{app}=require('electron');const fs=require('node:fs');
     app.setPath('userData',${JSON.stringify(path.join(output,'user-data'))});
@@ -74,10 +80,17 @@ try{
   fixture=await connect(log.match(/ws:\/\/127\.0\.0\.1:\d+\/[^\s]+/)[0]);
   const reference=await fixture.post('Runtime.evaluate',{expression:'global.__ri00MicroStore'});
   report.fixture=await call(fixture,reference.result.objectId,readMicroprobe);
+  if(report.evidence)report.evidence.fixture=await evidencePoints(fixture,reference.result.objectId);
   report.mainB=await call(main,store,readMicroprobe);
+  if(report.evidence)report.evidence.mainB=await evidencePoints(main,store);
   report.dataMatched=['selectedNamesSha256','sourceStampsSha256','selectedFactsSha256'].every(key=>
     report.mainA[key]===report.fixture[key]&&report.mainB[key]===report.fixture[key]);
   report.ok=report.dataMatched;
+  if(report.evidence){
+    const rows=Object.values(report.evidence).flat(),first=rows[0];
+    report.evidenceDataMatched=rows.every(row=>row.sourceStable&&row.sourceBefore===first.sourceBefore&&row.rows===first.rows);
+    if(!report.evidenceDataMatched)report.ok=false;
+  }
 }catch(error){report.failures.push(error.message);report.ok=false;}
 finally{
   fixture?.socket.close();
@@ -95,6 +108,6 @@ finally{
   if(report.failures.length||!report.harnessUnchangedDuringRun||(verifiedTarget&&args.includes('--close-inspector')&&!report.inspectorClosed))report.ok=false;
   report.finishedAt=new Date().toISOString();
   fs.writeFileSync(path.join(output,'report.private.json'),JSON.stringify(report,null,2),{mode:0o600});
-  console.log(JSON.stringify({ok:report.ok,dataMatched:report.dataMatched,inspectorClosed:report.inspectorClosed,failures:report.failures}));
+  console.log(JSON.stringify({ok:report.ok,dataMatched:report.dataMatched,evidenceDataMatched:report.evidenceDataMatched,inspectorClosed:report.inspectorClosed,failures:report.failures}));
   if(!report.ok)process.exitCode=1;
 }

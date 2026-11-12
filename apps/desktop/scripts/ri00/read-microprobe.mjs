@@ -37,3 +37,15 @@ export function readMicroprobe() {
     heapCode:v8.getHeapCodeStatistics(),pathFunctions:Object.fromEntries(['join','resolve','normalize'].map(key=>[key,hash(Function.prototype.toString.call(path[key]))])),
     fsFunctions: Object.fromEntries(['existsSync','statSync'].map(key => [key, hash(Function.prototype.toString.call(fs[key]))])) };
 }
+
+/** One full-index read per call; the driver yields between points and never returns records. */
+export function evidenceReadPoint() {
+  const fs=process.getBuiltinModule('fs'),path=process.getBuiltinModule('path'),crypto=process.getBuiltinModule('crypto');
+  const file=path.join(this.getStoreDir(),'evidence-index.jsonl');
+  const stamp=()=>{const s=fs.statSync(file,{bigint:true});return crypto.createHash('sha256')
+    .update(JSON.stringify(['dev','ino','size','mtimeNs','ctimeNs'].map(key=>String(s[key])))).digest('hex');};
+  const before=stamp(),started=Number(process.hrtime.bigint())/1e6;
+  const records=this.listEvidenceIndex();
+  const durationMs=Number(process.hrtime.bigint())/1e6-started,after=stamp();
+  return {at:new Date().toISOString(),durationMs,rows:records.length,sourceBefore:before,sourceAfter:after,sourceStable:before===after};
+}
