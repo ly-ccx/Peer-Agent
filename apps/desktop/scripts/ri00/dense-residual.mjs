@@ -12,12 +12,12 @@ export function summarizeDenseBlock(rows){
 /** Pure gate: same process/reference and source before any temporal CPU comparison. */
 export function advanceDenseResidual(state,checkpoint){
   const {identity,mainA,reference,mainB}=checkpoint;
-  if(!checkpoint.valid||!identity)return {...state,status:'invalidated',reason:'identity_or_measurement_failure'};
-  if(state.identity&&state.identity!==identity)return {...state,status:'invalidated',reason:'process_source_or_reference_changed'};
+  if(!checkpoint.valid||!identity)return {...state,status:'invalidated',reason:'identity_or_measurement_failure',streak:0};
+  if(state.identity&&state.identity!==identity)return {...state,status:'invalidated',reason:'process_source_or_reference_changed',streak:0};
   const groups=[mainA,reference,mainB];
   if(groups.some(rows=>rows.length<4||rows.some(row=>row.readFailure||row.metadataFailure||row.sourceBefore!==row.sourceAfter||row.evidence.length!==12
     ||row.evidence.some(e=>e.rows!==mainA[0].evidence[0].rows)||row.sourceBefore!==mainA[0].sourceBefore||row.outputSha256!==mainA[0].outputSha256)))
-    return {...state,status:'invalidated',reason:'read_graph_or_output_changed'};
+    return {...state,status:'invalidated',reason:'read_graph_or_output_changed',streak:0};
   const summaries=groups.map(summarizeDenseBlock);
   if(summaries.some(g=>g.compatible<3||g.compatibleRange>15))return {...state,identity,status:state.baseline?'armed':'waiting-baseline',reason:'unmatched_gc_state_or_unstable_warm',summaries,streak:0,deltas:null};
   const [a,r,b]=summaries,deltas=[a.median-r.median,b.median-r.median];

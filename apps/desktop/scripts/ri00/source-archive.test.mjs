@@ -1,0 +1,20 @@
+import test from'node:test';import assert from'node:assert/strict';import fs from'node:fs';import os from'node:os';import path from'node:path';import{DatabaseSync}from'node:sqlite';
+import{sourceInventory,archiveSource,archiveSourceBounded}from'./source-archive.mjs';
+test('source archive preserves input identity, uses a real SQLite backup and refuses unbounded copies or symlinks',async t=>{
+ const temp=fs.mkdtempSync(path.join(os.tmpdir(),'ri00-archive-'));t.after(()=>fs.rmSync(temp,{recursive:true,force:true}));const root=path.join(temp,'source');fs.mkdirSync(root);
+ for(const dir of['goal-plans','conversations','projects','coordination'])fs.mkdirSync(path.join(root,dir));
+ const coordination=path.join(root,'coordination');fs.mkdirSync(path.join(coordination,'coordination-v2'));fs.writeFileSync(path.join(coordination,'coordination-v2','head.json'),'{}');fs.mkdirSync(path.join(coordination,'coordination.jsonl'));fs.mkdirSync(path.join(coordination,'.read-models'));
+ const file='coordination-00000000-0000-0000-0000-000000000000.sqlite';fs.writeFileSync(path.join(coordination,'.read-models','coordination-current.json'),JSON.stringify({schemaVersion:1,file}));
+ fs.writeFileSync(path.join(root,'goal-plans','index.jsonl'),'{}\n');const db=new DatabaseSync(path.join(coordination,'.read-models',file));db.exec('CREATE TABLE meta (id TEXT,value TEXT); INSERT INTO meta VALUES (\'revision\',\'1\'); CREATE TABLE facts (id TEXT); INSERT INTO facts VALUES (\'one\')');db.close();
+ const before=sourceInventory(root,path.join(root,'coordination')),dest=path.join(temp,'archive');
+ await assert.rejects(archiveSource(root,coordination,dest,{remainingBytes:1,expectedRevision:1}),/budget/);assert.equal(fs.existsSync(dest),false);
+ const receipt=await archiveSource(root,coordination,dest,{remainingBytes:1048576,expectedRevision:1});assert.equal(receipt.consistent,true);
+ assert.equal(sourceInventory(root,path.join(root,'coordination')).sha256,before.sha256);
+ const copy=new DatabaseSync(path.join(dest,'coordination','.read-models',file),{readOnly:true});assert.equal(copy.prepare('SELECT id FROM facts').get().id,'one');copy.close();
+ const maintenance=new DatabaseSync(path.join(coordination,'.read-models',file));maintenance.exec('VACUUM');maintenance.close();assert.equal(sourceInventory(root,coordination).sha256,before.sha256);
+ await assert.rejects(archiveSource(root,coordination,path.join(temp,'wrong-revision'),{remainingBytes:1048576,expectedRevision:2}),/revision_mismatch/);
+ const bounded=await archiveSourceBounded(root,coordination,path.join(temp,'bounded'),{remainingBytes:1048576,expectedRevision:1});assert.equal(bounded.consistent,true);assert.ok(bounded.workerCpuMs>=0);
+ await assert.rejects(archiveSourceBounded(root,coordination,path.join(temp,'deadline'),{remainingBytes:1048576,expectedRevision:1},{timeoutMs:1}),/worker_timeout/);
+ const abort=new AbortController(),pending=archiveSourceBounded(root,coordination,path.join(temp,'aborted'),{remainingBytes:1048576,expectedRevision:1},{signal:abort.signal});abort.abort();await assert.rejects(pending,/worker_aborted/);
+ fs.symlinkSync('/unrelated',path.join(root,'projects','link'));assert.throws(()=>sourceInventory(root,path.join(root,'coordination')),/symlink/);
+});

@@ -1,5 +1,26 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from'node:fs';import os from'node:os';import path from'node:path';
 import {createDenseResidualProbe} from './dense-residual-probe.mjs';
+
+test('long probe notifies without queries, retains an idempotent unacknowledged batch and releases archived metadata',async t=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ri00-long-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));fs.writeFileSync(path.join(dir,'evidence-index.jsonl'),'{}\n');
+  let notices=0,calls=0;const binding='__ri00_test_natural_notice';globalThis[binding]=()=>notices++;
+  const store={getStoreDir:()=>dir,listEvidenceIndex:()=>[{}]},value=[{}],host={list(){calls++;for(let i=0;i<12;i++)store.listEvidenceIndex();return value;}};
+  const original=host.list,probe=createDenseResidualProbe.call(store,host,{workspaceId:'fixture'},{longWatch:true,durationMs:10000,leaseMs:10000,notificationName:binding});t.after(()=>probe.stop());
+  for(let block=0;block<3;block++){
+    for(let i=0;i<100;i++)assert.equal(host.list({workspaceId:'fixture'}),value);
+    const pending=probe.take();assert.equal(probe.take(),pending);const batch=await pending;assert.equal(batch.rows.length,100);assert.ok(batch.state.retainedRowBytes>0);
+    assert.equal(batch.rows[0].evidence.length,12);assert.match(batch.rows[0].evidence[0].entryStack,/dense-residual-probe\.test\.mjs/);assert.ok(Number.isFinite(batch.rows[0].evidence[0].newSpaceBefore));assert.equal(batch.rows[0].evidence[0].gc.absenceNotProven,true);probe.ack();
+  }
+  const empty=await probe.take();assert.equal(empty.rows.length,0);assert.equal(empty.state.retainedRowBytes,0);assert.equal(empty.state.naturalRows,300);assert.equal(empty.state.dropped,0);probe.ack();
+  assert.equal(calls,300);assert.ok(notices>0&&notices<=4);assert.equal(probe.stop().bindingRestored,true);assert.equal(globalThis[binding],undefined);assert.equal(host.list,original);
+});
+test('long probe lease restores owned methods and leaves a later notification owner intact',async t=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ri00-long-lease-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));fs.writeFileSync(path.join(dir,'evidence-index.jsonl'),'{}\n');
+  const binding='__ri00_test_lease_notice',store={getStoreDir:()=>dir,listEvidenceIndex:()=>[]},host={list:()=>[]},original=host.list;globalThis[binding]=()=>{};
+  const probe=createDenseResidualProbe.call(store,host,{workspaceId:'fixture'},{longWatch:true,durationMs:10000,leaseMs:100,notificationName:binding});
+  const replacement=()=>{};globalThis[binding]=replacement;await new Promise(r=>setTimeout(r,170));
+  const state=probe.stop();assert.equal(state.restored,true);assert.equal(state.stopReason,'controller-lease');assert.equal(state.bindingRestored,false);assert.equal(host.list,original);assert.equal(globalThis[binding],replacement);delete globalThis[binding];
+});
 test('persistent probe preserves application results/errors and streams metadata without reinstalling methods',async t=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ri00-dense-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));fs.writeFileSync(path.join(dir,'evidence-index.jsonl'),'{}\n');
   const store={getStoreDir:()=>dir,listEvidenceIndex:()=>[{}]},value=[{}],failure=Error('original');const host={list(input){store.listEvidenceIndex();if(input.fail)throw failure;return value;}};

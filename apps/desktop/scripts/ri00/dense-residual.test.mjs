@@ -21,6 +21,8 @@ test('input, source, process and reference changes invalidate temporal compariso
   const s=advanceDenseResidual({},point()),changed=point(35);changed.identity='replacement-reference';assert.equal(advanceDenseResidual(s,changed).status,'invalidated');
   const output=point(35);output.mainB[5].outputSha256='other-facts';assert.equal(advanceDenseResidual(s,output).status,'invalidated');
   const data=point(35);data.reference[3].evidence[0].rows++;assert.equal(advanceDenseResidual(s,data).status,'invalidated');
+  const suspect=advanceDenseResidual(s,point(30)),lost=advanceDenseResidual(suspect,{...point(30),valid:false});assert.equal(lost.streak,0);
+  assert.equal(advanceDenseResidual(lost,point(30)).status,'suspect');
 });
 test('a faster main is a baseline, while calibration drift or only one slow block is inconclusive',()=>{
   assert.equal(advanceDenseResidual({},point(-30)).status,'armed');
