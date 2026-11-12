@@ -3,16 +3,22 @@ import{createRequire}from'node:module';import{createHash,randomBytes}from'node:c
 import{createDenseResidualProbe}from'./ri00/dense-residual-probe.mjs';import{advanceDenseResidual}from'./ri00/dense-residual.mjs';
 import{readPortReferences}from'./ri00/inspector-read-ports.mjs';import{browserMainCounterDelta}from'./ri00/thread-counter-delta.mjs';
 import{inspectClosure}from'./ri00/trace.mjs';import{productionIdentity,resolveDestination}from'./ri00/identity.mjs';
-import{runLongResidualWatch}from'./ri00/long-residual-watch.mjs';import{sourceInventory,archiveSourceBounded}from'./ri00/source-archive.mjs';
+import{runLongResidualWatch}from'./ri00/long-residual-watch.mjs';import{archiveSourceBounded}from'./ri00/source-archive.mjs';
 import{captureCpuProfile}from'./ri00/cpu-profile-capture.mjs';
+import{observeSourceEpoch}from'./ri00/source-observer.mjs';import{captureBudget}from'./ri00/capture-budget.mjs';
 const args=process.argv.slice(2),option=(k,d)=>args.includes(k)?args[args.indexOf(k)+1]:d;
 const ownedMain=args.includes('--fixture-main'),simulate=Number(option('--simulate-residual','0'));
 const longWatch=args.includes('--long-watch'),leaseMs=Number(option('--lease-ms','90000')),fixtureNaturalMs=Number(option('--fixture-natural-ms','0')),fixtureSettleMs=Number(option('--fixture-settle-ms','60000'));
 const syntheticAdapter=args.includes('--simulate-adapter');
 const forceCanaryActions=args.includes('--validate-trigger-actions');
-const durationMs=Number(option('--duration-ms',longWatch?'14400000':'1200000')),intervalMs=Number(option('--interval-ms','420000')),pid=Number(option('--pid','0')),port=Number(option('--port','0'));
+const pid=Number(option('--pid','0')),port=Number(option('--port','0')),previousFile=option('--previous-capture-receipt');
+if(previousFile&&(!longWatch||ownedMain))throw Error('capture_budget_actual_long_watch_only');
+const previousBytes=previousFile?fs.readFileSync(previousFile):null,previousWitness=previousFile?path.join(path.dirname(previousFile),'vm-pre-trigger-witness.private.json'):null;
+const campaignBudget=longWatch?captureBudget({previous:previousBytes?JSON.parse(previousBytes):null,previousSha256:previousBytes?createHash('sha256').update(previousBytes).digest('hex'):null,
+ supplementalVm:previousWitness&&fs.existsSync(previousWitness)?JSON.parse(fs.readFileSync(previousWitness)):null,pid}):null;
+const durationMs=Number(option('--duration-ms',String(longWatch?campaignBudget.remaining.durationMs:1200000))),intervalMs=Number(option('--interval-ms','420000'));
 if(!Number.isInteger(durationMs)||durationMs<1000||durationMs>(longWatch?14400000:1200000)||!Number.isInteger(intervalMs)||intervalMs<1000||intervalMs>420000
-  ||(!ownedMain&&(durationMs!==(longWatch?14400000:1200000)||intervalMs!==420000||leaseMs!==90000))||![0,30,60].includes(simulate)||simulate&&!ownedMain||syntheticAdapter&&(!ownedMain||!simulate)||forceCanaryActions&&(!ownedMain||!syntheticAdapter)
+  ||(!ownedMain&&(durationMs!==(longWatch?campaignBudget.remaining.durationMs:1200000)||intervalMs!==420000||leaseMs!==90000))||![0,30,60].includes(simulate)||simulate&&!ownedMain||syntheticAdapter&&(!ownedMain||!simulate)||forceCanaryActions&&(!ownedMain||!syntheticAdapter)
   ||longWatch&&simulate||!Number.isInteger(leaseMs)||leaseMs<100||leaseMs>90000||!Number.isInteger(fixtureNaturalMs)||fixtureNaturalMs<0||fixtureNaturalMs&&(!ownedMain||!longWatch||fixtureNaturalMs<1000)
   ||!Number.isInteger(fixtureSettleMs)||fixtureSettleMs<0||fixtureSettleMs>60000||fixtureSettleMs!==60000&&!ownedMain)throw Error('bounded_dense_watch_configuration_required');
 for(const key of['--module-root','--fixture-root','--coordination-root','--parent-hash','--output'])if(!option(key))throw Error('explicit_dense_source_required');
@@ -23,11 +29,11 @@ if(fs.existsSync(output)||output===sourceRoot||output.startsWith(sourceRoot+path
 fs.mkdirSync(output,{recursive:true,mode:0o700});
 const wait=ms=>new Promise(r=>setTimeout(r,ms)),hash=bytes=>createHash('sha256').update(bytes).digest('hex'),require=createRequire(path.join(moduleRoot,'apps/desktop/package.json'));
 const cryptoRandom=()=>randomBytes(12).toString('hex');
-const readCpuLimit=longWatch?60000:30000;
-const report={kind:'persistent-dense-residual-formation-not-a-fix',longWatch,synthetic:simulate>0,syntheticAdapter,forcedActionsForCanaryOnly:forceCanaryActions,ownedMain,fixtureTimingOnly:ownedMain?{naturalMs:fixtureNaturalMs,settleMs:fixtureSettleMs}:null,startedAt:new Date().toISOString(),production:productionIdentity(moduleRoot),epochs:[],blocks:[],stream:[],failures:[],profiles:[],maxMainControlledCpuMs:readCpuLimit};
-const harness=()=>['capture-dense-residual.mjs','ri00/dense-residual-probe.mjs','ri00/dense-residual.mjs','ri00/natural-residual.mjs','ri00/long-residual-watch.mjs','ri00/source-archive.mjs','ri00/cpu-profile-capture.mjs','ri00/inspector-read-ports.mjs','ri00/thread-counter-delta.mjs','ri00/darwin-process-counters.py','ri00/read-host.mjs','ri00/readonly-coordination.mjs','ri00/coordination-snapshot.mjs','ri00/trace.mjs','ri00/identity.mjs'].map(relative=>({relative,sha256:hash(fs.readFileSync(new URL(relative,import.meta.url)))}));report.harness=harness();
+const readCpuLimit=longWatch?campaignBudget.remaining.hosts.main.readCpuMs:30000;
+const report={kind:'persistent-dense-residual-formation-not-a-fix',longWatch,synthetic:simulate>0,syntheticAdapter,forcedActionsForCanaryOnly:forceCanaryActions,ownedMain,fixtureTimingOnly:ownedMain?{naturalMs:fixtureNaturalMs,settleMs:fixtureSettleMs}:null,startedAt:new Date().toISOString(),production:productionIdentity(moduleRoot),epochs:[],blocks:[],stream:[],failures:[],profiles:[],maxMainControlledCpuMs:readCpuLimit,mainCpuMs:0,controllerCpuMs:0,campaignBudget};
+const harness=()=>['capture-dense-residual.mjs','ri00/dense-residual-probe.mjs','ri00/dense-residual.mjs','ri00/natural-residual.mjs','ri00/long-residual-watch.mjs','ri00/source-archive.mjs','ri00/source-observer.mjs','ri00/capture-budget.mjs','ri00/cpu-profile-capture.mjs','ri00/inspector-read-ports.mjs','ri00/thread-counter-delta.mjs','ri00/darwin-process-counters.py','ri00/read-host.mjs','ri00/readonly-coordination.mjs','ri00/coordination-snapshot.mjs','ri00/trace.mjs','ri00/identity.mjs'].map(relative=>({relative,sha256:hash(fs.readFileSync(new URL(relative,import.meta.url)))}));report.harness=harness();
 let actual,reference,counterProcess,counterReady,counterSeq=0,interrupted=false,gate={},actualOwnedInspector=false;
-let captureBegan=performance.now();
+let captureBegan=performance.now(),sourceObserver,longCpuStart;
 const counterPending=new Map(),children=[],sessions=[];
 let dirtyMain=false,wake;
 const captureAbort=new AbortController();
@@ -85,7 +91,8 @@ async function install(s){s.runtime=await evaluate(s,'({pid:process.pid,node:pro
     await s.post('Runtime.addBinding',{name:s.notificationName});s.onEvent=x=>{if(x.method==='Runtime.bindingCalled'&&x.params.name===s.notificationName&&s===actual){dirtyMain=true;wake?.();}};
   }
   const directory=value(await s.post('Runtime.callFunctionOn',{objectId:s.store,functionDeclaration:'function(){return this.getStoreDir();}',returnByValue:true}));s.indexFile=path.join(directory,'evidence-index.jsonl');
-  const p=await s.post('Runtime.callFunctionOn',{objectId:s.store,objectGroup:'ri00-dense-owned',functionDeclaration:createDenseResidualProbe.toString(),arguments:[{objectId:s.supervisor},{value:s.payload},{value:{durationMs:Math.min(longWatch?14400000:1200000,durationMs+30000),longWatch,leaseMs,notificationName:s.notificationName,closeInspectorOnWatchdog:!s.owned&&actualOwnedInspector}}]});
+  const limits=longWatch?campaignBudget.remaining.hosts[s===actual?'main':'reference']:null;
+  const p=await s.post('Runtime.callFunctionOn',{objectId:s.store,objectGroup:'ri00-dense-owned',functionDeclaration:createDenseResidualProbe.toString(),arguments:[{objectId:s.supervisor},{value:s.payload},{value:{durationMs:Math.min(longWatch?14400000:1200000,durationMs+30000),longWatch,leaseMs,...(limits?{readCpuLimitMs:limits.readCpuMs,nativeCpuLimitMs:limits.nativeCpuMs,probeCpuLimitMs:limits.probeCpuMs}:{}),notificationName:s.notificationName,closeInspectorOnWatchdog:!s.owned&&actualOwnedInspector}}]});
   if(p.exceptionDetails||!p.result?.objectId)throw Error('dense_probe_install_failed');s.probe=p.result.objectId;s.birth=(await counterRead(s.pid)).values.ri_proc_start_abstime;
 }
 async function collect(s,label){const batch=await invoke(s,'take');report.stream.push({host:label,...batch});if(batch.state.stopped||batch.state.metadataErrors||batch.state.dropped||batch.state.gcDropped)throw Error('dense_probe_invalid_or_stopped');return batch;}
@@ -127,16 +134,14 @@ async function postProfileControl(){report.postProfile=[];for(const[label,s]of[[
   }await collect(s,label);
 }}
 const coordinationDirectory=()=>path.join(coordinationLiveRoot,actual.payload.workspaceId);
-async function currentSource(){
-  if(!longWatch)return metadataIdentity();
-  const inventory=sourceInventory(sourceRoot,coordinationDirectory()),revision=await evaluate(reference,'globalThis.__ri00DenseHost.sourceRevision()');
-  if(!Number.isSafeInteger(revision)||revision<0)throw Error('long_watch_coordination_revision_required');
-  return {...inventory,metadataSha256:inventory.sha256,coordinationRevision:revision,sha256:hash(JSON.stringify([inventory.sha256,revision]))};
+async function currentSource(force=false){
+  if(longWatch)return sourceObserver.read({force});
+  return metadataIdentity();
 }
 async function checkpoint(state,expected,label){
-  const before=await currentSource(),indexBefore=hash(fs.readFileSync(actual.indexFile));
-  const mainA=await block(actual,label+'-a'),ref=await block(reference,label+'-r'),mainB=await block(actual,label+'-b'),after=await currentSource();
-  const sourceStable=before.sha256===expected.sha256&&after.sha256===expected.sha256&&hash(fs.readFileSync(actual.indexFile))===indexBefore;
+  const before=await currentSource(true),indexBefore=hash(fs.readFileSync(actual.indexFile));
+  const mainA=await block(actual,label+'-a'),ref=await block(reference,label+'-r'),mainB=await block(actual,label+'-b'),after=await currentSource(true);
+  const sourceStable=before.stable!==false&&after.stable!==false&&before.sha256===expected.sha256&&after.sha256===expected.sha256&&hash(fs.readFileSync(actual.indexFile))===indexBefore;
   const pmcStable=[...mainA.points,...ref.points,...mainB.points].every(p=>p.pmc.available&&p.pmc.exclusiveWindow),valid=sourceStable&&pmcStable;
   const identity=hash(JSON.stringify([actual.pid,actual.birth,reference.pid,reference.birth,expected.sha256,indexBefore,actual.runtime,reference.runtime]));
   const median=a=>[...a].sort((a,b)=>a-b)[Math.floor(a.length/2)],calibrationRatios=[mainA,mainB].map(b=>median(b.calibration.map(c=>c.userMs+c.systemMs))/median(ref.calibration.map(c=>c.userMs+c.systemMs)));
@@ -148,19 +153,20 @@ async function checkpoint(state,expected,label){
   const result={epoch:report.epochs.length,label,relativeMs:performance.now()-captureBegan,mainA,reference:ref,mainB,validation:{sourceStable,pmcStable},calibrationRatios,calibrationStable,gate:next};report.epochs.push(result);
   console.log(JSON.stringify({epoch:result.epoch,status:next.status,reason:next.reason,deltas:next.deltas,mainCpuMs:report.mainCpuMs}));return result;
 }
-function eventWait(ms){if(dirtyMain)return Promise.resolve();return new Promise(resolve=>{const timer=setTimeout(done,ms);function done(){clearTimeout(timer);wake=null;resolve();}wake=done;});}
+function eventWait(ms){if(dirtyMain||sourceObserver?.due())return Promise.resolve();return new Promise(resolve=>{const timer=setTimeout(done,ms);function done(){clearTimeout(timer);wake=null;resolve();}wake=done;});}
 async function longObservation(){
+  longCpuStart=process.cpuUsage();
   for(const key of['node','electron','v8','cachedDataVersionTag'])if(actual.runtime[key]!==reference.runtime[key])throw Error('long_watch_runtime_mismatch');
   for(let i=0;i<6;i++){await invoke(reference,'renew');await invoke(reference,'read',['reference-prewarm']);}await collect(reference,'reference');
-  let archiveBytes=0;const cpuStart=process.cpuUsage();
-  const io={now:()=>performance.now(),interrupted:()=>interrupted,wait:eventWait,source:async()=>currentSource(),remainingReadCpuMs:()=>readCpuLimit-report.mainCpuMs,
+  let archiveBytes=0;
+  const io={now:()=>performance.now(),interrupted:()=>interrupted,wait:eventWait,source:async()=>currentSource(),sourceDirty:()=>sourceObserver.due(),nextSourceCheckMs:()=>sourceObserver.nextCheckMs(),remainingReadCpuMs:()=>readCpuLimit-report.mainCpuMs,
     checkpoint,capture:async({label,status})=>{const n=report.profiles.length,vmBefore={main:await invoke(actual,'vm'),reference:await invoke(reference,'vm')};await interferenceControl();await profileCandidate(actual,label+'-main');await profileCandidate(reference,label+'-reference');await postProfileControl();
       return {statusBeforeActions:status,vmBefore,interference:report.interference,profiles:report.profiles.slice(n),postProfile:report.postProfile};},
     collectIfDirty:async()=>{if(!dirtyMain)return null;dirtyMain=false;return collect(actual,'main');},
     renew:async()=>{for(const s of[actual,reference]){await invoke(s,'renew');const c=await counterRead(s.pid);if(c.values.ri_proc_start_abstime!==s.birth)throw Error('long_watch_os_process_replaced');}
-      const cpu=process.cpuUsage(cpuStart);report.controllerCpuMs=(cpu.user+cpu.system)/1000;if(report.controllerCpuMs>30000)throw Error('long_watch_controller_cpu_budget');},
+      const cpu=process.cpuUsage(longCpuStart);report.controllerCpuMs=(cpu.user+cpu.system)/1000;if(report.controllerCpuMs>campaignBudget.remaining.controllerCpuMs)throw Error('long_watch_controller_cpu_budget');},
     archive:async(number,source)=>{const dir=path.join(output,'source-epoch-'+number);
-      try{const receipt=await archiveSourceBounded(sourceRoot,coordinationDirectory(),dir,{remainingBytes:1610612736-archiveBytes,expectedRevision:source.coordinationRevision},{signal:captureAbort.signal});
+      try{const receipt=await archiveSourceBounded(sourceRoot,coordinationDirectory(),dir,{remainingBytes:campaignBudget.remaining.archiveBytes-archiveBytes,expectedRevision:source.coordinationRevision},{signal:captureAbort.signal});
         if(receipt.beforeSha256!==source.metadataSha256)throw Error('archive_generation_identity_changed');return receipt;
       }finally{if(fs.existsSync(dir)){const size=p=>fs.readdirSync(p,{withFileTypes:true}).reduce((s,e)=>s+(e.isDirectory()?size(path.join(p,e.name)):fs.statSync(path.join(p,e.name)).size),0);archiveBytes+=size(dir);report.archiveBytes=archiveBytes;}}
     },
@@ -170,6 +176,9 @@ async function longObservation(){
   await runLongResidualWatch({durationMs:durationMs-Math.min(90000,durationMs*.1),report,io,settleMs:fixtureSettleMs});
 }
 try{
+  await counters();
+  if(campaignBudget?.prior){if(JSON.stringify(campaignBudget.prior.production)!==JSON.stringify(report.production))throw Error('capture_budget_product_replaced');
+   if(String((await counterRead(pid)).values.ri_proc_start_abstime)!==campaignBudget.prior.mainBirth)throw Error('capture_budget_main_process_replaced');}
   if(!ownedMain){
     const exe=execFileSync('ps',['-p',String(pid),'-o','comm='],{encoding:'utf8'}).trim();if(exe!=='/Applications/Peer Agent.app/Contents/MacOS/Peer Agent')throw Error('dense_existing_app_mismatch');
     report.preAttachClosure=await inspectClosure(port,{required:false});if(!report.preAttachClosure.closed)throw Error('dense_preexisting_or_uncertain_inspector');
@@ -184,9 +193,10 @@ try{
       }
     }finally{await actual.post('Runtime.releaseObjectGroup',{objectGroup:'ri00-read-ports'});report.discoveryHandlesReleased=true;}
   }else actual=await fixture('owned-main');
-  reference=await fixture('reference');actual.payload=reference.payload;await counters();await install(actual);await install(reference);report.mainRuntime=actual.runtime;report.referenceRuntime=reference.runtime;report.mainCpuMs=0;
+  reference=await fixture('reference');actual.payload=reference.payload;await install(actual);report.mainRuntime=actual.runtime;report.mainProcessBirth=actual.birth;await install(reference);report.referenceRuntime=reference.runtime;
   if(syntheticAdapter)for(const s of[actual,reference])for(let i=0;i<3;i++)await invoke(s,'native');
-  const started=Date.now(),source=await currentSource(),index=hash(fs.readFileSync(actual.indexFile));captureBegan=performance.now();report.sourceBefore={metadata:source,indexSha256:index};
+  if(longWatch)sourceObserver=observeSourceEpoch({root:sourceRoot,coordinationDirectory:coordinationDirectory(),readRevision:()=>evaluate(reference,'globalThis.__ri00DenseHost.sourceRevision()'),onDirty:()=>wake?.()});
+  const started=Date.now(),source=await currentSource(true),index=hash(fs.readFileSync(actual.indexFile));captureBegan=performance.now();report.sourceBefore={metadata:source,indexSha256:index};
   if(longWatch){await longObservation();gate=report.gate;}
   else{
     for(let epoch=0;epoch<(syntheticAdapter?5:3);epoch++){
@@ -203,9 +213,10 @@ try{
     }
     if(!ownedMain&&!gate.status.startsWith('confirmed')&&gate.status!=='slow-at-entry')while(Date.now()-started<durationMs-30000&&!interrupted){await wait(Math.min(5000,durationMs-30000-(Date.now()-started)));await collect(actual,'main');await collect(reference,'reference');}
   }
-  report.sourceAfter={metadata:await currentSource(),indexSha256:hash(fs.readFileSync(actual.indexFile))};report.sourceUnchangedForWholeCapture=report.sourceBefore.metadata.sha256===report.sourceAfter.metadata.sha256&&report.sourceBefore.indexSha256===report.sourceAfter.indexSha256;report.gate=gate;
+  report.sourceAfter={metadata:await currentSource(true),indexSha256:hash(fs.readFileSync(actual.indexFile))};report.sourceUnchangedForWholeCapture=report.sourceBefore.metadata.sha256===report.sourceAfter.metadata.sha256&&report.sourceBefore.indexSha256===report.sourceAfter.indexSha256;report.gate=gate;
 }catch(error){report.failures.push(error.message);}
 finally{
+  if(sourceObserver){report.sourceObserver=sourceObserver.close();if(report.sourceObserver.failed||report.sourceObserver.liveWatchers)report.failures.push('source-observer:'+report.sourceObserver.failed+':live='+report.sourceObserver.liveWatchers);}
   for(const[label,s]of[['main',actual],['reference',reference]])if(s?.probe){
     try{report.stream.push({host:label,...await invoke(s,'take')});}catch(e){report.failures.push('cleanup-take-'+label+':'+e.message);}
     try{s.stopped=await invoke(s,'stop');}catch(e){report.failures.push('cleanup-stop-'+label+':'+e.message);}
@@ -221,6 +232,7 @@ finally{
   for(const child of children){child.kill('SIGTERM');await new Promise(r=>child.exitCode==null&&child.signalCode==null?child.once('close',r):r());}
   if(counterProcess){counterProcess.stdin.end();counterProcess.kill('SIGTERM');}
   report.closeCheck=await inspectClosure(port,{required:actualOwnedInspector});report.harnessUnchanged=JSON.stringify(report.harness)===JSON.stringify(harness());report.productionUnchanged=JSON.stringify(report.production)===JSON.stringify(productionIdentity(moduleRoot));
+  if(longCpuStart){const c=process.cpuUsage(longCpuStart);report.controllerCpuMs=(c.user+c.system)/1000;report.controllerBudgetOvershootMs=Math.max(0,report.controllerCpuMs-campaignBudget.remaining.controllerCpuMs);}
   report.ok=!report.failures.length&&actual?.stopped?.restored&&reference?.stopped?.restored&&(!longWatch||actual?.stopped?.bindingRestored&&reference?.stopped?.bindingRestored)&&report.harnessUnchanged&&report.productionUnchanged&&(!actualOwnedInspector||report.closeCheck.closed)&&report.referenceGuard?.sourceWritesDenied===0&&report.referenceGuard?.readFailures===0&&(!ownedMain||report.mainGuard?.sourceWritesDenied===0&&report.mainGuard?.readFailures===0);
   report.finishedAt=new Date().toISOString();fs.writeFileSync(path.join(output,'report.private.json'),JSON.stringify(report),{mode:0o600});console.log(JSON.stringify({ok:report.ok,status:gate.status,failures:report.failures,closed:report.closeCheck.closed}));if(!report.ok)process.exitCode=1;
 }

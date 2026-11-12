@@ -3,6 +3,8 @@ export function createDenseResidualProbe(supervisor,payload,options={}){
   const durationMs=options.durationMs??1200000,long=options.longWatch===true;
   if(!Number.isInteger(durationMs)||durationMs<100||durationMs>(long?14400000:1200000))throw Error('bounded_dense_duration_required');
   const leaseMs=options.leaseMs??90000;
+  const cpuLimits={read:options.readCpuLimitMs??60000,native:options.nativeCpuLimitMs??3000,probe:options.probeCpuLimitMs??5000};
+  if(Object.entries(cpuLimits).some(([k,v])=>!Number.isFinite(v)||v<=0||v>({read:60000,native:3000,probe:5000}[k])))throw Error('bounded_dense_cpu_limits_required');
   if(long&&(!Number.isInteger(leaseMs)||leaseMs<100||leaseMs>90000))throw Error('bounded_dense_lease_required');
   const store=this,fs=process.getBuiltinModule('fs'),path=process.getBuiltinModule('path'),crypto=process.getBuiltinModule('crypto');
   const {performance,PerformanceObserver}=process.getBuiltinModule('perf_hooks'),v8=process.getBuiltinModule('v8');
@@ -11,13 +13,12 @@ export function createDenseResidualProbe(supervisor,payload,options={}){
   const file=path.join(store.getStoreDir(),'evidence-index.jsonl'),rows=[],gc=[],bytes=Buffer.alloc(4*1024*1024,0x5a);
   const binding=options.notificationName,notification=binding?globalThis[binding]:null;
   if(binding&&typeof notification!=='function')throw Error('dense_notification_binding_required');
-  let current,stopped=false,timedOut=false,cursor=0,gcCursor=0,timer,leaseTimer,notice,restored=null,bare=false,lastOutsideEnd=-Infinity,pendingTake=null;
+  let current,stopped=false,timedOut=false,cursor=0,gcCursor=0,timer,leaseTimer,notice,restored=null,bare=false,lastOutsideEnd=-Infinity,pendingTake=null,lastControlledSample=null;
   const rowBytes=[],state={metadataErrors:0,dropped:0,gcDropped:0,controlledCpuMs:0,nativeCpuMs:0,probeCpuMs:0,retainedRowBytes:0,naturalRows:0,controlledRows:0,outsideRows:0};
   const threadTotal=()=>{const c=process.threadCpuUsage();return(c.user+c.system)/1000;};
-  const newSpace=()=>v8.getHeapSpaceStatistics().find(s=>s.space_name==='new_space').space_size;
   function expired(reason){timedOut=reason==='watchdog'||reason==='controller-lease';probe.stop(reason);}
   function limits(){if(!long||stopped)return;
-    if(state.controlledCpuMs>=60000||state.nativeCpuMs>=3000||state.probeCpuMs>=5000)expired('cpu-budget');
+    if(state.controlledCpuMs>=cpuLimits.read||state.nativeCpuMs>=cpuLimits.native||state.probeCpuMs>=cpuLimits.probe)expired('cpu-budget');
     else if(state.retainedRowBytes+gc.length*96>16777216)expired('metadata-byte-budget');
   }
   function notify(){if(!notification||notice||stopped)return;notice=setImmediate(()=>{notice=null;const before=threadTotal();
@@ -47,7 +48,8 @@ export function createDenseResidualProbe(supervisor,payload,options={}){
     if(stopped)return Reflect.apply(fn,receiver,args);
     let row;const metadataBefore=process.threadCpuUsage();
     try{row={origin,label,observationMode:bare?'bare':'detailed',matches:origin!=='outside-index'&&args[0]?.workspaceId===payload.workspaceId,
-      entryStack:origin!=='outside-index'||performance.now()-lastOutsideEnd>250?stack():null,sourceBefore:stamp(),heapBefore:heap(),evidence:[]};}
+      samplingSchema:origin==='controlled'?'controlled-heap-v1':long?'passive-cpu-v2':'legacy-heap-v1',
+      entryStack:origin!=='outside-index'||performance.now()-lastOutsideEnd>250?stack():null,sourceBefore:stamp(),heapBefore:!long||origin==='controlled'?heap():null,evidence:[]};}
     catch{state.metadataErrors++;return Reflect.apply(fn,receiver,args);}
     const start=performance.now(),before={thread:process.threadCpuUsage(),whole:process.cpuUsage()},previous=current;row.start=start;current=row;
     let value;
@@ -57,7 +59,7 @@ export function createDenseResidualProbe(supervisor,payload,options={}){
       Object.assign(row,{userMs:measured.userMs,systemMs:measured.systemMs,processUserMs:measured.processUserMs,processSystemMs:measured.processSystemMs});
       if(origin==='controlled')state.controlledCpuMs+=row.userMs+row.systemMs;
       if(origin==='outside-index'){lastOutsideEnd=row.end;row.evidence.push({start:row.start,end:row.end,rows:row.rows??null,userMs:row.userMs,systemMs:row.systemMs});}
-      try{row.heapAfter=heap();row.sourceAfter=stamp();if(value&&origin!=='outside-index')row.outputSha256=crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');}
+      try{row.heapAfter=!long||origin==='controlled'?heap():null;if(origin==='controlled')lastControlledSample={start:row.start,end:row.end,heapBefore:row.heapBefore,heapAfter:row.heapAfter};row.sourceAfter=stamp();if(value&&origin!=='outside-index')row.outputSha256=crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');}
       catch{state.metadataErrors++;row.metadataFailure=true;}
       const after=process.threadCpuUsage();row.metadataCpuMs=(after.user+after.system-metadataBefore.user-metadataBefore.system)/1000-row.userMs-row.systemMs;
       if(long)row.instrumentationCpuMs=row.metadataCpuMs+row.evidence.reduce((s,e)=>s+(e.metadataCpuMs||0),0);
@@ -68,13 +70,13 @@ export function createDenseResidualProbe(supervisor,payload,options={}){
   const index=function(...args){
     if(!current&&!stopped)return root('outside-index',this,args,null,originalIndex);
     const observeIndex=long&&current?.origin==='natural';
-    const metadataBefore=long?threadTotal():0,entryStack=long&&current?.evidence.length===0?stack():null,spaceBefore=observeIndex?newSpace():null,wholeBefore=observeIndex?process.cpuUsage():null;
+    const metadataBefore=long?threadTotal():0,entryStack=long&&current?.evidence.length===0?stack():null,wholeBefore=observeIndex?process.cpuUsage():null;
     const before=process.threadCpuUsage(),start=performance.now();let value;
     try{value=Reflect.apply(originalIndex,this,args);return value;}
     finally{if(current){const after=process.threadCpuUsage(),end=performance.now(),userMs=(after.user-before.user)/1000,systemMs=(after.system-before.system)/1000;
       const span={start,end,rows:Array.isArray(value)?value.length:null,userMs,systemMs};
       if(entryStack)span.entryStack=entryStack;
-      if(observeIndex){const whole=process.cpuUsage();Object.assign(span,{newSpaceBefore:spaceBefore,newSpaceAfter:newSpace(),processUserMs:(whole.user-wholeBefore.user)/1000,processSystemMs:(whole.system-wholeBefore.system)/1000});}
+      if(observeIndex){const whole=process.cpuUsage();Object.assign(span,{processUserMs:(whole.user-wholeBefore.user)/1000,processSystemMs:(whole.system-wholeBefore.system)/1000});}
       if(long){span.metadataCpuMs=threadTotal()-metadataBefore-userMs-systemMs;state.probeCpuMs+=span.metadataCpuMs;}
       current.evidence.push(span);}}
   };
@@ -86,7 +88,7 @@ export function createDenseResidualProbe(supervisor,payload,options={}){
   }
   const annotate=row=>({...row,gc:overlapGc(row),...(long?{evidence:row.evidence.map(e=>({...e,gc:overlapGc(e)}))}:{})});
   const probe={read(label){if(stopped)throw Error('dense_probe_stopped');limits();if(stopped)throw Error('dense_probe_budget_exhausted');root('controlled',supervisor,[{workspaceId:payload.workspaceId}],label);return rows.at(-1);},
-    vm(){if(stopped)throw Error('dense_probe_stopped');return {heap:v8.getHeapStatistics(),spaces:v8.getHeapSpaceStatistics(),code:v8.getHeapCodeStatistics(),versions:{v8:process.versions.v8,cachedDataVersionTag:v8.cachedDataVersionTag()}};},
+    vm(){if(stopped)throw Error('dense_probe_stopped');return {notCurrentHeap:true,source:'cached-controlled-root-only',sample:lastControlledSample,versions:{v8:process.versions.v8}};},
     renew(){if(stopped)throw Error('dense_probe_stopped');const a=bare?originalIndex:index,b=bare?originalList:list;
       if(store.listEvidenceIndex!==a||supervisor.list!==b){probe.stop('method-owner-changed');throw Error('dense_method_owner_changed');}
       clearTimeout(leaseTimer);if(long){leaseTimer=setTimeout(()=>expired('controller-lease'),leaseMs);leaseTimer.unref?.();}return {...state,stopped};},
@@ -98,7 +100,7 @@ export function createDenseResidualProbe(supervisor,payload,options={}){
       const after=process.threadCpuUsage(),userMs=(after.user-before.user)/1000,systemMs=(after.system-before.system)/1000;
       state.nativeCpuMs+=userMs+systemMs;limits();return {start,end:performance.now(),userMs,systemMs,value};},
     take(){if(pendingTake){if(long)return pendingTake;throw Error('dense_take_ack_required');}pendingTake=(async()=>{await new Promise(r=>setImmediate(()=>setImmediate(r)));const before=threadTotal(),fresh=rows.slice(cursor).map(annotate),events=gc.slice(gcCursor);cursor=rows.length;gcCursor=gc.length;
-      const result={rows:fresh,gc:events,heap:heap(),clock:{hrtimeMs:Number(process.hrtime.bigint())/1e6,performanceMs:performance.now()}};
+      const result={rows:fresh,gc:events,heap:long?null:heap(),heapSampling:long?'not-sampled-passive':'legacy-active',clock:{hrtimeMs:Number(process.hrtime.bigint())/1e6,performanceMs:performance.now()}};
       if(long){state.probeCpuMs+=threadTotal()-before;limits();}return {...result,state:{...state,stopped,timedOut,restored}};})();return pendingTake;},
     ack(){const before=threadTotal();pendingTake=null;if(long){rows.splice(0,cursor);state.retainedRowBytes-=rowBytes.splice(0,cursor).reduce((s,x)=>s+x,0);cursor=0;
       const cutoff=Math.min(performance.now()-120000,...rows.map(r=>r.start));let n=0;while(n<gcCursor&&gc[n].start+gc[n].duration<cutoff)n++;gc.splice(0,n);gcCursor-=n;

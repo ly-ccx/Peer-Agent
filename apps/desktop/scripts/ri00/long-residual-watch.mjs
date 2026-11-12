@@ -18,6 +18,7 @@ export async function runLongResidualWatch({durationMs,report,io,settleMs=60000,
     gate={};fingerprint=null;learning=[];sentinel={...sentinel,streak:0};watch.phase='waiting-stable-source';
   };
   async function beginGeneration(){
+    if(pendingSource.stable===false){watch.phase='waiting-stable-source';event('source-not-stable');return;}
     source=pendingSource;gate={};fingerprint=null;learning=[];
     generation={number:watch.generations.length,sourceSha256:source.sha256,startedMs:io.now()-began,checkpoints:[],naturalLearning:[]};watch.generations.push(generation);
     try{generation.archive=await io.archive(generation.number,source);}catch(error){generation.archiveFailure=error.message;event('archive-failed',{reason:error.message});}
@@ -60,11 +61,11 @@ export async function runLongResidualWatch({durationMs,report,io,settleMs=60000,
   }
   await beginGeneration();
   while(io.now()<end&&!io.interrupted()&&watch.phase!=='captured-transition'){
-    await io.wait(Math.max(1,Math.min(30000,end-io.now(),heartbeat-io.now())));
-    if(io.now()>=heartbeat){
-      await io.renew();const next=await io.source();
-      if(next.sha256!==pendingSource.sha256){pendingSource=next;pendingSince=io.now();pendingGraph=null;freeze('source_metadata_changed');}
-      heartbeat=io.now()+30000;io.progress(watch,gate);
+    await io.wait(Math.max(1,Math.min(30000,end-io.now(),heartbeat-io.now(),io.nextSourceCheckMs?.()??Infinity)));
+    if(io.now()>=heartbeat||io.sourceDirty?.()){
+      const renewalDue=io.now()>=heartbeat;if(renewalDue)await io.renew();const next=await io.source();
+      if(next.sha256!==pendingSource.sha256||next.stable===false){pendingSource=next;pendingSince=io.now();pendingGraph=null;freeze('source_metadata_changed');}
+      if(renewalDue)heartbeat=io.now()+30000;io.progress(watch,gate);
     }
     const batch=await io.collectIfDirty();if(!batch)continue;
     for(const row of batch.rows){
@@ -74,7 +75,7 @@ export async function runLongResidualWatch({durationMs,report,io,settleMs=60000,
       if(known&&identity!==known){pendingGraph=identity;pendingSince=io.now();freeze('natural_read_identity_changed');}
       if(watch.phase==='waiting-stable-source'){
         if(pendingGraph&&pendingGraph!==identity){pendingGraph=identity;pendingSince=io.now();}
-        if(io.now()-pendingSince>=stableSourceMs&&rebases<2&&remaining()>=20000){rebases++;await beginGeneration();}
+        if(pendingSource.stable!==false&&io.now()-pendingSince>=stableSourceMs&&(!generation||rebases<2)&&remaining()>=20000){if(generation)rebases++;await beginGeneration();}
         continue;
       }
       if(io.now()<quietUntil)continue;

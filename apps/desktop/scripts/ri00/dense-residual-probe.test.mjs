@@ -9,7 +9,7 @@ test('long probe notifies without queries, retains an idempotent unacknowledged 
   for(let block=0;block<3;block++){
     for(let i=0;i<100;i++)assert.equal(host.list({workspaceId:'fixture'}),value);
     const pending=probe.take();assert.equal(probe.take(),pending);const batch=await pending;assert.equal(batch.rows.length,100);assert.ok(batch.state.retainedRowBytes>0);
-    assert.equal(batch.rows[0].evidence.length,12);assert.match(batch.rows[0].evidence[0].entryStack,/dense-residual-probe\.test\.mjs/);assert.ok(Number.isFinite(batch.rows[0].evidence[0].newSpaceBefore));assert.equal(batch.rows[0].evidence[0].gc.absenceNotProven,true);probe.ack();
+    assert.equal(batch.rows[0].evidence.length,12);assert.match(batch.rows[0].evidence[0].entryStack,/dense-residual-probe\.test\.mjs/);assert.equal(batch.rows[0].samplingSchema,'passive-cpu-v2');assert.equal(batch.rows[0].heapBefore,null);assert.equal(batch.rows[0].heapAfter,null);assert.equal(batch.rows[0].evidence[0].newSpaceBefore,undefined);assert.equal(batch.rows[0].evidence[0].gc.absenceNotProven,true);probe.ack();
   }
   const empty=await probe.take();assert.equal(empty.rows.length,0);assert.equal(empty.state.retainedRowBytes,0);assert.equal(empty.state.naturalRows,300);assert.equal(empty.state.dropped,0);probe.ack();
   assert.equal(calls,300);assert.ok(notices>0&&notices<=4);assert.equal(probe.stop().bindingRestored,true);assert.equal(globalThis[binding],undefined);assert.equal(host.list,original);
@@ -41,4 +41,14 @@ test('persistent probe watchdog and late-owner handling recover without overwrit
   assert.throws(()=>createDenseResidualProbe.call(store,host,{},{durationMs:1200001}),/bounded/);
   const probe=createDenseResidualProbe.call(store,host,{},{durationMs:100}),replacement=()=>[];host.list=replacement;
   await new Promise(r=>setTimeout(r,150));const end=probe.stop();assert.equal(end.timedOut,true);assert.equal(end.restored,false);assert.equal(host.list,replacement);assert.throws(()=>probe.read('late'),/stopped/);
+});
+
+test('passive natural, outside, take, VM summary, renew and stop never invoke V8 heap getters',async t=>{
+ const v8=process.getBuiltinModule('v8'),names=['getHeapStatistics','getHeapSpaceStatistics','getHeapCodeStatistics'],calls=Object.fromEntries(names.map(n=>[n,0])),original=Object.fromEntries(names.map(n=>[n,v8[n]]));
+ for(const n of names)v8[n]=function(...args){calls[n]++;return Reflect.apply(original[n],this,args);};
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ri00-passive-vm-'));let probe;t.after(()=>{probe?.stop();for(const n of names)v8[n]=original[n];fs.rmSync(dir,{recursive:true,force:true});});fs.writeFileSync(path.join(dir,'evidence-index.jsonl'),'{}\n');
+ const data=[{}],value=[{}],store={getStoreDir:()=>dir,listEvidenceIndex:()=>data},host={list(){for(let i=0;i<12;i++)store.listEvidenceIndex();return value;}};
+ probe=createDenseResidualProbe.call(store,host,{workspaceId:'fixture'},{longWatch:true,durationMs:10000});
+ assert.equal(host.list({workspaceId:'fixture'}),value);store.listEvidenceIndex();probe.renew();assert.equal(probe.vm().sample,null);const natural=await probe.take();probe.ack();assert.equal(natural.heap,null);assert.equal(natural.rows.length,2);assert.deepEqual(Object.values(calls),[0,0,0]);
+ probe.read('controlled');assert.ok(calls.getHeapStatistics>0&&calls.getHeapSpaceStatistics>0);assert.equal(calls.getHeapCodeStatistics,0);const before={...calls};assert.ok(probe.vm().sample.heapAfter);await probe.take();probe.ack();probe.renew();probe.stop();assert.deepEqual(calls,before);
 });

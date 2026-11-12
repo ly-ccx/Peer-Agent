@@ -33,3 +33,12 @@ test('source changes freeze history and admit at most two independent data gener
  const f=fixture({changes:true,drift:false});const r=await runLongResidualWatch({durationMs:300000,...f,settleMs:0,stableSourceMs:0});
  assert.equal(r.generations.length,3);assert.ok(r.generations.every(g=>g.invalidated));assert.equal(r.phase,'waiting-stable-source');assert.equal(f.counts().captures,0);
 });
+test('a source invalidation wakes before heartbeat without creating a business query',async()=>{
+ const f=fixture({natural:false});let now=0,consumed=false;f.io.now=()=>now;f.io.wait=async ms=>{now+=ms;};
+ f.io.source=async()=>{if(now>=1000)consumed=true;return {sha256:now>=1000?'B':'A',stable:true}};
+ f.io.sourceDirty=()=>now>=1000&&!consumed;f.io.nextSourceCheckMs=()=>consumed?Infinity:Math.max(0,1000-now);
+ await runLongResidualWatch({durationMs:2000,...f,settleMs:0});const frozen=f.report.longWatch.events.find(e=>e.kind==='generation-frozen');assert.ok(frozen.relativeMs<30000);assert.equal(f.counts().reads,1);assert.equal(f.counts().captures,0);
+});
+test('an unstable source cannot bootstrap a false fast state',async()=>{
+ const f=fixture({natural:false});f.io.source=async()=>({sha256:'changing',stable:false});const w=await runLongResidualWatch({durationMs:60000,...f,settleMs:0});assert.equal(f.counts().reads,0);assert.equal(w.generations.length,0);assert.equal(w.phase,'waiting-stable-source');
+});

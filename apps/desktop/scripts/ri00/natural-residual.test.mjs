@@ -16,3 +16,10 @@ test('GC inside other spans does not erase eligible positions; mismatches break 
  const pause=row();pause.end=2500;const s=advanceNaturalSentinel({},f,pause,0);assert.equal(s.trigger,true);assert.equal(s.reason,'natural_multi_second');
  assert.equal(learnNaturalFingerprint([...base,changed]),null);
 });
+
+test('v2 natural trigger uses CPU and observed GC only, and cannot mix with legacy heap fingerprints',()=>{
+ const passive=(extra=0)=>{const r=row(extra);r.samplingSchema='passive-cpu-v2';for(const e of r.evidence){delete e.newSpaceBefore;delete e.newSpaceAfter;}return r;};
+ const f=learnNaturalFingerprint(Array.from({length:5},()=>passive()));assert.equal(f.positions.length,12);assert.equal(f.heapStateSampled,false);assert.equal(f.samplingSchema,'passive-cpu-v2');
+ let state={};for(let i=0;i<3;i++)state=advanceNaturalSentinel(state,f,passive(2.5),i*15000);assert.equal(state.trigger,true);assert.equal(state.notDenseResidualConfirmation,true);
+ assert.equal(learnNaturalFingerprint([passive(),row()]),null);assert.equal(advanceNaturalSentinel({streak:2},f,row(2.5),0).streak,0);
+});
