@@ -52,7 +52,7 @@ const engineFlags={default:'','trace-gc':'--trace-gc-nvp --trace-memory-reducer 
   'trace-fixed-growth':'--no-memory-reducer --heap-growing-percent=500 --trace-gc-nvp --trace-incremental-marking --trace-concurrent-marking',
   'trace-tiering':'--trace-opt --trace-deopt --trace-pretenuring --trace-pretenuring-statistics'};
 if(!Object.hasOwn(engineFlags,engineExperiment)||engineExperiment!=='default'&&!isolationOnly)throw new Error('engine_controls_require_isolation');
-if(!['index','session'].includes(counterTarget)||counterTarget==='session'&&!isolationOnly&&!mainOnly||!Number.isInteger(counterRounds)||counterRounds<3||counterRounds>9||!Number.isInteger(counterIdleMs)||counterIdleMs<20||counterIdleMs>15000)throw new Error('unbounded_counter_configuration');
+if(!['index','session'].includes(counterTarget)||!Number.isInteger(counterRounds)||counterRounds<3||counterRounds>9||!Number.isInteger(counterIdleMs)||counterIdleMs<20||counterIdleMs>15000)throw new Error('unbounded_counter_configuration');
 let mainPayload;
 if(mainOnly&&counterTarget==='session'){
   const file=option('--payload-file');if(!file||fs.statSync(file).size>4096)throw new Error('bounded_session_payload_required');
@@ -389,7 +389,7 @@ try{
       if(!report.projectionMatched)report.sourceMatched=false;
     }
   }else{
-  const compare=async(session,supervisor,store,payload,pid,label)=>mode==='session'?profiledRead(session,supervisor,store,payload,label):mode==='cache'?cacheRead(session,store):mode==='ownership'?ownershipRead(session,store):mode==='vm-state'?vmStateRead(session,store):counterModeRead(session,store,pid);
+  const compare=async(session,supervisor,store,payload,pid,label)=>mode==='session'?profiledRead(session,supervisor,store,payload,label):mode==='cache'?cacheRead(session,store):mode==='ownership'?ownershipRead(session,store):mode==='vm-state'?vmStateRead(session,store):counterModeRead(session,store,pid,{supervisor,payload,label});
   report.mainA=await compare(main,supervisor,store,payload,pid,'main-a');
   if(mode==='ownership'||mode==='vm-state')await evaluate(fixture,'(async()=>{for(let i=0;i<12;i++)await globalThis.__ri00CpuHost.sessionFacts();return true;})()',true,true);
   report.fixture=await compare(fixture,childSupervisor,childStore,payload,fixturePid,'fixture');
@@ -397,6 +397,7 @@ try{
   report.sourceMatched=[report.mainA,report.fixture,report.mainB].every(row=>row.ok&&row.sourceBefore.sha256===report.mainA.sourceBefore.sha256
     &&row.sourceBefore.stampSha256===report.mainA.sourceBefore.stampSha256);
   if(mode==='session')report.projectionMatched=new Set([report.mainA,report.fixture,report.mainB].flatMap(group=>group.reads.map(row=>row.projectionSha256))).size===1;
+  if(mode==='counters'&&counterTarget==='session')report.projectionMatched=new Set([report.mainA,report.fixture,report.mainB].flatMap(group=>group.observation.reads.filter(row=>row.kind==='session').map(row=>row.projectionSha256))).size===1;
   }
   report.fixtureGuard=(await evaluate(fixture,'({...globalThis.__ri00CpuGuard.state})')).value;
   if(vmAfter){report.vmAfter=await vmStateRead(fixture,childStore,args.includes('--vm-debug-print'));if(!report.vmAfter.ok)throw new Error('post_query_vm_state_invalid');}
