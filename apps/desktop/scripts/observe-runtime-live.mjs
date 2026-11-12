@@ -58,6 +58,7 @@ try {
   if (report.runtime.pid !== pid || !report.runtime.electron) throw new Error('target_pid_or_host_mismatch');
   verifiedTarget = true;
   const readPorts = args.includes('--inspect-read-ports') ? await readPortReferences(post) : [];
+  report.readModules = readPorts.map(port=>port.module);
   const dependencyExpression = `(()=>{
     if(globalThis.__peerRi00Observation)throw Error('observer_owner_exists');
     const builtin=process.getBuiltinModule;

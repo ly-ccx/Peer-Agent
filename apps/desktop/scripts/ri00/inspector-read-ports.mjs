@@ -7,10 +7,10 @@ export async function readPortReferences(post) {
     if (!value?.objectId) throw new Error(`read_port_property_missing:${key}`);
     return value.objectId;
   }
-  async function closure(objectId, key) {
+  async function closure(objectId, key, optional = false) {
     const reply = await properties(objectId);
     const scopes = reply.internalProperties?.find(row => row.name === '[[Scopes]]')?.value.objectId;
-    if (!scopes) throw new Error('read_port_scopes_unavailable');
+    if (!scopes) { if(optional)return; throw new Error('read_port_scopes_unavailable'); }
     const scopeList = await properties(scopes);
     for (const item of scopeList.result) {
       if (!/^\d+$/.test(item.name) || !item.value?.objectId) continue;
@@ -18,7 +18,7 @@ export async function readPortReferences(post) {
       const value = entries.result.find(row => row.name === key)?.value;
       if (value?.objectId) return value.objectId;
     }
-    throw new Error(`read_port_binding_missing:${key}`);
+    if(!optional)throw new Error(`read_port_binding_missing:${key}`);
   }
   const evaluation = await post('Runtime.evaluate', { expression: `process.getBuiltinModule('module').createRequire(process.resourcesPath+'/app.asar/package.json')('electron').ipcMain._invokeHandlers.get('project-agent:list-obligation-grants')`, objectGroup: 'ri00-read-ports' });
   if (evaluation.exceptionDetails || !evaluation.result?.objectId) throw new Error('read_port_handler_unavailable');
@@ -28,8 +28,17 @@ export async function readPortReferences(post) {
   const supervisor = await closure(grant, 'sessions');
   const list = await property(supervisor, 'list');
   const goalPlanStore = await closure(list, 'goalPlanStore');
-  return [
+  const references = [
     { objectId: supervisor, module: 'SessionSupervisor', methods: ['list'] },
     { objectId: goalPlanStore, module: 'GoalPlanStore', methods: ['getPlan', 'listEvidenceIndex'] },
   ];
+  // Desktop's host fact port is separate from GoalPlanStore's optional UI-delivery port.
+  const facts = await closure(list, 'readSessionFacts', true);
+  const delivery = facts && await closure(facts, 'readUiDelivery', true);
+  const provider = delivery && await closure(delivery, 'desktopPreviewProvider', true);
+  if(provider){
+    const authority = await property(provider, 'authority');
+    references.push({objectId:authority,module:'UiDeliveryAuthority',methods:['read']});
+  }
+  return references;
 }
