@@ -59,6 +59,7 @@ try {
   verifiedTarget = true;
   const readPorts = args.includes('--inspect-read-ports') ? await readPortReferences(post) : [];
   report.readModules = readPorts.map(port=>port.module);
+  report.readPortDiscovery = readPorts.discovery;
   const dependencyExpression = `(()=>{
     if(globalThis.__peerRi00Observation)throw Error('observer_owner_exists');
     const builtin=process.getBuiltinModule;

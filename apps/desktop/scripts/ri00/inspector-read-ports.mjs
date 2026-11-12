@@ -7,17 +7,24 @@ export async function readPortReferences(post) {
     if (!value?.objectId) throw new Error(`read_port_property_missing:${key}`);
     return value.objectId;
   }
-  async function closure(objectId, key, optional = false) {
+  async function closure(objectId, key, optional = false, discovery = null) {
     const reply = await properties(objectId);
     const scopes = reply.internalProperties?.find(row => row.name === '[[Scopes]]')?.value.objectId;
-    if (!scopes) { if(optional)return; throw new Error('read_port_scopes_unavailable'); }
+    if (!scopes) { if(discovery)discovery.state='scopes-unavailable';if(optional)return; throw new Error('read_port_scopes_unavailable'); }
     const scopeList = await properties(scopes);
     for (const item of scopeList.result) {
       if (!/^\d+$/.test(item.name) || !item.value?.objectId) continue;
       const entries = await properties(item.value.objectId);
-      const value = entries.result.find(row => row.name === key)?.value;
-      if (value?.objectId) return value.objectId;
+      const binding = entries.result.find(row => row.name === key);
+      if(binding){
+        const value=binding.value;
+        if(discovery)discovery.state=value?.subtype||value?.type||'unavailable';
+        if(value?.objectId)return value.objectId;
+        if(optional)return;
+        throw new Error(`read_port_binding_not_an_object:${key}`);
+      }
     }
+    if(discovery)discovery.state='binding-unavailable';
     if(!optional)throw new Error(`read_port_binding_missing:${key}`);
   }
   const evaluation = await post('Runtime.evaluate', { expression: `process.getBuiltinModule('module').createRequire(process.resourcesPath+'/app.asar/package.json')('electron').ipcMain._invokeHandlers.get('project-agent:list-obligation-grants')`, objectGroup: 'ri00-read-ports' });
@@ -33,12 +40,15 @@ export async function readPortReferences(post) {
     { objectId: goalPlanStore, module: 'GoalPlanStore', methods: ['getPlan', 'listEvidenceIndex'] },
   ];
   // Desktop's host fact port is separate from GoalPlanStore's optional UI-delivery port.
-  const facts = await closure(list, 'readSessionFacts', true);
-  const delivery = facts && await closure(facts, 'readUiDelivery', true);
-  const provider = delivery && await closure(delivery, 'desktopPreviewProvider', true);
+  const discovery={sessionFacts:{},uiDelivery:{},previewProvider:{}};
+  const hostFacts=await closure(list,'hostFacts',true);
+  const facts = await closure(hostFacts||list, 'readSessionFacts', true,discovery.sessionFacts);
+  const delivery = facts && await closure(facts, 'readUiDelivery', true,discovery.uiDelivery);
+  const provider = delivery && await closure(delivery, 'desktopPreviewProvider', true,discovery.previewProvider);
   if(provider){
     const authority = await property(provider, 'authority');
     references.push({objectId:authority,module:'UiDeliveryAuthority',methods:['read']});
   }
+  references.discovery=discovery;
   return references;
 }

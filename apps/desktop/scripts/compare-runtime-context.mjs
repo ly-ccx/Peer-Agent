@@ -55,6 +55,7 @@ try{
   if(identity.exceptionDetails||identity.result?.value?.pid!==pid||!identity.result.value.electron)throw new Error('target_pid_or_host_mismatch');
   verifiedTarget=true;
   const ports=await readPortReferences(main.post.bind(main)),store=ports.find(row=>row.module==='GoalPlanStore').objectId;
+  report.readModules=ports.map(port=>port.module);report.readPortDiscovery=ports.discovery;
   const sourceDir=await call(main,store,function(){return this.getStoreDir();});
   report.mainA=await call(main,store,readMicroprobe);
   if(args.includes('--evidence-reads'))report.evidence={mainA:await evidencePoints(main,store)};
