@@ -14,11 +14,12 @@ const fixtureRoot=fs.realpathSync(option('--fixture-root')),output=resolveDestin
 const personal=resolveDestination(path.join(os.homedir(),'.peer-agent'));
 for(const root of [fixtureRoot,output])if(root===personal||root.startsWith(personal+path.sep))throw new Error('isolated_paths_required');
 if(output===fixtureRoot||output.startsWith(fixtureRoot+path.sep)||fs.existsSync(output)&&fs.readdirSync(output).length)throw new Error('new_output_outside_fixture_required');
-const factor=option('--factor','sham'),layout=option('--layout','workspace');
-if(!['sham','dictionary-shapes','frozen-shapes','retained-heap','full-host','diagnostic-hooks','cpu-profile','scope-inspection'].includes(factor))throw new Error('invalid_factor');
+const factor=option('--factor','sham'),layout=option('--layout','workspace'),target=option('--target','pipeline');
+if(!['sham','dictionary-shapes','frozen-shapes','retained-heap','full-host','diagnostic-hooks','cpu-profile','scope-inspection','array-species','regexp-exec','array-prototype-element'].includes(factor))throw new Error('invalid_factor');
+if(!['pipeline','evidence-read','store'].includes(target))throw new Error('invalid_target');
 if(!['workspace','installed'].includes(layout)||layout==='installed'&&!option('--installed-root'))throw new Error('invalid_module_layout');
 if(factor==='full-host'&&!option('--coordination-snapshot'))throw new Error('full_host_requires_fixed_coordination_snapshot');
-const config={moduleRoot,fixtureRoot,output,factor,layout,installedRoot:option('--installed-root'),
+const config={moduleRoot,fixtureRoot,output,factor,layout,target,installedRoot:option('--installed-root'),
   coordinationSnapshot:option('--coordination-snapshot'),parentHash:option('--parent-hash',''),
   batches:Number(option('--batches','7')),warmReads:Number(option('--warm-reads','12')),readsPerBatch:12,
   retainedMiB:Number(option('--retained-mib','128')),replicate:Number(option('--replicate','1'))};
@@ -52,5 +53,5 @@ envelope.productionUnchanged=JSON.stringify(production())===JSON.stringify(envel
 envelope.ok=code===0&&envelope.child?.ok&&envelope.harnessUnchanged&&envelope.fixtureUnchanged&&envelope.snapshotUnchanged&&envelope.productionUnchanged;
 envelope.finishedAt=new Date().toISOString();
 fs.writeFileSync(path.join(output,'report.private.json'),JSON.stringify(envelope,null,2),{mode:0o600});
-console.log(JSON.stringify({ok:envelope.ok,factor,layout,summaries:envelope.child?.phases.map(phase=>({phase:phase.name,...phase.summary})),failures:envelope.child?.failures.map(({name,code})=>({name,code}))}));
+console.log(JSON.stringify({ok:envelope.ok,factor,layout,target,summaries:envelope.child?.phases.map(phase=>({phase:phase.name,...phase.summary})),failures:envelope.child?.failures.map(({name,code})=>({name,code}))}));
 if(!envelope.ok)process.exitCode=1;

@@ -51,12 +51,20 @@ export async function runNormalizationLab(config) {
   const moduleFile=path.join(runtimeRoot,'dist/goal-plan-files.mjs');
   const {readJsonl,normalizeEvidenceIndexRecord,retainInteractiveEvidence}=await import(pathToFileURL(moduleFile).href);
   const records=readJsonl(file),rawDigest=digestRows(records);
-  const normalize=()=>retainInteractiveEvidence(records.map(normalizeEvidenceIndexRecord).filter(Boolean));
+  let normalize=()=>retainInteractiveEvidence(records.map(normalizeEvidenceIndexRecord).filter(Boolean));
+  let inspectedFunction=normalizeEvidenceIndexRecord;
+  if(config.target==='evidence-read'){
+    const {createGoalPlanEvidence}=await import(pathToFileURL(path.join(runtimeRoot,'dist/goal-plan-evidence.mjs')).href);
+    const evidence=createGoalPlanEvidence({storeDir:path.dirname(file)});inspectedFunction=evidence.readEvidenceIndex;normalize=()=>evidence.readEvidenceIndex();
+  }else if(config.target==='store'){
+    const {createGoalPlanStore}=await import(pathToFileURL(path.join(runtimeRoot,'dist/goal-plan-store.mjs')).href);
+    const store=createGoalPlanStore({storeDir:path.dirname(file)});inspectedFunction=store.listEvidenceIndex;normalize=()=>store.listEvidenceIndex();
+  }
   let invoke=normalize,observation,session,host,retained=[];
   const post=(method,params={})=>new Promise((resolve,reject)=>session.post(method,params,(error,result)=>error?reject(error):resolve(result)));
-  const report={kind:'isolated-normalization-trigger-experiment',layout:config.layout,factor:config.factor,
+  const report={kind:'isolated-normalization-trigger-experiment',layout:config.layout,factor:config.factor,target:config.target,
     replicate:config.replicate,startedAt:new Date().toISOString(),inputSha256:inputHash,rawDigest,rawRows:records.length,
-    moduleSha256:hash(fs.readFileSync(moduleFile)),functionSha256:{normalize:hash(normalizeEvidenceIndexRecord.toString()),retain:hash(retainInteractiveEvidence.toString())},
+    moduleSha256:hash(fs.readFileSync(moduleFile)),functionSha256:{normalize:hash(normalizeEvidenceIndexRecord.toString()),retain:hash(retainInteractiveEvidence.toString()),reader:hash(inspectedFunction.toString())},
     runtime:{electron:process.versions.electron,node:process.versions.node,arch:process.arch,cachedDataVersionTag:v8.cachedDataVersionTag(),cpuMetric:'process.threadCpuUsage',calibration:'native-SHA256-16MiB'},
     phases:[],gc:[],failures:[],intervention:{},restoration:{}};
   const observer=new PerformanceObserver(list=>{
@@ -90,7 +98,7 @@ export async function runNormalizationLab(config) {
     report.phases.push(result);
   }
   async function inspectScopes() {
-    globalThis.__ri00NormalizationFunction=normalizeEvidenceIndexRecord;
+    globalThis.__ri00NormalizationFunction=inspectedFunction;
     const reply=await post('Runtime.evaluate',{expression:'globalThis.__ri00NormalizationFunction',objectGroup:'ri00-lab-scopes'});
     let functions=0,scopes=0;
     const refs=[reply.result.objectId],seen=new Set();
@@ -113,6 +121,22 @@ export async function runNormalizationLab(config) {
     await phase('before');
     const started=performance.now();report.intervention.heapBefore=heap();
     if(config.factor==='sham')await wait(100);
+    else if(config.factor==='array-species'){
+      const descriptor=Object.getOwnPropertyDescriptor(Array,Symbol.species);
+      try{Object.defineProperty(Array,Symbol.species,{...descriptor,get(){return Array;}});[1,2].map(x=>x);}
+      finally{Object.defineProperty(Array,Symbol.species,descriptor);}
+      report.intervention.descriptorRestored=Object.getOwnPropertyDescriptor(Array,Symbol.species).get===descriptor.get;
+    }else if(config.factor==='regexp-exec'){
+      const descriptor=Object.getOwnPropertyDescriptor(RegExp.prototype,'exec');
+      try{Object.defineProperty(RegExp.prototype,'exec',{...descriptor,value:function(...args){return Reflect.apply(descriptor.value,this,args);}});/^a/.exec('a');}
+      finally{Object.defineProperty(RegExp.prototype,'exec',descriptor);}
+      report.intervention.descriptorRestored=RegExp.prototype.exec===descriptor.value;
+    }else if(config.factor==='array-prototype-element'){
+      const descriptor=Object.getOwnPropertyDescriptor(Array.prototype,'0'),length=Object.getOwnPropertyDescriptor(Array.prototype,'length');
+      try{Object.defineProperty(Array.prototype,'0',{value:1,configurable:true,writable:true});[].map(x=>x);}
+      finally{if(descriptor)Object.defineProperty(Array.prototype,'0',descriptor);else delete Array.prototype[0];Object.defineProperty(Array.prototype,'length',length);}
+      report.intervention.descriptorRestored=Object.getOwnPropertyDescriptor(Array.prototype,'0')?.value===descriptor?.value&&Array.prototype.length===length.value;
+    }
     else if(config.factor==='dictionary-shapes'||config.factor==='frozen-shapes') {
       const variants=records.slice(0,2048).map(record=>{
         const value={...record};
