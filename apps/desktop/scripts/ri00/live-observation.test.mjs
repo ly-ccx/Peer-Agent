@@ -36,6 +36,31 @@ test('live query observation preserves sync values, receiver and nested inclusiv
   } finally { assert.ok(observation.stop().restored.every(Boolean)); }
   assert.equal(f.ipcMain._invokeHandlers.get('catalog:query'), original);
 });
+test('resource observation measures synchronous CPU and bounded evidence heap snapshots without payloads',()=>{
+  let user=0,repeats=1;const store={listEvidenceIndex(){user+=10000;return [{}];}};
+  const f=fixture(()=>{let value;for(let i=0;i<repeats;i++)value=store.listEvidenceIndex();return value;});
+  f.deps.cpu=()=>({thread:{user,system:0},process:{user:user*2,system:0}});
+  f.deps.heapSnapshot=()=>({usedBytes:1024,totalBytes:2048,spaces:[]});
+  const observation=installObservation(f.deps,{durationMs:1000,resources:true,deepBuiltins:false});
+  observation.instrumentObject(store,'GoalPlanStore',['listEvidenceIndex']);
+  try{
+    assert.equal(f.ipcMain._invokeHandlers.get('catalog:query')().length,1);
+    const row=observation.peek().records[0],span=row.metrics['GoalPlanStore.listEvidenceIndex'].resourceReads[0];
+    assert.equal(row.syncCpu.threadUserMs,10);assert.equal(row.syncCpu.processUserMs,20);
+    assert.equal(span.cpu.threadUserMs,10);assert.equal(span.heapBefore.usedBytes,1024);assert.equal(observation.peek().resourceErrors,0);
+    repeats=40;f.ipcMain._invokeHandlers.get('catalog:query')();
+    const metric=observation.peek().records[1].metrics['GoalPlanStore.listEvidenceIndex'];
+    assert.equal(metric.resourceReads.length,32);assert.equal(metric.resourceReadsDropped,8);
+  }finally{observation.stop();}
+});
+test('resource collection failures cannot change the production return or bypass owned cleanup',()=>{
+  const f=fixture(()=>42),original=f.ipcMain._invokeHandlers.get('catalog:query');
+  f.deps.cpu=()=>{throw new Error('private telemetry failure');};f.deps.heapSnapshot=()=>({});
+  const observation=installObservation(f.deps,{durationMs:1000,resources:true});
+  assert.equal(f.ipcMain._invokeHandlers.get('catalog:query')(),42);const result=observation.stop();
+  assert.ok(result.resourceErrors>0);assert.equal(f.ipcMain._invokeHandlers.get('catalog:query'),original);
+  assert.equal(JSON.stringify(result).includes('private telemetry failure'),false);
+});
 
 test('live handler keeps original Promise identity and propagates rejection or synchronous throw', async () => {
   const failure = new Error('private failure');

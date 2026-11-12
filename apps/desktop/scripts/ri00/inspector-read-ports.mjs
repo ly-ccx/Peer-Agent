@@ -33,8 +33,14 @@ export async function readPortReferences(post) {
   const ports = await closure(callback, 'ports');
   const grant = await property(ports, 'listObligationGrants');
   const supervisor = await closure(grant, 'sessions');
-  const list = await property(supervisor, 'list');
-  const goalPlanStore = await closure(list, 'goalPlanStore');
+  let list = await property(supervisor, 'list'),goalPlanStore;
+  // The isolated read host retains an owned observation wrapper around the same
+  // production method. Follow only its two named original-function bindings.
+  for(let i=0;i<8;i++){
+    goalPlanStore=await closure(list,'goalPlanStore',true);if(goalPlanStore)break;
+    const original=await closure(list,'listed',true)||await closure(list,'original',true);if(!original)break;list=original;
+  }
+  if(!goalPlanStore)throw new Error('read_port_binding_missing:goalPlanStore');
   const references = [
     { objectId: supervisor, module: 'SessionSupervisor', methods: ['list'] },
     { objectId: goalPlanStore, module: 'GoalPlanStore', methods: ['getPlan', 'listEvidenceIndex'] },

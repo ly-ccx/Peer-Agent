@@ -2,6 +2,7 @@
 export function createIndexCounterProbe(supervisor,payload){
   const store=this,fs=process.getBuiltinModule('fs'),path=process.getBuiltinModule('path'),crypto=process.getBuiltinModule('crypto');
   const {performance,PerformanceObserver}=process.getBuiltinModule('perf_hooks');
+  const v8=process.getBuiltinModule('v8');
   const file=path.join(store.getStoreDir(),'evidence-index.jsonl'),gc=[],reads=[],bytes=Buffer.alloc(4*1024*1024,0x5a);
   const stamp=()=>{const s=fs.statSync(file,{bigint:true});return crypto.createHash('sha256').update(JSON.stringify(
     ['dev','ino','size','mtimeNs','ctimeNs'].map(key=>String(s[key])))).digest('hex');};
@@ -18,7 +19,7 @@ export function createIndexCounterProbe(supervisor,payload){
   if(supervisor)store.listEvidenceIndex=wrapped;
   return {read(kind){
     if(stopped)throw new Error('counter_probe_stopped');
-    const beforeStamp=stamp(),start=performance.now(),thread=process.threadCpuUsage(),whole=process.cpuUsage();let rows=0,projection;
+    const beforeStamp=stamp(),heapBefore=v8.getHeapStatistics(),spacesBefore=v8.getHeapSpaceStatistics(),start=performance.now(),thread=process.threadCpuUsage(),whole=process.cpuUsage();let rows=0,projection;
     const details={evidence:[]};active=details;
     try{
     if(kind==='session'){if(!supervisor)throw new Error('session_counter_port_required');projection=supervisor.list({workspaceId:payload.workspaceId});rows=projection.length;}
@@ -27,7 +28,7 @@ export function createIndexCounterProbe(supervisor,payload){
     else if(kind!=='noop')throw new Error('invalid_counter_probe_kind');
     }finally{active=undefined;}
     const end=performance.now(),after=process.threadCpuUsage(),processAfter=process.cpuUsage(),afterStamp=stamp();
-    const row={kind,start,end,rows,sourceStamp:beforeStamp,sourceStable:beforeStamp===afterStamp,
+    const row={kind,start,end,rows,sourceStamp:beforeStamp,sourceStable:beforeStamp===afterStamp,heapBefore,spacesBefore,heapAfter:v8.getHeapStatistics(),spacesAfter:v8.getHeapSpaceStatistics(),
       threadUserMs:(after.user-thread.user)/1000,threadSystemMs:(after.system-thread.system)/1000,
       processUserMs:(processAfter.user-whole.user)/1000,processSystemMs:(processAfter.system-whole.system)/1000,...details};
     if(projection)row.projectionSha256=crypto.createHash('sha256').update(JSON.stringify(projection)).digest('hex');

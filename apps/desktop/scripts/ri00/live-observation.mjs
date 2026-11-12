@@ -2,10 +2,20 @@
 export function installObservation(deps, options) {
   const { ipcMain, fs, json, phase, stores, timerHosts, timers, syncExports, now, wall, AsyncLocalStorage } = deps;
   const als = new AsyncLocalStorage();
+  const resources=options.resources===true;
+  if(resources&&(typeof deps.cpu!=='function'||typeof deps.heapSnapshot!=='function'))throw new Error('resource_metrics_unavailable');
+  const cpuDelta=(before,after)=>before&&after?({threadUserMs:(after.thread.user-before.thread.user)/1000,threadSystemMs:(after.thread.system-before.thread.system)/1000,
+    processUserMs:(after.process.user-before.process.user)/1000,processSystemMs:(after.process.system-before.process.system)/1000}):null;
   const contexts = new Set();
   const currentRow = () => als.getStore()?.row;
   const state = { startedAt: wall(), startedMono: now(), records: [], gaps: [], phases: {},
-    dropped: 0, droppedTimerWrappers: 0, stopped: false, detailed: options.detailed !== false };
+    dropped: 0, droppedTimerWrappers: 0, resourceErrors:0, stopped: false, detailed: options.detailed !== false };
+  function resource(kind){
+    try{const value=deps[kind]();if(!value||typeof value!=='object')throw new Error('invalid_resource_snapshot');
+      if(kind==='cpu'&&!['thread','process'].every(key=>Number.isFinite(value[key]?.user)&&Number.isFinite(value[key]?.system)))throw new Error('invalid_cpu_snapshot');
+      return value;
+    }catch{state.resourceErrors++;return null;}
+  }
   const restores = [], adopted = new WeakSet(), own = new Set();
   const modules = new Map();
   const limit = options.limit || 20000;
@@ -21,12 +31,17 @@ export function installObservation(deps, options) {
   function measure(name, callback) {
     const row = currentRow();
     if (state.stopped || !state.detailed || !row || row.closed) return callback();
+    const capture=resources&&name==='GoalPlanStore.listEvidenceIndex';
+    const heapBefore=capture?resource('heapSnapshot'):undefined,cpuBefore=capture?resource('cpu'):undefined;
     const parent = row.stack.at(-1), frame = { started: now(), children: 0 };
     row.stack.push(frame);
     try { return callback(); }
     finally {
-      const ms = now() - frame.started; row.stack.pop(); if (parent) parent.children += ms;
+      const ended=now(),cpuAfter=capture?resource('cpu'):undefined,ms = ended - frame.started; row.stack.pop(); if (parent) parent.children += ms;
       metric(row, name, ms, frame.children);
+      if(capture){const value=row.metrics[name];value.resourceReads||=[];
+        if(value.resourceReads.length<32)value.resourceReads.push({start:frame.started,end:ended,cpu:cpuDelta(cpuBefore,cpuAfter),heapBefore,heapAfter:resource('heapSnapshot')});
+        else value.resourceReadsDropped=(value.resourceReadsDropped||0)+1;}
     }
   }
   function retain(row) {
@@ -42,6 +57,9 @@ export function installObservation(deps, options) {
     let row = { id: ++sequence, parent: parent && !parent.closed ? parent.id : null,
       kind, name, at: wall(), entered: now(), detailed: state.detailed, phaseCapture, metrics: {}, phases: {}, stack: [],
       ...(kind === 'ipc-invoke' ? { scope: deps.scopeOf?.(args[1]) || {} } : {}), ...extra };
+    const cpuBefore=resources?resource('cpu'):undefined;
+    const rootHeap=resources&&(name==='project-agent:list-obligation-grants'||name==='SessionSupervisor.list');
+    if(rootHeap)row.heapBefore=resource('heapSnapshot');
     row.moduleCapture = Object.fromEntries([...modules].map(([name, group]) => [name, group.enabled]));
     // Clear this small cell explicitly: disable() alone need not erase inherited frames.
     const context = { row }; contexts.add(context);
@@ -57,6 +75,7 @@ export function installObservation(deps, options) {
       catch (error) { failed = true; throw error; }
       finally {
         row.syncEnd = now(); row.synchronousMs = row.syncEnd - row.entered; row.threw = failed;
+        if(resources)row.syncCpu=cpuDelta(cpuBefore,resource('cpu'));if(rootHeap)row.heapAfter=resource('heapSnapshot');
         if (awaitResult && !failed && value instanceof Promise) {
           // Return the original Promise. Observing settlement does not substitute its result or rejection.
           value.then(() => settle(false), () => settle(true));

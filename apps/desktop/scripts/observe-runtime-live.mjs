@@ -22,6 +22,7 @@ if (!Array.isArray(workspaceIds) || workspaceIds.some(id => typeof id !== 'strin
 const ownsInspector = args.includes('--close-inspector');
 if(args.includes('--paired-path')&&!args.includes('--inspect-path'))throw new Error('paired_path_requires_path_observation');
 if(args.includes('--unattributed-read-roots')&&!args.includes('--inspect-read-ports'))throw new Error('read_roots_require_read_ports');
+if(args.includes('--heap-cpu')&&!args.includes('--inspect-read-ports'))throw new Error('resource_metrics_require_read_ports');
 const harness = () => ['observe-runtime-live.mjs','ri00/live-observation.mjs','ri00/trace.mjs','ri00/profile-clock.mjs','ri00/gc-observation.mjs','ri00/inspector-read-ports.mjs'].map(relative => ({relative,
   sha256:createHash('sha256').update(fs.readFileSync(new URL(relative,import.meta.url))).digest('hex')}));
 const report = { kind: 'natural-live-observation-not-a-fix', startedAt: new Date().toISOString(),
@@ -29,6 +30,7 @@ const report = { kind: 'natural-live-observation-not-a-fix', startedAt: new Date
   harness: harness(), deepBuiltins: !args.includes('--no-builtins'),
   failures: [], ownsInspector, profileRequested: !args.includes('--no-profile') };
 report.unattributedReadRoots = args.includes('--unattributed-read-roots');
+report.resourceObservation=args.includes('--heap-cpu');
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 let socket, next = 0, pending = new Map(), installed = false, profiling = false, requestedStop = false, verifiedTarget = false;
 function post(method, params = {}) {
@@ -71,8 +73,12 @@ try {
       phase:require('@peer-agent/runtime-node/diagnostic-phase'),stores,timerHosts:[globalThis,builtin('timers')],
       scopeOf:payload=>Object.fromEntries(['workspaceId','parentConversationId','sessionId'].filter(key=>typeof payload?.[key]==='string').map(key=>[key,crypto.createHash('sha256').update(payload[key]).digest('hex')])),
       timers:builtin('timers'),syncExports:()=>builtin('module').syncBuiltinESMExports(),
+      cpu:()=>({thread:process.threadCpuUsage(),process:process.cpuUsage()}),
+      heapSnapshot:()=>{const v8=builtin('v8'),heap=v8.getHeapStatistics(),spaces=v8.getHeapSpaceStatistics();return {
+        usedBytes:heap.used_heap_size,totalBytes:heap.total_heap_size,externalBytes:heap.external_memory,
+        spaces:spaces.filter(space=>['new_space','old_space','large_object_space','new_large_object_space'].includes(space.space_name)).map(space=>({name:space.space_name,size:space.space_size,used:space.space_used_size,physical:space.physical_space_size}))};},
       AsyncLocalStorage:builtin('async_hooks').AsyncLocalStorage,now:()=>Number(process.hrtime.bigint())/1e6,wall:()=>new Date().toISOString()};
-    globalThis.__peerRi00Observation=(${installObservation.toString()})(deps,{durationMs:${durationMs},limit:20000,deepBuiltins:${!args.includes('--no-builtins')},
+    globalThis.__peerRi00Observation=(${installObservation.toString()})(deps,{durationMs:${durationMs},limit:20000,deepBuiltins:${!args.includes('--no-builtins')},resources:${args.includes('--heap-cpu')},
       onWatchdog:()=>{${ownsInspector ? "setTimeout(()=>builtin('inspector').close(),1000)" : ''}}});
     try {const perf=builtin('perf_hooks');
       globalThis.__peerRi00Observation.gc=(${observeGc.toString()})({PerformanceObserver:perf.PerformanceObserver,performance:perf.performance,now:deps.now,wall:deps.wall,timers:builtin('timers')},${durationMs+30000});
@@ -151,7 +157,7 @@ finally {
   report.closeCheck = await inspectClosure(port, { required: ownsInspector && verifiedTarget });
   report.inspectorClosed = report.closeCheck.closed;
   report.ok = report.failures.length === 0 && Boolean(report.observation?.restored?.every(Boolean))
-    && (!ownsInspector || report.inspectorClosed) && !profiling;
+    && (!ownsInspector || report.inspectorClosed) && !profiling && (report.observation?.resourceErrors||0)===0;
   report.harnessUnchangedDuringRun = JSON.stringify(report.harness) === JSON.stringify(harness());
   if(!report.harnessUnchangedDuringRun) report.ok=false;
   report.finishedAt = new Date().toISOString();

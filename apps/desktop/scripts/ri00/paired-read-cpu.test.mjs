@@ -32,3 +32,13 @@ test('late owner replacement is preserved and blocks probe acceptance',async t=>
   const result=await controlledSessionRead.call({list(){store.listEvidenceIndex=replacement;throw new Error('owner changed');}},store,{});
   assert.equal(result.ok,false);assert.equal(result.restored.includes(false),true);assert.equal(store.listEvidenceIndex,replacement);
 });
+test('unbounded session sampling is rejected before replacing any source method',async t=>{
+  const {store,original}=fixture(t);
+  await assert.rejects(controlledSessionRead.call({list:()=>[]},store,{}, {rounds:100,delayMs:0}),/unbounded_session_probe/);
+  assert.equal(store.getPlan,original.getPlan);assert.equal(store.listEvidenceIndex,original.listEvidenceIndex);
+});
+test('missing second read port is rejected before wrapping the first port',async t=>{
+  const {store,original}=fixture(t);delete store.listEvidenceIndex;
+  await assert.rejects(controlledSessionRead.call({list:()=>[]},store,{}),/required_read_method_missing/);
+  assert.equal(store.getPlan,original.getPlan);
+});

@@ -53,7 +53,10 @@ def read(pid):
         info = Thread()
         if lib.proc_pidinfo(pid, 5, tid, ctypes.byref(info), ctypes.sizeof(info)) != ctypes.sizeof(info):
             continue  # A thread can exit; no guessed counters are inserted.
-        threads.append({"id": str(tid), "user": str(info.user), "system": str(info.system),
+        name = info.name.decode("utf8", "replace")
+        category = next((label for prefix, label in [("ThreadPool", "chromium-pool"), ("V8", "v8-worker"),
+            ("Chrome_IOThread", "chromium-io"), ("CrBrowserMain", "browser-main")] if name.startswith(prefix)), "unclassified")
+        threads.append({"id": str(tid), "user": str(info.user), "system": str(info.system), "category": category,
                         "currentPriority": info.currentPriority, "priority": info.priority, "policy": info.policy})
     return {"atNs": str(time.monotonic_ns()), "values": {name: str(getattr(usage, name)) for name in FIELDS}, "threads": threads}
 
