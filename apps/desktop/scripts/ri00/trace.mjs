@@ -1,4 +1,19 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+
+/** Wait for an owned inspector's deferred close, without mistaking a timeout for refusal. */
+export async function inspectClosure(port, { required = true, timeoutMs = 15000, fetchImpl = fetch,
+  now = Date.now, wait = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
+  const started = now(), deadline = started + timeoutMs;
+  let status = 'uncertain', checks = 0;
+  do {
+    checks++;
+    try { await fetchImpl(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(500) }); status = 'open'; }
+    catch (error) { status = error.cause?.code === 'ECONNREFUSED' ? 'closed' : 'uncertain'; }
+    if (status === 'closed' || !required || now() >= deadline) break;
+    await wait(Math.min(250, deadline - now()));
+  } while (now() <= deadline);
+  return { closed: status === 'closed', status, checks, elapsedMs: now() - started };
+}
 import { performance } from 'node:perf_hooks';
 
 export function distribution(values) {

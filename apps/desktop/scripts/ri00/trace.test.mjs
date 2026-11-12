@@ -1,6 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createTrace, distribution, inspectorValue, synchronizeClocks, requestPhases } from './trace.mjs';
+import { createTrace, distribution, inspectorValue, synchronizeClocks, requestPhases, inspectClosure } from './trace.mjs';
+
+test('owned inspector closure waits past an early open port and requires connection refusal',async()=>{
+  let clock=0;
+  const result=await inspectClosure(9229,{now:()=>clock,wait:async ms=>{clock+=ms;},fetchImpl:async()=>{
+    if(clock<1250)return {};
+    throw Object.assign(new Error('refused'),{cause:{code:'ECONNREFUSED'}});
+  }});
+  assert.equal(result.closed,true);assert.equal(result.elapsedMs,1250);assert.equal(result.checks,6);
+});
+
+test('inspector timeouts remain uncertain at the cleanup deadline and unowned ports are checked once',async()=>{
+  let clock=0;
+  const options={timeoutMs:1500,now:()=>clock,wait:async ms=>{clock+=ms;},fetchImpl:async()=>{throw new Error('timeout');}};
+  const result=await inspectClosure(9229,options);assert.equal(result.closed,false);assert.equal(result.status,'uncertain');assert.equal(result.elapsedMs,1500);
+  clock=0;const unowned=await inspectClosure(9229,{...options,required:false,fetchImpl:async()=>({})});
+  assert.equal(unowned.status,'open');assert.equal(unowned.checks,1);assert.equal(unowned.elapsedMs,0);
+});
 
 test('nested synchronous spans account once and retain an explicit await/unsegmented remainder', async () => {
   let clock = 0;

@@ -136,6 +136,21 @@ test('unattributed synchronous read roots cover async callers without double-cou
   assert.equal(port.read,original);
 });
 
+test('read after await gets its own synchronous interval and retains the original IPC parent identity', async () => {
+  const port={read(){f.advance(80);return 1;}},f=fixture(async()=>{port.read();await Promise.resolve();return port.read();});
+  const observation=installObservation(f.deps,{durationMs:1000,deepBuiltins:false});
+  try{
+    observation.instrumentObject(port,'SessionSupervisor',['read'],{rootWhenUnattributed:true});
+    assert.equal(await f.ipcMain._invokeHandlers.get('catalog:query')(),1);
+    const rows=observation.peek().records,child=rows.find(row=>row.kind==='read-port'),parent=rows.find(row=>row.kind==='ipc-invoke');
+    assert.equal(rows.length,2);assert.equal(child.parent,parent.id);
+    assert.equal(parent.synchronousMs,80);assert.equal(child.synchronousMs,80);
+    assert.equal(parent.metrics['SessionSupervisor.read'].calls,1);
+    assert.equal(child.metrics['SessionSupervisor.read'].calls,1);
+    assert.equal(child.entered,parent.syncEnd);
+  }finally{observation.stop();}
+});
+
 test('phase capture can restore the production observer during paired live measurement', () => {
   const f = fixture(() => f.store.readLifecycleFacts()), observation = installObservation(f.deps, { durationMs: 1000, deepBuiltins: false });
   try {

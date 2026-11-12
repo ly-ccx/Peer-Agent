@@ -202,7 +202,8 @@ export function installObservation(deps, options) {
             if (metric && Array.isArray(result)) metric.resultRows = (metric.resultRows || 0) + result.length;
             return result;
           };
-          if (!state.stopped && portOptions.rootWhenUnattributed && !currentRow()) {
+          const parent = currentRow();
+          if (!state.stopped && portOptions.rootWhenUnattributed && (!parent || parent.syncEnd !== undefined)) {
             return root('read-port', `${module}.${key}`, () => {
               currentRow().sourceStack = readStack(); return observe();
             }, this, []);

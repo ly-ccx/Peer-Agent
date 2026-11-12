@@ -6,6 +6,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readPortReferences } from './ri00/inspector-read-ports.mjs';
 import { readMicroprobe } from './ri00/read-microprobe.mjs';
+import { inspectClosure } from './ri00/trace.mjs';
 import os from 'node:os';
 
 const args=process.argv.slice(2),option=(name,fallback)=>args.includes(name)?args[args.indexOf(name)+1]:fallback;
@@ -20,7 +21,7 @@ if([fixtureRoot,actualOutput].some(value=>value===personalRoot||value.startsWith
 fs.chmodSync(output,0o700);
 const require=createRequire(path.join(moduleRoot,'apps/desktop/package.json'));
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-const hashes=()=>['compare-runtime-context.mjs','ri00/read-microprobe.mjs','ri00/inspector-read-ports.mjs','ri00/readonly-coordination.mjs','ri00/identity.mjs'].map(relative=>({relative,
+const hashes=()=>['compare-runtime-context.mjs','ri00/read-microprobe.mjs','ri00/inspector-read-ports.mjs','ri00/readonly-coordination.mjs','ri00/identity.mjs','ri00/trace.mjs'].map(relative=>({relative,
   sha256:createHash('sha256').update(fs.readFileSync(new URL(relative,import.meta.url))).digest('hex')}));
 const report={kind:'controlled-read-only-context-comparison-not-natural-input',startedAt:new Date().toISOString(),harness:hashes(),
   sourceHead:execFileSync('git',['rev-parse','HEAD'],{cwd:moduleRoot,encoding:'utf8'}).trim(),failures:[]};
@@ -88,8 +89,8 @@ finally{
     }catch(error){report.failures.push(error.message);}
     main.socket.close();
   }
-  await wait(1000);
-  try{await fetch(`http://127.0.0.1:${port}/json/list`,{signal:AbortSignal.timeout(300)});report.inspectorClosed=false;}catch{report.inspectorClosed=true;}
+  report.closeCheck=await inspectClosure(port,{required:verifiedTarget&&args.includes('--close-inspector')});
+  report.inspectorClosed=report.closeCheck.closed;
   report.harnessUnchangedDuringRun=JSON.stringify(report.harness)===JSON.stringify(hashes());
   if(report.failures.length||!report.harnessUnchangedDuringRun||(verifiedTarget&&args.includes('--close-inspector')&&!report.inspectorClosed))report.ok=false;
   report.finishedAt=new Date().toISOString();

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { installObservation } from './ri00/live-observation.mjs';
-import { inspectorValue } from './ri00/trace.mjs';
+import { inspectorValue, inspectClosure } from './ri00/trace.mjs';
 import { profileClock } from './ri00/profile-clock.mjs';
 import { observeGc } from './ri00/gc-observation.mjs';
 import { readPortReferences } from './ri00/inspector-read-ports.mjs';
@@ -146,9 +146,8 @@ finally {
     } catch (error) { report.failures.push(`close:${error.message}`); }
     socket.close();
   }
-  await wait(1000);
-  try { await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(500) }); report.inspectorClosed = false; }
-  catch { report.inspectorClosed = true; }
+  report.closeCheck = await inspectClosure(port, { required: ownsInspector && verifiedTarget });
+  report.inspectorClosed = report.closeCheck.closed;
   report.ok = report.failures.length === 0 && Boolean(report.observation?.restored?.every(Boolean))
     && (!ownsInspector || report.inspectorClosed) && !profiling;
   report.harnessUnchangedDuringRun = JSON.stringify(report.harness) === JSON.stringify(harness());
