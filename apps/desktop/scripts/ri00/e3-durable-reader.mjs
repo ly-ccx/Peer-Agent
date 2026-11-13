@@ -24,6 +24,7 @@ export function createE3DurableReader({rpc,journal,counter,pid,timebase,charge=(
     const deadline=now()+6000;while(!['completed','failed','expired','acknowledged'].includes(ticket.state)){if(now()>=deadline)throw Error('e3_reader_ticket_timeout');await wait(2);ticket=await rpc('status',{id});}
     after=counter?await counter.read(pid):null;const record=await archive({id,before,after,ticket,label}),rows=record.batch.rows.filter(r=>r.ticketId===id);
     if(ticket.state!=='completed'||rows.length!==1)throw Error('e3_reader_ticket_'+ticket.state);
+    if(ticket.noticeFailures>0||ticket.noticeOwnerRestored===false)throw Error('e3_reader_notification_unverified');
     const row=rows[0],pmc=counter?browserMainCounterDelta(before,after,timebase,row.userMs+row.systemMs):null;
     return{row,pmc,record};
    }finally{busy=false;}

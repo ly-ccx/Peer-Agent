@@ -7,7 +7,7 @@ export function createReadTicketQueue(probe,{owner,epoch,allowExposure=false,max
   function detachNotice(expectedName=null){if(completionNotice&&expectedName&&completionNotice.name!==expectedName)return false;if(completionNotice){const {name,fn}=completionNotice;completionNotice=null;if(globalThis[name]===fn)delete globalThis[name];else noticeOwnerRestored=false;}return noticeOwnerRestored;}
   function notifyTerminal(){if(!completionNotice||!slot)return;const before=process.threadCpuUsage();try{if(globalThis[completionNotice.name]!==completionNotice.fn)throw Error('read_ticket_notice_owner_changed');completionNotice.fn(String(slot.id));}catch{noticeFailures++;detachNotice();}finally{const c=process.threadCpuUsage(before);noticeCpuMs+=(c.user+c.system)/1000;}}
   const terminal=t=>['completed','failed','expired'].includes(t.state);
-  const view=t=>t?{...t,completedRows:t.completedRows.map(r=>({...r})),...(t.error?{error:{...t.error}}:{})}:null;
+  const view=t=>t?{...t,noticeFailures,noticeOwnerRestored,completedRows:t.completedRows.map(r=>({...r})),...(t.error?{error:{...t.error}}:{})}:null;
   function cancelHandles(){clearImmediate(immediate);clearTimeout(timer);immediate=timer=undefined;}
   function expire(reason){if(slot?.state==='queued'){slot.state='expired';slot.reason=reason;slot.finishedMs=performance.now();cancelHandles();notifyTerminal();}}
   function run(){
