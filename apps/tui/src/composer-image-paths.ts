@@ -65,8 +65,32 @@ function stripWrappingQuotes(token: string): string {
   return token;
 }
 
+/**
+ * Terminal paste of a path with spaces arrives shell-escaped (`Application\ Support`).
+ * Turn those escapes back into the real pathname. Windows drive paths keep `\` as a separator.
+ */
+function unescapePosixShellEscapes(value: string): string {
+  if (!value.includes('\\')) return value;
+  if (/^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\')) return value;
+  return value.replace(/\\([ \t"'`$|&;<>(){}*?~\\])/g, '$1');
+}
+
+/** Quoted, shell-escaped, or file:// paste token → filesystem path. */
+function normalizePastedImagePath(token: string): string {
+  const unquoted = stripWrappingQuotes(token.trim());
+  const unescaped = unescapePosixShellEscapes(unquoted);
+  if (unescaped.startsWith('file://')) {
+    try {
+      return decodeURIComponent(new URL(unescaped).pathname);
+    } catch {
+      return unescaped.replace(/^file:\/\//, '');
+    }
+  }
+  return unescaped;
+}
+
 function isImagePathCandidate(token: string): boolean {
-  const cleaned = stripWrappingQuotes(token.trim());
+  const cleaned = normalizePastedImagePath(token);
   if (!cleaned) return false;
   if (cleaned.startsWith('data:image/')) return true;
   // Display chip labels like "...41-F4C365D4.png" must never re-enter chipify.
@@ -91,31 +115,39 @@ function isImagePathCandidate(token: string): boolean {
   );
 }
 
-const IMAGE_EXT_PATTERN = '(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif|avif)';
-// Match image paths even when glued to non-ASCII text (e.g. Chinese) without spaces.
-// Stop at whitespace / quotes / brackets / common CJK punctuation, not at every non-word char.
-const IMAGE_PATH_CANDIDATE_RE = new RegExp(
-  `(?:file:\\/\\/)?(?:\\/|\\.\\/|\\.\\.\\/|~\\/)?[^\\s"'\`<>\\[\\]{}|，。；：！？、（）【】《》]+?\\.${IMAGE_EXT_PATTERN}(?=$|[\\s"'\`<>\\[\\]{}|，。；：！？、（）【】《》]|[^\\w./\\\\-])`,
-  'gi',
-);
+// Shell-escaped spaces (`\ `) stay inside the token. A raw space still ends it.
+// Quoted pastes (`'/dir/My File.png'`) are one token even when the space is not escaped.
+const IMAGE_PATH_CANDIDATE_RE = /(?:'(?:\\.|[^'\n])*?\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif|avif)'|"(?:\\.|[^"\n])*?\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif|avif)"|(?:file:\/\/|\/|\.\/|\.\.\/|~\/)?(?:\\[ \t"'`$|&;<>(){}*?~\\]|[^\s"'`<>\[\]{}|，。；：！？、（）【】《》])+?\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif|avif))(?=$|[\s"'`<>\[\]{}|，。；：！？、（）【】《》]|[^\w./\\-])/gi;
+
+const IMAGE_PATH_ABSOLUTE_RE = /(?:file:\/\/|\/|\.\/|\.\.\/|~\/)(?:\\[ \t"'`$|&;<>(){}*?~\\]|[^\s"'`<>\[\]{}|，。；：！？、（）【】《》])*?\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif|avif)/i;
 
 /**
- * If text is glued in front of a path (e.g. Chinese + absolute path), keep only the path.
+ * Substring of a regex match that should be replaced.
+ * Keeps a CJK prefix outside the path, and keeps shell escapes plus surrounding
+ * quotes so the raw paste text can be removed whole.
  */
 function refineImagePathToken(raw: string): string {
-  const token = stripWrappingQuotes(raw);
-  if (!token) return token;
-  // Prefer absolute/relative path markers inside the match.
-  const absolute = token.match(
-    /(?:file:\/\/|\/|\.\/|\.\.\/|~\/)[^\s"'`<>\[\]{}|，。；：！？、（）【】《》]*?\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif|avif)/i,
+  if (!raw) return raw;
+  const quoted = raw.match(
+    /(['"])(?:\\.|(?!\1)[^])*?\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif|avif)\1/i,
   );
+  if (quoted?.[0]) return quoted[0];
+  const absolute = raw.match(IMAGE_PATH_ABSOLUTE_RE);
   if (absolute?.[0]) return absolute[0];
   // Bare relative image file name (no directory prefix).
-  const relative = token.match(
+  const relative = raw.match(
     /(?:^|[^A-Za-z0-9._-])([A-Za-z0-9._-]+\.(?:png|jpe?g|gif|webp|bmp|tiff?|heic|heif|avif))$/i,
   );
   if (relative?.[1]) return relative[1];
-  return token;
+  return raw;
+}
+
+function pastedImagePathFromMatch(raw: string): { readonly rawPath: string; readonly normalized: string } | null {
+  const rawPath = refineImagePathToken(raw);
+  if (!rawPath) return null;
+  const normalized = normalizePastedImagePath(rawPath);
+  if (!isImagePathCandidate(normalized)) return null;
+  return { rawPath, normalized };
 }
 
 /**
@@ -137,11 +169,11 @@ export function extractImagePathTokens(text: string): string[] {
   for (const match of masked.matchAll(IMAGE_PATH_CANDIDATE_RE)) {
     const start = match.index ?? 0;
     const raw = text.slice(start, start + (match[0]?.length ?? 0));
-    const token = refineImagePathToken(raw);
-    if (!isImagePathCandidate(token)) continue;
-    if (seen.has(token)) continue;
-    seen.add(token);
-    paths.push(token);
+    const parsed = pastedImagePathFromMatch(raw);
+    if (!parsed) continue;
+    if (seen.has(parsed.normalized)) continue;
+    seen.add(parsed.normalized);
+    paths.push(parsed.normalized);
   }
   return paths;
 }
@@ -230,14 +262,7 @@ function expandHome(filePath: string): string {
 }
 
 function normalizeLocalPath(token: string): string {
-  if (token.startsWith('file://')) {
-    try {
-      return decodeURIComponent(new URL(token).pathname);
-    } catch {
-      return token.replace(/^file:\/\//, '');
-    }
-  }
-  return expandHome(token);
+  return expandHome(normalizePastedImagePath(token));
 }
 
 function mimeTypeForPath(filePath: string): string {
@@ -320,13 +345,14 @@ export function chipifyImagePathsInText(text: string): string {
       }
       // Only scan non-chip text for real filesystem paths.
       return part.replace(IMAGE_PATH_CANDIDATE_RE, (raw) => {
-        const token = refineImagePathToken(raw);
-        if (!isImagePathCandidate(token)) return raw;
-        const start = raw.indexOf(token);
-        if (start < 0) return formatImagePathChip(token);
+        const parsed = pastedImagePathFromMatch(raw);
+        if (!parsed) return raw;
+        const chip = formatImagePathChip(parsed.normalized);
+        const start = raw.indexOf(parsed.rawPath);
+        if (start < 0) return chip;
         const prefix = raw.slice(0, start);
-        const suffix = raw.slice(start + token.length);
-        return `${prefix}${formatImagePathChip(token)}${suffix}`;
+        const suffix = raw.slice(start + parsed.rawPath.length);
+        return `${prefix}${chip}${suffix}`;
       });
     })
     .join('');
@@ -380,6 +406,43 @@ export function registerImagePathKeys(
   }
 }
 
+function toImagePathLookup(
+  pathByKey: ReadonlyMap<string, string> | Readonly<Record<string, string>>,
+): ReadonlyMap<string, string> {
+  return pathByKey instanceof Map ? pathByKey : new Map(Object.entries(pathByKey));
+}
+
+function resolveImageChipLabel(
+  label: string,
+  lookup: ReadonlyMap<string, string>,
+): string | undefined {
+  const key = label.trim();
+  const bare = key.startsWith('...') ? key.slice(3) : key;
+  const candidates = [key, bare, path.basename(bare)];
+  for (const candidate of candidates) {
+    const hit = lookup.get(candidate);
+    if (hit) return hit;
+  }
+  for (const [mapKey, fullPath] of lookup.entries()) {
+    if (mapKey === key || mapKey === bare) return fullPath;
+  }
+  for (const [, fullPath] of lookup.entries()) {
+    const base = path.basename(fullPath);
+    if (base === key || base === bare) return fullPath;
+  }
+  return undefined;
+}
+
+/** Forms a pasted path can take in the composer, so a loaded file is removed from the outgoing text. */
+function pastedPathVariants(filePath: string): readonly string[] {
+  return [
+    filePath,
+    filePath.replaceAll(' ', '\\ '),
+    `'${filePath}'`,
+    `"${filePath}"`,
+  ];
+}
+
 export async function loadLocalImageAttachments(
   text: string,
   options?: {
@@ -393,10 +456,22 @@ export async function loadLocalImageAttachments(
   readonly missingPaths: readonly string[];
 }> {
   const maxBytes = options?.maxBytes ?? 8 * 1024 * 1024;
-  const expanded = options?.pathByKey
-    ? expandImageChipsInText(text, options.pathByKey)
+  const lookup = options?.pathByKey ? toImagePathLookup(options.pathByKey) : null;
+  // Resolve chips to absolute paths directly. Re-parsing the expanded path would
+  // split `Application Support` on the space and then fail to read the file.
+  const resolvedChipPaths: string[] = [];
+  const textWithoutResolvedChips = lookup
+    ? text.replace(IMAGE_CHIP_RE, (full, label: string) => {
+      const hit = resolveImageChipLabel(String(label), lookup);
+      if (!hit) return full;
+      resolvedChipPaths.push(path.resolve(normalizeLocalPath(hit)));
+      return ' ';
+    })
     : text;
-  const tokens = extractImagePathTokens(expanded);
+  const tokens = [...new Set([
+    ...resolvedChipPaths,
+    ...extractImagePathTokens(textWithoutResolvedChips),
+  ])];
   const images: MessageImageLike[] = [];
   const usedPaths: string[] = [];
   const missingPaths: string[] = [];
@@ -442,6 +517,7 @@ export async function loadLocalImageAttachments(
     const abs = path.resolve(normalizeLocalPath(used));
     stripTargets.add(used);
     stripTargets.add(abs);
+    for (const variant of pastedPathVariants(abs)) stripTargets.add(variant);
     stripTargets.add(formatImagePathChip(abs));
     stripTargets.add(imagePathChipLabel(abs));
     stripTargets.add(`[Image ${imagePathChipLabel(abs)}]`);
@@ -464,7 +540,7 @@ export async function loadLocalImageAttachments(
     }
   }
 
-  let remainingText = stripImagePathsFromText(expanded, [...stripTargets]);
+  let remainingText = stripImagePathsFromText(text, [...stripTargets]);
   // Drop any leftover image chips that pointed at loaded images.
   remainingText = remainingText
     .replace(IMAGE_CHIP_RE, ' ')
@@ -489,28 +565,10 @@ export function expandImageChipsInText(
   text: string,
   pathByKey: ReadonlyMap<string, string> | Readonly<Record<string, string>>,
 ): string {
-  const lookup = pathByKey instanceof Map
-    ? pathByKey
-    : new Map(Object.entries(pathByKey));
-  return text.replace(IMAGE_CHIP_RE, (full, label: string) => {
-    const key = String(label).trim();
-    // Prefer exact unique label (`name.png · ab12cd`), then bare/truncated forms.
-    const bare = key.startsWith('...') ? key.slice(3) : key;
-    const candidates = [key, bare, path.basename(bare)];
-    for (const candidate of candidates) {
-      const hit = lookup.get(candidate);
-      if (hit) return hit;
-    }
-    // Soft fallback for legacy basename-only chips: first matching path only.
-    for (const [mapKey, fullPath] of lookup.entries()) {
-      if (mapKey === key || mapKey === bare) return fullPath;
-    }
-    for (const [, fullPath] of lookup.entries()) {
-      const base = path.basename(fullPath);
-      if (base === key || base === bare) return fullPath;
-    }
-    return full;
-  });
+  const lookup = toImagePathLookup(pathByKey);
+  return text.replace(IMAGE_CHIP_RE, (full, label: string) => (
+    resolveImageChipLabel(String(label), lookup) ?? full
+  ));
 }
 
 /**
