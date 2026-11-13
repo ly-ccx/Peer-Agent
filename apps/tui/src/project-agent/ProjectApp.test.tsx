@@ -119,3 +119,27 @@ test('task report opens the stored fixed result and displays a bounded computed 
     await expect(pending).rejects.toThrow('interactive_scope_denied');
   }finally{await f.close();}
 });
+
+test('pasting an image path in the bot conversation sends an upload instead of rejecting the command',async()=>{
+  const f=await harness('conversation');
+  try{
+    await f.frame();
+    // A real PNG on disk, using the same otty-paste shape the user pasted.
+    const pasteDir=path.join(path.sep+'tmp','otty-paste');mkdirSync(pasteDir,{recursive:true});
+    const imagePath=path.join(pasteDir,`image-${Date.now()}.png`);
+    writeFileSync(imagePath,Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==','base64'));
+    await f.type(`${imagePath} why is the layout different`);
+    // The composer must show a chip, not the raw absolute path.
+    const typed=await f.frame();
+    expect(typed).toContain('[Image ');
+    expect(typed).not.toContain('command is no longer valid');
+    await f.press('RETURN');
+    await act(async()=>{await Bun.sleep(1100);});
+    const after=await f.frame();
+    // Before the fix this read "Command invalid or the card expired".
+    expect(after).not.toContain('Command invalid');
+    expect(after).not.toContain('is no longer valid');
+    expect(after).toContain('scripted UI reply');
+    expect(after).toContain('Received');
+  }finally{await f.close();}
+});

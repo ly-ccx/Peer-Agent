@@ -21,6 +21,8 @@ import {runProjectCardAction} from './card-actions.ts';
 import {everydaySessions,projectCopy,projectStatus,projectSessionStatus} from './project-copy.ts';
 import {isRecoveryCard} from './card-presentation.ts';
 import {isEnterKeyName} from '../runtime-controls.ts';
+import {chipifyImagePathsInText,extractImagePathTokens,registerImagePathKeys} from '../composer-image-paths.ts';
+import {loadProjectImageAttachments,mergeProjectAttachments,type ProjectImageAttachment} from './project-image-attachments.ts';
 
 type Host=ReturnType<typeof createTuiProjectHost>;
 type Client=ReturnType<typeof createTuiProjectClient>;
@@ -36,6 +38,9 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
   useEffect(()=>{setOpenedResult(null);},[view,snapshot.workspaceId,ownerConversationId,detail]);
   const [notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[earlier,setEarlier]=useState(false),[,setTheme]=useState(themeStore.getState());
   const inputDraft=useProjectInputDraft(client,snapshot.workspaceId,editor,view);
+  // Chip label -> absolute path, so a chipped paste still resolves to real bytes on send.
+  const imagePaths=useRef(new Map<string,string>());
+  const chipifying=useRef(false);
   const operationPending=useRef(false);
   const [cardFocus,setCardFocus]=useState(false);
   useEffect(()=>setCardFocus(false),[view,snapshot.workspaceId]);
@@ -77,9 +82,36 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
     await perform(async()=>{setSnapshot(await client.select(selectedBot.workspaceId));setView('conversation');setEarlier(false);});
   }
   function openClassic() {setNotice(copy('leaving'));void perform(onClassic);}
+  function applyImageChips(){
+    const current=editor.current;if(!current||chipifying.current)return;
+    const raw=current.plainText??'';
+    const chipped=chipifyImagePathsInText(raw);
+    if(chipped===raw)return;
+    // Remember the real path behind each compact chip label before it replaces the text.
+    registerImagePathKeys(imagePaths.current,extractImagePathTokens(raw));
+    chipifying.current=true;
+    try {
+      current.setText(chipped);
+      try { (current as {cursorOffset?:number}).cursorOffset=chipped.length; } catch {}
+    } finally { chipifying.current=false; }
+    inputDraft.session.edit({text:chipped} as never);
+  }
   function submit(text:string) {
     const command=parseProjectCommand(text);
-    if(command.kind==='text'){if(command.text)void perform(async()=>{void client.latest().catch(()=>{});setEarlier(false);setView('conversation');return inputDraft.session.send({text:command.text});},copy('received'));return;}
+    if(command.kind==='text'){if(command.text)void perform(async()=>{
+      void client.latest().catch(()=>{});setEarlier(false);setView('conversation');
+      // The draft is the only attachment channel send() reads, so stage it before submitting.
+      // Pasted local image paths become real uploads instead of staying literal text.
+      const hasImagePaths=extractImagePathTokens(command.text).length>0||/\[Image [^\]]+\]/.test(command.text);
+      if(hasImagePaths){
+        const images=await loadProjectImageAttachments(command.text,{pathByKey:imagePaths.current});
+        const draft=inputDraft.session.getSnapshot().draft;
+        const attachments=mergeProjectAttachments(draft.attachments as readonly ProjectImageAttachment[],images.attachments);
+        if(images.attachments.length)inputDraft.session.edit({text:images.text,attachments});
+        return inputDraft.session.send();
+      }
+      return inputDraft.session.send({text:command.text});
+    },copy('received'));return;}
     if(command.kind==='retry_input'){void perform(()=>inputDraft.session.retry(command.inputId),copy('received')).then(result=>{if((result?.ok||result?.input)&&inputDraft.session.getSnapshot().draft.text===text)inputDraft.session.edit({text:''});});return;}
     if(command.kind==='save_draft'){void (inputDraft.state.ready?inputDraft.session.flush():inputDraft.session.load());return;}
     if(command.kind==='invalid'){setNotice(copy('invalid'));return;}
@@ -218,7 +250,7 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
       <box flexDirection="row" width="100%">
         <ThemedText fg={COLOR.accent}>{PICKER_CHROME.caretSelected}</ThemedText>
         <box flexGrow={1} minWidth={0}>
-          <ThemedTextarea ref={editor} focused={!busy&&!cardFocus} width="100%" height={3} placeholder={copy('composer')} wrapMode="char" onContentChange={()=>{inputDraft.changed();}} onKeyDown={event=>{
+          <ThemedTextarea ref={editor} focused={!busy&&!cardFocus} width="100%" height={3} placeholder={copy('composer')} wrapMode="char" onContentChange={()=>{applyImageChips();inputDraft.changed();}} onKeyDown={event=>{
             if(busy){event.preventDefault();event.stopPropagation();return;}
             const action=composerEnterAction({keyName:event.name,shift:event.shift,eventType:event.eventType,isComposing:(event as {isComposing?:boolean}).isComposing});
             if(action==='none')return;event.preventDefault();event.stopPropagation();
