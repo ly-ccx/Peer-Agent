@@ -1,11 +1,13 @@
 const fs=require('node:fs'),path=require('node:path'),{pathToFileURL}=require('node:url'),{app}=require('electron');
-const cfg=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+const cfgFile=process.env.PEER_RI00_OWNED_CONFIG;
+if(!cfgFile)throw Error('e3_owned_config_environment_required');
+const cfg=JSON.parse(fs.readFileSync(cfgFile,'utf8'));
 if(!cfg.output||!['production','functional'].includes(cfg.mode))throw Error('e3_owned_config_required');
 app.setPath('userData',path.join(cfg.output,'user-data'));
 if(cfg.fixtureRoot)process.env.PEER_AGENT_HOME=cfg.fixtureRoot;
 process.env.PEER_AGENT_SLOW_TIMER_MS='0';
 const send=x=>process.stdout.write('@ri00@'+JSON.stringify(x)+'\n');
-let host,guard,probe,queue,originals,inspectorSession,spies,ports,closing=false,readCount=0,inject=false,clockRestore,functionalValue;
+let host,guard,probe,queue,originals,inspectorSession,spies,ports,closing=false,readCount=0,inject=false,clockRestore,functionalValue,lastOriginalValue;
 const qualification={order:[],errors:[],notFieldCause:true};
 const binding='__ri00_e3_owned_notice';globalThis[binding]=()=>{};
 const deadline=setTimeout(()=>app.exit(124),cfg.hostDeadlineMs||180000);deadline.unref();
@@ -49,12 +51,13 @@ app.whenReady().then(async()=>{
  }
  const originalError=Error('e3_owned_original_error');
  if(cfg.spyGetters){const v8=require('node:v8'),names=['getHeapStatistics','getHeapSpaceStatistics','getHeapCodeStatistics'];spies={count:Object.fromEntries(names.map(n=>[n,0])),original:Object.fromEntries(names.map(n=>[n,v8[n]]))};for(const n of names)v8[n]=(...args)=>{spies.count[n]++;return spies.original[n](...args);};}
- if(cfg.nestedRequest){const listed=ports.supervisor.list;ports.supervisor.list=function(...args){
+ if(cfg.nestedRequest||cfg.qualification){const listed=ports.supervisor.list;ports.supervisor.list=function(...args){
+   if(qualification.failRead)throw originalError;
    qualification.order.push(inject?'outer-enter':'witness-enter');if(inject){inject=false;const before=probe.queueContext().controlledCpuMs;
     const accepted=queue.request({id:1,kind:'witness',label:'nested-witness'});qualification.queuedInsideOriginal=accepted.state==='queued';
-    const result=Reflect.apply(listed,this,args);qualification.noDiagnosticReadBeforeReturn=probe.queueContext().controlledCpuMs===before;
+    const result=lastOriginalValue=Reflect.apply(listed,this,args);qualification.noDiagnosticReadBeforeReturn=probe.queueContext().controlledCpuMs===before;
     qualification.order.push('outer-leave');return result;}
-   const result=Reflect.apply(listed,this,args);qualification.order.push('witness-leave');return result;};}
+   const result=lastOriginalValue=Reflect.apply(listed,this,args);qualification.order.push('witness-leave');return result;};}
  originals={list:ports.supervisor.list,index:ports.store.listEvidenceIndex,plan:ports.store.getPlan};await install();
  const wait=ms=>new Promise(r=>setTimeout(r,ms));
  const commands={
@@ -66,18 +69,18 @@ app.whenReady().then(async()=>{
   nested:()=>{inject=true;const result=ports.supervisor.list(ports.payload);return {rows:result.length,qualification,getters:getterCounts()};},
   fail:args=>{qualification.failRead=args.value;return true;},
   naturalError:()=>{try{ports.supervisor.list(ports.payload);}catch(e){return {sameError:e===originalError};}return {sameError:false};},
-  naturalIdentity:()=>({sameValue:ports.supervisor.list(ports.payload)===functionalValue}),
+  naturalIdentity:()=>{const value=ports.supervisor.list(ports.payload);return {sameValue:value===(cfg.qualification?lastOriginalValue:functionalValue)};},
   expire:()=>{const performance=require('node:perf_hooks').performance,descriptor=Object.getOwnPropertyDescriptor(performance,'now');let now=performance.now();Object.defineProperty(performance,'now',{configurable:true,value:()=>now});
    clockRestore=()=>{if(descriptor)Object.defineProperty(performance,'now',descriptor);else delete performance.now;clockRestore=null;};const accepted=queue.request({id:3,kind:'witness',label:'expires',ttlMs:1});now+=2;return accepted;},
   restoreClock:()=>{clockRestore?.();return true;},
   replaceOwner:()=>{qualification.replacement=()=>[];ports.supervisor.list=qualification.replacement;return true;},
   stop:()=>probe.stop(),
-  resetAfterOwnerTest:async()=>{qualification.ownerFailure=probe.stop();qualification.lateOwnerPreserved=ports.supervisor.list===qualification.replacement;ports.supervisor.list=originals.list;globalThis[binding]=()=>{};await install();return true;},
+  resetAfterOwnerTest:async args=>{qualification.ownerFailure=probe.stop();qualification.lateOwnerPreserved=ports.supervisor.list===qualification.replacement;ports.supervisor.list=originals.list;if(args.leaseMs)cfg.leaseMs=args.leaseMs;globalThis[binding]=()=>{};await install();return true;},
   shutdown:async()=>{const report=await finish();setImmediate(()=>app.exit(0));return report;}
  };
  let buffered='';process.stdin.setEncoding('utf8');process.stdin.on('data',chunk=>{buffered+=chunk;if(buffered.length>16384){app.exit(125);return;}let n;
   while((n=buffered.indexOf('\n'))>=0){const line=buffered.slice(0,n);buffered=buffered.slice(n+1);if(!line)continue;
-   (async()=>{let request;try{request=JSON.parse(line);if(!commands[request.method])throw Error('e3_owned_command_not_allowed');send({id:request.id,result:await commands[request.method](request.args||{})});}
+   (async()=>{let request;try{request=JSON.parse(line);if(!commands[request.method]||!cfg.qualification&&['nested','fail','naturalError','naturalIdentity','expire','restoreClock','replaceOwner','resetAfterOwnerTest'].includes(request.method))throw Error('e3_owned_command_not_allowed');send({id:request.id,result:await commands[request.method](request.args||{})});}
     catch(e){send({id:request?.id,error:{name:e.name,message:e.message}});}})();}
  });
  process.stdin.once('end',()=>{finish().finally(()=>app.exit(0));});

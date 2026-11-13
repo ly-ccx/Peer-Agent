@@ -15,7 +15,7 @@ async function drain(label,id){const batch=await host.rpc('take');journal(batch,
 async function launch(label,config){
  if(Date.now()-began>600000||report.ownedLaunches>=3)throw Error('e3_qualification_launch_budget');
  report.ownedLaunches++;const record={label,status:'launching',failures:[]};report.cases.push(record);save();
- host=await startOwnedE3Host({...base,output:path.join(output,label),label,epoch:'e3-fixed-qualification',mode:'functional',spyGetters:true,hostDeadlineMs:25000,...config});return record;
+ host=await startOwnedE3Host({...base,output:path.join(output,label),label,epoch:'e3-fixed-qualification',mode:'functional',qualification:true,spyGetters:true,hostDeadlineMs:25000,...config});return record;
 }
 async function close(record){record.exit=await host.close();await host.closed;assert.ok(Object.values(record.exit.owners).every(Boolean));assert.equal(record.exit.stopped.activeDepth,0);
  assert.equal(record.exit.stopped.readQueue.inFlight,false);assert.equal(record.exit.stopped.readQueue.immediatePending,false);assert.equal(record.exit.stopped.readQueue.deadlinePending,false);assert.equal(record.exit.stopped.retainedRowBytes,0);record.status='passed';host=null;save();}
