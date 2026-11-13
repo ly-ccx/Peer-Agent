@@ -109,6 +109,13 @@ app.whenReady().then(async()=>{
   wait:async args=>{const end=Date.now()+15000;while(Date.now()<end){const t=queue.status(args.id);if(['completed','failed','expired','acknowledged'].includes(t.state))return t;await wait(2);}throw Error('e3_ticket_wait_timeout');},
   take:()=>probe.take(),ackBatch:()=>probe.ack(),ackTicket:args=>queue.ack(args.id),renew:()=>cfg.site?site.renew():probe.renew(),native:()=>probe.native(),vm:()=>probe.vm(),
   passCounter:args=>probe.setPassCounter(args.enabled),
+  assemblyRoundTrip:async()=>{if(!cfg.site||cfg.mode!=='production'||!probe.queueContext().stopped||globalThis.__e3Owned!==site)throw Error('e3_assembly_stopped_owned_site_required');
+   delete globalThis.__e3Owned;const session=new (require('node:inspector').Session)();session.connect();const post=(method,params)=>new Promise((resolve,reject)=>session.post(method,params,(e,r)=>e?reject(e):resolve(r)));
+   try{const {discoverE3Entries}=await import(pathToFileURL(path.join(__dirname,'e3-entry-discovery.mjs')).href),{e3SynchronousAssemblySource}=await import(pathToFileURL(path.join(__dirname,'e3-site-install.mjs')).href),refs=await discoverE3Entries(post,{electronRequireBase:path.join(cfg.moduleRoot,'apps/desktop/package.json')});
+    const options={longWatch:true,eventLoopReads:true,exposureLedger:true,durationMs:1000,leaseMs:1000,readCpuLimitMs:1000,probeCpuLimitMs:1000,nativeCpuLimitMs:1000,notificationName:'__ri00_owned_assembly_notice',queue:{owner:'owned-assembly',epoch:cfg.epoch,allowExposure:false}};
+    const reply=await post('Runtime.callFunctionOn',{objectId:refs.store,functionDeclaration:e3SynchronousAssemblySource(),arguments:[{objectId:refs.supervisor},{value:ports.payload},{value:options},{objectId:refs.ports},{objectId:refs.directory}],returnByValue:true});if(reply.exceptionDetails)throw Error('e3_owned_assembly_roundtrip_failed');return reply.result.value;
+   }finally{session.disconnect();}
+  },
   takeEntries:()=>{if(!cfg.site)throw Error('e3_site_required');return entries.take();},ackEntries:()=>{if(!cfg.site)throw Error('e3_site_required');return entries.ack();},
   entryInvoke:async args=>{if(!cfg.site)throw Error('e3_site_required');if(siteCpuMs+probe.queueContext().controlledCpuMs>=(cfg.siteReadCpuLimitMs||20000))throw Error('e3_site_read_cpu_budget');
    const before=process.threadCpuUsage();let value,samePromise;

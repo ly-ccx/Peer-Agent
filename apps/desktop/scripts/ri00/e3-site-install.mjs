@@ -24,3 +24,13 @@ export function e3SiteCallDeclaration() {
     globalThis.__e3Owned=(${e3SiteInstallerSource()}).call(this,supervisor,payload,options,bindings);return true;
   }`;
 }
+
+/** Installation qualification only: no event loop turn or business query between install and restoration. */
+export function e3SynchronousAssemblySource(){return `function(supervisor,payload,options,ports,directory){
+ if(Object.hasOwn(globalThis,'__e3Owned')||Object.hasOwn(globalThis,options.notificationName))throw Error('site_assembly_owner_exists');
+ const notice=()=>{};globalThis[options.notificationName]=notice;let site,stopped;
+ try{(${e3SiteCallDeclaration()}).call(this,supervisor,payload,options,ports,directory);site=globalThis.__e3Owned;site.renew();stopped=site.probe.stop('controller');
+  if(stopped.controlledRows||stopped.naturalRows||stopped.outsideRows)throw Error('site_assembly_business_read_detected');
+  return{stopped,sameSynchronousCall:true};
+ }finally{if(site&&!stopped)site.probe.stop('assembly-failed');if(globalThis.__e3Owned===site)delete globalThis.__e3Owned;if(globalThis[options.notificationName]===notice)delete globalThis[options.notificationName];}
+}`;}

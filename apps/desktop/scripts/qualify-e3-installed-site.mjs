@@ -1,5 +1,5 @@
 import fs from'node:fs';import path from'node:path';import assert from'node:assert/strict';import{execFileSync}from'node:child_process';import{createHash}from'node:crypto';import{fileURLToPath}from'node:url';import{createRequire}from'node:module';
-import{proveE3RegisteredSite}from'./ri00/e3-site-proof.mjs';import{inspectClosure}from'./ri00/trace.mjs';import{loopbackListenerPorts,newlyOwnedPorts}from'./ri00/inspector-port-owner.mjs';
+import{proveE3RegisteredSite}from'./ri00/e3-site-proof.mjs';import{inspectClosure}from'./ri00/trace.mjs';import{loopbackListenerPorts,newlyOwnedPorts,discoverFreshInspector}from'./ri00/inspector-port-owner.mjs';import{e3SynchronousAssemblySource}from'./ri00/e3-site-install.mjs';
 const args=process.argv.slice(2),opt=k=>args[args.indexOf(k)+1];for(const k of['--pid','--output','--budget'])if(!args.includes(k))throw Error('installed_site_arguments');
 const pid=Number(opt('--pid')),output=path.resolve(opt('--output')),budget=JSON.parse(fs.readFileSync(opt('--budget')));assert.equal(budget.kind,'E3-installed-metadata-only-budget');
 if(!Number.isSafeInteger(pid)||pid<2||fs.existsSync(output))throw Error('installed_site_identity_or_output');
@@ -18,16 +18,22 @@ try{
  const asar=createRequire(path.join(root,'apps/desktop/package.json'))('@electron/asar'),file='/Applications/Peer Agent.app/Contents/Resources/app.asar';
  const paths=['electron/main/ipc/catalog-ipc-main.mjs','electron/main/ipc/trusted-window-registry.mjs','electron/main/ipc/register-project-agent-ipc.mjs','electron/main/project-agent/project-agent-application-service.mjs','node_modules/@peer-agent/runtime-node/dist/project-agent/bot-directory.mjs'];
  r.installedModules=paths.map(relative=>({relative,sha256:hash(asar.extractFile(file,relative))}));r.asarStat={size:fs.statSync(file).size,mtimeMs:fs.statSync(file).mtimeMs};
- process.kill(pid,'SIGUSR1');opened=true;let endpoint;
- for(let i=0;i<10;i++){const fresh=newlyOwnedPorts(beforePorts,ports());for(const candidate of fresh){try{const response=await fetch(`http://127.0.0.1:${candidate}/json/list`,{signal:AbortSignal.timeout(300)}),list=await response.json();const node=list.find(x=>x.type==='node'&&x.webSocketDebuggerUrl);if(node){const u=new URL(node.webSocketDebuggerUrl);if(u.hostname!=='127.0.0.1'||Number(u.port)!==candidate)throw Error('installed_site_endpoint_owner');endpoint=node;port=candidate;break;}}catch(error){r.endpointDiscoveryError=error.message;}}if(endpoint)break;await wait(50);}
+ process.kill(pid,'SIGUSR1');opened=true;const found=await discoverFreshInspector({beforePorts,listeners:ports,readList:async p=>(await fetch(`http://127.0.0.1:${p}/json/list`,{signal:AbortSignal.timeout(300)})).json()});port=found.port;const endpoint={webSocketDebuggerUrl:found.url};
  r.actualPort=port;
  if(!endpoint?.webSocketDebuggerUrl)throw Error('installed_site_endpoint_missing');
  await connect(endpoint.webSocketDebuggerUrl);
  r.runtime=await evaluate(`(()=>{if(process.pid!==${pid})throw Error('site_pid_mismatch');if(Object.hasOwn(globalThis,${JSON.stringify(globalKey)}))throw Error('site_deadline_owner_exists');const c=process.threadCpuUsage();globalThis[${JSON.stringify(globalKey)}]={before:c,timer:setTimeout(()=>{delete globalThis[${JSON.stringify(globalKey)}];process.getBuiltinModule('inspector').close();},30000)};globalThis[${JSON.stringify(globalKey)}].timer.unref();return {node:process.versions.node,electron:process.versions.electron,v8:process.versions.v8};})()`);
  proof=await proveE3RegisteredSite(post);r.proof=proof.proof;r.functionSourceHashes=proof.handlers.map(h=>({key:h.key,sha256:hash(h.outerSource)}));r.authorizerSourceSha256=hash(proof.authorizationSource);
+ if(budget.sameStackInstallRenewStop){
+  const options={longWatch:true,eventLoopReads:true,exposureLedger:true,durationMs:1000,leaseMs:1000,readCpuLimitMs:1000,probeCpuLimitMs:1000,nativeCpuLimitMs:1000,notificationName:'__ri00_installed_assembly_notice',queue:{owner:'e3-installed-assembly',epoch:'e3-installed-assembly',allowExposure:false}};
+  const functionDeclaration=e3SynchronousAssemblySource();
+  const assembly=await post('Runtime.callFunctionOn',{objectId:proof.refs.store,functionDeclaration,arguments:[{objectId:proof.refs.supervisor},{value:{workspaceId:'metadata-only-no-query'}},{value:options},{objectId:proof.refs.ports},{objectId:proof.refs.directory}],returnByValue:true});
+  if(assembly.exceptionDetails)throw Error('installed_site_synchronous_assembly_failed');r.assembly=assembly.result.value;r.temporaryAssemblyInstalledAndStopped=true;r.productWrappersRetained=false;assert.equal(r.assembly.stopped.restored,true);assert.equal(r.assembly.stopped.bindingRestored,true);assert.equal(r.assembly.stopped.entryAdapter.restored,true);
+ }
  // Repeat object discovery; no wrapper/global/probe is installed into the product graph.
  const second=await proveE3RegisteredSite(post);for(const k of['ports','directory','supervisor','store']){const x=await post('Runtime.callFunctionOn',{objectId:proof.refs[k],functionDeclaration:'function(b){return this===b;}',arguments:[{objectId:second.refs[k]}],returnByValue:true});assert.equal(x.result.value,true);}
  r.ownersStable=true;const s=fs.statSync(file);assert.equal(s.size,r.asarStat.size);assert.equal(s.mtimeMs,r.asarStat.mtimeMs);r.installedModulesUnchanged=paths.every((p,i)=>hash(asar.extractFile(file,p))===r.installedModules[i].sha256);assert.equal(r.installedModulesUnchanged,true);r.passed=true;
+ await post('Runtime.releaseObjectGroup',{objectGroup:'ri00-e3-entry-discovery'});
 }catch(error){r.failures.push({message:error.message,stack:error.stack});}
 finally{
  inCleanup=true;
