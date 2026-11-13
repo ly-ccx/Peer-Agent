@@ -40,6 +40,7 @@ describe('isSlashCommandInput', () => {
     expect(isSlashCommandInput('/var/folders/24/otty-paste/image.png')).toBe(false);
     expect(isSlashCommandInput('/Users/me/Desktop/shot.jpg 看一下间距')).toBe(false);
     expect(isSlashCommandInput('/tmp/a.webp')).toBe(false);
+    expect(isSlashCommandInput('/Users/yinliang/Library/Application\\ Support/shot.png')).toBe(false);
   });
 });
 
@@ -128,6 +129,42 @@ describe('extractImagePathTokens + loadLocalImageAttachments', () => {
     ]);
     expect(stripImagePathsFromText(text, ['/var/folders/x/otty-paste/image-1.png']))
       .toBe('看一下为什么有这么大的间距');
+  });
+
+  test('treats a shell-escaped path with spaces as one image', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'peer-img-space-'));
+    const spacedDir = path.join(dir, 'Application Support');
+    const imagePath = path.join(spacedDir, 'shot-3a0ac4eb097.png');
+    const escaped = imagePath.replaceAll(' ', '\\ ');
+    const draft = `但是这样就跑到这个目录下面了 ${escaped}`;
+    try {
+      const { mkdir } = await import('node:fs/promises');
+      await mkdir(spacedDir, { recursive: true });
+      await writeFile(imagePath, PNG);
+
+      expect(extractImagePathTokens(draft)).toEqual([imagePath]);
+      const chipped = chipifyImagePathsInText(draft);
+      expect(chipped).toBe(`但是这样就跑到这个目录下面了 ${formatImagePathChip(imagePath)}`);
+      expect(chipped.includes('Application\\')).toBe(false);
+      expect(chipped.includes(imagePath)).toBe(false);
+
+      const registry = new Map<string, string>();
+      registerImagePathKeys(registry, extractImagePathTokens(draft));
+      const result = await loadLocalImageAttachments(chipped, { pathByKey: registry });
+      expect(result.images).toHaveLength(1);
+      expect(result.images[0]?.mimeType).toBe('image/png');
+      expect(result.text).toBe('但是这样就跑到这个目录下面了');
+      expect(result.missingPaths).toEqual([]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('accepts a quoted paste whose path contains a raw space', () => {
+    const imagePath = '/Users/yinliang/Library/Application Support/shot.png';
+    const draft = `看一下 '${imagePath}'`;
+    expect(extractImagePathTokens(draft)).toEqual([imagePath]);
+    expect(chipifyImagePathsInText(draft)).toBe(`看一下 ${formatImagePathChip(imagePath)}`);
   });
 
   test('extracts image paths glued to Chinese without spaces', () => {
