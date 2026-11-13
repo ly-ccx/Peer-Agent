@@ -3,7 +3,7 @@ const fullIdentity = row => row.origin === 'natural' && row.matches && (!row.roo
   && row.samplingSchema === 'passive-cpu-v2' && !row.readFailure && !row.metadataFailure && row.sourceBefore === row.sourceAfter
   && row.evidence.length === 12 && row.evidence.every(e => e.rows > 0)
   ? JSON.stringify([row.sourceBefore,row.outputSha256,row.evidence.map(e=>e.rows)]) : null;
-const keyOf = entry => JSON.stringify([entry.kind,entry.shapeDigest,entry.portSequence]);
+const keyOf = entry => JSON.stringify([entry.kind,entry.parentSeq===null?'root':'nested',entry.shapeDigest,entry.portSequence]);
 
 /** Pure controller policy. Signals return metadata, never call a product entry or confirm G2. */
 export function createE3SignalAdapter({ epoch, startedMs, expectedIdentity, maxEvents = 2 } = {}) {
@@ -24,6 +24,7 @@ export function createE3SignalAdapter({ epoch, startedMs, expectedIdentity, maxE
       if(sourceEpoch!==epoch||!sourceStable)return stop('source-epoch-changed');
       for(const entry of entries){
         if(entry.epoch!==epoch||entry.truncated)return stop('entry-identity-or-overflow');
+        if(!Number.isSafeInteger(entry.seq)||entry.seq<1||entry.parentSeq!==null&&(!Number.isSafeInteger(entry.parentSeq)||entry.parentSeq<1||entry.parentSeq>=entry.seq))return stop('entry-parent-chain-invalid');
         if(entry.end===null||!entry.portSequence.length)continue;
         const key=keyOf(entry),novel=!known.has(key);if(novel&&known.size>=256)return stop('signal-exposure-cap');known.add(key);
         if(novel){lastNewExposureMs=nowMs;if(baseline&&bracketed)offer(key,'new-mapped-exposure',{kind:entry.kind,seq:entry.seq});}

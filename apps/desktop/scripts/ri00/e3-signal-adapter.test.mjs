@@ -21,10 +21,17 @@ test('a single full12 increase triggers, one-position marker alone does not, and
  p.complete(event.id);p.observe({rows:[row(12,3)],nowMs:63000});assert.equal(p.claim(),null);
 });
 test('a new mapped entry signals without CPU increase and at most two distinct events are admitted',()=>{
- const p=ready();const entry=(kind,seq)=>({kind,seq,epoch:'owned',shapeDigest:'shape',portSequence:[{kind:'index',count:1}],end:1});
+ const p=ready();const entry=(kind,seq)=>({kind,seq,parentSeq:null,epoch:'owned',shapeDigest:'shape',portSequence:[{kind:'index',count:1}],end:1});
  p.observe({entries:[entry('ipc-list',1)],nowMs:61000});const first=p.claim();assert.equal(first.reasons[0],'new-mapped-exposure');p.complete(first.id);
  p.observe({entries:[entry('ipc-get',2)],nowMs:62000});const second=p.claim();p.complete(second.id);
  p.observe({entries:[entry('directory-list',3)],nowMs:63000});assert.equal(p.claim(),null);assert.equal(p.state().events,2);
+});
+test('a root Directory call stays a new exposure after the same nested Directory signature was seen',()=>{
+ const p=createE3SignalAdapter({epoch:'owned',startedMs:0,expectedIdentity:e3NaturalIdentity(row(1))});
+ const entry={kind:'directory-list',seq:2,parentSeq:1,epoch:'owned',shapeDigest:'shape',portSequence:[{kind:'index',count:12}],end:1};
+ p.observe({entries:[entry],nowMs:1});for(let i=0;i<5;i++)p.observe({rows:[row(i)],nowMs:60000+i});p.bracket({f0Qualified:true,f1QualifiedFast:true});
+ p.observe({entries:[{...entry,seq:3,parentSeq:null}],nowMs:61000});assert.equal(p.claim().reasons[0],'new-mapped-exposure');
+ const q=ready();q.observe({entries:[{...entry,parentSeq:99}],nowMs:61000});assert.equal(q.state().reason,'entry-parent-chain-invalid');
 });
 test('overlap cannot train or trigger; source/graph change seals instead of relearning',()=>{
  const p=ready(),slow=row(10,3);p.observe({rows:[slow],nowMs:61000,diagnosticSpans:[{start:slow.start,end:slow.end}]});assert.equal(p.claim(),null);
