@@ -1,6 +1,18 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from'node:fs';import os from'node:os';import path from'node:path';
 import {createDenseResidualProbe} from './dense-residual-probe.mjs';
 
+test('owned counter uses 26 fixed slots, OFF calls none, and counter failure preserves the original read error',async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ri00-pass-work-'));fs.writeFileSync(path.join(dir,'evidence-index.jsonl'),'{}\n');
+ const key='__ri00_owned_test_counter',calls=[],data=[{}],error=Error('original-read'),store={getStoreDir:()=>dir,listEvidenceIndex:()=>data};let fail=false,counterFail=false;
+ const host={list(){for(let i=0;i<12;i++)store.listEvidenceIndex();if(fail)throw error;return data;}};
+ globalThis[key]={stride:44,levels:1,numer:1,denom:1,writeInto(a,slot){calls.push(slot);if(counterFail)throw Error('native-failure');a[slot*44]=9n;}};
+ const probe=createDenseResidualProbe.call(store,host,{workspaceId:'fixture'},{longWatch:true,eventLoopReads:true,ownedExperiment:true,ownedPassCounterKey:key,durationMs:10000});
+ t.after(()=>{probe.stop();delete globalThis[key];fs.rmSync(dir,{recursive:true,force:true});});
+ assert.equal(host.list({workspaceId:'fixture'}),data);let b=await probe.take();probe.ack();assert.equal(b.rows[0].passWork.slots,0);assert.equal(calls.length,0);
+ probe.setPassCounter(true);assert.equal(host.list({workspaceId:'fixture'}),data);b=await probe.take();probe.ack();assert.deepEqual(calls,Array.from({length:26},(_,i)=>i));assert.equal(b.rows[0].passWork.slots,26);
+ counterFail=true;fail=true;assert.throws(()=>host.list({workspaceId:'fixture'}),e=>e===error);b=await probe.take();probe.ack();assert.equal(b.rows[0].passWork.failed,true);assert.equal(b.rows[0].readFailure,true);assert.equal(b.state.metadataErrors,1);assert.equal(probe.stop().restored,true);
+});
+
 test('long probe notifies without queries, retains an idempotent unacknowledged batch and releases archived metadata',async t=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ri00-long-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));fs.writeFileSync(path.join(dir,'evidence-index.jsonl'),'{}\n');
   let notices=0,calls=0;const binding='__ri00_test_natural_notice';globalThis[binding]=()=>notices++;

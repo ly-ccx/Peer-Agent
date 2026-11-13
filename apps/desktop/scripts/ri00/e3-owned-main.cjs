@@ -18,6 +18,7 @@ async function install(){
  const options={longWatch:true,eventLoopReads:true,exposureLedger:true,ownedExperiment:true,durationMs:cfg.hostDeadlineMs||180000,
   leaseMs:cfg.leaseMs||90000,readCpuLimitMs:cfg.readCpuLimitMs||60000,probeCpuLimitMs:5000,nativeCpuLimitMs:3000,
   notificationName:binding,closeInspectorOnWatchdog:cfg.closeInspectorOnWatchdog===true,
+  ...(cfg.ownedCounterPath?{ownedPassCounterKey:'__ri00_owned_pass_counter'}:{}),
   queue:{owner:cfg.label,epoch:cfg.epoch,allowExposure:cfg.allowExposure===true}};
  globalThis.__e3InstallOptions=options;
  const post=(method,params)=>new Promise((resolve,reject)=>inspectorSession.post(method,params,(e,r)=>e?reject(e):resolve(r)));
@@ -64,6 +65,7 @@ async function finish(options={}){
  return report;
 }
 app.whenReady().then(async()=>{
+ if(cfg.ownedCounterPath){if(!path.isAbsolute(cfg.ownedCounterPath)||!cfg.ownedCounterPath.endsWith('.node')||process.execPath.endsWith('/Peer Agent.app/Contents/MacOS/Peer Agent'))throw Error('e3_owned_counter_path_required');globalThis.__ri00_owned_pass_counter=require(cfg.ownedCounterPath);}
  if(cfg.mode==='production'){
   const {guardReadOnlySource}=await import(pathToFileURL(path.join(__dirname,'readonly-coordination.mjs')).href);
   const {createReadHost}=await import(pathToFileURL(path.join(__dirname,'read-host.mjs')).href);
@@ -106,6 +108,7 @@ app.whenReady().then(async()=>{
   request:args=>queue.request(args),status:args=>queue.status(args.id),
   wait:async args=>{const end=Date.now()+15000;while(Date.now()<end){const t=queue.status(args.id);if(['completed','failed','expired','acknowledged'].includes(t.state))return t;await wait(2);}throw Error('e3_ticket_wait_timeout');},
   take:()=>probe.take(),ackBatch:()=>probe.ack(),ackTicket:args=>queue.ack(args.id),renew:()=>cfg.site?site.renew():probe.renew(),native:()=>probe.native(),vm:()=>probe.vm(),
+  passCounter:args=>probe.setPassCounter(args.enabled),
   takeEntries:()=>{if(!cfg.site)throw Error('e3_site_required');return entries.take();},ackEntries:()=>{if(!cfg.site)throw Error('e3_site_required');return entries.ack();},
   entryInvoke:async args=>{if(!cfg.site)throw Error('e3_site_required');if(siteCpuMs+probe.queueContext().controlledCpuMs>=(cfg.siteReadCpuLimitMs||20000))throw Error('e3_site_read_cpu_budget');
    const before=process.threadCpuUsage();let value,samePromise;

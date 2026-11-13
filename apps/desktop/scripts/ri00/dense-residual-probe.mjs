@@ -10,6 +10,13 @@ export function createDenseResidualProbe(supervisor,payload,options={}){
   if(long&&(!Number.isInteger(leaseMs)||leaseMs<100||leaseMs>90000))throw Error('bounded_dense_lease_required');
   const store=this,fs=process.getBuiltinModule('fs'),path=process.getBuiltinModule('path'),crypto=process.getBuiltinModule('crypto');
   const {performance,PerformanceObserver}=process.getBuiltinModule('perf_hooks'),v8=process.getBuiltinModule('v8');
+  if(options.ownedPassCounterKey&&(!options.ownedExperiment||!String(options.ownedPassCounterKey).startsWith('__ri00_owned_')))throw Error('dense_owned_counter_required');
+  const passCounter=options.ownedPassCounterKey?globalThis[options.ownedPassCounterKey]:null;
+  if(options.ownedPassCounterKey&&(!passCounter||passCounter.stride!==44||typeof passCounter.writeInto!=='function'))throw Error('dense_owned_counter_missing');
+  let passCounterEnabled=false;
+  function counterStamp(row,slot){if(!row?._work||!passCounterEnabled||row._work.failed)return;
+    const before=threadTotal();try{passCounter.writeInto(row._work.buffer,slot);row._work.slots++;}
+    catch{row._work.failed=true;state.metadataErrors++;}finally{row._work.counterCpuUpperMs+=threadTotal()-before;}}
   const originalIndex=store.listEvidenceIndex,originalList=supervisor.list;
   const originalPlan=options.exposureLedger&&typeof store.getPlan==='function'?store.getPlan:null;
   if(typeof originalIndex!=='function'||typeof originalList!=='function')throw Error('dense_read_ports_required');
@@ -61,19 +68,23 @@ export function createDenseResidualProbe(supervisor,payload,options={}){
     try{row={origin,label,observationMode:bare?'bare':'detailed',matches:origin!=='outside-index'&&(args[0]?.workspaceId===payload.workspaceId||Array.isArray(args[0])&&args[0].includes(payload.workspaceId)),
       ...(options.entryLedger?{entryContext:options.entryLedger.context(),rootMethod:indexOnly?'index':fn===originalList?'list':'listByWorkspaceIds'}:{}),
       samplingSchema:dense?'controlled-heap-v1':request?'heap-free-'+request.kind+'-v1':long?'passive-cpu-v2':'legacy-heap-v1',
+      ...(passCounter?{_work:{buffer:new BigUint64Array(26*44),slots:0,counterCpuUpperMs:0,failed:false},passCounterEnabled}:{}),
       ...(request?{readKind:request.kind,ticketId:request.id,ticketStep:request.step,sourceEpoch:request.epoch}:{}),
       ...(options.exposureLedger?{planCalls:0,portSequence:[]}:{}),
       entryStack:origin!=='outside-index'||performance.now()-lastOutsideEnd>250?stack():null,sourceBefore:stamp(),heapBefore:!long||dense?heap():null,evidence:[]};}
     catch{state.metadataErrors++;if(origin==='controlled')throw Error('dense_diagnostic_metadata_failed');return Reflect.apply(fn,receiver,args);}
     const start=performance.now(),before={thread:process.threadCpuUsage(),whole:process.cpuUsage()},previous=current;row.start=start;current=row;
+    if(previous&&passCounterEnabled){row._work.failed=true;state.metadataErrors++;}counterStamp(row,0);
     if(request?.kind==='exposure-index')recordPort('index');
     let value;
     try{value=Reflect.apply(fn,receiver,args);row.rows=value instanceof Map?value.size:value.length;return value;}
     catch(error){row.readFailure=true;throw error;}
-    finally{row.end=performance.now();const measured=cpu(before);current=previous;
+    finally{counterStamp(row,25);row.end=performance.now();const measured=cpu(before);current=previous;
       Object.assign(row,{userMs:measured.userMs,systemMs:measured.systemMs,processUserMs:measured.processUserMs,processSystemMs:measured.processSystemMs});
       if(origin==='controlled')state.controlledCpuMs+=row.userMs+row.systemMs;
       if(indexOnly){lastOutsideEnd=row.end;row.evidence.push({start:row.start,end:row.end,rows:row.rows??null,userMs:row.userMs,systemMs:row.systemMs});}
+      if(passCounter){const w=row._work;delete row._work;row.passWork={enabled:row.passCounterEnabled,slots:w.slots,failed:w.failed,counterCpuUpperMs:w.counterCpuUpperMs,
+        levels:passCounter.levels,numer:passCounter.numer,denom:passCounter.denom,values:Array.from(w.buffer,String)};}
       try{row.heapAfter=!long||dense?heap():null;if(dense)lastControlledSample={start:row.start,end:row.end,heapBefore:row.heapBefore,heapAfter:row.heapAfter};row.sourceAfter=stamp();if(value&&!indexOnly)row.outputSha256=crypto.createHash('sha256').update(JSON.stringify(value instanceof Map?[...value]:value)).digest('hex');}
       catch{state.metadataErrors++;row.metadataFailure=true;}
       const after=process.threadCpuUsage();row.metadataCpuMs=(after.user+after.system-metadataBefore.user-metadataBefore.system)/1000-row.userMs-row.systemMs;
@@ -95,8 +106,9 @@ export function createDenseResidualProbe(supervisor,payload,options={}){
     recordPort('index');
     const metadataBefore=long?threadTotal():0,entryStack=long&&current?.evidence.length===0?stack():null,wholeBefore=observeIndex?process.cpuUsage():null;
     const before=process.threadCpuUsage(),start=performance.now();let value;
+    const passPosition=current?.evidence.length;if(passCounterEnabled&&current){if(passPosition>=12){current._work.failed=true;state.metadataErrors++;}else counterStamp(current,1+passPosition*2);}
     try{value=Reflect.apply(originalIndex,this,args);return value;}
-    finally{if(current){const after=process.threadCpuUsage(),end=performance.now(),userMs=(after.user-before.user)/1000,systemMs=(after.system-before.system)/1000;
+    finally{if(current){if(passCounterEnabled&&passPosition<12)counterStamp(current,2+passPosition*2);const after=process.threadCpuUsage(),end=performance.now(),userMs=(after.user-before.user)/1000,systemMs=(after.system-before.system)/1000;
       const span={start,end,rows:Array.isArray(value)?value.length:null,userMs,systemMs};
       if(entryStack)span.entryStack=entryStack;
       if(observeIndex){const whole=process.cpuUsage();Object.assign(span,{processUserMs:(whole.user-wholeBefore.user)/1000,processSystemMs:(whole.system-wholeBefore.system)/1000});}
@@ -119,6 +131,7 @@ export function createDenseResidualProbe(supervisor,payload,options={}){
     if(state.controlledRows!==count+1)throw Error('dense_read_row_not_recorded');return rows.at(-1);
   }
   const probe={read(label){if(readQueue)throw Error('dense_event_loop_read_required');return perform('dense',label);},
+    setPassCounter(enabled){if(!passCounter||typeof enabled!=='boolean'||stopped||activeDepth||readQueue?.snapshot().ticket)throw Error('dense_counter_switch_invalid');passCounterEnabled=enabled;return {enabled};},
     attachReadQueue(queue){
       if(!long||!options.eventLoopReads||stopped||readQueue||!queue||typeof queue.stop!=='function')throw Error('dense_read_queue_attach_invalid');
       readQueue=queue;return (kind,label,ticket)=>perform(kind,label,ticket);
