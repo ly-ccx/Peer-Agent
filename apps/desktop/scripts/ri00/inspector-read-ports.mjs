@@ -1,5 +1,5 @@
 /** Inspect only named read-port bindings. Never return scope contents or primitive values. */
-export async function readPortReferences(post) {
+export function inspectNamedReadBindings(post) {
   const properties = async objectId => (await post('Runtime.getProperties', { objectId, ownProperties: true }));
   async function property(objectId, key) {
     const reply = await properties(objectId);
@@ -27,6 +27,11 @@ export async function readPortReferences(post) {
     if(discovery)discovery.state='binding-unavailable';
     if(!optional)throw new Error(`read_port_binding_missing:${key}`);
   }
+  return {property,closure};
+}
+
+export async function readPortReferences(post) {
+  const {property,closure}=inspectNamedReadBindings(post);
   const evaluation = await post('Runtime.evaluate', { expression: `process.getBuiltinModule('module').createRequire(process.resourcesPath+'/app.asar/package.json')('electron').ipcMain._invokeHandlers.get('project-agent:list-obligation-grants')`, objectGroup: 'ri00-read-ports' });
   if (evaluation.exceptionDetails || !evaluation.result?.objectId) throw new Error('read_port_handler_unavailable');
   const callback = await closure(evaluation.result.objectId, 'callback');

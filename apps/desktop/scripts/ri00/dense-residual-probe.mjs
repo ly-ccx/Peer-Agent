@@ -18,6 +18,9 @@ export function createDenseResidualProbe(supervisor,payload,options={}){
   const binding=options.notificationName,notification=binding?globalThis[binding]:null;
   if(binding&&typeof notification!=='function')throw Error('dense_notification_binding_required');
   let current,stopped=false,timedOut=false,cursor=0,gcCursor=0,timer,leaseTimer,notice,restored=null,bare=false,lastOutsideEnd=-Infinity,pendingTake=null,lastControlledSample=null,activeDepth=0,readQueue;
+  const extraRoots=options.entryLedger&&typeof supervisor.listByWorkspaceIds==='function'?[{key:'listByWorkspaceIds',original:supervisor.listByWorkspaceIds}]:[];
+  for(const port of extraRoots)port.wrapped=function(...args){return root('natural',this,args,port.key,port.original);};
+  const extraOwned=()=>extraRoots.every(port=>supervisor[port.key]===(bare?port.original:port.wrapped))&&(!options.entryLedger||options.entryLedger.verifyOwners({skipLayered:true}));
   const rowBytes=[],state={metadataErrors:0,dropped:0,gcDropped:0,ledgerOverflows:0,controlledCpuMs:0,nativeCpuMs:0,probeCpuMs:0,retainedRowBytes:0,naturalRows:0,controlledRows:0,outsideRows:0};
   const threadTotal=()=>{const c=process.threadCpuUsage();return(c.user+c.system)/1000;};
   function expired(reason){timedOut=reason==='watchdog'||reason==='controller-lease';probe.stop(reason);}
@@ -55,7 +58,8 @@ export function createDenseResidualProbe(supervisor,payload,options={}){
     if(stopped)return Reflect.apply(fn,receiver,args);
     const dense=origin==='controlled'&&(!request||request.kind==='dense'),indexOnly=origin==='outside-index'||request?.kind==='exposure-index';
     let row;const metadataBefore=process.threadCpuUsage();
-    try{row={origin,label,observationMode:bare?'bare':'detailed',matches:origin!=='outside-index'&&args[0]?.workspaceId===payload.workspaceId,
+    try{row={origin,label,observationMode:bare?'bare':'detailed',matches:origin!=='outside-index'&&(args[0]?.workspaceId===payload.workspaceId||Array.isArray(args[0])&&args[0].includes(payload.workspaceId)),
+      ...(options.entryLedger?{entryContext:options.entryLedger.context(),rootMethod:indexOnly?'index':fn===originalList?'list':'listByWorkspaceIds'}:{}),
       samplingSchema:dense?'controlled-heap-v1':request?'heap-free-'+request.kind+'-v1':long?'passive-cpu-v2':'legacy-heap-v1',
       ...(request?{readKind:request.kind,ticketId:request.id,ticketStep:request.step,sourceEpoch:request.epoch}:{}),
       ...(options.exposureLedger?{planCalls:0,portSequence:[]}:{}),
@@ -64,13 +68,13 @@ export function createDenseResidualProbe(supervisor,payload,options={}){
     const start=performance.now(),before={thread:process.threadCpuUsage(),whole:process.cpuUsage()},previous=current;row.start=start;current=row;
     if(request?.kind==='exposure-index')recordPort('index');
     let value;
-    try{value=Reflect.apply(fn,receiver,args);row.rows=value.length;return value;}
+    try{value=Reflect.apply(fn,receiver,args);row.rows=value instanceof Map?value.size:value.length;return value;}
     catch(error){row.readFailure=true;throw error;}
     finally{row.end=performance.now();const measured=cpu(before);current=previous;
       Object.assign(row,{userMs:measured.userMs,systemMs:measured.systemMs,processUserMs:measured.processUserMs,processSystemMs:measured.processSystemMs});
       if(origin==='controlled')state.controlledCpuMs+=row.userMs+row.systemMs;
       if(indexOnly){lastOutsideEnd=row.end;row.evidence.push({start:row.start,end:row.end,rows:row.rows??null,userMs:row.userMs,systemMs:row.systemMs});}
-      try{row.heapAfter=!long||dense?heap():null;if(dense)lastControlledSample={start:row.start,end:row.end,heapBefore:row.heapBefore,heapAfter:row.heapAfter};row.sourceAfter=stamp();if(value&&!indexOnly)row.outputSha256=crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');}
+      try{row.heapAfter=!long||dense?heap():null;if(dense)lastControlledSample={start:row.start,end:row.end,heapBefore:row.heapBefore,heapAfter:row.heapAfter};row.sourceAfter=stamp();if(value&&!indexOnly)row.outputSha256=crypto.createHash('sha256').update(JSON.stringify(value instanceof Map?[...value]:value)).digest('hex');}
       catch{state.metadataErrors++;row.metadataFailure=true;}
       const after=process.threadCpuUsage();row.metadataCpuMs=(after.user+after.system-metadataBefore.user-metadataBefore.system)/1000-row.userMs-row.systemMs;
       if(long)row.instrumentationCpuMs=row.metadataCpuMs+row.evidence.reduce((s,e)=>s+(e.metadataCpuMs||0),0);
@@ -119,15 +123,15 @@ export function createDenseResidualProbe(supervisor,payload,options={}){
       if(!long||!options.eventLoopReads||stopped||readQueue||!queue||typeof queue.stop!=='function')throw Error('dense_read_queue_attach_invalid');
       readQueue=queue;return (kind,label,ticket)=>perform(kind,label,ticket);
     },
-    queueContext(){const a=bare?originalIndex:index,b=bare?originalList:list;return {stopped,activeDepth,owned:store.listEvidenceIndex===a&&supervisor.list===b&&(!originalPlan||store.getPlan===(bare?originalPlan:plan)),controlledCpuMs:state.controlledCpuMs,metadataErrors:state.metadataErrors};},
+    queueContext(){const a=bare?originalIndex:index,b=bare?originalList:list;return {stopped,activeDepth,owned:store.listEvidenceIndex===a&&supervisor.list===b&&extraOwned()&&(!originalPlan||store.getPlan===(bare?originalPlan:plan)),controlledCpuMs:state.controlledCpuMs,metadataErrors:state.metadataErrors};},
     vm(){if(stopped)throw Error('dense_probe_stopped');return {notCurrentHeap:true,source:'cached-controlled-root-only',sample:lastControlledSample,versions:{v8:process.versions.v8}};},
     renew(){if(stopped)throw Error('dense_probe_stopped');const a=bare?originalIndex:index,b=bare?originalList:list;
-      if(store.listEvidenceIndex!==a||supervisor.list!==b||originalPlan&&store.getPlan!==(bare?originalPlan:plan)){probe.stop('method-owner-changed');throw Error('dense_method_owner_changed');}
+      if(store.listEvidenceIndex!==a||supervisor.list!==b||!extraOwned()||originalPlan&&store.getPlan!==(bare?originalPlan:plan)){probe.stop('method-owner-changed');throw Error('dense_method_owner_changed');}
       clearTimeout(leaseTimer);if(long){leaseTimer=setTimeout(()=>expired('controller-lease'),leaseMs);leaseTimer.unref?.();}return {...state,stopped};},
     setDetail(mode){if(stopped||!['bare','detailed'].includes(mode))throw Error('invalid_dense_observation_mode');const a=bare?originalIndex:index,b=bare?originalList:list;
       if(readQueue?.snapshot().ticket)throw Error('dense_read_ticket_pending');
-      if(store.listEvidenceIndex!==a||supervisor.list!==b||originalPlan&&store.getPlan!==(bare?originalPlan:plan))throw Error('dense_method_owner_changed');
-      bare=mode==='bare';store.listEvidenceIndex=bare?originalIndex:index;supervisor.list=bare?originalList:list;if(originalPlan)store.getPlan=bare?originalPlan:plan;return {mode};},
+      if(store.listEvidenceIndex!==a||supervisor.list!==b||!extraOwned()||originalPlan&&store.getPlan!==(bare?originalPlan:plan))throw Error('dense_method_owner_changed');
+      bare=mode==='bare';store.listEvidenceIndex=bare?originalIndex:index;supervisor.list=bare?originalList:list;if(originalPlan)store.getPlan=bare?originalPlan:plan;for(const port of extraRoots)supervisor[port.key]=bare?port.original:port.wrapped;return {mode};},
     native(){if(stopped)throw Error('dense_probe_stopped');if(readQueue?.snapshot().ticket)throw Error('dense_read_ticket_pending');const before=process.threadCpuUsage(),start=performance.now();let value=0;
       bytes??=Buffer.alloc(4*1024*1024,0x5a);
       for(let i=0;i<16;i++)value^=crypto.createHash('sha256').update(bytes).digest().readUInt32LE(0);
@@ -142,12 +146,15 @@ export function createDenseResidualProbe(supervisor,payload,options={}){
     stop(reason='controller'){clearTimeout(timer);clearTimeout(leaseTimer);clearImmediate(notice);pendingTake=null;readQueue?.stop(reason);if(!stopped){stopped=true;
       for(const e of observer.takeRecords()){if(gc.length<(long?32768:16384))gc.push({start:e.startTime,duration:e.duration,kind:e.detail?.kind});else state.gcDropped++;}observer.disconnect();
       const a=store.listEvidenceIndex===index,b=supervisor.list===list,c=originalPlan&&store.getPlan===plan;if(a)store.listEvidenceIndex=originalIndex;if(b)supervisor.list=originalList;if(c)store.getPlan=originalPlan;
-      restored=(a||store.listEvidenceIndex===originalIndex)&&(b||supervisor.list===originalList)&&(!originalPlan||store.getPlan===originalPlan);state.stopReason=reason;
+      let aliasesRestored=true;for(const port of extraRoots){if(supervisor[port.key]===port.wrapped)supervisor[port.key]=port.original;else if(supervisor[port.key]!==port.original)aliasesRestored=false;}
+      restored=(a||store.listEvidenceIndex===originalIndex)&&(b||supervisor.list===originalList)&&(!originalPlan||store.getPlan===originalPlan)&&aliasesRestored;state.stopReason=reason;
+      if(options.entryLedger){try{state.entryAdapter=options.entryLedger.stop(reason);restored=restored&&state.entryAdapter.restored;}catch{state.metadataErrors++;restored=false;}}
       if(reason!=='controller'&&notification)try{notification('stopped');}catch{}
       if(binding){state.bindingRestored=globalThis[binding]===notification;if(state.bindingRestored)delete globalThis[binding];}}
       if(reason!=='controller'&&options.closeInspectorOnWatchdog)setTimeout(()=>process.getBuiltinModule('inspector').close(),5000).unref?.();
+      if(options.entryLedger)state.entryAdapter=options.entryLedger.state();
       return {...state,stopped,timedOut,restored,activeDepth,...(readQueue?{readQueue:readQueue.snapshot()}:{} )};}};
-  try{observer.observe({entryTypes:['gc']});store.listEvidenceIndex=index;supervisor.list=list;if(originalPlan)store.getPlan=plan;}
-  catch(error){if(store.listEvidenceIndex===index)store.listEvidenceIndex=originalIndex;if(supervisor.list===list)supervisor.list=originalList;if(originalPlan&&store.getPlan===plan)store.getPlan=originalPlan;observer.disconnect();throw error;}
+  try{observer.observe({entryTypes:['gc']});store.listEvidenceIndex=index;supervisor.list=list;if(originalPlan)store.getPlan=plan;for(const port of extraRoots)supervisor[port.key]=port.wrapped;}
+  catch(error){if(store.listEvidenceIndex===index)store.listEvidenceIndex=originalIndex;if(supervisor.list===list)supervisor.list=originalList;if(originalPlan&&store.getPlan===plan)store.getPlan=originalPlan;for(const port of extraRoots)if(supervisor[port.key]===port.wrapped)supervisor[port.key]=port.original;observer.disconnect();throw error;}
   timer=setTimeout(()=>expired('watchdog'),durationMs);timer.unref?.();probe.renew();return probe;
 }
