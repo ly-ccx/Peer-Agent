@@ -44,5 +44,5 @@ finally{
  try{process.kill(pid,0);r.originalProcessAlive=true;}catch{r.originalProcessAlive=false;r.passed=false;}
  r.controllerCpu=process.cpuUsage(beforeCpu);r.discoveryChildWallCpuUpperMs=discoveryChildWallUpperMs;r.elapsedMs=Date.now()-began;r.commandCount=seq;r.finishedAt=new Date().toISOString();
  if(r.elapsedMs>45000||seq>1000||(r.controllerCpu.user+r.controllerCpu.system)/1000+discoveryChildWallUpperMs>2000||!r.mainThreadWindowCpu||r.mainThreadWindowCpu.userMs+r.mainThreadWindowCpu.systemMs>5000){r.passed=false;r.failures.push({message:'installed_site_budget_or_unknown_cost'});}
- if(r.failures.length)r.passed=false;save();console.log(JSON.stringify({passed:r.passed,proof:r.proof,elapsedMs:r.elapsedMs,commandCount:seq,controllerCpu:r.controllerCpu,mainThreadWindowCpu:r.mainThreadWindowCpu,portClosure:r.portClosure,failures:r.failures.map(e=>e.message)}));
+ if(r.failures.length)r.passed=false;if(!r.passed)process.exitCode=1;save();console.log(JSON.stringify({passed:r.passed,proof:r.proof,elapsedMs:r.elapsedMs,commandCount:seq,controllerCpu:r.controllerCpu,mainThreadWindowCpu:r.mainThreadWindowCpu,portClosure:r.portClosure,failures:r.failures.map(e=>e.message)}));
 }
