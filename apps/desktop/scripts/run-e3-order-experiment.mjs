@@ -25,22 +25,24 @@ const activeHosts=new Set();
 process.on('SIGINT',()=>{interrupted=true;});process.on('SIGTERM',()=>{interrupted=true;});
 const save=()=>{const temporary=path.join(output,'report.tmp'),fd=fs.openSync(temporary,'w',0o600);try{fs.writeSync(fd,JSON.stringify(report));fs.fdatasyncSync(fd);}finally{fs.closeSync(fd);}fs.renameSync(temporary,path.join(output,'report.private.json'));};
 const currentSource=()=>sourceInventory(base.fixtureRoot,coordinationDir);
-let expectedSource,indexSha,nativeSequence=0;const hashBuffer=Buffer.allocUnsafe(1048576);
+let expectedSource,indexSha,nativeSequence=0,journalBytes=0;const journalLimitBytes=33554432,hashBuffer=Buffer.allocUnsafe(1048576);
+function appendJournal(name,line){
+ const bytes=Buffer.byteLength(line);if(journalBytes+bytes>journalLimitBytes)throw Error('e3_order_journal_budget');
+ const fd=fs.openSync(path.join(output,name),'a',0o600);try{fs.writeFileSync(fd,line);fs.fdatasyncSync(fd);}finally{fs.closeSync(fd);}journalBytes+=bytes;
+}
 function fileSha(file){const h=createHash('sha256'),fd=fs.openSync(file,'r');try{let n;while((n=fs.readSync(fd,hashBuffer,0,hashBuffer.length,null)))h.update(hashBuffer.subarray(0,n));}finally{fs.closeSync(fd);}return h.digest('hex');}
 function budget(){if(interrupted)throw Error('e3_order_interrupted');if(Date.now()-began>maxWallMs)throw Error('e3_order_wall_budget');if(report.readCpuMs>=report.readCpuLimitMs)throw Error('e3_order_read_cpu_budget');}
 async function take(host){
- const batch=await host.rpc('take'),line=JSON.stringify({host:host.label,at:new Date().toISOString(),batch})+'\n',journal=path.join(output,'batches.private.jsonl');
- if((fs.existsSync(journal)?fs.statSync(journal).size:0)+Buffer.byteLength(line)>33554432)throw Error('e3_order_journal_budget');
- const fd=fs.openSync(journal,'a',0o600);try{fs.writeSync(fd,line);fs.fdatasyncSync(fd);}finally{fs.closeSync(fd);}await host.rpc('ackBatch');
+ const batch=await host.rpc('take'),line=JSON.stringify({host:host.label,at:new Date().toISOString(),batch})+'\n';
+ appendJournal('batches.private.jsonl',line);await host.rpc('ackBatch');
  const delta=batch.state.controlledCpuMs-host.chargedCpu;assert.ok(delta>=-.001);host.chargedCpu=batch.state.controlledCpuMs;report.readCpuMs+=Math.max(0,delta);host.record.readCpuMs=host.chargedCpu;
  if(batch.state.metadataErrors||batch.state.dropped||batch.state.gcDropped||batch.state.ledgerOverflows)throw Error('e3_order_probe_record_failure');return batch;
 }
 async function readTicket(host,kind,label){
  budget();await host.rpc('renew');const id=++host.nextId,before=await counter.read(host.child.pid);assert.equal(String(before.values.ri_proc_start_abstime),host.birth);
  await host.rpc('request',{id,kind,label,sourceEpoch:expectedSource.sha256});const ticket=await host.rpc('wait',{id}),after=await counter.read(host.child.pid);assert.equal(String(after.values.ri_proc_start_abstime),host.birth);
- const nativeFile=path.join(output,'native-points.private.jsonl'),nativeId=++nativeSequence,nativeLine=JSON.stringify({nativeId,host:host.label,id,before,after})+'\n';
- if((fs.existsSync(nativeFile)?fs.statSync(nativeFile).size:0)+Buffer.byteLength(nativeLine)>67108864)throw Error('e3_order_native_journal_budget');
- const nfd=fs.openSync(nativeFile,'a',0o600);try{fs.writeSync(nfd,nativeLine);fs.fdatasyncSync(nfd);}finally{fs.closeSync(nfd);}
+ const nativeId=++nativeSequence,nativeLine=JSON.stringify({nativeId,host:host.label,id,before,after})+'\n';
+ appendJournal('native-points.private.jsonl',nativeLine);
  const batch=await take(host);await host.rpc('ackTicket',{id});const rows=batch.rows.filter(r=>r.ticketId===id),summary={id,kind,label,ticket,rows,nativeId};host.record.tickets.push({id,kind,label,ticket,nativeId});
  if(ticket.state!=='completed'||ticket.stoppedDuringRun)throw Error('e3_order_ticket_incomplete:'+ticket.state);
  const count=kind.startsWith('order-')?9:1;assert.equal(rows.length,count);assert.ok(rows.every(r=>r.sourceBefore===r.sourceAfter&&!r.readFailure&&!r.metadataFailure));
@@ -111,7 +113,7 @@ try{
 }catch(error){report.failures.push({name:error.name,message:error.message,stack:error.stack});process.exitCode=1;}
 finally{
  for(const host of[...activeHosts])try{await close(host);}catch(error){report.failures.push({name:error.name,message:error.message});}
- if(counter)report.counterExit=await counter.close();report.finishedAt=new Date().toISOString();report.elapsedMs=Date.now()-began;report.readCpuOvershootMs=Math.max(0,report.readCpuMs-report.readCpuLimitMs);
+ if(counter)report.counterExit=await counter.close();report.finishedAt=new Date().toISOString();report.elapsedMs=Date.now()-began;report.journalBytes=journalBytes;report.readCpuOvershootMs=Math.max(0,report.readCpuMs-report.readCpuLimitMs);
  if(report.readCpuOvershootMs>0){report.mechanicsOk=false;report.failures.push({message:'e3_order_read_cpu_budget_exceeded'});process.exitCode=1;}save();
  console.log(JSON.stringify({mechanicsOk:report.mechanicsOk,orderHypothesisSupported:report.orderHypothesisSupported,ownedLaunches:report.ownedLaunches,readCpuMs:report.readCpuMs,targets:report.targets.map(t=>({label:t.label,arm:t.arm,status:t.status,reason:t.reason})),failures:report.failures.map(e=>e.message)}));
 }
