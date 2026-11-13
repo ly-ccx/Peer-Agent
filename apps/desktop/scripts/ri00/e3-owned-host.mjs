@@ -18,7 +18,7 @@ export async function startOwnedE3Host(config){
  const api={child,closed,output:config.output,
   rpc(method,args={}){return new Promise((resolve,reject)=>{if(child.exitCode!==null||child.signalCode!==null){reject(Error('e3_owned_process_closed'));return;}
    const id=++seq,timer=setTimeout(()=>{pending.delete(id);reject(Error('e3_owned_rpc_timeout:'+method));},20000);pending.set(id,{resolve,reject,timer});child.stdin.write(JSON.stringify({id,method,args})+'\n');});},
-  async close(){try{return await api.rpc('shutdown');}finally{child.stdin.end();let timeout;await Promise.race([closed,new Promise(r=>{timeout=setTimeout(r,3000);})]);clearTimeout(timeout);if(child.exitCode===null&&child.signalCode===null)child.kill('SIGTERM');await closed;}}
+  async close(options={}){try{return await api.rpc('shutdown',options);}finally{child.stdin.end();let timeout;await Promise.race([closed,new Promise(r=>{timeout=setTimeout(r,3000);})]);clearTimeout(timeout);if(child.exitCode===null&&child.signalCode===null)child.kill('SIGTERM');await closed;}}
  };
  try{api.ready=await readyPromise;return api;}catch(error){child.kill('SIGTERM');await closed;throw error;}
 }

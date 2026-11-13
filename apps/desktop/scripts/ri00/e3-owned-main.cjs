@@ -28,10 +28,20 @@ async function install(){
 function ownerState(){return {list:ports.supervisor.list===originals.list,index:ports.store.listEvidenceIndex===originals.index,
  plan:!originals.plan||ports.store.getPlan===originals.plan};}
 function getterCounts(){return spies?{...spies.count}:null;}
-async function finish(){
+async function finish(options={}){
  if(closing)return;closing=true;clockRestore?.();const stopped=probe?.stop();
  const report={stopped,owners:ownerState(),guard:guard?{...guard.state}:null,readFailures:host?.readFailures()||0,
   getters:getterCounts(),qualification,readCount,inspectorOpen:Boolean(require('node:inspector').url())};
+ if(cfg.auditOnShutdown&&!options.skipAudit){
+  if(!cfg.allowExposure||cfg.mode!=='production')throw Error('e3_owned_post_measurement_audit_required');
+  const before=process.threadCpuUsage();
+  try{const records=ports.store.listEvidenceIndex(),hash=require('node:crypto').createHash('sha256');for(const record of records)hash.update(JSON.stringify(record)+'\n');
+   report.postMeasurementAudit={rows:records.length,sha256:hash.digest('hex'),notUsedForPerformance:true};
+  }catch(error){report.postMeasurementAudit={failed:true,error:{name:error.name,message:error.message},notUsedForPerformance:true};}
+  const cost=process.threadCpuUsage(before);report.postMeasurementAudit.cpuMs=(cost.user+cost.system)/1000;
+  report.guard={...guard.state};report.readFailures=host.readFailures();
+ }
+ if(cfg.auditOnShutdown&&options.skipAudit)report.postMeasurementAudit={skipped:true,reason:'remaining-read-budget',cpuMs:0,notUsedForPerformance:true};
  fs.writeFileSync(path.join(cfg.output,'exit.private.json'),JSON.stringify(report),{mode:0o600});
  try{host?.close();}finally{guard?.close();if(spies)for(const[n,fn]of Object.entries(spies.original))require('node:v8')[n]=fn;}
  return report;
@@ -76,14 +86,14 @@ app.whenReady().then(async()=>{
   replaceOwner:()=>{qualification.replacement=()=>[];ports.supervisor.list=qualification.replacement;return true;},
   stop:()=>probe.stop(),
   resetAfterOwnerTest:async args=>{qualification.ownerFailure=probe.stop();qualification.lateOwnerPreserved=ports.supervisor.list===qualification.replacement;ports.supervisor.list=originals.list;if(args.leaseMs)cfg.leaseMs=args.leaseMs;globalThis[binding]=()=>{};await install();return true;},
-  shutdown:async()=>{const report=await finish();setImmediate(()=>app.exit(0));return report;}
+  shutdown:async args=>{const report=await finish(args);setImmediate(()=>app.exit(0));return report;}
  };
  let buffered='';process.stdin.setEncoding('utf8');process.stdin.on('data',chunk=>{buffered+=chunk;if(buffered.length>16384){app.exit(125);return;}let n;
   while((n=buffered.indexOf('\n'))>=0){const line=buffered.slice(0,n);buffered=buffered.slice(n+1);if(!line)continue;
    (async()=>{let request;try{request=JSON.parse(line);if(!commands[request.method]||!cfg.qualification&&['nested','fail','naturalError','naturalIdentity','expire','restoreClock','replaceOwner','resetAfterOwnerTest'].includes(request.method))throw Error('e3_owned_command_not_allowed');send({id:request.id,result:await commands[request.method](request.args||{})});}
     catch(e){send({id:request?.id,error:{name:e.name,message:e.message}});}})();}
  });
- process.stdin.once('end',()=>{finish().finally(()=>app.exit(0));});
+ process.stdin.once('end',()=>{finish({skipAudit:true}).finally(()=>app.exit(0));});
  send({event:'ready',pid:process.pid,runtime:{node:process.versions.node,electron:process.versions.electron,v8:process.versions.v8,cachedDataVersionTag:require('node:v8').cachedDataVersionTag()},
   indexFile:path.join(ports.store.getStoreDir(),'evidence-index.jsonl'),sourceRevision:host?.sourceRevision(),inspectorUrl:require('node:inspector').url()});
 }).catch(error=>{fs.writeFileSync(path.join(cfg.output,'bootstrap-error.private.txt'),error.stack,{mode:0o600});app.exit(1);});
