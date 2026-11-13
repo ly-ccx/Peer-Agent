@@ -1,0 +1,3 @@
+import fs from'node:fs';import{createHash}from'node:crypto';
+export const e3SourceFiles=['dense-residual-probe.mjs','read-ticket-queue.mjs','e3-install.mjs','e3-owned-main.cjs','e3-owned-host.mjs','e3-counter-client.mjs','e3-identity.mjs','dense-residual.mjs','thread-counter-delta.mjs','darwin-process-counters.py','read-host.mjs','readonly-coordination.mjs','coordination-snapshot.mjs','trace.mjs','identity.mjs'];
+export function e3SourceIdentity(){return e3SourceFiles.map(relative=>({relative,sha256:createHash('sha256').update(fs.readFileSync(new URL(relative,import.meta.url))).digest('hex')}));}
