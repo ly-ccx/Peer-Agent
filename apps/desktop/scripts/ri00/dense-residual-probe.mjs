@@ -132,11 +132,12 @@ export function createDenseResidualProbe(supervisor,payload,options={}){
     if(!['dense','witness','exposure-index','exposure-supervisor'].includes(kind)&&!(marker&&options.profileMarkers)||bare&&kind!=='dense')throw Error('dense_read_kind_invalid');
     const count=state.controlledRows,request=ticket?{...ticket,kind:marker?'dense':kind}:null;
     if(marker){
-      const before=boundaryStamp();let after;
+      const markerCpuBefore=threadTotal(),probeCpuBefore=state.probeCpuMs,readCpuBefore=state.controlledCpuMs,before=boundaryStamp();let after;
       try{if(kind==='clock-start')e3BoundaryStart(label,request);else e3BoundaryEnd(label,request);}finally{after=boundaryStamp();
         const row=rows.at(-1);if(state.controlledRows===count+1&&row){const cost=threadTotal();row.profileBoundary={name:kind==='clock-start'?'e3BoundaryStart':'e3BoundaryEnd',before,after};
           // The marker finishes after keep(); re-account its added metadata before any ACK.
-          const i=rows.length-1,n=Buffer.byteLength(JSON.stringify(row));state.retainedRowBytes+=n-rowBytes[i];rowBytes[i]=n;state.probeCpuMs+=threadTotal()-cost;limits();}}
+          const i=rows.length-1,n=Buffer.byteLength(JSON.stringify(row));state.retainedRowBytes+=n-rowBytes[i];rowBytes[i]=n;state.probeCpuMs+=threadTotal()-cost;
+          state.probeCpuMs+=Math.max(0,threadTotal()-markerCpuBefore-(state.controlledCpuMs-readCpuBefore)-(state.probeCpuMs-probeCpuBefore));limits();}}
     }
     else if(kind==='exposure-index')root('controlled',store,[],label,originalIndex,request);
     else root('controlled',supervisor,[{workspaceId:payload.workspaceId}],label,originalList,request);
