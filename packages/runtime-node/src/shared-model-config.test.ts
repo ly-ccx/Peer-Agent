@@ -108,6 +108,41 @@ test('loadSharedModelMetadata reads only non-sensitive metadata', () => {
   }
 });
 
+test('shared metadata uses reasoningEffortMap keys when levels were not persisted', () => {
+  const userDataPath = mkdtempSync(path.join(os.tmpdir(), 'peer-shared-effort-map-'));
+  try {
+    writeFileSync(getSharedModelConfigPath(userDataPath), JSON.stringify([{
+      id: 'provider-map',
+      model: 'deepseek-v4.1-flash',
+      apiKeyConfigured: true,
+      supportsReasoning: true,
+      reasoningEffortMap: { off: 'none', low: 'low', high: 'high', max: 'max' },
+    }]));
+    const metadata = loadSharedModelMetadata({ userDataPath });
+    assert.deepEqual(metadata?.supportedReasoningEfforts, ['off', 'low', 'high', 'max']);
+    assert.equal(metadata?.defaultReasoningEffort, 'high');
+  } finally {
+    rmSync(userDataPath, { recursive: true, force: true });
+  }
+});
+
+test('shared metadata keeps persisted reasoning levels ahead of the effort map', () => {
+  const userDataPath = mkdtempSync(path.join(os.tmpdir(), 'peer-shared-effort-levels-'));
+  try {
+    writeFileSync(getSharedModelConfigPath(userDataPath), JSON.stringify([{
+      id: 'provider-levels',
+      model: 'deepseek-v4.1-flash',
+      apiKeyConfigured: true,
+      reasoningEffortLevels: ['off', 'low'],
+      reasoningEffortMap: { off: 'none', low: 'low', high: 'high', max: 'max' },
+    }]));
+    const metadata = loadSharedModelMetadata({ userDataPath });
+    assert.deepEqual(metadata?.supportedReasoningEfforts, ['off', 'low']);
+  } finally {
+    rmSync(userDataPath, { recursive: true, force: true });
+  }
+});
+
 test('shared metadata preserves context choices and selected values without reading secrets', () => {
   const userDataPath = mkdtempSync(path.join(os.tmpdir(), 'peer-shared-options-'));
   try {
