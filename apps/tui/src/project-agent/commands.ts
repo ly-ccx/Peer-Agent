@@ -1,3 +1,5 @@
+import { isSlashCommandInput } from '../composer-image-paths.ts';
+
 export type ProjectCommand =
   | { kind: 'text'; text: string }
   | { kind: 'retry_input'; inputId: string }
@@ -10,7 +12,9 @@ export type ProjectCommand =
 
 export function parseProjectCommand(input: string): ProjectCommand {
   const text = input.trim();
-  if (!text.startsWith('/')) return {kind:'text',text};
+  // Share the classic composer's rule: `/var/...` and `/Users/...` are pasted paths,
+  // not commands. Without this, a pasted image path is dropped as an invalid command.
+  if (!isSlashCommandInput(text)) return {kind:'text',text};
   const [name, ...args] = text.slice(1).split(/\s+/);
   if (['bots','tasks','memory','objectives','cards','diagnostics'].includes(name!) && !args.length) return {kind:'view',view:name as any};
   if (['takeover','classic','older','latest','help'].includes(name!) && !args.length) return {kind:name as any};

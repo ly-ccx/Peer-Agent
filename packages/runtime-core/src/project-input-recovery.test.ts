@@ -130,3 +130,18 @@ test('resource feedback survives pending input recovery/retry; later draft edits
   assert.equal(f.calls[1]!.inputId, input.inputId); assert.equal(f.calls[1]!.resourceFeedback![0]!.id, 'selection-a');
   assert.equal(session.getSnapshot().draft.resourceFeedback![0]!.id, 'selection-b');
 });
+
+test('staging an image attachment on the draft then sending submits the bytes without needing message text', async () => {
+  const f = fixture(), session = f.make(); await session.load();
+  const image: ProjectInputAttachment = { id: 'image-abc', name: 'shot.png', mimeType: 'image/png', size: 70,
+    sourceKind: 'user_upload', kind: 'image', dataUrl: `data:image/png;base64,${'A'.repeat(4)}` };
+  // This is the exact order ProjectApp uses: draft first, then a text-less send.
+  // Passing text here instead would trip INPUT_CHANGED against the edited draft.
+  session.edit({ text: '', attachments: [image] }); await session.flush();
+  const result = await session.send();
+  assert.equal(result.ok, true);
+  assert.equal(f.calls.length, 1);
+  assert.deepEqual(f.calls[0]!.attachments, [image]);
+  assert.equal(f.calls[0]!.text, '');
+  assert.deepEqual(session.getSnapshot().draft.attachments, []);
+});

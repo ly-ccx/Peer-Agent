@@ -46,3 +46,19 @@ test('reply echo truncates by display columns with an ellipsis',()=>{
     expect(echoed).not.toContain('\n');
   }
 });
+test('pasted image paths are messages, not invalid slash commands',()=>{
+  // The reported failure: a pasted otty-paste image path was swallowed as an invalid
+  // command, so the message never reached the bot.
+  const pasted='/var/folders/p4/c4lxg6l12h1dt1_lkwcf63z80000gn/T/otty-paste/image-1794530499921.png 为什么样式没有和之前普通对话的版本一样，层次分明';
+  expect(parseProjectCommand(pasted)).toEqual({kind:'text',text:pasted});
+  expect(parseProjectCommand('/var/folders/x/otty-paste/image-1.png')).toEqual({kind:'text',text:'/var/folders/x/otty-paste/image-1.png'});
+  expect(parseProjectCommand('/Users/admin/Desktop/shot.PNG')).toEqual({kind:'text',text:'/Users/admin/Desktop/shot.PNG'});
+  expect(parseProjectCommand('~/Desktop/a.png')).toEqual({kind:'text',text:'~/Desktop/a.png'});
+  // Real commands must keep working after the exclusion rule.
+  expect(parseProjectCommand('/diagnostics')).toEqual({kind:'view',view:'diagnostics'});
+  expect(parseProjectCommand('/help')).toEqual({kind:'help'});
+  expect(parseProjectCommand('/task 3')).toEqual({kind:'task',number:3});
+  expect(parseProjectCommand('/answer 2 please try again')).toEqual({kind:'card',operation:'answer',number:2,text:'please try again'});
+  // An unknown command is still rejected; only paths are exempt.
+  expect(parseProjectCommand('/nope')).toEqual({kind:'invalid'});
+});
