@@ -7,7 +7,7 @@ const keyOf = entry => JSON.stringify([entry.kind,entry.parentSeq===null?'root':
 
 /** Pure controller policy. Signals return metadata, never call a product entry or confirm G2. */
 export function createE3SignalAdapter({ epoch, startedMs, expectedIdentity, maxEvents = 2 } = {}) {
-  if (!epoch || !Number.isFinite(startedMs) || !expectedIdentity || !Number.isInteger(maxEvents) || maxEvents < 1 || maxEvents > 2) throw Error('e3_signal_contract_required');
+  if (!epoch || !Number.isFinite(startedMs) || startedMs<0 || typeof expectedIdentity!=='string' || !expectedIdentity || !Number.isInteger(maxEvents) || maxEvents < 1 || maxEvents > 2) throw Error('e3_signal_contract_required');
   const learning=[],known=new Set(),used=new Set(),seenRoots=new Set();let baseline,bracketed=false,stopped=false,reason,pending,inFlight,events=0,lastNewExposureMs=startedMs,lastNow=startedMs,lastMarkers=[];
   function stop(why) { stopped=true;reason=why;pending=null;return api.state(); }
   function offer(exposure, signal, detail) {
@@ -27,10 +27,11 @@ export function createE3SignalAdapter({ epoch, startedMs, expectedIdentity, maxE
         if(!Number.isSafeInteger(entry.seq)||entry.seq<1||entry.parentSeq!==null&&(!Number.isSafeInteger(entry.parentSeq)||entry.parentSeq<1||entry.parentSeq>=entry.seq))return stop('entry-parent-chain-invalid');
         if(entry.end===null||!entry.portSequence.length)continue;
         const key=keyOf(entry),novel=!known.has(key);if(novel&&known.size>=256)return stop('signal-exposure-cap');known.add(key);
-        if(novel){lastNewExposureMs=nowMs;if(baseline&&bracketed)offer(key,'new-mapped-exposure',{kind:entry.kind,seq:entry.seq});}
+        if(novel){lastNewExposureMs=nowMs;if(baseline&&bracketed)offer(key,'new-mapped-exposure',{kind:entry.kind,seq:entry.seq,start:entry.start,end:entry.end});}
       }
       for(const row of rows){
         if(row.origin!=='natural')continue;
+        if(!Number.isFinite(row.start)||!Number.isFinite(row.end)||row.start<0||row.end<row.start||row.end>nowMs)return stop('natural-clock-invalid');
         const identity=fullIdentity(row);
         if(!identity){if(row.matches&&(!row.rootMethod||row.rootMethod==='list'))return stop('natural-read-graph-changed');continue;}
         if(identity!==expectedIdentity)return stop('natural-input-output-changed');
@@ -40,7 +41,7 @@ export function createE3SignalAdapter({ epoch, startedMs, expectedIdentity, maxE
         if(seenRoots.size>=256)return stop('signal-root-cap');seenRoots.add(rootKey);
         const total=row.evidence.reduce((n,e)=>n+e.userMs,0);
         if(!baseline){
-          if(nowMs>=startedMs+60000&&learning.length<5)learning.push(row);
+          if(row.start>=startedMs+60000&&learning.length<5)learning.push(row);
           if(learning.length===5)baseline={totalMs:median(learning.map(r=>r.evidence.reduce((n,e)=>n+e.userMs,0))),
             positions:row.evidence.map((_,i)=>median(learning.map(r=>r.evidence[i].userMs)))};
           continue;
@@ -64,7 +65,7 @@ export function createE3SignalAdapter({ epoch, startedMs, expectedIdentity, maxE
     },
     complete(id) { if(inFlight?.id!==id)throw Error('e3_signal_unknown_event');inFlight=null;return api.state(); },
     stop,
-    state() { return { stopped,reason,baseline,learningRoots:learning.length,bracketed,events,pending:pending?structuredClone(pending):null,inFlight:inFlight?structuredClone(inFlight):null,knownExposures:known.size,lastMarkers:structuredClone(lastMarkers),
+    state() { return { stopped,reason,baseline:baseline?structuredClone(baseline):undefined,learningRoots:learning.length,bracketed,events,pending:pending?structuredClone(pending):null,inFlight:inFlight?structuredClone(inFlight):null,knownExposures:known.size,lastMarkers:structuredClone(lastMarkers),
       notDenseResidualConfirmation:true }; },
   };
   return api;
