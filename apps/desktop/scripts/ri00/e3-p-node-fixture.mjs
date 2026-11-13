@@ -1,0 +1,9 @@
+import fs from'node:fs';import path from'node:path';import{createHash}from'node:crypto';import inspector from'node:inspector';import{e3InstallerSource}from'./e3-install.mjs';
+const dir=process.argv[2];if(!dir||!fs.existsSync(dir)||!inspector.url())throw Error('p0_owned_node_directory_and_inspector_required');
+fs.writeFileSync(path.join(dir,'evidence-index.jsonl'),'{}\n',{mode:0o600});const data=[{}],value=[{}],bytes=Buffer.alloc(256*1024,0x5a);let roots=0;
+const store={getStoreDir:()=>dir,getPlan:()=>({}),listEvidenceIndex(){for(let i=0;i<64;i++)createHash('sha256').update(bytes).digest();return data;}},supervisor={list(){if(++roots>9)throw Error('p0_fixture_root_cap');for(let i=0;i<12;i++){store.getPlan();store.listEvidenceIndex();}return value;}},original={list:supervisor.list,index:store.listEvidenceIndex,plan:store.getPlan};
+const install=Function('return ('+e3InstallerSource()+')')(),site=install.call(store,supervisor,{workspaceId:'p0-fixture'},{longWatch:true,eventLoopReads:true,ownedExperiment:true,profileMarkers:true,exposureLedger:true,durationMs:80000,readCpuLimitMs:8000,leaseMs:90000,queue:{owner:'p0-fixture',epoch:'p0-fixture',allowProfileMarkers:true}});
+globalThis.__e3Owned={...site,renew:()=>site.probe.renew(),entries:{take:()=>({entries:[],state:{metadataErrors:0}}),ack:()=>true}};
+const timer=setTimeout(()=>{finish();process.exit(124);},85000);timer.unref();
+function finish(){const stopped=site.probe.stop();const report={stopped,roots,owners:{list:supervisor.list===original.list,index:store.listEvidenceIndex===original.index,plan:store.getPlan===original.plan},cpu:process.cpuUsage()};fs.writeFileSync(path.join(dir,'exit.private.json'),JSON.stringify(report),{mode:0o600});delete globalThis.__e3Owned;return report;}
+process.stdin.resume();process.stdin.once('end',()=>{finish();process.exit(0);});console.log(JSON.stringify({ready:true,pid:process.pid,url:inspector.url(),node:process.versions.node}));

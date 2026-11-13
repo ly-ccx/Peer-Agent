@@ -1,5 +1,5 @@
 /** Serialized with the probe. Requests enqueue metadata; only setImmediate executes reads. */
-export function createReadTicketQueue(probe,{owner,epoch,allowExposure=false,maxQueueMs=5000}={}){
+export function createReadTicketQueue(probe,{owner,epoch,allowExposure=false,allowProfileMarkers=false,maxQueueMs=5000}={}){
   if(typeof owner!=='string'||!owner||owner.length>128||typeof epoch!=='string'||!epoch||epoch.length>128
     ||!Number.isInteger(maxQueueMs)||maxQueueMs<1||maxQueueMs>5000)throw Error('read_ticket_config_invalid');
   const {performance}=process.getBuiltinModule('perf_hooks');
@@ -33,7 +33,7 @@ export function createReadTicketQueue(probe,{owner,epoch,allowExposure=false,max
     attachCompletionNotice(name){if(stopped||completionNotice||typeof name!=='string'||!/^__ri00_controller_done_[a-f0-9]{32}$/.test(name)||typeof globalThis[name]!=='function')throw Error('read_ticket_notice_invalid');completionNotice={name,fn:globalThis[name]};return true;},
     detachCompletionNotice:detachNotice,
     request({id,kind,label,sourceEpoch=epoch,ttlMs=maxQueueMs}={}){
-      if(!Number.isSafeInteger(id)||id<1||!['dense','witness','order-index-first','order-supervisor-first'].includes(kind)
+      if(!Number.isSafeInteger(id)||id<1||!(['dense','witness','order-index-first','order-supervisor-first'].includes(kind)||allowProfileMarkers&&['clock-start','clock-end'].includes(kind))
         ||typeof label!=='string'||!label||label.length>128||sourceEpoch!==epoch||!Number.isInteger(ttlMs)||ttlMs<1||ttlMs>maxQueueMs
         ||kind.startsWith('order-')&&!allowExposure)throw Error('read_ticket_request_invalid');
       if(slot){if(slot.id===id&&slot.kind===kind&&slot.label===label&&slot.ttlMs===ttlMs)return view(slot);throw Error('read_ticket_slot_occupied');}

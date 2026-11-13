@@ -4,6 +4,7 @@ export function createDenseResidualProbe(supervisor,payload,options={}){
   if(!Number.isInteger(durationMs)||durationMs<100||durationMs>(long?14400000:1200000))throw Error('bounded_dense_duration_required');
   const leaseMs=options.leaseMs??90000;
   if(options.ownedExperiment&&(!options.eventLoopReads||!long||process.execPath.endsWith('/Peer Agent.app/Contents/MacOS/Peer Agent')))throw Error('dense_owned_experiment_required');
+  if(options.profileMarkers&&!options.ownedExperiment)throw Error('dense_owned_profile_marker_required');
   const maxReadCpuMs=options.ownedExperiment?300000:60000;
   const cpuLimits={read:options.readCpuLimitMs??60000,native:options.nativeCpuLimitMs??3000,probe:options.probeCpuLimitMs??5000};
   if(Object.entries(cpuLimits).some(([k,v])=>!Number.isFinite(v)||v<=0||v>({read:maxReadCpuMs,native:3000,probe:5000}[k])))throw Error('bounded_dense_cpu_limits_required');
@@ -122,11 +123,22 @@ export function createDenseResidualProbe(supervisor,payload,options={}){
     return {minor,major,incremental,observedOverlapMs:overlap,absenceNotProven:true};
   }
   const annotate=row=>({...row,gc:overlapGc(row),...(long?{evidence:row.evidence.map(e=>({...e,gc:overlapGc(e)}))}:{})});
+  function e3BoundaryStart(label,request){return root('controlled',supervisor,[{workspaceId:payload.workspaceId}],label,originalList,request);}
+  function e3BoundaryEnd(label,request){return root('controlled',supervisor,[{workspaceId:payload.workspaceId}],label,originalList,request);}
+  const boundaryStamp=()=>{const hrBefore=Number(process.hrtime.bigint())/1e6,performanceMs=performance.now(),hrAfter=Number(process.hrtime.bigint())/1e6;return{hrBefore,performanceMs,hrAfter};};
   function perform(kind,label,ticket=null){
     if(stopped)throw Error('dense_probe_stopped');limits();if(stopped)throw Error('dense_probe_budget_exhausted');
-    if(!['dense','witness','exposure-index','exposure-supervisor'].includes(kind)||bare&&kind!=='dense')throw Error('dense_read_kind_invalid');
-    const count=state.controlledRows,request=ticket?{...ticket,kind}:null;
-    if(kind==='exposure-index')root('controlled',store,[],label,originalIndex,request);
+    const marker=kind==='clock-start'||kind==='clock-end';
+    if(!['dense','witness','exposure-index','exposure-supervisor'].includes(kind)&&!(marker&&options.profileMarkers)||bare&&kind!=='dense')throw Error('dense_read_kind_invalid');
+    const count=state.controlledRows,request=ticket?{...ticket,kind:marker?'dense':kind}:null;
+    if(marker){
+      const before=boundaryStamp();let after;
+      try{if(kind==='clock-start')e3BoundaryStart(label,request);else e3BoundaryEnd(label,request);}finally{after=boundaryStamp();
+        const row=rows.at(-1);if(state.controlledRows===count+1&&row){const cost=threadTotal();row.profileBoundary={name:kind==='clock-start'?'e3BoundaryStart':'e3BoundaryEnd',before,after};
+          // The marker finishes after keep(); re-account its added metadata before any ACK.
+          const i=rows.length-1,n=Buffer.byteLength(JSON.stringify(row));state.retainedRowBytes+=n-rowBytes[i];rowBytes[i]=n;state.probeCpuMs+=threadTotal()-cost;limits();}}
+    }
+    else if(kind==='exposure-index')root('controlled',store,[],label,originalIndex,request);
     else root('controlled',supervisor,[{workspaceId:payload.workspaceId}],label,originalList,request);
     if(state.controlledRows!==count+1)throw Error('dense_read_row_not_recorded');return rows.at(-1);
   }

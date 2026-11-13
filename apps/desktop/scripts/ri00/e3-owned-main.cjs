@@ -16,10 +16,10 @@ async function install(){
  const inspector=require('node:inspector');inspectorSession=new inspector.Session();inspectorSession.connect();
  globalThis.__e3InstallPorts=ports;
  const options={longWatch:true,eventLoopReads:true,exposureLedger:true,ownedExperiment:true,durationMs:cfg.hostDeadlineMs||180000,
-  leaseMs:cfg.leaseMs||90000,readCpuLimitMs:cfg.readCpuLimitMs||60000,probeCpuLimitMs:5000,nativeCpuLimitMs:3000,
+  leaseMs:cfg.leaseMs||90000,readCpuLimitMs:cfg.readCpuLimitMs||60000,probeCpuLimitMs:5000,nativeCpuLimitMs:3000,profileMarkers:cfg.profileMarkers===true,
   notificationName:binding,closeInspectorOnWatchdog:cfg.closeInspectorOnWatchdog===true,
   ...(cfg.ownedCounterPath?{ownedPassCounterKey:'__ri00_owned_pass_counter'}:{}),
-  queue:{owner:cfg.label,epoch:cfg.epoch,allowExposure:cfg.allowExposure===true}};
+  queue:{owner:cfg.label,epoch:cfg.epoch,allowExposure:cfg.allowExposure===true,allowProfileMarkers:cfg.profileMarkers===true}};
  globalThis.__e3InstallOptions=options;
  const post=(method,params)=>new Promise((resolve,reject)=>inspectorSession.post(method,params,(e,r)=>e?reject(e):resolve(r)));
  if(cfg.site&&cfg.mode==='production'){
