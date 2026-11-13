@@ -1,6 +1,11 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from'node:fs';import os from'node:os';import path from'node:path';
 import {createDenseResidualProbe} from './dense-residual-probe.mjs';
 
+test('stop preserves the exact unacknowledged long batch even after its cursor advanced',async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ri00-stop-batch-'));fs.writeFileSync(path.join(dir,'evidence-index.jsonl'),'{}\n');const store={getStoreDir:()=>dir,listEvidenceIndex:()=>[{}]},host={list(){store.listEvidenceIndex();return[{}];}},probe=createDenseResidualProbe.call(store,host,{workspaceId:'fixture'},{longWatch:true,durationMs:10000});
+ t.after(()=>{probe.stop();fs.rmSync(dir,{recursive:true,force:true});});host.list({workspaceId:'fixture'});const promise=probe.take(),first=await promise;assert.equal(first.rows.length,1);probe.stop();assert.equal(probe.take(),promise);assert.equal(await probe.take(),first);probe.ack();assert.equal((await probe.take()).rows.length,0);probe.ack();
+});
+
 test('owned counter uses 26 fixed slots, OFF calls none, and counter failure preserves the original read error',async t=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ri00-pass-work-'));fs.writeFileSync(path.join(dir,'evidence-index.jsonl'),'{}\n');
  const key='__ri00_owned_test_counter',calls=[],data=[{}],error=Error('original-read'),store={getStoreDir:()=>dir,listEvidenceIndex:()=>data};let fail=false,counterFail=false;

@@ -156,7 +156,7 @@ export function createDenseResidualProbe(supervisor,payload,options={}){
     ack(){const before=threadTotal();pendingTake=null;if(long){rows.splice(0,cursor);state.retainedRowBytes-=rowBytes.splice(0,cursor).reduce((s,x)=>s+x,0);cursor=0;
       const cutoff=Math.min(performance.now()-120000,...rows.map(r=>r.start));let n=0;while(n<gcCursor&&gc[n].start+gc[n].duration<cutoff)n++;gc.splice(0,n);gcCursor-=n;
       state.probeCpuMs+=threadTotal()-before;limits();}return true;},
-    stop(reason='controller'){clearTimeout(timer);clearTimeout(leaseTimer);clearImmediate(notice);pendingTake=null;readQueue?.stop(reason);if(!stopped){stopped=true;
+    stop(reason='controller'){clearTimeout(timer);clearTimeout(leaseTimer);clearImmediate(notice);if(!long)pendingTake=null;readQueue?.stop(reason);if(!stopped){stopped=true;
       for(const e of observer.takeRecords()){if(gc.length<(long?32768:16384))gc.push({start:e.startTime,duration:e.duration,kind:e.detail?.kind});else state.gcDropped++;}observer.disconnect();
       const a=store.listEvidenceIndex===index,b=supervisor.list===list,c=originalPlan&&store.getPlan===plan;if(a)store.listEvidenceIndex=originalIndex;if(b)supervisor.list=originalList;if(c)store.getPlan=originalPlan;
       let aliasesRestored=true;for(const port of extraRoots){if(supervisor[port.key]===port.wrapped)supervisor[port.key]=port.original;else if(supervisor[port.key]!==port.original)aliasesRestored=false;}

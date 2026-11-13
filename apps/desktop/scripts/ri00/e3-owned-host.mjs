@@ -18,7 +18,11 @@ export async function startOwnedE3Host(config){
  const api={child,closed,output:config.output,
   rpc(method,args={}){return new Promise((resolve,reject)=>{if(child.exitCode!==null||child.signalCode!==null){reject(Error('e3_owned_process_closed'));return;}
    const id=++seq,timer=setTimeout(()=>{pending.delete(id);reject(Error('e3_owned_rpc_timeout:'+method));},20000);pending.set(id,{resolve,reject,timer});child.stdin.write(JSON.stringify({id,method,args})+'\n');});},
-  async close(options={}){try{return await api.rpc('shutdown',options);}finally{child.stdin.end();let timeout;await Promise.race([closed,new Promise(r=>{timeout=setTimeout(r,3000);})]);clearTimeout(timeout);if(child.exitCode===null&&child.signalCode===null)child.kill('SIGTERM');await closed;}}
+  async close(options={}){let shutdownTimer;try{return await Promise.race([api.rpc('shutdown',options),new Promise((_,reject)=>{shutdownTimer=setTimeout(()=>reject(Error('e3_owned_shutdown_timeout')),5000);})]);}
+   finally{clearTimeout(shutdownTimer);child.stdin.end();
+    const settled=async ms=>{let timer;const value=await Promise.race([closed.then(()=>true),new Promise(r=>{timer=setTimeout(()=>r(false),ms);})]);clearTimeout(timer);return value;};
+    if(!await settled(3000)){child.kill('SIGTERM');if(!await settled(1000)){child.kill('SIGKILL');if(!await settled(1000)){child.stdout.destroy();child.stderr.destroy();child.stdin.destroy();if(!await settled(1000))throw Error('e3_owned_exit_unverified');}}}
+   }}
  };
  try{api.ready=await readyPromise;return api;}catch(error){child.kill('SIGTERM');await closed;throw error;}
 }
