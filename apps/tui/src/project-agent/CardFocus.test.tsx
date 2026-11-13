@@ -34,7 +34,7 @@ test('the familiarize card is operable from the conversation view, not only via 
     await act(async()=>{await f.host.tick();await f.client.poll();});
     const withCard=await f.frame();
     expect(withCard).toContain('familiarize myself with this project');
-    expect(withCard).toContain('Message this bot, or /help');
+    expect(withCard).toContain('Message this bot');
 
     let started=0;
     const realStart=(f.host.lifecycle as any).startFamiliarize.bind(f.host.lifecycle);
@@ -44,15 +44,16 @@ test('the familiarize card is operable from the conversation view, not only via 
     await f.press('TAB');
     const focused=await f.frame();
     expect(focused).toContain('familiarize myself with this project');
-    expect(focused).toContain('1. Familiarize with project');
-    expect(focused).toContain('Message this bot, or /help');
+    expect(focused).toContain('Familiarize with project');
+    expect(focused).not.toContain('1. Familiarize with project');
+    expect(focused).not.toContain('Message this bot');
     expect(focused).not.toContain('Needs you');
     expect(focused).not.toContain('Tab to select cards');
 
     // Esc 把键盘交回 composer：此时回车不再执行卡片动作。
     await f.press('ESCAPE');
     const released=await f.frame();
-    expect(released).toContain('Message this bot, or /help');
+    expect(released).toContain('Message this bot');
     expect(released).toContain('familiarize myself with this project');
     await f.press('RETURN');
     await act(async()=>{await Bun.sleep(120);});
@@ -82,7 +83,7 @@ test('Enter in card focus actually runs the selected action',async()=>{
     await f.press('TAB');
     const focused=await f.frame();
     expect(focused).toContain('familiarize myself with this project');
-    expect(focused).toContain('Message this bot, or /help');
+    expect(focused).toContain('Familiarize with project');
     expect(focused).not.toContain('Needs you');
     await f.press('RETURN');
     await act(async()=>{await Bun.sleep(120);});
@@ -98,7 +99,7 @@ test('typing while the card has focus returns the keyboard to the composer',asyn
     expect(await f.frame()).toContain('familiarize myself with this project');
 
     await f.press('TAB');
-    expect(await f.frame()).toContain('Message this bot, or /help');
+    expect(await f.frame()).toContain('Familiarize with project');
 
     // 焦点在卡片上时直接打字：字符进入 composer，随后回车不再执行卡片。
     let started=0;

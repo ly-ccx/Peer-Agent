@@ -6,6 +6,8 @@ import { composerEnterAction } from '../runtime-controls.ts';
 import {useEffect,useMemo,useRef,useState} from 'react';
 import {useKeyboard,useTerminalDimensions} from '@opentui/react';
 import type {ScrollBoxRenderable,TextareaRenderable} from '@opentui/core';
+import {ComposerRunningStatusBar} from '../composer-status-view.tsx';
+import {RUNNING_ACTIVITY_LABEL} from '../tool-result-summary.ts';
 import {ThemedText,ThemedTextarea} from '../themed-primitives.tsx';
 import {COLOR,PICKER_CHROME,type TuiThemeStore} from '../tui-theme.ts';
 import type {TuiLocale} from '../tui-language.ts';
@@ -18,7 +20,7 @@ import {BotConversationView} from './BotConversationView.tsx';
 import {CardLine} from './CardLine.tsx';
 import {cardAction,createCardNumbers,parseProjectCommand,terminalText} from './commands.ts';
 import {runProjectCardAction} from './card-actions.ts';
-import {everydaySessions,projectCopy,projectStatus,projectSessionStatus} from './project-copy.ts';
+import {actionLabel,everydaySessions,projectCopy,projectStatus,projectSessionStatus} from './project-copy.ts';
 import {isRecoveryCard} from './card-presentation.ts';
 import {isEnterKeyName} from '../runtime-controls.ts';
 
@@ -27,6 +29,8 @@ type Client=ReturnType<typeof createTuiProjectClient>;
 type View='bind'|'bots'|'conversation'|'tasks'|'task'|'memory'|'objectives'|'cards'|'diagnostics'|'help';
 export function ProjectApp({host,client,initialView,workspacePath,locale,themeStore,onClassic,onQuit}:{host:Host;client:Client;initialView:'bind'|'bots'|'conversation';workspacePath:string;locale:TuiLocale;themeStore:TuiThemeStore;onClassic():Promise<void>;onQuit():void}) {
   const terminal=useTerminalDimensions(), editor=useRef<TextareaRenderable|null>(null),numbers=useRef(createCardNumbers());
+  const [frame,setFrame]=useState(0);
+  useEffect(()=>{const timer=setInterval(()=>setFrame(current=>current+1),280);return ()=>clearInterval(timer);},[]);
   const [snapshot,setSnapshot]=useState(()=>client.current()),[view,setView]=useState<View>(initialView),[selected,setSelected]=useState(0);
   const [cardIndex,setCardIndex]=useState(0),[option,setOption]=useState(0),[bindYes,setBindYes]=useState(true),[detail,setDetail]=useState<any>(null);
   const taskScroll=useRef<ScrollBoxRenderable|null>(null);
@@ -46,6 +50,11 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
     actions:[{id:'familiarize',channel:'project-agent:start-familiarize',payload:{}}],
   }]}]:snapshot.messages;
   const cards=numbers.current.project(snapshot.workspaceId,displayedMessages);
+  const runningSession=everydaySessions(snapshot.sessions).find((session:any)=>['queued','starting','running','verifying'].includes(session.status));
+  const slashCommands=['classic','diagnostics','bots','tasks','memory','objectives','cards','takeover','older','latest'];
+  const slashQuery=inputDraft.session.getSnapshot().draft.text;
+  const slashOpen=slashQuery.startsWith('/') && !slashQuery.includes(' ');
+  const slashItems=slashCommands.filter(command=>command.startsWith(slashQuery.slice(1)));
   const focusedCard=useRef<string|null>(null);
   useEffect(()=>{
     if(!cardFocus){focusedCard.current=null;return;}
@@ -88,7 +97,7 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
     if(command.kind==='takeover'){void perform(()=>host.takeover(),copy('takeover'));return;}
     if(command.kind==='older'){inputDraft.session.edit({text:''});void client.earlier().then(setSnapshot);setEarlier(true);setView('conversation');return;}
     if(command.kind==='latest'){inputDraft.session.edit({text:''});void client.latest().then(setSnapshot);setEarlier(false);setView('conversation');return;}
-    if(command.kind==='help'){inputDraft.session.edit({text:''});setView('help');return;}
+    if(command.kind==='help'){inputDraft.session.edit({text:'/'});return;}
     if(command.kind==='task'){
       const session=everydaySessions(snapshot.sessions)[command.number-1];if(!session){setNotice(copy('invalid'));return;}
       inputDraft.session.edit({text:''});setDetail(host.supervisor.get({sessionId:session.sessionId,detail:'report'}));setView('task');return;
@@ -145,6 +154,11 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
     if(view!=='cards'&&!cardFocus&&composer&&!composer.focused&&text!==undefined){
       key.preventDefault();key.stopPropagation();
       composer.focus();composer.insertText(text);inputDraft.changed();return;
+    }
+    if(view==='conversation' && cardFocus && !editor.current?.plainText && cards.length) {
+      if(key.name==='left'||key.name==='right'){key.preventDefault();setOption(Math.max(0,Math.min((cards[cardIndex]?.card.actions?.length??1)-1,option+(key.name==='right'?1:-1))));return;}
+      if(key.name==='up'||key.name==='down'){key.preventDefault();selectFocusedCard(Math.max(0,Math.min(cards.length-1,cardIndex+(key.name==='down'?1:-1))));setOption(0);return;}
+      if(isEnterKeyName(key.name)){key.preventDefault();selectedCardAction();return;}
     }
     if(view==='conversation') {
       const intent=cardFocusIntent(key,cardFocus,cards.length>0);
@@ -204,7 +218,7 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
       </box>
     </box>
       :view==='bots'?<BotListView bots={snapshot.bots} selected={selected} locale={locale} height={terminal.height} width={Math.max(24, terminal.width - 2)}/>
-      :view==='conversation'?<BotConversationView messages={displayedMessages} cards={cards} locale={locale} isHost={snapshot.isHost} selectedCard={cardIndex} option={option} cardFocus={cardFocus}/>
+      :view==='conversation'?<BotConversationView messages={displayedMessages} cards={cards} sessions={everydaySessions(snapshot.sessions)} locale={locale} isHost={snapshot.isHost} selectedCard={cardIndex} option={option} cardFocus={cardFocus}/>
       :view==='cards'?<box flexDirection="column" flexGrow={1}><ThemedText fg={COLOR.textSoft}>{copy('cards')} · {cards.length}</ThemedText>{currentCard?<CardLine row={currentCard} locale={locale} isHost={snapshot.isHost} selected option={option}/>:<ThemedText fg={COLOR.muted}>{copy('empty')}</ThemedText>}<ThemedText fg={COLOR.muted}>{copy('cardKeys')}</ThemedText></box>
       :<scrollbox ref={view==='task'?taskScroll:undefined} flexGrow={1} flexBasis={view==='task'?0:undefined} minHeight={0}><ThemedText fg={COLOR.textSoft}>{view==='help'?copy('help'):projectStatus(locale,view)}</ThemedText>{records?.error?<ThemedText fg={COLOR.info}>{copy('recordsUnavailable')}</ThemedText>:null}{rows.length?rows.map((row,index)=><ThemedText key={index} selectable fg={COLOR.text} marginBottom={1}>{row}</ThemedText>):view!=='help'&&!records?.error?<ThemedText fg={COLOR.muted}>{copy('empty')}</ThemedText>:null}
         {view==='task'&&detail?.workspaceId===snapshot.workspaceId?resultRefs.map((ref,index)=><ThemedText key={ref} fg={COLOR.link} selectable>{`/result ${index+1} · ${copy('resultOpen')} ${ref.slice(-12)}`}</ThemedText>):null}
@@ -214,11 +228,13 @@ export function ProjectApp({host,client,initialView,workspacePath,locale,themeSt
     <ThemedText fg={COLOR.info}>{notice}</ThemedText>
     {snapshot.workspaceId?<InputRecoveryStatus state={inputDraft.state} locale={locale}/>:null}
     {!['bind','bots','cards'].includes(view)?<box flexDirection="column" width="100%" flexShrink={0}>
+      {slashOpen?<box flexDirection="column" border={['top']} borderColor={COLOR.subtle}>{slashItems.length?slashItems.map(command=><ThemedText key={command} fg={COLOR.textSoft}>/{command}</ThemedText>):<ThemedText fg={COLOR.muted}>{copy('invalid')}</ThemedText>}</box>:null}
+      {runningSession?<ComposerRunningStatusBar activity={RUNNING_ACTIVITY_LABEL} statusLabel={`${terminalText(runningSession.title||runningSession.question||projectSessionStatus(locale,runningSession))} · ${projectSessionStatus(locale,runningSession)}`} frame={frame}/>:null}
       <ThemedText fg={COLOR.subtle} wrapMode="none">{PICKER_CHROME.separator.repeat(Math.max(1, terminal.width - 2))}</ThemedText>
       <box flexDirection="row" width="100%">
         <ThemedText fg={COLOR.accent}>{PICKER_CHROME.caretSelected}</ThemedText>
         <box flexGrow={1} minWidth={0}>
-          <ThemedTextarea ref={editor} focused={!busy&&!cardFocus} width="100%" height={3} placeholder={copy('composer')} wrapMode="char" onContentChange={()=>{inputDraft.changed();}} onKeyDown={event=>{
+          <ThemedTextarea ref={editor} focused={!busy&&!cardFocus} width="100%" height={3} placeholder={view==='conversation' && cardFocus && cards[cardIndex]?.card.actions?.length ? terminalText(actionLabel(locale,cards[cardIndex].card.actions[Math.min(option,cards[cardIndex].card.actions.length-1)])) : copy('composer')} wrapMode="char" onContentChange={()=>{inputDraft.changed();}} onKeyDown={event=>{
             if(busy){event.preventDefault();event.stopPropagation();return;}
             const action=composerEnterAction({keyName:event.name,shift:event.shift,eventType:event.eventType,isComposing:(event as {isComposing?:boolean}).isComposing});
             if(action==='none')return;event.preventDefault();event.stopPropagation();

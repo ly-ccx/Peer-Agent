@@ -55,7 +55,7 @@ for(const view of ['conversation','bots'] as const)test(`F2 opens task mode from
     expect(profile?.status).toBe('active');
     expect(profile?.displayName).toBeTruthy();
     expect(frame).toContain(profile!.displayName);
-    expect(frame).toContain(view==='conversation'?'Message this bot, or /help':'Up/down to select');
+    expect(frame).toContain(view==='conversation'?'Message this bot':'Up/down to select');
     expect(frame).not.toContain('Bind this directory');
     await f.press('F2');await f.frame();
     expect(f.classic()).toBe(1);

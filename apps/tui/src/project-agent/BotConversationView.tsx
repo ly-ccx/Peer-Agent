@@ -4,7 +4,7 @@ import {MarkdownView} from '../markdown-view.tsx';
 import {CardLine} from './CardLine.tsx';import {projectCopy,projectStatus} from './project-copy.ts';
 import {cardSummary,isRecoveryCard} from './card-presentation.ts';
 import {replyEchoText,terminalText,type NumberedCard} from './commands.ts';import type {TuiLocale} from '../tui-language.ts';
-export function BotConversationView({messages,cards,locale,isHost,selectedCard,option,cardFocus}:{messages:readonly any[];cards:readonly NumberedCard[];locale:TuiLocale;isHost:boolean;selectedCard:number;option:number;cardFocus:boolean}) {
+export function BotConversationView({messages,cards,sessions=[],locale,isHost,selectedCard,option,cardFocus}:{messages:readonly any[];cards:readonly NumberedCard[];sessions?:readonly any[];locale:TuiLocale;isHost:boolean;selectedCard:number;option:number;cardFocus:boolean}) {
   const terminal=useTerminalDimensions();
   const byId=new Map(messages.map(row=>[row.id,row]));
   const numbered=new Map(cards.map(row=>[row.card.cardId,row]));
@@ -30,5 +30,6 @@ export function BotConversationView({messages,cards,locale,isHost,selectedCard,o
       {(message.cards??[]).map(renderCard)}
     </box>)}
     {cards.filter(row=>!attached.has(row.card.cardId)).map(row=>renderCard(row.card))}
+    {sessions.length?<box flexDirection="column" marginTop={1}>{sessions.map((session:any)=><ThemedText key={session.sessionId} fg={session.status==='failed'?COLOR.danger:session.status==='completed'?COLOR.success:COLOR.textSoft}>{`${session.status==='running'?'›':session.status==='completed'?'✓':session.status==='failed'?'×':'·'} ${terminalText(session.title||session.sessionId)} · ${projectStatus(locale,session.status||'')}`}</ThemedText>)}</box>:null}
   </scrollbox>;
 }
