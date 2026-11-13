@@ -1,12 +1,13 @@
 import fs from'node:fs';import path from'node:path';import assert from'node:assert/strict';import{execFileSync}from'node:child_process';import{createHash}from'node:crypto';import{fileURLToPath}from'node:url';import{createRequire}from'node:module';
 import{proveE3RegisteredSite}from'./ri00/e3-site-proof.mjs';import{inspectClosure}from'./ri00/trace.mjs';import{loopbackListenerPorts,newlyOwnedPorts,discoverFreshInspector}from'./ri00/inspector-port-owner.mjs';import{e3SynchronousAssemblySource}from'./ri00/e3-site-install.mjs';
+import{startAccountedE3Counter}from'./ri00/e3-accounted-counter.mjs';import{browserMainCounterDelta}from'./ri00/thread-counter-delta.mjs';
 const args=process.argv.slice(2),opt=k=>args[args.indexOf(k)+1];for(const k of['--pid','--output','--budget'])if(!args.includes(k))throw Error('installed_site_arguments');
 const pid=Number(opt('--pid')),output=path.resolve(opt('--output')),budget=JSON.parse(fs.readFileSync(opt('--budget')));assert.equal(budget.kind,'E3-installed-metadata-only-budget');
 if(!Number.isSafeInteger(pid)||pid<2||fs.existsSync(output))throw Error('installed_site_identity_or_output');
 assert.equal(execFileSync('ps',['-p',String(pid),'-o','comm='],{encoding:'utf8'}).trim(),'/Applications/Peer Agent.app/Contents/MacOS/Peer Agent');
 fs.mkdirSync(output,{recursive:true,mode:0o700});const hash=b=>createHash('sha256').update(b).digest('hex'),wait=ms=>new Promise(r=>setTimeout(r,ms)),root=fileURLToPath(new URL('../../../',import.meta.url));
 const r={kind:'E3-installed-metadata-only-not-field',candidate:execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),pid,startedAt:new Date().toISOString(),budgetSha256:hash(fs.readFileSync(opt('--budget'))),businessReads:0,nativeLoaded:false,wrappersInstalled:false,failures:[],passed:false};
-const began=Date.now(),beforeCpu=process.cpuUsage();let ws,seq=0,opened=false,proof,port,inCleanup=false,discoveryChildWallUpperMs=0,globalKey='__ri00_site_metadata_deadline';const pending=new Map();
+const began=Date.now(),beforeCpu=process.cpuUsage();let ws,seq=0,opened=false,proof,port,inCleanup=false,discoveryChildWallUpperMs=0,counter,counterBefore,counterStartupWallMs=0,globalKey='__ri00_site_metadata_deadline';const pending=new Map();
 function ports(){const start=performance.now();try{return loopbackListenerPorts(execFileSync('lsof',['-nP','-a','-p',String(pid),'-iTCP','-sTCP:LISTEN','-Fn'],{encoding:'utf8',timeout:500,maxBuffer:65536}));}catch(e){if(e.status===1&&!String(e.stdout||'').trim())return[];throw e;}finally{discoveryChildWallUpperMs+=performance.now()-start;}}
 const save=()=>fs.writeFileSync(path.join(output,'report.private.json'),JSON.stringify(r),{mode:0o600});
 const post=(method,params={})=>new Promise((resolve,reject)=>{if(!inCleanup&&(Date.now()-began>30000||seq>=1000))return reject(Error('installed_site_wall_or_rpc_budget'));const id=++seq,timer=setTimeout(()=>{pending.delete(id);reject(Error('installed_site_rpc_timeout'));},2000);pending.set(id,{resolve,reject,timer});ws.send(JSON.stringify({id,method,params}));});
@@ -18,6 +19,7 @@ try{
  const asar=createRequire(path.join(root,'apps/desktop/package.json'))('@electron/asar'),file='/Applications/Peer Agent.app/Contents/Resources/app.asar';
  const paths=['electron/main/ipc/catalog-ipc-main.mjs','electron/main/ipc/trusted-window-registry.mjs','electron/main/ipc/register-project-agent-ipc.mjs','electron/main/project-agent/project-agent-application-service.mjs','node_modules/@peer-agent/runtime-node/dist/project-agent/bot-directory.mjs'];
  r.installedModules=paths.map(relative=>({relative,sha256:hash(asar.extractFile(file,relative))}));r.asarStat={size:fs.statSync(file).size,mtimeMs:fs.statSync(file).mtimeMs};
+ const counterStart=performance.now();counter=await startAccountedE3Counter(fileURLToPath(new URL('./ri00/darwin-process-counters.py',import.meta.url)));counterStartupWallMs=performance.now()-counterStart;counterBefore=await counter.read(pid);r.birthBefore=counterBefore.values.ri_proc_start_abstime;
  process.kill(pid,'SIGUSR1');opened=true;const found=await discoverFreshInspector({beforePorts,listeners:ports,readList:async p=>(await fetch(`http://127.0.0.1:${p}/json/list`,{signal:AbortSignal.timeout(300)})).json()});port=found.port;const endpoint={webSocketDebuggerUrl:found.url};
  r.actualPort=port;
  if(!endpoint?.webSocketDebuggerUrl)throw Error('installed_site_endpoint_missing');
@@ -48,7 +50,8 @@ finally{
  ws?.close();if(opened&&port)r.portClosure=await inspectClosure(port,{timeoutMs:Math.max(15000,35000-(Date.now()-began))});
  if(opened&&!r.portClosure?.closed){r.passed=false;r.failures.push({message:'installed_site_port_not_proven_closed'});}
  try{process.kill(pid,0);r.originalProcessAlive=true;}catch{r.originalProcessAlive=false;r.passed=false;}
- r.controllerCpu=process.cpuUsage(beforeCpu);r.discoveryChildWallCpuUpperMs=discoveryChildWallUpperMs;r.elapsedMs=Date.now()-began;r.commandCount=seq;r.finishedAt=new Date().toISOString();
- if(r.elapsedMs>45000||seq>1000||(r.controllerCpu.user+r.controllerCpu.system)/1000+discoveryChildWallUpperMs>2000||!r.mainThreadWindowCpu||r.mainThreadWindowCpu.userMs+r.mainThreadWindowCpu.systemMs>5000){r.passed=false;r.failures.push({message:'installed_site_budget_or_unknown_cost'});}
+ if(counter)try{if(counterBefore&&r.originalProcessAlive){const after=await counter.read(pid);r.sameBirth=after.values.ri_proc_start_abstime===r.birthBefore;r.wholeMainWindow=browserMainCounterDelta(counterBefore,after,counter.ready.timebase,0);}r.counterExit=await counter.close();}catch(error){r.failures.push({message:'site_counter:'+error.message});}
+ r.controllerCpu=process.cpuUsage(beforeCpu);r.discoveryChildWallCpuUpperMs=discoveryChildWallUpperMs;r.counterStartupWallMs=counterStartupWallMs;r.controllerAuxCpuUpperMs=(r.controllerCpu.user+r.controllerCpu.system)/1000+discoveryChildWallUpperMs+counterStartupWallMs+(r.counterExit?.finalCpuMs||0)+(r.counterExit?.shutdownElapsedMs||0);r.elapsedMs=Date.now()-began;r.commandCount=seq;r.finishedAt=new Date().toISOString();
+ if(r.elapsedMs>45000||seq>1000||r.controllerAuxCpuUpperMs>2000||!r.mainThreadWindowCpu||!r.sameBirth||!r.counterExit?.known||!r.wholeMainWindow?.available||r.wholeMainWindow.cpuMs>5000){r.passed=false;r.failures.push({message:'installed_site_budget_or_unknown_cost'});}
  if(r.failures.length)r.passed=false;if(!r.passed)process.exitCode=1;save();console.log(JSON.stringify({passed:r.passed,proof:r.proof,elapsedMs:r.elapsedMs,commandCount:seq,controllerCpu:r.controllerCpu,mainThreadWindowCpu:r.mainThreadWindowCpu,portClosure:r.portClosure,failures:r.failures.map(e=>e.message)}));
 }
