@@ -11,6 +11,12 @@ function fixture(t,{list,ttl=5000,allowExposure=false}={}){
  const queue=createReadTicketQueue(probe,{owner:'test-owner',epoch:'test-source',maxQueueMs:ttl,allowExposure});
  t.after(()=>{probe.stop();fs.rmSync(dir,{recursive:true,force:true});});return {store,host,probe,queue,seen,value,originalIndex,originalList};
 }
+test('completion notice is after the read, expiry is a fact not a read, and later binding owners survive stop',async t=>{
+ const f=fixture(t),name='__ri00_controller_done_'+'a'.repeat(32),notices=[];globalThis[name]=id=>{assert.equal(f.probe.queueContext().activeDepth,0);notices.push(id);};t.after(()=>delete globalThis[name]);
+ f.queue.attachCompletionNotice(name);f.queue.request({id:1,kind:'witness',label:'notice'});assert.deepEqual(notices,[]);await turn();assert.deepEqual(notices,['1']);await f.probe.take();f.probe.ack();f.queue.ack(1);
+ f.queue.request({id:2,kind:'witness',label:'stop-before-run'});const count=f.seen.length;assert.equal(f.probe.stop().restored,true);await turn();assert.equal(f.seen.length,count);assert.equal(f.queue.status(2).state,'expired');assert.deepEqual(notices,['1','2']);assert.equal(globalThis[name],undefined);
+ const g=fixture(t);globalThis[name]=()=>{};g.queue.attachCompletionNotice(name);const later=()=>{};globalThis[name]=later;assert.throws(()=>g.queue.request({id:1,kind:'witness',label:'changed-owner'}),/notice_owner_changed/);assert.equal(g.probe.stop().restored,false);assert.equal(globalThis[name],later);
+});
 test('request inside a synchronous application call executes only after the outer stack returns',async t=>{
  let request,queue;const order=[];const f=fixture(t,{list(input,store,value){order.push('enter');if(!request){request=queue.request({id:1,kind:'witness',label:'first'});order.push('requested');assert.equal(request.state,'queued');assert.equal(queue.status(1).completedRows.length,0);}for(let i=0;i<12;i++)store.listEvidenceIndex();order.push('leave');return value;}});queue=f.queue;
  assert.equal(f.host.list({workspaceId:'fixture'}),f.value);assert.deepEqual(order,['enter','requested','leave']);await turn();assert.deepEqual(order,['enter','requested','leave','enter','leave']);assert.equal(queue.status(1).state,'completed');

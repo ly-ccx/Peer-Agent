@@ -160,7 +160,7 @@ export function createDenseResidualProbe(supervisor,payload,options={}){
       for(const e of observer.takeRecords()){if(gc.length<(long?32768:16384))gc.push({start:e.startTime,duration:e.duration,kind:e.detail?.kind});else state.gcDropped++;}observer.disconnect();
       const a=store.listEvidenceIndex===index,b=supervisor.list===list,c=originalPlan&&store.getPlan===plan;if(a)store.listEvidenceIndex=originalIndex;if(b)supervisor.list=originalList;if(c)store.getPlan=originalPlan;
       let aliasesRestored=true;for(const port of extraRoots){if(supervisor[port.key]===port.wrapped)supervisor[port.key]=port.original;else if(supervisor[port.key]!==port.original)aliasesRestored=false;}
-      restored=(a||store.listEvidenceIndex===originalIndex)&&(b||supervisor.list===originalList)&&(!originalPlan||store.getPlan===originalPlan)&&aliasesRestored;state.stopReason=reason;
+      restored=(a||store.listEvidenceIndex===originalIndex)&&(b||supervisor.list===originalList)&&(!originalPlan||store.getPlan===originalPlan)&&aliasesRestored&&readQueue?.snapshot().noticeOwnerRestored!==false;state.stopReason=reason;
       if(options.entryLedger){try{state.entryAdapter=options.entryLedger.stop(reason);restored=restored&&state.entryAdapter.restored;}catch{state.metadataErrors++;restored=false;}}
       if(reason!=='controller'&&notification)try{notification('stopped');}catch{}
       if(binding){state.bindingRestored=globalThis[binding]===notification;if(state.bindingRestored)delete globalThis[binding];}}
