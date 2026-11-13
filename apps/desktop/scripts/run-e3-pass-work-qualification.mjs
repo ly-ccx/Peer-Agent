@@ -1,5 +1,5 @@
 import fs from'node:fs';import path from'node:path';import assert from'node:assert/strict';import{createHash}from'node:crypto';import{execFileSync}from'node:child_process';import{fileURLToPath}from'node:url';
-import{startOwnedE3Host}from'./ri00/e3-owned-host.mjs';import{startAccountedE3Counter}from'./ri00/e3-accounted-counter.mjs';import{browserMainCounterDelta}from'./ri00/thread-counter-delta.mjs';import{decodePassWork}from'./ri00/pass-work.mjs';import{sourceInventory}from'./ri00/source-archive.mjs';import{productionIdentity}from'./ri00/identity.mjs';
+import{startOwnedE3Host}from'./ri00/e3-owned-host.mjs';import{startAccountedE3Counter}from'./ri00/e3-accounted-counter.mjs';import{browserMainCounterDelta}from'./ri00/thread-counter-delta.mjs';import{decodePassWork}from'./ri00/pass-work.mjs';import{sourceInventory}from'./ri00/source-archive.mjs';import{productionIdentity}from'./ri00/identity.mjs';import{evaluatePassWorkTarget}from'./ri00/e3-pass-work-result.mjs';
 const args=process.argv.slice(2),opt=k=>args[args.indexOf(k)+1];for(const k of['--config','--budget','--parent','--output','--counter-addon'])if(!args.includes(k))throw Error('pass_work_arguments');
 const read=f=>JSON.parse(fs.readFileSync(f)),hash=b=>createHash('sha256').update(b).digest('hex'),base=read(opt('--config')),budget=read(opt('--budget')),parent=read(opt('--parent')),output=path.resolve(opt('--output')),addon=fs.realpathSync(opt('--counter-addon'));
 assert.equal(budget.kind,'E3-N-frozen-before-execution');assert.equal(budget.newBudget.launches,3);assert.equal(budget.newBudget.replacements,0);
@@ -25,18 +25,7 @@ async function point(label,kind='dense'){
  const p={label,row,pmc,work};record.points.push(p);save();guard();return p;
 }
 async function finish(){const end=await host.close({skipAudit:true});await host.closed;record.exit=end;host=null;assert.ok(Object.values(end.owners).every(Boolean));assert.equal(end.stopped.restored,true);assert.equal(end.stopped.bindingRestored,true);assert.equal(end.stopped.readQueue.inFlight,false);assert.equal(end.stopped.readQueue.ticket,null);assert.equal(end.stopped.retainedRowBytes,0);if(end.guard){assert.equal(end.guard.sourceWritesDenied,0);assert.equal(end.readFailures,0);}record.status='completed';save();}
-const median=a=>{const b=[...a].sort((a,b)=>a-b);return b[Math.floor(b.length/2)];};
-function toolGate(r){
- const on=r.blocks.filter(b=>b.enabled),off=r.blocks.filter(b=>!b.enabled),ev=p=>p.row.evidence.reduce((s,e)=>s+e.userMs,0),med=b=>median(b.points.slice(1).map(ev));
- const differences=on.map((b,i)=>med(b)-med(off[i]));const warmRanges=r.blocks.map(b=>{const a=b.points.slice(1).filter(p=>p.row.gc.major===0&&p.row.gc.incremental===0).map(ev);return a.length>=3?Math.max(...a)-Math.min(...a):null;});
- const instructionGap=p=>{const outer=p.pmc.levels.reduce((n,l)=>n+BigInt(l.instructions),0n);return Number(outer-BigInt(p.work.root.instructions))/Number(outer);};
- const checks={allGraphs:r.blocks.every(b=>b.points.every(p=>p.row.evidence.length===12&&p.row.planCalls===parent.expected.planCalls&&p.row.rows===parent.expected.sessions&&p.row.outputSha256===parent.expected.outputSha256&&p.row.evidence.every(e=>e.rows===parent.expected.evidenceRows))),
-  exclusive:r.blocks.every(b=>b.points.every(p=>p.pmc.available&&p.pmc.exclusiveWindow)),boundary:on.every(b=>b.points.every(p=>p.work.boundaryWallMs<=1&&p.work.counterCpuUpperMs<=1)),
-  counters:on.every(b=>b.points.every(p=>{const gap=instructionGap(p);return gap>=0&&gap<=.01&&Math.abs(p.work.root.cpuMs-p.pmc.cpuMs)<=Math.max(2,p.pmc.cpuMs*.05);})),
-  medianOverhead:differences.every(d=>Math.abs(d)<=2),returnStability:Math.abs(med(on[0])-med(on[1]))<15&&Math.abs(med(off[0])-med(off[1]))<15,
-  unchangedWarmGate:warmRanges.every(r=>r!==null&&r<=15)};
- return{checks,passed:Object.values(checks).every(Boolean),differences,warmRanges,maximumBoundaryWallMs:Math.max(...on.flatMap(b=>b.points.map(p=>p.work.boundaryWallMs))),maximumBoundaryCpuMs:Math.max(...on.flatMap(b=>b.points.map(p=>p.work.counterCpuUpperMs))),maximumInstructionGap:Math.max(...on.flatMap(b=>b.points.map(instructionGap)))};
-}
+
 try{
  const input=epoch();report.sourceBefore={sha256:input.sha256,files:input.entries.length};assert.equal(input.sha256,parent.sourceBefore.sha256);assert.deepEqual(report.production,parent.production);
  counter=await startAccountedE3Counter(fileURLToPath(new URL('./ri00/darwin-process-counters.py',import.meta.url)));report.counterRuntime=counter.ready;
@@ -46,7 +35,7 @@ try{
  for(const schedule of budget.schedule.production){await launch(schedule.label,'production');for(let i=0;i<8;i++)await point('warm-'+i);
   for(let block=0;block<4;block++){const enabled=schedule.modes[block];await host.rpc('passCounter',{enabled});const b={enabled,points:[],calibration:[]};record.blocks.push(b);
    for(let i=0;i<8;i++){b.points.push(await point('block-'+block+'-'+i));await wait(150);}for(let i=0;i<3;i++)b.calibration.push(await host.rpc('native'));save();}
-  record.gate=toolGate(record);console.log(JSON.stringify({stage:record.label,gate:record.gate}));
+  record.gate=evaluatePassWorkTarget(record,parent.expected);console.log(JSON.stringify({stage:record.label,gate:record.gate}));
   // Profiling requires a frozen, qualified implementation and BOTH counter targets to pass.
   // No speculative start here: host 1 cannot be kept alive beyond the one-host budget.
   record.profile={started:false,reason:'both-target-tool-gate-and-profile-controller-required'};
