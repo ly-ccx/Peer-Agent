@@ -11,7 +11,7 @@ export function installFr1Recorder({store,roots,entries,foreground=()=>null,noti
   if(typeof originalPlan!=='function'||typeof originalIndex!=='function')throw Error('fr1_store_ports');
   const installed=[],stackIds=new Map(),inFlightEntries=new Set();let stackBytes=0,records=[],retainedBytes=0,seq=0,rootId=0,entryId=0,gcCount=0,activeRoot=null,pending,lease,timer,heartbeat,notice;
   let stopped=false,stopReason,restored,metadataErrors=0,lost=0,selfMs=0,stopAfterRoot;
-  const state={ownerId,roots:0,entries:0,acks:0,lastAckSeq:0,controlledRequests:0,heapGetters:0,nativeCalls:0,rawRootUserMs:0,rawRootSystemMs:0};
+  const state={ownerId,roots:0,entries:0,acks:0,lastAckSeq:0,controlledRequests:0,heapGetters:0,nativeCalls:0,rawRootUserMs:0,rawRootSystemMs:0,stackCaptures:0,stackMaterializations:0};
   const cpu=()=>{const c=process.threadCpuUsage();return(c.user+c.system)/1000;};
   const hash=v=>crypto.createHash('sha256').update(v).digest('hex');
   const stamp=()=>{const s=fs.statSync(indexFile,{bigint:true});return hash(JSON.stringify(['dev','ino','size','mtimeNs','ctimeNs'].map(k=>String(s[k]))));};
@@ -21,13 +21,23 @@ export function installFr1Recorder({store,roots,entries,foreground=()=>null,noti
     seq++;records.push(row);retainedBytes+=bytes;note();return row.seq;}
   function own(){return installed.every(x=>x.object[x.key]===x.replacement);}
   function fatal(why){stopAfterRoot??=why;if(!activeRoot&&api)api.stop(why);}
-  function captureStack(){const old=Object.getOwnPropertyDescriptor(Error,'stackTraceLimit');let s;
-    try{Object.defineProperty(Error,'stackTraceLimit',{configurable:true,writable:true,value:cap.frames});s=String(new Error('fr1-call').stack);}
-    finally{if(old)Object.defineProperty(Error,'stackTraceLimit',old);else delete Error.stackTraceLimit;}
-    const truncated=s.length>cap.stackLength||s.split('\n').length-1>=cap.frames;s=s.slice(0,cap.stackLength);
-    if(stackIds.has(s))return{id:stackIds.get(s),truncated};
-    const n=Buffer.byteLength(s);if(stackIds.size>=cap.stacks||stackBytes+n>cap.stackBytes){fatal('stack-dictionary-cap');return {id:null,truncated:true};}
-    const id=stackIds.size+1;stackIds.set(s,id);stackBytes+=n;append('stack',{id,text:s,truncated});return{id,truncated};
+  function captureStack(){const old=Object.getOwnPropertyDescriptor(Error,'stackTraceLimit'),prepare=Object.getOwnPropertyDescriptor(Error,'prepareStackTrace');let sites;
+    try{Object.defineProperty(Error,'stackTraceLimit',{configurable:true,writable:true,value:cap.frames});
+      Object.defineProperty(Error,'prepareStackTrace',{configurable:true,writable:true,value:(_error,frames)=>frames});sites=new Error('fr1-call').stack;}
+    finally{if(old)Object.defineProperty(Error,'stackTraceLimit',old);else delete Error.stackTraceLimit;
+      if(prepare)Object.defineProperty(Error,'prepareStackTrace',prepare);else delete Error.prepareStackTrace;}
+    if(!Array.isArray(sites))throw Error('fr1_structured_stack_unavailable');state.stackCaptures++;
+    // Every call captures its current complete location vector. Only presentation is interned;
+    // neither a first-kind stack nor a receiver/function object is kept in the dictionary.
+    const frames=sites.map(f=>{const file=f.getFileName(),line=f.getLineNumber(),column=f.getColumnNumber();return[file,line,column,
+      f.isEval()?f.getEvalOrigin():null,(f.isAsync()?1:0)|(f.isNative()?2:0)|(f.isConstructor()?4:0)|(f.isEval()?8:0),f.isPromiseAll()?f.getPromiseIndex():null,
+      file&&line&&column?null:f.getFunctionName()];});
+    const signature=JSON.stringify(frames),truncated=sites.length>=cap.frames||Buffer.byteLength(signature)>cap.stackLength;
+    if(truncated){fatal('stack-capture-cap');return{id:null,truncated:true};}
+    if(stackIds.has(signature))return{id:stackIds.get(signature),truncated:false};
+    const text='Error: fr1-call\n'+sites.map((f,i)=>'    at '+(f.getFunctionName()||'<anonymous>')+' ('+(frames[i][0]||frames[i][3]||'<unknown>')+':'+frames[i][1]+':'+frames[i][2]+')').join('\n');
+    const n=Buffer.byteLength(JSON.stringify({frames,text}));if(n>cap.stackLength||stackIds.size>=cap.stacks||stackBytes+n>cap.stackBytes){fatal('stack-dictionary-cap');return {id:null,truncated:true};}
+    const id=stackIds.size+1;stackIds.set(signature,id);stackBytes+=n;state.stackMaterializations++;append('stack',{id,encoding:'source-location-v1',frames,text,truncated:false});return{id,truncated:false};
   }
   function scope(args){const p=args[0];if(!p||typeof p!=='object'||isProxy(p))return hash(JSON.stringify([Array.isArray(p)?'array':typeof p]));
     const get=k=>Object.getOwnPropertyDescriptor(p,k)?.value;
@@ -108,7 +118,7 @@ export function installFr1Recorder({store,roots,entries,foreground=()=>null,noti
       const r=activeRoot,meta=cpu();port('index');let stack;try{stack=captureStack();}catch(e){metadataErrors++;r.chainIncomplete=true;stack={id:null,truncated:true};}
       const pre=cpu()-meta,start=performance.now(),before=process.threadCpuUsage();let value,failed=false;
       try{value=Reflect.apply(original,this,args);return value;}catch(e){failed=true;throw e;}
-      finally{const end=performance.now(),c=process.threadCpuUsage(before),tail=cpu();r.evidence.push({position:r.evidence.length,start,end,userMs:c.user/1000,systemMs:c.system/1000,rows:Array.isArray(value)?value.length:null,readFailure:failed,entryStack:stack,selfMs:pre+cpu()-tail});}
+      finally{const end=performance.now(),c=process.threadCpuUsage(before),tail=cpu(),e={position:r.evidence.length,start,end,userMs:c.user/1000,systemMs:c.system/1000,rows:Array.isArray(value)?value.length:null,readFailure:failed,entryStack:stack,selfMs:0};r.evidence.push(e);e.selfMs=pre+cpu()-tail;}
     });
     observer=new PerformanceObserver(list=>{const before=cpu();for(const e of list.getEntries()){if(++gcCount>cap.gc){fatal('gc-cap');break;}append('gc',{start:e.startTime,duration:e.duration,kind:e.detail?.kind});}charge(cpu()-before);});observer.observe({entryTypes:['gc']});
     heartbeat=setInterval(()=>{const before=cpu();try{notify({kind:'heartbeat',at:performance.now(),seq,foregroundDelivery:Boolean(foreground())});}catch(e){metadataErrors++;fatal('heartbeat-notification');}charge(cpu()-before);},250);heartbeat.unref?.();

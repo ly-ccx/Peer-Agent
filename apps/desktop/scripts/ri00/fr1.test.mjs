@@ -71,3 +71,29 @@ test('durable duplicate batch following unknown ACK is recognized, not appended 
 test('native-overlap baseline keeps the original nine roots but cannot qualify a natural transition',()=>{const p=createFr1Policy({startedMs:0}),initial=Array.from({length:9},(_,i)=>root(i+1));initial[0].value.samplerOverlap=true;p.observe(initial,5000);p.observe([root(10,440,315),root(11,440,315),root(12,440,315),root(13,440,315)],9000);assert.equal(p.state().cohorts[0].baseline.diagnosticOverlap,true);assert.equal(p.state().event.wholeQueryChangeCandidate,false);assert.deepEqual(p.state().cohorts[0].baseline.rootIds,[1,2,3,4,5,6,7,8,9]);});
 test('profiler stop failure still disables, and disable failure cannot claim known disabled',()=>{for(const fault of ['Profiler.stop','Profiler.disable']){const p=createFr1Profiler({emit:()=>{},module:inspectorMock(fault)});p.arm();p.onNaturalEntry();p.stop();assert.equal(p.state().startAttempts,1);assert.equal(p.state().disabled,fault!=='Profiler.disable');assert.ok(p.state().errors.some(e=>e.message.includes(fault)));}});
 test('failed span never becomes a comparable complete query',()=>{const p=createFr1Policy({startedMs:0}),bad=root(1);bad.value.evidence[0].readFailure=true;p.observe([bad,...Array.from({length:8},(_,i)=>root(i+2))],5000);assert.equal(p.state().cohorts[0]?.baseline??null,null);});
+
+test('every current stack is captured; only an identical full location vector reuses presentation',async()=>{
+ const f=fixture();function fromFirstCaller(){return f.application.list();}function fromOtherCaller(){return f.application.list();}
+ try{fromFirstCaller();fromOtherCaller();const b=await f.recorder.take(),stacks=new Map(b.records.filter(x=>x.kind==='stack').map(x=>[x.value.id,x.value])),roots=b.records.filter(x=>x.kind==='root');
+  assert.equal(roots.length,2);assert.notEqual(roots[0].value.entryStack.id,roots[1].value.entryStack.id);
+  const first=stacks.get(roots[0].value.evidence[0].entryStack.id),second=stacks.get(roots[1].value.evidence[0].entryStack.id);
+  assert.ok(first.text.includes('fromFirstCaller'));assert.ok(second.text.includes('fromOtherCaller'));assert.ok(first.frames.length>3);assert.equal(first.encoding,'source-location-v1');
+  const s=f.recorder.state();assert.ok(s.stackCaptures>=28);assert.ok(s.stackMaterializations<s.stackCaptures);assert.equal(f.reads,2);
+ }finally{f.close();}
+});
+test('stack hooks and limit descriptors are restored before original code runs, including failure',()=>{
+ const old=Object.getOwnPropertyDescriptor(Error,'prepareStackTrace'),limit=Object.getOwnPropertyDescriptor(Error,'stackTraceLimit');let calls=0;const prepare=()=>{calls++;return 'external-formatter';};
+ Object.defineProperty(Error,'prepareStackTrace',{configurable:true,writable:false,value:prepare});const expected=Object.getOwnPropertyDescriptor(Error,'prepareStackTrace'),f=fixture();
+ try{f.application.list();assert.deepEqual(Object.getOwnPropertyDescriptor(Error,'prepareStackTrace'),expected);assert.deepEqual(Object.getOwnPropertyDescriptor(Error,'stackTraceLimit'),limit);
+  assert.equal(new Error('outside').stack,'external-formatter');assert.equal(calls,1);f.fail=true;assert.throws(()=>f.application.list(),e=>e===f.error);assert.deepEqual(Object.getOwnPropertyDescriptor(Error,'prepareStackTrace'),expected);
+ }finally{f.close();if(old)Object.defineProperty(Error,'prepareStackTrace',old);else delete Error.prepareStackTrace;}
+});
+
+import {snapshotFr1TargetFiles,assertFr1Target} from './fr1-target.mjs';
+test('target source epoch includes content and refuses later source mutation',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'fr1-target-'));fs.mkdirSync(path.join(dir,'main'));fs.writeFileSync(path.join(dir,'main','entry.mjs'),'original');
+ try{const files=snapshotFr1TargetFiles(dir,['main']);assert.equal(files.length,1);assert.equal(files[0].sha256.length,64);
+  const executable=process.getBuiltinModule('child_process').execFileSync('ps',['-p',String(process.pid),'-o','comm='],{encoding:'utf8'}).trim(),config={pid:process.pid},target={root:dir,executable,files};
+  assert.equal(assertFr1Target(config,target),true);fs.writeFileSync(path.join(dir,'main','entry.mjs'),'changed');assert.throws(()=>assertFr1Target(config,target),/source_epoch_changed/);
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
