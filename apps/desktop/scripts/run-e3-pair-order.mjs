@@ -8,6 +8,10 @@ import { pairOrderBudgetModel, pairOrderReserve } from './ri00/e3-pair-order-pla
 import { pairOrderSource } from './ri00/e3-pair-order-identity.mjs';
 import { runPairOrderCampaign, traceOrderBlock } from './ri00/e3-pair-order-controller.mjs';
 import { executeCadenceBlock } from './ri00/e3-cadence-block.mjs';
+import { placementSource } from './ri00/e3-calibration-placement-identity.mjs';
+import { calibrationPlacementBudgetModel, calibrationPlacementReserve } from './ri00/e3-calibration-placement-plan.mjs';
+import { runPlacementCampaign, executePlacementBlock } from './ri00/e3-calibration-placement-controller.mjs';
+import { inspectClosure } from './ri00/trace.mjs';
 import { cadenceReadMetrics } from './ri00/e3-cadence-result.mjs';
 import { startOwnedE3Host } from './ri00/e3-owned-host.mjs';
 import { connectE3Transport } from './ri00/e3-cdp-transport.mjs';
@@ -19,7 +23,7 @@ const args = process.argv.slice(2), opt = k => args[args.indexOf(k) + 1], keys =
 for (const k of keys)
     if (!args.includes('--' + k))
         throw Error('order_explicit_inputs');
-const read = f => JSON.parse(fs.readFileSync(f)), base = read(opt('--config')), budget = read(opt('--budget')), baseline = read(opt('--baseline')), parent = read(opt('--parent')), manifest = read(opt('--manifest')), seam = read(opt('--seam')), binding = read(opt('--binding')), ready = read(opt('--ready')), output = resolveDestination(opt('--output')), codeRoot = fileURLToPath(new URL('../../../', import.meta.url)), candidate = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: codeRoot, encoding: 'utf8' }).trim();
+const read = f => JSON.parse(fs.readFileSync(f)), base = read(opt('--config')), frozenBudget = read(opt('--budget')), placement = frozenBudget.kind === 'E3-HASH-PLACEMENT-warm-gate-diagnostic-design-frozen-not-executed', budget = placement ? {...frozenBudget, wallMs: frozenBudget.formalWallMs, rootCountMaximum: frozenBudget.rootsMaximum} : frozenBudget, currentSource = placement ? placementSource : pairOrderSource, baseline = read(opt('--baseline')), parent = read(opt('--parent')), manifest = read(opt('--manifest')), seam = read(opt('--seam')), binding = read(opt('--binding')), ready = read(opt('--ready')), output = resolveDestination(opt('--output')), codeRoot = fileURLToPath(new URL('../../../', import.meta.url)), candidate = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: codeRoot, encoding: 'utf8' }).trim();
 if (execFileSync('git', ['status', '--porcelain'], { cwd: codeRoot, encoding: 'utf8' }).trim())
     throw Error('order_dirty_candidate');
 assert.equal(ready.passed, true);
@@ -29,7 +33,8 @@ assert.equal(ready.seamSha256, hash(fs.readFileSync(opt('--seam'))));
 assert.ok(Number.isFinite(ready.preparationCpuMs) && ready.preparationCpuMs > 0 && ready.preparationCpuMs < budget.controllerAuxCpuMs);
 assert.deepEqual(ready.costs.map(c => c.name), ['tests', 'seam', 'binding']);
 assert.ok(ready.costs.every(c => c.exitCode === 0 && Number.isFinite(c.fullChildSubtreeCpuMs) && c.fullChildSubtreeCpuMs > 0));
-assert.ok(ready.priorPreparation && ready.priorPreparation.fullCpuMs > 0 && ready.priorPreparation.originalFailurePreserved === true);
+if (!placement) assert.ok(ready.priorPreparation && ready.priorPreparation.fullCpuMs > 0 && ready.priorPreparation.originalFailurePreserved === true);
+if (placement) { assert.ok(ready.preparationWallMs <= budget.preparationWallMs); assert.equal(ready.priorPreparation.fullCpuMs, 0); }
 assert.ok(Number.isFinite(ready.preparationOutputBytes) && ready.preparationOutputBytes > 0);
 assert.equal(ready.preparationCpuMs, ready.priorPreparation.fullCpuMs + ready.costs.reduce((n, c) => n + c.fullChildSubtreeCpuMs, 0));
 assert.equal(ready.costs[1].reportSha256, ready.seamSha256);
@@ -37,12 +42,12 @@ assert.equal(ready.costs[2].reportSha256, ready.bindingSha256);
 assert.equal(binding.passed, true);
 assert.equal(binding.candidate, candidate);
 assert.equal(seam.candidate, candidate);
-assert.deepEqual(binding.source, pairOrderSource());
-assert.deepEqual(seam.source, pairOrderSource());
+assert.deepEqual(binding.source, currentSource());
+assert.deepEqual(seam.source, currentSource());
 for (const [k, h] of Object.entries(binding.inputs))
     assert.equal(hash(fs.readFileSync(opt('--' + k))), h);
-assert.deepEqual(budget.resourceModel, pairOrderBudgetModel());
-assert.equal(budget.kind, 'E3-ORDER-complete-paired-block-order-design-frozen-not-executed');
+assert.deepEqual(budget.resourceModel, placement ? calibrationPlacementBudgetModel() : pairOrderBudgetModel());
+assert.equal(budget.kind, placement ? 'E3-HASH-PLACEMENT-warm-gate-diagnostic-design-frozen-not-executed' : 'E3-ORDER-complete-paired-block-order-design-frozen-not-executed');
 assert.equal(budget.profileStarts, 0);
 assert.equal(budget.electronLaunches, 3);
 assert.equal(budget.replacements, 0);
@@ -50,7 +55,8 @@ assert.equal(budget.parentReportSha256, hash(fs.readFileSync(opt('--parent'))));
 if (fs.existsSync(output) || output === base.fixtureRoot || output.startsWith(fs.realpathSync(base.fixtureRoot) + path.sep))
     throw Error('order_isolated_new_output');
 fs.mkdirSync(output, { recursive: true, mode: 0o700 });
-const report = { kind: 'ORDER-fixed-three-host-complete-block-ABBA-BAAB-no-profiler-not-field-cause', candidate, source: pairOrderSource(), inputs: { ...binding.inputs, binding: hash(fs.readFileSync(opt('--binding'))), ready: hash(fs.readFileSync(opt('--ready'))) }, startedAt: new Date().toISOString(), production: productionIdentity(base.moduleRoot), ownedLaunches: 0, hosts: [], targets: [], failures: [], executionCompleted: false, controlsQualified: false, orderSensitivitySupported: false, readCpuMs: 0, hashCpuMs: 0, profileStarts: 0, fieldWindowStarted: false, refactorStarted: false };
+const report = { kind: placement ? 'HASH-PLACEMENT-fixed-three-host-diagnostic-only-no-field-admission' : 'ORDER-fixed-three-host-complete-block-ABBA-BAAB-no-profiler-not-field-cause', candidate, source: currentSource(), inputs: { ...binding.inputs, binding: hash(fs.readFileSync(opt('--binding'))), ready: hash(fs.readFileSync(opt('--ready'))) }, startedAt: new Date().toISOString(), production: productionIdentity(base.moduleRoot), ownedLaunches: 0, hosts: [], targets: [], failures: [], executionCompleted: false, controlsQualified: false, orderSensitivitySupported: false, readCpuMs: 0, hashCpuMs: 0, profileStarts: 0, fieldWindowStarted: false, refactorStarted: false };
+if (placement) Object.assign(report, {diagnosticControlsValid:false,diagnosticOutcome:'incomplete',performanceQualified:false,f0AdmissionIssued:false,fieldWindowAllowed:false});
 const claim = fs.openSync(path.join(output, 'slot-claim.private.json'), 'wx', 0o600);
 try {
     fs.writeFileSync(claim, JSON.stringify({ candidate, budgetSha256: binding.inputs.budget, slots: 3, replacements: 0 }));
@@ -98,7 +104,7 @@ async function open(label) {
     report.hosts.push(record);
     report.ownedLaunches++;
     save();
-    const h = await startOwnedE3Host({ moduleRoot: base.moduleRoot, fixtureRoot: base.fixtureRoot, coordinationSnapshot: base.coordinationSnapshot, parentHash: base.parentHash, bindings: true, desktopDiagnostics: false, mode: 'production', site: false, defaultVm: true, inspect: true, profileMarkers: true, allowExposure: true, auditOnShutdown: true, output: path.join(output, label), label, epoch: 'order-fixed-copy', leaseMs: 90000, hostDeadlineMs: 840000, readCpuLimitMs: budget.readCpuMs });
+    const h = await startOwnedE3Host({ moduleRoot: base.moduleRoot, fixtureRoot: base.fixtureRoot, coordinationSnapshot: base.coordinationSnapshot, parentHash: base.parentHash, bindings: true, desktopDiagnostics: false, mode: 'production', site: false, defaultVm: true, inspect: true, profileMarkers: true, allowExposure: true, auditOnShutdown: true, output: path.join(output, label), label, epoch: 'order-fixed-copy', leaseMs: 90000, hostDeadlineMs: budget.wallMs + 30000, readCpuLimitMs: budget.readCpuMs });
     h.record = record;
     live.add(h);
     record.pid = h.child.pid;
@@ -115,7 +121,30 @@ async function open(label) {
     return h;
 }
 async function point(h, kind) { guard(); const p = await h.reader.read(kind, 'cadence-root'), r = p.row; assert.equal(p.record.before.values.ri_proc_start_abstime, h.record.birth); assert.equal(p.record.after.values.ri_proc_start_abstime, h.record.birth); assert.equal(r.origin, 'controlled'); assert.equal(r.sourceBefore, r.sourceAfter); assert.equal(r.outputSha256, binding.expected.outputSha256); assert.equal(r.rows, binding.expected.sessions); assert.equal(r.planCalls, binding.expected.planCalls); assert.equal(r.evidence.length, 12); assert.ok(r.evidence.every(e => e.rows === binding.expected.evidenceRows)); const result = { row: r, pmc: p.pmc, metrics: cadenceReadMetrics(p), controllerStage: h.stage }; h.record.points.push(result); guard(); return result; }
-async function block(h, spec, label) { await identity(); h.stage = label; const b = await traceOrderBlock({ journal, host: h.record.label, spec, label, run: () => executeCadenceBlock({ read: kind => point(h, kind), calibrate: async () => { const c = await h.transport.rpc('native'); h.record.recordedHashCpuMs += c.userMs + c.systemMs; charge(); journal.append('hash-calibration', { host: h.record.label, stage: label, value: c }); return c; }, guard }, spec, label) }); h.record.blocks.push({ label, arm: spec.arm, role: spec.role, tickets: b.sequence.map(p => p.row.ticketId) }); return b; }
+async function native(h, position = {}) {
+    guard();
+    const attempt = journal.append('hash-attempt', {host: h.record.label, stage: h.stage, position, startedAtMs: performance.now()});
+    let c;
+    try { c = await h.transport.rpc('native'); }
+    catch (e) {
+        h.record.nativeOutcomeUnknown = true;
+        journal.append('hash-unknown', {host: h.record.label, stage: h.stage, attemptSeq: attempt.seq, message: e.message});
+        throw e;
+    }
+    h.record.recordedHashCpuMs += c.userMs + c.systemMs;
+    (h.record.nativeResponses ??= []).push({attemptSeq: attempt.seq, position, value: c});
+    if (!('initializationIndex' in position)) (h.record.completedBlockHashes ??= []).push(c);
+    charge();
+    journal.append('hash-calibration', {host: h.record.label, stage: h.stage, attemptSeq: attempt.seq, position, value: c, finishedAtMs: performance.now()});
+    guard(); return c;
+}
+async function block(h, spec, label) {
+    await identity(); h.stage = label;
+    const execute = placement ? executePlacementBlock : executeCadenceBlock;
+    const b = await traceOrderBlock({journal, host: h.record.label, spec, label,
+      run: () => execute({read: kind => point(h, kind), calibrate: position => native(h, position), guard}, spec, label)});
+    h.record.blocks.push({label, arm: spec.arm, role: spec.role, tickets: b.sequence.map(p => p.row.ticketId)}); return b;
+}
 async function close(h) {
     if (!live.has(h))
         return;
@@ -148,6 +177,7 @@ async function close(h) {
         h.record.exit = await h.close({ skipAudit });
         h.record.closed = await h.closed;
         h.record.status = 'closed';
+        if (h.ready.inspectorUrl) {h.record.inspectorClosure = await inspectClosure(new URL(h.ready.inspectorUrl).port, {timeoutMs: 2000}); if (!h.record.inspectorClosure.closed) issues.push('inspector-port-not-refused');}
         live.delete(h);
     }
     catch (e) {
@@ -165,8 +195,8 @@ async function close(h) {
     }
     save();
 }
-const io = { open, identity, warm: async (h, n) => { h.stage = 'warm'; for (let i = 0; i < n; i++)
-        await point(h, 'dense'); }, block, close, reserve: async (f0) => { guard(); const r = pairOrderReserve(f0, { readCpuMs: budget.readCpuMs - report.readCpuMs, hashCpuMs: budget.hashCpuMs - report.hashCpuMs, wallMs: budget.wallMs - (performance.now() - started), controllerCpuMs: budget.controllerAuxCpuMs - cpu() - prepCpuMs - counter.selfCpuMs }); journal.append('complete-treatment-reservation', r); if (!r.admitted)
+const io = { open, identity, initialize: async (h, n) => {h.stage = 'initialization'; h.record.initialCalibration = []; for (let i=0;i<n;i++) h.record.initialCalibration.push(await native(h, {initializationIndex:i}));}, warm: async (h, n) => { h.stage = 'warm'; for (let i = 0; i < n; i++)
+        await point(h, 'dense'); }, block, close, reserve: async (f0) => { guard(); const remaining = { readCpuMs: budget.readCpuMs - report.readCpuMs, hashCpuMs: budget.hashCpuMs - report.hashCpuMs, wallMs: budget.wallMs - (performance.now() - started), controllerCpuMs: budget.controllerAuxCpuMs - cpu() - prepCpuMs - counter.selfCpuMs }; const r = placement ? calibrationPlacementReserve({completedHosts: report.hosts.filter(h=>h.points.length>=8), completedHashes: report.hosts.flatMap(h=>(h.initialCalibration||[]).concat(h.completedBlockHashes||[])), targetsRemaining:f0.targetsRemaining, remaining}) : pairOrderReserve(f0, remaining); journal.append('complete-treatment-reservation', r); if (!r.admitted)
         throw Error('order_complete_return_reserve'); return r; }, checkpoint: async (t) => { save(); console.log(JSON.stringify({ target: t.label, order: t.order, cells: t.cells.length, F0: t.f0?.gate.status, F0Ranges: t.f0?.gate.summaries?.map(s => s.compatibleRange), result: t.result?.reason || t.result?.checks || null })); } };
 try {
     assert.deepEqual(report.production, binding.production);
@@ -176,12 +206,12 @@ try {
     report.sourceBefore = { sha256: sourceBefore.sha256, files: sourceBefore.entries.length };
     counter = await startAccountedE3Counter(fileURLToPath(new URL('./ri00/darwin-process-counters.py', import.meta.url)));
     report.counterRuntime = counter.ready;
-    await runPairOrderCampaign({ io, expected: binding.expected, identity: hash(JSON.stringify([candidate, sourceBefore.sha256, binding.inputs.manifest])), report });
+    await (placement ? runPlacementCampaign : runPairOrderCampaign)({ io, expected: binding.expected, identity: hash(JSON.stringify([candidate, sourceBefore.sha256, binding.inputs.manifest])), report });
     await identity();
     report.finalCopy = verifyCadenceFixture(base.fixtureRoot, manifest, binding.copy.manifestSha256);
     assert.deepEqual(productionIdentity(base.moduleRoot), binding.production);
     report.sourceUnchanged = true;
-    report.driverUnchanged = JSON.stringify(report.source) === JSON.stringify(pairOrderSource());
+    report.driverUnchanged = JSON.stringify(report.source) === JSON.stringify(currentSource());
     assert.equal(report.driverUnchanged, true);
 }
 catch (e) {
@@ -219,15 +249,16 @@ finally {
     report.unknownCostGap = report.hosts.some(h => !h.exit) || !report.counterExit?.known;
     report.preparationOutputBytes = ready.preparationOutputBytes;
     report.logicalOutputBytesBeforeFinalReport = treeBytes(output) + ready.preparationOutputBytes;
-    if (report.wallMs > budget.wallMs || report.readCpuMs > budget.readCpuMs || report.hashCpuMs > budget.hashCpuMs || report.controllerAuxChargedMs > budget.controllerAuxCpuMs + budget.preparationShutdownReserveMs || report.unknownCostGap || rootCount > 244 || report.logicalOutputBytesBeforeFinalReport > budget.outputBytes)
+    if (report.wallMs > budget.wallMs || report.readCpuMs > budget.readCpuMs || report.hashCpuMs > budget.hashCpuMs || report.controllerAuxChargedMs > budget.controllerAuxCpuMs + budget.preparationShutdownReserveMs || report.unknownCostGap || rootCount > budget.rootCountMaximum || report.logicalOutputBytesBeforeFinalReport > budget.outputBytes)
         report.failures.push({ message: 'order_final_budget_or_unknown_cost' });
     if (report.failures.length) {
+        if (placement) {report.diagnosticControlsValid = false; report.diagnosticOutcome = 'invalid';}
         report.controlsQualified = false;
         report.orderSensitivitySupported = false;
     }
     report.finishedAt = new Date().toISOString();
     save();
-    if (!report.controlsQualified)
-        process.exitCode = 1;
-    console.log(JSON.stringify({ executionCompleted: report.executionCompleted, controlsQualified: report.controlsQualified, orderSensitivitySupported: report.orderSensitivitySupported, rawContrastsMs: report.rawContrastsMs, launches: report.ownedLaunches, roots: rootCount, readCpuMs: report.readCpuMs, hashCpuMs: report.hashCpuMs, wallMs: report.wallMs, controllerAuxChargedMs: report.controllerAuxChargedMs, failures: report.failures.map(e => e.message) }));
+    if (placement) {report.performanceQualified=false; report.f0AdmissionIssued=false; report.fieldWindowAllowed=false; report.totalActiveWallMs=report.wallMs+ready.preparationWallMs; if(report.totalActiveWallMs>budget.totalActiveWallMs){report.diagnosticControlsValid=false;report.diagnosticOutcome='invalid';report.failures.push({message:'placement_total_active_wall_budget'});} save();}
+    if (!(placement ? report.diagnosticControlsValid : report.controlsQualified)) process.exitCode = 1;
+    console.log(JSON.stringify({ diagnosticControlsValid: report.diagnosticControlsValid, diagnosticOutcome: report.diagnosticOutcome, executionCompleted: report.executionCompleted, controlsQualified: report.controlsQualified, orderSensitivitySupported: report.orderSensitivitySupported, rawContrastsMs: report.rawContrastsMs, launches: report.ownedLaunches, roots: rootCount, readCpuMs: report.readCpuMs, hashCpuMs: report.hashCpuMs, wallMs: report.wallMs, controllerAuxChargedMs: report.controllerAuxChargedMs, failures: report.failures.map(e => e.message) }));
 }
