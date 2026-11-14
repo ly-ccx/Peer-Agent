@@ -16,7 +16,9 @@
     min-height: 0;
   }
 
-  .app-shell.is-starting {
+  .app-shell.is-starting,
+  .app-shell.is-revealing,
+  .app-shell.is-revealed {
     animation: none;
   }
 
@@ -29,6 +31,19 @@
     padding: 0;
     overflow: hidden;
     background: var(--za-app-bg);
+  }
+
+  .startup-reveal-layer {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: grid;
+    min-width: 0;
+    min-height: 0;
+    padding: 0;
+    overflow: hidden;
+    pointer-events: none;
+    background: transparent;
   }
 
   .startup-surface > .ui-form-feedback {
@@ -224,117 +239,132 @@
     place-items: center;
     overflow: hidden;
     position: relative;
-    /* Theme-aware wash only — no hard-coded light white radial glow. */
     background: var(--za-app-bg);
   }
 
-  /* Soft cool bloom for light theme (subtle, not a white ball). */
-  :root:not([data-theme="dark"]) .brand-startup-loader {
+  /* Soft cool bloom for light theme (Frost tokens, no white ball). */
+  :root:not([data-theme="dark"]) .brand-startup-loader:not([data-revealing="true"]) {
     background:
-      radial-gradient(circle at 50% 48%, rgba(255, 255, 255, 0.42) 0 12%, rgba(255, 255, 255, 0) 48%),
+      radial-gradient(
+        circle at 50% 48%,
+        color-mix(in srgb, var(--paper-sheet, #FCFDFF) 62%, transparent) 0 14%,
+        transparent 52%
+      ),
       var(--za-app-bg);
   }
 
-  /* Dark theme: deep paper + faint cool mist, no white glow ball. */
-  :root[data-theme="dark"] .brand-startup-loader {
+  /* Dark theme: deep obsidian + subtle cool mist. */
+  :root[data-theme="dark"] .brand-startup-loader:not([data-revealing="true"]) {
     background:
-      radial-gradient(circle at 50% 48%, rgba(120, 150, 190, 0.08) 0 14%, rgba(15, 19, 26, 0) 50%),
-      var(--za-app-bg, #0f131a);
+      radial-gradient(
+        circle at 50% 48%,
+        color-mix(in srgb, var(--azure-soft, #3B6A8B) 12%, transparent) 0 14%,
+        transparent 54%
+      ),
+      var(--za-app-bg, #13171F);
+  }
+
+  .brand-startup-loader[data-revealing="true"] {
+    background: none;
+    background-color: transparent;
   }
 
   .brand-startup-loader::before {
-    width: min(62vw, 760px);
-    aspect-ratio: 1.55;
+    width: min(44vw, 460px);
+    aspect-ratio: 1.25;
     content: '';
     position: absolute;
     border-radius: var(--ui-radius-circle);
-    background: rgba(59, 127, 171, 0.08);
-    filter: blur(72px);
+    background: color-mix(in srgb, var(--azure-seal, #286891) 10%, transparent);
+    filter: blur(64px);
     opacity: 0;
-    /* Soft atmosphere bloom only — no canvas ink wash. */
-    animation: brand-startup-atmosphere 2.2s cubic-bezier(.2, .72, .2, 1) both;
+    animation: brand-startup-atmosphere 1.2s var(--za-ease-out) both;
     pointer-events: none;
   }
 
   :root[data-theme="dark"] .brand-startup-loader::before {
-    background: rgba(140, 170, 210, 0.06);
+    background: color-mix(in srgb, var(--azure-seal, #76B0D4) 12%, transparent);
+  }
+
+  .brand-startup-loader[data-revealing="true"]::before {
+    opacity: 0;
+    animation: none;
   }
 
   .brand-startup-loader__brand {
-    width: min(76vw, 940px);
-    min-width: 280px;
+    width: clamp(128px, 18vw, 176px);
+    height: clamp(128px, 18vw, 176px);
     position: relative;
     z-index: 1;
+    opacity: 1;
+    transform-origin: center 55.5%;
+    animation: brand-startup-cat-bounce 560ms linear both;
+  }
+
+  .brand-startup-loader__brand.is-waiting {
+    transform-origin: center 60%;
+    animation: brand-startup-cat-idle 2.2s var(--za-ease-standard) infinite;
+  }
+
+  .brand-startup-loader[data-revealing="true"] .brand-startup-loader__brand {
     opacity: 0;
-    /* 字标入场后定住（主题填充，无流体泼墨） */
-    animation: brand-startup-arrive 2.2s cubic-bezier(.2, .72, .2, 1) both;
+    animation: none;
   }
 
   .brand-startup-loader__lockup {
     display: block;
     width: 100%;
-    height: auto;
+    height: 100%;
     overflow: visible;
   }
 
-  .brand-startup-loader__wordmark {
-    font-family: 'Avenir Next Rounded', 'SF Pro Rounded', 'Nunito Sans', system-ui, sans-serif;
-    font-size: 176px;
-    font-weight: 650;
-    letter-spacing: -7px;
-    text-anchor: middle;
+  .brand-startup-loader__cat-silhouette,
+  .brand-startup-loader__portal-solid {
+    fill: var(--graphite-base);
   }
 
-  .brand-startup-loader__wordmark--ghost {
-    fill: rgba(26, 29, 33, 0.105);
-    stroke: rgba(255, 255, 255, 0.55);
-    stroke-width: 1px;
-    paint-order: stroke;
-  }
-
-  .brand-startup-loader__wordmark--ink {
-    fill: #1a1d21;
-  }
-
-  /* Dark theme: cool light wordmark (matches HTML ink preview). */
-  :root[data-theme="dark"] .brand-startup-loader__wordmark--ghost {
-    fill: rgba(215, 221, 232, 0.14);
-    stroke: rgba(215, 221, 232, 0.22);
-  }
-
-  :root[data-theme="dark"] .brand-startup-loader__wordmark--ink {
-    fill: #d7dde8;
-  }
-
-  .brand-startup-loader__fill-mask {
-    transform: translateY(220px);
-    animation: brand-startup-fill 2.2s cubic-bezier(.2, .72, .2, 1) both;
-    will-change: transform;
-  }
-
-  .brand-startup-loader__support {
-    stroke: #eabf58;
-    stroke-width: 4px;
+  .brand-startup-loader__portal {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 2;
+    pointer-events: none;
     opacity: 0;
-    transform: scaleX(.35);
-    transform-box: fill-box;
-    transform-origin: center;
-    animation: brand-startup-support 2.2s cubic-bezier(.2, .72, .2, 1) both;
+    visibility: hidden;
+  }
+
+  .brand-startup-loader[data-revealing="true"] .brand-startup-loader__portal {
+    opacity: 1;
+    visibility: visible;
+  }
+
+  .brand-startup-loader__scrim {
+    fill: var(--za-app-bg);
+  }
+
+  .brand-startup-loader__portal-veil {
+    fill: var(--za-app-bg);
+  }
+
+  .brand-startup-loader__portal-rim {
+    fill: none;
+    stroke: color-mix(in srgb, var(--graphite-fade) 44%, transparent);
+    stroke-linejoin: round;
+    stroke-linecap: round;
   }
 
   @media (prefers-reduced-motion: reduce) {
     .brand-startup-loader::before,
-    .brand-startup-loader__brand,
-    .brand-startup-loader__fill-mask,
-    .brand-startup-loader__support {
+    .brand-startup-loader__brand {
       animation: none;
     }
 
-    .brand-startup-loader::before { opacity: .44; }
-    .brand-startup-loader__brand { opacity: 1; }
-    .brand-startup-loader__fill-mask { transform: translateY(-4px); }
-    .brand-startup-loader__support { opacity: 1; transform: none; }
-
+    .brand-startup-loader::before { opacity: 0.45; }
+    .brand-startup-loader__brand {
+      opacity: 1;
+      transform: none;
+    }
   }
 
   .empty-actions span,

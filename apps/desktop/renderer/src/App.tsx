@@ -6,7 +6,8 @@ import { useSettingsAwarePage, requestSettingsNavigation } from './ui/forms/sett
 import { isImeKey } from './chat/state/compositionGuard';
 import { createI18n } from '@peer-agent/i18n';
 import type { AcceptanceCloseVerdict, LlmProviderConfigView } from '@peer-agent/protocol';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { prefersReducedMotion, subscribeMotionEnvironment } from './app/state/motionEnvironment';
 import type { SettingsSection } from './app/components/SettingsPage';
 import {
   SettingsPage,
@@ -160,6 +161,11 @@ function MainApp() {
   const botListShell = useBotListShell();
   const [botResourceOwner, setBotResourceOwner] = useState<BotResourceOwner | null>(null);
   const showMainShell = Boolean(session);
+  const reducedMotion = useSyncExternalStore(subscribeMotionEnvironment, prefersReducedMotion, () => false);
+  const [startupRevealed, setStartupRevealed] = useState(() => prefersReducedMotion());
+  const completeStartupReveal = useCallback(() => setStartupRevealed(true), []);
+  const showStartupLoader = !initError && (!showMainShell || (!startupRevealed && !reducedMotion));
+  const showStartupOverlay = !showMainShell || showStartupLoader;
   const confirm = useConfirm();
   const i18n = useMemo(() => createI18n(session?.locale), [session?.locale]);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -992,7 +998,7 @@ function MainApp() {
 
   return (
     <BackgroundRunsProvider isZh={isZh} sources={conversations} onSource={handleSelectConversation}>
-    <main className={`app-shell${isFullscreen ? ' is-fullscreen' : ''}${!showMainShell ? ' is-starting' : ''}`}>
+    <main className={`app-shell${isFullscreen ? ' is-fullscreen' : ''}${!showMainShell ? ' is-starting' : ''}${showMainShell && showStartupLoader ? ' is-revealing' : ''}${showMainShell && startupRevealed ? ' is-revealed' : ''}`}>
       <ClassicShellNotice
         open={classicShellNotice}
         i18n={i18n}
@@ -1000,7 +1006,7 @@ function MainApp() {
         onSwitch={() => { void switchToBotShell(); }}
       />
       {showMainShell ? (
-        <>
+        <Fragment key="main-shell">
           <section
             className={`app-page-layer app-chat-page${activePage !== 'settings' ? ' is-active' : ''}`}
             aria-hidden={activePage === 'settings'}
@@ -1558,13 +1564,15 @@ function MainApp() {
               </>}
             </Drawer>
           ) : null}
-        </>
-      ) : (
-        <section className="startup-surface">
-          {initError ? <ResourceFeedback i18n={i18n} loading={bootstrapLoading} error onReload={refreshBootstrap} /> : null}
-          {!initError ? <BrandStartupLoader /> : null}
+        </Fragment>
+      ) : null}
+
+      {showStartupOverlay ? (
+        <section key="startup-overlay" className={showMainShell ? 'startup-reveal-layer' : 'startup-surface'}>
+          {!showMainShell && initError ? <ResourceFeedback i18n={i18n} loading={bootstrapLoading} error onReload={refreshBootstrap} /> : null}
+          {showStartupLoader ? <BrandStartupLoader ready={showMainShell} onRevealComplete={completeStartupReveal} /> : null}
         </section>
-      )}
+      ) : null}
 
       {showMainShell && initError ? <ResourceFeedback i18n={i18n} error loading={bootstrapLoading} onReload={refreshBootstrap} /> : null}
       {/* 开屏完全磁盘访问检测：暂存档关闭。
