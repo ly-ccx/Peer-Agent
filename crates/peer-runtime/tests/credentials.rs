@@ -158,13 +158,19 @@ async fn failure_modes_redact_secret_and_do_not_poison_later_requests() {
 
 #[tokio::test]
 async fn deadline_kills_reaps_and_restores_next_admission() {
-    let (root, client) = fixture(Duration::from_millis(150));
+    let (root, client) = fixture(Duration::from_secs(1));
     fs::write(root.path().join("mode"), "sleep").unwrap();
     assert_eq!(
         client.ping(&CancellationToken::new()).await,
         Err(CredentialError::Timeout)
     );
-    assert_reaped(&pids(root.path())).await;
+    let started = pids(root.path());
+    assert_eq!(
+        started.len(),
+        1,
+        "the deadline case must observe an actually started helper"
+    );
+    assert_reaped(&started).await;
     fs::write(root.path().join("mode"), "good").unwrap();
     client.ping(&CancellationToken::new()).await.unwrap();
 }

@@ -1,12 +1,14 @@
 #![forbid(unsafe_code)]
 
 mod files;
+mod goal_source;
 mod history;
 mod lease;
 mod lock;
 mod policy;
 
 pub(crate) use files::identity;
+pub use goal_source::{GoalSourceSnapshot, GoalSourceStore};
 pub use history::{ConversationStore, HistorySnapshot};
 pub use lease::{
     AcquireLease, HOST_LEASE_HEARTBEAT_MS, HOST_LEASE_STALE_MS, HostIdentity, HostLeaseRecord,
@@ -30,6 +32,9 @@ pub enum StoreError {
     ReadFailed,
     PolicyUnavailable,
     PolicyLimit,
+    GoalLimit,
+    GoalCorrupt,
+    GoalChanged,
     LockBusy,
     LockOwnershipChanged,
     Cancelled,
@@ -53,6 +58,9 @@ impl StoreError {
             Self::ReadFailed => "BACKGROUND_READ_FAILED",
             Self::PolicyUnavailable => "POLICY_UNAVAILABLE",
             Self::PolicyLimit => "POLICY_RESOURCE_LIMIT",
+            Self::GoalLimit => "GOAL_SOURCE_LIMIT",
+            Self::GoalCorrupt => "GOAL_SOURCE_INVALID",
+            Self::GoalChanged => "GOAL_SOURCE_CHANGED",
             Self::LockBusy => "STORE_LOCK_BUSY",
             Self::LockOwnershipChanged => "STORE_LOCK_OWNERSHIP_CHANGED",
             Self::Cancelled => "CANCELLED",

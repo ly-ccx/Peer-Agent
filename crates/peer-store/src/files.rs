@@ -35,12 +35,11 @@ pub(crate) fn identity(path: &Path) -> Result<Option<FileIdentity>, StoreError> 
     }
 }
 
-/// Strict bounded read: lstat/open/fstat/read/lstat must describe one file.
-pub(crate) fn read(path: &Path, max: usize) -> Result<Option<Vec<u8>>, StoreError> {
+pub(crate) fn open(path: &Path, max: u64) -> Result<Option<(File, FileIdentity)>, StoreError> {
     let Some(before) = identity(path)? else {
         return Ok(None);
     };
-    if before.size > max as u64 {
+    if before.size > max {
         return Err(StoreError::HistoryLimit);
     }
     let fd = rustix::fs::open(
@@ -54,6 +53,14 @@ pub(crate) fn read(path: &Path, max: usize) -> Result<Option<Vec<u8>>, StoreErro
     if !meta.is_file() || from_metadata(&meta) != before {
         return Err(StoreError::VersionChanged);
     }
+    Ok(Some((file, before)))
+}
+
+/// Strict bounded read: lstat/open/fstat/read/lstat must describe one file.
+pub(crate) fn read(path: &Path, max: usize) -> Result<Option<Vec<u8>>, StoreError> {
+    let Some((file, before)) = open(path, max as u64)? else {
+        return Ok(None);
+    };
     let mut bytes = Vec::new();
     file.take(max as u64 + 1)
         .read_to_end(&mut bytes)

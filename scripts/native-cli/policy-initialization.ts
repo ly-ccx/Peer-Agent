@@ -48,4 +48,22 @@ assert.equal(malformedTS.read('bad').code, 'NOT_FOUND'); assert.equal(read(malfo
 const dbPath = join(imported, 'project-runtime/bot-access.sqlite');
 const { Database } = await import('bun:sqlite'); const db = new Database(dbPath); db.exec('PRAGMA user_version=2'); db.close();
 const before = readFileSync(dbPath); assert.equal(initialize(imported, 'full_local').code, 'POLICY_UNAVAILABLE'); assert.deepEqual(readFileSync(dbPath), before); cases++;
-process.stdout.write(`${JSON.stringify({ passed: cases, fixtureRoot: root, coverage: 'Native-first and Bun-first migration, new Bot Ask, imported marker, malformed profile and schema preservation; no personal policies.' })}\n`);
+const unclean = trial('unclean-wal'); profile(unclean, 'w'); assert.equal(initialize(unclean, 'full_local').ok, true);
+const clean = new Database(join(unclean,'project-runtime/bot-access.sqlite')); clean.exec('PRAGMA wal_checkpoint(TRUNCATE)'); clean.close();
+assert.equal(native(unclean, { op: 'policy_uncheckpointed_schema' }).simulatedUncleanExit, true);
+const uncleanPath=join(unclean,'project-runtime/bot-access.sqlite');
+const mainBefore=readFileSync(uncleanPath),walBefore=readFileSync(`${uncleanPath}-wal`);
+assert.equal(mainBefore.readUInt32BE(60),1,'fixture must keep schema 2 in the committed WAL rather than the main file');
+assert.equal(initialize(unclean,'full_local').code,'POLICY_UNAVAILABLE');
+assert.deepEqual(readFileSync(uncleanPath),mainBefore,'rejecting the schema must not checkpoint the existing WAL');
+assert.deepEqual(readFileSync(`${uncleanPath}-wal`),walBefore,'rejecting the schema must preserve the committed WAL');cases++;
+for (const request of [
+  { op:'policy_read',workspace_id:'w' },
+  { op:'policy_register',workspace_id:'w',updated_at:at },
+  { op:'policy_update',workspace_id:'w',expected_revision:1,access_level:'ask_before_local',updated_at:at },
+]) {
+  assert.equal(native(unclean,request).code,'POLICY_UNAVAILABLE');
+  assert.deepEqual(readFileSync(uncleanPath),mainBefore,`${request.op} must preserve the unknown main database`);
+  assert.deepEqual(readFileSync(`${uncleanPath}-wal`),walBefore,`${request.op} must preserve its committed WAL`);cases++;
+}
+process.stdout.write(`${JSON.stringify({ passed: cases, fixtureRoot: root, coverage: 'Native-first and Bun-first migration, new Bot Ask, imported marker, malformed profile and schema/WAL preservation; no personal policies.' })}\n`);

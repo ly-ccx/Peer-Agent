@@ -2,6 +2,9 @@ use serde::de::{DeserializeSeed, Error as _, MapAccess, SeqAccess, Visitor};
 use serde_json::{Map, Number, Value};
 use std::fmt;
 
+mod projection;
+pub use projection::{ProjectedJson, ProjectionError, ProjectionLimits, project_json_reader};
+
 #[derive(Debug, Clone, Copy)]
 pub struct JsonLimits {
     pub bytes: usize,

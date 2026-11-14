@@ -1,4 +1,4 @@
-use super::{PolicyStore, current, current_optional};
+use super::{PolicyStore, current, current_optional, finish_write};
 use crate::{StoreError, valid_id};
 use peer_protocol::{BotAccessPolicy, LocalAccessLevel};
 use rusqlite::{OptionalExtension, TransactionBehavior};
@@ -63,6 +63,79 @@ fn validate_columns(
     Ok(())
 }
 
+pub(super) fn inspect_schema(
+    connection: &rusqlite::Connection,
+) -> Result<(i64, Option<String>), StoreError> {
+    let version: i64 = connection
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .map_err(|_| StoreError::PolicyUnavailable)?;
+    if !matches!(version, 0 | 1) {
+        return Err(StoreError::PolicyUnavailable);
+    }
+    let unexpected:i64=connection.query_row("SELECT count(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' AND ((type='table' AND name NOT IN ('access_policy','access_meta')) OR type IN ('view','trigger'))",[],|r|r.get(0)).map_err(|_|StoreError::PolicyUnavailable)?;
+    if unexpected != 0 {
+        return Err(StoreError::PolicyUnavailable);
+    }
+    let policy_exists: bool = connection
+        .query_row(
+            "SELECT count(*)!=0 FROM sqlite_schema WHERE name='access_policy' AND type='table'",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|_| StoreError::PolicyUnavailable)?;
+    if policy_exists {
+        validate_columns(
+            connection,
+            "PRAGMA table_info(access_policy)",
+            &[
+                ("workspaceId", "TEXT", 1, 1),
+                ("conversationId", "TEXT", 1, 0),
+                ("revision", "INTEGER", 1, 2),
+                ("accessLevel", "TEXT", 1, 0),
+                ("updatedAt", "TEXT", 1, 0),
+                ("source", "TEXT", 1, 0),
+            ],
+        )?;
+    }
+    // Reject an unknown migration marker before changing a valid file's mode.
+    let meta_exists: bool = connection
+        .query_row(
+            "SELECT count(*)!=0 FROM sqlite_schema WHERE name='access_meta' AND type='table'",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|_| StoreError::PolicyUnavailable)?;
+    let marker = if meta_exists {
+        validate_columns(
+            connection,
+            "PRAGMA table_info(access_meta)",
+            &[("key", "TEXT", 0, 1), ("value", "TEXT", 1, 0)],
+        )?;
+        let marker: Option<String> = connection
+            .query_row(
+                "SELECT value FROM access_meta WHERE key='migrated'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|_| StoreError::PolicyUnavailable)?;
+        marker
+    } else {
+        None
+    };
+    if marker.as_deref().is_some_and(|m| m != "1") {
+        return Err(StoreError::PolicyUnavailable);
+    }
+    Ok((version, marker))
+}
+pub(super) fn require_initialized(connection: &rusqlite::Connection) -> Result<(), StoreError> {
+    let (version, marker) = inspect_schema(connection)?;
+    if version != 1 || marker.as_deref() != Some("1") {
+        return Err(StoreError::PolicyUnavailable);
+    }
+    Ok(())
+}
+
 impl PolicyStore {
     /// Explicit Host startup migration, never a side effect of read_existing.
     /// The legacy level comes from the existing host settings, not model input.
@@ -104,61 +177,21 @@ impl PolicyStore {
             Err(rustix::io::Errno::EXIST) => false,
             _ => return Err(StoreError::PolicyUnavailable),
         };
-        let (mut connection, version) = self.open_existing(true)?;
-        if !matches!(version, 0 | 1) {
-            return Err(StoreError::PolicyUnavailable);
-        }
-        let unexpected:i64=connection.query_row("SELECT count(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' AND ((type='table' AND name NOT IN ('access_policy','access_meta')) OR type IN ('view','trigger'))",[],|r|r.get(0)).map_err(|_|StoreError::PolicyUnavailable)?;
-        if unexpected != 0 {
-            return Err(StoreError::PolicyUnavailable);
-        }
-        let policy_exists: bool = connection
-            .query_row(
-                "SELECT count(*)!=0 FROM sqlite_schema WHERE name='access_policy' AND type='table'",
-                [],
-                |r| r.get(0),
-            )
+        let preflight = self.open_existing(false)?;
+        preflight
+            .execute_batch("BEGIN DEFERRED")
             .map_err(|_| StoreError::PolicyUnavailable)?;
-        if policy_exists {
-            validate_columns(
-                &connection,
-                "PRAGMA table_info(access_policy)",
-                &[
-                    ("workspaceId", "TEXT", 1, 1),
-                    ("conversationId", "TEXT", 1, 0),
-                    ("revision", "INTEGER", 1, 2),
-                    ("accessLevel", "TEXT", 1, 0),
-                    ("updatedAt", "TEXT", 1, 0),
-                    ("source", "TEXT", 1, 0),
-                ],
-            )?;
+        let (version, marker) = inspect_schema(&preflight)?;
+        if version == 1 && marker.as_deref() == Some("1") {
+            return Ok(PolicyInitialization {
+                created_authority,
+                migrated_profiles: 0,
+                skipped_profiles: Vec::new(),
+            });
         }
-        // Reject an unknown migration marker before changing a valid file's mode.
-        let meta_exists: bool = connection
-            .query_row(
-                "SELECT count(*)!=0 FROM sqlite_schema WHERE name='access_meta' AND type='table'",
-                [],
-                |r| r.get(0),
-            )
-            .map_err(|_| StoreError::PolicyUnavailable)?;
-        if meta_exists {
-            validate_columns(
-                &connection,
-                "PRAGMA table_info(access_meta)",
-                &[("key", "TEXT", 0, 1), ("value", "TEXT", 1, 0)],
-            )?;
-            let marker: Option<String> = connection
-                .query_row(
-                    "SELECT value FROM access_meta WHERE key='migrated'",
-                    [],
-                    |r| r.get(0),
-                )
-                .optional()
-                .map_err(|_| StoreError::PolicyUnavailable)?;
-            if marker.as_deref().is_some_and(|m| m != "1") {
-                return Err(StoreError::PolicyUnavailable);
-            }
-        }
+        drop(preflight);
+        let mut connection = self.open_existing(true)?;
+        inspect_schema(&connection)?;
         connection
             .pragma_update(None, "journal_mode", "WAL")
             .map_err(|_| StoreError::PolicyUnavailable)?;
@@ -175,6 +208,7 @@ impl PolicyStore {
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| StoreError::PolicyUnavailable)?;
+        inspect_schema(&transaction)?;
         transaction.execute_batch("CREATE TABLE IF NOT EXISTS access_policy(workspaceId TEXT NOT NULL,conversationId TEXT NOT NULL,revision INTEGER NOT NULL,accessLevel TEXT NOT NULL,updatedAt TEXT NOT NULL,source TEXT NOT NULL,PRIMARY KEY(workspaceId,revision));CREATE TABLE IF NOT EXISTS access_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);PRAGMA user_version=1;").map_err(|_|StoreError::PolicyUnavailable)?;
         let marker: Option<String> = transaction
             .query_row(
@@ -251,6 +285,7 @@ impl PolicyStore {
         transaction
             .commit()
             .map_err(|_| StoreError::PolicyUnavailable)?;
+        finish_write(&connection)?;
         Ok(result)
     }
 
@@ -269,6 +304,7 @@ impl PolicyStore {
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| StoreError::PolicyUnavailable)?;
+        require_initialized(&transaction)?;
         if current_optional(&transaction, workspace_id)?.is_none() {
             if self.profile(workspace_id)? != conversation {
                 return Err(StoreError::OutOfScope);
@@ -287,6 +323,7 @@ impl PolicyStore {
         transaction
             .commit()
             .map_err(|_| StoreError::PolicyUnavailable)?;
+        finish_write(&connection)?;
         self.read_existing(workspace_id)
     }
 }

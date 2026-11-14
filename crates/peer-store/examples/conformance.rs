@@ -19,6 +19,7 @@ enum Request {
     PolicyRead {
         workspace_id: String,
     },
+    PolicyUncheckpointedSchema,
     PolicyInitialize {
         legacy_access_level: LocalAccessLevel,
         updated_at: String,
@@ -53,6 +54,20 @@ fn run() -> Result<Value, Box<dyn std::error::Error>> {
     }
     let request: Request = serde_json::from_str(&input)?;
     Ok(match request {
+        Request::PolicyUncheckpointedSchema => {
+            // Synthetic WAL recovery fixture: process::exit deliberately skips
+            // Rust Drop, like a stopped writer whose committed WAL remains.
+            let database =
+                rusqlite::Connection::open(root.join("project-runtime/bot-access.sqlite"))?;
+            database.pragma_update(None, "user_version", 2)?;
+            writeln!(
+                io::stdout(),
+                "{}",
+                json!({"ok":true,"simulatedUncleanExit":true})
+            )?;
+            io::stdout().flush()?;
+            std::process::exit(0);
+        }
         Request::PolicyInitialize {
             legacy_access_level,
             updated_at,

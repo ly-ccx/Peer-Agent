@@ -12,7 +12,10 @@ mod bounded_json;
 mod permission_digest;
 mod store;
 
-pub use bounded_json::{DecodedJson, JsonDecodeError, JsonLimits, decode_json_bounded};
+pub use bounded_json::{
+    DecodedJson, JsonDecodeError, JsonLimits, ProjectedJson, ProjectionError, ProjectionLimits,
+    decode_json_bounded, project_json_reader,
+};
 pub use permission_digest::{
     DigestError, PermissionOperation, approval_args_digest, javascript_json_digest,
     javascript_json_string, permission_operation_key,

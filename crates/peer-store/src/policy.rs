@@ -69,7 +69,7 @@ impl PolicyStore {
             .ok_or(StoreError::NotFound)
     }
 
-    fn open_existing(&self, write: bool) -> Result<(Connection, i64), StoreError> {
+    fn open_existing(&self, write: bool) -> Result<Connection, StoreError> {
         // SQLite NOFOLLOW also rejects symlinked parent components (e.g.
         // macOS /var -> /private/var). Canonicalize only the parent; keep the
         // policy filename unfollowed and reject a symlink at that final path.
@@ -90,6 +90,13 @@ impl PolicyStore {
             access | OpenFlags::SQLITE_OPEN_NO_MUTEX | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )
         .map_err(|_| StoreError::PolicyUnavailable)?;
+        // Closing a rejected candidate must not checkpoint someone else's WAL.
+        connection
+            .set_db_config(
+                rusqlite::config::DbConfig::SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE,
+                true,
+            )
+            .map_err(|_| StoreError::PolicyUnavailable)?;
         for (limit, value) in [
             (rusqlite::limits::Limit::SQLITE_LIMIT_LENGTH, 1_048_576),
             (rusqlite::limits::Limit::SQLITE_LIMIT_SQL_LENGTH, 16_384),
@@ -108,30 +115,23 @@ impl PolicyStore {
         let quick: String = connection
             .query_row("PRAGMA quick_check", [], |r| r.get(0))
             .map_err(|_| StoreError::PolicyUnavailable)?;
-        let version: i64 = connection
-            .query_row("PRAGMA user_version", [], |r| r.get(0))
-            .map_err(|_| StoreError::PolicyUnavailable)?;
         if quick != "ok" {
             return Err(StoreError::PolicyUnavailable);
         }
-        Ok((connection, version))
+        Ok(connection)
     }
     fn connect(&self, write: bool) -> Result<Connection, StoreError> {
-        let (connection, version) = self.open_existing(write)?;
-        if version != 1 {
-            return Err(StoreError::PolicyUnavailable);
-        }
-        let migrated: Option<String> = connection
-            .query_row(
-                "SELECT value FROM access_meta WHERE key='migrated'",
-                [],
-                |r| r.get(0),
-            )
-            .optional()
+        let preflight = self.open_existing(false)?;
+        preflight
+            .execute_batch("BEGIN DEFERRED")
             .map_err(|_| StoreError::PolicyUnavailable)?;
-        if migrated.as_deref() != Some("1") {
-            return Err(StoreError::PolicyUnavailable);
+        initialize::require_initialized(&preflight)?;
+        if !write {
+            return Ok(preflight);
         }
+        drop(preflight);
+        let connection = self.open_existing(true)?;
+        initialize::require_initialized(&connection)?;
         Ok(connection)
     }
 
@@ -164,6 +164,7 @@ impl PolicyStore {
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|_| StoreError::PolicyUnavailable)?;
+        initialize::require_initialized(&transaction)?;
         let before = current(&transaction, workspace_id)?;
         if before.conversation_id != conversation || self.profile(workspace_id)? != conversation {
             return Err(StoreError::OutOfScope.into());
@@ -188,8 +189,21 @@ impl PolicyStore {
         transaction
             .commit()
             .map_err(|_| StoreError::PolicyUnavailable)?;
+        finish_write(&connection)?;
         self.read_existing(workspace_id).map_err(Into::into)
     }
+}
+
+fn finish_write(connection: &Connection) -> Result<(), StoreError> {
+    // A successful admitted transaction keeps the existing WAL-close behavior.
+    // Rejected/rolled-back candidates retain NO_CKPT_ON_CLOSE.
+    connection
+        .set_db_config(
+            rusqlite::config::DbConfig::SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE,
+            false,
+        )
+        .map_err(|_| StoreError::PolicyUnavailable)?;
+    Ok(())
 }
 
 fn current(connection: &Connection, workspace_id: &str) -> Result<BotAccessPolicy, StoreError> {
