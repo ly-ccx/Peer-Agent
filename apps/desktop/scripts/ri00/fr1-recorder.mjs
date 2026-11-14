@@ -10,7 +10,7 @@ export function installFr1Recorder({store,roots,entries,foreground=()=>null,noti
   const cap={roots:1500,entries:10000,gc:65536,bytes:8388608,stacks:256,stackBytes:8388608,frames:96,stackLength:32768,parentDepth:128,rootSelfMs:2,selfMs:3000,...bounds};
   const indexFile=path.join(store.getStoreDir(),'evidence-index.jsonl'),originalPlan=store.getPlan,originalIndex=store.listEvidenceIndex;
   if(typeof originalPlan!=='function'||typeof originalIndex!=='function')throw Error('fr1_store_ports');
-  const installed=[],stackIds=new Map(),inFlightEntries=new Set();let stackBytes=0,records=[],retainedBytes=0,seq=0,rootId=0,entryId=0,gcCount=0,activeRoot=null,pending,lease,timer,heartbeat,notice;
+  const installed=[],stackIds=new Map(),scripts=new Map(),inFlightEntries=new Set();let stackBytes=0,records=[],retainedBytes=0,seq=0,rootId=0,entryId=0,gcCount=0,activeRoot=null,lastPortRun=null,pending,lease,timer,heartbeat,notice;
   let stopped=false,stopReason,restored,metadataErrors=0,lost=0,selfMs=0,stopAfterRoot;
   const state={ownerId,roots:0,entries:0,acks:0,lastAckSeq:0,controlledRequests:0,heapGetters:0,nativeCalls:0,rawRootUserMs:0,rawRootSystemMs:0,stackCaptures:0,stackMaterializations:0};
   const cpu=()=>{const c=process.threadCpuUsage();return(c.user+c.system)/1000;};
@@ -22,15 +22,19 @@ export function installFr1Recorder({store,roots,entries,foreground=()=>null,noti
     seq++;records.push(row);retainedBytes+=bytes;note();return row.seq;}
   function own(){return installed.every(x=>x.object[x.key]===x.replacement);}
   function fatal(why){stopAfterRoot??=why;if(!activeRoot&&api)api.stop(why);}
-  function captureStack(){const frames=getCallSites(cap.frames,{sourceMap:false});state.stackCaptures++;
+  function captureStack(){const sites=getCallSites(cap.frames,{sourceMap:false});state.stackCaptures++;let sourceBytes=0,renderUpperBytes=64;
     // Every call captures its current complete location vector. Only presentation is interned;
     // neither a first-kind stack nor a receiver/function object is kept in the dictionary.
-    const signature=JSON.stringify(frames),truncated=frames.length>=cap.frames||Buffer.byteLength(signature)>cap.stackLength;
+    const frames=sites.map(f=>{const prior=scripts.get(f.scriptId);if(prior!==undefined&&prior!==f.scriptName)throw Error('fr1_script_identity_changed');
+      if(prior===undefined){const value={scriptId:f.scriptId,scriptName:f.scriptName},n=Buffer.byteLength(JSON.stringify(value));
+        if(scripts.size>=cap.stacks||stackBytes+n>cap.stackBytes)throw Error('fr1_script_dictionary_cap');scripts.set(f.scriptId,f.scriptName);stackBytes+=n;sourceBytes+=n;append('script',value);}
+      renderUpperBytes+=3*(f.functionName.length+f.scriptName.length+f.scriptId.length)+64;
+      return[f.functionName,f.scriptId,f.lineNumber,f.columnNumber];});
+    const signature=JSON.stringify(frames),truncated=frames.length>=cap.frames||Buffer.byteLength(signature)+sourceBytes>cap.stackLength||renderUpperBytes>cap.stackLength;
     if(truncated){fatal('stack-capture-cap');return{id:null,truncated:true};}
     if(stackIds.has(signature))return{id:stackIds.get(signature),truncated:false};
-    const text='FR1 current synchronous JS stack\n'+frames.map(f=>'    at '+(f.functionName||'<anonymous>')+' ('+(f.scriptName||'<script '+f.scriptId+'>')+':'+f.lineNumber+':'+f.columnNumber+')').join('\n');
-    const n=Buffer.byteLength(JSON.stringify({frames,text}));if(n>cap.stackLength||stackIds.size>=cap.stacks||stackBytes+n>cap.stackBytes){fatal('stack-dictionary-cap');return {id:null,truncated:true};}
-    const id=stackIds.size+1;stackIds.set(signature,id);stackBytes+=n;state.stackMaterializations++;append('stack',{id,encoding:'node-call-sites-v1',captureKind:'current-synchronous-JS',asyncParents:'mapped-ALS-only',nativeAndUnmappedAsyncFramesNotInvented:true,frames,text,truncated:false});return{id,truncated:false};
+    const n=Buffer.byteLength(signature);if(stackIds.size>=cap.stacks||stackBytes+n>cap.stackBytes){fatal('stack-dictionary-cap');return {id:null,truncated:true};}
+    const id=stackIds.size+1;stackIds.set(signature,id);stackBytes+=n;state.stackMaterializations++;append('stack',{id,encoding:'node-location-tuples-v1',captureKind:'current-synchronous-JS',asyncParents:'mapped-ALS-only',nativeAndUnmappedAsyncFramesNotInvented:true,frames,truncated:false});return{id,truncated:false};
   }
   function scope(args){const p=args[0];if(!p||typeof p!=='object'||isProxy(p))return hash(JSON.stringify([Array.isArray(p)?'array':typeof p]));
     const get=k=>Object.getOwnPropertyDescriptor(p,k)?.value;
@@ -40,7 +44,7 @@ export function installFr1Recorder({store,roots,entries,foreground=()=>null,noti
   function wrap(object,key,replacement){if(!object||typeof object[key]!=='function'||installed.some(x=>x.object===object&&x.key===key))throw Error('fr1_duplicate-or-missing-port');
     const original=object[key],desired=replacement(original);object[key]=desired;if(object[key]!==desired)throw Error('fr1_port_not_writable');installed.push({object,key,original,replacement:object[key]});}
   function port(kind){if(!activeRoot)return;const r=activeRoot;if(kind==='plan')r.planCalls++;
-    const last=r.portSequence.at(-1);if(last?.kind===kind)last.count++;else if(r.portSequence.length<64)r.portSequence.push({kind,count:1});else{r.chainIncomplete=true;fatal('port-run-cap');}}
+    if(lastPortRun?.kind===kind)lastPortRun.count++;else if(r.portSequence.length<64){lastPortRun={kind,count:1};r.portSequence.push(lastPortRun);}else{r.chainIncomplete=true;fatal('port-run-cap');}}
   const profiler=profilerFactory?profilerFactory({emit:(k,v)=>append(k,v)}):null;
   function runRoot(fn,receiver,args,method,indexOnly=false){
     if(stopped)return Reflect.apply(fn,receiver,args);
@@ -53,12 +57,12 @@ export function installFr1Recorder({store,roots,entries,foreground=()=>null,noti
         rootIncludesNestedRecorderCpu:true,spanCpuExcludesOwnPrePostMetadata:true,sourceBefore:stamp(),chainIncomplete:!context||Boolean(context?.chainIncomplete),indexOnly};
       append('root-start',{id:r.id,entryId:r.entryId,rootMethod:method,scope:r.scope,epoch,phase:r.phase});
     }catch(e){metadataErrors++;fatal('root-start:'+e.message);charge(cpu()-metadataStart);return Reflect.apply(fn,receiver,args);}
-    r.start=performance.now();const before=process.threadCpuUsage();r.preSelfMs=cpu()-metadataStart;activeRoot=r;
+    r.start=performance.now();const before=process.threadCpuUsage();r.preSelfMs=cpu()-metadataStart;activeRoot=r;lastPortRun=null;
     let value,error;
     try{value=Reflect.apply(fn,receiver,args);return value;}catch(e){error=e;r.readFailure=true;throw e;}
-    finally{r.end=performance.now();const c=process.threadCpuUsage(before);activeRoot=null;r.userMs=c.user/1000;r.systemMs=c.system/1000;r.totalCpuMs=r.userMs+r.systemMs;
+    finally{r.end=performance.now();const c=process.threadCpuUsage(before);activeRoot=null;lastPortRun=null;r.userMs=c.user/1000;r.systemMs=c.system/1000;r.totalCpuMs=r.userMs+r.systemMs;
       const afterStart=cpu();try{r.sourceAfter=stamp();r.rows=value instanceof Map?value.size:Array.isArray(value)?value.length:null;r.asyncRoot=isPromise(value);
-        if(value&&!r.asyncRoot){const text=JSON.stringify(value instanceof Map?[...value]:value);r.outputBytes=Buffer.byteLength(text);if(r.outputBytes<=1048576)r.outputSha256=hash(text);else r.identityComplete=false;}
+        if(value&&!r.asyncRoot){const bytes=Buffer.from(JSON.stringify(value instanceof Map?[...value]:value));r.outputBytes=bytes.length;if(r.outputBytes<=1048576)r.outputSha256=hash(bytes);else r.identityComplete=false;}
         if(r.asyncRoot)r.identityComplete=false;
         r.evidenceUserMs=r.evidence.reduce((s,e)=>s+e.userMs,0);r.evidenceSystemMs=r.evidence.reduce((s,e)=>s+e.systemMs,0);
         r.remainderUserMs=r.userMs-r.evidenceUserMs;r.remainderSystemMs=r.systemMs-r.evidenceSystemMs;
@@ -86,7 +90,7 @@ export function installFr1Recorder({store,roots,entries,foreground=()=>null,noti
     stop(reason='controller'){if(stopped)return api.state();stopped=true;stopReason=reason;clearTimeout(timer);clearTimeout(lease);clearInterval(heartbeat);clearImmediate(notice);
       observer?.disconnect();profiler?.stop('recorder-stop');restored=true;
       for(const x of [...installed].reverse()){if(x.object[x.key]===x.replacement)x.object[x.key]=x.original;else if(x.object[x.key]!==x.original)restored=false;}
-      als.disable();stackIds.clear();stackBytes=0;append('recorder-stop',{reason,restored});
+      als.disable();stackIds.clear();scripts.clear();stackBytes=0;append('recorder-stop',{reason,restored});
       try{notify({kind:'stopped',reason,at:performance.now()});}catch{metadataErrors++;}
       try{state.bindingRestored=cleanupNotice();}catch{state.bindingRestored=false;}
       if(closeInspectorOnWatchdog&&reason!=='controller')setTimeout(()=>process.getBuiltinModule('inspector').close(),5000).unref();
