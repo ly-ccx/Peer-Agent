@@ -2,6 +2,7 @@ import { criterionSourceRevision } from "./project-agent/criterion-review.mjs";
 import { randomUUID } from "node:crypto";
 import { normalizeGoalCheckpoint } from "@peer-agent/runtime-core";
 import { normalizeVisualRepair } from "./goal-visual-repair.mjs";
+import { normalizeSessionExecutionIdentity } from '@peer-agent/protocol';
 
 /** Canonical GoalPlan normalization and domain transitions; no persistence or host lifecycle. */
 
@@ -1277,6 +1278,21 @@ function normalizeCapabilityAdmission(value) {
   };
 }
 
+function validExecutionClaimClosureMirror(value, origin) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const execution = normalizeSessionExecutionIdentity(value.execution);
+  if (!execution || execution.sessionId !== origin.sessionId
+    || !['closureId', 'claimId', 'resourceRef', 'authorityRef', 'at'].every(key => typeof value[key] === 'string' && value[key])
+    || !Number.isSafeInteger(value.claimRevision) || value.claimRevision < 1
+    || !['verified_dead', 'legacy_user_confirmed'].includes(value.proof) || value.scope !== 'managed_execution'
+    || !Array.isArray(value.unknownCalls) || !value.unknownCalls.every(id => typeof id === 'string' && id)) return false;
+  const r = value.resolution;
+  return r === undefined || Boolean(r && typeof r === 'object' && !Array.isArray(r)
+    && typeof r.resolutionId === 'string' && r.resolutionId && typeof r.evidenceDigest === 'string' && r.evidenceDigest
+    && ['user_confirmed', 'bot_verified'].includes(r.tier) && ['no_effect_observed', 'effect_observed'].includes(r.verdict)
+    && (r.policyRef === undefined || typeof r.policyRef === 'string')
+    && (r.tier !== 'bot_verified' || typeof r.policyRef === 'string' && r.policyRef));
+}
 export function normalizeDelegationOrigin(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const anchorMessageId = normalizeOptionalString(value.anchorMessageId);
@@ -1311,6 +1327,9 @@ export function normalizeDelegationOrigin(value) {
     && value.executionControl.sessionId === value.sessionId && typeof value.executionControl.planId === 'string'
     && Number.isSafeInteger(value.executionControl.revision)
     && ['recorded', 'draining', 'reconciling', 'settled'].includes(value.executionControl.phase)) origin.executionControl = structuredClone(value.executionControl);
+  // A durable closure is an occupancy fact, not a tool success or new grant.
+  // Preserve the original receipt for ledger rebuild/recovery (ADR 127).
+  if (validExecutionClaimClosureMirror(value.executionClaimClosure, value)) origin.executionClaimClosure = structuredClone(value.executionClaimClosure);
   if (value.coordinationBinding && typeof value.coordinationBinding.workId === 'string'
     && Number.isSafeInteger(value.coordinationBinding.goalRevision) && typeof value.coordinationBinding.executionEpoch === 'string') origin.coordinationBinding = structuredClone(value.coordinationBinding);
   if (DELEGATION_PHASES.has(value.phase)) origin.phase = value.phase;

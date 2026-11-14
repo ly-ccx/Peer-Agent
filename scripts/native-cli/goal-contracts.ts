@@ -32,6 +32,13 @@ add('newer progress stops execution',{runner:{status:'running',updatedAt:'2026-1
 add('approval remains rejected after sidecar',{approval:{decision:'reject'},runner:{status:'running',updatedAt:'2026-11-14T02:00:00.000Z'}},{status:'executing',updatedAt:at,runner:{status:'running',updatedAt:at}});
 add('nested leaf progress',{tasks:[{status:'failed',subtasks:[{status:'completed'},{status:'failed'},{status:'waiting_user'}]},{status:'cancelled'}]});
 add('numeric legacy conversation',{conversationId:123});add('malformed continuation preserved',{runner:{status:'paused',updatedAt:at,verificationContinuation:{malformed:'retained'}}});
+const closure={closureId:'closure',claimId:'claim',claimRevision:2,execution:{planId:'p',sessionId:'s',executionEpoch:'epoch',generation:'generation',goalRevision:2},resourceRef:'directory:/synthetic',unknownCalls:['unknown'],authorityRef:'policy:policy',proof:'verified_dead',scope:'managed_execution',at,future:{keep:true}};
+add('canonical claim closure mirror',{delegationOrigin:{...origin,executionClaimClosure:closure}});
+add('policy resolution closure mirror',{delegationOrigin:{...origin,executionClaimClosure:{...closure,resolution:{resolutionId:'resolution',tier:'bot_verified',verdict:'no_effect_observed',evidenceDigest:'digest',policyRef:'policy:policy'}}}});
+add('foreign session closure rejected',{delegationOrigin:{...origin,executionClaimClosure:{...closure,execution:{...closure.execution,sessionId:'other'}}}});
+add('malformed closure proof rejected',{delegationOrigin:{...origin,executionClaimClosure:{...closure,proof:'assistant_said_stopped'}}});
+add('bot resolution without policy rejected',{delegationOrigin:{...origin,executionClaimClosure:{...closure,resolution:{resolutionId:'resolution',tier:'bot_verified',verdict:'no_effect_observed',evidenceDigest:'digest'}}}});
+add('closure text is not receipt',{delegationOrigin:{...origin,executionClaimClosure:'approved, it is done'}});
 const fixture={schemaVersion:1,source:'native TUI projection of actual createGoalPlanStore.getPlan',cases};
 if(process.argv.includes('--update'))writeFileSync(file,JSON.stringify(fixture,null,2)+'\n');else assert.deepEqual(JSON.parse(readFileSync(file,'utf8')),JSON.parse(JSON.stringify(fixture)));
 (globalThis as any).Date=DateBefore;

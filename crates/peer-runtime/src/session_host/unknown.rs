@@ -314,7 +314,22 @@ impl NativeSessionHost {
                 .ok_or(HostError("authorization_required"))?
         );
         let resolution = json!({"tier":"bot_verified","verdict":evidence["verdict"],"evidenceDigest":evidence["evidenceDigest"],"policyRef":authority});
-        Ok(self.resources.close_claim(
+        let projector = TuiGoalProjector::new(now).map_err(HostError)?;
+        let transaction = self.goals.prepare_execution_mirror(
+            self.journal.lease(),
+            plan_id,
+            &fresh.goal.source_revision,
+            &projector,
+            None,
+        )?;
+        if policy_store
+            .read_unknown_outcome_policy(&current.resource.workspace_id)?
+            .1
+            != revision
+        {
+            return Err(HostError("permission_policy_changed"));
+        }
+        let closure = self.resources.close_claim(
             &fresh.resource,
             HostClaimClosure {
                 claim_id,
@@ -327,6 +342,13 @@ impl NativeSessionHost {
                 resolution: Some(&resolution),
                 at: now,
             },
-        )?)
+        )?;
+        if transaction
+            .commit(GoalExecutionFact::ClaimClosure(&closure), now, None)
+            .is_err()
+        {
+            return Err(HostError("STORE_COMMIT_UNCERTAIN"));
+        }
+        Ok(closure)
     }
 }

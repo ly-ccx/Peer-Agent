@@ -11,6 +11,8 @@ use std::{
     path::{Path, PathBuf},
     sync::atomic::AtomicBool,
 };
+mod mirror;
+pub use mirror::{GoalExecutionFact, GoalMirrorCommit, GoalMirrorTransaction};
 static TASK: S<'static> = S::Object(&[("status", S::Full), ("subtasks", S::Each(&TASK))]);
 const RUNNER: S<'static> = S::Object(&[
     ("enabled", S::Full),

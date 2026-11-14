@@ -15,6 +15,12 @@ pub struct DirectoryLock {
 }
 
 impl DirectoryLock {
+    pub fn check_owned(&self) -> Result<(), StoreError> {
+        if !self.owned || identity(&self.path)?.as_ref() != Some(&self.identity) {
+            return Err(StoreError::LockOwnershipChanged);
+        }
+        Ok(())
+    }
     pub fn acquire(
         file: &Path,
         timeout: Duration,

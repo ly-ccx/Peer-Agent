@@ -6,7 +6,7 @@ rust-version.workspace = true
 publish = false
 
 [features]
-test-fixtures = []
+test-fixtures = ["peer-store/test-fixtures"]
 
 [dependencies]
 peer-store = { path = "../peer-store" }
@@ -35,4 +35,8 @@ required-features = ["test-fixtures"]
 
 [[example]]
 name = "goal-conformance"
+required-features = ["test-fixtures"]
+
+[[example]]
+name = "goal-mirror-conformance"
 required-features = ["test-fixtures"]

@@ -5,6 +5,7 @@ use crate::{
     live_execution::ExecutionRegistry,
 };
 use peer_protocol::normalize_session_execution_identity;
+use peer_store::GoalExecutionFact;
 use peer_store::{
     CoordinationSnapshot, CoordinationStore, ExecutionResourceStore, GoalSnapshot, GoalStore,
     HostResourcePlan,
@@ -129,7 +130,75 @@ impl NativeSessionHost {
             &NativeCoordinationReducer,
             None,
         )?;
+        let mirror = (|| -> Result<(), HostError> {
+            let now = operation["updatedAt"]
+                .as_str()
+                .ok_or(HostError("invalid_host_time"))?;
+            let projector = TuiGoalProjector::new(now).map_err(HostError)?;
+            let transaction = self.goals.prepare_execution_mirror(
+                self.journal.lease(),
+                &current.resource.execution.plan_id,
+                &current.goal.source_revision,
+                &projector,
+                None,
+            )?;
+            transaction.commit(GoalExecutionFact::SessionControl(operation), now, None)?;
+            Ok(())
+        })();
+        if mirror.is_err() {
+            return Err(HostError("STORE_COMMIT_UNCERTAIN"));
+        }
         Ok(())
+    }
+    /// Reconcile durable owner facts after journal/ledger committed but the
+    /// derived Goal mirror/index did not. Never replay a tool or erase unknown.
+    pub fn recover_execution_mirrors(
+        &mut self,
+        plan_id: &str,
+        now: &str,
+    ) -> Result<usize, HostError> {
+        let current = self.current(plan_id, now)?;
+        let operation = control(&current);
+        let mut count = 0;
+        if operation.is_object()
+            && operation["expectedExecution"] == current.goal.facts["execution"]
+        {
+            let projector = TuiGoalProjector::new(now).map_err(HostError)?;
+            let transaction = self.goals.prepare_execution_mirror(
+                self.journal.lease(),
+                plan_id,
+                &current.goal.source_revision,
+                &projector,
+                None,
+            )?;
+            count += usize::from(
+                transaction
+                    .commit(GoalExecutionFact::SessionControl(&operation), now, None)?
+                    .changed,
+            );
+        }
+        let current = self.current(plan_id, now)?;
+        if let Some(mut closure) = self.resources.retained_unknowns(&current.resource)?.pop() {
+            if let Some(m) = closure.as_object_mut() {
+                for field in ["planId", "sessionId", "title"] {
+                    m.shift_remove(field);
+                }
+            }
+            let projector = TuiGoalProjector::new(now).map_err(HostError)?;
+            let transaction = self.goals.prepare_execution_mirror(
+                self.journal.lease(),
+                plan_id,
+                &current.goal.source_revision,
+                &projector,
+                None,
+            )?;
+            count += usize::from(
+                transaction
+                    .commit(GoalExecutionFact::ClaimClosure(&closure), now, None)?
+                    .changed,
+            );
+        }
+        Ok(count)
     }
 }
 fn control(current: &Current) -> Value {

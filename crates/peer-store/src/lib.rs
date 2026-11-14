@@ -23,7 +23,10 @@ mod conversation_preview;
 mod conversation_write;
 mod goal;
 mod goal_source;
-pub use goal::{GoalError, GoalSelection, GoalSnapshot, GoalStore};
+pub use goal::{
+    GoalError, GoalExecutionFact, GoalMirrorCommit, GoalMirrorTransaction, GoalSelection,
+    GoalSnapshot, GoalStore,
+};
 mod history;
 pub use conversation_write::{MessageCommit, NewConversation};
 mod lease;

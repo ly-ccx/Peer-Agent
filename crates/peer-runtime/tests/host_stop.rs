@@ -43,6 +43,8 @@ fn fixture() -> Fixture {
         serde_json::to_vec(&plan).unwrap(),
     )
     .unwrap();
+    std::fs::write(root.path().join("goal-plans/index.jsonl"),
+        format!("{}\n",json!({"planId":"p","title":"p","conversationId":"c","status":plan["status"],"version":plan["version"],"updatedAt":plan["updatedAt"],"createdAt":plan["createdAt"]}))).unwrap();
     let goal = GoalStore::new(root.path())
         .read(
             "p",
@@ -703,4 +705,367 @@ async fn shell_unknown_requires_manual_gate_and_revoked_policy_blocks_file_closu
         "authorization_required"
     );
     assert!(!f.host.resources.snapshot().unwrap().is_empty());
+}
+fn close_ledger_only(f: &mut Fixture, id: &str, evidence: &Value) -> Value {
+    let claim = f
+        .host
+        .resources
+        .snapshot()
+        .unwrap()
+        .into_iter()
+        .find(|c| c["claimId"] == id)
+        .unwrap();
+    let resource = HostResourcePlan {
+        execution: f.execution.clone(),
+        workspace_id: "w".into(),
+        directory: Some(f.root.path().join("workspace")),
+        title: "p".into(),
+        read_only: false,
+    };
+    let resolution = json!({"tier":"bot_verified","verdict":evidence["verdict"],"evidenceDigest":evidence["evidenceDigest"],"policyRef":"policy:policy"});
+    f.host
+        .resources
+        .close_claim(
+            &resource,
+            peer_store::HostClaimClosure {
+                claim_id: id,
+                claim_revision: claim["revision"].as_u64().unwrap(),
+                authority_ref: "policy:policy",
+                unknown_calls: &["unknown".into()],
+                proof: "verified_dead",
+                resolution: Some(&resolution),
+                at: NOW,
+            },
+        )
+        .unwrap()
+}
+#[tokio::test]
+async fn closure_before_mirror_recovery_preserves_unknown_and_is_idempotent() {
+    let mut f = fixture();
+    let claim = prepare_unknown(&mut f, "local.file.write", true);
+    let evidence = f
+        .host
+        .reconcile_unknown("p", &claim, NOW, &CancellationToken::new())
+        .await
+        .unwrap();
+    let closure = close_ledger_only(&mut f, &claim, &evidence);
+    let goals = GoalStore::new(f.root.path());
+    let projector = peer_runtime::goal_facts::TuiGoalProjector::new(NOW).unwrap();
+    assert!(goals.read("p",&projector,None).unwrap().facts["delegationOrigin"]["executionClaimClosure"].is_null());
+    assert_eq!(f.host.recover_execution_mirrors("p", NOW).unwrap(), 2);
+    let recovered = goals.read("p", &projector, None).unwrap();
+    assert_eq!(
+        recovered.facts["delegationOrigin"]["executionClaimClosure"],
+        closure
+    );
+    let body: Value =
+        serde_json::from_slice(&std::fs::read(f.root.path().join("goal-plans/p.json")).unwrap())
+            .unwrap();
+    assert_eq!(body["future"]["opaque"], "preserved");
+    let events = std::fs::read(f.root.path().join("goal-plans/.changes.jsonl")).unwrap();
+    assert_eq!(f.host.recover_execution_mirrors("p", NOW).unwrap(), 0);
+    assert_eq!(
+        goals.read("p", &projector, None).unwrap().source_revision,
+        recovered.source_revision
+    );
+    assert_eq!(
+        std::fs::read(f.root.path().join("goal-plans/.changes.jsonl")).unwrap(),
+        events
+    );
+    let state = f
+        .host
+        .journal
+        .read(&NativeCoordinationReducer, None)
+        .unwrap()
+        .state;
+    assert_eq!(
+        state["works"]["work"]["budget"]["uncertainDispatches"][0]["toolCallId"],
+        "unknown"
+    );
+}
+#[tokio::test]
+async fn mirror_body_before_index_repairs_metadata_without_duplicate_goal_revision() {
+    let mut f = fixture();
+    let claim = prepare_unknown(&mut f, "local.file.write", true);
+    let evidence = f
+        .host
+        .reconcile_unknown("p", &claim, NOW, &CancellationToken::new())
+        .await
+        .unwrap();
+    let closure = close_ledger_only(&mut f, &claim, &evidence);
+    let goals = GoalStore::new(f.root.path());
+    let projector = peer_runtime::goal_facts::TuiGoalProjector::new(NOW).unwrap();
+    let before = goals.read("p", &projector, None).unwrap();
+    let transaction = goals
+        .prepare_execution_mirror(
+            f.host.journal.lease(),
+            "p",
+            &before.source_revision,
+            &projector,
+            None,
+        )
+        .unwrap();
+    assert_eq!(
+        transaction
+            .commit_before_index_fixture(peer_store::GoalExecutionFact::ClaimClosure(&closure), NOW)
+            .err()
+            .unwrap()
+            .code(),
+        "STORE_COMMIT_UNCERTAIN"
+    );
+    let written = goals.read("p", &projector, None).unwrap();
+    assert_eq!(written.facts["version"], 2);
+    let index: Value = serde_json::from_slice(
+        &std::fs::read(f.root.path().join("goal-plans/index.jsonl")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(index["version"], 1);
+    let transaction = goals
+        .prepare_execution_mirror(
+            f.host.journal.lease(),
+            "p",
+            &written.source_revision,
+            &projector,
+            None,
+        )
+        .unwrap();
+    assert!(
+        !transaction
+            .commit(
+                peer_store::GoalExecutionFact::ClaimClosure(&closure),
+                NOW,
+                None
+            )
+            .unwrap()
+            .changed
+    );
+    assert_eq!(
+        goals.read("p", &projector, None).unwrap().facts["version"],
+        2
+    );
+    let index: Value = serde_json::from_slice(
+        &std::fs::read(f.root.path().join("goal-plans/index.jsonl")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(index["version"], 2);
+}
+#[tokio::test]
+async fn missing_goal_index_or_orphan_lock_prevents_closure_before_sql_effect() {
+    let mut f = fixture();
+    let claim = prepare_unknown(&mut f, "local.file.write", true);
+    f.host
+        .reconcile_unknown("p", &claim, NOW, &CancellationToken::new())
+        .await
+        .unwrap();
+    let lock = f.root.path().join("goal-plans/index.jsonl.lock");
+    std::fs::create_dir(&lock).unwrap();
+    assert_eq!(
+        f.host
+            .resolve_unknown_bot_verified("p", &claim, NOW)
+            .await
+            .unwrap_err()
+            .0,
+        "STORE_LOCK_BUSY"
+    );
+    assert!(!f.host.resources.snapshot().unwrap().is_empty());
+    assert!(lock.is_dir());
+    std::fs::remove_dir(&lock).unwrap();
+    std::fs::write(f.root.path().join("goal-plans/index.jsonl"), b"").unwrap();
+    assert_eq!(
+        f.host
+            .resolve_unknown_bot_verified("p", &claim, NOW)
+            .await
+            .unwrap_err()
+            .0,
+        "GOAL_INDEX_RECONCILIATION_REQUIRED"
+    );
+    assert!(!f.host.resources.snapshot().unwrap().is_empty());
+}
+#[tokio::test]
+async fn new_canonical_task_is_admitted_by_host_after_old_unknown_closure() {
+    use peer_runtime::session_host::{
+        HostCallIdentity, LocalPermissionDecision, ProviderPermission,
+    };
+    let mut f = fixture();
+    let claim = prepare_unknown(&mut f, "local.file.write", true);
+    f.host
+        .reconcile_unknown("p", &claim, NOW, &CancellationToken::new())
+        .await
+        .unwrap();
+    f.host
+        .resolve_unknown_bot_verified("p", &claim, NOW)
+        .await
+        .unwrap();
+    // Seed a separate canonical task fixture, not an alternative execution log.
+    let mut next = f.plan.clone();
+    next["planId"] = json!("next");
+    next["conversationId"] = json!("next-conversation");
+    next["delegationOrigin"]["sessionId"] = json!("next-session");
+    next["delegationOrigin"]["coordinationBinding"]["executionEpoch"] = json!("next-epoch");
+    std::fs::write(
+        f.root.path().join("goal-plans/next.json"),
+        serde_json::to_vec(&next).unwrap(),
+    )
+    .unwrap();
+    let mut index = std::fs::read_to_string(f.root.path().join("goal-plans/index.jsonl")).unwrap();
+    index.push_str(&format!("{}\n",json!({"planId":"next","conversationId":"next-conversation","status":"executing","version":1,"updatedAt":NOW})));
+    std::fs::write(f.root.path().join("goal-plans/index.jsonl"), index).unwrap();
+    let meta = format!(
+        "{}\n{}\n",
+        json!({"id":"c","workspaceId":"w","role":"work_session","parentConversationId":"bot"}),
+        json!({"id":"next-conversation","workspaceId":"w","role":"work_session","parentConversationId":"bot"})
+    );
+    std::fs::write(f.root.path().join("conversations/index.jsonl"), meta).unwrap();
+    let before = f
+        .host
+        .journal
+        .read(&NativeCoordinationReducer, None)
+        .unwrap();
+    f.host.journal.append(&before,&json!({"kind":"coordination_decision","mandate":before.state["mandates"]["work"],"receipt":{"operationId":"next-decision","expectedRevision":2,"sourceInputIds":["next-input"]},"transition":{"schemaVersion":1,"minimumExecutorVersion":1,"executionEpoch":"next-epoch","expectedGoalRevision":2,"phase":"started"}}),MS,&NativeCoordinationReducer,None).unwrap();
+    let facts = GoalStore::new(f.root.path())
+        .read(
+            "next",
+            &peer_runtime::goal_facts::TuiGoalProjector::new(NOW).unwrap(),
+            None,
+        )
+        .unwrap()
+        .facts;
+    let execution = normalize_session_execution_identity(&facts["execution"]).unwrap();
+    let resource = HostResourcePlan {
+        execution: execution.clone(),
+        workspace_id: "w".into(),
+        directory: Some(f.root.path().join("workspace")),
+        title: "next".into(),
+        read_only: false,
+    };
+    let lease = f.host.journal.lease().record();
+    let epoch = format!("{}:{}", lease.host_id, lease.acquired_at);
+    f.host
+        .resources
+        .reserve(
+            &resource,
+            ResourceReservation {
+                host_epoch: &epoch,
+                scopes: &[],
+                record_conflict: false,
+            },
+            NOW,
+        )
+        .unwrap();
+    let attempt = f.host.live.begin(&execution).unwrap();
+    let args = json!({"path":"next.txt","content":"next"});
+    let pending = f
+        .host
+        .request_permission(
+            HostCallIdentity {
+                plan_id: "next",
+                session_id: "next-session",
+                conversation_id: "next-conversation",
+                tool_call_id: "next-call",
+                stream_id: "next-stream",
+                capability_id: "local.file.write",
+                permission: ProviderPermission::FileWrite,
+            },
+            &args,
+            NOW,
+        )
+        .unwrap();
+    let grant = f
+        .host
+        .decide_permission(pending, LocalPermissionDecision::Approve, &args, NOW)
+        .unwrap()
+        .unwrap();
+    f.host.validate_permission(&grant, &args, NOW).unwrap();
+    attempt.finish();
+    let old_resource = HostResourcePlan {
+        execution: f.execution.clone(),
+        workspace_id: "w".into(),
+        directory: Some(f.root.path().join("workspace")),
+        title: "p".into(),
+        read_only: false,
+    };
+    assert_eq!(
+        f.host.resources.retained_unknowns(&old_resource).unwrap()[0]["unknownCalls"],
+        json!(["unknown"])
+    );
+}
+#[tokio::test]
+async fn goal_mirror_rechecks_source_and_lock_owner_before_writing() {
+    let mut f = fixture();
+    let claim = prepare_unknown(&mut f, "local.file.write", true);
+    let evidence = f
+        .host
+        .reconcile_unknown("p", &claim, NOW, &CancellationToken::new())
+        .await
+        .unwrap();
+    let closure = close_ledger_only(&mut f, &claim, &evidence);
+    let goals = GoalStore::new(f.root.path());
+    let projector = peer_runtime::goal_facts::TuiGoalProjector::new(NOW).unwrap();
+    let before = goals.read("p", &projector, None).unwrap();
+    let transaction = goals
+        .prepare_execution_mirror(
+            f.host.journal.lease(),
+            "p",
+            &before.source_revision,
+            &projector,
+            None,
+        )
+        .unwrap();
+    let lock = f.root.path().join("goal-plans/index.jsonl.lock");
+    let retained = f.root.path().join("goal-plans/retained-index-lock");
+    std::fs::rename(&lock, &retained).unwrap();
+    std::fs::create_dir(&lock).unwrap();
+    assert_eq!(
+        transaction
+            .commit(
+                peer_store::GoalExecutionFact::ClaimClosure(&closure),
+                NOW,
+                None
+            )
+            .err()
+            .unwrap()
+            .code(),
+        "STORE_LOCK_OWNERSHIP_CHANGED"
+    );
+    assert_eq!(
+        goals.read("p", &projector, None).unwrap().source_revision,
+        before.source_revision
+    );
+    assert!(lock.is_dir());
+    assert!(retained.is_dir());
+    std::fs::remove_dir(&lock).unwrap();
+    let transaction = goals
+        .prepare_execution_mirror(
+            f.host.journal.lease(),
+            "p",
+            &before.source_revision,
+            &projector,
+            None,
+        )
+        .unwrap();
+    f.plan["future"] = json!({"opaque":"new external source"});
+    std::fs::write(
+        f.root.path().join("goal-plans/p.json"),
+        serde_json::to_vec(&f.plan).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        transaction
+            .commit(
+                peer_store::GoalExecutionFact::ClaimClosure(&closure),
+                NOW,
+                None
+            )
+            .err()
+            .unwrap()
+            .code(),
+        "GOAL_SOURCE_CHANGED"
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(
+            &std::fs::read(f.root.path().join("goal-plans/p.json")).unwrap()
+        )
+        .unwrap()["future"]["opaque"],
+        "new external source"
+    );
 }

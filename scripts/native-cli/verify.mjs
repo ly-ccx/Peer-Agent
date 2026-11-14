@@ -43,6 +43,9 @@ run('bun', ['scripts/native-cli/coordination-conformance.ts', 'target/debug/exam
 run('bun', ['scripts/native-cli/kernel-store-conformance.ts', 'target/debug/examples/coordination-conformance']);
 run('cargo', ['build', '--locked', '-p', 'peer-runtime', '--features', 'test-fixtures', '--example', 'goal-conformance']);
 run('bun', ['scripts/native-cli/goal-store-conformance.ts', 'target/debug/examples/goal-conformance']);
+run('cargo', ['build', '--locked', '-p', 'peer-runtime', '--features', 'test-fixtures', '--example', 'goal-mirror-conformance']);
+run('bun', ['scripts/native-cli/goal-mirror-conformance.ts', 'target/debug/examples/goal-mirror-conformance']);
+run('node', ['--test', 'packages/runtime-node/src/goal-plan-transactions.test.mjs', 'packages/runtime-node/src/goal-plan-closure-mirror.test.mjs']);
 run('cargo', ['build', '--locked', '-p', 'peer-credential-helper', '--bin', 'peer-credential-helper']);
 run('cargo', ['build', '--locked', '-p', 'peer-runtime', '--example', 'helper-probe']);
 execFileSync(join(root, 'target/debug/examples/helper-probe'), [join(root, 'target/debug/peer-credential-helper')], {

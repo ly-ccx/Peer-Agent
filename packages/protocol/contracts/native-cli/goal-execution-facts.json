@@ -1815,6 +1815,1058 @@
         "rawCheckpointDeclared": false,
         "requiresRuntimeCheck": true
       }
+    },
+    {
+      "name": "canonical claim closure mirror",
+      "now": "2026-11-14T04:00:00.000Z",
+      "raw": {
+        "planId": "p",
+        "conversationId": "c",
+        "status": "executing",
+        "version": 1,
+        "createdAt": "2026-11-13T00:00:00.000Z",
+        "updatedAt": "2026-11-14T03:00:00.000Z",
+        "tasks": [
+          {
+            "taskId": "t",
+            "status": "pending"
+          }
+        ],
+        "future": {
+          "opaque": "preserved"
+        },
+        "delegationOrigin": {
+          "anchorMessageId": "anchor",
+          "inputId": "input",
+          "surface": "tui",
+          "workspaceId": "w",
+          "sessionId": "s",
+          "workId": "work",
+          "parentConversationId": "bot",
+          "modelSelection": {
+            "worker": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false
+            },
+            "explorer": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false
+            },
+            "verifier": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false,
+              "sameFamilyAsWorker": true
+            },
+            "source": {
+              "worker": "project"
+            },
+            "resolvedAt": "2026-11-14T04:00:00.000Z"
+          },
+          "phase": "running",
+          "executionGeneration": "generation",
+          "coordinationBinding": {
+            "workId": "work",
+            "goalRevision": 2,
+            "executionEpoch": "epoch"
+          },
+          "executionClaimClosure": {
+            "closureId": "closure",
+            "claimId": "claim",
+            "claimRevision": 2,
+            "execution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "generation",
+              "goalRevision": 2
+            },
+            "resourceRef": "directory:/synthetic",
+            "unknownCalls": [
+              "unknown"
+            ],
+            "authorityRef": "policy:policy",
+            "proof": "verified_dead",
+            "scope": "managed_execution",
+            "at": "2026-11-14T04:00:00.000Z",
+            "future": {
+              "keep": true
+            }
+          }
+        }
+      },
+      "expected": {
+        "planId": "p",
+        "conversationId": "c",
+        "status": "executing",
+        "version": 1,
+        "createdAt": "2026-11-13T00:00:00.000Z",
+        "updatedAt": "2026-11-14T03:00:00.000Z",
+        "delegationOrigin": {
+          "anchorMessageId": "anchor",
+          "inputId": "input",
+          "surface": "tui",
+          "memorySnapshotId": null,
+          "modelSelection": {
+            "worker": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false
+            },
+            "explorer": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false
+            },
+            "verifier": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false,
+              "sameFamilyAsWorker": true
+            },
+            "source": {
+              "worker": "project"
+            },
+            "resolvedAt": "2026-11-14T04:00:00.000Z"
+          },
+          "depth": 1,
+          "workspaceId": "w",
+          "sessionId": "s",
+          "workId": "work",
+          "parentConversationId": "bot",
+          "executionGeneration": "generation",
+          "executionClaimClosure": {
+            "closureId": "closure",
+            "claimId": "claim",
+            "claimRevision": 2,
+            "execution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "generation",
+              "goalRevision": 2
+            },
+            "resourceRef": "directory:/synthetic",
+            "unknownCalls": [
+              "unknown"
+            ],
+            "authorityRef": "policy:policy",
+            "proof": "verified_dead",
+            "scope": "managed_execution",
+            "at": "2026-11-14T04:00:00.000Z",
+            "future": {
+              "keep": true
+            }
+          },
+          "coordinationBinding": {
+            "workId": "work",
+            "goalRevision": 2,
+            "executionEpoch": "epoch"
+          },
+          "phase": "running"
+        },
+        "runner": null,
+        "progress": {
+          "total": 1,
+          "completed": 0,
+          "failed": 0,
+          "blocked": 0,
+          "percent": 0
+        },
+        "active": true,
+        "inheritanceStopped": false,
+        "execution": {
+          "planId": "p",
+          "sessionId": "s",
+          "executionEpoch": "epoch",
+          "generation": "generation",
+          "goalRevision": 2
+        },
+        "resourceDirectory": null,
+        "rawCheckpointDeclared": false,
+        "requiresRuntimeCheck": true
+      }
+    },
+    {
+      "name": "policy resolution closure mirror",
+      "now": "2026-11-14T04:00:00.000Z",
+      "raw": {
+        "planId": "p",
+        "conversationId": "c",
+        "status": "executing",
+        "version": 1,
+        "createdAt": "2026-11-13T00:00:00.000Z",
+        "updatedAt": "2026-11-14T03:00:00.000Z",
+        "tasks": [
+          {
+            "taskId": "t",
+            "status": "pending"
+          }
+        ],
+        "future": {
+          "opaque": "preserved"
+        },
+        "delegationOrigin": {
+          "anchorMessageId": "anchor",
+          "inputId": "input",
+          "surface": "tui",
+          "workspaceId": "w",
+          "sessionId": "s",
+          "workId": "work",
+          "parentConversationId": "bot",
+          "modelSelection": {
+            "worker": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false
+            },
+            "explorer": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false
+            },
+            "verifier": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false,
+              "sameFamilyAsWorker": true
+            },
+            "source": {
+              "worker": "project"
+            },
+            "resolvedAt": "2026-11-14T04:00:00.000Z"
+          },
+          "phase": "running",
+          "executionGeneration": "generation",
+          "coordinationBinding": {
+            "workId": "work",
+            "goalRevision": 2,
+            "executionEpoch": "epoch"
+          },
+          "executionClaimClosure": {
+            "closureId": "closure",
+            "claimId": "claim",
+            "claimRevision": 2,
+            "execution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "generation",
+              "goalRevision": 2
+            },
+            "resourceRef": "directory:/synthetic",
+            "unknownCalls": [
+              "unknown"
+            ],
+            "authorityRef": "policy:policy",
+            "proof": "verified_dead",
+            "scope": "managed_execution",
+            "at": "2026-11-14T04:00:00.000Z",
+            "future": {
+              "keep": true
+            },
+            "resolution": {
+              "resolutionId": "resolution",
+              "tier": "bot_verified",
+              "verdict": "no_effect_observed",
+              "evidenceDigest": "digest",
+              "policyRef": "policy:policy"
+            }
+          }
+        }
+      },
+      "expected": {
+        "planId": "p",
+        "conversationId": "c",
+        "status": "executing",
+        "version": 1,
+        "createdAt": "2026-11-13T00:00:00.000Z",
+        "updatedAt": "2026-11-14T03:00:00.000Z",
+        "delegationOrigin": {
+          "anchorMessageId": "anchor",
+          "inputId": "input",
+          "surface": "tui",
+          "memorySnapshotId": null,
+          "modelSelection": {
+            "worker": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false
+            },
+            "explorer": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false
+            },
+            "verifier": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false,
+              "sameFamilyAsWorker": true
+            },
+            "source": {
+              "worker": "project"
+            },
+            "resolvedAt": "2026-11-14T04:00:00.000Z"
+          },
+          "depth": 1,
+          "workspaceId": "w",
+          "sessionId": "s",
+          "workId": "work",
+          "parentConversationId": "bot",
+          "executionGeneration": "generation",
+          "executionClaimClosure": {
+            "closureId": "closure",
+            "claimId": "claim",
+            "claimRevision": 2,
+            "execution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "generation",
+              "goalRevision": 2
+            },
+            "resourceRef": "directory:/synthetic",
+            "unknownCalls": [
+              "unknown"
+            ],
+            "authorityRef": "policy:policy",
+            "proof": "verified_dead",
+            "scope": "managed_execution",
+            "at": "2026-11-14T04:00:00.000Z",
+            "future": {
+              "keep": true
+            },
+            "resolution": {
+              "resolutionId": "resolution",
+              "tier": "bot_verified",
+              "verdict": "no_effect_observed",
+              "evidenceDigest": "digest",
+              "policyRef": "policy:policy"
+            }
+          },
+          "coordinationBinding": {
+            "workId": "work",
+            "goalRevision": 2,
+            "executionEpoch": "epoch"
+          },
+          "phase": "running"
+        },
+        "runner": null,
+        "progress": {
+          "total": 1,
+          "completed": 0,
+          "failed": 0,
+          "blocked": 0,
+          "percent": 0
+        },
+        "active": true,
+        "inheritanceStopped": false,
+        "execution": {
+          "planId": "p",
+          "sessionId": "s",
+          "executionEpoch": "epoch",
+          "generation": "generation",
+          "goalRevision": 2
+        },
+        "resourceDirectory": null,
+        "rawCheckpointDeclared": false,
+        "requiresRuntimeCheck": true
+      }
+    },
+    {
+      "name": "foreign session closure rejected",
+      "now": "2026-11-14T04:00:00.000Z",
+      "raw": {
+        "planId": "p",
+        "conversationId": "c",
+        "status": "executing",
+        "version": 1,
+        "createdAt": "2026-11-13T00:00:00.000Z",
+        "updatedAt": "2026-11-14T03:00:00.000Z",
+        "tasks": [
+          {
+            "taskId": "t",
+            "status": "pending"
+          }
+        ],
+        "future": {
+          "opaque": "preserved"
+        },
+        "delegationOrigin": {
+          "anchorMessageId": "anchor",
+          "inputId": "input",
+          "surface": "tui",
+          "workspaceId": "w",
+          "sessionId": "s",
+          "workId": "work",
+          "parentConversationId": "bot",
+          "modelSelection": {
+            "worker": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false
+            },
+            "explorer": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false
+            },
+            "verifier": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false,
+              "sameFamilyAsWorker": true
+            },
+            "source": {
+              "worker": "project"
+            },
+            "resolvedAt": "2026-11-14T04:00:00.000Z"
+          },
+          "phase": "running",
+          "executionGeneration": "generation",
+          "coordinationBinding": {
+            "workId": "work",
+            "goalRevision": 2,
+            "executionEpoch": "epoch"
+          },
+          "executionClaimClosure": {
+            "closureId": "closure",
+            "claimId": "claim",
+            "claimRevision": 2,
+            "execution": {
+              "planId": "p",
+              "sessionId": "other",
+              "executionEpoch": "epoch",
+              "generation": "generation",
+              "goalRevision": 2
+            },
+            "resourceRef": "directory:/synthetic",
+            "unknownCalls": [
+              "unknown"
+            ],
+            "authorityRef": "policy:policy",
+            "proof": "verified_dead",
+            "scope": "managed_execution",
+            "at": "2026-11-14T04:00:00.000Z",
+            "future": {
+              "keep": true
+            }
+          }
+        }
+      },
+      "expected": {
+        "planId": "p",
+        "conversationId": "c",
+        "status": "executing",
+        "version": 1,
+        "createdAt": "2026-11-13T00:00:00.000Z",
+        "updatedAt": "2026-11-14T03:00:00.000Z",
+        "delegationOrigin": {
+          "anchorMessageId": "anchor",
+          "inputId": "input",
+          "surface": "tui",
+          "memorySnapshotId": null,
+          "modelSelection": {
+            "worker": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false
+            },
+            "explorer": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false
+            },
+            "verifier": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false,
+              "sameFamilyAsWorker": true
+            },
+            "source": {
+              "worker": "project"
+            },
+            "resolvedAt": "2026-11-14T04:00:00.000Z"
+          },
+          "depth": 1,
+          "workspaceId": "w",
+          "sessionId": "s",
+          "workId": "work",
+          "parentConversationId": "bot",
+          "executionGeneration": "generation",
+          "coordinationBinding": {
+            "workId": "work",
+            "goalRevision": 2,
+            "executionEpoch": "epoch"
+          },
+          "phase": "running"
+        },
+        "runner": null,
+        "progress": {
+          "total": 1,
+          "completed": 0,
+          "failed": 0,
+          "blocked": 0,
+          "percent": 0
+        },
+        "active": true,
+        "inheritanceStopped": false,
+        "execution": {
+          "planId": "p",
+          "sessionId": "s",
+          "executionEpoch": "epoch",
+          "generation": "generation",
+          "goalRevision": 2
+        },
+        "resourceDirectory": null,
+        "rawCheckpointDeclared": false,
+        "requiresRuntimeCheck": true
+      }
+    },
+    {
+      "name": "malformed closure proof rejected",
+      "now": "2026-11-14T04:00:00.000Z",
+      "raw": {
+        "planId": "p",
+        "conversationId": "c",
+        "status": "executing",
+        "version": 1,
+        "createdAt": "2026-11-13T00:00:00.000Z",
+        "updatedAt": "2026-11-14T03:00:00.000Z",
+        "tasks": [
+          {
+            "taskId": "t",
+            "status": "pending"
+          }
+        ],
+        "future": {
+          "opaque": "preserved"
+        },
+        "delegationOrigin": {
+          "anchorMessageId": "anchor",
+          "inputId": "input",
+          "surface": "tui",
+          "workspaceId": "w",
+          "sessionId": "s",
+          "workId": "work",
+          "parentConversationId": "bot",
+          "modelSelection": {
+            "worker": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false
+            },
+            "explorer": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false
+            },
+            "verifier": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false,
+              "sameFamilyAsWorker": true
+            },
+            "source": {
+              "worker": "project"
+            },
+            "resolvedAt": "2026-11-14T04:00:00.000Z"
+          },
+          "phase": "running",
+          "executionGeneration": "generation",
+          "coordinationBinding": {
+            "workId": "work",
+            "goalRevision": 2,
+            "executionEpoch": "epoch"
+          },
+          "executionClaimClosure": {
+            "closureId": "closure",
+            "claimId": "claim",
+            "claimRevision": 2,
+            "execution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "generation",
+              "goalRevision": 2
+            },
+            "resourceRef": "directory:/synthetic",
+            "unknownCalls": [
+              "unknown"
+            ],
+            "authorityRef": "policy:policy",
+            "proof": "assistant_said_stopped",
+            "scope": "managed_execution",
+            "at": "2026-11-14T04:00:00.000Z",
+            "future": {
+              "keep": true
+            }
+          }
+        }
+      },
+      "expected": {
+        "planId": "p",
+        "conversationId": "c",
+        "status": "executing",
+        "version": 1,
+        "createdAt": "2026-11-13T00:00:00.000Z",
+        "updatedAt": "2026-11-14T03:00:00.000Z",
+        "delegationOrigin": {
+          "anchorMessageId": "anchor",
+          "inputId": "input",
+          "surface": "tui",
+          "memorySnapshotId": null,
+          "modelSelection": {
+            "worker": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false
+            },
+            "explorer": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false
+            },
+            "verifier": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false,
+              "sameFamilyAsWorker": true
+            },
+            "source": {
+              "worker": "project"
+            },
+            "resolvedAt": "2026-11-14T04:00:00.000Z"
+          },
+          "depth": 1,
+          "workspaceId": "w",
+          "sessionId": "s",
+          "workId": "work",
+          "parentConversationId": "bot",
+          "executionGeneration": "generation",
+          "coordinationBinding": {
+            "workId": "work",
+            "goalRevision": 2,
+            "executionEpoch": "epoch"
+          },
+          "phase": "running"
+        },
+        "runner": null,
+        "progress": {
+          "total": 1,
+          "completed": 0,
+          "failed": 0,
+          "blocked": 0,
+          "percent": 0
+        },
+        "active": true,
+        "inheritanceStopped": false,
+        "execution": {
+          "planId": "p",
+          "sessionId": "s",
+          "executionEpoch": "epoch",
+          "generation": "generation",
+          "goalRevision": 2
+        },
+        "resourceDirectory": null,
+        "rawCheckpointDeclared": false,
+        "requiresRuntimeCheck": true
+      }
+    },
+    {
+      "name": "bot resolution without policy rejected",
+      "now": "2026-11-14T04:00:00.000Z",
+      "raw": {
+        "planId": "p",
+        "conversationId": "c",
+        "status": "executing",
+        "version": 1,
+        "createdAt": "2026-11-13T00:00:00.000Z",
+        "updatedAt": "2026-11-14T03:00:00.000Z",
+        "tasks": [
+          {
+            "taskId": "t",
+            "status": "pending"
+          }
+        ],
+        "future": {
+          "opaque": "preserved"
+        },
+        "delegationOrigin": {
+          "anchorMessageId": "anchor",
+          "inputId": "input",
+          "surface": "tui",
+          "workspaceId": "w",
+          "sessionId": "s",
+          "workId": "work",
+          "parentConversationId": "bot",
+          "modelSelection": {
+            "worker": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false
+            },
+            "explorer": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false
+            },
+            "verifier": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false,
+              "sameFamilyAsWorker": true
+            },
+            "source": {
+              "worker": "project"
+            },
+            "resolvedAt": "2026-11-14T04:00:00.000Z"
+          },
+          "phase": "running",
+          "executionGeneration": "generation",
+          "coordinationBinding": {
+            "workId": "work",
+            "goalRevision": 2,
+            "executionEpoch": "epoch"
+          },
+          "executionClaimClosure": {
+            "closureId": "closure",
+            "claimId": "claim",
+            "claimRevision": 2,
+            "execution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "generation",
+              "goalRevision": 2
+            },
+            "resourceRef": "directory:/synthetic",
+            "unknownCalls": [
+              "unknown"
+            ],
+            "authorityRef": "policy:policy",
+            "proof": "verified_dead",
+            "scope": "managed_execution",
+            "at": "2026-11-14T04:00:00.000Z",
+            "future": {
+              "keep": true
+            },
+            "resolution": {
+              "resolutionId": "resolution",
+              "tier": "bot_verified",
+              "verdict": "no_effect_observed",
+              "evidenceDigest": "digest"
+            }
+          }
+        }
+      },
+      "expected": {
+        "planId": "p",
+        "conversationId": "c",
+        "status": "executing",
+        "version": 1,
+        "createdAt": "2026-11-13T00:00:00.000Z",
+        "updatedAt": "2026-11-14T03:00:00.000Z",
+        "delegationOrigin": {
+          "anchorMessageId": "anchor",
+          "inputId": "input",
+          "surface": "tui",
+          "memorySnapshotId": null,
+          "modelSelection": {
+            "worker": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false
+            },
+            "explorer": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false
+            },
+            "verifier": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false,
+              "sameFamilyAsWorker": true
+            },
+            "source": {
+              "worker": "project"
+            },
+            "resolvedAt": "2026-11-14T04:00:00.000Z"
+          },
+          "depth": 1,
+          "workspaceId": "w",
+          "sessionId": "s",
+          "workId": "work",
+          "parentConversationId": "bot",
+          "executionGeneration": "generation",
+          "coordinationBinding": {
+            "workId": "work",
+            "goalRevision": 2,
+            "executionEpoch": "epoch"
+          },
+          "phase": "running"
+        },
+        "runner": null,
+        "progress": {
+          "total": 1,
+          "completed": 0,
+          "failed": 0,
+          "blocked": 0,
+          "percent": 0
+        },
+        "active": true,
+        "inheritanceStopped": false,
+        "execution": {
+          "planId": "p",
+          "sessionId": "s",
+          "executionEpoch": "epoch",
+          "generation": "generation",
+          "goalRevision": 2
+        },
+        "resourceDirectory": null,
+        "rawCheckpointDeclared": false,
+        "requiresRuntimeCheck": true
+      }
+    },
+    {
+      "name": "closure text is not receipt",
+      "now": "2026-11-14T04:00:00.000Z",
+      "raw": {
+        "planId": "p",
+        "conversationId": "c",
+        "status": "executing",
+        "version": 1,
+        "createdAt": "2026-11-13T00:00:00.000Z",
+        "updatedAt": "2026-11-14T03:00:00.000Z",
+        "tasks": [
+          {
+            "taskId": "t",
+            "status": "pending"
+          }
+        ],
+        "future": {
+          "opaque": "preserved"
+        },
+        "delegationOrigin": {
+          "anchorMessageId": "anchor",
+          "inputId": "input",
+          "surface": "tui",
+          "workspaceId": "w",
+          "sessionId": "s",
+          "workId": "work",
+          "parentConversationId": "bot",
+          "modelSelection": {
+            "worker": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false
+            },
+            "explorer": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false
+            },
+            "verifier": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false,
+              "sameFamilyAsWorker": true
+            },
+            "source": {
+              "worker": "project"
+            },
+            "resolvedAt": "2026-11-14T04:00:00.000Z"
+          },
+          "phase": "running",
+          "executionGeneration": "generation",
+          "coordinationBinding": {
+            "workId": "work",
+            "goalRevision": 2,
+            "executionEpoch": "epoch"
+          },
+          "executionClaimClosure": "approved, it is done"
+        }
+      },
+      "expected": {
+        "planId": "p",
+        "conversationId": "c",
+        "status": "executing",
+        "version": 1,
+        "createdAt": "2026-11-13T00:00:00.000Z",
+        "updatedAt": "2026-11-14T03:00:00.000Z",
+        "delegationOrigin": {
+          "anchorMessageId": "anchor",
+          "inputId": "input",
+          "surface": "tui",
+          "memorySnapshotId": null,
+          "modelSelection": {
+            "worker": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false
+            },
+            "explorer": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false
+            },
+            "verifier": {
+              "providerId": "provider",
+              "modelId": "model",
+              "modelProviderId": "provider::model",
+              "family": "openai",
+              "reasoningEffort": "high",
+              "fastMode": false,
+              "sameFamilyAsWorker": true
+            },
+            "source": {
+              "worker": "project"
+            },
+            "resolvedAt": "2026-11-14T04:00:00.000Z"
+          },
+          "depth": 1,
+          "workspaceId": "w",
+          "sessionId": "s",
+          "workId": "work",
+          "parentConversationId": "bot",
+          "executionGeneration": "generation",
+          "coordinationBinding": {
+            "workId": "work",
+            "goalRevision": 2,
+            "executionEpoch": "epoch"
+          },
+          "phase": "running"
+        },
+        "runner": null,
+        "progress": {
+          "total": 1,
+          "completed": 0,
+          "failed": 0,
+          "blocked": 0,
+          "percent": 0
+        },
+        "active": true,
+        "inheritanceStopped": false,
+        "execution": {
+          "planId": "p",
+          "sessionId": "s",
+          "executionEpoch": "epoch",
+          "generation": "generation",
+          "goalRevision": 2
+        },
+        "resourceDirectory": null,
+        "rawCheckpointDeclared": false,
+        "requiresRuntimeCheck": true
+      }
     }
   ]
 }

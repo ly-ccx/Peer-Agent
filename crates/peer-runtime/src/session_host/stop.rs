@@ -31,6 +31,7 @@ impl NativeSessionHost {
             if old["requestDigest"] != digest {
                 return Err(HostError("operation_identity_conflict"));
             }
+            self.recover_execution_mirrors(plan_id, now)?;
             // Recover a crash between durable admission closure and ledger
             // protection. Do not skip the uncommitted second half on replay.
             if old["phase"] == "recorded" {

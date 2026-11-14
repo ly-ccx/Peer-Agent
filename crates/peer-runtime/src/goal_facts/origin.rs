@@ -148,6 +148,9 @@ pub(super) fn normalize(v: &Value) -> Result<Option<Value>, &'static str> {
         out["executionControl"] = c.clone()
     }
     let b = &v["coordinationBinding"];
+    if valid_closure(&v["executionClaimClosure"], v) {
+        out["executionClaimClosure"] = v["executionClaimClosure"].clone();
+    }
     if b["workId"].is_string()
         && b["goalRevision"]
             .as_f64()
@@ -210,4 +213,42 @@ pub(super) fn normalize(v: &Value) -> Result<Option<Value>, &'static str> {
         }
     }
     Ok(Some(out))
+}
+fn valid_closure(c: &Value, origin: &Value) -> bool {
+    let Some(execution) = peer_protocol::normalize_session_execution_identity(&c["execution"])
+    else {
+        return false;
+    };
+    if Some(execution.session_id.as_str()) != origin["sessionId"].as_str()
+        || !["closureId", "claimId", "resourceRef", "authorityRef", "at"]
+            .into_iter()
+            .all(|k| c[k].as_str().is_some_and(|s| !s.is_empty()))
+        || c["claimRevision"]
+            .as_f64()
+            .is_none_or(|n| n.fract() != 0.0 || !(1.0..=9_007_199_254_740_991.0).contains(&n))
+        || !matches!(
+            c["proof"].as_str(),
+            Some("verified_dead" | "legacy_user_confirmed")
+        )
+        || c["scope"] != "managed_execution"
+        || !c["unknownCalls"]
+            .as_array()
+            .is_some_and(|a| a.iter().all(|s| s.as_str().is_some_and(|s| !s.is_empty())))
+    {
+        return false;
+    }
+    c.get("resolution").is_none_or(|r| {
+        r.is_object()
+            && ["resolutionId", "evidenceDigest"]
+                .into_iter()
+                .all(|k| r[k].as_str().is_some_and(|s| !s.is_empty()))
+            && matches!(r["tier"].as_str(), Some("user_confirmed" | "bot_verified"))
+            && matches!(
+                r["verdict"].as_str(),
+                Some("no_effect_observed" | "effect_observed")
+            )
+            && r.get("policyRef").is_none_or(Value::is_string)
+            && (r["tier"] != "bot_verified"
+                || r["policyRef"].as_str().is_some_and(|s| !s.is_empty()))
+    })
 }
