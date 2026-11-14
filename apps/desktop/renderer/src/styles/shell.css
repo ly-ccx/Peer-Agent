@@ -16,7 +16,9 @@
     min-height: 0;
   }
 
-  .app-shell.is-starting {
+  .app-shell.is-starting,
+  .app-shell.is-revealing,
+  .app-shell.is-revealed {
     animation: none;
   }
 
@@ -29,6 +31,19 @@
     padding: 0;
     overflow: hidden;
     background: var(--chrome-canvas);
+  }
+
+  .startup-reveal-layer {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: grid;
+    min-width: 0;
+    min-height: 0;
+    padding: 0;
+    overflow: hidden;
+    pointer-events: none;
+    background: transparent;
   }
 
   .startup-surface > .ui-form-feedback {
@@ -228,31 +243,43 @@
     background: var(--chrome-canvas);
   }
 
-  /* Soft cool bloom for light theme (subtle, not a white ball). */
-  :root:not([data-theme="dark"]) .brand-startup-loader {
+  /* Soft matte bloom for light theme (Frost v2 tokens, no white ball). */
+  :root:not([data-theme="dark"]) .brand-startup-loader:not([data-revealing="true"]) {
     background:
-      radial-gradient(circle at 50% 48%, rgba(255, 255, 255, 0.42) 0 12%, rgba(255, 255, 255, 0) 48%),
+      radial-gradient(
+        circle at 50% 48%,
+        color-mix(in srgb, var(--paper-sheet) 62%, transparent) 0 14%,
+        transparent 52%
+      ),
       var(--chrome-canvas);
   }
 
   /* Dark theme: deep matte obsidian + faint neutral mist, no blue-slate drift. */
-  :root[data-theme="dark"] .brand-startup-loader {
+  :root[data-theme="dark"] .brand-startup-loader:not([data-revealing="true"]) {
     background:
-      radial-gradient(circle at 50% 48%, color-mix(in srgb, var(--graphite-base) 5%, transparent) 0 14%, transparent 50%),
+      radial-gradient(
+        circle at 50% 48%,
+        color-mix(in srgb, var(--graphite-base) 5%, transparent) 0 14%,
+        transparent 50%
+      ),
       var(--chrome-canvas);
   }
 
+  .brand-startup-loader[data-revealing="true"] {
+    background: none;
+    background-color: transparent;
+  }
+
   .brand-startup-loader::before {
-    width: min(62vw, 760px);
-    aspect-ratio: 1.55;
+    width: min(44vw, 460px);
+    aspect-ratio: 1.25;
     content: '';
     position: absolute;
     border-radius: var(--ui-radius-circle);
     background: color-mix(in srgb, var(--azure-seal) 8%, transparent);
-    filter: blur(72px);
+    filter: blur(64px);
     opacity: 0;
-    /* Soft atmosphere bloom only — no canvas ink wash. */
-    animation: brand-startup-atmosphere 2.2s cubic-bezier(.2, .72, .2, 1) both;
+    animation: brand-startup-atmosphere 1.2s var(--za-ease-out) both;
     pointer-events: none;
   }
 
@@ -260,81 +287,85 @@
     background: color-mix(in srgb, var(--graphite-base) 5%, transparent);
   }
 
+  .brand-startup-loader[data-revealing="true"]::before {
+    opacity: 0;
+    animation: none;
+  }
+
   .brand-startup-loader__brand {
-    width: min(76vw, 940px);
-    min-width: 280px;
+    width: clamp(128px, 18vw, 176px);
+    height: clamp(128px, 18vw, 176px);
     position: relative;
     z-index: 1;
+    opacity: 1;
+    transform-origin: center 55.5%;
+    animation: brand-startup-cat-bounce 560ms linear both;
+  }
+
+  .brand-startup-loader__brand.is-waiting {
+    transform-origin: center 60%;
+    animation: brand-startup-cat-idle 2.2s var(--za-ease-standard) infinite;
+  }
+
+  .brand-startup-loader[data-revealing="true"] .brand-startup-loader__brand {
     opacity: 0;
-    /* 字标入场后定住（主题填充，无流体泼墨） */
-    animation: brand-startup-arrive 2.2s cubic-bezier(.2, .72, .2, 1) both;
+    animation: none;
   }
 
   .brand-startup-loader__lockup {
     display: block;
     width: 100%;
-    height: auto;
+    height: 100%;
     overflow: visible;
   }
 
-  .brand-startup-loader__wordmark {
-    font-family: 'Avenir Next Rounded', 'SF Pro Rounded', 'Nunito Sans', system-ui, sans-serif;
-    font-size: 176px;
-    font-weight: 650;
-    letter-spacing: -7px;
-    text-anchor: middle;
-  }
-
-  .brand-startup-loader__wordmark--ghost {
-    fill: rgba(26, 29, 33, 0.105);
-    stroke: rgba(255, 255, 255, 0.55);
-    stroke-width: 1px;
-    paint-order: stroke;
-  }
-
-  .brand-startup-loader__wordmark--ink {
+  .brand-startup-loader__cat-silhouette,
+  .brand-startup-loader__portal-solid {
     fill: var(--graphite-base);
   }
 
-  /* Dark theme: neutral chalk wordmark. */
-  :root[data-theme="dark"] .brand-startup-loader__wordmark--ghost {
-    fill: rgba(235, 236, 239, 0.14);
-    stroke: rgba(235, 236, 239, 0.22);
-  }
-
-  :root[data-theme="dark"] .brand-startup-loader__wordmark--ink {
-    fill: var(--graphite-base);
-  }
-
-  .brand-startup-loader__fill-mask {
-    transform: translateY(220px);
-    animation: brand-startup-fill 2.2s cubic-bezier(.2, .72, .2, 1) both;
-    will-change: transform;
-  }
-
-  .brand-startup-loader__support {
-    stroke: var(--bot-tone-amber);
-    stroke-width: 4px;
+  .brand-startup-loader__portal {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 2;
+    pointer-events: none;
     opacity: 0;
-    transform: scaleX(.35);
-    transform-box: fill-box;
-    transform-origin: center;
-    animation: brand-startup-support 2.2s cubic-bezier(.2, .72, .2, 1) both;
+    visibility: hidden;
+  }
+
+  .brand-startup-loader[data-revealing="true"] .brand-startup-loader__portal {
+    opacity: 1;
+    visibility: visible;
+  }
+
+  .brand-startup-loader__scrim {
+    fill: var(--za-app-bg);
+  }
+
+  .brand-startup-loader__portal-veil {
+    fill: var(--za-app-bg);
+  }
+
+  .brand-startup-loader__portal-rim {
+    fill: none;
+    stroke: color-mix(in srgb, var(--graphite-fade) 44%, transparent);
+    stroke-linejoin: round;
+    stroke-linecap: round;
   }
 
   @media (prefers-reduced-motion: reduce) {
     .brand-startup-loader::before,
-    .brand-startup-loader__brand,
-    .brand-startup-loader__fill-mask,
-    .brand-startup-loader__support {
+    .brand-startup-loader__brand {
       animation: none;
     }
 
-    .brand-startup-loader::before { opacity: .44; }
-    .brand-startup-loader__brand { opacity: 1; }
-    .brand-startup-loader__fill-mask { transform: translateY(-4px); }
-    .brand-startup-loader__support { opacity: 1; transform: none; }
-
+    .brand-startup-loader::before { opacity: 0.45; }
+    .brand-startup-loader__brand {
+      opacity: 1;
+      transform: none;
+    }
   }
 
   .empty-actions span,

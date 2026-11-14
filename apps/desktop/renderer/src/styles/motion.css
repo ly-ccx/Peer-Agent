@@ -545,43 +545,58 @@
  * 品牌启动页 — brand-startup-loader 的编排关键帧
  * ---------------------------------------------------------------------------
  * 受控例外：这组关键帧是品牌启动动画的编排特效，不属于通用语义基元
- *（motion-*），因为其设计参数（时长 2.2s、专属 cubic-bezier、负向位移 +
- * 模糊 + 缩放 + 填充液位 + 装饰线）完全耦合于品牌启动的叙事节奏，无法被
- * 任何通用基元参数化表达。
+ *（motion-*），因为其设计参数（Q 弹挤压回弹曲线 + 待机微呼吸）耦合于小猫
+ * 剪影启动入场的叙事节奏，无法被通用基元参数化表达。
  *
- * 分段（无扫光）：
- *   1) 字标入场 + 液面上升填充
- *   2) 填充完成后展开黄色 support 底线
- *   去掉：liquid-edge 扫光、arrive 二次缩放脉冲
+ * 分段：
+ *   1) 中心小猫剪影从小到大 Q 弹入场（brand-startup-cat-bounce）
+ *   2) 若 bootstrap 仍未完成，保持柔和呼吸待机（brand-startup-cat-idle）
+ *   3) 主壳就绪后由 BrandStartupLoader 接管猫头放大剪影透视揭示
  *
- * 治理登记：在 check-architecture-governance.mjs 的 keyframeAllowlist 中，
- * motion.css 已是白名单文件；shell.css 仅保留 animation 引用（不定义
- * @keyframes），因此治理检查自然通过。
+ * 治理登记：motion.css 已在 check-architecture-governance.mjs 的
+ * keyframeAllowlist 中；shell.css 仅引用动画名，不定义 @keyframes。
  * ------------------------------------------------------------------------- */
 
-@keyframes brand-startup-arrive {
-  /* 单一入场，无 86% 二次 scale 脉冲 */
-  0% { opacity: 0; transform: translateY(14px) scale(.97); filter: blur(6px); }
-  20% { opacity: 1; filter: blur(0); }
-  100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
-}
-
 @keyframes brand-startup-atmosphere {
-  0%, 6% { opacity: 0; transform: translateY(13%) scale(.82); }
-  48% { opacity: .7; }
-  100% { opacity: .44; transform: translateY(4%) scale(1.05); }
+  0%, 10% { opacity: 0; transform: scale(0.76); }
+  55% { opacity: 0.72; }
+  100% { opacity: 0.45; transform: scale(1.04); }
 }
 
-@keyframes brand-startup-fill {
-  0%, 8% { transform: translateY(220px); }
-  55% { transform: translateY(0); }
-  100% { transform: translateY(-4px); }
+@keyframes brand-startup-cat-bounce {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0) scale(0.08, 0.08);
+  }
+  26% {
+    opacity: 1;
+    transform: translate3d(0, -6px, 0) scale(0.90, 1.18);
+  }
+  46% {
+    opacity: 1;
+    transform: translate3d(0, 3px, 0) scale(1.16, 0.86);
+  }
+  65% {
+    opacity: 1;
+    transform: translate3d(0, -2px, 0) scale(0.94, 1.07);
+  }
+  82% {
+    opacity: 1;
+    transform: translate3d(0, 1px, 0) scale(1.03, 0.975);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1, 1);
+  }
 }
 
-@keyframes brand-startup-support {
-  /* 填充接近完成后出现黄色底线 */
-  0%, 50% { opacity: 0; transform: scaleX(.35); }
-  62%, 100% { opacity: 1; transform: scaleX(1); }
+@keyframes brand-startup-cat-idle {
+  0%, 100% {
+    transform: scale(1, 1);
+  }
+  50% {
+    transform: scale(1.03, 0.975);
+  }
 }
 
 /* --------------------------------------------------------------------------

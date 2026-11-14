@@ -12,7 +12,6 @@ test('desktop bootstrap publishes session early and preloads workspace snapshot 
   assert.match(bootstrap, /clientApi\.workspaceInfo/);
   assert.match(bootstrap, /clientApi\.conversationsList/);
   assert.match(bootstrap, /Optional warmup cannot turn a usable bootstrap into a failure/);
-
 });
 
 test('App and Sidebar consume the startup snapshot on their first render', async () => {
@@ -37,11 +36,11 @@ test('desktop startup has no delayed hidden layout reveal', async () => {
   // 禁止：隐藏壳层后 setTimeout 再 reveal 的假启动（450ms 那套）
   assert.doesNotMatch(app, /450|isInitialWorkspaceReady|app-layout-initializing|app-layout-ready/);
   assert.doesNotMatch(sidebarCss, /app-layout-initializing|app-layout-ready/);
-  // 允许会话列表防抖；内容就绪不因品牌动画增加强制等待。
+  // 内容就绪不因品牌动画阻塞主壳挂载。
   assert.doesNotMatch(app, /BRAND_STARTUP_INTRO_MS|app-layout-initializing/);
 });
 
-test('bootstrap uses the branded wordmark loader without exposing initialization details', async () => {
+test('bootstrap uses the kitten silhouette loader and perspective reveal without exposing initialization details', async () => {
   const [app, loader] = await Promise.all([
     readRendererSource('../App.tsx'),
     readRendererSource('../app/components/BrandStartupLoader.tsx'),
@@ -49,11 +48,12 @@ test('bootstrap uses the branded wordmark loader without exposing initialization
 
   assert.doesNotMatch(app, /useBrandStartupMinHold/);
   assert.match(app, /showMainShell/);
-  assert.match(app, /!initError \? <BrandStartupLoader \/>/);
-  assert.match(app, /BrandStartupLoader/);
-  assert.match(loader, /getBBox\(\)/);
-  assert.match(loader, /brand-startup-loader__fill-mask/);
-  assert.match(loader, /brand-startup-loader__support/);
+  assert.match(app, /showStartupLoader \? <BrandStartupLoader ready=\{showMainShell\}/);
+  assert.match(app, /startup-reveal-layer/);
+  assert.match(loader, /brand-startup-loader__cat-silhouette/);
+  assert.match(loader, /brand-startup-loader__portal/);
+  assert.match(loader, /brand-startup-loader__scrim/);
+  assert.match(loader, /fillRule="evenodd"/);
   assert.doesNotMatch(loader, /progress|workspace|conversation|capabilit/i);
 });
 
@@ -61,82 +61,42 @@ test('branded startup motion has a reduced-motion fallback and the old progress 
   const shellCss = await readRendererSource('./shell.css');
 
   assert.match(shellCss, /@media \(prefers-reduced-motion: reduce\)/);
-  assert.match(shellCss, /brand-startup-loader__fill-mask/);
-  assert.match(shellCss, /brand-startup-loader__support/);
+  assert.match(shellCss, /brand-startup-loader__brand/);
+  assert.match(shellCss, /brand-startup-loader__portal/);
   assert.doesNotMatch(shellCss, /\.bootstrap-loader(?:-copy|-label|-track)?\b/);
 });
 
-test('brand startup is pure wordmark with theme-aware ink and no fluid wash', async () => {
+test('brand startup uses bouncy kitten silhouette entrance and cutout perspective reveal with Frost tokens', async () => {
   const shellCss = await readRendererSource('./shell.css');
   const motionCss = await readRendererSource('./motion.css');
   const loader = await readRendererSource('../app/components/BrandStartupLoader.tsx');
 
-  // 入场后字标定住；无呼吸 hold；2.2s 字标填充 + 黄线（无扫光）
-  assert.match(shellCss, /animation:\s*brand-startup-arrive 2\.2s/);
-  assert.match(shellCss, /animation:\s*brand-startup-fill 2\.2s/);
-  assert.match(shellCss, /animation:\s*brand-startup-support 2\.2s/);
-  assert.doesNotMatch(motionCss, /scale\(1\.018\)/);
-  assert.doesNotMatch(motionCss, /translateY\(-30px\)/);
-  assert.doesNotMatch(motionCss, /translateY\(-35px\)/);
-  // 去掉 liquid-edge 扫光节点与 edge 关键帧
-  assert.doesNotMatch(loader, /liquid-edge/);
-  assert.doesNotMatch(shellCss, /brand-startup-loader__liquid-edge/);
-  assert.doesNotMatch(motionCss, /@keyframes brand-startup-edge/);
-  assert.doesNotMatch(shellCss, /animation:\s*brand-startup-edge/);
-  // 黄线在填充后出现（support 从约 50% 起）
-  assert.match(motionCss, /@keyframes brand-startup-support[\s\S]*0%, 50%/);
-  assert.doesNotMatch(shellCss, /brand-startup-arrive-hold/);
-  assert.doesNotMatch(motionCss, /@keyframes brand-startup-arrive-hold/);
+  // Phase 1: 中心小猫剪影 Q 弹入场 + 柔和呼吸待机
+  assert.match(shellCss, /animation:\s*brand-startup-cat-bounce 560ms/);
+  assert.match(shellCss, /animation:\s*brand-startup-cat-idle 2\.2s/);
+  assert.match(motionCss, /@keyframes brand-startup-cat-bounce/);
+  assert.match(motionCss, /@keyframes brand-startup-cat-idle/);
 
-  // 去掉从下往上的 liquid-crest 尖峰箭头
-  assert.doesNotMatch(loader, /liquid-crest/);
-  assert.doesNotMatch(shellCss, /liquid-crest/);
-  assert.doesNotMatch(motionCss, /@keyframes brand-startup-crest/);
+  // 去掉旧的 Peer Agent 文字填充与黄色底线
+  assert.doesNotMatch(loader, /brand-startup-loader__wordmark/);
+  assert.doesNotMatch(loader, /brand-startup-loader__fill-mask/);
+  assert.doesNotMatch(loader, /brand-startup-loader__support/);
+  assert.doesNotMatch(motionCss, /@keyframes brand-startup-fill/);
+  assert.doesNotMatch(motionCss, /@keyframes brand-startup-support/);
+  assert.doesNotMatch(shellCss, /#eabf58/);
 
-  // 字标填充：浅色深墨 / 深色浅墨，跟随 data-theme
-  assert.match(loader, /INK_BLACK\s*=\s*'#1a1d21'/);
-  assert.match(loader, /INK_LIGHT\s*=\s*'#d7dde8'/);
-  assert.match(loader, /brand-startup-loader__wordmark--ink/);
-  assert.match(loader, /readThemeMode/);
-  assert.match(loader, /data-theme/);
-  assert.doesNotMatch(loader, /#5f7db8/);
-  assert.doesNotMatch(loader, /#b87898/);
-  assert.doesNotMatch(loader, /attributeName="gradientTransform"/);
-  assert.doesNotMatch(loader, /allowColorFlow/);
-
-  // 纯字标：无 canvas 流体泼墨 / 密度场引擎
-  assert.doesNotMatch(loader, /brand-startup-loader__ink-canvas/);
-  assert.doesNotMatch(loader, /data-ink-wash/);
+  // 使用 Frost 语义 token，无流体泼墨引擎
+  assert.match(shellCss, /fill:\s*var\(--graphite-base\)/);
+  assert.match(shellCss, /fill:\s*var\(--za-app-bg\)/);
   assert.doesNotMatch(loader, /getContext\('2d'/);
   assert.doesNotMatch(loader, /startInkWash/);
-  assert.doesNotMatch(loader, /randomDrop/);
-  assert.doesNotMatch(loader, /function splat/);
-  assert.doesNotMatch(loader, /AUTO_MIN_MS/);
-  assert.doesNotMatch(loader, /AUTO_MAX_MS/);
-  assert.doesNotMatch(loader, /DEN_DISSIPATION/);
-  assert.doesNotMatch(loader, /DIFFUSION/);
-  assert.doesNotMatch(loader, /velocityStep/);
-  assert.doesNotMatch(loader, /densityStep/);
-  assert.doesNotMatch(loader, /renderDensity/);
-  assert.doesNotMatch(loader, /InkFilament/);
-  assert.doesNotMatch(loader, /curlNoise/);
-  assert.doesNotMatch(loader, /burstDrop/);
-  assert.doesNotMatch(loader, /stampRibbon/);
-  assert.doesNotMatch(loader, /InkPuff/);
-  assert.doesNotMatch(loader, /drawInkPuff/);
-  assert.doesNotMatch(loader, /InkParticle/);
   assert.doesNotMatch(shellCss, /brand-startup-loader__ink-canvas/);
-  assert.doesNotMatch(loader, /ink-blot/);
-  assert.doesNotMatch(shellCss, /ink-blot/);
-  assert.doesNotMatch(shellCss, /brand-startup-ink-wash/);
-  assert.doesNotMatch(motionCss, /@keyframes brand-startup-ink-wash/);
-  assert.doesNotMatch(shellCss, /mix-blend-mode:\s*multiply/);
 
-  // 仍可渲染字标与支撑线
+  // Phase 2: 透视放大揭示可被交互及 reduced-motion 中断
   assert.match(loader, /export function BrandStartupLoader/);
-  assert.match(loader, /Peer Agent/);
-  assert.match(loader, /brand-startup-loader__support/);
-  assert.match(loader, /getBBox\(\)/);
+  assert.match(loader, /prefersReducedMotion/);
+  assert.match(loader, /pointerdown/);
+  assert.match(loader, /keydown/);
 
   assert.match(
     shellCss,
@@ -144,7 +104,7 @@ test('brand startup is pure wordmark with theme-aware ink and no fluid wash', as
   );
 });
 
-test('startup readiness has no brand hold and bootstrap failures offer a retry', async () => {
+test('startup readiness does not block main shell mount and bootstrap failures offer a retry', async () => {
   const app = await readRendererSource('../App.tsx');
   assert.match(app, /showMainShell = Boolean\(session\)/);
   assert.doesNotMatch(app, /brandStartupHoldDone|useBrandStartupMinHold|BRAND_STARTUP_INTRO_MS/);
