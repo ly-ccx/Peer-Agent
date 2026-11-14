@@ -29,6 +29,7 @@ assert.equal(seam.testsSha256, hash(fs.readFileSync(opt('tests')))); assert.equa
 assert.equal(seam.candidate, candidate); assert.deepEqual(seam.source, source); assert.equal(seam.electronLaunches, 0);
 assert.equal(seam.profilerWireCommands, 0); assert.equal(seam.notFieldCause, true); assert.equal(seam.actualOrderAndGapVerified, true);
 assert.equal(seamCost.exitCode, 0); assert.equal(seamCost.reportSha256, hash(fs.readFileSync(opt('seam'))));
+assert.equal(seamCost.outputBudgetPassed,true); assert.ok(seamCost.outputBytes <= 2097152);
 assert.ok(seamCost.fullChildSubtreeCpuMs > 0); assert.ok(seamCost.wallMsThroughReap <= 30000);
 assert.deepEqual(productionIdentity(config.moduleRoot), baseline.production); assert.deepEqual(parent.production, baseline.production);
 assert.equal(hash(JSON.stringify(baseline.production)), budget.data.productionIdentitySha256);

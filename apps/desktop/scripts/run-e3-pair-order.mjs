@@ -29,7 +29,9 @@ assert.equal(ready.seamSha256, hash(fs.readFileSync(opt('--seam'))));
 assert.ok(Number.isFinite(ready.preparationCpuMs) && ready.preparationCpuMs > 0 && ready.preparationCpuMs < budget.controllerAuxCpuMs);
 assert.deepEqual(ready.costs.map(c => c.name), ['tests', 'seam', 'binding']);
 assert.ok(ready.costs.every(c => c.exitCode === 0 && Number.isFinite(c.fullChildSubtreeCpuMs) && c.fullChildSubtreeCpuMs > 0));
-assert.equal(ready.preparationCpuMs, ready.costs.reduce((n, c) => n + c.fullChildSubtreeCpuMs, 0));
+assert.ok(ready.priorPreparation && ready.priorPreparation.fullCpuMs > 0 && ready.priorPreparation.originalFailurePreserved === true);
+assert.ok(Number.isFinite(ready.preparationOutputBytes) && ready.preparationOutputBytes > 0);
+assert.equal(ready.preparationCpuMs, ready.priorPreparation.fullCpuMs + ready.costs.reduce((n, c) => n + c.fullChildSubtreeCpuMs, 0));
 assert.equal(ready.costs[1].reportSha256, ready.seamSha256);
 assert.equal(ready.costs[2].reportSha256, ready.bindingSha256);
 assert.equal(binding.passed, true);
@@ -60,7 +62,7 @@ finally {
 const started = performance.now(), cpuStart = process.cpuUsage(), cpu = () => { const c = process.cpuUsage(cpuStart); return (c.user + c.system) / 1000; }, prepCpuMs = ready.preparationCpuMs, live = new Set();
 let counter, interrupted = false, rootCount = 0, recoveryJournal;
 const treeBytes = dir => fs.readdirSync(dir, { withFileTypes: true }).reduce((s, e) => s + (e.isDirectory() ? treeBytes(path.join(dir, e.name)) : fs.lstatSync(path.join(dir, e.name)).size), 0);
-function save() { const bytes = Buffer.from(JSON.stringify(report)); if (treeBytes(output) + bytes.length > budget.outputBytes)
+function save() { const bytes = Buffer.from(JSON.stringify(report)); if (ready.preparationOutputBytes + treeBytes(output) + bytes.length > budget.outputBytes)
     throw Error('order_report_output_cap'); const tmp = path.join(output, 'report.tmp'), fd = fs.openSync(tmp, 'w', 0o600); try {
     fs.writeFileSync(fd, bytes);
     fs.fdatasyncSync(fd);
@@ -68,7 +70,7 @@ function save() { const bytes = Buffer.from(JSON.stringify(report)); if (treeByt
 finally {
     fs.closeSync(fd);
 } fs.renameSync(tmp, path.join(output, 'report.private.json')); }
-const journal = createE3Journal(path.join(output, 'reads.private.jsonl'), { maxBytes: budget.journalBytes, beforeWrite(n) { if (treeBytes(output) + n + 16777216 > budget.outputBytes)
+const journal = createE3Journal(path.join(output, 'reads.private.jsonl'), { maxBytes: budget.journalBytes, beforeWrite(n) { if (ready.preparationOutputBytes + treeBytes(output) + n + 16777216 > budget.outputBytes)
         throw Error('order_archive_output_reserve'); } });
 function charge() { report.hashCpuMs = report.hosts.reduce((s, h) => s + Math.max(h.recordedHashCpuMs || 0, h.exit?.stopped?.nativeCpuMs || 0), 0); report.readCpuMs = report.hosts.reduce((s, h) => s + Math.max(h.recordedCpuMs || 0, h.exit?.stopped?.controlledCpuMs || 0) + (h.exit?.postMeasurementAudit?.cpuMs || 0), 0); }
 function guard() { charge(); if (interrupted)
@@ -215,7 +217,8 @@ finally {
     journal.close();
     recoveryJournal?.close();
     report.unknownCostGap = report.hosts.some(h => !h.exit) || !report.counterExit?.known;
-    report.logicalOutputBytesBeforeFinalReport = treeBytes(output);
+    report.preparationOutputBytes = ready.preparationOutputBytes;
+    report.logicalOutputBytesBeforeFinalReport = treeBytes(output) + ready.preparationOutputBytes;
     if (report.wallMs > budget.wallMs || report.readCpuMs > budget.readCpuMs || report.hashCpuMs > budget.hashCpuMs || report.controllerAuxChargedMs > budget.controllerAuxCpuMs + budget.preparationShutdownReserveMs || report.unknownCostGap || rootCount > 244 || report.logicalOutputBytesBeforeFinalReport > budget.outputBytes)
         report.failures.push({ message: 'order_final_budget_or_unknown_cost' });
     if (report.failures.length) {

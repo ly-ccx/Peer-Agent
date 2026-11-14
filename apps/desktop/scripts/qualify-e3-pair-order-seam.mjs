@@ -10,6 +10,7 @@ import {createE3Journal, createE3DurableReader} from './ri00/e3-durable-reader.m
 import {executeCadenceBlock} from './ri00/e3-cadence-block.mjs';
 import {cadenceBlockGaps} from './ri00/e3-cadence-result.mjs';
 import {traceOrderBlock, executeOrderCell} from './ri00/e3-pair-order-controller.mjs';
+import {compactOrderSeamCell} from './ri00/e3-pair-order-seam-record.mjs';
 import {actualOrderValid} from './ri00/e3-pair-order-result.mjs';
 import {pairOrderPlan} from './ri00/e3-pair-order-plan.mjs';
 import {pairOrderSource} from './ri00/e3-pair-order-identity.mjs';
@@ -66,7 +67,7 @@ try {
     const cell = await executeOrderCell({io, host: target, conditioning, spec, label: 'seam-' + spec.arm});
     assert.equal(actualOrderValid(cell), true);
     for (const b of cell.executed) {assert.ok(cadenceBlockGaps(b).minimumMs >= 150); assert.ok(b.sequence.every(p => p.row.label === 'cadence-root'));}
-    report.cells.push(cell); report.cases.push({name: 'complete-two-host-' + spec.arm + '-order-gap-and-hash-boundaries', passed: true});
+    report.cells.push(compactOrderSeamCell(cell)); report.cases.push({name: 'complete-two-host-' + spec.arm + '-order-gap-and-hash-boundaries', passed: true});
   }
   const before = totalReads; failSync = true;
   await assert.rejects(target.reader.read('dense', 'cadence-root'), /fsync_failure/);
@@ -96,7 +97,12 @@ finally {
     .filter(([name]) => name.startsWith('Profiler.')).reduce((s, [, n]) => s + n, 0), 0);
   report.fixtureReads = totalReads; report.wallMs = performance.now() - began;
   if (report.failures.length || report.profilerWireCommands || report.wallMs > 30000 || report.recovery.length !== 2) report.passed = false;
-  const data = JSON.stringify(report), fd = fs.openSync(path.join(output, 'report.private.json'), 'wx', 0o600);
+  const treeBytes = dir => fs.readdirSync(dir, {withFileTypes: true}).reduce((n, e) => n + (e.isDirectory() ? treeBytes(path.join(dir, e.name)) : fs.statSync(path.join(dir, e.name)).size), 0);
+  let data = JSON.stringify(report);
+  if (treeBytes(output) + Buffer.byteLength(data) > 2097152) {
+    report.passed = false; report.failures.push({message: 'qualification_output_budget'}); data = JSON.stringify(report);
+  }
+  const fd = fs.openSync(path.join(output, 'report.private.json'), 'wx', 0o600);
   try {fs.writeFileSync(fd, data); fs.fdatasyncSync(fd);} finally {fs.closeSync(fd);}
   if (!report.passed) process.exitCode = 1;
   console.log(JSON.stringify({passed: report.passed, cases: report.cases.length, fixtureReads: totalReads, profilerWireCommands: report.profilerWireCommands, wallMs: report.wallMs}));
