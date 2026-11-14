@@ -440,12 +440,12 @@
 
   .skill-upload-btn {
     @apply ml-auto inline-flex h-9 shrink-0 items-center gap-1.5 rounded-[var(--ui-radius-pill)] px-5 text-[13px] font-semibold;
-    color: #fff;
-    background: #222;
+    color: var(--za-primary-control-ink);
+    background: var(--za-primary-control-bg);
   }
 
   .skill-upload-btn:hover {
-    background: #333;
+    opacity: 0.9;
   }
 
   .skill-grid {
@@ -558,11 +558,11 @@
     top: 10px;
     right: -20px;
     padding: 3px 24px;
-    background: linear-gradient(135deg, #34d058 0%, #2ea44f 100%);
-    color: #fff;
+    background: var(--state-success);
+    color: var(--paper-sheet);
     transform: rotate(45deg);
     z-index: 1;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 1px 3px color-mix(in srgb, var(--graphite-base) 14%, transparent);
   }
 
   .skill-market-card-install-btn {
@@ -618,7 +618,7 @@
   .skill-avatar {
     @apply grid h-8 w-8 shrink-0 place-items-center rounded-[var(--ui-radius-circle)] text-[13px] font-semibold;
     color: var(--za-text-muted);
-    background: #f0f0f0;
+    background: var(--za-surface-1);
   }
 
   .skill-avatar--image {
@@ -763,8 +763,8 @@
 
   .aone-skill-card-avatar {
     @apply flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--ui-radius-control-compact)] text-[12px] font-medium;
-    background: #f0f0f0;
-    color: #666;
+    background: var(--za-surface-1);
+    color: var(--za-text-soft);
   }
 
   .aone-skill-card-title-row {
@@ -773,7 +773,7 @@
 
   .aone-skill-card-name {
     @apply truncate text-[13px] font-semibold;
-    color: var(--za-text-primary);
+    color: var(--za-text);
   }
 
   .aone-skill-card-stats {
@@ -787,7 +787,7 @@
 
   .aone-skill-card-desc {
     @apply line-clamp-2 text-[12px] leading-snug;
-    color: var(--za-text-secondary);
+    color: var(--za-text-soft);
   }
 
   .aone-skill-card-footer {
@@ -809,11 +809,11 @@
     top: 10px;
     right: -20px;
     padding: 3px 24px;
-    background: linear-gradient(135deg, #34d058 0%, #2ea44f 100%);
-    color: #fff;
+    background: var(--state-success);
+    color: var(--paper-sheet);
     transform: rotate(45deg);
     z-index: 1;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 1px 3px color-mix(in srgb, var(--graphite-base) 14%, transparent);
   }
 
   .aone-skill-card-install-btn {
@@ -868,20 +868,20 @@
 
   .skill-upload-close:hover {
     color: var(--za-text);
-    background: #f0f0f0;
+    background: var(--za-hover);
   }
 
   /* Info banner */
   .skill-upload-banner {
     @apply flex items-center gap-2 rounded-[var(--ui-radius-control)] px-3 py-2.5 text-[13px];
-    background: #e8f4fd;
-    color: #1a1a1a;
+    background: var(--azure-trace);
+    color: var(--za-text);
   }
 
   .skill-upload-banner-icon {
     @apply grid h-[18px] w-[18px] shrink-0 place-items-center rounded-[var(--ui-radius-circle)] text-[11px] font-bold;
-    background: #5bb7f0;
-    color: #fff;
+    background: var(--azure-seal);
+    color: var(--paper-sheet);
   }
 
   .skill-upload-banner-close {
@@ -906,7 +906,7 @@
   }
 
   .skill-upload-label .required {
-    color: #e53935;
+    color: var(--state-danger);
   }
 
   .skill-upload-file-row {
@@ -915,14 +915,14 @@
 
   .skill-upload-file-btn {
     @apply flex h-9 shrink-0 items-center justify-center rounded-[var(--ui-radius-control)] px-4 text-[13px] font-medium leading-none;
-    border: 1px dashed #ccc;
+    border: 1px dashed var(--za-line-strong);
     color: var(--za-text);
     background: transparent;
   }
 
   .skill-upload-file-btn:hover {
-    border-color: #999;
-    background: #fafafa;
+    border-color: var(--za-text-soft);
+    background: var(--za-hover);
   }
 
   .skill-upload-tip {
@@ -941,24 +941,24 @@
 
   .skill-btn-cancel {
     @apply h-10 rounded-[var(--ui-radius-pill)] px-6 text-[14px] font-medium;
-    border: 1px solid #ddd;
+    border: 1px solid var(--za-line);
     color: var(--za-text);
     background: transparent;
   }
 
   .skill-btn-cancel:hover {
-    background: #f5f5f5;
+    background: var(--za-hover);
   }
 
   .skill-btn-confirm {
     @apply h-10 rounded-[var(--ui-radius-pill)] px-6 text-[14px] font-medium;
     border: none;
-    color: #fff;
-    background: #222;
+    color: var(--za-primary-control-ink);
+    background: var(--za-primary-control-bg);
   }
 
   .skill-btn-confirm:hover {
-    background: #333;
+    opacity: 0.9;
   }
 
   .skill-btn-confirm:disabled {
@@ -1107,7 +1107,7 @@
   }
 
   .skill-scope-badge { @apply rounded-[var(--ui-radius-pill)] px-2.5 py-1 text-[11px] font-medium; }
-  .skill-scope-badge--workspace { color: #60a5fa; background: rgba(59, 130, 246, 0.14); }
+  .skill-scope-badge--workspace { color: var(--azure-seal); background: var(--azure-trace); }
   .skill-scope-badge--global { color: var(--za-text-muted); background: color-mix(in srgb, var(--za-text) 8%, transparent); }
 
   .skill-detail-close {
@@ -1133,11 +1133,11 @@
     border: 1px solid var(--za-line);
   }
   .skill-uninstall-btn {
-    color: #b42318;
-    background: color-mix(in srgb, #b42318 8%, transparent);
+    color: var(--state-danger);
+    background: color-mix(in srgb, var(--state-danger) 8%, transparent);
   }
   .skill-uninstall-btn:hover {
-    background: color-mix(in srgb, #b42318 14%, transparent);
+    background: color-mix(in srgb, var(--state-danger) 14%, transparent);
   }
   .skill-uninstall-confirm p {
     @apply m-0 text-sm;
@@ -1151,9 +1151,9 @@
     background: transparent;
   }
   .skill-uninstall-confirm-btn {
-    color: #fff;
-    background: #b42318;
-    border-color: #b42318;
+    color: var(--paper-sheet);
+    background: var(--state-danger);
+    border-color: var(--state-danger);
   }
   .skill-uninstall-confirm-btn:disabled,
   .skill-uninstall-btn:disabled,
@@ -1180,8 +1180,8 @@
   .skill-detail-content .markdown-content { font-size: 14px; line-height: 1.75; }
   .skill-detail-when {
     @apply mb-6 rounded-[var(--ui-radius-panel)] p-4;
-    background: color-mix(in srgb, #3b82f6 9%, transparent);
-    border: 1px solid color-mix(in srgb, #3b82f6 22%, transparent);
+    background: var(--azure-trace);
+    border: 1px solid color-mix(in srgb, var(--azure-seal) 22%, transparent);
   }
   .skill-detail-when h3, .skill-detail-when p { @apply m-0; }
   .skill-detail-when h3 { @apply mb-2 text-[13px] font-semibold; }
@@ -1197,7 +1197,7 @@
     @apply rounded-[var(--ui-radius-control)] border-0 bg-transparent px-4 py-2 text-[13px] font-medium;
     color: var(--za-text-muted);
   }
-  .skill-view-tabs button.active { color: var(--za-text); background: var(--za-surface); box-shadow: var(--za-shadow-xs); }
+  .skill-view-tabs button.active { color: var(--za-text); background: var(--paper-sheet); box-shadow: var(--shadow-card); }
   /* 搜索/分类/同步与顶部「市场/已安装」同一行右侧 */
   .skill-marketplace-toolbar {
     @apply absolute right-0 top-0 z-10 flex items-center justify-end gap-3;
@@ -1205,7 +1205,7 @@
   }
   .skill-marketplace-toolbar input {
     @apply min-w-[240px] px-3 py-2 text-[13px] outline-none;
-    color: var(--za-text); background: var(--za-surface); border: 1px solid var(--za-line);
+    color: var(--za-text); background: var(--paper-sheet); border: 1px solid var(--za-line);
     border-radius: var(--ui-radius-control);
   }
   .skill-marketplace {
@@ -1218,7 +1218,7 @@
   }
   .skill-marketplace-card {
     @apply flex h-full min-w-0 flex-col gap-2.5 rounded-[var(--ui-radius-panel)] p-3;
-    background: var(--za-surface); border: 1px solid var(--za-line);
+    background: var(--paper-sheet); border: 1px solid var(--za-line);
     transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
   }
   .skill-marketplace-card:hover {
@@ -1260,12 +1260,12 @@
   .skill-marketplace-install {
     @apply shrink-0 px-3 py-1.5 text-[12px] font-semibold;
     border-radius: var(--ui-radius-pill);
-    color: #fff; background: var(--za-accent); border: 0; cursor: pointer;
-    transition: filter 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+    color: var(--za-primary-control-ink); background: var(--za-primary-control-bg); border: 0; cursor: pointer;
+    transition: opacity 120ms ease, transform 120ms ease, box-shadow 120ms ease;
   }
   .skill-marketplace-install:hover {
-    filter: brightness(1.08);
-    box-shadow: 0 4px 12px color-mix(in srgb, var(--za-accent) 28%, transparent);
+    opacity: 0.9;
+    box-shadow: var(--shadow-soft);
   }
   .skill-marketplace-install:active { transform: translateY(1px); }
   .skill-marketplace-install:disabled { @apply cursor-wait opacity-60; }
@@ -1313,7 +1313,7 @@
   }
   .skill-marketplace-install-scope button.is-active {
     color: var(--za-text);
-    background: color-mix(in srgb, var(--za-accent, #5b8cff) 18%, transparent);
+    background: var(--azure-trace);
   }
   .skill-marketplace-install-scope button:disabled {
     @apply cursor-not-allowed opacity-45;
@@ -1407,7 +1407,7 @@
     border-radius: var(--ui-radius-control);
     min-height: 34px;
     color: var(--za-text);
-    background: var(--za-surface);
+    background: var(--paper-sheet);
     border: 1px solid var(--za-line);
   }
   .skill-marketplace-filters {
@@ -1460,7 +1460,7 @@
   .skill-marketplace-pagination button {
     @apply rounded-[var(--ui-radius-control)] px-3 py-2;
     color: var(--za-text);
-    background: var(--za-surface);
+    background: var(--paper-sheet);
     border: 1px solid var(--za-line);
     cursor: pointer;
     transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
@@ -1482,7 +1482,7 @@
     border-radius: var(--ui-radius-control);
     font-size: 15px;
     border: 1px solid var(--za-line);
-    background: var(--za-surface);
+    background: var(--paper-sheet);
     color: var(--za-text);
   }
   .skill-marketplace-pagination--pages .pagination-arrow:hover:not(:disabled) {
@@ -1504,7 +1504,7 @@
     color: var(--za-text-muted);
   }
   .skill-marketplace-pagination--pages .pagination-page:hover {
-    background: var(--za-surface-hover, var(--za-surface));
+    background: var(--paper-hover);
     color: var(--za-text);
   }
   .skill-marketplace-pagination--pages .pagination-page.is-active {

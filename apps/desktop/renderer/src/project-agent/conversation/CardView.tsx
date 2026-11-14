@@ -106,7 +106,9 @@ function CardItem({
   if (['approval', 'plan_approval'].includes(card.kind) && resolved) return <ApprovalReceipt card={card} i18n={i18n} notice={imageApproval ? imageNotice : undefined} />;
   return (
     <section ref={dismissal.ref} aria-busy={busy} inert={question && resolved ? true : undefined} aria-hidden={question && resolved ? true : undefined}
-      className={`bot-card${card.kind === 'agent_stopped' ? ' bot-stopped-reply' : ''}${card.kind === 'agent_unavailable' ? ' bot-unavailable-reply' : ''}${question ? ' bot-question' : ''}${resolved ? ' is-resolved' : ''}`} data-card-id={card.cardId}>
+      className={`bot-card${card.kind === 'agent_stopped' ? ' bot-stopped-reply' : ''}${card.kind === 'agent_unavailable' ? ' bot-unavailable-reply' : ''}${question ? ' bot-question' : ''}${resolved ? ' is-resolved' : ''}`}
+      data-card-id={card.cardId}
+      data-card-kind={card.kind}>
       {card.completionReview ? <CompletionReview title={card.content} review={card.completionReview} i18n={i18n} /> : card.kind === 'agent_stopped' ? <>
         {card.content ? <div className="bot-reply-body"><MarkdownMessage content={card.content} /></div> : null}
         <p className="bot-live-status"><PeerIcon name="stop" size={13} />{i18n.t('projectAgent.chat.stopped')}</p>

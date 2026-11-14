@@ -9,7 +9,7 @@ import { resolveThreadFollowAfterScroll } from '../../chat/state/threadScrollPol
 import { createStreamingScrollScheduler } from '../../chat/state/streamingScrollScheduler.ts';
 import { isImeKey } from '../../chat/state/compositionGuard.ts';
 
-function mountConversation(rows: unknown[] = [], snapshot?: ReadingSnapshot) {
+function mountConversation(rows: unknown[] = [], snapshot?: ReadingSnapshot, options?: { highlightedId?: string | null; highlightRequestId?: number }) {
   const effects: (() => void | (() => void))[] = [];
   const layoutEffects: (() => void | (() => void))[] = [];
   const frames = new Map<number, () => void>();
@@ -37,7 +37,9 @@ function mountConversation(rows: unknown[] = [], snapshot?: ReadingSnapshot) {
       useEffect: (effect: () => void | (() => void)) => effects.push(effect),
       useLayoutEffect: (effect: () => void | (() => void)) => layoutEffects.push(effect),
     },
-    '../state/botReplyContinuity': { replyRowContains: () => false },
+    '../state/botReplyContinuity': {
+      replyRowContains: (row: { message?: { id?: string } }, id?: string) => Boolean(id && row?.message?.id === id),
+    },
     '../state/conversationWindow': windowGeometry,
     '../state/conversationReadingMemory': { conversationReadingMemory: memory },
     '../../chat/state/threadScrollPolicy': { resolveThreadFollowAfterScroll },
@@ -57,7 +59,7 @@ function mountConversation(rows: unknown[] = [], snapshot?: ReadingSnapshot) {
     },
     require(id: string) { if (id in modules) return modules[id]; throw Error('Unexpected dependency: ' + id); },
   });
-  const view = exports.useConversationWindow(rows, null, 0, 0,
+  const view = exports.useConversationWindow(rows, options?.highlightedId ?? null, options?.highlightRequestId ?? 0, 0,
     { identity: 'clicked-bot', ready: true, hasOlder: false, locateMessage: async () => false });
   let scrollTop = 0;
   const nativeScroll = new Set<() => void>();
@@ -173,4 +175,18 @@ test('native scroll captures the applied gesture position before delayed React d
   mounted.dispose();
   assert.equal(mounted.frames.size, 0, 'leaving cancels pending follow frames');
   assert.equal(mounted.nativeScroll.size, 0, 'leaving releases native reading capture');
+});
+
+test('programmatic jump to a highlighted row keeps target anchor across scroll events', () => {
+  const rows = Array.from({ length: 60 }, (_, index) => ({
+    type: 'message', message: { id: `m${index}`, kind: 'user_input' },
+  }));
+  const mounted = mountConversation(rows, undefined, { highlightedId: 'm40', highlightRequestId: 1 });
+  const expectedTop = 40 * 72 - (320 - 72) / 2;
+  assert.equal(mounted.scroller.scrollTop, expectedTop);
+  mounted.view.onScroll();
+  mounted.layoutEffects[3]!();
+  assert.equal(mounted.memory.read('clicked-bot')?.anchor?.key, 'm40');
+  assert.equal(mounted.scroller.scrollTop, expectedTop);
+  mounted.dispose();
 });

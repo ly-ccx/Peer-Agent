@@ -77,7 +77,7 @@
 }
 
 .settings-warning {
-  color: var(--state-warning);
+  color: var(--state-warn);
 }
 
 .settings-actions--wrap {
@@ -101,7 +101,7 @@
   line-height: 1.2;
   white-space: nowrap;
   cursor: pointer;
-  box-shadow: var(--za-shadow-1, 0 1px 2px rgba(15, 18, 22, 0.06));
+  box-shadow: var(--shadow-soft);
 }
 
 .settings-actions button:hover:not(:disabled),

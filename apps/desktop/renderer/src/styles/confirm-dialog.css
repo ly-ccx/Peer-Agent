@@ -142,10 +142,10 @@
     opacity: 0.88;
   }
 
-  /* 危险态：朱砂红实心，用于删除等不可撤销操作。 */
+  /* 危险态：冷绛红实心，用于删除等不可撤销操作。 */
   .pa-confirm-btn.danger {
-    background: var(--cinnabar-seal, #c8503c);
-    color: #fff;
+    background: var(--state-danger);
+    color: var(--za-accent-ink);
   }
 
   .pa-confirm-btn.danger:hover:not(:disabled) {

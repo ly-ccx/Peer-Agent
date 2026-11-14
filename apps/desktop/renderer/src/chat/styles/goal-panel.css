@@ -1481,7 +1481,7 @@
   padding: 8px 10px;
   border: 1px solid var(--ui-border-subtle, var(--za-line));
   border-radius: var(--ui-radius-control);
-  background: var(--ui-surface-muted, var(--za-surface-2));
+  background: var(--paper-sunken);
   color: var(--za-text-soft);
   font-size: var(--ui-font-meta, 12px);
   line-height: 1.5;

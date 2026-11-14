@@ -41,7 +41,7 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--glass-modal-border, color-mix(in srgb, var(--za-border) 88%, transparent));
+  border: 1px solid var(--glass-modal-border, color-mix(in srgb, var(--chrome-hairline) 88%, transparent));
   border-radius: inherit;
   background: transparent;
   box-shadow: none;
@@ -108,7 +108,7 @@
   box-sizing: border-box;
   max-height: min(22rem, calc(100vh - 1.5rem));
   overflow: hidden;
-  border: 1px solid var(--glass-modal-border, color-mix(in srgb, var(--za-border) 88%, transparent));
+  border: 1px solid var(--glass-modal-border, color-mix(in srgb, var(--chrome-hairline) 88%, transparent));
   border-radius: inherit;
   background: transparent;
 }

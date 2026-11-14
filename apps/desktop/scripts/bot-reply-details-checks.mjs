@@ -55,6 +55,16 @@ export async function scrollToBotMessage(page, message) {
     }
   }
   assert.ok(await message.count(), `message must mount after scrolling the real conversation: ${message}`);
+  if (await message.evaluate(node => {
+    const thread = node.closest('.bot-thread');
+    if (!thread) return false;
+    const row = node.getBoundingClientRect(), box = thread.getBoundingClientRect();
+    return row.top < box.top;
+  })) {
+    // Release follow-latest with a genuine wheel gesture before scrollIntoViewIfNeeded()
+    // when an older target happens to sit in the mounted overscan window.
+    await wheelBotConversation(page, -1);
+  }
   await message.scrollIntoViewIfNeeded();
 }
 

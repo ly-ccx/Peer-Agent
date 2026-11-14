@@ -72,113 +72,111 @@ type MutablePalette = {
 };
 
 /**
- * Canonical dark palette — mirrors peer-tui-crush.html semantic tokens.
- * Surfaces establish depth; ice identifies people/information; lime is reserved
- * for focus and primary interaction; green/amber/red communicate outcomes.
+ * Canonical Frost 2.0 dark palette — aligned with Desktop cold obsidian slate
+ * and glacial azure accents.
  */
 export const DARK_PALETTE: TuiPalette = Object.freeze({
-  background: '#080a0c',
-  panel: '#0d1013',
-  panelRaised: '#12161a',
-  userPanel: '#0d1013',
-  selection: '#171c21',
-  textSelectionBackground: '#b8f35b',
-  textSelectionForeground: '#080a0c',
+  background: '#10141B',
+  panel: '#171C25',
+  panelRaised: '#1E2430',
+  userPanel: '#232A38',
+  selection: '#1D2E3F',
+  textSelectionBackground: '#76B0D4',
+  textSelectionForeground: '#10141B',
   // The composer belongs to the canvas rather than a separate input card.
-  inputBackground: '#080a0c',
-  inputForeground: '#e7ebee',
-  inputPlaceholder: '#69737d',
-  inputSelectionBackground: '#b8f35b',
-  inputSelectionForeground: '#080a0c',
-  inputCursor: '#b8f35b',
-  border: '#20262c',
-  borderFocus: '#3e4851',
+  inputBackground: '#10141B',
+  inputForeground: '#EEF2F7',
+  inputPlaceholder: '#8C98A9',
+  inputSelectionBackground: '#76B0D4',
+  inputSelectionForeground: '#10141B',
+  inputCursor: '#76B0D4',
+  border: '#27303E',
+  borderFocus: '#76B0D4',
 
-  text: '#e7ebee',
-  textSoft: '#b8c0c7',
-  muted: '#69737d',
-  subtle: '#56616b',
-  dim: '#3e4851',
+  text: '#EEF2F7',
+  textSoft: '#B2BCCB',
+  muted: '#8C98A9',
+  subtle: '#6A7586',
+  dim: '#4A5362',
 
-  accent: '#b8f35b',
-  accentSoft: '#d0fa8e',
-  link: '#a9d9e8',
-  brandHighlight: '#ffffff',
-  user: '#a9d9e8',
-  info: '#a9d9e8',
+  accent: '#76B0D4',
+  accentSoft: '#96C7E5',
+  link: '#76B0D4',
+  brandHighlight: '#EEF2F7',
+  user: '#96C7E5',
+  info: '#96C7E5',
 
-  success: '#68d391',
-  warning: '#e6b86a',
-  danger: '#ef7373',
-  dangerSoft: '#f59a9a',
+  success: '#63B39D',
+  warning: '#E0B268',
+  danger: '#D97C92',
+  dangerSoft: '#E59AA9',
 
-  tool: '#68d391',
-  toolFailed: '#ef7373',
-  toolRunning: '#e6b86a',
-  toolCancelled: '#69737d',
-  toolDetail: '#69737d',
+  tool: '#63B39D',
+  toolFailed: '#D97C92',
+  toolRunning: '#76A5D6',
+  toolCancelled: '#8C98A9',
+  toolDetail: '#8C98A9',
 
-  code: '#b8f35b',
-  codeBackground: '#12161a',
-  diffAdd: '#68d391',
-  diffDelete: '#ef7373',
-  diffHunk: '#a9d9e8',
-  diffMeta: '#69737d',
+  code: '#96C7E5',
+  codeBackground: '#171C25',
+  diffAdd: '#63B39D',
+  diffDelete: '#D97C92',
+  diffHunk: '#96C7E5',
+  diffMeta: '#8C98A9',
 });
 
 /**
- * Frost light — mapped from desktop tokens.css light scheme:
- * chrome-base / paper-sheet / graphite / state colors.
- * Accent uses a deeper lime so it stays readable on white paper.
+ * Frost 2.0 light palette — mapped from desktop tokens.css light scheme:
+ * chrome-canvas / paper-base / paper-sheet / graphite / glacial azure.
  */
 export const LIGHT_PALETTE: TuiPalette = Object.freeze({
-  background: '#F3F5F8', // --chrome-base
-  panel: '#FFFFFF', // --chrome-panel
-  panelRaised: '#F7F9FC', // --paper-sheet
-  userPanel: '#E8F1FF', // soft user blue
-  selection: '#E8EEF7', // --chrome-hover-ish
-  textSelectionBackground: '#1E3A5F',
-  textSelectionForeground: '#FFFFFF',
+  background: '#EFF3F8', // --chrome-canvas
+  panel: '#F7F9FC', // --paper-base
+  panelRaised: '#FCFDFF', // --paper-sheet
+  userPanel: '#E8EEF6', // --paper-hover
+  selection: '#E1ECF4', // --azure-trace
+  textSelectionBackground: '#286891',
+  textSelectionForeground: '#FCFDFF',
   // Match the light canvas so the composer never becomes a detached white card.
-  inputBackground: '#F3F5F8',
-  inputForeground: '#1A2332',
-  inputPlaceholder: '#6B7585',
-  inputSelectionBackground: '#1E3A5F',
-  inputSelectionForeground: '#FFFFFF',
-  inputCursor: '#4D7C0F',
-  border: '#DCE0E8', // --chrome-hairline
-  borderFocus: '#C8CEDA',
+  inputBackground: '#EFF3F8',
+  inputForeground: '#181C22',
+  inputPlaceholder: '#616A79',
+  inputSelectionBackground: '#286891',
+  inputSelectionForeground: '#FCFDFF',
+  inputCursor: '#286891',
+  border: '#DDE4EE', // --chrome-hairline
+  borderFocus: '#286891',
 
-  text: '#1A2332', // --graphite-ink
-  textSoft: '#2A3548', // --graphite-body
-  muted: '#6B7585', // --graphite-mute
-  subtle: '#8B93A1', // --graphite-faint
-  dim: '#A8B0BC',
+  text: '#181C22', // --graphite-base
+  textSoft: '#4E5664', // --graphite-soft
+  muted: '#616A79', // --graphite-fade
+  subtle: '#7B8494',
+  dim: '#A4AEBC', // --graphite-mute
 
-  accent: '#4D7C0F', // deep lime on light
-  accentSoft: '#65A30D',
-  link: '#2563EB',
-  brandHighlight: '#FFFFFF',
-  user: '#2563EB', // azure-ish user
-  info: '#4F7CFF', // --azure-seal
+  accent: '#286891', // --azure-seal
+  accentSoft: '#3B7FAB',
+  link: '#286891',
+  brandHighlight: '#FCFDFF',
+  user: '#286891',
+  info: '#32639B', // distinct cool steel-blue from accent
 
-  success: '#1A8F4A', // --state-success
-  warning: '#B45309', // --state-warning
-  danger: '#C23B3B', // --state-danger
-  dangerSoft: '#DC6B6B',
+  success: '#296E5D', // --state-success
+  warning: '#8E5B1E',
+  danger: '#963850', // --state-danger
+  dangerSoft: '#B04D66',
 
-  tool: '#1A8F4A',
-  toolFailed: '#C23B3B',
-  toolRunning: '#B45309',
-  toolCancelled: '#8B93A1',
-  toolDetail: '#6B7585',
+  tool: '#296E5D',
+  toolFailed: '#963850',
+  toolRunning: '#32639B',
+  toolCancelled: '#616A79',
+  toolDetail: '#616A79',
 
-  code: '#3F6212',
-  codeBackground: '#EBEEF3', // --chrome-sunken
-  diffAdd: '#1A8F4A',
-  diffDelete: '#C23B3B',
-  diffHunk: '#2563EB',
-  diffMeta: '#6B7585',
+  code: '#286891',
+  codeBackground: '#EAEFF5', // --paper-sunken
+  diffAdd: '#296E5D',
+  diffDelete: '#963850',
+  diffHunk: '#32639B',
+  diffMeta: '#616A79',
 });
 
 export const THEME_PALETTES: Readonly<Record<TuiThemeScheme, TuiPalette>> = Object.freeze({

@@ -51,8 +51,9 @@ export const BotRow = memo(function BotRow({ item, avatarMood, highlighted, open
             <span className="bot-sr">{i18n.t('projectAgent.list.unread')}</span>
           </span>
         ) : item.state.running > 0 ? (
-          <span>
+          <span className="bot-running-pill">
             <PeerIcon name="loader" size={10} className="bot-spin motion-spin" />
+            <span className="bot-running-count">{item.state.running}</span>
             <span className="bot-sr">{i18n.t('projectAgent.list.running')}</span>
           </span>
         ) : null}

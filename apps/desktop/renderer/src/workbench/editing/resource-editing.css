@@ -1,14 +1,14 @@
 .resource-editor { display: flex; flex-direction: column; flex: 1; height: 100%; min-height: 0; min-width: 0; color: var(--graphite-base); }
 .resource-editor-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-2); flex: none; }
 .resource-editor-name { font-size: var(--ui-font-body); font-weight: 600; overflow-wrap: anywhere; }
-.resource-editor-status { margin-inline-start: auto; color: var(--graphite-secondary); font-size: var(--ui-font-meta); min-height: 1.5em; }
+.resource-editor-status { margin-inline-start: auto; color: var(--graphite-soft); font-size: var(--ui-font-meta); min-height: 1.5em; }
 :is(.resource-editor, .resource-edit-library, .resource-edit-recovery) details > summary { display: flex; align-items: center; gap: var(--space-1); list-style: none; cursor: pointer; }
 :is(.resource-editor, .resource-edit-library, .resource-edit-recovery) details > summary::-webkit-details-marker { display: none; }
 :is(.resource-editor, .resource-edit-library, .resource-edit-recovery) details > summary > svg { flex: none; }
 :is(.resource-editor, .resource-edit-library, .resource-edit-recovery) details[open] > summary > svg { transform: rotate(90deg); }
 .resource-editor-input { flex: 1; width: 100%; min-height: var(--space-16, 64px); min-width: 0; resize: none; box-sizing: border-box; padding: var(--space-3); border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-control); color: var(--graphite-base); background: var(--paper-sheet); font: var(--ui-font-body)/1.6 var(--font-mono); tab-size: 2; }
 .resource-editor-input:focus-visible { outline: 2px solid var(--ui-focus-ring); outline-offset: -2px; }
-.resource-editor-input[readonly] { background: var(--ui-surface-muted, var(--paper-sheet)); }
+.resource-editor-input[readonly] { background: var(--paper-sunken); }
 .resource-editor-reading { flex: 1; overflow: auto; min-height: 0; padding: var(--space-3); }
 .resource-editor-notice { margin: var(--space-2); font-size: var(--ui-font-control); overflow-wrap: anywhere; }
 .resource-editor-notice .ui-button { margin: var(--space-1); }

@@ -748,7 +748,7 @@
   }
 
   .task-overview-plan-step.is-failed {
-    color: var(--za-danger, #ef4444);
+    color: var(--state-danger);
   }
 
   .task-overview-plan-step-marker {
@@ -764,9 +764,9 @@
     position: relative;
     isolation: isolate;
     overflow: visible;
-    background: var(--za-accent, #3b82f6);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--za-accent, #3b82f6) 22%, transparent);
-    --motion-ripple-color: var(--za-accent, #3b82f6);
+    background: var(--za-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--za-accent) 22%, transparent);
+    --motion-ripple-color: var(--za-accent);
     --motion-ripple-strength: 45%;
     --motion-ripple-scale: 2.4;
     --motion-ripple-duration: 1.6s;
@@ -780,7 +780,7 @@
     inset: 0;
     border: 1px solid color-mix(
       in srgb,
-      var(--motion-ripple-color, var(--za-accent, #3b82f6)) var(--motion-ripple-strength, 45%),
+      var(--motion-ripple-color, var(--za-accent)) var(--motion-ripple-strength, 45%),
       transparent
     );
     border-radius: inherit;
@@ -792,11 +792,11 @@
   }
 
   .task-overview-plan-step.is-completed .task-overview-plan-step-marker {
-    background: color-mix(in srgb, var(--za-success, #22c55e) 85%, transparent);
+    background: color-mix(in srgb, var(--state-success) 85%, transparent);
   }
 
   .task-overview-plan-step.is-failed .task-overview-plan-step-marker {
-    background: var(--za-danger, #ef4444);
+    background: var(--state-danger);
   }
 
   .task-overview-plan-step-title {
@@ -809,7 +809,7 @@
   }
 
   .task-overview-plan-step.is-current .task-overview-plan-step-status {
-    color: var(--za-accent, #3b82f6);
+    color: var(--za-accent);
   }
 
   .task-overview-progress {
@@ -833,13 +833,13 @@
   }
 
   .result-card-state {
-    color: #2f7a57;
+    color: var(--state-success);
   }
 
   .result-card-seal {
     @apply inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-[var(--ui-radius-circle)] text-[10px] font-semibold not-italic;
-    background: color-mix(in srgb, #3f9a6f 18%, var(--za-surface-0));
-    color: #2f7a57;
+    background: color-mix(in srgb, var(--state-success) 18%, var(--za-surface-0));
+    color: var(--state-success);
   }
 
   /* 结果卡：按钮贴右下 */
@@ -958,8 +958,8 @@
 
   .task-artifacts {
     @apply mt-3 rounded-[var(--ui-radius-panel)] border;
-    border-color: color-mix(in srgb, var(--za-border) 78%, transparent);
-    background: color-mix(in srgb, var(--za-card) 72%, transparent);
+    border-color: color-mix(in srgb, var(--chrome-hairline) 78%, transparent);
+    background: color-mix(in srgb, var(--paper-sheet) 72%, transparent);
     interpolate-size: allow-keywords;
   }
 
@@ -1001,7 +1001,7 @@
 
   .task-artifacts-content {
     @apply space-y-3 border-t px-3 pb-2 pt-2;
-    border-color: color-mix(in srgb, var(--za-border) 65%, transparent);
+    border-color: color-mix(in srgb, var(--chrome-hairline) 65%, transparent);
   }
 
   .task-artifacts-group-title {
@@ -1158,11 +1158,11 @@
   }
 
   .task-artifact-diff-line--added {
-    background: color-mix(in srgb, var(--za-success, #238636) 10%, transparent);
+    background: var(--za-diff-add-bg);
   }
 
   .task-artifact-diff-line--deleted {
-    background: color-mix(in srgb, var(--za-danger, #cf222e) 10%, transparent);
+    background: var(--za-diff-del-bg);
   }
 
   .task-artifact-preview--image {
@@ -1204,8 +1204,8 @@
   }
   .task-overview-result-seal {
     @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--ui-radius-circle)] text-sm font-semibold;
-    background: color-mix(in srgb, #3f9a6f 16%, var(--za-surface-0));
-    color: #2f7a57;
+    background: color-mix(in srgb, var(--state-success) 16%, var(--za-surface-0));
+    color: var(--state-success);
   }
 
   /* ---------- 空态 ---------- */
@@ -1411,8 +1411,8 @@
   }
 
   .task-action-owner--user {
-    background: color-mix(in srgb, #c48a3a 16%, var(--za-surface-0));
-    color: #9a6a2a;
+    background: color-mix(in srgb, var(--state-warn) 16%, var(--za-surface-0));
+    color: var(--state-warn);
   }
 
   .task-action-owner--peer {
@@ -1421,8 +1421,8 @@
   }
 
   .task-action-owner--review {
-    background: color-mix(in srgb, #3f9a6f 14%, var(--za-surface-0));
-    color: #2f7a57;
+    background: color-mix(in srgb, var(--state-success) 14%, var(--za-surface-0));
+    color: var(--state-success);
   }
 
   .task-action-owner--paused {
@@ -1480,12 +1480,12 @@
 
   .task-row-abandon {
     @apply inline-flex items-center rounded-[var(--ui-radius-pill)] px-2.5 py-1 text-xs font-semibold;
-    color: var(--state-danger, #c0392b);
+    color: var(--state-danger);
     background: transparent;
   }
 
   .task-row-abandon:hover {
-    background: color-mix(in srgb, var(--state-danger, #c0392b) 12%, transparent);
+    background: color-mix(in srgb, var(--state-danger) 12%, transparent);
   }
 
   .task-table-empty {
@@ -1513,8 +1513,8 @@
   }
 
   .history-state--accepted {
-    background: color-mix(in srgb, #3f9a6f 16%, var(--za-surface-0));
-    color: #2f7a57;
+    background: color-mix(in srgb, var(--state-success) 16%, var(--za-surface-0));
+    color: var(--state-success);
   }
 
   .history-state--archived {
@@ -1528,8 +1528,8 @@
   }
 
   .history-state--failed {
-    background: color-mix(in srgb, #c45b5b 14%, var(--za-surface-0));
-    color: #a53f3f;
+    background: color-mix(in srgb, var(--state-danger) 14%, var(--za-surface-0));
+    color: var(--state-danger);
   }
 
   .history-record-title {
@@ -1551,7 +1551,7 @@
   }
 
   .history-badge--accepted {
-    color: #2f7a57;
+    color: var(--state-success);
   }
 
   .history-badge--archived {
@@ -1563,7 +1563,7 @@
   }
 
   .history-badge--failed {
-    color: #a53f3f;
+    color: var(--state-danger);
   }
 
   .history-evidence-count {
@@ -2265,7 +2265,7 @@
   text-align: right;
   font-size: 0.72rem;
   line-height: 1.4;
-  color: var(--za-text-fade, var(--za-text-soft));
+  color: var(--graphite-fade);
 }
 
 .thread-list {
@@ -2295,14 +2295,14 @@
 }
 
 .thread-list-row:hover {
-  background: var(--za-surface-hover, color-mix(in srgb, var(--za-text) 6%, var(--za-surface-0)));
+  background: var(--paper-hover);
 }
 
 .thread-list-round {
   white-space: nowrap;
   font-size: 0.68rem;
   font-weight: 600;
-  color: var(--za-text-fade, var(--za-text-soft));
+  color: var(--graphite-fade);
 }
 
 .thread-list-row.is-current {
@@ -2321,15 +2321,15 @@
   height: 1.375rem;
   padding: 0 0.5rem;
   border-radius: var(--ui-radius-pill);
-  background: color-mix(in srgb, var(--za-ok, #3e7a6b) 14%, transparent);
-  color: var(--za-ok, #3e7a6b);
+  background: color-mix(in srgb, var(--state-success) 14%, transparent);
+  color: var(--state-success);
   font-size: 0.6875rem;
   font-weight: 600;
   white-space: nowrap;
 }
 
 .thread-tree-pill.is-wait {
-  background: color-mix(in srgb, var(--za-ok, #3e7a6b) 12%, #fff);
+  background: color-mix(in srgb, var(--state-success) 12%, var(--paper-sheet));
 }
 
 .thread-tree-title {
@@ -2346,13 +2346,13 @@
 .thread-tree-frac,
 .thread-tree-chevron {
   font-size: 0.72rem;
-  color: var(--za-text-fade, var(--za-text-soft));
+  color: var(--graphite-fade);
   white-space: nowrap;
 }
 
 .thread-tree-chevron {
   font-size: 1rem;
-  color: var(--za-text-mute, var(--za-text-soft));
+  color: var(--graphite-mute);
 }
 
 .goal-thread-group {
@@ -2442,7 +2442,7 @@
 .handoff-conflict-panel__head {
   font-size: 13px;
   font-weight: 600;
-  color: var(--za-fg, #e8e8ec);
+  color: var(--graphite-base);
 }
 .handoff-conflict-panel__list {
   list-style: none;
@@ -2458,9 +2458,9 @@
   gap: 4px;
 }
 .handoff-conflict-panel__path {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
-  color: var(--za-fg-dim, #a3a3ad);
+  color: var(--graphite-soft);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2475,7 +2475,7 @@
   align-items: center;
   gap: 5px;
   font-size: 12.5px;
-  color: var(--za-fg, #e8e8ec);
+  color: var(--graphite-base);
   cursor: pointer;
 }
 .handoff-conflict-panel__preview,
@@ -2485,16 +2485,16 @@
   border-radius: var(--ui-radius-control-compact);
 }
 .handoff-conflict-panel__preview {
-  background: color-mix(in srgb, var(--za-ok, #34c759) 12%, transparent);
-  color: var(--za-ok, #34c759);
+  background: color-mix(in srgb, var(--state-success) 12%, transparent);
+  color: var(--state-success);
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
 }
 .handoff-conflict-panel__error {
-  background: color-mix(in srgb, var(--za-danger, #ff453a) 12%, transparent);
-  color: var(--za-danger, #ff453a);
+  background: color-mix(in srgb, var(--state-danger) 12%, transparent);
+  color: var(--state-danger);
 }
 .handoff-conflict-panel__actions {
   display: flex;
@@ -2505,9 +2505,9 @@
   font-size: 12.5px;
   padding: 6px 12px;
   border-radius: var(--ui-radius-control);
-  border: 1px solid color-mix(in srgb, var(--za-fg-dim, #a3a3ad) 30%, transparent);
+  border: 1px solid var(--chrome-hairline);
   background: transparent;
-  color: var(--za-fg, #e8e8ec);
+  color: var(--graphite-base);
   cursor: pointer;
 }
 .handoff-conflict-panel__actions button:disabled {
@@ -2515,9 +2515,9 @@
   cursor: default;
 }
 .handoff-conflict-panel__actions .handoff-conflict-panel__apply {
-  background: var(--za-accent, #7c6cff);
+  background: var(--za-primary-control-bg);
   border-color: transparent;
-  color: #fff;
+  color: var(--za-primary-control-ink);
 }
 
 /* Hover preview chrome lives in task-artifact-preview-overlay.css so

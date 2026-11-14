@@ -23,6 +23,16 @@ async function renderMarkdown(content: string): Promise<string> {
   return (await renderMarkdownSetup(content)).captureCharFrame();
 }
 
+function hexToRgba(hexColor: string): [number, number, number, number] {
+  const hex = hexColor.replace('#', '');
+  return [
+    Number.parseInt(hex.slice(0, 2), 16),
+    Number.parseInt(hex.slice(2, 4), 16),
+    Number.parseInt(hex.slice(4, 6), 16),
+    255,
+  ];
+}
+
 function colorForText(setup: TestRendererSetup, text: string): number[] | undefined {
   return setup.captureSpans().lines
     .flatMap((line) => line.spans)
@@ -89,10 +99,10 @@ describe('Markdown terminal frame', () => {
     const metadata = colorForText(setup, 'diff --git a/file.ts b/file.ts');
     const context = colorForText(setup, ' const stable = true;');
 
-    expect(add).toEqual([104, 211, 145, 255]);
-    expect(deletion).toEqual([239, 115, 115, 255]);
-    expect(hunk).toEqual([169, 217, 232, 255]);
-    expect(metadata).toEqual([105, 115, 125, 255]);
+    expect(add).toEqual(hexToRgba(COLOR.diffAdd));
+    expect(deletion).toEqual(hexToRgba(COLOR.diffDelete));
+    expect(hunk).toEqual(hexToRgba(COLOR.diffHunk));
+    expect(metadata).toEqual(hexToRgba(COLOR.diffMeta));
     expect(new Set([add, deletion, hunk, metadata, context].map((color) => color?.join(','))).size).toBe(5);
   });
 
@@ -301,10 +311,10 @@ describe('Markdown terminal frame', () => {
     const comment = colorForText(setup, '// note');
     const typeName = colorForText(setup, 'Flag');
 
-    expect(keyword).toEqual([184, 243, 91, 255]); // accent
-    expect(stringLiteral).toEqual([104, 211, 145, 255]); // success
-    expect(comment).toEqual([105, 115, 125, 255]); // muted
-    expect(typeName).toEqual([169, 217, 232, 255]); // info
+    expect(keyword).toEqual(hexToRgba(COLOR.accent)); // accent
+    expect(stringLiteral).toEqual(hexToRgba(COLOR.success)); // success
+    expect(comment).toEqual(hexToRgba(COLOR.muted)); // muted
+    expect(typeName).toEqual(hexToRgba(COLOR.info)); // info
     expect(new Set([keyword, stringLiteral, comment, typeName].map((color) => color?.join(','))).size).toBe(4);
   });
 
@@ -320,9 +330,9 @@ describe('Markdown terminal frame', () => {
       '```',
     ].join('\n'));
 
-    expect(colorForText(setup, 'def')).toEqual([184, 243, 91, 255]);
-    expect(colorForText(setup, 'SELECT')).toEqual([184, 243, 91, 255]);
-    expect(colorForText(setup, '1')).toEqual([230, 184, 106, 255]); // warning/number
+    expect(colorForText(setup, 'def')).toEqual(hexToRgba(COLOR.accent));
+    expect(colorForText(setup, 'SELECT')).toEqual(hexToRgba(COLOR.accent));
+    expect(colorForText(setup, '1')).toEqual(hexToRgba(COLOR.warning)); // warning/number
   });
 
 });

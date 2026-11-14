@@ -166,7 +166,7 @@
   .workbench-resizer:hover::after,
   .workbench-resizer:focus-visible::after,
   .workbench-resizer[data-active='true']::after {
-    background: var(--za-accent, #4c8dff);
+    background: var(--azure-seal);
   }
   /* TabRail：内容区顶部的横向纯图标 tab。文字由原生 title tooltip 提供。
      高度与 .chat-header 同为 40px（border-box），底部分隔线必须画在同一条 Y 上。
@@ -210,7 +210,7 @@
   }
 
   .workbench-maximize-button:focus-visible {
-    outline: 2px solid var(--za-accent, #4c8dff);
+    outline: 2px solid var(--azure-seal);
     outline-offset: 1px;
   }
 
@@ -1285,9 +1285,10 @@
     max-width: min(320px, 80vw);
     padding: 6px;
     border-radius: var(--ui-radius-panel);
-    border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
-    background: var(--za-surface-1, #fff);
-    box-shadow: var(--ui-shadow-menu, 0 8px 28px rgba(0, 0, 0, 0.12));
+    border: 1px solid var(--chrome-hairline);
+    background: var(--glass-popover);
+    backdrop-filter: blur(var(--blur-popover)) saturate(var(--blur-saturate));
+    box-shadow: var(--glass-edge-highlight), var(--shadow-popover);
   }
   .browser-overflow-item {
     display: flex;
@@ -1334,9 +1335,9 @@
     display: flex;
     flex-direction: column;
     border-radius: var(--ui-radius-modal);
-    border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
-    background: var(--za-surface-1, #fff);
-    box-shadow: var(--ui-shadow-menu, 0 12px 40px rgba(0, 0, 0, 0.18));
+    border: 1px solid var(--chrome-hairline);
+    background: var(--paper-sheet);
+    box-shadow: var(--glass-edge-highlight), var(--shadow-popover);
     overflow: hidden;
   }
   .session-import-header {
@@ -1355,12 +1356,12 @@
   .session-import-sub {
     margin: 4px 0 0;
     font-size: 12px;
-    color: var(--graphite-muted, #667);
+    color: var(--graphite-soft);
   }
   .session-import-close,
   .session-import-btn {
-    border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
-    background: var(--za-surface-1, #fff);
+    border: 1px solid var(--chrome-hairline);
+    background: var(--control-fill);
     border-radius: var(--ui-radius-control);
     padding: 6px 10px;
     font-size: 13px;
@@ -1368,9 +1369,9 @@
     color: var(--graphite-base);
   }
   .session-import-btn--primary {
-    background: var(--za-accent, #2f6fed);
+    background: var(--za-primary-control-bg);
     border-color: transparent;
-    color: #fff;
+    color: var(--za-primary-control-ink);
   }
   .session-import-btn:disabled,
   .session-import-list-btn:disabled {
@@ -1392,7 +1393,7 @@
   .session-import-risk {
     margin: 0 0 10px;
     font-size: 12px;
-    color: var(--graphite-muted, #667);
+    color: var(--graphite-soft);
     line-height: 1.4;
   }
 
@@ -1541,8 +1542,8 @@
     margin: 0 16px 8px;
     padding: 8px 10px;
     border-radius: var(--ui-radius-control);
-    background: rgba(220, 50, 50, 0.08);
-    color: #b42318;
+    background: color-mix(in srgb, var(--state-danger) 10%, transparent);
+    color: var(--state-danger);
     font-size: 12px;
   }
   .session-import-list {
@@ -1561,15 +1562,15 @@
     gap: 6px 10px;
     width: 100%;
     text-align: left;
-    border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
+    border: 1px solid var(--chrome-hairline);
     border-radius: var(--ui-radius-control);
     padding: 8px 10px;
-    background: var(--za-surface-1, #fff);
+    background: var(--paper-base);
     cursor: pointer;
   }
   .session-import-list-btn:hover:not(:disabled),
   .session-import-check:hover {
-    background: var(--ui-surface-hover, var(--chrome-hover));
+    background: var(--paper-hover);
   }
   .session-import-list-main {
     font-size: 13px;
@@ -1577,12 +1578,12 @@
   }
   .session-import-list-meta {
     font-size: 12px;
-    color: var(--graphite-muted, #667);
+    color: var(--graphite-soft);
   }
   .session-import-static-item {
     padding: 6px 10px;
     border-radius: var(--ui-radius-control);
-    background: var(--ui-surface-hover, rgba(0, 0, 0, 0.04));
+    background: var(--paper-sunken);
     font-size: 13px;
   }
   .session-import-footer {
@@ -1613,9 +1614,9 @@
     min-width: 0;
     height: 32px;
     padding: 0 10px;
-    border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
+    border: 1px solid var(--chrome-hairline);
     border-radius: var(--ui-radius-control);
-    background: var(--za-surface-1, #fff);
+    background: var(--control-fill);
     color: var(--graphite-base);
     font-size: 13px;
   }
@@ -1901,7 +1902,7 @@
     min-height: 32px;
     padding: 0 10px 0 30px;
     border-radius: var(--ui-radius-pill);
-    background: var(--ui-surface-muted, rgba(120, 124, 136, 0.12));
+    background: var(--paper-sunken);
     color: var(--za-text-faint, #8b8f98);
   }
   .workbench-files-filter-icon {
@@ -1947,16 +1948,16 @@
     min-width: 0;
     height: 24px;
     padding: 0 8px;
-    border: 1px solid var(--ui-border-subtle, var(--chrome-hairline));
+    border: 1px solid var(--chrome-hairline);
     border-radius: var(--ui-radius-control);
-    background: var(--ui-surface, #fff);
+    background: var(--paper-sheet);
     color: var(--za-text);
     font-size: 12px;
   }
   .workbench-tree-draft-input:focus {
     outline: none;
-    border-color: var(--za-accent, #4c8dff);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--za-accent, #4c8dff) 25%, transparent);
+    border-color: var(--azure-seal);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--azure-seal) 25%, transparent);
   }
   .workbench-tree-draft-error {
     flex: 0 1 auto;
@@ -1964,7 +1965,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: #d14b4b;
+    color: var(--state-danger);
     font-size: 11px;
   }
   .workbench-tree {
@@ -2176,7 +2177,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-family: var(--ui-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-family: var(--font-mono);
     font-size: 12px;
   }
   .bg-threads-item-meta {
@@ -2236,7 +2237,7 @@
     color: var(--za-text);
     white-space: pre-wrap;
     word-break: break-word;
-    font-family: var(--ui-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-family: var(--font-mono);
     font-size: 12px;
   }
   .bg-threads-output {
@@ -2311,7 +2312,7 @@
     height: 32px;
     min-height: 32px;
     padding: 0 2px 0 4px;
-    font-size: var(--ui-font-label, 13px);
+    font-size: var(--ui-font-control);
     font-weight: 600;
     -webkit-app-region: no-drag;
   }
