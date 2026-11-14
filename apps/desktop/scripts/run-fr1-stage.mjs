@@ -39,8 +39,15 @@ const owner='fr1-stage-'+randomUUID(),report={kind:'FR1-real-Electron-stages-not
   historicalChargeMs:2.387122999994517,historicalChargeNotReconstructed:true,ownedLaunches:0,businessQueries:0,
   actualPeerAttachments:0,actualPeerBusinessQueries:0,actualPeerRestarts:0,profilerStarts:0,
   functionalQualification:false,fieldAdmission:false,RI00Closed:false,refactorStarted:false,failures:[]};
-let host,transport,journal,recovery;
+let host,transport,journal,recovery,meterCreated=false,meterSnapshot;
 function save(){fs.writeFileSync(path.join(output,'report.private.json'),JSON.stringify(report),{mode:0o600});}
+async function captureMeter(){
+  if(meterSnapshot)return meterSnapshot;
+  const meter=await transport.evaluate('globalThis.__fr1StageMeter.freeze()'),text=JSON.stringify(meter);
+  assert.ok(Buffer.byteLength(text)<=budget.stageSnapshotBytesMaximum);
+  fs.writeFileSync(path.join(output,'stages.private.json'),text,{mode:0o600,flag:'wx'});
+  report.stageSnapshotSha256=hash(text);meterSnapshot=meter;return meter;
+}
 const remaining=()=>performance.now()-started<23000;
 try{
   report.ownedLaunches=1;save();
@@ -52,6 +59,7 @@ try{
   transport=await connectFr1Transport(host.ready.inspectorUrl,{pid:host.child.pid});
   const refs=await discoverE3Entries(transport.post,{electronRequireBase:path.join(config.moduleRoot,'apps/desktop/package.json')});report.mapping=refs.proof;
   await transport.evaluate(`(()=>{if(!globalThis.__fr1OwnedChecks||Object.hasOwn(globalThis,'__fr1StageMeter'))throw Error('stage_owned_marker');globalThis.__fr1StageMeter=(${createFr1StageMeter.toString()})({owner:${JSON.stringify(owner)}});return true;})()`);
+  meterCreated=true;
   const adapted=Object.create(transport);let substitutions=0;
   adapted.post=(method,params)=>{
     if(method==='Runtime.callFunctionOn'&&params.functionDeclaration===fr1InstallDeclaration()){
@@ -66,9 +74,7 @@ try{
   if(!remaining())throw Error('stage_admission_deadline');
   report.query=await host.rpc('entry',{kind:'list-sessions'});assert.equal(report.query.ok,true);report.businessQueries=2;
   recovery=await stopFr1Session(transport,journal,{ownerId:owner});report.recovery=recovery;
-  const meter=await transport.evaluate('globalThis.__fr1StageMeter.freeze()');
-  const meterText=JSON.stringify(meter);assert.ok(Buffer.byteLength(meterText)<=budget.stageSnapshotBytesMaximum);
-  fs.writeFileSync(path.join(output,'stages.private.json'),meterText,{mode:0o600});report.stageSnapshotSha256=hash(meterText);
+  const meter=await captureMeter();
   const history=replayFr1Journal(fs.readFileSync(path.join(output,'history.private.jsonl'),'utf8')),roots=history.records.filter(x=>x.kind==='root');
   assert.equal(roots.length,1);const root=roots[0].value;assert.equal(root.rows,baseline.expected.sessions);assert.equal(root.planCalls,baseline.expected.planCalls);
   assert.equal(root.outputSha256,baseline.expected.outputSha256);assert.equal(root.evidence.length,12);assert.ok(root.evidence.every(e=>e.rows===baseline.expected.evidenceRows&&!e.readFailure));
@@ -82,6 +88,7 @@ try{
 }catch(error){report.failures.push({message:error.message,stack:error.stack});}
 finally{
   if(transport?.recorderId&&!recovery&&journal)try{report.recovery=await stopFr1Session(transport,journal,{ownerId:owner});}catch(error){report.failures.push({message:'stage_cleanup:'+error.message});}
+  if(transport&&meterCreated&&!meterSnapshot)try{await captureMeter();}catch(error){report.failures.push({message:'stage_raw_recovery:'+error.message});}
   if(transport){
     try{await transport.post('Runtime.removeBinding',{name:FR1_NOTICE});}catch(error){report.failures.push({message:'stage_binding_cleanup:'+error.message});}
     try{await transport.evaluate(`(()=>{const d=globalThis.__fr1StageMeter;if(d?.owner===${JSON.stringify(owner)})delete globalThis.__fr1StageMeter;return true;})()`);}catch(error){report.failures.push({message:'stage_meter_cleanup:'+error.message});}
