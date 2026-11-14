@@ -1,7 +1,7 @@
 import test from 'node:test';import assert from'node:assert/strict';import fs from'node:fs';import os from'node:os';import path from'node:path';
 import {installFr1Recorder}from'./fr1-recorder.mjs';import{createFr1Policy}from'./fr1-policy.mjs';import{createFr1Journal,replayFr1Journal}from'./fr1-journal.mjs';import{createFr1Profiler,fr1ProfileClock}from'./fr1-profiler.mjs';
 function fixture(options={}){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'fr1-unit-'));fs.writeFileSync(path.join(dir,'evidence-index.jsonl'),'{}');
- let reads=0,fail=false;const error=Error('original'),index=[{}],value=[{id:'one'}],store={getStoreDir:()=>dir,getPlan:()=>({}),listEvidenceIndex:()=>index},
+ let reads=0,fail=false;const error=Error('original'),index=[{}],value=[{id:'one'}],store={getStoreDir:()=>dir,getPlan:()=>({}),listEvidenceIndex:()=>{options.onIndex?.();return index;}},
  supervisor={list(){reads++;if(fail)throw error;for(let i=0;i<12;i++){store.getPlan();store.listEvidenceIndex();}return value;}};
  const application={list(){return supervisor.list({workspaceId:'scope'});},async nested(){await Promise.resolve();return application.list();},fail(){throw error;}};
  const original={list:supervisor.list,index:store.listEvidenceIndex,plan:store.getPlan};
@@ -77,7 +77,7 @@ test('every current stack is captured; only an identical full location vector re
  try{fromFirstCaller();fromOtherCaller();const b=await f.recorder.take(),stacks=new Map(b.records.filter(x=>x.kind==='stack').map(x=>[x.value.id,x.value])),roots=b.records.filter(x=>x.kind==='root');
   assert.equal(roots.length,2);assert.notEqual(roots[0].value.entryStack.id,roots[1].value.entryStack.id);
   const first=stacks.get(roots[0].value.evidence[0].entryStack.id),second=stacks.get(roots[1].value.evidence[0].entryStack.id);
-  assert.ok(first.text.includes('fromFirstCaller'));assert.ok(second.text.includes('fromOtherCaller'));assert.ok(first.frames.length>3);assert.equal(first.encoding,'source-location-v1');
+  assert.ok(first.text.includes('fromFirstCaller'));assert.ok(second.text.includes('fromOtherCaller'));assert.ok(first.frames.length>3);assert.equal(first.encoding,'node-call-sites-v1');assert.ok(first.frames.every(x=>typeof x.scriptId==='string'&&Number.isInteger(x.lineNumber)));assert.equal(first.asyncParents,'mapped-ALS-only');
   const s=f.recorder.state();assert.ok(s.stackCaptures>=28);assert.ok(s.stackMaterializations<s.stackCaptures);assert.equal(f.reads,2);
  }finally{f.close();}
 });
@@ -96,4 +96,12 @@ test('target source epoch includes content and refuses later source mutation',()
   const executable=process.getBuiltinModule('child_process').execFileSync('ps',['-p',String(process.pid),'-o','comm='],{encoding:'utf8'}).trim(),config={pid:process.pid},target={root:dir,executable,files};
   assert.equal(assertFr1Target(config,target),true);fs.writeFileSync(path.join(dir,'main','entry.mjs'),'changed');assert.throws(()=>assertFr1Target(config,target),/source_epoch_changed/);
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('shared span boundaries use exactly four CPU snapshots without dropping per-pass CPU',async()=>{
+ const original=process.threadCpuUsage,points=[];let count=0;process.threadCpuUsage=function(...args){count++;return Reflect.apply(original,process,args);};
+ const f=fixture({onIndex:()=>points.push(count)});
+ try{f.application.list();assert.equal(points.length,12);assert.ok(points.slice(1).every((x,i)=>x-points[i]===4));
+  const b=await f.recorder.take(),r=b.records.find(x=>x.kind==='root').value;assert.ok(r.evidence.every(e=>e.userMs>=0&&e.systemMs>=0&&e.selfMs>=0));assert.ok(Math.abs(r.userMs-r.evidenceUserMs-r.remainderUserMs)<1e-8);
+ }finally{f.close();process.threadCpuUsage=original;}
 });

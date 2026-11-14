@@ -5,7 +5,8 @@ export function installFr1Recorder({store,roots,entries,foreground=()=>null,noti
     durationMs<100||durationMs>1800000||leaseMs<100||leaseMs>90000)throw Error('fr1_install_contract');
   const fs=process.getBuiltinModule('fs'),path=process.getBuiltinModule('path'),crypto=process.getBuiltinModule('crypto'),
     {AsyncLocalStorage}=process.getBuiltinModule('async_hooks'),{performance,PerformanceObserver}=process.getBuiltinModule('perf_hooks'),
-    {isPromise,isProxy}=process.getBuiltinModule('util').types,als=new AsyncLocalStorage();
+    {isPromise,isProxy}=process.getBuiltinModule('util').types,getCallSites=process.getBuiltinModule('util').getCallSites,als=new AsyncLocalStorage();
+  if(typeof getCallSites!=='function')throw Error('fr1_native_call_sites_unavailable');
   const cap={roots:1500,entries:10000,gc:65536,bytes:8388608,stacks:256,stackBytes:8388608,frames:96,stackLength:32768,parentDepth:128,rootSelfMs:2,selfMs:3000,...bounds};
   const indexFile=path.join(store.getStoreDir(),'evidence-index.jsonl'),originalPlan=store.getPlan,originalIndex=store.listEvidenceIndex;
   if(typeof originalPlan!=='function'||typeof originalIndex!=='function')throw Error('fr1_store_ports');
@@ -21,23 +22,15 @@ export function installFr1Recorder({store,roots,entries,foreground=()=>null,noti
     seq++;records.push(row);retainedBytes+=bytes;note();return row.seq;}
   function own(){return installed.every(x=>x.object[x.key]===x.replacement);}
   function fatal(why){stopAfterRoot??=why;if(!activeRoot&&api)api.stop(why);}
-  function captureStack(){const old=Object.getOwnPropertyDescriptor(Error,'stackTraceLimit'),prepare=Object.getOwnPropertyDescriptor(Error,'prepareStackTrace');let sites;
-    try{Object.defineProperty(Error,'stackTraceLimit',{configurable:true,writable:true,value:cap.frames});
-      Object.defineProperty(Error,'prepareStackTrace',{configurable:true,writable:true,value:(_error,frames)=>frames});sites=new Error('fr1-call').stack;}
-    finally{if(old)Object.defineProperty(Error,'stackTraceLimit',old);else delete Error.stackTraceLimit;
-      if(prepare)Object.defineProperty(Error,'prepareStackTrace',prepare);else delete Error.prepareStackTrace;}
-    if(!Array.isArray(sites))throw Error('fr1_structured_stack_unavailable');state.stackCaptures++;
+  function captureStack(){const frames=getCallSites(cap.frames,{sourceMap:false});state.stackCaptures++;
     // Every call captures its current complete location vector. Only presentation is interned;
     // neither a first-kind stack nor a receiver/function object is kept in the dictionary.
-    const frames=sites.map(f=>{const file=f.getFileName(),line=f.getLineNumber(),column=f.getColumnNumber();return[file,line,column,
-      f.isEval()?f.getEvalOrigin():null,(f.isAsync()?1:0)|(f.isNative()?2:0)|(f.isConstructor()?4:0)|(f.isEval()?8:0),f.isPromiseAll()?f.getPromiseIndex():null,
-      file&&line&&column?null:f.getFunctionName()];});
-    const signature=JSON.stringify(frames),truncated=sites.length>=cap.frames||Buffer.byteLength(signature)>cap.stackLength;
+    const signature=JSON.stringify(frames),truncated=frames.length>=cap.frames||Buffer.byteLength(signature)>cap.stackLength;
     if(truncated){fatal('stack-capture-cap');return{id:null,truncated:true};}
     if(stackIds.has(signature))return{id:stackIds.get(signature),truncated:false};
-    const text='Error: fr1-call\n'+sites.map((f,i)=>'    at '+(f.getFunctionName()||'<anonymous>')+' ('+(frames[i][0]||frames[i][3]||'<unknown>')+':'+frames[i][1]+':'+frames[i][2]+')').join('\n');
+    const text='FR1 current synchronous JS stack\n'+frames.map(f=>'    at '+(f.functionName||'<anonymous>')+' ('+(f.scriptName||'<script '+f.scriptId+'>')+':'+f.lineNumber+':'+f.columnNumber+')').join('\n');
     const n=Buffer.byteLength(JSON.stringify({frames,text}));if(n>cap.stackLength||stackIds.size>=cap.stacks||stackBytes+n>cap.stackBytes){fatal('stack-dictionary-cap');return {id:null,truncated:true};}
-    const id=stackIds.size+1;stackIds.set(signature,id);stackBytes+=n;state.stackMaterializations++;append('stack',{id,encoding:'source-location-v1',frames,text,truncated:false});return{id,truncated:false};
+    const id=stackIds.size+1;stackIds.set(signature,id);stackBytes+=n;state.stackMaterializations++;append('stack',{id,encoding:'node-call-sites-v1',captureKind:'current-synchronous-JS',asyncParents:'mapped-ALS-only',nativeAndUnmappedAsyncFramesNotInvented:true,frames,text,truncated:false});return{id,truncated:false};
   }
   function scope(args){const p=args[0];if(!p||typeof p!=='object'||isProxy(p))return hash(JSON.stringify([Array.isArray(p)?'array':typeof p]));
     const get=k=>Object.getOwnPropertyDescriptor(p,k)?.value;
@@ -116,9 +109,9 @@ export function installFr1Recorder({store,roots,entries,foreground=()=>null,noti
     wrap(store,'listEvidenceIndex',original=>function(...args){
       if(stopped)return Reflect.apply(original,this,args);if(!activeRoot)return runRoot(original,this,args,'outside-index',true);
       const r=activeRoot,meta=cpu();port('index');let stack;try{stack=captureStack();}catch(e){metadataErrors++;r.chainIncomplete=true;stack={id:null,truncated:true};}
-      const pre=cpu()-meta,start=performance.now(),before=process.threadCpuUsage();let value,failed=false;
+      const before=process.threadCpuUsage(),pre=(before.user+before.system)/1000-meta,start=performance.now();let value,failed=false;
       try{value=Reflect.apply(original,this,args);return value;}catch(e){failed=true;throw e;}
-      finally{const end=performance.now(),c=process.threadCpuUsage(before),tail=cpu(),e={position:r.evidence.length,start,end,userMs:c.user/1000,systemMs:c.system/1000,rows:Array.isArray(value)?value.length:null,readFailure:failed,entryStack:stack,selfMs:0};r.evidence.push(e);e.selfMs=pre+cpu()-tail;}
+      finally{const end=performance.now(),c=process.threadCpuUsage(before),tail=(before.user+before.system+c.user+c.system)/1000,e={position:r.evidence.length,start,end,userMs:c.user/1000,systemMs:c.system/1000,rows:Array.isArray(value)?value.length:null,readFailure:failed,entryStack:stack,selfMs:0};r.evidence.push(e);e.selfMs=pre+cpu()-tail;}
     });
     observer=new PerformanceObserver(list=>{const before=cpu();for(const e of list.getEntries()){if(++gcCount>cap.gc){fatal('gc-cap');break;}append('gc',{start:e.startTime,duration:e.duration,kind:e.detail?.kind});}charge(cpu()-before);});observer.observe({entryTypes:['gc']});
     heartbeat=setInterval(()=>{const before=cpu();try{notify({kind:'heartbeat',at:performance.now(),seq,foregroundDelivery:Boolean(foreground())});}catch(e){metadataErrors++;fatal('heartbeat-notification');}charge(cpu()-before);},250);heartbeat.unref?.();
