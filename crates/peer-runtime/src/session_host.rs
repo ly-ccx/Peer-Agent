@@ -13,6 +13,10 @@ use peer_store::{
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 mod authority;
+mod episode;
+pub(crate) use episode::now as episode_time;
+pub use episode::{EpisodeOutcome, PermissionInput};
+mod recovery;
 mod stop;
 mod unknown;
 pub use authority::{
@@ -257,7 +261,7 @@ fn claim_refs(claims: &[Value]) -> Vec<Value> {
         .map(|c| json!({"claimId":c["claimId"],"revision":c["revision"]}))
         .collect()
 }
-fn milliseconds(now: &str) -> Result<i64, HostError> {
+pub(crate) fn milliseconds(now: &str) -> Result<i64, HostError> {
     let at = time::OffsetDateTime::parse(now, &time::format_description::well_known::Rfc3339)
         .map_err(|_| HostError("invalid_host_time"))?;
     i64::try_from(at.unix_timestamp_nanos() / 1_000_000).map_err(|_| HostError("invalid_host_time"))

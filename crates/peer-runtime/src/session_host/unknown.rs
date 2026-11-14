@@ -37,7 +37,10 @@ fn probe(
     );
     Ok(())
 }
-async fn recorder_proof(current: &Current) -> &'static str {
+async fn recorder_proof(host: &NativeSessionHost, current: &Current) -> &'static str {
+    if host.dead_native_episode(current).await {
+        return "dead";
+    }
     let control = control(current);
     if control["expectedExecution"] != current.goal.facts["execution"] {
         return "unproven";
@@ -131,7 +134,7 @@ impl NativeSessionHost {
             json!({"openHandles":handles}),
             now,
         )?;
-        let proof = recorder_proof(&current).await;
+        let proof = recorder_proof(self, &current).await;
         probe(
             &mut probes,
             "process",
@@ -275,7 +278,7 @@ impl NativeSessionHost {
             .ok_or(HostError("recorder_not_proven_dead"))?;
         let dead = |p: &str| matches!(p, "dead" | "reused" | "different_boot");
         if !process["recorderProof"].as_str().is_some_and(dead)
-            || !dead(recorder_proof(&current).await)
+            || !dead(recorder_proof(self, &current).await)
         {
             return Err(HostError("recorder_not_proven_dead"));
         }

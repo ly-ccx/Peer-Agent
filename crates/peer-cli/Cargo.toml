@@ -6,6 +6,9 @@ rust-version.workspace = true
 publish = false
 default-run = "peer-native"
 
+[features]
+test-fixtures = ["peer-runtime/test-fixtures"]
+
 [[bin]]
 name = "peer-native"
 path = "src/main.rs"
@@ -13,10 +16,14 @@ path = "src/main.rs"
 [dependencies]
 peer-protocol = { path = "../peer-protocol" }
 peer-tui = { path = "../peer-tui" }
+peer-runtime = { path = "../peer-runtime" }
 crossterm.workspace = true
 ratatui.workspace = true
 serde_json.workspace = true
 signal-hook = "0.3.18"
+tokio = { version = "=1.48.0", features = ["rt", "time", "io-std", "io-util"] }
+rustix = { version = "1.1.4", features = ["event", "pty"] }
 
 [dev-dependencies]
 tempfile = "3.23.0"
+peer-store = { path = "../peer-store" }

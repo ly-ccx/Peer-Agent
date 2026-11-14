@@ -2,14 +2,16 @@
 // Development verification uses TS as the conformance reference. The built
 // peer-native executable does not spawn this script, Node, or Bun.
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { existsSync,mkdirSync,mkdtempSync,writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const output = process.argv[2] ?? mkdtempSync(join(tmpdir(), 'peer-native-check-'));
-const run = (command, args) => execFileSync(command, args, { cwd: root, stdio: 'inherit' });
+const run = (command, args,extraEnv) => execFileSync(command, args, { cwd: root, stdio: 'inherit',env:extraEnv?{...process.env,...extraEnv}:process.env });
+const episodes=join(output,'episodes');mkdirSync(episodes,{recursive:true});writeFileSync(join(episodes,'.native-cli-fixture'),'isolated');
+if(!existsSync(join(root,'packages/runtime-core/dist/index.js')))run('pnpm',['--filter','@peer-agent/runtime-core','build']);
 run('bun', ['scripts/native-cli/contracts.ts']);
 run('bun', ['scripts/native-cli/control-contracts.ts']);
 run('bun', ['scripts/native-cli/work-contracts.ts']);
@@ -18,10 +20,12 @@ run('bun', ['scripts/native-cli/goal-contracts.ts']);
 run('bun', ['scripts/native-cli/admission-contracts.ts']);
 run('bun', ['scripts/native-cli/history-plan-contracts.ts']);
 run('bun', ['scripts/native-cli/access-policy-contracts.ts']);
+run('bun', ['scripts/native-cli/context-contracts.ts']);
 run('node', ['scripts/native-cli/check-boundaries.mjs']);
 run('cargo', ['fmt', '--all', '--check']);
-run('cargo', ['clippy', '--locked', '-p', 'peer-cli', '-p', 'peer-protocol', '-p', 'peer-tui', '-p', 'peer-store', '-p', 'peer-runtime', '--all-targets', '--features', 'peer-runtime/test-fixtures,peer-store/test-fixtures', '--', '-D', 'warnings']);
-run('cargo', ['test', '--locked', '--workspace', '--all-targets', '--features', 'peer-runtime/test-fixtures,peer-store/test-fixtures']);
+run('cargo', ['clippy', '--locked', '-p', 'peer-cli', '-p', 'peer-protocol', '-p', 'peer-tui', '-p', 'peer-store', '-p', 'peer-runtime', '--all-targets', '--features', 'peer-cli/test-fixtures,peer-store/test-fixtures', '--', '-D', 'warnings']);
+run('cargo', ['test', '--locked', '--workspace', '--all-targets', '--features', 'peer-cli/test-fixtures,peer-store/test-fixtures'],{PEER_NATIVE_P3_EVIDENCE_ROOT:episodes});
+run('bun',['scripts/native-cli/episode-conformance.ts',episodes]);
 run('cargo', ['build', '--release', '--locked', '-p', 'peer-cli', '--bins', '--examples']);
 run('cargo', ['build', '--locked', '-p', 'peer-store', '--example', 'conformance']);
 run('bun', ['scripts/native-cli/store-conformance.ts', 'target/debug/examples/conformance']);

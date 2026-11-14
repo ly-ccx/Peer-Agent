@@ -12,6 +12,8 @@ const MAX_BODY: usize = 8 * 1024 * 1024;
 pub enum GoalExecutionFact<'a> {
     SessionControl(&'a Value),
     ClaimClosure(&'a Value),
+    /// Actual Host-settled pause. Never Goal acceptance or model-reported done.
+    ManagedPause(&'a Value),
 }
 pub struct GoalMirrorCommit {
     pub source_revision: String,
@@ -179,7 +181,23 @@ impl GoalMirrorTransaction<'_> {
     ) -> Result<GoalMirrorCommit, GoalError> {
         use time::{OffsetDateTime, format_description::well_known::Rfc3339};
         let at = OffsetDateTime::parse(now, &Rfc3339).map_err(|_| GoalError::Invalid)?;
+        let pause = matches!(fact, GoalExecutionFact::ManagedPause(_));
         let (key, value, reason, by, identity) = match fact {
+            GoalExecutionFact::ManagedPause(value) => {
+                if value["kind"] != "pause"
+                    || value["phase"] != "settled"
+                    || !value["stopReceipt"].is_object()
+                {
+                    return Err(GoalError::Invalid);
+                }
+                (
+                    "executionControl",
+                    value,
+                    "managed execution paused",
+                    "session-control",
+                    &value["expectedExecution"],
+                )
+            }
             GoalExecutionFact::SessionControl(value) => (
                 "executionControl",
                 value,
@@ -204,7 +222,11 @@ impl GoalMirrorTransaction<'_> {
         if !value.is_object() {
             return Err(GoalError::Invalid);
         }
-        let changed = self.raw["delegationOrigin"].get(key) != Some(value);
+        let changed = self.raw["delegationOrigin"].get(key) != Some(value)
+            || pause
+                && (self.raw["delegationOrigin"]["phase"] != "paused"
+                    || self.raw["status"] != "paused"
+                    || self.raw["runner"]["status"] != "paused");
         if changed {
             let version = self.raw["version"]
                 .as_f64()
@@ -253,6 +275,16 @@ impl GoalMirrorTransaction<'_> {
                 }
                 self.raw["runner"] = patch["runner"].clone();
                 self.raw["status"] = self.facts["status"].clone();
+            }
+            if pause {
+                self.raw["delegationOrigin"]["phase"] = json!("paused");
+                self.raw["status"] = json!("paused");
+                if !self.raw["runner"].is_object() {
+                    self.raw["runner"] = json!({})
+                }
+                self.raw["runner"]["status"] = json!("paused");
+                self.raw["runner"]["updatedAt"] = json!(now);
+                self.facts["status"] = json!("paused");
             }
         }
         let original_index = self.index.clone();

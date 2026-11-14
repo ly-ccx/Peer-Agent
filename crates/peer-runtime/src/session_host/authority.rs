@@ -156,6 +156,13 @@ impl NativeSessionHost {
             return Err(HostError("work_execution_stopped"));
         }
         let origin = &current.goal.facts["delegationOrigin"];
+        if call.role != HostExecutionRole::ProjectAgent
+            && crate::execution_budget::worker_work_stopped(
+                &current.journal.state["works"][origin["workId"].as_str().unwrap_or("")],
+            )
+        {
+            return Err(HostError("work_execution_stopped"));
+        }
         let binding = &origin["coordinationBinding"];
         if binding.is_object() {
             let work_id = binding["workId"]

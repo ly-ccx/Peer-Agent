@@ -21,12 +21,12 @@ fn lightweight_entries_run_without_js_or_home_and_do_not_emit_terminal_sequences
     let result = run(&["doctor"]);
     let facts: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
     assert_eq!(facts["sidecar"], false);
-    assert_eq!(facts["runtimeConnected"], false);
+    assert_eq!(facts["runtimeConnected"], true);
     assert_eq!(facts["dataHomeConfigured"], false);
 }
 
 #[test]
-fn non_tty_and_unconnected_execution_fail_without_creating_personal_state() {
+fn non_tty_and_unsupported_execution_fail_without_creating_personal_state() {
     assert_eq!(run(&[]).status.code(), Some(2));
     for args in [&["exec", "hello"][..], &["acp"][..], &["sessions"][..]] {
         let result = run(args);

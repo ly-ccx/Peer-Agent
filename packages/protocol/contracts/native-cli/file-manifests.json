@@ -1,0 +1,68 @@
+[
+  {
+    "capabilityId": "local.file.read",
+    "displayName": "Read File",
+    "description": "Read a UTF-8 file from an absolute or workspace-relative path. Optional start_line/end_line return a numbered slice; omit both for the full file without line numbers.",
+    "sideEffectLevel": "L1",
+    "modeScopes": [
+      "chat",
+      "plan",
+      "goal",
+      "explorer",
+      "project_agent"
+    ],
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute or workspace-relative file path."
+        },
+        "start_line": {
+          "type": "number",
+          "description": "Optional 1-based inclusive start line. When set, content is a numbered slice."
+        },
+        "end_line": {
+          "type": "number",
+          "description": "Optional 1-based inclusive end line. When set with start_line, both ends are included."
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "capabilityId": "local.file.write",
+    "displayName": "Write File",
+    "description": "Create or replace a UTF-8 file after governed approval and freshness checks.",
+    "sideEffectLevel": "L2",
+    "modeScopes": [
+      "chat",
+      "goal"
+    ],
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute or workspace-relative file path."
+        },
+        "content": {
+          "type": "string",
+          "description": "The complete file content to write."
+        },
+        "allow_overwrite": {
+          "type": "boolean",
+          "description": "Set true only when intentionally replacing an existing file after reading it."
+        }
+      },
+      "required": [
+        "path",
+        "content"
+      ],
+      "additionalProperties": false
+    }
+  }
+]

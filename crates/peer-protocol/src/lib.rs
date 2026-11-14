@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
 mod coordination;
+mod native_episode;
+pub use native_episode::normalize_native_episode_recorder;
 mod evidence_refs;
 mod goal_facts;
 pub use coordination::CoordinationReducer;

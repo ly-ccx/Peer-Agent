@@ -189,7 +189,9 @@ impl NativeSessionHost {
                 self.journal.lease().record().host_id,
                 self.journal.lease().record().acquired_at
             ));
+        let native_stopped = self.dead_native_episode(&before).await;
         if !terminal_runner(&before.goal.facts)
+            && !native_stopped
             && !proof.allows_settlement()
             && (operation["unproven"] == true
                 || recorded_elsewhere && ownership != Ownership::Ended)
@@ -212,6 +214,7 @@ impl NativeSessionHost {
                 }
             }
         } else if ownership != Ownership::Ended
+            && !native_stopped
             && !terminal_runner(&before.goal.facts)
             && !proof.allows_settlement()
         {
@@ -312,8 +315,12 @@ impl NativeSessionHost {
         {
             return Err(HostError("execution_still_running"));
         }
-        self.resources
-            .settle(&current.resource, receipt, &[], now)?;
+        self.resources.settle(
+            &current.resource,
+            receipt,
+            &super::recovery::dispatch_scopes(&current),
+            now,
+        )?;
         if receipt["unknownCalls"]
             .as_array()
             .is_none_or(|a| !a.is_empty())
