@@ -324,7 +324,10 @@ mod tests {
         let mut bytes = BASE64.decode(ciphertext).expect("valid ciphertext");
         bytes[0] ^= 1;
         let replacement = BASE64.encode(bytes);
-        assert_ne!(replacement, ciphertext, "tamper must change authenticated bytes");
+        assert_ne!(
+            replacement, ciphertext,
+            "tamper must change authenticated bytes"
+        );
         json["records"]["model/openai/api-key"]["ciphertext"] = replacement.into();
         fs::write(vault.path(), serde_json::to_vec(&json).expect("encode")).expect("tamper");
 
