@@ -130,6 +130,13 @@ pub fn run(plan: &str, max_turns: usize, recover: bool) -> io::Result<CliExit> {
                 peer_tui::terminal_text(plan)
             )?;
             let hint = match e.0 {
+                "context_settings_invalid"
+                | "context_settings_schema_unsupported"
+                | "context_settings_changed"
+                | "context_settings_unavailable"
+                | "context_settings_limit" => Some(
+                    "无法完整读取当前设置；原文件已保留，此次未调用模型。修正设置后可重新准入同一待执行任务。",
+                ),
                 "native_capability_inventory_unsupported" | "native_nested_context_unsupported" => {
                     Some("原生候选尚未接通所需的上下文或能力配置来源；配置已保留，此次未调用模型。")
                 }

@@ -44,3 +44,7 @@ required-features = ["test-fixtures"]
 [[example]]
 name = "goal-mirror-conformance"
 required-features = ["test-fixtures"]
+
+[[example]]
+name = "instruction-conformance"
+required-features = ["test-fixtures"]

@@ -76,7 +76,6 @@ impl NativeSessionHost {
             .goals
             .read_context(plan_id, &current.goal.source_revision)?;
         for name in [
-            "settings.json",
             "developer-settings.json",
             "mcp-registry.json",
             "skills",
@@ -187,11 +186,12 @@ impl NativeSessionHost {
             .as_ref()
             .ok_or(HostError("execution_resource_scope_unknown"))?
             .clone();
-        // The existing Source observes workspace-root guidance. Other Context
-        // inventories still awaiting their adapters remain explicit blockers.
-        let instructions =
-            crate::system_context::instructions::ProjectInstructions::observe(&workspace)
-                .map_err(HostError)?;
+        // The registered Source owns prompt settings and workspace guidance.
+        // Unported settings and Context inventories remain explicit blockers.
+        let instructions = crate::system_context::instructions::ProjectInstructions::observe_host(
+            &workspace, &self.home, cancel,
+        )
+        .map_err(HostError)?;
         for name in [".peer", ".claude", ".agents"] {
             if workspace.join(name).exists() {
                 return Err(HostError("native_project_context_source_unsupported"));
