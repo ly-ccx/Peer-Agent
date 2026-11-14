@@ -13,11 +13,16 @@ const run = (command, args) => execFileSync(command, args, { cwd: root, stdio: '
 run('bun', ['scripts/native-cli/contracts.ts']);
 run('node', ['scripts/native-cli/check-boundaries.mjs']);
 run('cargo', ['fmt', '--all', '--check']);
-run('cargo', ['clippy', '--locked', '-p', 'peer-cli', '-p', 'peer-protocol', '-p', 'peer-tui', '-p', 'peer-store', '--all-targets', '--', '-D', 'warnings']);
-run('cargo', ['test', '--locked', '--workspace', '--all-targets']);
+run('cargo', ['clippy', '--locked', '-p', 'peer-cli', '-p', 'peer-protocol', '-p', 'peer-tui', '-p', 'peer-store', '-p', 'peer-runtime', '--all-targets', '--features', 'peer-runtime/test-fixtures', '--', '-D', 'warnings']);
+run('cargo', ['test', '--locked', '--workspace', '--all-targets', '--features', 'peer-runtime/test-fixtures']);
 run('cargo', ['build', '--release', '--locked', '-p', 'peer-cli', '--bins', '--examples']);
 run('cargo', ['build', '--locked', '-p', 'peer-store', '--example', 'conformance']);
 run('bun', ['scripts/native-cli/store-conformance.ts', 'target/debug/examples/conformance']);
+run('cargo', ['build', '--locked', '-p', 'peer-credential-helper', '--bin', 'peer-credential-helper']);
+run('cargo', ['build', '--locked', '-p', 'peer-runtime', '--example', 'helper-probe']);
+execFileSync(join(root, 'target/debug/examples/helper-probe'), [join(root, 'target/debug/peer-credential-helper')], {
+  cwd: root, stdio: 'inherit', env: { ...process.env, PATH: '/nonexistent' },
+});
 run('python3', ['scripts/native-cli/pty_checks.py', '--binary', 'target/release/peer-native',
   '--fixture', 'target/release/examples/terminal-lifecycle', '--output', join(output, 'pty')]);
 process.stdout.write(`Native scoped verification passed; PTY evidence: ${output}\n`);
