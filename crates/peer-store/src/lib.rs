@@ -2,11 +2,16 @@
 
 mod files;
 mod history;
+mod lease;
 mod lock;
 mod policy;
 
 pub(crate) use files::identity;
 pub use history::{ConversationStore, HistorySnapshot};
+pub use lease::{
+    AcquireLease, HOST_LEASE_HEARTBEAT_MS, HOST_LEASE_STALE_MS, HostIdentity, HostLeaseRecord,
+    HostLeaseStore, HostSurface, LeaseToken,
+};
 pub use lock::DirectoryLock;
 pub use policy::{PolicyStore, PolicyUpdateError};
 use std::fmt;
@@ -27,6 +32,9 @@ pub enum StoreError {
     LockBusy,
     LockOwnershipChanged,
     Cancelled,
+    LeaseCorrupt,
+    LeaseOwnershipLost,
+    LeaseContended,
 }
 
 impl StoreError {
@@ -46,6 +54,9 @@ impl StoreError {
             Self::LockBusy => "STORE_LOCK_BUSY",
             Self::LockOwnershipChanged => "STORE_LOCK_OWNERSHIP_CHANGED",
             Self::Cancelled => "CANCELLED",
+            Self::LeaseCorrupt => "CORRUPT_LEASE",
+            Self::LeaseOwnershipLost => "HOST_LEASE_LOST",
+            Self::LeaseContended => "HOST_LEASE_CONTENDED",
         }
     }
 }

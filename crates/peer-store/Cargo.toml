@@ -12,6 +12,5 @@ serde_json.workspace = true
 sha2.workspace = true
 rusqlite = { version = "=0.37.0", features = ["bundled"] }
 rustix = { version = "1.1.4", features = ["fs"] }
-
-[dev-dependencies]
 tempfile = "3.23.0"
+time = { version = "=0.3.55", features = ["formatting", "parsing"] }

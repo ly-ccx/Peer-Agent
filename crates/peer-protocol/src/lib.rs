@@ -83,3 +83,6 @@ mod tests {
         }
     }
 }
+
+mod lease;
+pub use lease::{HostLeaseRecord, HostSurface};

@@ -3,28 +3,129 @@
   "$id": "urn:peer-agent:contracts:native-cli:store:v1",
   "title": "Existing persisted-history and Bot-access-policy conformance shapes",
   "$defs": {
-    "localAccessLevel": { "enum": ["ask_before_local", "session_local", "restricted_local", "full_local"] },
+    "localAccessLevel": {
+      "enum": [
+        "ask_before_local",
+        "session_local",
+        "restricted_local",
+        "full_local"
+      ]
+    },
     "persistedHistory": {
-      "type": "object", "additionalProperties": false,
-      "required": ["conversationId", "contentRevision", "messages", "excludedFromMessageId", "requiresRuntimeCheck"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "conversationId",
+        "contentRevision",
+        "messages",
+        "excludedFromMessageId",
+        "requiresRuntimeCheck"
+      ],
       "properties": {
-        "conversationId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$" },
-        "contentRevision": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
-        "messages": { "type": "array", "items": { "type": "object" } },
-        "excludedFromMessageId": { "type": ["string", "null"] },
-        "requiresRuntimeCheck": { "const": true }
+        "conversationId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"
+        },
+        "contentRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "excludedFromMessageId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requiresRuntimeCheck": {
+          "const": true
+        }
       }
     },
     "botAccessPolicy": {
-      "type": "object", "additionalProperties": false,
-      "required": ["workspaceId", "conversationId", "revision", "accessLevel", "updatedAt", "source"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspaceId",
+        "conversationId",
+        "revision",
+        "accessLevel",
+        "updatedAt",
+        "source"
+      ],
       "properties": {
-        "workspaceId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$" },
-        "conversationId": { "type": "string" },
-        "revision": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
-        "accessLevel": { "$ref": "#/$defs/localAccessLevel" },
-        "updatedAt": { "type": "string" },
-        "source": { "enum": ["legacy_migration", "new_bot", "local_ui"] }
+        "workspaceId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "conversationId": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "accessLevel": {
+          "$ref": "#/$defs/localAccessLevel"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "legacy_migration",
+            "new_bot",
+            "local_ui"
+          ]
+        }
+      }
+    },
+    "hostLease": {
+      "type": "object",
+      "required": [
+        "hostId",
+        "surface",
+        "pid",
+        "acquiredAt",
+        "heartbeatAt"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "hostId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "surface": {
+          "enum": [
+            "desktop",
+            "tui"
+          ]
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "appVersion": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "acquiredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "heartbeatAt": {
+          "type": "string",
+          "format": "date-time"
+        }
       }
     }
   }
