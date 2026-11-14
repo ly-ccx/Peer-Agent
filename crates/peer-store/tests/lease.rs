@@ -132,34 +132,40 @@ fn lease_symlinks_and_workspace_symlinks_are_not_followed() {
 
 #[test]
 fn independent_threads_competing_for_a_free_lease_have_one_owner() {
-    let root = tempfile::tempdir().unwrap();
-    let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
-    let handles: Vec<_> = (1..=2)
-        .map(|pid| {
-            let root = root.path().to_owned();
-            let barrier = barrier.clone();
-            std::thread::spawn(move || {
-                barrier.wait();
-                HostLeaseStore::new(root).acquire("w", &identity(&format!("host-{pid}"), pid), 1000)
+    for _ in 0..256 {
+        let root = tempfile::tempdir().unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let handles: Vec<_> = (1..=2)
+            .map(|pid| {
+                let root = root.path().to_owned();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    HostLeaseStore::new(root).acquire(
+                        "w",
+                        &identity(&format!("host-{pid}"), pid),
+                        1000,
+                    )
+                })
             })
-        })
-        .collect();
-    let results: Vec<_> = handles
-        .into_iter()
-        .map(|h| h.join().unwrap().unwrap())
-        .collect();
-    assert_eq!(
-        results
-            .iter()
-            .filter(|r| matches!(r, AcquireLease::Acquired { .. }))
-            .count(),
-        1
-    );
-    assert_eq!(
-        results
-            .iter()
-            .filter(|r| matches!(r, AcquireLease::Held(_)))
-            .count(),
-        1
-    );
+            .collect();
+        let results: Vec<_> = handles
+            .into_iter()
+            .map(|h| h.join().unwrap().unwrap())
+            .collect();
+        assert_eq!(
+            results
+                .iter()
+                .filter(|r| matches!(r, AcquireLease::Acquired { .. }))
+                .count(),
+            1
+        );
+        assert_eq!(
+            results
+                .iter()
+                .filter(|r| matches!(r, AcquireLease::Held(_)))
+                .count(),
+            1
+        );
+    }
 }

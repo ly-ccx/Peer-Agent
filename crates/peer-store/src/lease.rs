@@ -79,6 +79,13 @@ fn millis(text: &str) -> Result<i64, StoreError> {
 }
 fn read(path: &Path) -> Result<Option<Snapshot>, StoreError> {
     let before = files::identity(path)?;
+    #[cfg(test)]
+    READ_INTERLEAVE.with(|slot| {
+        let hook = slot.borrow_mut().take();
+        if let Some(hook) = hook {
+            hook();
+        }
+    });
     let Some(bytes) = files::read(path, 16 * 1024)? else {
         return Ok(None);
     };
@@ -114,6 +121,12 @@ fn read(path: &Path) -> Result<Option<Snapshot>, StoreError> {
         identity: before.ok_or(StoreError::VersionChanged)?,
     }))
 }
+
+#[cfg(test)]
+thread_local! {
+    static READ_INTERLEAVE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+}
+
 fn temporary(directory: &Path, value: &Value) -> Result<NamedTempFile, StoreError> {
     let mut file = NamedTempFile::new_in(directory).map_err(|_| StoreError::ReadFailed)?;
     serde_json::to_writer(file.as_file_mut(), value).map_err(|_| StoreError::ReadFailed)?;
@@ -190,8 +203,13 @@ impl HostLeaseStore {
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
                 Err(_) => return Err(StoreError::ReadFailed),
             }
-            let Some(current) = read(&path)? else {
-                continue;
+            let current = match read(&path) {
+                Ok(Some(current)) => current,
+                // Publication unlinks its temporary hard-link alias, changing
+                // inode ctime. Re-observe in the existing bounded acquisition
+                // loop; never infer an absent lease or bypass the strict read.
+                Ok(None) | Err(StoreError::VersionChanged) => continue,
+                Err(error) => return Err(error),
             };
             if owner.owns(&current.record) {
                 return Ok(AcquireLease::Acquired {
@@ -353,5 +371,40 @@ impl LeaseToken {
         }
         fs::remove_file(&self.path).map_err(|_| StoreError::ReadFailed)?;
         sync_directory(self.path.parent().ok_or(StoreError::InvalidInput)?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn acquisition_reobserves_a_changed_lease_and_returns_the_current_owner() {
+        let root = tempfile::tempdir().unwrap();
+        let store = HostLeaseStore::new(root.path());
+        let owner = |id| HostIdentity::new(id, HostSurface::Tui, 1, "fixture").unwrap();
+        assert!(matches!(
+            store.acquire("w", &owner("first"), 1000),
+            Ok(AcquireLease::Acquired { .. })
+        ));
+        let path = store.path("w").unwrap();
+        let mut replacement = read(&path).unwrap().unwrap().raw;
+        replacement["hostId"] = "current-owner".into();
+        let temp = temporary(path.parent().unwrap(), &replacement).unwrap();
+        // Force replacement between the strict read's lstat and open. The
+        // original attempt returned VersionChanged; admission must read again.
+        READ_INTERLEAVE.with(|slot| {
+            *slot.borrow_mut() = Some(Box::new(move || {
+                temp.persist(path).unwrap();
+            }))
+        });
+        let AcquireLease::Held(current) = store.acquire("w", &owner("contender"), 1000).unwrap()
+        else {
+            panic!("current owner must retain the lease")
+        };
+        assert_eq!(current.host_id, "current-owner");
+        assert_eq!(
+            store.inspect("w").unwrap().unwrap().host_id,
+            "current-owner"
+        );
     }
 }
