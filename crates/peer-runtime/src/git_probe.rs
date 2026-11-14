@@ -55,9 +55,17 @@ async fn collect(
         if n == 0 {
             return Ok(bytes);
         }
-        budget
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |r| r.checked_sub(n))
-            .map_err(|_| GitProbeError("git_query_output_limit"))?;
+        let mut remaining = budget.load(Ordering::Acquire);
+        loop {
+            let next = remaining
+                .checked_sub(n)
+                .ok_or(GitProbeError("git_query_output_limit"))?;
+            match budget.compare_exchange_weak(remaining, next, Ordering::AcqRel, Ordering::Acquire)
+            {
+                Ok(_) => break,
+                Err(actual) => remaining = actual,
+            }
+        }
         bytes.extend_from_slice(&chunk[..n]);
     }
 }
