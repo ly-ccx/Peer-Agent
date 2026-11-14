@@ -489,6 +489,15 @@ fn partial_usage_stays_unknown_after_a_later_known_request() {
         "{}",
         String::from_utf8_lossy(&result.stderr)
     );
+    let receipt: Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(receipt["usage"]["usageScope"], "runtime_turn");
+    assert_eq!(receipt["usage"]["providerRequestCount"], 2);
+    assert_eq!(receipt["usage"]["totalTokens"], 16);
+    assert_eq!(
+        receipt["lastRequestUsage"]["usageScope"],
+        "provider_request"
+    );
+    assert_eq!(receipt["lastRequestUsage"]["requestIndex"], 2);
     let identity = HostIdentity::new(
         "usage-inspector",
         HostSurface::Tui,
@@ -537,6 +546,15 @@ fn truncated_stream_cannot_dispatch_a_partial_tool_and_next_task_can_run() {
         "{}",
         String::from_utf8_lossy(&r.stderr)
     );
+    let receipt: Value = serde_json::from_slice(&r.stdout).unwrap();
+    assert_eq!(receipt["usage"]["usageScope"], "runtime_turn");
+    assert_eq!(receipt["usage"]["providerRequestCount"], 1);
+    assert_eq!(receipt["usage"]["totalTokens"], 16);
+    assert_eq!(
+        receipt["lastRequestUsage"]["usageScope"],
+        "provider_request"
+    );
+    assert_eq!(receipt["lastRequestUsage"]["requestIndex"], 1);
 }
 #[test]
 fn foreground_timeout_is_reaped_and_persisted_as_failed() {
@@ -562,6 +580,105 @@ fn foreground_timeout_is_reaped_and_persisted_as_failed() {
         "shell_timeout"
     );
     assert_eq!(h[1]["segments"][0]["result"]["output"]["timedOut"], true);
+}
+
+#[test]
+fn real_tool_loop_reports_turn_totals_separately_and_later_tasks_start_fresh() {
+    let with_usage = |reply: String, input: u64, output: u64| {
+        let original =
+            json!({"prompt_tokens":12,"completion_tokens":4,"total_tokens":16}).to_string();
+        let raw=json!({"prompt_tokens":input+5,"completion_tokens":output,"prompt_tokens_details":{"cached_tokens":5},"total_tokens":input+output+5}).to_string();
+        let replaced = reply.replace(&original, &raw);
+        assert_ne!(replaced, reply);
+        replaced
+    };
+    let server = Server::new(vec![
+        with_usage(reply_tool("read_file", json!({"path":"input.txt"})), 30, 2),
+        with_usage(reply_tool("read_file", json!({"path":"input.txt"})), 40, 3),
+        with_usage(reply_text("The actual two reads completed."), 50, 4),
+        reply_text("A separate fresh task."),
+    ]);
+    let f = Fixture::new(&server);
+    let output = f.run();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let receipt: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        receipt["usage"],
+        json!({"usageScope":"runtime_turn","providerRequestCount":3,"inputTokens":120,"outputTokens":9,"cacheReadTokens":15,"cacheWriteTokens":0,"totalTokens":144})
+    );
+    assert_eq!(
+        receipt["lastRequestUsage"]["usageScope"],
+        "provider_request"
+    );
+    assert_eq!(receipt["lastRequestUsage"]["requestIndex"], 3);
+    assert_eq!(receipt["lastRequestUsage"]["inputTokens"], 50);
+    assert_eq!(receipt["lastRequestUsage"]["totalTokens"], 59);
+    assert_eq!(
+        receipt["lastRequestUsage"]["requestFingerprint"]
+            .as_str()
+            .unwrap()
+            .len(),
+        64
+    );
+    assert_eq!(receipt["goalAcceptance"], "pending");
+    assert_eq!(
+        f.history()
+            .iter()
+            .filter(|m| m["segments"].is_array())
+            .count(),
+        2
+    );
+    f.seed("p2", "c2", "s2", "work2", "epoch2");
+    let later = f.command("exec", "p2").output().unwrap();
+    assert_eq!(
+        later.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&later.stderr)
+    );
+    let receipt: Value = serde_json::from_slice(&later.stdout).unwrap();
+    assert_eq!(receipt["usage"]["providerRequestCount"], 1);
+    assert_eq!(receipt["usage"]["totalTokens"], 16);
+    assert_eq!(receipt["lastRequestUsage"]["requestIndex"], 1);
+}
+
+#[test]
+fn max_turns_retains_observed_usage_and_a_paired_actual_tool_result() {
+    let server = Server::new(vec![reply_tool("read_file", json!({"path":"input.txt"}))]);
+    let f = Fixture::new(&server);
+    let output = f
+        .command("exec", "p")
+        .args(["--max-turns", "1"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(5),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let receipt: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(receipt["status"], "max_turns");
+    assert_eq!(receipt["usage"]["usageScope"], "runtime_turn");
+    assert_eq!(receipt["usage"]["providerRequestCount"], 1);
+    assert_eq!(
+        receipt["lastRequestUsage"]["usageScope"],
+        "provider_request"
+    );
+    assert_eq!(receipt["lastRequestUsage"]["requestIndex"], 1);
+    assert_eq!(receipt["toolCalls"], 1);
+    assert_eq!(
+        f.history()
+            .iter()
+            .find(|m| m["segments"].is_array())
+            .unwrap()["segments"][0]["result"]["status"],
+        "success"
+    );
 }
 
 #[test]

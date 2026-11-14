@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
 mod coordination;
+mod usage;
+pub use usage::{ProviderRequestUsage, RuntimeTurnUsage, UsageAmounts, UsagePurpose};
 mod native_episode;
 pub use native_episode::normalize_native_episode_recorder;
 mod evidence_refs;

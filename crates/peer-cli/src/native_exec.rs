@@ -108,7 +108,7 @@ pub fn run(plan: &str, max_turns: usize, recover: bool) -> io::Result<CliExit> {
             max_turns,
             &cancel,
         )
-        .await.map(|outcome|{let code=if outcome.status=="max_turns"{CliExit::MaxTurns}else{CliExit::Ok};(json!({"status":outcome.status,"content":outcome.content,"toolCalls":outcome.tool_calls,"goalAcceptance":"pending","stop":outcome.stop}),code)})};
+        .await.map(|outcome|{let code=if outcome.status=="max_turns"{CliExit::MaxTurns}else{CliExit::Ok};(json!({"status":outcome.status,"content":outcome.content,"toolCalls":outcome.tool_calls,"goalAcceptance":"pending","stop":outcome.stop,"usage":outcome.usage.turn_total,"lastRequestUsage":outcome.usage.last_request}),code)})};
         watcher.abort();
         let _ = watcher.await;
         result

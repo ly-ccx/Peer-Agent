@@ -8,6 +8,7 @@ use crate::{
     model::NativeModel,
     providers::{EffectFuture, EffectOutcome, PreparedEffect, ProviderRegistry},
     system_context::assemble_work_context,
+    usage_accounting::{RequestMetadata, RuntimeUsageAccounting, UsageSnapshot},
 };
 use peer_store::{
     ConversationStore, EvidenceIndexStore, HostFileMaterialization, HostToolEvidence,
@@ -26,6 +27,7 @@ pub struct EpisodeOutcome {
     pub content: String,
     pub tool_calls: usize,
     pub stop: Value,
+    pub usage: UsageSnapshot,
 }
 pub(crate) fn now() -> String {
     time::OffsetDateTime::now_utc()
@@ -242,6 +244,7 @@ impl NativeSessionHost {
         let mut providers = ProviderRegistry::default();
         let projection = providers.project()?;
         let stream = format!("native-{}", uuid::Uuid::new_v4());
+        let mut usage_accounting = RuntimeUsageAccounting::default();
         let run=async {
             let mut count=0;let mut content=String::new();
             let mut live_history=crate::model::LiveHistory::default();
@@ -256,8 +259,11 @@ impl NativeSessionHost {
                 if history.history.excluded_from_message_id.is_some(){return Err(HostError("native_execution_recovery_required"))}
                 let projected=project_history(&history.history.messages).map_err(HostError)?;
                 budget.request(self,&now())?;
-                let turn=self.wait_owned(model.turn_with_history(system["rendered"].as_str().unwrap(),&projected,&projection.definitions(),&live_history,&cancellation),&cancellation,cancel).await?;
-                let turn=match turn{Ok(turn)=>turn,Err(e)=>{budget.usage(self,None,&now())?;return Err(HostError(e.0))}};
+                let turn=self.wait_owned(model.turn_with_history(system["rendered"].as_str().unwrap(),&projected,&projection.definitions(),&live_history,&cancellation),&cancellation,cancel).await;
+                let turn=match turn{Ok(turn)=>turn,Err(e)=>{usage_accounting.observe(None,RequestMetadata::default()).map_err(HostError)?;return Err(e)}};
+                let turn=match turn{Ok(turn)=>turn,Err(e)=>{usage_accounting.observe(None,RequestMetadata::default()).map_err(HostError)?;budget.usage(self,None,&now())?;return Err(HostError(e.0))}};
+                let observed=turn.usage.as_ref().filter(|u|!u.is_null()).map(|u|serde_json::from_value(u.clone()).map_err(|_|HostError("native_usage_invalid"))).transpose()?;
+                usage_accounting.observe(observed,RequestMetadata {fingerprint:Some(&turn.request_fingerprint),..RequestMetadata::default()}).map_err(HostError)?;
                 budget.usage(self,turn.usage.as_ref(),&now())?;
                 if !turn.content.is_empty(){self.append_episode_message(&conversation,&json!({"id":uuid::Uuid::new_v4().to_string(),"role":"assistant","content":turn.content,"createdAt":now(),"streamId":stream,"contextSnapshot":system["snapshot"],"requestFingerprint":turn.request_fingerprint}))?;content=turn.content;}
                 if turn.calls.is_empty(){return Ok(("replied",content,count))}
@@ -325,6 +331,7 @@ impl NativeSessionHost {
             content,
             tool_calls,
             stop,
+            usage: usage_accounting.snapshot(),
         })
     }
     fn append_episode_message(&self, conversation: &str, message: &Value) -> Result<(), HostError> {

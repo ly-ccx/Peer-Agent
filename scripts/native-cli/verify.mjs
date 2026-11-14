@@ -24,6 +24,7 @@ run('bun', ['scripts/native-cli/context-contracts.ts']);
 run('bun', ['scripts/native-cli/wire-contracts.ts']);
 run('bun', ['scripts/native-cli/stream-contracts.ts']);
 run('bun', ['scripts/native-cli/instruction-contracts.ts']);
+run('bun', ['scripts/native-cli/usage-contracts.ts']);
 run('cargo', ['build', '--locked', '-p', 'peer-runtime', '--features', 'test-fixtures', '--example', 'instruction-conformance']);
 run('bun', ['scripts/native-cli/instruction-conformance.ts']);
 run('node', ['--test', 'packages/system-context/src/sources/project-instructions-unicode.test.mjs']);
