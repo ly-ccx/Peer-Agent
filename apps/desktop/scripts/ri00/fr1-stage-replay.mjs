@@ -59,7 +59,8 @@ export function replayFr1Stages(report,meter,journalText){
   assert.equal(journal.sha256,report.history.sha256);assert.equal(journal.seq,report.finalRecorder.lastAckSeq);
   assert.equal(report.finalRecorder.lastSeq,journal.seq);assert.equal(report.finalRecorder.retainedBytes,0);
   const analysis=analyzeFr1Stages(meter,root,report.finalRecorder);assert.deepEqual(analysis,report.analysis);
-  return{producerCandidate:report.candidate,producerSourceUnmodified:true,journal:{chunks:journal.chunk,records:journal.seq,sha256:journal.sha256},
+  return{producerCandidate:report.candidate,producerIdentityTakenFromSealedReport:true,filesystemSourceCheckNotPerformedHere:true,
+    journal:{chunks:journal.chunk,records:journal.seq,sha256:journal.sha256},
     analysisReplayedExactly:true,measurementValid:analysis.valid,groups:analysis.groups,coverage:analysis.coverage,
     selfWindows:reconcileFr1SelfWindows(meter,root,report.finalRecorder),controls:clockSummary(report.clockControl.pairs),
     originalGatePassed:report.originalGatePassed,functionalQualification:false,fieldAdmission:false,oldRootNotBackfilled:true};
