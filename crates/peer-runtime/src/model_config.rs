@@ -91,7 +91,7 @@ pub fn resolve_model(config: &Value, selected: &Value) -> Result<ResolvedNativeM
             .map(str::trim)
             .filter(|s| !s.is_empty())
     };
-    let provider = field("providerType")
+    let family = field("providerType")
         .or_else(|| field("provider"))
         .map(str::to_lowercase)
         .unwrap_or_else(|| group.to_owned());
@@ -99,7 +99,7 @@ pub fn resolve_model(config: &Value, selected: &Value) -> Result<ResolvedNativeM
         || c["enabled"] == false
         || selected["modelId"] != m["model"]
         || selected["providerId"] != group
-        || selected["family"] != provider
+        || selected["family"] != family
     {
         return Err(ModelError("model_selection_unavailable"));
     }
@@ -178,7 +178,12 @@ pub fn resolve_model(config: &Value, selected: &Value) -> Result<ResolvedNativeM
         credential_key: format!("model/{group}/api-key"),
         key_configured: c["apiKeyConfigured"] == true || m["apiKeyConfigured"] == true,
         wire,
-        provider,
+        provider: c["channelId"]
+            .as_str()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or(group)
+            .trim()
+            .into(),
     })
 }
 

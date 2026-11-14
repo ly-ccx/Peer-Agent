@@ -187,15 +187,11 @@ impl NativeSessionHost {
             .as_ref()
             .ok_or(HostError("execution_resource_scope_unknown"))?
             .clone();
-        // Sources still awaiting their native discovery adapter must not vanish
-        // from a production request. The first P3 slice fails closed here.
-        for directory in workspace.ancestors() {
-            for name in ["AGENTS.md", "CLAUDE.md"] {
-                if directory.join(name).exists() {
-                    return Err(HostError("native_project_instruction_source_unsupported"));
-                }
-            }
-        }
+        // The existing Source observes workspace-root guidance. Other Context
+        // inventories still awaiting their adapters remain explicit blockers.
+        let instructions =
+            crate::system_context::instructions::ProjectInstructions::observe(&workspace)
+                .map_err(HostError)?;
         for name in [".peer", ".claude", ".agents"] {
             if workspace.join(name).exists() {
                 return Err(HostError("native_project_context_source_unsupported"));
@@ -255,7 +251,7 @@ impl NativeSessionHost {
                 let policy=peer_store::PolicyStore::new(&self.home).read_existing(&fresh.resource.workspace_id)?;
                 if policy.conversation_id!=origin["parentConversationId"]{return Err(HostError("out_of_scope"))}
                 if fresh.goal.source_revision!=current.goal.source_revision || !crate::coordination::execution_binding_current(&fresh.journal.state["mandates"][work_id],&fresh.journal.state["transitions"][transition["operationId"].as_str().unwrap_or("")],binding){return Err(HostError("execution_revision_stale"))}
-                let system=assemble_work_context(workspace.to_str().ok_or(HostError("invalid_workspace"))?,model.provider(),model.model_id(),&raw,&now()).map_err(HostError)?;
+                let system=assemble_work_context(workspace.to_str().ok_or(HostError("invalid_workspace"))?,model.provider(),model.model_id(),&raw,&now(),&instructions).map_err(HostError)?;
                 let history=ConversationStore::new(&self.home).read_committed(&conversation,None,1024*1024)?;
                 if history.history.excluded_from_message_id.is_some(){return Err(HostError("native_execution_recovery_required"))}
                 let projected=project_history(&history.history.messages).map_err(HostError)?;

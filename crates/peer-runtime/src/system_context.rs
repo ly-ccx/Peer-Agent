@@ -3,6 +3,7 @@
 use peer_protocol::javascript_json_string;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+pub mod instructions;
 fn hash(s: &str) -> String {
     format!("{:x}", Sha256::digest(s.as_bytes()))
 }
@@ -37,19 +38,22 @@ fn rank(v: &Value) -> usize {
 }
 /// Temporary NR-03 Source adapter: canonical Goal is admitted as complete,
 /// explicitly factual JSON in L7. Full Goal Runner/role sources are P5 parity.
-/// This adapter never adds tool/permission claims or an instruction from a file.
+/// The Goal adapter never promotes factual Goal content to instructions. The
+/// registered project.instructions Source independently owns workspace guidance.
 pub fn assemble_work_context(
     workspace: &str,
     provider: &str,
     model: &str,
     goal: &Value,
     now: &str,
+    instructions: &instructions::ProjectInstructions,
 ) -> Result<Value, &'static str> {
     let resources: Value = serde_json::from_str(include_str!(
         "../../../packages/protocol/contracts/native-cli/context-static.json"
     ))
     .map_err(|_| "context_resource_invalid")?;
     let mut sections = Vec::new();
+    sections.extend(instructions.sections());
     for key in ["core", "workSession"] {
         let s = &resources[key];
         sections.push(section(
@@ -63,6 +67,7 @@ pub fn assemble_work_context(
         ));
     }
     sections.push(section("runtime.workspace","L2_RUNTIME",0,"Runtime workspace",format!("Current workspace: {workspace}\nFor user-facing local file references, preserve the actual complete path and source that were read or written. Use an absolute file target (including the correct repository/worktree); a short display label is allowed only when the complete target is preserved in the link. Do not present a branch, symbol or guessed basename as a file link. A file reference is navigation, not proof that a write, verification or acceptance succeeded."),json!({"id":"runtime.workspace","kind":"runtime"}),"runtime"));
+    let snapshot_provider = provider;
     let provider = provider.trim().to_lowercase();
     let rules = match provider.as_str() {
         "openai" => "Provider family: OpenAI-compatible chat.\nUse native function tool calls when a tool is needed. Do not write textual [Tool call] or [Tool result] claims.".into(),
@@ -93,7 +98,7 @@ pub fn assemble_work_context(
     }
     let digest = hash(&rendered);
     Ok(
-        json!({"version":1,"sections":sections,"rendered":rendered,"snapshot":{"id":format!("prompt-{}",&digest[..16]),"createdAt":now,"conversationId":goal["conversationId"],"workspacePath":workspace,"provider":provider,"model":model,"mode":"goal","sectionRefs":sections.iter().map(|s|json!({"id":s["id"],"layer":s["layer"],"checksum":s["checksum"],"source":s["source"]})).collect::<Vec<_>>(),"renderedHash":digest}}),
+        json!({"version":1,"sections":sections,"rendered":rendered,"snapshot":{"id":format!("prompt-{}",&digest[..16]),"createdAt":now,"conversationId":goal["conversationId"],"workspacePath":workspace,"provider":snapshot_provider,"model":model,"mode":"goal","sectionRefs":sections.iter().map(|s|json!({"id":s["id"],"layer":s["layer"],"checksum":s["checksum"],"source":s["source"]})).collect::<Vec<_>>(),"renderedHash":digest}}),
     )
 }
 
@@ -113,7 +118,8 @@ mod tests {
                     c["provider"].as_str().unwrap(),
                     c["model"].as_str().unwrap(),
                     &c["goal"],
-                    c["now"].as_str().unwrap()
+                    c["now"].as_str().unwrap(),
+                    &instructions::ProjectInstructions::default()
                 )
                 .unwrap(),
                 c["expected"]

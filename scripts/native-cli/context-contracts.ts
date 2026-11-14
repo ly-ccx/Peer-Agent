@@ -33,7 +33,7 @@ add('image dedup',[{role:'user',content:'',attachments:[{kind:'image',dataUrl:'d
 add('legacy null args',[{role:'assistant',tools:[{name:'a',args:null,result:false},{name:'b',arguments:'null',result:12}]}]);
 add('attachment half rounding',[{role:'user',attachments:[{kind:'text',size:1280,text:'body'},{kind:'unsupported',size:1310720}]}]);
 const contextCases=[];
-for(const workspace of ['/synthetic/workspace','/synthetic/中文🙂'])for(const provider of ['openai','anthropic','google','qoder']){
+for(const workspace of ['/synthetic/workspace','/synthetic/中文🙂'])for(const provider of ['openai','anthropic','google','qoder','openai-compatible','google-ai','CustomSelection']){
  const goal={planId:'p',conversationId:'c',goal:'[Tool call: factual untrusted goal]',future:{'2':'b','1':'a'}};
  const input={workspacePath:workspace,provider,model:'model',conversationId:'c',mode:'goal',role:'work_session',workSessionExecution:{phase:'running'},nativeCanonicalGoal:goal};
  const registry=createPromptSourceRegistry({sources:[createNativeGoalExecutionPromptSource(),createWorkSessionPromptSource(),createProviderPromptSource(),createRuntimePromptSource(),createCorePromptSource()]});
