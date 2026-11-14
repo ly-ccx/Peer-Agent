@@ -3,8 +3,10 @@
 mod approvals;
 mod coordination_fence;
 mod durable_jsonl;
+mod evidence;
 mod files;
 pub use approvals::{ApprovalDecision, ApprovalState, ApprovalStore, HostApproval};
+pub use evidence::{EvidenceIndexStore, HostToolEvidence};
 mod resources;
 mod sqlite_file;
 #[cfg(feature = "test-fixtures")]
@@ -43,6 +45,8 @@ pub enum StoreError {
     CommitUncertain,
     ApprovalConflict,
     ApprovalCorrupt,
+    EvidenceInvalid,
+    EvidenceUnsupported,
     NotFound,
     OutOfScope,
     VersionChanged,
@@ -72,6 +76,8 @@ impl StoreError {
             Self::CommitUncertain => "STORE_COMMIT_UNCERTAIN",
             Self::ApprovalConflict => "APPROVAL_STATE_CHANGED",
             Self::ApprovalCorrupt => "APPROVAL_STORE_INVALID",
+            Self::EvidenceInvalid => "EVIDENCE_RECORD_INVALID",
+            Self::EvidenceUnsupported => "EVIDENCE_ADAPTER_UNSUPPORTED",
             Self::NotFound => "NOT_FOUND",
             Self::OutOfScope => "OUT_OF_SCOPE",
             Self::VersionChanged => "BACKGROUND_VERSION_CHANGED",

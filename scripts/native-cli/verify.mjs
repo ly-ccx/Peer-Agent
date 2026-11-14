@@ -32,6 +32,7 @@ run('node', ['--test', 'packages/runtime-node/src/project-agent/execution-resour
 run('cargo', ['build', '--locked', '-p', 'peer-store', '--features', 'test-fixtures', '--example', 'durable-conformance']);
 run('bun', ['scripts/native-cli/durable-conformance.ts', 'target/debug/examples/durable-conformance']);
 run('node', ['--test', 'packages/runtime-node/src/project-agent/approval-store.test.mjs']);
+run('node', ['--test', 'packages/runtime-node/src/goal-plan-evidence.native-lock.test.mjs', 'packages/runtime-node/src/goal-plan-store.desktop-preview-evidence.test.mjs', 'packages/runtime-node/src/goal-plan-store.ui-completion.test.mjs', 'packages/runtime-node/src/project-agent/tool-result-evidence-preview.test.mjs']);
 run('cargo', ['build', '--locked', '-p', 'peer-credential-helper', '--bin', 'peer-credential-helper']);
 run('cargo', ['build', '--locked', '-p', 'peer-runtime', '--example', 'helper-probe']);
 execFileSync(join(root, 'target/debug/examples/helper-probe'), [join(root, 'target/debug/peer-credential-helper')], {

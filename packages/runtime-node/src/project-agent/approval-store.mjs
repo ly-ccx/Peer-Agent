@@ -1,3 +1,4 @@
+import { withStoreFileLock } from '../store-file-lock.mjs';
 /**
  * 待批准项的持久记录。
  *
@@ -33,8 +34,6 @@ import { normalizeImageReadGrant } from './permission-inheritance.mjs';
 export { digestApprovalArgs } from './permission-operation.mjs';
 import {
   appendFileSync,
-  lstatSync,
-  rmdirSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -54,31 +53,6 @@ const WORKSPACE_DIR = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 const UNSCOPED_DIR = '_unscoped';
 const DEFAULT_COMPACT_BYTES = 5 * 1024 * 1024;
 const SUMMARY_LIMIT = 240;
-const LOCK_WAIT_MS = 100;
-const lockWait = new Int32Array(new SharedArrayBuffer(4));
-
-// Same empty-directory lock as native Store. Never reclaim by age or PID.
-function withApprovalLock(file, operation) {
-  const lock = `${file}.lock`, deadline = performance.now() + LOCK_WAIT_MS;
-  while (true) {
-    try { mkdirSync(lock, { mode: 0o700 }); break; }
-    catch (error) {
-      if (error.code !== 'EEXIST') throw error;
-      if (performance.now() >= deadline) throw Object.assign(Error('Approval store lock is busy'), { code: 'STORE_LOCK_BUSY' });
-      Atomics.wait(lockWait, 0, 0, 5);
-    }
-  }
-  const held = lstatSync(lock, { bigint: true });
-  try { return operation(); }
-  finally {
-    const current = lstatSync(lock, { bigint: true });
-    if (!current.isDirectory() || current.dev !== held.dev || current.ino !== held.ino) {
-      throw Object.assign(Error('Approval store lock ownership changed'), { code: 'STORE_LOCK_OWNERSHIP_CHANGED' });
-    }
-    // An unknown lock body blocks release rather than being recursively erased.
-    rmdirSync(lock);
-  }
-}
 
 
 function redactSummary(value) {
@@ -251,7 +225,7 @@ export function createApprovalStore({
     if (!record) return null;
     const file = fileFor(record.workspaceId);
     mkdirSync(path.dirname(file), { recursive: true });
-    const saved = withApprovalLock(file, () => {
+    const saved = withStoreFileLock(file, () => {
       const current = latestInFile(file, record.approvalId);
       if (current && current.state === record.state) return { record: current, changed: false };
       appendFileSync(file, `${JSON.stringify(record)}\n`, { encoding: 'utf8', flush: true, mode: 0o600 });

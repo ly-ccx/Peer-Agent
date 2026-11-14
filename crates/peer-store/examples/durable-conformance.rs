@@ -1,7 +1,7 @@
 //! Explicit synthetic fixture; never invoked by the native CLI.
 use peer_store::{
-    ApprovalDecision, ApprovalState, ApprovalStore, ConversationStore, HostApproval,
-    NewConversation,
+    ApprovalDecision, ApprovalState, ApprovalStore, ConversationStore, EvidenceIndexStore,
+    HostApproval, HostToolEvidence, NewConversation,
 };
 use serde_json::{Value, json};
 use std::{
@@ -76,6 +76,28 @@ fn main() {
                 std::thread::sleep(std::time::Duration::from_millis(400));
                 lock.release()?;
                 Value::Null
+            }
+            "evidence_register" => json!(EvidenceIndexStore::new(&root).register(
+                &HostToolEvidence {
+                    conversation_id: "conversation",
+                    plan_id: Some("plan"),
+                    stream_id: Some("stream"),
+                    tool_name: "write_file",
+                    capability_id: "local.file.write",
+                    tool_call_id: id,
+                    grant: &v["grant"],
+                    result: &v["result"],
+                },
+                None
+            )?),
+            "evidence_find" => {
+                let refs: Vec<String> = v["refs"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|r| r.as_str().unwrap().to_owned())
+                    .collect();
+                json!(EvidenceIndexStore::new(&root).find(&refs, None)?)
             }
             "approval_list" => json!(a.list(workspace, None)?),
             "approval_open" => a.open(

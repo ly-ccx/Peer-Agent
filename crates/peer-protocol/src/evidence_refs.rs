@@ -18,6 +18,14 @@ pub fn collect_tool_evidence_refs(
     tool_call_id: Option<&str>,
     execution: &Value,
 ) -> Result<Vec<String>, EvidenceRefError> {
+    collect_tool_result_evidence_refs(tool_call_id, &execution["result"])
+}
+
+/// Same collector at the Host's result seam, without cloning a result envelope.
+pub fn collect_tool_result_evidence_refs(
+    tool_call_id: Option<&str>,
+    result: &Value,
+) -> Result<Vec<String>, EvidenceRefError> {
     let mut refs = Vec::new();
     let mut seen = HashSet::new();
     let mut bytes = 0usize;
@@ -44,7 +52,6 @@ pub fn collect_tool_evidence_refs(
         }
         add(&format!("tool-result://{id}"))?;
     }
-    let result = &execution["result"];
     let evidence = &result["evidence"];
     let preview = &result["outputPreview"];
     for field in [

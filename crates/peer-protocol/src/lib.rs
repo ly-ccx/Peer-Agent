@@ -2,7 +2,10 @@
 
 mod evidence_refs;
 mod execution_identity;
-pub use evidence_refs::{EvidenceRefError, collect_tool_evidence_refs, javascript_trim};
+pub use evidence_refs::{
+    EvidenceRefError, collect_tool_evidence_refs, collect_tool_result_evidence_refs,
+    javascript_trim,
+};
 pub use execution_identity::{
     ExecutionResourceScope, SessionExecutionIdentity, normalize_execution_resource_scope,
     normalize_session_execution_identity,
