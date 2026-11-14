@@ -6,6 +6,8 @@ mod history;
 mod lease;
 mod lock;
 mod policy;
+mod transcript;
+pub use transcript::{TranscriptError, TranscriptLimit, TranscriptLimits, TranscriptReader};
 
 pub(crate) use files::identity;
 pub use goal_source::{GoalSourceSnapshot, GoalSourceStore};

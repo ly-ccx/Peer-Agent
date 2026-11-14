@@ -22,6 +22,8 @@ run('bun', ['scripts/native-cli/store-conformance.ts', 'target/debug/examples/co
 run('bun', ['scripts/native-cli/policy-initialization.ts', 'target/debug/examples/conformance']);
 run('cargo', ['build', '--locked', '-p', 'peer-store', '--example', 'lease-conformance']);
 run('bun', ['scripts/native-cli/lease-conformance.ts', 'target/debug/examples/lease-conformance']);
+run('cargo', ['build', '--locked', '-p', 'peer-store', '--example', 'transcript-conformance']);
+run('bun', ['scripts/native-cli/transcript-conformance.ts', 'target/debug/examples/transcript-conformance']);
 run('cargo', ['build', '--locked', '-p', 'peer-credential-helper', '--bin', 'peer-credential-helper']);
 run('cargo', ['build', '--locked', '-p', 'peer-runtime', '--example', 'helper-probe']);
 execFileSync(join(root, 'target/debug/examples/helper-probe'), [join(root, 'target/debug/peer-credential-helper')], {

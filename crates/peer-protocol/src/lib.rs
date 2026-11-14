@@ -11,6 +11,8 @@ pub use execution_identity::{
 mod bounded_json;
 mod permission_digest;
 mod store;
+mod transcript;
+pub use transcript::{TranscriptCursor, TranscriptPage, TranscriptRange, TranscriptRow};
 
 pub use bounded_json::{
     DecodedJson, JsonDecodeError, JsonLimits, ProjectedJson, ProjectionError, ProjectionLimits,
