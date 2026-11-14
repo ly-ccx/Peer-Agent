@@ -46,7 +46,8 @@ const malformedTS = createBotAccessPolicyAuthority({ dataHome: malformed, legacy
 assert.equal(malformedTS.read('bad').code, 'NOT_FOUND'); assert.equal(read(malformed, 'bad').code, 'NOT_FOUND'); malformedTS.close(); cases++;
 // Unknown schema initialization preserves the source rather than reconstructing policy.
 const dbPath = join(imported, 'project-runtime/bot-access.sqlite');
-const { Database } = await import('bun:sqlite'); const db = new Database(dbPath); db.exec('PRAGMA user_version=2'); db.close();
+const { Database } = await import('bun:sqlite'); const db = new Database(dbPath); db.exec('PRAGMA user_version=2; PRAGMA wal_checkpoint(TRUNCATE)'); db.close();
+assert.equal(readFileSync(dbPath).readUInt32BE(60), 2, 'clean unknown-schema fixture must publish its schema in the main file');
 const before = readFileSync(dbPath); assert.equal(initialize(imported, 'full_local').code, 'POLICY_UNAVAILABLE'); assert.deepEqual(readFileSync(dbPath), before); cases++;
 const unclean = trial('unclean-wal'); profile(unclean, 'w'); assert.equal(initialize(unclean, 'full_local').ok, true);
 const clean = new Database(join(unclean,'project-runtime/bot-access.sqlite')); clean.exec('PRAGMA wal_checkpoint(TRUNCATE)'); clean.close();

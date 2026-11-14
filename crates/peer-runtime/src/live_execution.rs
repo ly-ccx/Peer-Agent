@@ -292,6 +292,25 @@ impl ExecutionRegistry {
             })
             .unwrap_or_default())
     }
+    /// Called after the Host durably recorded the ended observation/result.
+    /// Active and unknown handles cannot be evicted to manufacture idle.
+    pub fn acknowledge_ended_handle(
+        &self,
+        execution: &SessionExecutionIdentity,
+        handle_id: &str,
+    ) -> Result<(), LiveError> {
+        let key = key(execution)?;
+        let mut state = self.inner.state.lock().map_err(|_| LiveError::Unknown)?;
+        let entry = state.entries.get_mut(&key).ok_or(LiveError::Unknown)?;
+        match entry.handles.get(handle_id) {
+            Some(handle) if handle.state == HandleState::Ended => {
+                entry.handles.remove(handle_id);
+                Ok(())
+            }
+            None => Ok(()),
+            _ => Err(LiveError::StopUnconfirmed),
+        }
+    }
 }
 struct HandleGuard {
     inner: Arc<Inner>,

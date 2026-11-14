@@ -27,6 +27,11 @@ export function createGoalPlanTransactions(storeDir) {
     return result;
   }
   function afterCommit(callback) { if (depth > 0) callbacks.push(callback); else callback(); }
+  /** @template {object} T
+   * @param {T} api
+   * @param {readonly (keyof T)[]} names
+   * @returns {T}
+   */
   function bind(api, names) {
     for (const name of names) {
       const operation = api[name];

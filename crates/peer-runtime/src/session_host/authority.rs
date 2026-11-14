@@ -14,6 +14,35 @@ pub enum ProviderPermission {
     FileWrite,
     Shell,
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum HostExecutionRole {
+    Worker,
+    ProjectAgent,
+    Explorer,
+    Verifier,
+    VisualVerifier,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum HostShellRisk {
+    Inert,
+    LocalRead,
+    LocalWrite,
+    ExternalWrite,
+    Privileged,
+    Destructive,
+}
+impl HostShellRisk {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Inert => "L0_inert",
+            Self::LocalRead => "L1_local_read",
+            Self::LocalWrite => "L2_local_write",
+            Self::ExternalWrite => "L3_external_write",
+            Self::Privileged => "L4_privileged",
+            Self::Destructive => "L5_destructive",
+        }
+    }
+}
 pub struct HostCallIdentity<'a> {
     pub plan_id: &'a str,
     pub session_id: &'a str,
@@ -22,6 +51,9 @@ pub struct HostCallIdentity<'a> {
     pub stream_id: &'a str,
     pub capability_id: &'a str,
     pub permission: ProviderPermission,
+    pub role: HostExecutionRole,
+    /// Derived by the actual Shell Provider, never a model-declared risk label.
+    pub shell_risk: Option<HostShellRisk>,
 }
 struct Authority {
     plan_id: String,
@@ -31,6 +63,8 @@ struct Authority {
     stream: String,
     capability: String,
     permission: ProviderPermission,
+    role: HostExecutionRole,
+    shell_risk: Option<HostShellRisk>,
     digest: String,
     policy: BotAccessPolicy,
     source_digest: String,
@@ -81,6 +115,27 @@ impl NativeSessionHost {
             return Err(HostError("access_identity_invalid"));
         }
         let current = self.current(call.plan_id, now)?;
+        let kind = match call.permission {
+            ProviderPermission::Read => "",
+            ProviderPermission::FileWrite => "file-write",
+            ProviderPermission::Shell => "shell",
+        };
+        let mode = crate::access_policy::evaluate_project_agent_turn(
+            &json!({"role":if call.role==HostExecutionRole::ProjectAgent{"project_agent"}else{"work_session"},"capabilityId":call.capability_id,"permissionKind":kind}),
+        );
+        if mode["allowed"] != true {
+            return Err(HostError("project_agent_capability_denied"));
+        }
+        if matches!(
+            call.role,
+            HostExecutionRole::Explorer
+                | HostExecutionRole::Verifier
+                | HostExecutionRole::VisualVerifier
+        ) && (call.permission != ProviderPermission::Read
+            || !read_capability(call.capability_id))
+        {
+            return Err(HostError("read_only"));
+        }
         if current.resource.execution.session_id != call.session_id
             || current.goal.facts["conversationId"] != call.conversation_id
         {
@@ -204,6 +259,8 @@ impl NativeSessionHost {
             stream: call.stream_id.into(),
             capability: call.capability_id.into(),
             permission: call.permission,
+            role: call.role,
+            shell_risk: call.shell_risk,
             digest: approval_args_digest(args)
                 .map_err(|_| HostError("permission_arguments_invalid"))?,
             policy,
@@ -258,6 +315,8 @@ impl NativeSessionHost {
                 stream_id: &a.stream,
                 capability_id: &a.capability,
                 permission: a.permission,
+                role: a.role,
+                shell_risk: a.shell_risk,
             },
             args,
             now,
@@ -316,6 +375,36 @@ impl NativeSessionHost {
         now: &str,
     ) -> Result<(), HostError> {
         self.validate_authority(&grant.authority, args, now)
+    }
+    /// Current policy is an approval factor only. Fresh Goal/role/binding/lease/
+    /// resource admission is evaluated first, then again at the Provider seam.
+    pub fn automatic_permission(
+        &self,
+        call: HostCallIdentity<'_>,
+        args: &Value,
+        now: &str,
+    ) -> Result<Option<HostPermissionGrant>, HostError> {
+        let permit = self
+            .permissions
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| HostError("permission_resource_limit"))?;
+        let authority = self.authority(&call, args, now)?;
+        let prompt = json!({"confirmation":{"kind":"capability-approval","approvalKind":match call.permission{ProviderPermission::Read=>"other",ProviderPermission::FileWrite=>"file-write",ProviderPermission::Shell=>"shell-exec"}},"riskLevel":call.shell_risk.map(HostShellRisk::as_str)});
+        let Some(decision) = crate::access_policy::automatic_access_decision(
+            authority.policy.access_level.as_str(),
+            &prompt,
+            true,
+        ) else {
+            return Ok(None);
+        };
+        self.validate_authority(&authority, args, now)?;
+        let facts = json!({"grantId":format!("grant-{}",uuid::Uuid::new_v4()),"toolCallId":authority.tool_call,"granted":true,"scope":authority.capability,"duration":"once","decidedAt":now,"reason":decision["reason"],"policyRevision":policy_stamp(&authority.policy)});
+        Ok(Some(HostPermissionGrant {
+            authority,
+            facts,
+            _permit: permit,
+        }))
     }
 }
 fn policy_stamp(policy: &BotAccessPolicy) -> String {

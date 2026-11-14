@@ -356,6 +356,8 @@ fn call() -> peer_runtime::session_host::HostCallIdentity<'static> {
         stream_id: "stream",
         capability_id: "local.file.write",
         permission: peer_runtime::session_host::ProviderPermission::FileWrite,
+        role: peer_runtime::session_host::HostExecutionRole::Worker,
+        shell_risk: None,
     }
 }
 #[tokio::test]
@@ -965,6 +967,8 @@ async fn new_canonical_task_is_admitted_by_host_after_old_unknown_closure() {
                 stream_id: "next-stream",
                 capability_id: "local.file.write",
                 permission: ProviderPermission::FileWrite,
+                role: peer_runtime::session_host::HostExecutionRole::Worker,
+                shell_risk: None,
             },
             &args,
             NOW,
@@ -1067,5 +1071,240 @@ async fn goal_mirror_rechecks_source_and_lock_owner_before_writing() {
         )
         .unwrap()["future"]["opaque"],
         "new external source"
+    );
+}
+#[tokio::test]
+async fn full_policy_is_a_factor_and_never_overrides_role_or_cancellation() {
+    use peer_protocol::LocalAccessLevel;
+    use peer_runtime::session_host::HostExecutionRole;
+    use peer_store::PolicyStore;
+    let mut f = fixture();
+    prepare_authority(&mut f);
+    let attempt = f.host.live.begin(&f.execution).unwrap();
+    PolicyStore::new(f.root.path())
+        .update_existing("w", 1, LocalAccessLevel::FullLocal, NOW)
+        .unwrap();
+    let args = json!({"path":"result.txt","content":"synthetic"});
+    for (role, error) in [
+        (
+            HostExecutionRole::ProjectAgent,
+            "project_agent_capability_denied",
+        ),
+        (HostExecutionRole::Verifier, "read_only"),
+        (HostExecutionRole::Explorer, "read_only"),
+        (HostExecutionRole::VisualVerifier, "read_only"),
+    ] {
+        let mut restricted = call();
+        restricted.role = role;
+        assert_eq!(
+            f.host
+                .automatic_permission(restricted, &args, NOW)
+                .err()
+                .unwrap()
+                .0,
+            error
+        );
+    }
+    let grant = f
+        .host
+        .automatic_permission(call(), &args, NOW)
+        .unwrap()
+        .unwrap();
+    assert_eq!(grant.facts()["reason"], "local_access_level_full");
+    f.host.validate_permission(&grant, &args, NOW).unwrap();
+    f.host
+        .begin_stop("p", "cancel", "cancel-full", "local-user:test", NOW)
+        .await
+        .unwrap();
+    assert!(f.host.validate_permission(&grant, &args, NOW).is_err());
+    attempt.finish();
+}
+#[tokio::test]
+async fn session_bot_policy_requires_file_approval_and_bounds_automatic_shell_risk() {
+    use peer_protocol::LocalAccessLevel;
+    use peer_runtime::session_host::{HostShellRisk, ProviderPermission};
+    use peer_store::PolicyStore;
+    let mut f = fixture();
+    prepare_authority(&mut f);
+    let attempt = f.host.live.begin(&f.execution).unwrap();
+    PolicyStore::new(f.root.path())
+        .update_existing("w", 1, LocalAccessLevel::SessionLocal, NOW)
+        .unwrap();
+    assert!(
+        f.host
+            .automatic_permission(call(), &json!({"path":"result.txt"}), NOW)
+            .unwrap()
+            .is_none()
+    );
+    let mut shell = call();
+    shell.permission = ProviderPermission::Shell;
+    shell.capability_id = "local.shell.exec";
+    shell.shell_risk = Some(HostShellRisk::ExternalWrite);
+    let grant = f
+        .host
+        .automatic_permission(shell, &json!({"command":"synthetic only"}), NOW)
+        .unwrap()
+        .unwrap();
+    assert_eq!(grant.facts()["reason"], "local_access_level_session");
+    let mut privileged = call();
+    privileged.permission = ProviderPermission::Shell;
+    privileged.capability_id = "local.shell.exec";
+    privileged.shell_risk = Some(HostShellRisk::Privileged);
+    assert!(
+        f.host
+            .automatic_permission(privileged, &json!({"command":"synthetic only"}), NOW)
+            .unwrap()
+            .is_none()
+    );
+    PolicyStore::new(f.root.path())
+        .update_existing("w", 2, LocalAccessLevel::AskBeforeLocal, NOW)
+        .unwrap();
+    assert_eq!(
+        f.host
+            .validate_permission(&grant, &json!({"command":"synthetic only"}), NOW)
+            .unwrap_err()
+            .0,
+        "permission_policy_changed"
+    );
+    attempt.finish();
+}
+#[tokio::test]
+async fn lease_loss_preserves_stop_protection_and_never_issues_a_receipt() {
+    let mut f = fixture();
+    let attempt = f.host.live.begin(&f.execution).unwrap();
+    f.host
+        .begin_stop("p", "pause", "lease-stop", "local-user:test", NOW)
+        .await
+        .unwrap();
+    attempt.finish();
+    let path = f.root.path().join("project-runtime/w/host.lease");
+    let mut lease: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    lease["hostId"] = json!("replacement-owner");
+    std::fs::write(&path, serde_json::to_vec(&lease).unwrap()).unwrap();
+    assert_eq!(
+        f.host
+            .drain_stop("p", "lease-stop", Duration::from_millis(10), NOW)
+            .await
+            .unwrap_err()
+            .0,
+        "HOST_LEASE_LOST"
+    );
+    assert!(
+        f.host
+            .resources
+            .snapshot()
+            .unwrap()
+            .iter()
+            .all(|c| c["state"] == "draining")
+    );
+    let raw: Value =
+        serde_json::from_slice(&std::fs::read(f.root.path().join("goal-plans/p.json")).unwrap())
+            .unwrap();
+    assert!(raw["delegationOrigin"]["executionControl"]["stopReceipt"].is_null());
+}
+#[tokio::test]
+async fn open_handles_and_unfenced_effects_block_policy_closure() {
+    let mut f = fixture();
+    let id = prepare_unknown(&mut f, "local.file.write", true);
+    let resource = HostResourcePlan {
+        execution: f.execution.clone(),
+        workspace_id: "w".into(),
+        directory: Some(f.root.path().join("workspace")),
+        title: "p".into(),
+        read_only: false,
+    };
+    f.host
+        .resources
+        .mark_handle(
+            &resource,
+            &json!({"handleId":"still-unknown","toolCallId":"unknown","state":"unknown"}),
+            NOW,
+        )
+        .unwrap();
+    assert_eq!(
+        f.host
+            .reconcile_unknown("p", &id, NOW, &CancellationToken::new())
+            .await
+            .unwrap()["verdict"],
+        "inconclusive"
+    );
+    assert_eq!(
+        f.host
+            .resolve_unknown_bot_verified("p", &id, NOW)
+            .await
+            .unwrap_err()
+            .0,
+        "open_handles"
+    );
+    let mut remote = fixture();
+    let id = prepare_unknown(&mut remote, "external.remote_effect", true);
+    assert_eq!(
+        remote
+            .host
+            .reconcile_unknown("p", &id, NOW, &CancellationToken::new())
+            .await
+            .unwrap()["verdict"],
+        "unfenced_external"
+    );
+    assert_eq!(
+        remote
+            .host
+            .resolve_unknown_bot_verified("p", &id, NOW)
+            .await
+            .unwrap_err()
+            .0,
+        "reconciliation_inconclusive"
+    );
+    assert!(!remote.host.resources.snapshot().unwrap().is_empty());
+}
+#[tokio::test]
+async fn ended_handle_acknowledgement_bounds_long_running_host_without_erasing_uncertainty() {
+    let f = fixture();
+    let registry = ExecutionRegistry::default();
+    let attempt = registry.begin(&f.execution).unwrap();
+    for i in 0..160 {
+        let id = format!("handle-{i}");
+        registry
+            .track_handle(
+                &f.execution,
+                &id,
+                &format!("call-{i}"),
+                CancellationToken::new(),
+                async { Ok(()) },
+            )
+            .unwrap();
+        tokio::task::yield_now().await;
+        registry
+            .acknowledge_ended_handle(&f.execution, &id)
+            .unwrap();
+    }
+    assert!(
+        registry
+            .handle_observations(&f.execution)
+            .unwrap()
+            .is_empty()
+    );
+    registry
+        .track_handle(
+            &f.execution,
+            "unknown",
+            "call",
+            CancellationToken::new(),
+            async { Err(()) },
+        )
+        .unwrap();
+    tokio::task::yield_now().await;
+    assert_eq!(
+        registry.acknowledge_ended_handle(&f.execution, "unknown"),
+        Err(LiveError::StopUnconfirmed)
+    );
+    assert_eq!(
+        registry.handle_observations(&f.execution).unwrap()[0].2,
+        "unknown"
+    );
+    attempt.finish();
+    assert_eq!(
+        registry.ownership(&f.execution).unwrap(),
+        Ownership::Unknown
     );
 }

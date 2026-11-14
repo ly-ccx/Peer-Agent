@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod access_policy;
 pub mod coordination;
 pub mod credentials;
 pub mod git_probe;

@@ -241,6 +241,11 @@ impl NativeSessionHost {
                 &json!({"handleId":id,"toolCallId":call,"state":state,"completedAt":now}),
                 now,
             )?;
+            if state == "ended" {
+                self.live
+                    .acknowledge_ended_handle(&fresh.resource.execution, &id)
+                    .map_err(|_| HostError("execution_stop_unconfirmed"))?;
+            }
         }
         let claims = self.resources.claims_for(&fresh.resource)?;
         let open = claims

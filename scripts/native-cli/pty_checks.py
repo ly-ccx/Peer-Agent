@@ -21,9 +21,6 @@ def check(binary, output, name, args=(), action='exit', expected=0, size=(40, 12
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', *size, 0, 0))
     original = termios.tcgetattr(slave)
-    def attach():
-        os.setsid()
-        fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
     home = output / (name + '-home')
     home.mkdir()
     guardian_home = output / (name + '-guardian-home')
@@ -33,7 +30,8 @@ def check(binary, output, name, args=(), action='exit', expected=0, size=(40, 12
     # exits would test a revoked fd, not terminal restoration.
     pid_file = output / (name + '-pid.json')
     status_file = output / (name + '-status.json')
-    guardian = """import json, os, pathlib, signal, subprocess, sys, time
+    guardian = """import fcntl, json, os, pathlib, signal, subprocess, sys, termios, time
+fcntl.ioctl(0, termios.TIOCSCTTY, 0)
 signal.signal(signal.SIGINT, signal.SIG_IGN)
 p = subprocess.Popen(sys.argv[4:], env={**os.environ, 'HOME': sys.argv[3], 'PEER_AGENT_HOME': sys.argv[3] + '/data'})
 pathlib.Path(sys.argv[1]).write_text(json.dumps({'pid': p.pid}))
@@ -42,7 +40,7 @@ pathlib.Path(sys.argv[2]).write_text(json.dumps({'exitCode': code}))
 time.sleep(20)
 """
     process = subprocess.Popen([sys.executable, '-c', guardian, str(pid_file), str(status_file), str(home), str(binary), *args], stdin=slave, stdout=slave, stderr=slave,
-        cwd=home, preexec_fn=attach,
+        cwd=home, start_new_session=True,
         env={'PATH': '/nonexistent', 'HOME': str(guardian_home),
              'TERM': 'xterm-256color', 'LANG': 'en_US.UTF-8'})
     captured = bytearray()
@@ -121,7 +119,12 @@ time.sleep(20)
                   'binarySha256': hashlib.sha256(binary.read_bytes()).hexdigest(), 'passed': True}
     finally:
         if process.poll() is None:
-            os.killpg(process.pid, signal.SIGTERM); process.wait()
+            os.killpg(process.pid, signal.SIGTERM)
+            try:
+                process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait(timeout=3)
         os.close(master); os.close(slave)
         (output / (name + '.ansi')).write_bytes(captured)
     return result

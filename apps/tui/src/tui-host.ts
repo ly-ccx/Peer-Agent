@@ -1,3 +1,4 @@
+import { automaticAccessDecision } from './tui-automatic-access.ts';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -16,7 +17,6 @@ import {
   createNodeProviderBundle,
   createNodeShellSessionManager,
   createNodeShellTaskManager,
-  NODE_SHELL_RISK_ORDER,
   evaluateProjectAgentTurn,
   evaluateWorkSessionWrite,
   createApprovalStore,
@@ -129,34 +129,6 @@ export interface CreateTuiHostOptions {
   readonly captureExecution?: (execution: RuntimeSdkProviderExecution, toolContext: Record<string, unknown>) => RuntimeSdkProviderExecution;
 }
 
-function isNodeShellRiskLevel(value: unknown): value is keyof typeof NODE_SHELL_RISK_ORDER {
-  return typeof value === 'string'
-    && Object.prototype.hasOwnProperty.call(NODE_SHELL_RISK_ORDER, value);
-}
-
-function automaticAccessDecision(
-  accessLevel: LocalAccessLevel,
-  prompt: NodeRuntimePermissionPrompt,
-  botPolicy = false,
-): { readonly granted: true; readonly reason: string } | null {
-  if (accessLevel === 'full_local') {
-    return { granted: true, reason: 'local_access_level_full' };
-  }
-  if (accessLevel !== 'session_local' || prompt.confirmation.kind !== 'capability-approval') {
-    return null;
-  }
-  if (prompt.confirmation.approvalKind === 'file-write' && !botPolicy) {
-    return { granted: true, reason: 'local_access_level_session' };
-  }
-  if (
-    prompt.confirmation.approvalKind === 'shell-exec'
-    && isNodeShellRiskLevel(prompt.riskLevel)
-    && NODE_SHELL_RISK_ORDER[prompt.riskLevel] <= NODE_SHELL_RISK_ORDER.L3_external_write
-  ) {
-    return { granted: true, reason: 'local_access_level_session' };
-  }
-  return null;
-}
 
 export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
   const resolvedOptions = typeof options === 'string' ? { workspaceRoot: options } : options;

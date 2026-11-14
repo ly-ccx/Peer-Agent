@@ -16,8 +16,8 @@ mod authority;
 mod stop;
 mod unknown;
 pub use authority::{
-    HostCallIdentity, HostPermissionGrant, LocalPermissionDecision, PendingPermission,
-    ProviderPermission,
+    HostCallIdentity, HostExecutionRole, HostPermissionGrant, HostShellRisk,
+    LocalPermissionDecision, PendingPermission, ProviderPermission,
 };
 pub struct NativeSessionHost {
     home: PathBuf,
