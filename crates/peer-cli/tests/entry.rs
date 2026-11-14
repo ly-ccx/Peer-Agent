@@ -34,3 +34,25 @@ fn non_tty_and_unconnected_execution_fail_without_creating_personal_state() {
         assert!(result.stdout.is_empty());
     }
 }
+
+#[test]
+fn explicit_data_home_is_resolved_without_home_and_discovery_never_writes() {
+    let root = tempfile::tempdir().unwrap();
+    for variable in ["PEER_AGENT_HOME", "PEER_USER_DATA_PATH"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_peer-native"))
+            .arg("doctor")
+            .env_clear()
+            .env("PATH", "/nonexistent")
+            .env(variable, root.path())
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let facts: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            facts["dataHomeConfigured"], true,
+            "override {variable} must precede HOME lookup"
+        );
+        assert!(std::fs::read_dir(root.path()).unwrap().next().is_none());
+    }
+}

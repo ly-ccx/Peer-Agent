@@ -1,11 +1,21 @@
 #![forbid(unsafe_code)]
 
+mod evidence_refs;
+mod execution_identity;
+pub use evidence_refs::{EvidenceRefError, collect_tool_evidence_refs, javascript_trim};
+pub use execution_identity::{
+    ExecutionResourceScope, SessionExecutionIdentity, normalize_execution_resource_scope,
+    normalize_session_execution_identity,
+};
+
 mod bounded_json;
 mod permission_digest;
 mod store;
 
 pub use bounded_json::{DecodedJson, JsonDecodeError, JsonLimits, decode_json_bounded};
-pub use permission_digest::{DigestError, approval_args_digest};
+pub use permission_digest::{
+    DigestError, PermissionOperation, approval_args_digest, permission_operation_key,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{env, path::PathBuf};
@@ -33,18 +43,24 @@ pub fn contract_hash() -> String {
 }
 
 /// Resolve only; discovery never creates or migrates a user data root.
-pub fn data_home_with(mut lookup: impl FnMut(&str) -> Option<String>, home: PathBuf) -> PathBuf {
+fn data_home_override(lookup: &mut impl FnMut(&str) -> Option<String>) -> Option<PathBuf> {
     for key in ["PEER_AGENT_HOME", "PEER_USER_DATA_PATH"] {
-        if let Some(value) = lookup(key).filter(|value| !value.trim().is_empty()) {
-            return PathBuf::from(value.trim());
+        if let Some(value) = lookup(key).filter(|value| !javascript_trim(value).is_empty()) {
+            return Some(PathBuf::from(javascript_trim(&value)));
         }
     }
-    home.join(".peer-agent")
+    None
+}
+pub fn data_home_with(mut lookup: impl FnMut(&str) -> Option<String>, home: PathBuf) -> PathBuf {
+    data_home_override(&mut lookup).unwrap_or_else(|| home.join(".peer-agent"))
 }
 
 pub fn data_home() -> Option<PathBuf> {
+    if let Some(path) = data_home_override(&mut |key| env::var(key).ok()) {
+        return Some(path);
+    }
     let home = env::var_os("HOME").or_else(|| env::var_os("USERPROFILE"))?;
-    Some(data_home_with(|key| env::var(key).ok(), home.into()))
+    Some(PathBuf::from(home).join(".peer-agent"))
 }
 
 #[cfg(test)]

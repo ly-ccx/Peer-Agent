@@ -19,6 +19,74 @@ pub fn approval_args_digest(value: &Value) -> Result<String, DigestError> {
     Ok(format!("{:x}", Sha256::digest(encoded.as_bytes())))
 }
 
+pub struct PermissionOperation<'a> {
+    pub capability_id: &'a str,
+    pub args: &'a Value,
+    pub conversation_id: Option<&'a str>,
+    pub workspace_path: Option<&'a str>,
+    pub session_id: Option<&'a str>,
+    pub plan_id: Option<&'a str>,
+}
+
+/// Same fixed operation object as permission-inheritance.mjs, without cloning args.
+pub fn permission_operation_key(input: PermissionOperation<'_>) -> Result<String, DigestError> {
+    let mut output = String::new();
+    append(&mut output, "{\"args\":")?;
+    encode(input.args, &mut output, 1)?;
+    append(&mut output, ",\"capabilityId\":")?;
+    encode_string(input.capability_id, &mut output)?;
+    for (key, value) in [
+        ("conversationId", input.conversation_id),
+        ("planId", input.plan_id),
+        ("sessionId", input.session_id),
+        ("workspacePath", input.workspace_path),
+    ] {
+        append(&mut output, ",")?;
+        encode_string(key, &mut output)?;
+        append(&mut output, ":")?;
+        if let Some(text) = value {
+            encode_string(text, &mut output)?;
+        } else {
+            append(&mut output, "null")?;
+        }
+    }
+    append(&mut output, "}")?;
+    Ok(format!("{:x}", Sha256::digest(output.as_bytes())))
+}
+
+fn encode_string(value: &str, output: &mut String) -> Result<(), DigestError> {
+    if value.len() > MAX_BYTES {
+        return Err(DigestError::TooLarge);
+    }
+    append(output, "\"")?;
+    for character in value.chars() {
+        let mut buffer = [0u8; 4];
+        match character {
+            '"' => append(output, "\\\"")?,
+            '\\' => append(output, "\\\\")?,
+            '\u{8}' => append(output, "\\b")?,
+            '\u{c}' => append(output, "\\f")?,
+            '\n' => append(output, "\\n")?,
+            '\r' => append(output, "\\r")?,
+            '\t' => append(output, "\\t")?,
+            control if (control as u32) < 32 => {
+                const HEX: &[u8; 16] = b"0123456789abcdef";
+                let encoded = [
+                    b'\\',
+                    b'u',
+                    b'0',
+                    b'0',
+                    HEX[(control as usize) >> 4],
+                    HEX[(control as usize) & 15],
+                ];
+                append(output, std::str::from_utf8(&encoded).expect("ASCII escape"))?;
+            }
+            other => append(output, other.encode_utf8(&mut buffer))?,
+        }
+    }
+    append(output, "\"")
+}
+
 fn append(output: &mut String, text: &str) -> Result<(), DigestError> {
     if output.len().saturating_add(text.len()) > MAX_BYTES {
         return Err(DigestError::TooLarge);
@@ -34,15 +102,7 @@ fn encode(value: &Value, output: &mut String, depth: usize) -> Result<(), Digest
     match value {
         Value::Null => append(output, "null"),
         Value::Bool(value) => append(output, if *value { "true" } else { "false" }),
-        Value::String(value) => {
-            if value.len() > MAX_BYTES {
-                return Err(DigestError::TooLarge);
-            }
-            append(
-                output,
-                &serde_json::to_string(value).expect("string serializes"),
-            )
-        }
+        Value::String(value) => encode_string(value, output),
         Value::Number(number) => {
             if number.as_u64().is_some_and(|n| n > MAX_SAFE_INTEGER)
                 || number
@@ -66,6 +126,9 @@ fn encode(value: &Value, output: &mut String, depth: usize) -> Result<(), Digest
             append(output, "]")
         }
         Value::Object(values) => {
+            if values.len() > 65_536 {
+                return Err(DigestError::TooLarge);
+            }
             let mut keys: Vec<_> = values.keys().collect();
             // JavaScript Object.keys(...).sort() compares UTF-16 code units.
             keys.sort_by(|left, right| left.encode_utf16().cmp(right.encode_utf16()));
@@ -74,7 +137,7 @@ fn encode(value: &Value, output: &mut String, depth: usize) -> Result<(), Digest
                 if index != 0 {
                     append(output, ",")?;
                 }
-                encode(&Value::String(key.clone()), output, depth + 1)?;
+                encode_string(key, output)?;
                 append(output, ":")?;
                 encode(&values[key], output, depth + 1)?;
             }
@@ -108,6 +171,11 @@ mod tests {
         );
         assert_eq!(
             approval_args_digest(&Value::String("x".repeat(MAX_BYTES + 1))),
+            Err(DigestError::TooLarge)
+        );
+        // Raw input fits; escaped wire bytes do not. Never hash a prefix.
+        assert_eq!(
+            approval_args_digest(&Value::String("\0".repeat(MAX_BYTES / 5))),
             Err(DigestError::TooLarge)
         );
         let mut value = Value::Null;

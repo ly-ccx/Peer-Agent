@@ -28,6 +28,20 @@
       },
       "expected": "/fixture/legacy",
       "home": "/fixture/home"
+    },
+    {
+      "env": {
+        "PEER_AGENT_HOME": "﻿/fixture/custom﻿"
+      },
+      "expected": "/fixture/custom",
+      "home": "/fixture/home"
+    },
+    {
+      "env": {
+        "PEER_AGENT_HOME": "/fixture/nel"
+      },
+      "expected": "/fixture/nel",
+      "home": "/fixture/home"
     }
   ],
   "approvalDigestCases": [
