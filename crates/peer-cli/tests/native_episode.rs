@@ -408,6 +408,50 @@ fn foreground_timeout_is_reaped_and_persisted_as_failed() {
 }
 
 #[test]
+fn created_file_can_be_read_and_edited_again_in_the_same_native_episode() {
+    let server = Server::new(vec![
+        reply_tool(
+            "write_file",
+            json!({"path":"created.txt","content":"first"}),
+        ),
+        reply_tool("read_file", json!({"path":"created.txt"})),
+        reply_tool(
+            "write_file",
+            json!({"path":"created.txt","content":"second","allow_overwrite":true}),
+        ),
+        reply_tool("read_file", json!({"path":"created.txt"})),
+        reply_text("Verified the edit."),
+    ]);
+    let f = Fixture::new(&server);
+    let r = f.run();
+    assert_eq!(
+        r.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&r.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(f.root.path().join("workspace/created.txt")).unwrap(),
+        "second"
+    );
+    let tools: Vec<_> = f
+        .history()
+        .into_iter()
+        .filter(|m| m["segments"].is_array())
+        .collect();
+    assert_eq!(tools.len(), 4);
+    assert!(
+        tools
+            .iter()
+            .all(|m| m["segments"][0]["result"]["status"] == "success")
+    );
+    assert_eq!(
+        tools[3]["segments"][0]["result"]["output"]["content"],
+        "second"
+    );
+    assert_eq!(server.requests.lock().unwrap().len(), 5);
+}
+#[test]
 fn existing_file_requires_a_real_read_and_preserves_the_owned_inode() {
     let server = Server::new(vec![
         reply_tool("read_file", json!({"path":"input.txt","end_line":1})),

@@ -1,7 +1,7 @@
 use peer_protocol::{ExecutionResourceScope, SessionExecutionIdentity};
 use peer_store::{
-    ExecutionResourceStore, HostClaimClosure, HostDispatchScopes, HostResourcePlan, ResourceError,
-    ResourceReservation,
+    ExecutionResourceStore, HostClaimClosure, HostDispatchScopes, HostFileMaterialization,
+    HostResourcePlan, ResourceError, ResourceReservation,
 };
 use serde_json::{Value, json};
 use std::{fs, path::Path, sync::atomic::AtomicBool};
@@ -150,6 +150,190 @@ fn reserved_file_claims_recover_with_file_identity_without_partial_activation() 
             .unwrap()["identity"],
         "missing"
     );
+}
+#[test]
+fn confirmed_creation_updates_only_its_owned_missing_claim_and_is_idempotent() {
+    let (root, mut s, p) = fixture();
+    let file = p.directory.as_ref().unwrap().join("created.txt");
+    let scopes = [ExecutionResourceScope::File {
+        path: file.to_str().unwrap().into(),
+    }];
+    reserve(&mut s, &p, &scopes);
+    s.activate(&p, "host", AT).unwrap();
+    fs::write(&file, "actual provider creation").unwrap();
+    let identity = peer_store::file_resource(&file, false).unwrap();
+    let before = s.claims_for(&p).unwrap();
+    let confirm = |s: &mut ExecutionResourceStore, epoch| {
+        s.confirm_file_materialization(
+            &p,
+            HostFileMaterialization {
+                host_epoch: epoch,
+                identity: &identity,
+                tool_call_id: "call-created",
+            },
+            AT,
+        )
+    };
+    assert_eq!(
+        confirm(&mut s, "foreign-host"),
+        Err(ResourceError::OwnerUnknown)
+    );
+    assert_eq!(s.claims_for(&p).unwrap(), before);
+    assert_eq!(confirm(&mut s, "host"), Ok(true));
+    let after = s.claims_for(&p).unwrap();
+    let claim = after
+        .iter()
+        .find(|c| c["resourceRef"] == identity.resource_ref)
+        .unwrap();
+    assert_eq!(claim["identity"], identity.identity);
+    let previous = before
+        .iter()
+        .find(|c| c["claimId"] == claim["claimId"])
+        .unwrap();
+    assert_eq!(
+        claim["revision"].as_u64().unwrap(),
+        previous["revision"].as_u64().unwrap() + 1
+    );
+    assert_eq!(confirm(&mut s, "host"), Ok(false));
+    assert_eq!(s.claims_for(&p).unwrap(), after);
+    assert_eq!(reserve(&mut s, &p, &scopes)["allowed"], true);
+    let db = rusqlite::Connection::open(
+        root.path()
+            .join("project-runtime/execution-resources.sqlite"),
+    )
+    .unwrap();
+    let events:i64 = db.query_row("SELECT count(*) FROM resource_events WHERE resource=? AND operationId='tool-result://call-created'",[&identity.resource_ref],|r|r.get(0)).unwrap();
+    assert_eq!(events, 1);
+}
+#[test]
+fn materialization_cannot_refresh_an_existing_inode_or_a_stale_observation() {
+    for old_exists in [false, true] {
+        let (_root, mut s, p) = fixture();
+        let file = p.directory.as_ref().unwrap().join("file.txt");
+        if old_exists {
+            fs::write(&file, "old").unwrap();
+        }
+        reserve(
+            &mut s,
+            &p,
+            &[ExecutionResourceScope::File {
+                path: file.to_str().unwrap().into(),
+            }],
+        );
+        fs::write(&file, "observed").unwrap();
+        let first = peer_store::file_resource(&file, false).unwrap();
+        fs::rename(&file, file.with_extension("old")).unwrap();
+        fs::write(&file, "foreign replacement").unwrap();
+        let before = s.claims_for(&p).unwrap();
+        let mut rejected = vec![first];
+        if old_exists {
+            rejected.push(peer_store::file_resource(&file, false).unwrap());
+        }
+        for identity in rejected {
+            assert_eq!(
+                s.confirm_file_materialization(
+                    &p,
+                    HostFileMaterialization {
+                        host_epoch: "host",
+                        identity: &identity,
+                        tool_call_id: "call-stale"
+                    },
+                    AT
+                ),
+                Err(ResourceError::Changed)
+            );
+            assert_eq!(s.claims_for(&p).unwrap(), before);
+        }
+    }
+}
+#[test]
+fn protected_released_closed_and_foreign_execution_claims_cannot_be_materialized() {
+    for state in [
+        "draining",
+        "reconciling",
+        "unknown",
+        "released",
+        "closed",
+        "foreign",
+    ] {
+        let (_root, mut s, mut p) = fixture();
+        let file = p.directory.as_ref().unwrap().join("file.txt");
+        reserve(
+            &mut s,
+            &p,
+            &[ExecutionResourceScope::File {
+                path: file.to_str().unwrap().into(),
+            }],
+        );
+        fs::write(&file, "created").unwrap();
+        let identity = peer_store::file_resource(&file, false).unwrap();
+        match state {
+            "draining" | "reconciling" => s
+                .protect(&p, Some("host"), Some("op"), state, &[], AT)
+                .unwrap(),
+            "unknown" => s
+                .protect(
+                    &p,
+                    Some("host"),
+                    Some("op"),
+                    "reconciling",
+                    &["unknown-call".into()],
+                    AT,
+                )
+                .unwrap(),
+            "released" => {
+                let r = receipt(&s, &p, "stop", &[]);
+                s.settle(&p, &r, &[], AT).unwrap();
+            }
+            "closed" => {
+                s.protect(
+                    &p,
+                    Some("host"),
+                    Some("op"),
+                    "reconciling",
+                    &["unknown-call".into()],
+                    AT,
+                )
+                .unwrap();
+                let c = s
+                    .claims_for(&p)
+                    .unwrap()
+                    .into_iter()
+                    .find(|c| c["resourceRef"] == identity.resource_ref)
+                    .unwrap();
+                s.close_claim(
+                    &p,
+                    HostClaimClosure {
+                        claim_id: c["claimId"].as_str().unwrap(),
+                        claim_revision: c["revision"].as_u64().unwrap(),
+                        authority_ref: "fixture-host-proof",
+                        unknown_calls: &["unknown-call".into()],
+                        proof: "verified_dead",
+                        resolution: None,
+                        at: AT,
+                    },
+                )
+                .unwrap();
+            }
+            "foreign" => p.execution.execution_epoch = "other-epoch".into(),
+            _ => unreachable!(),
+        }
+        let before = s.snapshot().unwrap();
+        assert!(
+            s.confirm_file_materialization(
+                &p,
+                HostFileMaterialization {
+                    host_epoch: "host",
+                    identity: &identity,
+                    tool_call_id: "call-protected"
+                },
+                AT
+            )
+            .is_err(),
+            "{state}"
+        );
+        assert_eq!(s.snapshot().unwrap(), before);
+    }
 }
 #[test]
 fn version_two_migrates_without_losing_unknown_fields_or_reconstructing_a_lost_ledger() {

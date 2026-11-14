@@ -15,9 +15,9 @@ mod sqlite_file;
 pub use coordination_fence::protect_coordination_writer_fixture;
 pub use coordination_fence::{FenceError, FenceOutcome, FenceStep, protect_coordination_writer};
 pub use resources::{
-    ExecutionResourceStore, HostClaimClosure, HostDispatchScopes, HostResourcePlan, ResourceError,
-    ResourceIdentity, ResourceReservation, directory_resource, file_resource,
-    provider_execution_scopes, provider_file_scopes, resource_conflicts,
+    ExecutionResourceStore, HostClaimClosure, HostDispatchScopes, HostFileMaterialization,
+    HostResourcePlan, ResourceError, ResourceIdentity, ResourceReservation, directory_resource,
+    file_resource, provider_execution_scopes, provider_file_scopes, resource_conflicts,
 };
 mod conversation_preview;
 mod conversation_write;

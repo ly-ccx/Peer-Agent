@@ -9,7 +9,10 @@ use crate::{
     providers::{EffectFuture, EffectOutcome, PreparedEffect, ProviderRegistry},
     system_context::assemble_work_context,
 };
-use peer_store::{ConversationStore, EvidenceIndexStore, HostToolEvidence, ResourceReservation};
+use peer_store::{
+    ConversationStore, EvidenceIndexStore, HostFileMaterialization, HostToolEvidence,
+    ResourceReservation,
+};
 use std::{future::Future, pin::Pin, time::Duration};
 pub trait PermissionInput {
     fn decide<'a>(
@@ -281,14 +284,19 @@ impl NativeSessionHost {
                     let grant_facts=grant.as_ref().map(|g|g.facts().clone()).unwrap_or_else(||json!({"grantId":format!("grant-{}",uuid::Uuid::new_v4()),"toolCallId":call_id,"granted":false,"scope":capability,"duration":"denied","decidedAt":now(),"reason":"local_permission_denied"}));
                     let outcome=if let Some(grant)=grant {
                         self.launch_effect(effect,&grant,&current.resource,&call_id,&cancellation,cancel).await?
-                    }else{EffectOutcome{status:"denied",output:json!({}),error:Some("permission_denied"),artifacts:vec![],ended:true}};
+                    }else{EffectOutcome{status:"denied",output:json!({}),error:Some("permission_denied"),artifacts:vec![],ended:true,materialization:None}};
                     #[cfg(feature="test-fixtures")]
                     if std::env::var("PEER_NATIVE_EPISODE_FAULT_AFTER_EFFECT").ok().as_deref()==Some(&call.name) && self.home.join(".native-cli-fixture").is_file(){std::process::exit(77)}
                     let mut result=json!({"toolCallId":call_id,"capabilityId":capability,"status":outcome.status,"output":outcome.output,"outputPreview":{"kind":"json"},"completedAt":now(),"evidence":{"evidenceId":format!("evidence-{}",uuid::Uuid::new_v4()),"toolCallId":call_id,"summary":format!("{}: {}",call.name,outcome.status),"artifactRefs":outcome.artifacts}});
                     if let Some(error)=outcome.error{result["error"]=json!({"code":error,"message":error,"recoverable":true})}
                     self.append_episode_message(&conversation,&json!({"id":uuid::Uuid::new_v4().to_string(),"role":"assistant","content":"","createdAt":now(),"streamId":stream,"segments":[{"type":"tool-call","tool":call.name,"toolCallId":call_id,"args":args,"result":result}],"permissionGrants":[grant_facts]}))?;
-                    EvidenceIndexStore::new(&self.home).register(&HostToolEvidence{conversation_id:&conversation,plan_id:Some(plan_id),stream_id:Some(&stream),tool_name:&call.name,capability_id:&capability,tool_call_id:&call_id,grant:&grant_facts,result:&result},None)?;
+                    let evidence=EvidenceIndexStore::new(&self.home).register(&HostToolEvidence{conversation_id:&conversation,plan_id:Some(plan_id),stream_id:Some(&stream),tool_name:&call.name,capability_id:&capability,tool_call_id:&call_id,grant:&grant_facts,result:&result},None)?;
                     budget.settle(self,&call_id,&dispatch,&result,&now())?;count+=1;
+                    if let Some(identity)=&outcome.materialization {
+                        let reference=format!("tool-result://{call_id}");
+                        if outcome.status!="success" || !evidence.iter().any(|e|e["evidenceRef"]==reference){return Err(HostError("native_materialization_receipt_invalid"))}
+                        self.resources.confirm_file_materialization(&current.resource,HostFileMaterialization{host_epoch:&epoch,identity,tool_call_id:&call_id},&now())?;
+                    }
                     if !outcome.ended || outcome.error==Some("execution_outcome_unknown"){return Err(HostError("execution_outcome_unknown"))}
                 }
             }Ok(("max_turns",content,count))

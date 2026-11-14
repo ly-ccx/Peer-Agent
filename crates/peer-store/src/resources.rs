@@ -7,6 +7,7 @@ use std::{fmt, path::PathBuf};
 mod claims;
 mod closure;
 mod database;
+mod materialization;
 mod scopes;
 mod settlement;
 pub use scopes::{
@@ -87,6 +88,14 @@ pub struct HostResourcePlan {
     pub directory: Option<PathBuf>,
     pub title: String,
     pub read_only: bool,
+}
+/// Host-only receipt after the Provider's exclusive create and durable paired
+/// Tool Result, Evidence index and canonical dispatch receipt. Never decoded
+/// from model arguments, persisted approvals or user-provided JSON.
+pub struct HostFileMaterialization<'a> {
+    pub host_epoch: &'a str,
+    pub identity: &'a ResourceIdentity,
+    pub tool_call_id: &'a str,
 }
 impl HostResourcePlan {
     fn check(&self) -> Result<(), ResourceError> {

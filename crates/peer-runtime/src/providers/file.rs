@@ -173,6 +173,7 @@ impl PreparedEffect for FileEffect {
         if cancel.is_cancelled() {
             return Err(HostError("CANCELLED"));
         }
+        let mut materialization = None;
         let result = (|| {
             if self.write {
                 let before = if self.path.exists() {
@@ -223,6 +224,18 @@ impl PreparedEffect for FileEffect {
                 std::fs::File::open(self.path.parent().unwrap())
                     .and_then(|d| d.sync_all())
                     .map_err(|_| HostError("execution_outcome_unknown"))?;
+                if before.is_none() {
+                    use std::os::unix::fs::MetadataExt;
+                    let meta = file
+                        .metadata()
+                        .map_err(|_| HostError("execution_outcome_unknown"))?;
+                    let observed = peer_store::file_resource(&self.path, false)
+                        .map_err(|_| HostError("execution_outcome_unknown"))?;
+                    if observed.identity != format!("{}:{}", meta.dev(), meta.ino()) {
+                        return Err(HostError("execution_outcome_unknown"));
+                    }
+                    materialization = Some(observed);
+                }
                 let hash = format!("{:x}", Sha256::digest(content.as_bytes()));
                 let mut snapshots = self
                     .snapshots
@@ -256,6 +269,7 @@ impl PreparedEffect for FileEffect {
                 error: None,
                 artifacts: vec![],
                 ended: true,
+                materialization,
             },
             Err(e) => EffectOutcome::failed(e.0),
         };

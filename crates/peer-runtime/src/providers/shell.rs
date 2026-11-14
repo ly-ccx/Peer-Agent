@@ -220,6 +220,7 @@ impl PreparedEffect for ShellEffect {
                     error: Some("execution_outcome_unknown"),
                     artifacts: vec![],
                     ended,
+                    materialization: None,
                 };
             }
             let reference = format!("local-shell-artifact://{}", self.handle);
@@ -233,6 +234,7 @@ impl PreparedEffect for ShellEffect {
                     format!("{reference}/metadata"),
                 ],
                 ended,
+                materialization: None,
             }
         }))
     }

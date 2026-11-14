@@ -22,6 +22,7 @@ pub struct EffectOutcome {
     pub error: Option<&'static str>,
     pub artifacts: Vec<String>,
     pub ended: bool,
+    pub materialization: Option<peer_store::ResourceIdentity>,
 }
 impl EffectOutcome {
     pub fn failed(code: &'static str) -> Self {
@@ -31,6 +32,7 @@ impl EffectOutcome {
             error: Some(code),
             artifacts: vec![],
             ended: true,
+            materialization: None,
         }
     }
 }
