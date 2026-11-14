@@ -104,7 +104,6 @@
 .bot-work-panel-feedback { margin-block: var(--space-2); font-size: var(--ui-font-caption); color: var(--graphite-soft); }
 .bot-work-panel-feedback p { margin: 0 0 var(--space-2); }
 .bot-work-panel-back { display: flex; align-items: center; gap: var(--space-2); min-height: var(--ui-control-height-compact); margin-bottom: var(--space-2); padding: 0; border: 0; color: var(--graphite-base); background: transparent; font: inherit; font-size: var(--ui-font-meta); cursor: pointer; }
-.bot-work-panel-footer { display: flex; flex: none; align-items: center; gap: var(--space-1); padding: var(--space-2) var(--space-5); border-top: 1px solid color-mix(in srgb, var(--chrome-hairline) 65%, transparent); color: var(--graphite-soft); font-size: var(--ui-font-caption); }
 .bot-work-panel :is(button, [tabindex]):focus-visible, .bot-work-panel-toggle:focus-visible { outline: var(--ui-focus-width) solid var(--ui-focus-color); outline-offset: var(--ui-focus-offset); }
 .bot-work-material-preview { display: flex; flex-direction: column; gap: var(--space-3); width: min(44rem, calc(100vw - var(--space-8))); max-height: calc(100dvh - var(--space-10)); overflow: auto; padding: var(--space-5); border-radius: var(--ui-radius-modal); background: var(--paper-sheet); }
 .bot-work-material-preview.is-code { width: min(64rem, calc(100vw - var(--space-8))); }
