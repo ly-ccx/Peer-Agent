@@ -7,7 +7,7 @@ const MAX_HISTORY_BYTES: usize = 8 * 1024 * 1024;
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 pub struct ConversationStore {
-    directory: PathBuf,
+    pub(crate) directory: PathBuf,
 }
 #[derive(Debug)]
 pub struct HistorySnapshot {

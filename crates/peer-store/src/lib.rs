@@ -1,7 +1,10 @@
 #![forbid(unsafe_code)]
 
+mod approvals;
 mod coordination_fence;
+mod durable_jsonl;
 mod files;
+pub use approvals::{ApprovalDecision, ApprovalState, ApprovalStore, HostApproval};
 mod resources;
 mod sqlite_file;
 #[cfg(feature = "test-fixtures")]
@@ -12,8 +15,11 @@ pub use resources::{
     ResourceIdentity, ResourceReservation, directory_resource, file_resource,
     provider_execution_scopes, provider_file_scopes, resource_conflicts,
 };
+mod conversation_preview;
+mod conversation_write;
 mod goal_source;
 mod history;
+pub use conversation_write::{MessageCommit, NewConversation};
 mod lease;
 mod lock;
 mod policy;
@@ -34,6 +40,9 @@ use std::fmt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoreError {
     InvalidInput,
+    CommitUncertain,
+    ApprovalConflict,
+    ApprovalCorrupt,
     NotFound,
     OutOfScope,
     VersionChanged,
@@ -60,6 +69,9 @@ impl StoreError {
     pub fn code(self) -> &'static str {
         match self {
             Self::InvalidInput => "INVALID_INPUT",
+            Self::CommitUncertain => "STORE_COMMIT_UNCERTAIN",
+            Self::ApprovalConflict => "APPROVAL_STATE_CHANGED",
+            Self::ApprovalCorrupt => "APPROVAL_STORE_INVALID",
             Self::NotFound => "NOT_FOUND",
             Self::OutOfScope => "OUT_OF_SCOPE",
             Self::VersionChanged => "BACKGROUND_VERSION_CHANGED",
