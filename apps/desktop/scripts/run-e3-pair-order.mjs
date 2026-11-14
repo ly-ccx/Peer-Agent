@@ -1,0 +1,230 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { cadenceHash as hash, verifyCadenceFixture } from './ri00/e3-cadence-identity.mjs';
+import { pairOrderBudgetModel, pairOrderReserve } from './ri00/e3-pair-order-plan.mjs';
+import { pairOrderSource } from './ri00/e3-pair-order-identity.mjs';
+import { runPairOrderCampaign, traceOrderBlock } from './ri00/e3-pair-order-controller.mjs';
+import { executeCadenceBlock } from './ri00/e3-cadence-block.mjs';
+import { cadenceReadMetrics } from './ri00/e3-cadence-result.mjs';
+import { startOwnedE3Host } from './ri00/e3-owned-host.mjs';
+import { connectE3Transport } from './ri00/e3-cdp-transport.mjs';
+import { createE3Journal, createE3DurableReader } from './ri00/e3-durable-reader.mjs';
+import { startAccountedE3Counter } from './ri00/e3-accounted-counter.mjs';
+import { sourceInventory } from './ri00/source-archive.mjs';
+import { productionIdentity, resolveDestination } from './ri00/identity.mjs';
+const args = process.argv.slice(2), opt = k => args[args.indexOf(k) + 1], keys = ['config', 'budget', 'baseline', 'parent', 'parent-journal', 'audit', 'design', 'seal', 'manifest', 'seam', 'seam-cost', 'tests', 'binding', 'ready', 'output'];
+for (const k of keys)
+    if (!args.includes('--' + k))
+        throw Error('order_explicit_inputs');
+const read = f => JSON.parse(fs.readFileSync(f)), base = read(opt('--config')), budget = read(opt('--budget')), baseline = read(opt('--baseline')), parent = read(opt('--parent')), manifest = read(opt('--manifest')), seam = read(opt('--seam')), binding = read(opt('--binding')), ready = read(opt('--ready')), output = resolveDestination(opt('--output')), codeRoot = fileURLToPath(new URL('../../../', import.meta.url)), candidate = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: codeRoot, encoding: 'utf8' }).trim();
+if (execFileSync('git', ['status', '--porcelain'], { cwd: codeRoot, encoding: 'utf8' }).trim())
+    throw Error('order_dirty_candidate');
+assert.equal(ready.passed, true);
+assert.equal(ready.candidate, candidate);
+assert.equal(ready.bindingSha256, hash(fs.readFileSync(opt('--binding'))));
+assert.equal(ready.seamSha256, hash(fs.readFileSync(opt('--seam'))));
+assert.ok(Number.isFinite(ready.preparationCpuMs) && ready.preparationCpuMs > 0 && ready.preparationCpuMs < budget.controllerAuxCpuMs);
+assert.deepEqual(ready.costs.map(c => c.name), ['tests', 'seam', 'binding']);
+assert.ok(ready.costs.every(c => c.exitCode === 0 && Number.isFinite(c.fullChildSubtreeCpuMs) && c.fullChildSubtreeCpuMs > 0));
+assert.equal(ready.preparationCpuMs, ready.costs.reduce((n, c) => n + c.fullChildSubtreeCpuMs, 0));
+assert.equal(ready.costs[1].reportSha256, ready.seamSha256);
+assert.equal(ready.costs[2].reportSha256, ready.bindingSha256);
+assert.equal(binding.passed, true);
+assert.equal(binding.candidate, candidate);
+assert.equal(seam.candidate, candidate);
+assert.deepEqual(binding.source, pairOrderSource());
+assert.deepEqual(seam.source, pairOrderSource());
+for (const [k, h] of Object.entries(binding.inputs))
+    assert.equal(hash(fs.readFileSync(opt('--' + k))), h);
+assert.deepEqual(budget.resourceModel, pairOrderBudgetModel());
+assert.equal(budget.kind, 'E3-ORDER-complete-paired-block-order-design-frozen-not-executed');
+assert.equal(budget.profileStarts, 0);
+assert.equal(budget.electronLaunches, 3);
+assert.equal(budget.replacements, 0);
+assert.equal(budget.parentReportSha256, hash(fs.readFileSync(opt('--parent'))));
+if (fs.existsSync(output) || output === base.fixtureRoot || output.startsWith(fs.realpathSync(base.fixtureRoot) + path.sep))
+    throw Error('order_isolated_new_output');
+fs.mkdirSync(output, { recursive: true, mode: 0o700 });
+const report = { kind: 'ORDER-fixed-three-host-complete-block-ABBA-BAAB-no-profiler-not-field-cause', candidate, source: pairOrderSource(), inputs: { ...binding.inputs, binding: hash(fs.readFileSync(opt('--binding'))), ready: hash(fs.readFileSync(opt('--ready'))) }, startedAt: new Date().toISOString(), production: productionIdentity(base.moduleRoot), ownedLaunches: 0, hosts: [], targets: [], failures: [], executionCompleted: false, controlsQualified: false, orderSensitivitySupported: false, readCpuMs: 0, hashCpuMs: 0, profileStarts: 0, fieldWindowStarted: false, refactorStarted: false };
+const claim = fs.openSync(path.join(output, 'slot-claim.private.json'), 'wx', 0o600);
+try {
+    fs.writeFileSync(claim, JSON.stringify({ candidate, budgetSha256: binding.inputs.budget, slots: 3, replacements: 0 }));
+    fs.fdatasyncSync(claim);
+}
+finally {
+    fs.closeSync(claim);
+}
+const started = performance.now(), cpuStart = process.cpuUsage(), cpu = () => { const c = process.cpuUsage(cpuStart); return (c.user + c.system) / 1000; }, prepCpuMs = ready.preparationCpuMs, live = new Set();
+let counter, interrupted = false, rootCount = 0, recoveryJournal;
+const treeBytes = dir => fs.readdirSync(dir, { withFileTypes: true }).reduce((s, e) => s + (e.isDirectory() ? treeBytes(path.join(dir, e.name)) : fs.lstatSync(path.join(dir, e.name)).size), 0);
+function save() { const bytes = Buffer.from(JSON.stringify(report)); if (treeBytes(output) + bytes.length > budget.outputBytes)
+    throw Error('order_report_output_cap'); const tmp = path.join(output, 'report.tmp'), fd = fs.openSync(tmp, 'w', 0o600); try {
+    fs.writeFileSync(fd, bytes);
+    fs.fdatasyncSync(fd);
+}
+finally {
+    fs.closeSync(fd);
+} fs.renameSync(tmp, path.join(output, 'report.private.json')); }
+const journal = createE3Journal(path.join(output, 'reads.private.jsonl'), { maxBytes: budget.journalBytes, beforeWrite(n) { if (treeBytes(output) + n + 16777216 > budget.outputBytes)
+        throw Error('order_archive_output_reserve'); } });
+function charge() { report.hashCpuMs = report.hosts.reduce((s, h) => s + Math.max(h.recordedHashCpuMs || 0, h.exit?.stopped?.nativeCpuMs || 0), 0); report.readCpuMs = report.hosts.reduce((s, h) => s + Math.max(h.recordedCpuMs || 0, h.exit?.stopped?.controlledCpuMs || 0) + (h.exit?.postMeasurementAudit?.cpuMs || 0), 0); }
+function guard() { charge(); if (interrupted)
+    throw Error('order_cancelled'); if (performance.now() - started > budget.wallMs - budget.cleanupReserveMs || rootCount > budget.rootCountMaximum || report.readCpuMs >= budget.readCpuMs || report.hashCpuMs > budget.hashCpuMs || cpu() + prepCpuMs + (counter?.selfCpuMs || 0) > budget.controllerAuxCpuMs)
+    throw Error('order_budget'); }
+const fullDeadline = setTimeout(() => { interrupted = true; for (const h of live) {
+    h.transport?.close().catch(() => { });
+    h.child.kill('SIGTERM');
+    setTimeout(() => { if (h.child.exitCode === null && h.child.signalCode === null)
+        h.child.kill('SIGKILL'); }, 1000).unref();
+} }, budget.wallMs);
+fullDeadline.unref();
+for (const signal of ['SIGINT', 'SIGTERM'])
+    process.on(signal, () => { interrupted = true; });
+const inventory = () => sourceInventory(base.fixtureRoot, path.dirname(path.dirname(base.coordinationSnapshot)));
+let sourceBefore;
+async function identity() { guard(); if (inventory().sha256 !== sourceBefore.sha256)
+    throw Error('order_source_epoch_changed'); return true; }
+async function open(label) {
+    guard();
+    assert.ok(live.size < 2);
+    if (report.ownedLaunches >= 3)
+        throw Error('order_fixed_slot_cap');
+    const record = { label, status: 'launching', points: [], blocks: [], recordedCpuMs: 0, recordedHashCpuMs: 0 };
+    report.hosts.push(record);
+    report.ownedLaunches++;
+    save();
+    const h = await startOwnedE3Host({ moduleRoot: base.moduleRoot, fixtureRoot: base.fixtureRoot, coordinationSnapshot: base.coordinationSnapshot, parentHash: base.parentHash, bindings: true, desktopDiagnostics: false, mode: 'production', site: false, defaultVm: true, inspect: true, profileMarkers: true, allowExposure: true, auditOnShutdown: true, output: path.join(output, label), label, epoch: 'order-fixed-copy', leaseMs: 90000, hostDeadlineMs: 840000, readCpuLimitMs: budget.readCpuMs });
+    h.record = record;
+    live.add(h);
+    record.pid = h.child.pid;
+    record.runtime = h.ready.runtime;
+    assert.deepEqual(h.ready.runtime, parent.hosts[0].runtime);
+    h.transport = await connectE3Transport(h.ready.inspectorUrl, { pid: h.child.pid, forbidProfiler: true });
+    record.birth = (await counter.read(h.child.pid)).values.ri_proc_start_abstime;
+    const scopedJournal = { append(kind, value) { const target = h.recovering ? (recoveryJournal ??= createE3Journal(path.join(output, 'recovery.private.jsonl'), { maxBytes: budget.unacknowledgedBytes })) : journal; return target.append(kind, { host: label, stage: h.stage || 'bootstrap', value }); } };
+    const rpc = (m, a) => m === 'takeEntries' ? Promise.resolve({ entries: [], state: { metadataErrors: 0, notInstalled: true } }) : m === 'ackEntries' ? Promise.resolve(true) : m === 'renew' ? h.rpc('renew') : h.transport.rpc(m, a);
+    h.reader = createE3DurableReader({ rpc, journal: scopedJournal, counter, pid: h.child.pid, timebase: counter.ready.timebase, charge(rows) { for (const r of rows) {
+            record.recordedCpuMs += r.userMs + r.systemMs;
+            rootCount++;
+        } charge(); } });
+    return h;
+}
+async function point(h, kind) { guard(); const p = await h.reader.read(kind, 'cadence-root'), r = p.row; assert.equal(p.record.before.values.ri_proc_start_abstime, h.record.birth); assert.equal(p.record.after.values.ri_proc_start_abstime, h.record.birth); assert.equal(r.origin, 'controlled'); assert.equal(r.sourceBefore, r.sourceAfter); assert.equal(r.outputSha256, binding.expected.outputSha256); assert.equal(r.rows, binding.expected.sessions); assert.equal(r.planCalls, binding.expected.planCalls); assert.equal(r.evidence.length, 12); assert.ok(r.evidence.every(e => e.rows === binding.expected.evidenceRows)); const result = { row: r, pmc: p.pmc, metrics: cadenceReadMetrics(p), controllerStage: h.stage }; h.record.points.push(result); guard(); return result; }
+async function block(h, spec, label) { await identity(); h.stage = label; const b = await traceOrderBlock({ journal, host: h.record.label, spec, label, run: () => executeCadenceBlock({ read: kind => point(h, kind), calibrate: async () => { const c = await h.transport.rpc('native'); h.record.recordedHashCpuMs += c.userMs + c.systemMs; charge(); journal.append('hash-calibration', { host: h.record.label, stage: label, value: c }); return c; }, guard }, spec, label) }); h.record.blocks.push({ label, arm: spec.arm, role: spec.role, tickets: b.sequence.map(p => p.row.ticketId) }); return b; }
+async function close(h) {
+    if (!live.has(h))
+        return;
+    const issues = [];
+    h.recovering = true;
+    try {
+        if (h.reader) {
+            if (h.reader.state().pendingArchive)
+                await h.reader.recoverArchive();
+            const state = await h.rpc('inspect');
+            if (state.queue.ticket) {
+                await h.reader.drain('same-ticket-cleanup');
+                await h.rpc('ackTicket', { id: state.queue.ticket.id });
+            }
+        }
+    }
+    catch (e) {
+        issues.push('archive:' + e.message);
+    }
+    try {
+        await h.transport?.close();
+    }
+    catch (e) {
+        issues.push('transport:' + e.message);
+    }
+    h.record.transport = h.transport?.stats();
+    charge();
+    const skipAudit = report.readCpuMs + 1500 > budget.readCpuMs;
+    try {
+        h.record.exit = await h.close({ skipAudit });
+        h.record.closed = await h.closed;
+        h.record.status = 'closed';
+        live.delete(h);
+    }
+    catch (e) {
+        issues.push('owned-exit:' + e.message);
+    }
+    charge();
+    const end = h.record.exit;
+    if (!end || skipAudit || !Object.values(end.owners).every(Boolean) || !end.stopped.restored || !end.stopped.bindingRestored || end.stopped.readQueue.ticket || end.stopped.retainedRowBytes || end.guard.sourceWritesDenied || end.readFailures || end.postMeasurementAudit?.rows !== binding.expected.evidenceRows || end.postMeasurementAudit?.sha256 !== binding.evidenceSemanticSha256)
+        issues.push('owner-source-semantic-recovery-unverified');
+    if (Object.entries(h.record.transport?.wireCounts || {}).some(([n]) => n.startsWith('Profiler.')) || Object.keys(h.record.transport?.deniedCounts || {}).length)
+        issues.push('unexpected-Profiler-operation');
+    if (issues.length) {
+        h.record.recoveryIssues = issues;
+        throw Error('order_recovery:' + issues.join(','));
+    }
+    save();
+}
+const io = { open, identity, warm: async (h, n) => { h.stage = 'warm'; for (let i = 0; i < n; i++)
+        await point(h, 'dense'); }, block, close, reserve: async (f0) => { guard(); const r = pairOrderReserve(f0, { readCpuMs: budget.readCpuMs - report.readCpuMs, hashCpuMs: budget.hashCpuMs - report.hashCpuMs, wallMs: budget.wallMs - (performance.now() - started), controllerCpuMs: budget.controllerAuxCpuMs - cpu() - prepCpuMs - counter.selfCpuMs }); journal.append('complete-treatment-reservation', r); if (!r.admitted)
+        throw Error('order_complete_return_reserve'); return r; }, checkpoint: async (t) => { save(); console.log(JSON.stringify({ target: t.label, order: t.order, cells: t.cells.length, F0: t.f0?.gate.status, F0Ranges: t.f0?.gate.summaries?.map(s => s.compatibleRange), result: t.result?.reason || t.result?.checks || null })); } };
+try {
+    assert.deepEqual(report.production, binding.production);
+    report.initialCopy = verifyCadenceFixture(base.fixtureRoot, manifest, binding.copy.manifestSha256);
+    sourceBefore = inventory();
+    assert.equal(sourceBefore.sha256, parent.sourceBefore.sha256);
+    report.sourceBefore = { sha256: sourceBefore.sha256, files: sourceBefore.entries.length };
+    counter = await startAccountedE3Counter(fileURLToPath(new URL('./ri00/darwin-process-counters.py', import.meta.url)));
+    report.counterRuntime = counter.ready;
+    await runPairOrderCampaign({ io, expected: binding.expected, identity: hash(JSON.stringify([candidate, sourceBefore.sha256, binding.inputs.manifest])), report });
+    await identity();
+    report.finalCopy = verifyCadenceFixture(base.fixtureRoot, manifest, binding.copy.manifestSha256);
+    assert.deepEqual(productionIdentity(base.moduleRoot), binding.production);
+    report.sourceUnchanged = true;
+    report.driverUnchanged = JSON.stringify(report.source) === JSON.stringify(pairOrderSource());
+    assert.equal(report.driverUnchanged, true);
+}
+catch (e) {
+    report.failures.push({ name: e.name, message: e.message, stack: e.stack });
+}
+finally {
+    for (const h of [...live].reverse())
+        try {
+            await close(h);
+        }
+        catch (e) {
+            report.failures.push({ message: e.message });
+            try {
+                await h.transport?.close();
+                await h.close({ skipAudit: true });
+                await h.closed;
+            }
+            catch (cleanup) {
+                report.failures.push({ message: 'cleanup:' + cleanup.message });
+            }
+        }
+    if (counter)
+        report.counterExit = await counter.close();
+    clearTimeout(fullDeadline);
+    charge();
+    report.wallMs = performance.now() - started;
+    report.controllerRuntimeCpuMs = cpu();
+    report.boundPrepCpuMs = prepCpuMs;
+    report.controllerAuxChargedMs = cpu() + prepCpuMs + (report.counterExit?.finalCpuMs || 0) + budget.preparationShutdownReserveMs;
+    report.supervisorRoots = rootCount;
+    report.journalBytes = journal.bytes;
+    report.recoveryJournalBytes = recoveryJournal?.bytes || 0;
+    journal.close();
+    recoveryJournal?.close();
+    report.unknownCostGap = report.hosts.some(h => !h.exit) || !report.counterExit?.known;
+    report.logicalOutputBytesBeforeFinalReport = treeBytes(output);
+    if (report.wallMs > budget.wallMs || report.readCpuMs > budget.readCpuMs || report.hashCpuMs > budget.hashCpuMs || report.controllerAuxChargedMs > budget.controllerAuxCpuMs + budget.preparationShutdownReserveMs || report.unknownCostGap || rootCount > 244 || report.logicalOutputBytesBeforeFinalReport > budget.outputBytes)
+        report.failures.push({ message: 'order_final_budget_or_unknown_cost' });
+    if (report.failures.length) {
+        report.controlsQualified = false;
+        report.orderSensitivitySupported = false;
+    }
+    report.finishedAt = new Date().toISOString();
+    save();
+    if (!report.controlsQualified)
+        process.exitCode = 1;
+    console.log(JSON.stringify({ executionCompleted: report.executionCompleted, controlsQualified: report.controlsQualified, orderSensitivitySupported: report.orderSensitivitySupported, rawContrastsMs: report.rawContrastsMs, launches: report.ownedLaunches, roots: rootCount, readCpuMs: report.readCpuMs, hashCpuMs: report.hashCpuMs, wallMs: report.wallMs, controllerAuxChargedMs: report.controllerAuxChargedMs, failures: report.failures.map(e => e.message) }));
+}
