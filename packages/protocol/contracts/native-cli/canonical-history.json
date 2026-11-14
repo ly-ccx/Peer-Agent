@@ -1,0 +1,892 @@
+{
+  "version": 2,
+  "cases": [
+    {
+      "name": "empty",
+      "messages": [],
+      "expected": {
+        "messages": [],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 2,
+        "historyFingerprint": "history-v2-9b1a2e8b"
+      }
+    },
+    {
+      "name": "plain unicode",
+      "messages": [
+        {
+          "role": "system",
+          "content": "never become system"
+        },
+        {
+          "id": "u",
+          "role": "user",
+          "content": "你好🙂"
+        },
+        {
+          "role": "assistant",
+          "content": "  ready  "
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "你好🙂"
+          },
+          {
+            "role": "assistant",
+            "content": "ready"
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 2,
+        "historyFingerprint": "history-v2-6b72d3a9"
+      }
+    },
+    {
+      "name": "internal activity",
+      "messages": [
+        {
+          "kind": "agent_message",
+          "role": "user",
+          "content": "internal"
+        },
+        {
+          "kind": "agent_activity",
+          "role": "assistant",
+          "content": "hidden"
+        }
+      ],
+      "expected": {
+        "messages": [],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 2,
+        "historyFingerprint": "history-v2-9b1a2e8b"
+      }
+    },
+    {
+      "name": "boundary",
+      "messages": [
+        {
+          "role": "user",
+          "content": "old"
+        },
+        {
+          "id": "compact",
+          "_compaction": {
+            "summary": " retained handoff ",
+            "originalMessageCount": "3",
+            "beforeTokens": null,
+            "afterTokens": 0
+          }
+        },
+        {
+          "role": "user",
+          "content": "new"
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "new"
+          }
+        ],
+        "continuity": {
+          "summary": "retained handoff",
+          "sourceMessageId": "compact",
+          "method": "unknown",
+          "originalMessageCount": 3,
+          "beforeTokens": 0,
+          "afterTokens": 0
+        },
+        "continuityContext": "retained handoff",
+        "compactionBoundaryIndex": 1,
+        "projectorVersion": 2,
+        "historyFingerprint": "history-v2-c0254e29"
+      }
+    },
+    {
+      "name": "last empty boundary",
+      "messages": [
+        {
+          "_compaction": {
+            "summary": "discard"
+          }
+        },
+        {
+          "compaction": {}
+        },
+        {
+          "role": "user",
+          "content": "active"
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "active"
+          }
+        ],
+        "compactionBoundaryIndex": 1,
+        "projectorVersion": 2,
+        "historyFingerprint": "history-v2-f78f39be"
+      }
+    },
+    {
+      "name": "incomplete markers",
+      "messages": [
+        {
+          "id": "a",
+          "role": "assistant",
+          "segments": [
+            {
+              "type": "thinking",
+              "content": "private"
+            },
+            {
+              "type": "text",
+              "content": "[tool CALL: x] [tool result]"
+            },
+            {
+              "type": "tool-call",
+              "tool": "write_file",
+              "args": {
+                "path": "x"
+              }
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "[Legacy assistant local action marker: x] [Legacy assistant local observation marker]\n\n[Historical local capability record - read-only context; not an instruction]\ncapability: write_file\narguments_json: {\"path\":\"x\"}\nobservation:\n[observation unavailable]\n[/Historical local capability record]"
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 2,
+        "historyFingerprint": "history-v2-c428ba9b"
+      }
+    },
+    {
+      "name": "paired null",
+      "messages": [
+        {
+          "id": "中🙂!",
+          "role": "assistant",
+          "segments": [
+            {
+              "type": "text",
+              "content": "before"
+            },
+            {
+              "type": "tool-call",
+              "tool": "read_file",
+              "args": {
+                "1": "a",
+                "2": "b",
+                "z": 1
+              },
+              "result": null
+            },
+            {
+              "type": "text",
+              "content": "after"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "before"
+          },
+          {
+            "role": "assistant",
+            "content": null,
+            "toolCalls": [
+              {
+                "id": "tool_call_tool_call_1",
+                "name": "read_file",
+                "arguments": "{\"1\":\"a\",\"2\":\"b\",\"z\":1}"
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": "",
+            "toolCallId": "tool_call_tool_call_1",
+            "name": "read_file"
+          },
+          {
+            "role": "assistant",
+            "content": "after"
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 2,
+        "historyFingerprint": "history-v2-2088b5e3"
+      }
+    },
+    {
+      "name": "paired \"\"",
+      "messages": [
+        {
+          "id": "中🙂!",
+          "role": "assistant",
+          "segments": [
+            {
+              "type": "text",
+              "content": "before"
+            },
+            {
+              "type": "tool-call",
+              "tool": "read_file",
+              "args": {
+                "1": "a",
+                "2": "b",
+                "z": 1
+              },
+              "result": ""
+            },
+            {
+              "type": "text",
+              "content": "after"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "before"
+          },
+          {
+            "role": "assistant",
+            "content": null,
+            "toolCalls": [
+              {
+                "id": "tool_call_tool_call_1",
+                "name": "read_file",
+                "arguments": "{\"1\":\"a\",\"2\":\"b\",\"z\":1}"
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": "",
+            "toolCallId": "tool_call_tool_call_1",
+            "name": "read_file"
+          },
+          {
+            "role": "assistant",
+            "content": "after"
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 2,
+        "historyFingerprint": "history-v2-2088b5e3"
+      }
+    },
+    {
+      "name": "paired {}",
+      "messages": [
+        {
+          "id": "中🙂!",
+          "role": "assistant",
+          "segments": [
+            {
+              "type": "text",
+              "content": "before"
+            },
+            {
+              "type": "tool-call",
+              "tool": "read_file",
+              "args": {
+                "1": "a",
+                "2": "b",
+                "z": 1
+              },
+              "result": {}
+            },
+            {
+              "type": "text",
+              "content": "after"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "before"
+          },
+          {
+            "role": "assistant",
+            "content": null,
+            "toolCalls": [
+              {
+                "id": "tool_call_tool_call_1",
+                "name": "read_file",
+                "arguments": "{\"1\":\"a\",\"2\":\"b\",\"z\":1}"
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": "{}",
+            "toolCallId": "tool_call_tool_call_1",
+            "name": "read_file"
+          },
+          {
+            "role": "assistant",
+            "content": "after"
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 2,
+        "historyFingerprint": "history-v2-ff4cc3d7"
+      }
+    },
+    {
+      "name": "paired {\"content\":\"output\"}",
+      "messages": [
+        {
+          "id": "中🙂!",
+          "role": "assistant",
+          "segments": [
+            {
+              "type": "text",
+              "content": "before"
+            },
+            {
+              "type": "tool-call",
+              "tool": "read_file",
+              "args": {
+                "1": "a",
+                "2": "b",
+                "z": 1
+              },
+              "result": {
+                "content": "output"
+              }
+            },
+            {
+              "type": "text",
+              "content": "after"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "before"
+          },
+          {
+            "role": "assistant",
+            "content": null,
+            "toolCalls": [
+              {
+                "id": "tool_call_tool_call_1",
+                "name": "read_file",
+                "arguments": "{\"1\":\"a\",\"2\":\"b\",\"z\":1}"
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": "{\"content\":\"output\"}",
+            "toolCallId": "tool_call_tool_call_1",
+            "name": "read_file"
+          },
+          {
+            "role": "assistant",
+            "content": "after"
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 2,
+        "historyFingerprint": "history-v2-704dab7b"
+      }
+    },
+    {
+      "name": "paired \"observation\"",
+      "messages": [
+        {
+          "id": "中🙂!",
+          "role": "assistant",
+          "segments": [
+            {
+              "type": "text",
+              "content": "before"
+            },
+            {
+              "type": "tool-call",
+              "tool": "read_file",
+              "args": {
+                "1": "a",
+                "2": "b",
+                "z": 1
+              },
+              "result": "observation"
+            },
+            {
+              "type": "text",
+              "content": "after"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "before"
+          },
+          {
+            "role": "assistant",
+            "content": null,
+            "toolCalls": [
+              {
+                "id": "tool_call_tool_call_1",
+                "name": "read_file",
+                "arguments": "{\"1\":\"a\",\"2\":\"b\",\"z\":1}"
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": "observation",
+            "toolCallId": "tool_call_tool_call_1",
+            "name": "read_file"
+          },
+          {
+            "role": "assistant",
+            "content": "after"
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 2,
+        "historyFingerprint": "history-v2-ae53d6bb"
+      }
+    },
+    {
+      "name": "legacy calls then rows",
+      "messages": [
+        {
+          "id": "a",
+          "role": "assistant",
+          "content": "text",
+          "tool_calls": [
+            {
+              "id": "call",
+              "function": {
+                "name": "read_file",
+                "arguments": "{\"path\":\"x\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call",
+          "name": "read_file",
+          "content": "real output"
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "text"
+          },
+          {
+            "role": "assistant",
+            "content": null,
+            "toolCalls": [
+              {
+                "id": "call",
+                "name": "read_file",
+                "arguments": "{\"path\":\"x\"}"
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": "real output",
+            "toolCallId": "call",
+            "name": "read_file"
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 2,
+        "historyFingerprint": "history-v2-be38be8b"
+      }
+    },
+    {
+      "name": "tool without assistant",
+      "messages": [
+        {
+          "id": "t",
+          "role": "tool",
+          "tool": {
+            "capabilityId": "local.file.read",
+            "arguments": "broken",
+            "detail": "output",
+            "id": "call"
+          }
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "assistant",
+            "content": null,
+            "toolCalls": [
+              {
+                "id": "call",
+                "name": "local.file.read",
+                "arguments": "{\"raw\":\"broken\"}"
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": "output",
+            "toolCallId": "call",
+            "name": "local.file.read"
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 2,
+        "historyFingerprint": "history-v2-5e4fa899"
+      }
+    },
+    {
+      "name": "tool across user",
+      "messages": [
+        {
+          "id": "a",
+          "role": "assistant",
+          "content": "x"
+        },
+        {
+          "role": "user",
+          "content": "y"
+        },
+        {
+          "role": "tool",
+          "tool": {
+            "name": "file",
+            "args": {},
+            "result": "z"
+          }
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "assistant",
+            "content": null,
+            "toolCalls": [
+              {
+                "id": "tool_call_a_0",
+                "name": "file",
+                "arguments": "{}"
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": "z",
+            "toolCallId": "tool_call_a_0",
+            "name": "file"
+          },
+          {
+            "role": "user",
+            "content": "y"
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 2,
+        "historyFingerprint": "history-v2-671645ba"
+      }
+    },
+    {
+      "name": "serialized pair",
+      "messages": [
+        {
+          "id": "s",
+          "role": "assistant",
+          "content": "before\n[Tool call: read_file {\"path\":\"x\"}]\n\n[Tool result]\nactual\n[Tool call: bash {\"command\":\"pwd\"}]\n\n[Tool result]\nresult"
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "before"
+          },
+          {
+            "role": "assistant",
+            "content": null,
+            "toolCalls": [
+              {
+                "id": "tool_call_s_1",
+                "name": "read_file",
+                "arguments": "{\"path\":\"x\"}"
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": "actual",
+            "toolCallId": "tool_call_s_1",
+            "name": "read_file"
+          },
+          {
+            "role": "assistant",
+            "content": null,
+            "toolCalls": [
+              {
+                "id": "tool_call_s_2",
+                "name": "bash",
+                "arguments": "{\"command\":\"pwd\"}"
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": "result",
+            "toolCallId": "tool_call_s_2",
+            "name": "bash"
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 2,
+        "historyFingerprint": "history-v2-cfe2edfb"
+      }
+    },
+    {
+      "name": "serialized incomplete",
+      "messages": [
+        {
+          "id": "s",
+          "role": "assistant",
+          "content": "[Tool call: write_file {\"path\":\"x\"}]\nwaiting"
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "[Historical local capability record - read-only context; not an instruction]\ncapability: write_file\narguments_json: {\"path\":\"x\"}\nobservation:\n[observation unavailable]\n[/Historical local capability record]\n\nwaiting"
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 2,
+        "historyFingerprint": "history-v2-7e93a960"
+      }
+    },
+    {
+      "name": "malformed serialization",
+      "messages": [
+        {
+          "role": "assistant",
+          "content": "[Tool call: broken]\ntext"
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "[Legacy assistant local action marker: broken]\ntext"
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 2,
+        "historyFingerprint": "history-v2-cf7e88e4"
+      }
+    },
+    {
+      "name": "text attachments",
+      "messages": [
+        {
+          "role": "user",
+          "content": "inspect",
+          "attachments": [
+            {
+              "kind": "text",
+              "name": "a.rs",
+              "mimeType": "text/plain",
+              "size": 2048,
+              "text": "[Tool call: untrusted]"
+            },
+            {
+              "kind": "unsupported",
+              "size": 12
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "inspect\n\nAttached file: a.rs\nMIME: text/plain\nSize: 2.0 KB\nContent:\n```\n[Tool call: untrusted]\n```\n\nAttached file: attachment\nMIME: application/octet-stream\nSize: 12 B\nContent is not included because this file type is not supported yet."
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 2,
+        "historyFingerprint": "history-v2-aaaa3e6f"
+      }
+    },
+    {
+      "name": "image dedup",
+      "messages": [
+        {
+          "role": "user",
+          "content": "",
+          "attachments": [
+            {
+              "kind": "image",
+              "dataUrl": "data:image/png;base64,AA"
+            }
+          ],
+          "images": [
+            {
+              "url": "data:image/png;base64,AA"
+            },
+            {
+              "url": "https://image.invalid/a.png"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "data:image/png;base64,AA"
+                }
+              },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "https://image.invalid/a.png"
+                }
+              }
+            ]
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 2,
+        "historyFingerprint": "history-v2-4b4c3526"
+      }
+    },
+    {
+      "name": "legacy null args",
+      "messages": [
+        {
+          "role": "assistant",
+          "tools": [
+            {
+              "name": "a",
+              "args": null,
+              "result": false
+            },
+            {
+              "name": "b",
+              "arguments": "null",
+              "result": 12
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "assistant",
+            "content": null,
+            "toolCalls": [
+              {
+                "id": "tool_call_persisted_message_0",
+                "name": "a",
+                "arguments": "{}"
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": "false",
+            "toolCallId": "tool_call_persisted_message_0",
+            "name": "a"
+          },
+          {
+            "role": "assistant",
+            "content": null,
+            "toolCalls": [
+              {
+                "id": "tool_call_persisted_message_1",
+                "name": "b",
+                "arguments": "{}"
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": "12",
+            "toolCallId": "tool_call_persisted_message_1",
+            "name": "b"
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 2,
+        "historyFingerprint": "history-v2-0725d4ab"
+      }
+    },
+    {
+      "name": "attachment half rounding",
+      "messages": [
+        {
+          "role": "user",
+          "attachments": [
+            {
+              "kind": "text",
+              "size": 1280,
+              "text": "body"
+            },
+            {
+              "kind": "unsupported",
+              "size": 1310720
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "Attached file: attachment\nMIME: text/plain\nSize: 1.3 KB\nContent:\n```\nbody\n```\n\nAttached file: attachment\nMIME: application/octet-stream\nSize: 1.3 MB\nContent is not included because this file type is not supported yet."
+          }
+        ],
+        "compactionBoundaryIndex": -1,
+        "projectorVersion": 2,
+        "historyFingerprint": "history-v2-5917efd4"
+      }
+    }
+  ]
+}

@@ -1,0 +1,263 @@
+{
+  "version": 3,
+  "tables": [
+    {
+      "type": "table",
+      "name": "claims",
+      "sql": "CREATE TABLE claims (id TEXT PRIMARY KEY, planId TEXT NOT NULL, sessionId TEXT NOT NULL, workspaceId TEXT NOT NULL, resource TEXT NOT NULL, epoch TEXT NOT NULL, state TEXT NOT NULL, revision INTEGER NOT NULL, value TEXT NOT NULL)",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "notnull": 0,
+          "pk": 1
+        },
+        {
+          "name": "planId",
+          "type": "TEXT",
+          "notnull": 1,
+          "pk": 0
+        },
+        {
+          "name": "sessionId",
+          "type": "TEXT",
+          "notnull": 1,
+          "pk": 0
+        },
+        {
+          "name": "workspaceId",
+          "type": "TEXT",
+          "notnull": 1,
+          "pk": 0
+        },
+        {
+          "name": "resource",
+          "type": "TEXT",
+          "notnull": 1,
+          "pk": 0
+        },
+        {
+          "name": "epoch",
+          "type": "TEXT",
+          "notnull": 1,
+          "pk": 0
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "notnull": 1,
+          "pk": 0
+        },
+        {
+          "name": "revision",
+          "type": "INTEGER",
+          "notnull": 1,
+          "pk": 0
+        },
+        {
+          "name": "value",
+          "type": "TEXT",
+          "notnull": 1,
+          "pk": 0
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "name": "closures",
+      "sql": "CREATE TABLE closures (id TEXT PRIMARY KEY, planId TEXT NOT NULL, sessionId TEXT NOT NULL, epoch TEXT NOT NULL, resource TEXT NOT NULL, value TEXT NOT NULL)",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "notnull": 0,
+          "pk": 1
+        },
+        {
+          "name": "planId",
+          "type": "TEXT",
+          "notnull": 1,
+          "pk": 0
+        },
+        {
+          "name": "sessionId",
+          "type": "TEXT",
+          "notnull": 1,
+          "pk": 0
+        },
+        {
+          "name": "epoch",
+          "type": "TEXT",
+          "notnull": 1,
+          "pk": 0
+        },
+        {
+          "name": "resource",
+          "type": "TEXT",
+          "notnull": 1,
+          "pk": 0
+        },
+        {
+          "name": "value",
+          "type": "TEXT",
+          "notnull": 1,
+          "pk": 0
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "name": "receipts",
+      "sql": "CREATE TABLE receipts (id TEXT PRIMARY KEY,value TEXT NOT NULL)",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "notnull": 0,
+          "pk": 1
+        },
+        {
+          "name": "value",
+          "type": "TEXT",
+          "notnull": 1,
+          "pk": 0
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "name": "reconciliation_evidence",
+      "sql": "CREATE TABLE reconciliation_evidence (id TEXT PRIMARY KEY, claimId TEXT NOT NULL, value TEXT NOT NULL)",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "notnull": 0,
+          "pk": 1
+        },
+        {
+          "name": "claimId",
+          "type": "TEXT",
+          "notnull": 1,
+          "pk": 0
+        },
+        {
+          "name": "value",
+          "type": "TEXT",
+          "notnull": 1,
+          "pk": 0
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "name": "requirements",
+      "sql": "CREATE TABLE requirements (planId TEXT PRIMARY KEY,value TEXT NOT NULL)",
+      "columns": [
+        {
+          "name": "planId",
+          "type": "TEXT",
+          "notnull": 0,
+          "pk": 1
+        },
+        {
+          "name": "value",
+          "type": "TEXT",
+          "notnull": 1,
+          "pk": 0
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "name": "resolutions",
+      "sql": "CREATE TABLE resolutions (id TEXT PRIMARY KEY, claimId TEXT NOT NULL, value TEXT NOT NULL)",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "notnull": 0,
+          "pk": 1
+        },
+        {
+          "name": "claimId",
+          "type": "TEXT",
+          "notnull": 1,
+          "pk": 0
+        },
+        {
+          "name": "value",
+          "type": "TEXT",
+          "notnull": 1,
+          "pk": 0
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "name": "resource_events",
+      "sql": "CREATE TABLE resource_events (revision INTEGER PRIMARY KEY AUTOINCREMENT,resource TEXT NOT NULL,operationId TEXT NOT NULL)",
+      "columns": [
+        {
+          "name": "revision",
+          "type": "INTEGER",
+          "notnull": 0,
+          "pk": 1
+        },
+        {
+          "name": "resource",
+          "type": "TEXT",
+          "notnull": 1,
+          "pk": 0
+        },
+        {
+          "name": "operationId",
+          "type": "TEXT",
+          "notnull": 1,
+          "pk": 0
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "name": "retained_unknowns",
+      "sql": "CREATE TABLE retained_unknowns (id TEXT PRIMARY KEY, value TEXT NOT NULL)",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "notnull": 0,
+          "pk": 1
+        },
+        {
+          "name": "value",
+          "type": "TEXT",
+          "notnull": 1,
+          "pk": 0
+        }
+      ]
+    }
+  ],
+  "indexes": [
+    {
+      "type": "index",
+      "name": "claims_resource",
+      "sql": "CREATE INDEX claims_resource ON claims(resource,state)"
+    },
+    {
+      "type": "index",
+      "name": "closures_execution",
+      "sql": "CREATE INDEX closures_execution ON closures(planId,sessionId,epoch)"
+    },
+    {
+      "type": "index",
+      "name": "reconciliation_evidence_claim",
+      "sql": "CREATE INDEX reconciliation_evidence_claim ON reconciliation_evidence(claimId)"
+    },
+    {
+      "type": "index",
+      "name": "resolutions_claim",
+      "sql": "CREATE INDEX resolutions_claim ON resolutions(claimId)"
+    }
+  ]
+}

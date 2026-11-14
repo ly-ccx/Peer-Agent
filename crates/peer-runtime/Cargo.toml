@@ -1,0 +1,44 @@
+[package]
+name = "peer-runtime"
+version = "0.1.0-rc.40"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[features]
+test-fixtures = ["peer-store/test-fixtures"]
+
+[dependencies]
+peer-store = { path = "../peer-store" }
+peer-protocol = { path = "../peer-protocol" }
+serde.workspace = true
+serde_json.workspace = true
+tokio = { version = "=1.48.0", features = ["rt", "macros", "process", "io-util", "sync", "time"] }
+tokio-util = { version = "=0.7.17", features = ["rt"] }
+zeroize = "1.8.2"
+time = { version = "=0.3.55", features = ["parsing"] }
+rustix = { version = "1.1.4", features = ["process"] }
+uuid = { version = "=1.18.1", features = ["v4"] }
+reqwest = { version = "=0.12.24", default-features = false, features = ["rustls-tls", "json", "stream"] }
+sha2.workspace = true
+
+[dev-dependencies]
+tempfile = "3.23.0"
+
+[[bin]]
+name = "helper-test-fixture"
+path = "tests/fixtures/helper.rs"
+required-features = ["test-fixtures"]
+test = false
+
+[[example]]
+name = "coordination-conformance"
+required-features = ["test-fixtures"]
+
+[[example]]
+name = "goal-conformance"
+required-features = ["test-fixtures"]
+
+[[example]]
+name = "goal-mirror-conformance"
+required-features = ["test-fixtures"]

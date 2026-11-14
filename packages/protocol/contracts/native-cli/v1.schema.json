@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:peer-agent:contracts:native-cli:v1",
+  "title": "Native CLI conformance resources v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "governance", "exitCodes", "dataHomeCases", "approvalDigestCases", "admission"],
+  "properties": {
+    "version": { "const": 1 },
+    "governance": { "type": "string" },
+    "exitCodes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "runtime", "usage", "auth", "cancelled", "maxTurns", "waitingUser", "goalFailed", "botReplyPending"],
+      "properties": {
+        "ok": { "const": 0 }, "runtime": { "const": 1 }, "usage": { "const": 2 },
+        "auth": { "const": 3 }, "cancelled": { "const": 4 }, "maxTurns": { "const": 5 },
+        "waitingUser": { "const": 6 }, "goalFailed": { "const": 7 }, "botReplyPending": { "const": 8 }
+      }
+    },
+    "dataHomeCases": {
+      "type": "array", "minItems": 2,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["env", "home", "expected"],
+        "properties": {
+          "env": { "type": "object", "additionalProperties": { "type": "string" } },
+          "home": { "type": "string" }, "expected": { "type": "string" }
+        }
+      }
+    },
+    "approvalDigestCases": {
+      "type": "array", "minItems": 5,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["name", "input", "expected"],
+        "properties": {
+          "name": { "type": "string" }, "input": true,
+          "expected": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "admission": {
+      "type": "object", "additionalProperties": false,
+      "required": ["maxDigestBytes", "maxJsonDepth", "maxSafeInteger"],
+      "properties": {
+        "maxDigestBytes": { "const": 1048576 },
+        "maxJsonDepth": { "const": 64 },
+        "maxSafeInteger": { "const": 9007199254740991 }
+      }
+    }
+  }
+}

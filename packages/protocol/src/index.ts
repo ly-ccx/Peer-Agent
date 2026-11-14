@@ -1,6 +1,7 @@
 export type { AttentionCard, BotDecisionSnapshot, BotAttentionItem, BotAttentionRequest, BotAttentionResult } from './attention.ts';
 export type {
   ProjectWorkBudgetLimits,
+  NativeEpisodeRecorder,
   ProjectWorkBudgetBoundary,
   ProjectReplyRecoveryAction,
   ProjectWorkReceipt,

@@ -1,3 +1,4 @@
+import { withStoreFileLock } from './store-file-lock.mjs';
 import { goalFileVersion as fileVersion } from "./goal-plan-files.mjs";
 import { appendJsonl, mergeEvidenceIndexRecords, normalizeEvidenceIndexRecord, readEvidenceRecordsFromTail, readJsonl, retainInteractiveEvidence, syncJsonl } from "./goal-plan-files.mjs";
 import { normalizeConversationId, normalizeEvidenceRefList, normalizeOptionalString } from "./goal-plan-domain.mjs";
@@ -136,6 +137,11 @@ export function createGoalPlanEvidence({ storeDir, getActivePlanByConversation }
   }
 
   function recordEvidenceRefs(entry = {}, { durable = false } = {}) {
+    if (!normalizeEvidenceRefList(entry.evidenceRefs ?? entry.evidenceRef).length) return [];
+    return withStoreFileLock(evidenceIndexFile, () => recordEvidenceRefsLocked(entry, { durable }));
+  }
+
+  function recordEvidenceRefsLocked(entry = {}, { durable = false } = {}) {
     refreshEvidenceCache();
     const refs = normalizeEvidenceRefList(entry.evidenceRefs ?? entry.evidenceRef);
     if (refs.length === 0) return [];

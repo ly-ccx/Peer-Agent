@@ -1,0 +1,657 @@
+{
+  "version": 1,
+  "identityCases": [
+    {
+      "input": {
+        "planId": "p",
+        "sessionId": "s",
+        "executionEpoch": "host:epoch"
+      },
+      "expected": {
+        "planId": "p",
+        "sessionId": "s",
+        "executionEpoch": "host:epoch"
+      }
+    },
+    {
+      "input": {
+        "planId": "p",
+        "sessionId": "s",
+        "executionEpoch": "host:epoch",
+        "goalRevision": 0,
+        "generation": "generation-1"
+      },
+      "expected": {
+        "planId": "p",
+        "sessionId": "s",
+        "executionEpoch": "host:epoch",
+        "generation": "generation-1",
+        "goalRevision": 0
+      }
+    },
+    {
+      "input": {
+        "planId": "p",
+        "sessionId": "s",
+        "executionEpoch": "host:epoch",
+        "goalRevision": 1.5
+      },
+      "expected": null
+    },
+    {
+      "input": {
+        "planId": "p",
+        "sessionId": "s",
+        "executionEpoch": "host:epoch",
+        "goalRevision": 9007199254740992
+      },
+      "expected": null
+    },
+    {
+      "input": {
+        "planId": "p",
+        "sessionId": "s",
+        "executionEpoch": "host:epoch",
+        "goalRevision": null
+      },
+      "expected": null
+    },
+    {
+      "input": {
+        "planId": "p",
+        "sessionId": "s",
+        "executionEpoch": "host:epoch",
+        "generation": null
+      },
+      "expected": null
+    },
+    {
+      "input": {
+        "planId": "p",
+        "sessionId": "s",
+        "executionEpoch": "host:epoch",
+        "future": true
+      },
+      "expected": null
+    },
+    {
+      "input": {
+        "planId": "../p",
+        "sessionId": "s",
+        "executionEpoch": "host:epoch"
+      },
+      "expected": null
+    },
+    {
+      "input": {
+        "planId": "p",
+        "sessionId": "",
+        "executionEpoch": "host:epoch"
+      },
+      "expected": null
+    },
+    {
+      "input": {
+        "planId": "p",
+        "sessionId": "s",
+        "executionEpoch": "x\n"
+      },
+      "expected": null
+    },
+    {
+      "input": {
+        "planId": "p",
+        "sessionId": "s",
+        "executionEpoch": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+      },
+      "expected": {
+        "planId": "p",
+        "sessionId": "s",
+        "executionEpoch": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+      }
+    },
+    {
+      "input": {
+        "planId": "p",
+        "sessionId": "s",
+        "executionEpoch": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+      },
+      "expected": null
+    },
+    {
+      "input": null,
+      "expected": null
+    },
+    {
+      "input": [],
+      "expected": null
+    },
+    {
+      "input": {},
+      "expected": null
+    }
+  ],
+  "resourceScopeCases": [
+    {
+      "input": {
+        "kind": "directory",
+        "path": "/fixture"
+      },
+      "expected": {
+        "kind": "directory",
+        "path": "/fixture"
+      }
+    },
+    {
+      "input": {
+        "kind": "file",
+        "path": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+      },
+      "expected": {
+        "kind": "file",
+        "path": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+      }
+    },
+    {
+      "input": {
+        "kind": "file",
+        "path": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+      },
+      "expected": null
+    },
+    {
+      "input": {
+        "kind": "file",
+        "path": "x\u0000"
+      },
+      "expected": null
+    },
+    {
+      "input": {
+        "kind": "file",
+        "path": "/x",
+        "extra": true
+      },
+      "expected": null
+    },
+    {
+      "input": {
+        "kind": "git_ref",
+        "ref": "refs/heads/topic"
+      },
+      "expected": {
+        "kind": "git_ref",
+        "ref": "refs/heads/topic"
+      }
+    },
+    {
+      "input": {
+        "kind": "git_ref",
+        "ref": "refs/../main"
+      },
+      "expected": null
+    },
+    {
+      "input": {
+        "kind": "remote_object",
+        "ref": "repo:pr/1"
+      },
+      "expected": {
+        "kind": "remote_object",
+        "ref": "repo:pr/1"
+      }
+    },
+    {
+      "input": {
+        "kind": "remote_object",
+        "ref": "#unsafe"
+      },
+      "expected": null
+    },
+    {
+      "input": {
+        "kind": "future",
+        "ref": "x"
+      },
+      "expected": null
+    },
+    {
+      "input": null,
+      "expected": null
+    }
+  ],
+  "evidenceCases": [
+    {
+      "input": {
+        "toolCallId": " call ",
+        "execution": {
+          "result": {
+            "evidence": {
+              "refs": [
+                "first",
+                "same",
+                "",
+                null
+              ],
+              "artifactRefs": [
+                "same",
+                "second"
+              ]
+            },
+            "outputPreview": {
+              "artifactRef": "third",
+              "artifactRefs": [
+                "first",
+                1
+              ],
+              "localToolResultRef": {
+                "artifactRefs": [
+                  "fourth"
+                ]
+              },
+              "text": "artifact://spoof"
+            }
+          }
+        }
+      },
+      "expected": [
+        "tool-result://call",
+        "first",
+        "same",
+        "second",
+        "third",
+        "fourth"
+      ]
+    },
+    {
+      "input": {
+        "toolCallId": "﻿call﻿",
+        "execution": {
+          "result": {
+            "evidence": {
+              "refs": [
+                "﻿trim﻿",
+                "preserve"
+              ]
+            }
+          }
+        }
+      },
+      "expected": [
+        "tool-result://call",
+        "trim",
+        "preserve"
+      ]
+    },
+    {
+      "input": {
+        "toolCallId": "",
+        "execution": {
+          "result": {
+            "output": {
+              "artifactRef": "spoof"
+            },
+            "outputPreview": "artifact://spoof"
+          }
+        }
+      },
+      "expected": []
+    },
+    {
+      "input": {
+        "toolCallId": "call",
+        "execution": {
+          "result": {
+            "evidence": {
+              "refs": "tool-result://call"
+            },
+            "outputPreview": {
+              "localToolResultRef": {
+                "artifactRef": "last"
+              }
+            }
+          }
+        }
+      },
+      "expected": [
+        "tool-result://call",
+        "last"
+      ]
+    }
+  ],
+  "principalCases": [
+    {
+      "query": {
+        "workspaceId": " w ",
+        "conversationId": "﻿bot﻿"
+      },
+      "hostFacts": {},
+      "expected": {
+        "workspaceId": "w",
+        "conversationId": "bot"
+      }
+    },
+    {
+      "query": {
+        "conversationId": ""
+      },
+      "hostFacts": {},
+      "expected": null
+    },
+    {
+      "query": {
+        "workspaceId": "w",
+        "conversationId": "goal",
+        "planId": "p"
+      },
+      "hostFacts": {
+        "p": {
+          "conversationId": "goal",
+          "inheritanceStopped": false,
+          "delegation": null
+        }
+      },
+      "expected": {
+        "workspaceId": "w",
+        "conversationId": "goal"
+      }
+    },
+    {
+      "query": {
+        "workspaceId": "w",
+        "conversationId": "other",
+        "planId": "p"
+      },
+      "hostFacts": {
+        "p": {
+          "conversationId": "goal",
+          "inheritanceStopped": false,
+          "delegation": null
+        }
+      },
+      "expected": null
+    },
+    {
+      "query": {
+        "workspaceId": "w",
+        "conversationId": "leaf",
+        "sessionId": "leaf",
+        "planId": "p"
+      },
+      "hostFacts": {
+        "p": {
+          "conversationId": "leaf",
+          "inheritanceStopped": false,
+          "delegation": {
+            "workspaceId": "w",
+            "sessionId": "leaf",
+            "parentConversationId": "parent"
+          }
+        },
+        "a": {
+          "conversationId": "parent",
+          "inheritanceStopped": false,
+          "delegation": {
+            "workspaceId": "w",
+            "sessionId": "parent",
+            "parentConversationId": "bot"
+          }
+        }
+      },
+      "expected": {
+        "workspaceId": "w",
+        "conversationId": "bot"
+      }
+    },
+    {
+      "query": {
+        "workspaceId": "w",
+        "sessionId": "leaf",
+        "planId": "p"
+      },
+      "hostFacts": {
+        "p": {
+          "conversationId": "leaf",
+          "inheritanceStopped": false,
+          "delegation": {
+            "workspaceId": "w",
+            "sessionId": "leaf",
+            "parentConversationId": "bot"
+          }
+        }
+      },
+      "expected": {
+        "workspaceId": "w",
+        "conversationId": "bot"
+      }
+    },
+    {
+      "query": {
+        "workspaceId": "w",
+        "conversationId": "leaf",
+        "sessionId": "wrong",
+        "planId": "p"
+      },
+      "hostFacts": {
+        "p": {
+          "conversationId": "leaf",
+          "inheritanceStopped": false,
+          "delegation": {
+            "workspaceId": "w",
+            "sessionId": "leaf",
+            "parentConversationId": "bot"
+          }
+        }
+      },
+      "expected": null
+    },
+    {
+      "query": {
+        "workspaceId": "w",
+        "conversationId": "leaf",
+        "sessionId": "leaf",
+        "planId": "p"
+      },
+      "hostFacts": {
+        "p": {
+          "conversationId": "leaf",
+          "inheritanceStopped": false,
+          "delegation": {
+            "workspaceId": "w",
+            "sessionId": "leaf",
+            "parentConversationId": "parent"
+          }
+        },
+        "a": {
+          "conversationId": "parent",
+          "inheritanceStopped": true,
+          "delegation": {
+            "workspaceId": "w",
+            "sessionId": "parent",
+            "parentConversationId": "bot"
+          }
+        }
+      },
+      "expected": null
+    },
+    {
+      "query": {
+        "workspaceId": "w",
+        "conversationId": "leaf",
+        "sessionId": "leaf",
+        "planId": "p"
+      },
+      "hostFacts": {
+        "p": {
+          "conversationId": "leaf",
+          "inheritanceStopped": false,
+          "delegation": {
+            "workspaceId": "w",
+            "sessionId": "leaf",
+            "parentConversationId": "leaf"
+          }
+        }
+      },
+      "expected": null
+    },
+    {
+      "query": {
+        "workspaceId": "w",
+        "conversationId": "leaf",
+        "sessionId": "leaf",
+        "planId": "missing"
+      },
+      "hostFacts": {},
+      "expected": null
+    },
+    {
+      "query": {
+        "workspaceId": "w",
+        "conversationId": "goal",
+        "planId": "p"
+      },
+      "hostFacts": {
+        "p": {
+          "conversationId": "goal",
+          "inheritanceStopped": true,
+          "delegation": null
+        }
+      },
+      "expected": null
+    }
+  ],
+  "operationCases": [
+    {
+      "input": {
+        "capabilityId": "local.file.read",
+        "args": {
+          "path": "中文\n\u0000"
+        }
+      },
+      "expected": "202519d926578ab8b43fa47b42cc938c0be23ed5a75c2c873dfa00f39600fab0"
+    },
+    {
+      "input": {
+        "capabilityId": "local.shell.exec",
+        "args": {
+          "command": "echo synthetic"
+        },
+        "workspacePath": "/fixture",
+        "conversationId": "c",
+        "planId": "p",
+        "sessionId": "s"
+      },
+      "expected": "3c3c829b0abbd3067baad0fc52cb2ca05973fe1990513ce4f4600474a935663f"
+    }
+  ],
+  "approvalSteps": [
+    {
+      "op": "remember",
+      "input": {
+        "capabilityId": "local.file.read",
+        "argsDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sessionId": "s",
+        "workspaceId": "w",
+        "policyRevision": "bot:w:bot:1",
+        "at": 0
+      },
+      "expected": {
+        "capabilityId": "local.file.read",
+        "argsDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expiresAt": 1800000,
+        "sessionId": "s",
+        "workspaceId": "w"
+      }
+    },
+    {
+      "op": "match",
+      "input": {
+        "capabilityId": "local.file.read",
+        "argsDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sessionId": "s",
+        "workspaceId": "other",
+        "policyRevision": "bot:w:bot:1",
+        "at": 1
+      },
+      "expected": false
+    },
+    {
+      "op": "match",
+      "input": {
+        "capabilityId": "local.file.read",
+        "argsDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sessionId": "s",
+        "workspaceId": "w",
+        "policyRevision": "bot:w:bot:2",
+        "at": 1
+      },
+      "expected": false
+    },
+    {
+      "op": "match",
+      "input": {
+        "capabilityId": "local.file.read",
+        "argsDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sessionId": "s",
+        "workspaceId": "w",
+        "policyRevision": "bot:w:bot:1",
+        "at": 1
+      },
+      "expected": true
+    },
+    {
+      "op": "match",
+      "input": {
+        "capabilityId": "local.file.read",
+        "argsDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sessionId": "s",
+        "workspaceId": "w",
+        "policyRevision": "bot:w:bot:1",
+        "at": 1
+      },
+      "expected": false
+    },
+    {
+      "op": "remember",
+      "input": {
+        "capabilityId": "local.file.read",
+        "argsDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sessionId": "s",
+        "workspaceId": "w",
+        "policyRevision": "bot:w:bot:1",
+        "at": 1000
+      },
+      "expected": {
+        "capabilityId": "local.file.read",
+        "argsDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expiresAt": 1801000,
+        "sessionId": "s",
+        "workspaceId": "w"
+      }
+    },
+    {
+      "op": "match",
+      "input": {
+        "capabilityId": "local.file.read",
+        "argsDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sessionId": "s",
+        "workspaceId": "w",
+        "policyRevision": "bot:w:bot:1",
+        "at": 1801000
+      },
+      "expected": false
+    },
+    {
+      "op": "remember",
+      "input": {
+        "capabilityId": "local.file.read",
+        "argsDigest": "bad",
+        "sessionId": "s",
+        "workspaceId": "w",
+        "policyRevision": "bot:w:bot:1",
+        "at": 1801001
+      },
+      "expected": null
+    }
+  ]
+}

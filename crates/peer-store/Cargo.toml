@@ -1,0 +1,32 @@
+[package]
+name = "peer-store"
+version = "0.1.0-rc.40"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[features]
+test-fixtures = []
+
+[[example]]
+name = "fence-conformance"
+required-features = ["test-fixtures"]
+
+[[example]]
+name = "resource-conformance"
+required-features = ["test-fixtures"]
+
+[[example]]
+name = "durable-conformance"
+required-features = ["test-fixtures"]
+
+[dependencies]
+peer-protocol = { path = "../peer-protocol" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+rusqlite = { version = "=0.37.0", features = ["bundled", "limits"] }
+rustix = { version = "1.1.4", features = ["fs"] }
+tempfile = "3.23.0"
+time = { version = "=0.3.55", features = ["formatting", "parsing"] }
+uuid = { version = "=1.18.1", features = ["v4"] }

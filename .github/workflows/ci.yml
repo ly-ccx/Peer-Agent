@@ -78,6 +78,17 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Native CLI scoped validation
+        run: node scripts/native-cli/verify.mjs "$RUNNER_TEMP/native-cli"
+
+      - name: Preserve native CLI terminal checks
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-cli-${{ matrix.os }}
+          path: ${{ runner.temp }}/native-cli
+          if-no-files-found: ignore
+
       - name: Check packaged main-process imports
         run: |
           node --test scripts/check-packaged-main-imports.test.mjs

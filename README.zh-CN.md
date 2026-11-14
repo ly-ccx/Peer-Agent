@@ -105,6 +105,14 @@ npm 包安装对应平台的二进制及 helper；可用平台与安装包以对
     pnpm pack:linux    # 解包目录，用于沙箱与冒烟检查
     pnpm dist:linux    # AppImage + .deb
 
+### 原生 Rust CLI 迁移候选
+
+运行 `cargo build --release --locked -p peer-cli -p peer-credential-helper` 构建独立候选。`target/release/peer-native` 完全以原生进程运行，无 Bun/Node sidecar；已安装和默认的 `peer` 尚未切换。
+
+首条执行切片为 `peer-native exec --plan <canonical-goal-id> [--max-turns N]`，通过 `PEER_AGENT_HOME` 指向显式隔离的既有数据根。它接受新的委托执行绑定、现有普通 OpenAI-compatible chat 渠道，以及有界文件和前台 Shell 工具。`recover --plan <id>` 对中断的原生执行进行观测，保留未知效果，不重放工具。回复后执行暂停，Goal 仍待验收。其他上下文、鉴权、wire 和完整 Bot/TUI 功能仍在迁移，未支持路径会明确拒绝。
+
+开发验证：`node scripts/native-cli/verify.mjs <临时输出目录>`。Node/Bun 只用现有实现做测试对照，不是候选的运行时子进程。
+
 ## 本地控制与证据
 
 模型负责认知，可以来自云端服务。Peer 本地负责能力执行、授权判断和证据。模型能收到什么，取决于所选 Provider 和允许纳入的上下文；本地优先不代表内容绝不会离开电脑。

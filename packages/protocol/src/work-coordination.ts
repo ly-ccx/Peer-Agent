@@ -1,4 +1,13 @@
 import type { ProjectRecoveryFailureKind } from './project-agent-failure.ts';
+import type { SessionExecutionIdentity, SessionControlOperation } from './session-control.ts';
+
+/** ADR 131 native attempt metadata. Shape alone proves neither death nor effect. */
+export interface NativeEpisodeRecorder {
+  readonly schemaVersion: 1;
+  readonly runtime: 'peer-native';
+  readonly execution: SessionExecutionIdentity;
+  readonly recorder: NonNullable<SessionControlOperation['recorder']>;
+}
 
 export interface ProjectWorkBudgetLimits {
   readonly schemaVersion?: 2;
@@ -129,11 +138,12 @@ export interface ProjectWorkReceipt {
     readonly lastBoundary?: ProjectWorkBudgetBoundary;
     readonly attempts: Readonly<Record<string, { readonly role: string; readonly requests?: number; readonly modelProviderId?: string;
       readonly checkpointRef?: string;
-      readonly pendingTools?: readonly { readonly toolCallId: string | null; readonly capabilityId: string | null; readonly verificationSessionId?: string }[] }>>;
+      readonly nativeRecorder?: NativeEpisodeRecorder;
+      readonly pendingTools?: readonly { readonly toolCallId: string | null; readonly capabilityId: string | null; readonly verificationSessionId?: string; readonly nativeRecorder?: NativeEpisodeRecorder }[] }>>;
     readonly reconciledDispatches?: readonly VerificationDispatchReconciliation[];
     readonly settledDispatches?: readonly SettledDelegationDispatch[];
     readonly uncertainDispatches?: readonly { readonly attemptId: string; readonly role: string;
-      readonly toolCallId: string | null; readonly capabilityId: string | null; readonly verificationSessionId?: string }[];
+      readonly toolCallId: string | null; readonly capabilityId: string | null; readonly verificationSessionId?: string; readonly nativeRecorder?: NativeEpisodeRecorder }[];
   };
   readonly stopScope: 'reply' | 'work';
   readonly updatedAt: string;
