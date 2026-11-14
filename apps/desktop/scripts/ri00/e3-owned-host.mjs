@@ -1,13 +1,13 @@
 import fs from'node:fs';import path from'node:path';import{createRequire}from'node:module';import{spawn}from'node:child_process';import{createInterface}from'node:readline';import{fileURLToPath}from'node:url';
 
 /** Owns one fixture process and a fixed command protocol; never attaches to a user process. */
-export async function startOwnedE3Host(config){
+export async function startOwnedE3Host(config,{entrypoint=new URL('./e3-owned-main.cjs',import.meta.url)}={}){
  if(!config.output||fs.existsSync(config.output))throw Error('e3_new_owned_output_required');fs.mkdirSync(config.output,{recursive:true,mode:0o700});
  const file=path.join(config.output,'config.private.json');fs.writeFileSync(file,JSON.stringify(config),{mode:0o600});
  const require=createRequire(path.join(config.moduleRoot,'apps/desktop/package.json')),env={...process.env};delete env.ELECTRON_RUN_AS_NODE;
  if(config.defaultVm){delete env.NODE_OPTIONS;delete env.NODE_V8_COVERAGE;delete env.V8_FLAGS;}
  env.PEER_RI00_OWNED_CONFIG=file;
- const child=spawn(require('electron'),[...(config.inspect?['--inspect=0']:[]),fileURLToPath(new URL('./e3-owned-main.cjs',import.meta.url)),file],{env,stdio:['pipe','pipe','pipe']});
+ const child=spawn(require('electron'),[...(config.inspect?['--inspect=0']:[]),fileURLToPath(entrypoint),file],{env,stdio:['pipe','pipe','pipe']});
  const closed=new Promise(resolve=>child.once('close',(code,signal)=>resolve({code,signal})));let stderr='',stdout='',seq=0,readyResolve,readyReject,readyTimer;
  const readyPromise=new Promise((resolve,reject)=>{readyResolve=resolve;readyReject=reject;readyTimer=setTimeout(()=>reject(Error('e3_owned_ready_timeout')),15000);});
  const pending=new Map();child.stderr.on('data',b=>{if(stderr.length<1048576)stderr+=b;});

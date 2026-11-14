@@ -1,0 +1,58 @@
+import fs from'node:fs';import path from'node:path';import assert from'node:assert/strict';import{execFileSync}from'node:child_process';import{fileURLToPath}from'node:url';import{randomUUID}from'node:crypto';
+import{startOwnedE3Host}from'./ri00/e3-owned-host.mjs';import{connectFr1Transport}from'./ri00/fr1-transport.mjs';import{installFr1Session,archiveFr1Batch,stopFr1Session}from'./ri00/fr1-session.mjs';import{runFr1Controller}from'./ri00/fr1-controller.mjs';import{discoverE3Entries}from'./ri00/e3-entry-discovery.mjs';
+import{createFr1Journal,replayFr1Journal}from'./ri00/fr1-journal.mjs';import{analyzeFr1Profile}from'./ri00/fr1-profile-analysis.mjs';import{fr1ProfileClock}from'./ri00/fr1-profiler.mjs';import{fr1NativeSample}from'./ri00/fr1-native-sample.mjs';import{fr1Source,fr1Hash as hash}from'./ri00/fr1-identity.mjs';import{inspectClosure}from'./ri00/trace.mjs';
+const args=process.argv.slice(2),opt=k=>args[args.indexOf('--'+k)+1];for(const k of ['config','budget','tests','output'])if(!args.includes('--'+k))throw Error('fr1_qualification_inputs');
+const read=k=>JSON.parse(fs.readFileSync(opt(k))),base=read('config'),budget=read('budget'),tests=read('tests'),output=path.resolve(opt('output')),root=fileURLToPath(new URL('../../../',import.meta.url)),candidate=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),source=fr1Source();
+assert.equal(execFileSync('git',['status','--porcelain'],{cwd:root,encoding:'utf8'}).trim(),'');assert.equal(tests.candidate,candidate);assert.equal(tests.sourceSha256,hash(JSON.stringify(source)));assert.equal(tests.passed,true);assert.equal(tests.configSha256,hash(fs.readFileSync(opt('config'))));
+assert.equal(budget.preparation.ownedFunctionalElectronLaunches,1);assert.equal(budget.preparation.productQueryCallsMaximum,12);if(fs.existsSync(output))throw Error('fr1_fresh_qualification');fs.mkdirSync(output,{recursive:true,mode:0o700});
+const report={kind:'FR1-only-functional-Electron-not-field-cause',candidate,source,budgetSha256:hash(fs.readFileSync(opt('budget'))),testsSha256:hash(fs.readFileSync(opt('tests'))),ownedLaunches:0,passed:false,cases:[],failures:[],notFieldCause:true,extraActualPeerQueries:0};
+const started=performance.now(),noticeName='__ri00_fr1_notice',wait=ms=>new Promise(r=>setTimeout(r,ms));let h,t,leaseTransport,journal,leaseJournal,lastHeartbeat=performance.now(),bindingFunction,failSync=false;
+function save(){fs.writeFileSync(path.join(output,'report.private.json'),JSON.stringify(report),{mode:0o600});}
+async function install(transport,refs,leaseMs,ownerId){return installFr1Session(transport,refs,{ownerId,expectedWorkspaceId:h.ready.scopeWorkspace,epoch:'fr1-owned-fixed-copy',identityComplete:true,durationMs:60000,leaseMs,ownedFunctional:true,electronRequireBase:path.join(base.moduleRoot,'apps/desktop/package.json')});}
+async function drain(){return(await archiveFr1Batch(t,journal)).batch;}
+try{
+ report.ownedLaunches=1;save();h=await startOwnedE3Host({...base,mode:'production',fr1Functional:true,output:path.join(output,'host'),label:'fr1-functional',inspect:true,defaultVm:true,hostDeadlineMs:60000},{entrypoint:new URL('./ri00/fr1-owned-main.cjs',import.meta.url)});report.runtime=h.ready.runtime;
+ t=await connectFr1Transport(h.ready.inspectorUrl,{pid:h.child.pid,onNotice:n=>{if(n.kind==='heartbeat')lastHeartbeat=performance.now();}});
+ const refs=await discoverE3Entries(t.post,{electronRequireBase:path.join(base.moduleRoot,'apps/desktop/package.json')});report.mapping=refs.proof;report.initial=await install(t,refs,90000,'functional-'+randomUUID());
+ journal=createFr1Journal(path.join(output,'history.private.jsonl'),{sync:fd=>{if(failSync){failSync=false;throw Error('fr1_injected_fsync');}fs.fdatasyncSync(fd);}});
+ const controls=await h.rpc('checks');assert.equal(controls.sameError,true);assert.equal(controls.samePromise,true);report.cases.push({name:'original-Promise-and-error-transparent',passed:true});
+ for(let i=0;i<9;i++){const value=await h.rpc('entry',{kind:'list-sessions'});assert.equal(value.ok,true);const b=await drain();const s=await t.call('state');
+  if(s.stopped)throw Error('fr1_unexpected_recorder_stop:'+s.stopReason+':rootSelf='+s.lastRootSelfCpuMs);assert.equal(s.metadataErrors,0);}
+ const hist=replayFr1Journal(fs.readFileSync(path.join(output,'history.private.jsonl'),'utf8')),natural=hist.records.filter(x=>x.kind==='root');assert.equal(natural.length,9);if(tests.expected)assert.ok(natural.every(x=>x.value.rows===tests.expected.sessions&&x.value.planCalls===tests.expected.planCalls&&x.value.outputSha256===tests.expected.outputSha256&&x.value.evidence.every(e=>e.rows===tests.expected.evidenceRows)));assert.ok(natural.every(x=>x.value.evidence.length===12&&x.value.evidence.every(e=>e.entryStack.id)&&!x.value.chainIncomplete));
+ report.cases.push({name:'all-nine-first-roots-and-contemporaneous-entry-span-chains',passed:true});
+ await t.call('armProfile');assert.equal((await h.rpc('entry',{kind:'directory'})).ok,true);assert.equal((await h.rpc('entry',{kind:'get-session'})).ok,true);await t.call('stopProfile');
+ const profile=await t.call('takeProfile');assert.ok(profile.profile);assert.equal(profile.state.startAttempts,1);assert.equal(profile.state.disabled,true);report.profileClock=fr1ProfileClock(profile.profile,profile.state);assert.equal(report.profileClock.valid,true);
+ const raw=JSON.stringify(profile);report.profileBytes=Buffer.byteLength(raw);assert.ok(report.profileBytes<=16777216);fs.writeFileSync(path.join(output,'profile.private.json'),raw,{mode:0o600});await t.call('ackProfile');report.cases.push({name:'one-natural-entry-profile-start-clock-stop-disable',passed:true});
+ const b=await t.take();failSync=true;assert.throws(()=>journal.commit(b),/injected_fsync/);const size=journal.bytes;assert.equal(journal.pending,b);assert.deepEqual(await t.take(),b);journal.commit(b);assert.equal(journal.bytes,size);
+ await t.call('ack',{throughSeq:b.throughSeq});await t.call('ack',{throughSeq:b.throughSeq});report.profileStructure=analyzeFr1Profile(profile.profile,report.profileClock,b.records);assert.ok(report.profileStructure.qualifiedSpanCount>0);report.cases.push({name:'fsync-original-batch-no-replay-and-idempotent-unknown-ACK-recovery',passed:true});
+ const hbDeadline=performance.now()+1500;while(performance.now()-lastHeartbeat>300&&performance.now()<hbDeadline)await wait(20);
+ let blockDone=false;const blocked=h.rpc('block').finally(()=>{blockDone=true;});const until=performance.now()+2000;
+ while(performance.now()-lastHeartbeat<1000&&performance.now()<until)await wait(10);
+ report.watchdogWhileMainHasNotReturned=!blockDone;assert.equal(report.watchdogWhileMainHasNotReturned,true);
+ report.nativeSample=await fr1NativeSample(h.child.pid,path.join(output,'owned-native.private.txt'));assert.equal(report.nativeSample.complete,true);await blocked;
+ report.cases.push({name:'external-stall-watchdog-before-main-returns-synthetic-not-field-cause',passed:true});
+ await drain();
+ const projection=replayFr1Journal(fs.readFileSync(path.join(output,'history.private.jsonl'),'utf8')).records;let projected=false,cancel=false;
+ const now=performance.now(),controllerReport={failures:[]};
+ report.controller=await runFr1Controller({startedMs:now,report:controllerReport,io:{now:()=>performance.now(),cancelled:()=>cancel,budget:()=>true,terminal:()=>null,
+  heartbeatAge:()=>0,dataReady:()=>!projected,drain:async()=>{projected=true;return{records:projection};},forPolicy:r=>r,control:async()=>{},renew:()=>t.call('renew'),
+  nativeSample:async()=>{throw Error('unexpected-second-native');},armProfile:async()=>{throw Error('unexpected-second-profile');},profileState:()=>t.call('state'),saveProfile:async()=>null,
+  progress:async()=>{},wait:async()=>{cancel=true;},stop:async()=>stopFr1Session(t,journal,{ownerId:report.initial.ownerId})}});
+ assert.equal(report.controller.reason,'fr1_cancelled');assert.equal(report.controller.recovery.restored,true);report.cases.push({name:'shared-controller-durable-real-history-projection-cancel-and-real-stop-not-field-cause',passed:true});
+ const normal=await t.call('state');assert.equal(normal.restored,true);assert.equal(normal.ownersRestored,true);assert.equal(normal.bindingRestored,true);await drain();
+ report.normalStop=await t.call('state');assert.equal(report.normalStop.retainedBytes,0);assert.equal(report.normalStop.activeRoot,null);report.cases.push({name:'normal-stop-original-owners-and-zero-unacked',passed:true});
+ await t.post('Runtime.removeBinding',{name:noticeName});await t.post('Runtime.callFunctionOn',{objectId:t.recorderId,functionDeclaration:'function(){if(globalThis.__ri00Fr1===this)delete globalThis.__ri00Fr1;return true;}',returnByValue:true});await t.close();t=null;
+ leaseTransport=await connectFr1Transport(h.ready.inspectorUrl,{pid:h.child.pid});const leaseRefs=await discoverE3Entries(leaseTransport.post,{electronRequireBase:path.join(base.moduleRoot,'apps/desktop/package.json')});await install(leaseTransport,leaseRefs,100,'lease-'+randomUUID());await wait(160);
+ const lease=await leaseTransport.call('state');assert.equal(lease.stopReason,'controller-lease');assert.equal(lease.restored,true);assert.equal(lease.bindingRestored,true);report.leaseStop=lease;
+ leaseJournal=createFr1Journal(path.join(output,'lease-history.private.jsonl'));const lb=await leaseTransport.take();leaseJournal.commit(lb);await leaseTransport.call('ack',{throughSeq:lb.throughSeq});report.cases.push({name:'lease-loss-restores-without-controller-renewal-or-business-read',passed:true});
+ const inspected=await h.rpc('inspect');report.beforeExit=inspected;assert.equal(inspected.queryCalls,12);assert.ok(inspected.readCpuMs<=8000);assert.ok(Object.values(inspected.owners).every(Boolean));assert.ok(Object.values(inspected.getters).every(x=>x===0));assert.equal(inspected.guard.sourceWritesDenied,0);
+ report.passed=true;
+}catch(error){report.failures.push({message:error.message,stack:error.stack});}
+finally{
+ for(const transport of [t,leaseTransport])if(transport){try{await transport.call('stop',{reason:'controller'});const b=await transport.take();const j=transport===t?journal:leaseJournal;if(j){j.commit(b);await transport.call('ack',{throughSeq:b.throughSeq});}await transport.post('Runtime.removeBinding',{name:noticeName});}catch(e){report.failures.push({message:'qualification-cleanup:'+e.message});}try{await transport.close();}catch(e){report.failures.push({message:e.message});}}
+ if(h)try{report.exit=await h.close();report.closed=await h.closed;report.portClosure=await inspectClosure(new URL(h.ready.inspectorUrl).port,{timeoutMs:2000});assert.equal(report.portClosure.closed,true);assert.equal(report.closed.code,0);assert.ok(Object.values(report.exit.owners).every(Boolean));}catch(e){report.failures.push({message:'owned-exit:'+e.message});}
+ journal?.close();leaseJournal?.close();report.wallMs=performance.now()-started;report.queryCalls=report.exit?.queryCalls??report.beforeExit?.queryCalls??null;
+ report.profilerStarts=report.profileBytes?1:0;report.qualifiesOnly='functional recorder/controller/recovery, not low-interference or cause';
+ if(report.failures.length||report.wallMs>60000||report.queryCalls>12)report.passed=false;save();if(!report.passed)process.exitCode=1;
+ console.log(JSON.stringify({passed:report.passed,launches:report.ownedLaunches,cases:report.cases.length,queryCalls:report.queryCalls,wallMs:report.wallMs,failures:report.failures.map(x=>x.message)}));
+}
