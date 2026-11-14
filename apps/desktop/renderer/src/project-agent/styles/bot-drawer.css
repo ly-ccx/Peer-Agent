@@ -147,6 +147,24 @@ html:not([data-vibrancy='true']) .bot-drawer-resizer {
   background: var(--paper-sheet, var(--za-surface-0));
 }
 
+.bot-drawer-chrome.bot-drawer-chrome--bar {
+  min-height: 52px;
+  justify-content: center;
+  padding: 5px 12px 5px 16px;
+}
+
+.bot-drawer-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.bot-drawer-bar > .bot-drawer-segments {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .bot-drawer-head p {
   flex: 1;
   min-width: 0;
@@ -155,24 +173,32 @@ html:not([data-vibrancy='true']) .bot-drawer-resizer {
   white-space: nowrap;
 }
 
-.bot-drawer-head button {
+.bot-drawer-chrome .bot-drawer-close {
   -webkit-app-region: no-drag;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--space-8, 32px);
+  min-width: var(--space-8, 32px);
+  min-inline-size: var(--space-8, 32px);
+  height: var(--space-8, 32px);
+  min-height: var(--space-8, 32px);
+  min-block-size: var(--space-8, 32px);
+  padding: 0;
   border: 0;
-  border-radius: var(--ui-radius-pill);
+  border-radius: var(--ui-radius-control-compact);
   background: transparent;
   color: var(--graphite-soft, var(--za-text-muted));
   font: inherit;
-  font-size: 12px;
-  padding: 5px 10px;
   cursor: pointer;
   transition:
     color var(--za-motion-fast) var(--za-ease-standard),
     background var(--za-motion-fast) var(--za-ease-standard);
 }
 
-.bot-drawer-head button:hover {
+.bot-drawer-chrome .bot-drawer-close:hover:not(:disabled) {
   color: var(--graphite-base, var(--za-text));
-  background: var(--chrome-hover);
+  background: var(--control-fill-hover);
 }
 
 .bot-drawer-head p,
@@ -1172,6 +1198,7 @@ html:not([data-vibrancy='true']) .bot-drawer-resizer {
   min-width: 0;
   min-height: 32px;
   padding: 5px 2px;
+  font-size: var(--ui-font-meta);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

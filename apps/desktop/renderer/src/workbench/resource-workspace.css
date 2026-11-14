@@ -7,7 +7,6 @@
 .bot-resource-primary .bot-drawer-dock-frame[data-drawer-cover='true'] { position: absolute; inset-block: 0; inset-inline-end: 0; z-index: 3; max-width: 100%; }
 .bot-resource-primary .bot-drawer-dock-frame[data-drawer-cover='true'] .bot-drawer-dock { max-width: 100%; }
 .bot-resource-primary .bot-drawer-dock-frame[data-drawer-cover='true'] .bot-drawer-body { min-width: 0; width: 100%; box-sizing: border-box; }
-.bot-drawer-head .bot-drawer-close { display: grid; place-items: center; flex: none; width: var(--space-8); height: var(--space-8); padding: 0; }
 .bot-resource-pane { position: relative; display: flex; flex: 0 0 auto; min-width: 0; min-height: 0; max-width: calc(100% - var(--resource-primary-min, 480px)); }
 /* The handle belongs to the gap, outside the rounded paper's overflow clip. */
 .bot-resource-pane > .resource-workspace-resizer { top: 0; bottom: 0; left: -3px; height: auto; touch-action: none; }
