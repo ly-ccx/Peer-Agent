@@ -2,9 +2,16 @@
 
 mod coordination_fence;
 mod files;
+mod resources;
+mod sqlite_file;
 #[cfg(feature = "test-fixtures")]
 pub use coordination_fence::protect_coordination_writer_fixture;
 pub use coordination_fence::{FenceError, FenceOutcome, FenceStep, protect_coordination_writer};
+pub use resources::{
+    ExecutionResourceStore, HostClaimClosure, HostDispatchScopes, HostResourcePlan, ResourceError,
+    ResourceIdentity, ResourceReservation, directory_resource, file_resource,
+    provider_execution_scopes, provider_file_scopes, resource_conflicts,
+};
 mod goal_source;
 mod history;
 mod lease;

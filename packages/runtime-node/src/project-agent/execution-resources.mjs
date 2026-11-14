@@ -253,8 +253,13 @@ export function createExecutionResources({ rootDir, now = () => new Date().toISO
       return transaction(connection => {
         const execution = executionIdentity(plan);
         const claims = rows(connection).filter(row => sameExecution(row.execution, execution)), primary = executionResource(plan);
+        const currentIdentity = claim => {
+          const scope = claimScope(claim);
+          if (!scope) throw new Error('execution_resource_scope_unknown');
+          return scope.kind === 'file' ? fileResource(scope.path, { allowMissing: true }).identity : directoryResource(scope.path).identity;
+        };
         if (!claims.some(claim => claim.resourceRef === primary.resourceRef) || claims.some(claim => claim.hostEpoch !== hostEpoch
-          || !['reserved', 'active'].includes(claim.state) || directoryResource(claim.resourceRef.slice('directory:'.length)).identity !== claim.identity)) return false;
+          || !['reserved', 'active'].includes(claim.state) || currentIdentity(claim) !== claim.identity)) return false;
         for (const claim of claims) if (claim.state !== 'active') put(connection, { ...claim, state: 'active', revision: claim.revision + 1, updatedAt: now() });
         return true;
       });

@@ -26,6 +26,9 @@ run('cargo', ['build', '--locked', '-p', 'peer-store', '--example', 'transcript-
 run('bun', ['scripts/native-cli/transcript-conformance.ts', 'target/debug/examples/transcript-conformance']);
 run('cargo', ['build', '--locked', '-p', 'peer-store', '--features', 'test-fixtures', '--example', 'fence-conformance']);
 run('bun', ['scripts/native-cli/fence-conformance.ts', 'target/debug/examples/fence-conformance']);
+run('cargo', ['build', '--locked', '-p', 'peer-store', '--features', 'test-fixtures', '--example', 'resource-conformance']);
+run('bun', ['scripts/native-cli/resource-conformance.ts', 'target/debug/examples/resource-conformance']);
+run('node', ['--test', 'packages/runtime-node/src/project-agent/execution-resources.test.mjs']);
 run('cargo', ['build', '--locked', '-p', 'peer-credential-helper', '--bin', 'peer-credential-helper']);
 run('cargo', ['build', '--locked', '-p', 'peer-runtime', '--example', 'helper-probe']);
 execFileSync(join(root, 'target/debug/examples/helper-probe'), [join(root, 'target/debug/peer-credential-helper')], {

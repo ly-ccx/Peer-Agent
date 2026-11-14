@@ -1,6 +1,6 @@
 use crate::{StoreError, files, valid_id};
 use peer_protocol::{BotAccessPolicy, JsonLimits, LocalAccessLevel, decode_json_bounded};
-use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
 use std::{
     path::{Path, PathBuf},
     time::Duration,
@@ -70,56 +70,14 @@ impl PolicyStore {
     }
 
     fn open_existing(&self, write: bool) -> Result<Connection, StoreError> {
-        // SQLite NOFOLLOW also rejects symlinked parent components (e.g.
-        // macOS /var -> /private/var). Canonicalize only the parent; keep the
-        // policy filename unfollowed and reject a symlink at that final path.
-        let directory = std::fs::canonicalize(self.home.join("project-runtime"))
-            .map_err(|_| StoreError::PolicyUnavailable)?;
-        let path = directory.join("bot-access.sqlite");
-        let meta = std::fs::symlink_metadata(&path).map_err(|_| StoreError::PolicyUnavailable)?;
-        if !meta.is_file() {
-            return Err(StoreError::PolicyUnavailable);
-        }
-        let access = if write {
-            OpenFlags::SQLITE_OPEN_READ_WRITE
-        } else {
-            OpenFlags::SQLITE_OPEN_READ_ONLY
-        };
-        let connection = Connection::open_with_flags(
-            path,
-            access | OpenFlags::SQLITE_OPEN_NO_MUTEX | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        let file = crate::sqlite_file::SqliteFile::existing(
+            &self.home.join("project-runtime/bot-access.sqlite"),
         )
         .map_err(|_| StoreError::PolicyUnavailable)?;
-        // Closing a rejected candidate must not checkpoint someone else's WAL.
-        connection
-            .set_db_config(
-                rusqlite::config::DbConfig::SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE,
-                true,
-            )
-            .map_err(|_| StoreError::PolicyUnavailable)?;
-        for (limit, value) in [
-            (rusqlite::limits::Limit::SQLITE_LIMIT_LENGTH, 1_048_576),
-            (rusqlite::limits::Limit::SQLITE_LIMIT_SQL_LENGTH, 16_384),
-            (rusqlite::limits::Limit::SQLITE_LIMIT_COLUMN, 32),
-        ] {
-            connection
-                .set_limit(limit, value)
-                .map_err(|_| StoreError::PolicyUnavailable)?;
-        }
-        connection
-            .busy_timeout(Duration::from_secs(3))
-            .map_err(|_| StoreError::PolicyUnavailable)?;
-        connection
-            .pragma_update(None, "cache_size", -2048)
-            .map_err(|_| StoreError::PolicyUnavailable)?;
-        let quick: String = connection
-            .query_row("PRAGMA quick_check", [], |r| r.get(0))
-            .map_err(|_| StoreError::PolicyUnavailable)?;
-        if quick != "ok" {
-            return Err(StoreError::PolicyUnavailable);
-        }
-        Ok(connection)
+        file.open(write, Duration::from_secs(3))
+            .map_err(|_| StoreError::PolicyUnavailable)
     }
+
     fn connect(&self, write: bool) -> Result<Connection, StoreError> {
         let preflight = self.open_existing(false)?;
         preflight
