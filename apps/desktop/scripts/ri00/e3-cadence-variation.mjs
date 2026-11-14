@@ -72,7 +72,7 @@ function workDifference(a, b) {
     cpuPerCycleRelative: (b.cpuMs / b.cycles) / (a.cpuMs / a.cycles) - 1,
     accounting: decomposeWork(a, b), notPhysicalFrequencyOrPerPassWork: true};
 }
-function extreme(block) {
+export function auditWarmBlock(block) {
   const points = block.points.slice(1).filter(compatible).map((p, i) => ({p, i,
     user: sum(p.row.evidence.map(e => e.userMs))})).sort((a, b) => a.user - b.user || a.i - b.i);
   assert.ok(points.length >= 3, 'cadence_original_compatible_count');
@@ -96,7 +96,28 @@ function extreme(block) {
   const buckets = new Map();
   for (const {p, user} of points) { const k = signature(p.row), bucket = buckets.get(k) || [];
     bucket.push({ticketId: p.row.ticketId, evidenceUserMs: user}); buckets.set(k, bucket); }
+  const ordered = block.points.slice(1).filter(compatible), sameSignatureChronologicalPairs = [];
+  for (let i = 0; i < ordered.length; i++) for (let j = i + 1; j < ordered.length; j++) {
+    const x = ordered[i], y = ordered[j];
+    assert.ok(y.row.ticketId > x.row.ticketId, 'warm_ticket_order');
+    if (signature(x.row) !== signature(y.row)) continue;
+    const lo = snapshot(x), hi = snapshot(y);
+    sameSignatureChronologicalPairs.push({beforeTicket: x.row.ticketId, afterTicket: y.row.ticketId,
+      delta: difference(lo, hi), rootWork: workDifference(lo.outer, hi.outer),
+      perPass: x.row.evidence.map((e, k) => ({position: k, userMs: y.row.evidence[k].userMs - e.userMs,
+        systemMs: y.row.evidence[k].systemMs - e.systemMs})), notIndependentReplicatesOrCause: true});
+  }
+  const perLevelWork = before.levels.map((level, i) => {
+    assert.equal(level.name, after.levels[i].name);
+    return {name: level.name, before: level, after: after.levels[i], accounting: decomposeWork(level, after.levels[i])};
+  });
   return {block: block.label, summary, before, after, delta, positions, groups,
+    chronology: {lowTicket: a.row.ticketId, highTicket: b.row.ticketId,
+      lowStartMs: a.row.start, highStartMs: b.row.start, highOccursLater: b.row.start > a.row.start,
+      signedChronologicalUserDeltaMs: b.row.start === a.row.start ? null :
+        (b.row.start > a.row.start ? 1 : -1) * delta.evidenceUserMs,
+      highMinusLowIsNotTemporalOrder: true, notQualifiedFastToSlow: true},
+    perLevelWork, sameSignatureChronologicalPairs,
     sameFullGcSignature: signature(a.row) === signature(b.row), rootWork: workDifference(before.outer, after.outer),
     sameSignatureSubgroups: [...buckets].map(([gcSignature, v]) => ({gcSignature: JSON.parse(gcSignature),
       points: v, rangeMs: Math.max(...v.map(p => p.evidenceUserMs)) - Math.min(...v.map(p => p.evidenceUserMs))})),
@@ -140,7 +161,7 @@ function drift(t) {
     originalUserGateChanged: false, referenceContributionMs: -referenceDelta.evidenceUserMs};
 }
 /** Only joins original acknowledged facts. Host + ticket identifies rows; remote label is deliberately constant. */
-function attachCadenceJournal(report, records) {
+export function joinControlledJournal(report, records, expectedRoots) {
   const index = new Map(), events = new Map();
   for (const j of records) {
     if (j.kind !== 'read-and-entry-batch') continue;
@@ -158,14 +179,15 @@ function attachCadenceJournal(report, records) {
     assert.equal(v.before.values.ri_proc_start_abstime, v.after.values.ri_proc_start_abstime);
     joined.set(key, {...p, record: v, observedGcEvents: events.get(h.label)});
   }
-  assert.equal(joined.size, 244); assert.equal(index.size, joined.size);
+  assert.ok(Number.isInteger(expectedRoots) && expectedRoots > 0, 'controlled_journal_expected_count');
+  assert.equal(joined.size, expectedRoots); assert.equal(index.size, joined.size);
   return {point(host, p) {const v = joined.get(`${host}/${p.row.ticketId}`); assert.ok(v); return v;}, events};
 }
 export function auditCadenceVariation(report, journal = null) {
   assert.equal(report.supervisorRoots, 244); assert.equal(report.ownedLaunches, 3);
   assert.equal(report.executionCompleted, true); assert.equal(report.controlsQualified, false);
   assert.deepEqual(report.targets.map(t => t.order), ['ABBA', 'BAAB']);
-  const join = journal ? attachCadenceJournal(report, journal) : null;
+  const join = journal ? joinControlledJournal(report, journal, 244) : null;
   assert.ok(report.targets.every(t => t.cells.length === 4 && t.cells.every(c => c.referenceBlock.arm === 'A')), 'cadence_original_reference_arm');
   const targets = report.targets.map(t => ({...t, cells: t.cells.map(c => ({...c,
     targetBlock: {...c.targetBlock, points: c.targetBlock.points.map(p => join ? join.point(t.label, p) : p)},
@@ -173,7 +195,7 @@ export function auditCadenceVariation(report, journal = null) {
   const warm = targets.flatMap(t => t.cells.flatMap((c, cell) => ['target', 'reference'].flatMap((role, i) => {
     const b = c[role + 'Block'], summary = summarizeDenseBlock(b.points.map(p => p.row));
     assert.deepEqual(summary, c.pair.summaries[i]);
-    return summary.compatibleRange > 15 ? [{order: t.order, cell, arm: c.arm, role, ...extreme(b)}] : [];
+    return summary.compatibleRange > 15 ? [{order: t.order, cell, arm: c.arm, role, ...auditWarmBlock(b)}] : [];
   })));
   assert.equal(warm.length, 6, 'cadence_six_original_warm_failures');
   const returns = targets.map(drift);
