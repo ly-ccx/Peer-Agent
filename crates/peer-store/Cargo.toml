@@ -5,6 +5,13 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+test-fixtures = []
+
+[[example]]
+name = "fence-conformance"
+required-features = ["test-fixtures"]
+
 [dependencies]
 peer-protocol = { path = "../peer-protocol" }
 serde.workspace = true
@@ -14,3 +21,4 @@ rusqlite = { version = "=0.37.0", features = ["bundled", "limits"] }
 rustix = { version = "1.1.4", features = ["fs"] }
 tempfile = "3.23.0"
 time = { version = "=0.3.55", features = ["formatting", "parsing"] }
+uuid = { version = "=1.18.1", features = ["v4"] }

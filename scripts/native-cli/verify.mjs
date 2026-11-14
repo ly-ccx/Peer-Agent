@@ -14,8 +14,8 @@ run('bun', ['scripts/native-cli/contracts.ts']);
 run('bun', ['scripts/native-cli/control-contracts.ts']);
 run('node', ['scripts/native-cli/check-boundaries.mjs']);
 run('cargo', ['fmt', '--all', '--check']);
-run('cargo', ['clippy', '--locked', '-p', 'peer-cli', '-p', 'peer-protocol', '-p', 'peer-tui', '-p', 'peer-store', '-p', 'peer-runtime', '--all-targets', '--features', 'peer-runtime/test-fixtures', '--', '-D', 'warnings']);
-run('cargo', ['test', '--locked', '--workspace', '--all-targets', '--features', 'peer-runtime/test-fixtures']);
+run('cargo', ['clippy', '--locked', '-p', 'peer-cli', '-p', 'peer-protocol', '-p', 'peer-tui', '-p', 'peer-store', '-p', 'peer-runtime', '--all-targets', '--features', 'peer-runtime/test-fixtures,peer-store/test-fixtures', '--', '-D', 'warnings']);
+run('cargo', ['test', '--locked', '--workspace', '--all-targets', '--features', 'peer-runtime/test-fixtures,peer-store/test-fixtures']);
 run('cargo', ['build', '--release', '--locked', '-p', 'peer-cli', '--bins', '--examples']);
 run('cargo', ['build', '--locked', '-p', 'peer-store', '--example', 'conformance']);
 run('bun', ['scripts/native-cli/store-conformance.ts', 'target/debug/examples/conformance']);
@@ -24,6 +24,8 @@ run('cargo', ['build', '--locked', '-p', 'peer-store', '--example', 'lease-confo
 run('bun', ['scripts/native-cli/lease-conformance.ts', 'target/debug/examples/lease-conformance']);
 run('cargo', ['build', '--locked', '-p', 'peer-store', '--example', 'transcript-conformance']);
 run('bun', ['scripts/native-cli/transcript-conformance.ts', 'target/debug/examples/transcript-conformance']);
+run('cargo', ['build', '--locked', '-p', 'peer-store', '--features', 'test-fixtures', '--example', 'fence-conformance']);
+run('bun', ['scripts/native-cli/fence-conformance.ts', 'target/debug/examples/fence-conformance']);
 run('cargo', ['build', '--locked', '-p', 'peer-credential-helper', '--bin', 'peer-credential-helper']);
 run('cargo', ['build', '--locked', '-p', 'peer-runtime', '--example', 'helper-probe']);
 execFileSync(join(root, 'target/debug/examples/helper-probe'), [join(root, 'target/debug/peer-credential-helper')], {

@@ -264,6 +264,9 @@ impl HostLeaseStore {
 }
 
 impl LeaseToken {
+    pub(crate) fn directory(&self) -> Result<&Path, StoreError> {
+        self.path.parent().ok_or(StoreError::InvalidInput)
+    }
     pub fn record(&self) -> &HostLeaseRecord {
         &self.record
     }

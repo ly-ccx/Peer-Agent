@@ -1,6 +1,10 @@
 #![forbid(unsafe_code)]
 
+mod coordination_fence;
 mod files;
+#[cfg(feature = "test-fixtures")]
+pub use coordination_fence::protect_coordination_writer_fixture;
+pub use coordination_fence::{FenceError, FenceOutcome, FenceStep, protect_coordination_writer};
 mod goal_source;
 mod history;
 mod lease;
