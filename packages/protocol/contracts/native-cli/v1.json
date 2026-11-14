@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "governance": "ADR 129–131 (review drafts 116–118)",
+  "exitCodes": {
+    "ok": 0,
+    "runtime": 1,
+    "usage": 2,
+    "auth": 3,
+    "cancelled": 4,
+    "maxTurns": 5,
+    "waitingUser": 6,
+    "goalFailed": 7,
+    "botReplyPending": 8
+  },
+  "dataHomeCases": [
+    {
+      "env": {
+        "PEER_AGENT_HOME": "/fixture/custom",
+        "PEER_USER_DATA_PATH": "/fixture/legacy"
+      },
+      "expected": "/fixture/custom",
+      "home": "/fixture/home"
+    },
+    {
+      "env": {
+        "PEER_AGENT_HOME": " ",
+        "PEER_USER_DATA_PATH": " /fixture/legacy "
+      },
+      "expected": "/fixture/legacy",
+      "home": "/fixture/home"
+    }
+  ],
+  "approvalDigestCases": [
+    {
+      "name": "null",
+      "input": null,
+      "expected": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    },
+    {
+      "name": "unordered",
+      "input": {
+        "z": 1,
+        "a": [
+          "中文",
+          true,
+          null
+        ]
+      },
+      "expected": "e071caba1b5e23f40add581ba9291f9ff1636138d3479c28fd7ee68645995ea3"
+    },
+    {
+      "name": "unicode-key-order",
+      "input": {
+        "": "bmp",
+        "𐀀": "surrogate",
+        "a": "normal"
+      },
+      "expected": "a82570aa0ce892fc125db0e574f7d20b65f4aba771d4676324b50cbc6e2477dd"
+    },
+    {
+      "name": "json-number-format",
+      "input": {
+        "small": 1e-7,
+        "boundary": 0.000001,
+        "big": 1e+21,
+        "zero": 0,
+        "decimal": 1.25
+      },
+      "expected": "d66fb9b1fc267205bcebf812906f2d20fdb8586d8ee98dcee47a6fca654f57c9"
+    },
+    {
+      "name": "operation-identity",
+      "input": {
+        "capabilityId": "local.file.write",
+        "args": {
+          "path": "../other/file",
+          "content": "a\nb\t\"c\""
+        },
+        "conversationId": "c",
+        "workspacePath": "/fixture",
+        "sessionId": "s",
+        "planId": null
+      },
+      "expected": "74212eecba26aec8a3044428ab3b0a7c1582485a4eef584725c29565d0e03b35"
+    }
+  ],
+  "admission": {
+    "maxDigestBytes": 1048576,
+    "maxJsonDepth": 64,
+    "maxSafeInteger": 9007199254740991
+  }
+}
