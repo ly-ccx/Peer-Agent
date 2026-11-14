@@ -485,7 +485,7 @@ export function BotListShell({
                   drawerTriggerRef.current = profileButtonRef.current;
                   setInspect(null);
                   setDrawerMemory((current) => (
-                    current.open && current.tab === 'settings' && !inspect && detailsVisible
+                    current.open && !inspect && detailsVisible
                       ? closeDrawer(current) : openDrawer(current, 'settings')
                   ));
                 }}
