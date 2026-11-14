@@ -2,12 +2,18 @@
 //! delegates to the existing native kernel. Unknown semantics fail explicitly.
 use peer_protocol::{CoordinationReducer, javascript_json_string};
 use serde_json::{Value, json};
+mod admission;
 mod decision;
 mod history;
+mod history_plan;
+pub use history_plan::{
+    HistoryRecoveryFacts, history_checkpoint_bindings, plan_history_resumption,
+};
 mod intent;
 mod obligation;
 mod supervision;
 mod value;
+pub use admission::{admit_coordination_decision, admit_intent_assessment, admit_intent_closure};
 pub struct NativeCoordinationReducer;
 pub fn execution_binding_current(mandate: &Value, transition: &Value, binding: &Value) -> bool {
     if !mandate.is_object() || !transition.is_object() || !binding.is_object() {

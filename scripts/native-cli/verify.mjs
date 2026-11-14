@@ -15,6 +15,8 @@ run('bun', ['scripts/native-cli/control-contracts.ts']);
 run('bun', ['scripts/native-cli/work-contracts.ts']);
 run('bun', ['scripts/native-cli/kernel-contracts.ts']);
 run('bun', ['scripts/native-cli/goal-contracts.ts']);
+run('bun', ['scripts/native-cli/admission-contracts.ts']);
+run('bun', ['scripts/native-cli/history-plan-contracts.ts']);
 run('node', ['scripts/native-cli/check-boundaries.mjs']);
 run('cargo', ['fmt', '--all', '--check']);
 run('cargo', ['clippy', '--locked', '-p', 'peer-cli', '-p', 'peer-protocol', '-p', 'peer-tui', '-p', 'peer-store', '-p', 'peer-runtime', '--all-targets', '--features', 'peer-runtime/test-fixtures,peer-store/test-fixtures', '--', '-D', 'warnings']);
