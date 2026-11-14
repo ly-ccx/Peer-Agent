@@ -2,7 +2,9 @@
 
 mod coordination;
 mod evidence_refs;
+mod goal_facts;
 pub use coordination::CoordinationReducer;
+pub use goal_facts::GoalFactProjector;
 mod execution_identity;
 pub use evidence_refs::{
     EvidenceRefError, collect_tool_evidence_refs, collect_tool_result_evidence_refs,
@@ -20,12 +22,12 @@ mod transcript;
 pub use transcript::{TranscriptCursor, TranscriptPage, TranscriptRange, TranscriptRow};
 
 pub use bounded_json::{
-    DecodedJson, JsonDecodeError, JsonLimits, ProjectedJson, ProjectionError, ProjectionLimits,
-    decode_json_bounded, project_json_reader,
+    DecodedJson, JsonDecodeError, JsonLimits, JsonSelection, ProjectedJson, ProjectionError,
+    ProjectionLimits, decode_json_bounded, project_json_reader, project_json_selected_reader,
 };
 pub use permission_digest::{
     DigestError, PermissionOperation, approval_args_digest, javascript_json_digest,
-    javascript_json_string, permission_operation_key,
+    javascript_json_string, javascript_object_keys, permission_operation_key,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

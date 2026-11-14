@@ -215,6 +215,22 @@ impl ExecutionResourceStore {
             writable: false,
         })
     }
+    /// Existing schema-3 Host writer. Preflight through the read-only port first;
+    /// never create or migrate when opening an execution/recovery service.
+    pub fn open_existing_writable(data_home: impl AsRef<Path>) -> Result<Self, ResourceError> {
+        let existing = Self::open_existing(data_home)?;
+        let c = existing
+            .file
+            .open(true, Duration::from_millis(100))
+            .map_err(mapped)?;
+        inspect_schema(&c, true)?;
+        existing.file.check_current().map_err(mapped)?;
+        Ok(Self {
+            file: existing.file,
+            connection: c,
+            writable: true,
+        })
+    }
     pub(super) fn read<T>(
         &self,
         run: impl FnOnce(&Connection) -> Result<T, ResourceError>,

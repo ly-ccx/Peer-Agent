@@ -41,6 +41,7 @@ pub(super) fn semantic_floor(entry: &Value, state: &Value) -> u64 {
         };
     }
     if kind == "agent_execution_completed"
+        || entry["transition"]["minimumExecutorVersion"] == 3
         || state["transitions"].as_object().is_some_and(|rows| {
             rows.values()
                 .any(|r| r["minimumExecutorVersion"] == 3 || r.get("reconciliationRef").is_some())
@@ -51,7 +52,17 @@ pub(super) fn semantic_floor(entry: &Value, state: &Value) -> u64 {
     {
         return 6;
     }
-    if kind.starts_with("agent_") || ["work_note_written", "context_window_opened"].contains(&kind)
+    if kind.starts_with("agent_")
+        || ["work_note_written", "context_window_opened"].contains(&kind)
+        || [
+            "agentMessages",
+            "agentRequests",
+            "agentCommands",
+            "workNotes",
+            "contextWindows",
+        ]
+        .into_iter()
+        .any(|bucket| state[bucket].as_object().is_some_and(|m| !m.is_empty()))
     {
         return 5;
     }
@@ -60,6 +71,7 @@ pub(super) fn semantic_floor(entry: &Value, state: &Value) -> u64 {
     }
     2
 }
+
 fn head(storage: &Storage<'_>) -> Result<Value, Error> {
     storage
         .json("coordination-v2/head.json")?
@@ -322,5 +334,31 @@ impl CoordinationStore {
             }
             Err(Error::Read)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn history_seeding_supervision_preserves_its_executor_floor() {
+        assert_eq!(
+            semantic_floor(
+                &json!({"kind":"history_reconciled"}),
+                &json!({"agentRequests":{"r":{"status":"open"}}})
+            ),
+            5
+        );
+        assert_eq!(
+            semantic_floor(
+                &json!({"kind":"history_reconciled"}),
+                &json!({"agentCommands":{"c":{"completionRecorded":true}}})
+            ),
+            6
+        );
+        assert_eq!(
+            semantic_floor(&json!({"kind":"work"}), &json!({"agentMessages":{"m":{}}})),
+            5
+        );
     }
 }

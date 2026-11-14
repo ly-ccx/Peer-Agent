@@ -264,6 +264,12 @@ impl HostLeaseStore {
 }
 
 impl LeaseToken {
+    pub fn workspace_id(&self) -> Result<&str, StoreError> {
+        self.directory()?
+            .file_name()
+            .and_then(|s| s.to_str())
+            .ok_or(StoreError::InvalidInput)
+    }
     pub(crate) fn directory(&self) -> Result<&Path, StoreError> {
         self.path.parent().ok_or(StoreError::InvalidInput)
     }

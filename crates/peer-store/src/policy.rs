@@ -31,6 +31,66 @@ impl PolicyStore {
             home: data_home.as_ref().to_owned(),
         }
     }
+    /// ADR 127's separate, user-saved per-Bot unknown-outcome policy. Neither
+    /// Full access nor an arbitrary model argument can delegate claim closure.
+    pub fn read_unknown_outcome_policy(
+        &self,
+        workspace: &str,
+    ) -> Result<(serde_json::Value, String), StoreError> {
+        let conversation = self.profile(workspace)?;
+        let path = self
+            .home
+            .join("projects")
+            .join(workspace)
+            .join("profile.json");
+        let before = files::identity(&path)?.ok_or(StoreError::NotFound)?;
+        let bytes = files::read(&path, 1_048_576)?.ok_or(StoreError::NotFound)?;
+        let profile = decode_json_bounded(
+            &bytes,
+            JsonLimits {
+                bytes: 1_048_576,
+                nodes: 4096,
+                depth: 64,
+                string_bytes: 1_048_576,
+            },
+        )
+        .map_err(|_| StoreError::PolicyUnavailable)?
+        .value;
+        if profile["agentConversationId"] != conversation {
+            return Err(StoreError::OutOfScope);
+        }
+        let stored = &profile["unknownOutcomePolicy"];
+        let policy = if stored.is_null() {
+            serde_json::json!({"workspaceId":workspace,"agentConversationId":conversation,"tier":"ask"})
+        } else {
+            if !stored.is_object()
+                || !matches!(stored["tier"].as_str(), Some("ask" | "bot_verified"))
+                || stored["policyId"]
+                    .as_str()
+                    .is_none_or(|s| s.is_empty() || s.len() > 4096)
+                || stored["revision"].as_f64().is_none_or(|n| {
+                    n.fract() != 0.0 || !(1.0..=9_007_199_254_740_991.0).contains(&n)
+                })
+                || stored["updatedAt"].as_str().is_none_or(str::is_empty)
+            {
+                return Err(StoreError::PolicyUnavailable);
+            }
+            let mut p = serde_json::json!({"workspaceId":workspace,"agentConversationId":conversation,"tier":stored["tier"],"policyId":stored["policyId"],"revision":stored["revision"],"updatedAt":stored["updatedAt"]});
+            if stored["delegatedAt"]
+                .as_str()
+                .is_some_and(|s| !s.is_empty())
+            {
+                p["delegatedAt"] = stored["delegatedAt"].clone();
+            }
+            p
+        };
+        if files::identity(&path)?.as_ref() != Some(&before)
+            || self.profile(workspace)? != conversation
+        {
+            return Err(StoreError::VersionChanged);
+        }
+        Ok((policy, files::fingerprint(&[Some(before)])))
+    }
 
     fn profile(&self, workspace_id: &str) -> Result<String, StoreError> {
         if !valid_id(workspace_id, true) {

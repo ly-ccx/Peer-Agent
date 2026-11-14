@@ -1269,12 +1269,14 @@ version = "0.1.0-rc.40"
 dependencies = [
  "peer-protocol",
  "peer-store",
+ "rustix",
  "serde",
  "serde_json",
  "tempfile",
  "time",
  "tokio",
  "tokio-util",
+ "uuid",
  "zeroize",
 ]
 

@@ -112,6 +112,28 @@ pub fn javascript_json_string(value: &Value) -> Result<String, DigestError> {
     encode(value, &mut encoded, 0, KeyOrder::JavaScript)?;
     Ok(encoded)
 }
+/// Object.keys order used by existing JS reducers: integer indices, then insertion.
+pub fn javascript_object_keys(value: &Value) -> Option<Vec<&str>> {
+    let fields = value.as_object()?;
+    let mut indexed = Vec::new();
+    let mut ordinary = Vec::new();
+    for key in fields.keys() {
+        if let Some(index) = array_index(key) {
+            indexed.push((index, key.as_str()))
+        } else {
+            ordinary.push(key.as_str())
+        }
+    }
+    indexed.sort_by_key(|(index, _)| *index);
+    Some(
+        indexed
+            .into_iter()
+            .map(|(_, key)| key)
+            .chain(ordinary)
+            .collect(),
+    )
+}
+
 fn array_index(key: &str) -> Option<u32> {
     if key.is_empty() || key.len() > 10 || key.len() > 1 && key.starts_with('0') {
         return None;

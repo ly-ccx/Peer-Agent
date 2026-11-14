@@ -72,12 +72,12 @@ for(const mode of ['cancel','head','lease','blob']as const){
   const result=native(f,false,{during:mode});assert.equal(result.ok,false,mode);assert.equal(result.code,{cancel:'CANCELLED',head:'coordination_read_changed',lease:'HOST_LEASE_LOST',blob:'coordination_read_changed'}[mode]);cases++;
  }finally{f.lease.close()}
 }
-const unsupported=await fixture('unsupported-canonical',false,false,true);try{
+const unsupported=await fixture('supported-coordination',false,false,true);try{
  unsupported.setNow(2_000_000);assert.equal(unsupported.lease.acquire('w').acquired,true);
  const s=createWorkCoordinationStore({...unsupported.options,formatVersion:2,fenceLegacyWrites:true});await s.prepare();
  const decision=s.decide({operationId:'operation',workId:'unported',expectedRevision:0,action:'parallel',sourceInputIds:['input'],sourceEventIds:[],reason:'synthetic'},{parentConversationId:'bot',currentInputIds:['input'],eventIds:[],policyRevision:'fixture'});assert.equal(decision.ok,true,JSON.stringify(decision));const expected=s.read();s.close();unsupported.lease.release('w');
- const result=native(unsupported,false,{event:{kind:'work_updated',workId:'must-not-appear',work:{state:'queued'},removed:[]}});assert.equal(result.code,'coordination_native_reducer_unsupported');cases++;
- unsupported.setNow(3_000_000);assert.equal(unsupported.lease.acquire('w').acquired,true);const compatible=createWorkCoordinationStore({...unsupported.options,formatVersion:2,fenceLegacyWrites:true});await compatible.prepare();assert.deepEqual(compatible.read(),expected);assert.equal(compatible.readWork('must-not-appear'),undefined);compatible.close();cases++;
+ const result=native(unsupported,false,{event:{kind:'work_updated',workId:'must-not-appear',work:{state:'queued'},removed:[]}});assert.equal(result.ok,true,JSON.stringify(result));assert.ok(result.state.works['must-not-appear']);cases++;
+ unsupported.setNow(3_000_000);assert.equal(unsupported.lease.acquire('w').acquired,true);const compatible=createWorkCoordinationStore({...unsupported.options,formatVersion:2,fenceLegacyWrites:true});await compatible.prepare();assert.deepEqual(compatible.read(),result.state);assert.ok(compatible.readWork('must-not-appear'));compatible.close();cases++;
 }finally{unsupported.lease.close()}
 for(const orphan of ['orphan.log','segments/orphan.jsonl.damaged']){
  const data=join(root,orphan==='orphan.log'?'unknown-root':'unknown-segment');mkdirSync(join(data,'project-runtime/w/coordination-v2/segments'),{recursive:true});writeFileSync(join(data,'.native-cli-fixture'),'synthetic');const path=join(data,'project-runtime/w/coordination-v2',orphan);writeFileSync(path,'unknown effects');const bytes=readFileSync(path);assert.equal(native({data},false,{initialize:true}).code,'coordination_recovery_pending');assert.deepEqual(readFileSync(path),bytes);cases++;

@@ -14,6 +14,10 @@ pub struct HistorySnapshot {
     pub history: PersistedHistory,
     pub source_revision: String,
 }
+pub struct ConversationMetadataSnapshot {
+    pub metadata: Option<Value>,
+    pub source_revision: String,
+}
 
 struct DecodeBudget(JsonLimits);
 impl DecodeBudget {
@@ -44,6 +48,34 @@ fn rows(bytes: &[u8], budget: &mut DecodeBudget) -> Result<Vec<Value>, StoreErro
 }
 
 impl ConversationStore {
+    /// Identity/ancestry lookup reads the index only, never a long message body.
+    pub fn read_metadata(
+        &self,
+        conversation_id: &str,
+    ) -> Result<ConversationMetadataSnapshot, StoreError> {
+        if !valid_id(conversation_id, false) {
+            return Err(StoreError::InvalidInput);
+        }
+        let path = self.directory.join("index.jsonl");
+        let before = identity(&path)?.ok_or(StoreError::NotFound)?;
+        let rows = crate::durable_jsonl::read(&path, None)?;
+        let mut found = None;
+        for row in rows {
+            if row["id"] == conversation_id {
+                if found.is_some() {
+                    return Err(StoreError::HistoryCorrupt);
+                }
+                found = Some(row);
+            }
+        }
+        if identity(&path)?.as_ref() != Some(&before) {
+            return Err(StoreError::VersionChanged);
+        }
+        Ok(ConversationMetadataSnapshot {
+            metadata: found,
+            source_revision: files::fingerprint(&[Some(before)]),
+        })
+    }
     /// Construction performs no migration, mkdir or write.
     pub fn new(data_home: impl AsRef<Path>) -> Self {
         Self {

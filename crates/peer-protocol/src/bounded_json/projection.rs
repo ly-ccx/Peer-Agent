@@ -1,6 +1,8 @@
 //! Bounded root-field projection. Skipped values are syntax-checked without
 //! constructing their AST; they remain source bytes, never Context instructions.
+mod selected;
 use super::{Budget, JsonLimits, Seed};
+pub use selected::{JsonSelection, project_json_selected_reader};
 use serde::{
     Deserializer,
     de::{Error as _, IgnoredAny, MapAccess, Visitor},

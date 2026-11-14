@@ -21,7 +21,9 @@ pub use resources::{
 };
 mod conversation_preview;
 mod conversation_write;
+mod goal;
 mod goal_source;
+pub use goal::{GoalError, GoalSelection, GoalSnapshot, GoalStore};
 mod history;
 pub use conversation_write::{MessageCommit, NewConversation};
 mod lease;
@@ -32,7 +34,7 @@ pub use transcript::{TranscriptError, TranscriptLimit, TranscriptLimits, Transcr
 
 pub(crate) use files::identity;
 pub use goal_source::{GoalSourceSnapshot, GoalSourceStore};
-pub use history::{ConversationStore, HistorySnapshot};
+pub use history::{ConversationMetadataSnapshot, ConversationStore, HistorySnapshot};
 pub use lease::{
     AcquireLease, HOST_LEASE_HEARTBEAT_MS, HOST_LEASE_STALE_MS, HostIdentity, HostLeaseRecord,
     HostLeaseStore, HostSurface, LeaseToken,

@@ -8,6 +8,7 @@ use peer_protocol::CoordinationReducer;
 use serde_json::{Value, json};
 use std::{fmt, sync::atomic::AtomicBool};
 mod initialize;
+mod read_model;
 mod replay;
 mod write;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -284,7 +285,7 @@ impl CoordinationStore {
         let source_revision = peer_protocol::javascript_json_digest(&json!(before))
             .map_err(|_| CoordinationError::Limit)?;
         Ok(CoordinationSnapshot {
-            state: replay.state,
+            state: read_model::project(&replay.state)?,
             source_revision,
             generation: manifest["generation"].as_str().unwrap().to_owned(),
             hash: replay.hash,

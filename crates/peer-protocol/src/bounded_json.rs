@@ -3,7 +3,10 @@ use serde_json::{Map, Number, Value};
 use std::fmt;
 
 mod projection;
-pub use projection::{ProjectedJson, ProjectionError, ProjectionLimits, project_json_reader};
+pub use projection::{
+    JsonSelection, ProjectedJson, ProjectionError, ProjectionLimits, project_json_reader,
+    project_json_selected_reader,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct JsonLimits {
