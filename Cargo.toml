@@ -4,6 +4,7 @@ members = [
   "crates/peer-protocol",
   "crates/peer-tui",
   "crates/peer-cli",
+  "crates/peer-store",
 ]
 resolver = "3"
 

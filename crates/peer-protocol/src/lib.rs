@@ -1,11 +1,15 @@
 #![forbid(unsafe_code)]
 
+mod bounded_json;
 mod permission_digest;
+mod store;
 
+pub use bounded_json::{DecodedJson, JsonDecodeError, JsonLimits, decode_json_bounded};
 pub use permission_digest::{DigestError, approval_args_digest};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{env, path::PathBuf};
+pub use store::{BotAccessPolicy, LocalAccessLevel, PersistedHistory};
 
 pub const CONTRACT_JSON: &str =
     include_str!("../../../packages/protocol/contracts/native-cli/v1.json");

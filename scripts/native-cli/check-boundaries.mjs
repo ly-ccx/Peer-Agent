@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const expected = readFileSync(resolve(root, 'VERSION'), 'utf8').trim();
 const metadata = JSON.parse(execFileSync('cargo', ['metadata', '--locked', '--no-deps', '--format-version', '1'], { cwd: root, encoding: 'utf8' }));
-const names = ['peer-protocol', 'peer-tui', 'peer-cli'];
+const names = ['peer-protocol', 'peer-tui', 'peer-cli', 'peer-store'];
 for (const name of names) {
   const pkg = metadata.packages.find(p => p.name === name);
   if (!pkg || pkg.version !== expected || pkg.publish?.length !== 0) throw Error(`${name}: version/publish contract mismatch`);
