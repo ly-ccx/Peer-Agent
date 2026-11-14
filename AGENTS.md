@@ -2,6 +2,10 @@
 
 This file governs the entire repository. All future code changes in this repository must follow these rules unless the user explicitly asks to change the architecture decision itself.
 
+## Highest Engineering Guidance
+
+Before design, implementation, refactoring, fixes, or review, resolve the companion knowledge root using the rules below and read `knowledge/architecture/00-engineering-philosophy.md` (Coding Agent 工程总纲). It is the highest cross-project engineering guidance and the sole canonical body. This file adds repository-specific contracts and workflows; do not copy or maintain a second charter here or in tool-specific instruction files. Existing accepted ADRs and runtime, permission, and data contracts remain binding; resolve a substantive conflict through an explicit decision rather than silently changing a boundary.
+
 ## Architecture Baseline
 
 Peer Agent follows the 端云能力代理设计原则:
@@ -124,18 +128,7 @@ Do not create separate execution paths for Bash, file operations, MCP, Plugin, S
 
 ## Module Design Rules
 
-Use these terms in architecture work:
-
-- Module: anything with an Interface and Implementation.
-- Interface: everything a caller must know, including types, invariants, ordering, errors, permissions, and config.
-- Implementation: the code inside the Module.
-- Depth: high leverage behind a small Interface.
-- Seam: where behavior can be replaced.
-- Adapter: a concrete implementation at a Seam.
-- Leverage: what callers gain.
-- Locality: where change and debugging stay concentrated.
-
-New Modules must increase Locality or Leverage. Avoid shallow pass-through wrappers.
+Use the Module, Interface, Implementation, Depth, Seam, Adapter, Leverage, and Locality definitions and design rules in `peer-knowledge/knowledge/architecture/00-engineering-philosophy.md`. The repository-specific layer and runtime rules above implement that charter.
 
 ## Change Discipline
 
@@ -159,15 +152,9 @@ Then classify:
 
 ## Engineering Delivery Consensus (2026-11-03)
 
-This repository-wide rule applies to every future session, feature, refactor, fix and prototype. Validation and recovery are the implementer's responsibility; the user must not become the first effective tester of a claimed fix. The durable rationale is in `peer-knowledge/knowledge/architecture/00-engineering-philosophy.md`.
+The canonical delivery principles, including real-flow investigation, observable acceptance, proportional validation, existing-state recovery, candidate identity, and evidence-bound claims, are maintained only in `peer-knowledge/knowledge/architecture/00-engineering-philosophy.md`. Apply them to every feature, refactor, fix, and prototype. The Validation Scope, Product Regression, and release gates below provide the repository-specific checks.
 
-- Before a non-trivial change, trace the actual entry, call/data flow, Module responsibilities, Interface invariants, authoritative fact owners and state transitions. Identify relevant denial, failure, timeout, cancellation, interruption, restart and recovery paths. File separation alone does not prove working boundaries.
-- Define observable acceptance criteria and proportional validation before implementation. For a defect, preserve the failing source/data identity and establish a reproducible baseline or recorded factual trace. If exact reproduction is unavailable, identify the substitute and its limits; do not claim reproduction.
-- Address prevention and existing-state recovery together when persistent state is involved. Cover already-stuck or partially-applied work, late results, stale revisions, idempotency and subsequent task admission as relevant. Never erase unknown effects, permissions, history or Evidence to manufacture recovery. A blocked recovery needs a concrete blocker and a supported reconciliation or recovery path.
-- Validate changed behavior through its real Module/host seams and relevant abnormal exits. Added tests, a commit, a PR, a build or green CI do not by themselves prove the original user outcome. Scope daily verification to the change; keep the full release gate separate.
-- Investigate and fix relevant validation failures, including patch regressions. Preserve failed attempts and bind later results to the actual candidate. Do not silently weaken assertions, call an unexplained regression a flake or substitute an unrelated passing check.
-- Distinguish source implementation, validated behavior, existing-state recovery and installed/release acceptance. Report candidate identity, actual checks/results, blockers, unrun coverage and real-model/platform/installed-build limits. Unverified work remains a candidate; never ask the user to discover whether it works by installing or retrying it.
-- This consensus does not authorize publishing, installing, restarting running apps, changing personal task data, bypassing permission/Evidence gates or including unrelated dirty work.
+This guidance does not authorize publishing, installing, restarting running apps, changing personal task data, bypassing permission/Evidence gates, or including unrelated dirty work.
 
 ## Git Sync
 
