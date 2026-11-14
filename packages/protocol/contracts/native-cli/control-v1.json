@@ -1,0 +1,3671 @@
+{
+  "version": 1,
+  "digestCases": [
+    {
+      "input": {
+        "z": 1,
+        "a": 2
+      },
+      "expected": "c5c2b1fdd0d4a83cda3ff79c9c74f2c72e2a92920afda20bcafc90c1a72f86a9"
+    },
+    {
+      "input": {
+        "a": 2,
+        "z": 1
+      },
+      "expected": "c2985c5ba6f7d2a55e768f92490ca09388e95bc4cccb9fdf11b15f4d42f93e73"
+    },
+    {
+      "input": {
+        "2": "two",
+        "10": "ten",
+        "a": "last",
+        "01": "not-index"
+      },
+      "expected": "487d4c71395266c6e8adbabf0bc3010633a15d6ea941e60c8bc3ebd7241c103b"
+    },
+    {
+      "input": {
+        "4294967294": "index",
+        "4294967295": "not-index",
+        "z": "after"
+      },
+      "expected": "b8643f23ae7cd9c27a7c9da3bf310aa7ea924e7d56a15fb5b3926b9515a3d166"
+    },
+    {
+      "input": {
+        "kind": "pause",
+        "operationId": "a",
+        "authorityRef": "local:synthetic",
+        "execution": {
+          "planId": "p",
+          "sessionId": "s",
+          "executionEpoch": "epoch",
+          "generation": "g",
+          "goalRevision": 2
+        }
+      },
+      "expected": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+    },
+    {
+      "input": {
+        "kind": "pause",
+        "operationId": "a",
+        "authorityRef": "local:synthetic",
+        "execution": {
+          "goalRevision": 2,
+          "generation": "g",
+          "executionEpoch": "epoch",
+          "sessionId": "s",
+          "planId": "p"
+        }
+      },
+      "expected": "3a53f95d0888d50064c11bb1dcd20c9e622edb3b66f790ac6635cc242aca5f8b"
+    },
+    {
+      "input": {
+        "small": 1e-7,
+        "big": 1e+21,
+        "zero": 0,
+        "control": "\u0000\n\"\\",
+        "unicode": "中文😀"
+      },
+      "expected": "6dd6ff0558981af4c4c07884e70bbc856c2999d39d989fc79b77ec82044a019c"
+    }
+  ],
+  "cases": [
+    {
+      "name": "recorded",
+      "state": {
+        "unrelated": {
+          "evidence": [
+            "preserved"
+          ],
+          "permission": "unchanged"
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "a",
+          "kind": "pause",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 2
+          },
+          "phase": "recorded",
+          "revision": 1,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "host",
+          "hostPid": 101,
+          "recorder": {
+            "bootId": "b",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "h",
+            "acquiredAt": "2026-11-14T00:00:00.000Z"
+          },
+          "unproven": false,
+          "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+        },
+        "expectedRevision": 0,
+        "expectedCurrentOperationId": null,
+        "minimumExecutorVersion": 9
+      },
+      "expected": {
+        "ok": true,
+        "state": {
+          "unrelated": {
+            "evidence": [
+              "preserved"
+            ],
+            "permission": "unchanged"
+          },
+          "sessionControls": {
+            "a": {
+              "operationId": "a",
+              "kind": "pause",
+              "workspaceId": "w",
+              "parentConversationId": "bot",
+              "sessionId": "s",
+              "planId": "p",
+              "authorityRef": "local:synthetic",
+              "expectedExecution": {
+                "planId": "p",
+                "sessionId": "s",
+                "executionEpoch": "epoch",
+                "generation": "g",
+                "goalRevision": 2
+              },
+              "phase": "recorded",
+              "revision": 1,
+              "updatedAt": "2026-11-14T00:00:00.000Z",
+              "hostEpoch": "host",
+              "hostPid": 101,
+              "recorder": {
+                "bootId": "b",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "h",
+                "acquiredAt": "2026-11-14T00:00:00.000Z"
+              },
+              "unproven": false,
+              "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+            }
+          },
+          "sessionControlHeads": {
+            "s": {
+              "operationId": "a"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "draining",
+      "state": {
+        "unrelated": {
+          "evidence": [
+            "preserved"
+          ],
+          "permission": "unchanged"
+        },
+        "sessionControls": {
+          "a": {
+            "operationId": "a",
+            "kind": "pause",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "sessionId": "s",
+            "planId": "p",
+            "authorityRef": "local:synthetic",
+            "expectedExecution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "phase": "recorded",
+            "revision": 1,
+            "updatedAt": "2026-11-14T00:00:00.000Z",
+            "hostEpoch": "host",
+            "hostPid": 101,
+            "recorder": {
+              "bootId": "b",
+              "pid": 101,
+              "pidStart": "start",
+              "hostId": "h",
+              "acquiredAt": "2026-11-14T00:00:00.000Z"
+            },
+            "unproven": false,
+            "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+          }
+        },
+        "sessionControlHeads": {
+          "s": {
+            "operationId": "a"
+          }
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "a",
+          "kind": "pause",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 2
+          },
+          "phase": "draining",
+          "revision": 2,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "host",
+          "hostPid": 101,
+          "recorder": {
+            "bootId": "b",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "h",
+            "acquiredAt": "2026-11-14T00:00:00.000Z"
+          },
+          "unproven": false,
+          "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+        },
+        "expectedRevision": 1,
+        "expectedCurrentOperationId": null,
+        "minimumExecutorVersion": 9
+      },
+      "expected": {
+        "ok": true,
+        "state": {
+          "unrelated": {
+            "evidence": [
+              "preserved"
+            ],
+            "permission": "unchanged"
+          },
+          "sessionControls": {
+            "a": {
+              "operationId": "a",
+              "kind": "pause",
+              "workspaceId": "w",
+              "parentConversationId": "bot",
+              "sessionId": "s",
+              "planId": "p",
+              "authorityRef": "local:synthetic",
+              "expectedExecution": {
+                "planId": "p",
+                "sessionId": "s",
+                "executionEpoch": "epoch",
+                "generation": "g",
+                "goalRevision": 2
+              },
+              "phase": "draining",
+              "revision": 2,
+              "updatedAt": "2026-11-14T00:00:00.000Z",
+              "hostEpoch": "host",
+              "hostPid": 101,
+              "recorder": {
+                "bootId": "b",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "h",
+                "acquiredAt": "2026-11-14T00:00:00.000Z"
+              },
+              "unproven": false,
+              "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+            }
+          },
+          "sessionControlHeads": {
+            "s": {
+              "operationId": "a"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "reconciling",
+      "state": {
+        "unrelated": {
+          "evidence": [
+            "preserved"
+          ],
+          "permission": "unchanged"
+        },
+        "sessionControls": {
+          "a": {
+            "operationId": "a",
+            "kind": "pause",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "sessionId": "s",
+            "planId": "p",
+            "authorityRef": "local:synthetic",
+            "expectedExecution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "phase": "draining",
+            "revision": 2,
+            "updatedAt": "2026-11-14T00:00:00.000Z",
+            "hostEpoch": "host",
+            "hostPid": 101,
+            "recorder": {
+              "bootId": "b",
+              "pid": 101,
+              "pidStart": "start",
+              "hostId": "h",
+              "acquiredAt": "2026-11-14T00:00:00.000Z"
+            },
+            "unproven": false,
+            "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+          }
+        },
+        "sessionControlHeads": {
+          "s": {
+            "operationId": "a"
+          }
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "a",
+          "kind": "pause",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 2
+          },
+          "phase": "reconciling",
+          "revision": 3,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "host",
+          "hostPid": 101,
+          "recorder": {
+            "bootId": "b",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "h",
+            "acquiredAt": "2026-11-14T00:00:00.000Z"
+          },
+          "unproven": false,
+          "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+        },
+        "expectedRevision": 2,
+        "expectedCurrentOperationId": null,
+        "minimumExecutorVersion": 9
+      },
+      "expected": {
+        "ok": true,
+        "state": {
+          "unrelated": {
+            "evidence": [
+              "preserved"
+            ],
+            "permission": "unchanged"
+          },
+          "sessionControls": {
+            "a": {
+              "operationId": "a",
+              "kind": "pause",
+              "workspaceId": "w",
+              "parentConversationId": "bot",
+              "sessionId": "s",
+              "planId": "p",
+              "authorityRef": "local:synthetic",
+              "expectedExecution": {
+                "planId": "p",
+                "sessionId": "s",
+                "executionEpoch": "epoch",
+                "generation": "g",
+                "goalRevision": 2
+              },
+              "phase": "reconciling",
+              "revision": 3,
+              "updatedAt": "2026-11-14T00:00:00.000Z",
+              "hostEpoch": "host",
+              "hostPid": 101,
+              "recorder": {
+                "bootId": "b",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "h",
+                "acquiredAt": "2026-11-14T00:00:00.000Z"
+              },
+              "unproven": false,
+              "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+            }
+          },
+          "sessionControlHeads": {
+            "s": {
+              "operationId": "a"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "settled-with-unknown-preserved",
+      "state": {
+        "unrelated": {
+          "evidence": [
+            "preserved"
+          ],
+          "permission": "unchanged"
+        },
+        "sessionControls": {
+          "a": {
+            "operationId": "a",
+            "kind": "pause",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "sessionId": "s",
+            "planId": "p",
+            "authorityRef": "local:synthetic",
+            "expectedExecution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "phase": "reconciling",
+            "revision": 3,
+            "updatedAt": "2026-11-14T00:00:00.000Z",
+            "hostEpoch": "host",
+            "hostPid": 101,
+            "recorder": {
+              "bootId": "b",
+              "pid": 101,
+              "pidStart": "start",
+              "hostId": "h",
+              "acquiredAt": "2026-11-14T00:00:00.000Z"
+            },
+            "unproven": false,
+            "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+          }
+        },
+        "sessionControlHeads": {
+          "s": {
+            "operationId": "a"
+          }
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "a",
+          "kind": "pause",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 2
+          },
+          "phase": "settled",
+          "revision": 4,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "host",
+          "hostPid": 101,
+          "recorder": {
+            "bootId": "b",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "h",
+            "acquiredAt": "2026-11-14T00:00:00.000Z"
+          },
+          "unproven": false,
+          "outcome": "applied",
+          "stopReceipt": {
+            "receiptId": "stop-a",
+            "operationId": "a",
+            "execution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "admissionClosed": true,
+            "runnerIdle": true,
+            "schedulerIdle": true,
+            "resourceClaims": [
+              {
+                "claimId": "claim",
+                "revision": 1
+              }
+            ],
+            "unknownCalls": [
+              "original-unknown"
+            ],
+            "completedAt": "2026-11-14T00:00:00.000Z",
+            "scope": "managed_execution"
+          },
+          "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+        },
+        "expectedRevision": 3,
+        "expectedCurrentOperationId": null,
+        "minimumExecutorVersion": 9
+      },
+      "expected": {
+        "ok": true,
+        "state": {
+          "unrelated": {
+            "evidence": [
+              "preserved"
+            ],
+            "permission": "unchanged"
+          },
+          "sessionControls": {
+            "a": {
+              "operationId": "a",
+              "kind": "pause",
+              "workspaceId": "w",
+              "parentConversationId": "bot",
+              "sessionId": "s",
+              "planId": "p",
+              "authorityRef": "local:synthetic",
+              "expectedExecution": {
+                "planId": "p",
+                "sessionId": "s",
+                "executionEpoch": "epoch",
+                "generation": "g",
+                "goalRevision": 2
+              },
+              "phase": "settled",
+              "revision": 4,
+              "updatedAt": "2026-11-14T00:00:00.000Z",
+              "hostEpoch": "host",
+              "hostPid": 101,
+              "recorder": {
+                "bootId": "b",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "h",
+                "acquiredAt": "2026-11-14T00:00:00.000Z"
+              },
+              "unproven": false,
+              "outcome": "applied",
+              "stopReceipt": {
+                "receiptId": "stop-a",
+                "operationId": "a",
+                "execution": {
+                  "planId": "p",
+                  "sessionId": "s",
+                  "executionEpoch": "epoch",
+                  "generation": "g",
+                  "goalRevision": 2
+                },
+                "admissionClosed": true,
+                "runnerIdle": true,
+                "schedulerIdle": true,
+                "resourceClaims": [
+                  {
+                    "claimId": "claim",
+                    "revision": 1
+                  }
+                ],
+                "unknownCalls": [
+                  "original-unknown"
+                ],
+                "completedAt": "2026-11-14T00:00:00.000Z",
+                "scope": "managed_execution"
+              },
+              "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+            }
+          },
+          "sessionControlHeads": {
+            "s": {
+              "operationId": "a"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "resume-recorded",
+      "state": {
+        "unrelated": {
+          "evidence": [
+            "preserved"
+          ],
+          "permission": "unchanged"
+        },
+        "sessionControls": {
+          "a": {
+            "operationId": "a",
+            "kind": "pause",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "sessionId": "s",
+            "planId": "p",
+            "authorityRef": "local:synthetic",
+            "expectedExecution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "phase": "settled",
+            "revision": 4,
+            "updatedAt": "2026-11-14T00:00:00.000Z",
+            "hostEpoch": "host",
+            "hostPid": 101,
+            "recorder": {
+              "bootId": "b",
+              "pid": 101,
+              "pidStart": "start",
+              "hostId": "h",
+              "acquiredAt": "2026-11-14T00:00:00.000Z"
+            },
+            "unproven": false,
+            "outcome": "applied",
+            "stopReceipt": {
+              "receiptId": "stop-a",
+              "operationId": "a",
+              "execution": {
+                "planId": "p",
+                "sessionId": "s",
+                "executionEpoch": "epoch",
+                "generation": "g",
+                "goalRevision": 2
+              },
+              "admissionClosed": true,
+              "runnerIdle": true,
+              "schedulerIdle": true,
+              "resourceClaims": [
+                {
+                  "claimId": "claim",
+                  "revision": 1
+                }
+              ],
+              "unknownCalls": [
+                "original-unknown"
+              ],
+              "completedAt": "2026-11-14T00:00:00.000Z",
+              "scope": "managed_execution"
+            },
+            "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+          }
+        },
+        "sessionControlHeads": {
+          "s": {
+            "operationId": "a"
+          }
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "b",
+          "kind": "resume",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 2
+          },
+          "phase": "recorded",
+          "revision": 1,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "host",
+          "hostPid": 101,
+          "recorder": {
+            "bootId": "b",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "h",
+            "acquiredAt": "2026-11-14T00:00:00.000Z"
+          },
+          "unproven": false,
+          "priorStopReceiptId": "stop-a",
+          "requestDigest": "f6566e18379bd3140229dc369041883d8a61973cb02753b5f39c137f226a01b8"
+        },
+        "expectedRevision": 0,
+        "expectedCurrentOperationId": "a",
+        "minimumExecutorVersion": 9
+      },
+      "expected": {
+        "ok": true,
+        "state": {
+          "unrelated": {
+            "evidence": [
+              "preserved"
+            ],
+            "permission": "unchanged"
+          },
+          "sessionControls": {
+            "a": {
+              "operationId": "a",
+              "kind": "pause",
+              "workspaceId": "w",
+              "parentConversationId": "bot",
+              "sessionId": "s",
+              "planId": "p",
+              "authorityRef": "local:synthetic",
+              "expectedExecution": {
+                "planId": "p",
+                "sessionId": "s",
+                "executionEpoch": "epoch",
+                "generation": "g",
+                "goalRevision": 2
+              },
+              "phase": "settled",
+              "revision": 4,
+              "updatedAt": "2026-11-14T00:00:00.000Z",
+              "hostEpoch": "host",
+              "hostPid": 101,
+              "recorder": {
+                "bootId": "b",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "h",
+                "acquiredAt": "2026-11-14T00:00:00.000Z"
+              },
+              "unproven": false,
+              "outcome": "applied",
+              "stopReceipt": {
+                "receiptId": "stop-a",
+                "operationId": "a",
+                "execution": {
+                  "planId": "p",
+                  "sessionId": "s",
+                  "executionEpoch": "epoch",
+                  "generation": "g",
+                  "goalRevision": 2
+                },
+                "admissionClosed": true,
+                "runnerIdle": true,
+                "schedulerIdle": true,
+                "resourceClaims": [
+                  {
+                    "claimId": "claim",
+                    "revision": 1
+                  }
+                ],
+                "unknownCalls": [
+                  "original-unknown"
+                ],
+                "completedAt": "2026-11-14T00:00:00.000Z",
+                "scope": "managed_execution"
+              },
+              "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+            },
+            "b": {
+              "operationId": "b",
+              "kind": "resume",
+              "workspaceId": "w",
+              "parentConversationId": "bot",
+              "sessionId": "s",
+              "planId": "p",
+              "authorityRef": "local:synthetic",
+              "expectedExecution": {
+                "planId": "p",
+                "sessionId": "s",
+                "executionEpoch": "epoch",
+                "generation": "g",
+                "goalRevision": 2
+              },
+              "phase": "recorded",
+              "revision": 1,
+              "updatedAt": "2026-11-14T00:00:00.000Z",
+              "hostEpoch": "host",
+              "hostPid": 101,
+              "recorder": {
+                "bootId": "b",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "h",
+                "acquiredAt": "2026-11-14T00:00:00.000Z"
+              },
+              "unproven": false,
+              "priorStopReceiptId": "stop-a",
+              "requestDigest": "f6566e18379bd3140229dc369041883d8a61973cb02753b5f39c137f226a01b8"
+            }
+          },
+          "sessionControlHeads": {
+            "s": {
+              "operationId": "b"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "resume-draining",
+      "state": {
+        "unrelated": {
+          "evidence": [
+            "preserved"
+          ],
+          "permission": "unchanged"
+        },
+        "sessionControls": {
+          "a": {
+            "operationId": "a",
+            "kind": "pause",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "sessionId": "s",
+            "planId": "p",
+            "authorityRef": "local:synthetic",
+            "expectedExecution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "phase": "settled",
+            "revision": 4,
+            "updatedAt": "2026-11-14T00:00:00.000Z",
+            "hostEpoch": "host",
+            "hostPid": 101,
+            "recorder": {
+              "bootId": "b",
+              "pid": 101,
+              "pidStart": "start",
+              "hostId": "h",
+              "acquiredAt": "2026-11-14T00:00:00.000Z"
+            },
+            "unproven": false,
+            "outcome": "applied",
+            "stopReceipt": {
+              "receiptId": "stop-a",
+              "operationId": "a",
+              "execution": {
+                "planId": "p",
+                "sessionId": "s",
+                "executionEpoch": "epoch",
+                "generation": "g",
+                "goalRevision": 2
+              },
+              "admissionClosed": true,
+              "runnerIdle": true,
+              "schedulerIdle": true,
+              "resourceClaims": [
+                {
+                  "claimId": "claim",
+                  "revision": 1
+                }
+              ],
+              "unknownCalls": [
+                "original-unknown"
+              ],
+              "completedAt": "2026-11-14T00:00:00.000Z",
+              "scope": "managed_execution"
+            },
+            "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+          },
+          "b": {
+            "operationId": "b",
+            "kind": "resume",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "sessionId": "s",
+            "planId": "p",
+            "authorityRef": "local:synthetic",
+            "expectedExecution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "phase": "recorded",
+            "revision": 1,
+            "updatedAt": "2026-11-14T00:00:00.000Z",
+            "hostEpoch": "host",
+            "hostPid": 101,
+            "recorder": {
+              "bootId": "b",
+              "pid": 101,
+              "pidStart": "start",
+              "hostId": "h",
+              "acquiredAt": "2026-11-14T00:00:00.000Z"
+            },
+            "unproven": false,
+            "priorStopReceiptId": "stop-a",
+            "requestDigest": "f6566e18379bd3140229dc369041883d8a61973cb02753b5f39c137f226a01b8"
+          }
+        },
+        "sessionControlHeads": {
+          "s": {
+            "operationId": "b"
+          }
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "b",
+          "kind": "resume",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 2
+          },
+          "phase": "draining",
+          "revision": 2,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "host",
+          "hostPid": 101,
+          "recorder": {
+            "bootId": "b",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "h",
+            "acquiredAt": "2026-11-14T00:00:00.000Z"
+          },
+          "unproven": false,
+          "priorStopReceiptId": "stop-a",
+          "requestDigest": "f6566e18379bd3140229dc369041883d8a61973cb02753b5f39c137f226a01b8"
+        },
+        "expectedRevision": 1,
+        "expectedCurrentOperationId": null,
+        "minimumExecutorVersion": 9
+      },
+      "expected": {
+        "ok": true,
+        "state": {
+          "unrelated": {
+            "evidence": [
+              "preserved"
+            ],
+            "permission": "unchanged"
+          },
+          "sessionControls": {
+            "a": {
+              "operationId": "a",
+              "kind": "pause",
+              "workspaceId": "w",
+              "parentConversationId": "bot",
+              "sessionId": "s",
+              "planId": "p",
+              "authorityRef": "local:synthetic",
+              "expectedExecution": {
+                "planId": "p",
+                "sessionId": "s",
+                "executionEpoch": "epoch",
+                "generation": "g",
+                "goalRevision": 2
+              },
+              "phase": "settled",
+              "revision": 4,
+              "updatedAt": "2026-11-14T00:00:00.000Z",
+              "hostEpoch": "host",
+              "hostPid": 101,
+              "recorder": {
+                "bootId": "b",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "h",
+                "acquiredAt": "2026-11-14T00:00:00.000Z"
+              },
+              "unproven": false,
+              "outcome": "applied",
+              "stopReceipt": {
+                "receiptId": "stop-a",
+                "operationId": "a",
+                "execution": {
+                  "planId": "p",
+                  "sessionId": "s",
+                  "executionEpoch": "epoch",
+                  "generation": "g",
+                  "goalRevision": 2
+                },
+                "admissionClosed": true,
+                "runnerIdle": true,
+                "schedulerIdle": true,
+                "resourceClaims": [
+                  {
+                    "claimId": "claim",
+                    "revision": 1
+                  }
+                ],
+                "unknownCalls": [
+                  "original-unknown"
+                ],
+                "completedAt": "2026-11-14T00:00:00.000Z",
+                "scope": "managed_execution"
+              },
+              "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+            },
+            "b": {
+              "operationId": "b",
+              "kind": "resume",
+              "workspaceId": "w",
+              "parentConversationId": "bot",
+              "sessionId": "s",
+              "planId": "p",
+              "authorityRef": "local:synthetic",
+              "expectedExecution": {
+                "planId": "p",
+                "sessionId": "s",
+                "executionEpoch": "epoch",
+                "generation": "g",
+                "goalRevision": 2
+              },
+              "phase": "draining",
+              "revision": 2,
+              "updatedAt": "2026-11-14T00:00:00.000Z",
+              "hostEpoch": "host",
+              "hostPid": 101,
+              "recorder": {
+                "bootId": "b",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "h",
+                "acquiredAt": "2026-11-14T00:00:00.000Z"
+              },
+              "unproven": false,
+              "priorStopReceiptId": "stop-a",
+              "requestDigest": "f6566e18379bd3140229dc369041883d8a61973cb02753b5f39c137f226a01b8"
+            }
+          },
+          "sessionControlHeads": {
+            "s": {
+              "operationId": "b"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "resume-applied-shape-only",
+      "state": {
+        "unrelated": {
+          "evidence": [
+            "preserved"
+          ],
+          "permission": "unchanged"
+        },
+        "sessionControls": {
+          "a": {
+            "operationId": "a",
+            "kind": "pause",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "sessionId": "s",
+            "planId": "p",
+            "authorityRef": "local:synthetic",
+            "expectedExecution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "phase": "settled",
+            "revision": 4,
+            "updatedAt": "2026-11-14T00:00:00.000Z",
+            "hostEpoch": "host",
+            "hostPid": 101,
+            "recorder": {
+              "bootId": "b",
+              "pid": 101,
+              "pidStart": "start",
+              "hostId": "h",
+              "acquiredAt": "2026-11-14T00:00:00.000Z"
+            },
+            "unproven": false,
+            "outcome": "applied",
+            "stopReceipt": {
+              "receiptId": "stop-a",
+              "operationId": "a",
+              "execution": {
+                "planId": "p",
+                "sessionId": "s",
+                "executionEpoch": "epoch",
+                "generation": "g",
+                "goalRevision": 2
+              },
+              "admissionClosed": true,
+              "runnerIdle": true,
+              "schedulerIdle": true,
+              "resourceClaims": [
+                {
+                  "claimId": "claim",
+                  "revision": 1
+                }
+              ],
+              "unknownCalls": [
+                "original-unknown"
+              ],
+              "completedAt": "2026-11-14T00:00:00.000Z",
+              "scope": "managed_execution"
+            },
+            "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+          },
+          "b": {
+            "operationId": "b",
+            "kind": "resume",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "sessionId": "s",
+            "planId": "p",
+            "authorityRef": "local:synthetic",
+            "expectedExecution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "phase": "draining",
+            "revision": 2,
+            "updatedAt": "2026-11-14T00:00:00.000Z",
+            "hostEpoch": "host",
+            "hostPid": 101,
+            "recorder": {
+              "bootId": "b",
+              "pid": 101,
+              "pidStart": "start",
+              "hostId": "h",
+              "acquiredAt": "2026-11-14T00:00:00.000Z"
+            },
+            "unproven": false,
+            "priorStopReceiptId": "stop-a",
+            "requestDigest": "f6566e18379bd3140229dc369041883d8a61973cb02753b5f39c137f226a01b8"
+          }
+        },
+        "sessionControlHeads": {
+          "s": {
+            "operationId": "b"
+          }
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "b",
+          "kind": "resume",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 2
+          },
+          "phase": "settled",
+          "revision": 3,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "host",
+          "hostPid": 101,
+          "recorder": {
+            "bootId": "b",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "h",
+            "acquiredAt": "2026-11-14T00:00:00.000Z"
+          },
+          "unproven": false,
+          "priorStopReceiptId": "stop-a",
+          "outcome": "applied",
+          "requestDigest": "f6566e18379bd3140229dc369041883d8a61973cb02753b5f39c137f226a01b8"
+        },
+        "expectedRevision": 2,
+        "expectedCurrentOperationId": null,
+        "minimumExecutorVersion": 9
+      },
+      "expected": {
+        "ok": true,
+        "state": {
+          "unrelated": {
+            "evidence": [
+              "preserved"
+            ],
+            "permission": "unchanged"
+          },
+          "sessionControls": {
+            "a": {
+              "operationId": "a",
+              "kind": "pause",
+              "workspaceId": "w",
+              "parentConversationId": "bot",
+              "sessionId": "s",
+              "planId": "p",
+              "authorityRef": "local:synthetic",
+              "expectedExecution": {
+                "planId": "p",
+                "sessionId": "s",
+                "executionEpoch": "epoch",
+                "generation": "g",
+                "goalRevision": 2
+              },
+              "phase": "settled",
+              "revision": 4,
+              "updatedAt": "2026-11-14T00:00:00.000Z",
+              "hostEpoch": "host",
+              "hostPid": 101,
+              "recorder": {
+                "bootId": "b",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "h",
+                "acquiredAt": "2026-11-14T00:00:00.000Z"
+              },
+              "unproven": false,
+              "outcome": "applied",
+              "stopReceipt": {
+                "receiptId": "stop-a",
+                "operationId": "a",
+                "execution": {
+                  "planId": "p",
+                  "sessionId": "s",
+                  "executionEpoch": "epoch",
+                  "generation": "g",
+                  "goalRevision": 2
+                },
+                "admissionClosed": true,
+                "runnerIdle": true,
+                "schedulerIdle": true,
+                "resourceClaims": [
+                  {
+                    "claimId": "claim",
+                    "revision": 1
+                  }
+                ],
+                "unknownCalls": [
+                  "original-unknown"
+                ],
+                "completedAt": "2026-11-14T00:00:00.000Z",
+                "scope": "managed_execution"
+              },
+              "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+            },
+            "b": {
+              "operationId": "b",
+              "kind": "resume",
+              "workspaceId": "w",
+              "parentConversationId": "bot",
+              "sessionId": "s",
+              "planId": "p",
+              "authorityRef": "local:synthetic",
+              "expectedExecution": {
+                "planId": "p",
+                "sessionId": "s",
+                "executionEpoch": "epoch",
+                "generation": "g",
+                "goalRevision": 2
+              },
+              "phase": "settled",
+              "revision": 3,
+              "updatedAt": "2026-11-14T00:00:00.000Z",
+              "hostEpoch": "host",
+              "hostPid": 101,
+              "recorder": {
+                "bootId": "b",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "h",
+                "acquiredAt": "2026-11-14T00:00:00.000Z"
+              },
+              "unproven": false,
+              "priorStopReceiptId": "stop-a",
+              "outcome": "applied",
+              "requestDigest": "f6566e18379bd3140229dc369041883d8a61973cb02753b5f39c137f226a01b8"
+            }
+          },
+          "sessionControlHeads": {
+            "s": {
+              "operationId": "b"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "cancel-supersedes-draining",
+      "state": {
+        "unrelated": {
+          "evidence": [
+            "preserved"
+          ],
+          "permission": "unchanged"
+        },
+        "sessionControls": {
+          "a": {
+            "operationId": "a",
+            "kind": "pause",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "sessionId": "s",
+            "planId": "p",
+            "authorityRef": "local:synthetic",
+            "expectedExecution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "phase": "draining",
+            "revision": 2,
+            "updatedAt": "2026-11-14T00:00:00.000Z",
+            "hostEpoch": "host",
+            "hostPid": 101,
+            "recorder": {
+              "bootId": "b",
+              "pid": 101,
+              "pidStart": "start",
+              "hostId": "h",
+              "acquiredAt": "2026-11-14T00:00:00.000Z"
+            },
+            "unproven": false,
+            "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+          }
+        },
+        "sessionControlHeads": {
+          "s": {
+            "operationId": "a"
+          }
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "c",
+          "kind": "cancel",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 2
+          },
+          "phase": "recorded",
+          "revision": 1,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "host",
+          "hostPid": 101,
+          "recorder": {
+            "bootId": "b",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "h",
+            "acquiredAt": "2026-11-14T00:00:00.000Z"
+          },
+          "unproven": false,
+          "requestDigest": "54eb76823e261e4789a0c84b3d5bcf6626f1966cddbde5670b55261c75031f5f"
+        },
+        "expectedRevision": 0,
+        "expectedCurrentOperationId": "a",
+        "minimumExecutorVersion": 9
+      },
+      "expected": {
+        "ok": true,
+        "state": {
+          "unrelated": {
+            "evidence": [
+              "preserved"
+            ],
+            "permission": "unchanged"
+          },
+          "sessionControls": {
+            "a": {
+              "operationId": "a",
+              "kind": "pause",
+              "workspaceId": "w",
+              "parentConversationId": "bot",
+              "sessionId": "s",
+              "planId": "p",
+              "authorityRef": "local:synthetic",
+              "expectedExecution": {
+                "planId": "p",
+                "sessionId": "s",
+                "executionEpoch": "epoch",
+                "generation": "g",
+                "goalRevision": 2
+              },
+              "phase": "settled",
+              "revision": 3,
+              "updatedAt": "2026-11-14T00:00:00.000Z",
+              "hostEpoch": "host",
+              "hostPid": 101,
+              "recorder": {
+                "bootId": "b",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "h",
+                "acquiredAt": "2026-11-14T00:00:00.000Z"
+              },
+              "unproven": false,
+              "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba",
+              "outcome": "superseded",
+              "supersededBy": "c"
+            },
+            "c": {
+              "operationId": "c",
+              "kind": "cancel",
+              "workspaceId": "w",
+              "parentConversationId": "bot",
+              "sessionId": "s",
+              "planId": "p",
+              "authorityRef": "local:synthetic",
+              "expectedExecution": {
+                "planId": "p",
+                "sessionId": "s",
+                "executionEpoch": "epoch",
+                "generation": "g",
+                "goalRevision": 2
+              },
+              "phase": "recorded",
+              "revision": 1,
+              "updatedAt": "2026-11-14T00:00:00.000Z",
+              "hostEpoch": "host",
+              "hostPid": 101,
+              "recorder": {
+                "bootId": "b",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "h",
+                "acquiredAt": "2026-11-14T00:00:00.000Z"
+              },
+              "unproven": false,
+              "requestDigest": "54eb76823e261e4789a0c84b3d5bcf6626f1966cddbde5670b55261c75031f5f"
+            }
+          },
+          "sessionControlHeads": {
+            "s": {
+              "operationId": "c"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "cancel-blocks-later-resume",
+      "state": {
+        "unrelated": {
+          "evidence": [
+            "preserved"
+          ],
+          "permission": "unchanged"
+        },
+        "sessionControls": {
+          "a": {
+            "operationId": "a",
+            "kind": "pause",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "sessionId": "s",
+            "planId": "p",
+            "authorityRef": "local:synthetic",
+            "expectedExecution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "phase": "settled",
+            "revision": 3,
+            "updatedAt": "2026-11-14T00:00:00.000Z",
+            "hostEpoch": "host",
+            "hostPid": 101,
+            "recorder": {
+              "bootId": "b",
+              "pid": 101,
+              "pidStart": "start",
+              "hostId": "h",
+              "acquiredAt": "2026-11-14T00:00:00.000Z"
+            },
+            "unproven": false,
+            "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba",
+            "outcome": "superseded",
+            "supersededBy": "c"
+          },
+          "c": {
+            "operationId": "c",
+            "kind": "cancel",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "sessionId": "s",
+            "planId": "p",
+            "authorityRef": "local:synthetic",
+            "expectedExecution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "phase": "recorded",
+            "revision": 1,
+            "updatedAt": "2026-11-14T00:00:00.000Z",
+            "hostEpoch": "host",
+            "hostPid": 101,
+            "recorder": {
+              "bootId": "b",
+              "pid": 101,
+              "pidStart": "start",
+              "hostId": "h",
+              "acquiredAt": "2026-11-14T00:00:00.000Z"
+            },
+            "unproven": false,
+            "requestDigest": "54eb76823e261e4789a0c84b3d5bcf6626f1966cddbde5670b55261c75031f5f"
+          }
+        },
+        "sessionControlHeads": {
+          "s": {
+            "operationId": "c"
+          }
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "later",
+          "kind": "resume",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 2
+          },
+          "phase": "recorded",
+          "revision": 1,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "host",
+          "hostPid": 101,
+          "recorder": {
+            "bootId": "b",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "h",
+            "acquiredAt": "2026-11-14T00:00:00.000Z"
+          },
+          "unproven": false,
+          "requestDigest": "37ef80eaaeacee72c0d1bc3a449f998bb7b71db55b45db89b549f36598d338e3"
+        },
+        "expectedRevision": 0,
+        "expectedCurrentOperationId": "c",
+        "minimumExecutorVersion": 9
+      },
+      "expected": {
+        "ok": false,
+        "code": "work_execution_stopped"
+      }
+    },
+    {
+      "name": "cancel-can-supersede-cancel",
+      "state": {
+        "unrelated": {
+          "evidence": [
+            "preserved"
+          ],
+          "permission": "unchanged"
+        },
+        "sessionControls": {
+          "a": {
+            "operationId": "a",
+            "kind": "pause",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "sessionId": "s",
+            "planId": "p",
+            "authorityRef": "local:synthetic",
+            "expectedExecution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "phase": "settled",
+            "revision": 3,
+            "updatedAt": "2026-11-14T00:00:00.000Z",
+            "hostEpoch": "host",
+            "hostPid": 101,
+            "recorder": {
+              "bootId": "b",
+              "pid": 101,
+              "pidStart": "start",
+              "hostId": "h",
+              "acquiredAt": "2026-11-14T00:00:00.000Z"
+            },
+            "unproven": false,
+            "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba",
+            "outcome": "superseded",
+            "supersededBy": "c"
+          },
+          "c": {
+            "operationId": "c",
+            "kind": "cancel",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "sessionId": "s",
+            "planId": "p",
+            "authorityRef": "local:synthetic",
+            "expectedExecution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "phase": "recorded",
+            "revision": 1,
+            "updatedAt": "2026-11-14T00:00:00.000Z",
+            "hostEpoch": "host",
+            "hostPid": 101,
+            "recorder": {
+              "bootId": "b",
+              "pid": 101,
+              "pidStart": "start",
+              "hostId": "h",
+              "acquiredAt": "2026-11-14T00:00:00.000Z"
+            },
+            "unproven": false,
+            "requestDigest": "54eb76823e261e4789a0c84b3d5bcf6626f1966cddbde5670b55261c75031f5f"
+          }
+        },
+        "sessionControlHeads": {
+          "s": {
+            "operationId": "c"
+          }
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "new-cancel",
+          "kind": "cancel",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 2
+          },
+          "phase": "recorded",
+          "revision": 1,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "host",
+          "hostPid": 101,
+          "recorder": {
+            "bootId": "b",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "h",
+            "acquiredAt": "2026-11-14T00:00:00.000Z"
+          },
+          "unproven": false,
+          "requestDigest": "da4dd787de5707b757cb3233ef3592c18d7c6d781e9ba64a269d01c0817fabce"
+        },
+        "expectedRevision": 0,
+        "expectedCurrentOperationId": "c",
+        "minimumExecutorVersion": 9
+      },
+      "expected": {
+        "ok": true,
+        "state": {
+          "unrelated": {
+            "evidence": [
+              "preserved"
+            ],
+            "permission": "unchanged"
+          },
+          "sessionControls": {
+            "a": {
+              "operationId": "a",
+              "kind": "pause",
+              "workspaceId": "w",
+              "parentConversationId": "bot",
+              "sessionId": "s",
+              "planId": "p",
+              "authorityRef": "local:synthetic",
+              "expectedExecution": {
+                "planId": "p",
+                "sessionId": "s",
+                "executionEpoch": "epoch",
+                "generation": "g",
+                "goalRevision": 2
+              },
+              "phase": "settled",
+              "revision": 3,
+              "updatedAt": "2026-11-14T00:00:00.000Z",
+              "hostEpoch": "host",
+              "hostPid": 101,
+              "recorder": {
+                "bootId": "b",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "h",
+                "acquiredAt": "2026-11-14T00:00:00.000Z"
+              },
+              "unproven": false,
+              "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba",
+              "outcome": "superseded",
+              "supersededBy": "c"
+            },
+            "c": {
+              "operationId": "c",
+              "kind": "cancel",
+              "workspaceId": "w",
+              "parentConversationId": "bot",
+              "sessionId": "s",
+              "planId": "p",
+              "authorityRef": "local:synthetic",
+              "expectedExecution": {
+                "planId": "p",
+                "sessionId": "s",
+                "executionEpoch": "epoch",
+                "generation": "g",
+                "goalRevision": 2
+              },
+              "phase": "settled",
+              "revision": 2,
+              "updatedAt": "2026-11-14T00:00:00.000Z",
+              "hostEpoch": "host",
+              "hostPid": 101,
+              "recorder": {
+                "bootId": "b",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "h",
+                "acquiredAt": "2026-11-14T00:00:00.000Z"
+              },
+              "unproven": false,
+              "requestDigest": "54eb76823e261e4789a0c84b3d5bcf6626f1966cddbde5670b55261c75031f5f",
+              "outcome": "superseded",
+              "supersededBy": "new-cancel"
+            },
+            "new-cancel": {
+              "operationId": "new-cancel",
+              "kind": "cancel",
+              "workspaceId": "w",
+              "parentConversationId": "bot",
+              "sessionId": "s",
+              "planId": "p",
+              "authorityRef": "local:synthetic",
+              "expectedExecution": {
+                "planId": "p",
+                "sessionId": "s",
+                "executionEpoch": "epoch",
+                "generation": "g",
+                "goalRevision": 2
+              },
+              "phase": "recorded",
+              "revision": 1,
+              "updatedAt": "2026-11-14T00:00:00.000Z",
+              "hostEpoch": "host",
+              "hostPid": 101,
+              "recorder": {
+                "bootId": "b",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "h",
+                "acquiredAt": "2026-11-14T00:00:00.000Z"
+              },
+              "unproven": false,
+              "requestDigest": "da4dd787de5707b757cb3233ef3592c18d7c6d781e9ba64a269d01c0817fabce"
+            }
+          },
+          "sessionControlHeads": {
+            "s": {
+              "operationId": "new-cancel"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "later-cancel-after-resume",
+      "state": {
+        "unrelated": {
+          "evidence": [
+            "preserved"
+          ],
+          "permission": "unchanged"
+        },
+        "sessionControls": {
+          "a": {
+            "operationId": "a",
+            "kind": "pause",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "sessionId": "s",
+            "planId": "p",
+            "authorityRef": "local:synthetic",
+            "expectedExecution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "phase": "settled",
+            "revision": 4,
+            "updatedAt": "2026-11-14T00:00:00.000Z",
+            "hostEpoch": "host",
+            "hostPid": 101,
+            "recorder": {
+              "bootId": "b",
+              "pid": 101,
+              "pidStart": "start",
+              "hostId": "h",
+              "acquiredAt": "2026-11-14T00:00:00.000Z"
+            },
+            "unproven": false,
+            "outcome": "applied",
+            "stopReceipt": {
+              "receiptId": "stop-a",
+              "operationId": "a",
+              "execution": {
+                "planId": "p",
+                "sessionId": "s",
+                "executionEpoch": "epoch",
+                "generation": "g",
+                "goalRevision": 2
+              },
+              "admissionClosed": true,
+              "runnerIdle": true,
+              "schedulerIdle": true,
+              "resourceClaims": [
+                {
+                  "claimId": "claim",
+                  "revision": 1
+                }
+              ],
+              "unknownCalls": [
+                "original-unknown"
+              ],
+              "completedAt": "2026-11-14T00:00:00.000Z",
+              "scope": "managed_execution"
+            },
+            "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+          },
+          "b": {
+            "operationId": "b",
+            "kind": "resume",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "sessionId": "s",
+            "planId": "p",
+            "authorityRef": "local:synthetic",
+            "expectedExecution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "phase": "settled",
+            "revision": 3,
+            "updatedAt": "2026-11-14T00:00:00.000Z",
+            "hostEpoch": "host",
+            "hostPid": 101,
+            "recorder": {
+              "bootId": "b",
+              "pid": 101,
+              "pidStart": "start",
+              "hostId": "h",
+              "acquiredAt": "2026-11-14T00:00:00.000Z"
+            },
+            "unproven": false,
+            "priorStopReceiptId": "stop-a",
+            "outcome": "applied",
+            "requestDigest": "f6566e18379bd3140229dc369041883d8a61973cb02753b5f39c137f226a01b8"
+          }
+        },
+        "sessionControlHeads": {
+          "s": {
+            "operationId": "b"
+          }
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "c",
+          "kind": "cancel",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 2
+          },
+          "phase": "recorded",
+          "revision": 1,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "host",
+          "hostPid": 101,
+          "recorder": {
+            "bootId": "b",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "h",
+            "acquiredAt": "2026-11-14T00:00:00.000Z"
+          },
+          "unproven": false,
+          "requestDigest": "54eb76823e261e4789a0c84b3d5bcf6626f1966cddbde5670b55261c75031f5f"
+        },
+        "expectedRevision": 0,
+        "expectedCurrentOperationId": "b",
+        "minimumExecutorVersion": 9
+      },
+      "expected": {
+        "ok": true,
+        "state": {
+          "unrelated": {
+            "evidence": [
+              "preserved"
+            ],
+            "permission": "unchanged"
+          },
+          "sessionControls": {
+            "a": {
+              "operationId": "a",
+              "kind": "pause",
+              "workspaceId": "w",
+              "parentConversationId": "bot",
+              "sessionId": "s",
+              "planId": "p",
+              "authorityRef": "local:synthetic",
+              "expectedExecution": {
+                "planId": "p",
+                "sessionId": "s",
+                "executionEpoch": "epoch",
+                "generation": "g",
+                "goalRevision": 2
+              },
+              "phase": "settled",
+              "revision": 4,
+              "updatedAt": "2026-11-14T00:00:00.000Z",
+              "hostEpoch": "host",
+              "hostPid": 101,
+              "recorder": {
+                "bootId": "b",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "h",
+                "acquiredAt": "2026-11-14T00:00:00.000Z"
+              },
+              "unproven": false,
+              "outcome": "applied",
+              "stopReceipt": {
+                "receiptId": "stop-a",
+                "operationId": "a",
+                "execution": {
+                  "planId": "p",
+                  "sessionId": "s",
+                  "executionEpoch": "epoch",
+                  "generation": "g",
+                  "goalRevision": 2
+                },
+                "admissionClosed": true,
+                "runnerIdle": true,
+                "schedulerIdle": true,
+                "resourceClaims": [
+                  {
+                    "claimId": "claim",
+                    "revision": 1
+                  }
+                ],
+                "unknownCalls": [
+                  "original-unknown"
+                ],
+                "completedAt": "2026-11-14T00:00:00.000Z",
+                "scope": "managed_execution"
+              },
+              "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+            },
+            "b": {
+              "operationId": "b",
+              "kind": "resume",
+              "workspaceId": "w",
+              "parentConversationId": "bot",
+              "sessionId": "s",
+              "planId": "p",
+              "authorityRef": "local:synthetic",
+              "expectedExecution": {
+                "planId": "p",
+                "sessionId": "s",
+                "executionEpoch": "epoch",
+                "generation": "g",
+                "goalRevision": 2
+              },
+              "phase": "settled",
+              "revision": 3,
+              "updatedAt": "2026-11-14T00:00:00.000Z",
+              "hostEpoch": "host",
+              "hostPid": 101,
+              "recorder": {
+                "bootId": "b",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "h",
+                "acquiredAt": "2026-11-14T00:00:00.000Z"
+              },
+              "unproven": false,
+              "priorStopReceiptId": "stop-a",
+              "outcome": "applied",
+              "requestDigest": "f6566e18379bd3140229dc369041883d8a61973cb02753b5f39c137f226a01b8"
+            },
+            "c": {
+              "operationId": "c",
+              "kind": "cancel",
+              "workspaceId": "w",
+              "parentConversationId": "bot",
+              "sessionId": "s",
+              "planId": "p",
+              "authorityRef": "local:synthetic",
+              "expectedExecution": {
+                "planId": "p",
+                "sessionId": "s",
+                "executionEpoch": "epoch",
+                "generation": "g",
+                "goalRevision": 2
+              },
+              "phase": "recorded",
+              "revision": 1,
+              "updatedAt": "2026-11-14T00:00:00.000Z",
+              "hostEpoch": "host",
+              "hostPid": 101,
+              "recorder": {
+                "bootId": "b",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "h",
+                "acquiredAt": "2026-11-14T00:00:00.000Z"
+              },
+              "unproven": false,
+              "requestDigest": "54eb76823e261e4789a0c84b3d5bcf6626f1966cddbde5670b55261c75031f5f"
+            }
+          },
+          "sessionControlHeads": {
+            "s": {
+              "operationId": "c"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "stale-revision",
+      "state": {
+        "unrelated": {
+          "evidence": [
+            "preserved"
+          ],
+          "permission": "unchanged"
+        },
+        "sessionControls": {
+          "a": {
+            "operationId": "a",
+            "kind": "pause",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "sessionId": "s",
+            "planId": "p",
+            "authorityRef": "local:synthetic",
+            "expectedExecution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "phase": "draining",
+            "revision": 2,
+            "updatedAt": "2026-11-14T00:00:00.000Z",
+            "hostEpoch": "host",
+            "hostPid": 101,
+            "recorder": {
+              "bootId": "b",
+              "pid": 101,
+              "pidStart": "start",
+              "hostId": "h",
+              "acquiredAt": "2026-11-14T00:00:00.000Z"
+            },
+            "unproven": false,
+            "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+          }
+        },
+        "sessionControlHeads": {
+          "s": {
+            "operationId": "a"
+          }
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "a",
+          "kind": "pause",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 2
+          },
+          "phase": "reconciling",
+          "revision": 3,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "host",
+          "hostPid": 101,
+          "recorder": {
+            "bootId": "b",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "h",
+            "acquiredAt": "2026-11-14T00:00:00.000Z"
+          },
+          "unproven": false,
+          "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+        },
+        "expectedRevision": 1,
+        "expectedCurrentOperationId": null,
+        "minimumExecutorVersion": 9
+      },
+      "expected": {
+        "ok": false,
+        "code": "session_control_conflict"
+      }
+    },
+    {
+      "name": "illegal-phase-jump",
+      "state": {
+        "unrelated": {
+          "evidence": [
+            "preserved"
+          ],
+          "permission": "unchanged"
+        },
+        "sessionControls": {
+          "a": {
+            "operationId": "a",
+            "kind": "pause",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "sessionId": "s",
+            "planId": "p",
+            "authorityRef": "local:synthetic",
+            "expectedExecution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "phase": "recorded",
+            "revision": 1,
+            "updatedAt": "2026-11-14T00:00:00.000Z",
+            "hostEpoch": "host",
+            "hostPid": 101,
+            "recorder": {
+              "bootId": "b",
+              "pid": 101,
+              "pidStart": "start",
+              "hostId": "h",
+              "acquiredAt": "2026-11-14T00:00:00.000Z"
+            },
+            "unproven": false,
+            "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+          }
+        },
+        "sessionControlHeads": {
+          "s": {
+            "operationId": "a"
+          }
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "a",
+          "kind": "pause",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 2
+          },
+          "phase": "reconciling",
+          "revision": 2,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "host",
+          "hostPid": 101,
+          "recorder": {
+            "bootId": "b",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "h",
+            "acquiredAt": "2026-11-14T00:00:00.000Z"
+          },
+          "unproven": false,
+          "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+        },
+        "expectedRevision": 1,
+        "expectedCurrentOperationId": null,
+        "minimumExecutorVersion": 9
+      },
+      "expected": {
+        "ok": false,
+        "code": "session_control_conflict"
+      }
+    },
+    {
+      "name": "unknown-executor",
+      "state": {
+        "unrelated": {
+          "evidence": [
+            "preserved"
+          ],
+          "permission": "unchanged"
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "a",
+          "kind": "pause",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 2
+          },
+          "phase": "recorded",
+          "revision": 1,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "host",
+          "hostPid": 101,
+          "recorder": {
+            "bootId": "b",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "h",
+            "acquiredAt": "2026-11-14T00:00:00.000Z"
+          },
+          "unproven": false,
+          "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+        },
+        "expectedRevision": 0,
+        "expectedCurrentOperationId": null,
+        "minimumExecutorVersion": 8
+      },
+      "expected": {
+        "ok": false,
+        "code": "session_control_executor_unsupported"
+      }
+    },
+    {
+      "name": "executor-seven",
+      "state": {
+        "unrelated": {
+          "evidence": [
+            "preserved"
+          ],
+          "permission": "unchanged"
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "a",
+          "kind": "pause",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 2
+          },
+          "phase": "recorded",
+          "revision": 1,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "host",
+          "hostPid": 101,
+          "recorder": {
+            "bootId": "b",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "h",
+            "acquiredAt": "2026-11-14T00:00:00.000Z"
+          },
+          "unproven": false,
+          "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+        },
+        "expectedRevision": 0,
+        "expectedCurrentOperationId": null,
+        "minimumExecutorVersion": 7
+      },
+      "expected": {
+        "ok": true,
+        "state": {
+          "unrelated": {
+            "evidence": [
+              "preserved"
+            ],
+            "permission": "unchanged"
+          },
+          "sessionControls": {
+            "a": {
+              "operationId": "a",
+              "kind": "pause",
+              "workspaceId": "w",
+              "parentConversationId": "bot",
+              "sessionId": "s",
+              "planId": "p",
+              "authorityRef": "local:synthetic",
+              "expectedExecution": {
+                "planId": "p",
+                "sessionId": "s",
+                "executionEpoch": "epoch",
+                "generation": "g",
+                "goalRevision": 2
+              },
+              "phase": "recorded",
+              "revision": 1,
+              "updatedAt": "2026-11-14T00:00:00.000Z",
+              "hostEpoch": "host",
+              "hostPid": 101,
+              "recorder": {
+                "bootId": "b",
+                "pid": 101,
+                "pidStart": "start",
+                "hostId": "h",
+                "acquiredAt": "2026-11-14T00:00:00.000Z"
+              },
+              "unproven": false,
+              "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+            }
+          },
+          "sessionControlHeads": {
+            "s": {
+              "operationId": "a"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "wrong-request-digest",
+      "state": {
+        "unrelated": {
+          "evidence": [
+            "preserved"
+          ],
+          "permission": "unchanged"
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "a",
+          "kind": "pause",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 2
+          },
+          "phase": "recorded",
+          "revision": 1,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "host",
+          "hostPid": 101,
+          "recorder": {
+            "bootId": "b",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "h",
+            "acquiredAt": "2026-11-14T00:00:00.000Z"
+          },
+          "unproven": false,
+          "requestDigest": "bad"
+        },
+        "expectedRevision": 0,
+        "expectedCurrentOperationId": null,
+        "minimumExecutorVersion": 9
+      },
+      "expected": {
+        "ok": false,
+        "code": "session_control_conflict"
+      }
+    },
+    {
+      "name": "missing-outcome",
+      "state": {
+        "unrelated": {
+          "evidence": [
+            "preserved"
+          ],
+          "permission": "unchanged"
+        },
+        "sessionControls": {
+          "a": {
+            "operationId": "a",
+            "kind": "pause",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "sessionId": "s",
+            "planId": "p",
+            "authorityRef": "local:synthetic",
+            "expectedExecution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "phase": "draining",
+            "revision": 2,
+            "updatedAt": "2026-11-14T00:00:00.000Z",
+            "hostEpoch": "host",
+            "hostPid": 101,
+            "recorder": {
+              "bootId": "b",
+              "pid": 101,
+              "pidStart": "start",
+              "hostId": "h",
+              "acquiredAt": "2026-11-14T00:00:00.000Z"
+            },
+            "unproven": false,
+            "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+          }
+        },
+        "sessionControlHeads": {
+          "s": {
+            "operationId": "a"
+          }
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "a",
+          "kind": "pause",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 2
+          },
+          "phase": "settled",
+          "revision": 3,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "host",
+          "hostPid": 101,
+          "recorder": {
+            "bootId": "b",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "h",
+            "acquiredAt": "2026-11-14T00:00:00.000Z"
+          },
+          "unproven": false,
+          "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+        },
+        "expectedRevision": 2,
+        "expectedCurrentOperationId": null,
+        "minimumExecutorVersion": 9
+      },
+      "expected": {
+        "ok": false,
+        "code": "session_control_outcome_required"
+      }
+    },
+    {
+      "name": "missing-stop-receipt",
+      "state": {
+        "unrelated": {
+          "evidence": [
+            "preserved"
+          ],
+          "permission": "unchanged"
+        },
+        "sessionControls": {
+          "a": {
+            "operationId": "a",
+            "kind": "pause",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "sessionId": "s",
+            "planId": "p",
+            "authorityRef": "local:synthetic",
+            "expectedExecution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "phase": "draining",
+            "revision": 2,
+            "updatedAt": "2026-11-14T00:00:00.000Z",
+            "hostEpoch": "host",
+            "hostPid": 101,
+            "recorder": {
+              "bootId": "b",
+              "pid": 101,
+              "pidStart": "start",
+              "hostId": "h",
+              "acquiredAt": "2026-11-14T00:00:00.000Z"
+            },
+            "unproven": false,
+            "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+          }
+        },
+        "sessionControlHeads": {
+          "s": {
+            "operationId": "a"
+          }
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "a",
+          "kind": "pause",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 2
+          },
+          "phase": "settled",
+          "revision": 3,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "host",
+          "hostPid": 101,
+          "recorder": {
+            "bootId": "b",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "h",
+            "acquiredAt": "2026-11-14T00:00:00.000Z"
+          },
+          "unproven": false,
+          "outcome": "applied",
+          "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+        },
+        "expectedRevision": 2,
+        "expectedCurrentOperationId": null,
+        "minimumExecutorVersion": 9
+      },
+      "expected": {
+        "ok": false,
+        "code": "session_control_receipt_required"
+      }
+    },
+    {
+      "name": "falsey-stop-receipt",
+      "state": {
+        "unrelated": {
+          "evidence": [
+            "preserved"
+          ],
+          "permission": "unchanged"
+        },
+        "sessionControls": {
+          "a": {
+            "operationId": "a",
+            "kind": "pause",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "sessionId": "s",
+            "planId": "p",
+            "authorityRef": "local:synthetic",
+            "expectedExecution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "phase": "draining",
+            "revision": 2,
+            "updatedAt": "2026-11-14T00:00:00.000Z",
+            "hostEpoch": "host",
+            "hostPid": 101,
+            "recorder": {
+              "bootId": "b",
+              "pid": 101,
+              "pidStart": "start",
+              "hostId": "h",
+              "acquiredAt": "2026-11-14T00:00:00.000Z"
+            },
+            "unproven": false,
+            "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+          }
+        },
+        "sessionControlHeads": {
+          "s": {
+            "operationId": "a"
+          }
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "a",
+          "kind": "pause",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 2
+          },
+          "phase": "settled",
+          "revision": 3,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "host",
+          "hostPid": 101,
+          "recorder": {
+            "bootId": "b",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "h",
+            "acquiredAt": "2026-11-14T00:00:00.000Z"
+          },
+          "unproven": false,
+          "outcome": "applied",
+          "stopReceipt": 0,
+          "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+        },
+        "expectedRevision": 2,
+        "expectedCurrentOperationId": null,
+        "minimumExecutorVersion": 9
+      },
+      "expected": {
+        "ok": false,
+        "code": "session_control_receipt_required"
+      }
+    },
+    {
+      "name": "invalid-stop-barrier",
+      "state": {
+        "unrelated": {
+          "evidence": [
+            "preserved"
+          ],
+          "permission": "unchanged"
+        },
+        "sessionControls": {
+          "a": {
+            "operationId": "a",
+            "kind": "pause",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "sessionId": "s",
+            "planId": "p",
+            "authorityRef": "local:synthetic",
+            "expectedExecution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "phase": "draining",
+            "revision": 2,
+            "updatedAt": "2026-11-14T00:00:00.000Z",
+            "hostEpoch": "host",
+            "hostPid": 101,
+            "recorder": {
+              "bootId": "b",
+              "pid": 101,
+              "pidStart": "start",
+              "hostId": "h",
+              "acquiredAt": "2026-11-14T00:00:00.000Z"
+            },
+            "unproven": false,
+            "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+          }
+        },
+        "sessionControlHeads": {
+          "s": {
+            "operationId": "a"
+          }
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "a",
+          "kind": "pause",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 2
+          },
+          "phase": "settled",
+          "revision": 3,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "host",
+          "hostPid": 101,
+          "recorder": {
+            "bootId": "b",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "h",
+            "acquiredAt": "2026-11-14T00:00:00.000Z"
+          },
+          "unproven": false,
+          "outcome": "applied",
+          "stopReceipt": {
+            "receiptId": "stop-a",
+            "operationId": "a",
+            "execution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "admissionClosed": true,
+            "runnerIdle": false,
+            "schedulerIdle": true,
+            "resourceClaims": [
+              {
+                "claimId": "claim",
+                "revision": 1
+              }
+            ],
+            "unknownCalls": [
+              "original-unknown"
+            ],
+            "completedAt": "2026-11-14T00:00:00.000Z",
+            "scope": "managed_execution"
+          },
+          "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+        },
+        "expectedRevision": 2,
+        "expectedCurrentOperationId": null,
+        "minimumExecutorVersion": 9
+      },
+      "expected": {
+        "ok": false,
+        "code": "session_control_receipt_invalid"
+      }
+    },
+    {
+      "name": "duplicate-resource-claim",
+      "state": {
+        "unrelated": {
+          "evidence": [
+            "preserved"
+          ],
+          "permission": "unchanged"
+        },
+        "sessionControls": {
+          "a": {
+            "operationId": "a",
+            "kind": "pause",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "sessionId": "s",
+            "planId": "p",
+            "authorityRef": "local:synthetic",
+            "expectedExecution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "phase": "draining",
+            "revision": 2,
+            "updatedAt": "2026-11-14T00:00:00.000Z",
+            "hostEpoch": "host",
+            "hostPid": 101,
+            "recorder": {
+              "bootId": "b",
+              "pid": 101,
+              "pidStart": "start",
+              "hostId": "h",
+              "acquiredAt": "2026-11-14T00:00:00.000Z"
+            },
+            "unproven": false,
+            "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+          }
+        },
+        "sessionControlHeads": {
+          "s": {
+            "operationId": "a"
+          }
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "a",
+          "kind": "pause",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 2
+          },
+          "phase": "settled",
+          "revision": 3,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "host",
+          "hostPid": 101,
+          "recorder": {
+            "bootId": "b",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "h",
+            "acquiredAt": "2026-11-14T00:00:00.000Z"
+          },
+          "unproven": false,
+          "outcome": "applied",
+          "stopReceipt": {
+            "receiptId": "stop-a",
+            "operationId": "a",
+            "execution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "admissionClosed": true,
+            "runnerIdle": true,
+            "schedulerIdle": true,
+            "resourceClaims": [
+              {
+                "claimId": "x",
+                "revision": 1
+              },
+              {
+                "claimId": "x",
+                "revision": 2
+              }
+            ],
+            "unknownCalls": [
+              "original-unknown"
+            ],
+            "completedAt": "2026-11-14T00:00:00.000Z",
+            "scope": "managed_execution"
+          },
+          "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+        },
+        "expectedRevision": 2,
+        "expectedCurrentOperationId": null,
+        "minimumExecutorVersion": 9
+      },
+      "expected": {
+        "ok": false,
+        "code": "session_control_receipt_invalid"
+      }
+    },
+    {
+      "name": "unknown-call-shape",
+      "state": {
+        "unrelated": {
+          "evidence": [
+            "preserved"
+          ],
+          "permission": "unchanged"
+        },
+        "sessionControls": {
+          "a": {
+            "operationId": "a",
+            "kind": "pause",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "sessionId": "s",
+            "planId": "p",
+            "authorityRef": "local:synthetic",
+            "expectedExecution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "phase": "draining",
+            "revision": 2,
+            "updatedAt": "2026-11-14T00:00:00.000Z",
+            "hostEpoch": "host",
+            "hostPid": 101,
+            "recorder": {
+              "bootId": "b",
+              "pid": 101,
+              "pidStart": "start",
+              "hostId": "h",
+              "acquiredAt": "2026-11-14T00:00:00.000Z"
+            },
+            "unproven": false,
+            "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+          }
+        },
+        "sessionControlHeads": {
+          "s": {
+            "operationId": "a"
+          }
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "a",
+          "kind": "pause",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 2
+          },
+          "phase": "settled",
+          "revision": 3,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "host",
+          "hostPid": 101,
+          "recorder": {
+            "bootId": "b",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "h",
+            "acquiredAt": "2026-11-14T00:00:00.000Z"
+          },
+          "unproven": false,
+          "outcome": "applied",
+          "stopReceipt": {
+            "receiptId": "stop-a",
+            "operationId": "a",
+            "execution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "admissionClosed": true,
+            "runnerIdle": true,
+            "schedulerIdle": true,
+            "resourceClaims": [
+              {
+                "claimId": "claim",
+                "revision": 1
+              }
+            ],
+            "unknownCalls": [
+              1
+            ],
+            "completedAt": "2026-11-14T00:00:00.000Z",
+            "scope": "managed_execution"
+          },
+          "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+        },
+        "expectedRevision": 2,
+        "expectedCurrentOperationId": null,
+        "minimumExecutorVersion": 9
+      },
+      "expected": {
+        "ok": false,
+        "code": "session_control_receipt_invalid"
+      }
+    },
+    {
+      "name": "host-epoch-changed",
+      "state": {
+        "unrelated": {
+          "evidence": [
+            "preserved"
+          ],
+          "permission": "unchanged"
+        },
+        "sessionControls": {
+          "a": {
+            "operationId": "a",
+            "kind": "pause",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "sessionId": "s",
+            "planId": "p",
+            "authorityRef": "local:synthetic",
+            "expectedExecution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "phase": "draining",
+            "revision": 2,
+            "updatedAt": "2026-11-14T00:00:00.000Z",
+            "hostEpoch": "host",
+            "hostPid": 101,
+            "recorder": {
+              "bootId": "b",
+              "pid": 101,
+              "pidStart": "start",
+              "hostId": "h",
+              "acquiredAt": "2026-11-14T00:00:00.000Z"
+            },
+            "unproven": false,
+            "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+          }
+        },
+        "sessionControlHeads": {
+          "s": {
+            "operationId": "a"
+          }
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "a",
+          "kind": "pause",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 2
+          },
+          "phase": "reconciling",
+          "revision": 3,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "other",
+          "hostPid": 101,
+          "recorder": {
+            "bootId": "b",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "h",
+            "acquiredAt": "2026-11-14T00:00:00.000Z"
+          },
+          "unproven": false,
+          "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+        },
+        "expectedRevision": 2,
+        "expectedCurrentOperationId": null,
+        "minimumExecutorVersion": 9
+      },
+      "expected": {
+        "ok": false,
+        "code": "session_control_conflict"
+      }
+    },
+    {
+      "name": "execution-revision-changed",
+      "state": {
+        "unrelated": {
+          "evidence": [
+            "preserved"
+          ],
+          "permission": "unchanged"
+        },
+        "sessionControls": {
+          "a": {
+            "operationId": "a",
+            "kind": "pause",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "sessionId": "s",
+            "planId": "p",
+            "authorityRef": "local:synthetic",
+            "expectedExecution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "phase": "draining",
+            "revision": 2,
+            "updatedAt": "2026-11-14T00:00:00.000Z",
+            "hostEpoch": "host",
+            "hostPid": 101,
+            "recorder": {
+              "bootId": "b",
+              "pid": 101,
+              "pidStart": "start",
+              "hostId": "h",
+              "acquiredAt": "2026-11-14T00:00:00.000Z"
+            },
+            "unproven": false,
+            "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+          }
+        },
+        "sessionControlHeads": {
+          "s": {
+            "operationId": "a"
+          }
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "a",
+          "kind": "pause",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 3
+          },
+          "phase": "reconciling",
+          "revision": 3,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "host",
+          "hostPid": 101,
+          "recorder": {
+            "bootId": "b",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "h",
+            "acquiredAt": "2026-11-14T00:00:00.000Z"
+          },
+          "unproven": false,
+          "requestDigest": "bd0571f280a9657ad05ccd2529b9e204e111e0f1857fdff5432fbaddaa724e9e"
+        },
+        "expectedRevision": 2,
+        "expectedCurrentOperationId": null,
+        "minimumExecutorVersion": 9
+      },
+      "expected": {
+        "ok": false,
+        "code": "session_control_conflict"
+      }
+    },
+    {
+      "name": "recorder-order-is-immutable",
+      "state": {
+        "unrelated": {
+          "evidence": [
+            "preserved"
+          ],
+          "permission": "unchanged"
+        },
+        "sessionControls": {
+          "a": {
+            "operationId": "a",
+            "kind": "pause",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "sessionId": "s",
+            "planId": "p",
+            "authorityRef": "local:synthetic",
+            "expectedExecution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "phase": "draining",
+            "revision": 2,
+            "updatedAt": "2026-11-14T00:00:00.000Z",
+            "hostEpoch": "host",
+            "hostPid": 101,
+            "recorder": {
+              "bootId": "b",
+              "pid": 101,
+              "pidStart": "start",
+              "hostId": "h",
+              "acquiredAt": "2026-11-14T00:00:00.000Z"
+            },
+            "unproven": false,
+            "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+          }
+        },
+        "sessionControlHeads": {
+          "s": {
+            "operationId": "a"
+          }
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "a",
+          "kind": "pause",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 2
+          },
+          "phase": "reconciling",
+          "revision": 3,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "host",
+          "hostPid": 101,
+          "recorder": {
+            "acquiredAt": "2026-11-14T00:00:00.000Z",
+            "hostId": "h",
+            "pidStart": "start",
+            "pid": 101,
+            "bootId": "b"
+          },
+          "unproven": false,
+          "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+        },
+        "expectedRevision": 2,
+        "expectedCurrentOperationId": null,
+        "minimumExecutorVersion": 9
+      },
+      "expected": {
+        "ok": false,
+        "code": "session_control_conflict"
+      }
+    },
+    {
+      "name": "unknown-operation-kind",
+      "state": {
+        "unrelated": {
+          "evidence": [
+            "preserved"
+          ],
+          "permission": "unchanged"
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "a",
+          "kind": "future",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 2
+          },
+          "phase": "recorded",
+          "revision": 1,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "host",
+          "hostPid": 101,
+          "recorder": {
+            "bootId": "b",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "h",
+            "acquiredAt": "2026-11-14T00:00:00.000Z"
+          },
+          "unproven": false,
+          "requestDigest": "1436da4754e0a1ed7214ec62756648b58d1355acce898427f233c8d288857d76"
+        },
+        "expectedRevision": 0,
+        "expectedCurrentOperationId": null,
+        "minimumExecutorVersion": 9
+      },
+      "expected": {
+        "ok": false,
+        "code": "session_control_conflict"
+      }
+    },
+    {
+      "name": "old-record-cannot-change-settled-operation",
+      "state": {
+        "unrelated": {
+          "evidence": [
+            "preserved"
+          ],
+          "permission": "unchanged"
+        },
+        "sessionControls": {
+          "a": {
+            "operationId": "a",
+            "kind": "pause",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "sessionId": "s",
+            "planId": "p",
+            "authorityRef": "local:synthetic",
+            "expectedExecution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "phase": "settled",
+            "revision": 4,
+            "updatedAt": "2026-11-14T00:00:00.000Z",
+            "hostEpoch": "host",
+            "hostPid": 101,
+            "recorder": {
+              "bootId": "b",
+              "pid": 101,
+              "pidStart": "start",
+              "hostId": "h",
+              "acquiredAt": "2026-11-14T00:00:00.000Z"
+            },
+            "unproven": false,
+            "outcome": "applied",
+            "stopReceipt": {
+              "receiptId": "stop-a",
+              "operationId": "a",
+              "execution": {
+                "planId": "p",
+                "sessionId": "s",
+                "executionEpoch": "epoch",
+                "generation": "g",
+                "goalRevision": 2
+              },
+              "admissionClosed": true,
+              "runnerIdle": true,
+              "schedulerIdle": true,
+              "resourceClaims": [
+                {
+                  "claimId": "claim",
+                  "revision": 1
+                }
+              ],
+              "unknownCalls": [
+                "original-unknown"
+              ],
+              "completedAt": "2026-11-14T00:00:00.000Z",
+              "scope": "managed_execution"
+            },
+            "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+          }
+        },
+        "sessionControlHeads": {
+          "s": {
+            "operationId": "a"
+          }
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "a",
+          "kind": "pause",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 2
+          },
+          "phase": "settled",
+          "revision": 5,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "host",
+          "hostPid": 101,
+          "recorder": {
+            "bootId": "b",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "h",
+            "acquiredAt": "2026-11-14T00:00:00.000Z"
+          },
+          "unproven": false,
+          "outcome": "applied",
+          "stopReceipt": {
+            "receiptId": "stop-a",
+            "operationId": "a",
+            "execution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "admissionClosed": true,
+            "runnerIdle": true,
+            "schedulerIdle": true,
+            "resourceClaims": [
+              {
+                "claimId": "claim",
+                "revision": 1
+              }
+            ],
+            "unknownCalls": [
+              "original-unknown"
+            ],
+            "completedAt": "2026-11-14T00:00:00.000Z",
+            "scope": "managed_execution"
+          },
+          "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+        },
+        "expectedRevision": 4,
+        "expectedCurrentOperationId": null,
+        "minimumExecutorVersion": 9
+      },
+      "expected": {
+        "ok": false,
+        "code": "session_control_conflict"
+      }
+    },
+    {
+      "name": "current-head-mismatch",
+      "state": {
+        "unrelated": {
+          "evidence": [
+            "preserved"
+          ],
+          "permission": "unchanged"
+        },
+        "sessionControls": {
+          "a": {
+            "operationId": "a",
+            "kind": "pause",
+            "workspaceId": "w",
+            "parentConversationId": "bot",
+            "sessionId": "s",
+            "planId": "p",
+            "authorityRef": "local:synthetic",
+            "expectedExecution": {
+              "planId": "p",
+              "sessionId": "s",
+              "executionEpoch": "epoch",
+              "generation": "g",
+              "goalRevision": 2
+            },
+            "phase": "draining",
+            "revision": 2,
+            "updatedAt": "2026-11-14T00:00:00.000Z",
+            "hostEpoch": "host",
+            "hostPid": 101,
+            "recorder": {
+              "bootId": "b",
+              "pid": 101,
+              "pidStart": "start",
+              "hostId": "h",
+              "acquiredAt": "2026-11-14T00:00:00.000Z"
+            },
+            "unproven": false,
+            "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+          }
+        },
+        "sessionControlHeads": {
+          "s": {
+            "operationId": "other"
+          }
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "a",
+          "kind": "pause",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 2
+          },
+          "phase": "reconciling",
+          "revision": 3,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "host",
+          "hostPid": 101,
+          "recorder": {
+            "bootId": "b",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "h",
+            "acquiredAt": "2026-11-14T00:00:00.000Z"
+          },
+          "unproven": false,
+          "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+        },
+        "expectedRevision": 2,
+        "expectedCurrentOperationId": null,
+        "minimumExecutorVersion": 9
+      },
+      "expected": {
+        "ok": false,
+        "code": "session_control_superseded"
+      }
+    },
+    {
+      "name": "unknown-existing-control-preserved",
+      "state": {
+        "sessionControls": {
+          "a": "unknown-record"
+        }
+      },
+      "entry": {
+        "operation": {
+          "operationId": "a",
+          "kind": "pause",
+          "workspaceId": "w",
+          "parentConversationId": "bot",
+          "sessionId": "s",
+          "planId": "p",
+          "authorityRef": "local:synthetic",
+          "expectedExecution": {
+            "planId": "p",
+            "sessionId": "s",
+            "executionEpoch": "epoch",
+            "generation": "g",
+            "goalRevision": 2
+          },
+          "phase": "recorded",
+          "revision": 1,
+          "updatedAt": "2026-11-14T00:00:00.000Z",
+          "hostEpoch": "host",
+          "hostPid": 101,
+          "recorder": {
+            "bootId": "b",
+            "pid": 101,
+            "pidStart": "start",
+            "hostId": "h",
+            "acquiredAt": "2026-11-14T00:00:00.000Z"
+          },
+          "unproven": false,
+          "requestDigest": "dc710b18541b74b9798dff489bc5d0e708f2bc7a24b08b3c94c4778cd93881ba"
+        },
+        "expectedRevision": 0,
+        "expectedCurrentOperationId": null,
+        "minimumExecutorVersion": 9
+      },
+      "expected": {
+        "ok": false,
+        "code": "session_control_conflict"
+      }
+    }
+  ]
+}

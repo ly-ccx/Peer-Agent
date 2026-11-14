@@ -11,6 +11,7 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 const output = process.argv[2] ?? mkdtempSync(join(tmpdir(), 'peer-native-check-'));
 const run = (command, args) => execFileSync(command, args, { cwd: root, stdio: 'inherit' });
 run('bun', ['scripts/native-cli/contracts.ts']);
+run('bun', ['scripts/native-cli/control-contracts.ts']);
 run('node', ['scripts/native-cli/check-boundaries.mjs']);
 run('cargo', ['fmt', '--all', '--check']);
 run('cargo', ['clippy', '--locked', '-p', 'peer-cli', '-p', 'peer-protocol', '-p', 'peer-tui', '-p', 'peer-store', '-p', 'peer-runtime', '--all-targets', '--features', 'peer-runtime/test-fixtures', '--', '-D', 'warnings']);

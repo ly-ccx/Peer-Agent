@@ -15,7 +15,7 @@ const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 /// Exact existing JS digest for admitted JSON; never issues authority by itself.
 pub fn approval_args_digest(value: &Value) -> Result<String, DigestError> {
     let mut encoded = String::new();
-    encode(value, &mut encoded, 0)?;
+    encode(value, &mut encoded, 0, KeyOrder::Stable)?;
     Ok(format!("{:x}", Sha256::digest(encoded.as_bytes())))
 }
 
@@ -32,7 +32,7 @@ pub struct PermissionOperation<'a> {
 pub fn permission_operation_key(input: PermissionOperation<'_>) -> Result<String, DigestError> {
     let mut output = String::new();
     append(&mut output, "{\"args\":")?;
-    encode(input.args, &mut output, 1)?;
+    encode(input.args, &mut output, 1, KeyOrder::Stable)?;
     append(&mut output, ",\"capabilityId\":")?;
     encode_string(input.capability_id, &mut output)?;
     for (key, value) in [
@@ -95,7 +95,38 @@ fn append(output: &mut String, text: &str) -> Result<(), DigestError> {
     Ok(())
 }
 
-fn encode(value: &Value, output: &mut String, depth: usize) -> Result<(), DigestError> {
+#[derive(Clone, Copy)]
+enum KeyOrder {
+    Stable,
+    JavaScript,
+}
+
+/// Existing controlDigest uses JSON.stringify order, unlike approval's sorted keys.
+/// serde_json preserve_order retains the source object's insertion order.
+pub fn javascript_json_digest(value: &Value) -> Result<String, DigestError> {
+    let encoded = javascript_json_string(value)?;
+    Ok(format!("{:x}", Sha256::digest(encoded.as_bytes())))
+}
+pub fn javascript_json_string(value: &Value) -> Result<String, DigestError> {
+    let mut encoded = String::new();
+    encode(value, &mut encoded, 0, KeyOrder::JavaScript)?;
+    Ok(encoded)
+}
+fn array_index(key: &str) -> Option<u32> {
+    if key.is_empty() || key.len() > 10 || key.len() > 1 && key.starts_with('0') {
+        return None;
+    }
+    if !key.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    key.parse::<u32>().ok().filter(|n| *n != u32::MAX)
+}
+fn encode(
+    value: &Value,
+    output: &mut String,
+    depth: usize,
+    order: KeyOrder,
+) -> Result<(), DigestError> {
     if depth > MAX_DEPTH {
         return Err(DigestError::TooDeep);
     }
@@ -121,7 +152,7 @@ fn encode(value: &Value, output: &mut String, depth: usize) -> Result<(), Digest
                 if index != 0 {
                     append(output, ",")?;
                 }
-                encode(value, output, depth + 1)?;
+                encode(value, output, depth + 1, order)?;
             }
             append(output, "]")
         }
@@ -131,7 +162,19 @@ fn encode(value: &Value, output: &mut String, depth: usize) -> Result<(), Digest
             }
             let mut keys: Vec<_> = values.keys().collect();
             // JavaScript Object.keys(...).sort() compares UTF-16 code units.
-            keys.sort_by(|left, right| left.encode_utf16().cmp(right.encode_utf16()));
+            match order {
+                KeyOrder::Stable => {
+                    keys.sort_by(|left, right| left.encode_utf16().cmp(right.encode_utf16()))
+                }
+                KeyOrder::JavaScript => {
+                    keys.sort_by(|a, b| match (array_index(a), array_index(b)) {
+                        (Some(a), Some(b)) => a.cmp(&b),
+                        (Some(_), None) => std::cmp::Ordering::Less,
+                        (None, Some(_)) => std::cmp::Ordering::Greater,
+                        (None, None) => std::cmp::Ordering::Equal,
+                    })
+                }
+            }
             append(output, "{")?;
             for (index, key) in keys.into_iter().enumerate() {
                 if index != 0 {
@@ -139,7 +182,7 @@ fn encode(value: &Value, output: &mut String, depth: usize) -> Result<(), Digest
                 }
                 encode_string(key, output)?;
                 append(output, ":")?;
-                encode(&values[key], output, depth + 1)?;
+                encode(&values[key], output, depth + 1, order)?;
             }
             append(output, "}")
         }

@@ -14,7 +14,8 @@ mod store;
 
 pub use bounded_json::{DecodedJson, JsonDecodeError, JsonLimits, decode_json_bounded};
 pub use permission_digest::{
-    DigestError, PermissionOperation, approval_args_digest, permission_operation_key,
+    DigestError, PermissionOperation, approval_args_digest, javascript_json_digest,
+    javascript_json_string, permission_operation_key,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
