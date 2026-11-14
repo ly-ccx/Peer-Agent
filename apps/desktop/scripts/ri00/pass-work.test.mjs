@@ -1,0 +1,5 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {decodePassWork}from './pass-work.mjs';
+const fixture=()=>({slots:26,levels:1,numer:1,denom:1,counterCpuUpperMs:.1,values:Array.from({length:26},(_,i)=>[9n,1n,BigInt(i*10),BigInt(i*10+1),BigInt(i*100),BigInt(i*200),BigInt(i*1000),BigInt(i*100),0n,...Array(35).fill(0n)]).flat().map(String)});
+test('per-pass arithmetic reconciles root and uninstrumented remainder without treating sampling as function instructions',()=>{const w=decodePassWork(fixture());assert.equal(w.root.instructions,'2500');assert.equal(w.passes.length,12);assert.equal(w.remainder.instructions,'1300');assert.equal(w.boundaryWallMs,.000026);assert.equal(w.notFunctionInstructions,true);});
+test('missing slots, swapped thread, backward counters and overlapping ordering fail closed',()=>{for(const change of[w=>w.slots=25,w=>w.values[44]='10',w=>w.values[4+44*5]='0',w=>w.values[44+1]='2']){const w=fixture();change(w);assert.throws(()=>decodePassWork(w),/pass_work/);}});

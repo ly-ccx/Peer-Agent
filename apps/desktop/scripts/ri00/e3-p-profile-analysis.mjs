@@ -1,0 +1,14 @@
+import{attributeProfileSpans}from'./profile-pass-work.mjs';import{mapPProfileClock}from'./e3-p-clock.mjs';
+export function classifyPFrame(frame,{mappedScriptIds=new Set(),sealedUrls=new Set()}={}){
+ const name=frame?.functionName||'';if(name==='(garbage collector)')return'gc';if(name==='(idle)')return'idle';if(name==='(program)')return'program';
+ if(!name||name.startsWith('('))return'unknown';if(!frame.scriptId||frame.scriptId==='0'||frame.lineNumber<0||frame.columnNumber<0)return'native-unresolved';
+ if(frame.url&&sealedUrls.has(frame.url))return'sealed-js';if(!frame.url&&mappedScriptIds.has(frame.scriptId))return'sealed-eval-js';return'unknown-source';
+}
+export function analyzePProfile(profile,block,{sealedUrls=new Set()}={}){
+ const clock=mapPProfileClock(profile,block.markers.map(p=>p.row.profileBoundary)),mappedScriptIds=new Set(profile.nodes.filter(n=>['e3BoundaryStart','e3BoundaryEnd'].includes(n.callFrame.functionName)).map(n=>n.callFrame.scriptId));
+ const spans=block.points.flatMap((p,i)=>{const r=p.row,gaps=[];let start=r.start;for(const[e,k]of r.evidence.map((e,k)=>[e,k])){if(e.start<start||e.end<e.start||e.end>r.end)throw Error('p_profile_pass_order');gaps.push({label:'root-'+i+'-remainder-'+k,start,end:e.start,kind:'remainder',root:i});start=e.end;}gaps.push({label:'root-'+i+'-remainder-end',start,end:r.end,kind:'remainder',root:i});return[{label:'root-'+i,start:r.start,end:r.end,kind:'root',root:i},...r.evidence.map((e,k)=>({label:'root-'+i+'-pass-'+k,start:e.start,end:e.end,kind:'pass',root:i})),...gaps];});
+ const analysis=attributeProfileSpans(profile,clock,spans).map(s=>{const unknownByKind={};for(const leaf of s.leaves){leaf.classification=classifyPFrame(leaf.path.at(-1),{sealedUrls,mappedScriptIds});if(!['sealed-js','sealed-eval-js'].includes(leaf.classification))unknownByKind[leaf.classification]=(unknownByKind[leaf.classification]||0)+leaf.estimatedSampledWallMs;}
+  const identity=spans.find(x=>x.label===s.label);return{...s,kind:identity.kind,root:identity.root,sufficientSamples:s.definiteSamples>=10,unknownByKind,unresolvedSampledWallMs:Object.values(unknownByKind).reduce((a,b)=>a+b,0)};});
+ const remainder=block.points.map((_,root)=>{const a=analysis.filter(s=>s.root===root&&s.kind==='remainder');return{root,segments:a.map(s=>s.label),estimatedSampledWallMs:a.reduce((n,s)=>n+s.estimatedSampledWallMs,0),definiteSamples:a.reduce((n,s)=>n+s.definiteSamples,0),unresolvedSampledWallMs:a.reduce((n,s)=>n+s.unresolvedSampledWallMs,0),notCpuOrInstructions:true};});
+ return{clock,spans:analysis,remainder,passed:analysis.filter(s=>s.kind==='pass').every(s=>s.sufficientSamples),partitionRule:'root = twelve pass intervals + disjoint remainder segments; never sum root inclusive estimate with partitions',notCpuOrInstructions:true,notCause:true};
+}
