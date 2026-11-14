@@ -60,3 +60,13 @@ test('设置项只经 IPC 写入', () => {
 test('ChatSurface 不超过原模块预算', () => {
   assert.ok(lineCount('chat/components/ChatSurface.tsx') <= 3306, '抽离逻辑可以减行，新增职责仍须放到独立模块');
 });
+
+test('档案抽屉与页签共用单行关闭栏，顶栏按钮跨页签直接开关', () => {
+  const drawer = source('project-agent/drawer/BotProfileDrawer.tsx');
+  assert.match(drawer, /!embedded && inspect \? <header className="bot-drawer-head">/);
+  assert.match(drawer, /<div className="bot-drawer-bar">[\s\S]*<BotDrawerSegments[\s\S]*className="ui-button bot-drawer-close"/);
+  const shell = source('project-agent/BotListShell.tsx');
+  assert.match(shell, /aria-expanded=\{currentDrawerMemory\.open && !inspect\}/);
+  assert.match(shell, /current\.open && !inspect && detailsVisible\s*\?\s*closeDrawer\(current\) : openDrawer\(current, 'settings'\)/);
+  assert.equal(/current\.tab === 'settings'/.test(shell), false);
+});
