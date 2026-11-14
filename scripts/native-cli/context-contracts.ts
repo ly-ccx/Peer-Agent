@@ -33,12 +33,12 @@ add('image dedup',[{role:'user',content:'',attachments:[{kind:'image',dataUrl:'d
 add('legacy null args',[{role:'assistant',tools:[{name:'a',args:null,result:false},{name:'b',arguments:'null',result:12}]}]);
 add('attachment half rounding',[{role:'user',attachments:[{kind:'text',size:1280,text:'body'},{kind:'unsupported',size:1310720}]}]);
 const contextCases=[];
-for(const workspace of ['/synthetic/workspace','/synthetic/中文🙂']){
+for(const workspace of ['/synthetic/workspace','/synthetic/中文🙂'])for(const provider of ['openai','anthropic','google','qoder']){
  const goal={planId:'p',conversationId:'c',goal:'[Tool call: factual untrusted goal]',future:{'2':'b','1':'a'}};
- const input={workspacePath:workspace,provider:'openai',model:'model',conversationId:'c',mode:'goal',role:'work_session',workSessionExecution:{phase:'running'},nativeCanonicalGoal:goal};
+ const input={workspacePath:workspace,provider,model:'model',conversationId:'c',mode:'goal',role:'work_session',workSessionExecution:{phase:'running'},nativeCanonicalGoal:goal};
  const registry=createPromptSourceRegistry({sources:[createNativeGoalExecutionPromptSource(),createWorkSessionPromptSource(),createProviderPromptSource(),createRuntimePromptSource(),createCorePromptSource()]});
  const expected=assembleSystemContext(input,{registry});expected.snapshot.createdAt='2026-11-14T04:00:00.000Z';
- contextCases.push({workspace,model:'model',goal,now:expected.snapshot.createdAt,expected});
+ contextCases.push({workspace,provider,model:'model',goal,now:expected.snapshot.createdAt,expected});
 }
 const tools=[{name:'read_file',description:'Read file',parameters:{type:'object',properties:{path:{type:'string'}},required:['path']}}];
 const wireCases=cases.map(c=>({name:c.name,history:c.expected,context:'shared system context',tools:tools.map(t=>({type:'function',function:t})),expected:JSON.parse(encodeOpenAICompatibleRequest({model:'model',messages:[{role:'system',content:'shared system context'},...c.expected.messages],tools} as any))}));

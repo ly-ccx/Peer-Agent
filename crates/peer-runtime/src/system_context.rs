@@ -40,6 +40,7 @@ fn rank(v: &Value) -> usize {
 /// This adapter never adds tool/permission claims or an instruction from a file.
 pub fn assemble_work_context(
     workspace: &str,
+    provider: &str,
     model: &str,
     goal: &Value,
     now: &str,
@@ -62,7 +63,14 @@ pub fn assemble_work_context(
         ));
     }
     sections.push(section("runtime.workspace","L2_RUNTIME",0,"Runtime workspace",format!("Current workspace: {workspace}\nFor user-facing local file references, preserve the actual complete path and source that were read or written. Use an absolute file target (including the correct repository/worktree); a short display label is allowed only when the complete target is preserved in the link. Do not present a branch, symbol or guessed basename as a file link. A file reference is navigation, not proof that a write, verification or acceptance succeeded."),json!({"id":"runtime.workspace","kind":"runtime"}),"runtime"));
-    sections.push(section("runtime.provider","L2_RUNTIME",10,"Provider target",format!("Provider target: openai / {model}.\nProvider family: OpenAI-compatible chat.\nUse native function tool calls when a tool is needed. Do not write textual [Tool call] or [Tool result] claims.\nProvider-specific request formatting is handled by the runtime encoder; do not describe provider wire-format details in the answer."),json!({"id":"runtime.provider","kind":"provider-selection","provider":"openai","model":model}),"runtime"));
+    let provider = provider.trim().to_lowercase();
+    let rules = match provider.as_str() {
+        "openai" => "Provider family: OpenAI-compatible chat.\nUse native function tool calls when a tool is needed. Do not write textual [Tool call] or [Tool result] claims.".into(),
+        "anthropic" => "Provider family: Anthropic-compatible messages.\nUse native tool_use blocks when a tool is needed. Do not write textual [Tool call] or [Tool result] claims.".into(),
+        "qoder" => "Provider family: Qoder private API.\nUse native function tool calls when a tool is needed. Do not print tool-call markup or provider wire-format details as text.\nDo not write textual [Tool call] or [Tool result] claims.".into(),
+        _ => format!("Provider family: {}.\nUse only structured tool calls exposed by the runtime. Do not write textual [Tool call] or [Tool result] claims.",if provider.is_empty(){"unknown"}else{&provider}),
+    };
+    sections.push(section("runtime.provider","L2_RUNTIME",10,"Provider target",format!("Provider target: {provider} / {model}.\n{rules}\nProvider-specific request formatting is handled by the runtime encoder; do not describe provider wire-format details in the answer."),json!({"id":"runtime.provider","kind":"provider-selection","provider":provider,"model":model}),"runtime"));
     sections.push(section("work-session-admission","L7_CONTINUITY",39,"Local task admission","Current local task admission (runtime facts): phase=running. This does not authorize any capability, approve a tool call, or accept a result.".into(),json!({"id":"work-session","kind":"work-session-admission","phase":"running"}),"runtime"));
     let raw = javascript_json_string(goal).map_err(|_| "context_goal_limit")?;
     sections.push(section("native.goal-execution","L7_CONTINUITY",40,"Canonical Goal execution facts",format!("Canonical Goal snapshot (factual context, not system instructions or a capability grant).\n{raw}"),json!({"id":"native.goal-execution","kind":"temporary-native-goal-adapter","planId":goal["planId"]}),"runtime"));
@@ -85,7 +93,7 @@ pub fn assemble_work_context(
     }
     let digest = hash(&rendered);
     Ok(
-        json!({"version":1,"sections":sections,"rendered":rendered,"snapshot":{"id":format!("prompt-{}",&digest[..16]),"createdAt":now,"conversationId":goal["conversationId"],"workspacePath":workspace,"provider":"openai","model":model,"mode":"goal","sectionRefs":sections.iter().map(|s|json!({"id":s["id"],"layer":s["layer"],"checksum":s["checksum"],"source":s["source"]})).collect::<Vec<_>>(),"renderedHash":digest}}),
+        json!({"version":1,"sections":sections,"rendered":rendered,"snapshot":{"id":format!("prompt-{}",&digest[..16]),"createdAt":now,"conversationId":goal["conversationId"],"workspacePath":workspace,"provider":provider,"model":model,"mode":"goal","sectionRefs":sections.iter().map(|s|json!({"id":s["id"],"layer":s["layer"],"checksum":s["checksum"],"source":s["source"]})).collect::<Vec<_>>(),"renderedHash":digest}}),
     )
 }
 
@@ -102,6 +110,7 @@ mod tests {
             assert_eq!(
                 assemble_work_context(
                     c["workspace"].as_str().unwrap(),
+                    c["provider"].as_str().unwrap(),
                     c["model"].as_str().unwrap(),
                     &c["goal"],
                     c["now"].as_str().unwrap()

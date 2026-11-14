@@ -173,7 +173,7 @@ impl Fixture {
         std::fs::write(root.path().join("conversations/index.jsonl"), "").unwrap();
         put(
             root.path().join("llm-providers.json"),
-            &json!({"version":2,"channels":[{"id":"provider","channelId":"openai-compatible","authMethod":"api_key","baseUrl":server.url,"apiKeyConfigured":false}],"models":[{"id":"provider::model","groupId":"provider","model":"model","enabled":true,"supportsReasoning":false}]}),
+            &json!({"version":2,"channels":[{"id":"provider","provider":"openai","channelId":"openai-compatible","authMethod":"api_key","baseUrl":server.url,"apiKeyConfigured":false}],"models":[{"id":"provider::model","groupId":"provider","model":"model","enabled":true,"supportsReasoning":false}]}),
         );
         let f = Self { root };
         f.seed("p", "c", "s", "work", "epoch");
@@ -321,6 +321,125 @@ fn native_model_file_shell_result_evidence_and_pause_use_the_public_composition_
         assert_eq!(m["segments"][0]["result"]["status"], "success");
     }
     assert_eq!(server.requests.lock().unwrap().len(), 4);
+}
+#[test]
+fn four_native_wires_execute_real_tools_and_preserve_only_live_provider_continuation() {
+    let fixtures: Value = serde_json::from_str(include_str!(
+        "../../../packages/protocol/contracts/native-cli/model-streams.json"
+    ))
+    .unwrap();
+    for (wire, channel, provider) in [
+        ("openai-chat", "openai-compatible", "openai"),
+        ("openai-responses", "openai", "openai"),
+        ("anthropic-messages", "anthropic", "anthropic"),
+        ("gemini", "google-ai", "google"),
+    ] {
+        let rows = fixtures["cases"].as_array().unwrap();
+        let tool = rows
+            .iter()
+            .find(|r| r["wire"] == wire && r["kind"] == "tool")
+            .unwrap()["stream"]
+            .as_str()
+            .unwrap();
+        let text = rows
+            .iter()
+            .find(|r| r["wire"] == wire && r["kind"] == "text")
+            .unwrap()["stream"]
+            .as_str()
+            .unwrap();
+        let server = Server::new(vec![tool.into(), tool.into(), text.into()]);
+        let f = Fixture::new(&server);
+        let config_path = f.root.path().join("llm-providers.json");
+        let mut config = get(&config_path);
+        config["channels"][0]["channelId"] = json!(channel);
+        config["channels"][0]["provider"] = json!(provider);
+        if wire == "openai-responses" {
+            config["channels"][0]["wireOverride"] = json!(wire);
+        }
+        put(config_path, &config);
+        let goal_path = f.root.path().join("goal-plans/p.json");
+        let mut goal = get(&goal_path);
+        for role in ["worker", "explorer", "verifier"] {
+            goal["delegationOrigin"]["modelSelection"][role]["family"] = json!(provider);
+        }
+        put(&goal_path, &goal);
+        let result = f.run();
+        assert_eq!(
+            result.status.code(),
+            Some(0),
+            "{wire}: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let out: Value = serde_json::from_slice(&result.stdout).unwrap();
+        assert_eq!(out["toolCalls"], 2, "{wire}");
+        assert_eq!(out["goalAcceptance"], "pending");
+        let history = f.history();
+        let reply = history
+            .iter()
+            .rev()
+            .find(|m| m["content"] == "Native complete.")
+            .unwrap();
+        assert_eq!(
+            reply["contextSnapshot"]["provider"], provider,
+            "{wire} snapshot must use the actual provider fact"
+        );
+        let calls: Vec<_> = history
+            .iter()
+            .filter(|m| m["segments"].is_array())
+            .collect();
+        assert_eq!(calls.len(), 2);
+        for m in &calls {
+            assert_eq!(m["segments"][0]["result"]["status"], "success");
+            assert!(m["segments"][0]["result"]["evidence"].is_object());
+            assert_ne!(m["segments"][0]["toolCallId"], "upstream");
+        }
+        assert_eq!(get(&goal_path)["status"], "paused");
+        let persisted = serde_json::to_string(&history).unwrap();
+        assert!(
+            !persisted.contains("synthetic-signature"),
+            "native signatures stay out of canonical history"
+        );
+        let requests = server.requests.lock().unwrap();
+        assert_eq!(requests.len(), 3, "{wire}");
+        let first = serde_json::to_string(&requests[0]).unwrap();
+        assert!(
+            first.contains(&format!("Provider target: {provider} / model.")),
+            "{wire} Source must match its provider"
+        );
+        let replay = serde_json::to_string(&requests[1]).unwrap();
+        if matches!(wire, "anthropic-messages" | "gemini") {
+            assert_eq!(
+                replay.matches("Inspecting source.").count(),
+                1,
+                "{wire} must not duplicate signed live text"
+            );
+            if wire == "anthropic-messages" {
+                assert!(
+                    requests[1]["messages"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|m| m["content"].as_array().is_some_and(|p| p
+                            .iter()
+                            .any(|b| b["type"] == "thinking")
+                            && p.iter()
+                                .any(|b| b["type"] == "text" && b["text"] == "Inspecting source.")
+                            && p.iter().any(|b| b["type"] == "tool_use"))),
+                    "thinking, text and tool intent from one response stay in one assistant turn"
+                );
+            }
+            assert!(
+                replay.contains("synthetic-signature"),
+                "{wire} must replay authentic live material"
+            );
+        } else {
+            assert!(!replay.contains("synthetic-signature"));
+        }
+        assert!(
+            replay.contains(calls[0]["segments"][0]["toolCallId"].as_str().unwrap())
+                || wire == "gemini"
+        );
+    }
 }
 #[test]
 fn denial_is_a_real_persisted_result_without_effect() {

@@ -1551,8 +1551,10 @@ dependencies = [
 name = "peer-runtime"
 version = "0.1.0-rc.40"
 dependencies = [
+ "base64 0.22.1",
  "peer-protocol",
  "peer-store",
+ "percent-encoding",
  "reqwest",
  "rustix",
  "serde",

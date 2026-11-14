@@ -136,7 +136,7 @@ impl EpisodeBudget {
     ) -> Result<(), HostError> {
         self.change(host, now, false, |b| {
             if let Some(n) = usage
-                .and_then(|u| u["total_tokens"].as_u64())
+                .and_then(|u| u["totalTokens"].as_u64())
                 .filter(|n| *n <= 9_007_199_254_740_991)
             {
                 let total = b["tokens"]

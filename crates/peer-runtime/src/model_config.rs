@@ -3,7 +3,10 @@
 use crate::{
     CancellationToken,
     credentials::HelperClient,
-    model::{ModelError, OpenAiChatModel},
+    model::{
+        ModelConfig, ModelError, NativeModel,
+        wire::{GenerationOptions, Wire},
+    },
 };
 use peer_protocol::{JsonLimits, decode_json_bounded};
 use serde_json::Value;
@@ -51,6 +54,8 @@ pub struct ResolvedNativeModel {
     pub model: String,
     pub credential_key: String,
     pub key_configured: bool,
+    pub wire: Wire,
+    pub provider: String,
 }
 pub fn resolve_model(config: &Value, selected: &Value) -> Result<ResolvedNativeModel, ModelError> {
     if config["version"] != 2 {
@@ -78,23 +83,51 @@ pub fn resolve_model(config: &Value, selected: &Value) -> Result<ResolvedNativeM
         return Err(ModelError("model_config_invalid"));
     }
     let c = matches[0];
+    // Same flattened channel -> model precedence as the existing catalog.
+    let field = |key| {
+        m.get(key)
+            .or_else(|| c.get(key))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    };
+    let provider = field("providerType")
+        .or_else(|| field("provider"))
+        .map(str::to_lowercase)
+        .unwrap_or_else(|| group.to_owned());
     if m["enabled"] == false
         || c["enabled"] == false
         || selected["modelId"] != m["model"]
-        || selected["family"] != "openai"
+        || selected["providerId"] != group
+        || selected["family"] != provider
     {
         return Err(ModelError("model_selection_unavailable"));
     }
-    if c["channelId"] != "openai-compatible"
-        || c["authMethod"] != "api_key"
-        || c.get("wireOverride")
-            .is_some_and(|v| !v.is_null() && v != "openai-chat")
+    let wire = match (
+        c["channelId"].as_str().unwrap_or("openai-compatible"),
+        c["wireOverride"].as_str(),
+    ) {
+        ("openai" | "openai-compatible", None | Some("openai-chat")) => Wire::Chat,
+        ("openai" | "openai-compatible" | "grok", Some("openai-responses")) | ("grok", None) => {
+            Wire::Responses
+        }
+        ("anthropic" | "anthropic-compatible", None | Some("anthropic-messages")) => {
+            Wire::Anthropic
+        }
+        ("google-ai", None) => Wire::Gemini,
+        _ => return Err(ModelError("native_model_channel_unsupported")),
+    };
+    if c["authMethod"] != "api_key"
         || m["supportsReasoning"] == true
         || c["supportsReasoning"] == true
         || selected["reasoningEffort"]
             .as_str()
             .is_some_and(|e| !matches!(e, "off" | "default"))
         || !m["maxOutputTokens"].is_null()
+        || selected["fastMode"] == true
+        || m["modelOptionValues"]
+            .as_object()
+            .is_some_and(|v| !v.is_empty())
         || [m, c].iter().any(|v| {
             v.get("apiKey").is_some()
                 || v.get("oauthTokens").is_some()
@@ -123,17 +156,37 @@ pub fn resolve_model(config: &Value, selected: &Value) -> Result<ResolvedNativeM
         return Err(ModelError("model_credential_key_invalid"));
     }
     Ok(ResolvedNativeModel {
-        endpoint: format!("{base}/chat/completions"),
+        endpoint: match wire {
+            Wire::Chat => format!("{base}/chat/completions"),
+            Wire::Responses => format!("{base}/responses"),
+            Wire::Anthropic => format!("{base}/v1/messages"),
+            Wire::Gemini => {
+                if model.contains(['?', '#', '\\', '/', '%'])
+                    && !model
+                        .strip_prefix("models/")
+                        .is_some_and(|s| !s.is_empty() && !s.contains(['?', '#', '\\', '/', '%']))
+                {
+                    return Err(ModelError("model_selection_invalid"));
+                }
+                format!(
+                    "{base}/models/{}:streamGenerateContent?alt=sse",
+                    model.strip_prefix("models/").unwrap_or(model)
+                )
+            }
+        },
         model: model.into(),
         credential_key: format!("model/{group}/api-key"),
         key_configured: c["apiKeyConfigured"] == true || m["apiKeyConfigured"] == true,
+        wire,
+        provider,
     })
 }
+
 pub async fn load_model(
     home: &Path,
     selected: &Value,
     cancel: &CancellationToken,
-) -> Result<OpenAiChatModel, ModelError> {
+) -> Result<NativeModel, ModelError> {
     let config = read(&home.join("llm-providers.json"))?;
     let resolved = resolve_model(&config, selected)?;
     let secret = if resolved.key_configured {
@@ -158,10 +211,63 @@ pub async fn load_model(
     } else {
         None
     };
-    OpenAiChatModel::new(
-        &resolved.endpoint,
-        &resolved.model,
+    NativeModel::new(
+        ModelConfig {
+            endpoint: resolved.endpoint,
+            model: resolved.model,
+            provider: resolved.provider,
+            wire: resolved.wire,
+            generation: GenerationOptions::default(),
+        },
         secret,
         Duration::from_secs(120),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn channel_model_selection_and_credential_identity_cannot_be_substituted() {
+        let base = json!({"version":2,"channels":[{"id":"channel","provider":"openai","channelId":"openai-compatible","authMethod":"api_key","baseUrl":"https://fixture.invalid/v1"}],"models":[{"id":"channel::model","groupId":"channel","model":"model"}]});
+        let selection = json!({"providerId":"channel","modelProviderId":"channel::model","modelId":"model","family":"openai","reasoningEffort":"off"});
+        let good = resolve_model(&base, &selection).unwrap();
+        assert_eq!(good.credential_key, "model/channel/api-key");
+        assert_eq!(good.wire, Wire::Chat);
+        for (key, value) in [
+            ("providerId", json!("foreign")),
+            ("modelId", json!("other-model")),
+            ("family", json!("other-family")),
+        ] {
+            let mut changed = selection.clone();
+            changed[key] = value;
+            assert!(resolve_model(&base, &changed).is_err());
+        }
+        for patch in [
+            json!({"wireOverride":"gemini"}),
+            json!({"authMethod":"oauth_chatgpt"}),
+            json!({"apiKey":"legacy inline secret"}),
+            json!({"customHeaders":{"Authorization":"override"}}),
+        ] {
+            let mut changed = base.clone();
+            changed["channels"][0]
+                .as_object_mut()
+                .unwrap()
+                .extend(patch.as_object().unwrap().clone());
+            assert!(resolve_model(&changed, &selection).is_err());
+        }
+        let mut changed = base.clone();
+        changed["models"]
+            .as_array_mut()
+            .unwrap()
+            .push(base["models"][0].clone());
+        assert!(resolve_model(&changed, &selection).is_err());
+        let mut changed = base;
+        changed["channels"][0]["providerType"] = json!(" ");
+        changed["models"][0]["provider"] = json!("");
+        let mut selected = selection;
+        selected["family"] = json!("channel");
+        assert!(resolve_model(&changed, &selected).is_ok());
+    }
 }

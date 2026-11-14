@@ -1,4 +1,10 @@
-use peer_runtime::{CancellationToken, model::OpenAiChatModel};
+use peer_runtime::{
+    CancellationToken,
+    model::{
+        ModelConfig, NativeModel,
+        wire::{GenerationOptions, Wire},
+    },
+};
 use serde_json::json;
 use std::{
     io::{Read, Write},
@@ -54,9 +60,14 @@ async fn native_http_timeout_and_cancellation_close_the_actual_connection() {
     for cancel_request in [false, true] {
         let (url, closed, thread) = server(None);
         let cancel = CancellationToken::new();
-        let model = OpenAiChatModel::new(
-            &url,
-            "model",
+        let model = NativeModel::new(
+            ModelConfig {
+                endpoint: url,
+                model: "model".into(),
+                provider: "openai".into(),
+                wire: Wire::Chat,
+                generation: GenerationOptions::default(),
+            },
             None,
             if cancel_request {
                 Duration::from_secs(2)
@@ -119,7 +130,18 @@ async fn provider_rejections_and_truncated_tool_streams_remain_errors() {
         ),
     ] {
         let (url, _, thread) = server(Some(response));
-        let model = OpenAiChatModel::new(&url, "model", None, Duration::from_secs(2)).unwrap();
+        let model = NativeModel::new(
+            ModelConfig {
+                endpoint: url,
+                model: "model".into(),
+                provider: "openai".into(),
+                wire: Wire::Chat,
+                generation: GenerationOptions::default(),
+            },
+            None,
+            Duration::from_secs(2),
+        )
+        .unwrap();
         let r = model
             .turn(
                 "context",

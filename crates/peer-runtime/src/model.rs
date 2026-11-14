@@ -1,16 +1,33 @@
 //! Wire owns request formatting and streaming. It cannot execute tools.
 use crate::{CancellationToken, credentials::Secret};
 use peer_protocol::{JsonLimits, decode_json_bounded};
-use serde_json::{Value, json};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::time::Duration;
+mod continuation;
 mod sse;
-pub struct OpenAiChatModel {
+pub use continuation::LiveHistory;
+mod sse_frame;
+mod stream;
+mod usage;
+pub mod wire;
+pub struct NativeModel {
     client: reqwest::Client,
     endpoint: reqwest::Url,
     model: String,
+    provider: String,
     secret: Option<Secret>,
     deadline: Duration,
+    wire: wire::Wire,
+    generation: wire::GenerationOptions,
+    binding: String,
+}
+pub struct ModelConfig {
+    pub endpoint: String,
+    pub model: String,
+    pub provider: String,
+    pub wire: wire::Wire,
+    pub generation: wire::GenerationOptions,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ModelError(pub &'static str);
@@ -29,62 +46,33 @@ pub struct ModelTurn {
     pub calls: Vec<ModelToolCall>,
     pub usage: Option<Value>,
     pub request_fingerprint: String,
+    pub(crate) continuation: Option<continuation::Continuation>,
 }
-/// Current P3 encoder subset: tools + canonical history, no reasoning dialect.
-/// Unsupported provider/model metadata is rejected by the config adapter.
-pub fn encode_chat_request(
-    model: &str,
-    context: &str,
-    history: &Value,
-    tools: &Value,
-) -> Result<Value, ModelError> {
-    let mut messages = vec![json!({"role":"system","content":context})];
-    for message in history["messages"]
-        .as_array()
-        .ok_or(ModelError("history_projection_invalid"))?
-    {
-        let mut m = json!({"role":message["role"],"content":message["content"]});
-        if let Some(id) = message.get("toolCallId") {
-            m["tool_call_id"] = id.clone()
-        }
-        if let Some(calls) = message["toolCalls"].as_array() {
-            m["tool_calls"]=json!(calls.iter().map(|c|json!({"id":c["id"],"type":"function","function":{"name":c["name"],"arguments":c["arguments"]}})).collect::<Vec<_>>())
-        }
-        messages.push(m);
-    }
-    let mut body = json!({"model":model,"messages":messages,"stream":true,"stream_options":{"include_usage":true}});
-    if tools.as_array().is_some_and(|a| !a.is_empty()) {
-        body["tools"] = tools.clone()
-    }
-    if serde_json::to_vec(&body)
-        .map_err(|_| ModelError("model_request_invalid"))?
-        .len()
-        > 2 * 1024 * 1024
-    {
-        return Err(ModelError("model_request_limit"));
-    }
-    Ok(body)
-}
-impl OpenAiChatModel {
+impl NativeModel {
     pub fn model_id(&self) -> &str {
         &self.model
     }
+    pub fn provider(&self) -> &str {
+        &self.provider
+    }
     pub fn new(
-        endpoint: &str,
-        model: &str,
+        config: ModelConfig,
         secret: Option<Secret>,
         deadline: Duration,
     ) -> Result<Self, ModelError> {
-        let endpoint =
-            reqwest::Url::parse(endpoint).map_err(|_| ModelError("model_endpoint_invalid"))?;
+        let endpoint = reqwest::Url::parse(&config.endpoint)
+            .map_err(|_| ModelError("model_endpoint_invalid"))?;
         if !matches!(endpoint.scheme(), "https" | "http")
             || endpoint.host_str().is_none()
             || !endpoint.username().is_empty()
             || endpoint.password().is_some()
             || endpoint.fragment().is_some()
-            || endpoint.query().is_some()
-            || model.is_empty()
-            || model.len() > 512
+            || (endpoint.query().is_some()
+                && !(config.wire == wire::Wire::Gemini && endpoint.query() == Some("alt=sse")))
+            || config.model.is_empty()
+            || config.model.len() > 512
+            || config.provider.is_empty()
+            || config.provider.len() > 200
             || deadline.is_zero()
             || deadline > Duration::from_secs(600)
         {
@@ -99,12 +87,19 @@ impl OpenAiChatModel {
             .pool_max_idle_per_host(1)
             .build()
             .map_err(|_| ModelError("model_transport_unavailable"))?;
+        // A live cache cannot cross provider instances, even when two channels
+        // share the same endpoint and model name with different credentials.
+        let binding = uuid::Uuid::new_v4().to_string();
         Ok(Self {
             client,
             endpoint,
-            model: model.into(),
+            model: config.model,
+            provider: config.provider,
             secret,
             deadline,
+            wire: config.wire,
+            generation: config.generation,
+            binding,
         })
     }
     pub async fn turn(
@@ -112,6 +107,17 @@ impl OpenAiChatModel {
         context: &str,
         history: &Value,
         tools: &Value,
+        cancel: &CancellationToken,
+    ) -> Result<ModelTurn, ModelError> {
+        self.turn_with_history(context, history, tools, &LiveHistory::default(), cancel)
+            .await
+    }
+    pub async fn turn_with_history(
+        &self,
+        context: &str,
+        history: &Value,
+        tools: &Value,
+        live: &LiveHistory,
         cancel: &CancellationToken,
     ) -> Result<ModelTurn, ModelError> {
         if history["messages"]
@@ -122,7 +128,22 @@ impl OpenAiChatModel {
         {
             return Err(ModelError("native_model_images_unsupported"));
         }
-        let body = encode_chat_request(&self.model, context, history, tools)?;
+        let mut messages = continuation::lower(history)?;
+        live.apply(&self.binding, &mut messages);
+        let body = wire::encode_runtime(
+            self.wire,
+            &wire::WireInput {
+                model: &self.model,
+                system: context,
+                stable_system: None,
+                messages: &messages,
+                tools: tools
+                    .as_array()
+                    .filter(|t| self.wire != wire::Wire::Chat || !t.is_empty())
+                    .map(Vec::as_slice),
+                options: &self.generation,
+            },
+        )?;
         let bytes = serde_json::to_vec(&body).map_err(|_| ModelError("model_request_invalid"))?;
         let request_fingerprint = format!("{:x}", Sha256::digest(&bytes));
         let mut request = self
@@ -131,12 +152,28 @@ impl OpenAiChatModel {
             .header("content-type", "application/json")
             .header("accept", "text/event-stream")
             .body(bytes);
+        if self.wire == wire::Wire::Anthropic {
+            request = request.header("anthropic-version", "2023-06-01");
+        }
         if let Some(s) = &self.secret {
-            let bearer = zeroize::Zeroizing::new(format!("Bearer {}", s.expose()));
+            let bearer = zeroize::Zeroizing::new(
+                if matches!(self.wire, wire::Wire::Chat | wire::Wire::Responses) {
+                    format!("Bearer {}", s.expose())
+                } else {
+                    s.expose().to_owned()
+                },
+            );
             let mut value = reqwest::header::HeaderValue::from_str(&bearer)
                 .map_err(|_| ModelError("model_credential_invalid"))?;
             value.set_sensitive(true);
-            request = request.header(reqwest::header::AUTHORIZATION, value)
+            request = request.header(
+                match self.wire {
+                    wire::Wire::Anthropic => "x-api-key",
+                    wire::Wire::Gemini => "x-goog-api-key",
+                    _ => "authorization",
+                },
+                value,
+            )
         }
         let read = async {
             let mut response = request.send().await.map_err(|e| {
@@ -157,15 +194,23 @@ impl OpenAiChatModel {
             {
                 return Err(ModelError("model_content_type_invalid"));
             }
-            let mut stream = sse::ChatStream::default();
+            let mut stream = stream::Stream::new(self.wire);
             while let Some(chunk) = response
                 .chunk()
                 .await
                 .map_err(|_| ModelError("model_stream_interrupted"))?
             {
                 stream.push(&chunk)?;
+                if stream.terminal() {
+                    break;
+                }
             }
-            stream.finish(request_fingerprint)
+            let mut turn = stream.finish(request_fingerprint)?;
+            if let Some(c) = &mut turn.continuation {
+                c.binding = self.binding.clone();
+                c.text = turn.content.clone();
+            }
+            Ok(turn)
         };
         tokio::select! {biased;_=cancel.cancelled()=>Err(ModelError("CANCELLED")),r=tokio::time::timeout(self.deadline,read)=>r.map_err(|_|ModelError("model_timeout"))?}
     }
@@ -195,11 +240,19 @@ mod tests {
         .unwrap();
         for c in f["wireCases"].as_array().unwrap() {
             assert_eq!(
-                encode_chat_request(
-                    "model",
-                    c["context"].as_str().unwrap(),
-                    &c["history"],
-                    &c["tools"]
+                wire::encode_runtime(
+                    wire::Wire::Chat,
+                    &wire::WireInput {
+                        model: "model",
+                        system: c["context"].as_str().unwrap(),
+                        stable_system: None,
+                        messages: &continuation::lower(&c["history"]).unwrap(),
+                        tools: c["tools"]
+                            .as_array()
+                            .filter(|t| !t.is_empty())
+                            .map(Vec::as_slice),
+                        options: &wire::GenerationOptions::default(),
+                    }
                 )
                 .unwrap(),
                 c["expected"],

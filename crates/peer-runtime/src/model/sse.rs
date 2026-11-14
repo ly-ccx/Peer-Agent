@@ -1,4 +1,5 @@
 use super::*;
+use serde_json::json;
 use std::collections::BTreeMap;
 #[derive(Default)]
 struct Call {
@@ -8,61 +9,28 @@ struct Call {
 }
 #[derive(Default)]
 pub(super) struct ChatStream {
-    line: Vec<u8>,
-    event: Vec<u8>,
-    bytes: usize,
+    frames: super::sse_frame::Frames,
     text: String,
     calls: BTreeMap<usize, Call>,
     usage: Option<Value>,
     reason: Option<String>,
     done: bool,
+    thought: String,
 }
 impl ChatStream {
     pub fn push(&mut self, chunk: &[u8]) -> Result<(), ModelError> {
-        self.bytes = self
-            .bytes
-            .checked_add(chunk.len())
-            .ok_or(ModelError("model_response_limit"))?;
-        if self.bytes > 8 * 1024 * 1024 {
-            return Err(ModelError("model_response_limit"));
-        }
-        for b in chunk {
-            if *b == b'\n' {
-                self.line()?;
-            } else {
-                if self.line.len() >= 1024 * 1024 {
-                    return Err(ModelError("model_event_limit"));
-                }
-                self.line.push(*b)
-            }
-        }
-        Ok(())
+        let mut frames = std::mem::take(&mut self.frames);
+        let result = frames.push(chunk, |bytes| {
+            self.event(bytes)?;
+            Ok(self.done)
+        });
+        self.frames = frames;
+        result.map(|_| ())
     }
-    fn line(&mut self) -> Result<(), ModelError> {
-        if self.line.last() == Some(&b'\r') {
-            self.line.pop();
-        }
-        if self.line.is_empty() {
-            if !self.event.is_empty() {
-                self.event()?;
-            }
-            return Ok(());
-        }
-        if let Some(data) = self.line.strip_prefix(b"data:") {
-            let data = data.strip_prefix(b" ").unwrap_or(data);
-            if self.event.len() + data.len() + 1 > 1024 * 1024 {
-                return Err(ModelError("model_event_limit"));
-            }
-            if !self.event.is_empty() {
-                self.event.push(b'\n')
-            }
-            self.event.extend_from_slice(data);
-        }
-        self.line.clear();
-        Ok(())
+    pub fn terminal(&self) -> bool {
+        self.done
     }
-    fn event(&mut self) -> Result<(), ModelError> {
-        let bytes = std::mem::take(&mut self.event);
+    fn event(&mut self, bytes: &[u8]) -> Result<(), ModelError> {
         if bytes == b"[DONE]" {
             if self.done {
                 return Err(ModelError("model_stream_invalid"));
@@ -73,7 +41,7 @@ impl ChatStream {
         if self.done {
             return Err(ModelError("model_stream_invalid"));
         }
-        let v = decode(&bytes, 1024 * 1024)?;
+        let v = decode(bytes, 1024 * 1024)?;
         if v.get("error").is_some() {
             return Err(ModelError("model_provider_error"));
         }
@@ -102,6 +70,12 @@ impl ChatStream {
             self.reason = Some(r.into())
         }
         let d = &c["delta"];
+        if let Some(t) = d["reasoning_content"].as_str() {
+            if self.thought.len() + t.len() > 512 * 1024 {
+                return Err(ModelError("model_text_limit"));
+            }
+            self.thought.push_str(t);
+        }
         if let Some(t) = d["content"].as_str() {
             if self.text.len() + t.len() > 512 * 1024 {
                 return Err(ModelError("model_text_limit"));
@@ -145,8 +119,7 @@ impl ChatStream {
             return Err(ModelError("model_empty_response"));
         }
         if !self.done
-            || !self.line.is_empty()
-            || !self.event.is_empty()
+            || !self.frames.complete()
             || !matches!(self.reason.as_deref(), Some("stop" | "tool_calls"))
         {
             return Err(ModelError("model_stream_incomplete"));
@@ -172,8 +145,18 @@ impl ChatStream {
         Ok(ModelTurn {
             content: self.text,
             calls,
-            usage: self.usage,
+            usage: self
+                .usage
+                .as_ref()
+                .map(|u| super::usage::normalize(wire::Wire::Chat, u))
+                .transpose()?,
             request_fingerprint: fingerprint,
+            continuation: (!self.thought.is_empty()).then(|| continuation::Continuation {
+                binding: String::new(),
+                text: String::new(),
+                wire: wire::Wire::Chat,
+                blocks: vec![json!({"reasoning_content":self.thought})],
+            }),
         })
     }
 }

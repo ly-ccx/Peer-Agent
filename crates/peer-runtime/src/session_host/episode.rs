@@ -5,7 +5,7 @@ use crate::{
     CancellationToken,
     canonical_history::project_history,
     execution_budget::EpisodeBudget,
-    model::OpenAiChatModel,
+    model::NativeModel,
     providers::{EffectFuture, EffectOutcome, PreparedEffect, ProviderRegistry},
     system_context::assemble_work_context,
 };
@@ -41,7 +41,7 @@ impl NativeSessionHost {
     pub async fn run_episode(
         &mut self,
         plan_id: &str,
-        model: &OpenAiChatModel,
+        model: &NativeModel,
         permission: &mut impl PermissionInput,
         max_turns: usize,
         cancel: &CancellationToken,
@@ -248,22 +248,24 @@ impl NativeSessionHost {
         let stream = format!("native-{}", uuid::Uuid::new_v4());
         let run=async {
             let mut count=0;let mut content=String::new();
+            let mut live_history=crate::model::LiveHistory::default();
             for _ in 0..max_turns {
                 if cancel.is_cancelled() || cancellation.is_cancelled(){return Err(HostError("CANCELLED"))}
                 let fresh=self.current(plan_id,&now())?;
                 let policy=peer_store::PolicyStore::new(&self.home).read_existing(&fresh.resource.workspace_id)?;
                 if policy.conversation_id!=origin["parentConversationId"]{return Err(HostError("out_of_scope"))}
                 if fresh.goal.source_revision!=current.goal.source_revision || !crate::coordination::execution_binding_current(&fresh.journal.state["mandates"][work_id],&fresh.journal.state["transitions"][transition["operationId"].as_str().unwrap_or("")],binding){return Err(HostError("execution_revision_stale"))}
-                let system=assemble_work_context(workspace.to_str().ok_or(HostError("invalid_workspace"))?,model.model_id(),&raw,&now()).map_err(HostError)?;
+                let system=assemble_work_context(workspace.to_str().ok_or(HostError("invalid_workspace"))?,model.provider(),model.model_id(),&raw,&now()).map_err(HostError)?;
                 let history=ConversationStore::new(&self.home).read_committed(&conversation,None,1024*1024)?;
                 if history.history.excluded_from_message_id.is_some(){return Err(HostError("native_execution_recovery_required"))}
                 let projected=project_history(&history.history.messages).map_err(HostError)?;
                 budget.request(self,&now())?;
-                let turn=self.wait_owned(model.turn(system["rendered"].as_str().unwrap(),&projected,&projection.definitions(),&cancellation),&cancellation,cancel).await?;
+                let turn=self.wait_owned(model.turn_with_history(system["rendered"].as_str().unwrap(),&projected,&projection.definitions(),&live_history,&cancellation),&cancellation,cancel).await?;
                 let turn=match turn{Ok(turn)=>turn,Err(e)=>{budget.usage(self,None,&now())?;return Err(HostError(e.0))}};
                 budget.usage(self,turn.usage.as_ref(),&now())?;
                 if !turn.content.is_empty(){self.append_episode_message(&conversation,&json!({"id":uuid::Uuid::new_v4().to_string(),"role":"assistant","content":turn.content,"createdAt":now(),"streamId":stream,"contextSnapshot":system["snapshot"],"requestFingerprint":turn.request_fingerprint}))?;content=turn.content;}
                 if turn.calls.is_empty(){return Ok(("replied",content,count))}
+                let mut completed_ids=Vec::new();
                 for call in turn.calls {
                     if cancel.is_cancelled() || cancellation.is_cancelled(){return Err(HostError("CANCELLED"))}
                     let effect=providers.prepare(&projection,&call.name,call.arguments,&workspace,&self.home)?;
@@ -298,7 +300,11 @@ impl NativeSessionHost {
                         self.resources.confirm_file_materialization(&current.resource,HostFileMaterialization{host_epoch:&epoch,identity,tool_call_id:&call_id},&now())?;
                     }
                     if !outcome.ended || outcome.error==Some("execution_outcome_unknown"){return Err(HostError("execution_outcome_unknown"))}
+                    completed_ids.push(call_id);
                 }
+                let committed=ConversationStore::new(&self.home).read_committed(&conversation,None,1024*1024)?;
+                let projected=project_history(&committed.history.messages).map_err(HostError)?;
+                live_history.remember(&projected,&completed_ids,turn.continuation).map_err(|e|HostError(e.0))?;
             }Ok(("max_turns",content,count))
         }.await;
         // Completion owns the actual attempt. Stop drains its real handles;
