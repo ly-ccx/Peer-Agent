@@ -19,6 +19,14 @@ enum Request {
     PolicyRead {
         workspace_id: String,
     },
+    PolicyInitialize {
+        legacy_access_level: LocalAccessLevel,
+        updated_at: String,
+    },
+    PolicyRegister {
+        workspace_id: String,
+        updated_at: String,
+    },
     PolicyUpdate {
         workspace_id: String,
         expected_revision: u64,
@@ -45,6 +53,20 @@ fn run() -> Result<Value, Box<dyn std::error::Error>> {
     }
     let request: Request = serde_json::from_str(&input)?;
     Ok(match request {
+        Request::PolicyInitialize {
+            legacy_access_level,
+            updated_at,
+        } => match PolicyStore::new(&root).initialize(legacy_access_level, &updated_at, None) {
+            Ok(_) => json!({"ok":true}),
+            Err(error) => json!({"ok":false,"code":error.code()}),
+        },
+        Request::PolicyRegister {
+            workspace_id,
+            updated_at,
+        } => match PolicyStore::new(&root).read_or_register(&workspace_id, &updated_at) {
+            Ok(policy) => json!({"ok":true,"policy":policy}),
+            Err(error) => json!({"ok":false,"code":error.code()}),
+        },
         Request::History { id } => {
             match ConversationStore::new(&root).read_committed(&id, None, 8 * 1024 * 1024) {
                 Ok(snapshot) => json!({"ok":true,"history":snapshot.history}),

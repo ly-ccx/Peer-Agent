@@ -6,6 +6,9 @@ use std::{
     time::Duration,
 };
 
+mod initialize;
+pub use initialize::PolicyInitialization;
+
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 pub struct PolicyStore {
     home: PathBuf,
@@ -51,6 +54,8 @@ impl PolicyStore {
         .map_err(|_| StoreError::PolicyUnavailable)?
         .value;
         if profile["workspaceId"].as_str() != Some(workspace_id)
+            || profile["displayName"].as_str().is_none_or(str::is_empty)
+            || !(profile["avatar"].is_object() || profile["avatar"].is_array())
             || profile
                 .get("status")
                 .is_some_and(|status| !status.is_null() && status.as_str() != Some("active"))
@@ -64,7 +69,7 @@ impl PolicyStore {
             .ok_or(StoreError::NotFound)
     }
 
-    fn connect(&self, write: bool) -> Result<Connection, StoreError> {
+    fn open_existing(&self, write: bool) -> Result<(Connection, i64), StoreError> {
         // SQLite NOFOLLOW also rejects symlinked parent components (e.g.
         // macOS /var -> /private/var). Canonicalize only the parent; keep the
         // policy filename unfollowed and reject a symlink at that final path.
@@ -85,6 +90,15 @@ impl PolicyStore {
             access | OpenFlags::SQLITE_OPEN_NO_MUTEX | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )
         .map_err(|_| StoreError::PolicyUnavailable)?;
+        for (limit, value) in [
+            (rusqlite::limits::Limit::SQLITE_LIMIT_LENGTH, 1_048_576),
+            (rusqlite::limits::Limit::SQLITE_LIMIT_SQL_LENGTH, 16_384),
+            (rusqlite::limits::Limit::SQLITE_LIMIT_COLUMN, 32),
+        ] {
+            connection
+                .set_limit(limit, value)
+                .map_err(|_| StoreError::PolicyUnavailable)?;
+        }
         connection
             .busy_timeout(Duration::from_secs(3))
             .map_err(|_| StoreError::PolicyUnavailable)?;
@@ -97,7 +111,14 @@ impl PolicyStore {
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(|_| StoreError::PolicyUnavailable)?;
-        if quick != "ok" || version != 1 {
+        if quick != "ok" {
+            return Err(StoreError::PolicyUnavailable);
+        }
+        Ok((connection, version))
+    }
+    fn connect(&self, write: bool) -> Result<Connection, StoreError> {
+        let (connection, version) = self.open_existing(write)?;
+        if version != 1 {
             return Err(StoreError::PolicyUnavailable);
         }
         let migrated: Option<String> = connection
@@ -172,10 +193,19 @@ impl PolicyStore {
 }
 
 fn current(connection: &Connection, workspace_id: &str) -> Result<BotAccessPolicy, StoreError> {
-    let row: (String, String, i64, String, String, String) = connection.query_row(
+    current_optional(connection, workspace_id)?.ok_or(StoreError::PolicyUnavailable)
+}
+fn current_optional(
+    connection: &Connection,
+    workspace_id: &str,
+) -> Result<Option<BotAccessPolicy>, StoreError> {
+    let row: Option<(String, String, i64, String, String, String)> = connection.query_row(
         "SELECT workspaceId,conversationId,revision,accessLevel,updatedAt,source FROM access_policy WHERE workspaceId=?1 ORDER BY revision DESC LIMIT 1",
-        [workspace_id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?)))
+        [workspace_id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?))).optional()
         .map_err(|_| StoreError::PolicyUnavailable)?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
     let level = match row.3.as_str() {
         "ask_before_local" => LocalAccessLevel::AskBeforeLocal,
         "session_local" => LocalAccessLevel::SessionLocal,
@@ -190,12 +220,12 @@ fn current(connection: &Connection, workspace_id: &str) -> Result<BotAccessPolic
     {
         return Err(StoreError::PolicyUnavailable);
     }
-    Ok(BotAccessPolicy {
+    Ok(Some(BotAccessPolicy {
         workspace_id: row.0,
         conversation_id: row.1,
         revision: row.2 as u64,
         access_level: level,
         updated_at: row.4,
         source: row.5,
-    })
+    }))
 }

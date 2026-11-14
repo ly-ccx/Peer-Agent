@@ -148,7 +148,7 @@ fn policy_fixture() -> tempfile::TempDir {
     fs::create_dir(root.path().join("project-runtime")).unwrap();
     fs::write(
         root.path().join("projects/w/profile.json"),
-        r#"{"workspaceId":"w","agentConversationId":"bot","status":"active"}"#,
+        r#"{"workspaceId":"w","agentConversationId":"bot","status":"active","displayName":"Fixture Bot","avatar":{"kind":"generated"}}"#,
     )
     .unwrap();
     let db =
@@ -182,7 +182,7 @@ fn existing_policy_cas_history_and_principal_changes_are_real_sqlite_facts() {
     );
     fs::write(
         root.path().join("projects/w/profile.json"),
-        r#"{"workspaceId":"w","agentConversationId":"replacement","status":"active"}"#,
+        r#"{"workspaceId":"w","agentConversationId":"replacement","status":"active","displayName":"Fixture Bot","avatar":{"kind":"generated"}}"#,
     )
     .unwrap();
     assert_eq!(first.read_existing("w"), Err(StoreError::OutOfScope));

@@ -19,6 +19,7 @@ run('cargo', ['test', '--locked', '--workspace', '--all-targets', '--features', 
 run('cargo', ['build', '--release', '--locked', '-p', 'peer-cli', '--bins', '--examples']);
 run('cargo', ['build', '--locked', '-p', 'peer-store', '--example', 'conformance']);
 run('bun', ['scripts/native-cli/store-conformance.ts', 'target/debug/examples/conformance']);
+run('bun', ['scripts/native-cli/policy-initialization.ts', 'target/debug/examples/conformance']);
 run('cargo', ['build', '--locked', '-p', 'peer-store', '--example', 'lease-conformance']);
 run('bun', ['scripts/native-cli/lease-conformance.ts', 'target/debug/examples/lease-conformance']);
 run('cargo', ['build', '--locked', '-p', 'peer-credential-helper', '--bin', 'peer-credential-helper']);

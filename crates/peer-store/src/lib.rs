@@ -13,7 +13,7 @@ pub use lease::{
     HostLeaseStore, HostSurface, LeaseToken,
 };
 pub use lock::DirectoryLock;
-pub use policy::{PolicyStore, PolicyUpdateError};
+pub use policy::{PolicyInitialization, PolicyStore, PolicyUpdateError};
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +29,7 @@ pub enum StoreError {
     StreamTargetMissing,
     ReadFailed,
     PolicyUnavailable,
+    PolicyLimit,
     LockBusy,
     LockOwnershipChanged,
     Cancelled,
@@ -51,6 +52,7 @@ impl StoreError {
             Self::StreamTargetMissing => "BACKGROUND_STREAM_TARGET_MISSING",
             Self::ReadFailed => "BACKGROUND_READ_FAILED",
             Self::PolicyUnavailable => "POLICY_UNAVAILABLE",
+            Self::PolicyLimit => "POLICY_RESOURCE_LIMIT",
             Self::LockBusy => "STORE_LOCK_BUSY",
             Self::LockOwnershipChanged => "STORE_LOCK_OWNERSHIP_CHANGED",
             Self::Cancelled => "CANCELLED",
