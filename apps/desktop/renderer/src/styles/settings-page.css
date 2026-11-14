@@ -773,12 +773,12 @@
 }
 
 .shortcut-state.is-ok {
-  color: var(--za-color-success, #3c8c62);
+  color: var(--state-success);
 }
 
 .shortcut-state.is-error,
 .shortcut-warning {
-  color: var(--za-color-danger, #c45a5a);
+  color: var(--state-danger);
 }
 
 .shortcut-reset {
@@ -798,7 +798,7 @@
 }
 
 .shortcut-reset:disabled {
-  color: var(--graphite-faint);
+  color: var(--graphite-mute);
   cursor: default;
 }
 
@@ -921,7 +921,7 @@
 }
 
 .usage-stats-metric__hint {
-  color: var(--pa-text-tertiary, var(--pa-text-secondary));
+  color: var(--graphite-fade);
   font-size: 12px;
 }
 
@@ -933,7 +933,7 @@
 }
 
 .usage-stats-note--warn {
-  color: var(--state-warning, #b7791f);
+  color: var(--state-warn);
 }
 
 .usage-stats-table-wrap {
@@ -1099,19 +1099,19 @@
 }
 
 .usage-heatmap__cell--l1 {
-  background: color-mix(in srgb, var(--pa-accent, #3b82f6) 28%, var(--pa-surface));
+  background: color-mix(in srgb, var(--azure-seal) 28%, var(--paper-sheet));
 }
 
 .usage-heatmap__cell--l2 {
-  background: color-mix(in srgb, var(--pa-accent, #3b82f6) 48%, var(--pa-surface));
+  background: color-mix(in srgb, var(--azure-seal) 48%, var(--paper-sheet));
 }
 
 .usage-heatmap__cell--l3 {
-  background: color-mix(in srgb, var(--pa-accent, #3b82f6) 70%, var(--pa-surface));
+  background: color-mix(in srgb, var(--azure-seal) 70%, var(--paper-sheet));
 }
 
 .usage-heatmap__cell--l4 {
-  background: color-mix(in srgb, var(--pa-accent, #3b82f6) 92%, #0f172a);
+  background: color-mix(in srgb, var(--azure-seal) 92%, var(--graphite-base));
 }
 
 .usage-heatmap__legend {
@@ -1229,7 +1229,7 @@
 }
 
 .usage-trend__line {
-  stroke: var(--pa-accent, #3b82f6);
+  stroke: var(--azure-seal);
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -1243,8 +1243,8 @@
 }
 
 .usage-trend__dot {
-  fill: var(--pa-surface, #fff);
-  stroke: var(--pa-accent, #3b82f6);
+  fill: var(--paper-sheet);
+  stroke: var(--azure-seal);
   stroke-width: 2;
   pointer-events: none;
 }
@@ -1323,13 +1323,13 @@
 
 .usage-heatmap__cell:focus-visible,
 .usage-heatmap-strip__cell:focus-visible {
-  outline: 2px solid var(--pa-accent, #3b82f6);
+  outline: 2px solid var(--azure-seal);
   outline-offset: 1px;
 }
 
 .usage-heatmap__cell--selected,
 .usage-heatmap-strip__cell--selected {
-  outline: 2px solid var(--pa-accent, #3b82f6);
+  outline: 2px solid var(--azure-seal);
   outline-offset: 1px;
 }
 
@@ -1428,7 +1428,7 @@
   border: none;
   padding: 0;
   border-radius: var(--ui-radius-detail) var(--ui-radius-detail) 0 0;
-  background: color-mix(in srgb, var(--pa-accent, #3b82f6) 55%, var(--pa-surface));
+  background: color-mix(in srgb, var(--azure-seal) 55%, var(--paper-sheet));
   cursor: pointer;
   transition: background 0.08s ease;
 }
@@ -1439,7 +1439,7 @@
 
 .usage-hours__bar--active,
 .usage-hours__bar:hover {
-  background: var(--pa-accent, #3b82f6);
+  background: var(--azure-seal);
 }
 
 .usage-hours__labels {
@@ -1487,7 +1487,7 @@
 }
 
 .settings-btn:focus-visible {
-  outline: 2px solid var(--pa-accent, #3b82f6);
+  outline: 2px solid var(--azure-seal);
   outline-offset: 1px;
 }
 

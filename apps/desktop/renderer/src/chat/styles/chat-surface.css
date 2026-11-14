@@ -482,7 +482,7 @@
   border: 1px solid var(--ui-selected-border, var(--azure-seal));
   border-radius: var(--ui-radius-control);
   padding: var(--space-3);
-  color: var(--text-primary);
+  color: var(--graphite-base);
   background: var(--chrome-canvas);
   font: inherit;
   line-height: 1.5;
@@ -493,7 +493,7 @@
 }
 
 .chat-message-editor-error {
-  color: var(--status-danger, #b42318);
+  color: var(--state-danger);
   font-size: 0.78rem;
 }
 
@@ -512,8 +512,8 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--ui-radius-control);
   padding: 5px 10px;
-  color: var(--text-primary);
-  background: var(--surface-raised);
+  color: var(--graphite-base);
+  background: var(--paper-sheet);
   cursor: pointer;
 }
 
@@ -3811,11 +3811,11 @@
 }
 
 .chat-header-menu-item.danger {
-  color: var(--state-error);
+  color: var(--state-danger);
 }
 
 .chat-header-menu-item.danger:hover {
-  background: var(--state-error-bg, rgba(220, 38, 38, 0.06));
+  background: color-mix(in srgb, var(--state-danger) 10%, transparent);
 }
 
 .chat-header-menu-item-label {
@@ -4607,7 +4607,7 @@ button.chat-header-cap-item:focus-visible {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  color: var(--graphite-ink);
+  color: var(--graphite-base);
   font-size: 0.84rem;
   font-weight: 600;
   line-height: 1.3;

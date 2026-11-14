@@ -112,8 +112,8 @@
   --motion-pulse-floor: 0.4;
   animation: motion-pulse-soft calc(var(--za-motion-slow) * 8) ease-in-out infinite;
 }
-.goal-investigation-card[data-status='failed'] { border-color: var(--za-warning, #b88665); }
-.goal-investigation-card[data-status='completed'] .goal-investigation-signal { color: var(--za-success, #659b85); }
+.goal-investigation-card[data-status='failed'] { border-color: var(--state-warn); }
+.goal-investigation-card[data-status='completed'] .goal-investigation-signal { color: var(--state-success); }
 
 /* 降低透明度偏好：与 docked 胶囊一致，退回不透明底色并停用模糊。
    阴影/顶边高光沿用基础规则，不透底时它们仍然是卡片浮起的唯一交代。 */

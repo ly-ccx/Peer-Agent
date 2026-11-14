@@ -41,8 +41,8 @@ export function AppearancePanel({
     const byLabel = Object.fromEntries(swatches.map((s) => [s.label, s.value]));
     return {
       accent: byLabel.Accent ?? 'var(--za-accent)',
-      background: byLabel.Background ?? 'var(--za-bg)',
-      foreground: byLabel.Text ?? byLabel.Foreground ?? 'var(--za-fg)',
+      background: byLabel.Background ?? 'var(--za-bg-0)',
+      foreground: byLabel.Text ?? byLabel.Foreground ?? 'var(--za-text)',
     };
   }, [activeScheme, settings.palette]);
 

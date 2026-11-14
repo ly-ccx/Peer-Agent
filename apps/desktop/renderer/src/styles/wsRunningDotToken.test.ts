@@ -21,9 +21,9 @@ test('--state-info is defined for Frost and Catppuccin themes', async () => {
   const matches = css.match(/--state-info:\s*#[0-9A-Fa-f]{6}/g) ?? [];
   assert.equal(matches.length, 4, `expected 4 --state-info definitions, got ${matches.length}`);
 
-  // Frost light must stay cold azure (not Tailwind blue-500)
-  assert.match(css, /--state-info:\s*#3B7FAB/i);
-  assert.match(css, /--state-info:\s*#5D9CBF/i);
+  // Frost light/dark must stay cold azure (not Tailwind blue-500)
+  assert.match(css, /--state-info:\s*#286891/i);
+  assert.match(css, /--state-info:\s*#76B0D4/i);
 });
 
 test('.ws-running-dot consumes --state-info without hardcoded blue fallback', async () => {

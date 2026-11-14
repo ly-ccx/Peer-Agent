@@ -622,11 +622,11 @@ select.quick-chat-workspace-name {
 
 .quick-chat-model-provider:hover,
 .quick-chat-model-provider.is-active {
-  background: color-mix(in srgb, var(--accent-main, #1677ff) 10%, transparent);
+  background: color-mix(in srgb, var(--azure-seal) 12%, transparent);
 }
 
 .quick-chat-model-provider.is-selected {
-  color: var(--accent-main, #1677ff);
+  color: var(--azure-seal);
 }
 
 .quick-chat-model-arrow {
@@ -675,8 +675,8 @@ select.quick-chat-workspace-name {
   --effort-track-h: 12px;
   --effort-thumb: 20px;
   --effort-tick: 4px;
-  --effort-fill: #6ea8ff;
-  --effort-rest: color-mix(in srgb, #9aa4b2 28%, transparent);
+  --effort-fill: var(--azure-seal);
+  --effort-rest: color-mix(in srgb, var(--graphite-fade) 28%, transparent);
   position: relative;
   display: block;
   width: 100%;
@@ -752,12 +752,10 @@ select.quick-chat-workspace-name {
   height: var(--effort-thumb);
   margin-top: calc((var(--effort-track-h) - var(--effort-thumb)) / 2);
   appearance: none;
-  border: 0;
+  border: 2px solid var(--azure-seal);
   border-radius: var(--ui-radius-circle);
-  background: #ffffff;
-  box-shadow:
-    0 0 0 1px rgba(15, 23, 42, 0.08),
-    0 1px 3px rgba(15, 23, 42, 0.18);
+  background: var(--paper-sheet);
+  box-shadow: var(--shadow-soft);
 }
 
 .quick-chat-effort-slider::-moz-range-track {
@@ -775,12 +773,10 @@ select.quick-chat-workspace-name {
 .quick-chat-effort-slider::-moz-range-thumb {
   width: var(--effort-thumb);
   height: var(--effort-thumb);
-  border: 0;
+  border: 2px solid var(--azure-seal);
   border-radius: var(--ui-radius-circle);
-  background: #ffffff;
-  box-shadow:
-    0 0 0 1px rgba(15, 23, 42, 0.08),
-    0 1px 3px rgba(15, 23, 42, 0.18);
+  background: var(--paper-sheet);
+  box-shadow: var(--shadow-soft);
 }
 
 .quick-chat-task-card {
@@ -872,7 +868,7 @@ select.quick-chat-workspace-name {
 }
 
 .quick-chat-task-title { min-width: 0; gap: 6px; font-size: 11px; font-weight: 650; }
-.quick-chat-task-dot { width: 7px; height: 7px; border-radius: var(--ui-radius-circle); background: var(--state-warning); }
+.quick-chat-task-dot { width: 7px; height: 7px; border-radius: var(--ui-radius-circle); background: var(--state-warn); }
 .quick-chat-task-conversation { overflow: hidden; color: var(--quick-muted); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .quick-chat-task-question { margin: 9px 0; font-size: 13px; line-height: 1.45; }
 .quick-chat-task-options { flex-wrap: wrap; gap: 6px; }

@@ -42,7 +42,7 @@
   }
 
   .conversation-search-input::placeholder {
-    color: var(--pa-text-tertiary, var(--graphite-soft));
+    color: var(--graphite-fade);
   }
 
   .conversation-search-kbd {
@@ -69,7 +69,7 @@
     font-weight: 600;
     letter-spacing: 0.02em;
     text-transform: uppercase;
-    color: var(--pa-text-tertiary, var(--graphite-soft));
+    color: var(--graphite-fade);
   }
 
   .conversation-search-section-suggested {
@@ -167,7 +167,7 @@
     padding: 3px 5px;
     border-radius: var(--ui-radius-control-compact);
     border: 1px solid var(--za-line);
-    color: var(--pa-text-tertiary, var(--graphite-soft));
+    color: var(--graphite-fade);
     opacity: 0.85;
   }
 

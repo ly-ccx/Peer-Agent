@@ -20,7 +20,7 @@
 .remote-access-connection button { margin-left:auto; }
 .remote-access-links { display:flex; gap:16px; margin-top:12px; }
 .remote-access-links a { color:var(--za-accent); text-underline-offset:3px; }
-.remote-access-panel .remote-access-error { color:var(--pa-text-danger, var(--pa-text-primary)); }
+.remote-access-panel .remote-access-error { color:var(--state-danger); }
 .remote-access-grants { width:100%; border-collapse:collapse; margin-top:var(--space-3); font-size:.82rem; }
 .remote-access-grants th { font-weight:500; text-align:left; }
 .remote-access-grants thead th { color:var(--pa-text-secondary); font-size:.75rem; padding:8px 0; }

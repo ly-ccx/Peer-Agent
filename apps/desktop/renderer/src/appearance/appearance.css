@@ -99,23 +99,23 @@
   }
 
   .appearance-mode-thumb--light {
-    background: linear-gradient(160deg, #f4f7fb 0%, #e7edf5 100%);
+    background: linear-gradient(160deg, #f7f9fc 0%, #eaeff5 100%);
   }
 
   .appearance-mode-thumb--dark {
-    background: linear-gradient(160deg, #151a22 0%, #0f1319 100%);
+    background: linear-gradient(160deg, #171c25 0%, #0d1016 100%);
   }
 
   .appearance-mode-thumb--system {
     background:
-      linear-gradient(110deg, #f4f7fb 0 50%, transparent 50%),
-      linear-gradient(160deg, #151a22 0%, #0f1319 100%);
+      linear-gradient(110deg, #f7f9fc 0 50%, transparent 50%),
+      linear-gradient(160deg, #171c25 0%, #0d1016 100%);
   }
 
   .appearance-mode-thumb-bar {
     @apply absolute left-0 right-0 top-0;
     height: 18%;
-    background: color-mix(in srgb, #5d9cbf 55%, transparent);
+    background: color-mix(in srgb, #286891 55%, transparent);
     opacity: 0.55;
   }
 
@@ -126,12 +126,12 @@
   .appearance-mode-thumb-line {
     @apply block h-[3px] w-full rounded-[var(--ui-radius-pill)];
     background: color-mix(in srgb, currentColor 22%, transparent);
-    color: #1a1d21;
+    color: #181c22;
   }
 
   .appearance-mode-thumb--dark .appearance-mode-thumb-line,
   .appearance-mode-thumb--system .appearance-mode-thumb-line {
-    color: #edf1f6;
+    color: #eef2f7;
   }
 
   .appearance-mode-thumb-line.short {
@@ -140,8 +140,13 @@
 
   .appearance-mode-thumb-chip {
     @apply mt-0.5 block h-[7px] w-[34%] rounded-[var(--ui-radius-pill)];
-    background: #5d9cbf;
+    background: #286891;
     opacity: 0.9;
+  }
+
+  .appearance-mode-thumb--dark .appearance-mode-thumb-chip,
+  .appearance-mode-thumb--system .appearance-mode-thumb-chip {
+    background: #76b0d4;
   }
 
   /* —— 双栏实时预览 —— */
@@ -164,7 +169,7 @@
   .appearance-live-code,
   .appearance-live-diff {
     @apply min-h-[88px] overflow-hidden rounded-[var(--ui-radius-control)] p-2.5 text-[11px] leading-relaxed;
-    background: var(--preview-bg, var(--za-bg));
+    background: var(--preview-bg, var(--za-bg-0));
     color: var(--preview-fg, var(--za-text));
     border: 1px solid color-mix(in srgb, var(--preview-fg, var(--za-text)) 10%, transparent);
     font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
@@ -197,7 +202,7 @@
   }
 
   .appearance-live-code .tok-string {
-    color: color-mix(in srgb, var(--preview-accent, var(--za-accent)) 70%, #7ec699);
+    color: color-mix(in srgb, var(--preview-accent, var(--za-accent)) 65%, var(--state-success));
   }
 
   .appearance-live-code .tok-punct {
@@ -220,19 +225,19 @@
   }
 
   .appearance-live-diff-row.is-add {
-    background: color-mix(in srgb, #3e7a6b 22%, transparent);
+    background: color-mix(in srgb, var(--state-success) 20%, transparent);
   }
 
   .appearance-live-diff-row.is-add .sign {
-    color: #3e7a6b;
+    color: var(--state-success);
   }
 
   .appearance-live-diff-row.is-del {
-    background: color-mix(in srgb, #7a3e50 20%, transparent);
+    background: color-mix(in srgb, var(--state-danger) 18%, transparent);
   }
 
   .appearance-live-diff-row.is-del .sign {
-    color: #a35b6d;
+    color: var(--state-danger);
   }
 
   .appearance-live-diff-row .line {
@@ -292,10 +297,10 @@
     top: 100%;
     max-height: 16rem;
     border-radius: var(--ui-radius-control);
-    background: color-mix(in srgb, var(--za-surface-1) 96%, transparent);
+    background: var(--glass-popover);
     border: 1px solid var(--za-line);
-    box-shadow: 0 12px 28px color-mix(in srgb, #000 18%, transparent);
-    backdrop-filter: blur(12px);
+    box-shadow: var(--glass-edge-highlight), var(--shadow-popover);
+    backdrop-filter: blur(var(--blur-popover)) saturate(var(--blur-saturate));
     outline: none;
   }
 
@@ -350,7 +355,7 @@
 
   .appearance-inline-error {
     @apply m-0 text-[11px];
-    color: color-mix(in srgb, #c45b6d 85%, var(--za-text));
+    color: var(--state-danger);
   }
 
   /* 预设 swatch 条（只读） */
@@ -361,7 +366,7 @@
   .appearance-swatch-dot {
     @apply h-5 w-5 rounded-[var(--ui-radius-circle)];
     border: 1px solid color-mix(in srgb, var(--za-line) 80%, transparent);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, #fff 8%, transparent);
+    box-shadow: var(--glass-edge-highlight);
   }
 
   /* Custom 浅/深双卡 */
@@ -378,13 +383,13 @@
 
   .appearance-scheme-card[data-scheme='light'] {
     background:
-      linear-gradient(180deg, color-mix(in srgb, #fff 8%, transparent), transparent),
+      linear-gradient(180deg, color-mix(in srgb, var(--paper-sheet) 32%, transparent), transparent),
       color-mix(in srgb, var(--za-surface-1) 92%, transparent);
   }
 
   .appearance-scheme-card[data-scheme='dark'] {
     background:
-      linear-gradient(180deg, color-mix(in srgb, #000 10%, transparent), transparent),
+      linear-gradient(180deg, color-mix(in srgb, var(--chrome-sunken) 24%, transparent), transparent),
       color-mix(in srgb, var(--za-surface-1) 92%, transparent);
   }
 
@@ -505,7 +510,7 @@
     color: var(--za-text);
     background: color-mix(in srgb, var(--za-surface-1) 92%, transparent);
     border-color: color-mix(in srgb, var(--za-accent) 28%, var(--za-line));
-    box-shadow: 0 1px 0 color-mix(in srgb, #fff 6%, transparent);
+    box-shadow: var(--glass-edge-highlight);
   }
 
   .appearance-code-font {
@@ -559,9 +564,9 @@
     width: 14px;
     height: 14px;
     border-radius: var(--ui-radius-circle);
-    background: var(--za-surface-1);
+    background: var(--paper-sheet);
     border: 2px solid var(--za-accent);
-    box-shadow: 0 1px 3px color-mix(in srgb, #000 18%, transparent);
+    box-shadow: var(--shadow-soft);
   }
 
   .appearance-slider input[type='range']::-moz-range-track,

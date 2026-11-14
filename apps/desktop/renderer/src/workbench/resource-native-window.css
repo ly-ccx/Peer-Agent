@@ -5,7 +5,8 @@ body:has(.resource-native-shell) { min-width: 0; min-height: 0; }
 .resource-native-header .resource-native-icon { width: var(--space-8); height: var(--space-8); padding: var(--space-2); flex: none; background: transparent; border: 0; border-radius: var(--ui-radius-control); }
 .resource-native-header .resource-native-icon:hover { background: var(--ui-surface-hover); }
 .resource-native-icon svg { display: block; flex: none; }
-.resource-native-path, .resource-native-notice { margin: 0; padding: var(--space-2); color: var(--graphite-secondary); font-size: var(--ui-font-caption); overflow-wrap: anywhere; }
+.resource-native-path, .resource-native-notice { margin: 0; padding: var(--space-2); color: var(--graphite-soft); font-size: var(--ui-font-caption); overflow-wrap: anywhere; }
+.resource-native-path { font-family: var(--font-mono); }
 .resource-native-content { flex: 1; min-height: 0; min-width: 0; border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-panel); background: var(--paper-sheet); overflow: hidden; }
 .resource-native-reading { display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; padding: var(--space-3); }
 .resource-native-read-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); flex: none; }

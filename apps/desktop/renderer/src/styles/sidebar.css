@@ -124,11 +124,11 @@
 .sidebar-resizer:hover::after,
 .sidebar-resizer:focus-visible::after,
 .sidebar-resizer[data-active='true']::after {
-  background: var(--za-accent, #4c8dff);
+  background: var(--azure-seal);
 }
 /* 阻尼区视觉提示：宽度已拖到最小展开宽度以下、即将触发收起。 */
 .sidebar-resizer[data-damping='true']::after {
-  background: var(--za-warning, #f0a020);
+  background: var(--state-warn);
 }
 
 /* 非 darwin 全屏没有系统交通灯,顶部预留只是死空白,收成 12px。
@@ -196,7 +196,7 @@
 }
 .sidebar-search-icon-btn:hover {
   background: var(--za-sidebar-active-bg);
-  color: var(--graphite-ink, var(--graphite-base));
+  color: var(--graphite-base);
 }
 .sidebar-search-icon-btn:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--azure-seal) 55%, transparent);
@@ -572,7 +572,7 @@
   padding: 3px 5px;
   border-radius: var(--ui-radius-control-compact);
   border: 1px solid var(--za-line);
-  color: var(--pa-text-tertiary, var(--graphite-soft));
+  color: var(--graphite-fade);
   flex: 0 0 auto;
   font-family: inherit;
   font-weight: 500;
@@ -603,7 +603,7 @@
 .sidebar-new-chat:hover {
   background: var(--za-sidebar-active-bg);
   border-color: var(--za-line, var(--chrome-hairline));
-  color: var(--graphite-ink, var(--graphite-base));
+  color: var(--graphite-base);
 }
 .sidebar-return-chat {
   color: var(--graphite-soft);
@@ -654,7 +654,7 @@
 .sidebar-top .sidebar-automation-nav.active,
 .sidebar-top .sidebar-nav-btn.active {
   background: var(--za-sidebar-active-bg, rgba(0, 0, 0, 0.05));
-  color: var(--graphite-ink, var(--graphite-base));
+  color: var(--graphite-base);
 }
 
 
@@ -820,8 +820,9 @@
   padding: 6px;
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-panel);
-  background: var(--za-surface-elevated, var(--za-sidebar-bg));
-  box-shadow: var(--shadow-popover, 0 12px 32px rgb(0 0 0 / 18%));
+  background: var(--glass-popover);
+  backdrop-filter: blur(var(--blur-popover)) saturate(var(--blur-saturate));
+  box-shadow: var(--glass-edge-highlight), var(--shadow-popover);
   -webkit-app-region: no-drag;
 }
 .sidebar-context-menu button {
@@ -991,7 +992,7 @@
   border: 1px solid var(--azure-seal);
   border-radius: var(--ui-radius-control);
   outline: none;
-  background: var(--za-surface-glass);
+  background: var(--glass-chrome);
   color: var(--graphite-base);
   font: inherit;
   -webkit-app-region: no-drag;
@@ -1259,8 +1260,9 @@
   min-width: 260px;
   padding: 10px;
   border-radius: var(--ui-radius-panel);
-  background: var(--chrome-surface, #fff);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+  background: var(--glass-popover);
+  backdrop-filter: blur(var(--blur-popover)) saturate(var(--blur-saturate));
+  box-shadow: var(--glass-edge-highlight), var(--shadow-popover);
   border: 1px solid var(--chrome-hairline);
 }
 
@@ -1467,6 +1469,6 @@
 }
 
 .edit-project-save {
-  background: var(--graphite-base, #111);
-  color: #fff;
+  background: var(--graphite-base);
+  color: var(--paper-sheet);
 }

@@ -19,7 +19,7 @@
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-control-compact);
   background: var(--control-fill);
   color: var(--graphite-base);
@@ -27,7 +27,7 @@
   cursor: pointer;
 }
 .input-prediction-accept:focus-visible { outline: 2px solid var(--azure-seal); outline-offset: 2px; }
-.input-prediction-accept kbd { font: inherit; }
+.input-prediction-accept kbd { font-family: var(--font-mono); font-size: inherit; }
 .input-prediction-status {
   position: absolute;
   width: 1px;

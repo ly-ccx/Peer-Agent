@@ -37,18 +37,18 @@
   --font-serif-zh: var(--font-sans);
   --font-sans-zh: var(--font-sans);
   --font-mono: "IBM Plex Mono", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
-  --color-paper-sheet: #F8F8F8;
-  --color-paper-base: #F8F8F8;
-  --color-graphite-base: #1A1D21;
-  --color-azure-seal: #3B7FAB;
+  --color-paper-sheet: #FCFDFF;
+  --color-paper-base: #F7F9FC;
+  --color-graphite-base: #181C22;
+  --color-azure-seal: #286891;
   --radius-frost: var(--ui-radius-panel);
   --radius-frost-sm: var(--ui-radius-control-compact);
-  --glass-chrome: hsla(0, 0%, 96%, 0.86);
-  --glass-chrome-hover: hsla(0, 0%, 98%, 0.90);
-  --glass-control: hsla(0, 0%, 96%, 0.70);
+  --glass-chrome: hsla(215, 22%, 96%, 0.78);
+  --glass-chrome-hover: hsla(215, 24%, 98%, 0.86);
+  --glass-control: hsla(216, 20%, 95%, 0.74);
   /* 磨砂毛玻璃：提高不透明度，避免「透明玻璃」可读背景字 */
-  --glass-popover: hsla(0, 0%, 99%, 0.88);
-  --glass-edge-highlight: inset 0 1px 0 hsla(210, 30%, 100%, 0.55);
+  --glass-popover: hsla(214, 24%, 99%, 0.88);
+  --glass-edge-highlight: inset 0 1px 0 hsla(210, 45%, 100%, 0.78);
   --blur-chrome: 24px;
   --blur-control: 16px;
   --blur-popover: 24px;
@@ -82,53 +82,53 @@
   -webkit-font-smoothing: antialiased;
   font-feature-settings: "kern";
 
-  /* 中性底面与独立浮层共用语义色阶；印记和状态色继续保留 Frost 色彩。 */
-  /* ─── Chrome 环境层 ─── */
-  --chrome-canvas: #F4F4F4;
-  --chrome-raised: #F3F3F3;
-  --chrome-sunken: #EAEAEA;
-  --chrome-hover: #EDEDED;
-  --chrome-active: #E4E4E4;
-  --chrome-hairline: #DEDEDE;
+  /* 中性底面与独立浮层共用冷石板语义色阶（L0-L4）；印记和状态色维持 Frost 冷调克制。 */
+  /* ─── Chrome 环境层 (L1) ─── */
+  --chrome-canvas: #EFF3F8;
+  --chrome-raised: #EFF3F8;
+  --chrome-sunken: #E4EAF2;
+  --chrome-hover: #E7EDF5;
+  --chrome-active: #DDE5F0;
+  --chrome-hairline: #DDE4EE;
 
-  /* ─── Paper 内容层（中性近白面板）─── */
-  --paper-base: #F8F8F8;
-  --paper-sheet: #F8F8F8;
-  /* ★ 消息卡 / 面板卡默认 */
-  --paper-sunken: #E8E8E8;
-  --paper-hover: #EFEFEF;
-  --paper-active: #DEDEDE;
+  /* ─── Paper 内容层 (L0 / L2 / L3) ─── */
+  --paper-base: #F7F9FC;
+  --paper-sheet: #FCFDFF;
+  /* ★ 结构卡 / 面板默认 */
+  --paper-sunken: #EAEFF5;
+  --paper-hover: #E8EEF6;
+  --paper-active: #DCE4EE;
 
-  /* ─── Control 控件层 ─── */
-  --control-composer: #FFFFFF;
-  --control-fill: #EBEBEB;
-  --control-fill-active: #DDDDDD;
-  --control-fill-hover: #E3E3E3;
+  /* ─── Control 控件层 (L3 / L4) ─── */
+  --control-composer: #FCFDFF;
+  --control-fill: #E6ECF3;
+  --control-fill-active: #D2DCE8;
+  --control-fill-hover: #DCE4EE;
 
-  /* ─── Graphite 文字阶（冷石墨，hue 210-220 sat 5-14%）─── */
-  --graphite-base: #1A1D21;
-  --graphite-base-hover: #2A2D33;
-  --graphite-soft: #525660;
-  --graphite-fade: #878B95;
-  --graphite-mute: #B0B4BC;
-  --graphite-hairline: #DCE0E8;
+  /* ─── Graphite 文字阶（冷石墨，hue 215-220，对比度均 ≥ 4.5:1）─── */
+  --graphite-base: #181C22;
+  --graphite-base-hover: #262C35;
+  --graphite-soft: #4E5664;
+  --graphite-fade: #616A79;
+  --graphite-mute: #A4AEBC;
+  --graphite-hairline: #D4DCE8;
 
-  /* ─── Azure 印记（冰湖青，仅 5 处白名单使用）─── */
-  --azure-seal: #3B7FAB;
-  --azure-soft: #7BA8C8;
-  --azure-trace: #D8E4EE;
+  /* ─── Azure 印记（冰湖青，仅白名单使用）─── */
+  --azure-seal: #286891;
+  --azure-soft: #7FB0CF;
+  --azure-trace: #E1ECF4;
 
   /* ─── State 状态色（全冷化）─── */
-  --state-thinking: #6B7FA0;
-  --state-active-on: #1A1D21;
-  --state-confirm: #1F6B9B;
-  --state-success: #3E7A6B;
-  --state-warn: #3B6FAB;
+  --state-thinking: #5B7296;
+  --state-active-on: #181C22;
+  --state-confirm: #286891;
+  --state-success: #296E5D;
+  --state-warn: #32639B;
   /* 与 confirm 同 hue 区，靠 icon+文案区分 */
-  --state-danger: #7A3E50;
+  --state-danger: #963850;
   --state-denied: #5C5A70;
-  /* 运行中/信息指示：冷蓝（对齐 azure-seal，非 Tailwind blue-500） */
-  --state-info: #3B7FAB;
+  /* 运行中/信息指示：冷蓝（对齐 azure-seal） */
+  --state-info: #286891;
 
   /* ─── Spacing / Radius / Shadow ─── */
   --space-1: 4px;
@@ -155,11 +155,11 @@
   --radius-lg: var(--ui-radius-panel);
   --radius-xl: var(--ui-radius-modal);
   /* 悬浮内容卡片：明显高于页面，仍低于 popover / drag 浮层。 */
-  --shadow-card: 0 1px 2px rgba(26, 29, 33, 0.08), 0 10px 28px rgba(26, 29, 33, 0.10);
-  --shadow-card-hover: 0 2px 4px rgba(26, 29, 33, 0.10), 0 16px 36px rgba(26, 29, 33, 0.14);
-  --shadow-card-active: 0 1px 3px rgba(26, 29, 33, 0.10), 0 8px 22px rgba(26, 29, 33, 0.12);
-  --shadow-popover: 0 6px 20px rgba(26, 29, 33, 0.07), 0 1px 3px rgba(26, 29, 33, 0.04);
-  --shadow-drag: 0 4px 16px rgba(26, 29, 33, 0.10);
+  --shadow-card: 0 1px 2px rgba(24, 28, 34, 0.08), 0 10px 28px rgba(24, 28, 34, 0.10);
+  --shadow-card-hover: 0 2px 4px rgba(24, 28, 34, 0.10), 0 16px 36px rgba(24, 28, 34, 0.14);
+  --shadow-card-active: 0 1px 3px rgba(24, 28, 34, 0.10), 0 8px 22px rgba(24, 28, 34, 0.12);
+  --shadow-popover: 0 6px 20px rgba(24, 28, 34, 0.07), 0 1px 3px rgba(24, 28, 34, 0.04);
+  --shadow-drag: 0 4px 16px rgba(24, 28, 34, 0.10);
   /* 弹窗专用磨砂：浅色主题不能整块发白，面板采样顶部浮条的 blur，但用更薄的冷灰玻璃和明确边界。 */
   --glass-modal-scrim: color-mix(in srgb, var(--chrome-sunken) 30%, transparent);
   --glass-modal-background:
@@ -175,7 +175,7 @@
     0 20px 46px color-mix(in srgb, var(--ink-base) 16%, transparent),
     0 6px 18px color-mix(in srgb, var(--ink-base) 10%, transparent);
   /* 统一软阴影：输入框 / 侧栏选中态等同级轻浮起。 */
-  --shadow-soft: 0 1px 2px rgba(26, 29, 33, 0.06), 0 6px 18px rgba(26, 29, 33, 0.08);
+  --shadow-soft: 0 1px 2px rgba(24, 28, 34, 0.06), 0 6px 18px rgba(24, 28, 34, 0.08);
   --shadow-composer: var(--shadow-soft);
 
   /* ─────────────────────────────────────────────────────────────
@@ -207,55 +207,55 @@
    *    primary control 永远是 graphite-on-paper（红线 1）
    *    surface 体系全部解构成冷雪纸 paper 阶
    * ───────────────────────────────────────────────────────────── */
-  --za-bg-0: #FAFBFC;
-  --za-bg-1: #F3F5F8;
-  --za-bg-2: #EBEEF3;
-  --za-panel-1: #F7F9FC;
-  --za-surface-0: #F7F9FC;
-  --za-surface-1: #EAEEF4;
-  --za-surface-2: #DDE3EB;
-  --za-line: #DCE0E8;
-  --za-line-strong: #B0B4BC;
-  --za-text: #1A1D21;
-  --za-text-soft: #525660;
-  --za-text-muted: #878B95;
-  --za-text-faint: #B0B4BC;
-  --za-accent: #3B7FAB;
-  --za-accent-soft: #D8E4EE;
-  --za-accent-ink: #F7F9FC;
-  --za-good: #3E7A6B;
-  --za-good-soft: rgba(62, 122, 107, 0.10);
-  --za-warn: #3B6FAB;
-  --za-warn-soft: rgba(59, 111, 171, 0.10);
-  --za-danger: #7A3E50;
-  --za-danger-soft: rgba(122, 62, 80, 0.10);
-  --za-app-bg: #FAFBFC;
-  --za-thread-bg: #FAFBFC;
-  --za-thread-glow: rgba(59, 127, 171, 0.025);
-  --za-hover: #F0F2F6;
-  --za-active: #E5E8EE;
-  --za-sidebar-bg: #F3F5F8;
+  --za-bg-0: #F7F9FC;
+  --za-bg-1: #EFF3F8;
+  --za-bg-2: #EAEFF5;
+  --za-panel-1: #FCFDFF;
+  --za-surface-0: #FCFDFF;
+  --za-surface-1: #EFF3F8;
+  --za-surface-2: #EAEFF5;
+  --za-line: #DDE4EE;
+  --za-line-strong: #B0BAC9;
+  --za-text: #181C22;
+  --za-text-soft: #4E5664;
+  --za-text-muted: #616A79;
+  --za-text-faint: #8A95A5;
+  --za-accent: #286891;
+  --za-accent-soft: #E1ECF4;
+  --za-accent-ink: #FCFDFF;
+  --za-good: #296E5D;
+  --za-good-soft: rgba(41, 110, 93, 0.10);
+  --za-warn: #32639B;
+  --za-warn-soft: rgba(50, 99, 155, 0.10);
+  --za-danger: #963850;
+  --za-danger-soft: rgba(150, 56, 80, 0.10);
+  --za-app-bg: #EFF3F8;
+  --za-thread-bg: #F7F9FC;
+  --za-thread-glow: rgba(40, 104, 145, 0.025);
+  --za-hover: #E8EEF6;
+  --za-active: #DCE4EE;
+  --za-sidebar-bg: #EFF3F8;
   /* Selected fill matches frosted chrome, not opaque paper white. */
   --za-sidebar-active-bg: var(--glass-chrome-hover);
   --za-sidebar-thread-active-bg: var(--glass-chrome-hover);
   /* 选中态：发丝边 + 毛玻璃底，不用投影抬升，也不画左侧印记。 */
   --za-sidebar-active-border: #DCE0E8;
   --za-sidebar-width: 264px;
-  --za-inset-highlight: #FAFBFC;
-  --za-focus: rgba(59, 127, 171, 0.25);
-  --za-scrollbar-thumb: rgba(176, 180, 188, 0.25);
-  --za-popover-bg: #FAFBFC;
-  --za-header-bg: #F3F5F8;
-  --za-message-bg: #F7F9FC;
-  --za-user-message-bg: #F7F9FC;
-  --za-composer-bg: #EFF2F6;
-  --za-composer-empty-bg: #EFF2F6;
+  --za-inset-highlight: #FCFDFF;
+  --za-focus: rgba(40, 104, 145, 0.25);
+  --za-scrollbar-thumb: rgba(140, 152, 169, 0.28);
+  --za-popover-bg: #FCFDFF;
+  --za-header-bg: #EFF3F8;
+  --za-message-bg: #FCFDFF;
+  --za-user-message-bg: #E8EEF6;
+  --za-composer-bg: #FCFDFF;
+  --za-composer-empty-bg: #FCFDFF;
   --za-control-fill: var(--control-fill);
   --za-control-fill-hover: var(--control-fill-hover);
-  --za-control-ink: #1A1D21;
-  --za-primary-control-bg: #1A1D21;
-  --za-primary-control-ink: #F7F9FC;
-  --za-shadow-panel: 0 2px 12px rgba(26, 29, 33, 0.06);
+  --za-control-ink: #181C22;
+  --za-primary-control-bg: #181C22;
+  --za-primary-control-ink: #FCFDFF;
+  --za-shadow-panel: 0 2px 12px rgba(24, 28, 34, 0.06);
   --za-shadow-popover: var(--shadow-popover);
   --za-radius: var(--ui-radius-panel);
   --za-radius-sm: var(--ui-radius-control-compact);
@@ -277,9 +277,9 @@
   --za-font-ui: var(--font-sans);
   --za-font-code: var(--font-mono);
   /* 用户偏好快照（Frost 模式下永远固定为 canonical 值，不再可改） */
-  --za-user-accent: #3B7FAB;
-  --za-user-background: #FAFBFC;
-  --za-user-foreground: #1A1D21;
+  --za-user-accent: #286891;
+  --za-user-background: #F7F9FC;
+  --za-user-foreground: #181C22;
 
   /* ─── 代码字号（px）───
    *  默认值；AppearanceProvider 在 <html style 上注入同名变量覆盖。
@@ -391,11 +391,14 @@
    * ───────────────────────────────────────────────────────────── */
   --pa-text-primary: var(--za-text);
   --pa-text-secondary: var(--za-text-soft);
+  --pa-text-muted: var(--za-text-muted);
+  --pa-accent: var(--za-accent);
   --pa-border-subtle: var(--za-line);
   --pa-surface: var(--za-surface-0);
   --pa-surface-card: var(--za-surface-0);
   --pa-surface-panel: var(--za-surface-1);
   --pa-surface-muted: var(--za-surface-1);
+  --pa-surface-elevated: var(--za-popover-bg);
   --pa-surface-hover: var(--za-hover);
 }
 
@@ -405,51 +408,51 @@
  * ───────────────────────────────────────────────────────────── */
 [data-theme="dark"] {
   color-scheme: dark;
-  --glass-chrome: hsla(0, 0%, 24%, 0.72);
-  --glass-chrome-hover: hsla(0, 0%, 28%, 0.78);
-  --glass-control: hsla(0, 0%, 18%, 0.62);
-  /* 暗色磨砂：同样抬不透明度，背景字不可清晰辨认 */
-  --glass-popover: hsla(0, 0%, 12%, 0.86);
-  --glass-edge-highlight: inset 0 1px 0 hsla(210, 30%, 100%, 0.14);
+  --glass-chrome: hsla(218, 22%, 11%, 0.72);
+  --glass-chrome-hover: hsla(218, 22%, 15%, 0.80);
+  --glass-control: hsla(218, 20%, 14%, 0.68);
+  /* 暗色磨砂：抬高冷石板不透明度，背景字不可清晰辨认 */
+  --glass-popover: hsla(218, 20%, 13%, 0.88);
+  --glass-edge-highlight: inset 0 1px 0 hsla(214, 40%, 100%, 0.08);
 
-  /* ─── Frost 正名 token ─── */
-  --chrome-canvas: #383838;
-  --chrome-raised: #383838;
-  --chrome-sunken: #202020;
-  --chrome-hover: #424242;
-  --chrome-active: #4A4A4A;
-  --chrome-hairline: #303030;
+  /* ─── Frost 正名 token (L0-L4 冷黑曜石阶梯) ─── */
+  --chrome-canvas: #13171F;
+  --chrome-raised: #13171F;
+  --chrome-sunken: #0D1016;
+  --chrome-hover: #1B212D;
+  --chrome-active: #232A38;
+  --chrome-hairline: #27303E;
 
-  --paper-base: #141414;
-  --paper-sheet: #141414;
-  --paper-sunken: #101010;
-  --paper-hover: #242424;
-  --paper-active: #303030;
+  --paper-base: #171C25;
+  --paper-sheet: #1E2430;
+  --paper-sunken: #0D1016;
+  --paper-hover: #232A38;
+  --paper-active: #2C3547;
 
-  --control-composer: #262626;
-  --control-fill: #2C2C2C;
-  --control-fill-active: #3C3C3C;
-  --control-fill-hover: #343434;
+  --control-composer: #1E2430;
+  --control-fill: #252C3A;
+  --control-fill-active: #364054;
+  --control-fill-hover: #2D3647;
 
-  --graphite-base: #EDF1F6;
-  --graphite-base-hover: #D5DCE6;
-  --graphite-soft: #B0B4BC;
-  --graphite-fade: #7B7F8A;
-  --graphite-mute: #494D58;
-  --graphite-hairline: #2A303B;
+  --graphite-base: #EEF2F7;
+  --graphite-base-hover: #D7DFEA;
+  --graphite-soft: #B2BCCB;
+  --graphite-fade: #8C98A9;
+  --graphite-mute: #4A5362;
+  --graphite-hairline: #2A3343;
 
-  --azure-seal: #5D9CBF;
-  --azure-soft: #3D6E8E;
-  --azure-trace: #1D2F3D;
+  --azure-seal: #76B0D4;
+  --azure-soft: #3B6A8B;
+  --azure-trace: #1D2E3F;
 
-  --state-thinking: #8B9FC0;
-  --state-active-on: #EDF1F6;
-  --state-confirm: #4F9BCB;
-  --state-success: #6EAA9B;
-  --state-warn: #6B9FCB;
-  --state-danger: #AA6E80;
+  --state-thinking: #92A7C9;
+  --state-active-on: #EEF2F7;
+  --state-confirm: #76B0D4;
+  --state-success: #63B39D;
+  --state-warn: #76A5D6;
+  --state-danger: #D97C92;
   --state-denied: #8C8AA0;
-  --state-info: #5D9CBF;
+  --state-info: #76B0D4;
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.30), 0 12px 30px rgba(0, 0, 0, 0.34);
   --shadow-card-hover: 0 2px 5px rgba(0, 0, 0, 0.34), 0 18px 42px rgba(0, 0, 0, 0.44);
   --shadow-card-active: 0 1px 3px rgba(0, 0, 0, 0.34), 0 9px 24px rgba(0, 0, 0, 0.38);
@@ -492,56 +495,56 @@
   --cinnabar-trace: var(--azure-trace);
 
   /* ─── --za-* 别名层 ─── */
-  --za-bg-0: #11141A;
-  --za-bg-1: #181C24;
-  --za-bg-2: #0C0F14;
-  --za-panel-1: #1E232C;
-  --za-surface-0: #1E232C;
-  --za-surface-1: #262C37;
-  --za-surface-2: #11141A;
-  --za-line: #2A303B;
-  --za-line-strong: #494D58;
-  --za-text: #EDF1F6;
-  --za-text-soft: #B0B4BC;
-  --za-text-muted: #7B7F8A;
-  --za-text-faint: #494D58;
-  --za-accent: #5D9CBF;
-  --za-accent-soft: #1D2F3D;
-  --za-accent-ink: #11141A;
-  --za-good: #6EAA9B;
-  --za-good-soft: rgba(110, 170, 155, 0.14);
-  --za-warn: #6B9FCB;
-  --za-warn-soft: rgba(107, 159, 203, 0.14);
-  --za-danger: #AA6E80;
-  --za-danger-soft: rgba(170, 110, 128, 0.14);
-  --za-app-bg: #11141A;
-  --za-thread-bg: #11141A;
-  --za-thread-glow: rgba(93, 156, 191, 0.04);
-  --za-hover: #1E232C;
-  --za-active: #262C37;
-  --za-sidebar-bg: #181C24;
+  --za-bg-0: #171C25;
+  --za-bg-1: #13171F;
+  --za-bg-2: #0D1016;
+  --za-panel-1: #1E2430;
+  --za-surface-0: #1E2430;
+  --za-surface-1: #252C3A;
+  --za-surface-2: #0D1016;
+  --za-line: #27303E;
+  --za-line-strong: #4A5362;
+  --za-text: #EEF2F7;
+  --za-text-soft: #B2BCCB;
+  --za-text-muted: #8C98A9;
+  --za-text-faint: #4A5362;
+  --za-accent: #76B0D4;
+  --za-accent-soft: #1D2E3F;
+  --za-accent-ink: #13171F;
+  --za-good: #63B39D;
+  --za-good-soft: rgba(99, 179, 157, 0.15);
+  --za-warn: #76A5D6;
+  --za-warn-soft: rgba(118, 165, 214, 0.15);
+  --za-danger: #D97C92;
+  --za-danger-soft: rgba(217, 124, 146, 0.15);
+  --za-app-bg: #13171F;
+  --za-thread-bg: #171C25;
+  --za-thread-glow: rgba(118, 176, 212, 0.04);
+  --za-hover: #1E2430;
+  --za-active: #252C3A;
+  --za-sidebar-bg: #13171F;
   --za-sidebar-active-bg: var(--glass-chrome-hover);
   --za-sidebar-thread-active-bg: var(--glass-chrome-hover);
-  --za-sidebar-active-border: #2A303B;
-  --za-inset-highlight: #181C24;
-  --za-focus: rgba(93, 156, 191, 0.30);
-  --za-scrollbar-thumb: rgba(73, 77, 88, 0.25);
-  --za-popover-bg: #181C24;
-  --za-header-bg: #181C24;
-  --za-message-bg: #1E232C;
-  --za-user-message-bg: #1E232C;
-  --za-composer-bg: #0C0F14;
-  --za-composer-empty-bg: #0C0F14;
+  --za-sidebar-active-border: #27303E;
+  --za-inset-highlight: #1E2430;
+  --za-focus: rgba(118, 176, 212, 0.30);
+  --za-scrollbar-thumb: rgba(140, 152, 169, 0.25);
+  --za-popover-bg: #1E2430;
+  --za-header-bg: #13171F;
+  --za-message-bg: #1E2430;
+  --za-user-message-bg: #232A38;
+  --za-composer-bg: #1E2430;
+  --za-composer-empty-bg: #1E2430;
   --za-control-fill: var(--control-fill);
   --za-control-fill-hover: var(--control-fill-hover);
-  --za-control-ink: #EDF1F6;
-  --za-primary-control-bg: #EDF1F6;
-  --za-primary-control-ink: #11141A;
+  --za-control-ink: #EEF2F7;
+  --za-primary-control-bg: #EEF2F7;
+  --za-primary-control-ink: #13171F;
   --za-shadow-panel: 0 2px 12px rgba(0, 0, 0, 0.40);
   --za-shadow-popover: var(--shadow-popover);
-  --za-user-accent: #5D9CBF;
-  --za-user-background: #11141A;
-  --za-user-foreground: #EDF1F6;
+  --za-user-accent: #76B0D4;
+  --za-user-background: #171C25;
+  --za-user-foreground: #EEF2F7;
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -569,7 +572,7 @@
   --paper-sunken: #DCE0E8;
   --paper-hover: #E6E9EF;
   --paper-active: #CCD0DA;
-  --control-composer: #E6E9EF;
+  --control-composer: #EFF1F5;
   --control-fill: #DCE0E8;
   --control-fill-active: #BCC0CC;
   --control-fill-hover: #CCD0DA;
@@ -744,42 +747,47 @@
 [data-palette="custom"][data-theme="light"] {
   color-scheme: light;
 
-  --za-accent: var(--za-custom-accent, #3B7FAB);
-  --za-accent-soft: var(--za-custom-accent, #3B7FAB);
-  --za-user-accent: var(--za-custom-accent, #3B7FAB);
+  --za-accent: var(--za-custom-accent, #286891);
+  --za-accent-soft: var(--za-custom-accent, #286891);
+  --za-user-accent: var(--za-custom-accent, #286891);
 
-  --za-bg-0: var(--za-custom-bg, #FAFBFC);
-  --za-bg-1: var(--za-custom-bg, #F3F5F8);
-  --za-app-bg: var(--za-custom-bg, #FAFBFC);
-  --za-thread-bg: var(--za-custom-bg, #FAFBFC);
-  --za-user-background: var(--za-custom-bg, #FAFBFC);
+  --za-bg-0: var(--za-custom-bg, #F7F9FC);
+  --za-bg-1: var(--za-custom-bg, #EFF3F8);
+  --za-app-bg: var(--za-custom-bg, #F7F9FC);
+  --za-thread-bg: var(--za-custom-bg, #F7F9FC);
+  --za-user-background: var(--za-custom-bg, #F7F9FC);
 
-  --za-text: var(--za-custom-fg, #1A1D21);
-  --za-user-foreground: var(--za-custom-fg, #1A1D21);
+  --za-text: var(--za-custom-fg, #181C22);
+  --za-user-foreground: var(--za-custom-fg, #181C22);
 }
 
 [data-palette="custom"][data-theme="dark"] {
   color-scheme: dark;
 
-  --za-accent: var(--za-custom-accent, #5D9CBF);
-  --za-accent-soft: var(--za-custom-accent, #5D9CBF);
-  --za-user-accent: var(--za-custom-accent, #5D9CBF);
+  --za-accent: var(--za-custom-accent, #76B0D4);
+  --za-accent-soft: var(--za-custom-accent, #76B0D4);
+  --za-user-accent: var(--za-custom-accent, #76B0D4);
 
-  --za-bg-0: var(--za-custom-bg, #11141A);
-  --za-bg-1: var(--za-custom-bg, #161A21);
-  --za-app-bg: var(--za-custom-bg, #11141A);
-  --za-thread-bg: var(--za-custom-bg, #11141A);
-  --za-user-background: var(--za-custom-bg, #11141A);
+  --za-bg-0: var(--za-custom-bg, #171C25);
+  --za-bg-1: var(--za-custom-bg, #13171F);
+  --za-app-bg: var(--za-custom-bg, #171C25);
+  --za-thread-bg: var(--za-custom-bg, #171C25);
+  --za-user-background: var(--za-custom-bg, #171C25);
 
-  --za-text: var(--za-custom-fg, #EDF1F6);
-  --za-user-foreground: var(--za-custom-fg, #EDF1F6);
+  --za-text: var(--za-custom-fg, #EEF2F7);
+  --za-user-foreground: var(--za-custom-fg, #EEF2F7);
 }
 
 /* ─────────────────────────────────────────────────────────────
  *  Density: Compact（默认 comfortable）
  * ───────────────────────────────────────────────────────────── */
 [data-density="compact"] {
-  /* 留作后续落地：行高 / control 高度 / 卡内边距压缩 */
+  --ui-control-height: 2rem;
+  --ui-control-height-compact: 1.75rem;
+  --space-3: 10px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 20px;
 }
 
 /* ─────────────────────────────────────────────────────────────

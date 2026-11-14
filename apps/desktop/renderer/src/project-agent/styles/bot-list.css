@@ -269,25 +269,27 @@
   align-items: center;
   width: 100%;
   min-width: 0;
-  margin-bottom: 8px;
-  background: var(--chrome-canvas);
+  margin-bottom: 10px;
+  background: var(--paper-sunken);
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-control);
   transition:
+    background var(--za-motion-fast) var(--za-ease-standard),
     border-color var(--za-motion-fast) var(--za-ease-standard),
     box-shadow var(--za-motion-fast) var(--za-ease-standard);
 }
 
 .bot-search-frame:focus-within {
-  border-color: color-mix(in srgb, var(--graphite-base) 32%, var(--chrome-hairline));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--graphite-base) 8%, transparent);
+  background: var(--paper-sheet);
+  border-color: color-mix(in srgb, var(--azure-seal) 48%, var(--chrome-hairline));
+  box-shadow: 0 0 0 3px var(--azure-trace);
 }
 
 .bot-search {
   flex: 1;
   width: 100%;
   min-width: 0;
-  padding: 8px 12px;
+  padding: 8px 11px;
   color: var(--graphite-base);
   font: inherit;
   font-size: 12.5px;
@@ -299,13 +301,15 @@
 .bot-need-filter {
   flex: 0 0 auto;
   margin-right: 5px;
-  padding: 5px 8px;
-  color: var(--graphite-soft);
-  font: inherit;
+  padding: 4px 9px;
+  color: var(--azure-seal);
+  font-family: var(--font-mono);
   font-size: 11px;
-  background: transparent;
-  border: 0;
-  border-radius: var(--ui-radius-control-compact);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  background: var(--azure-trace);
+  border: 1px solid var(--azure-soft);
+  border-radius: var(--ui-radius-pill);
   cursor: pointer;
   white-space: nowrap;
   transition:
@@ -315,14 +319,13 @@
 }
 
 .bot-need-filter.is-on {
-  color: var(--graphite-base);
-  background: var(--chrome-hover);
-  box-shadow: inset 0 0 0 1px var(--chrome-hairline);
+  color: var(--paper-sheet);
+  background: var(--azure-seal);
+  border-color: var(--azure-seal);
 }
 
 .bot-need-filter:hover {
-  color: var(--graphite-base);
-  background: var(--chrome-hover);
+  background: color-mix(in srgb, var(--azure-seal) 16%, var(--azure-trace));
 }
 
 .bot-list {
@@ -337,10 +340,10 @@
 .bot-list-empty {
   margin: 0 0 12px;
   padding: 12px 14px;
-  color: var(--graphite-base);
+  color: var(--graphite-soft);
   font-size: 13px;
   line-height: 1.55;
-  background: var(--chrome-canvas);
+  background: var(--paper-sheet);
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-panel);
 }
@@ -352,10 +355,10 @@
   margin: 0 2px 12px;
   padding: 11px 12px 12px;
   color: var(--graphite-base);
-  background: var(--chrome-canvas);
+  background: var(--paper-sheet);
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-panel);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, white 5%, transparent);
+  box-shadow: var(--glass-edge-highlight);
   -webkit-app-region: no-drag;
 }
 
@@ -450,9 +453,9 @@
   grid-template-columns: 40px minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
-  padding: 9px 8px;
+  padding: 9px 9px;
   border: 1px solid transparent;
-  border-radius: var(--ui-radius-panel);
+  border-radius: var(--ui-radius-row);
   cursor: pointer;
   transition:
     background var(--za-motion-fast) var(--za-ease-standard),
@@ -462,19 +465,20 @@
 
 .bot-row:hover,
 .bot-row.is-highlighted {
-  background: var(--chrome-hover);
+  background: color-mix(in srgb, var(--paper-sheet) 60%, transparent);
 }
 
 .bot-row.is-open {
-  padding: 8px 7px;
-  background: var(--chrome-canvas);
+  padding: 9px 9px;
+  background: var(--paper-sheet);
   border-color: var(--chrome-hairline);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--graphite-base) 6%, transparent);
+  box-shadow: var(--glass-edge-highlight), 0 1px 3px color-mix(in srgb, var(--graphite-base) 6%, transparent);
 }
 
 [data-theme="dark"] .bot-row.is-open {
-  /* Lift the selected surface above both the glass sidebar and its hover fill. */
-  background: color-mix(in srgb, var(--graphite-base) 14%, var(--chrome-active));
+  /* Lift the selected obsidian card above the glass/chrome sidebar. */
+  background: var(--paper-sheet);
+  border-color: color-mix(in srgb, var(--graphite-base) 12%, var(--chrome-hairline));
 }
 
 .bot-row-copy {
@@ -492,6 +496,7 @@
 .bot-row-name {
   font-size: 13.5px;
   font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .bot-row-preview,
@@ -512,13 +517,15 @@
 }
 
 .bot-row-time {
+  font-family: var(--font-mono);
   font-size: 11px;
+  font-variant-numeric: tabular-nums;
   color: var(--graphite-soft);
 }
 
 [data-theme="dark"] .bot-row.is-open .bot-row-preview,
 [data-theme="dark"] .bot-row.is-open .bot-row-time {
-  color: var(--graphite-base);
+  color: var(--graphite-soft);
 }
 
 [data-palette="catppuccin"][data-theme="light"] .bot-row-preview,
@@ -530,27 +537,45 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 6px;
-  color: var(--chrome-canvas);
-  font-size: 10.5px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 7px;
+  color: var(--azure-seal);
+  font-family: var(--font-mono);
+  font-size: 11px;
   font-weight: 600;
-  background: var(--graphite-base);
+  font-variant-numeric: tabular-nums;
+  background: var(--azure-trace);
+  border: 1px solid var(--azure-soft);
   border-radius: var(--ui-radius-pill);
 }
 
 .bot-unread {
   width: 8px;
   height: 8px;
-  background: var(--graphite-base);
+  background: var(--azure-seal);
   border-radius: var(--ui-radius-circle);
+}
+
+.bot-running-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--ui-radius-pill);
+  background: var(--paper-sunken);
+  border: 1px solid var(--chrome-hairline);
+  color: var(--graphite-soft);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
 }
 
 .bot-spin {
   width: 10px;
   height: 10px;
-  color: var(--graphite-fade);
+  color: var(--state-info);
 }
 
 .bot-sr {
@@ -866,7 +891,7 @@
 .bot-column-resizer:hover::after,
 .bot-column-resizer:focus-visible::after,
 .bot-column-resizer[data-active='true']::after {
-  background: var(--za-accent, #4c8dff);
+  background: var(--azure-seal);
 }
 
 .bot-column-resizer:focus-visible,
@@ -884,7 +909,7 @@
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  background: var(--paper-sheet);
+  background: var(--paper-base);
 }
 
 .bot-main-thread,
@@ -902,9 +927,10 @@
   gap: 10px;
   align-items: center;
   flex: none;
+  height: 52px;
   min-height: 52px;
-  padding: 0 27px;
-  background: var(--paper-sheet);
+  padding: 0 24px;
+  background: var(--paper-base);
   border-bottom: 1px solid var(--chrome-hairline);
   -webkit-app-region: drag;
 }
@@ -918,8 +944,16 @@
 
 .bot-main-head > .bot-avatar { width: 32px; height: 32px; flex-basis: 32px; }
 
-.bot-main-title {
+.bot-main-heading {
+  display: flex;
   flex: 1;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.bot-main-title {
+  flex: 0 1 auto;
   min-width: 0;
   margin: 0;
   overflow: hidden;
@@ -927,6 +961,17 @@
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.bot-main-path {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--graphite-fade);
+  font-family: var(--font-mono);
+  font-size: 11px;
 }
 
 .bot-profile,
@@ -1051,17 +1096,18 @@
   padding: 12px 14px;
   color: var(--graphite-base);
   text-align: left;
-  background: var(--chrome-canvas);
+  background: var(--paper-sheet);
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-panel);
+  box-shadow: var(--glass-edge-highlight);
   cursor: pointer;
   transition: background var(--za-motion-fast) var(--za-ease-standard), border-color var(--za-motion-fast) var(--za-ease-standard);
 }
 
 .bot-main-pick:hover,
 .bot-main-pick:focus-visible {
-  background: var(--chrome-hover);
-  border-color: color-mix(in srgb, var(--graphite-base) 24%, var(--chrome-hairline));
+  background: var(--paper-hover);
+  border-color: color-mix(in srgb, var(--azure-soft) 55%, var(--chrome-hairline));
 }
 
 .bot-main-pick-copy {
@@ -1377,7 +1423,7 @@ html[data-vibrancy='true'] .bot-main {
 
 /* Conversation and resource views are peers in the same floating shell. */
 html[data-vibrancy='true'] :is(.bot-main, .resource-workspace) {
-  background: var(--paper-sheet);
+  background: var(--paper-base);
   overflow: hidden;
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-panel);

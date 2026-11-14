@@ -161,7 +161,7 @@
   box-sizing: border-box;
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-control);
-  background: var(--surface-inset, transparent);
+  background: var(--paper-sunken);
   color: inherit;
   font: inherit;
   font-size: 0.78rem;
@@ -197,7 +197,7 @@
   color: var(--graphite-base, var(--pa-text-primary));
 }
 .pa-dropdown-tab.is-active {
-  background: var(--surface-raised, var(--pa-surface-card));
+  background: var(--paper-sheet);
   color: var(--graphite-base, var(--pa-text-primary));
   font-weight: 600;
 }

@@ -82,6 +82,12 @@ function typingTarget(target: EventTarget | null): boolean {
 
 const ignoreResourceOwner = (_owner: BotResourceOwner | null) => {};
 
+function compactHeaderPath(fullPath: string): string {
+  const parts = fullPath.replace(/[\\/]+$/, '').split(/[\\/]+/).filter(Boolean);
+  if (parts.length <= 2) return fullPath;
+  return `…/${parts.slice(-2).join('/')}`;
+}
+
 export function BotListShell({
   onResourceOwnerChange = ignoreResourceOwner,
   i18n,
@@ -470,7 +476,12 @@ export function BotListShell({
             <header className="bot-main-head">
               <BotAvatar avatar={opened.profile.avatar} label={opened.profile.displayName} workspaceId={opened.workspaceId}
                 animate mood={openedAvatarMood} />
-              <p className="bot-main-title">{opened.profile.displayName}</p>
+              <div className="bot-main-heading">
+                <p className="bot-main-title">{opened.profile.displayName}</p>
+                {resources?.owner?.workspaceId === opened.workspaceId && resources.owner.path ? (
+                  <span className="bot-main-path" title={resources.owner.path}>{compactHeaderPath(resources.owner.path)}</span>
+                ) : null}
+              </div>
               <button
                 ref={profileButtonRef}
                 type="button"
@@ -485,7 +496,7 @@ export function BotListShell({
                   drawerTriggerRef.current = profileButtonRef.current;
                   setInspect(null);
                   setDrawerMemory((current) => (
-                    current.open && current.tab === 'settings' && !inspect && detailsVisible
+                    current.open && !inspect && detailsVisible
                       ? closeDrawer(current) : openDrawer(current, 'settings')
                   ));
                 }}

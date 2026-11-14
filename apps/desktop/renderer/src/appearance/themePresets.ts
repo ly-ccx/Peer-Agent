@@ -41,15 +41,15 @@ export interface ThemeSnapshot {
 export const PEER_FROST_TOKENS: Readonly<Record<AppearanceScheme, ThemeSnapshot>> = {
   light: {
     scheme: 'light',
-    accent: '#3B7FAB',     // azure-seal
-    background: '#F8F8F8', // paper-base (light)
-    foreground: '#1A1D21', // graphite-base
+    accent: '#286891',     // azure-seal
+    background: '#F7F9FC', // paper-base (light)
+    foreground: '#181C22', // graphite-base
   },
   dark: {
     scheme: 'dark',
-    accent: '#5D9CBF',     // azure-seal (dark)
-    background: '#141414', // paper-base (dark)
-    foreground: '#EDF1F6',
+    accent: '#76B0D4',     // azure-seal (dark)
+    background: '#171C25', // paper-base (dark)
+    foreground: '#EEF2F7',
   },
 };
 
@@ -59,14 +59,14 @@ export const PEER_FROST_TOKENS: Readonly<Record<AppearanceScheme, ThemeSnapshot>
  */
 export const DEFAULT_CUSTOM_COLORS: CustomColors = {
   light: {
-    accent: '#3B7FAB',
-    background: '#EDF1F6',
-    foreground: '#1A1D21',
+    accent: '#286891',
+    background: '#F7F9FC',
+    foreground: '#181C22',
   },
   dark: {
-    accent: '#5D9CBF',
-    background: '#11141A',
-    foreground: '#EDF1F6',
+    accent: '#76B0D4',
+    background: '#171C25',
+    foreground: '#EEF2F7',
   },
 };
 

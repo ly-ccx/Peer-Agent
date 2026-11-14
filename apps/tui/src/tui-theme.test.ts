@@ -35,20 +35,20 @@ afterEach(() => {
 
 describe('TUI theme tokens', () => {
   test('exposes canonical semantic palettes with readable light and dark hierarchy', () => {
-    expect(DARK_PALETTE.background).toBe('#080a0c');
-    expect(DARK_PALETTE.panel).toBe('#0d1013');
-    expect(DARK_PALETTE.panelRaised).toBe('#12161a');
-    expect(DARK_PALETTE.accent).toBe('#b8f35b');
-    expect(DARK_PALETTE.user).toBe('#a9d9e8');
-    expect(DARK_PALETTE.success).toBe('#68d391');
-    expect(DARK_PALETTE.warning).toBe('#e6b86a');
-    expect(DARK_PALETTE.danger).toBe('#ef7373');
+    expect(DARK_PALETTE.background).toBe('#10141B');
+    expect(DARK_PALETTE.panel).toBe('#171C25');
+    expect(DARK_PALETTE.panelRaised).toBe('#1E2430');
+    expect(DARK_PALETTE.accent).toBe('#76B0D4');
+    expect(DARK_PALETTE.user).toBe('#96C7E5');
+    expect(DARK_PALETTE.success).toBe('#63B39D');
+    expect(DARK_PALETTE.warning).toBe('#E0B268');
+    expect(DARK_PALETTE.danger).toBe('#D97C92');
     expect(DARK_PALETTE.inputBackground).toBe(DARK_PALETTE.background);
 
-    expect(LIGHT_PALETTE.background).toBe('#F3F5F8');
-    expect(LIGHT_PALETTE.panel).toBe('#FFFFFF');
-    expect(LIGHT_PALETTE.text).toBe('#1A2332');
-    expect(LIGHT_PALETTE.accent).toBe('#4D7C0F');
+    expect(LIGHT_PALETTE.background).toBe('#EFF3F8');
+    expect(LIGHT_PALETTE.panel).toBe('#F7F9FC');
+    expect(LIGHT_PALETTE.text).toBe('#181C22');
+    expect(LIGHT_PALETTE.accent).toBe('#286891');
     expect(LIGHT_PALETTE.inputBackground).toBe(LIGHT_PALETTE.background);
   });
 

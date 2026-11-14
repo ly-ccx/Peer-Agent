@@ -290,10 +290,11 @@
   max-width: 100%;
   min-width: 0;
   gap: 10px;
-  padding: 12px 16px;
+  padding: 11px 15px;
   border-radius: var(--ui-radius-message);
   background: var(--paper-hover);
-  transition: background var(--za-motion-fast) var(--za-ease-standard);
+  border: 1px solid color-mix(in srgb, var(--chrome-hairline) 75%, transparent);
+  transition: background var(--za-motion-fast) var(--za-ease-standard), border-color var(--za-motion-fast) var(--za-ease-standard);
 }
 
 .bot-message-role {
@@ -367,7 +368,7 @@
 .bot-card-actions button:first-child {
   border-color: transparent;
   background: var(--graphite-base);
-  color: var(--chrome-canvas, #fff);
+  color: var(--paper-sheet);
 }
 
 .bot-card-actions button:hover,
@@ -380,7 +381,7 @@
 
 .bot-card-actions button:first-child:hover {
   background: var(--graphite-base);
-  color: var(--chrome-canvas, #fff);
+  color: var(--paper-sheet);
   opacity: 0.9;
 }
 
@@ -449,7 +450,8 @@
 .bot-reply.is-anchored > .bot-reply-body,
 .bot-reply.is-anchored > .bot-continuous-paragraphs > .bot-reply-body,
 .bot-system.is-anchored > .bot-card {
-  background: var(--control-fill-hover);
+  background: color-mix(in srgb, var(--azure-trace) 72%, var(--paper-base));
+  border-radius: var(--ui-radius-inset);
 }
 
 .bot-reply-bar {
@@ -460,10 +462,10 @@
   max-width: min(360px, 100%);
   min-width: 0;
   min-height: 44px;
-  padding: 8px 10px;
+  padding: 8px 11px;
   border: 0;
-  border-radius: var(--ui-radius-control-compact);
-  background: color-mix(in srgb, var(--graphite-base) 6%, transparent);
+  border-radius: var(--ui-radius-control);
+  background: var(--paper-sunken);
   color: var(--graphite-soft);
   font: inherit;
   text-align: left;
@@ -474,7 +476,7 @@
 }
 
 .bot-reply-bar:is(:hover, :focus-visible) {
-  background: color-mix(in srgb, var(--graphite-base) 10%, transparent);
+  background: var(--control-fill);
 }
 
 .bot-reply-bar:is(:hover, :focus-visible) .bot-reply-bar-excerpt {
@@ -571,13 +573,15 @@
   flex-shrink: 1;
   color: var(--graphite-soft);
   font-size: inherit;
-  font-weight: 400;
+  font-weight: 500;
   line-height: inherit;
 }
 
 .bot-reply-bar-source time {
   flex-shrink: 0;
   white-space: nowrap;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .bot-reply-bar-action {
@@ -668,15 +672,13 @@
 .bot-unavailable-reply > .bot-reply-body,
 .bot-continuous-paragraphs > .bot-reply-body,
 .bot-narration:not(.bot-continuous-paragraphs) .markdown-content > * {
-  --graphite-soft: var(--bot-reply-secondary);
-  --za-text-soft: var(--bot-reply-secondary);
   box-sizing: border-box;
   width: fit-content;
-  max-width: min(680px, 100%);
+  max-width: min(720px, 100%);
   min-width: 0;
-  padding: 10px 14px;
-  border-radius: var(--ui-radius-message);
-  background: var(--bot-reply-background);
+  padding: 0;
+  border-radius: 0;
+  background: var(--paper-base);
   overflow-wrap: anywhere;
 }
 
@@ -716,13 +718,16 @@
   flex-direction: column;
   box-sizing: border-box;
   min-width: 0;
-  max-width: 100%;
+  max-width: min(720px, 100%);
   gap: 12px;
-  padding: 16px 16px 14px;
+  padding: 16px 18px 15px;
   border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-panel);
   background: var(--paper-sheet);
-  box-shadow: none;
+}
+
+.bot-card:not(.is-resolved):is([data-card-kind="approval"], [data-card-kind="plan_approval"], [data-card-kind="confirm_result"]) {
+  border-color: color-mix(in srgb, var(--azure-soft) 68%, var(--chrome-hairline));
 }
 
 .bot-card.is-resolved {
@@ -881,15 +886,16 @@
   gap: 10px;
   margin: 12px var(--bot-column-gutter) 14px;
   padding: 14px 14px 10px;
-  border: 1px solid var(--composer-edge);
+  border: 1px solid var(--chrome-hairline);
   border-radius: var(--ui-radius-composer);
   background: var(--control-composer);
-  box-shadow: var(--shadow-composer);
-  transition: border-color var(--za-motion-fast) var(--za-ease-standard);
+  box-shadow: var(--glass-edge-highlight), var(--shadow-composer);
+  transition: border-color var(--za-motion-fast) var(--za-ease-standard), box-shadow var(--za-motion-fast) var(--za-ease-standard);
 }
 
 .bot-composer:focus-within {
-  border-color: var(--composer-focus-edge);
+  border-color: color-mix(in srgb, var(--azure-seal) 52%, var(--chrome-hairline));
+  box-shadow: var(--glass-edge-highlight), var(--shadow-composer), 0 0 0 3px var(--azure-trace);
 }
 
 .bot-quote-chip {
@@ -900,7 +906,7 @@
   padding: 8px 10px;
   border: 0;
   border-radius: var(--ui-radius-inset);
-  background: color-mix(in srgb, var(--graphite-base) 6%, transparent);
+  background: var(--paper-sunken);
   color: var(--graphite-soft);
   font-size: 12px;
 }
@@ -929,7 +935,7 @@
   border: 0;
   border-radius: var(--ui-radius-circle);
   background: var(--graphite-base);
-  color: var(--chrome-canvas, #fff);
+  color: var(--paper-sheet);
   font: inherit;
   font-size: 13px;
   padding: 0;
@@ -1224,19 +1230,19 @@
 .bot-composer-bar .bot-attach-button { color: var(--graphite-soft, var(--za-text-muted)); padding: 6px; border: 0; border-radius: var(--ui-radius-control); background: transparent; flex: none; }
 .bot-composer-bar .bot-attach-button:hover:not(:disabled) { background: var(--control-fill); color: var(--graphite-base); }
 .bot-composer.is-file-drop { border-color: var(--graphite-soft); }
-.bot-file-drop-hint { position: absolute; inset: 0; border-radius: inherit; display: grid; place-items: center; background: var(--paper-base, var(--za-surface)); pointer-events: none; z-index: 2; }
+.bot-file-drop-hint { position: absolute; inset: 0; border-radius: inherit; display: grid; place-items: center; background: var(--paper-base); pointer-events: none; z-index: 2; }
 .bot-composer { position: relative; }
 .bot-attachments { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 8px; max-width: 100%; }
-.bot-attachment { position: relative; display: flex; align-items: center; gap: 8px; padding: 9px 12px; max-width: min(260px, 100%); min-width: 0; border: 1px solid var(--za-border); border-radius: var(--ui-radius-control); background: var(--paper-sunken, var(--za-surface)); color: var(--graphite-base, var(--za-text)); }
+.bot-attachment { position: relative; display: flex; align-items: center; gap: 8px; padding: 9px 12px; max-width: min(260px, 100%); min-width: 0; border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-control); background: var(--paper-sunken); color: var(--graphite-base); }
 .bot-attachment.image { padding: 0; width: 64px; height: 64px; }
 .bot-attachment-image { padding: 0; border: 0; border-radius: inherit; background: transparent; width: 100%; height: 100%; cursor: zoom-in; overflow: hidden; }
 .bot-attachment-image img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .bot-attachment-meta { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .bot-attachment-meta > span { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.bot-attachment-meta small { font-size: 10px; color: var(--graphite-soft, var(--za-text-muted)); }
-.bot-attachment-remove { position: absolute; right: -5px; top: -5px; display: grid; place-items: center; border: 1px solid var(--za-border); padding: 3px; border-radius: var(--ui-radius-circle); background: var(--paper-base, var(--za-surface)); color: var(--graphite-soft); cursor: pointer; }
+.bot-attachment-meta small { font-size: 10px; color: var(--graphite-soft); }
+.bot-attachment-remove { position: absolute; right: -5px; top: -5px; display: grid; place-items: center; border: 1px solid var(--chrome-hairline); padding: 3px; border-radius: var(--ui-radius-circle); background: var(--paper-sheet); color: var(--graphite-soft); cursor: pointer; }
 .bot-attachment:has(.bot-attachment-remove) { margin-right: 3px; }
-.bot-attachment-error { margin: 0; font-size: 12px; color: var(--za-error); }
+.bot-attachment-error { margin: 0; font-size: 12px; color: var(--state-danger); }
 .bot-attachment-status { margin: 0; font-size: 12px; color: var(--graphite-soft); }
 
 .bot-message-author {
@@ -1246,11 +1252,19 @@
   min-width: 0;
   margin-bottom: var(--space-2);
   color: var(--graphite-base);
-  font-size: var(--ui-font-body);
-  font-weight: 500;
+  font-size: var(--ui-font-control);
+  font-weight: 600;
   line-height: 1.4;
 }
-.bot-message-author .bot-avatar { width: var(--space-8); height: var(--space-8); flex-basis: var(--space-8); }
+.bot-message-author::after {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--ui-radius-circle);
+  background: var(--bot-message-accent, var(--azure-seal));
+}
+.bot-message-author .bot-avatar { width: 24px; height: 24px; flex-basis: 24px; }
 .bot-message-author > span:last-child { min-width: 0; overflow-wrap: anywhere; }
 /* The user bubble is fit-content. A nowrap excerpt must not become that width:
    cap the preview at the same column fraction as the bubble, then ellipsize. */
@@ -1260,6 +1274,7 @@
   max-width: min(100%, calc(var(--bot-column-width) * 0.8));
   min-width: 0;
   margin: 0;
+  background: color-mix(in srgb, var(--graphite-base) 6%, var(--paper-hover));
   overflow: hidden;
 }
 .bot-reply-marks > button { min-height: 27px; padding: 5px 7px; border-color: transparent; background: transparent; font-size: .6875rem; }
@@ -1288,7 +1303,7 @@
 }
 
 .bot-attachment-preview { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 0; border: 0; color: inherit; background: transparent; text-align: start; cursor: pointer; }
-.bot-attachment-text-preview { width: min(720px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow: auto; padding: var(--space-5); background: var(--za-surface); color: var(--za-text); border: 1px solid var(--za-border); border-radius: var(--ui-radius-panel); }
+.bot-attachment-text-preview { width: min(720px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow: auto; padding: var(--space-5); background: var(--paper-sheet); color: var(--graphite-base); border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-panel); }
 .bot-attachment-text-preview header { display: flex; align-items: start; justify-content: space-between; gap: var(--space-3); }
 .bot-attachment-text-preview h2 { overflow-wrap: anywhere; }
 .bot-attachment-text-preview pre { max-height: 65dvh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -1299,7 +1314,7 @@
 .bot-resource-feedback-card { border: 1px solid var(--chrome-hairline); border-radius: var(--ui-radius-panel); background: var(--paper-sheet); padding: var(--space-2); min-width: 0; }
 .bot-resource-feedback-card header { display: flex; align-items: center; gap: var(--space-2); }
 .bot-resource-feedback-card .resource-feedback-source { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ui-font-caption); }
-.bot-resource-feedback-card header span, .bot-resource-feedback-card p { color: var(--graphite-secondary); font-size: var(--ui-font-caption); margin: 0; }
+.bot-resource-feedback-card header span, .bot-resource-feedback-card p { color: var(--graphite-soft); font-size: var(--ui-font-caption); margin: 0; }
 .bot-resource-feedback-card blockquote { margin: var(--space-1) 0 0; padding: 0; border: 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: calc(var(--ui-control-height) * 2); overflow: auto; font-size: var(--ui-font-caption); }
 
 .resource-feedback-source { color: inherit; text-align: start; background: transparent; border: 0; padding: 0; text-decoration: underline; text-underline-offset: 0.15em; }

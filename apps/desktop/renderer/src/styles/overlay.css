@@ -334,11 +334,11 @@
   font-weight: 600;
   padding: 4px 8px;
   border-radius: var(--ui-radius-pill);
-  background: color-mix(in srgb, #f59e0b 16%, transparent);
-  color: color-mix(in srgb, #b45309 90%, #000);
+  background: color-mix(in srgb, var(--state-warn) 14%, transparent);
+  color: var(--state-warn);
 }
 .fda-permission-row-status.is-pending {
-  background: color-mix(in srgb, #f59e0b 16%, transparent);
+  background: color-mix(in srgb, var(--state-warn) 14%, transparent);
 }
 .fda-drag-banner {
   font-size: 12px;

@@ -395,7 +395,9 @@ export async function checkResponseInteraction({ page, until, report, captureDir
         padding: parseFloat(style.paddingLeft), bottom: rect.bottom };
     }));
     assert.equal(bubbles.length, 2);
-    assert.ok(bubbles.every(item => item.background !== 'rgba(0, 0, 0, 0)' && item.radius >= 12 && item.padding >= 12 && item.fits));
+    // Peer Frost 2.0 de-bubbles ordinary reading prose onto the opaque reading
+    // paper surface (--paper-base) while keeping every line inside column bounds.
+    assert.ok(bubbles.every(item => item.background !== 'rgba(0, 0, 0, 0)' && item.radius === 0 && item.padding === 0 && item.fits));
     assert.equal(await detail.locator('.bot-turn-process > summary').isVisible(), false);
     assert.equal(await footer.locator(':scope > button').evaluate(node => node.getBoundingClientRect().top >= Math.max(...[...node.closest('.bot-reply').querySelectorAll('.bot-narration p')].map(p => p.getBoundingClientRect().bottom))), true);
     assert.doesNotMatch(await footer.textContent(), /正在整理回复|正在准备下一步/);

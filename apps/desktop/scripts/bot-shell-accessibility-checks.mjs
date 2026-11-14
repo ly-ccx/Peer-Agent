@@ -51,7 +51,11 @@ export async function checkBotShellAccessibility({ page, app, quickNative, until
   assert.equal(await tabs.getByRole('tab', { name: '任务', exact: true }).getAttribute('aria-selected'), 'true');
   assert.equal(await page.locator(BOT_DETAIL_SURFACE).count(), 1, 'tab Enter must not be intercepted by the shell');
   await trigger.click();
-  assert.equal(await tabs.getByRole('tab', { name: '设置', exact: true }).getAttribute('aria-selected'), 'true', 'settings entry navigates from another drawer tab');
+  await until(() => page.locator(BOT_DETAIL_SURFACE).count(), count => count === 0);
+  assert.equal(await trigger.getAttribute('aria-expanded'), 'false', 'header toggle closes the drawer from any active tab');
+  await trigger.click();
+  await page.locator(BOT_DETAIL_SURFACE).waitFor();
+  assert.equal(await tabs.getByRole('tab', { name: '设置', exact: true }).getAttribute('aria-selected'), 'true', 'reopening via Bot settings enters configuration directly');
   await page.keyboard.press('Escape');
   await until(() => focused(trigger), Boolean);
   assert.equal(await trigger.getAttribute('aria-expanded'), 'false');

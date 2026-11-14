@@ -147,7 +147,7 @@ export function BotProfileDrawer({
           if (document.activeElement === document.body) restore();
         });
       } else if (inspect) {
-        bodyRef.current?.querySelector<HTMLElement>('.bot-drawer-head button')?.focus({ preventScroll: true });
+        bodyRef.current?.querySelector<HTMLElement>('.bot-drawer-close')?.focus({ preventScroll: true });
       } else if (previousInspect.current) {
         bodyRef.current?.querySelector<HTMLElement>('[role=tab][aria-selected=true]')?.focus({ preventScroll: true });
       }
@@ -260,9 +260,9 @@ export function BotProfileDrawer({
   const body = (requestClose = close) => (
     <div className="bot-drawer-body" ref={bodyRef}>
       <div className="bot-detail-content" hidden={embedded && !!classicScene} inert={embedded && !!classicScene}>
-      <div className="bot-drawer-chrome" hidden={embedded && !!inspect?.replyId && !inspect.evidence}>
-        {!embedded ? <header className="bot-drawer-head">
-          <p>{inspect ? i18n.t(inspect.evidence ? 'projectAgent.evidence.title' : inspect.replyId ? 'projectAgent.chat.context.title' : 'projectAgent.chat.openProcess') : profile.displayName}</p>
+      <div className={`bot-drawer-chrome${!inspect ? ' bot-drawer-chrome--bar' : ''}`} hidden={embedded && !!inspect?.replyId && !inspect.evidence}>
+        {!embedded && inspect ? <header className="bot-drawer-head">
+          <p>{i18n.t(inspect.evidence ? 'projectAgent.evidence.title' : inspect.replyId ? 'projectAgent.chat.context.title' : 'projectAgent.chat.openProcess')}</p>
           <button
             type="button"
             className="ui-button bot-drawer-close"
@@ -272,9 +272,30 @@ export function BotProfileDrawer({
             <PeerIcon name="close" size={16} />
           </button>
         </header> : null}
-        {inspect && (inspect.evidence || !inspect.replyId) ? <button className="bot-inspect-back" type="button" onClick={onCloseInspect}>{i18n.t(inspect.replyId ? 'projectAgent.chat.context.back' : 'projectAgent.drawer.inspectBack')}</button> : !inspect ? <BotDrawerSegments workspaceId={workspaceId} selected={memory.tab}
-          items={TABS.map(tab => ({ id: tab.id, label: i18n.t(tab.key) }))}
-          onChange={tab => onMemory({ ...memory, open: true, tab, sessionId: null })} /> : null}
+        {inspect && (inspect.evidence || !inspect.replyId) ? (
+          <button className="bot-inspect-back" type="button" onClick={onCloseInspect}>
+            {i18n.t(inspect.replyId ? 'projectAgent.chat.context.back' : 'projectAgent.drawer.inspectBack')}
+          </button>
+        ) : !inspect ? (
+          <div className="bot-drawer-bar">
+            <BotDrawerSegments
+              workspaceId={workspaceId}
+              selected={memory.tab}
+              items={TABS.map(tab => ({ id: tab.id, label: i18n.t(tab.key) }))}
+              onChange={tab => onMemory({ ...memory, open: true, tab, sessionId: null })}
+            />
+            {!embedded ? (
+              <button
+                type="button"
+                className="ui-button bot-drawer-close"
+                aria-label={i18n.t('projectAgent.drawer.close')}
+                onClick={requestClose}
+              >
+                <PeerIcon name="close" size={16} />
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
       {inspect?.evidence ? <EvidenceView evidence={inspect.evidence} i18n={i18n} workspaceId={workspaceId} /> : null}
       {inspect?.rounds ? <AgentProcessView rounds={inspect.rounds} i18n={i18n} /> : null}

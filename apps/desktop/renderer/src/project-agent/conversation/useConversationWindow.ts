@@ -29,6 +29,7 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
   const [following, setFollowing] = useState(pinned.current), [restoreStatus, setRestoreStatus] = useState<'none' | 'loading' | 'more' | 'missing'>('none');
   const [referenceStatus, setReferenceStatus] = useState<'none' | 'loading' | 'missing'>('none');
   const referenceRequest = useRef(0);
+  const programmaticTop = useRef<number | null>(null);
   const latest = useRef(options); latest.current = options;
   const previousKeys = useRef<readonly string[]>([]), nextKeys = rows.map(conversationRowKey);
   if (nextKeys.length !== previousKeys.current.length || nextKeys.some((key, index) => key !== previousKeys.current[index])) previousKeys.current = nextKeys;
@@ -50,6 +51,22 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
   };
   const saveOnLeave = useRef(persist); saveOnLeave.current = persist;
   useLayoutEffect(() => () => saveOnLeave.current(), [options.identity]);
+  const bindResizePoint = (node: HTMLElement, visible: HTMLElement | undefined) => {
+    const viewportTop = node.getBoundingClientRect().top;
+    const blocks = visible?.querySelectorAll?.<HTMLElement>('p, li, pre, h1, h2, h3, h4, table') ?? [];
+    const point = [...blocks].find(block => {
+      const rect = block.getBoundingClientRect();
+      return rect.bottom > viewportTop && rect.top < viewportTop + node.clientHeight;
+    }) ?? visible;
+    resizePoint.current = visible && point ? { row: visible, element: point, delta: point.getBoundingClientRect().top - viewportTop } : null;
+  };
+  const syncResizePoint = () => {
+    const node = scrollerRef.current;
+    if (!node || !reading.current) return;
+    const row = [...node.querySelectorAll<HTMLElement>('[data-conversation-row]')].find(item => item.dataset.conversationRow === reading.current?.key);
+    if (row) bindResizePoint(node, row);
+    else resizePoint.current = null;
+  };
   const remember = () => {
     const node = scrollerRef.current;
     if (!node || !keys.length) return;
@@ -60,12 +77,7 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
     if (index < 0 || !keys[index]) return;
     reading.current = { key: keys[index]!, delta: visible ? visible.getBoundingClientRect().top - viewportTop : origin() + offsets[index]! - node.scrollTop,
       messageId: sourceId(rows[index]) ?? sourceId(rows[index + 1]) };
-    const blocks = visible?.querySelectorAll?.<HTMLElement>('p, li, pre, h1, h2, h3, h4, table') ?? [];
-    const point = [...blocks].find(block => {
-      const rect = block.getBoundingClientRect();
-      return rect.bottom > viewportTop && rect.top < viewportTop + node.clientHeight;
-    }) ?? visible;
-    resizePoint.current = visible && point ? { row: visible, element: point, delta: point.getBoundingClientRect().top - viewportTop } : null;
+    bindResizePoint(node, visible);
   };
   const cancelRestore = () => { resizePoint.current = null; pendingRestore.current = null; restoration.current++; setRestoreStatus('none'); };
   const followLatest = () => {
@@ -134,10 +146,18 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
         if (match >= 0) reading.current = { ...anchor, key: keys[match]! };
       }
       const target = restoreConversationOffset(keys, offsets, reading.current, origin());
-      if (target !== null) { node.scrollTop = target; pendingRestore.current = null; setRestoreStatus('none'); }
+      if (target !== null) {
+        node.scrollTop = target;
+        programmaticTop.current = node.scrollTop;
+        pendingRestore.current = null;
+        setRestoreStatus('none');
+      }
     }
-    if (!pinned.current && !pendingRestore.current && (!resizePoint.current || resizePoint.current.element.isConnected === false
-      || resizePoint.current.row.dataset.conversationRow !== reading.current?.key)) remember();
+    if (!pinned.current && !pendingRestore.current) {
+      if (!reading.current) remember();
+      else if (!resizePoint.current || resizePoint.current.element.isConnected === false
+        || resizePoint.current.row.dataset.conversationRow !== reading.current.key) syncResizePoint();
+    }
     updateTop(node.scrollTop); persist();
   }, [keys, offsets, height]);
 
@@ -212,9 +232,13 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
     const index = rows.findIndex(row => replyRowContains(row, highlightedId)), node = scrollerRef.current;
     cancelRestore(); pinned.current = false; setFollowing(false);
     if (index < 0 || !node) return;
-    located.current = request;
-    reading.current = { key: keys[index]!, messageId: sourceId(rows[index]), delta: Math.max(0, (node.clientHeight - (heights.current.get(keys[index]!) ?? 72)) / 2) };
+    const measured = heights.current.get(keys[index]!);
+    if (measured !== undefined) located.current = request;
+    const rowHeight = Math.min(node.clientHeight, measured ?? 72);
+    reading.current = { key: keys[index]!, messageId: sourceId(rows[index]), delta: Math.max(0, (node.clientHeight - rowHeight) / 2) };
     node.scrollTop = restoreConversationOffset(keys, offsets, reading.current, origin())!;
+    programmaticTop.current = node.scrollTop;
+    syncResizePoint();
     updateTop(node.scrollTop); persist();
   }, [highlightedId, highlightRequestId, keys, offsets, referenceStatus]);
 
@@ -241,7 +265,10 @@ export function useConversationWindow(rows: readonly BotConversationViewRow[], h
     holdPosition: () => { cancelRestore(); remember(); pinned.current = false; setFollowing(false); persist(); },
     onScroll: () => {
       const node = scrollerRef.current; if (!node) return;
+      const programmatic = programmaticTop.current !== null && Math.abs(node.scrollTop - programmaticTop.current) <= 2;
+      programmaticTop.current = null;
       if (pendingRestore.current) { updateTop(node.scrollTop); return; }
+      if (!gesture.current.active && programmatic) { updateTop(node.scrollTop); return; }
       const decision = resolveThreadFollowAfterScroll({ currentlyFollowing: pinned.current, atBottom: node.scrollHeight - node.scrollTop - node.clientHeight < 80,
         userInitiated: gesture.current.active, direction: gesture.current.direction });
       pinned.current = decision.nextFollowing; setFollowing(decision.nextFollowing);

@@ -176,7 +176,6 @@ export function BotWorkPanel({ workspaceId, workIndex, rows, messages, recoverin
         {data.loaded ? <><p className="bot-work-panel-note">{i18n.t('projectAgent.workPanel.materialWindow', { limit: data.windowLimit })}</p>
           <button type="button" className="ui-button is-compact" disabled={data.loading} onClick={data.loadMore}>{i18n.t('projectAgent.workPanel.loadMore')}</button></> : null}
       </div>
-      <footer className="bot-work-panel-footer"><PeerIcon name="blocks" size={12} />{i18n.t('projectAgent.workPanel.followBot')}</footer>
     </aside>
   </div>;
 }
