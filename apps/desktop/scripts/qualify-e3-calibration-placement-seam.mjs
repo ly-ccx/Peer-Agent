@@ -38,9 +38,10 @@ async function open(label) {
   const h = {label, failRead: false, lose: false}, store = {getStoreDir: () => dir, getPlan: () => ({}), listEvidenceIndex: () => [{}]},
     supervisor = {list() {if (++totalReads > 44) throw Error('order_seam_read_cap'); if (h.failRead) throw Error('order_seam_original_read_error');
       for (let i = 0; i < 12; i++) {store.getPlan(); store.listEvidenceIndex();} return [{}];}};
+  h.notificationName='__ri00_placement_'+label;assert.equal(globalThis[h.notificationName],undefined);globalThis[h.notificationName]=()=>{};
   h.store = store; h.supervisor = supervisor; h.original = {list: supervisor.list, plan: store.getPlan, index: store.listEvidenceIndex};
   h.site = install.call(store, supervisor, {workspaceId: 'order-seam'}, {longWatch: true, eventLoopReads: true,
-    ownedExperiment: true, profileMarkers: true, exposureLedger: true, durationMs: 25000,
+    notificationName:h.notificationName, ownedExperiment: true, profileMarkers: true, exposureLedger: true, durationMs: 25000,
     readCpuLimitMs: 2000, queue: {owner: label, epoch: 'order-seam', allowProfileMarkers: true}});
   hosts.push(h); globalThis.__e3Owned = {...h.site, renew: () => h.site.probe.renew()};
   h.transport = await connectE3Transport(inspector.url(), {pid: process.pid, forbidProfiler: true});
@@ -99,7 +100,7 @@ finally {
       await h.transport?.close(); const stopped = h.site.probe.stop();
       const restored = h.store.getPlan === h.original.plan && h.store.listEvidenceIndex === h.original.index && h.supervisor.list === h.original.list;
       report.recovery.push({label: h.label, stopped, restored, transport: h.transport?.stats()});
-      assert.equal(restored, true); assert.equal(stopped.restored, true); assert.equal(stopped.bindingRestored,true); assert.equal(stopped.readQueue.inFlight,false); assert.equal(stopped.retainedRowBytes, 0); assert.equal(stopped.readQueue.ticket, null);
+      assert.equal(restored, true); assert.equal(stopped.restored, true); assert.equal(stopped.bindingRestored,true); assert.equal(globalThis[h.notificationName],undefined); assert.equal(stopped.readQueue.inFlight,false); assert.equal(stopped.retainedRowBytes, 0); assert.equal(stopped.readQueue.ticket, null);
     } catch (error) {report.failures.push({message: 'recovery:' + error.message});}
   }
   inspector.close(); delete globalThis.__e3Owned; journal.close();

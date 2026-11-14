@@ -14,7 +14,7 @@ const config=read('config'),budget=read('budget'),baseline=read('baseline'),pare
 assert.equal(budget.kind,'E3-HASH-PLACEMENT-warm-gate-diagnostic-design-frozen-not-executed');
 assert.equal(budget.electronLaunches,3);assert.equal(budget.replacements,0);assert.equal(budget.profileStarts,0);
 assert.equal(hash(fs.readFileSync(opt('parent'))),budget.parentReportSha256);assert.equal(hash(fs.readFileSync(opt('parent-journal'))),budget.parentJournalSha256);
-assert.equal(seal.rawSha256.campaign,budget.parentReportSha256);assert.equal(seal.rawSha256.primaryJournal,budget.parentJournalSha256);
+assert.equal(seal.rawSha256.campaign,budget.parentReportSha256);assert.equal(seal.rawSha256.journal,budget.parentJournalSha256);
 assert.equal(hash(fs.readFileSync(opt('audit'))),budget.parentAuditSha256);assert.equal(audit.inputSha256,budget.parentReportSha256);assert.equal(audit.journalSha256,budget.parentJournalSha256);
 assert.equal(hash(fs.readFileSync(opt('design'))),budget.actionGraphAndModelSha256);
 assert.deepEqual(read('design'),{plan:calibrationPlacementPlan(),model:calibrationPlacementBudgetModel(),executed:false});
