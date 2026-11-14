@@ -22,6 +22,15 @@ pub(super) fn normalize(wire: Wire, v: &Value) -> Result<Value, ModelError> {
     if !v.is_object() {
         return Err(ModelError("model_usage_invalid"));
     }
+    let present = |keys: &[&str]| keys.iter().any(|k| v.get(*k).is_some_and(|n| !n.is_null()));
+    let complete = match wire {
+        Wire::Chat | Wire::Responses => {
+            present(&["input_tokens", "prompt_tokens"])
+                && present(&["output_tokens", "completion_tokens"])
+        }
+        Wire::Anthropic => present(&["input_tokens"]) && present(&["output_tokens"]),
+        Wire::Gemini => present(&["promptTokenCount"]) && present(&["candidatesTokenCount"]),
+    };
     let (input, output, cache, write) = match wire {
         Wire::Chat | Wire::Responses => {
             let cache = if let Some(c) = v["input_tokens_details"]
@@ -40,8 +49,13 @@ pub(super) fn normalize(wire: Wire, v: &Value) -> Result<Value, ModelError> {
             let output = first_count(v, &["output_tokens", "completion_tokens"])?;
             let write = v
                 .get("cache_creation_input_tokens")
-                .or_else(|| v.get("cache_write_input_tokens"))
-                .or_else(|| v["prompt_tokens_details"].get("cache_write_tokens"));
+                .filter(|v| !v.is_null())
+                .or_else(|| v.get("cache_write_input_tokens").filter(|v| !v.is_null()))
+                .or_else(|| {
+                    v["prompt_tokens_details"]
+                        .get("cache_write_tokens")
+                        .filter(|v| !v.is_null())
+                });
             (
                 input.saturating_sub(cache),
                 output,
@@ -70,6 +84,11 @@ pub(super) fn normalize(wire: Wire, v: &Value) -> Result<Value, ModelError> {
             )
         }
     };
+    // Optional observations are distinct from a provider-reported zero. Still
+    // validate any present dimensions above; unknown is not malformed data.
+    if !complete {
+        return Ok(Value::Null);
+    }
     let total = [input, output, cache, write.unwrap_or(0)]
         .into_iter()
         .try_fold(0u64, |a, b| {
@@ -120,5 +139,20 @@ mod tests {
             )
             .is_err()
         );
+    }
+    #[test]
+    fn incomplete_observations_cannot_become_known_zero_usage() {
+        for (wire, raw) in [
+            (Wire::Chat, json!({"total_tokens":16})),
+            (Wire::Responses, json!({"input_tokens":20})),
+            (Wire::Anthropic, json!({"output_tokens":3})),
+            (
+                Wire::Gemini,
+                json!({"promptTokenCount":20,"cachedContentTokenCount":5}),
+            ),
+        ] {
+            assert_eq!(normalize(wire, &raw).unwrap(), Value::Null);
+        }
+        assert!(normalize(Wire::Chat,&json!({"prompt_tokens":20,"completion_tokens":3,"cache_creation_input_tokens":null})).unwrap().get("cacheWriteTokens").is_none());
     }
 }

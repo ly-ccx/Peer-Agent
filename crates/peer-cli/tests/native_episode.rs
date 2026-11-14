@@ -474,6 +474,44 @@ fn denial_is_a_real_persisted_result_without_effect() {
             .exists()
     );
 }
+
+#[test]
+fn partial_usage_stays_unknown_after_a_later_known_request() {
+    let raw = reply_tool("read_file", json!({"path":"input.txt"}));
+    let partial = raw.replace("\"prompt_tokens\":12,\"completion_tokens\":4,", "");
+    assert_ne!(raw, partial);
+    let server = Server::new(vec![partial, reply_text("Known second request.")]);
+    let f = Fixture::new(&server);
+    let result = f.run();
+    assert_eq!(
+        result.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let identity = HostIdentity::new(
+        "usage-inspector",
+        HostSurface::Tui,
+        std::process::id(),
+        env!("CARGO_PKG_VERSION"),
+    )
+    .unwrap();
+    let AcquireLease::Acquired { token, .. } = HostLeaseStore::new(f.root.path())
+        .acquire("w", &identity, ms())
+        .unwrap()
+    else {
+        panic!("finished native episode must release its lease")
+    };
+    let journal = CoordinationStore::new(token);
+    let state = journal
+        .read(&NativeCoordinationReducer, None)
+        .unwrap()
+        .state;
+    assert_eq!(state["works"]["work"]["budget"]["modelRequests"], 2);
+    assert_eq!(state["works"]["work"]["budget"]["tokens"], 16);
+    assert_eq!(state["works"]["work"]["budget"]["unknownUsage"], true);
+    journal.into_lease().release().unwrap();
+}
 #[test]
 fn truncated_stream_cannot_dispatch_a_partial_tool_and_next_task_can_run() {
     let full = reply_tool(
