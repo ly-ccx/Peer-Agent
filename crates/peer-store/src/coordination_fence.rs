@@ -5,7 +5,7 @@ use crate::{LeaseToken, StoreError};
 use serde_json::{Value, json};
 use std::{fmt, sync::atomic::AtomicBool};
 
-mod storage;
+pub(crate) mod storage;
 use storage::{ContentProof, Storage};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,7 +90,7 @@ pub fn protect_coordination_writer_fixture(
     protect(lease, cancelled, &mut observer)
 }
 
-fn floor(value: &Value) -> Result<u64, FenceError> {
+pub(crate) fn floor(value: &Value) -> Result<u64, FenceError> {
     let reader = value["minimumReaderVersion"]
         .as_u64()
         .ok_or(FenceError::Unsupported)?;
@@ -109,7 +109,7 @@ fn floor(value: &Value) -> Result<u64, FenceError> {
     }
     Ok(reader)
 }
-fn check_head(manifest: &Value, head: &Value) -> Result<(), FenceError> {
+pub(crate) fn check_head(manifest: &Value, head: &Value) -> Result<(), FenceError> {
     if !head.is_object()
         || head["generation"] != manifest["generation"]
         || head["legacyVersion"] != manifest["legacyVersion"]
@@ -152,7 +152,7 @@ fn proof(value: &Value) -> Result<ContentProof, FenceError> {
     }
     Ok(proof)
 }
-fn check_seal(
+pub(crate) fn check_seal(
     storage: &Storage<'_>,
     manifest: &Value,
     original: Option<&ContentProof>,
@@ -366,7 +366,10 @@ fn protect(
     storage.publish("coordination-fence.json", &intent, &[Some(&previous)])?;
     Ok(FenceOutcome::Promoted)
 }
-fn already_protected(storage: &Storage<'_>, manifest: &Value) -> Result<FenceOutcome, FenceError> {
+pub(crate) fn already_protected(
+    storage: &Storage<'_>,
+    manifest: &Value,
+) -> Result<FenceOutcome, FenceError> {
     if floor(manifest)? < 3
         || manifest["frozenLegacyFile"].as_str() != Some("baseline.jsonl")
         || !storage.is_directory("coordination.jsonl")?

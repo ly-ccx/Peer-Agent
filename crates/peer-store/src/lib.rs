@@ -1,7 +1,9 @@
 #![forbid(unsafe_code)]
 
 mod approvals;
+mod coordination;
 mod coordination_fence;
+pub use coordination::{CoordinationError, CoordinationSnapshot, CoordinationStore};
 mod durable_jsonl;
 mod evidence;
 mod files;

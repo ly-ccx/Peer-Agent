@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod coordination;
 pub mod credentials;
 pub mod one_time_approval;
 pub mod principal;

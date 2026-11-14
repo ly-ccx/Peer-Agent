@@ -63,7 +63,7 @@ pub struct LeaseToken {
     record: HostLeaseRecord,
 }
 
-fn stamp(ms: i64) -> Result<String, StoreError> {
+pub(crate) fn stamp(ms: i64) -> Result<String, StoreError> {
     let date = OffsetDateTime::from_unix_timestamp_nanos(i128::from(ms) * 1_000_000)
         .map_err(|_| StoreError::InvalidInput)?;
     // Match JS Date.toISOString() millisecond precision for existing records.

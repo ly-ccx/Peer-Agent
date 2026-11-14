@@ -18,6 +18,7 @@ zeroize = "1.8.2"
 time = { version = "=0.3.55", features = ["parsing"] }
 
 [dev-dependencies]
+peer-store = { path = "../peer-store" }
 tempfile = "3.23.0"
 
 [[bin]]
@@ -25,3 +26,7 @@ name = "helper-test-fixture"
 path = "tests/fixtures/helper.rs"
 required-features = ["test-fixtures"]
 test = false
+
+[[example]]
+name = "coordination-conformance"
+required-features = ["test-fixtures"]

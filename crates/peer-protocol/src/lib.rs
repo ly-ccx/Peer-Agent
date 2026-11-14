@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
+mod coordination;
 mod evidence_refs;
+pub use coordination::CoordinationReducer;
 mod execution_identity;
 pub use evidence_refs::{
     EvidenceRefError, collect_tool_evidence_refs, collect_tool_result_evidence_refs,

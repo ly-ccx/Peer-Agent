@@ -143,6 +143,14 @@ pub(crate) fn append(
     bytes: &[u8],
     cancel: Option<&AtomicBool>,
 ) -> Result<(), StoreError> {
+    append_to_limit(path, bytes, MAX_BYTES as u64, cancel)
+}
+pub(crate) fn append_to_limit(
+    path: &Path,
+    bytes: &[u8],
+    max_file_bytes: u64,
+    cancel: Option<&AtomicBool>,
+) -> Result<(), StoreError> {
     check_cancel(cancel)?;
     let before = files::identity(path)?;
     let mut options = OpenOptions::new();
@@ -173,7 +181,7 @@ pub(crate) fn append(
             return Err(StoreError::VersionChanged);
         }
     }
-    if opened.len().saturating_add(bytes.len() as u64) > MAX_BYTES as u64 {
+    if opened.len().saturating_add(bytes.len() as u64) > max_file_bytes {
         return Err(StoreError::HistoryLimit);
     }
     check_cancel(cancel)?;

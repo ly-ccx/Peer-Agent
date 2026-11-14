@@ -1268,6 +1268,7 @@ name = "peer-runtime"
 version = "0.1.0-rc.40"
 dependencies = [
  "peer-protocol",
+ "peer-store",
  "serde",
  "serde_json",
  "tempfile",

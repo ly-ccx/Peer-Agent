@@ -11,7 +11,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 use tempfile::NamedTempFile;
-pub(super) const MAX_BASELINE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+pub(crate) const MAX_BASELINE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 fn version(v: &files::FileIdentity) -> String {
     format!(
         "{}:{}:{}:{}:{}",
@@ -20,7 +20,7 @@ fn version(v: &files::FileIdentity) -> String {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(super) struct ContentProof {
+pub(crate) struct ContentProof {
     pub version: String,
     pub bytes: u64,
     pub sha256: String,
@@ -34,7 +34,7 @@ impl ContentProof {
         }
     }
 }
-pub(super) struct Storage<'a> {
+pub(crate) struct Storage<'a> {
     directory: PathBuf,
     lease: &'a LeaseToken,
     cancelled: Option<&'a AtomicBool>,
@@ -60,7 +60,7 @@ impl<'a> Storage<'a> {
         }
         Ok(())
     }
-    fn path(&self, relative: &str) -> Result<PathBuf, FenceError> {
+    pub(crate) fn path(&self, relative: &str) -> Result<PathBuf, FenceError> {
         let mut path = self.directory.clone();
         for part in Path::new(relative).components() {
             let Component::Normal(part) = part else {

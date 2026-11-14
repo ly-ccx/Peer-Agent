@@ -12,6 +12,7 @@ const output = process.argv[2] ?? mkdtempSync(join(tmpdir(), 'peer-native-check-
 const run = (command, args) => execFileSync(command, args, { cwd: root, stdio: 'inherit' });
 run('bun', ['scripts/native-cli/contracts.ts']);
 run('bun', ['scripts/native-cli/control-contracts.ts']);
+run('bun', ['scripts/native-cli/work-contracts.ts']);
 run('node', ['scripts/native-cli/check-boundaries.mjs']);
 run('cargo', ['fmt', '--all', '--check']);
 run('cargo', ['clippy', '--locked', '-p', 'peer-cli', '-p', 'peer-protocol', '-p', 'peer-tui', '-p', 'peer-store', '-p', 'peer-runtime', '--all-targets', '--features', 'peer-runtime/test-fixtures,peer-store/test-fixtures', '--', '-D', 'warnings']);
@@ -33,6 +34,8 @@ run('cargo', ['build', '--locked', '-p', 'peer-store', '--features', 'test-fixtu
 run('bun', ['scripts/native-cli/durable-conformance.ts', 'target/debug/examples/durable-conformance']);
 run('node', ['--test', 'packages/runtime-node/src/project-agent/approval-store.test.mjs']);
 run('node', ['--test', 'packages/runtime-node/src/goal-plan-evidence.native-lock.test.mjs', 'packages/runtime-node/src/goal-plan-store.desktop-preview-evidence.test.mjs', 'packages/runtime-node/src/goal-plan-store.ui-completion.test.mjs', 'packages/runtime-node/src/project-agent/tool-result-evidence-preview.test.mjs']);
+run('cargo', ['build', '--locked', '-p', 'peer-runtime', '--features', 'peer-runtime/test-fixtures,peer-store/test-fixtures', '--example', 'coordination-conformance']);
+run('bun', ['scripts/native-cli/coordination-conformance.ts', 'target/debug/examples/coordination-conformance']);
 run('cargo', ['build', '--locked', '-p', 'peer-credential-helper', '--bin', 'peer-credential-helper']);
 run('cargo', ['build', '--locked', '-p', 'peer-runtime', '--example', 'helper-probe']);
 execFileSync(join(root, 'target/debug/examples/helper-probe'), [join(root, 'target/debug/peer-credential-helper')], {
