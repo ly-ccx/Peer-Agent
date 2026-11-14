@@ -5,6 +5,7 @@ export async function startOwnedE3Host(config){
  if(!config.output||fs.existsSync(config.output))throw Error('e3_new_owned_output_required');fs.mkdirSync(config.output,{recursive:true,mode:0o700});
  const file=path.join(config.output,'config.private.json');fs.writeFileSync(file,JSON.stringify(config),{mode:0o600});
  const require=createRequire(path.join(config.moduleRoot,'apps/desktop/package.json')),env={...process.env};delete env.ELECTRON_RUN_AS_NODE;
+ if(config.defaultVm){delete env.NODE_OPTIONS;delete env.NODE_V8_COVERAGE;delete env.V8_FLAGS;}
  env.PEER_RI00_OWNED_CONFIG=file;
  const child=spawn(require('electron'),[...(config.inspect?['--inspect=0']:[]),fileURLToPath(new URL('./e3-owned-main.cjs',import.meta.url)),file],{env,stdio:['pipe','pipe','pipe']});
  const closed=new Promise(resolve=>child.once('close',(code,signal)=>resolve({code,signal})));let stderr='',stdout='',seq=0,readyResolve,readyReject,readyTimer;
@@ -24,5 +25,5 @@ export async function startOwnedE3Host(config){
     if(!await settled(3000)){child.kill('SIGTERM');if(!await settled(1000)){child.kill('SIGKILL');if(!await settled(1000)){child.stdout.destroy();child.stderr.destroy();child.stdin.destroy();if(!await settled(1000))throw Error('e3_owned_exit_unverified');}}}
    }}
  };
- try{api.ready=await readyPromise;return api;}catch(error){child.kill('SIGTERM');await closed;throw error;}
+ try{api.ready=await readyPromise;return api;}catch(error){try{await api.close({skipAudit:true});}catch(cleanup){error.ownedCleanupError=cleanup.message;}throw error;}
 }
