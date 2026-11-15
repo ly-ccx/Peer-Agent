@@ -5,6 +5,8 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::time::Duration;
 mod continuation;
+mod count;
+pub use count::ProviderTokenCount;
 mod sse;
 pub use continuation::LiveHistory;
 mod error;
@@ -23,6 +25,19 @@ pub struct NativeModel {
     wire: wire::Wire,
     generation: wire::GenerationOptions,
     binding: String,
+}
+/// An encoded request bound to the exact provider instance that built it.
+/// Counting can borrow it; sending consumes its original immutable wire bytes.
+pub struct PreparedRequest<'a> {
+    owner: &'a NativeModel,
+    body: Value,
+    bytes: Vec<u8>,
+    fingerprint: String,
+}
+impl PreparedRequest<'_> {
+    pub fn fingerprint(&self) -> &str {
+        &self.fingerprint
+    }
 }
 pub struct ModelConfig {
     pub endpoint: String,
@@ -114,6 +129,17 @@ impl NativeModel {
         live: &LiveHistory,
         cancel: &CancellationToken,
     ) -> Result<ModelTurn, ModelError> {
+        self.prepare_request(context, history, tools, live)?
+            .send(cancel)
+            .await
+    }
+    pub fn prepare_request<'a>(
+        &'a self,
+        context: &str,
+        history: &Value,
+        tools: &Value,
+        live: &LiveHistory,
+    ) -> Result<PreparedRequest<'a>, ModelError> {
         if history["messages"]
             .as_array()
             .into_iter()
@@ -140,13 +166,25 @@ impl NativeModel {
         )?;
         let bytes =
             serde_json::to_vec(&body).map_err(|_| ModelError::new("model_request_invalid"))?;
-        let request_fingerprint = format!("{:x}", Sha256::digest(&bytes));
+        let fingerprint = format!("{:x}", Sha256::digest(&bytes));
+        Ok(PreparedRequest {
+            owner: self,
+            body,
+            bytes,
+            fingerprint,
+        })
+    }
+    fn request_builder(
+        &self,
+        endpoint: reqwest::Url,
+        accept: &str,
+    ) -> Result<reqwest::RequestBuilder, ModelError> {
         let mut request = self
             .client
-            .post(self.endpoint.clone())
+            .post(endpoint)
             .header("content-type", "application/json")
-            .header("accept", "text/event-stream")
-            .body(bytes);
+            .header("accept", accept);
+
         if self.wire == wire::Wire::Anthropic {
             request = request.header("anthropic-version", "2023-06-01");
         }
@@ -170,7 +208,17 @@ impl NativeModel {
                 value,
             )
         }
-        let mut stream = Some(stream::Stream::new(self.wire));
+        Ok(request)
+    }
+}
+impl PreparedRequest<'_> {
+    pub async fn send(self, cancel: &CancellationToken) -> Result<ModelTurn, ModelError> {
+        let model = self.owner;
+        let request_fingerprint = self.fingerprint;
+        let request = model
+            .request_builder(model.endpoint.clone(), "text/event-stream")?
+            .body(self.bytes);
+        let mut stream = Some(stream::Stream::new(model.wire));
         let mut final_observation = None;
         let read = async {
             let mut response = request.send().await.map_err(|e| {
@@ -208,12 +256,12 @@ impl NativeModel {
                 .expect("one request decoder")
                 .finish(request_fingerprint.clone())?;
             if let Some(c) = &mut turn.continuation {
-                c.binding = self.binding.clone();
+                c.binding = model.binding.clone();
                 c.text = turn.content.clone();
             }
             Ok(turn)
         };
-        let result = tokio::select! {biased;_=cancel.cancelled()=>Err(ModelError::new("CANCELLED")),r=tokio::time::timeout(self.deadline,read)=>r.unwrap_or_else(|_|Err(ModelError::new("model_timeout")))};
+        let result = tokio::select! {biased;_=cancel.cancelled()=>Err(ModelError::new("CANCELLED")),r=tokio::time::timeout(model.deadline,read)=>r.unwrap_or_else(|_|Err(ModelError::new("model_timeout")))};
         let observation =
             final_observation.or_else(|| stream.as_ref().and_then(stream::Stream::observed_usage));
         result.map_err(|error| error.observed(request_fingerprint, observation))
