@@ -44,6 +44,14 @@ impl Server {
         Self::respond_count_mode(replies, stall, false)
     }
     fn respond_count_mode(replies: Vec<String>, stall: bool, fail_count: bool) -> Self {
+        Self::respond_counts(replies, stall, fail_count, vec![])
+    }
+    fn respond_counts(
+        replies: Vec<String>,
+        stall: bool,
+        fail_count: bool,
+        counts_sequence: Vec<u64>,
+    ) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/v1", listener.local_addr().unwrap());
         listener.set_nonblocking(true).unwrap();
@@ -58,6 +66,7 @@ impl Server {
         let thread = thread::spawn(move || {
             let deadline = Instant::now() + Duration::from_secs(15);
             let mut replies = replies.into_iter();
+            let mut counts_sequence = counts_sequence.into_iter();
             while Instant::now() < deadline && !ended.load(std::sync::atomic::Ordering::Relaxed) {
                 match listener.accept() {
                     Ok((mut s, _)) => {
@@ -70,9 +79,10 @@ impl Server {
                         if is_count {
                             counts.lock().unwrap().push(request);
                             let body = if fail_count {
-                                "{\"error\":\"counter unavailable\"}"
+                                "{\"error\":\"counter unavailable\"}".to_owned()
                             } else {
-                                "{\"input_tokens\":12,\"totalTokens\":12}"
+                                let n = counts_sequence.next().unwrap_or(12);
+                                json!({"input_tokens":n,"totalTokens":n}).to_string()
                             };
                             let status = if fail_count {
                                 "404 Not Found"
@@ -84,6 +94,10 @@ impl Server {
                         }
                         captured.lock().unwrap().push(request);
                         let reply = replies.next().unwrap_or_else(|| reply_text("done"));
+                        if reply.starts_with("HTTP/1.1 ") {
+                            let _ = s.write_all(reply.as_bytes());
+                            continue;
+                        }
                         if stall {
                             let _ = write!(
                                 s,
@@ -307,11 +321,18 @@ impl Fixture {
             "goal-plans/index.jsonl",
             json!({"planId":plan,"title":"Native task","conversationId":conversation,"status":"executing","version":1,"createdAt":AT,"updatedAt":AT}),
         );
-        append(
-            "conversations/index.jsonl",
-            json!({"id":conversation,"role":"work_session","workspaceId":"w","parentConversationId":"bot","title":"Native task","contentRevision":1,"messageCount":1,"createdAt":AT,"updatedAt":AT}),
-        );
-        std::fs::write(self.root.path().join(format!("conversations/{conversation}.jsonl")),format!("{}\n",json!({"id":format!("input-{conversation}"),"role":"user","content":"Carry out this assigned task through tools.","createdAt":AT}))).unwrap();
+        if !self
+            .root
+            .path()
+            .join(format!("conversations/{conversation}.jsonl"))
+            .exists()
+        {
+            append(
+                "conversations/index.jsonl",
+                json!({"id":conversation,"role":"work_session","workspaceId":"w","parentConversationId":"bot","title":"Native task","contentRevision":1,"messageCount":1,"createdAt":AT,"updatedAt":AT}),
+            );
+            std::fs::write(self.root.path().join(format!("conversations/{conversation}.jsonl")),format!("{}\n",json!({"id":format!("input-{conversation}"),"role":"user","content":"Carry out this assigned task through tools.","createdAt":AT}))).unwrap();
+        }
         let identity = HostIdentity::new(
             "fixture-seed",
             HostSurface::Tui,
@@ -859,6 +880,236 @@ fn ledger_rows(f: &Fixture) -> Vec<Value> {
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect()
+}
+
+fn overflow_reply() -> String {
+    let body=json!({"error":{"code":"context_length_exceeded","message":"Maximum context length is 1000 tokens; request contains 1100 tokens."}}).to_string();
+    format!(
+        "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
+fn context_window(f: &Fixture) {
+    let file = f.root.path().join("llm-providers.json");
+    let mut value = get(&file);
+    value["models"][0]["contextWindow"] = json!(1000);
+    put(file, &value);
+}
+#[test]
+fn native_durable_compaction_rebuilds_and_recounts_exact_frozen_request() {
+    let streams: Value = serde_json::from_str(include_str!(
+        "../../../packages/protocol/contracts/native-cli/model-streams.json"
+    ))
+    .unwrap();
+    for (wire, channel, provider) in [
+        ("anthropic-messages", "anthropic", "anthropic"),
+        ("gemini", "google-ai", "google"),
+    ] {
+        let reply = |kind: &str| {
+            streams["cases"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|c| c["wire"] == wire && c["kind"] == kind)
+                .unwrap()["stream"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        };
+        let server = Server::respond_counts(
+            vec![reply("tool"), reply("text"), reply("text")],
+            false,
+            false,
+            vec![20, 900, 20],
+        );
+        let f = Fixture::new(&server);
+        f.use_wire(wire, channel, provider);
+        context_window(&f);
+        let output = f.run();
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{wire}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let receipt: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(receipt["usage"]["providerRequestCount"], 3);
+        assert_eq!(receipt["usage"]["totalTokens"], 69);
+        assert_eq!(receipt["lifetimeUsage"]["totalTokens"], 69);
+        assert_eq!(receipt["contextAccounting"]["compactionEpoch"], 1);
+        assert_eq!(receipt["contextAccounting"]["authoritativeInputTokens"], 20);
+        assert_eq!(receipt["lastRequestUsage"]["requestPurpose"], "agent");
+        let history = f.history();
+        let marker = history
+            .iter()
+            .find(|m| m["_compaction"].is_object())
+            .unwrap();
+        assert_eq!(
+            marker["_compaction"]["historySelection"]["retainedMessageIds"],
+            json!(["input-c"])
+        );
+        assert!(
+            history
+                .iter()
+                .any(|m| m["segments"][0]["result"]["status"] == "success")
+        );
+        let cold = peer_runtime::canonical_history::project_history(&history).unwrap();
+        assert_eq!(cold["messages"].as_array().unwrap().len(), 2);
+        assert!(cold["continuity"].is_object());
+        let counts = server.count_requests.lock().unwrap();
+        let sends = server.requests.lock().unwrap();
+        assert_eq!(counts.len(), 3);
+        assert_eq!(sends.len(), 3);
+        if wire == "anthropic-messages" {
+            assert_eq!(counts[2]["messages"], sends[2]["messages"]);
+            assert_eq!(counts[2]["system"], sends[2]["system"]);
+            assert_eq!(sends[1]["tools"], json!([]));
+        } else {
+            assert_eq!(
+                counts[2]["generateContentRequest"]["contents"],
+                sends[2]["contents"]
+            );
+            assert_eq!(
+                counts[2]["generateContentRequest"]["systemInstruction"],
+                sends[2]["systemInstruction"]
+            );
+        }
+        let sidecar = get(f
+            .root
+            .path()
+            .join("conversations/.context-snapshots/c.json"));
+        assert_eq!(sidecar["compactionBoundaryId"], marker["id"]);
+        assert_eq!(sidecar["authoritativeInputTokens"], 20);
+    }
+}
+#[test]
+fn provider_overflow_compacts_once_and_repeated_overflow_stops_without_replaying_effect() {
+    for repeated in [false, true] {
+        let server = Server::new(vec![
+            reply_tool("read_file", json!({"path":"input.txt"})),
+            overflow_reply(),
+            reply_text("Read completed; re-read tool-result evidence as needed."),
+            if repeated {
+                overflow_reply()
+            } else {
+                reply_text("complete")
+            },
+            reply_text("later task"),
+        ]);
+        let f = Fixture::new(&server);
+        context_window(&f);
+        let output = f.run();
+        assert_eq!(
+            output.status.code(),
+            Some(if repeated { 1 } else { 0 }),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(server.requests.lock().unwrap().len(), 4);
+        assert_eq!(
+            f.history()
+                .iter()
+                .filter(|m| m["segments"].is_array())
+                .count(),
+            1
+        );
+        assert_eq!(
+            f.history()
+                .iter()
+                .filter(|m| m["_compaction"].is_object())
+                .count(),
+            1
+        );
+        let ledger = ledger_rows(&f);
+        assert_eq!(ledger.len(), 1);
+        assert_eq!(ledger[0]["totalTokens"], if repeated { 32 } else { 48 });
+        assert_eq!(ledger[0]["providerRequestCount"], 4);
+        if !repeated {
+            let receipt: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(receipt["contextAccounting"]["authoritativeInputTokens"], 12);
+            assert_eq!(receipt["contextAccounting"]["compactionEpoch"], 1);
+        }
+        f.seed("p2", "c2", "s2", "work2", "epoch2");
+        let later = f.command("exec", "p2").output().unwrap();
+        assert_eq!(
+            later.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&later.stderr)
+        );
+        assert_eq!(server.requests.lock().unwrap().len(), 5);
+    }
+}
+#[test]
+fn hard_exit_after_marker_recovers_epoch_known_fees_and_later_task_without_replay() {
+    let server = Server::new(vec![
+        reply_tool("read_file", json!({"path":"input.txt"})),
+        overflow_reply(),
+        reply_text(
+            "Read was completed; retrieve the persisted Evidence before claiming acceptance.",
+        ),
+        reply_text("continued"),
+    ]);
+    let f = Fixture::new(&server);
+    context_window(&f);
+    let failed = f
+        .command("exec", "p")
+        .env("PEER_NATIVE_CONTEXT_FAULT", "after_marker")
+        .output()
+        .unwrap();
+    assert_eq!(
+        failed.status.code(),
+        Some(77),
+        "{}",
+        String::from_utf8_lossy(&failed.stderr)
+    );
+    assert_eq!(server.requests.lock().unwrap().len(), 3);
+    let original = std::fs::read(f.root.path().join("conversations/c.jsonl")).unwrap();
+    let store = peer_store::ConversationStore::new(f.root.path());
+    let history = store.read_committed("c", None, 1024 * 1024).unwrap();
+    assert!(
+        store
+            .read_context_snapshot(&history, "provider::model")
+            .unwrap()
+            .is_none()
+    );
+    f.age_dead_lease();
+    for _ in 0..2 {
+        let recovered = f.command("recover", "p").output().unwrap();
+        assert_eq!(
+            recovered.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&recovered.stderr)
+        );
+    }
+    assert_eq!(server.requests.lock().unwrap().len(), 3);
+    assert_eq!(
+        std::fs::read(f.root.path().join("conversations/c.jsonl")).unwrap(),
+        original
+    );
+    assert_eq!(ledger_rows(&f).len(), 1);
+    assert_eq!(ledger_rows(&f)[0]["totalTokens"], 32);
+    f.seed("p2", "c", "s2", "work2", "epoch2");
+    let resumed = f.command("exec", "p2").output().unwrap();
+    assert_eq!(
+        resumed.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&resumed.stderr)
+    );
+    let result: Value = serde_json::from_slice(&resumed.stdout).unwrap();
+    assert_eq!(result["contextAccounting"]["compactionEpoch"], 1);
+    assert_eq!(result["usage"]["totalTokens"], 16);
+    assert_eq!(result["lifetimeUsage"]["totalTokens"], 48);
+    assert_eq!(
+        f.history()
+            .iter()
+            .filter(|m| m["segments"].is_array())
+            .count(),
+        1
+    );
+    assert_eq!(server.requests.lock().unwrap().len(), 4);
 }
 
 #[test]

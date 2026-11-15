@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "cases": [
     {
       "name": "empty",
@@ -7,8 +7,8 @@
       "expected": {
         "messages": [],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-9b1a2e8b"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-9a92d8d0"
       }
     },
     {
@@ -40,8 +40,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-6b72d3a9"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-36d3ce8c"
       }
     },
     {
@@ -61,8 +61,8 @@
       "expected": {
         "messages": [],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-9b1a2e8b"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-9a92d8d0"
       }
     },
     {
@@ -103,8 +103,8 @@
         },
         "continuityContext": "retained handoff",
         "compactionBoundaryIndex": 1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-c0254e29"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-4b65a0cc"
       }
     },
     {
@@ -131,8 +131,8 @@
           }
         ],
         "compactionBoundaryIndex": 1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-f78f39be"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-e38ab17f"
       }
     },
     {
@@ -168,8 +168,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-c428ba9b"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-2918a748"
       }
     },
     {
@@ -229,8 +229,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-2088b5e3"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-7fff8302"
       }
     },
     {
@@ -290,8 +290,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-2088b5e3"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-7fff8302"
       }
     },
     {
@@ -351,8 +351,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-ff4cc3d7"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-e73e463e"
       }
     },
     {
@@ -414,8 +414,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-704dab7b"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-e752d6b2"
       }
     },
     {
@@ -475,8 +475,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-ae53d6bb"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-efcb96fc"
       }
     },
     {
@@ -528,8 +528,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-be38be8b"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-1acffec4"
       }
     },
     {
@@ -567,8 +567,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-5e4fa899"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-85e6b664"
       }
     },
     {
@@ -617,8 +617,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-671645ba"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-e038bbb5"
       }
     },
     {
@@ -672,8 +672,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-cfe2edfb"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-e920dacc"
       }
     },
     {
@@ -693,8 +693,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-7e93a960"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-f0d26c83"
       }
     },
     {
@@ -713,8 +713,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-cf7e88e4"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-5bb80b59"
       }
     },
     {
@@ -746,8 +746,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-aaaa3e6f"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-10681666"
       }
     },
     {
@@ -793,8 +793,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-4b4c3526"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-064c765d"
       }
     },
     {
@@ -854,8 +854,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-0725d4ab"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-0cc8d39c"
       }
     },
     {
@@ -884,8 +884,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-5917efd4"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-903aabf7"
       }
     }
   ]

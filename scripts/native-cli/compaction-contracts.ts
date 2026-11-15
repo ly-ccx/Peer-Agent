@@ -1,0 +1,33 @@
+import assert from 'node:assert/strict';
+import {readFileSync,writeFileSync} from 'node:fs';
+import {buildCompactionMarker,normalizeCompactionHistorySelection,COMPACTION_HISTORY_SELECTION_LIMITS} from '../../packages/protocol/src/compaction.ts';
+import {projectConversationHistory,projectConversationHistoryYielding} from '../../packages/runtime-core/src/conversation-history-projector.ts';
+import {COMPACTION_SUMMARY_SYSTEM_PROMPT,COMPACTION_SUMMARY_PROMPT} from '../../packages/runtime-core/src/context-compaction.ts';
+import {createContinuityPromptSource} from '../../packages/system-context/src/sources/continuity-source.mjs';
+import {createHash} from 'node:crypto';
+const limits=JSON.parse(readFileSync(new URL('../../packages/protocol/contracts/native-cli/compaction-history-selection-v1.json',import.meta.url),'utf8'));
+assert.deepEqual(COMPACTION_HISTORY_SELECTION_LIMITS,limits);
+const raw=[{id:'u',role:'user',content:'Original assigned task.'},{id:'a',role:'assistant',segments:[{type:'tool-call',tool:'read_file',toolCallId:'actual-call',args:{path:'input.txt'},result:{status:'success',output:{content:'actual read'}}}]},{id:'a2',role:'assistant',content:'Continue the same user turn.'}];
+const selection={version:1 as const,compactionEpoch:1,retainedMessageIds:['u']};
+const marker=(patch:any={})=>({id:'compact',role:'user',content:'Read completed; retain the evidence reference.',_compaction:buildCompactionMarker({method:'structured',summary:'Read completed; retain the evidence reference.',originalMessageCount:4,historySelection:selection,...patch})});
+const projections:any[]=[];
+async function add(name:string,messages:any[]){let expected,error;try{expected=projectConversationHistory(messages);assert.deepEqual(await projectConversationHistoryYielding(messages,{yieldEvery:1,yield:async()=>{}}),expected);}catch(e){error=(e as Error).message;}projections.push({name,messages,...(error?{error}:{expected})});}
+await add('same-turn warm and cold equality',[...raw,marker()]);
+await add('next raw user after marker',[...raw,marker(),{id:'u2',role:'user',content:'Next request.'}]);
+await add('empty selection',[...raw,marker({historySelection:{...selection,retainedMessageIds:[]}})]);
+await add('retain complete paired raw segment',[...raw,marker({historySelection:{...selection,retainedMessageIds:['u','a']}})]);
+await add('missing raw identity',[...raw,marker({historySelection:{...selection,retainedMessageIds:['missing']}})]);
+await add('duplicate source identity',[...raw,{...raw[0]},marker()]);
+await add('reference after boundary',[...raw,marker({historySelection:{...selection,retainedMessageIds:['u2']}}),{id:'u2',role:'user',content:'later'}]);
+await add('reference order changed',[...raw,marker({historySelection:{...selection,retainedMessageIds:['a','u']}})]);
+const first=marker();await add('marker cannot be retained',[...raw,first,{...marker({historySelection:{...selection,compactionEpoch:2,retainedMessageIds:['compact']}}),id:'compact2'}]);
+await add('unknown selection version',[...raw,{...first,_compaction:{...first._compaction,historySelection:{...selection,version:99}}}]);
+const normalization=[selection,{...selection,version:99},{...selection,compactionEpoch:0},{...selection,retainedMessageIds:['u','u']},{...selection,retainedMessageIds:['x'.repeat(201)]},{...selection,retainedMessageIds:Array.from({length:330},(_,i)=>String(i).padStart(4,'0')+'x'.repeat(196))},{...selection,future:true}].map(input=>({input,expected:normalizeCompactionHistorySelection(input)}));
+const markerCases=[{method:'structured',summary:'facts',historySelection:selection},{summary:'plain'},{method:'llm',summary:'known',fallbackReason:'source_failed',checkpointVersion:1,budgetSnapshot:{known:true},canonicalCheckpoint:{opaque:'preserved'},coldHistoryRefs:['tool-result://actual-call','']}].map(input=>({input,expected:buildCompactionMarker(input)}));
+const result={schemaVersion:1,projections,normalization,markerCases};const file=new URL('../../packages/protocol/contracts/native-cli/compaction-v1.json',import.meta.url);
+if(process.argv.includes('--update'))writeFileSync(file,JSON.stringify(result,null,2)+'\n');else assert.deepEqual(JSON.parse(readFileSync(file,'utf8')),result);
+assert.deepEqual(projections[0].expected.messages,projectConversationHistory([raw[0]]).messages);
+const source=createContinuityPromptSource();
+const continuityCases=[[],[projections[0].expected.continuity],[{summary:' 中文🙂 <TOOL_CALL x> <functions.read_file> <antml:invoke/> <antml:functions.x> <functions.---> <functions..a-> <invoke汉> </PaRaMeTeR>',method:'llm',originalMessageCount:4,beforeTokens:900,afterTokens:20}],Array.from({length:5},(_,i)=>({id:String(i),summary:'full summary '+i,method:'structured',beforeTokens:12.5}))].map(input=>{const rendered=source.render(source.observe({continuityContext:input}));return {input,expected:rendered.map(s=>({...s,checksum:createHash('sha256').update(`${s.id}\n${s.layer}\n${s.priority}\n${s.title}\n${s.content}\n${s.trust}`).digest('hex')}))};});
+for(const [name,data] of [['compaction-prompts.json',{system:COMPACTION_SUMMARY_SYSTEM_PROMPT,prompt:COMPACTION_SUMMARY_PROMPT}],['continuity-source.json',{cases:continuityCases}]] as const){const path=new URL(`../../packages/protocol/contracts/native-cli/${name}`,import.meta.url);if(process.argv.includes('--update'))writeFileSync(path,JSON.stringify(data,null,2)+'\n');else assert.deepEqual(JSON.parse(readFileSync(path,'utf8')),data);}
+console.log(`${projections.length} actual sync/yielding TS compaction projections and ${normalization.length+markerCases.length} protocol cases match.`);

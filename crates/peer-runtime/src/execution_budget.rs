@@ -117,6 +117,39 @@ impl EpisodeBudget {
         }
         Ok(())
     }
+    pub fn check_request(&self, host: &NativeSessionHost) -> Result<(), HostError> {
+        let snapshot = host.journal.read(&NativeCoordinationReducer, None)?;
+        let work = &snapshot.state["works"][&self.work];
+        if !work.is_object() {
+            return Err(HostError("work_budget_host_unavailable"));
+        }
+        if worker_work_stopped(work) {
+            return Err(HostError("work_execution_stopped"));
+        }
+        let b = &work["budget"];
+        Self::validate_existing(b)?;
+        let relevant = |r: &Value| r["planId"].as_str().is_none_or(|p| p == self.plan);
+        if b["uncertainDispatches"]
+            .as_array()
+            .is_some_and(|a| a.iter().any(relevant))
+            || b["attempts"]
+                .as_object()
+                .into_iter()
+                .flat_map(|m| m.values())
+                .filter(|a| relevant(a))
+                .any(|a| a["pendingTools"].as_array().is_some_and(|p| !p.is_empty()))
+        {
+            return Err(HostError("execution_outcome_unknown"));
+        }
+        for (m, c) in [
+            ("modelRequests", "maxModelRequests"),
+            ("tokens", "maxTokens"),
+            ("costUsd", "maxCostUsd"),
+        ] {
+            Self::boundary(b, m, c)?
+        }
+        Ok(())
+    }
     pub fn request(&self, host: &mut NativeSessionHost, now: &str) -> Result<(), HostError> {
         self.change(host,now,true,|b|{
             let relevant=|r:&Value|r["planId"].as_str().is_none_or(|p|p==self.plan);

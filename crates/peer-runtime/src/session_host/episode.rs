@@ -7,7 +7,6 @@ use crate::{
     execution_budget::EpisodeBudget,
     model::NativeModel,
     providers::{EffectFuture, EffectOutcome, PreparedEffect, ProviderRegistry},
-    system_context::assemble_work_context,
     usage_accounting::{RuntimeUsageAccounting, UsageSnapshot},
 };
 use peer_store::{
@@ -175,17 +174,15 @@ impl NativeSessionHost {
         {
             return Err(HostError("out_of_scope"));
         }
-        let history =
-            ConversationStore::new(&self.home).read_committed(&conversation, None, 1024 * 1024)?;
+        let history = ConversationStore::new(&self.home).read_committed(
+            &conversation,
+            None,
+            8 * 1024 * 1024,
+        )?;
         if history.history.excluded_from_message_id.is_some() {
             return Err(HostError("native_execution_recovery_required"));
         }
-        let projected = project_history(&history.history.messages).map_err(HostError)?;
-        // Native continuity Source/legacy checkpoint replay is a later adapter;
-        // never silently drop a compaction handoff from an admitted request.
-        if projected.get("continuity").is_some() {
-            return Err(HostError("native_continuity_context_unsupported"));
-        }
+        project_history(&history.history.messages).map_err(HostError)?;
         let workspace = current
             .resource
             .directory
@@ -206,6 +203,14 @@ impl NativeSessionHost {
         if current.resource.read_only {
             return Err(HostError("native_readonly_episode_unsupported"));
         }
+        let mut context_pipeline = super::context_pipeline::ContextPipeline::open(
+            &self.home,
+            &conversation,
+            origin["modelSelection"]["worker"]["providerId"]
+                .as_str()
+                .ok_or(HostError("model_selection_unavailable"))?,
+            model,
+        )?;
         let lease = self.journal.lease().record();
         let epoch = format!("{}:{}", lease.host_id, lease.acquired_at);
         let recorder = crate::recorder::local_recorder(&lease.host_id, &lease.acquired_at)
@@ -254,49 +259,30 @@ impl NativeSessionHost {
             attribution: &usage_attribution,
         };
         let mut usage_accounting = RuntimeUsageAccounting::default();
-        let mut capacity = crate::context_accounting::ContextCapacity::new(
-            &conversation,
-            &format!(
-                "{}::{}",
-                origin["modelSelection"]["worker"]["providerId"]
-                    .as_str()
-                    .unwrap_or("unknown-provider"),
-                model.model_id()
-            ),
-            model.context_window(),
-            0,
-            model.supports_input_count(),
-        );
+        let definitions = projection.definitions();
+        let frame = super::context_pipeline::RequestFrame {
+            plan: plan_id,
+            goal_revision: &current.goal.source_revision,
+            goal: &raw,
+            workspace: &workspace,
+            instructions: &instructions,
+            budget: &budget,
+            billing: &billing_scope,
+            model,
+            tools: &definitions,
+            owned: &cancellation,
+            external: cancel,
+        };
         let run=async {
             let mut count=0;let mut content=String::new();
-            let mut live_history=crate::model::LiveHistory::default();
             for _ in 0..max_turns {
                 if cancel.is_cancelled() || cancellation.is_cancelled(){return Err(HostError("CANCELLED"))}
                 let fresh=self.current(plan_id,&now())?;
                 let policy=peer_store::PolicyStore::new(&self.home).read_existing(&fresh.resource.workspace_id)?;
                 if policy.conversation_id!=origin["parentConversationId"]{return Err(HostError("out_of_scope"))}
                 if fresh.goal.source_revision!=current.goal.source_revision || !crate::coordination::execution_binding_current(&fresh.journal.state["mandates"][work_id],&fresh.journal.state["transitions"][transition["operationId"].as_str().unwrap_or("")],binding){return Err(HostError("execution_revision_stale"))}
-                let system=assemble_work_context(workspace.to_str().ok_or(HostError("invalid_workspace"))?,model.provider(),model.model_id(),&raw,&now(),&instructions).map_err(HostError)?;
-                let history=ConversationStore::new(&self.home).read_committed(&conversation,None,1024*1024)?;
-                if history.history.excluded_from_message_id.is_some(){return Err(HostError("native_execution_recovery_required"))}
-                let projected=project_history(&history.history.messages).map_err(HostError)?;
-                budget.request(self,&now())?;
-                let prepared=model.prepare_request(system["rendered"].as_str().unwrap(),&projected,&projection.definitions(),&live_history).map_err(|error|HostError(error.code))?;
-                let fingerprint=prepared.fingerprint().to_owned();
-                let counted=if capacity.should_count(){match self.wait_owned(prepared.count_input_tokens(&cancellation),&cancellation,cancel).await? {Ok(value)=>Ok(value),Err(error) if error.code=="CANCELLED"=>return Err(HostError("CANCELLED")),Err(_)=>Err(())}}else{Ok(None)};
-                capacity.built(&fingerprint,history.history.content_revision,counted,milliseconds(&now())?).map_err(HostError)?;
-                capacity.publish("request_preflight",milliseconds(&now())?).map_err(HostError)?;
-                let mut observed=None;
-                let turn=self.wait_owned(async {
-                    let result=prepared.send(&cancellation).await;
-                    observed=Some(super::billing::ModelObservation::capture(&result));
-                    result
-                },&cancellation,cancel).await;
-                let observed=observed.unwrap_or_default();
-                let capacity_observed=capacity.observe(observed.usage(),&fingerprint,milliseconds(&now())?);
-                self.observe_model_usage(&budget,&mut usage_accounting,observed,&billing_scope)?;
-                capacity_observed.map_err(HostError)?;capacity.complete();capacity.publish("turn_complete",milliseconds(&now())?).map_err(HostError)?;
-                let turn=turn?.map_err(|error|HostError(error.code))?;
+                let response=context_pipeline.request(self,&frame,&mut usage_accounting).await?;
+                let turn=response.turn;let system=response.system;
                 if !turn.content.is_empty(){self.append_episode_message(&conversation,&json!({"id":uuid::Uuid::new_v4().to_string(),"role":"assistant","content":turn.content,"createdAt":now(),"streamId":stream,"contextSnapshot":system["snapshot"],"requestFingerprint":turn.request_fingerprint}))?;content=turn.content;}
                 if turn.calls.is_empty(){return Ok(("replied",content,count))}
                 let mut completed_ids=Vec::new();
@@ -336,9 +322,9 @@ impl NativeSessionHost {
                     if !outcome.ended || outcome.error==Some("execution_outcome_unknown"){return Err(HostError("execution_outcome_unknown"))}
                     completed_ids.push(call_id);
                 }
-                let committed=ConversationStore::new(&self.home).read_committed(&conversation,None,1024*1024)?;
+                let committed=ConversationStore::new(&self.home).read_committed(&conversation,None,8*1024*1024)?;
                 let projected=project_history(&committed.history.messages).map_err(HostError)?;
-                live_history.remember(&projected,&completed_ids,turn.continuation).map_err(|e|HostError(e.code))?;
+                context_pipeline.live.remember(&projected,&completed_ids,turn.continuation).map_err(|e|HostError(e.code))?;
             }Ok(("max_turns",content,count))
         }.await;
         // Completion owns the actual attempt. Stop drains its real handles;
@@ -394,17 +380,7 @@ impl NativeSessionHost {
             return Err(HostError("CANCELLED"));
         }
         let (status, content, tool_calls) = run?;
-        let metadata = ConversationStore::new(&self.home)
-            .read_metadata(&conversation)?
-            .metadata
-            .ok_or(HostError("conversation_metadata_missing"))?;
-        capacity
-            .content_changed(
-                metadata["contentRevision"]
-                    .as_u64()
-                    .ok_or(HostError("conversation_metadata_invalid"))?,
-            )
-            .map_err(HostError)?;
+        context_pipeline.finish(&self.home)?;
         Ok(EpisodeOutcome {
             status,
             content,
@@ -412,7 +388,7 @@ impl NativeSessionHost {
             stop,
             usage: usage_accounting.snapshot(),
             lifetime_usage,
-            context_accounting: capacity.snapshot(milliseconds(&now())?),
+            context_accounting: context_pipeline.capacity.snapshot(milliseconds(&now())?),
         })
     }
     #[cfg(feature = "test-fixtures")]
@@ -425,7 +401,7 @@ impl NativeSessionHost {
     }
     fn append_episode_message(&self, conversation: &str, message: &Value) -> Result<(), HostError> {
         let store = ConversationStore::new(&self.home);
-        let snapshot = store.read_committed(conversation, None, 1024 * 1024)?;
+        let snapshot = store.read_committed(conversation, None, 8 * 1024 * 1024)?;
         store.commit_message(&snapshot, message, &now(), None)?;
         Ok(())
     }

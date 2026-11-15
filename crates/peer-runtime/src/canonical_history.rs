@@ -1,4 +1,4 @@
-//! ADR 57 projector v2. Persisted tool records are history, never new calls.
+//! ADR 57 projector v3. Persisted tool records are history, never new calls.
 use peer_protocol::{javascript_json_string, javascript_trim};
 use serde_json::{Value, json};
 fn text(v: &Value) -> &str {
@@ -14,6 +14,59 @@ fn encoded(v: &Value) -> Result<String, &'static str> {
         .map_err(|_| "history_projection_limit")
 }
 static EMPTY: std::sync::LazyLock<Value> = std::sync::LazyLock::new(|| json!({}));
+fn selected_history(values: &[Value], boundary: Option<usize>) -> Result<Vec<Value>, &'static str> {
+    let Some(index) = boundary else {
+        return Ok(values.to_vec());
+    };
+    let Some(raw) = marker(&values[index]).and_then(|m| m.get("historySelection")) else {
+        return Ok(values[index + 1..].to_vec());
+    };
+    let selection = peer_protocol::normalize_compaction_history_selection(raw)
+        .ok_or("compaction_history_selection_invalid")?;
+    if text(&values[index]["id"]).is_empty()
+        || [
+            &marker(&values[index]).unwrap()["summary"],
+            &marker(&values[index]).unwrap()["handoffContent"],
+            &values[index]["content"],
+        ]
+        .into_iter()
+        .all(|v| text(v).is_empty())
+    {
+        return Err("compaction_history_selection_invalid");
+    }
+    let wanted: std::collections::HashSet<_> = selection
+        .retained_message_ids
+        .iter()
+        .map(String::as_str)
+        .collect();
+    let mut ids = Vec::new();
+    let mut selected = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for (i, row) in values.iter().enumerate() {
+        let id = row["id"].as_str().unwrap_or("");
+        if !wanted.contains(id) {
+            continue;
+        }
+        if i >= index
+            || !seen.insert(id)
+            || marker(row).is_some()
+            || !matches!(row["role"].as_str(), Some("user" | "assistant" | "tool"))
+            || matches!(
+                row["kind"].as_str(),
+                Some("agent_message" | "agent_activity")
+            )
+        {
+            return Err("compaction_history_selection_invalid");
+        }
+        ids.push(id.to_owned());
+        selected.push(row.clone());
+    }
+    if ids != selection.retained_message_ids {
+        return Err("compaction_history_selection_invalid");
+    }
+    selected.extend_from_slice(&values[index + 1..]);
+    Ok(selected)
+}
 fn parsed(v: &Value) -> Value {
     if let Some(s) = v.as_str() {
         serde_json::from_str(s).unwrap_or_else(|_| json!({"raw":s}))
@@ -414,8 +467,18 @@ pub fn project_history(values: &[Value]) -> Result<Value, &'static str> {
             )
         }
     }
+    if let Some(c) = &mut continuity
+        && let Some(i) = boundary
+        && let Some(raw) = marker(&values[i]).and_then(|m| m.get("historySelection"))
+    {
+        c["compactionEpoch"] = json!(
+            peer_protocol::normalize_compaction_history_selection(raw)
+                .ok_or("compaction_history_selection_invalid")?
+                .compaction_epoch
+        );
+    }
     let mut messages = Vec::new();
-    for m in folded(&values[boundary.map_or(0, |i| i + 1)..]) {
+    for m in folded(&selected_history(values, boundary)?) {
         if matches!(m["kind"].as_str(), Some("agent_message" | "agent_activity"))
             || marker(&m).is_some()
         {
@@ -432,12 +495,12 @@ pub fn project_history(values: &[Value]) -> Result<Value, &'static str> {
         }
     }
     let index = boundary.map_or(-1, |i| i as i64);
-    let input = json!({"projectorVersion":2,"compactionBoundaryIndex":index,"continuity":continuity,"messages":messages});
+    let input = json!({"projectorVersion":peer_protocol::CANONICAL_HISTORY_PROJECTOR_VERSION,"compactionBoundaryIndex":index,"continuity":continuity,"messages":messages});
     let bytes = javascript_json_string(&input).map_err(|_| "history_projection_limit")?;
     let hash = bytes.encode_utf16().fold(0x811c9dc5u32, |h, c| {
         (h ^ u32::from(c)).wrapping_mul(0x01000193)
     });
-    let mut out = json!({"messages":messages,"compactionBoundaryIndex":index,"projectorVersion":2,"historyFingerprint":format!("history-v2-{hash:08x}")});
+    let mut out = json!({"messages":messages,"compactionBoundaryIndex":index,"projectorVersion":peer_protocol::CANONICAL_HISTORY_PROJECTOR_VERSION,"historyFingerprint":format!("history-v3-{hash:08x}")});
     if let Some(c) = continuity {
         out["continuityContext"] = c["summary"].clone();
         out["continuity"] = c
@@ -448,6 +511,21 @@ pub fn project_history(values: &[Value]) -> Result<Value, &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn durable_selection_matches_actual_ts_sync_and_yielding_projectors() {
+        let f: Value = serde_json::from_str(include_str!(
+            "../../../packages/protocol/contracts/native-cli/compaction-v1.json"
+        ))
+        .unwrap();
+        for case in f["projections"].as_array().unwrap() {
+            let result = project_history(case["messages"].as_array().unwrap());
+            if let Some(code) = case["error"].as_str() {
+                assert_eq!(result.unwrap_err(), code, "{}", case["name"]);
+            } else {
+                assert_eq!(result.unwrap(), case["expected"], "{}", case["name"]);
+            }
+        }
+    }
     #[test]
     fn actual_typescript_projector_v2_contracts_match() {
         let fixture: Value = serde_json::from_str(include_str!(

@@ -10,6 +10,8 @@ await mkdir(outputDirectory, { recursive: true });
 const runtimeFiles = [
   'index.mjs',
   'usage-ledger.mjs',
+  'context-accounting.mjs',
+  'context-history-binding.mjs',
   'usage-ledger-contract.generated.mjs',
   'index.d.ts',
   'interaction-reader.mjs',

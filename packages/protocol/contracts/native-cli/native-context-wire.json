@@ -2429,8 +2429,8 @@
       "history": {
         "messages": [],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-9b1a2e8b"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-9a92d8d0"
       },
       "context": "shared system context",
       "tools": [
@@ -2501,8 +2501,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-6b72d3a9"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-36d3ce8c"
       },
       "context": "shared system context",
       "tools": [
@@ -2572,8 +2572,8 @@
       "history": {
         "messages": [],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-9b1a2e8b"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-9a92d8d0"
       },
       "context": "shared system context",
       "tools": [
@@ -2649,8 +2649,8 @@
         },
         "continuityContext": "retained handoff",
         "compactionBoundaryIndex": 1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-c0254e29"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-4b65a0cc"
       },
       "context": "shared system context",
       "tools": [
@@ -2721,8 +2721,8 @@
           }
         ],
         "compactionBoundaryIndex": 1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-f78f39be"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-e38ab17f"
       },
       "context": "shared system context",
       "tools": [
@@ -2793,8 +2793,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-c428ba9b"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-2918a748"
       },
       "context": "shared system context",
       "tools": [
@@ -2886,8 +2886,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-2088b5e3"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-7fff8302"
       },
       "context": "shared system context",
       "tools": [
@@ -3002,8 +3002,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-2088b5e3"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-7fff8302"
       },
       "context": "shared system context",
       "tools": [
@@ -3118,8 +3118,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-ff4cc3d7"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-e73e463e"
       },
       "context": "shared system context",
       "tools": [
@@ -3234,8 +3234,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-704dab7b"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-e752d6b2"
       },
       "context": "shared system context",
       "tools": [
@@ -3350,8 +3350,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-ae53d6bb"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-efcb96fc"
       },
       "context": "shared system context",
       "tools": [
@@ -3462,8 +3462,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-be38be8b"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-1acffec4"
       },
       "context": "shared system context",
       "tools": [
@@ -3566,8 +3566,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-5e4fa899"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-85e6b664"
       },
       "context": "shared system context",
       "tools": [
@@ -3670,8 +3670,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-671645ba"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-e038bbb5"
       },
       "context": "shared system context",
       "tools": [
@@ -3795,8 +3795,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-cfe2edfb"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-e920dacc"
       },
       "context": "shared system context",
       "tools": [
@@ -3905,8 +3905,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-7e93a960"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-f0d26c83"
       },
       "context": "shared system context",
       "tools": [
@@ -3977,8 +3977,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-cf7e88e4"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-5bb80b59"
       },
       "context": "shared system context",
       "tools": [
@@ -4049,8 +4049,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-aaaa3e6f"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-10681666"
       },
       "context": "shared system context",
       "tools": [
@@ -4134,8 +4134,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-4b4c3526"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-064c765d"
       },
       "context": "shared system context",
       "tools": [
@@ -4249,8 +4249,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-0725d4ab"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-0cc8d39c"
       },
       "context": "shared system context",
       "tools": [
@@ -4355,8 +4355,8 @@
           }
         ],
         "compactionBoundaryIndex": -1,
-        "projectorVersion": 2,
-        "historyFingerprint": "history-v2-5917efd4"
+        "projectorVersion": 3,
+        "historyFingerprint": "history-v3-903aabf7"
       },
       "context": "shared system context",
       "tools": [

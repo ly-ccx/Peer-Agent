@@ -45,6 +45,18 @@ fn main() {
                 let snap = s.read_committed(id, None, 8 * 1024 * 1024)?;
                 json!({"history":snap.history,"source":snap.source_revision})
             }
+            "context_read" => {
+                let history = s.read_committed(id, None, 8 * 1024 * 1024)?;
+                json!(s.read_context_snapshot(
+                    &history,
+                    v["modelKey"].as_str().unwrap_or("provider::model")
+                )?)
+            }
+            "context_write" => {
+                let history = s.read_committed(id, None, 8 * 1024 * 1024)?;
+                s.write_context_snapshot(&history, &v["snapshot"])?;
+                json!(true)
+            }
             "commit" | "crash" | "interrupt" => {
                 let mut snapshot = s.read_committed(id, None, 8 * 1024 * 1024)?;
                 if let Some(rev) = v["revision"].as_u64() {

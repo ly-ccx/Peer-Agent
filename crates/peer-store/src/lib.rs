@@ -19,8 +19,10 @@ pub use resources::{
     HostResourcePlan, ResourceError, ResourceIdentity, ResourceReservation, directory_resource,
     file_resource, provider_execution_scopes, provider_file_scopes, resource_conflicts,
 };
+mod context_accounting;
 mod conversation_preview;
 mod conversation_write;
+pub use context_accounting::context_model_key;
 mod goal;
 mod goal_source;
 pub use goal::{
@@ -49,6 +51,9 @@ use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoreError {
+    ContextInvalid,
+    ContextConflict,
+    ContextCommitUncertain,
     UsageInvalid,
     UsageLimit,
     UsageConflict,
@@ -84,6 +89,9 @@ pub enum StoreError {
 impl StoreError {
     pub fn code(self) -> &'static str {
         match self {
+            Self::ContextInvalid => "CONTEXT_SNAPSHOT_INVALID",
+            Self::ContextConflict => "CONTEXT_SNAPSHOT_CHANGED",
+            Self::ContextCommitUncertain => "CONTEXT_SNAPSHOT_COMMIT_UNCERTAIN",
             Self::UsageInvalid => "USAGE_LEDGER_INVALID",
             Self::UsageLimit => "USAGE_LEDGER_LIMIT",
             Self::UsageConflict => "USAGE_LEDGER_CONFLICT",

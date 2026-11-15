@@ -238,7 +238,19 @@ impl PreparedRequest<'_> {
                 }
             })?;
             if !response.status().is_success() {
-                return Err(ModelError::new("model_http_rejected"));
+                let status = response.status().as_u16();
+                let mut body = Vec::new();
+                while let Some(chunk) = response
+                    .chunk()
+                    .await
+                    .map_err(|_| ModelError::new("model_transport_failed"))?
+                {
+                    if body.len() + chunk.len() > 65536 {
+                        return Err(ModelError::new("model_error_body_limit"));
+                    }
+                    body.extend_from_slice(&chunk);
+                }
+                return Err(ModelError::http(status, &body));
             }
             if !response
                 .headers()

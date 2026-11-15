@@ -1,4 +1,9 @@
 #![forbid(unsafe_code)]
+mod compaction;
+pub use compaction::{
+    CANONICAL_HISTORY_PROJECTOR_VERSION, CompactionHistorySelection, build_compaction_marker,
+    context_history_binding, normalize_compaction_history_selection,
+};
 
 mod coordination;
 mod usage;

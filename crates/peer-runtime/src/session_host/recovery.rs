@@ -77,6 +77,13 @@ impl NativeSessionHost {
             self.recover_execution_mirrors(plan, &at)?;
             self.persist_episode_pause(plan, &existing)?;
             self.settle_finished_recorders(&existing)?;
+            peer_store::ConversationStore::new(&self.home).reconcile_index(
+                current.goal.facts["conversationId"]
+                    .as_str()
+                    .ok_or(HostError("access_identity_invalid"))?,
+                &at,
+                None,
+            )?;
             let intent = self.prepare_usage_ledger(cancel).await?;
             let pending = self.recover_pending_usage(cancel).await?;
             existing["usageLedgerRecovery"] = json!({"intent":intent,"pending":pending});
@@ -123,6 +130,15 @@ impl NativeSessionHost {
             budget.finish(self, &super::episode_time(), None)?;
         }
         self.settle_finished_recorders(&stop)?;
+        if stop["phase"] == "settled" {
+            peer_store::ConversationStore::new(&self.home).reconcile_index(
+                current.goal.facts["conversationId"]
+                    .as_str()
+                    .ok_or(HostError("access_identity_invalid"))?,
+                &super::episode_time(),
+                None,
+            )?;
+        }
         if stop["phase"] == "settled" {
             self.persist_episode_pause(plan, &stop)?;
         }

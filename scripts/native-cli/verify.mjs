@@ -21,6 +21,7 @@ run('bun', ['scripts/native-cli/admission-contracts.ts']);
 run('bun', ['scripts/native-cli/history-plan-contracts.ts']);
 run('bun', ['scripts/native-cli/access-policy-contracts.ts']);
 run('bun', ['scripts/native-cli/context-contracts.ts']);
+run('bun', ['scripts/native-cli/compaction-contracts.ts']);
 run('bun', ['scripts/native-cli/wire-contracts.ts']);
 run('bun', ['scripts/native-cli/count-contracts.ts']);
 run('bun', ['scripts/native-cli/context-accounting-contracts.ts']);
@@ -58,6 +59,8 @@ run('bun', ['scripts/native-cli/resource-conformance.ts', 'target/debug/examples
 run('node', ['--test', 'packages/runtime-node/src/project-agent/execution-resources.test.mjs']);
 run('cargo', ['build', '--locked', '-p', 'peer-store', '--features', 'test-fixtures', '--example', 'durable-conformance']);
 run('bun', ['scripts/native-cli/durable-conformance.ts', 'target/debug/examples/durable-conformance']);
+run('node',['scripts/native-cli/context-store-conformance.mjs']);
+run('bun',['scripts/native-cli/context-store-conformance.mjs']);
 run('node', ['--test', 'packages/runtime-node/src/project-agent/approval-store.test.mjs']);
 run('node', ['--test', 'packages/runtime-node/src/goal-plan-evidence.native-lock.test.mjs', 'packages/runtime-node/src/goal-plan-store.desktop-preview-evidence.test.mjs', 'packages/runtime-node/src/goal-plan-store.ui-completion.test.mjs', 'packages/runtime-node/src/project-agent/tool-result-evidence-preview.test.mjs']);
 run('bun', ['scripts/native-cli/coordination-conformance.ts', 'target/debug/examples/coordination-conformance']);

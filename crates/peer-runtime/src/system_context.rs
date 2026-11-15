@@ -3,6 +3,7 @@
 use peer_protocol::javascript_json_string;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+mod continuity;
 pub mod instructions;
 fn hash(s: &str) -> String {
     format!("{:x}", Sha256::digest(s.as_bytes()))
@@ -36,6 +37,19 @@ fn rank(v: &Value) -> usize {
     .position(|l| v == *l)
     .unwrap_or(999)
 }
+/// Explicit NR-04 Source adapter; factual history is a separate user payload.
+pub(crate) fn compaction_summary_context(prompt: &str) -> String {
+    let s = section(
+        "native.compaction-summary",
+        "L0_CORE",
+        0,
+        "Compaction summary",
+        prompt.into(),
+        json!({"id":"native.compaction-summary","kind":"temporary-native-compaction-adapter"}),
+        "runtime",
+    );
+    s["content"].as_str().unwrap().into()
+}
 /// Temporary NR-03 Source adapter: canonical Goal is admitted as complete,
 /// explicitly factual JSON in L7. Full Goal Runner/role sources are P5 parity.
 /// The Goal adapter never promotes factual Goal content to instructions. The
@@ -48,12 +62,26 @@ pub fn assemble_work_context(
     now: &str,
     instructions: &instructions::ProjectInstructions,
 ) -> Result<Value, &'static str> {
+    assemble_work_context_with_continuity(workspace, provider, model, goal, now, instructions, &[])
+}
+pub fn assemble_work_context_with_continuity(
+    workspace: &str,
+    provider: &str,
+    model: &str,
+    goal: &Value,
+    now: &str,
+    instructions: &instructions::ProjectInstructions,
+    continuity: &[Value],
+) -> Result<Value, &'static str> {
     let resources: Value = serde_json::from_str(include_str!(
         "../../../packages/protocol/contracts/native-cli/context-static.json"
     ))
     .map_err(|_| "context_resource_invalid")?;
     let mut sections = Vec::new();
     sections.extend(instructions.sections());
+    if let Some(section) = self::continuity::render(continuity) {
+        sections.push(section)
+    }
     for key in ["core", "workSession"] {
         let s = &resources[key];
         sections.push(section(

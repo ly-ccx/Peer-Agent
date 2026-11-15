@@ -26,6 +26,7 @@ pub struct ContextCapacity {
     observed: Option<Value>,
     counted: Option<Value>,
     verification: Option<Value>,
+    overflow: Option<Value>,
 }
 impl ContextCapacity {
     pub fn new(
@@ -51,10 +52,71 @@ impl ContextCapacity {
             observed: None,
             counted: None,
             verification: None,
+            overflow: None,
         }
     }
     pub fn should_count(&self) -> bool {
         self.counter && !self.degraded
+    }
+    /// Only a request observation from a matching sidecar may seed occupancy.
+    /// Counts are always rebuilt, and billing is never consulted.
+    pub fn restore(
+        &mut self,
+        snapshot: Option<&Value>,
+        epoch: Option<u64>,
+        content_revision: u64,
+    ) -> Result<(), &'static str> {
+        if content_revision > SAFE || epoch.is_some_and(|n| n > SAFE) {
+            return Err("context_revision_limit");
+        }
+        self.content_revision = content_revision;
+        self.epoch = epoch.unwrap_or(0);
+        self.latest = None;
+        self.counted = None;
+        self.observed = None;
+        self.verification = None;
+        self.overflow = None;
+        self.degraded = false;
+        self.revision = 0;
+        self.compaction_revision = 0;
+        self.phase = "restored";
+        let Some(v) = snapshot.filter(|v| {
+            v["version"].as_f64() == Some(1.0)
+                && v["projectorVersion"].as_f64() == Some(3.0)
+                && v["conversationId"] == self.conversation
+                && v["modelKey"] == self.model
+                && epoch.is_none_or(|epoch| v["compactionEpoch"].as_f64() == Some(epoch as f64))
+        }) else {
+            return Ok(());
+        };
+        let safe = |v: &Value| {
+            v.as_f64()
+                .filter(|n| n.is_finite() && *n >= 0.0 && n.fract() == 0.0 && *n <= SAFE as f64)
+                .map(|n| n as u64)
+        };
+        if epoch.is_none() {
+            self.epoch = safe(&v["compactionEpoch"]).unwrap_or(0);
+        }
+        self.revision = safe(&v["revision"]).unwrap_or(0);
+        self.degraded = v["counterStatus"] == "degraded";
+        let observed = &v["lastObserved"];
+        if observed["source"] == "provider_usage"
+            && observed["supersededByCompactionRevision"].is_null()
+            && safe(&observed["compactionEpoch"]) == Some(self.epoch)
+            && safe(&observed["inputTokens"]).is_some_and(|n| n > 0)
+            && observed["requestFingerprint"]
+                .as_str()
+                .is_some_and(|s| !peer_protocol::javascript_trim(s).is_empty() && s.len() <= 1024)
+            && safe(&observed["observedAt"]).is_some()
+        {
+            let mut normalized = observed.clone();
+            normalized["compactionEpoch"] = json!(self.epoch);
+            normalized["inputTokens"] = json!(safe(&observed["inputTokens"]).unwrap());
+            normalized["observedAt"] = json!(safe(&observed["observedAt"]).unwrap());
+            self.observed = Some(normalized);
+        }
+        self.phase = "restored";
+        Ok(())
     }
     pub fn built(
         &mut self,
@@ -140,12 +202,18 @@ impl ContextCapacity {
         self.epoch = epoch;
         self.compaction_revision = revision;
         self.counted = None;
+        self.overflow = None;
         if let Some(observed) = &mut self.observed
             && observed["supersededByCompactionRevision"].is_null()
         {
             observed["supersededByCompactionRevision"] = json!(revision);
         }
         Ok(())
+    }
+    pub fn overflow(&mut self, status: u16) {
+        self.overflow = Some(
+            json!({"status":status,"message":"Provider rejected the current request for context length."}),
+        );
     }
     pub fn content_changed(&mut self, revision: u64) -> Result<(), &'static str> {
         if revision > SAFE {
@@ -221,6 +289,7 @@ impl ContextCapacity {
             ("lastObserved", self.observed.as_ref()),
             ("nextCounted", counted),
             ("verification", self.verification.as_ref()),
+            ("lastOverflow", self.overflow.as_ref()),
         ] {
             if let Some(data) = data {
                 value[key] = data.clone();
@@ -256,6 +325,25 @@ impl ContextCapacity {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn restore_reuses_only_same_epoch_observation_and_always_rebuilds_counts() {
+        let mut capacity = ContextCapacity::new("c", "provider::model", Some(1000), 0, true);
+        let saved = json!({"version":1,"projectorVersion":3,"conversationId":"c","modelKey":"provider::model","revision":4,"compactionEpoch":1,"counterStatus":"active","lastObserved":{"inputTokens":20,"requestFingerprint":"actual","compactionEpoch":1,"source":"provider_usage","observedAt":1},"nextCounted":{"inputTokens":999,"requestFingerprint":"old-count"}});
+        capacity.restore(Some(&saved), Some(1), 3).unwrap();
+        let restored = capacity.snapshot(2);
+        assert_eq!(restored["authoritativeInputTokens"], 20);
+        assert_eq!(restored["pendingUncountedChanges"], true);
+        assert!(restored["nextCounted"].is_null());
+        capacity.restore(Some(&saved), Some(2), 4).unwrap();
+        assert!(capacity.snapshot(3)["authoritativeInputTokens"].is_null());
+        let mut superseded = saved.clone();
+        superseded["lastObserved"]["supersededByCompactionRevision"] = json!(1);
+        capacity.restore(Some(&superseded), Some(1), 3).unwrap();
+        assert!(capacity.snapshot(4)["authoritativeInputTokens"].is_null());
+        capacity.restore(Some(&saved), Some(1), 3).unwrap();
+        capacity.restore(None, Some(1), 4).unwrap();
+        assert!(capacity.snapshot(5)["lastObserved"].is_null());
+    }
     static CONTRACT: LazyLock<Value> = LazyLock::new(|| {
         serde_json::from_str(include_str!(
             "../../../packages/protocol/contracts/native-cli/context-accounting-native.json"

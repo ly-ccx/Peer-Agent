@@ -28,7 +28,7 @@ fn timestamp(at: &str) -> bool {
     at.len() <= 64
         && time::OffsetDateTime::parse(at, &time::format_description::well_known::Rfc3339).is_ok()
 }
-fn locks(
+pub(crate) fn locks(
     directory: &Path,
     id: Option<&str>,
     cancel: Option<&AtomicBool>,
@@ -76,7 +76,7 @@ fn validate_messages(rows: &[Value]) -> Result<(), StoreError> {
     Ok(())
 }
 impl ConversationStore {
-    fn write_directory(&self) -> Result<PathBuf, StoreError> {
+    pub(crate) fn write_directory(&self) -> Result<PathBuf, StoreError> {
         log::directory(&self.directory)
     }
     pub fn create(

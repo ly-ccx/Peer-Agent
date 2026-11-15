@@ -337,9 +337,28 @@ impl NativeSessionHost {
         observed: ModelObservation,
         scope: &BillingScope<'_>,
     ) -> Result<(), HostError> {
+        self.observe_usage_for(
+            budget,
+            accounting,
+            observed,
+            scope,
+            peer_protocol::UsagePurpose::Agent,
+            true,
+        )
+    }
+    pub(super) fn observe_usage_for(
+        &mut self,
+        budget: &EpisodeBudget,
+        accounting: &mut RuntimeUsageAccounting,
+        observed: ModelObservation,
+        scope: &BillingScope<'_>,
+        purpose: peer_protocol::UsagePurpose,
+        capacity_bearing: bool,
+    ) -> Result<(), HostError> {
         let metadata = RequestMetadata {
             fingerprint: observed.fingerprint.as_deref(),
-            ..RequestMetadata::default()
+            purpose,
+            capacity_bearing,
         };
         if let Err(code) = accounting.observe(observed.usage.clone(), metadata) {
             accounting
