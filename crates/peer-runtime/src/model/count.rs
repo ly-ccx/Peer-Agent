@@ -9,56 +9,64 @@ pub struct ProviderTokenCount {
     pub request_fingerprint: String,
 }
 
+fn count_endpoint(model: &NativeModel) -> Option<(reqwest::Url, &'static str)> {
+    if model
+        .generation
+        .auth_method
+        .as_deref()
+        .is_some_and(|a| a != "api_key")
+    {
+        return None;
+    }
+    let mut endpoint = model.endpoint.clone();
+    let (path, field) = match model.wire {
+        wire::Wire::Anthropic => (
+            format!(
+                "{}/messages/count_tokens",
+                endpoint.path().strip_suffix("/messages")?
+            ),
+            "input_tokens",
+        ),
+        wire::Wire::Gemini => {
+            let prefix = endpoint.path().strip_suffix(":streamGenerateContent")?;
+            if !prefix.ends_with(&format!(
+                "/models/{}",
+                model.model.strip_prefix("models/").unwrap_or(&model.model)
+            )) {
+                return None;
+            }
+            (format!("{prefix}:countTokens"), "totalTokens")
+        }
+        _ => return None,
+    };
+    endpoint.set_path(&path);
+    endpoint.set_query(None);
+    Some((endpoint, field))
+}
+impl NativeModel {
+    pub fn supports_input_count(&self) -> bool {
+        count_endpoint(self).is_some()
+    }
+}
 impl PreparedRequest<'_> {
     fn count_request(&self) -> Option<(reqwest::Url, Value, &'static str)> {
-        let model = self.owner;
-        if model
-            .generation
-            .auth_method
-            .as_deref()
-            .is_some_and(|a| a != "api_key")
-        {
-            return None;
+        let (endpoint, field) = count_endpoint(self.owner)?;
+        let mut body = self.body.clone();
+        if self.owner.wire == wire::Wire::Anthropic {
+            let fields = body.as_object_mut()?;
+            fields.shift_remove("stream");
+            fields.shift_remove("max_tokens");
+        } else {
+            body["model"] = Value::String(format!(
+                "models/{}",
+                self.owner
+                    .model
+                    .strip_prefix("models/")
+                    .unwrap_or(&self.owner.model)
+            ));
+            body = serde_json::json!({"generateContentRequest":body});
         }
-        let mut endpoint = model.endpoint.clone();
-        match model.wire {
-            wire::Wire::Anthropic => {
-                let prefix = endpoint.path().strip_suffix("/messages")?;
-                let path = format!("{prefix}/messages/count_tokens");
-                endpoint.set_path(&path);
-                let mut body = self.body.clone();
-                let fields = body.as_object_mut()?;
-                fields.shift_remove("stream");
-                fields.shift_remove("max_tokens");
-                Some((endpoint, body, "input_tokens"))
-            }
-            wire::Wire::Gemini => {
-                let prefix = endpoint.path().strip_suffix(":streamGenerateContent")?;
-                if !prefix.ends_with(&format!(
-                    "/models/{}",
-                    model.model.strip_prefix("models/").unwrap_or(&model.model)
-                )) {
-                    return None;
-                }
-                let path = format!("{prefix}:countTokens");
-                endpoint.set_path(&path);
-                endpoint.set_query(None);
-                let mut body = self.body.clone();
-                body.as_object_mut()?.insert(
-                    "model".into(),
-                    Value::String(format!(
-                        "models/{}",
-                        model.model.strip_prefix("models/").unwrap_or(&model.model)
-                    )),
-                );
-                Some((
-                    endpoint,
-                    serde_json::json!({"generateContentRequest":body}),
-                    "totalTokens",
-                ))
-            }
-            wire::Wire::Chat | wire::Wire::Responses => None,
-        }
+        Some((endpoint, body, field))
     }
 
     /// Unavailable counters remain observed-only. Count errors are advisory to

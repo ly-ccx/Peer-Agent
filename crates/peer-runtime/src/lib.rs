@@ -2,6 +2,7 @@
 
 pub mod access_policy;
 pub mod canonical_history;
+pub mod context_accounting;
 pub mod coordination;
 pub mod credentials;
 mod execution_budget;

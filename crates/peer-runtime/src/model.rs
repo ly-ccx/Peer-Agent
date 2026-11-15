@@ -25,6 +25,7 @@ pub struct NativeModel {
     wire: wire::Wire,
     generation: wire::GenerationOptions,
     binding: String,
+    context_window: Option<u64>,
 }
 /// An encoded request bound to the exact provider instance that built it.
 /// Counting can borrow it; sending consumes its original immutable wire bytes.
@@ -58,6 +59,13 @@ pub struct ModelTurn {
     pub(crate) continuation: Option<continuation::Continuation>,
 }
 impl NativeModel {
+    pub fn context_window(&self) -> Option<u64> {
+        self.context_window
+    }
+    pub(crate) fn with_context_window(mut self, window: Option<u64>) -> Self {
+        self.context_window = window;
+        self
+    }
     pub fn model_id(&self) -> &str {
         &self.model
     }
@@ -109,6 +117,7 @@ impl NativeModel {
             wire: config.wire,
             generation: config.generation,
             binding,
+            context_window: None,
         })
     }
     pub async fn turn(

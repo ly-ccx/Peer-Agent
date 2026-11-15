@@ -51,6 +51,7 @@ fn read(path: &Path) -> Result<Value, ModelError> {
     .map_err(|_| ModelError::new("model_config_invalid"))
 }
 pub struct ResolvedNativeModel {
+    pub context_window: Option<u64>,
     pub endpoint: String,
     pub model: String,
     pub credential_key: String,
@@ -157,6 +158,13 @@ pub fn resolve_model(config: &Value, selected: &Value) -> Result<ResolvedNativeM
         return Err(ModelError::new("model_credential_key_invalid"));
     }
     Ok(ResolvedNativeModel {
+        context_window: m
+            .get("contextWindow")
+            .or_else(|| c.get("contextWindow"))
+            .and_then(Value::as_f64)
+            .filter(|n| n.is_finite() && *n > 0.0 && *n <= 9_007_199_254_740_991.0)
+            .map(|n| n.floor() as u64)
+            .filter(|n| *n > 0),
         endpoint: match wire {
             Wire::Chat => format!("{base}/chat/completions"),
             Wire::Responses => format!("{base}/responses"),
@@ -228,6 +236,7 @@ pub async fn load_model(
         secret,
         Duration::from_secs(120),
     )
+    .map(|model| model.with_context_window(resolved.context_window))
 }
 
 #[cfg(test)]
@@ -241,6 +250,22 @@ mod tests {
         let good = resolve_model(&base, &selection).unwrap();
         assert_eq!(good.credential_key, "model/channel/api-key");
         assert_eq!(good.wire, Wire::Chat);
+        let mut capacity = base.clone();
+        capacity["channels"][0]["contextWindow"] = json!(2000);
+        assert_eq!(
+            resolve_model(&capacity, &selection).unwrap().context_window,
+            Some(2000)
+        );
+        capacity["models"][0]["contextWindow"] = json!(1000);
+        assert_eq!(
+            resolve_model(&capacity, &selection).unwrap().context_window,
+            Some(1000)
+        );
+        capacity["models"][0]["contextWindow"] = json!("unknown");
+        assert_eq!(
+            resolve_model(&capacity, &selection).unwrap().context_window,
+            None
+        );
         for (key, value) in [
             ("providerId", json!("foreign")),
             ("modelId", json!("other-model")),

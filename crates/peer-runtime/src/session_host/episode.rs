@@ -30,6 +30,7 @@ pub struct EpisodeOutcome {
     pub stop: Value,
     pub usage: UsageSnapshot,
     pub lifetime_usage: Option<Value>,
+    pub context_accounting: Value,
 }
 pub(crate) fn now() -> String {
     time::OffsetDateTime::now_utc()
@@ -253,6 +254,19 @@ impl NativeSessionHost {
             attribution: &usage_attribution,
         };
         let mut usage_accounting = RuntimeUsageAccounting::default();
+        let mut capacity = crate::context_accounting::ContextCapacity::new(
+            &conversation,
+            &format!(
+                "{}::{}",
+                origin["modelSelection"]["worker"]["providerId"]
+                    .as_str()
+                    .unwrap_or("unknown-provider"),
+                model.model_id()
+            ),
+            model.context_window(),
+            0,
+            model.supports_input_count(),
+        );
         let run=async {
             let mut count=0;let mut content=String::new();
             let mut live_history=crate::model::LiveHistory::default();
@@ -267,13 +281,21 @@ impl NativeSessionHost {
                 if history.history.excluded_from_message_id.is_some(){return Err(HostError("native_execution_recovery_required"))}
                 let projected=project_history(&history.history.messages).map_err(HostError)?;
                 budget.request(self,&now())?;
+                let prepared=model.prepare_request(system["rendered"].as_str().unwrap(),&projected,&projection.definitions(),&live_history).map_err(|error|HostError(error.code))?;
+                let fingerprint=prepared.fingerprint().to_owned();
+                let counted=if capacity.should_count(){match self.wait_owned(prepared.count_input_tokens(&cancellation),&cancellation,cancel).await? {Ok(value)=>Ok(value),Err(error) if error.code=="CANCELLED"=>return Err(HostError("CANCELLED")),Err(_)=>Err(())}}else{Ok(None)};
+                capacity.built(&fingerprint,history.history.content_revision,counted,milliseconds(&now())?).map_err(HostError)?;
+                capacity.publish("request_preflight",milliseconds(&now())?).map_err(HostError)?;
                 let mut observed=None;
                 let turn=self.wait_owned(async {
-                    let result=model.turn_with_history(system["rendered"].as_str().unwrap(),&projected,&projection.definitions(),&live_history,&cancellation).await;
+                    let result=prepared.send(&cancellation).await;
                     observed=Some(super::billing::ModelObservation::capture(&result));
                     result
                 },&cancellation,cancel).await;
-                self.observe_model_usage(&budget,&mut usage_accounting,observed.unwrap_or_default(),&billing_scope)?;
+                let observed=observed.unwrap_or_default();
+                let capacity_observed=capacity.observe(observed.usage(),&fingerprint,milliseconds(&now())?);
+                self.observe_model_usage(&budget,&mut usage_accounting,observed,&billing_scope)?;
+                capacity_observed.map_err(HostError)?;capacity.complete();capacity.publish("turn_complete",milliseconds(&now())?).map_err(HostError)?;
                 let turn=turn?.map_err(|error|HostError(error.code))?;
                 if !turn.content.is_empty(){self.append_episode_message(&conversation,&json!({"id":uuid::Uuid::new_v4().to_string(),"role":"assistant","content":turn.content,"createdAt":now(),"streamId":stream,"contextSnapshot":system["snapshot"],"requestFingerprint":turn.request_fingerprint}))?;content=turn.content;}
                 if turn.calls.is_empty(){return Ok(("replied",content,count))}
@@ -372,6 +394,17 @@ impl NativeSessionHost {
             return Err(HostError("CANCELLED"));
         }
         let (status, content, tool_calls) = run?;
+        let metadata = ConversationStore::new(&self.home)
+            .read_metadata(&conversation)?
+            .metadata
+            .ok_or(HostError("conversation_metadata_missing"))?;
+        capacity
+            .content_changed(
+                metadata["contentRevision"]
+                    .as_u64()
+                    .ok_or(HostError("conversation_metadata_invalid"))?,
+            )
+            .map_err(HostError)?;
         Ok(EpisodeOutcome {
             status,
             content,
@@ -379,6 +412,7 @@ impl NativeSessionHost {
             stop,
             usage: usage_accounting.snapshot(),
             lifetime_usage,
+            context_accounting: capacity.snapshot(milliseconds(&now())?),
         })
     }
     #[cfg(feature = "test-fixtures")]

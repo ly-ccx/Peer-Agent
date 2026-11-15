@@ -31,6 +31,7 @@ fn get(path: impl AsRef<Path>) -> Value {
 struct Server {
     url: String,
     requests: Arc<Mutex<Vec<Value>>>,
+    count_requests: Arc<Mutex<Vec<Value>>>,
     stop: Arc<std::sync::atomic::AtomicBool>,
     closed: Arc<std::sync::atomic::AtomicBool>,
     thread: Option<thread::JoinHandle<()>>,
@@ -40,11 +41,16 @@ impl Server {
         Self::respond(replies, false)
     }
     fn respond(replies: Vec<String>, stall: bool) -> Self {
+        Self::respond_count_mode(replies, stall, false)
+    }
+    fn respond_count_mode(replies: Vec<String>, stall: bool, fail_count: bool) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/v1", listener.local_addr().unwrap());
         listener.set_nonblocking(true).unwrap();
         let requests = Arc::new(Mutex::new(Vec::new()));
         let captured = requests.clone();
+        let count_requests = Arc::new(Mutex::new(Vec::new()));
+        let counts = count_requests.clone();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let ended = stop.clone();
         let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -60,7 +66,22 @@ impl Server {
                         s.set_nonblocking(false).unwrap();
                         s.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
                         s.set_write_timeout(Some(Duration::from_secs(3))).unwrap();
-                        let request = read_request(&mut s);
+                        let (request, is_count) = read_request(&mut s);
+                        if is_count {
+                            counts.lock().unwrap().push(request);
+                            let body = if fail_count {
+                                "{\"error\":\"counter unavailable\"}"
+                            } else {
+                                "{\"input_tokens\":12,\"totalTokens\":12}"
+                            };
+                            let status = if fail_count {
+                                "404 Not Found"
+                            } else {
+                                "200 OK"
+                            };
+                            write!(s,"HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
+                            continue;
+                        }
                         captured.lock().unwrap().push(request);
                         let reply = replies.next().unwrap_or_else(|| reply_text("done"));
                         if stall {
@@ -109,6 +130,7 @@ impl Server {
         Self {
             url,
             requests,
+            count_requests,
             stop,
             closed,
             thread: Some(thread),
@@ -126,7 +148,7 @@ impl Drop for Server {
         }
     }
 }
-fn read_request(s: &mut TcpStream) -> Value {
+fn read_request(s: &mut TcpStream) -> (Value, bool) {
     let mut bytes = Vec::new();
     let mut one = [0; 1];
     while !bytes.ends_with(b"\r\n\r\n") {
@@ -146,7 +168,11 @@ fn read_request(s: &mut TcpStream) -> Value {
     assert!(n <= 2 * 1024 * 1024);
     let mut body = vec![0; n];
     s.read_exact(&mut body).unwrap();
-    serde_json::from_slice(&body).unwrap()
+    let path = headers.lines().next().unwrap();
+    (
+        serde_json::from_slice(&body).unwrap(),
+        path.contains("/count_tokens HTTP/") || path.contains(":countTokens HTTP/"),
+    )
 }
 fn reply_tool(name: &str, args: Value) -> String {
     format!(
@@ -749,6 +775,21 @@ fn real_tool_loop_reports_turn_totals_separately_and_later_tasks_start_fresh() {
         "conversation_lifetime"
     );
     assert_eq!(receipt["lifetimeUsage"]["totalTokens"], 144);
+    assert_eq!(receipt["contextAccounting"]["authoritativeInputTokens"], 55);
+    assert_eq!(
+        receipt["contextAccounting"]["pressureSource"],
+        "provider_usage"
+    );
+    assert_eq!(
+        receipt["contextAccounting"]["countCapability"]["kind"],
+        "observed_usage_only"
+    );
+    assert!(receipt["contextAccounting"]["contextWindow"].is_null());
+    assert!(receipt["contextAccounting"]["percent"].is_null());
+    assert_eq!(
+        receipt["contextAccounting"]["pendingUncountedChanges"],
+        true
+    );
     assert_eq!(ledger_rows(&f)[0]["providerRequestCount"], 3);
     assert_eq!(
         f.history()
@@ -769,6 +810,7 @@ fn real_tool_loop_reports_turn_totals_separately_and_later_tasks_start_fresh() {
     assert_eq!(receipt["usage"]["providerRequestCount"], 1);
     assert_eq!(receipt["usage"]["totalTokens"], 16);
     assert_eq!(receipt["lastRequestUsage"]["requestIndex"], 1);
+    assert_eq!(receipt["contextAccounting"]["authoritativeInputTokens"], 12);
 }
 
 #[test]
@@ -817,6 +859,85 @@ fn ledger_rows(f: &Fixture) -> Vec<Value> {
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect()
+}
+
+#[test]
+fn native_host_counts_frozen_requests_and_keeps_capacity_separate_from_billing() {
+    let streams: Value = serde_json::from_str(include_str!(
+        "../../../packages/protocol/contracts/native-cli/model-streams.json"
+    ))
+    .unwrap();
+    for (wire, channel, provider) in [
+        ("anthropic-messages", "anthropic", "anthropic"),
+        ("gemini", "google-ai", "google"),
+    ] {
+        for unavailable in [false, true] {
+            let replies = ["tool", "text"]
+                .map(|kind| {
+                    streams["cases"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|c| c["wire"] == wire && c["kind"] == kind)
+                        .unwrap()["stream"]
+                        .as_str()
+                        .unwrap()
+                        .to_owned()
+                })
+                .to_vec();
+            let server = Server::respond_count_mode(replies, false, unavailable);
+            let f = Fixture::new(&server);
+            f.use_wire(wire, channel, provider);
+            let config = f.root.path().join("llm-providers.json");
+            let mut raw = get(&config);
+            raw["models"][0]["contextWindow"] = json!(1000);
+            put(config, &raw);
+            let output = f.run();
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "{wire} {unavailable}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+            let capacity = &result["contextAccounting"];
+            assert_eq!(capacity["authoritativeInputTokens"], 20);
+            assert_eq!(capacity["contextWindow"], 1000);
+            assert_eq!(capacity["percent"], 2);
+            assert_eq!(capacity["pressureSource"], "provider_usage");
+            assert_eq!(capacity["counterStatus"], "degraded");
+            assert_eq!(capacity["countCapability"]["kind"], "provider_count_api");
+            assert_eq!(capacity["pendingUncountedChanges"], true);
+            assert_eq!(
+                capacity["lastObserved"]["requestFingerprint"],
+                result["lastRequestUsage"]["requestFingerprint"]
+            );
+            if unavailable {
+                assert!(capacity["verification"].is_null());
+            } else {
+                assert_eq!(capacity["verification"]["status"], "drift");
+                assert_eq!(capacity["verification"]["countedInputTokens"], 12);
+                assert_eq!(capacity["verification"]["observedInputTokens"], 20);
+            }
+            assert_eq!(result["usage"]["providerRequestCount"], 2);
+            assert_eq!(result["usage"]["totalTokens"], 46);
+            assert_eq!(result["lifetimeUsage"]["totalTokens"], 46);
+            assert_eq!(
+                server.count_requests.lock().unwrap().len(),
+                1,
+                "degraded counter must not be retried on the second request"
+            );
+            assert_eq!(server.requests.lock().unwrap().len(), 2);
+            let meta = std::fs::read_to_string(f.root.path().join("conversations/index.jsonl"))
+                .unwrap()
+                .lines()
+                .map(|s| serde_json::from_str::<Value>(s).unwrap())
+                .find(|v| v["id"] == "c")
+                .unwrap();
+            assert_eq!(capacity["contentRevision"], meta["contentRevision"]);
+            assert_eq!(capacity["modelKey"], "provider::model");
+        }
+    }
 }
 #[test]
 fn known_terminal_tool_preparation_error_is_billed_and_stops_before_error_receipt() {

@@ -23,6 +23,9 @@ pub(super) struct ModelObservation {
     invalid: bool,
 }
 impl ModelObservation {
+    pub(super) fn usage(&self) -> Option<&UsageAmounts> {
+        self.usage.as_ref()
+    }
     pub(super) fn capture(result: &Result<ModelTurn, ModelError>) -> Self {
         match result {
             Ok(turn) => {

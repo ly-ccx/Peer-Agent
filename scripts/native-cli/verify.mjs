@@ -23,6 +23,7 @@ run('bun', ['scripts/native-cli/access-policy-contracts.ts']);
 run('bun', ['scripts/native-cli/context-contracts.ts']);
 run('bun', ['scripts/native-cli/wire-contracts.ts']);
 run('bun', ['scripts/native-cli/count-contracts.ts']);
+run('bun', ['scripts/native-cli/context-accounting-contracts.ts']);
 run('bun', ['scripts/native-cli/stream-contracts.ts']);
 run('bun', ['scripts/native-cli/instruction-contracts.ts']);
 run('bun', ['scripts/native-cli/usage-contracts.ts']);
