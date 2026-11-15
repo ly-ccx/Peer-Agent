@@ -1109,6 +1109,22 @@ export interface Evidence {
   readonly dataLevel: DataLevel;
   readonly redactions: readonly string[];
   readonly artifactRefs: readonly string[];
+  /** Host/Provider observation before tools/call; never read from server output. */
+  readonly dispatchOutcome?: 'not_dispatched';
+}
+
+/** Native MCP attempt metadata, including denials and failed initialization. */
+export interface NativeMcpToolEvidenceMetadata {
+  readonly evidenceKind: 'local_mcp_tool_call';
+  readonly serverId: string;
+  readonly providerId: string;
+  readonly transport: 'stdio' | 'streamable_http' | 'sse';
+  readonly toolName: string;
+  readonly projectionId: string;
+  readonly permissionGrantId: string;
+  readonly status: 'success' | 'denied' | 'failed' | 'cancelled';
+  readonly startedAt: string;
+  readonly endedAt: string;
 }
 
 export interface ClientToolResult {

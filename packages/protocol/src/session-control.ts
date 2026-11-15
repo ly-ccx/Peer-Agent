@@ -130,6 +130,17 @@ export interface UnknownOutcomeResolution {
   readonly unknownCalls: readonly string[];
   readonly at: string;
 }
+/** ADR 131: local transport ownership only; never proof of remote tool effects. */
+export interface NativeMcpHandleObservation {
+  readonly schemaVersion: 1;
+  readonly role: 'rpc' | 'connection';
+  readonly transport: 'stdio' | 'streamable_http' | 'sse';
+  readonly registryRevision: string;
+  readonly ownerRecorder: NonNullable<SessionControlOperation['recorder']>;
+  readonly childRecorder?: NonNullable<SessionControlOperation['recorder']>;
+  readonly ownerStopObservation?: 'original_owner_dead';
+  readonly childStopObservation?: 'group_absent';
+}
 export interface ExecutionResourceClaim {
   readonly claimId: string;
   readonly resourceRef: string;
@@ -138,7 +149,7 @@ export interface ExecutionResourceClaim {
   readonly hostEpoch: string;
   readonly state: 'reserved' | 'active' | 'draining' | 'reconciling' | 'released';
   readonly revision: number;
-  readonly handles?: Readonly<Record<string, { readonly handleId: string; readonly toolCallId: string; readonly state: 'active' | 'ended' | 'unknown'; readonly completedAt?: string }>>;
+  readonly handles?: Readonly<Record<string, { readonly handleId: string; readonly toolCallId: string; readonly state: 'active' | 'ended' | 'unknown'; readonly completedAt?: string; readonly nativeMcp?: NativeMcpHandleObservation }>>;
   readonly evidenceCalls: readonly string[];
   /** Absent means the legacy directory scope derived from resourceRef; dispatch-declared scopes arrive with claim scope convergence. */
   readonly scope?: ExecutionResourceScope;
