@@ -16,6 +16,7 @@ use serde_json::{Value, json};
 use std::path::Path;
 
 pub(super) struct RequestFrame<'a> {
+    pub mcp_revision: &'a str,
     pub plan: &'a str,
     pub goal_revision: &'a str,
     pub goal: &'a Value,
@@ -86,6 +87,13 @@ impl ContextPipeline {
     fn authority(host: &NativeSessionHost, f: &RequestFrame<'_>) -> Result<(), HostError> {
         if f.owned.is_cancelled() || f.external.is_cancelled() {
             return Err(HostError("CANCELLED"));
+        }
+        if peer_store::McpRegistryStore::new(&host.home)
+            .read()?
+            .source_revision
+            != f.mcp_revision
+        {
+            return Err(HostError("native_capability_inventory_changed"));
         }
         let fresh = host.current(f.plan, &now())?;
         if fresh.goal.source_revision != f.goal_revision {

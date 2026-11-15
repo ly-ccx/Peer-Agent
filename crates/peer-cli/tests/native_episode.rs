@@ -896,6 +896,77 @@ fn context_window(f: &Fixture) {
     put(file, &value);
 }
 #[test]
+fn empty_mcp_registry_admits_native_work_but_nonempty_and_future_inventory_block_before_dispatch() {
+    let server = Server::new(vec![reply_text("completed")]);
+    let f = Fixture::new(&server);
+    let file = f.root.path().join("mcp-registry.json");
+    for value in [
+        json!({"version":1,"servers":[{"id":"s","transport":"sse","tools":[{"name":"read"}]}]}),
+        json!({"version":99,"servers":[]}),
+    ] {
+        put(&file, &value);
+        let original = std::fs::read(&file).unwrap();
+        let output = f.run();
+        assert_eq!(output.status.code(), Some(1));
+        assert!(server.requests.lock().unwrap().is_empty());
+        assert_eq!(std::fs::read(&file).unwrap(), original);
+    }
+    put(&file, &json!({"version":1,"servers":[]}));
+    let output = f.run();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
+}
+#[test]
+fn changed_mcp_inventory_stops_before_next_cognition_and_does_not_replay_the_write() {
+    let registry =
+        json!({"version":1,"servers":[{"id":"new","transport":"sse","tools":[]}]}).to_string();
+    let server = Server::new(vec![
+        reply_tool(
+            "write_file",
+            json!({"path":"../mcp-registry.json","content":registry}),
+        ),
+        reply_text("later"),
+    ]);
+    let f = Fixture::new(&server);
+    let output = f.run();
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("native_capability_inventory_changed")
+    );
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
+    assert_eq!(
+        f.history()
+            .iter()
+            .filter(|m| m["segments"][0]["result"]["status"] == "success")
+            .count(),
+        1
+    );
+    assert_eq!(ledger_rows(&f)[0]["totalTokens"], 16);
+    put(
+        f.root.path().join("mcp-registry.json"),
+        &json!({"version":1,"servers":[]}),
+    );
+    f.seed("p2", "c2", "s2", "work2", "epoch2");
+    let later = f.command("exec", "p2").output().unwrap();
+    assert_eq!(
+        later.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&later.stderr)
+    );
+    assert_eq!(server.requests.lock().unwrap().len(), 2);
+}
+#[test]
 fn native_durable_compaction_rebuilds_and_recounts_exact_frozen_request() {
     let streams: Value = serde_json::from_str(include_str!(
         "../../../packages/protocol/contracts/native-cli/model-streams.json"

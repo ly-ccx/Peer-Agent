@@ -20,6 +20,8 @@ pub use resources::{
     file_resource, provider_execution_scopes, provider_file_scopes, resource_conflicts,
 };
 mod context_accounting;
+mod mcp_inventory;
+pub use mcp_inventory::{McpRegistrySnapshot, McpRegistryStore};
 mod conversation_preview;
 mod conversation_write;
 pub use context_accounting::context_model_key;
@@ -51,6 +53,7 @@ use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoreError {
+    McpInventoryInvalid,
     ContextInvalid,
     ContextConflict,
     ContextCommitUncertain,
@@ -89,6 +92,7 @@ pub enum StoreError {
 impl StoreError {
     pub fn code(self) -> &'static str {
         match self {
+            Self::McpInventoryInvalid => "MCP_INVENTORY_INVALID",
             Self::ContextInvalid => "CONTEXT_SNAPSHOT_INVALID",
             Self::ContextConflict => "CONTEXT_SNAPSHOT_CHANGED",
             Self::ContextCommitUncertain => "CONTEXT_SNAPSHOT_COMMIT_UNCERTAIN",

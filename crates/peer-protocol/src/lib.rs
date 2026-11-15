@@ -1,4 +1,6 @@
 #![forbid(unsafe_code)]
+mod mcp_inventory;
+pub use mcp_inventory::{McpInventory, project_mcp_inventory};
 mod compaction;
 pub use compaction::{
     CANONICAL_HISTORY_PROJECTOR_VERSION, CompactionHistorySelection, build_compaction_marker,

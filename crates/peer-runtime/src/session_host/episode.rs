@@ -80,15 +80,16 @@ impl NativeSessionHost {
         let raw = self
             .goals
             .read_context(plan_id, &current.goal.source_revision)?;
-        for name in [
-            "developer-settings.json",
-            "mcp-registry.json",
-            "skills",
-            "permissions",
-        ] {
+        for name in ["developer-settings.json", "skills", "permissions"] {
             if self.home.join(name).exists() {
                 return Err(HostError("native_capability_inventory_unsupported"));
             }
+        }
+        // This card admits only an empty, strictly validated inventory. A
+        // nonempty catalog still needs the native transport/credential Source.
+        let mcp_inventory = peer_store::McpRegistryStore::new(&self.home).read()?;
+        if mcp_inventory.inventory.server_count != 0 {
+            return Err(HostError("native_capability_inventory_unsupported"));
         }
         if origin["capabilityAdmission"]["required"]
             .as_array()
@@ -261,6 +262,7 @@ impl NativeSessionHost {
         let mut usage_accounting = RuntimeUsageAccounting::default();
         let definitions = projection.definitions();
         let frame = super::context_pipeline::RequestFrame {
+            mcp_revision: &mcp_inventory.source_revision,
             plan: plan_id,
             goal_revision: &current.goal.source_revision,
             goal: &raw,
