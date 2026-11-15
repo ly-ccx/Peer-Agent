@@ -42,6 +42,7 @@ pub(super) async fn open(
     }
     let client = Client::builder()
         .redirect(reqwest::redirect::Policy::none())
+        .retry(reqwest::retry::never())
         .default_headers(headers)
         .connect_timeout(Duration::from_secs(10))
         .build()
@@ -80,6 +81,55 @@ pub(super) async fn open(
         state.fail(result.err().unwrap_or("mcp_connection_closed"));
     }))
 }
+// A primary SSE response and one SDK control POST can coexist. Both futures
+// stay inside the registered worker; cancellation drops them together.
+struct HttpPosts {
+    client: Client,
+    endpoint: Url,
+    session: Option<String>,
+}
+impl HttpPosts {
+    async fn send(
+        &mut self,
+        bytes: Vec<u8>,
+        state: &Arc<McpState>,
+    ) -> Result<reqwest::Response, &'static str> {
+        let value: Value = serde_json::from_slice(&bytes).map_err(|_| "mcp_request_invalid")?;
+        let mut request = self
+            .client
+            .post(self.endpoint.clone())
+            .header("content-type", "application/json")
+            .header("accept", "application/json, text/event-stream")
+            .body(bytes);
+        if let Some(id) = &self.session {
+            request = request.header("mcp-session-id", id);
+        }
+        if let Some(version) = state.inner.lock().unwrap().protocol.clone() {
+            request = request.header("mcp-protocol-version", version);
+        }
+        if value["method"] == "tools/call" {
+            state.sent.store(true, Ordering::Release);
+        }
+        let response = request.send().await.map_err(|_| "mcp_connect_failed")?;
+        if !response.status().is_success() {
+            return Err("mcp_http_rejected");
+        }
+        if let Some(id) = response.headers().get("mcp-session-id") {
+            let id = id
+                .to_str()
+                .ok()
+                .filter(|s| {
+                    !s.is_empty() && s.len() <= 256 && s.bytes().all(|b| (0x21..=0x7e).contains(&b))
+                })
+                .ok_or("mcp_session_invalid")?;
+            if self.session.as_ref().is_some_and(|old| old != id) {
+                return Err("mcp_session_changed");
+            }
+            self.session = Some(id.into());
+        }
+        Ok(response)
+    }
+}
 async fn post(
     client: Client,
     _base: Url,
@@ -89,42 +139,14 @@ async fn post(
     state: &Arc<McpState>,
     legacy: bool,
 ) -> Result<(), &'static str> {
-    let mut session = None::<String>;
-    let mut protocol = None::<String>;
+    let mut posts = HttpPosts {
+        client,
+        endpoint,
+        session: None,
+    };
     while let Some(bytes) = requests.recv().await {
         let value: Value = serde_json::from_slice(&bytes).map_err(|_| "mcp_request_invalid")?;
-        let mut request = client
-            .post(endpoint.clone())
-            .header("content-type", "application/json")
-            .header("accept", "application/json, text/event-stream")
-            .body(bytes);
-        if let Some(session) = &session {
-            request = request.header("mcp-session-id", session);
-        }
-        if protocol.is_none() {
-            protocol = state.inner.lock().unwrap().protocol.clone();
-        }
-        if let Some(version) = &protocol {
-            request = request.header("mcp-protocol-version", version);
-        }
-        if value["method"] == "tools/call" {
-            state.sent.store(true, Ordering::Release);
-        }
-        let mut response = request.send().await.map_err(|_| "mcp_connect_failed")?;
-        if !response.status().is_success() {
-            return Err("mcp_http_rejected");
-        }
-        if let Some(id) = response.headers().get("mcp-session-id") {
-            let id = id
-                .to_str()
-                .ok()
-                .filter(|s| !s.is_empty() && s.len() <= 256)
-                .ok_or("mcp_session_invalid")?;
-            if session.as_ref().is_some_and(|old| old != id) {
-                return Err("mcp_session_changed");
-            }
-            session = Some(id.into());
-        }
+        let mut response = posts.send(bytes, state).await?;
         if legacy || response.status() == 202 {
             continue;
         }
@@ -137,7 +159,22 @@ async fn post(
             .next()
             .unwrap_or("");
         if kind == "text/event-stream" {
-            sse(response, state, incoming.clone(), None, Some(&value["id"])).await?;
+            let receive = sse(response, state, incoming.clone(), None, Some(&value["id"]));
+            tokio::pin!(receive);
+            loop {
+                tokio::select! {biased;
+                    outcome=&mut receive=>{outcome?;break},
+                    bytes=requests.recv()=>{
+                        let bytes=bytes.ok_or("mcp_connection_closed")?;
+                        let control:Value=serde_json::from_slice(&bytes).map_err(|_|"mcp_request_invalid")?;
+                        let reply=!control["id"].is_null() && control.get("method").is_none() && (control.get("result").is_some() || control.get("error").is_some());
+                        let notification=control["id"].is_null() && control["method"].as_str().is_some_and(|m|m.starts_with("notifications/"));
+                        if !reply && !notification{return Err("mcp_interleaved_request")}
+                        let response=posts.send(bytes,state).await?;
+                        if response.status()!=202{return Err("mcp_control_rejected")}
+                    }
+                }
+            }
         } else if kind == "application/json" {
             let mut body = Vec::new();
             while let Some(chunk) = response.chunk().await.map_err(|_| "mcp_read_failed")? {
@@ -146,13 +183,8 @@ async fn post(
                 }
                 body.extend_from_slice(&chunk);
             }
-            let message = state.incoming(&body)?;
-            let raw: Value = serde_json::from_slice(&body).map_err(|_| "mcp_message_invalid")?;
-            if let Some(version) = raw["result"]["protocolVersion"].as_str() {
-                protocol = Some(version.into());
-            }
             incoming
-                .send(message)
+                .send(state.incoming(&body)?)
                 .await
                 .map_err(|_| "mcp_connection_closed")?;
         } else {
@@ -192,11 +224,17 @@ async fn sse(
                     }
                     let _ = sender.send(target);
                 } else if !data.is_empty() {
+                    let message = state.incoming(data.as_bytes())?;
                     let raw: Value =
                         serde_json::from_str(&data).map_err(|_| "mcp_message_invalid")?;
-                    let complete = until.is_some_and(|id| !id.is_null() && raw["id"] == *id);
+                    let complete = until.is_some_and(|id| {
+                        !id.is_null()
+                            && raw["id"] == *id
+                            && raw.get("method").is_none()
+                            && (raw.get("result").is_some() || raw.get("error").is_some())
+                    });
                     incoming
-                        .send(state.incoming(data.as_bytes())?)
+                        .send(message)
                         .await
                         .map_err(|_| "mcp_connection_closed")?;
                     if complete {

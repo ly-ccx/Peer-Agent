@@ -32,6 +32,7 @@ struct Server {
     url: String,
     requests: Arc<Mutex<Vec<Value>>>,
     count_requests: Arc<Mutex<Vec<Value>>>,
+    trace: Arc<Mutex<Vec<Value>>>,
     stop: Arc<std::sync::atomic::AtomicBool>,
     closed: Arc<std::sync::atomic::AtomicBool>,
     thread: Option<thread::JoinHandle<()>>,
@@ -52,6 +53,9 @@ impl Server {
         fail_count: bool,
         counts_sequence: Vec<u64>,
     ) -> Self {
+        let trace = Arc::new(Mutex::new(Vec::new()));
+        let captured_trace = trace.clone();
+        let started = Instant::now();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/v1", listener.local_addr().unwrap());
         listener.set_nonblocking(true).unwrap();
@@ -64,10 +68,11 @@ impl Server {
         let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let observed_close = closed.clone();
         let thread = thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(15);
             let mut replies = replies.into_iter();
             let mut counts_sequence = counts_sequence.into_iter();
-            while Instant::now() < deadline && !ended.load(std::sync::atomic::Ordering::Relaxed) {
+            // The fixture owner controls listener lifetime across slow human
+            // decisions/recovery. Socket waits remain independently bounded.
+            while !ended.load(std::sync::atomic::Ordering::Relaxed) {
                 match listener.accept() {
                     Ok((mut s, _)) => {
                         // Darwin accept can inherit the listener's nonblocking
@@ -76,6 +81,7 @@ impl Server {
                         s.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
                         s.set_write_timeout(Some(Duration::from_secs(3))).unwrap();
                         let (request, is_count) = read_request(&mut s);
+                        captured_trace.lock().unwrap().push(json!({"event":"request","count":is_count,"elapsedMs":started.elapsed().as_millis()}));
                         if is_count {
                             counts.lock().unwrap().push(request);
                             let body = if fail_count {
@@ -107,6 +113,7 @@ impl Server {
                             s.set_read_timeout(Some(Duration::from_millis(100)))
                                 .unwrap();
                             let mut byte = [0];
+                            let deadline = Instant::now() + Duration::from_secs(15);
                             while Instant::now() < deadline
                                 && !ended.load(std::sync::atomic::Ordering::Relaxed)
                             {
@@ -140,11 +147,13 @@ impl Server {
                     Err(_) => break,
                 }
             }
+            captured_trace.lock().unwrap().push(json!({"event":if ended.load(std::sync::atomic::Ordering::Relaxed){"owner_stop"}else{"listener_error"},"elapsedMs":started.elapsed().as_millis()}));
         });
         Self {
             url,
             requests,
             count_requests,
+            trace,
             stop,
             closed,
             thread: Some(thread),
@@ -205,10 +214,17 @@ fn reply_text(text: &str) -> String {
 }
 struct Fixture {
     root: tempfile::TempDir,
+    server_trace: Arc<Mutex<Vec<Value>>>,
 }
 static RECEIPT_LOCK: Mutex<()> = Mutex::new(());
 impl Drop for Fixture {
     fn drop(&mut self) {
+        if thread::panicking() || std::env::var_os("PEER_NATIVE_P3_EVIDENCE_ROOT").is_some() {
+            put(
+                self.root.path().join("model-http-trace.json"),
+                &json!(*self.server_trace.lock().unwrap()),
+            );
+        }
         if thread::panicking() {
             self.root.disable_cleanup(true);
             eprintln!(
@@ -277,7 +293,10 @@ impl Fixture {
             root.path().join("llm-providers.json"),
             &json!({"version":2,"channels":[{"id":"provider","provider":"openai","channelId":"openai-compatible","authMethod":"api_key","baseUrl":server.url,"apiKeyConfigured":false}],"models":[{"id":"provider::model","groupId":"provider","model":"model","enabled":true,"supportsReasoning":false}]}),
         );
-        let f = Self { root };
+        let f = Self {
+            root,
+            server_trace: server.trace.clone(),
+        };
         f.seed("p", "c", "s", "work", "epoch");
         f
     }
@@ -1942,6 +1961,90 @@ fn inactive_bot_and_foreign_conversation_cannot_dispatch_cognition() {
     }
 }
 
+fn permission_pty(f: &Fixture) -> (std::os::fd::OwnedFd, OwnedChild) {
+    let master =
+        rustix::pty::openpt(rustix::pty::OpenptFlags::RDWR | rustix::pty::OpenptFlags::NOCTTY)
+            .unwrap();
+    rustix::io::fcntl_setfd(&master, rustix::io::FdFlags::CLOEXEC).unwrap();
+    rustix::pty::grantpt(&master).unwrap();
+    rustix::pty::unlockpt(&master).unwrap();
+    let path = rustix::pty::ptsname(&master, Vec::new()).unwrap();
+    let slave = rustix::fs::open(
+        path.as_c_str(),
+        rustix::fs::OFlags::RDWR | rustix::fs::OFlags::NOCTTY | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::empty(),
+    )
+    .unwrap();
+    let child = OwnedChild(Some(
+        f.command("exec", "p")
+            .stdin(Stdio::from(rustix::io::dup(&slave).unwrap()))
+            .stderr(Stdio::from(slave))
+            .spawn()
+            .unwrap(),
+    ));
+    (master, child)
+}
+fn wait_permission_prompt(master: &std::os::fd::OwnedFd) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut bytes = Vec::new();
+    while !String::from_utf8_lossy(&bytes).contains("[y/N]") {
+        assert!(
+            Instant::now() < deadline,
+            "approval prompt missing: {}",
+            String::from_utf8_lossy(&bytes)
+        );
+        let mut poll = [rustix::event::PollFd::new(
+            master,
+            rustix::event::PollFlags::IN,
+        )];
+        if rustix::event::poll(
+            &mut poll,
+            Some(&rustix::event::Timespec {
+                tv_sec: 0,
+                tv_nsec: 20_000_000,
+            }),
+        )
+        .unwrap()
+            > 0
+        {
+            let mut chunk = [0; 8192];
+            let n = rustix::io::read(master, &mut chunk).unwrap();
+            bytes.extend_from_slice(&chunk[..n]);
+        }
+    }
+}
+fn wait_permission_decision(f: &Fixture, state: &str) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let rows = std::fs::read_to_string(f.root.path().join("project-runtime/w/approvals.jsonl"))
+            .unwrap_or_default();
+        if rows
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .any(|v| v["state"] == state)
+        {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "stdin decision did not become a persisted {state} fact"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+fn wait_permission_episode(mut child: OwnedChild) -> Output {
+    // The input decision is tested separately. This bounds the remaining real
+    // model/tool/stop/billing workflow, rather than calling all of it stdin I/O.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while child.child().try_wait().unwrap().is_none() {
+        assert!(
+            Instant::now() < deadline,
+            "permission episode did not settle"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    child.output()
+}
 #[test]
 fn real_pty_permission_accept_deny_and_signal_have_no_stuck_stdin_reader() {
     for answer in [Some(true), Some(false), None] {
@@ -1963,67 +2066,26 @@ fn real_pty_permission_accept_deny_and_signal_have_no_stuck_stdin_reader() {
                 AT,
             )
             .unwrap();
-        let master =
-            rustix::pty::openpt(rustix::pty::OpenptFlags::RDWR | rustix::pty::OpenptFlags::NOCTTY)
-                .unwrap();
-        rustix::io::fcntl_setfd(&master, rustix::io::FdFlags::CLOEXEC).unwrap();
-        rustix::pty::grantpt(&master).unwrap();
-        rustix::pty::unlockpt(&master).unwrap();
-        let path = rustix::pty::ptsname(&master, Vec::new()).unwrap();
-        let slave = rustix::fs::open(
-            path.as_c_str(),
-            rustix::fs::OFlags::RDWR | rustix::fs::OFlags::NOCTTY | rustix::fs::OFlags::CLOEXEC,
-            rustix::fs::Mode::empty(),
-        )
-        .unwrap();
-        let mut child = f
-            .command("exec", "p")
-            .stdin(Stdio::from(rustix::io::dup(&slave).unwrap()))
-            .stderr(Stdio::from(slave))
-            .spawn()
-            .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(5);
-        let mut bytes = Vec::new();
-        while !String::from_utf8_lossy(&bytes).contains("[y/N]") {
-            assert!(
-                Instant::now() < deadline,
-                "approval prompt missing: {}",
-                String::from_utf8_lossy(&bytes)
-            );
-            let mut poll = [rustix::event::PollFd::new(
-                &master,
-                rustix::event::PollFlags::IN,
-            )];
-            if rustix::event::poll(
-                &mut poll,
-                Some(&rustix::event::Timespec {
-                    tv_sec: 0,
-                    tv_nsec: 20_000_000,
-                }),
-            )
-            .unwrap()
-                > 0
-            {
-                let mut b = [0; 8192];
-                let n = rustix::io::read(&master, &mut b).unwrap();
-                bytes.extend_from_slice(&b[..n]);
-            }
-        }
+        let (master, mut child) = permission_pty(&f);
+        wait_permission_prompt(&master);
         if let Some(allow) = answer {
             rustix::io::write(&master, if allow { b"y\n" } else { b"n\n" }).unwrap();
         } else {
             rustix::process::kill_process(
-                rustix::process::Pid::from_raw(child.id() as i32).unwrap(),
+                rustix::process::Pid::from_raw(child.child().id() as i32).unwrap(),
                 rustix::process::Signal::TERM,
             )
             .unwrap();
         }
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while child.try_wait().unwrap().is_none() {
-            assert!(Instant::now() < deadline, "permission stdin did not settle");
-            thread::sleep(Duration::from_millis(10))
-        }
-        let r = child.wait_with_output().unwrap();
+        wait_permission_decision(
+            &f,
+            match answer {
+                Some(true) => "approved",
+                Some(false) => "denied",
+                None => "cancelled",
+            },
+        );
+        let r = wait_permission_episode(child);
         assert_eq!(
             r.status.code(),
             Some(if answer.is_none() { 4 } else { 0 }),
@@ -2392,3 +2454,45 @@ fn canonical_usage_recovery_is_bounded_and_later_batches_do_not_duplicate_charge
 #[cfg(feature = "test-fixtures")]
 #[path = "native_mcp/mod.rs"]
 mod native_mcp;
+
+#[test]
+fn delayed_pty_approval_keeps_current_lease_and_completes_the_real_tool_episode() {
+    let server = Server::new(vec![
+        reply_tool(
+            "write_file",
+            json!({"path":"delayed.txt","content":"after real user approval"}),
+        ),
+        reply_text("completed after user decision"),
+    ]);
+    let f = Fixture::new(&server);
+    PolicyStore::new(f.root.path())
+        .update_existing("w", 1, peer_protocol::LocalAccessLevel::AskBeforeLocal, AT)
+        .unwrap();
+    let (master, child) = permission_pty(&f);
+    wait_permission_prompt(&master);
+    let before = get(f.root.path().join("project-runtime/w/host.lease"))["heartbeatAt"].clone();
+    thread::sleep(Duration::from_secs(16));
+    assert_ne!(
+        get(f.root.path().join("project-runtime/w/host.lease"))["heartbeatAt"],
+        before
+    );
+    assert!(!f.root.path().join("workspace/delayed.txt").exists());
+    rustix::io::write(&master, b"y\n").unwrap();
+    wait_permission_decision(&f, "approved");
+    let output = wait_permission_episode(child);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(server.requests.lock().unwrap().len(), 2);
+    assert_eq!(
+        std::fs::read_to_string(f.root.path().join("workspace/delayed.txt")).unwrap(),
+        "after real user approval"
+    );
+    assert_eq!(
+        get(f.root.path().join("goal-plans/p.json"))["status"],
+        "paused"
+    );
+}

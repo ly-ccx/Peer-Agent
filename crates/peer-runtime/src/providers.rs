@@ -26,12 +26,17 @@ pub struct EffectOutcome {
     pub artifacts: Vec<String>,
     pub ended: bool,
     pub materialization: Option<peer_store::ResourceIdentity>,
+    /// Trusted Provider observation that the capability request was not issued.
+    /// Never decode this from output. A started connection still requires drain.
     pub not_dispatched: bool,
 }
 impl EffectOutcome {
     pub(crate) fn not_dispatched(code: &'static str) -> Self {
         let mut result = Self::failed(code);
         result.not_dispatched = true;
+        if code == "CANCELLED" {
+            result.status = "cancelled";
+        }
         result
     }
     pub fn failed(code: &'static str) -> Self {

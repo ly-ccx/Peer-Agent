@@ -588,3 +588,207 @@ fn future_mcp_handle_metadata_blocks_recovery_without_erasing_it_then_original_i
         1
     );
 }
+
+#[test]
+fn streamable_http_answers_server_ping_while_waiting_for_the_tool_result() {
+    for same_id in [false, true] {
+        let server = Server::new(vec![
+            reply_tool("mcp__s__read_fact", json!({})),
+            reply_tool("mcp__s__read_fact", json!({})),
+            reply_text("duplex verified"),
+        ]);
+        let f = Fixture::new(&server);
+        let mcp = http::Http::duplex(same_id);
+        put(
+            f.root.path().join("mcp-registry.json"),
+            &json!({"version":1,"servers":[{"id":"s","transport":"streamable_http","url":mcp.url,"tools":[{"name":"read_fact","inputSchema":{"type":"object"}}]}]}),
+        );
+        let output = f.run();
+        put(
+            f.root.path().join("mcp-http-trace.json"),
+            &json!({"events":*mcp.events.lock().unwrap(),"requests":*mcp.requests.lock().unwrap()}),
+        );
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "same_id={same_id}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            *mcp.events.lock().unwrap(),
+            ["ping_queued", "pong_received", "tool_result_sent"].repeat(2)
+        );
+        let receipt: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(receipt["toolCalls"], 2);
+        assert_eq!(server.requests.lock().unwrap().len(), 3);
+        let requests = mcp.requests.lock().unwrap();
+        for (headers, _) in requests.iter().filter(|(_, v)| v["method"] == "tools/call") {
+            assert!(
+                headers
+                    .to_lowercase()
+                    .contains("mcp-protocol-version: 2025-11-25"),
+                "tool data changed negotiated protocol: {headers}"
+            );
+        }
+        assert!(
+            serde_json::to_string(&f.history())
+                .unwrap()
+                .contains("untrusted-result-not-negotiation")
+        );
+        let (_, call) = requests
+            .iter()
+            .find(|(_, v)| v["method"] == "tools/call")
+            .unwrap();
+        let (_, pong) = requests
+            .iter()
+            .find(|(_, v)| v["method"].is_null() && v.get("result").is_some())
+            .expect("actual JSON-RPC ping response");
+        assert_eq!(pong["result"], json!({}));
+        assert_eq!(
+            pong["id"],
+            if same_id {
+                call["id"].clone()
+            } else {
+                json!("server-ping")
+            }
+        );
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|(_, v)| v["method"] == "tools/call")
+                .count(),
+            2
+        );
+        assert_eq!(
+            f.budget(|_| {})["uncertainDispatches"]
+                .as_array()
+                .map_or(0, Vec::len),
+            0
+        );
+        assert!(
+            serde_json::to_string(&f.history())
+                .unwrap()
+                .contains("native HTTP MCP fact")
+        );
+    }
+}
+
+#[test]
+fn http_control_rejection_and_cancellation_keep_the_original_tool_unknown_without_retry() {
+    for stall in [false, true] {
+        let server = Server::new(vec![reply_tool("mcp__s__read_fact", json!({}))]);
+        let f = Fixture::new(&server);
+        let mcp = http::Http::duplex_fault(stall);
+        put(
+            f.root.path().join("mcp-registry.json"),
+            &json!({"version":1,"servers":[{"id":"s","transport":"streamable_http","url":mcp.url,"tools":[{"name":"read_fact","inputSchema":{"type":"object"}}]}]}),
+        );
+        let mut child = OwnedChild(Some(f.command("exec", "p").spawn().unwrap()));
+        let deadline = Instant::now() + Duration::from_secs(8);
+        while !mcp.events.lock().unwrap().contains(&"pong_received") {
+            assert!(Instant::now() < deadline, "control POST missing");
+            thread::sleep(Duration::from_millis(10));
+        }
+        if stall {
+            rustix::process::kill_process(
+                rustix::process::Pid::from_raw(child.child().id() as i32).unwrap(),
+                rustix::process::Signal::TERM,
+            )
+            .unwrap();
+        }
+        let deadline = Instant::now() + Duration::from_secs(6);
+        while child.child().try_wait().unwrap().is_none() {
+            assert!(
+                Instant::now() < deadline,
+                "owned control request failed to stop"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        let output = child.output();
+        put(
+            f.root.path().join("mcp-http-trace.json"),
+            &json!({"events":*mcp.events.lock().unwrap(),"requests":*mcp.requests.lock().unwrap()}),
+        );
+        assert_eq!(
+            output.status.code(),
+            Some(1),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            f.budget(|_| {})["uncertainDispatches"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(server.requests.lock().unwrap().len(), 1);
+        let requests = mcp.requests.lock().unwrap();
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|(_, v)| v["method"] == "tools/call")
+                .count(),
+            1
+        );
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|(_, v)| v["method"].is_null() && v.get("result").is_some())
+                .count(),
+            1
+        );
+        assert_eq!(ledger_rows(&f).len(), 1);
+        assert_eq!(ledger_rows(&f)[0]["totalTokens"], 16);
+        if stall {
+            let deadline = Instant::now() + Duration::from_secs(1);
+            while !mcp.events.lock().unwrap().contains(&"control_closed") {
+                assert!(Instant::now() < deadline, "control socket stayed open");
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+    }
+}
+
+#[test]
+fn cancellation_during_initialize_is_a_cancelled_not_dispatched_fact_and_reaps_the_server() {
+    let server = Server::new(vec![reply_tool("mcp__s__read_fact", json!({}))]);
+    let f = Fixture::new(&server);
+    registry(&f, "gate");
+    let mut child = OwnedChild(Some(f.command("exec", "p").spawn().unwrap()));
+    wait_file(&f, "mcp.ready");
+    rustix::process::kill_process(
+        rustix::process::Pid::from_raw(child.child().id() as i32).unwrap(),
+        rustix::process::Signal::TERM,
+    )
+    .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(6);
+    while child.child().try_wait().unwrap().is_none() {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(10));
+    }
+    let output = child.output();
+    assert_eq!(output.status.code(), Some(4));
+    let history = f.history();
+    let result = &history[1]["segments"][0]["result"];
+    assert_eq!(result["status"], "cancelled");
+    assert_eq!(result["evidence"]["dispatchOutcome"], "not_dispatched");
+    assert!(!f.root.path().join("mcp.effect").exists());
+    assert!(!requests(&f).iter().any(|v| v["method"] == "tools/call"));
+    assert_eq!(
+        f.budget(|_| {})["uncertainDispatches"]
+            .as_array()
+            .map_or(0, Vec::len),
+        0
+    );
+    let pid: u32 = std::fs::read_to_string(f.root.path().join("mcp.pid"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(
+        rustix::process::test_kill_process(rustix::process::Pid::from_raw(pid as i32).unwrap()),
+        Err(rustix::io::Errno::SRCH)
+    );
+    assert_eq!(ledger_rows(&f).len(), 1);
+    assert_eq!(ledger_rows(&f)[0]["totalTokens"], 16);
+}

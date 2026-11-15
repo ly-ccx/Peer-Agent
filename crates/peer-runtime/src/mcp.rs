@@ -34,6 +34,7 @@ struct WireState {
     bytes: usize,
     frames: usize,
     id: Value,
+    initialize_id: Value,
     result: Option<Value>,
     error: Option<&'static str>,
     protocol: Option<String>,
@@ -48,6 +49,7 @@ impl McpState {
                 bytes: 0,
                 frames: 0,
                 id: Value::Null,
+                initialize_id: Value::Null,
                 result: None,
                 error: None,
                 protocol: None,
@@ -55,6 +57,9 @@ impl McpState {
         })
     }
     fn begin(&self, v: &Value) {
+        if v["method"] == "initialize" {
+            self.inner.lock().unwrap().initialize_id = v["id"].clone();
+        }
         if v["method"] == "tools/call" {
             let mut s = self.inner.lock().unwrap();
             s.bytes = 0;
@@ -94,8 +99,15 @@ impl McpState {
             s.result = Some(v["result"].clone());
         }
         let message = serde_json::from_value(v.clone()).map_err(|_| "mcp_message_invalid")?;
-        if let Some(version) = v["result"]["protocolVersion"].as_str() {
-            s.protocol = Some(version.into());
+        if !s.initialize_id.is_null()
+            && v["id"] == s.initialize_id
+            && v.get("method").is_none()
+            && (v.get("result").is_some() || v.get("error").is_some())
+        {
+            if let Some(version) = v["result"]["protocolVersion"].as_str() {
+                s.protocol = Some(version.into());
+            }
+            s.initialize_id = Value::Null;
         }
         Ok(message)
     }
