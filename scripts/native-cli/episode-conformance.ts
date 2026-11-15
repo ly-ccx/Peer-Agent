@@ -9,6 +9,8 @@ import {createConversationStore} from '../../packages/conversation-store/src/ind
 import {projectConversationHistory} from '../../packages/runtime-core/src/conversation-history-projector.ts';
 import {createExecutionResources} from '../../packages/runtime-node/src/project-agent/execution-resources.mjs';
 import {Database} from 'bun:sqlite';
+import {createWorkCoordinationStore} from '../../packages/runtime-node/src/project-agent/work-coordination-store.mjs';
+import {spawnSync} from 'node:child_process';
 const output=resolve(process.argv[2]);assert.ok(existsSync(join(output,'.native-cli-fixture')));const roots=readFileSync(join(output,'roots.jsonl'),'utf8').trim().split('\n').map(s=>JSON.parse(s));let cases=0;
 for(const receipt of roots){const root=receipt.root;assert.ok(existsSync(join(root,'.native-cli-fixture')));const plans=createGoalPlanStore({storeDir:join(root,'goal-plans')});const conversations=createConversationStore({storeDir:join(root,'conversations')});
  const storage=createCoordinationStorageV2({directory:join(root,'project-runtime/w'),legacyFile:join(root,'project-runtime/w/coordination.jsonl'),assertOwner(){}});
@@ -30,5 +32,15 @@ for(const receipt of roots){const root=receipt.root;assert.ok(existsSync(join(ro
  for(const work of Object.values(state.works) as any[]){for(const pending of [...(work.budget?.uncertainDispatches||[]),...Object.values(work.budget?.attempts||{}).flatMap((a:any)=>a.pendingTools||[])]){assert.equal(pending.nativeRecorder.schemaVersion,1);assert.equal(pending.nativeRecorder.runtime,'peer-native');assert.ok(pending.dispatchId.startsWith('dispatch-'));assert.equal(pending.nativeRecorder.execution.planId,pending.planId||'p');cases++;}}
  if(receipt.case?.includes('crash_after_file')){assert.equal(state.works.work.budget.uncertainDispatches.length,1);assert.equal(state.works.work.budget.attempts && Object.keys(state.works.work.budget.attempts).length,0);assert.equal(plan.delegationOrigin.executionControl.phase,'reconciling');assert.equal(state.works.work2.budget.toolCalls,1);assert.equal(plans.getPlan('p2').status,'paused');cases++;}
  }finally{storage.close();}
+ // These roots were created by the actual native executable. Re-save each
+ // original Work through the current TS writer, including future opaque facts.
+ const writer=createWorkCoordinationStore({rootDir:join(root,'project-runtime'),workspaceId:'w',holdsLease:()=>true,leaseEpoch:()=> 'owned-fixture-roundtrip',formatVersion:2,fenceLegacyWrites:true});
+ let expected:any;
+ try{await writer.prepare();for(const work of Object.values(writer.read().works) as any[]){const budget=structuredClone(work.budget);writer.saveWork({...work,roundtrip:'current-ts-writer'});assert.deepEqual(writer.readWork(work.workId).budget,budget);cases++;}expected=writer.read();}
+ finally{writer.close();}
+ // All public test children have exited. Use the existing real Rust Host/Store
+ // fixture seam to re-read the TS write; it cannot dispatch models or tools.
+ const native=spawnSync(resolve('target/debug/examples/coordination-conformance'),[],{input:JSON.stringify({now:Date.now()+1_000_000}),encoding:'utf8',timeout:30000,env:{PATH:'/nonexistent',PEER_NATIVE_CONFORMANCE_ROOT:root}});
+ assert.equal(native.status,0,native.stderr);const read=JSON.parse(native.stdout);assert.equal(read.ok,true,JSON.stringify(read));assert.deepEqual(read.state,expected);cases++;
 }
 assert.ok(roots.length>=6);console.log(JSON.stringify({ok:true,roots:roots.length,cases,coverage:'Actual native exec -> current TS Goal/Conversation/canonical coordination, native recorder retention, pending/receipt history and later task; no model execution by TS.'}));

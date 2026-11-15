@@ -77,6 +77,8 @@ export type {
   ConversationLifetimeUsage,
   ProviderRequestUsage,
   RuntimeTurnUsage,
+  NativeRuntimeUsageSnapshot,
+  NativeUsageRecoveryProgress,
   UsageAmounts,
   UsageScope,
 } from './usage-accounting.ts';

@@ -30,13 +30,21 @@ impl NativeSessionHost {
                     .into_iter()
                     .flatten(),
             )
-            .filter(|r| r["planId"] == *plan);
+            .filter(|r| r["planId"] == *plan)
+            .map(|r| &r["nativeRecorder"])
+            .chain(
+                budget["nativeUsagePending"]
+                    .as_object()
+                    .into_iter()
+                    .flat_map(|m| m.values())
+                    .map(|r| &r["nativeRecorder"])
+                    .filter(|r| r["execution"]["planId"] == *plan),
+            );
         let mut recorder = None;
         for row in rows {
-            let Some(normalized) = normalize_native_episode_recorder(
-                &row["nativeRecorder"],
-                &current.resource.execution,
-            ) else {
+            let Some(normalized) =
+                normalize_native_episode_recorder(row, &current.resource.execution)
+            else {
                 return false;
             };
             let Ok(next) =
@@ -64,11 +72,14 @@ impl NativeSessionHost {
     ) -> Result<Value, HostError> {
         let at = super::episode_time();
         let current = self.current(plan, &at)?;
-        let existing = control(&current);
+        let mut existing = control(&current);
         if existing["phase"] == "settled" && existing["kind"] == "pause" {
             self.recover_execution_mirrors(plan, &at)?;
             self.persist_episode_pause(plan, &existing)?;
-            self.prepare_usage_ledger(cancel).await?;
+            self.settle_finished_recorders(&existing)?;
+            let intent = self.prepare_usage_ledger(cancel).await?;
+            let pending = self.recover_pending_usage(cancel).await?;
+            existing["usageLedgerRecovery"] = json!({"intent":intent,"pending":pending});
             return Ok(existing);
         }
         if !self.dead_native_episode(&current).await {
@@ -108,9 +119,10 @@ impl NativeSessionHost {
                 session: current.resource.execution.session_id.clone(),
                 native_recorder,
             };
-            budget.usage(self, None, &super::episode_time())?;
-            budget.finish(self, &super::episode_time())?;
+            budget.usage(self, None, None, &super::episode_time())?;
+            budget.finish(self, &super::episode_time(), None)?;
         }
+        self.settle_finished_recorders(&stop)?;
         if stop["phase"] == "settled" {
             self.persist_episode_pause(plan, &stop)?;
         }
@@ -135,7 +147,9 @@ impl NativeSessionHost {
             }
         }
         // Usage reconciliation follows actual execution stop, never blocks it.
-        let usage = self.prepare_usage_ledger(cancel).await?;
+        let intent = self.prepare_usage_ledger(cancel).await?;
+        let pending = self.recover_pending_usage(cancel).await?;
+        let usage = json!({"intent":intent,"pending":pending});
         Ok(
             json!({"control":stop,"reconciliation":evidence,"unknownRetained":true,"usageLedgerRecovery":usage}),
         )

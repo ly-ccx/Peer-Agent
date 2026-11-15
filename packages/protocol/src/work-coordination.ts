@@ -139,8 +139,14 @@ export interface ProjectWorkReceipt {
     readonly attempts: Readonly<Record<string, { readonly role: string; readonly requests?: number; readonly modelProviderId?: string;
       readonly checkpointRef?: string;
       readonly nativeRecorder?: NativeEpisodeRecorder;
+      /** Unvalidated stored snapshot; admit v1 before consuming billing facts. */
+      readonly nativeUsage?: unknown;
+      /** Loop admission ended; this is not a stop receipt. */
+      readonly nativeLoopFinished?: true;
       readonly pendingTools?: readonly { readonly toolCallId: string | null; readonly capabilityId: string | null; readonly verificationSessionId?: string; readonly nativeRecorder?: NativeEpisodeRecorder }[] }>>;
     readonly reconciledDispatches?: readonly VerificationDispatchReconciliation[];
+    /** Keep unknown/future records intact until a compatible billing owner acts. */
+    readonly nativeUsagePending?: Readonly<Record<string, { readonly snapshot: unknown; readonly nativeRecorder: unknown }>>;
     readonly settledDispatches?: readonly SettledDelegationDispatch[];
     readonly uncertainDispatches?: readonly { readonly attemptId: string; readonly role: string;
       readonly toolCallId: string | null; readonly capabilityId: string | null; readonly verificationSessionId?: string; readonly nativeRecorder?: NativeEpisodeRecorder }[];

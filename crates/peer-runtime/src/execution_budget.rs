@@ -132,6 +132,7 @@ impl EpisodeBudget {
         &self,
         host: &mut NativeSessionHost,
         usage: Option<&Value>,
+        native_usage: Option<&Value>,
         now: &str,
     ) -> Result<(), HostError> {
         self.change(host, now, false, |b| {
@@ -150,6 +151,16 @@ impl EpisodeBudget {
                 b["unknownUsage"] = json!(true)
             }
             b["unknownCost"] = json!(true);
+            if let Some(snapshot) = native_usage {
+                let attempt = &mut b["attempts"][&self.attempt];
+                if !attempt.is_object() {
+                    return Err(HostError("work_budget_host_unavailable"));
+                }
+                if let Some(previous) = attempt.get("nativeUsage") {
+                    Self::usage_advances(previous, snapshot, &self.work)?;
+                }
+                attempt["nativeUsage"] = snapshot.clone();
+            }
             Ok(())
         })
     }
@@ -203,12 +214,68 @@ impl EpisodeBudget {
             a["settledTools"].as_array_mut().unwrap().push(json!({"dispatchId":dispatch,"toolCallId":call,"outcome":if result["status"]=="denied"{"not_dispatched"}else if result["status"]=="cancelled"{"terminated"}else{"resulted"},"evidenceRefs":refs,"settledAt":now}));Ok(())
         })
     }
-    pub fn finish(&self, host: &mut NativeSessionHost, now: &str) -> Result<(), HostError> {
+    fn usage_advances(before: &Value, after: &Value, work: &str) -> Result<(), HostError> {
+        let workspace = after["attribution"]["workspaceId"].as_str().unwrap_or("");
+        let old = peer_protocol::normalize_native_usage_snapshot(before, work, workspace)
+            .ok_or(HostError("native_usage_snapshot_invalid"))?;
+        let next = peer_protocol::normalize_native_usage_snapshot(after, work, workspace)
+            .ok_or(HostError("native_usage_snapshot_invalid"))?;
+        if old.execution != next.execution
+            || old.conversation_id != next.conversation_id
+            || peer_protocol::approval_args_digest(&old.attribution).ok()
+                != peer_protocol::approval_args_digest(&next.attribution).ok()
+            || old.usage.provider_request_count > next.usage.provider_request_count
+            || [
+                old.usage.amounts.input_tokens,
+                old.usage.amounts.output_tokens,
+                old.usage.amounts.cache_read_tokens,
+                old.usage.amounts.cache_write_tokens,
+            ]
+            .into_iter()
+            .zip([
+                next.usage.amounts.input_tokens,
+                next.usage.amounts.output_tokens,
+                next.usage.amounts.cache_read_tokens,
+                next.usage.amounts.cache_write_tokens,
+            ])
+            .any(|(a, b)| a > b)
+        {
+            return Err(HostError("native_usage_snapshot_changed"));
+        }
+        Ok(())
+    }
+    pub fn finish(
+        &self,
+        host: &mut NativeSessionHost,
+        now: &str,
+        latest: Option<&Value>,
+    ) -> Result<(), HostError> {
         self.change(host, now, false, |b| {
-            let a = b["attempts"]
+            let mut a = b["attempts"]
                 .as_object_mut()
                 .and_then(|m| m.shift_remove(&self.attempt))
                 .unwrap_or(Value::Null);
+            if let Some(latest)=latest {
+                let prior=a.get("nativeUsage");
+                let usable=prior.is_none_or(|old|Self::usage_advances(old,latest,&self.work).is_ok());
+                if usable {
+                    let before=prior.and_then(|old|old["usage"]["totalTokens"].as_u64()).unwrap_or(0);
+                    let after=latest["usage"]["totalTokens"].as_u64().ok_or(HostError("native_usage_snapshot_invalid"))?;
+                    let delta=after.checked_sub(before).ok_or(HostError("native_usage_snapshot_changed"))?;
+                    b["tokens"]=json!(b["tokens"].as_u64().unwrap_or(0).checked_add(delta).filter(|n|*n<=9_007_199_254_740_991).ok_or(HostError("work_budget_limited"))?);
+                    if a.is_null(){a=json!({});}a["nativeUsage"]=latest.clone();
+                }
+            }
+            if let Some(snapshot)=a.get("nativeUsage") {
+                if !b["nativeUsagePending"].is_object(){
+                    if !b["nativeUsagePending"].is_null(){return Err(HostError("native_usage_snapshot_invalid"));}
+                    b["nativeUsagePending"]=json!({});
+                }
+                let record=json!({"snapshot":snapshot,"nativeRecorder":a.get("nativeRecorder").unwrap_or(&self.native_recorder)});
+                let old=&b["nativeUsagePending"][&self.attempt];
+                if !old.is_null() && peer_protocol::approval_args_digest(old).ok()!=peer_protocol::approval_args_digest(&record).ok(){return Err(HostError("native_usage_snapshot_changed"));}
+                b["nativeUsagePending"][&self.attempt]=record;
+            }
             if !b["uncertainDispatches"].is_array() {
                 b["uncertainDispatches"] = json!([])
             }
@@ -228,6 +295,13 @@ impl EpisodeBudget {
                     .ok_or(HostError("work_budget_invalid"))?;
                 b["dispatchReceipts"][id] = row.clone()
             }
+            // Keep original OS provenance across the finish -> stop window,
+            // including loops with no billable usage. Only a real stop receipt
+            // may remove this marker; pending tool effects remain elsewhere.
+            if a.is_null(){a=json!({"role":"work_session","planId":self.plan,"sessionId":self.session,"requests":0,"nativeRecorder":self.native_recorder});}
+            a.as_object_mut().ok_or(HostError("work_budget_invalid"))?.shift_remove("nativeUsage");
+            a["pendingTools"]=json!([]);a["settledTools"]=json!([]);a["nativeLoopFinished"]=json!(true);
+            b["attempts"][&self.attempt]=a;
             Ok(())
         })
     }

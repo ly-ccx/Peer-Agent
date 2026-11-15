@@ -22,6 +22,7 @@ pub trait PermissionInput {
         cancel: &'a CancellationToken,
     ) -> Pin<Box<dyn Future<Output = LocalPermissionDecision> + 'a>>;
 }
+
 pub struct EpisodeOutcome {
     pub status: &'static str,
     pub content: String,
@@ -52,7 +53,7 @@ impl NativeSessionHost {
         if max_turns == 0 || max_turns > 1000 {
             return Err(HostError("invalid_max_turns"));
         }
-        self.prepare_usage_ledger(cancel).await?;
+        self.prepare_episode_usage(cancel).await?;
         let current = self.current(plan_id, &now())?;
         let facts = &current.goal.facts;
         let origin = &facts["delegationOrigin"];
@@ -247,6 +248,10 @@ impl NativeSessionHost {
         let projection = providers.project()?;
         let stream = format!("native-{}", uuid::Uuid::new_v4());
         let usage_attribution = json!({"id":stream,"streamId":stream,"at":now(),"modelProviderId":origin["modelSelection"]["worker"]["modelProviderId"],"groupId":origin["modelSelection"]["worker"]["providerId"],"model":model.model_id(),"role":"work_session","workspaceId":current.resource.workspace_id});
+        let billing_scope = super::billing::BillingScope {
+            conversation: &conversation,
+            attribution: &usage_attribution,
+        };
         let mut usage_accounting = RuntimeUsageAccounting::default();
         let run=async {
             let mut count=0;let mut content=String::new();
@@ -268,7 +273,7 @@ impl NativeSessionHost {
                     observed=Some(super::billing::ModelObservation::capture(&result));
                     result
                 },&cancellation,cancel).await;
-                self.observe_model_usage(&budget,&mut usage_accounting,observed.unwrap_or_default())?;
+                self.observe_model_usage(&budget,&mut usage_accounting,observed.unwrap_or_default(),&billing_scope)?;
                 let turn=turn?.map_err(|error|HostError(error.code))?;
                 if !turn.content.is_empty(){self.append_episode_message(&conversation,&json!({"id":uuid::Uuid::new_v4().to_string(),"role":"assistant","content":turn.content,"createdAt":now(),"streamId":stream,"contextSnapshot":system["snapshot"],"requestFingerprint":turn.request_fingerprint}))?;content=turn.content;}
                 if turn.calls.is_empty(){return Ok(("replied",content,count))}
@@ -316,8 +321,15 @@ impl NativeSessionHost {
         }.await;
         // Completion owns the actual attempt. Stop drains its real handles;
         // errors leave canonical pending dispatches/unknown intact.
-        let finished = budget.finish(self, &now());
+        let latest_usage = billing_scope.snapshot(&budget, usage_accounting.snapshot().turn_total);
+        let finished = budget.finish(
+            self,
+            &now(),
+            latest_usage.as_ref().ok().and_then(Option::as_ref),
+        );
         attempt.finish();
+        #[cfg(feature = "test-fixtures")]
+        self.billing_crash_fixture("before_stop");
         // Stop is attempted before potentially long billing I/O; its failure
         // also must not discard an already observed provider charge.
         let stopped = async {
@@ -327,6 +339,7 @@ impl NativeSessionHost {
             self.drain_stop(plan_id, &operation, Duration::from_secs(5), &now())
                 .await?;
             let stop = self.settle_stop(plan_id, &operation, &now())?;
+            self.settle_finished_recorders(&stop)?;
             if stop["phase"] != "settled" {
                 return Err(HostError("execution_outcome_unknown"));
             }
@@ -334,6 +347,8 @@ impl NativeSessionHost {
             Ok(stop)
         }
         .await;
+        #[cfg(feature = "test-fixtures")]
+        self.billing_crash_fixture("before_ledger");
         let recorded = self
             .persist_turn_usage(
                 &conversation,
@@ -343,9 +358,15 @@ impl NativeSessionHost {
                 cancel,
             )
             .await;
+        let acknowledged = match &recorded {
+            Ok(Some(receipt)) => self.acknowledge_current_usage(&budget, receipt),
+            _ => Ok(()),
+        };
         let stop = stopped?;
         // Neither a budget-write error nor a billing-write error may skip stop.
         finished?;
+        latest_usage?;
+        acknowledged?;
         let lifetime_usage = recorded?.map(|receipt| receipt["lifetimeUsage"].clone());
         if cancel.is_cancelled() {
             return Err(HostError("CANCELLED"));
@@ -359,6 +380,14 @@ impl NativeSessionHost {
             usage: usage_accounting.snapshot(),
             lifetime_usage,
         })
+    }
+    #[cfg(feature = "test-fixtures")]
+    fn billing_crash_fixture(&self, point: &str) {
+        if std::env::var("PEER_NATIVE_BILLING_CRASH").ok().as_deref() == Some(point)
+            && self.home.join(".native-cli-fixture").is_file()
+        {
+            std::process::exit(77);
+        }
     }
     fn append_episode_message(&self, conversation: &str, message: &Value) -> Result<(), HostError> {
         let store = ConversationStore::new(&self.home);
@@ -394,7 +423,19 @@ impl NativeSessionHost {
         let mut tick = tokio::time::interval(Duration::from_secs(5));
         tick.tick().await;
         let mut cancelled = false;
-        let mut lost = false;
+        // Short consecutive operations must share the persisted heartbeat
+        // deadline; restarting a five-second timer per operation can starve it.
+        let at = milliseconds(&now())?;
+        let mut lost = !self.journal.lease().holds().unwrap_or(false)
+            || self.journal.lease().takeover_requested().unwrap_or(true);
+        if !lost
+            && at.saturating_sub(milliseconds(&self.journal.lease().record().heartbeat_at)?) >= 5000
+        {
+            lost = self.journal.heartbeat(at).is_err();
+        }
+        if lost {
+            owned.cancel();
+        }
         loop {
             tokio::select! {biased;r=&mut future=>{if lost{return Err(HostError("HOST_LEASE_LOST"))}return Ok(r)},_=external.cancelled(),if !cancelled=>{owned.cancel();cancelled=true},_=tick.tick()=>{if !self.journal.lease().holds().unwrap_or(false) || self.journal.lease().takeover_requested().unwrap_or(true) || self.journal.heartbeat(milliseconds(&now())?).is_err(){lost=true;owned.cancel()}}}
         }
@@ -468,5 +509,61 @@ impl NativeSessionHost {
                 Err(e) => Ok(EffectOutcome::failed(e.0)),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod heartbeat_tests {
+    use super::*;
+    use peer_store::{
+        AcquireLease, CoordinationStore, ExecutionResourceStore, HostIdentity, HostLeaseStore,
+        HostSurface,
+    };
+
+    #[tokio::test]
+    async fn immediately_ready_operation_renews_an_already_due_persisted_heartbeat() {
+        let root = tempfile::tempdir().unwrap();
+        ExecutionResourceStore::initialize(root.path(), None).unwrap();
+        let owner = HostIdentity::new(
+            "heartbeat-test",
+            HostSurface::Tui,
+            std::process::id(),
+            "test",
+        )
+        .unwrap();
+        let AcquireLease::Acquired { token, .. } = HostLeaseStore::new(root.path())
+            .acquire("workspace", &owner, 1000)
+            .unwrap()
+        else {
+            panic!("isolated lease held")
+        };
+        let before = token.record().heartbeat_at.clone();
+        let mut journal = CoordinationStore::new(token);
+        journal
+            .initialize(&crate::coordination::NativeCoordinationReducer, None)
+            .unwrap();
+        let mut host = NativeSessionHost::open(
+            root.path(),
+            journal,
+            crate::live_execution::ExecutionRegistry::default(),
+        )
+        .unwrap();
+        let cancel = CancellationToken::new();
+        assert_eq!(
+            host.wait_owned(async { 7 }, &cancel, &cancel)
+                .await
+                .unwrap(),
+            7
+        );
+        let record = HostLeaseStore::new(root.path())
+            .inspect("workspace")
+            .unwrap()
+            .unwrap();
+        assert_ne!(record.heartbeat_at, before);
+        assert_eq!(
+            record.heartbeat_at,
+            host.journal.lease().record().heartbeat_at
+        );
+        assert!(!cancel.is_cancelled());
     }
 }

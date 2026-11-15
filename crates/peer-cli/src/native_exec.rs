@@ -130,6 +130,15 @@ pub fn run(plan: &str, max_turns: usize, recover: bool) -> io::Result<CliExit> {
                 peer_tui::terminal_text(plan)
             )?;
             let hint = match e.0 {
+                "native_usage_snapshot_invalid"
+                | "native_usage_snapshot_changed"
+                | "native_usage_receipt_invalid"
+                | "native_usage_conversation_missing" => Some(
+                    "已观察用量的核对受阻，原始预算和账本已保留。recover --plan 会先核对真实停机，再核对用量；修复来源冲突前不能开始新的模型请求。",
+                ),
+                "native_usage_recovery_required" => Some(
+                    "本批已核对的用量已保存，仍有待核对记录。继续运行 recover --plan 完成后续批次。",
+                ),
                 "USAGE_LEDGER_INVALID"
                 | "USAGE_LEDGER_LIMIT"
                 | "USAGE_LEDGER_CONFLICT"

@@ -328,6 +328,45 @@ impl Fixture {
     fn run(&self) -> Output {
         self.command("exec", "p").output().unwrap()
     }
+    fn age_dead_lease(&self) {
+        let path = self.root.path().join("project-runtime/w/host.lease");
+        let mut lease = get(&path);
+        lease["heartbeatAt"] = json!(AT);
+        put(path, &lease);
+    }
+    fn budget(&self, change: impl FnOnce(&mut Value)) -> Value {
+        let identity = HostIdentity::new(
+            "fixture-inspection",
+            HostSurface::Tui,
+            std::process::id(),
+            "fixture",
+        )
+        .unwrap();
+        let AcquireLease::Acquired { token, .. } = HostLeaseStore::new(self.root.path())
+            .acquire("w", &identity, ms())
+            .unwrap()
+        else {
+            panic!("fixture lease held")
+        };
+        let mut journal = CoordinationStore::new(token);
+        let state = journal.read(&NativeCoordinationReducer, None).unwrap();
+        let mut work = state.state["works"]["work"].clone();
+        let before = work.clone();
+        change(&mut work["budget"]);
+        if work != before {
+            journal
+                .append(
+                    &state,
+                    &json!({"kind":"work","work":work}),
+                    ms(),
+                    &NativeCoordinationReducer,
+                    None,
+                )
+                .unwrap();
+        }
+        journal.into_lease().release().unwrap();
+        work["budget"].clone()
+    }
     fn history(&self) -> Vec<Value> {
         std::fs::read_to_string(self.root.path().join("conversations/c.jsonl"))
             .unwrap()
@@ -1671,6 +1710,12 @@ fn crash_after_file_effect_is_unknown_and_native_recovery_never_replays_it() {
         1
     );
     assert_eq!(server.requests.lock().unwrap().len(), 1);
+    assert_eq!(ledger_rows(&f).len(), 1);
+    assert_eq!(ledger_rows(&f)[0]["conversationId"], "c");
+    assert_eq!(ledger_rows(&f)[0]["totalTokens"], 16);
+    let budget = f.budget(|_| {});
+    assert_eq!(budget["nativeUsagePending"], json!({}));
+    assert_eq!(budget["attempts"], json!({}));
     assert_eq!(
         std::fs::read_to_string(f.root.path().join("workspace/uncertain.txt")).unwrap(),
         "effect before receipt"
@@ -1692,4 +1737,210 @@ fn crash_after_file_effect_is_unknown_and_native_recovery_never_replays_it() {
         old["delegationOrigin"]["executionControl"]["phase"],
         "reconciling"
     );
+}
+
+#[test]
+fn hard_exit_between_loop_finish_stop_and_billing_recovers_known_usage_once() {
+    for point in ["before_stop", "before_ledger"] {
+        for known in [true, false] {
+            let reply = if known {
+                reply_text("Observed before hard exit.")
+            } else {
+                format!(
+                    "data: {}\n\ndata: [DONE]\n\n",
+                    json!({"choices":[{"index":0,"delta":{"content":"No provider usage."},"finish_reason":"stop"}]})
+                )
+            };
+            let server = Server::new(vec![reply, reply_text("Later task.")]);
+            let f = Fixture::new(&server);
+            let output = f
+                .command("exec", "p")
+                .env("PEER_NATIVE_BILLING_CRASH", point)
+                .output()
+                .unwrap();
+            assert_eq!(
+                output.status.code(),
+                Some(77),
+                "{point} {known}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            f.age_dead_lease();
+            let budget = f.budget(|_| {});
+            let markers = budget["attempts"].as_object().unwrap();
+            assert_eq!(markers.len(), usize::from(point == "before_stop"));
+            assert!(markers.values().all(|a| a["nativeLoopFinished"] == true));
+            if known {
+                assert_eq!(budget["nativeUsagePending"].as_object().unwrap().len(), 1);
+            }
+            let output = f.command("recover", "p").output().unwrap();
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "{point} {known}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let budget = f.budget(|_| {});
+            assert_eq!(budget["attempts"], json!({}));
+            assert!(
+                budget["nativeUsagePending"]
+                    .as_object()
+                    .is_none_or(|m| m.is_empty())
+            );
+            if known {
+                assert_eq!(ledger_rows(&f).len(), 1);
+                assert_eq!(ledger_rows(&f)[0]["totalTokens"], 16);
+            } else {
+                assert!(!f.root.path().join("usage/requests.jsonl").exists());
+                assert_eq!(budget["unknownUsage"], true);
+            }
+            let retry = f.command("recover", "p").output().unwrap();
+            assert_eq!(retry.status.code(), Some(0));
+            assert_eq!(server.requests.lock().unwrap().len(), 1);
+            f.seed("p2", "c2", "s2", "work2", "epoch2");
+            let output = f.command("exec", "p2").output().unwrap();
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(ledger_rows(&f).len(), if known { 2 } else { 1 });
+        }
+    }
+}
+
+#[test]
+fn future_usage_snapshot_blocks_billing_after_real_stop_and_preserves_raw_facts() {
+    let server = Server::new(vec![reply_text("Known observation.")]);
+    let f = Fixture::new(&server);
+    let output = f
+        .command("exec", "p")
+        .env("PEER_NATIVE_BILLING_CRASH", "before_stop")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(77));
+    f.age_dead_lease();
+    let budget = f.budget(|b| {
+        let p = b["nativeUsagePending"]
+            .as_object_mut()
+            .unwrap()
+            .values_mut()
+            .next()
+            .unwrap();
+        p["snapshot"]["schemaVersion"] = json!(99);
+        p["snapshot"]["future"] = json!({"opaque":"preserve"});
+    });
+    let original = budget["nativeUsagePending"].clone();
+    let output = f.command("recover", "p").output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("native_usage_snapshot_invalid"));
+    assert_eq!(
+        get(f.root.path().join("goal-plans/p.json"))["status"],
+        "paused"
+    );
+    let budget = f.budget(|_| {});
+    assert_eq!(budget["attempts"], json!({}));
+    assert_eq!(budget["nativeUsagePending"], original);
+    assert!(!f.root.path().join("usage/requests.jsonl").exists());
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
+    f.seed("p2", "c2", "s2", "work2", "epoch2");
+    let output = f.command("exec", "p2").output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("native_usage_snapshot_invalid"));
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
+    assert_eq!(f.budget(|_| {})["nativeUsagePending"], original);
+}
+
+#[test]
+fn native_closed_loop_billing_facts_remain_canonical_until_recovered() {
+    let server = Server::new(vec![reply_text("Canonical observation before stop.")]);
+    let f = Fixture::new(&server);
+    let output = f
+        .command("exec", "p")
+        .env("PEER_NATIVE_BILLING_CRASH", "before_stop")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(77));
+    f.age_dead_lease();
+    let budget = f.budget(|_| {});
+    assert_eq!(budget["nativeUsagePending"].as_object().unwrap().len(), 1);
+    let attempt = budget["attempts"]
+        .as_object()
+        .unwrap()
+        .values()
+        .next()
+        .unwrap();
+    assert_eq!(attempt["nativeLoopFinished"], true);
+    assert_eq!(attempt["nativeRecorder"]["runtime"], "peer-native");
+    assert!(!f.root.path().join("usage/requests.jsonl").exists());
+}
+
+#[test]
+fn canonical_usage_recovery_is_bounded_and_later_batches_do_not_duplicate_charges() {
+    let server = Server::new(vec![reply_text("Known before interruption.")]);
+    let f = Fixture::new(&server);
+    let output = f
+        .command("exec", "p")
+        .env("PEER_NATIVE_BILLING_CRASH", "before_ledger")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(77));
+    f.age_dead_lease();
+    f.budget(|b| {
+        let raw = b["nativeUsagePending"]
+            .as_object()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap()
+            .clone();
+        b["nativeUsagePending"] = json!({});
+        for i in 0..65 {
+            let mut row = raw.clone();
+            let id = format!("fixture-batch-{i}");
+            row["snapshot"]["attribution"]["id"] = json!(id);
+            row["snapshot"]["attribution"]["streamId"] = json!(id);
+            b["nativeUsagePending"][format!("attempt-{i}")] = row;
+        }
+    });
+    for (settled, remaining) in [(64, 1), (1, 0), (0, 0)] {
+        let output = f.command("recover", "p").output().unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            result["facts"]["usageLedgerRecovery"]["pending"],
+            json!({"schemaVersion":1,"settled":settled,"remaining":remaining})
+        );
+        assert_eq!(
+            f.budget(|_| {})["nativeUsagePending"]
+                .as_object()
+                .unwrap()
+                .len(),
+            remaining as usize
+        );
+        assert_eq!(ledger_rows(&f).len(), 65 - remaining as usize);
+    }
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
+    // Recovery has no network deadline. Start a fresh bounded HTTP fixture for
+    // the later admission instead of consuming its 15 seconds while journaling.
+    let later_server = Server::new(vec![reply_text("Later task.")]);
+    let config = f.root.path().join("llm-providers.json");
+    let mut raw = get(&config);
+    raw["channels"][0]["baseUrl"] = json!(later_server.url);
+    put(&config, &raw);
+    f.seed("p2", "c2", "s2", "work2", "epoch2");
+    let output = f.command("exec", "p2").output().unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(ledger_rows(&f).len(), 66);
+    assert_eq!(later_server.requests.lock().unwrap().len(), 1);
 }

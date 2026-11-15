@@ -39,6 +39,7 @@ run('node', ['scripts/native-cli/check-boundaries.mjs']);
 run('cargo', ['fmt', '--all', '--check']);
 run('cargo', ['clippy', '--locked', '-p', 'peer-cli', '-p', 'peer-protocol', '-p', 'peer-tui', '-p', 'peer-store', '-p', 'peer-runtime', '--all-targets', '--features', 'peer-cli/test-fixtures,peer-store/test-fixtures', '--', '-D', 'warnings']);
 run('cargo', ['test', '--locked', '--workspace', '--all-targets', '--features', 'peer-cli/test-fixtures,peer-store/test-fixtures'],{PEER_NATIVE_P3_EVIDENCE_ROOT:episodes});
+run('cargo', ['build', '--locked', '-p', 'peer-runtime', '--features', 'peer-runtime/test-fixtures,peer-store/test-fixtures', '--example', 'coordination-conformance']);
 run('bun',['scripts/native-cli/episode-conformance.ts',episodes]);
 run('cargo', ['build', '--release', '--locked', '-p', 'peer-cli', '--bins', '--examples']);
 run('cargo', ['build', '--locked', '-p', 'peer-store', '--example', 'conformance']);
@@ -57,7 +58,6 @@ run('cargo', ['build', '--locked', '-p', 'peer-store', '--features', 'test-fixtu
 run('bun', ['scripts/native-cli/durable-conformance.ts', 'target/debug/examples/durable-conformance']);
 run('node', ['--test', 'packages/runtime-node/src/project-agent/approval-store.test.mjs']);
 run('node', ['--test', 'packages/runtime-node/src/goal-plan-evidence.native-lock.test.mjs', 'packages/runtime-node/src/goal-plan-store.desktop-preview-evidence.test.mjs', 'packages/runtime-node/src/goal-plan-store.ui-completion.test.mjs', 'packages/runtime-node/src/project-agent/tool-result-evidence-preview.test.mjs']);
-run('cargo', ['build', '--locked', '-p', 'peer-runtime', '--features', 'peer-runtime/test-fixtures,peer-store/test-fixtures', '--example', 'coordination-conformance']);
 run('bun', ['scripts/native-cli/coordination-conformance.ts', 'target/debug/examples/coordination-conformance']);
 run('bun', ['scripts/native-cli/kernel-store-conformance.ts', 'target/debug/examples/coordination-conformance']);
 run('cargo', ['build', '--locked', '-p', 'peer-runtime', '--features', 'test-fixtures', '--example', 'goal-conformance']);

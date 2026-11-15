@@ -4,7 +4,12 @@ mod coordination;
 mod usage;
 pub use usage::{ProviderRequestUsage, RuntimeTurnUsage, UsageAmounts, UsagePurpose};
 mod native_episode;
+mod native_usage;
 pub use native_episode::normalize_native_episode_recorder;
+pub use native_usage::{
+    NativeUsageRecoveryProgress, NativeUsageSnapshot, native_usage_recovery_batch_limit,
+    normalize_native_usage_snapshot,
+};
 mod evidence_refs;
 mod goal_facts;
 pub use coordination::CoordinationReducer;
