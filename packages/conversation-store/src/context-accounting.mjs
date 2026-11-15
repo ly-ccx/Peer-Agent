@@ -209,6 +209,3 @@ export function projectDurableContextSnapshot(snapshot, meta) {
     ...(usageBreakdown ? { usageBreakdown } : {}),
   };
 }
-
-
-
