@@ -14,10 +14,28 @@ export async function checkBotUserReceipt({ page, until, report, captureDirector
   await page.keyboard.press('Home');
   const latest = page.locator('.bot-thread-latest');
   await latest.waitFor();
-  assert.equal(await latest.evaluate(button => {
-    const thread = button.closest('.bot-thread-shell').querySelector('.bot-thread');
-    return button.getBoundingClientRect().top >= thread.getBoundingClientRect().bottom;
-  }), true, 'the return-to-latest action does not cover the reading viewport');
+  assert.deepEqual(await latest.evaluate(button => {
+    const shell = button.closest('.bot-thread-shell');
+    const thread = shell.querySelector('.bot-thread');
+    const composer = button.closest('.bot-convo')?.querySelector('.bot-composer');
+    const buttonRect = button.getBoundingClientRect();
+    const shellRect = shell.getBoundingClientRect();
+    const threadRect = thread.getBoundingClientRect();
+    const composerRect = composer?.getBoundingClientRect();
+    return {
+      position: getComputedStyle(button).position,
+      shellMatchesThreadBottom: Math.abs(threadRect.bottom - shellRect.bottom) <= 1,
+      insideShellHorizontally: buttonRect.left >= shellRect.left && buttonRect.right <= shellRect.right,
+      insideThreadBottom: buttonRect.top >= threadRect.top && buttonRect.bottom <= threadRect.bottom,
+      aboveComposer: !composerRect || buttonRect.bottom <= composerRect.top,
+    };
+  }), {
+    position: 'absolute',
+    shellMatchesThreadBottom: true,
+    insideShellHorizontally: true,
+    insideThreadBottom: true,
+    aboveComposer: true,
+  }, 'the return-to-latest button floats inside the thread shell without reserving a strip below the viewport');
   const initial = JSON.parse(readFileSync(commandFile, 'utf8'));
   const titles = ['入口样式收尾', '中断原因核查收尾', '设置按钮记录核对'];
   const sessions = titles.map((title, index) => ({ ...initial.sessions[0], sessionId: `receipt-task-${index}`,

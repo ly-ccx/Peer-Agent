@@ -1399,11 +1399,21 @@
   :is(.bot-reply-bar, .bot-quote-chip):not(:focus-visible) { outline: 1px solid ButtonText; outline-offset: -1px; }
   .bot-composer:focus-within { border-color: Highlight; }
   .bot-question .bot-card-actions button { border-color: ButtonText; }
+  .bot-thread-latest {
+    background: Canvas;
+    border-color: ButtonText;
+    color: ButtonText;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .bot-user.is-arriving .bot-user-content { animation: none; }
   .bot-composer { transition-duration: 1ms; }
+  .bot-thread-latest { transition-duration: 1ms; }
+  .bot-thread-latest:is(:hover, :active) { transform: translateX(-50%); }
 }
 
 .bot-attachment-preview { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 0; border: 0; color: inherit; background: transparent; text-align: start; cursor: pointer; }
