@@ -11,6 +11,7 @@ import {
   mergeBotSearch,
   readBotListWidth,
   retainSelectedId,
+  retainProfileReceipts,
   visibleBotList,
 } from './botListState';
 
@@ -82,8 +83,9 @@ export function useBotList(active = true) {
   const creatingRef = useRef(false);
   const catalogRef = useRef<readonly BotListItem[]>([]);
 
-  const replaceCatalog = useCallback((next: readonly BotListItem[]) => {
-    const sorted = reconcileFacts(catalogRef.current, sortReadyCatalog(next), row => row.workspaceId);
+  const replaceCatalog = useCallback((next: readonly BotListItem[], beforeRead?: readonly BotListItem[]) => {
+    const projected = beforeRead ? retainProfileReceipts(beforeRead, catalogRef.current, next) : next;
+    const sorted = reconcileFacts(catalogRef.current, sortReadyCatalog(projected), row => row.workspaceId);
     setOpenedId((current) => retainSelectedId(current, sorted));
     setHighlightedId((current) => retainSelectedId(current, sorted));
     // 思考强度保存后目录会再读一遍。事实没变就不要换列表引用，否则右侧档案会整棵重绘。
@@ -93,16 +95,18 @@ export function useBotList(active = true) {
   }, []);
 
   const reload = useCallback(async () => {
+    const beforeRead = catalogRef.current;
     const result = await clientApi.projectAgentList();
     if (!result?.ok) {
       setStatus(result?.code === 'PROJECT_AGENT_DISABLED' ? 'disabled' : 'error');
       return;
     }
-    replaceCatalog(result.items ?? []);
+    replaceCatalog(result.items ?? [], beforeRead);
     setStatus('ready');
   }, [replaceCatalog]);
 
   const updateProfile = useCallback((profile: BotProfile) => {
+    readBotDetails.invalidate(profile.workspaceId);
     replaceCatalog(catalogRef.current.map(item => item.workspaceId === profile.workspaceId ? { ...item, profile } : item));
   }, [replaceCatalog]);
 
@@ -112,13 +116,14 @@ export function useBotList(active = true) {
       return;
     }
     const updates = [];
+    const beforeRead = catalogRef.current;
     for (const workspaceId of workspaceIds) {
       const result = await readBotDetails(workspaceId);
       if (result?.ok && result.item) updates.push({ workspaceId, item: result.item });
       else if (result?.code === 'ARCHIVED' || result?.code === 'NOT_FOUND') updates.push({ workspaceId, item: null });
     }
     if (updates.length === 0) return;
-    replaceCatalog(applyBotRefresh(catalogRef.current, updates));
+    replaceCatalog(applyBotRefresh(catalogRef.current, updates), beforeRead);
   }, [reload, replaceCatalog]);
 
   useEffect(() => {

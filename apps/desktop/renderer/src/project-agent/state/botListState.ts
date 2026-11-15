@@ -90,6 +90,27 @@ export function mergeBotSearch(
   return sortBotList([...matches.values()]);
 }
 
+/** Keep a profile applied while this read was pending; other row facts can
+ * refresh. A subsequent read starts from that receipt and may replace it.
+ * Object identity is the local publication order, not a wall-clock revision. */
+export function retainProfileReceipts(
+  beforeRead: readonly BotListItem[],
+  current: readonly BotListItem[],
+  incoming: readonly BotListItem[],
+): BotListItem[] {
+  const before = new Map(beforeRead.map(item => [item.workspaceId, item.profile]));
+  const latest = new Map(current.map(item => [item.workspaceId, item.profile]));
+  const result = incoming.map(item => {
+    const profile = latest.get(item.workspaceId);
+    return profile && profile !== before.get(item.workspaceId) ? { ...item, profile } : item;
+  });
+  const received = new Set(incoming.map(item => item.workspaceId));
+  for (const item of current) {
+    if (!received.has(item.workspaceId) && item.profile !== before.get(item.workspaceId)) result.push(item);
+  }
+  return result;
+}
+
 /** 局部刷新：有新投影就替换或插入，空投影表示归档或消失。结果重新排序。 */
 export function applyBotRefresh(
   items: readonly BotListItem[],
