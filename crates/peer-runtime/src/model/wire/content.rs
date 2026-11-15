@@ -1,7 +1,7 @@
 use super::*;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 pub(super) fn stringified(v: &Value) -> Result<String, ModelError> {
-    peer_protocol::javascript_json_string(v).map_err(|_| ModelError("model_request_invalid"))
+    peer_protocol::javascript_json_string(v).map_err(|_| ModelError::new("model_request_invalid"))
 }
 pub(super) fn openai_content(v: &Value) -> Result<Value, ModelError> {
     let Some(parts) = v.as_array() else {
@@ -53,7 +53,7 @@ pub(super) fn anthropic_content(v: &Value) -> Result<Value, ModelError> {
                     } else {
                         let bytes = percent_encoding::percent_decode_str(payload)
                             .decode_utf8()
-                            .map_err(|_| ModelError("model_image_invalid"))?;
+                            .map_err(|_| ModelError::new("model_image_invalid"))?;
                         STANDARD.encode(bytes.as_bytes())
                     };
                     out.push(json!({"type":"image","source":{"type":"base64","media_type":mime,"data":data}}));

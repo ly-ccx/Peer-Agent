@@ -29,6 +29,7 @@ run('node', ['scripts/native-cli/usage-ledger-contract.mjs']);
 run('node', ['--test', 'packages/conversation-store/src/usage-ledger.test.mjs']);
 run('cargo', ['build', '--locked', '-p', 'peer-store', '--features', 'test-fixtures', '--example', 'usage-conformance']);
 run('node', ['scripts/native-cli/usage-ledger-conformance.mjs']);
+run('bun', ['scripts/native-cli/usage-ledger-conformance.mjs']);
 run('cargo', ['build', '--locked', '-p', 'peer-runtime', '--features', 'test-fixtures', '--example', 'instruction-conformance']);
 run('bun', ['scripts/native-cli/instruction-conformance.ts']);
 run('node', ['--test', 'packages/system-context/src/sources/project-instructions-unicode.test.mjs']);

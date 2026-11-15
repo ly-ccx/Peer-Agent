@@ -4,7 +4,7 @@ pub(super) struct Gemini {
     text: String,
     thought: String,
     calls: Vec<ModelToolCall>,
-    usage: Option<Value>,
+    pub(super) usage: Option<Value>,
     native: Vec<Value>,
     native_bytes: usize,
     pub done: bool,
@@ -16,20 +16,20 @@ impl Gemini {
             || v.get("error").is_some()
             || v["promptFeedback"].get("blockReason").is_some()
         {
-            return Err(ModelError("model_provider_error"));
+            return Err(ModelError::new("model_provider_error"));
         }
         if let Some(usage) = v.get("usageMetadata") {
             self.usage = Some(usage.clone());
         }
         let candidates = v["candidates"]
             .as_array()
-            .ok_or(ModelError("model_stream_invalid"))?;
+            .ok_or(ModelError::new("model_stream_invalid"))?;
         if candidates.len() > 1 {
-            return Err(ModelError("model_choices_unsupported"));
+            return Err(ModelError::new("model_choices_unsupported"));
         }
         if let Some(c) = candidates.first() {
             if c.get("index").is_some_and(|i| i != 0) {
-                return Err(ModelError("model_choices_unsupported"));
+                return Err(ModelError::new("model_choices_unsupported"));
             }
             if let Some(parts) = c["content"]["parts"].as_array() {
                 for part in parts {
@@ -46,7 +46,7 @@ impl Gemini {
                         self.remember(part)?;
                     } else if let Some(f) = part.get("functionCall") {
                         if self.calls.len() >= 32 {
-                            return Err(ModelError("model_tool_limit"));
+                            return Err(ModelError::new("model_tool_limit"));
                         }
                         self.calls.push(call(
                             name(&f["name"], 200)?,
@@ -57,7 +57,7 @@ impl Gemini {
                         )?);
                         self.remember(part)?;
                     } else {
-                        return Err(ModelError("model_block_unsupported"));
+                        return Err(ModelError::new("model_block_unsupported"));
                     }
                 }
             }
@@ -66,7 +66,7 @@ impl Gemini {
                 .filter(|r| *r != "FINISH_REASON_UNSPECIFIED")
             {
                 if reason != "STOP" {
-                    return Err(ModelError("model_stream_incomplete"));
+                    return Err(ModelError::new("model_stream_incomplete"));
                 }
                 self.done = true;
             }
@@ -75,7 +75,7 @@ impl Gemini {
     }
     pub fn finish(self, fingerprint: String) -> Result<ModelTurn, ModelError> {
         if !self.done {
-            return Err(ModelError("model_stream_incomplete"));
+            return Err(ModelError::new("model_stream_incomplete"));
         }
         let mut turn = finish(self.text, self.calls, self.usage, Wire::Gemini, fingerprint)?;
         turn.continuation =
@@ -89,10 +89,10 @@ impl Gemini {
     }
     fn remember(&mut self, part: &Value) -> Result<(), ModelError> {
         self.native_bytes += serde_json::to_vec(part)
-            .map_err(|_| ModelError("model_payload_invalid"))?
+            .map_err(|_| ModelError::new("model_payload_invalid"))?
             .len();
         if self.native.len() >= 128 || self.native_bytes > 512 * 1024 {
-            return Err(ModelError("model_continuation_limit"));
+            return Err(ModelError::new("model_continuation_limit"));
         }
         self.native.push(part.clone());
         Ok(())

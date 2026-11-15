@@ -12,31 +12,31 @@ pub(super) struct Responses {
     text: String,
     thought: String,
     items: BTreeMap<usize, Item>,
-    usage: Option<Value>,
+    pub(super) usage: Option<Value>,
     pub done: bool,
 }
 impl Responses {
     pub fn event(&mut self, v: &Value) -> Result<bool, ModelError> {
         match v["type"].as_str() {
             Some("response.failed" | "response.incomplete" | "error") => {
-                return Err(ModelError("model_provider_error"));
+                return Err(ModelError::new("model_provider_error"));
             }
             Some("response.output_text.delta") => append(&mut self.text, &v["delta"], 512 * 1024)?,
             Some("response.reasoning_summary_text.delta" | "response.reasoning_text.delta") => {
                 append(&mut self.thought, &v["delta"], 512 * 1024)?
             }
             Some("response.refusal.delta" | "response.refusal.done") => {
-                return Err(ModelError("model_provider_refused"));
+                return Err(ModelError::new("model_provider_refused"));
             }
             Some("response.output_item.added") if v["item"]["type"] == "function_call" => {
                 let i = index(v)?;
                 if self.items.len() >= 32 || self.items.contains_key(&i) {
-                    return Err(ModelError("model_tool_limit"));
+                    return Err(ModelError::new("model_tool_limit"));
                 }
                 let item = &v["item"];
                 let args = item["arguments"].as_str().unwrap_or("").to_owned();
                 if args.len() > 65536 {
-                    return Err(ModelError("model_tool_limit"));
+                    return Err(ModelError::new("model_tool_limit"));
                 }
                 self.items.insert(
                     i,
@@ -58,9 +58,9 @@ impl Responses {
                 if item.args
                     != v["arguments"]
                         .as_str()
-                        .ok_or(ModelError("model_arguments_invalid"))?
+                        .ok_or(ModelError::new("model_arguments_invalid"))?
                 {
-                    return Err(ModelError("model_arguments_invalid"));
+                    return Err(ModelError::new("model_arguments_invalid"));
                 }
             }
             Some("response.output_item.done") if v["item"]["type"] == "function_call" => {
@@ -71,18 +71,18 @@ impl Responses {
                     || final_item["name"] != item.name
                     || final_item["arguments"] != item.args
                 {
-                    return Err(ModelError("model_arguments_invalid"));
+                    return Err(ModelError::new("model_arguments_invalid"));
                 }
                 item.closed = true;
             }
             Some("response.completed") => {
                 let response = &v["response"];
                 if response["status"] != "completed" {
-                    return Err(ModelError("model_stream_incomplete"));
+                    return Err(ModelError::new("model_stream_incomplete"));
                 }
                 let output = response["output"]
                     .as_array()
-                    .ok_or(ModelError("model_stream_invalid"))?;
+                    .ok_or(ModelError::new("model_stream_invalid"))?;
                 let mut seen = HashSet::new();
                 let mut text = String::new();
                 for (i, final_item) in output.iter().enumerate() {
@@ -91,37 +91,37 @@ impl Responses {
                             let item = self
                                 .items
                                 .get(&i)
-                                .ok_or(ModelError("model_call_id_invalid"))?;
+                                .ok_or(ModelError::new("model_call_id_invalid"))?;
                             if !item.closed
                                 || final_item["id"] != item.id
                                 || final_item["call_id"] != item.call_id
                                 || final_item["name"] != item.name
                                 || final_item["arguments"] != item.args
                             {
-                                return Err(ModelError("model_arguments_invalid"));
+                                return Err(ModelError::new("model_arguments_invalid"));
                             }
                             seen.insert(i);
                         }
                         Some("message") => {
                             if final_item["role"] != "assistant" {
-                                return Err(ModelError("model_stream_invalid"));
+                                return Err(ModelError::new("model_stream_invalid"));
                             }
                             for part in final_item["content"]
                                 .as_array()
-                                .ok_or(ModelError("model_stream_invalid"))?
+                                .ok_or(ModelError::new("model_stream_invalid"))?
                             {
                                 if part["type"] != "output_text" {
-                                    return Err(ModelError("model_block_unsupported"));
+                                    return Err(ModelError::new("model_block_unsupported"));
                                 }
                                 append(&mut text, &part["text"], 512 * 1024)?;
                             }
                         }
                         Some("reasoning") => {}
-                        _ => return Err(ModelError("model_tool_type_unsupported")),
+                        _ => return Err(ModelError::new("model_tool_type_unsupported")),
                     }
                 }
                 if seen.len() != self.items.len() || text != self.text {
-                    return Err(ModelError("model_stream_incomplete"));
+                    return Err(ModelError::new("model_stream_incomplete"));
                 }
                 self.usage = response.get("usage").filter(|u| !u.is_null()).cloned();
                 self.done = true;
@@ -140,7 +140,7 @@ impl Responses {
                 | "response.reasoning_summary_text.done"
                 | "response.reasoning_text.done",
             ) => {}
-            _ => return Err(ModelError("model_event_unsupported")),
+            _ => return Err(ModelError::new("model_event_unsupported")),
         }
         Ok(self.done)
     }
@@ -148,24 +148,24 @@ impl Responses {
         self.items
             .get_mut(&i)
             .filter(|i| !i.closed)
-            .ok_or(ModelError("model_call_id_invalid"))
+            .ok_or(ModelError::new("model_call_id_invalid"))
     }
     fn item(&mut self, v: &Value) -> Result<&mut Item, ModelError> {
         let item = self.item_by_index(index(v)?)?;
         if v["item_id"] != item.id {
-            return Err(ModelError("model_call_id_invalid"));
+            return Err(ModelError::new("model_call_id_invalid"));
         }
         Ok(item)
     }
     pub fn finish(self, fingerprint: String) -> Result<ModelTurn, ModelError> {
         if !self.done {
-            return Err(ModelError("model_stream_incomplete"));
+            return Err(ModelError::new("model_stream_incomplete"));
         }
         let mut calls = Vec::new();
         let mut ids = HashSet::new();
         for item in self.items.into_values() {
             if !ids.insert(item.call_id) {
-                return Err(ModelError("model_call_id_invalid"));
+                return Err(ModelError::new("model_call_id_invalid"));
             }
             calls.push(call(item.name, &item.args)?);
         }
@@ -177,5 +177,5 @@ fn index(v: &Value) -> Result<usize, ModelError> {
         .as_u64()
         .filter(|i| *i < 128)
         .map(|i| i as usize)
-        .ok_or(ModelError("model_block_limit"))
+        .ok_or(ModelError::new("model_block_limit"))
 }

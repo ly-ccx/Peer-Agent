@@ -21,7 +21,7 @@ pub(super) struct Anthropic {
     blocks: BTreeMap<usize, Block>,
     closed: HashSet<usize>,
     text: String,
-    usage: Option<Value>,
+    pub(super) usage: Option<Value>,
     reason: Option<String>,
     started: bool,
     pub done: bool,
@@ -29,24 +29,24 @@ pub(super) struct Anthropic {
 impl Anthropic {
     pub fn event(&mut self, v: &Value) -> Result<bool, ModelError> {
         if v["type"] == "error" || v.get("error").is_some() {
-            return Err(ModelError("model_provider_error"));
+            return Err(ModelError::new("model_provider_error"));
         }
         match v["type"].as_str() {
             Some("ping") => {}
             Some("message_start") => {
                 if self.started || v["message"]["role"] != "assistant" {
-                    return Err(ModelError("model_stream_invalid"));
+                    return Err(ModelError::new("model_stream_invalid"));
                 }
                 self.started = true;
                 self.usage = v["message"].get("usage").filter(|u| !u.is_null()).cloned();
             }
             Some("content_block_start") => {
                 if !self.started || self.reason.is_some() {
-                    return Err(ModelError("model_stream_invalid"));
+                    return Err(ModelError::new("model_stream_invalid"));
                 }
                 let index = index(v)?;
                 if self.blocks.contains_key(&index) || index != self.blocks.len() {
-                    return Err(ModelError("model_stream_invalid"));
+                    return Err(ModelError::new("model_stream_invalid"));
                 }
                 let b = &v["content_block"];
                 let block = match b["type"].as_str() {
@@ -73,10 +73,10 @@ impl Anthropic {
                             .count()
                             >= 32
                         {
-                            return Err(ModelError("model_tool_limit"));
+                            return Err(ModelError::new("model_tool_limit"));
                         }
                         if !b["input"].is_object() {
-                            return Err(ModelError("model_arguments_invalid"));
+                            return Err(ModelError::new("model_arguments_invalid"));
                         }
                         Block::Tool {
                             id: name(&b["id"], 512)?,
@@ -85,19 +85,19 @@ impl Anthropic {
                             initial: b["input"].clone(),
                         }
                     }
-                    _ => return Err(ModelError("model_block_unsupported")),
+                    _ => return Err(ModelError::new("model_block_unsupported")),
                 };
                 self.blocks.insert(index, block);
             }
             Some("content_block_delta") => {
                 let index = index(v)?;
                 if self.closed.contains(&index) {
-                    return Err(ModelError("model_stream_invalid"));
+                    return Err(ModelError::new("model_stream_invalid"));
                 }
                 let block = self
                     .blocks
                     .get_mut(&index)
-                    .ok_or(ModelError("model_stream_invalid"))?;
+                    .ok_or(ModelError::new("model_stream_invalid"))?;
                 let d = &v["delta"];
                 match (block, d["type"].as_str()) {
                     (Block::Text, Some("text_delta")) => {
@@ -114,31 +114,33 @@ impl Anthropic {
                     {
                         append(args, &d["partial_json"], 65536)?
                     }
-                    _ => return Err(ModelError("model_stream_invalid")),
+                    _ => return Err(ModelError::new("model_stream_invalid")),
                 }
             }
             Some("content_block_stop") => {
                 let index = index(v)?;
                 if !self.blocks.contains_key(&index) || !self.closed.insert(index) {
-                    return Err(ModelError("model_stream_invalid"));
+                    return Err(ModelError::new("model_stream_invalid"));
                 }
             }
             Some("message_delta") => {
                 if !self.started || self.closed.len() != self.blocks.len() {
-                    return Err(ModelError("model_stream_invalid"));
+                    return Err(ModelError::new("model_stream_invalid"));
                 }
                 if let Some(reason) = v["delta"]["stop_reason"].as_str()
                     && self.reason.replace(reason.into()).is_some()
                 {
-                    return Err(ModelError("model_stream_invalid"));
+                    return Err(ModelError::new("model_stream_invalid"));
                 }
                 if let Some(usage) = v.get("usage").filter(|v| !v.is_null()) {
-                    let object = usage.as_object().ok_or(ModelError("model_usage_invalid"))?;
+                    let object = usage
+                        .as_object()
+                        .ok_or(ModelError::new("model_usage_invalid"))?;
                     let accumulated = self
                         .usage
                         .get_or_insert_with(|| serde_json::json!({}))
                         .as_object_mut()
-                        .ok_or(ModelError("model_usage_invalid"))?;
+                        .ok_or(ModelError::new("model_usage_invalid"))?;
                     for (key, val) in object {
                         accumulated.insert(key.clone(), val.clone());
                     }
@@ -152,17 +154,17 @@ impl Anthropic {
                         Some("end_turn" | "tool_use" | "stop_sequence")
                     )
                 {
-                    return Err(ModelError("model_stream_incomplete"));
+                    return Err(ModelError::new("model_stream_incomplete"));
                 }
                 self.done = true;
             }
-            _ => return Err(ModelError("model_event_unsupported")),
+            _ => return Err(ModelError::new("model_event_unsupported")),
         }
         Ok(self.done)
     }
     pub fn finish(self, fingerprint: String) -> Result<ModelTurn, ModelError> {
         if !self.done {
-            return Err(ModelError("model_stream_incomplete"));
+            return Err(ModelError::new("model_stream_incomplete"));
         }
         let mut calls = Vec::new();
         let mut blocks = Vec::new();
@@ -184,7 +186,7 @@ impl Anthropic {
             } = block
             {
                 if !ids.insert(id) {
-                    return Err(ModelError("model_call_id_invalid"));
+                    return Err(ModelError::new("model_call_id_invalid"));
                 }
                 calls.push(call(
                     name,
@@ -197,7 +199,7 @@ impl Anthropic {
             }
         }
         if (self.reason.as_deref() == Some("tool_use")) == calls.is_empty() {
-            return Err(ModelError("model_stream_invalid"));
+            return Err(ModelError::new("model_stream_invalid"));
         }
         let mut turn = finish(self.text, calls, self.usage, Wire::Anthropic, fingerprint)?;
         turn.continuation =
@@ -215,5 +217,5 @@ fn index(v: &Value) -> Result<usize, ModelError> {
         .as_u64()
         .filter(|i| *i < 128)
         .map(|i| i as usize)
-        .ok_or(ModelError("model_block_limit"))
+        .ok_or(ModelError::new("model_block_limit"))
 }

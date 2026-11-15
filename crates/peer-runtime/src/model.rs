@@ -7,9 +7,11 @@ use std::time::Duration;
 mod continuation;
 mod sse;
 pub use continuation::LiveHistory;
+mod error;
 mod sse_frame;
 mod stream;
 mod usage;
+pub use error::{ModelError, ModelRequestObservation};
 pub mod wire;
 pub struct NativeModel {
     client: reqwest::Client,
@@ -29,14 +31,6 @@ pub struct ModelConfig {
     pub wire: wire::Wire,
     pub generation: wire::GenerationOptions,
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ModelError(pub &'static str);
-impl std::fmt::Display for ModelError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.0)
-    }
-}
-impl std::error::Error for ModelError {}
 pub struct ModelToolCall {
     pub name: String,
     pub arguments: Value,
@@ -61,7 +55,7 @@ impl NativeModel {
         deadline: Duration,
     ) -> Result<Self, ModelError> {
         let endpoint = reqwest::Url::parse(&config.endpoint)
-            .map_err(|_| ModelError("model_endpoint_invalid"))?;
+            .map_err(|_| ModelError::new("model_endpoint_invalid"))?;
         if !matches!(endpoint.scheme(), "https" | "http")
             || endpoint.host_str().is_none()
             || !endpoint.username().is_empty()
@@ -76,7 +70,7 @@ impl NativeModel {
             || deadline.is_zero()
             || deadline > Duration::from_secs(600)
         {
-            return Err(ModelError("model_config_invalid"));
+            return Err(ModelError::new("model_config_invalid"));
         }
         let client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
@@ -86,7 +80,7 @@ impl NativeModel {
             .timeout(deadline)
             .pool_max_idle_per_host(1)
             .build()
-            .map_err(|_| ModelError("model_transport_unavailable"))?;
+            .map_err(|_| ModelError::new("model_transport_unavailable"))?;
         // A live cache cannot cross provider instances, even when two channels
         // share the same endpoint and model name with different credentials.
         let binding = uuid::Uuid::new_v4().to_string();
@@ -126,7 +120,7 @@ impl NativeModel {
             .flatten()
             .any(|m| m["content"].is_array())
         {
-            return Err(ModelError("native_model_images_unsupported"));
+            return Err(ModelError::new("native_model_images_unsupported"));
         }
         let mut messages = continuation::lower(history)?;
         live.apply(&self.binding, &mut messages);
@@ -144,7 +138,8 @@ impl NativeModel {
                 options: &self.generation,
             },
         )?;
-        let bytes = serde_json::to_vec(&body).map_err(|_| ModelError("model_request_invalid"))?;
+        let bytes =
+            serde_json::to_vec(&body).map_err(|_| ModelError::new("model_request_invalid"))?;
         let request_fingerprint = format!("{:x}", Sha256::digest(&bytes));
         let mut request = self
             .client
@@ -164,7 +159,7 @@ impl NativeModel {
                 },
             );
             let mut value = reqwest::header::HeaderValue::from_str(&bearer)
-                .map_err(|_| ModelError("model_credential_invalid"))?;
+                .map_err(|_| ModelError::new("model_credential_invalid"))?;
             value.set_sensitive(true);
             request = request.header(
                 match self.wire {
@@ -175,16 +170,18 @@ impl NativeModel {
                 value,
             )
         }
+        let mut stream = Some(stream::Stream::new(self.wire));
+        let mut final_observation = None;
         let read = async {
             let mut response = request.send().await.map_err(|e| {
                 if e.is_timeout() {
-                    ModelError("model_timeout")
+                    ModelError::new("model_timeout")
                 } else {
-                    ModelError("model_transport_failed")
+                    ModelError::new("model_transport_failed")
                 }
             })?;
             if !response.status().is_success() {
-                return Err(ModelError("model_http_rejected"));
+                return Err(ModelError::new("model_http_rejected"));
             }
             if !response
                 .headers()
@@ -192,27 +189,34 @@ impl NativeModel {
                 .and_then(|v| v.to_str().ok())
                 .is_some_and(|v| v.split(';').next() == Some("text/event-stream"))
             {
-                return Err(ModelError("model_content_type_invalid"));
+                return Err(ModelError::new("model_content_type_invalid"));
             }
-            let mut stream = stream::Stream::new(self.wire);
+            let decoder = stream.as_mut().expect("one request decoder");
             while let Some(chunk) = response
                 .chunk()
                 .await
-                .map_err(|_| ModelError("model_stream_interrupted"))?
+                .map_err(|_| ModelError::new("model_stream_interrupted"))?
             {
-                stream.push(&chunk)?;
-                if stream.terminal() {
+                decoder.push(&chunk)?;
+                if decoder.terminal() {
                     break;
                 }
             }
-            let mut turn = stream.finish(request_fingerprint)?;
+            final_observation = decoder.observed_usage();
+            let mut turn = stream
+                .take()
+                .expect("one request decoder")
+                .finish(request_fingerprint.clone())?;
             if let Some(c) = &mut turn.continuation {
                 c.binding = self.binding.clone();
                 c.text = turn.content.clone();
             }
             Ok(turn)
         };
-        tokio::select! {biased;_=cancel.cancelled()=>Err(ModelError("CANCELLED")),r=tokio::time::timeout(self.deadline,read)=>r.map_err(|_|ModelError("model_timeout"))?}
+        let result = tokio::select! {biased;_=cancel.cancelled()=>Err(ModelError::new("CANCELLED")),r=tokio::time::timeout(self.deadline,read)=>r.unwrap_or_else(|_|Err(ModelError::new("model_timeout")))};
+        let observation =
+            final_observation.or_else(|| stream.as_ref().and_then(stream::Stream::observed_usage));
+        result.map_err(|error| error.observed(request_fingerprint, observation))
     }
 }
 fn decode(bytes: &[u8], max: usize) -> Result<Value, ModelError> {
@@ -226,7 +230,7 @@ fn decode(bytes: &[u8], max: usize) -> Result<Value, ModelError> {
         },
     )
     .map(|v| v.value)
-    .map_err(|_| ModelError("model_payload_invalid"))
+    .map_err(|_| ModelError::new("model_payload_invalid"))
 }
 
 #[cfg(test)]

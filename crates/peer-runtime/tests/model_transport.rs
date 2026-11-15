@@ -17,10 +17,12 @@ fn server(
     String,
     tokio::sync::oneshot::Receiver<bool>,
     std::thread::JoinHandle<()>,
+    tokio::sync::oneshot::Receiver<Vec<u8>>,
 ) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let endpoint = format!("http://{}/chat/completions", listener.local_addr().unwrap());
     let (send, recv) = tokio::sync::oneshot::channel();
+    let (capture, captured) = tokio::sync::oneshot::channel();
     let thread = std::thread::spawn(move || {
         let (mut socket, _) = listener.accept().unwrap();
         socket
@@ -45,6 +47,7 @@ fn server(
         assert!(n < 32768);
         let mut body = vec![0; n];
         socket.read_exact(&mut body).unwrap();
+        let _ = capture.send(body);
         if let Some(response) = response {
             socket.write_all(response.as_bytes()).unwrap();
             let _ = send.send(true);
@@ -53,12 +56,12 @@ fn server(
             let _ = send.send(closed);
         }
     });
-    (endpoint, recv, thread)
+    (endpoint, recv, thread, captured)
 }
 #[tokio::test]
 async fn native_http_timeout_and_cancellation_close_the_actual_connection() {
     for cancel_request in [false, true] {
-        let (url, closed, thread) = server(None);
+        let (url, closed, thread, _) = server(None);
         let cancel = CancellationToken::new();
         let model = NativeModel::new(
             ModelConfig {
@@ -96,7 +99,7 @@ async fn native_http_timeout_and_cancellation_close_the_actual_connection() {
             Ok(_) => panic!("stalled HTTP must not succeed"),
         };
         assert_eq!(
-            error.0,
+            error.code,
             if cancel_request {
                 "CANCELLED"
             } else {
@@ -129,7 +132,7 @@ async fn provider_rejections_and_truncated_tool_streams_remain_errors() {
             "model_stream_incomplete",
         ),
     ] {
-        let (url, _, thread) = server(Some(response));
+        let (url, _, thread, _) = server(Some(response));
         let model = NativeModel::new(
             ModelConfig {
                 endpoint: url,
@@ -150,7 +153,49 @@ async fn provider_rejections_and_truncated_tool_streams_remain_errors() {
                 &CancellationToken::new(),
             )
             .await;
-        assert!(r.is_err_and(|e| e.0 == code));
+        assert!(r.is_err_and(|e| e.code == code));
         thread.join().unwrap();
     }
+}
+#[tokio::test]
+async fn terminal_error_observation_binds_usage_to_the_actual_sent_bytes() {
+    use sha2::{Digest, Sha256};
+    let body = "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n";
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let (url, _, thread, captured) = server(Some(response));
+    let model = NativeModel::new(
+        ModelConfig {
+            endpoint: url,
+            model: "model".into(),
+            provider: "openai".into(),
+            wire: Wire::Chat,
+            generation: GenerationOptions::default(),
+        },
+        None,
+        Duration::from_secs(2),
+    )
+    .unwrap();
+    let error = match model
+        .turn(
+            "context",
+            &json!({"messages":[{"role":"user","content":"same immutable request"}]}),
+            &json!([]),
+            &CancellationToken::new(),
+        )
+        .await
+    {
+        Err(e) => e,
+        Ok(_) => panic!("empty response cannot succeed"),
+    };
+    assert_eq!(error.code, "model_empty_response");
+    let observation = error.observation.unwrap();
+    assert_eq!(observation.usage.unwrap().total_tokens, 16);
+    assert_eq!(
+        observation.request_fingerprint,
+        format!("{:x}", Sha256::digest(captured.await.unwrap()))
+    );
+    thread.join().unwrap();
 }

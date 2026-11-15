@@ -7,6 +7,7 @@ import path from 'node:path';
 import { createConversationStore } from '../../packages/conversation-store/src/index.mjs';
 import { appendAuxiliaryUsageRecord } from '../../packages/conversation-store/src/usage-ledger.mjs';
 const binary=path.resolve(process.argv[2]??'target/debug/examples/usage-conformance');
+const peerRuntime={name:process.versions.bun?'bun':'node',version:process.versions.bun??process.version};
 const root=mkdtempSync(path.join(tmpdir(),'peer-native-ledger-conformance-'));let cases=0;
 const base={usage:{usageScope:'runtime_turn',providerRequestCount:3,inputTokens:100,outputTokens:20,cacheReadTokens:7,cacheWriteTokens:4,totalTokens:99999},
   attribution:{id:'turn-one',at:'2026-11-15T00:00:00.000Z',streamId:'stream-one',modelProviderId:'channel::模型😀',groupId:'channel',model:'模型😀',providerName:'供应商',estimatedCostUsd:0.03,role:'work_session',workspaceId:'workspace'}};
@@ -92,5 +93,5 @@ function asyncWriter(command,args,f){return new Promise((resolve,reject)=>{const
  assert.equal(native(f).ok,true);assert.equal(f.store.getConversation(f.id).runtimeTurnCount,1);next(f);cases++;console.log('ok real native/Node concurrent same-id writers (bounded contention may retry the billing identity)');
 }
 const digest=file=>createHash('sha256').update(readFileSync(file)).digest('hex');
-const receipt={cases,root,binarySha256:digest(binary),contractSha256:digest('packages/protocol/contracts/native-cli/usage-ledger-v1.json'),scope:'Actual TS/Rust/Node Store processes; owned synthetic roots; no personal state; exact original partial line bytes; controlled offline orphan-lock maintenance after observed child exit'};
+const receipt={cases,root,peerRuntime,binarySha256:digest(binary),contractSha256:digest('packages/protocol/contracts/native-cli/usage-ledger-v1.json'),scope:'Actual TS Store peer runtime and native Rust processes; owned synthetic roots; no personal state; exact original partial line bytes; controlled offline orphan-lock maintenance after observed child exit'};
 writeFileSync(path.join(root,'receipt.json'),JSON.stringify(receipt,null,2)+'\n');console.log(JSON.stringify(receipt));

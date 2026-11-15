@@ -8,7 +8,7 @@ use crate::{
     model::NativeModel,
     providers::{EffectFuture, EffectOutcome, PreparedEffect, ProviderRegistry},
     system_context::assemble_work_context,
-    usage_accounting::{RequestMetadata, RuntimeUsageAccounting, UsageSnapshot},
+    usage_accounting::{RuntimeUsageAccounting, UsageSnapshot},
 };
 use peer_store::{
     ConversationStore, EvidenceIndexStore, HostFileMaterialization, HostToolEvidence,
@@ -28,6 +28,7 @@ pub struct EpisodeOutcome {
     pub tool_calls: usize,
     pub stop: Value,
     pub usage: UsageSnapshot,
+    pub lifetime_usage: Option<Value>,
 }
 pub(crate) fn now() -> String {
     time::OffsetDateTime::now_utc()
@@ -51,6 +52,7 @@ impl NativeSessionHost {
         if max_turns == 0 || max_turns > 1000 {
             return Err(HostError("invalid_max_turns"));
         }
+        self.prepare_usage_ledger(cancel).await?;
         let current = self.current(plan_id, &now())?;
         let facts = &current.goal.facts;
         let origin = &facts["delegationOrigin"];
@@ -244,6 +246,7 @@ impl NativeSessionHost {
         let mut providers = ProviderRegistry::default();
         let projection = providers.project()?;
         let stream = format!("native-{}", uuid::Uuid::new_v4());
+        let usage_attribution = json!({"id":stream,"streamId":stream,"at":now(),"modelProviderId":origin["modelSelection"]["worker"]["modelProviderId"],"groupId":origin["modelSelection"]["worker"]["providerId"],"model":model.model_id(),"role":"work_session","workspaceId":current.resource.workspace_id});
         let mut usage_accounting = RuntimeUsageAccounting::default();
         let run=async {
             let mut count=0;let mut content=String::new();
@@ -259,12 +262,14 @@ impl NativeSessionHost {
                 if history.history.excluded_from_message_id.is_some(){return Err(HostError("native_execution_recovery_required"))}
                 let projected=project_history(&history.history.messages).map_err(HostError)?;
                 budget.request(self,&now())?;
-                let turn=self.wait_owned(model.turn_with_history(system["rendered"].as_str().unwrap(),&projected,&projection.definitions(),&live_history,&cancellation),&cancellation,cancel).await;
-                let turn=match turn{Ok(turn)=>turn,Err(e)=>{usage_accounting.observe(None,RequestMetadata::default()).map_err(HostError)?;return Err(e)}};
-                let turn=match turn{Ok(turn)=>turn,Err(e)=>{usage_accounting.observe(None,RequestMetadata::default()).map_err(HostError)?;budget.usage(self,None,&now())?;return Err(HostError(e.0))}};
-                let observed=turn.usage.as_ref().filter(|u|!u.is_null()).map(|u|serde_json::from_value(u.clone()).map_err(|_|HostError("native_usage_invalid"))).transpose()?;
-                usage_accounting.observe(observed,RequestMetadata {fingerprint:Some(&turn.request_fingerprint),..RequestMetadata::default()}).map_err(HostError)?;
-                budget.usage(self,turn.usage.as_ref(),&now())?;
+                let mut observed=None;
+                let turn=self.wait_owned(async {
+                    let result=model.turn_with_history(system["rendered"].as_str().unwrap(),&projected,&projection.definitions(),&live_history,&cancellation).await;
+                    observed=Some(super::billing::ModelObservation::capture(&result));
+                    result
+                },&cancellation,cancel).await;
+                self.observe_model_usage(&budget,&mut usage_accounting,observed.unwrap_or_default())?;
+                let turn=turn?.map_err(|error|HostError(error.code))?;
                 if !turn.content.is_empty(){self.append_episode_message(&conversation,&json!({"id":uuid::Uuid::new_v4().to_string(),"role":"assistant","content":turn.content,"createdAt":now(),"streamId":stream,"contextSnapshot":system["snapshot"],"requestFingerprint":turn.request_fingerprint}))?;content=turn.content;}
                 if turn.calls.is_empty(){return Ok(("replied",content,count))}
                 let mut completed_ids=Vec::new();
@@ -306,24 +311,44 @@ impl NativeSessionHost {
                 }
                 let committed=ConversationStore::new(&self.home).read_committed(&conversation,None,1024*1024)?;
                 let projected=project_history(&committed.history.messages).map_err(HostError)?;
-                live_history.remember(&projected,&completed_ids,turn.continuation).map_err(|e|HostError(e.0))?;
+                live_history.remember(&projected,&completed_ids,turn.continuation).map_err(|e|HostError(e.code))?;
             }Ok(("max_turns",content,count))
         }.await;
         // Completion owns the actual attempt. Stop drains its real handles;
         // errors leave canonical pending dispatches/unknown intact.
         let finished = budget.finish(self, &now());
         attempt.finish();
-        finished?;
-        let operation = format!("native-pause-{}", uuid::Uuid::new_v4());
-        self.begin_stop(plan_id, "pause", &operation, "host:native-exec", &now())
-            .await?;
-        self.drain_stop(plan_id, &operation, Duration::from_secs(5), &now())
-            .await?;
-        let stop = self.settle_stop(plan_id, &operation, &now())?;
-        if stop["phase"] == "settled" {
+        // Stop is attempted before potentially long billing I/O; its failure
+        // also must not discard an already observed provider charge.
+        let stopped = async {
+            let operation = format!("native-pause-{}", uuid::Uuid::new_v4());
+            self.begin_stop(plan_id, "pause", &operation, "host:native-exec", &now())
+                .await?;
+            self.drain_stop(plan_id, &operation, Duration::from_secs(5), &now())
+                .await?;
+            let stop = self.settle_stop(plan_id, &operation, &now())?;
+            if stop["phase"] != "settled" {
+                return Err(HostError("execution_outcome_unknown"));
+            }
             self.persist_episode_pause(plan_id, &stop)?;
-        } else {
-            return Err(HostError("execution_outcome_unknown"));
+            Ok(stop)
+        }
+        .await;
+        let recorded = self
+            .persist_turn_usage(
+                &conversation,
+                usage_accounting.snapshot().turn_total,
+                usage_attribution,
+                &cancellation,
+                cancel,
+            )
+            .await;
+        let stop = stopped?;
+        // Neither a budget-write error nor a billing-write error may skip stop.
+        finished?;
+        let lifetime_usage = recorded?.map(|receipt| receipt["lifetimeUsage"].clone());
+        if cancel.is_cancelled() {
+            return Err(HostError("CANCELLED"));
         }
         let (status, content, tool_calls) = run?;
         Ok(EpisodeOutcome {
@@ -332,6 +357,7 @@ impl NativeSessionHost {
             tool_calls,
             stop,
             usage: usage_accounting.snapshot(),
+            lifetime_usage,
         })
     }
     fn append_episode_message(&self, conversation: &str, message: &Value) -> Result<(), HostError> {
@@ -358,7 +384,7 @@ impl NativeSessionHost {
             .commit(GoalExecutionFact::ManagedPause(control), &now(), None)?;
         Ok(())
     }
-    async fn wait_owned<F: Future>(
+    pub(super) async fn wait_owned<F: Future>(
         &mut self,
         future: F,
         owned: &CancellationToken,

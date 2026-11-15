@@ -13,6 +13,7 @@ use peer_store::{
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 mod authority;
+mod billing;
 mod episode;
 pub(crate) use episode::now as episode_time;
 pub use episode::{EpisodeOutcome, PermissionInput};

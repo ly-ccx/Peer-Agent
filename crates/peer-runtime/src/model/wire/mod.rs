@@ -63,11 +63,11 @@ pub fn encode(wire: Wire, input: &WireInput<'_>) -> Result<Value, ModelError> {
         Wire::Gemini => gemini::encode(input)?,
     };
     if serde_json::to_vec(&body)
-        .map_err(|_| ModelError("model_request_invalid"))?
+        .map_err(|_| ModelError::new("model_request_invalid"))?
         .len()
         > 2 * 1024 * 1024
     {
-        return Err(ModelError("model_request_limit"));
+        return Err(ModelError::new("model_request_limit"));
     }
     Ok(body)
 }

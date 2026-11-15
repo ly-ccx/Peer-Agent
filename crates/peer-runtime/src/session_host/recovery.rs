@@ -68,6 +68,7 @@ impl NativeSessionHost {
         if existing["phase"] == "settled" && existing["kind"] == "pause" {
             self.recover_execution_mirrors(plan, &at)?;
             self.persist_episode_pause(plan, &existing)?;
+            self.prepare_usage_ledger(cancel).await?;
             return Ok(existing);
         }
         if !self.dead_native_episode(&current).await {
@@ -133,7 +134,11 @@ impl NativeSessionHost {
                 );
             }
         }
-        Ok(json!({"control":stop,"reconciliation":evidence,"unknownRetained":true}))
+        // Usage reconciliation follows actual execution stop, never blocks it.
+        let usage = self.prepare_usage_ledger(cancel).await?;
+        Ok(
+            json!({"control":stop,"reconciliation":evidence,"unknownRetained":true,"usageLedgerRecovery":usage}),
+        )
     }
 }
 pub(super) fn dispatch_scopes(current: &Current) -> Vec<peer_store::HostDispatchScopes> {

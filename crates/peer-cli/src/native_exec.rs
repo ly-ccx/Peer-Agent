@@ -108,7 +108,7 @@ pub fn run(plan: &str, max_turns: usize, recover: bool) -> io::Result<CliExit> {
             max_turns,
             &cancel,
         )
-        .await.map(|outcome|{let code=if outcome.status=="max_turns"{CliExit::MaxTurns}else{CliExit::Ok};(json!({"status":outcome.status,"content":outcome.content,"toolCalls":outcome.tool_calls,"goalAcceptance":"pending","stop":outcome.stop,"usage":outcome.usage.turn_total,"lastRequestUsage":outcome.usage.last_request}),code)})};
+        .await.map(|outcome|{let code=if outcome.status=="max_turns"{CliExit::MaxTurns}else{CliExit::Ok};(json!({"status":outcome.status,"content":outcome.content,"toolCalls":outcome.tool_calls,"goalAcceptance":"pending","stop":outcome.stop,"usage":outcome.usage.turn_total,"lastRequestUsage":outcome.usage.last_request,"lifetimeUsage":outcome.lifetime_usage}),code)})};
         watcher.abort();
         let _ = watcher.await;
         result
@@ -130,6 +130,12 @@ pub fn run(plan: &str, max_turns: usize, recover: bool) -> io::Result<CliExit> {
                 peer_tui::terminal_text(plan)
             )?;
             let hint = match e.0 {
+                "USAGE_LEDGER_INVALID"
+                | "USAGE_LEDGER_LIMIT"
+                | "USAGE_LEDGER_CONFLICT"
+                | "USAGE_LEDGER_COMMIT_UNCERTAIN" => Some(
+                    "用量账本校验未完成，原文件已保留。首次准入受阻时，修正账本后可重试同一任务；已停稳的回合使用 recover --plan 核对原提交。",
+                ),
                 "context_settings_invalid"
                 | "context_settings_schema_unsupported"
                 | "context_settings_changed"

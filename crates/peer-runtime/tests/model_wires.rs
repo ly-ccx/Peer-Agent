@@ -251,7 +251,7 @@ async fn native_helper_credentials_use_each_wire_auth_header_without_exposing_th
         model
             .turn("context", &json!({"messages":[]}), &json!([]), &cancel)
             .await
-            .is_err_and(|e| e.0 == "model_credential_invalid")
+            .is_err_and(|e| e.code == "model_credential_invalid")
     );
     assert!(
         listener

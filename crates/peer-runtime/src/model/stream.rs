@@ -21,6 +21,24 @@ enum Decoder {
     Gemini(gemini::Gemini),
 }
 impl Stream {
+    /// A complete normalized usage observation is useful even when response
+    /// validation fails. This never exposes partially validated tool intent.
+    pub fn observed_usage(&self) -> Option<peer_protocol::UsageAmounts> {
+        let (wire, raw) = match self {
+            Self::Chat(s) => (Wire::Chat, s.usage.as_ref()),
+            Self::Other(s) => match &s.decoder {
+                Decoder::Anthropic(d) => (Wire::Anthropic, d.usage.as_ref()),
+                Decoder::Responses(d) => (Wire::Responses, d.usage.as_ref()),
+                Decoder::Gemini(d) => (Wire::Gemini, d.usage.as_ref()),
+            },
+        };
+        let normalized = super::usage::normalize(wire, raw?).ok()?;
+        if normalized.is_null() {
+            None
+        } else {
+            serde_json::from_value(normalized).ok()
+        }
+    }
     pub fn new(wire: Wire) -> Self {
         let decoder = match wire {
             Wire::Chat => return Self::Chat(Box::default()),
@@ -64,7 +82,7 @@ impl Stream {
             Self::Chat(s) => s.finish(fingerprint),
             Self::Other(s) => {
                 if !s.frames.complete() {
-                    return Err(ModelError("model_stream_incomplete"));
+                    return Err(ModelError::new("model_stream_incomplete"));
                 }
                 match s.decoder {
                     Decoder::Anthropic(d) => d.finish(fingerprint),
@@ -76,9 +94,11 @@ impl Stream {
     }
 }
 fn append(target: &mut String, value: &Value, limit: usize) -> Result<(), ModelError> {
-    let part = value.as_str().ok_or(ModelError("model_stream_invalid"))?;
+    let part = value
+        .as_str()
+        .ok_or(ModelError::new("model_stream_invalid"))?;
     if target.len() + part.len() > limit {
-        return Err(ModelError("model_response_limit"));
+        return Err(ModelError::new("model_response_limit"));
     }
     target.push_str(part);
     Ok(())
@@ -88,12 +108,12 @@ fn name(value: &Value, limit: usize) -> Result<String, ModelError> {
         .as_str()
         .filter(|s| !s.is_empty() && s.len() <= limit)
         .map(str::to_owned)
-        .ok_or(ModelError("model_call_id_invalid"))
+        .ok_or(ModelError::new("model_call_id_invalid"))
 }
 fn call(name: String, args: &str) -> Result<ModelToolCall, ModelError> {
     let arguments = decode(args.as_bytes(), 65536)?;
     if !arguments.is_object() {
-        return Err(ModelError("model_arguments_invalid"));
+        return Err(ModelError::new("model_arguments_invalid"));
     }
     Ok(ModelToolCall { name, arguments })
 }
@@ -105,7 +125,7 @@ fn finish(
     fingerprint: String,
 ) -> Result<ModelTurn, ModelError> {
     if calls.is_empty() && text.trim().is_empty() {
-        return Err(ModelError("model_empty_response"));
+        return Err(ModelError::new("model_empty_response"));
     }
     Ok(ModelTurn {
         content: text,
@@ -153,8 +173,13 @@ mod tests {
             assert!(!stream.terminal());
             assert!(matches!(
                 stream.finish(String::new()),
-                Err(ModelError("model_stream_incomplete"))
-                    | Err(ModelError("model_empty_response"))
+                Err(ModelError {
+                    code: "model_stream_incomplete",
+                    ..
+                }) | Err(ModelError {
+                    code: "model_empty_response",
+                    ..
+                })
             ));
         }
     }

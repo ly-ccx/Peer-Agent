@@ -7,7 +7,7 @@ fn count(v: Option<&Value>) -> Result<u64, ModelError> {
         Some(v) => v
             .as_u64()
             .filter(|n| *n <= 9_007_199_254_740_991)
-            .ok_or(ModelError("model_usage_invalid")),
+            .ok_or(ModelError::new("model_usage_invalid")),
     }
 }
 fn first_count(v: &Value, keys: &[&str]) -> Result<u64, ModelError> {
@@ -20,7 +20,7 @@ fn first_count(v: &Value, keys: &[&str]) -> Result<u64, ModelError> {
 }
 pub(super) fn normalize(wire: Wire, v: &Value) -> Result<Value, ModelError> {
     if !v.is_object() {
-        return Err(ModelError("model_usage_invalid"));
+        return Err(ModelError::new("model_usage_invalid"));
     }
     let present = |keys: &[&str]| keys.iter().any(|k| v.get(*k).is_some_and(|n| !n.is_null()));
     let complete = match wire {
@@ -75,10 +75,10 @@ pub(super) fn normalize(wire: Wire, v: &Value) -> Result<Value, ModelError> {
                 count(v.get("promptTokenCount"))?
                     .saturating_sub(cache)
                     .checked_add(count(v.get("toolUsePromptTokenCount"))?)
-                    .ok_or(ModelError("model_usage_invalid"))?,
+                    .ok_or(ModelError::new("model_usage_invalid"))?,
                 count(v.get("candidatesTokenCount"))?
                     .checked_add(count(v.get("thoughtsTokenCount"))?)
-                    .ok_or(ModelError("model_usage_invalid"))?,
+                    .ok_or(ModelError::new("model_usage_invalid"))?,
                 cache,
                 None,
             )
@@ -94,7 +94,7 @@ pub(super) fn normalize(wire: Wire, v: &Value) -> Result<Value, ModelError> {
         .try_fold(0u64, |a, b| {
             a.checked_add(b).filter(|n| *n <= 9_007_199_254_740_991)
         })
-        .ok_or(ModelError("model_usage_invalid"))?;
+        .ok_or(ModelError::new("model_usage_invalid"))?;
     let mut out = json!({"inputTokens":input,"outputTokens":output,"cacheReadTokens":cache,"totalTokens":total});
     if let Some(w) = write {
         out["cacheWriteTokens"] = w.into();

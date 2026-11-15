@@ -18,14 +18,14 @@ impl Frames {
         self.bytes = self
             .bytes
             .checked_add(chunk.len())
-            .ok_or(ModelError("model_response_limit"))?;
+            .ok_or(ModelError::new("model_response_limit"))?;
         if self.bytes > 8 * 1024 * 1024 {
-            return Err(ModelError("model_response_limit"));
+            return Err(ModelError::new("model_response_limit"));
         }
         for b in chunk {
             if *b != b'\n' {
                 if self.line.len() >= 1024 * 1024 {
-                    return Err(ModelError("model_event_limit"));
+                    return Err(ModelError::new("model_event_limit"));
                 }
                 self.line.push(*b);
                 continue;
@@ -46,7 +46,7 @@ impl Frames {
             if let Some(data) = self.line.strip_prefix(b"data:") {
                 let data = data.strip_prefix(b" ").unwrap_or(data);
                 if self.event.len() + data.len() + 1 > 1024 * 1024 {
-                    return Err(ModelError("model_event_limit"));
+                    return Err(ModelError::new("model_event_limit"));
                 }
                 if !self.event.is_empty() {
                     self.event.push(b'\n');

@@ -109,7 +109,7 @@ pub async fn execute_plan(
         cancel,
     )
     .await
-    .map_err(|e| HostError(e.0))?;
+    .map_err(|e| HostError(e.code))?;
     if cancel.is_cancelled() {
         return Err(HostError("CANCELLED"));
     }

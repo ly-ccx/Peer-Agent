@@ -6,7 +6,13 @@ use peer_protocol::{
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::{fs, io::Read, path::Path, sync::atomic::AtomicBool, time::Duration};
+use std::{
+    fs,
+    io::Read,
+    path::{Path, PathBuf},
+    sync::atomic::AtomicBool,
+    time::Duration,
+};
 
 #[path = "usage_ledger_contract.generated.rs"]
 mod contract;
@@ -212,6 +218,9 @@ fn fault(_transaction: &Path, _step: &str) -> Result<()> {
                 return Err(StoreError::UsageCommitUncertain);
             }
             Some(value) if value == format!("crash:{_step}") => std::process::exit(77),
+            Some(value) if value == format!("hold:{_step}") => {
+                std::thread::sleep(Duration::from_secs(6))
+            }
             _ => (),
         }
     }
@@ -406,7 +415,70 @@ fn uncertain(error: StoreError) -> StoreError {
     }
 }
 
+/// One lock owner for recording and recovery; callers cannot change lock order.
+struct UsageFiles {
+    ledger: PathBuf,
+    index: PathBuf,
+    intent: PathBuf,
+    _locks: [DirectoryLock; 3],
+}
+impl UsageFiles {
+    fn open(store: &ConversationStore, cancel: Option<&AtomicBool>) -> Result<Self> {
+        log::check_cancel(cancel)?;
+        let directory = log::directory(&store.directory)?;
+        let usage = log::directory(&directory.parent().ok_or_else(invalid)?.join("usage"))?;
+        let ledger = usage.join("requests.jsonl");
+        let index = directory.join("index.jsonl");
+        let intent = directory.join(INTENT_FILE);
+        let locks = [
+            DirectoryLock::acquire(&index, Duration::from_millis(100), cancel)?,
+            DirectoryLock::acquire(&intent, Duration::from_millis(100), cancel)?,
+            DirectoryLock::acquire(&ledger, Duration::from_millis(100), cancel)?,
+        ];
+        Ok(Self {
+            ledger,
+            index,
+            intent,
+            _locks: locks,
+        })
+    }
+    fn load(&self, cancel: Option<&AtomicBool>) -> Result<(Vec<Value>, Option<Value>)> {
+        let mut rows = log::read(&self.index, cancel)?;
+        let recovered = if let Some(bytes) = files::read(&self.intent, INTENT_BYTES)? {
+            let mut intent = decode(&bytes, INTENT_BYTES)?;
+            recover(
+                &self.intent,
+                &self.ledger,
+                &self.index,
+                LEDGER_RELATIVE,
+                &mut rows,
+                &mut intent,
+            )
+            .map_err(uncertain)?;
+            let pos = position(
+                &rows,
+                intent["conversationId"].as_str().ok_or_else(invalid)?,
+            )?
+            .ok_or(StoreError::UsageConflict)?;
+            Some(json!({"lifetimeUsage":lifetime(&rows[pos])?,"ledgerRow":intent["ledgerRow"]}))
+        } else {
+            None
+        };
+        Ok((rows, recovered))
+    }
+}
+
 impl ConversationStore {
+    /// Reconcile only an existing intent; never synthesize a turn or replay a
+    /// model/tool. Also verifies a complete readable ledger before new dispatch.
+    pub fn recover_runtime_usage(&self, cancel: Option<&AtomicBool>) -> Result<Option<Value>> {
+        let files = UsageFiles::open(self, cancel)?;
+        let (_, recovered) = files.load(cancel)?;
+        if !scan(&files.ledger, "", "", 0, cancel)?.tail.is_empty() {
+            return Err(invalid());
+        }
+        Ok(recovered)
+    }
     /// A completed/errored turn's known usage; duplicates return the original row.
     /// Before the intent, cancellation is safe. After it, finish or retain recovery.
     pub fn record_runtime_turn_usage(
@@ -420,32 +492,11 @@ impl ConversationStore {
             return Err(StoreError::InvalidInput);
         }
         let row = row(id, usage, attribution)?;
-        log::check_cancel(cancel)?;
-        let directory = log::directory(&self.directory)?;
-        let usage_dir = log::directory(&directory.parent().ok_or_else(invalid)?.join("usage"))?;
-        let ledger = usage_dir.join("requests.jsonl");
-        let index_file = directory.join("index.jsonl");
-        let transaction = directory.join(INTENT_FILE);
-        let _index_lock = DirectoryLock::acquire(&index_file, Duration::from_millis(100), cancel)?;
-        let _intent_lock =
-            DirectoryLock::acquire(&transaction, Duration::from_millis(100), cancel)?;
-        let _ledger_lock = DirectoryLock::acquire(&ledger, Duration::from_millis(100), cancel)?;
-        let mut rows = log::read(&index_file, cancel)?;
-        if let Some(bytes) = files::read(&transaction, INTENT_BYTES)? {
-            let mut intent = decode(&bytes, INTENT_BYTES)?;
-            recover(
-                &transaction,
-                &ledger,
-                &index_file,
-                LEDGER_RELATIVE,
-                &mut rows,
-                &mut intent,
-            )
-            .map_err(uncertain)?;
-            rows = log::read(&index_file, cancel)?;
-        }
+        let held = UsageFiles::open(self, cancel)?;
+        let (mut rows, _) = held.load(cancel)?;
+        let (ledger, index_file, transaction) = (&held.ledger, &held.index, &held.intent);
         let s = scan(
-            &ledger,
+            ledger,
             id,
             row["id"].as_str().ok_or_else(invalid)?,
             0,
@@ -496,12 +547,12 @@ impl ConversationStore {
         let mut intent = json!({"schemaVersion":SCHEMA_VERSION,"ledgerRelative":LEDGER_RELATIVE,"conversationId":id,"before":counters(&rows[pos]),"after":next(&rows[pos],&row)?,"ledgerRow":row,"ledgerLine":ledger_line,"prefixBytes":s.length,"prefixSha256":s.sha256});
         let encoded = encode(&intent, INTENT_BYTES)?;
         log::check_cancel(cancel)?;
-        log::replace(&transaction, &encoded, cancel)?;
-        fault(&transaction, "after_intent")?;
+        log::replace(transaction, &encoded, cancel)?;
+        fault(transaction, "after_intent")?;
         recover(
-            &transaction,
-            &ledger,
-            &index_file,
+            transaction,
+            ledger,
+            index_file,
             LEDGER_RELATIVE,
             &mut rows,
             &mut intent,

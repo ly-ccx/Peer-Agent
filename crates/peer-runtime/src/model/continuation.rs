@@ -25,7 +25,7 @@ pub(super) fn lower(history: &Value) -> Result<Vec<Value>, ModelError> {
     let mut out = Vec::new();
     for message in history["messages"]
         .as_array()
-        .ok_or(ModelError("history_projection_invalid"))?
+        .ok_or(ModelError::new("history_projection_invalid"))?
     {
         let mut m = json!({"role":message["role"],"content":message["content"]});
         if let Some(id) = message.get("toolCallId") {
@@ -59,7 +59,7 @@ impl LiveHistory {
         let mut start = messages
             .iter()
             .position(|m| m["role"] == "assistant" && m["tool_calls"][0]["id"] == ids[0])
-            .ok_or(ModelError("model_continuation_identity_changed"))?;
+            .ok_or(ModelError::new("model_continuation_identity_changed"))?;
         if !peer_protocol::javascript_trim(&continuation.text).is_empty() {
             let expected = crate::canonical_history::sanitize_assistant(&continuation.text);
             if start == 0
@@ -67,14 +67,14 @@ impl LiveHistory {
                 || messages[start - 1]["content"] != expected
                 || !messages[start - 1]["tool_calls"].is_null()
             {
-                return Err(ModelError("model_continuation_identity_changed"));
+                return Err(ModelError::new("model_continuation_identity_changed"));
             }
             start -= 1;
         }
         let end = messages
             .iter()
             .rposition(|m| m["role"] == "tool" && m["tool_call_id"] == *ids.last().unwrap())
-            .ok_or(ModelError("model_continuation_identity_changed"))?;
+            .ok_or(ModelError::new("model_continuation_identity_changed"))?;
         let canonical = messages[start..=end].to_vec();
         let mut calls = Vec::new();
         let mut results = Vec::new();
@@ -87,7 +87,7 @@ impl LiveHistory {
             } else if m["role"] == "assistant" && m["content"].is_string() && text.is_null() {
                 text = m["content"].clone();
             } else {
-                return Err(ModelError("model_continuation_identity_changed"));
+                return Err(ModelError::new("model_continuation_identity_changed"));
             }
         }
         if calls
@@ -99,7 +99,7 @@ impl LiveHistory {
                 .map(|c| c["tool_call_id"].as_str().unwrap_or(""))
                 .ne(ids.iter().map(String::as_str))
         {
-            return Err(ModelError("model_continuation_identity_changed"));
+            return Err(ModelError::new("model_continuation_identity_changed"));
         }
         let mut assistant = json!({"role":"assistant","content":text,"tool_calls":calls});
         match continuation.wire {
@@ -116,19 +116,19 @@ impl LiveHistory {
             Wire::Chat => {
                 assistant["reasoning_content"] = continuation.blocks[0]["reasoning_content"].clone()
             }
-            Wire::Responses => return Err(ModelError("model_continuation_wire_invalid")),
+            Wire::Responses => return Err(ModelError::new("model_continuation_wire_invalid")),
         }
         let mut replacement = vec![assistant];
         replacement.extend(results);
         let bytes = serde_json::to_vec(&canonical)
-            .map_err(|_| ModelError("model_continuation_invalid"))?
+            .map_err(|_| ModelError::new("model_continuation_invalid"))?
             .len()
             + serde_json::to_vec(&replacement)
-                .map_err(|_| ModelError("model_continuation_invalid"))?
+                .map_err(|_| ModelError::new("model_continuation_invalid"))?
                 .len();
         // Evicted history uses the ordinary historical-context encoder.
         if bytes > 1024 * 1024 {
-            return Err(ModelError("model_continuation_limit"));
+            return Err(ModelError::new("model_continuation_limit"));
         }
         while self.bytes + bytes > 1024 * 1024 || self.entries.len() >= 32 {
             if let Some(old) = self.entries.pop_front() {

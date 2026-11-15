@@ -32,10 +32,14 @@ struct Server {
     url: String,
     requests: Arc<Mutex<Vec<Value>>>,
     stop: Arc<std::sync::atomic::AtomicBool>,
+    closed: Arc<std::sync::atomic::AtomicBool>,
     thread: Option<thread::JoinHandle<()>>,
 }
 impl Server {
     fn new(replies: Vec<String>) -> Self {
+        Self::respond(replies, false)
+    }
+    fn respond(replies: Vec<String>, stall: bool) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/v1", listener.local_addr().unwrap());
         listener.set_nonblocking(true).unwrap();
@@ -43,6 +47,8 @@ impl Server {
         let captured = requests.clone();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let ended = stop.clone();
+        let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let observed_close = closed.clone();
         let thread = thread::spawn(move || {
             let deadline = Instant::now() + Duration::from_secs(15);
             let mut replies = replies.into_iter();
@@ -57,6 +63,35 @@ impl Server {
                         let request = read_request(&mut s);
                         captured.lock().unwrap().push(request);
                         let reply = replies.next().unwrap_or_else(|| reply_text("done"));
+                        if stall {
+                            let _ = write!(
+                                s,
+                                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n{reply}"
+                            );
+                            let _ = s.flush();
+                            s.set_read_timeout(Some(Duration::from_millis(100)))
+                                .unwrap();
+                            let mut byte = [0];
+                            while Instant::now() < deadline
+                                && !ended.load(std::sync::atomic::Ordering::Relaxed)
+                            {
+                                match s.read(&mut byte) {
+                                    Ok(0) => {
+                                        observed_close
+                                            .store(true, std::sync::atomic::Ordering::Release);
+                                        break;
+                                    }
+                                    Err(e)
+                                        if matches!(
+                                            e.kind(),
+                                            std::io::ErrorKind::WouldBlock
+                                                | std::io::ErrorKind::TimedOut
+                                        ) => {}
+                                    _ => break,
+                                }
+                            }
+                            continue;
+                        }
                         let _ = write!(
                             s,
                             "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -75,6 +110,7 @@ impl Server {
             url,
             requests,
             stop,
+            closed,
             thread: Some(thread),
         }
     }
@@ -133,6 +169,13 @@ struct Fixture {
 static RECEIPT_LOCK: Mutex<()> = Mutex::new(());
 impl Drop for Fixture {
     fn drop(&mut self) {
+        if thread::panicking() {
+            self.root.disable_cleanup(true);
+            eprintln!(
+                "Preserved failed owned fixture: {}",
+                self.root.path().display()
+            );
+        }
         if let Some(output) = std::env::var_os("PEER_NATIVE_P3_EVIDENCE_ROOT") {
             let output = std::path::PathBuf::from(output);
             assert!(output.join(".native-cli-fixture").is_file());
@@ -150,6 +193,25 @@ impl Drop for Fixture {
             )
             .unwrap();
         }
+    }
+}
+struct OwnedChild(Option<std::process::Child>);
+impl Drop for OwnedChild {
+    fn drop(&mut self) {
+        if let Some(child) = self.0.as_mut() {
+            if child.try_wait().ok().flatten().is_none() {
+                let _ = child.kill();
+            }
+            let _ = child.wait();
+        }
+    }
+}
+impl OwnedChild {
+    fn child(&mut self) -> &mut std::process::Child {
+        self.0.as_mut().unwrap()
+    }
+    fn output(mut self) -> Output {
+        self.0.take().unwrap().wait_with_output().unwrap()
     }
 }
 impl Fixture {
@@ -272,6 +334,22 @@ impl Fixture {
             .lines()
             .map(|s| serde_json::from_str(s).unwrap())
             .collect()
+    }
+    fn use_wire(&self, wire: &str, channel: &str, provider: &str) {
+        let path = self.root.path().join("llm-providers.json");
+        let mut config = get(&path);
+        config["channels"][0]["channelId"] = json!(channel);
+        config["channels"][0]["provider"] = json!(provider);
+        if wire == "openai-responses" {
+            config["channels"][0]["wireOverride"] = json!(wire);
+        }
+        put(path, &config);
+        let path = self.root.path().join("goal-plans/p.json");
+        let mut goal = get(&path);
+        for role in ["worker", "explorer", "verifier"] {
+            goal["delegationOrigin"]["modelSelection"][role]["family"] = json!(provider);
+        }
+        put(path, &goal);
     }
 }
 #[test]
@@ -534,6 +612,7 @@ fn truncated_stream_cannot_dispatch_a_partial_tool_and_next_task_can_run() {
     assert_eq!(r.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&r.stderr).contains("model_stream_incomplete"));
     assert!(!f.root.path().join("workspace/partial.txt").exists());
+    assert_eq!(ledger_rows(&f)[0]["totalTokens"], 16);
     assert_eq!(
         get(f.root.path().join("goal-plans/p.json"))["status"],
         "paused"
@@ -627,6 +706,12 @@ fn real_tool_loop_reports_turn_totals_separately_and_later_tasks_start_fresh() {
     );
     assert_eq!(receipt["goalAcceptance"], "pending");
     assert_eq!(
+        receipt["lifetimeUsage"]["usageScope"],
+        "conversation_lifetime"
+    );
+    assert_eq!(receipt["lifetimeUsage"]["totalTokens"], 144);
+    assert_eq!(ledger_rows(&f)[0]["providerRequestCount"], 3);
+    assert_eq!(
         f.history()
             .iter()
             .filter(|m| m["segments"].is_array())
@@ -673,11 +758,305 @@ fn max_turns_retains_observed_usage_and_a_paired_actual_tool_result() {
     assert_eq!(receipt["lastRequestUsage"]["requestIndex"], 1);
     assert_eq!(receipt["toolCalls"], 1);
     assert_eq!(
+        receipt["lifetimeUsage"]["usageScope"],
+        "conversation_lifetime"
+    );
+    assert_eq!(receipt["lifetimeUsage"]["runtimeTurnCount"], 1);
+    assert_eq!(receipt["lifetimeUsage"]["totalTokens"], 16);
+    assert_eq!(
         f.history()
             .iter()
             .find(|m| m["segments"].is_array())
             .unwrap()["segments"][0]["result"]["status"],
         "success"
+    );
+}
+
+fn ledger_rows(f: &Fixture) -> Vec<Value> {
+    std::fs::read_to_string(f.root.path().join("usage/requests.jsonl"))
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
+}
+#[test]
+fn known_terminal_tool_preparation_error_is_billed_and_stops_before_error_receipt() {
+    let server = Server::new(vec![reply_tool("not_projected", json!({}))]);
+    let f = Fixture::new(&server);
+    let output = f.run();
+    assert_eq!(output.status.code(), Some(1));
+    let rows = ledger_rows(&f);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["totalTokens"], 16);
+    assert_eq!(rows[0]["providerRequestCount"], 1);
+    assert_eq!(rows[0]["usageScope"], "runtime_turn");
+    assert_eq!(rows[0]["groupId"], "provider");
+    assert_eq!(rows[0]["role"], "work_session");
+    assert_eq!(
+        get(f.root.path().join("goal-plans/p.json"))["status"],
+        "paused"
+    );
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
+}
+#[test]
+fn empty_terminal_model_response_keeps_observed_usage_in_the_real_billing_ledger() {
+    let server = Server::new(vec![reply_text("")]);
+    let f = Fixture::new(&server);
+    let output = f.run();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("model_empty_response"));
+    let rows = ledger_rows(&f);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["totalTokens"], 16);
+    assert_eq!(rows[0]["providerRequestCount"], 1);
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
+    assert_eq!(
+        f.history()
+            .iter()
+            .filter(|m| m["segments"].is_array())
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn every_native_wire_bills_known_usage_on_an_empty_response_without_tool_execution() {
+    let fixtures: Value = serde_json::from_str(include_str!(
+        "../../../packages/protocol/contracts/native-cli/model-streams.json"
+    ))
+    .unwrap();
+    for (wire, channel, provider) in [
+        ("openai-chat", "openai-compatible", "openai"),
+        ("openai-responses", "openai", "openai"),
+        ("anthropic-messages", "anthropic", "anthropic"),
+        ("gemini", "google-ai", "google"),
+    ] {
+        let fixture = fixtures["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["wire"] == wire && c["kind"] == "text")
+            .unwrap();
+        let raw = fixture["stream"].as_str().unwrap();
+        let empty = raw.replace("Native complete.", "");
+        assert_ne!(raw, empty);
+        let server = Server::new(vec![empty]);
+        let f = Fixture::new(&server);
+        f.use_wire(wire, channel, provider);
+        let output = f.run();
+        assert_eq!(output.status.code(), Some(1), "{wire}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("model_empty_response"),
+            "{wire}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let rows = ledger_rows(&f);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["inputTokens"], 15);
+        assert_eq!(rows[0]["outputTokens"], 3);
+        assert_eq!(rows[0]["cacheReadTokens"], 5);
+        assert_eq!(rows[0]["totalTokens"], 23);
+        assert_eq!(server.requests.lock().unwrap().len(), 1);
+        assert_eq!(f.history().len(), 1);
+    }
+}
+#[test]
+fn ledger_append_failure_still_stops_then_native_recover_settles_without_model_replay() {
+    use std::os::unix::fs::PermissionsExt;
+    let server = Server::new(vec![
+        reply_text("Observed before billing failure."),
+        reply_text("Later task."),
+    ]);
+    let f = Fixture::new(&server);
+    let ledger = f.root.path().join("usage/requests.jsonl");
+    std::fs::create_dir(ledger.parent().unwrap()).unwrap();
+    std::fs::write(&ledger, "").unwrap();
+    std::fs::set_permissions(&ledger, std::fs::Permissions::from_mode(0o400)).unwrap();
+    let output = f.run();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("USAGE_LEDGER_COMMIT_UNCERTAIN"));
+    assert_eq!(
+        get(f.root.path().join("goal-plans/p.json"))["status"],
+        "paused"
+    );
+    assert!(
+        f.root
+            .path()
+            .join("conversations/.usage-ledger-transaction")
+            .is_file()
+    );
+    std::fs::set_permissions(&ledger, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let recovered = f.command("recover", "p").output().unwrap();
+    assert_eq!(
+        recovered.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&recovered.stderr)
+    );
+    assert_eq!(ledger_rows(&f).len(), 1);
+    assert_eq!(ledger_rows(&f)[0]["totalTokens"], 16);
+    assert!(
+        !f.root
+            .path()
+            .join("conversations/.usage-ledger-transaction")
+            .exists()
+    );
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
+    f.seed("p2", "c2", "s2", "work2", "epoch2");
+    let next = f.command("exec", "p2").output().unwrap();
+    assert_eq!(
+        next.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&next.stderr)
+    );
+    assert_eq!(ledger_rows(&f).len(), 2);
+    assert_eq!(server.requests.lock().unwrap().len(), 2);
+}
+#[test]
+fn malformed_ledger_blocks_before_dispatch_and_corrected_fixture_admits_the_same_task() {
+    let server = Server::new(vec![reply_text("Same task after ledger correction.")]);
+    let f = Fixture::new(&server);
+    let ledger = f.root.path().join("usage/requests.jsonl");
+    std::fs::create_dir(ledger.parent().unwrap()).unwrap();
+    let bad = b"unrecognized incomplete billing bytes";
+    std::fs::write(&ledger, bad).unwrap();
+    let output = f.run();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("USAGE_LEDGER_INVALID"));
+    assert_eq!(server.requests.lock().unwrap().len(), 0);
+    assert_eq!(std::fs::read(&ledger).unwrap(), bad);
+    assert_eq!(f.history().len(), 1);
+    // Restore only this fixture's known-empty original, preserving its injected
+    // unknown bytes as a diagnostic. Production recovery never erases a tail.
+    std::fs::rename(
+        &ledger,
+        f.root.path().join("injected-invalid-ledger.diagnostic"),
+    )
+    .unwrap();
+    std::fs::write(&ledger, "").unwrap();
+    let output = f.run();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
+    assert_eq!(ledger_rows(&f).len(), 1);
+}
+#[cfg(feature = "test-fixtures")]
+#[test]
+fn billing_worker_keeps_lease_heartbeat_and_signal_cannot_discard_observed_usage() {
+    let server = Server::new(vec![
+        reply_text("Completed before cleanup."),
+        reply_text("New task."),
+    ]);
+    let f = Fixture::new(&server);
+    let mut child = OwnedChild(Some(
+        f.command("exec", "p")
+            .env("PEER_NATIVE_USAGE_FAULT", "hold:after_intent")
+            .spawn()
+            .unwrap(),
+    ));
+    let intent = f
+        .root
+        .path()
+        .join("conversations/.usage-ledger-transaction");
+    let lease = f.root.path().join("project-runtime/w/host.lease");
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while !intent.exists() {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(10));
+    }
+    let intent_at = Instant::now();
+    let deadline = intent_at + Duration::from_secs(8);
+    assert_eq!(
+        get(f.root.path().join("goal-plans/p.json"))["status"],
+        "paused"
+    );
+    let before = get(&lease)["heartbeatAt"].clone();
+    while get(&lease)["heartbeatAt"] == before {
+        assert!(
+            Instant::now() < deadline,
+            "blocking usage I/O stopped the host heartbeat"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    eprintln!("Billing intent -> heartbeat: {:?}", intent_at.elapsed());
+    rustix::process::kill_process(
+        rustix::process::Pid::from_raw(child.child().id() as i32).unwrap(),
+        rustix::process::Signal::TERM,
+    )
+    .unwrap();
+    while child.child().try_wait().unwrap().is_none() {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(10));
+    }
+    eprintln!("Billing intent -> process exit: {:?}", intent_at.elapsed());
+    let result = child.output();
+    assert_eq!(
+        result.status.code(),
+        Some(4),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert_eq!(ledger_rows(&f).len(), 1);
+    assert_eq!(ledger_rows(&f)[0]["totalTokens"], 16);
+    f.seed("p2", "c2", "s2", "work2", "epoch2");
+    let result = f.command("exec", "p2").output().unwrap();
+    assert_eq!(result.status.code(), Some(0));
+    assert_eq!(ledger_rows(&f).len(), 2);
+}
+
+#[test]
+fn takeover_retains_known_usage_while_rejecting_unfinished_provider_tool_intent() {
+    let body = reply_tool(
+        "write_file",
+        json!({"path":"late.txt","content":"must not execute"}),
+    );
+    let incomplete = body.split("data: [DONE]").next().unwrap().to_owned();
+    let server = Server::respond(vec![incomplete], true);
+    let f = Fixture::new(&server);
+    let mut child = OwnedChild(Some(f.command("exec", "p").spawn().unwrap()));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while server.requests.lock().unwrap().is_empty() {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(10));
+    }
+    let requester = HostIdentity::new(
+        "takeover-inspector",
+        HostSurface::Desktop,
+        std::process::id(),
+        env!("CARGO_PKG_VERSION"),
+    )
+    .unwrap();
+    assert!(
+        HostLeaseStore::new(f.root.path())
+            .request_takeover("w", &requester, ms())
+            .unwrap()
+    );
+    while child.child().try_wait().unwrap().is_none() {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(10));
+    }
+    let output = child.output();
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("HOST_LEASE_LOST"));
+    assert!(!f.root.path().join("workspace/late.txt").exists());
+    assert_eq!(f.history().len(), 1);
+    assert_eq!(ledger_rows(&f).len(), 1);
+    assert_eq!(ledger_rows(&f)[0]["totalTokens"], 16);
+    assert_eq!(ledger_rows(&f)[0]["providerRequestCount"], 1);
+    assert!(server.closed.load(std::sync::atomic::Ordering::Acquire));
+    assert_eq!(
+        get(f.root.path().join("goal-plans/p.json"))["status"],
+        "paused"
     );
 }
 
