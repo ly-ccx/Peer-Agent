@@ -32,7 +32,7 @@ pub struct ProviderRequestUsage {
     #[serde(flatten)]
     pub amounts: UsageAmounts,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "usageScope", rename = "runtime_turn", rename_all = "camelCase")]
 pub struct RuntimeTurnUsage {
     pub provider_request_count: u64,

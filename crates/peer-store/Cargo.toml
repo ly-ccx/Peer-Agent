@@ -20,6 +20,10 @@ required-features = ["test-fixtures"]
 name = "durable-conformance"
 required-features = ["test-fixtures"]
 
+[[example]]
+name = "usage-conformance"
+required-features = ["test-fixtures"]
+
 [dependencies]
 peer-protocol = { path = "../peer-protocol" }
 serde.workspace = true

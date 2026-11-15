@@ -16,6 +16,7 @@ import { acquireMessageRetentionGuard } from './message-retention-guard.mjs';
 import { withFileLock, withFileLocksAsync } from './conversation-file-lock.mjs';
 import { readJsonlByteWindow } from './jsonl-byte-window.mjs';
 import { createTerminalMessageCommitter, conversationFileVersion } from './terminal-message-committer.mjs';
+import { recordRuntimeTurnUsage as commitRuntimeTurnUsage } from './usage-ledger.mjs';
 
 function defaultStoreDir() {
   const dataHome = process.env.PEER_AGENT_HOME || process.env.PEER_USER_DATA_PATH || path.join(os.homedir(), '.peer-agent');
@@ -1771,170 +1772,11 @@ export function createConversationStore(options = {}) {
     return meta.lifetimeUsage;
   }
 
-  /**
-   * Merge one runtime turn into the per-model ledger slice of lifetimeUsage.
-   * Keyed by modelProviderId (fallback 'unknown' when attribution is absent),
-   * so switching providers keeps historical per-model totals accurate.
-   */
-  function mergeLifetimeUsageByModel(previousByModel = {}, { attribution = {}, tokens, estimatedCostUsd }) {
-    const modelProviderId =
-      typeof attribution.modelProviderId === 'string' && attribution.modelProviderId.trim()
-        ? attribution.modelProviderId.trim()
-        : 'unknown';
-    const previousEntry = previousByModel[modelProviderId] || {};
-    const inputTokens = Number(previousEntry.inputTokens || 0) + Number(tokens.inputTokens || 0);
-    const outputTokens = Number(previousEntry.outputTokens || 0) + Number(tokens.outputTokens || 0);
-    const cacheReadTokens = Number(previousEntry.cacheReadTokens || 0) + Number(tokens.cacheReadTokens || 0);
-    const cacheWriteTokens = Number(previousEntry.cacheWriteTokens || 0) + Number(tokens.cacheWriteTokens || 0);
-    const requestCount = Number(previousEntry.requestCount || 0) + 1;
-    return {
-      ...previousByModel,
-      [modelProviderId]: {
-        modelProviderId,
-        model: attribution.model || previousEntry.model || undefined,
-        providerName: attribution.providerName || previousEntry.providerName || undefined,
-        inputTokens,
-        outputTokens,
-        totalTokens: inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens,
-        cacheReadTokens,
-        cacheWriteTokens,
-        estimatedCostUsd:
-          Number(previousEntry.estimatedCostUsd || 0) + (Number.isFinite(estimatedCostUsd) ? estimatedCostUsd : 0),
-        requestCount,
-      },
-    };
-  }
-
-  /**
-   * Canonical durable sink for one completed runtime turn.
-   *
-   * This is intentionally deeper than the Desktop/TUI hosts: it validates the
-   * scope, updates conversation lifetime, and appends the runtime-turn ledger
-   * row together so both hosts have identical persistence semantics.
-   */
+  /** Caller wrapper owns the canonical index lock; the sink owns recovery. */
   function recordRuntimeTurnUsage(id, { usage, attribution = {} } = {}) {
-    if (usage?.usageScope !== 'runtime_turn') {
-      throw new TypeError('recordRuntimeTurnUsage requires usageScope=runtime_turn');
-    }
-    const providerRequestCount = Number(usage.providerRequestCount);
-    if (!Number.isSafeInteger(providerRequestCount) || providerRequestCount < 1) {
-      throw new TypeError('recordRuntimeTurnUsage requires providerRequestCount >= 1');
-    }
-    const conversationId = typeof id === 'string' ? id.trim() : '';
-    if (!conversationId) return null;
-    const ledgerId = typeof attribution.id === 'string' && attribution.id.trim()
-      ? attribution.id.trim()
-      : `runtime_turn_${Date.now()}_${randomUUID()}`;
-    const usageTransactionFile = path.join(storeDir, '.usage-ledger-transaction');
-    return withFileLock(usageTransactionFile, () => {
-      const existing = readJsonl(usageLogFile).find(
-        (row) => row?.id === ledgerId && row?.conversationId === conversationId,
-      );
-      if (existing) {
-        const meta = readIndex().find((candidate) => candidate.id === conversationId);
-        return meta
-          ? {
-              lifetimeUsage: {
-                usageScope: 'conversation_lifetime',
-                runtimeTurnCount: Number(meta.runtimeTurnCount || 0),
-                inputTokens: Number(meta.lifetimeUsage?.inputTokens || 0),
-                outputTokens: Number(meta.lifetimeUsage?.outputTokens || 0),
-                cacheReadTokens: Number(meta.lifetimeUsage?.cacheReadTokens || 0),
-                cacheWriteTokens: Number(meta.lifetimeUsage?.cacheWriteTokens || 0),
-                totalTokens:
-                  Number(meta.lifetimeUsage?.inputTokens || 0)
-                  + Number(meta.lifetimeUsage?.outputTokens || 0)
-                  + Number(meta.lifetimeUsage?.cacheReadTokens || 0)
-                  + Number(meta.lifetimeUsage?.cacheWriteTokens || 0),
-                ...(meta.lifetimeUsage?.byModel ? { byModel: meta.lifetimeUsage.byModel } : {}),
-              },
-              ledgerRow: existing,
-            }
-          : null;
-      }
-
-      const normalizedToken = (value) => {
-        const number = Number(value);
-        return Number.isFinite(number) && number >= 0 ? Math.floor(number) : 0;
-      };
-      const tokens = {
-        inputTokens: normalizedToken(usage.inputTokens),
-        outputTokens: normalizedToken(usage.outputTokens),
-        cacheReadTokens: normalizedToken(usage.cacheReadTokens),
-        cacheWriteTokens: normalizedToken(usage.cacheWriteTokens),
-      };
-      const index = readIndex();
-      const meta = index.find((candidate) => candidate.id === conversationId);
-      if (!meta) return null;
-      const previous = meta.lifetimeUsage || {};
-      meta.lifetimeUsage = {
-        inputTokens: Number(previous.inputTokens || 0) + tokens.inputTokens,
-        outputTokens: Number(previous.outputTokens || 0) + tokens.outputTokens,
-        cacheReadTokens: Number(previous.cacheReadTokens || 0) + tokens.cacheReadTokens,
-        cacheWriteTokens: Number(previous.cacheWriteTokens || 0) + tokens.cacheWriteTokens,
-        // 按模型拆分累计：切换 Provider 后历史累计仍按各自模型归因，不再串账。
-        byModel: mergeLifetimeUsageByModel(previous.byModel, {
-          attribution,
-          tokens,
-          estimatedCostUsd: Number(attribution.estimatedCostUsd) || 0,
-        }),
-      };
-      meta.runtimeTurnCount = Math.max(0, Math.floor(Number(meta.runtimeTurnCount) || 0)) + 1;
-      meta.updatedAt = new Date().toISOString();
-      writeIndex(index);
-
-      const optionalText = (value) => (
-        typeof value === 'string' && value.trim() ? value.trim() : null
-      );
-      const estimatedCost = Number(attribution.estimatedCostUsd);
-      const ledgerRow = {
-        id: ledgerId,
-        at: optionalText(attribution.at) || new Date().toISOString(),
-        conversationId,
-        streamId: optionalText(attribution.streamId),
-        modelProviderId: optionalText(attribution.modelProviderId),
-        // 统计按渠道归组：优先写入方解析好的 groupId；回退从复合 id 拆。
-        // 裸 uuid（模型条目 id）不猜，留给聚合层用 provider 索引归组。
-        groupId: (() => {
-          const explicit = optionalText(attribution.groupId);
-          if (explicit) return explicit;
-          const raw = optionalText(attribution.modelProviderId);
-          if (raw && raw.includes('::')) {
-            const group = raw.slice(0, raw.indexOf('::')).trim();
-            if (group) return group;
-          }
-          return null;
-        })(),
-        model: optionalText(attribution.model),
-        providerName: optionalText(attribution.providerName),
-        usageScope: 'runtime_turn',
-        providerRequestCount,
-        ...tokens,
-        totalTokens:
-          tokens.inputTokens
-          + tokens.outputTokens
-          + tokens.cacheReadTokens
-          + tokens.cacheWriteTokens,
-        estimatedCostUsd: Number.isFinite(estimatedCost) ? estimatedCost : null,
-        pricingSource: optionalText(attribution.pricingSource),
-        ...(optionalText(attribution.role) ? { role: optionalText(attribution.role) } : {}),
-        ...(optionalText(attribution.workspaceId) ? { workspaceId: optionalText(attribution.workspaceId) } : {}),
-      };
-      appendJsonl(usageLogFile, ledgerRow);
-      return {
-        lifetimeUsage: {
-          usageScope: 'conversation_lifetime',
-          runtimeTurnCount: meta.runtimeTurnCount,
-          ...meta.lifetimeUsage,
-          totalTokens:
-            meta.lifetimeUsage.inputTokens
-            + meta.lifetimeUsage.outputTokens
-            + meta.lifetimeUsage.cacheReadTokens
-            + meta.lifetimeUsage.cacheWriteTokens,
-        },
-        ledgerRow,
-      };
-    });
+    if (typeof id !== 'string' || !id.trim()) return null;
+    return commitRuntimeTurnUsage({ storeDir, usageLogFile, conversationId: id.trim(), usage, attribution,
+      onIndexChanged: forgetPreviewIndex });
   }
 
   function setArchiveStatus(id, status) {
@@ -2209,3 +2051,5 @@ export {
   createSessionService,
 } from './session-service.mjs';
 export { coerceSessionPreview, truncatePreview } from './session-preview.mjs';
+
+export { appendAuxiliaryUsageRecord } from './usage-ledger.mjs';

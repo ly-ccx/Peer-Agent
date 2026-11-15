@@ -28,6 +28,7 @@ pub use goal::{
     GoalSnapshot, GoalStore,
 };
 mod history;
+mod usage_ledger;
 pub use conversation_write::{MessageCommit, NewConversation};
 mod lease;
 mod lock;
@@ -48,6 +49,10 @@ use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoreError {
+    UsageInvalid,
+    UsageLimit,
+    UsageConflict,
+    UsageCommitUncertain,
     InvalidInput,
     CommitUncertain,
     ApprovalConflict,
@@ -79,6 +84,10 @@ pub enum StoreError {
 impl StoreError {
     pub fn code(self) -> &'static str {
         match self {
+            Self::UsageInvalid => "USAGE_LEDGER_INVALID",
+            Self::UsageLimit => "USAGE_LEDGER_LIMIT",
+            Self::UsageConflict => "USAGE_LEDGER_CONFLICT",
+            Self::UsageCommitUncertain => "USAGE_LEDGER_COMMIT_UNCERTAIN",
             Self::InvalidInput => "INVALID_INPUT",
             Self::CommitUncertain => "STORE_COMMIT_UNCERTAIN",
             Self::ApprovalConflict => "APPROVAL_STATE_CHANGED",

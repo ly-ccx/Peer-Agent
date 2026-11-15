@@ -282,6 +282,7 @@ export interface ConversationStore {
         at?: string;
         streamId?: string | null;
         modelProviderId?: string | null;
+        groupId?: string | null;
         model?: string | null;
         providerName?: string | null;
         estimatedCostUsd?: number | null;
@@ -384,3 +385,6 @@ export function rankConversationMatch(
   options?: { includeWorkspaceNameMatch?: boolean },
 ): number;
 import type { ContextAccountingSnapshot } from '@peer-agent/protocol';
+
+/** Host-owned auxiliary usage append; participates in the canonical ledger lock. */
+export function appendAuxiliaryUsageRecord(file: string, row: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>>;
