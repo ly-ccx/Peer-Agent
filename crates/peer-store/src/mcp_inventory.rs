@@ -7,6 +7,16 @@ pub struct McpRegistryStore {
 pub struct McpRegistrySnapshot {
     pub source_revision: String,
     pub inventory: peer_protocol::McpInventory,
+    servers: Vec<serde_json::Value>,
+}
+impl McpRegistrySnapshot {
+    /// Host transport configuration only. Never return this to a renderer/model.
+    pub fn server(&self, id: &str) -> Option<serde_json::Value> {
+        self.servers
+            .iter()
+            .find(|v| v["id"].as_str().or_else(|| v["mcpId"].as_str()) == Some(id))
+            .cloned()
+    }
 }
 impl McpRegistryStore {
     pub fn new(home: impl AsRef<Path>) -> Self {
@@ -41,6 +51,11 @@ impl McpRegistryStore {
         Ok(McpRegistrySnapshot {
             source_revision: files::fingerprint(&[before]),
             inventory,
+            servers: value
+                .as_array()
+                .or_else(|| value["servers"].as_array())
+                .cloned()
+                .unwrap_or_default(),
         })
     }
 }

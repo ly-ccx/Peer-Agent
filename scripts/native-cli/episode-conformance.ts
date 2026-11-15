@@ -32,6 +32,16 @@ for(const receipt of roots){const root=receipt.root;assert.ok(existsSync(join(ro
  for(const work of Object.values(state.works) as any[]){for(const pending of [...(work.budget?.uncertainDispatches||[]),...Object.values(work.budget?.attempts||{}).flatMap((a:any)=>a.pendingTools||[])]){assert.equal(pending.nativeRecorder.schemaVersion,1);assert.equal(pending.nativeRecorder.runtime,'peer-native');assert.ok(pending.dispatchId.startsWith('dispatch-'));assert.equal(pending.nativeRecorder.execution.planId,pending.planId||'p');cases++;}}
  if(receipt.case?.includes('crash_after_file')){assert.equal(state.works.work.budget.uncertainDispatches.length,1);assert.equal(state.works.work.budget.attempts && Object.keys(state.works.work.budget.attempts).length,0);assert.equal(plan.delegationOrigin.executionControl.phase,'reconciling');assert.equal(state.works.work2.budget.toolCalls,1);assert.equal(plans.getPlan('p2').status,'paused');cases++;}
  }finally{storage.close();}
+ if(receipt.case?.includes('native_mcp::')){
+  const history=conversations.getPersistedConversationHistory('c');
+  const rawMessages=readFileSync(join(root,'conversations/c.jsonl'),'utf8').trim().split('\n').map(s=>JSON.parse(s));
+  for(const message of history.messages as any[]){for(const segment of message.segments||[]){if(!segment.tool?.startsWith('mcp__')||!segment.result)continue;
+   const original=rawMessages.flatMap((m:any)=>m.segments||[]).find((s:any)=>s.toolCallId===segment.toolCallId);assert.deepEqual(segment.result,original.result);
+   assert.equal(segment.result.evidence.evidenceKind,'local_mcp_tool_call');assert.equal(segment.result.evidence.serverId,'s');assert.ok(segment.result.evidence.projectionId);assert.ok(segment.result.evidence.permissionGrantId);
+   const indexed=readFileSync(join(root,'goal-plans/evidence-index.jsonl'),'utf8').trim().split('\n').map(s=>JSON.parse(s));assert.ok(indexed.some((row:any)=>row.evidenceRef===`tool-result://${segment.toolCallId}`));cases++;
+  }}
+  assert.ok(!JSON.stringify(history).includes('fixture-sensitive-secret'));cases++;
+ }
  // These roots were created by the actual native executable. Re-save each
  // original Work through the current TS writer, including future opaque facts.
  const writer=createWorkCoordinationStore({rootDir:join(root,'project-runtime'),workspaceId:'w',holdsLease:()=>true,leaseEpoch:()=> 'owned-fixture-roundtrip',formatVersion:2,fenceLegacyWrites:true});

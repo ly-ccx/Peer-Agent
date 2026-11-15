@@ -244,7 +244,7 @@ impl EpisodeBudget {
             pending.retain(|r|r["toolCallId"]!=call);
             if !a["settledTools"].is_array(){a["settledTools"]=json!([])}
             let refs=peer_protocol::collect_tool_result_evidence_refs(Some(call),result).map_err(|_|HostError("work_budget_invalid"))?;
-            a["settledTools"].as_array_mut().unwrap().push(json!({"dispatchId":dispatch,"toolCallId":call,"outcome":if result["status"]=="denied"{"not_dispatched"}else if result["status"]=="cancelled"{"terminated"}else{"resulted"},"evidenceRefs":refs,"settledAt":now}));Ok(())
+            a["settledTools"].as_array_mut().unwrap().push(json!({"dispatchId":dispatch,"toolCallId":call,"outcome":if result["status"]=="denied" || result["evidence"]["dispatchOutcome"]=="not_dispatched"{"not_dispatched"}else if result["status"]=="cancelled"{"terminated"}else{"resulted"},"evidenceRefs":refs,"settledAt":now}));Ok(())
         })
     }
     fn usage_advances(before: &Value, after: &Value, work: &str) -> Result<(), HostError> {

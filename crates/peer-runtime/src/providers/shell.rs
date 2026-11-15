@@ -83,7 +83,7 @@ impl PreparedEffect for ShellEffect {
     }
     fn start(
         self: Box<Self>,
-        host: &NativeSessionHost,
+        host: &mut NativeSessionHost,
         grant: &HostPermissionGrant,
         cancel: CancellationToken,
         now: &str,
@@ -221,6 +221,7 @@ impl PreparedEffect for ShellEffect {
                     artifacts: vec![],
                     ended,
                     materialization: None,
+                    not_dispatched: false,
                 };
             }
             let reference = format!("local-shell-artifact://{}", self.handle);
@@ -235,11 +236,12 @@ impl PreparedEffect for ShellEffect {
                 ],
                 ended,
                 materialization: None,
+                not_dispatched: false,
             }
         }))
     }
 }
-fn group_absent(pid: u32) -> bool {
+pub(crate) fn group_absent(pid: u32) -> bool {
     rustix::process::Pid::from_raw(pid as i32).is_some_and(|p| {
         rustix::process::test_kill_process_group(p) == Err(rustix::io::Errno::SRCH)
     })

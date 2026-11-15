@@ -14,7 +14,10 @@ use std::{
     pin::Pin,
 };
 mod file;
+mod mcp;
 mod shell;
+pub use crate::effect_admission::EffectAdmission;
+pub(crate) use shell::group_absent;
 mod shell_risk;
 pub struct EffectOutcome {
     pub status: &'static str,
@@ -23,8 +26,14 @@ pub struct EffectOutcome {
     pub artifacts: Vec<String>,
     pub ended: bool,
     pub materialization: Option<peer_store::ResourceIdentity>,
+    pub not_dispatched: bool,
 }
 impl EffectOutcome {
+    pub(crate) fn not_dispatched(code: &'static str) -> Self {
+        let mut result = Self::failed(code);
+        result.not_dispatched = true;
+        result
+    }
     pub fn failed(code: &'static str) -> Self {
         Self {
             status: "failed",
@@ -33,17 +42,26 @@ impl EffectOutcome {
             artifacts: vec![],
             ended: true,
             materialization: None,
+            not_dispatched: false,
         }
     }
 }
 pub type EffectFuture = Pin<Box<dyn Future<Output = EffectOutcome> + Send>>;
 pub trait PreparedEffect {
+    fn admission(&mut self, _port: crate::effect_admission::EffectAdmission) {}
+    fn evidence(&self) -> Option<Value> {
+        None
+    }
+    fn projection(&mut self, _id: &str) {}
     fn args(&self) -> &Value;
     fn permission(&self) -> ProviderPermission;
     fn risk(&self) -> Option<HostShellRisk> {
         None
     }
     fn scopes(&self) -> Result<Vec<ExecutionResourceScope>, HostError>;
+    fn handle_metadata(&self) -> Option<Value> {
+        None
+    }
     fn handle(&self) -> Option<&str> {
         None
     }
@@ -51,7 +69,7 @@ pub trait PreparedEffect {
     /// before open/rename/spawn and return an owned completion future.
     fn start(
         self: Box<Self>,
-        host: &NativeSessionHost,
+        host: &mut NativeSessionHost,
         grant: &HostPermissionGrant,
         cancel: CancellationToken,
         now: &str,
@@ -75,6 +93,7 @@ pub struct ProjectedTool {
 }
 pub struct RuntimeProjection {
     tools: Vec<ProjectedTool>,
+    id: String,
 }
 pub struct ProviderRegistry {
     providers: Vec<Box<dyn CapabilityProvider>>,
@@ -90,6 +109,17 @@ impl Default for ProviderRegistry {
     }
 }
 impl ProviderRegistry {
+    pub fn with_mcp(
+        snapshot: &peer_store::McpRegistrySnapshot,
+        resource: &peer_store::HostResourcePlan,
+        owner: &Value,
+    ) -> Result<Self, HostError> {
+        let mut registry = Self::default();
+        registry
+            .providers
+            .push(Box::new(mcp::McpProvider::new(snapshot, resource, owner)?));
+        Ok(registry)
+    }
     pub fn project(&self) -> Result<RuntimeProjection, HostError> {
         let mut tools = Vec::new();
         for (provider, p) in self.providers.iter().enumerate() {
@@ -109,7 +139,11 @@ impl ProviderRegistry {
                 })
             }
         }
-        Ok(RuntimeProjection { tools })
+        let id = peer_protocol::javascript_json_digest(&json!(
+            tools.iter().map(|t| &t.manifest).collect::<Vec<_>>()
+        ))
+        .map_err(|_| HostError("projection_limit"))?;
+        Ok(RuntimeProjection { tools, id })
     }
     pub fn prepare(
         &mut self,
@@ -128,7 +162,9 @@ impl ProviderRegistry {
             .providers
             .get_mut(tool.provider)
             .ok_or(HostError("tool_not_projected"))?;
-        provider.prepare(&tool.capability, args, workspace, home)
+        let mut effect = provider.prepare(&tool.capability, args, workspace, home)?;
+        effect.projection(&projection.id);
+        Ok(effect)
     }
 }
 impl RuntimeProjection {

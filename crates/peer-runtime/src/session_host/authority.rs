@@ -13,6 +13,7 @@ pub enum ProviderPermission {
     Read,
     FileWrite,
     Shell,
+    Mcp,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum HostExecutionRole {
@@ -119,6 +120,7 @@ impl NativeSessionHost {
             ProviderPermission::Read => "",
             ProviderPermission::FileWrite => "file-write",
             ProviderPermission::Shell => "shell",
+            ProviderPermission::Mcp => "mcp-tool",
         };
         let mode = crate::access_policy::evaluate_project_agent_turn(
             &json!({"role":if call.role==HostExecutionRole::ProjectAgent{"project_agent"}else{"work_session"},"capabilityId":call.capability_id,"permissionKind":kind}),
@@ -204,6 +206,14 @@ impl NativeSessionHost {
             .to_owned();
         let mut conversation = call.conversation_id.to_owned();
         let mut sources = vec![json!([call.plan_id, current.goal.source_revision])];
+        if call.permission == ProviderPermission::Mcp {
+            sources.push(json!([
+                "mcp-registry",
+                peer_store::McpRegistryStore::new(&self.home)
+                    .read()?
+                    .source_revision
+            ]));
+        }
         let mut seen = std::collections::HashSet::new();
         let projector = TuiGoalProjector::new(now).map_err(HostError)?;
         for _ in 0..4 {
@@ -397,7 +407,7 @@ impl NativeSessionHost {
             .try_acquire_owned()
             .map_err(|_| HostError("permission_resource_limit"))?;
         let authority = self.authority(&call, args, now)?;
-        let prompt = json!({"confirmation":{"kind":"capability-approval","approvalKind":match call.permission{ProviderPermission::Read=>"other",ProviderPermission::FileWrite=>"file-write",ProviderPermission::Shell=>"shell-exec"}},"riskLevel":call.shell_risk.map(HostShellRisk::as_str)});
+        let prompt = json!({"confirmation":{"kind":"capability-approval","approvalKind":match call.permission{ProviderPermission::Read|ProviderPermission::Mcp=>"other",ProviderPermission::FileWrite=>"file-write",ProviderPermission::Shell=>"shell-exec"}},"riskLevel":call.shell_risk.map(HostShellRisk::as_str)});
         let Some(decision) = crate::access_policy::automatic_access_decision(
             authority.policy.access_level.as_str(),
             &prompt,

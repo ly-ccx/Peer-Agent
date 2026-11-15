@@ -896,7 +896,8 @@ fn context_window(f: &Fixture) {
     put(file, &value);
 }
 #[test]
-fn empty_mcp_registry_admits_native_work_but_nonempty_and_future_inventory_block_before_dispatch() {
+fn empty_mcp_registry_admits_native_work_but_invalid_config_and_future_inventory_block_before_dispatch()
+ {
     let server = Server::new(vec![reply_text("completed")]);
     let f = Fixture::new(&server);
     let file = f.root.path().join("mcp-registry.json");
@@ -2387,3 +2388,7 @@ fn canonical_usage_recovery_is_bounded_and_later_batches_do_not_duplicate_charge
     assert_eq!(ledger_rows(&f).len(), 66);
     assert_eq!(later_server.requests.lock().unwrap().len(), 1);
 }
+
+#[cfg(feature = "test-fixtures")]
+#[path = "native_mcp/mod.rs"]
+mod native_mcp;

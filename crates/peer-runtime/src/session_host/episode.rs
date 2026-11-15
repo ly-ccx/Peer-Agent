@@ -85,12 +85,7 @@ impl NativeSessionHost {
                 return Err(HostError("native_capability_inventory_unsupported"));
             }
         }
-        // This card admits only an empty, strictly validated inventory. A
-        // nonempty catalog still needs the native transport/credential Source.
         let mcp_inventory = peer_store::McpRegistryStore::new(&self.home).read()?;
-        if mcp_inventory.inventory.server_count != 0 {
-            return Err(HostError("native_capability_inventory_unsupported"));
-        }
         if origin["capabilityAdmission"]["required"]
             .as_array()
             .into_iter()
@@ -99,7 +94,11 @@ impl NativeSessionHost {
                 !matches!(
                     v.as_str(),
                     Some("local.file.read" | "local.file.write" | "local.shell.exec")
-                )
+                ) && !mcp_inventory
+                    .inventory
+                    .manifests
+                    .iter()
+                    .any(|m| m["capabilityId"] == *v)
             })
         {
             return Err(HostError("native_capability_inventory_unsupported"));
@@ -218,6 +217,9 @@ impl NativeSessionHost {
             .await
             .ok_or(HostError("native_recorder_unavailable"))?;
         let native_recorder = json!({"schemaVersion":1,"runtime":"peer-native","execution":facts["execution"],"recorder":recorder});
+        let mut providers =
+            ProviderRegistry::with_mcp(&mcp_inventory, &current.resource, &native_recorder)?;
+        let projection = providers.project()?;
         if self.resources.has_claim(&current.resource)?
             && !self.resources.admitted(&current.resource, &epoch)?
         {
@@ -251,8 +253,6 @@ impl NativeSessionHost {
             session: current.resource.execution.session_id.clone(),
             native_recorder,
         };
-        let mut providers = ProviderRegistry::default();
-        let projection = providers.project()?;
         let stream = format!("native-{}", uuid::Uuid::new_v4());
         let usage_attribution = json!({"id":stream,"streamId":stream,"at":now(),"modelProviderId":origin["modelSelection"]["worker"]["modelProviderId"],"groupId":origin["modelSelection"]["worker"]["providerId"],"model":model.model_id(),"role":"work_session","workspaceId":current.resource.workspace_id});
         let billing_scope = super::billing::BillingScope {
@@ -292,7 +292,7 @@ impl NativeSessionHost {
                     if cancel.is_cancelled() || cancellation.is_cancelled(){return Err(HostError("CANCELLED"))}
                     let effect=providers.prepare(&projection,&call.name,call.arguments,&workspace,&self.home)?;
                     let capability=projection.capability(&call.name).ok_or(HostError("tool_not_projected"))?.to_owned();
-                    let call_id=format!("call-{}",uuid::Uuid::new_v4());let args=effect.args().clone();let scopes=effect.scopes()?;
+                    let call_id=format!("call-{}",uuid::Uuid::new_v4());let args=effect.args().clone();let scopes=effect.scopes()?;let provider_evidence=effect.evidence();
                     let current=self.current(plan_id,&now())?;
                     let reserved=self.resources.reserve(&current.resource,ResourceReservation{host_epoch:&epoch,scopes:&scopes,record_conflict:false},&now())?;
                     if reserved["allowed"]!=true{return Err(HostError("execution_resource_busy"))}
@@ -304,14 +304,16 @@ impl NativeSessionHost {
                         let grant=self.decide_permission(pending,decision,&args,&now())?;
                         if cancelled{return Err(HostError("CANCELLED"))}grant
                     };
-                    let dispatch=budget.dispatch(self,crate::execution_budget::DispatchFacts{call:&call_id,capability:&capability,scopes:&scopes,stream:&stream,conversation:&conversation},&now())?;
+                    let started_at=now();let dispatch=budget.dispatch(self,crate::execution_budget::DispatchFacts{call:&call_id,capability:&capability,scopes:&scopes,stream:&stream,conversation:&conversation},&now())?;
                     let grant_facts=grant.as_ref().map(|g|g.facts().clone()).unwrap_or_else(||json!({"grantId":format!("grant-{}",uuid::Uuid::new_v4()),"toolCallId":call_id,"granted":false,"scope":capability,"duration":"denied","decidedAt":now(),"reason":"local_permission_denied"}));
                     let outcome=if let Some(grant)=grant {
                         self.launch_effect(effect,&grant,&current.resource,&call_id,&cancellation,cancel).await?
-                    }else{EffectOutcome{status:"denied",output:json!({}),error:Some("permission_denied"),artifacts:vec![],ended:true,materialization:None}};
+                    }else{EffectOutcome{status:"denied",output:json!({}),error:Some("permission_denied"),artifacts:vec![],ended:true,materialization:None,not_dispatched:true}};
                     #[cfg(feature="test-fixtures")]
                     if std::env::var("PEER_NATIVE_EPISODE_FAULT_AFTER_EFFECT").ok().as_deref()==Some(&call.name) && self.home.join(".native-cli-fixture").is_file(){std::process::exit(77)}
                     let mut result=json!({"toolCallId":call_id,"capabilityId":capability,"status":outcome.status,"output":outcome.output,"outputPreview":{"kind":"json"},"completedAt":now(),"evidence":{"evidenceId":format!("evidence-{}",uuid::Uuid::new_v4()),"toolCallId":call_id,"summary":format!("{}: {}",call.name,outcome.status),"artifactRefs":outcome.artifacts}});
+                    if let Some(metadata)=provider_evidence {let target=result["evidence"].as_object_mut().unwrap();target.extend(metadata.as_object().unwrap().clone());target.insert("permissionGrantId".into(),grant_facts["grantId"].clone());target.insert("status".into(),json!(outcome.status));target.insert("startedAt".into(),json!(started_at));target.insert("endedAt".into(),json!(now()));}
+                    if outcome.not_dispatched {result["evidence"]["dispatchOutcome"]=json!("not_dispatched");}
                     if let Some(error)=outcome.error{result["error"]=json!({"code":error,"message":error,"recoverable":true})}
                     self.append_episode_message(&conversation,&json!({"id":uuid::Uuid::new_v4().to_string(),"role":"assistant","content":"","createdAt":now(),"streamId":stream,"segments":[{"type":"tool-call","tool":call.name,"toolCallId":call_id,"args":args,"result":result}],"permissionGrants":[grant_facts]}))?;
                     let evidence=EvidenceIndexStore::new(&self.home).register(&HostToolEvidence{conversation_id:&conversation,plan_id:Some(plan_id),stream_id:Some(&stream),tool_name:&call.name,capability_id:&capability,tool_call_id:&call_id,grant:&grant_facts,result:&result},None)?;
@@ -431,43 +433,28 @@ impl NativeSessionHost {
         owned: &CancellationToken,
         external: &CancellationToken,
     ) -> Result<F::Output, HostError> {
-        tokio::pin!(future);
-        let mut tick = tokio::time::interval(Duration::from_secs(5));
-        tick.tick().await;
-        let mut cancelled = false;
-        // Short consecutive operations must share the persisted heartbeat
-        // deadline; restarting a five-second timer per operation can starve it.
-        let at = milliseconds(&now())?;
-        let mut lost = !self.journal.lease().holds().unwrap_or(false)
-            || self.journal.lease().takeover_requested().unwrap_or(true);
-        if !lost
-            && at.saturating_sub(milliseconds(&self.journal.lease().record().heartbeat_at)?) >= 5000
-        {
-            lost = self.journal.heartbeat(at).is_err();
-        }
-        if lost {
-            owned.cancel();
-        }
-        loop {
-            tokio::select! {biased;r=&mut future=>{if lost{return Err(HostError("HOST_LEASE_LOST"))}return Ok(r)},_=external.cancelled(),if !cancelled=>{owned.cancel();cancelled=true},_=tick.tick()=>{if !self.journal.lease().holds().unwrap_or(false) || self.journal.lease().takeover_requested().unwrap_or(true) || self.journal.heartbeat(milliseconds(&now())?).is_err(){lost=true;owned.cancel()}}}
-        }
+        self.wait_effect(future, owned, external, None).await
     }
     async fn launch_effect(
         &mut self,
-        effect: Box<dyn PreparedEffect>,
+        mut effect: Box<dyn PreparedEffect>,
         grant: &HostPermissionGrant,
         resource: &HostResourcePlan,
         call: &str,
         owned: &CancellationToken,
         external: &CancellationToken,
     ) -> Result<EffectOutcome, HostError> {
+        let args = effect.args().clone();
+        let (port, mut receiver) = crate::effect_admission::EffectAdmission::channel(owned);
+        effect.admission(port);
+        let metadata = effect.handle_metadata();
         let handle = effect.handle().map(str::to_owned);
         if let Some(handle) = handle.as_deref() {
-            self.resources.mark_handle(
-                resource,
-                &json!({"handleId":handle,"toolCallId":call,"state":"active"}),
-                &now(),
-            )?;
+            let mut record = json!({"handleId":handle,"toolCallId":call,"state":"active"});
+            if let Some(metadata) = metadata {
+                record["nativeMcp"] = metadata;
+            }
+            self.resources.mark_handle(resource, &record, &now())?;
             let (send, recv) = tokio::sync::oneshot::channel();
             let (start, started) = tokio::sync::oneshot::channel::<EffectFuture>();
             let registration = self.live.track_handle(
@@ -501,7 +488,17 @@ impl NativeSessionHost {
                 .send(future)
                 .map_err(|_| HostError("execution_outcome_unknown"))?;
             let outcome = self
-                .wait_owned(recv, owned, external)
+                .wait_effect(
+                    recv,
+                    owned,
+                    external,
+                    Some(super::effect_wait::AuthorizationWait {
+                        receiver: &mut receiver,
+                        grant,
+                        args: &args,
+                        resource,
+                    }),
+                )
                 .await?
                 .map_err(|_| HostError("execution_outcome_unknown"))?;
             if outcome.ended {
@@ -517,7 +514,20 @@ impl NativeSessionHost {
             Ok(outcome)
         } else {
             match effect.start(self, grant, owned.clone(), &now()) {
-                Ok(future) => self.wait_owned(future, owned, external).await,
+                Ok(future) => {
+                    self.wait_effect(
+                        future,
+                        owned,
+                        external,
+                        Some(super::effect_wait::AuthorizationWait {
+                            receiver: &mut receiver,
+                            grant,
+                            args: &args,
+                            resource,
+                        }),
+                    )
+                    .await
+                }
                 Err(e) => Ok(EffectOutcome::failed(e.0)),
             }
         }

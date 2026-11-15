@@ -165,7 +165,7 @@ impl PreparedEffect for FileEffect {
     }
     fn start(
         self: Box<Self>,
-        host: &NativeSessionHost,
+        host: &mut NativeSessionHost,
         grant: &HostPermissionGrant,
         cancel: CancellationToken,
         now: &str,
@@ -270,6 +270,7 @@ impl PreparedEffect for FileEffect {
                 artifacts: vec![],
                 ended: true,
                 materialization,
+                not_dispatched: false,
             },
             Err(e) => EffectOutcome::failed(e.0),
         };

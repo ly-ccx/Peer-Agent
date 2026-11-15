@@ -27,3 +27,9 @@ rustix = { version = "1.1.4", features = ["event", "pty"] }
 [dev-dependencies]
 tempfile = "3.23.0"
 peer-store = { path = "../peer-store" }
+
+[[bin]]
+name = "mcp-test-fixture"
+path = "tests/fixtures/mcp.rs"
+required-features = ["test-fixtures"]
+test = false

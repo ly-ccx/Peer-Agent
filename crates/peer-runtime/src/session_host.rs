@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 mod authority;
 mod billing;
 mod context_pipeline;
+mod effect_wait;
 mod episode;
 pub(crate) use episode::now as episode_time;
 pub use episode::{EpisodeOutcome, PermissionInput};

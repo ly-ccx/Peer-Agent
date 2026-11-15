@@ -202,8 +202,10 @@ async fn process_start(pid: u32) -> ProcessStart {
     }
 }
 pub async fn local_recorder(host_id: &str, acquired_at: &str) -> Option<Recorder> {
+    process_recorder(std::process::id(), host_id, acquired_at).await
+}
+pub async fn process_recorder(pid: u32, host_id: &str, acquired_at: &str) -> Option<Recorder> {
     let boot = boot_id().await?;
-    let pid = std::process::id();
     let ProcessStart::Present(pid_start) = process_start(pid).await else {
         return None;
     };

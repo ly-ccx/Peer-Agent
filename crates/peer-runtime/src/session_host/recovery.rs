@@ -15,6 +15,9 @@ impl NativeSessionHost {
         {
             return false;
         }
+        self.dead_native_owner(current).await.is_some()
+    }
+    async fn dead_native_owner(&self, current: &Current) -> Option<recorder::Recorder> {
         let plan = &current.resource.execution.plan_id;
         let work = current.goal.facts["delegationOrigin"]["workId"]
             .as_str()
@@ -42,26 +45,109 @@ impl NativeSessionHost {
             );
         let mut recorder = None;
         for row in rows {
-            let Some(normalized) =
-                normalize_native_episode_recorder(row, &current.resource.execution)
-            else {
-                return false;
-            };
+            let normalized = normalize_native_episode_recorder(row, &current.resource.execution)?;
             let Ok(next) =
                 serde_json::from_value::<recorder::Recorder>(normalized["recorder"].clone())
             else {
-                return false;
+                return None;
             };
             if recorder.as_ref().is_some_and(|old| old != &next) {
-                return false;
+                return None;
             }
             recorder = Some(next);
         }
         if let Some(recorder) = recorder {
-            recorder::prove(&recorder).await.allows_settlement()
+            recorder::prove(&recorder)
+                .await
+                .allows_settlement()
+                .then_some(recorder)
         } else {
-            false
+            None
         }
+    }
+    // ADR 131: local pump/owned child settlement is separate from the remote
+    // tool's unknown effect. The latter remains canonical and unfenced.
+    async fn recover_native_mcp_handles(
+        &mut self,
+        current: &Current,
+        cancel: &crate::CancellationToken,
+    ) -> Result<(), HostError> {
+        if self.live.ownership(&current.resource.execution).ok()
+            == Some(crate::live_execution::Ownership::Live)
+        {
+            return Ok(());
+        }
+        let Some(owner) = self.dead_native_owner(current).await else {
+            return Ok(());
+        };
+        for mut handle in self.resources.unsettled_handles(&current.resource)? {
+            if cancel.is_cancelled() {
+                return Err(HostError("CANCELLED"));
+            }
+            let meta = &handle["nativeMcp"];
+            if meta["schemaVersion"] != 1
+                || !matches!(meta["role"].as_str(), Some("rpc" | "connection"))
+                || !matches!(
+                    meta["transport"].as_str(),
+                    Some("stdio" | "streamable_http" | "sse")
+                )
+                || meta["registryRevision"].as_str().is_none_or(str::is_empty)
+            {
+                continue;
+            }
+            let Ok(recorded) =
+                serde_json::from_value::<recorder::Recorder>(meta["ownerRecorder"].clone())
+            else {
+                continue;
+            };
+            if recorded != owner {
+                continue;
+            }
+            if meta["role"] == "connection" && meta["transport"] == "stdio" {
+                let Ok(child) =
+                    serde_json::from_value::<recorder::Recorder>(meta["childRecorder"].clone())
+                else {
+                    continue;
+                };
+                if !child.complete()
+                    || child.host_id != owner.host_id
+                    || child.acquired_at != owner.acquired_at
+                {
+                    continue;
+                }
+                let proof = recorder::prove(&child).await;
+                if proof == recorder::RecorderProof::Alive {
+                    let Some(pid) = rustix::process::Pid::from_raw(child.pid as i32) else {
+                        continue;
+                    };
+                    if rustix::process::getpgid(Some(pid)).ok() != Some(pid) {
+                        continue;
+                    }
+                    if rustix::process::kill_process_group(pid, rustix::process::Signal::KILL)
+                        .is_err()
+                    {
+                        continue;
+                    }
+                    for _ in 0..20 {
+                        if crate::providers::group_absent(child.pid) {
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                    }
+                } else if !proof.allows_settlement() {
+                    continue;
+                }
+                if !crate::providers::group_absent(child.pid) {
+                    continue;
+                }
+                handle["nativeMcp"]["childStopObservation"] = json!("group_absent");
+            }
+            handle["nativeMcp"]["ownerStopObservation"] = json!("original_owner_dead");
+            handle["state"] = json!("ended");
+            self.resources
+                .mark_handle(&current.resource, &handle, &super::episode_time())?;
+        }
+        Ok(())
     }
     /// Stops a proven-dead native worker, preserves pending tools as unknown,
     /// then obtains fresh reconciliation observations. It never replays a tool.
@@ -89,6 +175,7 @@ impl NativeSessionHost {
             existing["usageLedgerRecovery"] = json!({"intent":intent,"pending":pending});
             return Ok(existing);
         }
+        self.recover_native_mcp_handles(&current, cancel).await?;
         if !self.dead_native_episode(&current).await {
             return Err(HostError("native_execution_stop_unproven"));
         }

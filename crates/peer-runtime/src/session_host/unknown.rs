@@ -112,7 +112,7 @@ impl NativeSessionHost {
                 .unwrap_or(&Value::Null);
             fenced &= row["capabilityId"]
                 .as_str()
-                .is_some_and(|s| s.starts_with("local."));
+                .is_some_and(|s| s.starts_with("local.") && !s.starts_with("local.mcp."));
             all_not_dispatched &= receipt["outcome"] == "not_dispatched";
             probe(
                 &mut probes,

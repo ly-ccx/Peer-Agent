@@ -1,0 +1,220 @@
+{
+  "version": 1,
+  "initialize": {
+    "protocolVersion": "2025-11-25",
+    "capabilities": {},
+    "clientInfo": {
+      "name": "peer-agent",
+      "version": "1.0.0"
+    }
+  },
+  "cases": [
+    {
+      "input": null,
+      "expected": {
+        "raw": null,
+        "content": [],
+        "text": "{}",
+        "isError": false,
+        "structuredContent": null
+      }
+    },
+    {
+      "input": {},
+      "expected": {
+        "raw": {},
+        "content": [],
+        "text": "{}",
+        "isError": false,
+        "structuredContent": null
+      }
+    },
+    {
+      "input": {
+        "content": []
+      },
+      "expected": {
+        "raw": {
+          "content": []
+        },
+        "content": [],
+        "text": "{\n  \"content\": []\n}",
+        "isError": false,
+        "structuredContent": null
+      }
+    },
+    {
+      "input": {
+        "content": [
+          {
+            "type": "text",
+            "text": "native"
+          },
+          {
+            "type": "text",
+            "text": ""
+          },
+          {
+            "type": "image",
+            "data": "base64-data"
+          }
+        ],
+        "isError": true,
+        "structuredContent": {
+          "nested": [
+            "value"
+          ]
+        }
+      },
+      "expected": {
+        "raw": {
+          "content": [
+            {
+              "type": "text",
+              "text": "native"
+            },
+            {
+              "type": "text",
+              "text": ""
+            },
+            {
+              "type": "image",
+              "data": "base64-data"
+            }
+          ],
+          "isError": true,
+          "structuredContent": {
+            "nested": [
+              "value"
+            ]
+          }
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "native"
+          },
+          {
+            "type": "text",
+            "text": ""
+          },
+          {
+            "type": "image",
+            "data": "base64-data"
+          }
+        ],
+        "text": "native\nbase64-data",
+        "isError": true,
+        "structuredContent": {
+          "nested": [
+            "value"
+          ]
+        }
+      }
+    },
+    {
+      "input": {
+        "content": [
+          {
+            "type": "resource",
+            "resource": {
+              "uri": "fixture://fact",
+              "text": "factual context"
+            }
+          }
+        ],
+        "extension": {
+          "retained": true
+        }
+      },
+      "expected": {
+        "raw": {
+          "content": [
+            {
+              "type": "resource",
+              "resource": {
+                "uri": "fixture://fact",
+                "text": "factual context"
+              }
+            }
+          ],
+          "extension": {
+            "retained": true
+          }
+        },
+        "content": [
+          {
+            "type": "resource",
+            "resource": {
+              "uri": "fixture://fact",
+              "text": "factual context"
+            }
+          }
+        ],
+        "text": "{\n  \"content\": [\n    {\n      \"type\": \"resource\",\n      \"resource\": {\n        \"uri\": \"fixture://fact\",\n        \"text\": \"factual context\"\n      }\n    }\n  ],\n  \"extension\": {\n    \"retained\": true\n  }\n}",
+        "isError": false,
+        "structuredContent": null
+      }
+    },
+    {
+      "input": {
+        "content": [
+          {
+            "type": "text",
+            "text": "ESC\u001b[31m"
+          }
+        ],
+        "isError": false
+      },
+      "expected": {
+        "raw": {
+          "content": [
+            {
+              "type": "text",
+              "text": "ESC\u001b[31m"
+            }
+          ],
+          "isError": false
+        },
+        "content": [
+          {
+            "type": "text",
+            "text": "ESC\u001b[31m"
+          }
+        ],
+        "text": "ESC\u001b[31m",
+        "isError": false,
+        "structuredContent": null
+      }
+    },
+    {
+      "input": {
+        "structuredContent": {
+          "2": 2,
+          "10": 1,
+          "中文🙂": 1,
+          "exponent": 1e-7
+        }
+      },
+      "expected": {
+        "raw": {
+          "structuredContent": {
+            "2": 2,
+            "10": 1,
+            "中文🙂": 1,
+            "exponent": 1e-7
+          }
+        },
+        "content": [],
+        "text": "{\n  \"structuredContent\": {\n    \"2\": 2,\n    \"10\": 1,\n    \"中文🙂\": 1,\n    \"exponent\": 1e-7\n  }\n}",
+        "isError": false,
+        "structuredContent": {
+          "2": 2,
+          "10": 1,
+          "中文🙂": 1,
+          "exponent": 1e-7
+        }
+      }
+    }
+  ]
+}

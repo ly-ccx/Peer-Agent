@@ -1,0 +1,60 @@
+//! Ownership heartbeat and fresh dispatch authorization share the control lane.
+use super::*;
+use crate::{CancellationToken, effect_admission::AdmissionRequest};
+use std::{future::Future, time::Duration};
+use tokio::sync::mpsc;
+pub(super) struct AuthorizationWait<'a> {
+    pub receiver: &'a mut mpsc::Receiver<AdmissionRequest>,
+    pub grant: &'a HostPermissionGrant,
+    pub args: &'a Value,
+    pub resource: &'a HostResourcePlan,
+}
+impl NativeSessionHost {
+    pub(super) async fn wait_effect<F: Future>(
+        &mut self,
+        future: F,
+        owned: &CancellationToken,
+        external: &CancellationToken,
+        mut authorization: Option<AuthorizationWait<'_>>,
+    ) -> Result<F::Output, HostError> {
+        tokio::pin!(future);
+        let mut tick = tokio::time::interval(Duration::from_secs(5));
+        tick.tick().await;
+        let mut cancelled = false;
+        let at = milliseconds(&episode_time())?;
+        let mut lost = !self.journal.lease().holds().unwrap_or(false)
+            || self.journal.lease().takeover_requested().unwrap_or(true);
+        if !lost
+            && at.saturating_sub(milliseconds(&self.journal.lease().record().heartbeat_at)?) >= 5000
+        {
+            lost = self.journal.heartbeat(at).is_err();
+        }
+        if lost {
+            owned.cancel();
+        }
+        loop {
+            tokio::select! {biased;
+                _=external.cancelled(),if !cancelled=>{owned.cancel();cancelled=true},
+                _=tick.tick()=>{if !self.journal.lease().holds().unwrap_or(false)||self.journal.lease().takeover_requested().unwrap_or(true)||self.journal.heartbeat(milliseconds(&episode_time())?).is_err(){lost=true;owned.cancel();}},
+                request=async{authorization.as_mut().unwrap().receiver.recv().await},if authorization.is_some()=>{
+                    if let Some(request)=request {
+                        let a=authorization.as_ref().unwrap();
+                        let valid=if lost{Err(HostError("HOST_LEASE_LOST"))}else if owned.is_cancelled(){Err(HostError("CANCELLED"))}else{self.validate_permission(a.grant,a.args,&episode_time())};
+                        match request {
+                            AdmissionRequest::Check(reply)=>{let _=reply.send(valid);},
+                            AdmissionRequest::Child{handle,recorder,reply}=>{
+                                let result=valid.and_then(|_|{
+                                    let raw=self.resources.unsettled_handles(a.resource)?.into_iter().find(|h|h["handleId"]==handle).ok_or(HostError("mcp_handle_invalid"))?;
+                                    if raw["nativeMcp"]["schemaVersion"]!=1 || !recorder.complete() || recorder.host_id!=self.journal.lease().record().host_id || recorder.acquired_at!=self.journal.lease().record().acquired_at{return Err(HostError("mcp_handle_invalid"))}
+                                    let mut raw=raw;raw["nativeMcp"]["childRecorder"]=serde_json::to_value(recorder).map_err(|_|HostError("mcp_handle_invalid"))?;
+                                    self.resources.mark_handle(a.resource,&raw,&episode_time())?;Ok(())
+                                });let _=reply.send(result);
+                            }
+                        }
+                    }else{authorization=None;}
+                },
+                result=&mut future=>{if lost{return Err(HostError("HOST_LEASE_LOST"))}return Ok(result)}
+            }
+        }
+    }
+}

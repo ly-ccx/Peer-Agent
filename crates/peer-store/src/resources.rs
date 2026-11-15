@@ -82,6 +82,7 @@ impl From<rusqlite::Error> for ResourceError {
 
 /// Fresh facts supplied by the Host's canonical plan adapter. Deliberately not
 /// Deserialize: UI/model arguments are not a source of execution ownership.
+#[derive(Clone)]
 pub struct HostResourcePlan {
     pub execution: SessionExecutionIdentity,
     pub workspace_id: String,
