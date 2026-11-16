@@ -8,6 +8,8 @@ mod authentication;
 mod continuation;
 mod count;
 mod grok;
+pub(crate) mod qoder_retry;
+mod retry_seed;
 pub use count::ProviderTokenCount;
 mod sse;
 pub use continuation::LiveHistory;
@@ -201,29 +203,7 @@ impl NativeModel {
                 options: &self.generation,
             },
         )?;
-        let bytes =
-            serde_json::to_vec(&body).map_err(|_| ModelError::new("model_request_invalid"))?;
-        let bytes = if self.wire == wire::Wire::Qoder
-            && self.generation.qoder_dialect == wire::QoderDialect::Prepared
-        {
-            let raw = std::str::from_utf8(&bytes)
-                .map_err(|_| ModelError::new("model_request_invalid"))?;
-            let encoded = crate::qoder::encode_body(raw)
-                .map_err(|_| ModelError::new("model_request_limit"))?;
-            if encoded.expose().len() > 2 * 1024 * 1024 {
-                return Err(ModelError::new("model_request_limit"));
-            }
-            encoded.expose().as_bytes().to_vec()
-        } else {
-            bytes
-        };
-        let fingerprint = format!("{:x}", Sha256::digest(&bytes));
-        Ok(PreparedRequest {
-            owner: self,
-            body,
-            bytes,
-            fingerprint,
-        })
+        self.freeze(body)
     }
     async fn request_builder(
         &self,
@@ -292,11 +272,17 @@ impl PreparedRequest<'_> {
                     .send()
                     .await
                     .map_err(|e| {
-                        if e.is_timeout() {
-                            ModelError::new("model_timeout")
+                        let mut error = ModelError::new(if e.is_timeout() {
+                            "model_timeout"
                         } else {
-                            ModelError::new("model_transport_failed")
+                            "model_transport_failed"
+                        });
+                        if model.wire == wire::Wire::Qoder
+                            && (e.is_connect() || e.is_request() || e.is_timeout())
+                        {
+                            error.retry = Some(qoder_retry::Hint::Connection);
                         }
+                        error
                     })?,
             };
             if !response.status().is_success() {
@@ -312,7 +298,11 @@ impl PreparedRequest<'_> {
                     }
                     body.extend_from_slice(&chunk);
                 }
-                return Err(ModelError::http(status, &body));
+                return Err(if model.wire == wire::Wire::Qoder {
+                    qoder_retry::http(status, &body)
+                } else {
+                    ModelError::http(status, &body)
+                });
             }
             if !response
                 .headers()
@@ -323,11 +313,13 @@ impl PreparedRequest<'_> {
                 return Err(ModelError::new("model_content_type_invalid"));
             }
             let decoder = stream.as_mut().expect("one request decoder");
-            while let Some(chunk) = response
-                .chunk()
-                .await
-                .map_err(|_| ModelError::new("model_stream_interrupted"))?
-            {
+            while let Some(chunk) = response.chunk().await.map_err(|e| {
+                let mut error = ModelError::new("model_stream_interrupted");
+                if model.wire == wire::Wire::Qoder && !e.is_timeout() {
+                    error.retry = Some(qoder_retry::Hint::Transient);
+                }
+                error
+            })? {
                 decoder.push(&chunk)?;
                 if decoder.terminal() {
                     break;

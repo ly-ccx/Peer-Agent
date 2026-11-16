@@ -121,6 +121,9 @@ impl Server {
                         }
                         captured.lock().unwrap().push(request);
                         let reply = replies.next().unwrap_or_else(|| reply_text("done"));
+                        if reply == "FIXTURE_CLOSE_WITHOUT_HEADERS" {
+                            continue;
+                        }
                         if reply.starts_with("HTTP/1.1 ") {
                             let _ = s.write_all(reply.as_bytes());
                             continue;

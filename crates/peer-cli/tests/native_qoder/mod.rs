@@ -357,13 +357,13 @@ fn qoder_outer_business_error_cannot_hide_behind_an_inner_executable_tool() {
     for (outer, code) in [
         (
             json!({"code":"10605","message":{"isQueued":true}}),
-            "qoder_queue_wait_required",
+            "work_budget_limited",
         ),
         (
             json!({"statusCodeValue":"401","status":200}),
             "qoder_stream_rejected",
         ),
-        (json!({"code":"103"}), "qoder_stream_rejected"),
+        (json!({"code":"103"}), "work_budget_limited"),
     ] {
         let raw = reply_tool(
             "write_file",
@@ -385,6 +385,7 @@ fn qoder_outer_business_error_cannot_hide_behind_an_inner_executable_tool() {
         let server = Server::new(vec![rejected]);
         let f = Fixture::new(&server);
         configure(&f, &server);
+        f.budget(|b| b["limits"] = json!({"maxModelRequests":1}));
         let output = command(&f).output().unwrap();
         assert!(
             !f.root
@@ -403,3 +404,5 @@ fn qoder_outer_business_error_cannot_hide_behind_an_inner_executable_tool() {
 mod legacy;
 
 mod network;
+
+mod retry;

@@ -6,7 +6,7 @@ mod anthropic;
 mod content;
 mod environment;
 mod gemini;
-mod qoder;
+pub(super) mod qoder;
 mod responses;
 use content::*;
 
@@ -93,7 +93,7 @@ pub fn encode(wire: Wire, input: &WireInput<'_>) -> Result<Value, ModelError> {
     check_limit(&body)?;
     Ok(body)
 }
-fn check_limit(body: &Value) -> Result<(), ModelError> {
+pub(super) fn check_limit(body: &Value) -> Result<(), ModelError> {
     if serde_json::to_vec(body)
         .map_err(|_| ModelError::new("model_request_invalid"))?
         .len()

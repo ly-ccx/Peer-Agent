@@ -42,6 +42,7 @@ run('bun', ['scripts/native-cli/session-shell-contracts.ts']);
 run('bun', ['scripts/native-cli/qoder-format-contracts.ts']);
 run('bun', ['scripts/native-cli/qoder-request-contracts.ts']);
 run('bun', ['scripts/native-cli/qoder-legacy-contracts.ts']);
+run('bun', ['scripts/native-cli/qoder-retry-contracts.ts']);
 run('bun', ['scripts/native-cli/network-contracts.ts']);
 run('bun', ['scripts/native-cli/count-contracts.ts']);
 run('bun', ['scripts/native-cli/context-accounting-contracts.ts']);

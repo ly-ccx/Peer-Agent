@@ -134,6 +134,25 @@ fn legacy(input: &WireInput<'_>) -> Result<Value, ModelError> {
     Ok(body)
 }
 
+/// The live sender refreshes all correlations; pure builder defaults remain a
+/// shared compatibility vector, never a production task identity.
+pub(in crate::model) fn refresh_identity(body: &mut Value, dialect: QoderDialect, retry: bool) {
+    let id = json!(uuid::Uuid::new_v4().to_string());
+    let context = if dialect == QoderDialect::Legacy {
+        &mut body["metadata"]["context"]
+    } else {
+        &mut *body
+    };
+    context["request_id"] = id.clone();
+    context["request_set_id"] = id.clone();
+    context["session_id"] = json!(uuid::Uuid::new_v4().to_string());
+    context["task_id"] = json!(format!("peer-agent:{}", uuid::Uuid::new_v4()));
+    if dialect == QoderDialect::Prepared {
+        context["chat_record_id"] = id;
+        context["is_retry"] = json!(retry);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

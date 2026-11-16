@@ -12,6 +12,7 @@ pub struct ModelError {
     pub code: &'static str,
     pub observation: Option<Box<ModelRequestObservation>>,
     pub context_overflow_status: Option<u16>,
+    pub(crate) retry: Option<super::qoder_retry::Hint>,
 }
 impl ModelError {
     pub const fn new(code: &'static str) -> Self {
@@ -19,6 +20,7 @@ impl ModelError {
             code,
             observation: None,
             context_overflow_status: None,
+            retry: None,
         }
     }
     pub(super) fn http(status: u16, body: &[u8]) -> Self {

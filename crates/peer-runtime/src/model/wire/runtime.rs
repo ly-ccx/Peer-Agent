@@ -94,6 +94,9 @@ pub(crate) fn encode(wire: Wire, input: &WireInput<'_>) -> Result<Value, ModelEr
             body.as_object_mut().unwrap().remove("reasoning");
         }
     }
+    if wire == Wire::Qoder {
+        qoder::refresh_identity(&mut body, input.options.qoder_dialect, false);
+    }
     check_limit(&body)?;
     Ok(body)
 }

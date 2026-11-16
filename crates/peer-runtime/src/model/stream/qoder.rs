@@ -44,20 +44,26 @@ fn reject_business_error(event: &Value) -> Result<(), ModelError> {
     let status = status
         .as_u64()
         .or_else(|| status.as_str().and_then(|s| s.parse().ok()));
-    if status.is_some_and(|n| n >= 400) || event["success"] == false {
-        return Err(ModelError::new("qoder_stream_rejected"));
-    }
-    if event["code"] == "10605" || event["code"] == 10605 {
-        return Err(ModelError::new("qoder_queue_wait_required"));
-    }
-    if event["type"] == "error"
+    let hint = super::super::qoder_retry::classify(event);
+    if hint.is_some()
+        || status.is_some_and(|n| n >= 400)
+        || event["success"] == false
+        || event["type"] == "error"
         || !event["error"].is_null()
         || (!event["code"].is_null()
             && !matches!(event["code"].as_str(), Some("0" | "200"))
             && event["code"] != 0
             && event["code"] != 200)
     {
-        return Err(ModelError::new("qoder_stream_rejected"));
+        let mut error = ModelError::new(
+            if matches!(hint, Some(super::super::qoder_retry::Hint::Queue { .. })) {
+                "qoder_queue_wait_required"
+            } else {
+                "qoder_stream_rejected"
+            },
+        );
+        error.retry = hint;
+        return Err(error);
     }
     Ok(())
 }

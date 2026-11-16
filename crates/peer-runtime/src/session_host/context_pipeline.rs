@@ -1,5 +1,6 @@
 //! NR-04 owns durable compaction, request reconstruction and capacity recovery.
 //! All cognition goes through NativeModel; this module cannot execute tools.
+mod attempts;
 use super::billing::{BillingScope, ModelObservation};
 use super::{HostError, NativeSessionHost, episode_time as now, milliseconds};
 use crate::{
@@ -206,38 +207,9 @@ impl ContextPipeline {
                 compacted = true;
                 continue;
             }
-            Self::guard(host, f)?;
-            f.budget.request(host, &now())?;
-            let mut observed = None;
-            let turn = host
-                .wait_owned(
-                    async {
-                        let result = prepared.send(f.owned).await;
-                        observed = Some(ModelObservation::capture(&result));
-                        result
-                    },
-                    f.owned,
-                    f.external,
-                )
-                .await;
-            let observed = observed.unwrap_or_default();
-            let capacity =
-                self.capacity
-                    .observe(observed.usage(), &fingerprint, milliseconds(&now())?);
-            host.observe_model_usage(f.budget, accounting, observed, f.billing)?;
-            capacity.map_err(HostError)?;
-            // A late charge is factual; lease loss must not authorize a capacity write.
-            let turn = turn?;
-            if f.owned.is_cancelled() || f.external.is_cancelled() {
-                return Err(HostError("CANCELLED"));
-            }
-            self.capacity.complete();
-            if let Err(error) = &turn
-                && let Some(status) = error.context_overflow_status
-            {
-                self.capacity.overflow(status);
-            }
-            self.persist(&store, &history, "turn_complete")?;
+            let turn = self
+                .send_attempts(host, f, accounting, prepared, &history, true)
+                .await?;
             let turn = match turn {
                 Err(error) if error.context_overflow_status.is_some() && !compacted => {
                     let fresh = store.read_committed(&self.conversation, None, 8 * 1024 * 1024)?;
@@ -329,29 +301,9 @@ impl ContextPipeline {
                 &LiveHistory::default(),
             )
             .map_err(|e| HostError(e.code))?;
-        Self::guard(host, f)?;
-        f.budget.request(host, &now())?;
-        let mut observation = None;
-        let result = host
-            .wait_owned(
-                async {
-                    let result = prepared.send(f.owned).await;
-                    observation = Some(ModelObservation::capture(&result));
-                    result
-                },
-                f.owned,
-                f.external,
-            )
-            .await;
-        host.observe_usage_for(
-            f.budget,
-            accounting,
-            observation.unwrap_or_default(),
-            f.billing,
-            peer_protocol::UsagePurpose::CompactionSummary,
-            false,
-        )?;
-        let result = result?;
+        let result = self
+            .send_attempts(host, f, accounting, prepared, history, false)
+            .await?;
         Self::authority(host, f)?;
         let (method, summary) = match result {
             Ok(turn)
