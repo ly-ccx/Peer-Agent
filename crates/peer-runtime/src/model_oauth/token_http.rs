@@ -9,9 +9,10 @@ pub(crate) async fn request(
     started: Option<&std::sync::atomic::AtomicBool>,
 ) -> Result<Token, ModelError> {
     let client = network
-        .builder(url, cancel)
+        .prepare(url, cancel)
         .await
         .map_err(|e| ModelError::new(e.0))?
+        .builder
         .connect_timeout(Duration::from_secs(5))
         .read_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(15))

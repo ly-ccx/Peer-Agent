@@ -29,6 +29,7 @@ pub(crate) struct McpState {
     pub sent: AtomicBool,
     pub notify: Notify,
     inner: Mutex<WireState>,
+    transport_secrets: Mutex<zeroize::Zeroizing<Vec<String>>>,
 }
 struct WireState {
     bytes: usize,
@@ -45,6 +46,7 @@ impl McpState {
             closed: AtomicBool::new(false),
             sent: AtomicBool::new(false),
             notify: Notify::new(),
+            transport_secrets: Mutex::new(zeroize::Zeroizing::new(Vec::new())),
             inner: Mutex::new(WireState {
                 bytes: 0,
                 frames: 0,
@@ -55,6 +57,22 @@ impl McpState {
                 protocol: None,
             }),
         })
+    }
+    fn protect(&self, selected: &[String]) -> Result<(), &'static str> {
+        let mut values = self.transport_secrets.lock().unwrap();
+        let added: Vec<_> = selected.iter().filter(|s| !values.contains(s)).collect();
+        if values.len() + added.len() > 64
+            || values.iter().map(String::len).sum::<usize>()
+                + added.iter().map(|s| s.len()).sum::<usize>()
+                > 262144
+        {
+            return Err("mcp_network_protection_limit");
+        }
+        values.extend(added.into_iter().cloned());
+        Ok(())
+    }
+    pub(crate) fn prepare_result(&self, raw: Value, config: &Value) -> Result<Value, &'static str> {
+        result::prepare_result(raw, config, &self.transport_secrets.lock().unwrap())
     }
     fn begin(&self, v: &Value) {
         if v["method"] == "initialize" {
@@ -300,4 +318,38 @@ impl FailedConnection {
     }
 }
 mod result;
-pub(crate) use result::prepare_result;
+
+#[cfg(test)]
+mod protection_tests {
+    use super::*;
+    #[test]
+    fn selected_route_protection_is_bounded_deduplicated_and_never_marks_dispatch() {
+        let state = McpState::new();
+        let initial = vec!["first-secret".to_owned()];
+        state.protect(&initial).unwrap();
+        state.protect(&initial).unwrap();
+        assert_eq!(state.transport_secrets.lock().unwrap().len(), 1);
+        assert_eq!(
+            state.protect(&["x".repeat(262144)]),
+            Err("mcp_network_protection_limit")
+        );
+        assert_eq!(
+            state.transport_secrets.lock().unwrap().as_slice(),
+            initial.as_slice()
+        );
+        assert_eq!(
+            state.protect(&(0..64).map(|i| format!("secret-{i}")).collect::<Vec<_>>()),
+            Err("mcp_network_protection_limit")
+        );
+        assert!(!state.sent.load(Ordering::Acquire));
+        assert_eq!(
+            state
+                .prepare_result(
+                    json!({"content":[{"type":"text","text":"first-secret retained"}]}),
+                    &json!({})
+                )
+                .unwrap()["text"],
+            "[REDACTED] retained"
+        );
+    }
+}

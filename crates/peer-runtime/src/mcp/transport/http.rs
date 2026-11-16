@@ -40,19 +40,22 @@ pub(super) async fn open(
             );
         }
     }
-    let client = Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .retry(reqwest::retry::never())
-        .default_headers(headers)
-        .connect_timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|_| "mcp_transport_unavailable")?;
+    let network = crate::network::Network::new().map_err(|e| e.0)?;
     let legacy = config["transport"] == "sse";
     Ok(tokio::spawn(async move {
         let operation = async {
+            let mut posts = HttpPosts {
+                network,
+                headers,
+                cancel: cancel.clone(),
+                endpoint: url.clone(),
+                session: None,
+            };
             if legacy {
                 let (response_tx, response_rx) = oneshot::channel();
-                let response = client
+                let response = posts
+                    .client(&url, &state)
+                    .await?
                     .get(url.clone())
                     .header("accept", "text/event-stream")
                     .send()
@@ -70,11 +73,12 @@ pub(super) async fn open(
                 );
                 let write = async {
                     let endpoint = response_rx.await.map_err(|_| "mcp_endpoint_missing")?;
-                    post(client, url, endpoint, requests, incoming, &state, true).await
+                    posts.endpoint = endpoint;
+                    post(posts, requests, incoming, &state, true).await
                 };
                 tokio::select! {v=read=>v,v=write=>v}
             } else {
-                post(client, url.clone(), url, requests, incoming, &state, false).await
+                post(posts, requests, incoming, &state, false).await
             }
         };
         let result = tokio::select! {biased;_=cancel.cancelled()=>Ok(()),v=operation=>v};
@@ -84,11 +88,27 @@ pub(super) async fn open(
 // A primary SSE response and one SDK control POST can coexist. Both futures
 // stay inside the registered worker; cancellation drops them together.
 struct HttpPosts {
-    client: Client,
+    network: crate::network::Network,
+    headers: HeaderMap,
+    cancel: CancellationToken,
     endpoint: Url,
     session: Option<String>,
 }
 impl HttpPosts {
+    async fn client(&self, url: &Url, state: &McpState) -> Result<Client, &'static str> {
+        let prepared = self
+            .network
+            .prepare(url, &self.cancel)
+            .await
+            .map_err(|e| e.0)?;
+        state.protect(&prepared.secrets)?;
+        prepared
+            .builder
+            .default_headers(self.headers.clone())
+            .connect_timeout(Duration::from_secs(10))
+            .build()
+            .map_err(|_| "mcp_transport_unavailable")
+    }
     async fn send(
         &mut self,
         bytes: Vec<u8>,
@@ -96,7 +116,8 @@ impl HttpPosts {
     ) -> Result<reqwest::Response, &'static str> {
         let value: Value = serde_json::from_slice(&bytes).map_err(|_| "mcp_request_invalid")?;
         let mut request = self
-            .client
+            .client(&self.endpoint, state)
+            .await?
             .post(self.endpoint.clone())
             .header("content-type", "application/json")
             .header("accept", "application/json, text/event-stream")
@@ -106,6 +127,9 @@ impl HttpPosts {
         }
         if let Some(version) = state.inner.lock().unwrap().protocol.clone() {
             request = request.header("mcp-protocol-version", version);
+        }
+        if self.cancel.is_cancelled() {
+            return Err("CANCELLED");
         }
         if value["method"] == "tools/call" {
             state.sent.store(true, Ordering::Release);
@@ -131,19 +155,12 @@ impl HttpPosts {
     }
 }
 async fn post(
-    client: Client,
-    _base: Url,
-    endpoint: Url,
+    mut posts: HttpPosts,
     mut requests: mpsc::Receiver<Vec<u8>>,
     incoming: mpsc::Sender<RxJsonRpcMessage<RoleClient>>,
     state: &Arc<McpState>,
     legacy: bool,
 ) -> Result<(), &'static str> {
-    let mut posts = HttpPosts {
-        client,
-        endpoint,
-        session: None,
-    };
     while let Some(bytes) = requests.recv().await {
         let value: Value = serde_json::from_slice(&bytes).map_err(|_| "mcp_request_invalid")?;
         let mut response = posts.send(bytes, state).await?;

@@ -1,7 +1,7 @@
 //! Actual isolated native host, network configuration and recovery.
 use super::*;
-mod tls;
-fn clean_network(command: &mut Command) {
+pub(crate) mod tls;
+pub(crate) fn clean_network(command: &mut Command) {
     for key in [
         "HTTP_PROXY",
         "http_proxy",

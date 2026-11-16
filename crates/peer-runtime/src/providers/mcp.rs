@@ -303,7 +303,7 @@ impl PreparedEffect for McpEffect {
             let result = peer
                 .call(name, self.args.clone(), &cancel)
                 .await
-                .and_then(|raw| crate::mcp::prepare_result(raw, &config.0));
+                .and_then(|raw| peer.state.prepare_result(raw, &config.0));
             match result {
                 Ok(output) => EffectOutcome {
                     status: if output["isError"] == true {

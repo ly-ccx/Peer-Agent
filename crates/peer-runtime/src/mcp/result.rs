@@ -79,9 +79,13 @@ pub(crate) fn normalize_result(raw: Value) -> Value {
 }
 /// Redaction can change arbitrary server keys, including a key named isError.
 /// Preserve the SDK-validated protocol outcome separately from that data.
-pub(crate) fn prepare_result(raw: Value, config: &Value) -> Result<Value, &'static str> {
+pub(crate) fn prepare_result(
+    raw: Value,
+    config: &Value,
+    extra: &[String],
+) -> Result<Value, &'static str> {
     let is_error = raw["isError"] == true;
-    let mut output = normalize_result(redact(raw, config));
+    let mut output = normalize_result(redact_with(raw, config, extra));
     output["isError"] = json!(is_error);
     if serde_json::to_vec(&output).map_or(true, |v| {
         v.len() > LIMITS["maxResultBytes"].as_u64().unwrap() as usize
@@ -92,8 +96,12 @@ pub(crate) fn prepare_result(raw: Value, config: &Value) -> Result<Value, &'stat
 }
 /// Configured header/environment values may be echoed by an untrusted server.
 /// Sanitize before any Tool Result, model context or Evidence persistence.
-pub(crate) fn redact(mut value: Value, config: &Value) -> Value {
-    let mut secrets = Vec::new();
+#[cfg(test)]
+fn redact(value: Value, config: &Value) -> Value {
+    redact_with(value, config, &[])
+}
+fn redact_with(mut value: Value, config: &Value, extra: &[String]) -> Value {
+    let mut secrets = zeroize::Zeroizing::new(extra.to_vec());
     if let Some(values) = config["_credentialRedaction"].as_array() {
         secrets.extend(
             values
@@ -120,7 +128,7 @@ pub(crate) fn redact(mut value: Value, config: &Value) -> Value {
     let matcher = aho_corasick::AhoCorasick::builder()
         .kind(Some(aho_corasick::AhoCorasickKind::ContiguousNFA))
         .match_kind(aho_corasick::MatchKind::LeftmostLongest)
-        .build(&secrets);
+        .build(secrets.iter());
     let Ok(matcher) = matcher else {
         return json!({"redacted":true});
     };
@@ -163,9 +171,19 @@ mod tests {
         let output = prepare_result(
             json!({"content":[],"isError":true}),
             &json!({"env":{"TOKEN":"Error"}}),
+            &[],
         )
         .unwrap();
         assert_eq!(output["isError"], true);
+        assert!(!output["raw"].to_string().contains("isError"));
+        let output = prepare_result(
+            json!({"content":[{"type":"text","text":"Error secret"}],"isError":true}),
+            &json!({}),
+            &["Error".into(), "secret".into()],
+        )
+        .unwrap();
+        assert_eq!(output["isError"], true);
+        assert_eq!(output["text"], "[REDACTED] [REDACTED]");
         assert!(!output["raw"].to_string().contains("isError"));
     }
     #[test]

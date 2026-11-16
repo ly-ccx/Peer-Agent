@@ -253,9 +253,10 @@ impl NativeModel {
         }
         let client = self
             .network
-            .builder(&endpoint, cancel)
+            .prepare(&endpoint, cancel)
             .await
             .map_err(|e| ModelError::new(e.0))?
+            .builder
             .connect_timeout(Duration::from_secs(10))
             .read_timeout(Duration::from_secs(30))
             .timeout(self.deadline)

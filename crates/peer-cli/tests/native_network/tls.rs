@@ -1,14 +1,14 @@
 //! Isolated TLS front for the suite's real HTTP/SSE server. No OS trust changes.
 use super::*;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
-pub(super) const CA: &str = include_str!("../fixtures/network/ca.pem");
-pub(super) struct TlsFront {
+pub(crate) const CA: &str = include_str!("../fixtures/network/ca.pem");
+pub(crate) struct TlsFront {
     pub url: String,
     pub address: std::net::SocketAddr,
     stop: Arc<std::sync::atomic::AtomicBool>,
     worker: Option<thread::JoinHandle<()>>,
 }
-pub(super) fn request(stream: &mut impl Read) -> std::io::Result<Vec<u8>> {
+pub(crate) fn request(stream: &mut impl Read) -> std::io::Result<Vec<u8>> {
     let mut bytes = vec![];
     let mut one = [0u8; 1];
     while !bytes.ends_with(b"\r\n\r\n") {
@@ -37,6 +37,9 @@ pub(super) fn request(stream: &mut impl Read) -> std::io::Result<Vec<u8>> {
 }
 impl TlsFront {
     pub fn new(server: &Server, wrong_name: bool) -> Self {
+        Self::for_url(&server.url, wrong_name)
+    }
+    pub fn for_url(url: &str, wrong_name: bool) -> Self {
         let (certificate, key) = if wrong_name {
             (
                 include_bytes!("../fixtures/network/wrong.pem").as_slice(),
@@ -63,50 +66,44 @@ impl TlsFront {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         listener.set_nonblocking(true).unwrap();
-        let upstream = url::Url::parse(&server.url)
-            .unwrap()
-            .socket_addrs(|| None)
-            .unwrap()[0];
+        let upstream = url::Url::parse(url).unwrap().socket_addrs(|| None).unwrap()[0];
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let ended = stop.clone();
-        let worker = thread::spawn(move || {
-            while !ended.load(std::sync::atomic::Ordering::Acquire) {
-                match listener.accept() {
-                    Ok((socket, _)) => {
-                        socket.set_nonblocking(false).unwrap();
-                        socket
-                            .set_read_timeout(Some(Duration::from_secs(3)))
-                            .unwrap();
-                        socket
-                            .set_write_timeout(Some(Duration::from_secs(3)))
-                            .unwrap();
-                        let mut tls = rustls::StreamOwned::new(
-                            rustls::ServerConnection::new(config.clone()).unwrap(),
-                            socket,
-                        );
-                        // TLS rejection/cancellation is an expected fixture input.
-                        match request(&mut tls) {
-                            Ok(body) => {
-                                let mut backend = TcpStream::connect(upstream).unwrap();
-                                backend
-                                    .set_read_timeout(Some(Duration::from_secs(3)))
-                                    .unwrap();
-                                backend.write_all(&body).unwrap();
-                                let mut response = vec![];
-                                backend.read_to_end(&mut response).unwrap();
-                                let _ = tls.write_all(&response);
-                                let _ = tls.flush();
-                                tls.conn.send_close_notify();
-                                let _ = tls.flush();
-                            }
-                            Err(error) => eprintln!("isolated TLS handshake/read: {error:?}"),
+        let worker = listeners(listener, ended, move |socket| {
+            socket
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            socket
+                .set_write_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut tls = rustls::StreamOwned::new(
+                rustls::ServerConnection::new(config.clone()).unwrap(),
+                socket,
+            );
+            // TLS rejection/cancellation is an expected fixture input.
+            if let Ok(body) = request(&mut tls) {
+                let mut backend = TcpStream::connect(upstream).unwrap();
+                backend
+                    .set_read_timeout(Some(Duration::from_secs(3)))
+                    .unwrap();
+                backend
+                    .set_write_timeout(Some(Duration::from_secs(3)))
+                    .unwrap();
+                if backend.write_all(&body).is_ok() {
+                    let mut bytes = [0; 8192];
+                    while let Ok(count) = backend.read(&mut bytes) {
+                        if count == 0
+                            || tls
+                                .write_all(&bytes[..count])
+                                .and_then(|_| tls.flush())
+                                .is_err()
+                        {
+                            break;
                         }
                     }
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        thread::sleep(Duration::from_millis(5))
-                    }
-                    Err(_) => break,
                 }
+                tls.conn.send_close_notify();
+                let _ = tls.flush();
             }
         });
         Self {
@@ -123,9 +120,10 @@ impl Drop for TlsFront {
         self.worker.take().unwrap().join().unwrap();
     }
 }
-pub(super) struct ConnectProxy {
+pub(crate) struct ConnectProxy {
     pub url: String,
     pub headers: Arc<Mutex<Vec<String>>>,
+    pub closed: Arc<std::sync::atomic::AtomicUsize>,
     stop: Arc<std::sync::atomic::AtomicBool>,
     worker: Option<thread::JoinHandle<()>>,
 }
@@ -136,52 +134,50 @@ impl ConnectProxy {
         listener.set_nonblocking(true).unwrap();
         let headers = Arc::new(Mutex::new(vec![]));
         let captured = headers.clone();
+        let closed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed_close = closed.clone();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let ended = stop.clone();
-        let worker = thread::spawn(move || {
-            while !ended.load(std::sync::atomic::Ordering::Acquire) {
-                match listener.accept() {
-                    Ok((mut client, _)) => {
-                        client.set_nonblocking(false).unwrap();
-                        client
-                            .set_read_timeout(Some(Duration::from_secs(3)))
-                            .unwrap();
-                        client
-                            .set_write_timeout(Some(Duration::from_secs(3)))
-                            .unwrap();
-                        let header = String::from_utf8(request(&mut client).unwrap()).unwrap();
-                        assert!(header.starts_with("CONNECT "));
-                        captured.lock().unwrap().push(header);
-                        let mut upstream = TcpStream::connect(target).unwrap();
-                        upstream
-                            .set_read_timeout(Some(Duration::from_secs(3)))
-                            .unwrap();
-                        upstream
-                            .set_write_timeout(Some(Duration::from_secs(3)))
-                            .unwrap();
-                        client
-                            .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
-                            .unwrap();
-                        let mut read_client = client.try_clone().unwrap();
-                        let mut write_upstream = upstream.try_clone().unwrap();
-                        let copy = thread::spawn(move || {
-                            let _ = std::io::copy(&mut read_client, &mut write_upstream);
-                            let _ = write_upstream.shutdown(std::net::Shutdown::Write);
-                        });
-                        let _ = std::io::copy(&mut upstream, &mut client);
-                        let _ = client.shutdown(std::net::Shutdown::Both);
-                        copy.join().unwrap();
-                    }
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        thread::sleep(Duration::from_millis(5))
-                    }
-                    Err(_) => break,
+        let worker = listeners(listener, ended, move |mut client| {
+            client
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            client
+                .set_write_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let Ok(bytes) = request(&mut client) else {
+                return;
+            };
+            let header = String::from_utf8(bytes).unwrap();
+            assert!(header.starts_with("CONNECT "));
+            captured.lock().unwrap().push(header);
+            let mut upstream = TcpStream::connect(target).unwrap();
+            upstream
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            upstream
+                .set_write_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            client
+                .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+                .unwrap();
+            let mut read_client = client.try_clone().unwrap();
+            let mut write_upstream = upstream.try_clone().unwrap();
+            let observed_close = observed_close.clone();
+            let copy = thread::spawn(move || {
+                if std::io::copy(&mut read_client, &mut write_upstream).is_ok() {
+                    observed_close.fetch_add(1, std::sync::atomic::Ordering::Release);
                 }
-            }
+                let _ = write_upstream.shutdown(std::net::Shutdown::Write);
+            });
+            let _ = std::io::copy(&mut upstream, &mut client);
+            let _ = client.shutdown(std::net::Shutdown::Both);
+            copy.join().unwrap();
         });
         Self {
             url: format!("http://synthetic-user:synthetic-proxy-secret@{address}"),
             headers,
+            closed,
             stop,
             worker: Some(worker),
         }
@@ -192,4 +188,42 @@ impl Drop for ConnectProxy {
         self.stop.store(true, std::sync::atomic::Ordering::Release);
         self.worker.take().unwrap().join().unwrap();
     }
+}
+
+// Legacy SSE and Streamable HTTP control POSTs require simultaneous sockets.
+// Every fixture worker is bounded and joined; no detached test servers.
+fn listeners(
+    listener: TcpListener,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    serve: impl Fn(TcpStream) + Send + Sync + 'static,
+) -> thread::JoinHandle<()> {
+    let serve = Arc::new(serve);
+    thread::spawn(move || {
+        let mut workers: Vec<thread::JoinHandle<()>> = vec![];
+        while !stop.load(std::sync::atomic::Ordering::Acquire) {
+            let mut i = 0;
+            while i < workers.len() {
+                if workers[i].is_finished() {
+                    workers.swap_remove(i).join().unwrap();
+                } else {
+                    i += 1;
+                }
+            }
+            match listener.accept() {
+                Ok((socket, _)) => {
+                    assert!(workers.len() < 16, "synthetic connection bound");
+                    socket.set_nonblocking(false).unwrap();
+                    let serve = serve.clone();
+                    workers.push(thread::spawn(move || serve(socket)));
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(5))
+                }
+                Err(_) => break,
+            }
+        }
+        for worker in workers {
+            worker.join().unwrap();
+        }
+    })
 }
