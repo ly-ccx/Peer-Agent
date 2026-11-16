@@ -22,7 +22,7 @@ pub enum Wire {
 fn default_effort() -> String {
     "default".into()
 }
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerationOptions {
     #[serde(default = "default_effort")]
@@ -36,6 +36,8 @@ pub struct GenerationOptions {
     pub max_output_tokens: Option<f64>,
     #[serde(default)]
     pub omit_max_output_tokens: bool,
+    #[serde(default)]
+    pub fast_mode: bool,
     pub auth_method: Option<String>,
     pub project_id: Option<String>,
     pub user_prompt_id: Option<String>,
@@ -77,6 +79,40 @@ pub(crate) fn encode_runtime(wire: Wire, input: &WireInput<'_>) -> Result<Value,
     if wire == Wire::Responses {
         body["tool_choice"] = json!("auto");
         body["parallel_tool_calls"] = json!(true);
+        // The live CLI uses the Desktop Responses encoder's newer effort
+        // semantics: declared maps are authoritative, including mapped off.
+        body.as_object_mut().unwrap().remove("reasoning");
+        let o = input.options;
+        if o.supports_reasoning
+            && o.reasoning_param_style
+                .as_deref()
+                .unwrap_or("openai-effort")
+                == "openai-effort"
+            && !o.effort.is_empty()
+        {
+            let mapped = if let Some(map) = &o.reasoning_effort_map {
+                if o.effort == "default" {
+                    map.get("default")
+                        .filter(|v| !v.is_null())
+                        .or_else(|| map.get("medium"))
+                } else {
+                    map.get(&o.effort)
+                }
+                .cloned()
+            } else if o.effort != "off" {
+                Some(effort(o, false))
+            } else {
+                None
+            };
+            if let Some(value) =
+                mapped.filter(|v| !v.is_null() && v != "" && v != &json!(false) && v != &json!(0))
+            {
+                body["reasoning"] = json!({"effort":value});
+            }
+        }
+        if o.fast_mode {
+            body["service_tier"] = json!("priority");
+        }
     }
     Ok(body)
 }

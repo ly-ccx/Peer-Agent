@@ -637,6 +637,145 @@ fn four_native_wires_execute_real_tools_and_preserve_only_live_provider_continua
     }
 }
 #[test]
+fn configured_api_key_channels_run_native_tools_and_record_real_evidence() {
+    let channels: Value = serde_json::from_str(include_str!(
+        "../../../packages/protocol/contracts/native-cli/model-channels.json"
+    ))
+    .unwrap();
+    let streams: Value = serde_json::from_str(include_str!(
+        "../../../packages/protocol/contracts/native-cli/model-streams.json"
+    ))
+    .unwrap();
+    for case in channels["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["name"].as_str().unwrap().ends_with("/enabled"))
+    {
+        let wire = case["expected"]["wire"].as_str().unwrap();
+        let replies = ["tool", "text"]
+            .map(|kind| {
+                streams["cases"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|c| c["wire"] == wire && c["kind"] == kind)
+                    .unwrap()["stream"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            })
+            .to_vec();
+        let server = Server::new(replies);
+        let f = Fixture::new(&server);
+        let mut config = case["config"].clone();
+        config["channels"][0]["id"] = json!("provider");
+        config["channels"][0]["baseUrl"] = json!(server.url);
+        config["channels"][0]["customHeaders"] =
+            json!({"X-Native-Fixture":"synthetic-private-header"});
+        config["models"][0]["id"] = json!("provider::model");
+        config["models"][0]["groupId"] = json!("provider");
+        put(f.root.path().join("llm-providers.json"), &config);
+        let plan_path = f.root.path().join("goal-plans/p.json");
+        let mut plan = get(&plan_path);
+        for role in ["worker", "explorer", "verifier"] {
+            let mut selected = case["selected"].clone();
+            selected["providerId"] = json!("provider");
+            selected["modelProviderId"] = json!("provider::model");
+            plan["delegationOrigin"]["modelSelection"][role] = selected;
+        }
+        put(&plan_path, &plan);
+        let output = f.run();
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}: {}",
+            case["name"],
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("synthetic-private-header"));
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("synthetic-private-header"));
+        let history = f.history();
+        let calls: Vec<_> = history
+            .iter()
+            .filter(|m| m["segments"].is_array())
+            .collect();
+        assert_eq!(calls.len(), 1, "{}", case["name"]);
+        assert_eq!(calls[0]["segments"][0]["result"]["status"], "success");
+        assert!(calls[0]["segments"][0]["result"]["evidence"].is_object());
+        assert!(
+            !serde_json::to_string(&history)
+                .unwrap()
+                .contains("synthetic-private-header")
+        );
+        assert_eq!(
+            std::fs::read_to_string(f.root.path().join("workspace/input.txt")).unwrap(),
+            "source fact"
+        );
+        let requests = server.requests.lock().unwrap();
+        assert_eq!(requests.len(), 2, "{}", case["name"]);
+        assert_eq!(
+            history.last().unwrap()["contextSnapshot"]["model"],
+            config["models"][0]["model"]
+        );
+        for request in requests.iter() {
+            assert_eq!(request["model"], case["expected"]["request"]["model"]);
+            for field in [
+                "reasoning",
+                "thinking",
+                "enable_thinking",
+                "thinking_budget",
+                "output_config",
+                "max_tokens",
+                "max_output_tokens",
+                "generationConfig",
+                "service_tier",
+            ] {
+                assert_eq!(
+                    request[field], case["expected"]["request"][field],
+                    "{} field {field}",
+                    case["name"]
+                );
+            }
+        }
+    }
+}
+#[test]
+fn rejected_model_headers_preserve_the_source_and_same_task_can_retry_after_correction() {
+    let server = Server::new(vec![
+        reply_tool("read_file", json!({"path":"input.txt"})),
+        reply_text("done"),
+    ]);
+    let f = Fixture::new(&server);
+    let path = f.root.path().join("llm-providers.json");
+    let mut config = get(&path);
+    config["channels"][0]["customHeaders"] = json!({"aUtHoRiZaTiOn":"private-invalid-override"});
+    put(&path, &config);
+    let bytes = std::fs::read(&path).unwrap();
+    let rejected = f.run();
+    assert!(!rejected.status.success());
+    assert!(server.requests.lock().unwrap().is_empty());
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    assert!(!String::from_utf8_lossy(&rejected.stderr).contains("private-invalid-override"));
+    config["channels"][0]["customHeaders"] = json!({"X-Native-Fixture":"corrected"});
+    put(&path, &config);
+    let output = f.run();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(server.requests.lock().unwrap().len(), 2);
+    assert_eq!(
+        f.history()
+            .iter()
+            .filter(|m| m["segments"].is_array())
+            .count(),
+        1
+    );
+}
+#[test]
 fn denial_is_a_real_persisted_result_without_effect() {
     let server = Server::new(vec![
         reply_tool("write_file", json!({"path":"denied.txt","content":"never"})),

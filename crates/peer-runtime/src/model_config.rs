@@ -11,6 +11,7 @@ use crate::{
 use peer_protocol::{JsonLimits, decode_json_bounded};
 use serde_json::Value;
 use std::{io::Read, path::Path, time::Duration};
+mod channel;
 fn read(path: &Path) -> Result<Value, ModelError> {
     let mut f =
         std::fs::File::open(path).map_err(|_| ModelError::new("model_config_unavailable"))?;
@@ -58,6 +59,8 @@ pub struct ResolvedNativeModel {
     pub key_configured: bool,
     pub wire: Wire,
     pub provider: String,
+    pub generation: GenerationOptions,
+    pub headers: reqwest::header::HeaderMap,
 }
 pub fn resolve_model(config: &Value, selected: &Value) -> Result<ResolvedNativeModel, ModelError> {
     if config["version"] != 2 {
@@ -105,46 +108,24 @@ pub fn resolve_model(config: &Value, selected: &Value) -> Result<ResolvedNativeM
     {
         return Err(ModelError::new("model_selection_unavailable"));
     }
-    let wire = match (
-        c["channelId"].as_str().unwrap_or("openai-compatible"),
-        c["wireOverride"].as_str(),
-    ) {
-        ("openai" | "openai-compatible", None | Some("openai-chat")) => Wire::Chat,
-        ("openai" | "openai-compatible" | "grok", Some("openai-responses")) | ("grok", None) => {
-            Wire::Responses
-        }
-        ("anthropic" | "anthropic-compatible", None | Some("anthropic-messages")) => {
-            Wire::Anthropic
-        }
-        ("google-ai", None) => Wire::Gemini,
-        _ => return Err(ModelError::new("native_model_channel_unsupported")),
-    };
-    if c["authMethod"] != "api_key"
-        || m["supportsReasoning"] == true
-        || c["supportsReasoning"] == true
-        || selected["reasoningEffort"]
-            .as_str()
-            .is_some_and(|e| !matches!(e, "off" | "default"))
-        || !m["maxOutputTokens"].is_null()
-        || selected["fastMode"] == true
-        || m["modelOptionValues"]
-            .as_object()
-            .is_some_and(|v| !v.is_empty())
-        || [m, c].iter().any(|v| {
-            v.get("apiKey").is_some()
-                || v.get("oauthTokens").is_some()
-                || v["customHeaders"]
-                    .as_object()
-                    .is_some_and(|h| !h.is_empty())
-                || !v["proxy"].is_null()
-        })
-    {
+    if [m, c].iter().any(|v| {
+        v.get("apiKey").is_some()
+            || v.get("oauthTokens").is_some()
+            || v.get("oauthClientSecret").is_some()
+            || !v["proxy"].is_null()
+    }) {
         return Err(ModelError::new("native_model_channel_unsupported"));
     }
-    let base = c["baseUrl"]
-        .as_str()
-        .ok_or(ModelError::new("model_endpoint_invalid"))?
-        .trim_end_matches('/');
+    let mut flat = c
+        .as_object()
+        .ok_or(ModelError::new("model_config_invalid"))?
+        .clone();
+    flat.extend(
+        m.as_object()
+            .ok_or(ModelError::new("model_config_invalid"))?
+            .clone(),
+    );
+    let resolved = channel::resolve(&Value::Object(flat), selected)?;
     let model = m["model"]
         .as_str()
         .filter(|s| !s.is_empty())
@@ -165,34 +146,14 @@ pub fn resolve_model(config: &Value, selected: &Value) -> Result<ResolvedNativeM
             .filter(|n| n.is_finite() && *n > 0.0 && *n <= 9_007_199_254_740_991.0)
             .map(|n| n.floor() as u64)
             .filter(|n| *n > 0),
-        endpoint: match wire {
-            Wire::Chat => format!("{base}/chat/completions"),
-            Wire::Responses => format!("{base}/responses"),
-            Wire::Anthropic => format!("{base}/v1/messages"),
-            Wire::Gemini => {
-                if model.contains(['?', '#', '\\', '/', '%'])
-                    && !model
-                        .strip_prefix("models/")
-                        .is_some_and(|s| !s.is_empty() && !s.contains(['?', '#', '\\', '/', '%']))
-                {
-                    return Err(ModelError::new("model_selection_invalid"));
-                }
-                format!(
-                    "{base}/models/{}:streamGenerateContent?alt=sse",
-                    model.strip_prefix("models/").unwrap_or(model)
-                )
-            }
-        },
+        endpoint: resolved.endpoint,
         model: model.into(),
         credential_key: format!("model/{group}/api-key"),
         key_configured: c["apiKeyConfigured"] == true || m["apiKeyConfigured"] == true,
-        wire,
-        provider: c["channelId"]
-            .as_str()
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or(group)
-            .trim()
-            .into(),
+        wire: resolved.wire,
+        provider: resolved.provider,
+        generation: resolved.generation,
+        headers: resolved.headers,
     })
 }
 
@@ -231,18 +192,129 @@ pub async fn load_model(
             model: resolved.model,
             provider: resolved.provider,
             wire: resolved.wire,
-            generation: GenerationOptions::default(),
+            generation: resolved.generation,
         },
         secret,
         Duration::from_secs(120),
     )
-    .map(|model| model.with_context_window(resolved.context_window))
+    .map(|model| {
+        model
+            .with_context_window(resolved.context_window)
+            .with_headers(resolved.headers)
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn actual_ts_channel_configuration_and_runtime_requests_match() {
+        let data: Value = serde_json::from_str(include_str!(
+            "../../../packages/protocol/contracts/native-cli/model-channels.json"
+        ))
+        .unwrap();
+        for case in data["cases"].as_array().unwrap() {
+            let model = resolve_model(&case["config"], &case["selected"]).unwrap();
+            let expected = &case["expected"];
+            assert_eq!(
+                model.wire,
+                serde_json::from_value(expected["wire"].clone()).unwrap(),
+                "{}",
+                case["name"]
+            );
+            assert_eq!(model.endpoint, expected["endpoint"], "{}", case["name"]);
+            assert_eq!(
+                model.generation,
+                serde_json::from_value(expected["options"].clone()).unwrap(),
+                "{}",
+                case["name"]
+            );
+            let headers: serde_json::Map<String, Value> = model
+                .headers
+                .iter()
+                .map(|(k, v)| (k.to_string(), json!(v.to_str().unwrap())))
+                .collect();
+            assert_eq!(
+                Value::Object(headers),
+                expected["headers"],
+                "{}",
+                case["name"]
+            );
+            let request = crate::model::wire::encode_runtime(
+                model.wire,
+                &crate::model::wire::WireInput {
+                    model: &model.model,
+                    system: data["system"].as_str().unwrap(),
+                    stable_system: None,
+                    messages: data["messages"].as_array().unwrap(),
+                    tools: data["tools"].as_array().map(Vec::as_slice),
+                    options: &model.generation,
+                },
+            )
+            .unwrap();
+            assert_eq!(request, expected["request"], "{}", case["name"]);
+            // No API-key adapter here declares private model options. Unknown
+            // values follow ADR48: no projection, never raw request injection.
+            let mut unknown = case["config"].clone();
+            unknown["models"][0]["modelOptionValues"] =
+                json!({"system":"injected", "Authorization":"injected", "temperature":"1"});
+            let unknown = resolve_model(&unknown, &case["selected"]).unwrap();
+            assert_eq!(unknown.generation, model.generation);
+            assert_eq!(unknown.headers, model.headers);
+        }
+    }
+
+    #[test]
+    fn model_header_protection_limits_and_metadata_precedence_are_enforced() {
+        let data: Value = serde_json::from_str(include_str!(
+            "../../../packages/protocol/contracts/native-cli/model-channels.json"
+        ))
+        .unwrap();
+        let mut config = data["cases"][0]["config"].clone();
+        let selected = &data["cases"][0]["selected"];
+        config["channels"][0]["customHeaders"] = json!({"X-Channel":"shadowed"});
+        config["models"][0]["customHeaders"] = json!({"X-Model":"private-synthetic-header"});
+        config["channels"][0]["supportsReasoning"] = json!(true);
+        config["models"][0]["supportsReasoning"] = json!(false);
+        let resolved = resolve_model(&config, selected).unwrap();
+        assert!(!resolved.generation.supports_reasoning);
+        assert!(!resolved.headers.contains_key("x-channel"));
+        assert_eq!(resolved.headers["x-model"], "private-synthetic-header");
+        assert!(!format!("{:?}", resolved.headers).contains("private-synthetic-header"));
+        let registry: Value = serde_json::from_str(include_str!(
+            "../../../packages/protocol/contracts/native-cli/model-channel-registry.json"
+        ))
+        .unwrap();
+        for header in registry["protectedHeaders"].as_array().unwrap() {
+            let mut changed = config.clone();
+            changed["models"][0]["customHeaders"] =
+                json!({header.as_str().unwrap().to_uppercase():""});
+            assert!(resolve_model(&changed, selected).is_err(), "{header}");
+        }
+        for headers in [
+            json!({"host":"foreign.invalid"}),
+            json!({"content-length":0}),
+            json!({"X-Foo":"line\r\nbreak"}),
+            json!({"X Bad":"value"}),
+            json!({"":"value"}),
+            json!({"X-Too-Large":"x".repeat(8193)}),
+            json!(
+                (0..33)
+                    .map(|i| (format!("x-{i}"), json!("v")))
+                    .collect::<serde_json::Map<_, _>>()
+            ),
+            json!("not an object"),
+        ] {
+            config["models"][0]["customHeaders"] = headers;
+            assert!(resolve_model(&config, selected).is_err());
+        }
+        for channel in ["unknown", "grok", "qoder", "opencode-go"] {
+            config["models"][0]["customHeaders"] = json!({});
+            config["channels"][0]["channelId"] = json!(channel);
+            assert!(resolve_model(&config, selected).is_err());
+        }
+    }
     #[test]
     fn channel_model_selection_and_credential_identity_cannot_be_substituted() {
         let base = json!({"version":2,"channels":[{"id":"channel","provider":"openai","channelId":"openai-compatible","authMethod":"api_key","baseUrl":"https://fixture.invalid/v1"}],"models":[{"id":"channel::model","groupId":"channel","model":"model"}]});

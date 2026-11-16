@@ -26,6 +26,7 @@ pub struct NativeModel {
     generation: wire::GenerationOptions,
     binding: String,
     context_window: Option<u64>,
+    headers: reqwest::header::HeaderMap,
 }
 /// An encoded request bound to the exact provider instance that built it.
 /// Counting can borrow it; sending consumes its original immutable wire bytes.
@@ -64,6 +65,10 @@ impl NativeModel {
     }
     pub(crate) fn with_context_window(mut self, window: Option<u64>) -> Self {
         self.context_window = window;
+        self
+    }
+    pub(crate) fn with_headers(mut self, headers: reqwest::header::HeaderMap) -> Self {
+        self.headers = headers;
         self
     }
     pub fn model_id(&self) -> &str {
@@ -118,6 +123,7 @@ impl NativeModel {
             generation: config.generation,
             binding,
             context_window: None,
+            headers: reqwest::header::HeaderMap::new(),
         })
     }
     pub async fn turn(
@@ -188,14 +194,23 @@ impl NativeModel {
         endpoint: reqwest::Url,
         accept: &str,
     ) -> Result<reqwest::RequestBuilder, ModelError> {
-        let mut request = self
-            .client
-            .post(endpoint)
-            .header("content-type", "application/json")
-            .header("accept", accept);
-
+        let mut headers = self.headers.clone();
+        headers.insert(
+            "content-type",
+            reqwest::header::HeaderValue::from_static("application/json"),
+        );
+        if !headers.contains_key("accept") {
+            headers.insert(
+                "accept",
+                reqwest::header::HeaderValue::from_str(accept)
+                    .map_err(|_| ModelError::new("model_header_invalid"))?,
+            );
+        }
         if self.wire == wire::Wire::Anthropic {
-            request = request.header("anthropic-version", "2023-06-01");
+            headers.insert(
+                "anthropic-version",
+                reqwest::header::HeaderValue::from_static("2023-06-01"),
+            );
         }
         if let Some(s) = &self.secret {
             let bearer = zeroize::Zeroizing::new(
@@ -208,16 +223,16 @@ impl NativeModel {
             let mut value = reqwest::header::HeaderValue::from_str(&bearer)
                 .map_err(|_| ModelError::new("model_credential_invalid"))?;
             value.set_sensitive(true);
-            request = request.header(
+            headers.insert(
                 match self.wire {
                     wire::Wire::Anthropic => "x-api-key",
                     wire::Wire::Gemini => "x-goog-api-key",
                     _ => "authorization",
                 },
                 value,
-            )
+            );
         }
-        Ok(request)
+        Ok(self.client.post(endpoint).headers(headers))
     }
 }
 impl PreparedRequest<'_> {
