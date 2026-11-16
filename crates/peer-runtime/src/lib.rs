@@ -24,6 +24,7 @@ mod oauth_callback;
 pub mod one_time_approval;
 pub mod principal;
 pub mod providers;
+pub mod qoder;
 pub mod recorder;
 pub mod session_control;
 pub mod session_host;

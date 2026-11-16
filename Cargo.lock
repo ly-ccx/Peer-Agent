@@ -21,6 +21,7 @@ dependencies = [
  "cfg-if",
  "cipher",
  "cpufeatures 0.2.17",
+ "zeroize",
 ]
 
 [[package]]
@@ -355,6 +356,7 @@ checksum = "773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad"
 dependencies = [
  "crypto-common 0.1.7",
  "inout",
+ "zeroize",
 ]
 
 [[package]]
@@ -1717,10 +1719,14 @@ dependencies = [
 name = "peer-runtime"
 version = "0.1.0-rc.40"
 dependencies = [
+ "aes",
+ "aes-gcm",
  "aho-corasick",
  "base64 0.22.1",
  "bytes",
+ "cbc",
  "getrandom 0.3.4",
+ "hkdf",
  "http",
  "http-body-util",
  "hyper",
