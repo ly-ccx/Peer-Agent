@@ -4,6 +4,9 @@ import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
+import { createMcpOAuthIo, oauthGuard, tokenNeedsRefresh } from './mcp-oauth-io.mjs';
+
+const oauthSessions = new WeakMap();
 const CLIENT_INFO = { name: 'peer-agent', version: '1.0.0' };
 const CLIENT_CAPABILITIES = { capabilities: {} };
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -100,7 +103,7 @@ function normalizeServerConfig(server) {
   };
 }
 
-async function prepareServerConfig(server, options = {}) {
+async function prepareServerConfig(server, options = {}, purpose = 'runtime') {
   const config = normalizeServerConfig(server);
   const auth = config.auth && typeof config.auth === 'object' ? config.auth : { mode: 'none' };
   if (!auth?.mode || auth.mode === 'none') {
@@ -112,10 +115,10 @@ async function prepareServerConfig(server, options = {}) {
   if (typeof options.credentialResolver !== 'function') {
     throw new Error('MCP credential resolver is required for authenticated server.');
   }
-  const injection = await options.credentialResolver(auth, config);
+  const injection = await options.credentialResolver(auth, config, {purpose});
   // OAuth 凭据解析器把 authProviderConfig 作为 authContext 的兄弟字段返回（其中携带
   // oauth/updateOAuth/openAuthorizationUrl）。若不在此处合并进 authContext，
-  // createOAuthProvider 永远拿不到 provider 配置，OAuth 流程会被静默跳过。
+  // createOAuthSession 永远拿不到 provider 配置，OAuth 流程会被静默跳过。
   const authContext = normalizeAuthContext({
     ...(injection?.authContext ?? {}),
     authProviderConfig: injection?.authProviderConfig ?? injection?.authContext?.authProviderConfig,
@@ -134,14 +137,16 @@ async function prepareServerConfig(server, options = {}) {
   };
 }
 
-function createOAuthProvider(server) {
+function createOAuthSession(server, options = {}) {
   const authContext = normalizeAuthContext(server?.__authContext);
   const providerConfig = authContext.authProviderConfig;
   if (authContext.mode !== 'oauth2' || !providerConfig?.oauth || !providerConfig?.credentialRef) return undefined;
   const oauth = providerConfig.oauth;
+  const io = createMcpOAuthIo({...providerConfig, serverUrl:server.url}, options);
+  const checked = (fn) => { io.check(); try { return fn(); } catch(error) { throw oauthGuard(error); } };
+  const save = async (patch) => { io.check(); try { await providerConfig.updateOAuth(patch); Object.assign(oauth, patch); } catch(error) { throw oauthGuard(error); } };
   const redirectUrl = typeof oauth.redirectUrl === 'string' && oauth.redirectUrl ? oauth.redirectUrl : DEFAULT_OAUTH_REDIRECT_URL;
   const scopes = Array.isArray(oauth.scopes) ? oauth.scopes.filter((scope) => typeof scope === 'string' && scope.trim()) : [];
-  const updateOAuth = typeof providerConfig.updateOAuth === 'function' ? providerConfig.updateOAuth : async () => {};
   const clientMetadata = {
     client_name: CLIENT_INFO.name,
     redirect_uris: [redirectUrl],
@@ -153,59 +158,58 @@ function createOAuthProvider(server) {
     ...(oauth.clientSecret ? { client_secret: oauth.clientSecret } : {}),
   };
   let codeVerifier = typeof oauth.codeVerifier === 'string' ? oauth.codeVerifier : '';
-  return {
-    get redirectUrl() { return redirectUrl; },
-    get clientMetadata() { return clientMetadata; },
-    state() { return undefined; },
-    clientInformation() { return oauth.clientInformation; },
+  const provider = {
+    get redirectUrl() { return checked(() => redirectUrl); },
+    get clientMetadata() { return checked(() => clientMetadata); },
+    state() { return checked(() => undefined); },
+    clientInformation() { return checked(() => oauth.clientInformation ?? (oauth.clientId ? {client_id:oauth.clientId,...(oauth.clientSecret ? {client_secret:oauth.clientSecret} : {})} : undefined)); },
     async saveClientInformation(clientInformation) {
-      oauth.clientInformation = clientInformation;
-      await updateOAuth({ clientInformation });
+      await save({ clientInformation });
     },
-    tokens() { return oauth.tokens; },
+    tokens() { return checked(() => oauth.tokens); },
     async saveTokens(tokens) {
-      oauth.tokens = tokens;
-      await updateOAuth({ tokens });
+      io.saveTokens(tokens);
     },
     async redirectToAuthorization(authorizationUrl) {
+      io.check();
       if (typeof providerConfig.openAuthorizationUrl === 'function') {
         await providerConfig.openAuthorizationUrl(String(authorizationUrl));
         return;
       }
-      throw new Error(`MCP OAuth authorization required: ${authorizationUrl}`);
+      throw oauthGuard(new Error('mcp_oauth_authorization_required'));
     },
     async saveCodeVerifier(nextCodeVerifier) {
-      codeVerifier = String(nextCodeVerifier ?? '');
-      oauth.codeVerifier = codeVerifier;
-      await updateOAuth({ codeVerifier });
+      const next = String(nextCodeVerifier ?? '');
+      await save({ codeVerifier:next });
+      codeVerifier = next;
     },
     codeVerifier() {
-      if (!codeVerifier) throw new Error('MCP OAuth code verifier is missing.');
+      io.check();
+      if (!codeVerifier) throw oauthGuard(new Error('mcp_oauth_code_verifier_missing'));
       return codeVerifier;
     },
-    discoveryState() { return oauth.discoveryState ?? undefined; },
+    discoveryState() { return checked(() => oauth.discoveryState ?? undefined); },
     async saveDiscoveryState(discoveryState) {
-      oauth.discoveryState = discoveryState;
-      await updateOAuth({ discoveryState });
+      await save({ discoveryState });
     },
     async invalidateCredentials(scope) {
-      if (scope === 'tokens' || scope === 'all') {
-        oauth.tokens = undefined;
-        await updateOAuth({ tokens: null });
-      }
-      if (scope === 'client' || scope === 'all') {
-        oauth.clientInformation = undefined;
-        await updateOAuth({ clientInformation: null });
-      }
-      if (scope === 'discovery' || scope === 'all') {
-        oauth.discoveryState = undefined;
-        await updateOAuth({ discoveryState: null });
-      }
+      const patch = {};
+      if (scope === 'tokens' || scope === 'all') patch.tokens = null;
+      if (scope === 'client' || scope === 'all') patch.clientInformation = null;
+      if (scope === 'discovery' || scope === 'all') patch.discoveryState = null;
+      await save(patch);
     },
   };
+  return {provider, io, async ensureFresh() {
+    io.check();
+    if (tokenNeedsRefresh(oauth.tokens)) {
+      const result = await auth(provider, {serverUrl:server.url, fetchFn:io.fetch});
+      if (result !== 'AUTHORIZED') throw oauthGuard(new Error('mcp_oauth_authorization_required'));
+    }
+  }};
 }
 
-function createTransport(server) {
+function createTransport(server, options = {}) {
   const config = normalizeServerConfig(server);
   if (config.transport === 'stdio') {
     if (!config.command) throw new Error('MCP stdio server requires command.');
@@ -222,12 +226,21 @@ function createTransport(server) {
     ? { headers: config.headers }
     : undefined;
   const transportOptions = { requestInit };
-  const authProvider = createOAuthProvider(config);
-  if (authProvider) transportOptions.authProvider = authProvider;
-  if (config.transport === 'sse') {
-    return new SSEClientTransport(new URL(config.url), transportOptions);
+  const session = createOAuthSession(config, options);
+  if (session) { transportOptions.authProvider = session.provider; transportOptions.fetch = session.io.fetch; }
+  const transport = config.transport === 'sse'
+    ? new SSEClientTransport(new URL(config.url), transportOptions)
+    : new StreamableHTTPClientTransport(new URL(config.url), transportOptions);
+  if (session) {
+    oauthSessions.set(transport, session);
+    const close = transport.close.bind(transport);
+    let closing;
+    transport.close = () => closing ??= Promise.allSettled([session.io.close(), close()]).then(results => {
+      const failed = results.find(r => r.status === 'rejected');
+      if (failed) throw failed.reason;
+    });
   }
-  return new StreamableHTTPClientTransport(new URL(config.url), transportOptions);
+  return transport;
 }
 
 async function connect(server, options = {}) {
@@ -237,8 +250,9 @@ async function connect(server, options = {}) {
   if (existing) return existing;
 
   const client = new Client(CLIENT_INFO, CLIENT_CAPABILITIES);
-  const transport = createTransport(config);
-  await client.connect(transport);
+  const transport = createTransport(config, options);
+  try { await client.connect(transport); }
+  catch(error) { await transport.close(); throw error; }
   const entry = { key, client, transport, server: config, connectedAt: nowIso() };
   pool.set(key, entry);
   return entry;
@@ -356,7 +370,8 @@ function isAuthRequiredError(error) {
   const message = errorMessage(error).toLowerCase();
   const status = error?.status ?? error?.statusCode ?? error?.response?.status ?? error?.cause?.status ?? error?.cause?.statusCode;
   if (status === 401 || status === 403) return true;
-  return message.includes('401')
+  return message === 'mcp_oauth_authorization_required'
+    || message.includes('401')
     || message.includes('403')
     || message.includes('unauthorized')
     || message.includes('forbidden')
@@ -456,7 +471,8 @@ export async function listMcpTools(server, options = {}) {
 export async function callMcpTool(server, toolName, args = {}, options = {}) {
   if (!toolName) throw new Error('MCP toolName is required.');
   const timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
-  return withClient(server, async (client) => {
+  return withClient(server, async (client, entry) => {
+    await oauthSessions.get(entry.transport)?.ensureFresh();
     const result = await client.callTool({ name: toolName, arguments: args ?? {} }, undefined, { timeout });
     return normalizeMcpToolResult(result);
   }, options);
@@ -475,7 +491,7 @@ export async function getMcpPrompt(server, name, args = {}, options = {}) {
 }
 
 export async function startMcpOAuth(server, options = {}) {
-  const config = await prepareServerConfig(server, options);
+  const config = await prepareServerConfig(server, options, 'authorize');
   if (config.transport === 'stdio') {
     throw new Error('MCP_OAUTH_UNSUPPORTED_TRANSPORT');
   }
@@ -483,7 +499,8 @@ export async function startMcpOAuth(server, options = {}) {
     throw new Error('MCP_OAUTH_NOT_CONFIGURED');
   }
   if (!config.url) throw new Error('MCP HTTP server requires url.');
-  const provider = createOAuthProvider(config);
+  const session = createOAuthSession(config, options);
+  const provider = session?.provider;
   if (!provider) {
     // 进入这里说明 oauth2 模式下凭据/Provider 配置缺失，给出可读错误而非静默无认证。
     throw new Error('MCP_OAUTH_NOT_CONFIGURED');
@@ -498,14 +515,14 @@ export async function startMcpOAuth(server, options = {}) {
   //   'REDIRECT'   —— 已打开浏览器，等待 loopback 回调拿 code 再交换 token。
   let result;
   try {
-    result = await auth(provider, { serverUrl: config.url });
+    result = await auth(provider, { serverUrl: config.url, fetchFn:session.io.fetch });
   } catch (error) {
     if (error instanceof UnauthorizedError) {
       // SDK 在无法完成发现/注册时抛出 UnauthorizedError；归一成可读错误码。
       throw new Error('MCP_OAUTH_DISCOVERY_FAILED');
     }
     throw error;
-  }
+  } finally { await session.io.close(); }
   return {
     status: result === 'AUTHORIZED' ? 'authorized' : 'redirect',
     redirected: result !== 'AUTHORIZED',
@@ -515,13 +532,12 @@ export async function startMcpOAuth(server, options = {}) {
 export async function finishMcpOAuth(server, authorizationCode, options = {}) {
   const code = typeof authorizationCode === 'string' ? authorizationCode.trim() : '';
   if (!code) throw new Error('MCP OAuth authorization code is required.');
-  const config = await prepareServerConfig(server, options);
-  const transport = createTransport(config);
+  const config = await prepareServerConfig(server, options, 'authorize');
+  const transport = createTransport(config, options);
   if (typeof transport?.finishAuth !== 'function') {
     throw new Error('MCP transport does not support OAuth finishAuth.');
   }
-  await transport.finishAuth(code);
-  try { await transport.close?.(); } catch {}
+  try { await transport.finishAuth(code); } finally { await transport.close?.(); }
   return { ok: true };
 }
 
@@ -568,22 +584,24 @@ function sameServer(left, right) {
   return (a.url ?? '') === (b.url ?? '');
 }
 
-export function disconnectMcp(server) {
-  for (const [key, entry] of pool.entries()) {
-    if (sameServer(entry.server, server)) {
-      try { entry.client.close(); } catch {}
-      try { entry.transport.close?.(); } catch {}
-      pool.delete(key);
-    }
-  }
+async function closeEntries(entries) {
+  const results = await Promise.allSettled(entries.map(async entry => {
+    try { await entry.client.close(); } finally { await entry.transport.close?.(); }
+  }));
+  const failed = results.find(result => result.status === 'rejected');
+  if (failed) throw failed.reason;
 }
 
-export function disconnectAll() {
-  for (const [key, entry] of pool.entries()) {
-    try { entry.client.close(); } catch {}
-    try { entry.transport.close?.(); } catch {}
-    pool.delete(key);
-  }
+export async function disconnectMcp(server) {
+  const entries = [...pool.entries()].filter(([,entry]) => sameServer(entry.server, server));
+  for (const [key] of entries) pool.delete(key);
+  await closeEntries(entries.map(([,entry]) => entry));
+}
+
+export async function disconnectAll() {
+  const entries = [...pool.values()];
+  pool.clear();
+  await closeEntries(entries);
 }
 
 export const __mcpClientInternals = {

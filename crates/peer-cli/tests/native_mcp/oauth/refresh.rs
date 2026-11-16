@@ -331,3 +331,22 @@ fn hard_killed_refresh_preserves_the_orphan_lock_and_blocks_tools_and_second_ref
         0
     );
 }
+
+#[test]
+fn explicit_refresh_cannot_invent_an_unknown_previous_grant_from_new_response_scopes() {
+    let server = Server::new(vec![]);
+    let f = Fixture::new(&server);
+    let oauth = OAuth::new("");
+    setup(&f, &oauth);
+    credentials::setup_with(&f, "oauth2", "unscoped");
+    let before = std::fs::read(f.root.path().join("mcp-credentials.json")).unwrap();
+    let output = command(&f, "refresh").output().unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("mcp_oauth_scope_changed"));
+    assert_eq!(oauth.tokens().len(), 1);
+    assert_refresh_recovery(&f, &before);
+    let again = command(&f, "refresh").output().unwrap();
+    assert!(!again.status.success());
+    assert!(String::from_utf8_lossy(&again.stderr).contains("mcp_oauth_recovery_required"));
+    assert_eq!(oauth.tokens().len(), 1);
+}

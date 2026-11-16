@@ -81,7 +81,8 @@ impl OAuth {
                     );
                     continue;
                 }
-                let (status, value) = if path.starts_with("/.well-known/oauth-protected-resource")
+                let (status, mut value) = if path
+                    .starts_with("/.well-known/oauth-protected-resource")
                     || path == "/oauth-resource"
                 {
                     (
@@ -177,6 +178,9 @@ impl OAuth {
                 } else {
                     ("404 Not Found", json!({}))
                 };
+                if path == "/token" && mode == "scope-omitted" {
+                    value.as_object_mut().unwrap().remove("scope");
+                }
                 let body = if value.is_null() {
                     String::new()
                 } else {

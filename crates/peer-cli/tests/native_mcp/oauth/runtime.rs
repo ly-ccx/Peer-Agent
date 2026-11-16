@@ -522,3 +522,194 @@ fn runtime_refresh_through_strict_tls_numeric_connect_keeps_the_model_and_tool_e
     }
     assert_eq!(server.requests.lock().unwrap().len(), 2);
 }
+
+#[test]
+fn legacy_sdk_cache_and_actual_granted_scope_continue_through_the_encrypted_native_tool_loop() {
+    for mode in [
+        "legacy",
+        "legacy-omitted",
+        "legacy-conflict",
+        "legacy-invalid",
+    ] {
+        let server = Server::new(vec![
+            reply_tool("mcp__s__read_fact", json!({})),
+            reply_text("legacy continued"),
+        ]);
+        let f = Fixture::new(&server);
+        let oauth = OAuth::new(if mode == "legacy-omitted" {
+            "scope-omitted"
+        } else {
+            ""
+        });
+        let helper =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/examples/vault-fixture");
+        std::fs::write(f.root.path().join(".synthetic-vault-key"), [41u8; 32]).unwrap();
+        configure(&f, &oauth, true, &helper);
+        let peer = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scripts/native-cli/mcp-credential-peer.mjs");
+        let seeded = Command::new("node")
+            .arg(&peer)
+            .arg(f.root.path())
+            .arg(&helper)
+            .args(["oauth2", mode, &format!("{}/issuer", oauth.base)])
+            .output()
+            .unwrap();
+        assert!(
+            seeded.status.success(),
+            "{}",
+            String::from_utf8_lossy(&seeded.stderr)
+        );
+        let before = std::fs::read(f.root.path().join("mcp-credentials.json")).unwrap();
+        let output = credentials::run(&f)
+            .env("PEER_CREDENTIAL_HELPER_PATH", &helper)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let rows = serde_json::to_string(&f.history()).unwrap();
+        if matches!(mode, "legacy" | "legacy-omitted") {
+            assert_eq!(oauth.tokens().len(), 1);
+            assert_eq!(
+                f.history()
+                    .iter()
+                    .filter(|v| v["permissionGrants"][0]["granted"] == true)
+                    .count(),
+                1
+            );
+            assert!(rows.contains("success"));
+            let cold = Command::new("node")
+                .arg(&peer)
+                .arg(f.root.path())
+                .arg(&helper)
+                .args(["oauth2", "read-legacy"])
+                .output()
+                .unwrap();
+            assert!(
+                cold.status.success(),
+                "{}",
+                String::from_utf8_lossy(&cold.stderr)
+            );
+        } else {
+            assert!(
+                oauth.requests.lock().unwrap().is_empty(),
+                "conflicting or invalid pins fail before discovery"
+            );
+            assert_eq!(
+                std::fs::read(f.root.path().join("mcp-credentials.json")).unwrap(),
+                before
+            );
+            assert!(rows.contains(if mode == "legacy-conflict" {
+                "mcp_oauth_issuer_changed"
+            } else {
+                "mcp_oauth_issuer_invalid"
+            }));
+        }
+        assert!(!rows.contains("fixture-sensitive-secret"));
+    }
+}
+
+#[test]
+fn current_ts_cached_sender_and_native_owner_are_fenced_before_remote_refresh_in_both_orders() {
+    for ts_first in [true, false] {
+        let server = Server::new(vec![
+            reply_tool("mcp__s__read_fact", json!({})),
+            reply_text("cohost continued"),
+        ]);
+        let f = Fixture::new(&server);
+        let oauth = OAuth::new(if ts_first { "stall-token" } else { "" });
+        let helper =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/examples/vault-fixture");
+        std::fs::write(f.root.path().join(".synthetic-vault-key"), [43u8; 32]).unwrap();
+        configure(&f, &oauth, true, &helper);
+        let peer = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scripts/native-cli/mcp-oauth-cohost.mjs");
+        let mut ts = OwnedChild(Some(
+            Command::new("node")
+                .arg(peer)
+                .arg(f.root.path())
+                .arg(&helper)
+                .arg(format!("{}/mcp", oauth.base))
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        ));
+        let mut ready = String::new();
+        BufReader::new(ts.child().stdout.as_mut().unwrap())
+            .read_line(&mut ready)
+            .unwrap();
+        assert_eq!(ready, "ready\n");
+        if ts_first {
+            ts.child()
+                .stdin
+                .as_mut()
+                .unwrap()
+                .write_all(b"refresh\n")
+                .unwrap();
+            wait_token(&oauth);
+            let native = command(&f, "refresh")
+                .env("PEER_CREDENTIAL_HELPER_PATH", &helper)
+                .output()
+                .unwrap();
+            assert!(!native.status.success());
+            assert!(
+                String::from_utf8_lossy(&native.stderr).contains("STORE_LOCK_BUSY"),
+                "{}",
+                String::from_utf8_lossy(&native.stderr)
+            );
+            assert_eq!(oauth.tokens().len(), 1);
+            oauth.stall.store(false, Ordering::Release);
+            let output = ts.output();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        } else {
+            let native = command(&f, "refresh")
+                .env("PEER_CREDENTIAL_HELPER_PATH", &helper)
+                .output()
+                .unwrap();
+            assert!(
+                native.status.success(),
+                "{}",
+                String::from_utf8_lossy(&native.stderr)
+            );
+            ts.child()
+                .stdin
+                .as_mut()
+                .unwrap()
+                .write_all(b"refresh\n")
+                .unwrap();
+            let output = ts.output();
+            assert!(!output.status.success());
+            assert!(String::from_utf8_lossy(&output.stderr).contains("mcp_credential_changed"));
+        }
+        assert_eq!(
+            oauth.tokens().len(),
+            1,
+            "cached refresh must never be replayed"
+        );
+        let output = credentials::run(&f)
+            .env("PEER_CREDENTIAL_HELPER_PATH", &helper)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let rows = f.history();
+        let row = rows.iter().find(|r| r["segments"].is_array()).unwrap();
+        assert_eq!(row["segments"][0]["result"]["status"], "success");
+        assert_eq!(
+            row["permissionGrants"][0]["grantId"],
+            row["segments"][0]["result"]["evidence"]["permissionGrantId"]
+        );
+        assert_eq!(oauth.tokens().len(), 1);
+    }
+}

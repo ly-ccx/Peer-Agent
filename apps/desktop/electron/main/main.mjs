@@ -369,8 +369,8 @@ const mcpRegistry = createMcpRegistry();
 const mcpCredentialStore = createMcpCredentialStore();
 const passwordVaultStore = createPasswordVaultStore();
 const baseMcpCredentialResolver = createMcpCredentialResolver(mcpCredentialStore);
-const mcpCredentialResolver = async (auth, server) => {
-  const injection = await baseMcpCredentialResolver(auth, server);
+const mcpCredentialResolver = async (auth, server, context) => {
+  const injection = await baseMcpCredentialResolver(auth, server, context);
   if (injection?.authProviderConfig) {
     injection.authProviderConfig.openAuthorizationUrl = (url) => shell.openExternal(String(url));
   }

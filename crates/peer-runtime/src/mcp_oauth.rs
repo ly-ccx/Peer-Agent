@@ -33,6 +33,56 @@ fn now_ms() -> Result<u64, &'static str> {
         .map(|v| v.as_millis() as u64)
         .map_err(|_| "mcp_oauth_clock_invalid")
 }
+fn pinned_issuers(oauth: &serde_json::Value) -> Result<Vec<Url>, &'static str> {
+    let cache = &oauth["discoveryState"];
+    let mut result = Vec::new();
+    for value in [
+        oauth.get("nativeIssuer"),
+        oauth.get("authorizationServerUrl"),
+        cache.get("authorizationServerUrl"),
+        cache["authorizationServerMetadata"].get("issuer"),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if value.as_str() == Some("") {
+            continue;
+        }
+        let raw = value.as_str().ok_or("mcp_oauth_issuer_invalid")?;
+        let url = Url::parse(raw).map_err(|_| "mcp_oauth_issuer_invalid")?;
+        if !matches!(url.scheme(), "http" | "https")
+            || url.host_str().is_none()
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.fragment().is_some()
+        {
+            return Err("mcp_oauth_issuer_invalid");
+        }
+        if result.first().is_some_and(|first| first != &url) {
+            return Err("mcp_oauth_issuer_changed");
+        }
+        result.push(url);
+    }
+    Ok(result)
+}
+fn granted_scopes(
+    oauth: &serde_json::Value,
+    tokens: &serde_json::Value,
+) -> Result<Vec<String>, &'static str> {
+    if let Some(scope) = tokens.get("scope") {
+        return Ok(scope
+            .as_str()
+            .ok_or("mcp_oauth_authorization_required")?
+            .split_whitespace()
+            .map(str::to_owned)
+            .collect());
+    }
+    oauth["scopes"]
+        .as_array()
+        .filter(|v| v.iter().all(|s| s.is_string()))
+        .map(|v| v.iter().map(|s| s.as_str().unwrap().to_owned()).collect())
+        .ok_or("mcp_oauth_authorization_required")
+}
 struct Commit {
     registry_revision: String,
     binding: McpCredentialBinding,
@@ -40,6 +90,7 @@ struct Commit {
     payload: SensitiveConfig,
     memory: InMemoryCredentialStore,
     epoch: Option<CredentialEpoch>,
+    refresh: bool,
 }
 struct Flow {
     commit: Commit,
@@ -72,11 +123,8 @@ impl Flow {
             .transaction(&binding)
             .map_err(|e| e.code())?;
         let payload = mcp_auth::load_payload(home, &binding, cancel).await?;
-        if admission.is_some()
-            && ["nativeIssuer", "authorizationServerUrl"]
-                .into_iter()
-                .all(|key| payload.0["oauth"][key].as_str().is_none_or(str::is_empty))
-        {
+        let pins = pinned_issuers(&payload.0["oauth"])?;
+        if admission.is_some() && pins.is_empty() {
             return Err("mcp_oauth_authorization_required");
         }
         if let Some(state) = payload.0.get("refreshState") {
@@ -113,14 +161,9 @@ impl Flow {
             .issuer
             .as_deref()
             .ok_or("mcp_oauth_issuer_missing")?;
-        for key in ["authorizationServerUrl", "nativeIssuer"] {
-            if let Some(expected) = payload.0["oauth"][key].as_str().filter(|v| !v.is_empty()) {
-                let expected = Url::parse(expected).map_err(|_| "mcp_oauth_issuer_invalid")?;
-                let actual = Url::parse(issuer).map_err(|_| "mcp_oauth_issuer_invalid")?;
-                if expected != actual {
-                    return Err("mcp_oauth_issuer_changed");
-                }
-            }
+        let actual = Url::parse(issuer).map_err(|_| "mcp_oauth_issuer_invalid")?;
+        if pins.iter().any(|expected| expected != &actual) {
+            return Err("mcp_oauth_issuer_changed");
         }
         let mut payload = payload;
         payload.0["oauth"]["nativeIssuer"] = json!(issuer);
@@ -135,6 +178,7 @@ impl Flow {
                 payload,
                 memory,
                 epoch: None,
+                refresh: false,
             },
             manager,
         })
@@ -149,14 +193,18 @@ impl Flow {
             .as_str()
             .filter(|v| !v.is_empty())
             .or_else(|| oauth["clientId"].as_str().filter(|v| !v.is_empty()));
-        let mut scopes = oauth["scopes"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|v| v.as_str())
-            .map(str::to_owned)
-            .collect::<Vec<_>>();
-        if scopes.is_empty() && self.commit.epoch.is_none() {
+        let mut scopes = if self.commit.refresh {
+            granted_scopes(oauth, &oauth["tokens"])?
+        } else {
+            oauth["scopes"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|v| v.as_str())
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        if scopes.is_empty() && !self.commit.refresh {
             scopes = self.manager.select_initial_scopes(&[]).await;
         }
         let client = if let Some(id) = id {
@@ -211,22 +259,25 @@ impl Commit {
             serde_json::to_value(stored.token_response.ok_or("mcp_oauth_token_missing")?)
                 .map_err(|_| "mcp_oauth_token_invalid")?,
         );
-        if self.epoch.is_some()
-            && let Some(scope) = tokens.0.get("scope")
-        {
-            let returned: std::collections::BTreeSet<_> = scope
-                .as_str()
-                .ok_or("mcp_oauth_scope_changed")?
-                .split_whitespace()
-                .collect();
-            let expected: std::collections::BTreeSet<_> = self.payload.0["oauth"]["scopes"]
-                .as_array()
-                .ok_or("mcp_oauth_scope_changed")?
-                .iter()
-                .filter_map(|v| v.as_str())
-                .collect();
-            if returned != expected {
-                return Err("mcp_oauth_scope_changed");
+        if self.refresh {
+            let previous = &self.payload.0["refreshState"]["previousTokens"];
+            let expected = granted_scopes(&self.payload.0["oauth"], previous)?;
+            if let Some(scope) = tokens.0.get("scope") {
+                let returned: std::collections::BTreeSet<_> = scope
+                    .as_str()
+                    .ok_or("mcp_oauth_scope_changed")?
+                    .split_whitespace()
+                    .collect();
+                let expected: std::collections::BTreeSet<_> =
+                    expected.iter().map(String::as_str).collect();
+                if returned != expected {
+                    return Err("mcp_oauth_scope_changed");
+                }
+            } else if previous.get("scope").is_some() {
+                tokens.0["scope"] = previous["scope"].clone();
+            }
+            if tokens.0.get("refresh_token").is_none() && previous.get("refresh_token").is_some() {
+                tokens.0["refresh_token"] = previous["refresh_token"].clone();
             }
         }
         if let Some(seconds) = tokens.0["expires_in"].as_u64() {
@@ -240,7 +291,7 @@ impl Commit {
             tokens.0["expires_at"] = json!(expires);
         }
         self.payload.0["oauth"]["tokens"] = tokens.0.take();
-        if !stored.granted_scopes.is_empty() {
+        if !self.refresh && !stored.granted_scopes.is_empty() {
             self.payload.0["oauth"]["scopes"] = json!(stored.granted_scopes);
         }
         self.payload.0["oauth"]["codeVerifier"] = json!("");
@@ -441,12 +492,7 @@ pub(crate) async fn refresh_runtime(
     epoch.check()?;
     let oauth = &flow.commit.payload.0["oauth"];
     let mut protection = oauth_secrets(oauth);
-    if oauth["scopes"]
-        .as_array()
-        .is_none_or(|s| s.iter().any(|v| !v.is_string()))
-    {
-        return Err("mcp_oauth_authorization_required");
-    }
+    granted_scopes(oauth, &oauth["tokens"])?;
     if [
         oauth["clientId"].as_str(),
         oauth["clientInformation"]["client_id"].as_str(),
@@ -479,6 +525,7 @@ async fn refresh_flow(
         .filter(|v| !v.is_empty())
         .unwrap_or("http://127.0.0.1/mcp/oauth/callback")
         .to_owned();
+    flow.commit.refresh = true;
     let config = flow.client(&redirect, cancel).await?;
     flow.manager
         .configure_client(config.clone())

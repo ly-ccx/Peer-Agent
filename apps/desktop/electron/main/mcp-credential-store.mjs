@@ -167,7 +167,8 @@ export function createMcpCredentialStore({ credentialFile = pathOf('mcpCredentia
     if (!raw || Buffer.byteLength(raw) > MAX_ENVELOPE) throw new Error('mcp_credential_missing');
     let payload;
     try { payload = JSON.parse(raw); } catch { throw new Error('mcp_credential_invalid'); }
-    if (payload.version !== 1 || payload.credentialRef !== entry.credentialRef || payload.kind !== entry.kind) throw new Error('mcp_credential_invalid');
+    bounded(payload, 8192);
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload) || payload.version !== 1 || payload.credentialRef !== entry.credentialRef || payload.kind !== entry.kind) throw new Error('mcp_credential_invalid');
     const current=load(credentialFile).data.credentials.find(item=>item.credentialRef===entry.credentialRef);
     if(current?.vaultKey!==entry.vaultKey) throw new Error('mcp_credential_changed');
     return payload;
@@ -185,11 +186,14 @@ export function createMcpCredentialStore({ credentialFile = pathOf('mcpCredentia
     if (actualBytes.length !== expectedBytes.length || !timingSafeEqual(actualBytes, expectedBytes)) throw new Error('mcp_credential_verification_failed');
     const next = { ...entry, vaultKey, storage: 'vault' };
     delete next.secret;
-    if (entry.kind === 'oauth2') next.oauth = oauthView(payload.oauth);
+    if (entry.kind === 'oauth2') {
+      next.oauth = oauthView(payload.oauth);
+      if ('refreshState' in payload) next.oauth.tokenStatus = 'recovery_required';
+    }
     else delete next.oauth;
     return next;
   }
-  function transaction(action) {
+  function openTransaction() {
     mkdirSync(dirname(credentialFile), { recursive: true, mode: 0o700 });
     const lock = `${credentialFile}.lock`;
     try { mkdirSync(lock, { mode: 0o700 }); } catch { throw new Error('mcp_credential_lock_busy'); }
@@ -199,7 +203,7 @@ export function createMcpCredentialStore({ credentialFile = pathOf('mcpCredentia
       if (!current.isDirectory() || current.dev !== owner.dev || current.ino !== owner.ino) throw new Error('mcp_credential_lock_changed');
     };
     try {
-      const source = load(credentialFile);
+      let source = load(credentialFile);
       const data = { ...source.data, credentials: [...source.data.credentials] };
       if (data.version === 1) {
         data.credentials = data.credentials.map(entry => {
@@ -214,10 +218,19 @@ export function createMcpCredentialStore({ credentialFile = pathOf('mcpCredentia
         });
         data.version = 2;
       }
-      const result = action(data);
-      publish(credentialFile, source, data, checkLock);
-      return result;
-    } finally { checkLock(); rmdirSync(lock); }
+      return { data, publish() {
+        publish(credentialFile, source, data, checkLock);
+        checkLock();
+        const actual = load(credentialFile);
+        if (!actual.raw?.equals(Buffer.from(`${JSON.stringify(data, null, 2)}\n`))) throw new Error('mcp_credential_commit_uncertain');
+        source = actual;
+      }, close() { checkLock(); rmdirSync(lock); } };
+    } catch (error) { checkLock(); rmdirSync(lock); throw error; }
+  }
+  function transaction(action) {
+    const tx = openTransaction();
+    try { const result = action(tx.data); tx.publish(); return result; }
+    finally { tx.close(); }
   }
   function readAll() {
     const source = load(credentialFile);
@@ -236,7 +249,7 @@ export function createMcpCredentialStore({ credentialFile = pathOf('mcpCredentia
       if (old && kind !== old.kind) throw new Error('mcp_credential_kind_invalid');
       const previous = old ? envelope(old) : {};
       if ('refreshState' in previous) throw new Error('mcp_oauth_recovery_required');
-      const payload = kind === 'oauth2' ? { oauth: normalizeOAuth(input.oauth, previous.oauth) } : { secret: input.secret ?? previous.secret };
+      const payload = kind === 'oauth2' ? { ...previous, oauth: normalizeOAuth(input.oauth, previous.oauth) } : { ...previous, secret: input.secret ?? previous.secret };
       if (kind !== 'oauth2' && (typeof payload.secret !== 'string' || !payload.secret.length)) throw new Error('MCP credential secret is required.');
       const entry = {
         ...old, id, credentialRef, kind, target: targetForKind(kind), label: asString(input.label) || old?.label || 'MCP credential',
@@ -272,18 +285,108 @@ export function createMcpCredentialStore({ credentialFile = pathOf('mcpCredentia
       if (typeof payload.secret !== 'string' || !payload.secret) throw new Error('mcp_credential_invalid');
       return { metadata: metadata(entry), secret: payload.secret };
     },
-    getOAuthCredential(ref) {
+    getOAuthCredential(ref, { purpose = 'runtime' } = {}) {
       const entry = find(ref);
       if (!entry) throw new Error('MCP credential not found.');
       if (entry.kind !== 'oauth2') throw new Error('MCP credential is not OAuth 2.0.');
       const payload = envelope(entry);
-      if ('refreshState' in payload) throw new Error('mcp_oauth_recovery_required');
-      let revision=entry.vaultKey;
-      return { metadata: metadata(entry), oauth: payload.oauth, updateOAuth(patch) {
-        const result=writeCredential({credentialRef:entry.credentialRef,kind:'oauth2',oauth:patch},revision);
-        revision=result.revision;
-        return result.metadata;
-      } };
+      const authorize = purpose === 'authorize';
+      const knownPending = (state) => state?.schemaVersion === 1
+        && /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(state.operationId)
+        && state.previousTokens && typeof state.previousTokens === 'object' && !Array.isArray(state.previousTokens);
+      const checkPending = (value) => {
+        if ('refreshState' in value && (!authorize || !knownPending(value.refreshState))) throw new Error('mcp_oauth_recovery_required');
+      };
+      checkPending(payload);
+      const oauth = { ...payload.oauth };
+      if ('refreshState' in payload) delete oauth.tokens;
+      const originalIssuers = [oauth.nativeIssuer,oauth.authorizationServerUrl,oauth.discoveryState?.authorizationServerUrl,oauth.discoveryState?.authorizationServerMetadata?.issuer].filter(v => v !== undefined && v !== '');
+      const originalClient = oauth.clientInformation?.client_id ?? oauth.clientId;
+      let revision = entry.vaultKey;
+      const assertCurrent = () => {
+        const data = load(credentialFile).data;
+        const current = data.credentials.find(item => item.credentialRef === entry.credentialRef);
+        if (data.version !== 2 || current?.kind !== 'oauth2' || current.vaultKey !== revision) throw new Error('mcp_credential_changed');
+      };
+      const adopt = (next, value) => {
+        revision = next.vaultKey;
+        for (const key of Object.keys(oauth)) delete oauth[key];
+        Object.assign(oauth, value.oauth);
+        if ('refreshState' in value) delete oauth.tokens;
+      };
+      const currentIn = (tx) => {
+        const index = tx.data.credentials.findIndex(item => item.credentialRef === entry.credentialRef);
+        const current = tx.data.credentials[index];
+        if (current?.kind !== 'oauth2' || current.vaultKey !== revision) throw new Error('mcp_credential_changed');
+        return { index, current, value: envelope(current) };
+      };
+      return { metadata: metadata(entry), oauth, assertCurrent,
+        updateOAuth(patch) {
+          const tx = openTransaction();
+          try {
+            const { index, current, value } = currentIn(tx);
+            checkPending(value);
+            if ('refreshState' in value && Object.keys(patch).some(key => !['discoveryState','clientInformation','codeVerifier'].includes(key))) throw new Error('mcp_oauth_recovery_required');
+            const updated = { ...value, oauth: normalizeOAuth(patch, value.oauth) };
+            const next = stage(current, updated);
+            tx.data.credentials[index] = next;
+            tx.publish();
+            adopt(next, updated);
+            return metadata(next);
+          } finally { tx.close(); }
+        },
+        async exchangeTokens(request, exchange) {
+          const tx = openTransaction();
+          try {
+            const { index, current, value } = currentIn(tx);
+            checkPending(value);
+            const old = value.oauth;
+            const tokenUrl = (url) => {
+              let parsed;
+              try { parsed = new URL(url); } catch { throw new Error('mcp_oauth_binding_invalid'); }
+              if (!['https:','http:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.hash) throw new Error('mcp_oauth_binding_invalid');
+              return parsed.href;
+            };
+            const cache = old.discoveryState;
+            const issuers = [...originalIssuers,old.nativeIssuer,old.authorizationServerUrl,cache?.authorizationServerUrl,cache?.authorizationServerMetadata?.issuer].filter(v => v !== undefined && v !== '');
+            const pinned = issuers.map(tokenUrl);
+            if (!pinned.length || pinned.some(v => v !== pinned[0])
+              || tokenUrl(request.tokenUrl) !== tokenUrl(cache?.authorizationServerMetadata?.token_endpoint)) throw new Error('mcp_oauth_binding_invalid');
+            const refresh = request.grantType === 'refresh_token';
+            if (!refresh && (request.grantType !== 'authorization_code' || !authorize)) throw new Error('mcp_oauth_exchange_forbidden');
+            if (refresh && ((old.clientInformation?.client_id ?? old.clientId) !== originalClient || 'refreshState' in value || !old.tokens?.refresh_token || request.refreshToken !== old.tokens.refresh_token)) throw new Error('mcp_oauth_binding_changed');
+            if (!refresh && (!old.codeVerifier || request.codeVerifier !== old.codeVerifier)) throw new Error('mcp_oauth_binding_changed');
+            const previousTokens = value.refreshState?.previousTokens ?? old.tokens ?? {};
+            if (refresh && 'scope' in previousTokens && typeof previousTokens.scope !== 'string') throw new Error('mcp_oauth_scope_invalid');
+            const pending = { ...value, oauth: { ...old }, refreshState: { schemaVersion:1, operationId:randomUUID(), previousTokens } };
+            delete pending.oauth.tokens;
+            const intent = stage(current, pending);
+            tx.data.credentials[index] = intent;
+            tx.publish();
+            // The lock remains owned across the one remote exchange. No old token is republished on any failure.
+            const tokens = { ...await exchange() };
+            const scopes = (v) => [...new Set(String(v ?? '').split(/\s+/).filter(Boolean))].sort().join(' ');
+            if (refresh) {
+              if (!tokens.refresh_token) tokens.refresh_token = previousTokens.refresh_token;
+              const oldScope = typeof previousTokens.scope === 'string' ? previousTokens.scope : normalizeScopes(old.scopes).join(' ');
+              if (tokens.scope !== undefined && scopes(tokens.scope) !== scopes(oldScope)) throw new Error('mcp_oauth_scope_changed');
+              if (tokens.scope === undefined && oldScope) tokens.scope = oldScope;
+            }
+            if (tokens.expires_in !== undefined) {
+              const expires = Number(tokens.expires_in), at = Date.now() + expires * 1000;
+              if (!Number.isFinite(expires) || expires <= 0 || !Number.isSafeInteger(at) || at > 8640000000000000) throw new Error('mcp_oauth_expiry_invalid');
+              tokens.expires_at = at;
+            }
+            const updated = { ...value, oauth: { ...old, nativeIssuer:pinned[0], codeVerifier:'', tokens } };
+            delete updated.refreshState;
+            const next = stage(intent, updated);
+            tx.data.credentials[index] = next;
+            tx.publish();
+            adopt(next, updated);
+            return tokens;
+          } finally { tx.close(); }
+        },
+      };
     },
     updateOAuthCredential(ref, patch = {}) {
       return writeCredential({ credentialRef: ref, kind: 'oauth2', oauth: patch }).metadata;
@@ -314,7 +417,7 @@ function ensureCompatible(kind, auth, server) {
   }
 }
 
-export async function resolveMcpCredentialInjection(credentialStore, auth = {}, server = {}) {
+export async function resolveMcpCredentialInjection(credentialStore, auth = {}, server = {}, context = {}) {
   const binding = normalizeAuthBinding(auth);
   if (binding.mode === 'none') {
     return { headers: {}, env: {}, authContext: { mode: 'none', hasCredential: false } };
@@ -325,7 +428,7 @@ export async function resolveMcpCredentialInjection(credentialStore, auth = {}, 
 
   if (binding.mode === 'oauth2') {
     if (typeof credentialStore.getOAuthCredential !== 'function') throw new Error('MCP OAuth credential resolver is not configured.');
-    const { metadata, oauth, updateOAuth } = credentialStore.getOAuthCredential(binding.credentialRef);
+    const { metadata, oauth, updateOAuth, assertCurrent, exchangeTokens } = credentialStore.getOAuthCredential(binding.credentialRef, context);
     if(typeof updateOAuth!=='function') throw new Error('mcp_oauth_revision_guard_required');
     ensureCompatible(metadata.kind, binding, server);
     return {
@@ -335,6 +438,8 @@ export async function resolveMcpCredentialInjection(credentialStore, auth = {}, 
         credentialRef: metadata.credentialRef,
         oauth,
         updateOAuth,
+        assertCurrent,
+        exchangeTokens,
       },
       authContext: {
         mode: binding.mode,
@@ -392,7 +497,7 @@ export async function resolveMcpCredentialInjection(credentialStore, auth = {}, 
 }
 
 export function createMcpCredentialResolver(credentialStore) {
-  return (auth, server) => resolveMcpCredentialInjection(credentialStore, auth, server);
+  return (auth, server, context) => resolveMcpCredentialInjection(credentialStore, auth, server, context);
 }
 
 export const MCP_CREDENTIAL_PREFIX = CREDENTIAL_PREFIX;

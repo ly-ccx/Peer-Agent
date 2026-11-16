@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import { __mcpClientInternals, startMcpOAuth } from './mcp-client.mjs';
 
 describe('MCP client OAuth transport integration', () => {
-  it('injects an OAuth authProvider for HTTP transports and persists token updates', async () => {
+  it('injects an OAuth authProvider and requires an owned token commit receipt', async () => {
     const updates = [];
     const server = {
       transport: 'streamable_http',
@@ -16,6 +16,7 @@ describe('MCP client OAuth transport integration', () => {
         hasCredential: true,
         authProviderConfig: {
           credentialRef: 'mcp-cred:test',
+          assertCurrent() {}, exchangeTokens: async () => {throw new Error('no exchange in this fixture');},
           oauth: {
             authorizationServerUrl: 'https://auth.example.com/',
             clientId: 'client-id',
@@ -36,14 +37,15 @@ describe('MCP client OAuth transport integration', () => {
     assert.equal(provider.clientMetadata.client_id, 'client-id');
     assert.equal(provider.clientMetadata.scope, 'mcp.read mcp.write');
 
-    await provider.saveTokens({ access_token: 'access-secret', token_type: 'Bearer' });
-    assert.deepEqual(updates.at(-1), { tokens: { access_token: 'access-secret', token_type: 'Bearer' } });
+    await assert.rejects(provider.saveTokens({ access_token: 'access-secret', token_type: 'Bearer' }), /mcp_oauth_commit_receipt_required/);
+    assert.deepEqual(updates, []);
 
     await provider.saveCodeVerifier('pkce-secret');
     assert.deepEqual(updates.at(-1), { codeVerifier: 'pkce-secret' });
 
     await provider.redirectToAuthorization('https://auth.example.com/authorize');
     assert.deepEqual(updates.at(-1), { opened: 'https://auth.example.com/authorize' });
+    await transport.close();
   });
 
   it('classifies auth challenge errors for MCP probe state', () => {
@@ -51,6 +53,7 @@ describe('MCP client OAuth transport integration', () => {
     assert.equal(__mcpClientInternals.isAuthRequiredError(new Error('HTTP 403 Forbidden')), true);
     assert.equal(__mcpClientInternals.isAuthRequiredError(new Error('www-authenticate: Bearer')), true);
     assert.equal(__mcpClientInternals.isAuthRequiredError(new Error('ECONNREFUSED')), false);
+    assert.equal(__mcpClientInternals.isAuthRequiredError(new Error('mcp_oauth_authorization_required')), true);
   });
 
   it('forwards sibling authProviderConfig from resolver injection into the transport (root-bug regression)', async () => {
@@ -61,6 +64,7 @@ describe('MCP client OAuth transport integration', () => {
       env: {},
       authProviderConfig: {
         credentialRef: 'mcp-cred:test',
+        assertCurrent() {}, exchangeTokens: async () => {throw new Error('no exchange in this fixture');},
         oauth: {
           authorizationServerUrl: 'https://auth.example.com/',
           clientId: 'client-id',
@@ -82,6 +86,7 @@ describe('MCP client OAuth transport integration', () => {
     assert.ok(config.__authContext.authProviderConfig, 'authProviderConfig must survive into __authContext');
     const transport = __mcpClientInternals.createTransport(config);
     assert.ok(transport._authProvider, 'transport should receive an OAuth authProvider after the fix');
+    await transport.close();
   });
 
   it('startMcpOAuth throws readable error codes for unsupported/unconfigured servers', async () => {
