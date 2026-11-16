@@ -1,14 +1,5 @@
-import { randomUUID } from 'node:crypto';
-import {
-  closeSync,
-  existsSync,
-  fsyncSync,
-  openSync,
-  readFileSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { readModelConfigFile, replaceModelConfigFile, withModelConfigLock } from './model-config-file.mjs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -256,6 +247,9 @@ function serializeProvidersDocument(
   if (previousContent) {
     try {
       const previous = JSON.parse(previousContent) as unknown;
+      if (isRecord(previous) && Array.isArray(previous.providers)) {
+        return `${JSON.stringify({ ...previous, providers }, null, 2)}\n`;
+      }
       if (
         isRecord(previous)
         && Array.isArray(previous.channels)
@@ -290,6 +284,7 @@ function serializeProvidersDocument(
         }
 
         return `${JSON.stringify({
+          ...previous,
           version: 2,
           channels: [...channels.values()],
           models: [...modelsById.values()],
@@ -469,32 +464,11 @@ function writeProvidersAtomically(
   configFile: string,
   providers: readonly StoredModelProvider[],
 ): void {
-  const temporaryFile = path.join(
-    path.dirname(configFile),
-    `.${path.basename(configFile)}.${process.pid}.${randomUUID()}.tmp`,
-  );
-  let descriptor: number | undefined;
-  try {
-    const previousContent = existsSync(configFile)
-      ? readFileSync(configFile, 'utf8')
-      : null;
-    descriptor = openSync(temporaryFile, 'wx', 0o600);
-    writeFileSync(
-      descriptor,
-      serializeProvidersDocument(providers, previousContent),
-      'utf8',
-    );
-    fsyncSync(descriptor);
-    closeSync(descriptor);
-    descriptor = undefined;
-    renameSync(temporaryFile, configFile);
-  } catch (error) {
-    if (descriptor !== undefined) {
-      try { closeSync(descriptor); } catch { /* best effort */ }
-    }
-    try { unlinkSync(temporaryFile); } catch { /* best effort */ }
-    throw error;
-  }
+  withModelConfigLock(configFile, () => {
+    const before = readModelConfigFile(configFile);
+    replaceModelConfigFile(configFile, before.revision,
+      JSON.parse(serializeProvidersDocument(providers, before.content)));
+  });
 }
 
 export function loadSharedModelMetadata(
@@ -572,30 +546,37 @@ export function loadSharedModelSelection(
         && authMethod !== 'oauth_google'
         && authMethod !== 'oauth_grok'
       ) return;
-      const previousTokens = options.credentialStore?.getOAuthTokens(credentialId) ?? null;
-      options.credentialStore?.setOAuthTokens(credentialId, tokens);
-      try {
+      return withModelConfigLock(configFile, () => {
         const current = parseProviders(read(configFile));
-        const updated = current.map((provider) => credentialIdOf(provider) === credentialId
-          ? {
-              ...provider,
-              oauthConfigured: Boolean(tokens.access),
-              oauthExpires: typeof tokens.expires === 'number' ? tokens.expires : undefined,
-              oauthAccountId: tokens.accountId || undefined,
-            }
-          : provider);
-        (options.writeProviders ?? writeProvidersAtomically)(configFile, updated);
-      } catch (error) {
-        try {
-          options.credentialStore?.setOAuthTokens(credentialId, previousTokens);
-        } catch (rollbackError) {
-          throw new AggregateError(
-            [error, rollbackError],
-            'shared_model_credential_rollback_failed',
-          );
+        const matches = current.filter(provider => provider.id === selected.id);
+        if (matches.length !== 1 || JSON.stringify(matches[0]) !== JSON.stringify(selected)) {
+          throw new Error('credential_oauth_configuration_changed');
         }
-        throw error;
-      }
+        const previousTokens = options.credentialStore?.getOAuthTokens(credentialId) ?? null;
+        options.credentialStore?.setOAuthTokens(credentialId, tokens);
+        try {
+          const updated = current.map((provider) => credentialIdOf(provider) === credentialId
+            ? {
+                ...provider,
+                oauthConfigured: Boolean(tokens.access),
+                oauthExpires: typeof tokens.expires === 'number' ? tokens.expires : undefined,
+                oauthAccountId: tokens.accountId || undefined,
+              }
+            : provider);
+          (options.writeProviders ?? writeProvidersAtomically)(configFile, updated);
+        } catch (error) {
+          if (error instanceof Error && error.message === 'model_config_commit_unknown') throw error;
+          try {
+            options.credentialStore?.setOAuthTokens(credentialId, previousTokens);
+          } catch (rollbackError) {
+            throw new AggregateError(
+              [error, rollbackError],
+              'shared_model_credential_rollback_failed',
+            );
+          }
+          throw error;
+        }
+      });
     },
   };
 }

@@ -79,6 +79,59 @@ function withStore(fn) {
   }
 }
 
+test('configuration mutations preserve corrupt and future-version documents instead of replacing them with an empty store', () => withStore(({ configFile }) => {
+  for (const original of ['{broken', JSON.stringify({ version: 99, channels: [], models: [], future: true })]) {
+    writeFileSync(configFile, original);
+    const store = createLlmConfigStore({ configFile });
+    assert.throws(() => store.addProvider({ provider: 'openai', model: 'fixture' }), /model_config_/);
+    assert.equal(readFileSync(configFile, 'utf8'), original);
+  }
+}));
+
+test('a normal configuration mutation retains unknown root fields', () => withStore(({ configFile }) => {
+  writeFileSync(configFile, JSON.stringify({ version: 2, channels: [], models: [], future: { preserved: [1, 'yes'] } }));
+  createLlmConfigStore({ configFile }).addProvider({ provider: 'openai', model: 'fixture' });
+  assert.deepEqual(JSON.parse(readFileSync(configFile, 'utf8')).future, { preserved: [1, 'yes'] });
+}));
+
+test('a late connection diagnostic cannot overwrite a changed configuration or hold the writer lock during HTTP', () => withStore(async ({ configFile }) => {
+  let release, started;
+  const ready = new Promise(resolve => { started = resolve; });
+  const response = new Promise(resolve => { release = resolve; });
+  const store = createLlmConfigStore({ configFile, providerFetch: async () => { started(); return response; } });
+  const item = store.addProvider({ provider: 'openai', model: 'fixture', apiKey: 'synthetic-key' });
+  const checking = store.testConnection(item.id);
+  await ready;
+  const other = createLlmConfigStore({ configFile });
+  other.updateProvider(item.id, { name: 'new configuration' });
+  const before = readFileSync(configFile, 'utf8');
+  release(new Response(JSON.stringify({ model: 'fixture' }), {status: 200, headers: {'content-type':'application/json'}}));
+  assert.equal((await checking).success, true);
+  assert.equal(readFileSync(configFile, 'utf8'), before);
+}));
+
+test('directory sync failure after config rename preserves actually committed OAuth credentials for reconciliation', () => withStore(async ({configFile, credentialSecrets}) => {
+  const fs = (await import('node:fs')).default;
+  const {syncBuiltinESMExports} = await import('node:module');
+  const store=createLlmConfigStore({configFile});
+  const provider=store.addProvider({provider:'openai',authMethod:'oauth_chatgpt'});
+  const groupId=readPersistedChannels(configFile)[0].id;
+  const original=fs.fsyncSync;let syncs=0;
+  fs.fsyncSync=fd=>{
+    // readAll can first persist a legitimate subscription metadata migration.
+    // Inject only after this operation has actually written the new credential.
+    if(credentialSecrets.has(modelOauthCredentialKey(groupId)) && ++syncs===2)throw new Error('fixture directory sync failure');
+    return original(fd);
+  };
+  syncBuiltinESMExports();
+  try {
+    assert.throws(()=>store.setOAuthTokens(provider.id,{access:'synthetic-fresh',refresh:'synthetic-next',expires:Date.now()+3600000,accountId:'fixture'}),/model_config_commit_unknown/);
+  } finally {fs.fsyncSync=original;syncBuiltinESMExports();}
+  assert.equal(JSON.parse(credentialSecrets.get(modelOauthCredentialKey(groupId))).access,'synthetic-fresh');
+  assert.equal(readPersistedChannels(configFile)[0].oauthConfigured,true);
+  assert.equal(store.listProviders().find(p=>p.id===provider.id).oauthStatus.status,'connected');
+}));
+
 test('subscription provider creation defaults to GPT-6 Astra metadata', () => withStore(({ configFile }) => {
   const store = createLlmConfigStore({ configFile });
   const provider = store.addProvider({ provider: 'openai', authMethod: 'oauth_chatgpt' });

@@ -7,8 +7,10 @@ pub use coordination::{CoordinationError, CoordinationSnapshot, CoordinationStor
 mod durable_jsonl;
 mod evidence;
 mod files;
+mod model_config;
 pub use approvals::{ApprovalDecision, ApprovalState, ApprovalStore, HostApproval};
 pub use evidence::{EvidenceIndexStore, HostToolEvidence};
+pub use model_config::{ModelConfigSnapshot, ModelConfigStore, ModelConfigTransaction};
 mod resources;
 mod sqlite_file;
 #[cfg(feature = "test-fixtures")]

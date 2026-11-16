@@ -19,7 +19,11 @@ fn main() {
         .unwrap();
     assert!(bytes.len() <= 524_288);
     let request: Value = serde_json::from_slice(&bytes).unwrap();
-    fs::write(root.join("last-request.json"), &bytes).unwrap();
+    // Readers use existence as the completed-request handshake. Publish the
+    // complete JSON atomically instead of exposing a newly truncated file.
+    let marker = root.join(format!("last-request-{}.tmp", std::process::id()));
+    fs::write(&marker, &bytes).unwrap();
+    fs::rename(marker, root.join("last-request.json")).unwrap();
     match mode.as_str() {
         "sleep" => std::thread::sleep(Duration::from_secs(20)),
         "stdout-flood" => {

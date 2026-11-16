@@ -13,6 +13,10 @@ const run = (command, args,extraEnv) => execFileSync(command, args, { cwd: root,
 const episodes=join(output,'episodes');mkdirSync(episodes,{recursive:true});writeFileSync(join(episodes,'.native-cli-fixture'),'isolated');
 if(!existsSync(join(root,'packages/runtime-core/dist/index.js')))run('pnpm',['--filter','@peer-agent/runtime-core','build']);
 run('pnpm',['--filter','@peer-agent/credential-helper','build']);
+run('pnpm',['--filter','@peer-agent/runtime-node','build']);
+run('cargo', ['build', '--locked', '-p', 'peer-store', '--features', 'test-fixtures', '--example', 'model-config-conformance']);
+run('node', ['scripts/native-cli/model-config-store.mjs']);
+run('node', ['--test', 'packages/runtime-node/src/model-config-file.test.mjs', 'packages/runtime-node/src/shared-model-config.test.ts', 'apps/desktop/electron/main/llm-config-store.test.mjs']);
 run('cargo',['build','--locked','-p','peer-credential-helper','--features','test-fixtures','--example','vault-fixture']);
 run('bun',['scripts/native-cli/credential-cas.ts']);
 run('bun',['scripts/native-cli/model-oauth-coordination.ts']);

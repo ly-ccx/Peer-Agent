@@ -245,6 +245,21 @@ test('OAuth metadata write failure restores the previous credential', () => {
   }
 });
 
+test('explicit OAuth metadata updates preserve a legacy providers envelope and unknown root fields', () => {
+  const userDataPath=mkdtempSync(path.join(os.tmpdir(),'peer-shared-envelope-'));
+  try {
+    const configFile=getSharedModelConfigPath(userDataPath);
+    writeFileSync(configFile,JSON.stringify({future:{keep:['yes']},providers:[{id:'oauth',groupId:'account',provider:'openai',authMethod:'oauth_chatgpt',model:'gpt-5.5',enabled:true,isDefault:true,oauthConfigured:true,futureModel:'kept'}]}));
+    const credentials=createCredentialStore({oauthTokens:{account:{access:'old'}}});
+    const selection=loadSharedModelSelection({userDataPath,credentialStore:credentials.store});
+    assert.ok(selection);selection.persistOAuthTokens({access:'new',expires:456});
+    const saved=JSON.parse(readFileSync(configFile,'utf8'));
+    assert.deepEqual(saved.future,{keep:['yes']});assert.equal(saved.providers[0].futureModel,'kept');
+    assert.equal(saved.providers[0].oauthExpires,456);assert.equal(saved.providers[0].oauthTokens,undefined);
+    assert.equal(credentials.oauthTokens.get('account')?.access,'new');
+  } finally {rmSync(userDataPath,{recursive:true,force:true});}
+});
+
 test('loadSharedModelSelection returns null without a credential store, and resolves oauth_google with tokens', () => {
   const userDataPath = mkdtempSync(path.join(os.tmpdir(), 'peer-shared-unsupported-'));
   try {
