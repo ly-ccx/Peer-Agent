@@ -69,7 +69,11 @@ export interface SharedModelCredentialStore {
   getApiKey(credentialId: string): string | null;
   getOAuthTokens(credentialId: string): ChatGptOAuthTokens | null;
   setOAuthTokens(credentialId: string, tokens: ChatGptOAuthTokens | null): void;
+  refreshOAuthTokens?(credentialId: string, tokens: ChatGptOAuthTokens, authMethod: string,
+    refresh: OAuthRefreshOperation, validate: () => void, force?: boolean): Promise<OAuthRefreshResult>;
 }
+export interface OAuthRefreshResult { readonly tokens: ChatGptOAuthTokens; readonly refreshed: boolean }
+export type OAuthRefreshOperation = (tokens: ChatGptOAuthTokens) => Promise<OAuthRefreshResult>;
 
 export interface SharedModelMetadata {
   readonly wireOverride?: string;
@@ -114,6 +118,7 @@ export interface SharedModelSelection extends SharedModelMetadata {
   readonly oauthProjectId?: string | null;
   readonly oauthTokens?: ChatGptOAuthTokens;
   persistOAuthTokens(tokens: ChatGptOAuthTokens): void;
+  refreshOAuthTokens(tokens: ChatGptOAuthTokens, refresh: OAuthRefreshOperation, force?: boolean): Promise<OAuthRefreshResult>;
 }
 
 export interface LoadSharedModelSelectionOptions {
@@ -551,6 +556,16 @@ export function loadSharedModelSelection(
     ...(accountId ? { accountId } : { accountId: null }),
     ...(oauthProjectId ? { oauthProjectId } : { oauthProjectId: null }),
     ...(oauthTokens ? { oauthTokens } : {}),
+    async refreshOAuthTokens(tokens, refresh, force) {
+      const store = options.credentialStore;
+      if (!store?.refreshOAuthTokens) throw new Error('credential_oauth_coordinator_required');
+      const validate = () => {
+        const matches = parseProviders(read(configFile)).filter((provider) => provider.id === selected.id);
+        if (matches.length !== 1 || matches[0].enabled === false
+          || JSON.stringify(matches[0]) !== JSON.stringify(selected)) throw new Error('credential_oauth_configuration_changed');
+      };
+      return store.refreshOAuthTokens(credentialId, tokens, authMethod, refresh, validate, force);
+    },
     persistOAuthTokens(tokens) {
       if (
         authMethod !== 'oauth_chatgpt'

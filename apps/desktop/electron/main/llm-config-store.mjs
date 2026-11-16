@@ -16,6 +16,8 @@ import path from 'node:path';
 import {
   modelApiKeyCredentialKey,
   modelOauthCredentialKey,
+  readModelOAuthTokens,
+  refreshModelOAuthTokens,
 } from '@peer-agent/credential-helper';
 import { getDataHome, pathOf } from './data-store.mjs';
 import { createDesktopModelCredentialClient } from './model-credential-client.mjs';
@@ -314,14 +316,25 @@ export function createLlmConfigStore({
   function readOAuthTokens(item) {
     const key = groupKey(item);
     if (!key) return null;
-    const raw = credentials().getSecret(modelOauthCredentialKey(key));
-    if (!raw) return null;
-    try {
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === 'object' ? parsed : null;
-    } catch {
-      throw new Error('credential_oauth_tokens_invalid');
-    }
+    return readModelOAuthTokens(credentials(), modelOauthCredentialKey(key));
+  }
+
+  // Automatic renewal owns only its Vault generation. Configuration hints may
+  // lag; a metadata failure must never restore an already-consumed refresh token.
+  async function refreshOAuthTokens(id, tokens, refresh, options = {}) {
+    const item = readAll().find((entry) => entry.id === id);
+    if (!item || !isOAuthAuthMethod(item.authMethod)) throw new Error('credential_oauth_configuration_changed');
+    const original = JSON.stringify(item);
+    const validate = () => {
+      const matches = readAll().filter((entry) => entry.id === id);
+      if (matches.length !== 1 || matches[0].enabled === false || JSON.stringify(matches[0]) !== original) {
+        throw new Error('credential_oauth_configuration_changed');
+      }
+    };
+    return refreshModelOAuthTokens({
+      client: credentials(), key: modelOauthCredentialKey(groupKey(item)),
+      authMethod: item.authMethod, tokens, refresh, validate, force: options.force === true,
+    });
   }
 
   function writeVerifiedSecret(key, secret) {
@@ -1932,7 +1945,7 @@ export function createLlmConfigStore({
     }
   }
 
-  return { resolveCredentialAsync: createPredictionCredentialResolver({ configFile, dataHome: credentialDataHome || getDataHome() }), listProviders, listGroups, listChatProviders, addProvider, addModel, updateProvider, duplicateProvider, duplicateModel, removeProvider, removeGroup, setDefault, getDecryptedApiKey, getCredential, getApiKeyRequestConfig, setOAuthTokens, testConnection, completePrompt, backfillMissingPricingFromModelsDev };
+  return { resolveCredentialAsync: createPredictionCredentialResolver({ configFile, dataHome: credentialDataHome || getDataHome() }), listProviders, listGroups, listChatProviders, addProvider, addModel, updateProvider, duplicateProvider, duplicateModel, removeProvider, removeGroup, setDefault, getDecryptedApiKey, getCredential, getApiKeyRequestConfig, setOAuthTokens, refreshOAuthTokens, testConnection, completePrompt, backfillMissingPricingFromModelsDev };
 }
 
 async function testOpenAI(resolved, model, start, fetchImpl) {

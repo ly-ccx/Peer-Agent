@@ -44,7 +44,7 @@ import {
 } from './desktop-provider-adapters.ts';
 import { denyInteractiveTools, restrictTuiHostTools } from './cli-host-filter.ts';
 import { createTuiHost, type TuiHost, type TuiCapabilityProvider } from './tui-host.ts';
-import { createTuiProviderFetch } from './provider-transport.ts';
+import { createTuiProviderFetch, createTuiOAuthRefreshFetch } from './provider-transport.ts';
 import { buildTuiSystemContext, createTuiLanguageStore, type TuiLanguageStore } from './tui-language.ts';
 import { agentMessagesForContext, readWorkingContext, recordAgentContextAdmission } from '@peer-agent/runtime-node/project-agent';
 import { createTuiThemeStore, type TuiThemeStore } from './tui-theme.ts';
@@ -81,6 +81,7 @@ export interface TuiRuntime {
 export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
   const { workspaceRoot, userDataPath } = options;
   const providerFetch = createTuiProviderFetch();
+  const oauthRefreshFetch = createTuiOAuthRefreshFetch();
   const providerSessionId = `peer-${randomUUID()}`;
   const languageStore = createTuiLanguageStore({ userDataPath });
   const themeStore = createTuiThemeStore({ userDataPath });
@@ -153,19 +154,20 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
               ? { extraHeaders: GROK_SUBSCRIPTION_HEADERS }
               : {}),
             resolveTokens() {
-              const current = modelConfig.resolveSharedSelection?.(credentialId);
-              if (!current?.oauthTokens) {
+              if (!selection.oauthTokens) {
                 throw new Error('Desktop credential is locked. Allow Keychain access and retry.');
               }
-              return current.oauthTokens;
+              return selection.oauthTokens;
             },
             async refreshTokens(tokens) {
-              if (metadata.authMethod === 'oauth_chatgpt') {
-                return refreshChatGptOAuthTokens(tokens);
-              }
               try {
-                const fresh = await ensureFreshGrokTokensFromDesktop(tokens, { fetchImpl: providerFetch });
-                return fresh.tokens;
+                const result = await selection.refreshOAuthTokens(tokens, async (current) => {
+                  if (metadata.authMethod === 'oauth_chatgpt') {
+                    return { tokens: await refreshChatGptOAuthTokens(current, oauthRefreshFetch), refreshed: true };
+                  }
+                  return ensureFreshGrokTokensFromDesktop(current, { fetchImpl: oauthRefreshFetch });
+                }, true);
+                return result.tokens;
               } catch (err: any) {
                 if (err?.code === 'grok_oauth_scope_upgrade_required') {
                   // Scope upgrade requires a fresh device flow — refresh tokens
@@ -178,11 +180,6 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
                 }
                 throw err;
               }
-            },
-            persistTokens(tokens) {
-              const current = modelConfig.resolveSharedSelection?.(credentialId);
-              if (!current) throw new Error('Desktop credential is locked. Allow Keychain access and retry.');
-              current.persistOAuthTokens(tokens);
             },
           }).stream(request);
         }
@@ -226,10 +223,10 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
               const current = modelConfig.resolveSharedSelection?.(credentialId);
               if (current?.apiKey) return current.apiKey;
               if (metadata.authMethod === 'oauth_google' && current?.oauthTokens) {
-                const fresh = await ensureFreshGoogleTokensFromDesktop(current.oauthTokens);
-                if (fresh?.access) {
-                  current.persistOAuthTokens?.(fresh);
-                  return String(fresh.access);
+                const fresh = await current.refreshOAuthTokens(current.oauthTokens,
+                  async (tokens) => ({ tokens: await ensureFreshGoogleTokensFromDesktop(tokens, { fetchImpl: oauthRefreshFetch }), refreshed: true }));
+                if (fresh.tokens?.access) {
+                  return String(fresh.tokens.access);
                 }
               }
               throw new Error(

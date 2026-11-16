@@ -7,6 +7,9 @@ import {
   createSubprocessCredentialTransport,
   modelApiKeyCredentialKey,
   modelOauthCredentialKey,
+  readModelOAuthTokens,
+  refreshModelOAuthTokens,
+  type ModelOAuthVault,
 } from '@peer-agent/credential-helper';
 import type {
   ChatGptOAuthTokens,
@@ -16,7 +19,7 @@ import type {
 const MODULE_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_ROOT = path.resolve(MODULE_DIRECTORY, '../../..');
 
-export interface TuiCredentialClient {
+export interface TuiCredentialClient extends ModelOAuthVault {
   getSecret(key: string): string | null;
   setSecret(key: string, value: string): void;
   deleteSecret(key: string): boolean;
@@ -98,9 +101,12 @@ export function createTuiSharedModelCredentialStore(
       return credentials().getSecret(modelApiKeyCredentialKey(credentialId));
     },
     getOAuthTokens(credentialId) {
-      return parseOAuthTokens(
-        credentials().getSecret(modelOauthCredentialKey(credentialId)),
-      );
+      return readModelOAuthTokens(credentials(), modelOauthCredentialKey(credentialId),
+        (raw) => parseOAuthTokens(JSON.stringify(raw))!);
+    },
+    refreshOAuthTokens(credentialId, tokens, authMethod, refresh, validate, force) {
+      return refreshModelOAuthTokens({ client: credentials(), key: modelOauthCredentialKey(credentialId),
+        authMethod, tokens, refresh, validate, force });
     },
     setOAuthTokens(credentialId, tokens) {
       const key = modelOauthCredentialKey(credentialId);

@@ -231,7 +231,7 @@ export function createChatGptResponsesProvider(options: CreateChatGptResponsesPr
     async stream(request) {
       tokens ??= options.resolveTokens?.();
       if (!tokens?.access) throw new Error('desktop_model_credential_unavailable');
-      if (tokens.expires && tokens.expires <= Date.now() + 60_000 && options.refreshTokens) {
+      if ((!Number.isSafeInteger(tokens.expires) || tokens.expires! <= Date.now() + 60_000) && options.refreshTokens) {
         tokens = await options.refreshTokens(tokens);
         options.persistTokens?.(tokens);
       }

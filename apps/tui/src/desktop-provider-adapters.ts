@@ -109,6 +109,7 @@ export async function ensureFreshGrokTokensFromDesktop(
   options?: { fetchImpl?: typeof fetch },
 ): Promise<{
   tokens: ChatGptOAuthTokens;
+  refreshed: boolean;
   [key: string]: unknown;
 }> {
   return ensureFreshGrokTokens(tokens, {

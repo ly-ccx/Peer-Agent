@@ -17,7 +17,7 @@ import {
   ensureFreshGrokTokensFromDesktop,
 } from './desktop-provider-adapters.ts';
 import { createTuiSharedModelCredentialStore } from './model-credential-store.ts';
-import { createTuiProviderFetch } from './provider-transport.ts';
+import { createTuiProviderFetch, createTuiOAuthRefreshFetch } from './provider-transport.ts';
 import type { TuiLocale } from './tui-language.ts';
 import { COLOR } from './tui-theme.ts';
 
@@ -177,21 +177,23 @@ export async function fetchTuiSubscriptionQuota(
   const refreshChatGpt = options.refreshChatGpt ?? refreshChatGptOAuthTokens;
   const refreshGoogle = options.refreshGoogle ?? ensureFreshGoogleTokensFromDesktop;
   const refreshGrok = options.refreshGrok ?? ensureFreshGrokTokensFromDesktop;
+  const refreshFetch = createTuiOAuthRefreshFetch(options.fetchImpl ? { fetch: options.fetchImpl } : {});
 
   try {
-    if (selection.authMethod === 'oauth_chatgpt') {
-      tokens = await refreshChatGpt(tokens);
-      selection.persistOAuthTokens(tokens);
-    } else if (selection.authMethod === 'oauth_google') {
-      tokens = await refreshGoogle(tokens);
-      selection.persistOAuthTokens(tokens);
-    } else if (selection.authMethod === 'oauth_grok') {
-      const fresh = await refreshGrok(tokens, { fetchImpl: options.fetchImpl ?? createQuotaFetchImpl() });
-      tokens = fresh.tokens;
-      selection.persistOAuthTokens(tokens);
-    }
+    const result = await selection.refreshOAuthTokens(tokens, async (current) => {
+      if (selection.authMethod === 'oauth_chatgpt') {
+        return { tokens: await refreshChatGpt(current, refreshFetch), refreshed: true };
+      }
+      if (selection.authMethod === 'oauth_google') {
+        return { tokens: await refreshGoogle(current, { fetchImpl: refreshFetch }), refreshed: true };
+      }
+      return refreshGrok(current, { fetchImpl: refreshFetch });
+    });
+    tokens = result.tokens;
   } catch {
-    // Keep going with the existing access token; quota endpoints will report auth failures.
+    // A pending refresh or changed generation cannot fall back to pre-read access.
+    return { success: false, status: 'fetch_failed', providerId: options.credentialId,
+      authMethod: selection.authMethod as LlmSubscriptionQuota['authMethod'], error: 'OAuth credentials require recovery' };
   }
 
   if (!tokens?.access) {

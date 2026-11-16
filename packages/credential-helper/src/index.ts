@@ -352,3 +352,5 @@ function throwInvalidResponse(): never {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
+export { readModelOAuthTokens, refreshModelOAuthTokens } from './model-oauth-refresh.ts';
+export type { ModelOAuthVault } from './model-oauth-refresh.ts';

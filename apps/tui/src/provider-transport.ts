@@ -115,6 +115,16 @@ export interface CreateTuiProviderFetchOptions {
   readonly connectionRecovery?: boolean;
 }
 
+/** Refresh POSTs may have rotated a token even when their response is lost. */
+export function createTuiOAuthRefreshFetch(options: CreateTuiProviderFetchOptions = {}): typeof fetch {
+  const transport = createTuiProviderFetch({ ...options, connectionRecovery: false });
+  return ((input: RequestInfo | URL, init?: RequestInit) => {
+    const deadline = AbortSignal.timeout(15_000);
+    return transport(input, { ...init, redirect: 'error',
+      signal: init?.signal ? AbortSignal.any([init.signal, deadline]) : deadline });
+  }) as typeof fetch;
+}
+
 export function mergeTrustedCertificates(
   builtInRoots: readonly string[],
   macosTrusted: readonly string[],

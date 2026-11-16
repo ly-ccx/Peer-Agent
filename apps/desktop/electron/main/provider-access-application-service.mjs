@@ -39,6 +39,7 @@ export function createProviderAccessApplicationService({
   removeProvider,
   getCredential,
   setOAuthTokens,
+  refreshOAuthTokens,
   getApiKeyRequestConfig,
   fetchWithRecovery,
   openExternal,
@@ -58,6 +59,7 @@ export function createProviderAccessApplicationService({
     removeProvider: assertFunction(removeProvider, 'removeProvider'),
     getCredential: assertFunction(getCredential, 'getCredential'),
     setOAuthTokens: assertFunction(setOAuthTokens, 'setOAuthTokens'),
+    refreshOAuthTokens: assertFunction(refreshOAuthTokens, 'refreshOAuthTokens'),
     getApiKeyRequestConfig: assertFunction(getApiKeyRequestConfig, 'getApiKeyRequestConfig'),
     fetchWithRecovery: assertFunction(fetchWithRecovery, 'fetchWithRecovery'),
     openExternal: assertFunction(openExternal, 'openExternal'),
@@ -226,12 +228,9 @@ export function createProviderAccessApplicationService({
     const tokens = credential?.tokens || null;
     if (!tokens?.access) return { success: false, models: [], error: 'oauth_not_logged_in' };
     try {
-      const { tokens: fresh, refreshed } = authMethod === 'oauth_google'
-        ? await ops.ensureFreshGoogleTokens(tokens)
-        : authMethod === 'oauth_grok'
-          ? await ops.ensureFreshGrokTokens(tokens)
-          : await ops.ensureFreshTokens(tokens);
-      if (refreshed) ports.setOAuthTokens(id, fresh);
+      const ensureFresh = authMethod === 'oauth_google' ? ops.ensureFreshGoogleTokens
+        : authMethod === 'oauth_grok' ? ops.ensureFreshGrokTokens : ops.ensureFreshTokens;
+      const { tokens: fresh } = await ports.refreshOAuthTokens(id, tokens, ensureFresh);
       const { models, source, error } = authMethod === 'oauth_google'
         ? await ops.listGeminiModels(fresh)
         : authMethod === 'oauth_grok'

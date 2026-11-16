@@ -166,8 +166,7 @@ export async function resolveProviderCredential({
       throw createProviderCredentialError('oauth_not_logged_in');
     }
     try {
-      const { tokens: fresh, refreshed } = await ensureFreshChatGptTokens(tokens);
-      if (refreshed) llmConfigStore.setOAuthTokens(credentialId, fresh);
+      const { tokens: fresh } = await llmConfigStore.refreshOAuthTokens(credentialId, tokens, ensureFreshChatGptTokens);
       return {
         authMethod,
         apiKey: fresh.access,
@@ -185,8 +184,7 @@ export async function resolveProviderCredential({
       throw createProviderCredentialError('oauth_not_logged_in');
     }
     try {
-      const { tokens: fresh, refreshed } = await ensureFreshGrokAccessTokens(tokens);
-      if (refreshed) llmConfigStore.setOAuthTokens(credentialId, fresh);
+      const { tokens: fresh } = await llmConfigStore.refreshOAuthTokens(credentialId, tokens, ensureFreshGrokAccessTokens);
       return {
         authMethod,
         apiKey: fresh.access,
@@ -204,8 +202,7 @@ export async function resolveProviderCredential({
       throw createProviderCredentialError('oauth_not_logged_in');
     }
     try {
-      const { tokens: fresh, refreshed } = await ensureFreshGeminiTokens(tokens);
-      if (refreshed) llmConfigStore.setOAuthTokens(credentialId, fresh);
+      const { tokens: fresh } = await llmConfigStore.refreshOAuthTokens(credentialId, tokens, ensureFreshGeminiTokens);
       return {
         authMethod,
         apiKey: fresh.access,

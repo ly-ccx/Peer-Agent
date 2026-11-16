@@ -1373,6 +1373,7 @@ const providerAccessApplicationService = createProviderAccessApplicationService(
   removeProvider: (id) => llmConfigStore.removeProvider(id),
   getCredential: (id) => llmConfigStore.getCredential(id),
   setOAuthTokens: (id, tokens, options) => llmConfigStore.setOAuthTokens(id, tokens, options),
+  refreshOAuthTokens: (id, tokens, refresh) => llmConfigStore.refreshOAuthTokens(id, tokens, refresh),
   getApiKeyRequestConfig: (id) => llmConfigStore.getApiKeyRequestConfig(id),
   fetchWithRecovery: (url, init, context) => fetchWithConnectionRecovery(url, init, context),
   openExternal: (url) => shell.openExternal(url),

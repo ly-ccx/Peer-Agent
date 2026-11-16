@@ -156,15 +156,34 @@ async fn failure_modes_redact_secret_and_do_not_poison_later_requests() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn deadline_kills_reaps_and_restores_next_admission() {
     let (root, client) = fixture(Duration::from_secs(1));
+    let client = Arc::new(client);
     fs::write(root.path().join("mode"), "sleep").unwrap();
-    assert_eq!(
-        client.ping(&CancellationToken::new()).await,
-        Err(CredentialError::Timeout)
-    );
-    let started = pids(root.path());
+    let pending = {
+        let client = client.clone();
+        tokio::spawn(async move { client.ping(&CancellationToken::new()).await })
+    };
+    // Keep the test clock frozen until the real child has entered the fixture.
+    // A runnable observer prevents Tokio's idle-time automatic advancement;
+    // readiness has a separate wall-clock bound, never a longer client deadline.
+    let readiness = std::time::Instant::now();
+    let started = loop {
+        tokio::task::yield_now().await;
+        let ids = pids(root.path());
+        if !ids.is_empty() {
+            break ids;
+        }
+        assert!(
+            readiness.elapsed() < Duration::from_secs(5),
+            "helper fixture did not start"
+        );
+        std::thread::sleep(Duration::from_millis(2));
+    };
+    tokio::time::advance(Duration::from_secs(1)).await;
+    assert_eq!(pending.await.unwrap(), Err(CredentialError::Timeout));
+    tokio::time::resume();
     assert_eq!(
         started.len(),
         1,

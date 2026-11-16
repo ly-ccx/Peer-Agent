@@ -12,6 +12,8 @@ import http from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
 
 import { fetchWithConnectionRecovery } from '../provider-transports/recovering-fetch.mjs';
+import { createOAuthRefreshFetch } from '../provider-transports/oauth-refresh-fetch.mjs';
+const refreshFetch = createOAuthRefreshFetch(fetchWithConnectionRecovery);
 
 // 在系统浏览器打开授权页。electron 的 shell 仅在 main 运行时可用,
 // 故惰性加载,避免该模块在 node 测试环境(无 electron shell 导出)下崩溃。
@@ -85,7 +87,7 @@ async function exchangeCode({ code, verifier, fetchImpl = fetchWithConnectionRec
 }
 
 // 用 refresh_token 换新 access_token。
-export async function refreshAccessToken(tokens, { fetchImpl = fetchWithConnectionRecovery } = {}) {
+export async function refreshAccessToken(tokens, { fetchImpl = refreshFetch } = {}) {
   if (!tokens?.refresh) throw new Error('No refresh token available');
   const res = await fetchImpl(TOKEN_URL, {
     method: 'POST',
@@ -114,7 +116,7 @@ export async function refreshAccessToken(tokens, { fetchImpl = fetchWithConnecti
 // 临近过期(默认 60s 缓冲)即刷新。返回 { tokens, refreshed }。
 export async function ensureFreshTokens(
   tokens,
-  { skewMs = 60_000, fetchImpl = fetchWithConnectionRecovery } = {},
+  { skewMs = 60_000, fetchImpl = refreshFetch } = {},
 ) {
   if (!tokens?.access) throw new Error('Not logged in');
   if (typeof tokens.expires === 'number' && tokens.expires - skewMs > Date.now()) {

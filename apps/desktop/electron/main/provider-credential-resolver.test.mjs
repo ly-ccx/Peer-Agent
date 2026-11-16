@@ -49,7 +49,12 @@ describe('provider credential resolver', () => {
             accountId: 'acct-1',
           },
         }),
-        setOAuthTokens: (...args) => setCalls.push(args),
+        refreshOAuthTokens: async (id, tokens, refresh) => {
+          const result = await refresh(tokens);
+          if (result.refreshed) setCalls.push([id, result.tokens]);
+          return result;
+        },
+        setOAuthTokens: () => { throw new Error('automatic refresh must use its transaction'); },
       },
       ensureFreshChatGptTokens: async () => ({ tokens: refreshedTokens, refreshed: true }),
     });
@@ -97,7 +102,12 @@ describe('provider credential resolver', () => {
             tokens: { access: 'old', refresh: 'old-r', expires: Date.now() - 1, accountId: 'acct-1' },
           };
         },
-        setOAuthTokens: (...args) => setCalls.push(args),
+        refreshOAuthTokens: async (id, tokens, refresh) => {
+          const result = await refresh(tokens);
+          if (result.refreshed) setCalls.push([id, result.tokens]);
+          return result;
+        },
+        setOAuthTokens: () => { throw new Error('automatic refresh must use its transaction'); },
       },
       ensureFreshChatGptTokens: async () => ({ tokens: refreshedTokens, refreshed: true }),
     });
@@ -121,7 +131,12 @@ describe('provider credential resolver', () => {
         getCredential: () => ({
           tokens: { access: 'grok-old', refresh: 'grok-refresh', expires: 0 },
         }),
-        setOAuthTokens: (...args) => setCalls.push(args),
+        refreshOAuthTokens: async (id, tokens, refresh) => {
+          const result = await refresh(tokens);
+          if (result.refreshed) setCalls.push([id, result.tokens]);
+          return result;
+        },
+        setOAuthTokens: () => { throw new Error('automatic refresh must use its transaction'); },
       },
       ensureFreshGrokAccessTokens: async () => ({ tokens: refreshedTokens, refreshed: true }),
     });

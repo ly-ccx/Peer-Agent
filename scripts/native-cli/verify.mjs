@@ -15,6 +15,7 @@ if(!existsSync(join(root,'packages/runtime-core/dist/index.js')))run('pnpm',['--
 run('pnpm',['--filter','@peer-agent/credential-helper','build']);
 run('cargo',['build','--locked','-p','peer-credential-helper','--features','test-fixtures','--example','vault-fixture']);
 run('bun',['scripts/native-cli/credential-cas.ts']);
+run('bun',['scripts/native-cli/model-oauth-coordination.ts']);
 run('node',['--test','apps/desktop/electron/main/mcp-credential-store.test.mjs']);
 run('bun', ['scripts/native-cli/contracts.ts']);
 run('bun', ['scripts/native-cli/control-contracts.ts']);
