@@ -61,7 +61,8 @@ export interface SharedModelCredentialStore {
   getOAuthTokens(credentialId: string): ChatGptOAuthTokens | null;
   setOAuthTokens(credentialId: string, tokens: ChatGptOAuthTokens | null): void;
   refreshOAuthTokens?(credentialId: string, tokens: ChatGptOAuthTokens, authMethod: string,
-    refresh: OAuthRefreshOperation, validate: () => void, force?: boolean): Promise<OAuthRefreshResult>;
+    refresh: OAuthRefreshOperation, validate: () => void, force?: boolean,
+    withConfiguration?: <R>(action: () => R) => R): Promise<OAuthRefreshResult>;
 }
 export interface OAuthRefreshResult { readonly tokens: ChatGptOAuthTokens; readonly refreshed: boolean }
 export type OAuthRefreshOperation = (tokens: ChatGptOAuthTokens) => Promise<OAuthRefreshResult>;
@@ -538,7 +539,8 @@ export function loadSharedModelSelection(
         if (matches.length !== 1 || matches[0].enabled === false
           || JSON.stringify(matches[0]) !== JSON.stringify(selected)) throw new Error('credential_oauth_configuration_changed');
       };
-      return store.refreshOAuthTokens(credentialId, tokens, authMethod, refresh, validate, force);
+      return store.refreshOAuthTokens(credentialId, tokens, authMethod, refresh, validate, force,
+        action => withModelConfigLock(configFile, action));
     },
     persistOAuthTokens(tokens) {
       if (

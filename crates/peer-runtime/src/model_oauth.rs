@@ -129,7 +129,7 @@ impl ModelOAuth {
         cancel: &CancellationToken,
     ) -> Result<Self, ModelError> {
         let provider = provider(auth).ok_or(ModelError::new("native_model_auth_unsupported"))?;
-        binding.validate()?;
+        let guard = binding.transaction(cancel).await?;
         let cas = helper
             .supports_model_oauth_cas(cancel)
             .await
@@ -155,6 +155,9 @@ impl ModelOAuth {
         token.ensure_ready()?;
         let client = token_http::client()?;
         let (_, token_url) = endpoints(home, auth, provider["baseUrl"].as_str().unwrap())?;
+        guard
+            .finish()
+            .map_err(|_| ModelError::new("model_configuration_changed"))?;
         Ok(Self {
             helper,
             key: key.into(),
@@ -170,7 +173,7 @@ impl ModelOAuth {
     }
     pub(crate) async fn access(&self, cancel: &CancellationToken) -> Result<Access, ModelError> {
         let mut expected = tokio::select! { biased; _=cancel.cancelled()=>return Err(ModelError::new("CANCELLED")), state=self.state.lock()=>state };
-        self.binding.validate()?;
+        let guard = self.binding.transaction(cancel).await?;
         let (secret, revision) = if self.cas {
             let snapshot = self
                 .helper
@@ -227,6 +230,9 @@ impl ModelOAuth {
             }
             let claim_revision = claim.revision;
             self.binding.validate()?;
+            guard
+                .finish()
+                .map_err(|_| ModelError::new("model_oauth_reservation_unknown"))?;
             let started = std::sync::atomic::AtomicBool::new(false);
             let refresh = async {
                 started.store(true, std::sync::atomic::Ordering::Release);
@@ -235,20 +241,23 @@ impl ModelOAuth {
             let response = tokio::select! { biased; _=cancel.cancelled()=>Err(ModelError::new("CANCELLED")), result=tokio::time::timeout(Duration::from_secs(15),refresh)=>result.unwrap_or_else(|_|Err(ModelError::new("model_oauth_refresh_timeout"))) };
             if response.is_err() && !started.load(std::sync::atomic::Ordering::Acquire) {
                 let cleanup = CancellationToken::new();
-                let _ = self
-                    .helper
-                    .compare_set(
-                        &self.key,
-                        claim_revision.as_deref(),
-                        Some(secret.expose()),
-                        &cleanup,
-                    )
-                    .await;
+                if let Ok(cleanup_guard) = self.binding.transaction(&cleanup).await {
+                    let _ = self
+                        .helper
+                        .compare_set(
+                            &self.key,
+                            claim_revision.as_deref(),
+                            Some(secret.expose()),
+                            &cleanup,
+                        )
+                        .await;
+                    let _ = cleanup_guard.finish();
+                }
             }
             let response = response?;
             token.updated(&response, &self.auth, now_ms()?)?;
             let updated = token.serialize()?;
-            self.binding.validate()?;
+            let write_guard = self.binding.transaction(cancel).await?;
             let applied = self
                 .helper
                 .compare_set(&self.key, claim_revision.as_deref(), Some(&updated), cancel)
@@ -271,6 +280,13 @@ impl ModelOAuth {
                 return Err(ModelError::new("model_credential_changed"));
             }
             *expected = stamp(&current_secret, current.revision.as_deref());
+            write_guard
+                .finish()
+                .map_err(|_| ModelError::new("model_oauth_commit_unknown"))?;
+        } else {
+            guard
+                .finish()
+                .map_err(|_| ModelError::new("model_configuration_changed"))?;
         }
         self.binding.validate()?;
         if token.account() != self.account || token.project() != self.project {

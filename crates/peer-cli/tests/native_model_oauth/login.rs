@@ -161,6 +161,45 @@ fn state(f: &Fixture) -> Value {
     );
     serde_json::from_slice(&output.stdout).unwrap()
 }
+
+#[test]
+fn account_logout_waits_for_the_shared_config_writer_without_deleting_credentials_then_recovers() {
+    let idp = Idp::new(body("oauth_chatgpt"), "200 OK", false, false);
+    let model = Server::new(vec![]);
+    let f = Fixture::new(&model);
+    let config = setup(&f, "oauth_chatgpt", &idp, &model);
+    let original = std::fs::read(f.root.path().join("credentials.vault.json")).unwrap();
+    let lock = peer_store::DirectoryLock::acquire(
+        &f.root.path().join("llm-providers.json"),
+        Duration::ZERO,
+        None,
+    )
+    .unwrap();
+    let output = cli(&f, "logout").output().unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("model_config_lock_busy"));
+    assert_eq!(
+        std::fs::read(f.root.path().join("credentials.vault.json")).unwrap(),
+        original
+    );
+    assert_eq!(
+        std::fs::read(f.root.path().join("llm-providers.json")).unwrap(),
+        config
+    );
+    assert!(idp.requests.lock().unwrap().is_empty());
+    lock.release().unwrap();
+    assert!(cli(&f, "logout").output().unwrap().status.success());
+    assert_eq!(state(&f)["status"], "not_logged_in");
+    let login = Login::start(&f);
+    login.approve();
+    assert!(login.finish().status.success());
+    assert_eq!(state(&f)["status"], "authenticated");
+}
 fn login_redirect_from_output(output: &Output) -> String {
     let text = String::from_utf8_lossy(&output.stdout);
     let value: Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
@@ -284,8 +323,18 @@ fn late_browser_exchange_cannot_overwrite_new_login_logout_or_changed_channel() 
         let f = Fixture::new(&model);
         setup(&f, "oauth_chatgpt", &idp, &model);
         let login = Login::start(&f);
+        peer_store::ModelConfigStore::new(f.root.path())
+            .begin(Duration::ZERO, None)
+            .unwrap()
+            .finish()
+            .unwrap();
         login.approve();
         idp.wait_request();
+        peer_store::ModelConfigStore::new(f.root.path())
+            .begin(Duration::ZERO, None)
+            .unwrap()
+            .finish()
+            .unwrap();
         if action == "login" {
             vault(
                 &f,
@@ -317,6 +366,77 @@ fn late_browser_exchange_cannot_overwrite_new_login_logout_or_changed_channel() 
         assert!(next.finish().status.success());
         assert_eq!(state(&f)["status"], "authenticated");
     }
+}
+
+#[test]
+fn cancellation_after_browser_callback_while_a_config_writer_owns_the_lock_has_no_exchange_and_later_login_works()
+ {
+    let idp = Idp::new(body("oauth_chatgpt"), "200 OK", false, false);
+    let model = Server::new(vec![]);
+    let f = Fixture::new(&model);
+    setup(&f, "oauth_chatgpt", &idp, &model);
+    let mut login = Login::start(&f);
+    let guard = peer_store::ModelConfigStore::new(f.root.path())
+        .begin(Duration::ZERO, None)
+        .unwrap();
+    let before = std::fs::read(f.root.path().join("credentials.vault.json")).unwrap();
+    login.approve();
+    login.signal();
+    let result = login.finish();
+    assert_eq!(
+        result.status.code(),
+        Some(4),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(idp.requests.lock().unwrap().is_empty());
+    assert_eq!(
+        std::fs::read(f.root.path().join("credentials.vault.json")).unwrap(),
+        before
+    );
+    guard.finish().unwrap();
+    let login = Login::start(&f);
+    login.approve();
+    assert!(login.finish().status.success());
+    assert_eq!(state(&f)["status"], "authenticated");
+}
+
+#[test]
+fn refresh_config_commit_wait_preserves_pending_then_explicit_native_auth_and_new_task_recover() {
+    let mut idp = Idp::new(refreshed(), "200 OK", true, false);
+    let model = Server::new(vec![stream("openai-responses", "text")]);
+    let f = Fixture::new(&model);
+    setup(&f, "oauth_chatgpt", &idp, &model);
+    let child = OwnedChild(Some(command(&f, "p").spawn().unwrap()));
+    idp.wait_request();
+    let guard = peer_store::ModelConfigStore::new(f.root.path())
+        .begin(Duration::ZERO, None)
+        .unwrap();
+    let pending = std::fs::read(f.root.path().join("credentials.vault.json")).unwrap();
+    idp.gate.take().unwrap().send(()).unwrap();
+    let result = wait_output(child);
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("model_config_lock_busy"));
+    assert!(model.requests.lock().unwrap().is_empty());
+    assert_eq!(
+        std::fs::read(f.root.path().join("credentials.vault.json")).unwrap(),
+        pending
+    );
+    guard.finish().unwrap();
+    assert_eq!(state(&f)["status"], "recovery_required");
+    let login = Login::start(&f);
+    login.approve();
+    assert!(login.finish().status.success());
+    seed_next(&f);
+    let result = command(&f, "next").output().unwrap();
+    assert_eq!(
+        result.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert_eq!(idp.requests.lock().unwrap().len(), 2);
+    assert_eq!(model.requests.lock().unwrap().len(), 1);
 }
 #[test]
 fn denial_signal_timeout_and_port_conflict_preserve_credentials_and_release_callback_owner() {

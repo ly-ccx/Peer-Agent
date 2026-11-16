@@ -323,6 +323,7 @@ export function createLlmConfigStore({
     return refreshModelOAuthTokens({
       client: credentials(), key: modelOauthCredentialKey(groupKey(item)),
       authMethod: item.authMethod, tokens, refresh, validate, force: options.force === true,
+      withConfiguration: action => withModelConfigLock(configFile, action),
     });
   }
 

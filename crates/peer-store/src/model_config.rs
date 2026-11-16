@@ -90,6 +90,15 @@ impl ModelConfigTransaction {
     pub fn snapshot(&self) -> &ModelConfigSnapshot {
         &self.snapshot
     }
+    /// Finish a guarded external credential operation without rewriting config.
+    /// A changed source or replaced lock cannot produce a successful receipt.
+    pub fn finish(self) -> Result<(), StoreError> {
+        self.lock.check_owned()?;
+        if self.store.read()?.source_revision != self.snapshot.source_revision {
+            return Err(StoreError::VersionChanged);
+        }
+        self.lock.release()
+    }
     /// Consume the transaction so an uncertain commit can never be replayed by
     /// this handle. Re-read the actual file to reconcile any unknown outcome.
     pub fn commit(
@@ -120,6 +129,31 @@ impl ModelConfigTransaction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn guarded_external_operations_detect_changed_source_and_preserve_replacement_lock_owners() {
+        let root = tempfile::tempdir().unwrap();
+        let store = ModelConfigStore::new(root.path());
+        let tx = store.begin(Duration::ZERO, None).unwrap();
+        let raw = r#"{"version":2,"channels":[],"models":[],"external":"preserved"}"#;
+        std::fs::write(root.path().join("llm-providers.json"), raw).unwrap();
+        assert!(matches!(tx.finish(), Err(StoreError::VersionChanged)));
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("llm-providers.json")).unwrap(),
+            raw
+        );
+        let tx = store.begin(Duration::ZERO, None).unwrap();
+        let lock = root.path().join("llm-providers.json.lock");
+        let displaced = root.path().join("owned-old-lock");
+        std::fs::rename(&lock, &displaced).unwrap();
+        std::fs::create_dir(&lock).unwrap();
+        assert!(matches!(tx.finish(), Err(StoreError::LockOwnershipChanged)));
+        assert!(lock.is_dir());
+        assert!(displaced.is_dir());
+        // Both directories belong to this fixture, not to a personal runtime.
+        std::fs::remove_dir(lock).unwrap();
+        std::fs::remove_dir(displaced).unwrap();
+        store.begin(Duration::ZERO, None).unwrap().finish().unwrap();
+    }
     #[test]
     fn stale_snapshot_cancellation_and_corrupt_state_preserve_existing_configuration() {
         let root = tempfile::tempdir().unwrap();

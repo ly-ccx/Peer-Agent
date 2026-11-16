@@ -104,9 +104,9 @@ export function createTuiSharedModelCredentialStore(
       return readModelOAuthTokens(credentials(), modelOauthCredentialKey(credentialId),
         (raw) => parseOAuthTokens(JSON.stringify(raw))!);
     },
-    refreshOAuthTokens(credentialId, tokens, authMethod, refresh, validate, force) {
+    refreshOAuthTokens(credentialId, tokens, authMethod, refresh, validate, force, withConfiguration) {
       return refreshModelOAuthTokens({ client: credentials(), key: modelOauthCredentialKey(credentialId),
-        authMethod, tokens, refresh, validate, force });
+        authMethod, tokens, refresh, validate, force, withConfiguration });
     },
     setOAuthTokens(credentialId, tokens) {
       const key = modelOauthCredentialKey(credentialId);

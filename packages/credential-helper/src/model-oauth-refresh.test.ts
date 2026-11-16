@@ -31,6 +31,33 @@ function gate() {
   return { promise: new Promise<void>(done => { resolve = done; }), open: () => resolve() };
 }
 
+test('configuration ownership encloses both Vault CAS segments and is released throughout HTTP', async () => {
+  let locked=false,entries=0;
+  class GuardedVault extends Vault {
+    override compareSet(k:string,r:string|null,s:string|null) {
+      assert.equal(locked,true,'actual credential writes require config ownership');
+      return super.compareSet(k,r,s);
+    }
+  }
+  const client=new GuardedVault(),tokens=read(client);
+  const result=await refreshModelOAuthTokens({client,key,authMethod:'oauth_chatgpt',tokens,
+    withConfiguration:action=>{assert.equal(locked,false);locked=true;entries++;try{return action();}finally{locked=false;}},
+    validate:()=>assert.equal(locked,true),
+    refresh:async()=>{assert.equal(locked,false);await Promise.resolve();return {tokens:fresh(),refreshed:true};},
+  });
+  assert.equal(result.tokens.access,'new-access');assert.equal(entries,2);assert.equal(locked,false);
+});
+
+test('loss of configuration ownership after actual Vault commit reports unknown and preserves the new generation', async () => {
+  const client=new Vault(),tokens=read(client);let entries=0;
+  await assert.rejects(refreshModelOAuthTokens({client,key,authMethod:'oauth_chatgpt',tokens,
+    withConfiguration:action=>{const result=action();if(++entries===2)throw new Error('model_config_lock_changed');return result;},
+    refresh:async()=>({tokens:fresh(),refreshed:true}),
+  }),/credential_oauth_commit_unknown/);
+  assert.equal(JSON.parse(client.secret!).access,'new-access');
+  const actual=read(client);assert.equal((await run(client,actual)).refreshed,false);
+});
+
 test('one pre-HTTP owner, preserved unknown fields and fresh receipt for continuation', async () => {
   const client = new Vault();
   const left = read(client), right = read(client);

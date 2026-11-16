@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { withModelConfigLock } from '../../packages/runtime-node/src/model-config-file.mjs';
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { createServer } from 'node:http';
@@ -41,7 +42,19 @@ try {
   const client = new CredentialHelperClient(createSubprocessCredentialTransport({
     explicitPath: resolve('target/debug/examples/vault-fixture'), dataHome: home,
   }));
-  const store = createLlmConfigStore({ configFile: join(home, 'llm-providers.json'), credentialClient: client });
+  // Assert actual production Desktop/TUI writes own the same configuration
+  // directory lock as Rust. Direct fixture setup still uses the raw client.
+  let guardedCas = 0;
+  const guardedClient = new Proxy(client, { get(target, property) {
+    const value = Reflect.get(target, property, target);
+    if (property === 'compareSet') return (...args: Parameters<typeof client.compareSet>) => {
+      assert.ok(existsSync(join(home, 'llm-providers.json.lock')), 'host CAS must own the shared configuration lock');
+      guardedCas++;
+      return target.compareSet(...args);
+    };
+    return typeof value === 'function' ? value.bind(target) : value;
+  } });
+  const store = createLlmConfigStore({ configFile: join(home, 'llm-providers.json'), credentialClient: guardedClient });
   const model = store.addProvider({ provider: 'openai', channelId: 'openai', authMethod: 'oauth_chatgpt', groupId: 'fixture', model: DEFAULT_SUBSCRIPTION_MODEL });
   const key = 'model/fixture/oauth-tokens';
   const old = { access: 'old', refresh: 'old-refresh', expires: 1, accountId: 'account', unknown: { preserved: true } };
@@ -82,6 +95,7 @@ try {
   reset();
   const left = credential(), right = credential();
   const first = renew(left); await waitStarted();
+  withModelConfigLock(join(home,'llm-providers.json'),()=>{});
   const before = requests;
   await assert.rejects(renew(right), /credential_oauth_changed/);
   assert.equal(requests, before);
@@ -126,7 +140,7 @@ try {
   });
   assert.equal(resolved.apiKey, 'refreshed-access');
   assert.deepEqual(JSON.parse(client.getSecret('model/google/oauth-tokens')!).unknown, old.unknown);
-  const tuiCredentials = createTuiSharedModelCredentialStore({ dataHome: home, client });
+  const tuiCredentials = createTuiSharedModelCredentialStore({ dataHome: home, client: guardedClient });
   const tuiSelection = () => {
     const value = loadSharedModelSelection({ userDataPath: home, credentialId: 'fixture', credentialStore: tuiCredentials });
     assert.ok(value?.oauthTokens); return value;
@@ -148,6 +162,8 @@ try {
   await assert.rejects(staleConfig.refreshOAuthTokens(staleConfig.oauthTokens!, callback), /credential_oauth_configuration_changed/);
   store.updateProvider(model.id, { enabled: true });
   assert.ok(readFileSync(join(home, 'credentials.vault.json')).length);
+  assert.ok(guardedCas >= 10, 'actual Desktop and TUI refresh CAS calls must use the guarded client');
+  console.log(JSON.stringify({configurationGuardedVaultCas:guardedCas,httpWaitReleasedConfigLock:true}));
   console.log('Actual Desktop/TUI/SharedSelection -> encrypted Rust Vault pre-dispatch refresh, HTTP, late login/logout, unknown outcome, recovery, narrow-view generation and Google resolver passed.');
 } finally {
   finish.open(); server.closeAllConnections();

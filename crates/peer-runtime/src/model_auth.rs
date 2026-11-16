@@ -85,10 +85,21 @@ impl Account {
     }
     fn validate(&self) -> Result<(), ModelError> {
         let config = crate::model_config::read(&self.home.join("llm-providers.json"))?;
-        if Self::channel(&config, &self.id)? != self.channel {
+        self.validate_value(&config)
+    }
+    fn validate_value(&self, config: &Value) -> Result<(), ModelError> {
+        if Self::channel(config, &self.id)? != self.channel {
             return Err(ModelError::new("model_configuration_changed"));
         }
         Ok(())
+    }
+    async fn transaction(
+        &self,
+        cancel: &CancellationToken,
+    ) -> Result<peer_store::ModelConfigTransaction, ModelError> {
+        let guard = crate::model_config::transaction(&self.home, cancel).await?;
+        self.validate_value(&guard.snapshot().value)?;
+        Ok(guard)
     }
     async fn snapshot(&self, cancel: &CancellationToken) -> Result<CredentialSnapshot, ModelError> {
         if !self
@@ -111,6 +122,7 @@ pub async fn status(
     cancel: &CancellationToken,
 ) -> Result<ModelAccountStatus, ModelError> {
     let account = Account::load(home, id)?;
+    let guard = account.transaction(cancel).await?;
     let conditional = account
         .helper
         .supports_model_oauth_cas(cancel)
@@ -131,6 +143,9 @@ pub async fn status(
             .map_err(credential_error)?
     };
     account.validate()?;
+    guard
+        .finish()
+        .map_err(|_| ModelError::new("model_configuration_changed"))?;
     let mut expires = None;
     let state = match secret {
         None => ModelAccountState::NotLoggedIn,
@@ -162,6 +177,7 @@ pub async fn status(
 }
 pub async fn logout(home: &Path, id: &str, cancel: &CancellationToken) -> Result<(), ModelError> {
     let account = Account::load(home, id)?;
+    let guard = account.transaction(cancel).await?;
     let snapshot = account.snapshot(cancel).await?;
     account.validate()?;
     if !account
@@ -179,6 +195,9 @@ pub async fn logout(home: &Path, id: &str, cancel: &CancellationToken) -> Result
     if after.secret.is_some() {
         return Err(ModelError::new("model_credential_changed"));
     }
+    guard
+        .finish()
+        .map_err(|_| ModelError::new("model_oauth_commit_unknown"))?;
     Ok(())
 }
 fn callback_error(error: oauth_callback::Error) -> ModelError {
@@ -210,7 +229,11 @@ pub async fn authorize(
     present: impl FnOnce(&str) -> Result<(), ModelError>,
 ) -> Result<(), ModelError> {
     let account = Account::load(home, id)?;
+    let guard = account.transaction(cancel).await?;
     let before = account.snapshot(cancel).await?;
+    guard
+        .finish()
+        .map_err(|_| ModelError::new("model_configuration_changed"))?;
     let descriptor = provider(&account.auth).unwrap();
     let config = LoginConfig::load(home, descriptor)?;
     let verifier = random()?;
@@ -287,15 +310,18 @@ pub async fn authorize(
         }
     }
     let form = zeroize::Zeroizing::new(form.query().unwrap().to_owned());
-    account.validate()?;
+    let guard = account.transaction(cancel).await?;
     let current = account.snapshot(cancel).await?;
     if current.revision != before.revision {
         return Err(ModelError::new("model_credential_changed"));
     }
+    guard
+        .finish()
+        .map_err(|_| ModelError::new("model_configuration_changed"))?;
     let client = token_http::client()?;
     let response = tokio::select! {biased;_=cancel.cancelled()=>return Err(ModelError::new("CANCELLED")), result=token_http::request(&client,&config.token,&form)=>result.map_err(|_|ModelError::new("model_oauth_exchange_failed"))?};
     let tokens = Token::login(&response, &account.auth, now_ms()?)?.serialize()?;
-    account.validate()?;
+    let guard = account.transaction(cancel).await?;
     if !account
         .helper
         .compare_set(
@@ -309,7 +335,10 @@ pub async fn authorize(
     {
         return Err(ModelError::new("model_credential_changed"));
     }
-    let current = account.snapshot(cancel).await?;
+    let current = account
+        .snapshot(cancel)
+        .await
+        .map_err(|_| ModelError::new("model_oauth_commit_unknown"))?;
     if current
         .secret
         .as_ref()
@@ -320,5 +349,8 @@ pub async fn authorize(
     account
         .validate()
         .map_err(|_| ModelError::new("model_oauth_configuration_changed_after_commit"))?;
+    guard
+        .finish()
+        .map_err(|_| ModelError::new("model_oauth_commit_unknown"))?;
     Ok(())
 }

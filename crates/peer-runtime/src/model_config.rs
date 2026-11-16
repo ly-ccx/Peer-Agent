@@ -13,7 +13,9 @@ use serde_json::Value;
 use std::{io::Read, path::Path, time::Duration};
 mod binding;
 mod channel;
+mod transaction;
 pub(crate) use binding::ModelBinding;
+pub(crate) use transaction::acquire as transaction;
 pub(crate) fn account_auth(channel: &Value) -> Result<String, ModelError> {
     channel::account_auth(channel)
 }
