@@ -18,4 +18,6 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.145", features = ["preserve_order"] }
 sha2 = "0.10.9"
 ratatui = { version = "=0.30.2", default-features = false, features = ["crossterm"] }
-crossterm = { version = "=0.29.0", features = ["bracketed-paste"] }
+# The bounded tty poll source returns on EOF/hangup; the default Mio source
+# can spin inside a read loop without returning to our cancellation flag.
+crossterm = { version = "=0.29.0", features = ["bracketed-paste", "use-dev-tty"] }

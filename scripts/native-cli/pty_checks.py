@@ -34,10 +34,19 @@ def check(binary, output, name, args=(), action='exit', expected=0, size=(40, 12
 fcntl.ioctl(0, termios.TIOCSCTTY, 0)
 signal.signal(signal.SIGINT, signal.SIG_IGN)
 p = subprocess.Popen(sys.argv[4:], env={**os.environ, 'HOME': sys.argv[3], 'PEER_AGENT_HOME': sys.argv[3] + '/data'})
-pathlib.Path(sys.argv[1]).write_text(json.dumps({'pid': p.pid}))
-code = p.wait()
-pathlib.Path(sys.argv[2]).write_text(json.dumps({'exitCode': code}))
-time.sleep(20)
+try:
+    pathlib.Path(sys.argv[1]).write_text(json.dumps({'pid': p.pid}))
+    code = p.wait()
+    pathlib.Path(sys.argv[2]).write_text(json.dumps({'exitCode': code}))
+    time.sleep(20)
+finally:
+    if p.poll() is None:
+        p.terminate()
+        try:
+            p.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            p.wait(timeout=3)
 """
     process = subprocess.Popen([sys.executable, '-c', guardian, str(pid_file), str(status_file), str(home), str(binary), *args], stdin=slave, stdout=slave, stderr=slave,
         cwd=home, start_new_session=True,
@@ -130,12 +139,73 @@ time.sleep(20)
     return result
 
 
+def check_hangup(binary, output):
+    home = output / 'hangup-home'
+    home.mkdir()
+    ready_read, ready_write = os.pipe()
+    pid, master = pty.fork()
+    if pid == 0:
+        os.close(ready_write)
+        os.read(ready_read, 1)
+        os.close(ready_read)
+        os.chdir(home)
+        os.execve(str(binary), [str(binary)], {
+            'PATH': '/nonexistent', 'HOME': str(home),
+            'PEER_AGENT_HOME': str(home / 'data'),
+            'TERM': 'xterm-256color', 'LANG': 'en_US.UTF-8',
+        })
+    os.close(ready_read)
+    fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack('HHHH', 40, 120, 0, 0))
+    os.write(ready_write, b'g')
+    os.close(ready_write)
+    status = None
+    captured = bytearray()
+    started = time.monotonic()
+    try:
+        while b'Peer' not in captured and time.monotonic() - started < 8:
+            if select.select([master], [], [], 0.05)[0]:
+                captured.extend(os.read(master, 65536))
+            assert len(captured) <= 2 * 1024 * 1024
+        assert b'Peer' in captured, 'hangup: startup not observed'
+        # Drawing precedes lazy input-source initialization. Closing immediately
+        # would only test startup failure, missing EOF in an active poll source.
+        ready_at = time.monotonic() + 0.2
+        while time.monotonic() < ready_at:
+            if select.select([master], [], [], 0.02)[0]:
+                captured.extend(os.read(master, 65536))
+            assert len(captured) <= 2 * 1024 * 1024
+        os.close(master)
+        master = None
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            done, code = os.waitpid(pid, os.WNOHANG)
+            if done:
+                status = code
+                break
+            time.sleep(0.02)
+        assert status is not None, 'hangup: candidate did not settle after terminal close'
+        code = os.waitstatus_to_exitcode(status)
+        assert code in (0, 1), ('hangup', code)
+        assert not list(home.rglob('*')), 'hangup: unexpected persistent state'
+        return {'case': 'pty-hangup', 'exitCode': code, 'reaped': True,
+                'settledWithoutKill': True, 'terminalNoLongerAvailable': True,
+                'binarySha256': hashlib.sha256(binary.read_bytes()).hexdigest(), 'passed': True}
+    finally:
+        if master is not None:
+            os.close(master)
+        if status is None:
+            os.kill(pid, signal.SIGKILL)
+            os.waitpid(pid, 0)
+        (output / 'pty-hangup.ansi').write_bytes(captured)
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--binary', type=Path, required=True)
     parser.add_argument('--fixture', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
+    args.output = args.output.resolve()
     args.output.mkdir(parents=True)
     results = []
     for name, action in [('normal', 'exit'), ('unicode-paste-resize-draft', 'edit'), ('sigterm', 'sigterm'), ('ctrl-d', 'eof')]:
@@ -143,5 +213,6 @@ if __name__ == '__main__':
     for name, code in [('normal', 0), ('error', 1), ('panic', 101)]:
         results.append(check(args.fixture.resolve(), args.output, 'guard-' + name, args=[name], action='automatic', expected=code))
     results.append(check(args.binary.resolve(), args.output, 'oversized-terminal', action='oversize', expected=1, size=(4000, 4000)))
+    results.append(check_hangup(args.binary.resolve(), args.output))
     (args.output / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
     print(json.dumps({'passed': len(results), 'results': results}))

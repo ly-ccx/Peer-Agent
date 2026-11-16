@@ -182,7 +182,7 @@ fn setup(f: &Fixture, oauth: &OAuth) {
     );
 }
 fn command(f: &Fixture, action: &str) -> Command {
-    let mut c = Command::new(env!("CARGO_BIN_EXE_peer-native"));
+    let mut c = Command::new(native_test_binary());
     c.args(["mcp", action, "s"])
         .env("PEER_AGENT_HOME", f.root.path())
         .env("HOME", f.root.path())

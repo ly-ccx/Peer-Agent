@@ -16,6 +16,18 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 const AT: &str = "2026-11-14T04:00:00.000Z";
+// Exercise the extracted, featureless release artifact with this same Host suite.
+// Only the test harness accepts this override; the product has no launcher seam.
+fn native_test_binary() -> std::path::PathBuf {
+    let path = std::env::var_os("PEER_NATIVE_TEST_BINARY")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| env!("CARGO_BIN_EXE_peer-native").into());
+    assert!(
+        path.is_absolute() && path.is_file(),
+        "native test binary missing"
+    );
+    path
+}
 fn ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -381,7 +393,7 @@ impl Fixture {
         journal.into_lease().release().unwrap();
     }
     fn command(&self, mode: &str, plan: &str) -> Command {
-        let mut c = Command::new(env!("CARGO_BIN_EXE_peer-native"));
+        let mut c = Command::new(native_test_binary());
         c.args([mode, "--plan", plan])
             .env("PEER_AGENT_HOME", self.root.path())
             .env("HOME", self.root.path())
