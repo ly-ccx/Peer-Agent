@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync,mkdirSync,readFileSync,writeFileSync,readdirSync } from 'node:fs';
+import { mkdtempSync,mkdirSync,readFileSync,writeFileSync,readdirSync,openSync,closeSync,fstatSync } from 'node:fs';
 import { join,resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createWorkCoordinationStore } from '../../packages/runtime-node/src/project-agent/work-coordination-store.mjs';
@@ -20,7 +20,22 @@ async function fixture(name:string,control=false,payload=false,fenced=false){
  const directory=join(data,'project-runtime/w');
  return{data,directory,state,lease,options,setNow:(n:number)=>now=n};
 }
-function native(f:any,protect=false,extra:object={},status=0){const p=spawnSync(binary,[],{env:{PATH:'/nonexistent',PEER_NATIVE_CONFORMANCE_ROOT:f.data},input:JSON.stringify({protect,...extra}),encoding:'utf8',timeout:10000});assert.equal(p.status,status,p.stderr);return status===0?JSON.parse(p.stdout):null;}
+let capture=0;
+function native(f:any,protect=false,extra:object={},status=0){
+ // The completed native response belongs to this fixture file. Bun's macOS
+ // synchronous pipe capture returned a status-0, unterminated JSON response
+ // in CI; never parse an incompletely drained stdout pipe as a Store result.
+ const output=join(f.data,`native-stdout-${capture++}.json`);
+ const fd=openSync(output,'wx',0o600);
+ let p;
+ try{
+  p=spawnSync(binary,[],{env:{PATH:'/nonexistent',PEER_NATIVE_CONFORMANCE_ROOT:f.data},input:JSON.stringify({protect,...extra}),timeout:10000,stdio:['pipe',fd,'pipe']});
+  assert.ifError(p.error);
+  assert.equal(p.status,status,p.stderr?.toString());
+  assert.ok(fstatSync(fd).size<=1024*1024,'native fixture response exceeds original pipe buffer limit');
+ }finally{closeSync(fd);}
+ return status===0?JSON.parse(readFileSync(output,'utf8')):null;
+}
 for(const [name,control,payload,fenced]of [['plain',false,false,false],['payload',false,true,false],['control',true,false,true],['protected',false,false,true]]as const){
  const f=await fixture(name,control,payload,fenced);try{const result=native(f);assert.equal(result.ok,true,JSON.stringify(result));assert.deepEqual(result.state,f.state);cases++;if(!fenced){const promoted=native(f,true);assert.equal(promoted.ok,true,JSON.stringify(promoted));assert.equal(promoted.fenced,true);assert.deepEqual(promoted.state,f.state);cases++;}
  const written=native(f,false,{event:{kind:'work_updated',workId:'native',work:{workId:'native',state:'queued',opaque:payload?'b'.repeat(70000):'native'},removed:[]}});assert.equal(written.ok,true,JSON.stringify(written));assert.equal(written.state.works.native.state,'queued');cases++;
