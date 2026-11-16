@@ -5,10 +5,12 @@ use super::{
 use serde_json::Value;
 mod anthropic;
 mod gemini;
+mod qoder;
 mod responses;
 
 pub(super) enum Stream {
     Chat(Box<ChatStream>),
+    Qoder(Box<qoder::Qoder>),
     Other(Box<Framed>),
 }
 pub(super) struct Framed {
@@ -26,6 +28,7 @@ impl Stream {
     pub fn observed_usage(&self) -> Option<peer_protocol::UsageAmounts> {
         let (wire, raw) = match self {
             Self::Chat(s) => (Wire::Chat, s.usage.as_ref()),
+            Self::Qoder(s) => (Wire::Qoder, s.chat.usage.as_ref()),
             Self::Other(s) => match &s.decoder {
                 Decoder::Anthropic(d) => (Wire::Anthropic, d.usage.as_ref()),
                 Decoder::Responses(d) => (Wire::Responses, d.usage.as_ref()),
@@ -42,6 +45,7 @@ impl Stream {
     pub fn new(wire: Wire) -> Self {
         let decoder = match wire {
             Wire::Chat => return Self::Chat(Box::default()),
+            Wire::Qoder => return Self::Qoder(Box::default()),
             Wire::Responses => Decoder::Responses(Default::default()),
             Wire::Anthropic => Decoder::Anthropic(Default::default()),
             Wire::Gemini => Decoder::Gemini(Default::default()),
@@ -54,6 +58,7 @@ impl Stream {
     pub fn push(&mut self, chunk: &[u8]) -> Result<(), ModelError> {
         match self {
             Self::Chat(stream) => stream.push(chunk),
+            Self::Qoder(stream) => stream.push(chunk),
             Self::Other(stream) => {
                 stream.frames.push(chunk, |bytes| {
                     let event = decode(bytes, 1024 * 1024)?;
@@ -70,6 +75,7 @@ impl Stream {
     pub fn terminal(&self) -> bool {
         match self {
             Self::Chat(s) => s.terminal(),
+            Self::Qoder(s) => s.chat.terminal(),
             Self::Other(s) => match &s.decoder {
                 Decoder::Anthropic(d) => d.done,
                 Decoder::Responses(d) => d.done,
@@ -80,6 +86,7 @@ impl Stream {
     pub fn finish(self, fingerprint: String) -> Result<ModelTurn, ModelError> {
         match self {
             Self::Chat(s) => s.finish(fingerprint),
+            Self::Qoder(s) => s.finish(fingerprint),
             Self::Other(s) => {
                 if !s.frames.complete() {
                     return Err(ModelError::new("model_stream_incomplete"));
@@ -194,7 +201,7 @@ mod tests {
             let wire: Wire = serde_json::from_value(c["wire"].clone()).unwrap();
             let raw = c["stream"].as_str().unwrap();
             let malformed = match wire {
-                Wire::Chat => raw.replace("\"tool_calls\"}]", "\"length\"}]"),
+                Wire::Chat | Wire::Qoder => raw.replace("\"tool_calls\"}]", "\"length\"}]"),
                 Wire::Anthropic => raw.replace(
                     "\"stop_reason\":\"tool_use\"",
                     "\"stop_reason\":\"max_tokens\"",

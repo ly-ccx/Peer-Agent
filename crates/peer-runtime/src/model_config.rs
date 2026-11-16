@@ -201,7 +201,33 @@ pub async fn load_model(
     }
     let config = read(&home.join("llm-providers.json"))?;
     let mut resolved = resolve_model(&config, selected)?;
-    let oauth = if resolved.auth_method != "api_key" {
+    let qoder = if resolved.wire == Wire::Qoder {
+        let account = crate::qoder::account::Account::load(
+            ModelBinding::new(home, &config, selected)?,
+            cancel,
+        )?;
+        resolved.endpoint = account.endpoint().to_string();
+        resolved.generation.qoder_metadata =
+            Some(account.metadata(&resolved.model, &config, selected)?);
+        resolved.context_window = crate::model::wire::qoder_context_window(
+            resolved
+                .generation
+                .qoder_metadata
+                .as_ref()
+                .expect("loaded Qoder metadata"),
+            resolved
+                .generation
+                .model_option_values
+                .as_ref()
+                .unwrap_or(&Value::Null),
+        )
+        .or(resolved.context_window);
+        resolved.generation.qoder_session_type = Some(account.session_type().to_owned());
+        Some(account)
+    } else {
+        None
+    };
+    let oauth = if resolved.auth_method != "api_key" && resolved.wire != Wire::Qoder {
         let oauth = crate::model_oauth::ModelOAuth::load(
             home,
             &resolved.credential_key,
@@ -268,6 +294,7 @@ pub async fn load_model(
             .with_context_window(resolved.context_window)
             .with_headers(resolved.headers)
             .with_oauth(oauth)
+            .with_qoder(qoder)
             .with_compatibility(home, &resolved.auth_method)
     })
 }
@@ -276,6 +303,26 @@ pub async fn load_model(
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn qoder_identity_headers_cannot_be_replaced_by_custom_configuration() {
+        let mut config = json!({"version":2,"channels":[{"id":"provider","provider":"qoder","channelId":"qoder","authMethod":"qoder_local_auth"}],"models":[{"id":"provider::auto","groupId":"provider","model":"auto","enabled":true}]});
+        let selected = json!({"providerId":"provider","family":"qoder","modelId":"auto","modelProviderId":"provider::auto"});
+        assert_eq!(resolve_model(&config, &selected).unwrap().wire, Wire::Qoder);
+        for header in [
+            "Cosy-Key",
+            "COSY-MachineId",
+            "cosy-user",
+            "Authorization",
+            "X-Model-Key",
+            "Login-Version",
+        ] {
+            config["channels"][0]["customHeaders"] = json!({header:"synthetic-override"});
+            assert_eq!(
+                resolve_model(&config, &selected).err().unwrap().code,
+                "model_header_protected"
+            );
+        }
+    }
     #[cfg(unix)]
     #[test]
     fn non_regular_model_configuration_is_rejected_without_waiting_for_a_fifo_writer() {

@@ -4,6 +4,7 @@ use peer_protocol::{JsonLimits, decode_json_bounded};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::time::Duration;
+mod authentication;
 mod continuation;
 mod count;
 mod grok;
@@ -21,14 +22,13 @@ pub struct NativeModel {
     endpoint: reqwest::Url,
     model: String,
     provider: String,
-    secret: Option<Secret>,
+    authentication: authentication::Access,
     deadline: Duration,
     wire: wire::Wire,
     generation: wire::GenerationOptions,
     binding: String,
     context_window: Option<u64>,
     headers: reqwest::header::HeaderMap,
-    oauth: Option<crate::model_oauth::ModelOAuth>,
     compatibility: Option<grok::Compatibility>,
 }
 /// An encoded request bound to the exact provider instance that built it.
@@ -75,7 +75,15 @@ impl NativeModel {
         self
     }
     pub(crate) fn with_oauth(mut self, oauth: Option<crate::model_oauth::ModelOAuth>) -> Self {
-        self.oauth = oauth;
+        if let Some(oauth) = oauth {
+            self.authentication = authentication::Access::OAuth(Box::new(oauth));
+        }
+        self
+    }
+    pub(crate) fn with_qoder(mut self, account: Option<crate::qoder::account::Account>) -> Self {
+        if let Some(account) = account {
+            self.authentication = authentication::Access::Qoder(Box::new(account));
+        }
         self
     }
     pub(crate) fn with_compatibility(
@@ -107,7 +115,10 @@ impl NativeModel {
             || endpoint.password().is_some()
             || endpoint.fragment().is_some()
             || (endpoint.query().is_some()
-                && !(config.wire == wire::Wire::Gemini && endpoint.query() == Some("alt=sse")))
+                && !(config.wire == wire::Wire::Gemini && endpoint.query() == Some("alt=sse"))
+                && !(config.wire == wire::Wire::Qoder
+                    && endpoint.query()
+                        == Some("FetchKeys=llm_model_result&AgentId=agent_common&Encode=1")))
             || config.model.is_empty()
             || config.model.len() > 512
             || config.provider.is_empty()
@@ -126,14 +137,13 @@ impl NativeModel {
             endpoint,
             model: config.model,
             provider: config.provider,
-            secret,
+            authentication: authentication::Access::from_key(secret),
             deadline,
             wire: config.wire,
             generation: config.generation,
             binding,
             context_window: None,
             headers: reqwest::header::HeaderMap::new(),
-            oauth: None,
             compatibility: None,
         })
     }
@@ -166,11 +176,12 @@ impl NativeModel {
         tools: &Value,
         live: &LiveHistory,
     ) -> Result<PreparedRequest<'a>, ModelError> {
-        if history["messages"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .any(|m| m["content"].is_array())
+        if self.wire != wire::Wire::Qoder
+            && history["messages"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|m| m["content"].is_array())
         {
             return Err(ModelError::new("native_model_images_unsupported"));
         }
@@ -192,6 +203,18 @@ impl NativeModel {
         )?;
         let bytes =
             serde_json::to_vec(&body).map_err(|_| ModelError::new("model_request_invalid"))?;
+        let bytes = if self.wire == wire::Wire::Qoder {
+            let raw = std::str::from_utf8(&bytes)
+                .map_err(|_| ModelError::new("model_request_invalid"))?;
+            let encoded = crate::qoder::encode_body(raw)
+                .map_err(|_| ModelError::new("model_request_limit"))?;
+            if encoded.expose().len() > 2 * 1024 * 1024 {
+                return Err(ModelError::new("model_request_limit"));
+            }
+            encoded.expose().as_bytes().to_vec()
+        } else {
+            bytes
+        };
         let fingerprint = format!("{:x}", Sha256::digest(&bytes));
         Ok(PreparedRequest {
             owner: self,
@@ -205,6 +228,7 @@ impl NativeModel {
         endpoint: reqwest::Url,
         accept: &str,
         cancel: &CancellationToken,
+        prepared: Option<(&Value, &[u8])>,
     ) -> Result<reqwest::RequestBuilder, ModelError> {
         let mut headers = self.headers.clone();
         headers.insert(
@@ -224,49 +248,6 @@ impl NativeModel {
                 reqwest::header::HeaderValue::from_static("2023-06-01"),
             );
         }
-        let oauth = match &self.oauth {
-            Some(oauth) => Some(oauth.access(cancel).await?),
-            None => None,
-        };
-        if let Some((account, name)) = oauth
-            .as_ref()
-            .and_then(|v| v.account.as_deref().zip(v.account_header.as_deref()))
-        {
-            if account.len() > 512 {
-                return Err(ModelError::new("model_oauth_account_invalid"));
-            }
-            let mut value = reqwest::header::HeaderValue::from_str(account)
-                .map_err(|_| ModelError::new("model_oauth_account_invalid"))?;
-            value.set_sensitive(true);
-            let name = reqwest::header::HeaderName::from_bytes(name.as_bytes())
-                .map_err(|_| ModelError::new("model_header_invalid"))?;
-            headers.insert(name, value);
-        }
-        if let Some(s) = oauth.as_ref().map(|v| &v.secret).or(self.secret.as_ref()) {
-            let bearer = zeroize::Zeroizing::new(
-                if oauth.is_some() || matches!(self.wire, wire::Wire::Chat | wire::Wire::Responses)
-                {
-                    format!("Bearer {}", s.expose())
-                } else {
-                    s.expose().to_owned()
-                },
-            );
-            let mut value = reqwest::header::HeaderValue::from_str(&bearer)
-                .map_err(|_| ModelError::new("model_credential_invalid"))?;
-            value.set_sensitive(true);
-            headers.insert(
-                if oauth.is_some() {
-                    "authorization"
-                } else {
-                    match self.wire {
-                        wire::Wire::Anthropic => "x-api-key",
-                        wire::Wire::Gemini => "x-goog-api-key",
-                        _ => "authorization",
-                    }
-                },
-                value,
-            );
-        }
         let client = self
             .network
             .prepare(&endpoint, cancel)
@@ -282,6 +263,9 @@ impl NativeModel {
             "connection",
             reqwest::header::HeaderValue::from_static("close"),
         );
+        self.authentication
+            .apply(&mut headers, self.wire, prepared, cancel)
+            .await?;
         Ok(client.post(endpoint).headers(headers))
     }
 }
@@ -295,7 +279,12 @@ impl PreparedRequest<'_> {
             let mut response = match &model.compatibility {
                 Some(adapter) => adapter.send(model, &self.bytes, cancel).await?,
                 None => model
-                    .request_builder(model.endpoint.clone(), "text/event-stream", cancel)
+                    .request_builder(
+                        model.endpoint.clone(),
+                        "text/event-stream",
+                        cancel,
+                        Some((&self.body, &self.bytes)),
+                    )
                     .await?
                     .body(self.bytes)
                     .send()

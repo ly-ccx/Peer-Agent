@@ -30,7 +30,7 @@ impl ChatStream {
     pub fn terminal(&self) -> bool {
         self.done
     }
-    fn event(&mut self, bytes: &[u8]) -> Result<(), ModelError> {
+    pub(super) fn event(&mut self, bytes: &[u8]) -> Result<(), ModelError> {
         if bytes == b"[DONE]" {
             if self.done {
                 return Err(ModelError::new("model_stream_invalid"));

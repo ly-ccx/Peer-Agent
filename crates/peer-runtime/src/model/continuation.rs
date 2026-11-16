@@ -113,7 +113,7 @@ impl LiveHistory {
             Wire::Gemini => {
                 assistant["geminiContent"] = json!({"role":"model","parts":continuation.blocks})
             }
-            Wire::Chat => {
+            Wire::Chat | Wire::Qoder => {
                 assistant["reasoning_content"] = continuation.blocks[0]["reasoning_content"].clone()
             }
             Wire::Responses => return Err(ModelError::new("model_continuation_wire_invalid")),

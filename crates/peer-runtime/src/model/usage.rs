@@ -24,7 +24,7 @@ pub(super) fn normalize(wire: Wire, v: &Value) -> Result<Value, ModelError> {
     }
     let present = |keys: &[&str]| keys.iter().any(|k| v.get(*k).is_some_and(|n| !n.is_null()));
     let complete = match wire {
-        Wire::Chat | Wire::Responses => {
+        Wire::Chat | Wire::Qoder | Wire::Responses => {
             present(&["input_tokens", "prompt_tokens"])
                 && present(&["output_tokens", "completion_tokens"])
         }
@@ -32,7 +32,7 @@ pub(super) fn normalize(wire: Wire, v: &Value) -> Result<Value, ModelError> {
         Wire::Gemini => present(&["promptTokenCount"]) && present(&["candidatesTokenCount"]),
     };
     let (input, output, cache, write) = match wire {
-        Wire::Chat | Wire::Responses => {
+        Wire::Chat | Wire::Qoder | Wire::Responses => {
             let cache = if let Some(c) = v["input_tokens_details"]
                 .get("cached_tokens")
                 .filter(|v| !v.is_null())

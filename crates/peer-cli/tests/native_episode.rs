@@ -230,6 +230,10 @@ fn read_request(s: &mut TcpStream) -> (Value, bool, String, Vec<u8>) {
                     .map(|(k, v)| (k.to_string(), v.to_string()))
                     .collect::<std::collections::BTreeMap<_, _>>()
             )
+        } else if path.contains("/sse/agent_chat_generation?") {
+            let decoded =
+                peer_runtime::qoder::decode_body(std::str::from_utf8(&body).unwrap()).unwrap();
+            serde_json::from_str(decoded.expose()).unwrap()
         } else {
             serde_json::from_slice(&body).unwrap()
         },
@@ -2745,3 +2749,5 @@ fn delayed_pty_approval_keeps_current_lease_and_completes_the_real_tool_episode(
         "paused"
     );
 }
+
+mod native_qoder;

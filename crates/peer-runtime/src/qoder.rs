@@ -1,6 +1,11 @@
-//! Native Qoder data formats. No third-party process, VM, file writes or grants.
-//! These are preparation primitives; a decoded credential is not a login proof.
+//! Native Qoder formats and read-only account binding. No third-party process,
+//! VM, account writes or grants. Decoding a credential proves no remote login.
+pub(crate) mod account;
+mod account_files;
+pub(crate) mod authentication;
+mod catalog;
 mod cryptography;
+mod sensitive_json;
 mod transport_encoding;
 pub use cryptography::{CacheFormat, DecodedCache, decrypt_cache, decrypt_credential};
 pub use transport_encoding::{decode_body, encode_body};
