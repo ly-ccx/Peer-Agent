@@ -106,10 +106,10 @@ pub(super) async fn proxy(cancel: &CancellationToken) -> Result<BTreeMap<String,
         Ok(BTreeMap::new())
     }
 }
-pub(super) async fn roots(cancel: &CancellationToken) -> Result<&'static [Certificate], Error> {
+pub(super) async fn roots(cancel: &CancellationToken) -> Result<&'static [Root], Error> {
     #[cfg(target_os = "macos")]
     {
-        static ROOTS: tokio::sync::OnceCell<Vec<Certificate>> = tokio::sync::OnceCell::const_new();
+        static ROOTS: tokio::sync::OnceCell<Vec<Root>> = tokio::sync::OnceCell::const_new();
         ROOTS
             .get_or_try_init(|| load_roots(cancel))
             .await
@@ -122,7 +122,7 @@ pub(super) async fn roots(cancel: &CancellationToken) -> Result<&'static [Certif
     }
 }
 #[cfg(target_os = "macos")]
-async fn load_roots(cancel: &CancellationToken) -> Result<Vec<Certificate>, Error> {
+async fn load_roots(cancel: &CancellationToken) -> Result<Vec<Root>, Error> {
     use std::ffi::OsStr;
     let directory = match tempfile::tempdir() {
         Ok(value) => value,

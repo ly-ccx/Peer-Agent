@@ -66,7 +66,7 @@ impl Flow {
             .or_else(|| config["serverUrl"].as_str())
             .ok_or("mcp_url_invalid")?;
         let url = Url::parse(raw).map_err(|_| "mcp_url_invalid")?;
-        let client = Arc::new(http::BoundedHttp::new(&url)?);
+        let client = Arc::new(http::BoundedHttp::new(&url, cancel)?);
         let challenge = bounded(cancel, client.challenge(&url), 30).await??;
         let mut manager = AuthorizationManager::new_with_oauth_http_client(raw, client)
             .await

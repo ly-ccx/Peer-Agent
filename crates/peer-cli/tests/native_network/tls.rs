@@ -69,6 +69,7 @@ impl TlsFront {
         let upstream = url::Url::parse(url).unwrap().socket_addrs(|| None).unwrap()[0];
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let ended = stop.clone();
+        let tunnel_stop = ended.clone();
         let worker = listeners(listener, ended, move |socket| {
             socket
                 .set_read_timeout(Some(Duration::from_secs(3)))
@@ -90,6 +91,12 @@ impl TlsFront {
                     .set_write_timeout(Some(Duration::from_secs(3)))
                     .unwrap();
                 if backend.write_all(&body).is_ok() {
+                    if body.starts_with(b"CONNECT ") {
+                        bridge(&mut tls, &mut backend, &tunnel_stop);
+                        tls.conn.send_close_notify();
+                        let _ = tls.flush();
+                        return;
+                    }
                     let mut bytes = [0; 8192];
                     while let Ok(count) = backend.read(&mut bytes) {
                         if count == 0
@@ -226,4 +233,58 @@ fn listeners(
             worker.join().unwrap();
         }
     })
+}
+
+// TLS forward proxies need both directions after CONNECT, unlike a finite
+// ordinary HTTP response. Poll both owned sockets; no detached copy thread.
+fn bridge(
+    tls: &mut rustls::StreamOwned<rustls::ServerConnection, TcpStream>,
+    backend: &mut TcpStream,
+    stop: &std::sync::atomic::AtomicBool,
+) {
+    tls.sock
+        .set_read_timeout(Some(Duration::from_millis(10)))
+        .unwrap();
+    backend
+        .set_read_timeout(Some(Duration::from_millis(10)))
+        .unwrap();
+    let mut bytes = [0; 8192];
+    let mut deadline = Instant::now() + Duration::from_secs(3);
+    while !stop.load(std::sync::atomic::Ordering::Acquire) && Instant::now() < deadline {
+        match tls.read(&mut bytes) {
+            Ok(0) => break,
+            Ok(n) => {
+                if backend.write_all(&bytes[..n]).is_err() {
+                    break;
+                }
+                deadline = Instant::now() + Duration::from_secs(3);
+            }
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) => {}
+            Err(_) => break,
+        }
+        match backend.read(&mut bytes) {
+            Ok(0) => break,
+            Ok(n) => {
+                if tls
+                    .write_all(&bytes[..n])
+                    .and_then(|_| tls.flush())
+                    .is_err()
+                {
+                    break;
+                }
+                deadline = Instant::now() + Duration::from_secs(3);
+            }
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) => {}
+            Err(_) => break,
+        }
+    }
+    let _ = backend.shutdown(std::net::Shutdown::Both);
 }

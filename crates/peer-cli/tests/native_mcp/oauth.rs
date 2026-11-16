@@ -4,6 +4,8 @@ use std::io::{BufRead, BufReader};
 use std::sync::atomic::{AtomicBool, Ordering};
 struct OAuth {
     base: String,
+    origin: Arc<Mutex<String>>,
+    stall: Arc<AtomicBool>,
     requests: Arc<Mutex<Vec<(String, String)>>>,
     stop: Arc<AtomicBool>,
     worker: Option<thread::JoinHandle<()>>,
@@ -47,7 +49,10 @@ impl OAuth {
         let stopped = stop.clone();
         let requests = Arc::new(Mutex::new(Vec::new()));
         let captured = requests.clone();
-        let origin = base.clone();
+        let stall = Arc::new(AtomicBool::new(mode == "stall-token"));
+        let stalled = stall.clone();
+        let origin = Arc::new(Mutex::new(base.clone()));
+        let published = origin.clone();
         let worker = thread::spawn(move || {
             while !stopped.load(Ordering::Acquire) {
                 let (mut socket, _) = match listener.accept() {
@@ -66,6 +71,7 @@ impl OAuth {
                     .lock()
                     .unwrap()
                     .push((headers.clone(), body.clone()));
+                let origin = published.lock().unwrap().clone();
                 let line = headers.lines().next().unwrap();
                 let path = line.split(' ').nth(1).unwrap();
                 if path == "/mcp" && line.starts_with("GET ") {
@@ -80,7 +86,7 @@ impl OAuth {
                 {
                     (
                         "200 OK",
-                        json!({"resource":format!("{origin}/mcp"),"authorization_servers":[format!("{origin}/issuer")],"scopes_supported":["mcp.read"]}),
+                        json!({"resource":format!("{origin}/mcp"),"authorization_servers":[if mode=="metadata-address" {"https://169.254.169.254/issuer".to_owned()}else{format!("{origin}/issuer")}],"scopes_supported":["mcp.read"]}),
                     )
                 } else if path.starts_with("/.well-known/") {
                     (
@@ -88,6 +94,26 @@ impl OAuth {
                         json!({"issuer":format!("{origin}/issuer"),"authorization_endpoint":format!("{origin}/authorize"),"token_endpoint":format!("{origin}/token"),"registration_endpoint":format!("{origin}/register"),"response_types_supported":["code"],"code_challenge_methods_supported":["S256"],"grant_types_supported":["authorization_code","refresh_token"],"token_endpoint_auth_methods_supported":["none","client_secret_post"],"scopes_supported":["mcp.read"]}),
                     )
                 } else if path == "/token" {
+                    if stalled.load(Ordering::Acquire) {
+                        socket
+                            .set_read_timeout(Some(Duration::from_millis(50)))
+                            .unwrap();
+                        let deadline = Instant::now() + Duration::from_secs(10);
+                        let mut byte = [0];
+                        while !stopped.load(Ordering::Acquire) && Instant::now() < deadline {
+                            match socket.read(&mut byte) {
+                                Ok(0) => break,
+                                Err(e)
+                                    if matches!(
+                                        e.kind(),
+                                        std::io::ErrorKind::WouldBlock
+                                            | std::io::ErrorKind::TimedOut
+                                    ) => {}
+                                _ => break,
+                            }
+                        }
+                        continue;
+                    }
                     if mode == "redirect" {
                         let _ = write!(
                             socket,
@@ -148,10 +174,16 @@ impl OAuth {
         });
         Self {
             base,
+            origin,
+            stall,
             requests,
             stop,
             worker: Some(worker),
         }
+    }
+    fn public_base(&mut self, base: &str) {
+        self.base = base.to_owned();
+        *self.origin.lock().unwrap() = self.base.clone();
     }
     fn tokens(&self) -> Vec<String> {
         self.requests
@@ -216,7 +248,10 @@ impl Pending {
     }
 }
 fn pending(f: &Fixture) -> Pending {
-    let mut child = command(f, "auth").spawn().unwrap();
+    pending_command(command(f, "auth"))
+}
+fn pending_command(mut command: Command) -> Pending {
+    let mut child = command.spawn().unwrap();
     let stdout = child.stdout.take().unwrap();
     let (tx, rx) = std::sync::mpsc::channel();
     let reader = thread::spawn(move || {
@@ -473,3 +508,5 @@ fn wrong_issuer_and_signal_cancellation_preserve_credentials_and_close_callback(
         assert!(!f.root.path().join("mcp-credentials.json.lock").exists());
     }
 }
+
+mod network;

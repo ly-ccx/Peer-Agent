@@ -39,7 +39,7 @@ impl Environment {
         }
         Ok(Self::from_values(values))
     }
-    fn from_values(values: BTreeMap<String, Zeroizing<String>>) -> Self {
+    pub(super) fn from_values(values: BTreeMap<String, Zeroizing<String>>) -> Self {
         let mut result = Self {
             values,
             extra_ca: None,

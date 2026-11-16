@@ -2,10 +2,11 @@
 //! Routing/trust never grant tools. A prepared client is bound to its one
 //! physical destination: no redirect, retry, fallback or cross-origin reuse.
 use crate::CancellationToken;
-use reqwest::{Certificate, ClientBuilder, Url};
+use reqwest::{ClientBuilder, Url};
 use std::collections::BTreeMap;
 use zeroize::Zeroizing;
 mod environment;
+pub(crate) mod pinned;
 mod system;
 mod trust;
 use environment::Environment;
@@ -13,7 +14,20 @@ use environment::Environment;
 pub(crate) struct Error(pub &'static str);
 pub(crate) struct Network {
     environment: Environment,
-    extra: Vec<Certificate>,
+    extra: Vec<Root>,
+}
+#[derive(Clone)]
+struct Root {
+    http: reqwest::Certificate,
+    der: rustls::pki_types::CertificateDer<'static>,
+}
+impl Root {
+    fn from_der(bytes: &[u8]) -> Result<Self, reqwest::Error> {
+        Ok(Self {
+            http: reqwest::Certificate::from_der(bytes)?,
+            der: bytes.to_vec().into(),
+        })
+    }
 }
 /// Routing material is ephemeral. Callers that return untrusted server data
 /// retain only the selected route's protection patterns until that data is safe.
@@ -32,11 +46,7 @@ impl Network {
             .unwrap_or_default();
         Ok(Self { environment, extra })
     }
-    pub(crate) async fn prepare(
-        &self,
-        url: &Url,
-        cancel: &CancellationToken,
-    ) -> Result<Prepared, Error> {
+    async fn route(&self, url: &Url, cancel: &CancellationToken) -> Result<Option<Url>, Error> {
         if cancel.is_cancelled() {
             return Err(Error("CANCELLED"));
         }
@@ -45,7 +55,30 @@ impl Network {
         } else {
             BTreeMap::new()
         };
-        let route = self.environment.select(url, &system);
+        self.environment
+            .select(url, &system)
+            .map(|raw| {
+                let proxy = Url::parse(raw).map_err(|_| Error("network_proxy_invalid"))?;
+                if !matches!(proxy.scheme(), "http" | "https")
+                    || proxy.host_str().is_none()
+                    || proxy.fragment().is_some()
+                    || proxy.query().is_some()
+                {
+                    return Err(Error("network_proxy_invalid"));
+                }
+                Ok(proxy)
+            })
+            .transpose()
+    }
+    pub(crate) async fn prepare(
+        &self,
+        url: &Url,
+        cancel: &CancellationToken,
+    ) -> Result<Prepared, Error> {
+        if cancel.is_cancelled() {
+            return Err(Error("CANCELLED"));
+        }
+        let route = self.route(url, cancel).await?;
         let mut builder = reqwest::Client::builder()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
@@ -53,15 +86,7 @@ impl Network {
             .pool_max_idle_per_host(0);
         let mut tls = url.scheme() == "https";
         let mut secrets = Zeroizing::new(Vec::new());
-        if let Some(raw) = route {
-            let proxy = Url::parse(raw).map_err(|_| Error("network_proxy_invalid"))?;
-            if !matches!(proxy.scheme(), "http" | "https")
-                || proxy.host_str().is_none()
-                || proxy.fragment().is_some()
-                || proxy.query().is_some()
-            {
-                return Err(Error("network_proxy_invalid"));
-            }
+        if let Some(proxy) = route {
             tls |= proxy.scheme() == "https";
             secrets.extend(proxy_secrets(&proxy).iter().cloned());
             // reqwest 0.12 only inserts non-tunnel proxy auth for http://
@@ -88,7 +113,7 @@ impl Network {
             &[]
         };
         for certificate in self.extra.iter().chain(system_roots.iter()) {
-            builder = builder.add_root_certificate(certificate.clone());
+            builder = builder.add_root_certificate(certificate.http.clone());
         }
         if cancel.is_cancelled() {
             return Err(Error("CANCELLED"));

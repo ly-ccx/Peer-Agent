@@ -6,10 +6,7 @@ use std::collections::BTreeSet;
 use std::{io::Read, path::Path};
 const START: &str = "-----BEGIN CERTIFICATE-----";
 const END: &str = "-----END CERTIFICATE-----";
-pub(super) fn certificates(
-    raw: &str,
-    strict: bool,
-) -> Result<Vec<(String, String, Certificate)>, Error> {
+pub(super) fn certificates(raw: &str, strict: bool) -> Result<Vec<(String, String, Root)>, Error> {
     let mut values = vec![];
     let mut remaining = raw;
     let mut count = 0;
@@ -45,7 +42,7 @@ pub(super) fn certificates(
             Ok((
                 fingerprint,
                 pem,
-                Certificate::from_der(&der).map_err(|_| Error("network_ca_invalid"))?,
+                Root::from_der(&der).map_err(|_| Error("network_ca_invalid"))?,
             ))
         };
         match parse() {
@@ -59,7 +56,7 @@ pub(super) fn certificates(
     }
     Ok(values)
 }
-pub(super) fn read_extra(path: &Path) -> Result<Vec<Certificate>, Error> {
+pub(super) fn read_extra(path: &Path) -> Result<Vec<Root>, Error> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -123,7 +120,7 @@ pub(super) fn fingerprints(xml: &str) -> BTreeSet<String> {
     allowed
 }
 #[cfg(any(target_os = "macos", test))]
-pub(super) fn selected(pem: &str, allowed: &BTreeSet<String>) -> Vec<(String, Certificate)> {
+pub(super) fn selected(pem: &str, allowed: &BTreeSet<String>) -> Vec<(String, Root)> {
     let mut seen = BTreeSet::new();
     certificates(pem, false)
         .unwrap_or_default()

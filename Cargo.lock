@@ -1718,8 +1718,12 @@ version = "0.1.0-rc.40"
 dependencies = [
  "aho-corasick",
  "base64 0.22.1",
+ "bytes",
  "getrandom 0.3.4",
  "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "peer-protocol",
  "peer-store",
  "percent-encoding",
@@ -1734,8 +1738,10 @@ dependencies = [
  "tempfile",
  "time",
  "tokio",
+ "tokio-rustls",
  "tokio-util",
  "uuid",
+ "webpki-roots",
  "zeroize",
 ]
 

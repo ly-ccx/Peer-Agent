@@ -1,12 +1,16 @@
 //! Bounded OAuth HTTP port for the SDK. Never retries a token/code exchange.
-use reqwest::{
-    Client, Url,
-    dns::{Addrs, Name, Resolve, Resolving},
+use crate::{
+    CancellationToken,
+    network::{Network, pinned::ResponseBody},
 };
+use reqwest::Url;
 use rmcp::transport::auth::{
     OAuthHttpClient, OAuthHttpClientFuture, OAuthHttpRedirectPolicy, OAuthHttpRequest,
 };
-use std::{net::IpAddr, sync::Arc, time::Duration};
+use std::{
+    net::{IpAddr, SocketAddr},
+    time::Duration,
+};
 
 #[derive(Clone)]
 struct Addresses {
@@ -65,24 +69,50 @@ impl Addresses {
             && ip.is_none_or(|v| self.allows(v))
     }
 }
-impl Resolve for Addresses {
-    fn resolve(&self, name: Name) -> Resolving {
-        let policy = self.clone();
-        let host = name.as_str().to_owned();
-        Box::pin(async move {
-            let addresses = tokio::net::lookup_host((host, 0))
-                .await?
-                .filter(|v| policy.allows(v.ip()))
-                .collect::<Vec<_>>();
-            if addresses.is_empty() {
-                return Err(std::io::Error::other("mcp_oauth_address_denied").into());
-            }
-            Ok(Box::new(addresses.into_iter()) as Addrs)
-        })
+impl Addresses {
+    async fn approved(&self, url: &Url) -> Result<Vec<SocketAddr>, &'static str> {
+        if !self.url(url) {
+            return Err("mcp_oauth_address_denied");
+        }
+        let host = url
+            .host_str()
+            .ok_or("mcp_oauth_address_denied")?
+            .trim_matches(['[', ']']);
+        let port = url
+            .port_or_known_default()
+            .ok_or("mcp_oauth_address_denied")?;
+        if let Ok(ip) = host.parse::<IpAddr>() {
+            return Ok(vec![SocketAddr::new(ip, port)]);
+        }
+        let answers: Vec<_> = tokio::net::lookup_host((host, port))
+            .await
+            .map_err(|_| "mcp_oauth_dns_failed")?
+            .take(65)
+            .collect();
+        self.filter(answers)
+    }
+    fn filter(&self, answers: Vec<SocketAddr>) -> Result<Vec<SocketAddr>, &'static str> {
+        if answers.len() > 64 {
+            return Err("mcp_oauth_dns_limit");
+        }
+        let mut approved: Vec<_> = answers
+            .into_iter()
+            .filter(|a| self.allows(a.ip()))
+            .collect();
+        if approved.is_empty() {
+            return Err("mcp_oauth_address_denied");
+        }
+        // Stable IPv4 preference also lets explicit localhost bases retain
+        // their existing IPv4 callback/test-server behavior through a proxy.
+        approved.sort_by_key(|a| a.is_ipv6());
+        let mut seen = std::collections::BTreeSet::new();
+        approved.retain(|a| seen.insert(*a));
+        Ok(approved)
     }
 }
 pub(super) struct BoundedHttp {
-    client: Client,
+    network: Network,
+    cancel: CancellationToken,
     addresses: Addresses,
 }
 impl BoundedHttp {
@@ -90,13 +120,17 @@ impl BoundedHttp {
         if !self.addresses.url(base) {
             return Err("mcp_oauth_address_denied");
         }
-        let response = self
-            .client
-            .get(base.clone())
+        let approved = self.addresses.approved(base).await?;
+        let request = http::Request::builder()
+            .uri(base.as_str())
             .header("MCP-Protocol-Version", "2025-11-25")
-            .send()
+            .body(vec![])
+            .map_err(|_| "mcp_oauth_request_invalid")?;
+        let response = self
+            .network
+            .pinned_http(request, &approved, ResponseBody::HeadersOnly, &self.cancel)
             .await
-            .map_err(|_| "mcp_oauth_discovery_failed")?;
+            .map_err(|e| e.0)?;
         if response.status() != reqwest::StatusCode::UNAUTHORIZED {
             return Ok(None);
         }
@@ -112,7 +146,7 @@ impl BoundedHttp {
             })
             .transpose()
     }
-    pub fn new(base: &Url) -> Result<Self, &'static str> {
+    pub fn new(base: &Url, cancel: &CancellationToken) -> Result<Self, &'static str> {
         let ip = base
             .host_str()
             .unwrap_or("")
@@ -126,66 +160,135 @@ impl BoundedHttp {
                 IpAddr::V6(v) => (v.segments()[0] & 0xfe00) == 0xfc00,
             }),
         };
-        let client = Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .retry(reqwest::retry::never())
-            .no_proxy()
-            .dns_resolver(Arc::new(addresses.clone()))
-            .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_secs(30))
-            .build()
-            .map_err(|_| "mcp_oauth_http_unavailable")?;
-        Ok(Self { client, addresses })
+        let network = Network::new().map_err(|e| e.0)?;
+        Ok(Self {
+            network,
+            cancel: cancel.clone(),
+            addresses,
+        })
     }
 }
 impl OAuthHttpClient for BoundedHttp {
     fn execute(&self, operation: OAuthHttpRequest) -> OAuthHttpClientFuture<'_> {
         Box::pin(async move {
-            let mut url = Url::parse(&operation.request.uri().to_string())?;
-            let origin = url.origin();
-            if operation.request.body().len() > 262144 {
-                return Err(std::io::Error::other("mcp_oauth_request_limit").into());
-            }
-            for hop in 0..=3 {
-                if !self.addresses.url(&url) || url.origin() != origin {
-                    return Err(std::io::Error::other("mcp_oauth_address_denied").into());
+            let execute = async {
+                let mut url = Url::parse(&operation.request.uri().to_string())
+                    .map_err(|_| "mcp_oauth_url_invalid")?;
+                let origin = url.origin();
+                if operation.request.body().len() > 262144 {
+                    return Err("mcp_oauth_request_limit");
                 }
-                let mut response = self
-                    .client
-                    .request(operation.request.method().clone(), url.clone())
-                    .headers(operation.request.headers().clone())
-                    .body(operation.request.body().clone())
-                    .send()
-                    .await?;
-                if response.status().is_redirection()
-                    && matches!(operation.redirect_policy, OAuthHttpRedirectPolicy::Follow)
-                {
-                    if hop == 3 {
-                        return Err(std::io::Error::other("mcp_oauth_redirect_limit").into());
+                for hop in 0..=3 {
+                    if url.origin() != origin {
+                        return Err("mcp_oauth_address_denied");
                     }
-                    let location = response
-                        .headers()
-                        .get("location")
-                        .ok_or_else(|| std::io::Error::other("mcp_oauth_redirect_invalid"))?
-                        .to_str()?;
-                    url = url.join(location)?;
-                    continue;
-                }
-                let mut builder = http::Response::builder().status(response.status());
-                *builder
-                    .headers_mut()
-                    .ok_or_else(|| std::io::Error::other("mcp_oauth_response_invalid"))? =
-                    response.headers().clone();
-                let mut bytes = Vec::new();
-                while let Some(chunk) = response.chunk().await? {
-                    if bytes.len() + chunk.len() > 1024 * 1024 {
-                        return Err(std::io::Error::other("mcp_oauth_response_limit").into());
+                    let approved = self.addresses.approved(&url).await?;
+                    let mut request = http::Request::builder()
+                        .method(operation.request.method().clone())
+                        .uri(url.as_str())
+                        .body(operation.request.body().clone())
+                        .map_err(|_| "mcp_oauth_request_invalid")?;
+                    *request.headers_mut() = operation.request.headers().clone();
+                    let response = self
+                        .network
+                        .pinned_http(request, &approved, ResponseBody::Bounded, &self.cancel)
+                        .await
+                        .map_err(|e| e.0)?;
+                    if response.status().is_redirection()
+                        && matches!(operation.redirect_policy, OAuthHttpRedirectPolicy::Follow)
+                    {
+                        if hop == 3 {
+                            return Err("mcp_oauth_redirect_limit");
+                        }
+                        let location = response
+                            .headers()
+                            .get("location")
+                            .ok_or("mcp_oauth_redirect_invalid")?
+                            .to_str()
+                            .map_err(|_| "mcp_oauth_redirect_invalid")?;
+                        url = url
+                            .join(location)
+                            .map_err(|_| "mcp_oauth_redirect_invalid")?;
+                        continue;
                     }
-                    bytes.extend_from_slice(&chunk);
+                    return Ok(response);
                 }
-                return Ok(builder.body(bytes)?);
-            }
-            Err(std::io::Error::other("mcp_oauth_redirect_limit").into())
+                Err("mcp_oauth_redirect_limit")
+            };
+            let result = tokio::select! {biased;
+                _=self.cancel.cancelled()=>Err("CANCELLED"),
+                value=tokio::time::timeout(Duration::from_secs(30),execute)=>value.map_err(|_|"mcp_oauth_timeout").and_then(|v|v),
+            };
+            result.map_err(|code| std::io::Error::other(code).into())
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn dns_and_literal_policy_cannot_admit_metadata_loopback_or_private_via_proxy() {
+        let public = Addresses {
+            loopback: false,
+            private: false,
+        };
+        for url in [
+            "https://169.254.169.254/",
+            "https://127.0.0.1/",
+            "https://[::ffff:127.0.0.1]/",
+            "https://10.0.0.1/",
+            "https://[fd00::1]/",
+            "http://localhost/",
+        ] {
+            assert!(
+                public.approved(&Url::parse(url).unwrap()).await.is_err(),
+                "{url}"
+            );
+        }
+        assert!(
+            public
+                .approved(&Url::parse("https://localhost/").unwrap())
+                .await
+                .is_err()
+        );
+        let answers = vec![
+            "127.0.0.1:443".parse().unwrap(),
+            "8.8.8.8:443".parse().unwrap(),
+            "10.0.0.1:443".parse().unwrap(),
+            "8.8.8.8:443".parse().unwrap(),
+            "169.254.169.254:443".parse().unwrap(),
+        ];
+        assert_eq!(
+            public.filter(answers).unwrap(),
+            vec!["8.8.8.8:443".parse::<SocketAddr>().unwrap()]
+        );
+        assert_eq!(
+            public.filter(vec!["8.8.8.8:443".parse().unwrap(); 65]),
+            Err("mcp_oauth_dns_limit")
+        );
+        let local = Addresses {
+            loopback: true,
+            private: false,
+        };
+        assert!(
+            !local
+                .approved(&Url::parse("http://localhost:1234/").unwrap())
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            local
+                .approved(&Url::parse("https://169.254.169.254/").unwrap())
+                .await
+                .is_err()
+        );
+        let private = Addresses {
+            loopback: false,
+            private: true,
+        };
+        assert!(private.url(&Url::parse("https://10.0.0.1/").unwrap()));
+        assert!(!private.url(&Url::parse("http://10.0.0.1/").unwrap()));
     }
 }
