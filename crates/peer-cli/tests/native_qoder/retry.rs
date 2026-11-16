@@ -206,16 +206,44 @@ fn every_retry_respects_request_and_unknown_token_budget_without_a_second_post()
         assert_eq!(f.budget(|_| {})["unknownUsage"], true);
     }
 }
-fn wait_attempt(server: &Server, child: &mut OwnedChild) {
+fn wait_attempt(f: &Fixture, server: &Server, child: &mut OwnedChild) {
     let deadline = Instant::now() + Duration::from_secs(10);
     while server.requests.lock().unwrap().is_empty() {
         assert!(Instant::now() < deadline);
         assert!(child.child().try_wait().unwrap().is_none());
         thread::sleep(Duration::from_millis(10));
     }
-    // The response is complete and the Host should now be in the policy wait.
-    thread::sleep(Duration::from_millis(150));
-    assert!(child.child().try_wait().unwrap().is_none());
+    // The sidecar is published before the index. Wait for the committed
+    // pair and released Store locks before mutating a source or killing the
+    // process. Observing the HTTP request alone does not prove policy wait.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let committed = std::fs::read_to_string(f.root.path().join("conversations/index.jsonl"))
+            .ok()
+            .and_then(|text| {
+                text.lines().find_map(|line| {
+                    serde_json::from_str::<Value>(line)
+                        .ok()
+                        .filter(|v| v["id"] == "c")
+                })
+            });
+        if committed.is_some_and(|v| v["contextSnapshot"]["phase"] == "turn_complete")
+            && !f
+                .root
+                .path()
+                .join("conversations/index.jsonl.lock")
+                .exists()
+            && !f.root.path().join("conversations/c.jsonl.lock").exists()
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "attempt observation did not commit"
+        );
+        assert!(child.child().try_wait().unwrap().is_none());
+        thread::sleep(Duration::from_millis(10));
+    }
 }
 #[test]
 fn waiting_revalidates_credentials_and_history_and_preserves_known_fees() {
@@ -226,7 +254,7 @@ fn waiting_revalidates_credentials_and_history_and_preserves_known_fees() {
         let f = Fixture::new(&server);
         setup(&f, &server, false);
         let mut child = OwnedChild(Some(command(&f).spawn().unwrap()));
-        wait_attempt(&server, &mut child);
+        wait_attempt(&f, &server, &mut child);
         if history {
             use std::io::Write;
             let mut file = std::fs::OpenOptions::new()
@@ -262,7 +290,7 @@ fn long_queue_wait_renews_lease_cancels_promptly_and_admits_later_work() {
     let f = Fixture::new(&server);
     setup(&f, &server, false);
     let mut child = OwnedChild(Some(command(&f).spawn().unwrap()));
-    wait_attempt(&server, &mut child);
+    wait_attempt(&f, &server, &mut child);
     let lease = f.root.path().join("project-runtime/w/host.lease");
     let before = get(&lease)["heartbeatAt"].clone();
     let deadline = Instant::now() + Duration::from_secs(8);
@@ -335,39 +363,7 @@ fn hard_exit_during_wait_recovers_known_fees_without_resuming_the_old_request() 
         let f = Fixture::new(&server);
         setup(&f, &server, false);
         let mut child = OwnedChild(Some(command(&f).spawn().unwrap()));
-        wait_attempt(&server, &mut child);
-        // The sidecar is published before the index. Wait for the committed
-        // pair and released Store locks, so this kill targets the policy wait
-        // rather than an in-flight Store transaction (which needs maintenance).
-        let deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            let committed =
-                std::fs::read_to_string(f.root.path().join("conversations/index.jsonl"))
-                    .ok()
-                    .and_then(|text| {
-                        text.lines().find_map(|line| {
-                            serde_json::from_str::<Value>(line)
-                                .ok()
-                                .filter(|v| v["id"] == "c")
-                        })
-                    });
-            if committed.is_some_and(|v| v["contextSnapshot"]["phase"] == "turn_complete")
-                && !f
-                    .root
-                    .path()
-                    .join("conversations/index.jsonl.lock")
-                    .exists()
-                && !f.root.path().join("conversations/c.jsonl.lock").exists()
-            {
-                break;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "attempt observation did not commit"
-            );
-            assert!(child.child().try_wait().unwrap().is_none());
-            thread::sleep(Duration::from_millis(10));
-        }
+        wait_attempt(&f, &server, &mut child);
         child.child().kill().unwrap();
         let output = child.output();
         assert!(!output.status.success());

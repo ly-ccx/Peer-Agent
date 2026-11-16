@@ -406,3 +406,5 @@ mod legacy;
 mod network;
 
 mod retry;
+
+mod options;

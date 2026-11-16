@@ -998,7 +998,7 @@ async function sendQoderPreparedStream({
   bufferThinkingDeltas = false,
   emitBufferedThinkingDeltas = true,
   streamIdleTimeoutMs = 0,
-  modelOptions,
+  metadata,
   modelOptionValues = {},
   effort = null,
   fetchWithRecovery,
@@ -1007,10 +1007,9 @@ async function sendQoderPreparedStream({
   // Keep non-identity payload (messages/tools/metadata) stable across connection
   // recovery, but regenerate request_id/session_id/task_id on every attempt so a
   // timed-out first socket is not rejected by Qoder as Duplicate request (103).
-  const catalogMetadata = await getQoderModelMetadataForSend(model);
-  const metadata = catalogMetadata && Array.isArray(modelOptions)
-    ? { ...catalogMetadata, modelOptions }
-    : catalogMetadata;
+  // The caller already selected catalog/persisted metadata. Keep that exact
+  // selection through preparation and connection recovery; a second catalog
+  // lookup would drop persisted-only model options when the cache has no row.
   const resolvedEndpoint = normalizeQoderPreparedEndpoint(endpoint) || await resolveQoderInferenceEndpoint();
   let requestBody = null;
   let preparedUrl = null;
@@ -1285,7 +1284,7 @@ export async function sendQoderPrivateStream({
       bufferThinkingDeltas,
       emitBufferedThinkingDeltas,
       streamIdleTimeoutMs,
-      modelOptions: metadata.modelOptions,
+      metadata,
       modelOptionValues,
       effort,
       fetchWithRecovery: fetchHost,
