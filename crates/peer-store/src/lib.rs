@@ -36,6 +36,8 @@ pub use goal::{
     GoalSnapshot, GoalStore,
 };
 mod history;
+mod presentation;
+pub use presentation::{DisplayEvent, DisplayReadError, DisplaySnapshot, SessionMetadata};
 mod usage_ledger;
 pub use conversation_write::{MessageCommit, NewConversation};
 mod lease;

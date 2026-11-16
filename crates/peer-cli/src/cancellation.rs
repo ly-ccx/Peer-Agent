@@ -17,13 +17,7 @@ impl Drop for Signals {
         }
     }
 }
-pub(crate) fn run<T, F: Future<Output = T>>(
-    operation: impl FnOnce(CancellationToken) -> F,
-) -> io::Result<T> {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-    let flag = Arc::new(AtomicBool::new(false));
+fn listen(flag: &Arc<AtomicBool>) -> io::Result<Signals> {
     let mut signals = Signals(Vec::new());
     for signal in [
         signal_hook::consts::SIGINT,
@@ -34,6 +28,21 @@ pub(crate) fn run<T, F: Future<Output = T>>(
             .0
             .push(signal_hook::flag::register(signal, flag.clone())?);
     }
+    Ok(signals)
+}
+pub(crate) fn run_blocking<T>(operation: impl FnOnce(Arc<AtomicBool>) -> T) -> io::Result<T> {
+    let flag = Arc::new(AtomicBool::new(false));
+    let _signals = listen(&flag)?;
+    Ok(operation(flag))
+}
+pub(crate) fn run<T, F: Future<Output = T>>(
+    operation: impl FnOnce(CancellationToken) -> F,
+) -> io::Result<T> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let flag = Arc::new(AtomicBool::new(false));
+    let _signals = listen(&flag)?;
     let result = runtime.block_on(async {
         let cancel = CancellationToken::new();
         let stop = cancel.clone();

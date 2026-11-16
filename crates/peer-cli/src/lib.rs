@@ -1,11 +1,16 @@
 #![forbid(unsafe_code)]
 
 mod cancellation;
+pub mod doctor;
+pub mod export;
 pub mod mcp;
 pub mod model_auth;
 pub mod models;
 pub mod native_exec;
+pub mod sessions;
+mod shell_args;
 pub mod terminal;
+mod text;
 
 pub const VERSION: &str = include_str!("../../../VERSION");
 
@@ -16,9 +21,12 @@ pub enum Command {
     Doctor,
     Interactive,
     Models,
+    SessionsList,
     Completions(String),
     CompletionsHelp,
-    Usage(&'static str),
+    Usage(String),
+    ShellHelp(&'static str),
+    Export(export::Options),
     Exec { plan: String, max_turns: usize },
     Recover(String),
     McpAuth { server: String, refresh: bool },
@@ -41,14 +49,23 @@ pub fn command(argv: &[String]) -> Command {
         if argv.first().is_some_and(|s| s == "completions") {
             return Command::CompletionsHelp;
         }
+        match argv.first().map(String::as_str) {
+            Some("doctor") => return Command::ShellHelp("doctor"),
+            Some("sessions") => return Command::ShellHelp("sessions"),
+            Some("export") => return Command::ShellHelp("export"),
+            _ => {}
+        }
         return Command::Help;
+    }
+    if let Some(command) = shell_args::parse(argv) {
+        return command;
     }
     match argv.first().map(String::as_str) {
         Some("completions") => {
             if argv.len() == 2 && matches!(argv[1].as_str(), "bash" | "zsh" | "fish") {
                 Command::Completions(argv[1].clone())
             } else {
-                Command::Usage("Usage: peer completions <bash|zsh|fish>")
+                Command::Usage("Usage: peer completions <bash|zsh|fish>".into())
             }
         }
         Some("models") if argv.len() == 1 => Command::Models,
@@ -84,7 +101,6 @@ pub fn command(argv: &[String]) -> Command {
             }
         }
         None | Some("bots" | "--classic") if argv.len() <= 1 => Command::Interactive,
-        Some("doctor") if argv.len() == 1 => Command::Doctor,
         Some(name) => Command::Unavailable(name.to_owned()),
         _ => Command::Interactive,
     }

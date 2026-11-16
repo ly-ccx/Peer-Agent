@@ -2,13 +2,14 @@
 // Development verification uses TS as the conformance reference. The built
 // peer-native executable does not spawn this script, Node, or Bun.
 import { execFileSync } from 'node:child_process';
-import { existsSync,mkdirSync,mkdtempSync,writeFileSync } from 'node:fs';
+import { copyFileSync,existsSync,mkdirSync,mkdtempSync,readFileSync,writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join,resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
-const output = process.argv[2] ?? mkdtempSync(join(tmpdir(), 'peer-native-check-'));
+const output = resolve(process.argv[2] ?? mkdtempSync(join(tmpdir(), 'peer-native-check-')));
 const run = (command, args,extraEnv) => execFileSync(command, args, { cwd: root, stdio: 'inherit',env:extraEnv?{...process.env,...extraEnv}:process.env });
 const episodes=join(output,'episodes');mkdirSync(episodes,{recursive:true});writeFileSync(join(episodes,'.native-cli-fixture'),'isolated');
 if(!existsSync(join(root,'packages/runtime-core/dist/index.js')))run('pnpm',['--filter','@peer-agent/runtime-core','build']);
@@ -37,6 +38,7 @@ run('node', ['scripts/native-cli/channel-contracts.mjs']);
 run('bun', ['scripts/native-cli/model-oauth-contracts.ts']);
 run('bun', ['scripts/native-cli/model-catalog-contracts.ts']);
 run('bun', ['scripts/native-cli/shell-contracts.ts']);
+run('bun', ['scripts/native-cli/session-shell-contracts.ts']);
 run('bun', ['scripts/native-cli/network-contracts.ts']);
 run('bun', ['scripts/native-cli/count-contracts.ts']);
 run('bun', ['scripts/native-cli/context-accounting-contracts.ts']);
@@ -56,7 +58,14 @@ run('node', ['--test', 'packages/runtime-node/src/provider-adapters/gemini-usage
 run('node', ['scripts/native-cli/check-boundaries.mjs']);
 run('cargo', ['fmt', '--all', '--check']);
 run('cargo', ['clippy', '--locked', '-p', 'peer-cli', '-p', 'peer-protocol', '-p', 'peer-tui', '-p', 'peer-store', '-p', 'peer-runtime', '--all-targets', '--features', 'peer-cli/test-fixtures,peer-store/test-fixtures', '--', '-D', 'warnings']);
-run('cargo', ['test', '--locked', '--workspace', '--all-targets', '--features', 'peer-cli/test-fixtures,peer-store/test-fixtures'],{PEER_NATIVE_P3_EVIDENCE_ROOT:episodes,NO_PROXY:'*'});
+// Cargo's shared target/debug name can be relinked by a featureless build while
+// the Host suite is running. Pin the fixture-enabled executable for that suite;
+// the later featureless release and its PTY checks remain separate artifacts.
+run('cargo', ['build', '--locked', '-p', 'peer-cli', '--bins', '--features', 'peer-cli/test-fixtures,peer-store/test-fixtures']);
+const fixtureBinary=join(output,'fixture-peer-native');
+copyFileSync(join(root,'target/debug/peer-native'),fixtureBinary);
+writeFileSync(join(output,'fixture-binary.json'),JSON.stringify({path:fixtureBinary,sha256:createHash('sha256').update(readFileSync(fixtureBinary)).digest('hex')},null,2)+'\n');
+run('cargo', ['test', '--locked', '--workspace', '--all-targets', '--features', 'peer-cli/test-fixtures,peer-store/test-fixtures'],{PEER_NATIVE_P3_EVIDENCE_ROOT:episodes,PEER_NATIVE_TEST_BINARY:fixtureBinary,NO_PROXY:'*'});
 run('cargo', ['build', '--locked', '-p', 'peer-runtime', '--features', 'peer-runtime/test-fixtures,peer-store/test-fixtures', '--example', 'coordination-conformance']);
 run('bun', ['scripts/native-cli/mcp-runtime-contracts.ts']);
 run('bun',['scripts/native-cli/episode-conformance.ts',episodes]);

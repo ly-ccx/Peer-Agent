@@ -27,7 +27,7 @@ fn run() -> io::Result<CliExit> {
         Command::Version => writeln!(out, "peer {}", VERSION.trim())?,
         Command::Help => writeln!(
             out,
-            "Peer native CLI migration candidate\n\nUsage: peer-native [--help|--version|doctor|--classic|bots]\n       peer-native exec --plan <canonical-goal-id> [--max-turns N]\n       peer-native recover --plan <canonical-goal-id>\n       peer-native mcp auth <server-id>\n       peer-native mcp refresh <server-id>\n       peer-native completions <bash|zsh|fish>\n       peer-native models\n       peer-native models <auth|logout|status|reconcile> <configured-channel-id>\n\nNative exec supports fresh delegated worker admissions with native model and MCP\ntransports. Unsupported configuration is rejected. OAuth commands update configured\nVault credentials; they do not grant tools. The interactive TUI edits drafts.\nPEER_MODEL_API_KEY, PEER_MODEL_BASE_URL and PEER_MODEL_ID configure the independent\nenvironment model source. No Bun/Node sidecar is started."
+            "Peer native CLI migration candidate\n\nUsage: peer-native [--help|--version|doctor|--classic|bots]\n       peer-native exec --plan <canonical-goal-id> [--max-turns N]\n       peer-native recover --plan <canonical-goal-id>\n       peer-native sessions [list]\n       peer-native export <session-id> [--output <path>] [--force]\n       peer-native mcp auth <server-id>\n       peer-native mcp refresh <server-id>\n       peer-native completions <bash|zsh|fish>\n       peer-native models\n       peer-native models <auth|logout|status|reconcile> <configured-channel-id>\n\nNative exec supports fresh delegated worker admissions with native model and MCP\ntransports. Unsupported configuration is rejected. OAuth commands update configured\nVault credentials; they do not grant tools. The interactive TUI edits drafts.\nPEER_MODEL_API_KEY, PEER_MODEL_BASE_URL and PEER_MODEL_ID configure the independent\nenvironment model source. No Bun/Node sidecar is started."
         )?,
         Command::Completions(shell) => {
             let data: serde_json::Value =
@@ -39,20 +39,29 @@ fn run() -> io::Result<CliExit> {
                 serde_json::from_str(SHELL_CONTRACT).expect("verified shell contract");
             writeln!(out, "{}", data["help"].as_str().unwrap())?;
         }
+        Command::ShellHelp(topic) => {
+            let data: serde_json::Value = serde_json::from_str(include_str!(
+                "../../../packages/protocol/contracts/native-cli/session-shell.json"
+            ))
+            .expect("verified shell contract");
+            writeln!(out, "{}", data["help"][topic].as_str().unwrap())?;
+        }
+        Command::Export(options) => {
+            drop(out);
+            return peer_cli::export::run(&options);
+        }
         Command::Usage(message) => {
             writeln!(io::stderr(), "{message}")?;
             return Ok(CliExit::Usage);
         }
-        Command::Doctor => writeln!(
-            out,
-            "{}",
-            serde_json::json!({
-                "version": VERSION.trim(), "native": true, "candidate": true,
-                "contractVersion": 1, "contractHash": peer_protocol::contract_hash(),
-                "runtimeConnected": true, "sidecar": false,
-                "dataHomeConfigured": peer_protocol::data_home().is_some(),
-            })
-        )?,
+        Command::Doctor => {
+            drop(out);
+            return peer_cli::doctor::run();
+        }
+        Command::SessionsList => {
+            drop(out);
+            return peer_cli::sessions::list();
+        }
         Command::Unavailable(name) => {
             writeln!(
                 io::stderr(),
