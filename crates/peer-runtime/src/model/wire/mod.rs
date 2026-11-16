@@ -64,58 +64,21 @@ pub fn encode(wire: Wire, input: &WireInput<'_>) -> Result<Value, ModelError> {
         Wire::Anthropic => anthropic::encode(input)?,
         Wire::Gemini => gemini::encode(input)?,
     };
-    if serde_json::to_vec(&body)
+    check_limit(&body)?;
+    Ok(body)
+}
+fn check_limit(body: &Value) -> Result<(), ModelError> {
+    if serde_json::to_vec(body)
         .map_err(|_| ModelError::new("model_request_invalid"))?
         .len()
         > 2 * 1024 * 1024
     {
         return Err(ModelError::new("model_request_limit"));
     }
-    Ok(body)
+    Ok(())
 }
-/// CLI defaults live at the wire seam rather than in the HTTP transport.
-pub(crate) fn encode_runtime(wire: Wire, input: &WireInput<'_>) -> Result<Value, ModelError> {
-    let mut body = encode(wire, input)?;
-    if wire == Wire::Responses {
-        body["tool_choice"] = json!("auto");
-        body["parallel_tool_calls"] = json!(true);
-        // The live CLI uses the Desktop Responses encoder's newer effort
-        // semantics: declared maps are authoritative, including mapped off.
-        body.as_object_mut().unwrap().remove("reasoning");
-        let o = input.options;
-        if o.supports_reasoning
-            && o.reasoning_param_style
-                .as_deref()
-                .unwrap_or("openai-effort")
-                == "openai-effort"
-            && !o.effort.is_empty()
-        {
-            let mapped = if let Some(map) = &o.reasoning_effort_map {
-                if o.effort == "default" {
-                    map.get("default")
-                        .filter(|v| !v.is_null())
-                        .or_else(|| map.get("medium"))
-                } else {
-                    map.get(&o.effort)
-                }
-                .cloned()
-            } else if o.effort != "off" {
-                Some(effort(o, false))
-            } else {
-                None
-            };
-            if let Some(value) =
-                mapped.filter(|v| !v.is_null() && v != "" && v != &json!(false) && v != &json!(0))
-            {
-                body["reasoning"] = json!({"effort":value});
-            }
-        }
-        if o.fast_mode {
-            body["service_tier"] = json!("priority");
-        }
-    }
-    Ok(body)
-}
+mod runtime;
+pub(crate) use runtime::encode as encode_runtime;
 fn token_limit(value: Option<f64>) -> Option<f64> {
     value.filter(|n| n.is_finite() && *n > 0.).map(f64::floor)
 }

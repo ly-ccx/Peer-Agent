@@ -7,6 +7,7 @@ use crate::model::{
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde_json::{Value, json};
 use std::sync::OnceLock;
+mod go;
 
 pub(super) struct Channel {
     pub wire: Wire,
@@ -73,7 +74,12 @@ fn insert_header(headers: &mut HeaderMap, name: &str, value: &str) -> Result<(),
     headers.insert(name, value);
     Ok(())
 }
-fn headers(descriptor: &Value, flat: &Value, wire: Wire) -> Result<HeaderMap, ModelError> {
+fn headers(
+    descriptor: &Value,
+    flat: &Value,
+    wire: Wire,
+    is_go: bool,
+) -> Result<HeaderMap, ModelError> {
     // JS object merging replaces exact spelling first; the HTTP Headers seam
     // then combines distinct spellings of one case-insensitive name.
     let mut raw = serde_json::Map::new();
@@ -85,6 +91,9 @@ fn headers(descriptor: &Value, flat: &Value, wire: Wire) -> Result<HeaderMap, Mo
     }
     for (name, value) in descriptor["headers"].as_object().into_iter().flatten() {
         raw.insert(name.clone(), value.clone());
+    }
+    if is_go {
+        raw.extend(go::headers(wire, flat)?);
     }
     let empty = json!({});
     let custom = flat
@@ -158,14 +167,8 @@ pub(super) fn resolve(flat: &Value, selected: &Value) -> Result<Channel, ModelEr
             }
         })
         .trim();
-    // Go has model-dependent wire and effort profiles; it is admitted by its
-    // dedicated adapter, never by treating it as an arbitrary compatible host.
-    if matches!(
-        provider,
-        "opencode-go" | "opencode-go-openai" | "opencode-go-anthropic"
-    ) {
-        return Err(ModelError::new("native_model_channel_unsupported"));
-    }
+    let provider = go::normalize(provider);
+    let is_go = provider == "opencode-go";
     let d = registry()["descriptors"]
         .as_array()
         .unwrap()
@@ -176,8 +179,10 @@ pub(super) fn resolve(flat: &Value, selected: &Value) -> Result<Channel, ModelEr
     if auth != "api_key" || d["authMethods"][auth].is_null() {
         return Err(ModelError::new("native_model_auth_unsupported"));
     }
+    let model = text(flat, "model").ok_or(ModelError::new("model_selection_invalid"))?;
     let wire_name = text(flat, "wireOverride")
         .or_else(|| text(flat, "wire"))
+        .or_else(|| is_go.then(|| go::wire(model)))
         .or_else(|| text(&d["authMethods"][auth], "wire"))
         .or_else(|| text(d, "defaultWire"))
         .ok_or(ModelError::new("native_model_channel_unsupported"))?;
@@ -195,7 +200,11 @@ pub(super) fn resolve(flat: &Value, selected: &Value) -> Result<Channel, ModelEr
         .or_else(|| text(&d["defaults"], "baseUrl"))
         .ok_or(ModelError::new("model_endpoint_invalid"))?
         .trim_end_matches('/');
-    let model = text(flat, "model").ok_or(ModelError::new("model_selection_invalid"))?;
+    let base = if is_go {
+        go::base_url(wire, base, d["defaults"]["baseUrl"].as_str().unwrap())
+    } else {
+        base.into()
+    };
     let endpoint = match wire {
         Wire::Chat => format!("{base}/chat/completions"),
         Wire::Responses => format!("{base}/responses"),
@@ -208,14 +217,18 @@ pub(super) fn resolve(flat: &Value, selected: &Value) -> Result<Channel, ModelEr
             format!("{base}/models/{model}:streamGenerateContent?alt=sse")
         }
     };
-    let mut reasoning = d["capabilities"]["reasoning"].clone();
-    if let Some(value) = flat.get("supportsReasoning") {
+    let mut reasoning = if is_go {
+        go::reasoning(wire_name, model, flat)?
+    } else {
+        d["capabilities"]["reasoning"].clone()
+    };
+    if !is_go && let Some(value) = flat.get("supportsReasoning") {
         reasoning["supported"] = json!(truthy(value));
         if !truthy(value) {
             reasoning["paramStyle"] = json!("none");
         }
     }
-    if let Some(style) = text(flat, "reasoningParamStyle") {
+    if !is_go && let Some(style) = text(flat, "reasoningParamStyle") {
         reasoning["paramStyle"] = json!(style);
         reasoning["supported"] = json!(style != "none");
     }
@@ -227,8 +240,12 @@ pub(super) fn resolve(flat: &Value, selected: &Value) -> Result<Channel, ModelEr
         effort: effort.into(),
         supports_reasoning: reasoning["supported"] == true,
         reasoning_param_style: text(&reasoning, "paramStyle").map(str::to_owned),
-        reasoning_effort_map: normalized_map(&flat["reasoningEffortMap"])
-            .or_else(|| reasoning.get("effortMap").cloned()),
+        reasoning_effort_map: if is_go {
+            reasoning.get("effortMap").cloned()
+        } else {
+            normalized_map(&flat["reasoningEffortMap"])
+                .or_else(|| reasoning.get("effortMap").cloned())
+        },
         // null is undeclared metadata, not a user request to disable caching.
         prompt_caching: Some(
             flat.get("supportsPromptCaching")
@@ -245,6 +262,6 @@ pub(super) fn resolve(flat: &Value, selected: &Value) -> Result<Channel, ModelEr
         endpoint,
         provider: provider.into(),
         generation,
-        headers: headers(d, flat, wire)?,
+        headers: headers(d, flat, wire, is_go)?,
     })
 }

@@ -309,11 +309,58 @@ mod tests {
             config["models"][0]["customHeaders"] = headers;
             assert!(resolve_model(&config, selected).is_err());
         }
-        for channel in ["unknown", "grok", "qoder", "opencode-go"] {
+        for channel in ["unknown", "grok", "qoder"] {
             config["models"][0]["customHeaders"] = json!({});
             config["channels"][0]["channelId"] = json!(channel);
             assert!(resolve_model(&config, selected).is_err());
         }
+        config["channels"][0]["channelId"] = json!("opencode-go");
+        config["channels"][0]["wireOverride"] = json!("gemini");
+        assert!(resolve_model(&config, selected).is_err());
+    }
+    #[test]
+    fn go_session_identity_is_owned_bounded_and_does_not_mutate_configuration() {
+        let data: Value = serde_json::from_str(include_str!(
+            "../../../packages/protocol/contracts/native-cli/model-channels.json"
+        ))
+        .unwrap();
+        let case = data["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["config"]["channels"][0]["channelId"] == "opencode-go")
+            .unwrap();
+        let mut config = case["config"].clone();
+        config["channels"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("sessionId");
+        let bytes = serde_json::to_vec(&config).unwrap();
+        let first = resolve_model(&config, &case["selected"]).unwrap();
+        let second = resolve_model(&config, &case["selected"]).unwrap();
+        assert!(
+            first.headers["x-opencode-session"]
+                .to_str()
+                .unwrap()
+                .starts_with("peer-")
+        );
+        assert_ne!(
+            first.headers["x-opencode-session"],
+            second.headers["x-opencode-session"]
+        );
+        assert_eq!(serde_json::to_vec(&config).unwrap(), bytes);
+        config["channels"][0]["conversationId"] = json!("canonical-conversation");
+        assert_eq!(
+            resolve_model(&config, &case["selected"]).unwrap().headers["x-opencode-session"],
+            "canonical-conversation"
+        );
+        for value in [json!("injected\r\nheader: bad"), json!("x".repeat(1025))] {
+            config["channels"][0]["sessionId"] = value;
+            assert!(resolve_model(&config, &case["selected"]).is_err());
+        }
+        config["channels"][0]["sessionId"] = json!("fixed");
+        config["models"][0]["reasoningEffortValues"] = json!(["low", null]);
+        assert!(resolve_model(&config, &case["selected"]).is_err());
     }
     #[test]
     fn channel_model_selection_and_credential_identity_cannot_be_substituted() {

@@ -44,6 +44,7 @@ struct Server {
     url: String,
     requests: Arc<Mutex<Vec<Value>>>,
     count_requests: Arc<Mutex<Vec<Value>>>,
+    request_headers: Arc<Mutex<Vec<String>>>,
     trace: Arc<Mutex<Vec<Value>>>,
     stop: Arc<std::sync::atomic::AtomicBool>,
     closed: Arc<std::sync::atomic::AtomicBool>,
@@ -75,6 +76,8 @@ impl Server {
         let captured = requests.clone();
         let count_requests = Arc::new(Mutex::new(Vec::new()));
         let counts = count_requests.clone();
+        let request_headers = Arc::new(Mutex::new(Vec::new()));
+        let captured_headers = request_headers.clone();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let ended = stop.clone();
         let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -92,7 +95,8 @@ impl Server {
                         s.set_nonblocking(false).unwrap();
                         s.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
                         s.set_write_timeout(Some(Duration::from_secs(3))).unwrap();
-                        let (request, is_count) = read_request(&mut s);
+                        let (request, is_count, headers) = read_request(&mut s);
+                        captured_headers.lock().unwrap().push(headers);
                         captured_trace.lock().unwrap().push(json!({"event":"request","count":is_count,"elapsedMs":started.elapsed().as_millis()}));
                         if is_count {
                             counts.lock().unwrap().push(request);
@@ -165,6 +169,7 @@ impl Server {
             url,
             requests,
             count_requests,
+            request_headers,
             trace,
             stop,
             closed,
@@ -183,7 +188,7 @@ impl Drop for Server {
         }
     }
 }
-fn read_request(s: &mut TcpStream) -> (Value, bool) {
+fn read_request(s: &mut TcpStream) -> (Value, bool, String) {
     let mut bytes = Vec::new();
     let mut one = [0; 1];
     while !bytes.ends_with(b"\r\n\r\n") {
@@ -207,6 +212,7 @@ fn read_request(s: &mut TcpStream) -> (Value, bool) {
     (
         serde_json::from_slice(&body).unwrap(),
         path.contains("/count_tokens HTTP/") || path.contains(":countTokens HTTP/"),
+        headers,
     )
 }
 fn reply_tool(name: &str, args: Value) -> String {
@@ -767,6 +773,69 @@ fn rejected_model_headers_preserve_the_source_and_same_task_can_retry_after_corr
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(server.requests.lock().unwrap().len(), 2);
+    assert_eq!(
+        f.history()
+            .iter()
+            .filter(|m| m["segments"].is_array())
+            .count(),
+        1
+    );
+}
+#[test]
+fn go_session_header_stays_with_its_real_episode_and_later_tasks_get_fresh_identity() {
+    let server = Server::new(vec![
+        reply_tool("read_file", json!({"path":"input.txt"})),
+        reply_text("first done"),
+        reply_tool("read_file", json!({"path":"input.txt"})),
+        reply_text("second done"),
+    ]);
+    let f = Fixture::new(&server);
+    let path = f.root.path().join("llm-providers.json");
+    let mut config = get(&path);
+    config["channels"][0]["channelId"] = json!("opencode-go");
+    put(&path, &config);
+    let config_bytes = std::fs::read(&path).unwrap();
+    let output = f.run();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    f.seed(
+        "next",
+        "next-conversation",
+        "next-session",
+        "next-work",
+        "next-epoch",
+    );
+    let output = f.command("exec", "next").output().unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let headers = server.request_headers.lock().unwrap();
+    assert_eq!(headers.len(), 4);
+    let sessions: Vec<_> = headers
+        .iter()
+        .map(|headers| {
+            headers
+                .lines()
+                .find_map(|line| line.strip_prefix("x-opencode-session: "))
+                .unwrap()
+        })
+        .collect();
+    assert!(sessions[0].starts_with("peer-"));
+    assert_eq!(sessions[0], sessions[1]);
+    assert_eq!(sessions[2], sessions[3]);
+    assert_ne!(sessions[0], sessions[2]);
+    assert_eq!(std::fs::read(&path).unwrap(), config_bytes);
+    let requests = server.requests.lock().unwrap();
+    // Unknown Go models use server defaults. Neither a closed empty map nor
+    // the UI's legacy default may regain an invented generic effort value.
+    assert!(requests.iter().all(|r| r["reasoning_effort"].is_null()));
     assert_eq!(
         f.history()
             .iter()
