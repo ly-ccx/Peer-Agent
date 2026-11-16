@@ -210,7 +210,18 @@ fn read_request(s: &mut TcpStream) -> (Value, bool, String) {
     s.read_exact(&mut body).unwrap();
     let path = headers.lines().next().unwrap();
     (
-        serde_json::from_slice(&body).unwrap(),
+        if headers
+            .to_ascii_lowercase()
+            .contains("content-type: application/x-www-form-urlencoded")
+        {
+            json!(
+                url::form_urlencoded::parse(&body)
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect::<std::collections::BTreeMap<_, _>>()
+            )
+        } else {
+            serde_json::from_slice(&body).unwrap()
+        },
         path.contains("/count_tokens HTTP/") || path.contains(":countTokens HTTP/"),
         headers,
     )
@@ -2674,6 +2685,9 @@ fn canonical_usage_recovery_is_bounded_and_later_batches_do_not_duplicate_charge
 #[cfg(feature = "test-fixtures")]
 #[path = "native_mcp/mod.rs"]
 mod native_mcp;
+#[cfg(feature = "test-fixtures")]
+#[path = "native_model_oauth/mod.rs"]
+mod native_model_oauth;
 
 #[test]
 fn delayed_pty_approval_keeps_current_lease_and_completes_the_real_tool_episode() {

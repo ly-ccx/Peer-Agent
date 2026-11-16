@@ -11,13 +11,26 @@ use crate::{
 use peer_protocol::{JsonLimits, decode_json_bounded};
 use serde_json::Value;
 use std::{io::Read, path::Path, time::Duration};
+mod binding;
 mod channel;
+pub(crate) use binding::ModelBinding;
 fn read(path: &Path) -> Result<Value, ModelError> {
-    let mut f =
-        std::fs::File::open(path).map_err(|_| ModelError::new("model_config_unavailable"))?;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(rustix::fs::OFlags::NONBLOCK.bits() as i32);
+    }
+    let mut f = options
+        .open(path)
+        .map_err(|_| ModelError::new("model_config_unavailable"))?;
     let before = f
         .metadata()
         .map_err(|_| ModelError::new("model_config_unavailable"))?;
+    if !before.is_file() {
+        return Err(ModelError::new("model_config_invalid"));
+    }
     let mut bytes = Vec::new();
     f.by_ref()
         .take(1024 * 1024 + 1)
@@ -61,6 +74,7 @@ pub struct ResolvedNativeModel {
     pub provider: String,
     pub generation: GenerationOptions,
     pub headers: reqwest::header::HeaderMap,
+    pub auth_method: String,
 }
 pub fn resolve_model(config: &Value, selected: &Value) -> Result<ResolvedNativeModel, ModelError> {
     if config["version"] != 2 {
@@ -138,18 +152,33 @@ pub fn resolve_model(config: &Value, selected: &Value) -> Result<ResolvedNativeM
     {
         return Err(ModelError::new("model_credential_key_invalid"));
     }
+    let auth_method = resolved
+        .generation
+        .auth_method
+        .clone()
+        .unwrap_or_else(|| "api_key".into());
+    let oauth = auth_method != "api_key";
     Ok(ResolvedNativeModel {
-        context_window: m
-            .get("contextWindow")
-            .or_else(|| c.get("contextWindow"))
-            .and_then(Value::as_f64)
-            .filter(|n| n.is_finite() && *n > 0.0 && *n <= 9_007_199_254_740_991.0)
-            .map(|n| n.floor() as u64)
-            .filter(|n| *n > 0),
+        context_window: resolved.context_window_override.or_else(|| {
+            m.get("contextWindow")
+                .or_else(|| c.get("contextWindow"))
+                .and_then(Value::as_f64)
+                .filter(|n| n.is_finite() && *n > 0.0 && *n <= 9_007_199_254_740_991.0)
+                .map(|n| n.floor() as u64)
+                .filter(|n| *n > 0)
+        }),
         endpoint: resolved.endpoint,
         model: model.into(),
-        credential_key: format!("model/{group}/api-key"),
-        key_configured: c["apiKeyConfigured"] == true || m["apiKeyConfigured"] == true,
+        credential_key: format!(
+            "model/{group}/{}",
+            if oauth { "oauth-tokens" } else { "api-key" }
+        ),
+        key_configured: if oauth {
+            c["oauthConfigured"] == true || m["oauthConfigured"] == true
+        } else {
+            c["apiKeyConfigured"] == true || m["apiKeyConfigured"] == true
+        },
+        auth_method,
         wire: resolved.wire,
         provider: resolved.provider,
         generation: resolved.generation,
@@ -163,8 +192,40 @@ pub async fn load_model(
     cancel: &CancellationToken,
 ) -> Result<NativeModel, ModelError> {
     let config = read(&home.join("llm-providers.json"))?;
-    let resolved = resolve_model(&config, selected)?;
-    let secret = if resolved.key_configured {
+    let mut resolved = resolve_model(&config, selected)?;
+    let oauth = if resolved.auth_method != "api_key" {
+        if !resolved.key_configured {
+            return Err(ModelError::new("model_credential_missing"));
+        }
+        let oauth = crate::model_oauth::ModelOAuth::load(
+            home,
+            &resolved.credential_key,
+            &resolved.auth_method,
+            ModelBinding::new(home, &config, selected)?,
+            cancel,
+        )
+        .await?;
+        if resolved.wire == Wire::Gemini && resolved.generation.project_id.is_none() {
+            resolved.generation.project_id = oauth.project.clone();
+        }
+        let base = crate::model_oauth::endpoints(
+            home,
+            &resolved.auth_method,
+            crate::model_oauth::provider(&resolved.auth_method).unwrap()["baseUrl"]
+                .as_str()
+                .unwrap(),
+        )?
+        .0;
+        resolved.endpoint = if resolved.wire == Wire::Gemini {
+            format!("{base}/v1internal:streamGenerateContent?alt=sse")
+        } else {
+            format!("{base}/responses")
+        };
+        Some(oauth)
+    } else {
+        None
+    };
+    let secret = if resolved.auth_method == "api_key" && resolved.key_configured {
         let helper = if let Some(path) = std::env::var_os("PEER_CREDENTIAL_HELPER_PATH") {
             std::path::PathBuf::from(path)
         } else {
@@ -201,6 +262,7 @@ pub async fn load_model(
         model
             .with_context_window(resolved.context_window)
             .with_headers(resolved.headers)
+            .with_oauth(oauth)
     })
 }
 
@@ -208,6 +270,22 @@ pub async fn load_model(
 mod tests {
     use super::*;
     use serde_json::json;
+    #[cfg(unix)]
+    #[test]
+    fn non_regular_model_configuration_is_rejected_without_waiting_for_a_fifo_writer() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("llm-providers.json");
+        assert!(
+            std::process::Command::new("/usr/bin/mkfifo")
+                .arg(&path)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let start = std::time::Instant::now();
+        assert_eq!(read(&path).err().unwrap().code, "model_config_invalid");
+        assert!(start.elapsed() < Duration::from_secs(1));
+    }
     #[test]
     fn actual_ts_channel_configuration_and_runtime_requests_match() {
         let data: Value = serde_json::from_str(include_str!(

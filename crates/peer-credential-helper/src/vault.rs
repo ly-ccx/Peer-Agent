@@ -47,6 +47,14 @@ pub struct CredentialVault<'a> {
     data_home: PathBuf,
     key_store: &'a dyn KeyStore,
 }
+pub struct CredentialSnapshot {
+    pub secret: Zeroizing<String>,
+    pub revision: String,
+}
+pub struct ConditionalCommit {
+    pub applied: bool,
+    pub revision: Option<String>,
+}
 
 impl<'a> CredentialVault<'a> {
     pub fn new(data_home: impl Into<PathBuf>, key_store: &'a dyn KeyStore) -> Self {
@@ -88,6 +96,73 @@ impl<'a> CredentialVault<'a> {
                 .records
                 .insert(key.to_owned(), encrypt_record(&master_key, key, secret)?);
             write_vault_atomic(&self.data_home, &vault_path, &vault)
+        })
+    }
+
+    pub fn get_snapshot(&self, key: &str) -> Result<Option<CredentialSnapshot>> {
+        self.with_lock(false, || {
+            let path = self.path();
+            if !path.exists() {
+                return Ok(None);
+            }
+            let vault = read_vault(&path)?;
+            let Some(record) = vault.records.get(key) else {
+                return Ok(None);
+            };
+            let master = load_or_create_master_key(self.key_store, true)?;
+            Ok(Some(CredentialSnapshot {
+                secret: decrypt_record(&master, key, record)?,
+                revision: record.nonce.clone(),
+            }))
+        })
+    }
+
+    pub fn compare_set(
+        &self,
+        key: &str,
+        expected_revision: Option<&str>,
+        secret: Option<&str>,
+    ) -> Result<ConditionalCommit> {
+        self.with_lock(true, || {
+            let path = self.path();
+            let mut vault = if path.exists() {
+                read_vault(&path)?
+            } else {
+                VaultFile::default()
+            };
+            let current = vault.records.get(key);
+            if current.map(|r| r.nonce.as_str()) != expected_revision {
+                return Ok(ConditionalCommit {
+                    applied: false,
+                    revision: None,
+                });
+            }
+            if current.is_none() && secret.is_none() {
+                return Ok(ConditionalCommit {
+                    applied: true,
+                    revision: None,
+                });
+            }
+            let master = load_or_create_master_key(self.key_store, path.exists())?;
+            // Matching an opaque generation does not authenticate a record.
+            // Corrupt encrypted state must never be overwritten as recovery.
+            if let Some(record) = current {
+                drop(decrypt_record(&master, key, record)?);
+            }
+            let revision = if let Some(secret) = secret {
+                let record = encrypt_record(&master, key, secret)?;
+                let revision = record.nonce.clone();
+                vault.records.insert(key.into(), record);
+                Some(revision)
+            } else {
+                vault.records.remove(key);
+                None
+            };
+            write_vault_atomic(&self.data_home, &path, &vault)?;
+            Ok(ConditionalCommit {
+                applied: true,
+                revision,
+            })
         })
     }
 
@@ -358,6 +433,76 @@ mod tests {
         vault.set("model/openai/api-key", "same").expect("second");
         let second = fs::read_to_string(vault.path()).expect("second raw");
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn conditional_updates_are_serialized_per_key_and_preserve_other_keys() {
+        let directory = tempdir().unwrap();
+        let store = MemoryKeyStore::default();
+        let vault = CredentialVault::new(directory.path(), &store);
+        let key = "model/channel/oauth-tokens";
+        vault.set(key, "initial").unwrap();
+        let revision = vault.get_snapshot(key).unwrap().unwrap().revision;
+        let results = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|i| {
+                    let vault = &vault;
+                    let revision = &revision;
+                    scope.spawn(move || {
+                        vault
+                            .compare_set(key, Some(revision), Some(&format!("candidate-{i}")))
+                            .unwrap()
+                            .applied
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| h.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(results.iter().filter(|r| **r).count(), 1);
+        let snapshot = vault.get_snapshot(key).unwrap().unwrap();
+        vault.set("model/other/oauth-tokens", "unrelated").unwrap();
+        assert!(
+            vault
+                .compare_set(key, Some(&snapshot.revision), None)
+                .unwrap()
+                .applied
+        );
+        assert!(vault.get_snapshot(key).unwrap().is_none());
+        assert_eq!(
+            vault
+                .get("model/other/oauth-tokens")
+                .unwrap()
+                .unwrap()
+                .as_str(),
+            "unrelated"
+        );
+    }
+
+    #[test]
+    fn matching_revision_does_not_allow_overwriting_authenticated_corruption() {
+        let directory = tempdir().unwrap();
+        let store = MemoryKeyStore::default();
+        let vault = CredentialVault::new(directory.path(), &store);
+        let key = "model/channel/oauth-tokens";
+        vault.set(key, "first").unwrap();
+        let revision = vault.get_snapshot(key).unwrap().unwrap().revision;
+        let mut data: serde_json::Value =
+            serde_json::from_slice(&fs::read(vault.path()).unwrap()).unwrap();
+        let mut bytes = BASE64
+            .decode(data["records"][key]["ciphertext"].as_str().unwrap())
+            .unwrap();
+        bytes[0] ^= 1;
+        data["records"][key]["ciphertext"] = BASE64.encode(bytes).into();
+        fs::write(vault.path(), serde_json::to_vec(&data).unwrap()).unwrap();
+        let before = fs::read(vault.path()).unwrap();
+        assert!(matches!(
+            vault.compare_set(key, Some(&revision), Some("replacement")),
+            Err(HelperError::VaultAuthenticationFailed)
+        ));
+        assert_eq!(fs::read(vault.path()).unwrap(), before);
     }
 
     #[test]

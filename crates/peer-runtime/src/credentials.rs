@@ -36,6 +36,7 @@ pub enum CredentialError {
     VaultUnavailable,
     VaultInvalid,
     VaultAuthenticationFailed,
+    OAuthRefreshPending,
 }
 impl std::fmt::Display for CredentialError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -55,6 +56,7 @@ impl std::fmt::Display for CredentialError {
             Self::VaultUnavailable => "credential_vault_unavailable",
             Self::VaultInvalid => "credential_vault_invalid",
             Self::VaultAuthenticationFailed => "credential_vault_authentication_failed",
+            Self::OAuthRefreshPending => "credential_oauth_refresh_pending",
         })
     }
 }
@@ -66,6 +68,24 @@ impl Secret {
     pub fn expose(&self) -> &str {
         &self.0
     }
+    pub(crate) fn from_string(value: String) -> Result<Self, CredentialError> {
+        let secret = Self(Zeroizing::new(value));
+        if secret.expose().is_empty() || secret.expose().len() > MAX_SECRET {
+            return Err(CredentialError::InvalidSecret);
+        }
+        Ok(secret)
+    }
+}
+pub struct CredentialSnapshot {
+    pub secret: Option<Secret>,
+    pub revision: Option<String>,
+}
+fn oauth_key(key: &str) -> bool {
+    key_valid(key) && key.starts_with("model/") && key.ends_with("/oauth-tokens")
+}
+fn valid_revision(revision: &str) -> bool {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    revision.len() == 16 && STANDARD.decode(revision).is_ok_and(|v| v.len() == 12)
 }
 
 pub struct HelperClient {
@@ -204,6 +224,101 @@ impl HelperClient {
             }
             _ => Err(CredentialError::ResponseInvalid),
         }
+    }
+
+    pub async fn supports_model_oauth_cas(
+        &self,
+        cancel: &CancellationToken,
+    ) -> Result<bool, CredentialError> {
+        let result = self
+            .invoke(json!({"version":1,"action":"ping"}), cancel)
+            .await?;
+        if result.0["status"].as_str().is_none_or(str::is_empty) {
+            return Err(CredentialError::ResponseInvalid);
+        }
+        Ok(result.0["features"]
+            .as_array()
+            .is_some_and(|v| v.iter().any(|f| f == "model-oauth-cas-v1")))
+    }
+
+    pub async fn get_snapshot(
+        &self,
+        key: &str,
+        cancel: &CancellationToken,
+    ) -> Result<CredentialSnapshot, CredentialError> {
+        if !oauth_key(key) {
+            return Err(CredentialError::InvalidKey);
+        }
+        let mut response = self
+            .invoke(
+                json!({"version":1,"action":"get-snapshot","key":key}),
+                cancel,
+            )
+            .await?;
+        let revision = match response.0.get("revision") {
+            Some(Value::Null) => None,
+            Some(Value::String(v)) if valid_revision(v) => Some(v.clone()),
+            _ => return Err(CredentialError::ResponseInvalid),
+        };
+        let secret = match response.0.get_mut("secret") {
+            Some(Value::Null) if revision.is_none() => None,
+            Some(v @ Value::String(_)) if revision.is_some() => {
+                let Value::String(secret) = v.take() else {
+                    unreachable!()
+                };
+                Some(Secret::from_string(secret).map_err(|_| CredentialError::ResponseInvalid)?)
+            }
+            _ => return Err(CredentialError::ResponseInvalid),
+        };
+        Ok(CredentialSnapshot { secret, revision })
+    }
+
+    pub async fn compare_set(
+        &self,
+        key: &str,
+        expected_revision: Option<&str>,
+        secret: Option<&str>,
+        cancel: &CancellationToken,
+    ) -> Result<bool, CredentialError> {
+        if !oauth_key(key) {
+            return Err(CredentialError::InvalidKey);
+        }
+        if expected_revision.is_some_and(|v| !valid_revision(v)) {
+            return Err(CredentialError::ResponseInvalid);
+        }
+        if secret.is_some_and(|s| s.is_empty() || s.len() > MAX_SECRET) {
+            return Err(CredentialError::InvalidSecret);
+        }
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Compare<'a> {
+            version: u8,
+            action: &'static str,
+            key: &'a str,
+            expected_revision: Option<&'a str>,
+            secret: Option<&'a str>,
+        }
+        let response = self
+            .invoke(
+                Compare {
+                    version: 1,
+                    action: "compare-set",
+                    key,
+                    expected_revision,
+                    secret,
+                },
+                cancel,
+            )
+            .await?;
+        let applied = response.0["applied"]
+            .as_bool()
+            .ok_or(CredentialError::ResponseInvalid)?;
+        match response.0.get("revision") {
+            Some(Value::String(v)) if applied && secret.is_some() && valid_revision(v) => {}
+            Some(Value::Null) if !applied || secret.is_none() => {}
+            _ => return Err(CredentialError::ResponseInvalid),
+        }
+        Ok(applied)
     }
 
     pub async fn set(
@@ -350,6 +465,7 @@ impl HelperClient {
                 Some("credential_vault_authentication_failed") => {
                     CredentialError::VaultAuthenticationFailed
                 }
+                Some("credential_oauth_refresh_pending") => CredentialError::OAuthRefreshPending,
                 _ => CredentialError::HelperRejected,
             };
             scrub(&mut response);

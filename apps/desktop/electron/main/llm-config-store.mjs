@@ -333,7 +333,8 @@ export function createLlmConfigStore({
       return;
     }
     credentials().setSecret(key, secret);
-    const verify = credentials().getSecret(key);
+    const verify = key.endsWith('/oauth-tokens') && hasRefreshIntent(secret)
+      ? rawOAuthSecret(key.slice('model/'.length, -'/oauth-tokens'.length)) : credentials().getSecret(key);
     if (!secretsEqual(secret, verify)) throw new Error('credential_migration_verify_failed');
   }
 
@@ -362,8 +363,23 @@ export function createLlmConfigStore({
   function snapshotGroupSecrets(groupId) {
     return {
       apiKey: credentials().getSecret(modelApiKeyCredentialKey(groupId)),
-      oauthTokens: credentials().getSecret(modelOauthCredentialKey(groupId)),
+      oauthTokens: rawOAuthSecret(groupId),
     };
+  }
+  function rawOAuthSecret(groupId) {
+    const client = credentials();
+    const key = modelOauthCredentialKey(groupId);
+    return typeof client.supportsModelOAuthCas === 'function' && client.supportsModelOAuthCas()
+      ? client.getSnapshot(key).secret : client.getSecret(key);
+  }
+  function hasRefreshIntent(raw) {
+    if (!raw) return false;
+    try {
+      const value = JSON.parse(raw);
+      return Boolean(value && typeof value === 'object' && Object.hasOwn(value, 'peerModelRefresh'));
+    } catch {
+      return false;
+    }
   }
 
   function restoreGroupSecrets(groupId, snapshot) {
@@ -371,8 +387,9 @@ export function createLlmConfigStore({
     writeVerifiedSecret(modelOauthCredentialKey(groupId), snapshot.oauthTokens || '');
   }
 
-  function withGroupSecretTransaction(groupId, mutateSecrets, writeMetadata) {
+  function withGroupSecretTransaction(groupId, mutateSecrets, writeMetadata, options = {}) {
     const snapshot = snapshotGroupSecrets(groupId);
+    if (options.denyPendingOAuth && hasRefreshIntent(snapshot.oauthTokens)) throw new Error('credential_oauth_refresh_pending');
     try {
       mutateSecrets();
       const next = snapshotGroupSecrets(groupId);
@@ -1633,7 +1650,7 @@ export function createLlmConfigStore({
 
   // 写入/刷新订阅 token 集合。秘密进入统一 Vault，配置文件只保存连接状态元数据。
   // tokens 形如 { access, refresh, expires, accountId }。
-  function setOAuthTokens(id, tokens) {
+  function setOAuthTokens(id, tokens, options = {}) {
     const items = readAll();
     const idx = items.findIndex((i) => i.id === id);
     if (idx < 0) throw new Error(`Provider ${id} not found`);
@@ -1651,6 +1668,7 @@ export function createLlmConfigStore({
         writeAll(items);
         return toView(item);
       },
+      { denyPendingOAuth: options.allowPending !== true },
     );
   }
 

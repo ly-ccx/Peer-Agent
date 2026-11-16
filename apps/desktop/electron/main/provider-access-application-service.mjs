@@ -128,7 +128,7 @@ export function createProviderAccessApplicationService({
     try {
       const tokens = await session.promise;
       const targetId = id ?? (createdId = ports.addProvider({ ...draft, authMethod }).id);
-      ports.setOAuthTokens(targetId, tokens);
+      ports.setOAuthTokens(targetId, tokens, { allowPending: true });
       let provider = providerById(targetId);
       let models = null;
 

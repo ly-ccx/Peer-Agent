@@ -12,11 +12,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = tempfile::tempdir()?;
     let client = HelperClient::new(&helper, root.path(), Duration::from_secs(2))?;
     client.ping(&CancellationToken::new()).await?;
+    if !client
+        .supports_model_oauth_cas(&CancellationToken::new())
+        .await?
+    {
+        return Err("model OAuth conditional commit feature missing".into());
+    }
     if fs::read_dir(root.path())?.next().is_some() {
         return Err("ping mutated isolated data home".into());
     }
     println!(
-        "{{\"ok\":true,\"protocol\":1,\"nativeHelper\":true,\"secretAccess\":false,\"dataHomeMutated\":false}}"
+        "{{\"ok\":true,\"protocol\":1,\"nativeHelper\":true,\"modelOAuthCas\":true,\"secretAccess\":false,\"dataHomeMutated\":false}}"
     );
     Ok(())
 }

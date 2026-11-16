@@ -74,6 +74,9 @@ pub(crate) fn encode(wire: Wire, input: &WireInput<'_>) -> Result<Value, ModelEr
         if o.fast_mode {
             body["service_tier"] = json!("priority");
         }
+        if o.auth_method.as_deref() == Some("oauth_chatgpt") && o.effort == "default" {
+            body.as_object_mut().unwrap().remove("reasoning");
+        }
     }
     check_limit(&body)?;
     Ok(body)

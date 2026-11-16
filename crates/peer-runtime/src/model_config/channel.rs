@@ -15,6 +15,7 @@ pub(super) struct Channel {
     pub provider: String,
     pub generation: GenerationOptions,
     pub headers: HeaderMap,
+    pub context_window_override: Option<u64>,
 }
 fn registry() -> &'static Value {
     static DATA: OnceLock<Value> = OnceLock::new();
@@ -79,6 +80,7 @@ fn headers(
     flat: &Value,
     wire: Wire,
     is_go: bool,
+    auth: &str,
 ) -> Result<HeaderMap, ModelError> {
     // JS object merging replaces exact spelling first; the HTTP Headers seam
     // then combines distinct spellings of one case-insensitive name.
@@ -91,6 +93,11 @@ fn headers(
     }
     for (name, value) in descriptor["headers"].as_object().into_iter().flatten() {
         raw.insert(name.clone(), value.clone());
+    }
+    if let Some(provider) = crate::model_oauth::provider(auth) {
+        for (name, value) in provider["headers"].as_object().into_iter().flatten() {
+            raw.insert(name.clone(), value.clone());
+        }
     }
     if is_go {
         raw.extend(go::headers(wire, flat)?);
@@ -176,7 +183,8 @@ pub(super) fn resolve(flat: &Value, selected: &Value) -> Result<Channel, ModelEr
         .find(|d| d["id"] == provider)
         .ok_or(ModelError::new("native_model_channel_unsupported"))?;
     let auth = text(flat, "authMethod").unwrap_or("api_key");
-    if auth != "api_key" || d["authMethods"][auth].is_null() {
+    let oauth = crate::model_oauth::provider(auth);
+    if (auth != "api_key" && oauth.is_none()) || d["authMethods"][auth].is_null() {
         return Err(ModelError::new("native_model_auth_unsupported"));
     }
     let model = text(flat, "model").ok_or(ModelError::new("model_selection_invalid"))?;
@@ -186,6 +194,9 @@ pub(super) fn resolve(flat: &Value, selected: &Value) -> Result<Channel, ModelEr
         .or_else(|| text(&d["authMethods"][auth], "wire"))
         .or_else(|| text(d, "defaultWire"))
         .ok_or(ModelError::new("native_model_channel_unsupported"))?;
+    if oauth.is_some() && wire_name != d["authMethods"][auth]["wire"].as_str().unwrap() {
+        return Err(ModelError::new("native_model_channel_unsupported"));
+    }
     if !d["allowedWires"]
         .as_array()
         .unwrap()
@@ -196,7 +207,9 @@ pub(super) fn resolve(flat: &Value, selected: &Value) -> Result<Channel, ModelEr
     }
     let wire: Wire = serde_json::from_value(json!(wire_name))
         .map_err(|_| ModelError::new("native_model_channel_unsupported"))?;
-    let base = text(flat, "baseUrl")
+    let base = oauth
+        .and_then(|v| v["baseUrl"].as_str())
+        .or_else(|| text(flat, "baseUrl"))
         .or_else(|| text(&d["defaults"], "baseUrl"))
         .ok_or(ModelError::new("model_endpoint_invalid"))?
         .trim_end_matches('/');
@@ -210,11 +223,15 @@ pub(super) fn resolve(flat: &Value, selected: &Value) -> Result<Channel, ModelEr
         Wire::Responses => format!("{base}/responses"),
         Wire::Anthropic => format!("{base}/v1/messages"),
         Wire::Gemini => {
-            let model = model.strip_prefix("models/").unwrap_or(model);
-            if model.is_empty() || model.contains(['?', '#', '\\', '/', '%']) {
-                return Err(ModelError::new("model_selection_invalid"));
+            if auth == "oauth_google" {
+                format!("{base}/v1internal:streamGenerateContent?alt=sse")
+            } else {
+                let model = model.strip_prefix("models/").unwrap_or(model);
+                if model.is_empty() || model.contains(['?', '#', '\\', '/', '%']) {
+                    return Err(ModelError::new("model_selection_invalid"));
+                }
+                format!("{base}/models/{model}:streamGenerateContent?alt=sse")
             }
-            format!("{base}/models/{model}:streamGenerateContent?alt=sse")
         }
     };
     let mut reasoning = if is_go {
@@ -255,6 +272,13 @@ pub(super) fn resolve(flat: &Value, selected: &Value) -> Result<Channel, ModelEr
         ),
         max_output_tokens: flat["maxOutputTokens"].as_f64(),
         fast_mode: selected["fastMode"] == true,
+        auth_method: oauth.map(|_| auth.to_owned()),
+        omit_max_output_tokens: auth == "oauth_chatgpt",
+        project_id: if auth == "oauth_google" {
+            text(flat, "oauthProjectId").map(str::to_owned)
+        } else {
+            None
+        },
         ..GenerationOptions::default()
     };
     Ok(Channel {
@@ -262,6 +286,11 @@ pub(super) fn resolve(flat: &Value, selected: &Value) -> Result<Channel, ModelEr
         endpoint,
         provider: provider.into(),
         generation,
-        headers: headers(d, flat, wire, is_go)?,
+        headers: headers(d, flat, wire, is_go, auth)?,
+        context_window_override: crate::model_oauth::context_window(
+            auth,
+            model,
+            &flat["modelOptionValues"],
+        )?,
     })
 }

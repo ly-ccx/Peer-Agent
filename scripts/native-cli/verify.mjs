@@ -13,6 +13,8 @@ const run = (command, args,extraEnv) => execFileSync(command, args, { cwd: root,
 const episodes=join(output,'episodes');mkdirSync(episodes,{recursive:true});writeFileSync(join(episodes,'.native-cli-fixture'),'isolated');
 if(!existsSync(join(root,'packages/runtime-core/dist/index.js')))run('pnpm',['--filter','@peer-agent/runtime-core','build']);
 run('pnpm',['--filter','@peer-agent/credential-helper','build']);
+run('cargo',['build','--locked','-p','peer-credential-helper','--features','test-fixtures','--example','vault-fixture']);
+run('bun',['scripts/native-cli/credential-cas.ts']);
 run('node',['--test','apps/desktop/electron/main/mcp-credential-store.test.mjs']);
 run('bun', ['scripts/native-cli/contracts.ts']);
 run('bun', ['scripts/native-cli/control-contracts.ts']);
@@ -27,6 +29,7 @@ run('bun', ['scripts/native-cli/compaction-contracts.ts']);
 run('bun', ['scripts/native-cli/mcp-inventory-contracts.ts']);
 run('bun', ['scripts/native-cli/wire-contracts.ts']);
 run('node', ['scripts/native-cli/channel-contracts.mjs']);
+run('bun', ['scripts/native-cli/model-oauth-contracts.ts']);
 run('bun', ['scripts/native-cli/count-contracts.ts']);
 run('bun', ['scripts/native-cli/context-accounting-contracts.ts']);
 run('bun', ['scripts/native-cli/stream-contracts.ts']);
@@ -50,6 +53,7 @@ run('cargo', ['build', '--locked', '-p', 'peer-runtime', '--features', 'peer-run
 run('bun', ['scripts/native-cli/mcp-runtime-contracts.ts']);
 run('bun',['scripts/native-cli/episode-conformance.ts',episodes]);
 run('cargo', ['build', '--release', '--locked', '-p', 'peer-cli', '--bins', '--examples']);
+run('cargo', ['build', '--release', '--locked', '-p', 'peer-credential-helper', '--bin', 'peer-credential-helper']);
 run('cargo', ['build', '--locked', '-p', 'peer-store', '--example', 'conformance']);
 run('bun', ['scripts/native-cli/store-conformance.ts', 'target/debug/examples/conformance']);
 run('bun', ['scripts/native-cli/policy-initialization.ts', 'target/debug/examples/conformance']);
@@ -78,6 +82,9 @@ run('node', ['--test', 'packages/runtime-node/src/goal-plan-transactions.test.mj
 run('cargo', ['build', '--locked', '-p', 'peer-credential-helper', '--bin', 'peer-credential-helper']);
 run('cargo', ['build', '--locked', '-p', 'peer-runtime', '--example', 'helper-probe']);
 execFileSync(join(root, 'target/debug/examples/helper-probe'), [join(root, 'target/debug/peer-credential-helper')], {
+  cwd: root, stdio: 'inherit', env: { ...process.env, PATH: '/nonexistent' },
+});
+execFileSync(join(root, 'target/debug/examples/helper-probe'), [join(root, 'target/release/peer-credential-helper')], {
   cwd: root, stdio: 'inherit', env: { ...process.env, PATH: '/nonexistent' },
 });
 run('python3', ['scripts/native-cli/pty_checks.py', '--binary', 'target/release/peer-native',

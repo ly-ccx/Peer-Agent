@@ -12,7 +12,9 @@ export type CredentialHelperRequest =
   | { readonly version: 1; readonly action: 'ping' }
   | { readonly version: 1; readonly action: 'get'; readonly key: string }
   | { readonly version: 1; readonly action: 'set'; readonly key: string; readonly secret: string }
-  | { readonly version: 1; readonly action: 'delete'; readonly key: string };
+  | { readonly version: 1; readonly action: 'delete'; readonly key: string }
+  | { readonly version: 1; readonly action: 'get-snapshot'; readonly key: string }
+  | { readonly version: 1; readonly action: 'compare-set'; readonly key: string; readonly expectedRevision: string | null; readonly secret: string | null };
 
 interface CredentialHelperResponse {
   readonly version: 1;
@@ -172,7 +174,12 @@ export class CredentialHelperClient {
       action: 'get',
       key,
     });
-    return readNullableString(response.data, 'secret');
+    const secret = readNullableString(response.data, 'secret');
+    if (key.endsWith('/oauth-tokens') && secret) {
+      let parsed: unknown; try { parsed = JSON.parse(secret); } catch { /* opaque legacy values remain unchanged */ }
+      if (isRecord(parsed) && Object.hasOwn(parsed, 'peerModelRefresh')) throw new CredentialHelperError('credential_oauth_refresh_pending', 'A model OAuth refresh is unresolved; sign in again.');
+    }
+    return secret;
   }
 
   setSecret(key: string, secret: string): void {
@@ -200,6 +207,37 @@ export class CredentialHelperClient {
     });
     return readBoolean(response.data, 'deleted');
   }
+
+  supportsModelOAuthCas(): boolean {
+    const response = this.transport.invoke({version: 1, action: 'ping'});
+    readString(response.data, 'status');
+    return Array.isArray(response.data?.features) && response.data.features.includes('model-oauth-cas-v1');
+  }
+
+  getSnapshot(key: string): {readonly secret: string | null; readonly revision: string | null} {
+    validateOAuthKey(key);
+    const response = this.transport.invoke({version: 1, action: 'get-snapshot', key});
+    const secret = readNullableString(response.data, 'secret');
+    const revision = readNullableString(response.data, 'revision');
+    if ((secret === null) !== (revision === null) || (revision !== null && !validRevision(revision))) throwInvalidResponse();
+    return {secret, revision};
+  }
+
+  compareSet(key: string, expectedRevision: string | null, secret: string | null): boolean {
+    validateOAuthKey(key);
+    if (expectedRevision !== null && !validRevision(expectedRevision)) throwInvalidResponse();
+    if (secret === '') throw new CredentialHelperError('credential_secret_invalid', 'Credential secrets cannot be empty.');
+    const response = this.transport.invoke({version: 1, action: 'compare-set', key, expectedRevision, secret});
+    const applied = readBoolean(response.data, 'applied');
+    const revision = readNullableString(response.data, 'revision');
+    if ((applied && secret !== null) ? revision === null || !validRevision(revision) : revision !== null) throwInvalidResponse();
+    return applied;
+  }
+}
+function validRevision(value: string): boolean { return /^[A-Za-z0-9+/]{16}$/.test(value); }
+function validateOAuthKey(key: string): void {
+  validateCredentialKey(key);
+  if (!key.startsWith('model/') || !key.endsWith('/oauth-tokens')) throw new CredentialHelperError('credential_key_namespace_denied', 'This operation requires a model OAuth key.');
 }
 
 export function modelApiKeyCredentialKey(providerId: string): string {
@@ -224,6 +262,10 @@ function validateRequest(request: CredentialHelperRequest): void {
     );
   }
   if ('key' in request) validateCredentialKey(request.key);
+  if (request.action === 'get-snapshot' || request.action === 'compare-set') validateOAuthKey(request.key);
+  if (request.action === 'compare-set' && ((request.expectedRevision !== null && !validRevision(request.expectedRevision)) || request.secret === '')) {
+    throw new CredentialHelperError('credential_request_invalid', 'The conditional credential request is invalid.');
+  }
   if (request.action === 'set' && !request.secret) {
     throw new CredentialHelperError(
       'credential_secret_invalid',

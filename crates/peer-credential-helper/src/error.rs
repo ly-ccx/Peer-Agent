@@ -18,6 +18,8 @@ pub enum HelperError {
     VaultAuthenticationFailed,
     #[error("the credential helper request is invalid")]
     InvalidRequest,
+    #[error("a model OAuth refresh has an unresolved outcome")]
+    OAuthRefreshPending,
 }
 
 impl HelperError {
@@ -30,6 +32,7 @@ impl HelperError {
             Self::VaultInvalid => "credential_vault_invalid",
             Self::VaultAuthenticationFailed => "credential_vault_authentication_failed",
             Self::InvalidRequest => "credential_request_invalid",
+            Self::OAuthRefreshPending => "credential_oauth_refresh_pending",
         }
     }
 
@@ -48,6 +51,9 @@ impl HelperError {
                 "The credential vault failed integrity verification."
             }
             Self::InvalidRequest => "The credential helper request is invalid.",
+            Self::OAuthRefreshPending => {
+                "A model OAuth refresh is unresolved. Sign in again or use a supported reconciliation flow."
+            }
         }
     }
 }

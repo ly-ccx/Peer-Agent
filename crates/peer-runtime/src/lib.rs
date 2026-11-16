@@ -15,6 +15,7 @@ pub mod goal_facts;
 pub mod live_execution;
 pub mod model;
 pub mod model_config;
+mod model_oauth;
 pub mod native_exec;
 pub mod one_time_approval;
 pub mod principal;

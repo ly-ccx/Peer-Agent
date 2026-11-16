@@ -27,6 +27,7 @@ pub struct NativeModel {
     binding: String,
     context_window: Option<u64>,
     headers: reqwest::header::HeaderMap,
+    oauth: Option<crate::model_oauth::ModelOAuth>,
 }
 /// An encoded request bound to the exact provider instance that built it.
 /// Counting can borrow it; sending consumes its original immutable wire bytes.
@@ -69,6 +70,10 @@ impl NativeModel {
     }
     pub(crate) fn with_headers(mut self, headers: reqwest::header::HeaderMap) -> Self {
         self.headers = headers;
+        self
+    }
+    pub(crate) fn with_oauth(mut self, oauth: Option<crate::model_oauth::ModelOAuth>) -> Self {
+        self.oauth = oauth;
         self
     }
     pub fn model_id(&self) -> &str {
@@ -124,6 +129,7 @@ impl NativeModel {
             binding,
             context_window: None,
             headers: reqwest::header::HeaderMap::new(),
+            oauth: None,
         })
     }
     pub async fn turn(
@@ -189,10 +195,11 @@ impl NativeModel {
             fingerprint,
         })
     }
-    fn request_builder(
+    async fn request_builder(
         &self,
         endpoint: reqwest::Url,
         accept: &str,
+        cancel: &CancellationToken,
     ) -> Result<reqwest::RequestBuilder, ModelError> {
         let mut headers = self.headers.clone();
         headers.insert(
@@ -212,9 +219,25 @@ impl NativeModel {
                 reqwest::header::HeaderValue::from_static("2023-06-01"),
             );
         }
-        if let Some(s) = &self.secret {
+        let oauth = match &self.oauth {
+            Some(oauth) => Some(oauth.access(cancel).await?),
+            None => None,
+        };
+        if let Some(account) = oauth.as_ref().and_then(|v| v.account.as_ref()) {
+            if account.len() > 512 {
+                return Err(ModelError::new("model_oauth_account_invalid"));
+            }
+            let mut value = reqwest::header::HeaderValue::from_str(account)
+                .map_err(|_| ModelError::new("model_oauth_account_invalid"))?;
+            value.set_sensitive(true);
+            if self.wire == wire::Wire::Responses {
+                headers.insert("chatgpt-account-id", value);
+            }
+        }
+        if let Some(s) = oauth.as_ref().map(|v| &v.secret).or(self.secret.as_ref()) {
             let bearer = zeroize::Zeroizing::new(
-                if matches!(self.wire, wire::Wire::Chat | wire::Wire::Responses) {
+                if oauth.is_some() || matches!(self.wire, wire::Wire::Chat | wire::Wire::Responses)
+                {
                     format!("Bearer {}", s.expose())
                 } else {
                     s.expose().to_owned()
@@ -224,10 +247,14 @@ impl NativeModel {
                 .map_err(|_| ModelError::new("model_credential_invalid"))?;
             value.set_sensitive(true);
             headers.insert(
-                match self.wire {
-                    wire::Wire::Anthropic => "x-api-key",
-                    wire::Wire::Gemini => "x-goog-api-key",
-                    _ => "authorization",
+                if oauth.is_some() {
+                    "authorization"
+                } else {
+                    match self.wire {
+                        wire::Wire::Anthropic => "x-api-key",
+                        wire::Wire::Gemini => "x-goog-api-key",
+                        _ => "authorization",
+                    }
                 },
                 value,
             );
@@ -240,7 +267,8 @@ impl PreparedRequest<'_> {
         let model = self.owner;
         let request_fingerprint = self.fingerprint;
         let request = model
-            .request_builder(model.endpoint.clone(), "text/event-stream")?
+            .request_builder(model.endpoint.clone(), "text/event-stream", cancel)
+            .await?
             .body(self.bytes);
         let mut stream = Some(stream::Stream::new(model.wire));
         let mut final_observation = None;

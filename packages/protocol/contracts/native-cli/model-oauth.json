@@ -1,0 +1,1235 @@
+{
+  "schemaVersion": 1,
+  "now": 1800000000000,
+  "providers": [
+    {
+      "authMethod": "oauth_chatgpt",
+      "channelId": "openai",
+      "wire": "openai-responses",
+      "baseUrl": "https://chatgpt.com/backend-api/codex",
+      "tokenUrl": "https://auth.openai.com/oauth/token",
+      "clientId": "app_EMoamEEZ73f0CkXaXp7hrann",
+      "headers": {
+        "originator": "peer-agent"
+      }
+    },
+    {
+      "authMethod": "oauth_google",
+      "channelId": "google-ai",
+      "wire": "gemini",
+      "baseUrl": "https://cloudcode-pa.googleapis.com",
+      "tokenUrl": "https://oauth2.googleapis.com/token",
+      "clientId": "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
+      "clientSecret": "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"
+    }
+  ],
+  "cases": [
+    {
+      "authMethod": "oauth_chatgpt",
+      "variant": "rotate",
+      "tokens": {
+        "access": "synthetic-old-access",
+        "refresh": "synthetic-old-refresh",
+        "expires": 1799999999999,
+        "accountId": "fixture-account"
+      },
+      "response": {
+        "access_token": "synthetic-new-access",
+        "token_type": "Bearer",
+        "expires_in": 7200,
+        "refresh_token": "synthetic-new-refresh"
+      },
+      "request": {
+        "url": "https://auth.openai.com/oauth/token",
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        "form": {
+          "grant_type": "refresh_token",
+          "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
+          "refresh_token": "synthetic-old-refresh"
+        }
+      },
+      "expected": {
+        "access": "synthetic-new-access",
+        "refresh": "synthetic-new-refresh",
+        "expires": 1800007200000,
+        "accountId": "fixture-account"
+      }
+    },
+    {
+      "authMethod": "oauth_chatgpt",
+      "variant": "retain",
+      "tokens": {
+        "access": "synthetic-old-access",
+        "refresh": "synthetic-old-refresh",
+        "expires": 1799999999999,
+        "accountId": "fixture-account"
+      },
+      "response": {
+        "access_token": "synthetic-new-access",
+        "token_type": "Bearer",
+        "expires_in": 7200
+      },
+      "request": {
+        "url": "https://auth.openai.com/oauth/token",
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        "form": {
+          "grant_type": "refresh_token",
+          "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
+          "refresh_token": "synthetic-old-refresh"
+        }
+      },
+      "expected": {
+        "access": "synthetic-new-access",
+        "refresh": "synthetic-old-refresh",
+        "expires": 1800007200000,
+        "accountId": "fixture-account"
+      }
+    },
+    {
+      "authMethod": "oauth_chatgpt",
+      "variant": "default-expiry",
+      "tokens": {
+        "access": "synthetic-old-access",
+        "refresh": "synthetic-old-refresh",
+        "expires": 1799999999999,
+        "accountId": "fixture-account"
+      },
+      "response": {
+        "access_token": "synthetic-new-access",
+        "token_type": "Bearer"
+      },
+      "request": {
+        "url": "https://auth.openai.com/oauth/token",
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        "form": {
+          "grant_type": "refresh_token",
+          "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
+          "refresh_token": "synthetic-old-refresh"
+        }
+      },
+      "expected": {
+        "access": "synthetic-new-access",
+        "refresh": "synthetic-old-refresh",
+        "expires": 1800003600000,
+        "accountId": "fixture-account"
+      }
+    },
+    {
+      "authMethod": "oauth_google",
+      "variant": "rotate",
+      "tokens": {
+        "access": "synthetic-old-access",
+        "refresh": "synthetic-old-refresh",
+        "expires": 1799999999999,
+        "accountId": "fixture-account"
+      },
+      "response": {
+        "access_token": "synthetic-new-access",
+        "token_type": "Bearer",
+        "expires_in": 7200,
+        "refresh_token": "synthetic-new-refresh"
+      },
+      "request": {
+        "url": "https://oauth2.googleapis.com/token",
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        "form": {
+          "grant_type": "refresh_token",
+          "client_id": "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
+          "client_secret": "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",
+          "refresh_token": "synthetic-old-refresh"
+        }
+      },
+      "expected": {
+        "provider": "google",
+        "access": "synthetic-new-access",
+        "refresh": "synthetic-new-refresh",
+        "expires": 1800007200000,
+        "accountId": "fixture-account"
+      }
+    },
+    {
+      "authMethod": "oauth_google",
+      "variant": "retain",
+      "tokens": {
+        "access": "synthetic-old-access",
+        "refresh": "synthetic-old-refresh",
+        "expires": 1799999999999,
+        "accountId": "fixture-account"
+      },
+      "response": {
+        "access_token": "synthetic-new-access",
+        "token_type": "Bearer",
+        "expires_in": 7200
+      },
+      "request": {
+        "url": "https://oauth2.googleapis.com/token",
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        "form": {
+          "grant_type": "refresh_token",
+          "client_id": "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
+          "client_secret": "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",
+          "refresh_token": "synthetic-old-refresh"
+        }
+      },
+      "expected": {
+        "provider": "google",
+        "access": "synthetic-new-access",
+        "refresh": "synthetic-old-refresh",
+        "expires": 1800007200000,
+        "accountId": "fixture-account"
+      }
+    },
+    {
+      "authMethod": "oauth_google",
+      "variant": "default-expiry",
+      "tokens": {
+        "access": "synthetic-old-access",
+        "refresh": "synthetic-old-refresh",
+        "expires": 1799999999999,
+        "accountId": "fixture-account"
+      },
+      "response": {
+        "access_token": "synthetic-new-access",
+        "token_type": "Bearer"
+      },
+      "request": {
+        "url": "https://oauth2.googleapis.com/token",
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        "form": {
+          "grant_type": "refresh_token",
+          "client_id": "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
+          "client_secret": "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",
+          "refresh_token": "synthetic-old-refresh"
+        }
+      },
+      "expected": {
+        "provider": "google",
+        "access": "synthetic-new-access",
+        "refresh": "synthetic-old-refresh",
+        "expires": 1800003600000,
+        "accountId": "fixture-account"
+      }
+    }
+  ],
+  "requests": [
+    {
+      "effort": "off",
+      "input": {
+        "model": "gpt-6-astra",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "user",
+            "content": "hello"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "options": {
+          "authMethod": "oauth_chatgpt",
+          "effort": "off",
+          "supportsReasoning": true,
+          "omitMaxOutputTokens": true,
+          "maxOutputTokens": 16384,
+          "fastMode": false
+        }
+      },
+      "expected": {
+        "url": "https://chatgpt.com/backend-api/codex/responses",
+        "headers": {
+          "accept": "text/event-stream",
+          "authorization": "Bearer synthetic-access",
+          "chatgpt-account-id": "fixture-account",
+          "content-type": "application/json",
+          "openai-beta": "responses=experimental",
+          "originator": "peer-agent"
+        },
+        "body": {
+          "model": "gpt-6-astra",
+          "instructions": "shared system",
+          "input": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "input_text",
+                  "text": "hello"
+                }
+              ]
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              },
+              "strict": false
+            }
+          ],
+          "tool_choice": "auto",
+          "parallel_tool_calls": true,
+          "stream": true,
+          "store": false
+        }
+      }
+    },
+    {
+      "effort": "default",
+      "input": {
+        "model": "gpt-6-astra",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "user",
+            "content": "hello"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "options": {
+          "authMethod": "oauth_chatgpt",
+          "effort": "default",
+          "supportsReasoning": true,
+          "omitMaxOutputTokens": true,
+          "maxOutputTokens": 16384,
+          "fastMode": false
+        }
+      },
+      "expected": {
+        "url": "https://chatgpt.com/backend-api/codex/responses",
+        "headers": {
+          "accept": "text/event-stream",
+          "authorization": "Bearer synthetic-access",
+          "chatgpt-account-id": "fixture-account",
+          "content-type": "application/json",
+          "openai-beta": "responses=experimental",
+          "originator": "peer-agent"
+        },
+        "body": {
+          "model": "gpt-6-astra",
+          "instructions": "shared system",
+          "input": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "input_text",
+                  "text": "hello"
+                }
+              ]
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              },
+              "strict": false
+            }
+          ],
+          "tool_choice": "auto",
+          "parallel_tool_calls": true,
+          "stream": true,
+          "store": false
+        }
+      }
+    },
+    {
+      "effort": "high",
+      "input": {
+        "model": "gpt-6-astra",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "user",
+            "content": "hello"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "options": {
+          "authMethod": "oauth_chatgpt",
+          "effort": "high",
+          "supportsReasoning": true,
+          "omitMaxOutputTokens": true,
+          "maxOutputTokens": 16384,
+          "fastMode": false
+        }
+      },
+      "expected": {
+        "url": "https://chatgpt.com/backend-api/codex/responses",
+        "headers": {
+          "accept": "text/event-stream",
+          "authorization": "Bearer synthetic-access",
+          "chatgpt-account-id": "fixture-account",
+          "content-type": "application/json",
+          "openai-beta": "responses=experimental",
+          "originator": "peer-agent"
+        },
+        "body": {
+          "model": "gpt-6-astra",
+          "instructions": "shared system",
+          "input": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "input_text",
+                  "text": "hello"
+                }
+              ]
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              },
+              "strict": false
+            }
+          ],
+          "tool_choice": "auto",
+          "parallel_tool_calls": true,
+          "reasoning": {
+            "effort": "high"
+          },
+          "stream": true,
+          "store": false
+        }
+      }
+    },
+    {
+      "effort": "xhigh",
+      "input": {
+        "model": "gpt-6-astra",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "user",
+            "content": "hello"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "options": {
+          "authMethod": "oauth_chatgpt",
+          "effort": "xhigh",
+          "supportsReasoning": true,
+          "omitMaxOutputTokens": true,
+          "maxOutputTokens": 16384,
+          "fastMode": false
+        }
+      },
+      "expected": {
+        "url": "https://chatgpt.com/backend-api/codex/responses",
+        "headers": {
+          "accept": "text/event-stream",
+          "authorization": "Bearer synthetic-access",
+          "chatgpt-account-id": "fixture-account",
+          "content-type": "application/json",
+          "openai-beta": "responses=experimental",
+          "originator": "peer-agent"
+        },
+        "body": {
+          "model": "gpt-6-astra",
+          "instructions": "shared system",
+          "input": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "input_text",
+                  "text": "hello"
+                }
+              ]
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              },
+              "strict": false
+            }
+          ],
+          "tool_choice": "auto",
+          "parallel_tool_calls": true,
+          "reasoning": {
+            "effort": "xhigh"
+          },
+          "stream": true,
+          "store": false
+        }
+      }
+    },
+    {
+      "effort": "max",
+      "input": {
+        "model": "gpt-6-astra",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "user",
+            "content": "hello"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "options": {
+          "authMethod": "oauth_chatgpt",
+          "effort": "max",
+          "supportsReasoning": true,
+          "omitMaxOutputTokens": true,
+          "maxOutputTokens": 16384,
+          "fastMode": true
+        }
+      },
+      "expected": {
+        "url": "https://chatgpt.com/backend-api/codex/responses",
+        "headers": {
+          "accept": "text/event-stream",
+          "authorization": "Bearer synthetic-access",
+          "chatgpt-account-id": "fixture-account",
+          "content-type": "application/json",
+          "openai-beta": "responses=experimental",
+          "originator": "peer-agent"
+        },
+        "body": {
+          "model": "gpt-6-astra",
+          "instructions": "shared system",
+          "input": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "input_text",
+                  "text": "hello"
+                }
+              ]
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              },
+              "strict": false
+            }
+          ],
+          "tool_choice": "auto",
+          "parallel_tool_calls": true,
+          "reasoning": {
+            "effort": "max"
+          },
+          "service_tier": "priority",
+          "stream": true,
+          "store": false
+        }
+      }
+    }
+  ],
+  "contextCases": [
+    {
+      "model": "gpt-6-astra",
+      "values": {},
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6-astra",
+      "values": {
+        "contextTier": 1000000
+      },
+      "expected": 1000000
+    },
+    {
+      "model": "gpt-6-astra",
+      "values": {
+        "contextTier": 400000
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6-astra",
+      "values": {
+        "contextTier": "1000000"
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6-astra",
+      "values": {
+        "contextTier": false
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6-astra",
+      "values": {
+        "contextTier": "unknown"
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6-astra",
+      "values": {
+        "unadmitted": {
+          "system": "bad"
+        }
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "values": {},
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "values": {
+        "contextTier": 1000000
+      },
+      "expected": 1000000
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "values": {
+        "contextTier": 400000
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "values": {
+        "contextTier": "1000000"
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "values": {
+        "contextTier": false
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "values": {
+        "contextTier": "unknown"
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "values": {
+        "unadmitted": {
+          "system": "bad"
+        }
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6.1-terra",
+      "values": {},
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6.1-terra",
+      "values": {
+        "contextTier": 1000000
+      },
+      "expected": 1000000
+    },
+    {
+      "model": "gpt-6.1-terra",
+      "values": {
+        "contextTier": 400000
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6.1-terra",
+      "values": {
+        "contextTier": "1000000"
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6.1-terra",
+      "values": {
+        "contextTier": false
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6.1-terra",
+      "values": {
+        "contextTier": "unknown"
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6.1-terra",
+      "values": {
+        "unadmitted": {
+          "system": "bad"
+        }
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6-sol",
+      "values": {},
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6-sol",
+      "values": {
+        "contextTier": 1000000
+      },
+      "expected": 1000000
+    },
+    {
+      "model": "gpt-6-sol",
+      "values": {
+        "contextTier": 400000
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6-sol",
+      "values": {
+        "contextTier": "1000000"
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6-sol",
+      "values": {
+        "contextTier": false
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6-sol",
+      "values": {
+        "contextTier": "unknown"
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6-sol",
+      "values": {
+        "unadmitted": {
+          "system": "bad"
+        }
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6-luna",
+      "values": {},
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6-luna",
+      "values": {
+        "contextTier": 1000000
+      },
+      "expected": 1000000
+    },
+    {
+      "model": "gpt-6-luna",
+      "values": {
+        "contextTier": 400000
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6-luna",
+      "values": {
+        "contextTier": "1000000"
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6-luna",
+      "values": {
+        "contextTier": false
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6-luna",
+      "values": {
+        "contextTier": "unknown"
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-6-luna",
+      "values": {
+        "unadmitted": {
+          "system": "bad"
+        }
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "values": {},
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "values": {
+        "contextTier": 1000000
+      },
+      "expected": 1000000
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "values": {
+        "contextTier": 400000
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "values": {
+        "contextTier": "1000000"
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "values": {
+        "contextTier": false
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "values": {
+        "contextTier": "unknown"
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "values": {
+        "unadmitted": {
+          "system": "bad"
+        }
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "values": {},
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "values": {
+        "contextTier": 1000000
+      },
+      "expected": 1000000
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "values": {
+        "contextTier": 400000
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "values": {
+        "contextTier": "1000000"
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "values": {
+        "contextTier": false
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "values": {
+        "contextTier": "unknown"
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "values": {
+        "unadmitted": {
+          "system": "bad"
+        }
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.6-luna",
+      "values": {},
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.6-luna",
+      "values": {
+        "contextTier": 1000000
+      },
+      "expected": 1000000
+    },
+    {
+      "model": "gpt-5.6-luna",
+      "values": {
+        "contextTier": 400000
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.6-luna",
+      "values": {
+        "contextTier": "1000000"
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.6-luna",
+      "values": {
+        "contextTier": false
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.6-luna",
+      "values": {
+        "contextTier": "unknown"
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.6-luna",
+      "values": {
+        "unadmitted": {
+          "system": "bad"
+        }
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.4",
+      "values": {},
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.4",
+      "values": {
+        "contextTier": 1000000
+      },
+      "expected": 1000000
+    },
+    {
+      "model": "gpt-5.4",
+      "values": {
+        "contextTier": 400000
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.4",
+      "values": {
+        "contextTier": "1000000"
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.4",
+      "values": {
+        "contextTier": false
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.4",
+      "values": {
+        "contextTier": "unknown"
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.4",
+      "values": {
+        "unadmitted": {
+          "system": "bad"
+        }
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.4-mini",
+      "values": {},
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.4-mini",
+      "values": {
+        "contextTier": 1000000
+      },
+      "expected": 1000000
+    },
+    {
+      "model": "gpt-5.4-mini",
+      "values": {
+        "contextTier": 400000
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.4-mini",
+      "values": {
+        "contextTier": "1000000"
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.4-mini",
+      "values": {
+        "contextTier": false
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.4-mini",
+      "values": {
+        "contextTier": "unknown"
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.4-mini",
+      "values": {
+        "unadmitted": {
+          "system": "bad"
+        }
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.3-codex-spark",
+      "values": {},
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.3-codex-spark",
+      "values": {
+        "contextTier": 1000000
+      },
+      "expected": 1000000
+    },
+    {
+      "model": "gpt-5.3-codex-spark",
+      "values": {
+        "contextTier": 400000
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.3-codex-spark",
+      "values": {
+        "contextTier": "1000000"
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.3-codex-spark",
+      "values": {
+        "contextTier": false
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.3-codex-spark",
+      "values": {
+        "contextTier": "unknown"
+      },
+      "expected": 400000
+    },
+    {
+      "model": "gpt-5.3-codex-spark",
+      "values": {
+        "unadmitted": {
+          "system": "bad"
+        }
+      },
+      "expected": 400000
+    }
+  ]
+}

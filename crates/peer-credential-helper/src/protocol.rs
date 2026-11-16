@@ -5,7 +5,7 @@ pub const PROTOCOL_VERSION: u8 = 1;
 const MAX_KEY_LEN: usize = 240;
 const MAX_SECRET_LEN: usize = 256 * 1024;
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Request {
     Ping {
@@ -24,6 +24,26 @@ pub enum Request {
         version: u8,
         key: String,
     },
+    GetSnapshot {
+        version: u8,
+        key: String,
+    },
+    CompareSet {
+        version: u8,
+        key: String,
+        #[serde(
+            rename = "expectedRevision",
+            deserialize_with = "required_nullable_string"
+        )]
+        expected_revision: Option<String>,
+        #[serde(deserialize_with = "required_nullable_string")]
+        secret: Option<String>,
+    },
+}
+fn required_nullable_string<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    Option::<String>::deserialize(deserializer)
 }
 
 impl Request {
@@ -32,7 +52,9 @@ impl Request {
             Self::Ping { version }
             | Self::Get { version, .. }
             | Self::Set { version, .. }
-            | Self::Delete { version, .. } => *version,
+            | Self::Delete { version, .. }
+            | Self::GetSnapshot { version, .. }
+            | Self::CompareSet { version, .. } => *version,
         }
     }
 
@@ -50,7 +72,62 @@ impl Request {
                 }
                 Ok(())
             }
+            Self::GetSnapshot { key, .. } => validate_oauth_key(key),
+            Self::CompareSet {
+                key,
+                expected_revision,
+                secret,
+                ..
+            } => {
+                validate_oauth_key(key)?;
+                if let Some(revision) = expected_revision {
+                    validate_revision(revision)?;
+                }
+                if secret
+                    .as_ref()
+                    .is_some_and(|s| s.is_empty() || s.len() > MAX_SECRET_LEN)
+                {
+                    return Err("credential_secret_invalid");
+                }
+                Ok(())
+            }
         }
+    }
+}
+impl Drop for Request {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        match self {
+            Self::Set { secret, .. } => secret.zeroize(),
+            Self::CompareSet {
+                secret: Some(secret),
+                ..
+            } => secret.zeroize(),
+            _ => {}
+        }
+    }
+}
+fn validate_oauth_key(key: &str) -> Result<(), &'static str> {
+    validate_key(key)?;
+    let parts: Vec<_> = key.split('/').collect();
+    if parts.len() != 3 || parts[0] != "model" || parts[1].is_empty() || parts[2] != "oauth-tokens"
+    {
+        return Err("credential_key_namespace_denied");
+    }
+    Ok(())
+}
+fn validate_revision(revision: &str) -> Result<(), &'static str> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    if revision.len() != 16 || !STANDARD.decode(revision).is_ok_and(|v| v.len() == 12) {
+        return Err("credential_revision_invalid");
+    }
+    Ok(())
+}
+impl std::fmt::Debug for Request {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CredentialHelperRequest")
+            .field("version", &self.version())
+            .finish_non_exhaustive()
     }
 }
 
@@ -141,6 +218,16 @@ mod tests {
             key: "model/openai/api-key".into(),
         };
         assert!(request.validate().is_ok());
+    }
+    #[test]
+    fn conditional_requests_require_explicit_nullable_preconditions_and_secret() {
+        let key = "model/channel/oauth-tokens";
+        for value in [
+            serde_json::json!({"version":1,"action":"compare-set","key":key,"secret":"next"}),
+            serde_json::json!({"version":1,"action":"compare-set","key":key,"expectedRevision":null}),
+        ] {
+            assert!(serde_json::from_value::<Request>(value).is_err());
+        }
     }
 
     #[test]
