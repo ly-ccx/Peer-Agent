@@ -1,0 +1,581 @@
+{
+  "version": 1,
+  "routes": [
+    {
+      "name": "http-system",
+      "url": "http://api.example.com/v1",
+      "environment": {},
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": "http://system-http:80",
+      "extraCa": null
+    },
+    {
+      "name": "http-environment-priority",
+      "url": "http://api.example.com/v1",
+      "environment": {
+        "HTTP_PROXY": "http://upper-http:80",
+        "http_proxy": "http://lower-http:80",
+        "HTTPS_PROXY": "http://upper-https:80",
+        "https_proxy": "http://lower-https:80",
+        "ALL_PROXY": "http://all:80"
+      },
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": "http://upper-http:80",
+      "extraCa": null
+    },
+    {
+      "name": "http-lowercase",
+      "url": "http://api.example.com/v1",
+      "environment": {
+        "http_proxy": "http://lower-http:80",
+        "https_proxy": "http://lower-https:80"
+      },
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": "http://lower-http:80",
+      "extraCa": null
+    },
+    {
+      "name": "http-all",
+      "url": "http://api.example.com/v1",
+      "environment": {
+        "ALL_PROXY": "http://all:80"
+      },
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": "http://all:80",
+      "extraCa": null
+    },
+    {
+      "name": "http-blank-upper",
+      "url": "http://api.example.com/v1",
+      "environment": {
+        "HTTP_PROXY": " ",
+        "HTTPS_PROXY": "﻿",
+        "ALL_PROXY": "",
+        "all_proxy": " http://lower-all:80 "
+      },
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": "http://lower-all:80",
+      "extraCa": null
+    },
+    {
+      "name": "http-no-proxy-*",
+      "url": "http://api.example.com/v1",
+      "environment": {
+        "HTTPS_PROXY": "http://env:80",
+        "HTTP_PROXY": "http://env:80",
+        "NO_PROXY": "*"
+      },
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": null,
+      "extraCa": null
+    },
+    {
+      "name": "http-no-proxy-api.example.com",
+      "url": "http://api.example.com/v1",
+      "environment": {
+        "HTTPS_PROXY": "http://env:80",
+        "HTTP_PROXY": "http://env:80",
+        "NO_PROXY": "api.example.com"
+      },
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": null,
+      "extraCa": null
+    },
+    {
+      "name": "http-no-proxy-example.com",
+      "url": "http://api.example.com/v1",
+      "environment": {
+        "HTTPS_PROXY": "http://env:80",
+        "HTTP_PROXY": "http://env:80",
+        "NO_PROXY": "example.com"
+      },
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": "http://env:80",
+      "extraCa": null
+    },
+    {
+      "name": "http-no-proxy-.example.com",
+      "url": "http://api.example.com/v1",
+      "environment": {
+        "HTTPS_PROXY": "http://env:80",
+        "HTTP_PROXY": "http://env:80",
+        "NO_PROXY": ".example.com"
+      },
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": null,
+      "extraCa": null
+    },
+    {
+      "name": "http-no-proxy-*.example.com",
+      "url": "http://api.example.com/v1",
+      "environment": {
+        "HTTPS_PROXY": "http://env:80",
+        "HTTP_PROXY": "http://env:80",
+        "NO_PROXY": "*.example.com"
+      },
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": null,
+      "extraCa": null
+    },
+    {
+      "name": "http-no-proxy-api.example.com:80",
+      "url": "http://api.example.com/v1",
+      "environment": {
+        "HTTPS_PROXY": "http://env:80",
+        "HTTP_PROXY": "http://env:80",
+        "NO_PROXY": "api.example.com:80"
+      },
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": null,
+      "extraCa": null
+    },
+    {
+      "name": "http-no-proxy-api.example.com:443",
+      "url": "http://api.example.com/v1",
+      "environment": {
+        "HTTPS_PROXY": "http://env:80",
+        "HTTP_PROXY": "http://env:80",
+        "NO_PROXY": "api.example.com:443"
+      },
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": "http://env:80",
+      "extraCa": null
+    },
+    {
+      "name": "http-no-proxy-unrelated.test,api.example.com",
+      "url": "http://api.example.com/v1",
+      "environment": {
+        "HTTPS_PROXY": "http://env:80",
+        "HTTP_PROXY": "http://env:80",
+        "NO_PROXY": "unrelated.test,api.example.com"
+      },
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": null,
+      "extraCa": null
+    },
+    {
+      "name": "http-no-proxy-﻿api.example.com﻿",
+      "url": "http://api.example.com/v1",
+      "environment": {
+        "HTTPS_PROXY": "http://env:80",
+        "HTTP_PROXY": "http://env:80",
+        "NO_PROXY": "﻿api.example.com﻿"
+      },
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": null,
+      "extraCa": null
+    },
+    {
+      "name": "http-no-proxy-api.example.com",
+      "url": "http://api.example.com/v1",
+      "environment": {
+        "HTTPS_PROXY": "http://env:80",
+        "HTTP_PROXY": "http://env:80",
+        "NO_PROXY": "api.example.com"
+      },
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": "http://env:80",
+      "extraCa": null
+    },
+    {
+      "name": "https-system",
+      "url": "https://api.example.com/v1",
+      "environment": {},
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": "http://system-https:443",
+      "extraCa": null
+    },
+    {
+      "name": "https-environment-priority",
+      "url": "https://api.example.com/v1",
+      "environment": {
+        "HTTP_PROXY": "http://upper-http:80",
+        "http_proxy": "http://lower-http:80",
+        "HTTPS_PROXY": "http://upper-https:80",
+        "https_proxy": "http://lower-https:80",
+        "ALL_PROXY": "http://all:80"
+      },
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": "http://upper-https:80",
+      "extraCa": null
+    },
+    {
+      "name": "https-lowercase",
+      "url": "https://api.example.com/v1",
+      "environment": {
+        "http_proxy": "http://lower-http:80",
+        "https_proxy": "http://lower-https:80"
+      },
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": "http://lower-https:80",
+      "extraCa": null
+    },
+    {
+      "name": "https-all",
+      "url": "https://api.example.com/v1",
+      "environment": {
+        "ALL_PROXY": "http://all:80"
+      },
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": "http://all:80",
+      "extraCa": null
+    },
+    {
+      "name": "https-blank-upper",
+      "url": "https://api.example.com/v1",
+      "environment": {
+        "HTTP_PROXY": " ",
+        "HTTPS_PROXY": "﻿",
+        "ALL_PROXY": "",
+        "all_proxy": " http://lower-all:80 "
+      },
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": "http://lower-all:80",
+      "extraCa": null
+    },
+    {
+      "name": "https-no-proxy-*",
+      "url": "https://api.example.com/v1",
+      "environment": {
+        "HTTPS_PROXY": "http://env:80",
+        "HTTP_PROXY": "http://env:80",
+        "NO_PROXY": "*"
+      },
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": null,
+      "extraCa": null
+    },
+    {
+      "name": "https-no-proxy-api.example.com",
+      "url": "https://api.example.com/v1",
+      "environment": {
+        "HTTPS_PROXY": "http://env:80",
+        "HTTP_PROXY": "http://env:80",
+        "NO_PROXY": "api.example.com"
+      },
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": null,
+      "extraCa": null
+    },
+    {
+      "name": "https-no-proxy-example.com",
+      "url": "https://api.example.com/v1",
+      "environment": {
+        "HTTPS_PROXY": "http://env:80",
+        "HTTP_PROXY": "http://env:80",
+        "NO_PROXY": "example.com"
+      },
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": "http://env:80",
+      "extraCa": null
+    },
+    {
+      "name": "https-no-proxy-.example.com",
+      "url": "https://api.example.com/v1",
+      "environment": {
+        "HTTPS_PROXY": "http://env:80",
+        "HTTP_PROXY": "http://env:80",
+        "NO_PROXY": ".example.com"
+      },
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": null,
+      "extraCa": null
+    },
+    {
+      "name": "https-no-proxy-*.example.com",
+      "url": "https://api.example.com/v1",
+      "environment": {
+        "HTTPS_PROXY": "http://env:80",
+        "HTTP_PROXY": "http://env:80",
+        "NO_PROXY": "*.example.com"
+      },
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": null,
+      "extraCa": null
+    },
+    {
+      "name": "https-no-proxy-api.example.com:80",
+      "url": "https://api.example.com/v1",
+      "environment": {
+        "HTTPS_PROXY": "http://env:80",
+        "HTTP_PROXY": "http://env:80",
+        "NO_PROXY": "api.example.com:80"
+      },
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": "http://env:80",
+      "extraCa": null
+    },
+    {
+      "name": "https-no-proxy-api.example.com:443",
+      "url": "https://api.example.com/v1",
+      "environment": {
+        "HTTPS_PROXY": "http://env:80",
+        "HTTP_PROXY": "http://env:80",
+        "NO_PROXY": "api.example.com:443"
+      },
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": null,
+      "extraCa": null
+    },
+    {
+      "name": "https-no-proxy-unrelated.test,api.example.com",
+      "url": "https://api.example.com/v1",
+      "environment": {
+        "HTTPS_PROXY": "http://env:80",
+        "HTTP_PROXY": "http://env:80",
+        "NO_PROXY": "unrelated.test,api.example.com"
+      },
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": null,
+      "extraCa": null
+    },
+    {
+      "name": "https-no-proxy-﻿api.example.com﻿",
+      "url": "https://api.example.com/v1",
+      "environment": {
+        "HTTPS_PROXY": "http://env:80",
+        "HTTP_PROXY": "http://env:80",
+        "NO_PROXY": "﻿api.example.com﻿"
+      },
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": null,
+      "extraCa": null
+    },
+    {
+      "name": "https-no-proxy-api.example.com",
+      "url": "https://api.example.com/v1",
+      "environment": {
+        "HTTPS_PROXY": "http://env:80",
+        "HTTP_PROXY": "http://env:80",
+        "NO_PROXY": "api.example.com"
+      },
+      "system": {
+        "http": "http://system-http:80",
+        "https": "http://system-https:443"
+      },
+      "expected": "http://env:80",
+      "extraCa": null
+    },
+    {
+      "name": "lowercase-bypass",
+      "url": "https://api.example.com",
+      "environment": {
+        "HTTPS_PROXY": "http://env:80",
+        "NO_PROXY": " ",
+        "no_proxy": "api.example.com"
+      },
+      "system": {},
+      "expected": null,
+      "extraCa": null
+    },
+    {
+      "name": "upper-bypass-overrides-lower",
+      "url": "https://api.example.com",
+      "environment": {
+        "HTTPS_PROXY": "http://env:80",
+        "NO_PROXY": "other.test",
+        "no_proxy": "*"
+      },
+      "system": {},
+      "expected": "http://env:80",
+      "extraCa": null
+    },
+    {
+      "name": "ipv6-[::1]",
+      "url": "http://[::1]:8080",
+      "environment": {
+        "HTTP_PROXY": "http://env:80",
+        "NO_PROXY": "[::1]"
+      },
+      "system": {},
+      "expected": "http://env:80",
+      "extraCa": null
+    },
+    {
+      "name": "ipv6-[::1]:8080",
+      "url": "http://[::1]:8080",
+      "environment": {
+        "HTTP_PROXY": "http://env:80",
+        "NO_PROXY": "[::1]:8080"
+      },
+      "system": {},
+      "expected": "http://env:80",
+      "extraCa": null
+    },
+    {
+      "name": "ipv6-::1",
+      "url": "http://[::1]:8080",
+      "environment": {
+        "HTTP_PROXY": "http://env:80",
+        "NO_PROXY": "::1"
+      },
+      "system": {},
+      "expected": "http://env:80",
+      "extraCa": null
+    },
+    {
+      "name": "ipv6-*",
+      "url": "http://[::1]:8080",
+      "environment": {
+        "HTTP_PROXY": "http://env:80",
+        "NO_PROXY": "*"
+      },
+      "system": {},
+      "expected": null,
+      "extraCa": null
+    },
+    {
+      "name": "extra-ca-precedence",
+      "url": "https://api.example.com",
+      "environment": {
+        "PEER_EXTRA_CA_CERTS": " chosen.pem ",
+        "NODE_EXTRA_CA_CERTS": "fallback.pem"
+      },
+      "system": {},
+      "expected": null,
+      "extraCa": "chosen.pem"
+    },
+    {
+      "name": "extra-ca-fallback",
+      "url": "https://api.example.com",
+      "environment": {
+        "PEER_EXTRA_CA_CERTS": " ",
+        "NODE_EXTRA_CA_CERTS": "fallback.pem"
+      },
+      "system": {},
+      "expected": null,
+      "extraCa": "fallback.pem"
+    }
+  ],
+  "system": [
+    {
+      "raw": "<dictionary> {\n HTTPEnable : 1\n HTTPProxy : 127.0.0.1\n HTTPPort : 8899\n HTTPSEnable : 1\n HTTPSProxy : proxy.test\n HTTPSPort : 8080\n}",
+      "expected": {
+        "http": "http://127.0.0.1:8899",
+        "https": "http://proxy.test:8080"
+      }
+    },
+    {
+      "raw": "HTTPEnable : 0\nHTTPProxy : disabled\nSOCKSEnable : 1\nSOCKSProxy : ignored",
+      "expected": {}
+    },
+    {
+      "raw": "HTTPEnable : 1\nHTTPProxy : host-only",
+      "expected": {
+        "http": "http://host-only"
+      }
+    },
+    {
+      "raw": "HTTPEnable : 1\nHTTPPort : 80",
+      "expected": {}
+    }
+  ],
+  "trust": [
+    {
+      "xml": "<dict><key>B31EB1B740E36C8402DADC37D44DF5D4674952F9</key><dict></dict><key>9F744E9F2B4DBAEC0F312C50B6563B8E2D93C311</key><dict><key>kSecTrustSettingsResult</key>\n<integer>3</integer></dict></dict>",
+      "pem": "-----BEGIN CERTIFICATE-----\nMIIEkTCCA3mgAwIBAgIERWtQVDANBgkqhkiG9w0BAQUFADCBsDELMAkGA1UEBhMCVVMxFjAU\nBgNVBAoTDUVudHJ1c3QsIEluYy4xOTA3BgNVBAsTMHd3dy5lbnRydXN0Lm5ldC9DUFMgaXMg\naW5jb3Jwb3JhdGVkIGJ5IHJlZmVyZW5jZTEfMB0GA1UECxMWKGMpIDIwMDYgRW50cnVzdCwg\nSW5jLjEtMCsGA1UEAxMkRW50cnVzdCBSb290IENlcnRpZmljYXRpb24gQXV0aG9yaXR5MB4X\nDTA2MTEyNzIwMjM0MloXDTI2MTEyNzIwNTM0MlowgbAxCzAJBgNVBAYTAlVTMRYwFAYDVQQK\nEw1FbnRydXN0LCBJbmMuMTkwNwYDVQQLEzB3d3cuZW50cnVzdC5uZXQvQ1BTIGlzIGluY29y\ncG9yYXRlZCBieSByZWZlcmVuY2UxHzAdBgNVBAsTFihjKSAyMDA2IEVudHJ1c3QsIEluYy4x\nLTArBgNVBAMTJEVudHJ1c3QgUm9vdCBDZXJ0aWZpY2F0aW9uIEF1dGhvcml0eTCCASIwDQYJ\nKoZIhvcNAQEBBQADggEPADCCAQoCggEBALaVtkNC+sZtKm9I35RMOVcF7sN5EUFoNu3s/poB\nj6E4KPz3EEZmLk0eGrEaTsbRwJWIsMn/MYszA9u3g3s+IIRe7bJWKKf44LlAcTfFy0cOlypo\nwCKVYhXbR9n10Cv/gkvJrT7eTNuQgFA/CYqEAOwwCj0Yzfv9KlmaI5UXLEWeH25DeW0MXJj+\nSKfFI0dcXv1u5x609mhF0YaDW6KKjbHjKYD+JXGIrb68j6xSlkuqUY3kEzEZ6E5Nn9uss2rV\nvDlUccp6en+Q3X0dgNmBu1kmwhH+5pPi94DkZfs0Nw4pgHBNrziGLp5/V6+eF67rHMsoIV+2\nHNjnogQi+dPa2MsCAwEAAaOBsDCBrTAOBgNVHQ8BAf8EBAMCAQYwDwYDVR0TAQH/BAUwAwEB\n/zArBgNVHRAEJDAigA8yMDA2MTEyNzIwMjM0MlqBDzIwMjYxMTI3MjA1MzQyWjAfBgNVHSME\nGDAWgBRokORnpKZTgMeGZqTx90tD+4S9bTAdBgNVHQ4EFgQUaJDkZ6SmU4DHhmak8fdLQ/uE\nvW0wHQYJKoZIhvZ9B0EABBAwDhsIVjcuMTo0LjADAgSQMA0GCSqGSIb3DQEBBQUAA4IBAQCT\n1DCw1wMgKtD5Y+iRDAUgqV8ZyntyTtSx29CW+1RaGSwMCPeyvIWonX9tO1KzKtvn1ISMY/YP\nyyYBkVBs9F8U4pN0wBOeMDpQ47RgxRzwIkSNcUesyBrJ6ZuaAGAT/3B+XxFNSRuzFVJ7yVTa\nv52Vr2ua2J7p8eRDjeIRRDq/r72DQnNSi6q7pynP9WQcCk3RvKqsnyrQ/39/2n3qse0wJcGE\n2jTSW3iDVuycNsMm4hH2Z0kdkquM++v/eu6FSqdQgPCnXEqULl8FmTxSQeDNtGPPAUO6nIPc\nj2A781q0tHuu2guQOHXvgR1m0vdXcDazv/wor3ElhVsT/h5/WrQ8\n-----END CERTIFICATE-----\n-----BEGIN CERTIFICATE-----\nMIICiTCCAg+gAwIBAgIQH0evqmIAcFBUTAGem2OZKjAKBggqhkjOPQQDAzCBhTELMAkGA1UE\nBhMCR0IxGzAZBgNVBAgTEkdyZWF0ZXIgTWFuY2hlc3RlcjEQMA4GA1UEBxMHU2FsZm9yZDEa\nMBgGA1UEChMRQ09NT0RPIENBIExpbWl0ZWQxKzApBgNVBAMTIkNPTU9ETyBFQ0MgQ2VydGlm\naWNhdGlvbiBBdXRob3JpdHkwHhcNMDgwMzA2MDAwMDAwWhcNMzgwMTE4MjM1OTU5WjCBhTEL\nMAkGA1UEBhMCR0IxGzAZBgNVBAgTEkdyZWF0ZXIgTWFuY2hlc3RlcjEQMA4GA1UEBxMHU2Fs\nZm9yZDEaMBgGA1UEChMRQ09NT0RPIENBIExpbWl0ZWQxKzApBgNVBAMTIkNPTU9ETyBFQ0Mg\nQ2VydGlmaWNhdGlvbiBBdXRob3JpdHkwdjAQBgcqhkjOPQIBBgUrgQQAIgNiAAQDR3svdcmC\nFYX7deSRFtSrYpn1PlILBs5BAH+X4QokPB0BBO490o0JlwzgdeT6+3eKKvUDYEs2ixYjFq0J\ncfRK9ChQtP6IHG4/bC8vCVlbpVsLM5niwz2J+Wos77LTBumjQjBAMB0GA1UdDgQWBBR1cacZ\nSBm8nZ3qQUfflMRId5nTeTAOBgNVHQ8BAf8EBAMCAQYwDwYDVR0TAQH/BAUwAwEB/zAKBggq\nhkjOPQQDAwNoADBlAjEA7wNbeqy3eApyt4jf/7VGFAkK+qDmfQjGGoe9GKhzvSbKYAydzpmf\nz1wPMOG+FDHqAjAU9JM8SaczepBGR7NjfRObTrdvGDeAU/7dIOA1mjbRxwG55tzd8/8dLDoW\nV9mSOdY=\n-----END CERTIFICATE-----\n-----BEGIN CERTIFICATE-----\nMIIEkTCCA3mgAwIBAgIERWtQVDANBgkqhkiG9w0BAQUFADCBsDELMAkGA1UEBhMCVVMxFjAU\nBgNVBAoTDUVudHJ1c3QsIEluYy4xOTA3BgNVBAsTMHd3dy5lbnRydXN0Lm5ldC9DUFMgaXMg\naW5jb3Jwb3JhdGVkIGJ5IHJlZmVyZW5jZTEfMB0GA1UECxMWKGMpIDIwMDYgRW50cnVzdCwg\nSW5jLjEtMCsGA1UEAxMkRW50cnVzdCBSb290IENlcnRpZmljYXRpb24gQXV0aG9yaXR5MB4X\nDTA2MTEyNzIwMjM0MloXDTI2MTEyNzIwNTM0MlowgbAxCzAJBgNVBAYTAlVTMRYwFAYDVQQK\nEw1FbnRydXN0LCBJbmMuMTkwNwYDVQQLEzB3d3cuZW50cnVzdC5uZXQvQ1BTIGlzIGluY29y\ncG9yYXRlZCBieSByZWZlcmVuY2UxHzAdBgNVBAsTFihjKSAyMDA2IEVudHJ1c3QsIEluYy4x\nLTArBgNVBAMTJEVudHJ1c3QgUm9vdCBDZXJ0aWZpY2F0aW9uIEF1dGhvcml0eTCCASIwDQYJ\nKoZIhvcNAQEBBQADggEPADCCAQoCggEBALaVtkNC+sZtKm9I35RMOVcF7sN5EUFoNu3s/poB\nj6E4KPz3EEZmLk0eGrEaTsbRwJWIsMn/MYszA9u3g3s+IIRe7bJWKKf44LlAcTfFy0cOlypo\nwCKVYhXbR9n10Cv/gkvJrT7eTNuQgFA/CYqEAOwwCj0Yzfv9KlmaI5UXLEWeH25DeW0MXJj+\nSKfFI0dcXv1u5x609mhF0YaDW6KKjbHjKYD+JXGIrb68j6xSlkuqUY3kEzEZ6E5Nn9uss2rV\nvDlUccp6en+Q3X0dgNmBu1kmwhH+5pPi94DkZfs0Nw4pgHBNrziGLp5/V6+eF67rHMsoIV+2\nHNjnogQi+dPa2MsCAwEAAaOBsDCBrTAOBgNVHQ8BAf8EBAMCAQYwDwYDVR0TAQH/BAUwAwEB\n/zArBgNVHRAEJDAigA8yMDA2MTEyNzIwMjM0MlqBDzIwMjYxMTI3MjA1MzQyWjAfBgNVHSME\nGDAWgBRokORnpKZTgMeGZqTx90tD+4S9bTAdBgNVHQ4EFgQUaJDkZ6SmU4DHhmak8fdLQ/uE\nvW0wHQYJKoZIhvZ9B0EABBAwDhsIVjcuMTo0LjADAgSQMA0GCSqGSIb3DQEBBQUAA4IBAQCT\n1DCw1wMgKtD5Y+iRDAUgqV8ZyntyTtSx29CW+1RaGSwMCPeyvIWonX9tO1KzKtvn1ISMY/YP\nyyYBkVBs9F8U4pN0wBOeMDpQ47RgxRzwIkSNcUesyBrJ6ZuaAGAT/3B+XxFNSRuzFVJ7yVTa\nv52Vr2ua2J7p8eRDjeIRRDq/r72DQnNSi6q7pynP9WQcCk3RvKqsnyrQ/39/2n3qse0wJcGE\n2jTSW3iDVuycNsMm4hH2Z0kdkquM++v/eu6FSqdQgPCnXEqULl8FmTxSQeDNtGPPAUO6nIPc\nj2A781q0tHuu2guQOHXvgR1m0vdXcDazv/wor3ElhVsT/h5/WrQ8\n-----END CERTIFICATE-----\nnot a certificate",
+      "expected": [
+        "-----BEGIN CERTIFICATE-----\nMIIEkTCCA3mgAwIBAgIERWtQVDANBgkqhkiG9w0BAQUFADCBsDELMAkGA1UEBhMCVVMxFjAU\nBgNVBAoTDUVudHJ1c3QsIEluYy4xOTA3BgNVBAsTMHd3dy5lbnRydXN0Lm5ldC9DUFMgaXMg\naW5jb3Jwb3JhdGVkIGJ5IHJlZmVyZW5jZTEfMB0GA1UECxMWKGMpIDIwMDYgRW50cnVzdCwg\nSW5jLjEtMCsGA1UEAxMkRW50cnVzdCBSb290IENlcnRpZmljYXRpb24gQXV0aG9yaXR5MB4X\nDTA2MTEyNzIwMjM0MloXDTI2MTEyNzIwNTM0MlowgbAxCzAJBgNVBAYTAlVTMRYwFAYDVQQK\nEw1FbnRydXN0LCBJbmMuMTkwNwYDVQQLEzB3d3cuZW50cnVzdC5uZXQvQ1BTIGlzIGluY29y\ncG9yYXRlZCBieSByZWZlcmVuY2UxHzAdBgNVBAsTFihjKSAyMDA2IEVudHJ1c3QsIEluYy4x\nLTArBgNVBAMTJEVudHJ1c3QgUm9vdCBDZXJ0aWZpY2F0aW9uIEF1dGhvcml0eTCCASIwDQYJ\nKoZIhvcNAQEBBQADggEPADCCAQoCggEBALaVtkNC+sZtKm9I35RMOVcF7sN5EUFoNu3s/poB\nj6E4KPz3EEZmLk0eGrEaTsbRwJWIsMn/MYszA9u3g3s+IIRe7bJWKKf44LlAcTfFy0cOlypo\nwCKVYhXbR9n10Cv/gkvJrT7eTNuQgFA/CYqEAOwwCj0Yzfv9KlmaI5UXLEWeH25DeW0MXJj+\nSKfFI0dcXv1u5x609mhF0YaDW6KKjbHjKYD+JXGIrb68j6xSlkuqUY3kEzEZ6E5Nn9uss2rV\nvDlUccp6en+Q3X0dgNmBu1kmwhH+5pPi94DkZfs0Nw4pgHBNrziGLp5/V6+eF67rHMsoIV+2\nHNjnogQi+dPa2MsCAwEAAaOBsDCBrTAOBgNVHQ8BAf8EBAMCAQYwDwYDVR0TAQH/BAUwAwEB\n/zArBgNVHRAEJDAigA8yMDA2MTEyNzIwMjM0MlqBDzIwMjYxMTI3MjA1MzQyWjAfBgNVHSME\nGDAWgBRokORnpKZTgMeGZqTx90tD+4S9bTAdBgNVHQ4EFgQUaJDkZ6SmU4DHhmak8fdLQ/uE\nvW0wHQYJKoZIhvZ9B0EABBAwDhsIVjcuMTo0LjADAgSQMA0GCSqGSIb3DQEBBQUAA4IBAQCT\n1DCw1wMgKtD5Y+iRDAUgqV8ZyntyTtSx29CW+1RaGSwMCPeyvIWonX9tO1KzKtvn1ISMY/YP\nyyYBkVBs9F8U4pN0wBOeMDpQ47RgxRzwIkSNcUesyBrJ6ZuaAGAT/3B+XxFNSRuzFVJ7yVTa\nv52Vr2ua2J7p8eRDjeIRRDq/r72DQnNSi6q7pynP9WQcCk3RvKqsnyrQ/39/2n3qse0wJcGE\n2jTSW3iDVuycNsMm4hH2Z0kdkquM++v/eu6FSqdQgPCnXEqULl8FmTxSQeDNtGPPAUO6nIPc\nj2A781q0tHuu2guQOHXvgR1m0vdXcDazv/wor3ElhVsT/h5/WrQ8\n-----END CERTIFICATE-----\n"
+      ]
+    },
+    {
+      "xml": "<dict/>",
+      "pem": "-----BEGIN CERTIFICATE-----\nMIIEkTCCA3mgAwIBAgIERWtQVDANBgkqhkiG9w0BAQUFADCBsDELMAkGA1UEBhMCVVMxFjAU\nBgNVBAoTDUVudHJ1c3QsIEluYy4xOTA3BgNVBAsTMHd3dy5lbnRydXN0Lm5ldC9DUFMgaXMg\naW5jb3Jwb3JhdGVkIGJ5IHJlZmVyZW5jZTEfMB0GA1UECxMWKGMpIDIwMDYgRW50cnVzdCwg\nSW5jLjEtMCsGA1UEAxMkRW50cnVzdCBSb290IENlcnRpZmljYXRpb24gQXV0aG9yaXR5MB4X\nDTA2MTEyNzIwMjM0MloXDTI2MTEyNzIwNTM0MlowgbAxCzAJBgNVBAYTAlVTMRYwFAYDVQQK\nEw1FbnRydXN0LCBJbmMuMTkwNwYDVQQLEzB3d3cuZW50cnVzdC5uZXQvQ1BTIGlzIGluY29y\ncG9yYXRlZCBieSByZWZlcmVuY2UxHzAdBgNVBAsTFihjKSAyMDA2IEVudHJ1c3QsIEluYy4x\nLTArBgNVBAMTJEVudHJ1c3QgUm9vdCBDZXJ0aWZpY2F0aW9uIEF1dGhvcml0eTCCASIwDQYJ\nKoZIhvcNAQEBBQADggEPADCCAQoCggEBALaVtkNC+sZtKm9I35RMOVcF7sN5EUFoNu3s/poB\nj6E4KPz3EEZmLk0eGrEaTsbRwJWIsMn/MYszA9u3g3s+IIRe7bJWKKf44LlAcTfFy0cOlypo\nwCKVYhXbR9n10Cv/gkvJrT7eTNuQgFA/CYqEAOwwCj0Yzfv9KlmaI5UXLEWeH25DeW0MXJj+\nSKfFI0dcXv1u5x609mhF0YaDW6KKjbHjKYD+JXGIrb68j6xSlkuqUY3kEzEZ6E5Nn9uss2rV\nvDlUccp6en+Q3X0dgNmBu1kmwhH+5pPi94DkZfs0Nw4pgHBNrziGLp5/V6+eF67rHMsoIV+2\nHNjnogQi+dPa2MsCAwEAAaOBsDCBrTAOBgNVHQ8BAf8EBAMCAQYwDwYDVR0TAQH/BAUwAwEB\n/zArBgNVHRAEJDAigA8yMDA2MTEyNzIwMjM0MlqBDzIwMjYxMTI3MjA1MzQyWjAfBgNVHSME\nGDAWgBRokORnpKZTgMeGZqTx90tD+4S9bTAdBgNVHQ4EFgQUaJDkZ6SmU4DHhmak8fdLQ/uE\nvW0wHQYJKoZIhvZ9B0EABBAwDhsIVjcuMTo0LjADAgSQMA0GCSqGSIb3DQEBBQUAA4IBAQCT\n1DCw1wMgKtD5Y+iRDAUgqV8ZyntyTtSx29CW+1RaGSwMCPeyvIWonX9tO1KzKtvn1ISMY/YP\nyyYBkVBs9F8U4pN0wBOeMDpQ47RgxRzwIkSNcUesyBrJ6ZuaAGAT/3B+XxFNSRuzFVJ7yVTa\nv52Vr2ua2J7p8eRDjeIRRDq/r72DQnNSi6q7pynP9WQcCk3RvKqsnyrQ/39/2n3qse0wJcGE\n2jTSW3iDVuycNsMm4hH2Z0kdkquM++v/eu6FSqdQgPCnXEqULl8FmTxSQeDNtGPPAUO6nIPc\nj2A781q0tHuu2guQOHXvgR1m0vdXcDazv/wor3ElhVsT/h5/WrQ8\n-----END CERTIFICATE-----",
+      "expected": []
+    },
+    {
+      "xml": "<key>9f744e9f2b4dbaec0f312c50b6563b8e2d93c311</key><dict/>",
+      "pem": "-----BEGIN CERTIFICATE-----\nMIIEkTCCA3mgAwIBAgIERWtQVDANBgkqhkiG9w0BAQUFADCBsDELMAkGA1UEBhMCVVMxFjAU\nBgNVBAoTDUVudHJ1c3QsIEluYy4xOTA3BgNVBAsTMHd3dy5lbnRydXN0Lm5ldC9DUFMgaXMg\naW5jb3Jwb3JhdGVkIGJ5IHJlZmVyZW5jZTEfMB0GA1UECxMWKGMpIDIwMDYgRW50cnVzdCwg\nSW5jLjEtMCsGA1UEAxMkRW50cnVzdCBSb290IENlcnRpZmljYXRpb24gQXV0aG9yaXR5MB4X\nDTA2MTEyNzIwMjM0MloXDTI2MTEyNzIwNTM0MlowgbAxCzAJBgNVBAYTAlVTMRYwFAYDVQQK\nEw1FbnRydXN0LCBJbmMuMTkwNwYDVQQLEzB3d3cuZW50cnVzdC5uZXQvQ1BTIGlzIGluY29y\ncG9yYXRlZCBieSByZWZlcmVuY2UxHzAdBgNVBAsTFihjKSAyMDA2IEVudHJ1c3QsIEluYy4x\nLTArBgNVBAMTJEVudHJ1c3QgUm9vdCBDZXJ0aWZpY2F0aW9uIEF1dGhvcml0eTCCASIwDQYJ\nKoZIhvcNAQEBBQADggEPADCCAQoCggEBALaVtkNC+sZtKm9I35RMOVcF7sN5EUFoNu3s/poB\nj6E4KPz3EEZmLk0eGrEaTsbRwJWIsMn/MYszA9u3g3s+IIRe7bJWKKf44LlAcTfFy0cOlypo\nwCKVYhXbR9n10Cv/gkvJrT7eTNuQgFA/CYqEAOwwCj0Yzfv9KlmaI5UXLEWeH25DeW0MXJj+\nSKfFI0dcXv1u5x609mhF0YaDW6KKjbHjKYD+JXGIrb68j6xSlkuqUY3kEzEZ6E5Nn9uss2rV\nvDlUccp6en+Q3X0dgNmBu1kmwhH+5pPi94DkZfs0Nw4pgHBNrziGLp5/V6+eF67rHMsoIV+2\nHNjnogQi+dPa2MsCAwEAAaOBsDCBrTAOBgNVHQ8BAf8EBAMCAQYwDwYDVR0TAQH/BAUwAwEB\n/zArBgNVHRAEJDAigA8yMDA2MTEyNzIwMjM0MlqBDzIwMjYxMTI3MjA1MzQyWjAfBgNVHSME\nGDAWgBRokORnpKZTgMeGZqTx90tD+4S9bTAdBgNVHQ4EFgQUaJDkZ6SmU4DHhmak8fdLQ/uE\nvW0wHQYJKoZIhvZ9B0EABBAwDhsIVjcuMTo0LjADAgSQMA0GCSqGSIb3DQEBBQUAA4IBAQCT\n1DCw1wMgKtD5Y+iRDAUgqV8ZyntyTtSx29CW+1RaGSwMCPeyvIWonX9tO1KzKtvn1ISMY/YP\nyyYBkVBs9F8U4pN0wBOeMDpQ47RgxRzwIkSNcUesyBrJ6ZuaAGAT/3B+XxFNSRuzFVJ7yVTa\nv52Vr2ua2J7p8eRDjeIRRDq/r72DQnNSi6q7pynP9WQcCk3RvKqsnyrQ/39/2n3qse0wJcGE\n2jTSW3iDVuycNsMm4hH2Z0kdkquM++v/eu6FSqdQgPCnXEqULl8FmTxSQeDNtGPPAUO6nIPc\nj2A781q0tHuu2guQOHXvgR1m0vdXcDazv/wor3ElhVsT/h5/WrQ8\n-----END CERTIFICATE-----\n-----BEGIN CERTIFICATE-----\nMIICiTCCAg+gAwIBAgIQH0evqmIAcFBUTAGem2OZKjAKBggqhkjOPQQDAzCBhTELMAkGA1UE\nBhMCR0IxGzAZBgNVBAgTEkdyZWF0ZXIgTWFuY2hlc3RlcjEQMA4GA1UEBxMHU2FsZm9yZDEa\nMBgGA1UEChMRQ09NT0RPIENBIExpbWl0ZWQxKzApBgNVBAMTIkNPTU9ETyBFQ0MgQ2VydGlm\naWNhdGlvbiBBdXRob3JpdHkwHhcNMDgwMzA2MDAwMDAwWhcNMzgwMTE4MjM1OTU5WjCBhTEL\nMAkGA1UEBhMCR0IxGzAZBgNVBAgTEkdyZWF0ZXIgTWFuY2hlc3RlcjEQMA4GA1UEBxMHU2Fs\nZm9yZDEaMBgGA1UEChMRQ09NT0RPIENBIExpbWl0ZWQxKzApBgNVBAMTIkNPTU9ETyBFQ0Mg\nQ2VydGlmaWNhdGlvbiBBdXRob3JpdHkwdjAQBgcqhkjOPQIBBgUrgQQAIgNiAAQDR3svdcmC\nFYX7deSRFtSrYpn1PlILBs5BAH+X4QokPB0BBO490o0JlwzgdeT6+3eKKvUDYEs2ixYjFq0J\ncfRK9ChQtP6IHG4/bC8vCVlbpVsLM5niwz2J+Wos77LTBumjQjBAMB0GA1UdDgQWBBR1cacZ\nSBm8nZ3qQUfflMRId5nTeTAOBgNVHQ8BAf8EBAMCAQYwDwYDVR0TAQH/BAUwAwEB/zAKBggq\nhkjOPQQDAwNoADBlAjEA7wNbeqy3eApyt4jf/7VGFAkK+qDmfQjGGoe9GKhzvSbKYAydzpmf\nz1wPMOG+FDHqAjAU9JM8SaczepBGR7NjfRObTrdvGDeAU/7dIOA1mjbRxwG55tzd8/8dLDoW\nV9mSOdY=\n-----END CERTIFICATE-----",
+      "expected": [
+        "-----BEGIN CERTIFICATE-----\nMIICiTCCAg+gAwIBAgIQH0evqmIAcFBUTAGem2OZKjAKBggqhkjOPQQDAzCBhTELMAkGA1UE\nBhMCR0IxGzAZBgNVBAgTEkdyZWF0ZXIgTWFuY2hlc3RlcjEQMA4GA1UEBxMHU2FsZm9yZDEa\nMBgGA1UEChMRQ09NT0RPIENBIExpbWl0ZWQxKzApBgNVBAMTIkNPTU9ETyBFQ0MgQ2VydGlm\naWNhdGlvbiBBdXRob3JpdHkwHhcNMDgwMzA2MDAwMDAwWhcNMzgwMTE4MjM1OTU5WjCBhTEL\nMAkGA1UEBhMCR0IxGzAZBgNVBAgTEkdyZWF0ZXIgTWFuY2hlc3RlcjEQMA4GA1UEBxMHU2Fs\nZm9yZDEaMBgGA1UEChMRQ09NT0RPIENBIExpbWl0ZWQxKzApBgNVBAMTIkNPTU9ETyBFQ0Mg\nQ2VydGlmaWNhdGlvbiBBdXRob3JpdHkwdjAQBgcqhkjOPQIBBgUrgQQAIgNiAAQDR3svdcmC\nFYX7deSRFtSrYpn1PlILBs5BAH+X4QokPB0BBO490o0JlwzgdeT6+3eKKvUDYEs2ixYjFq0J\ncfRK9ChQtP6IHG4/bC8vCVlbpVsLM5niwz2J+Wos77LTBumjQjBAMB0GA1UdDgQWBBR1cacZ\nSBm8nZ3qQUfflMRId5nTeTAOBgNVHQ8BAf8EBAMCAQYwDwYDVR0TAQH/BAUwAwEB/zAKBggq\nhkjOPQQDAwNoADBlAjEA7wNbeqy3eApyt4jf/7VGFAkK+qDmfQjGGoe9GKhzvSbKYAydzpmf\nz1wPMOG+FDHqAjAU9JM8SaczepBGR7NjfRObTrdvGDeAU/7dIOA1mjbRxwG55tzd8/8dLDoW\nV9mSOdY=\n-----END CERTIFICATE-----\n"
+      ]
+    }
+  ]
+}

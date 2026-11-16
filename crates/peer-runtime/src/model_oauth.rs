@@ -102,7 +102,7 @@ pub(crate) struct ModelOAuth {
     key: String,
     auth: String,
     binding: ModelBinding,
-    client: reqwest::Client,
+    network: crate::network::Network,
     token_url: reqwest::Url,
     state: tokio::sync::Mutex<String>,
     cas: bool,
@@ -154,7 +154,7 @@ impl ModelOAuth {
         let token = Token::parse(secret.expose())?;
         token.validate_provider(auth)?;
         token.ensure_ready()?;
-        let client = token_http::client()?;
+        let network = crate::network::Network::new().map_err(|e| ModelError::new(e.0))?;
         let (_, token_url) = endpoints(home, auth, provider["baseUrl"].as_str().unwrap())?;
         guard
             .finish()
@@ -164,7 +164,7 @@ impl ModelOAuth {
             key: key.into(),
             auth: auth.into(),
             binding,
-            client,
+            network,
             token_url,
             state: tokio::sync::Mutex::new(stamp(&secret, revision.as_deref())),
             cas,
@@ -236,8 +236,14 @@ impl ModelOAuth {
                 .map_err(|_| ModelError::new("model_oauth_reservation_unknown"))?;
             let started = std::sync::atomic::AtomicBool::new(false);
             let refresh = async {
-                started.store(true, std::sync::atomic::Ordering::Release);
-                token_http::request(&self.client, &self.token_url, &form).await
+                token_http::request(
+                    &self.network,
+                    cancel,
+                    &self.token_url,
+                    &form,
+                    Some(&started),
+                )
+                .await
             };
             let response = tokio::select! { biased; _=cancel.cancelled()=>Err(ModelError::new("CANCELLED")), result=tokio::time::timeout(Duration::from_secs(15),refresh)=>result.unwrap_or_else(|_|Err(ModelError::new("model_oauth_refresh_timeout"))) };
             if response.is_err() && !started.load(std::sync::atomic::Ordering::Acquire) {

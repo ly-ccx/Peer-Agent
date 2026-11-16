@@ -36,6 +36,7 @@ run('bun', ['scripts/native-cli/wire-contracts.ts']);
 run('node', ['scripts/native-cli/channel-contracts.mjs']);
 run('bun', ['scripts/native-cli/model-oauth-contracts.ts']);
 run('bun', ['scripts/native-cli/model-catalog-contracts.ts']);
+run('bun', ['scripts/native-cli/network-contracts.ts']);
 run('bun', ['scripts/native-cli/count-contracts.ts']);
 run('bun', ['scripts/native-cli/context-accounting-contracts.ts']);
 run('bun', ['scripts/native-cli/stream-contracts.ts']);
@@ -54,7 +55,7 @@ run('node', ['--test', 'packages/runtime-node/src/provider-adapters/gemini-usage
 run('node', ['scripts/native-cli/check-boundaries.mjs']);
 run('cargo', ['fmt', '--all', '--check']);
 run('cargo', ['clippy', '--locked', '-p', 'peer-cli', '-p', 'peer-protocol', '-p', 'peer-tui', '-p', 'peer-store', '-p', 'peer-runtime', '--all-targets', '--features', 'peer-cli/test-fixtures,peer-store/test-fixtures', '--', '-D', 'warnings']);
-run('cargo', ['test', '--locked', '--workspace', '--all-targets', '--features', 'peer-cli/test-fixtures,peer-store/test-fixtures'],{PEER_NATIVE_P3_EVIDENCE_ROOT:episodes});
+run('cargo', ['test', '--locked', '--workspace', '--all-targets', '--features', 'peer-cli/test-fixtures,peer-store/test-fixtures'],{PEER_NATIVE_P3_EVIDENCE_ROOT:episodes,NO_PROXY:'*'});
 run('cargo', ['build', '--locked', '-p', 'peer-runtime', '--features', 'peer-runtime/test-fixtures,peer-store/test-fixtures', '--example', 'coordination-conformance']);
 run('bun', ['scripts/native-cli/mcp-runtime-contracts.ts']);
 run('bun',['scripts/native-cli/episode-conformance.ts',episodes]);

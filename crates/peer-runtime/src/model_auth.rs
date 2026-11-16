@@ -343,8 +343,8 @@ pub async fn authorize(
     guard
         .finish()
         .map_err(|_| ModelError::new("model_configuration_changed"))?;
-    let client = token_http::client()?;
-    let response = tokio::select! {biased;_=cancel.cancelled()=>return Err(ModelError::new("CANCELLED")), result=token_http::request(&client,&config.token,&form)=>result.map_err(|_|ModelError::new("model_oauth_exchange_failed"))?};
+    let network = crate::network::Network::new().map_err(|e| ModelError::new(e.0))?;
+    let response = tokio::select! {biased;_=cancel.cancelled()=>return Err(ModelError::new("CANCELLED")), result=token_http::request(&network,cancel,&config.token,&form,None)=>result.map_err(|_|ModelError::new("model_oauth_exchange_failed"))?};
     let token = Token::login(&response, &account.auth, now_ms()?)?;
     let tokens = token.serialize()?;
     let guard = account.transaction(cancel).await?;

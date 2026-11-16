@@ -1,26 +1,29 @@
 //! Shared pinned OAuth token exchange: one request, bounded body, no redirects/replay.
 use super::{ModelError, Token};
 use std::time::Duration;
-pub(crate) fn client() -> Result<reqwest::Client, ModelError> {
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .retry(reqwest::retry::never())
-        .no_proxy()
+pub(crate) async fn request(
+    network: &crate::network::Network,
+    cancel: &crate::CancellationToken,
+    url: &reqwest::Url,
+    form: &str,
+    started: Option<&std::sync::atomic::AtomicBool>,
+) -> Result<Token, ModelError> {
+    let client = network
+        .builder(url, cancel)
+        .await
+        .map_err(|e| ModelError::new(e.0))?
         .connect_timeout(Duration::from_secs(5))
         .read_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(15))
         .build()
         .map_err(|_| ModelError::new("model_oauth_transport_unavailable"))?;
-    Ok(client)
-}
-pub(crate) async fn request(
-    client: &reqwest::Client,
-    url: &reqwest::Url,
-    form: &str,
-) -> Result<Token, ModelError> {
+    if let Some(started) = started {
+        started.store(true, std::sync::atomic::Ordering::Release);
+    }
     let mut response = client
         .post(url.clone())
         .header("content-type", "application/x-www-form-urlencoded")
+        .header("connection", "close")
         .body(form.to_string())
         .send()
         .await

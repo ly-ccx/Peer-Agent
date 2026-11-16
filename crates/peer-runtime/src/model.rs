@@ -16,7 +16,7 @@ mod usage;
 pub use error::{ModelError, ModelRequestObservation};
 pub mod wire;
 pub struct NativeModel {
-    client: reqwest::Client,
+    network: crate::network::Network,
     endpoint: reqwest::Url,
     model: String,
     provider: String,
@@ -105,20 +105,12 @@ impl NativeModel {
         {
             return Err(ModelError::new("model_config_invalid"));
         }
-        let client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .retry(reqwest::retry::never())
-            .connect_timeout(Duration::from_secs(10))
-            .read_timeout(Duration::from_secs(30))
-            .timeout(deadline)
-            .pool_max_idle_per_host(1)
-            .build()
-            .map_err(|_| ModelError::new("model_transport_unavailable"))?;
+        let network = crate::network::Network::new().map_err(|e| ModelError::new(e.0))?;
         // A live cache cannot cross provider instances, even when two channels
         // share the same endpoint and model name with different credentials.
         let binding = uuid::Uuid::new_v4().to_string();
         Ok(Self {
-            client,
+            network,
             endpoint,
             model: config.model,
             provider: config.provider,
@@ -259,7 +251,21 @@ impl NativeModel {
                 value,
             );
         }
-        Ok(self.client.post(endpoint).headers(headers))
+        let client = self
+            .network
+            .builder(&endpoint, cancel)
+            .await
+            .map_err(|e| ModelError::new(e.0))?
+            .connect_timeout(Duration::from_secs(10))
+            .read_timeout(Duration::from_secs(30))
+            .timeout(self.deadline)
+            .build()
+            .map_err(|_| ModelError::new("model_transport_unavailable"))?;
+        headers.insert(
+            "connection",
+            reqwest::header::HeaderValue::from_static("close"),
+        );
+        Ok(client.post(endpoint).headers(headers))
     }
 }
 impl PreparedRequest<'_> {

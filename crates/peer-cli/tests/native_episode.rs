@@ -1,6 +1,7 @@
 //! Public native executable, real HTTP/SSE, actual files and child processes.
 //! All data is synthetic; PATH cannot find Node/Bun, and no OS secret is read.
 use peer_runtime::coordination::NativeCoordinationReducer;
+mod native_network;
 use peer_store::{
     AcquireLease, CoordinationStore, ExecutionResourceStore, HostIdentity, HostLeaseStore,
     HostSurface, PolicyStore,
@@ -415,6 +416,7 @@ impl Fixture {
             .env("PEER_AGENT_HOME", self.root.path())
             .env("HOME", self.root.path())
             .env("PATH", "/nonexistent")
+            .env("NO_PROXY", "*")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());

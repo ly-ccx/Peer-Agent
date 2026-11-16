@@ -2,6 +2,7 @@
 use super::*;
 use std::sync::mpsc;
 mod login;
+mod network;
 
 // Exact full-document comparison: only the accepted three hint projections
 // may change. Every other root/channel/model field stays present and equal.

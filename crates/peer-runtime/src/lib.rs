@@ -19,6 +19,7 @@ pub mod model_catalog;
 pub mod model_config;
 mod model_oauth;
 pub mod native_exec;
+mod network;
 mod oauth_callback;
 pub mod one_time_approval;
 pub mod principal;
