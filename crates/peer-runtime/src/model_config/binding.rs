@@ -8,6 +8,21 @@ pub(crate) struct ModelBinding {
     model: Value,
 }
 impl ModelBinding {
+    pub(crate) fn model_id(&self) -> &str {
+        self.model["model"].as_str().expect("validated model")
+    }
+    pub(crate) fn model_options(&self) -> Option<&Value> {
+        self.model
+            .get("modelOptions")
+            .or_else(|| self.channel.get("modelOptions"))
+    }
+    pub(crate) fn base_url(&self) -> Option<&str> {
+        self.model
+            .get("baseUrl")
+            .or_else(|| self.channel.get("baseUrl"))
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+    }
     pub(crate) fn channel_id(&self) -> &str {
         self.channel["id"]
             .as_str()

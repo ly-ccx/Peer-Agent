@@ -1,46 +1,24 @@
 //! Local catalog decoding is read-only and bound to the prepared account.
-use super::{
-    CACHE_LIMIT,
-    account_files::{self, Observation},
-    sensitive_json::SensitiveJson,
-};
+use super::{CACHE_LIMIT, account_files::ReadSet, sensitive_json::SensitiveJson};
 use crate::{CancellationToken, model::ModelError};
 use serde_json::{Value, json};
-use std::{
-    collections::HashSet,
-    path::{Path, PathBuf},
-};
+use std::{collections::HashSet, path::Path};
 fn invalid() -> ModelError {
     ModelError::new("qoder_catalog_invalid")
 }
 #[derive(Default)]
 pub(super) struct Catalog {
     models: Vec<Value>,
-    files: Vec<Observation>,
-    absent: Vec<PathBuf>,
 }
 impl Catalog {
-    fn read(
-        &mut self,
-        path: &Path,
+    pub fn load(
+        root: &Path,
+        uid: Option<&str>,
+        reads: &mut ReadSet,
         cancel: &CancellationToken,
-    ) -> Result<Option<zeroize::Zeroizing<Vec<u8>>>, ModelError> {
-        match std::fs::symlink_metadata(path) {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                self.absent.push(path.into());
-                Ok(None)
-            }
-            Err(_) => Err(ModelError::new("qoder_catalog_unavailable")),
-            Ok(_) => {
-                let (bytes, observation) = account_files::read(path, CACHE_LIMIT, cancel)?;
-                self.files.push(observation);
-                Ok(Some(bytes))
-            }
-        }
-    }
-    pub fn load(root: &Path, uid: &str, cancel: &CancellationToken) -> Result<Self, ModelError> {
+    ) -> Result<Self, ModelError> {
         let mut result = Self::default();
-        if let Some(bytes) = result.read(&root.join(".models/default"), cancel)? {
+        if let Some(bytes) = reads.optional(&root.join(".models/default"), CACHE_LIMIT, cancel)? {
             let info = SensitiveJson::parse(&bytes, CACHE_LIMIT)?;
             let indexed = info.0["uid"]
                 .as_str()
@@ -49,12 +27,12 @@ impl Catalog {
                     !s.is_empty() && *s != "." && *s != ".." && !s.contains(['/', '\\', '\0'])
                 })
                 .ok_or_else(invalid)?;
-            if indexed != uid {
+            if uid.is_some_and(|uid| indexed != uid) {
                 return Err(ModelError::new("qoder_catalog_account_changed"));
             }
             for name in ["catalog-v5", "catalog-v4", "catalog-v2", "catalog"] {
                 let path = root.join(".models").join(indexed).join(name);
-                if let Some(bytes) = result.read(&path, cancel)? {
+                if let Some(bytes) = reads.optional(&path, CACHE_LIMIT, cancel)? {
                     let encoded = std::str::from_utf8(&bytes).map_err(|_| invalid())?;
                     let decoded =
                         super::decrypt_cache(encoded, indexed.as_bytes()).map_err(|_| invalid())?;
@@ -63,11 +41,12 @@ impl Catalog {
                 }
             }
         }
-        let legacy = if let Some(bytes) = result.read(&root.join(".auth/models"), cancel)? {
-            parse(&bytes)?
-        } else {
-            Vec::new()
-        };
+        let legacy =
+            if let Some(bytes) = reads.optional(&root.join(".auth/models"), CACHE_LIMIT, cancel)? {
+                parse(&bytes)?
+            } else {
+                Vec::new()
+            };
         if result.models.is_empty() {
             result.models = legacy;
         } else {
@@ -90,19 +69,15 @@ impl Catalog {
         }
         Ok(result)
     }
-    pub fn validate(&self) -> Result<(), ModelError> {
-        for file in &self.files {
-            file.validate()?;
+    pub fn metadata(
+        &self,
+        model: &str,
+        options: Option<&Value>,
+    ) -> Result<Option<Value>, ModelError> {
+        let options = options.filter(|v| !v.is_null());
+        if options.is_some_and(|v| !v.is_array()) {
+            return Err(invalid());
         }
-        for path in &self.absent {
-            match std::fs::symlink_metadata(path) {
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                _ => return Err(ModelError::new("qoder_auth_changed")),
-            }
-        }
-        Ok(())
-    }
-    pub fn metadata(&self, model: &str, options: Option<&Value>) -> Result<Value, ModelError> {
         let mut metadata = match self.models.iter().find(|v| {
             v["id"]
                 .as_str()
@@ -115,7 +90,7 @@ impl Catalog {
             {
                 json!({"id":model.trim(),"label":model,"source":"system","format":"openai","supportsVision":true,"supportsReasoning":false})
             }
-            None => return Err(ModelError::new("native_qoder_legacy_wire_unsupported")),
+            None => return Ok(None),
         };
         if let Some(options) = options {
             if !options.is_array() {
@@ -123,7 +98,7 @@ impl Catalog {
             }
             metadata["modelOptions"] = options.clone();
         }
-        Ok(metadata)
+        Ok(Some(metadata))
     }
 }
 fn number(n: f64) -> Value {

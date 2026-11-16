@@ -209,6 +209,100 @@ fn environment_token_precedence_does_not_fall_back_to_another_disk_account() {
     );
 }
 #[test]
+fn legacy_mode_uses_bound_base_and_catalog_changes_cannot_silently_switch_it() {
+    let mut f = Fixture::new();
+    f.config["models"][0]["model"] = json!("unknown-model");
+    f.config["channels"][0]["baseUrl"] = json!("http://127.0.0.1:1234/custom");
+    std::fs::write(
+        f.root.path().join("llm-providers.json"),
+        f.config.to_string(),
+    )
+    .unwrap();
+    let account = f.load().unwrap();
+    assert_eq!(account.dialect(), QoderDialect::Legacy);
+    assert_eq!(
+        account.endpoint().as_str(),
+        "http://127.0.0.1:1234/custom/chat/completions"
+    );
+    assert!(account.metadata().is_none());
+    std::fs::write(
+        f.root.path().join("qoder/.auth/models"),
+        r#"{"chat":[{"key":"unknown-model"}]}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        account
+            .validate_source(&CancellationToken::new(), now().unwrap())
+            .unwrap_err()
+            .code,
+        "qoder_auth_changed"
+    );
+    let fresh = f.load().unwrap();
+    assert_eq!(fresh.dialect(), QoderDialect::Prepared);
+    assert_eq!(
+        fresh.endpoint().as_str(),
+        "http://127.0.0.1:1/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1"
+    );
+}
+#[test]
+fn nonempty_persisted_options_select_prepared_but_empty_or_null_options_keep_legacy() {
+    for options in [
+        json!([]),
+        Value::Null,
+        json!([{"id":"contextTier","kind":"select","choices":[]}]),
+    ] {
+        let mut f = Fixture::new();
+        f.config["models"][0]["model"] = json!("unknown-model");
+        f.config["models"][0]["modelOptions"] = options.clone();
+        std::fs::write(
+            f.root.path().join("llm-providers.json"),
+            f.config.to_string(),
+        )
+        .unwrap();
+        let account = f.load().unwrap();
+        assert_eq!(
+            account.dialect(),
+            if options.as_array().is_some_and(|a| !a.is_empty()) {
+                QoderDialect::Prepared
+            } else {
+                QoderDialect::Legacy
+            }
+        );
+    }
+}
+#[test]
+fn default_legacy_host_follows_captured_environment_and_rejects_url_credentials() {
+    let f = Fixture::new();
+    let mut env = f.env();
+    for (name, value) in [
+        ("QODER_ENV", "test"),
+        ("QODER_MODEL_SERVER_HOST", "https://host.fixture.invalid/"),
+    ] {
+        env.0[ENV_NAMES.iter().position(|v| *v == name).unwrap()] =
+            Some(Zeroizing::new(value.into()));
+        let endpoint = super::super::endpoint::legacy(&env, None).unwrap();
+        assert_eq!(
+            endpoint.as_str(),
+            if name == "QODER_ENV" {
+                "https://test-api2-v2.qoder.sh/model/v1/chat/completions"
+            } else {
+                "https://host.fixture.invalid/model/v1/chat/completions"
+            }
+        );
+    }
+    env.0[ENV_NAMES
+        .iter()
+        .position(|v| *v == "QODER_MODEL_SERVER_HOST")
+        .unwrap()] = Some(Zeroizing::new("user:secret@host.fixture.invalid".into()));
+    assert_eq!(
+        super::super::endpoint::legacy(&env, None)
+            .err()
+            .unwrap()
+            .code,
+        "model_endpoint_invalid"
+    );
+}
+#[test]
 fn catalog_and_endpoint_identity_changes_invalidate_the_prepared_account() {
     let f = Fixture::new();
     let account = f.load().unwrap();

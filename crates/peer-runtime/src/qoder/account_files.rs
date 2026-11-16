@@ -34,6 +34,50 @@ pub(super) struct Observation {
     path: PathBuf,
     before: Version,
 }
+#[derive(Default)]
+pub(super) struct ReadSet {
+    files: Vec<Observation>,
+    absent: Vec<PathBuf>,
+}
+impl ReadSet {
+    pub fn required(
+        &mut self,
+        path: &Path,
+        limit: usize,
+        cancel: &CancellationToken,
+    ) -> Result<Zeroizing<Vec<u8>>, ModelError> {
+        let (bytes, observation) = read(path, limit, cancel)?;
+        self.files.push(observation);
+        Ok(bytes)
+    }
+    pub fn optional(
+        &mut self,
+        path: &Path,
+        limit: usize,
+        cancel: &CancellationToken,
+    ) -> Result<Option<Zeroizing<Vec<u8>>>, ModelError> {
+        match std::fs::symlink_metadata(path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                self.absent.push(path.into());
+                Ok(None)
+            }
+            Err(e) => Err(error(e)),
+            Ok(_) => self.required(path, limit, cancel).map(Some),
+        }
+    }
+    pub fn validate(&self) -> Result<(), ModelError> {
+        for file in &self.files {
+            file.validate()?;
+        }
+        for path in &self.absent {
+            match std::fs::symlink_metadata(path) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                _ => return Err(ModelError::new("qoder_auth_changed")),
+            }
+        }
+        Ok(())
+    }
+}
 impl Observation {
     pub fn validate(&self) -> Result<(), ModelError> {
         let m = std::fs::symlink_metadata(&self.path)

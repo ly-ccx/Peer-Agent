@@ -207,21 +207,19 @@ pub async fn load_model(
             cancel,
         )?;
         resolved.endpoint = account.endpoint().to_string();
-        resolved.generation.qoder_metadata =
-            Some(account.metadata(&resolved.model, &config, selected)?);
-        resolved.context_window = crate::model::wire::qoder_context_window(
-            resolved
-                .generation
-                .qoder_metadata
-                .as_ref()
-                .expect("loaded Qoder metadata"),
-            resolved
-                .generation
-                .model_option_values
-                .as_ref()
-                .unwrap_or(&Value::Null),
-        )
-        .or(resolved.context_window);
+        resolved.generation.qoder_metadata = account.metadata().cloned();
+        resolved.generation.qoder_dialect = account.dialect();
+        if let Some(metadata) = account.metadata() {
+            resolved.context_window = crate::model::wire::qoder_context_window(
+                metadata,
+                resolved
+                    .generation
+                    .model_option_values
+                    .as_ref()
+                    .unwrap_or(&Value::Null),
+            )
+            .or(resolved.context_window);
+        }
         resolved.generation.qoder_session_type = Some(account.session_type().to_owned());
         Some(account)
     } else {

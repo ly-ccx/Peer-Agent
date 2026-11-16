@@ -91,6 +91,33 @@ struct Envelope<'a> {
     cosy_version: &'a str,
     ide_version: &'a str,
 }
+pub(super) fn legacy_headers(token: &str, body: &Value) -> Result<HeaderMap, ModelError> {
+    let auth = Zeroizing::new(format!("Bearer {token}"));
+    let mut headers = HeaderMap::new();
+    for (name, value) in [
+        ("authorization", auth.as_str()),
+        (
+            "x-request-id",
+            body["metadata"]["context"]["request_id"]
+                .as_str()
+                .ok_or_else(invalid)?,
+        ),
+        (
+            "x-session-id",
+            body["metadata"]["context"]["session_id"]
+                .as_str()
+                .ok_or_else(invalid)?,
+        ),
+    ] {
+        if value.is_empty() || value.len() > 8192 {
+            return Err(invalid());
+        }
+        let mut value = HeaderValue::from_str(value).map_err(|_| invalid())?;
+        value.set_sensitive(true);
+        headers.insert(HeaderName::from_static(name), value);
+    }
+    Ok(headers)
+}
 
 pub(super) struct Request<'a> {
     pub profile: &'a Value,
@@ -202,6 +229,23 @@ impl Request<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn legacy_headers_match_actual_ts_and_remain_sensitive() {
+        let data: Value = serde_json::from_str(include_str!(
+            "../../../../packages/protocol/contracts/native-cli/qoder-legacy.json"
+        ))
+        .unwrap();
+        for case in data["cases"].as_array().unwrap() {
+            let headers = legacy_headers("SYNTHETIC", &case["expected"]).unwrap();
+            for key in ["Authorization", "X-Request-ID", "X-Session-ID"] {
+                assert_eq!(
+                    headers[key.to_lowercase()].to_str().unwrap(),
+                    case["headers"][key].as_str().unwrap()
+                );
+                assert!(headers[key.to_lowercase()].is_sensitive());
+            }
+        }
+    }
     struct Fixed;
     impl rsa::rand_core::TryRng for Fixed {
         type Error = std::convert::Infallible;

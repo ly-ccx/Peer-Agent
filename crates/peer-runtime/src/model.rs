@@ -203,7 +203,9 @@ impl NativeModel {
         )?;
         let bytes =
             serde_json::to_vec(&body).map_err(|_| ModelError::new("model_request_invalid"))?;
-        let bytes = if self.wire == wire::Wire::Qoder {
+        let bytes = if self.wire == wire::Wire::Qoder
+            && self.generation.qoder_dialect == wire::QoderDialect::Prepared
+        {
             let raw = std::str::from_utf8(&bytes)
                 .map_err(|_| ModelError::new("model_request_invalid"))?;
             let encoded = crate::qoder::encode_body(raw)

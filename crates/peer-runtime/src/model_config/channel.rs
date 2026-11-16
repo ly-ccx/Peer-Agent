@@ -124,7 +124,11 @@ fn headers(
                 && (normalized.starts_with("cosy-")
                     || matches!(
                         normalized.as_str(),
-                        "login-version" | "x-model-key" | "x-model-source"
+                        "login-version"
+                            | "x-model-key"
+                            | "x-model-source"
+                            | "x-request-id"
+                            | "x-session-id"
                     )))
             || matches!(
                 normalized.as_str(),

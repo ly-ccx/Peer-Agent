@@ -1,279 +1,45 @@
-//! Read-only account ownership. Every send fences the actual source and model.
+//! Selected account owns source identity and one immutable request dialect.
+#[cfg(test)]
+use super::CREDENTIAL_LIMIT;
+#[cfg(test)]
+use super::environment::ENV_NAMES;
 use super::{
-    CACHE_LIMIT, CREDENTIAL_LIMIT,
-    account_files::{self, Observation},
+    account_files::ReadSet,
     authentication::{self, Fields, Runtime},
-    sensitive_json::SensitiveJson,
+    environment::Environment,
+    local_auth::Login,
 };
-use crate::{CancellationToken, model::ModelError, model_config::ModelBinding};
+use crate::{
+    CancellationToken,
+    model::{ModelError, wire::QoderDialect},
+    model_config::ModelBinding,
+};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
-use std::{
-    path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(test)]
 use zeroize::Zeroizing;
-const ENV_NAMES: &[&str] = &[
-    "HOME",
-    "QODER_CONFIG_DIR",
-    "QODER_CLI_HOME",
-    "QODER_ACCESS_TOKEN",
-    "QODER_PERSONAL_ACCESS_TOKEN",
-    "QODER_PAT",
-    "QODER_INFERENCE_ENDPOINT",
-    "QODER_INFER_ENDPOINT",
-    "QODER_ENV",
-    "QODER_ENVIRONMENT",
-    "QODER_CLIENT_TYPE",
-    "QODER_BUSINESS_PRODUCT",
-    "QODER_BUSINESS_TYPE",
-    "QODER_SCENE",
-    "QODER_SESSION_TYPE",
-];
-struct Environment(Vec<Option<Zeroizing<String>>>);
-impl Environment {
-    fn capture() -> Result<Self, ModelError> {
-        ENV_NAMES
-            .iter()
-            .map(|name| match std::env::var(name) {
-                Ok(value) if value.len() <= 8192 => Ok(Some(Zeroizing::new(value))),
-                Err(std::env::VarError::NotPresent) => Ok(None),
-                _ => Err(invalid()),
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .map(Self)
-    }
-    fn get(&self, name: &str) -> Option<&str> {
-        self.0[ENV_NAMES
-            .iter()
-            .position(|n| *n == name)
-            .expect("registered Qoder environment")]
-        .as_deref()
-        .map(String::as_str)
-    }
-    fn text(&self, name: &str) -> Option<&str> {
-        self.get(name)
-            .map(peer_protocol::javascript_trim)
-            .filter(|v| !v.is_empty())
-    }
-    fn fingerprint(&self) -> [u8; 32] {
-        let mut hash = Sha256::new();
-        for value in &self.0 {
-            match value {
-                Some(v) => {
-                    hash.update([1]);
-                    hash.update((v.len() as u64).to_be_bytes());
-                    hash.update(v.as_bytes());
-                }
-                None => hash.update([0]),
-            }
-        }
-        hash.finalize().into()
-    }
-    fn root(&self) -> Result<PathBuf, ModelError> {
-        let root = if let Some(path) = self.text("QODER_CONFIG_DIR") {
-            PathBuf::from(path)
-        } else {
-            Path::new(
-                self.text("QODER_CLI_HOME")
-                    .or_else(|| self.text("HOME"))
-                    .ok_or_else(invalid)?,
-            )
-            .join(".qoder")
-        };
-        if root.is_absolute() {
-            Ok(root)
-        } else {
-            std::env::current_dir()
-                .map(|cwd| cwd.join(root))
-                .map_err(|_| invalid())
-        }
-    }
-    fn runtime(&self) -> Runtime {
-        let value = |name, default: &str| {
-            self.get(name)
-                .filter(|s| !s.is_empty())
-                .unwrap_or(default)
-                .to_owned()
-        };
-        Runtime {
-            client: value("QODER_CLIENT_TYPE", "5"),
-            product: value("QODER_BUSINESS_PRODUCT", "cli"),
-            business: value("QODER_BUSINESS_TYPE", "agent"),
-            scene: value("QODER_SCENE", "assistant"),
-        }
-    }
-}
-fn invalid() -> ModelError {
-    ModelError::new("qoder_auth_invalid")
-}
 fn now() -> Result<u64, ModelError> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|v| v.as_secs())
         .map_err(|_| ModelError::new("qoder_auth_clock_invalid"))
 }
-fn expiry(profile: &Value, now: u64) -> Result<(), ModelError> {
-    let Some(value) = profile.get("expire_time").filter(|v| !v.is_null()) else {
-        return Ok(());
-    };
-    let value = match value {
-        Value::Number(n) => n.as_f64(),
-        Value::String(s) => s.parse().ok(),
-        _ => None,
-    }
-    .filter(|n: &f64| n.is_finite() && *n >= 0.0)
-    .ok_or_else(invalid)?;
-    if value > 0.0 && value <= now.saturating_add(60) as f64 {
-        return Err(ModelError::new("qoder_auth_expired"));
-    }
-    Ok(())
+struct Prepared {
+    fields: Fields,
+    metadata: Value,
+    runtime: Runtime,
 }
-fn validate_profile(profile: &Value) -> Result<(), ModelError> {
-    if !profile.is_object() {
-        return Err(invalid());
-    }
-    let bounded_text = |key, limit| -> Result<Option<&str>, ModelError> {
-        match profile.get(key) {
-            None => Ok(None),
-            Some(Value::String(s)) if s.len() <= limit => Ok(Some(s)),
-            _ => Err(invalid()),
-        }
-    };
-    bounded_text("uid", 512)?
-        .filter(|s| !s.is_empty())
-        .ok_or_else(invalid)?;
-    let primary = bounded_text("security_oauth_token", 8192)?
-        .map(peer_protocol::javascript_trim)
-        .filter(|s| !s.is_empty());
-    let secondary = bounded_text("access_token", 8192)?
-        .map(peer_protocol::javascript_trim)
-        .filter(|s| !s.is_empty());
-    primary
-        .or(secondary)
-        .ok_or(ModelError::new("qoder_auth_token_missing"))?;
-    for name in ["encrypt_user_info", "key", "organization_id"] {
-        bounded_text(name, 8192)?;
-    }
-    if let Some(tags) = profile.get("organization_tags") {
-        let tags = tags
-            .as_array()
-            .filter(|a| a.len() <= 128)
-            .ok_or_else(invalid)?;
-        if tags
-            .iter()
-            .any(|v| !v.as_str().is_some_and(|s| s.len() <= 512))
-        {
-            return Err(invalid());
-        }
-    }
-    if profile
-        .get("data_policy_agreed")
-        .is_some_and(|v| !v.is_boolean())
-    {
-        return Err(invalid());
-    }
-    Ok(())
-}
-enum EndpointObservation {
-    File(Observation),
-    Absent(PathBuf),
-    Explicit,
-}
-impl EndpointObservation {
-    fn validate(&self) -> Result<(), ModelError> {
-        match self {
-            Self::File(file) => file.validate(),
-            Self::Explicit => Ok(()),
-            Self::Absent(path) => match std::fs::symlink_metadata(path) {
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                _ => Err(ModelError::new("qoder_auth_changed")),
-            },
-        }
-    }
-}
-fn endpoint(
-    env: &Environment,
-    root: &Path,
-    cancel: &CancellationToken,
-) -> Result<(reqwest::Url, EndpointObservation), ModelError> {
-    let explicit = env
-        .get("QODER_INFERENCE_ENDPOINT")
-        .filter(|s| !s.is_empty())
-        .or_else(|| env.get("QODER_INFER_ENDPOINT"))
-        .map(peer_protocol::javascript_trim)
-        .filter(|v| !v.is_empty());
-    let mut observed = EndpointObservation::Explicit;
-    let mut cache = None;
-    if explicit.is_none() {
-        let path = root.join(".cache/endpoint-cache.json");
-        match std::fs::symlink_metadata(&path) {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                observed = EndpointObservation::Absent(path)
-            }
-            Err(_) => return Err(ModelError::new("qoder_auth_unavailable")),
-            Ok(_) => {
-                let (bytes, observation) = account_files::read(&path, CACHE_LIMIT, cancel)?;
-                cache = Some(SensitiveJson::parse(&bytes, CACHE_LIMIT)?);
-                observed = EndpointObservation::File(observation);
-            }
-        }
-    }
-    if cache.as_ref().is_some_and(|c| !c.0["entries"].is_object()) {
-        return Err(invalid());
-    }
-    let env_name = env
-        .text("QODER_ENV")
-        .or_else(|| env.text("QODER_ENVIRONMENT"))
-        .unwrap_or("prod");
-    let entries = cache.as_ref().map(|c| &c.0["entries"]);
-    let cached = entries.and_then(|e| {
-        [
-            &e[env_name]["endpoint"],
-            &e["prod"]["endpoint"],
-            &e[env_name]["inferEndpoints"][0],
-            &e["prod"]["inferEndpoints"][0],
-        ]
-        .into_iter()
-        .filter_map(Value::as_str)
-        .map(peer_protocol::javascript_trim)
-        .find(|v| !v.is_empty())
-    });
-    let fallback = match env_name.to_lowercase().as_str() {
-        "daily" => "https://daily-api3.qoder.sh",
-        "test" => "https://test-api3.qoder.sh",
-        _ => "https://api3.qoder.sh",
-    };
-    let base = explicit
-        .or(cached)
-        .unwrap_or(fallback)
-        .trim_end_matches('/');
-    let base_url =
-        reqwest::Url::parse(base).map_err(|_| ModelError::new("model_endpoint_invalid"))?;
-    if !matches!(base_url.scheme(), "http" | "https")
-        || base_url.host_str().is_none()
-        || !base_url.username().is_empty()
-        || base_url.password().is_some()
-        || base_url.query().is_some()
-        || base_url.fragment().is_some()
-    {
-        return Err(ModelError::new("model_endpoint_invalid"));
-    }
-    let url = reqwest::Url::parse(&format!("{base}{}", authentication::INFER_PATH))
-        .map_err(|_| ModelError::new("model_endpoint_invalid"))?;
-    Ok((url, observed))
+enum Mode {
+    Prepared(Box<Prepared>),
+    Legacy,
 }
 pub(crate) struct Account {
-    profile: SensitiveJson,
-    machine: Zeroizing<String>,
-    fields: Fields,
-    observations: Vec<Observation>,
-    endpoint_observation: EndpointObservation,
+    login: Login,
+    reads: ReadSet,
+    mode: Mode,
     environment: [u8; 32],
-    runtime: Runtime,
     binding: ModelBinding,
     endpoint: reqwest::Url,
-    catalog: super::catalog::Catalog,
     session_type: String,
 }
 impl Account {
@@ -291,51 +57,37 @@ impl Account {
         if cancel.is_cancelled() {
             return Err(ModelError::new("CANCELLED"));
         }
-        if [
-            "QODER_ACCESS_TOKEN",
-            "QODER_PERSONAL_ACCESS_TOKEN",
-            "QODER_PAT",
-        ]
-        .iter()
-        .any(|name| env.text(name).is_some())
-        {
-            // The current prepared-infer dialect requires profile fields. Never
-            // fall back to a different on-disk account when an env token wins.
-            return Err(ModelError::new("qoder_local_user_info_required"));
-        }
         let root = env.root()?;
-        let (machine, first) = account_files::read(&root.join(".auth/machine_id"), 4096, cancel)?;
-        let machine = std::str::from_utf8(&machine).map_err(|_| invalid())?;
-        let machine = Zeroizing::new(peer_protocol::javascript_trim(machine).to_owned());
-        let key = Zeroizing::new(machine.encode_utf16().take(16).collect::<Vec<_>>());
-        let key = Zeroizing::new(String::from_utf16(&key).map_err(|_| invalid())?);
-        let (cipher, second) =
-            account_files::read(&root.join(".auth/user"), CREDENTIAL_LIMIT, cancel)?;
-        let cipher = std::str::from_utf8(&cipher).map_err(|_| invalid())?;
-        let plain =
-            super::decrypt_credential(peer_protocol::javascript_trim(cipher), key.as_bytes())
-                .map_err(|_| invalid())?;
-        let profile = SensitiveJson::parse(plain.expose().as_bytes(), CREDENTIAL_LIMIT)?;
-        validate_profile(&profile.0)?;
-        expiry(&profile.0, now()?)?;
-        let fields = Fields::from_profile(&profile.0)?;
-        let catalog = super::catalog::Catalog::load(
-            &root,
-            profile.0["uid"].as_str().ok_or_else(invalid)?,
-            cancel,
-        )?;
-        let (endpoint, endpoint_observation) = endpoint(&env, &root, cancel)?;
+        let mut reads = ReadSet::default();
+        let login = Login::load(&env, &root, &mut reads, cancel)?;
+        login.validate(now()?)?;
+        let catalog = super::catalog::Catalog::load(&root, login.uid(), &mut reads, cancel)?;
+        let metadata = catalog.metadata(binding.model_id(), binding.model_options())?;
+        let (mode, endpoint) = if let Some(metadata) = metadata {
+            let (profile, _) = login.prepared()?;
+            let fields = Fields::from_profile(profile)?;
+            let endpoint = super::endpoint::prepared(&env, &root, &mut reads, cancel)?;
+            (
+                Mode::Prepared(Box::new(Prepared {
+                    fields,
+                    metadata,
+                    runtime: env.runtime(),
+                })),
+                endpoint,
+            )
+        } else {
+            (
+                Mode::Legacy,
+                super::endpoint::legacy(&env, binding.base_url())?,
+            )
+        };
         let account = Self {
-            profile,
-            machine,
-            fields,
-            observations: vec![first, second],
-            endpoint_observation,
+            login,
+            reads,
+            mode,
             environment: env.fingerprint(),
-            runtime: env.runtime(),
             binding,
             endpoint,
-            catalog,
             session_type: env
                 .get("QODER_SESSION_TYPE")
                 .filter(|s| !s.is_empty())
@@ -350,39 +102,23 @@ impl Account {
             return Err(ModelError::new("CANCELLED"));
         }
         self.binding.validate()?;
-        for observation in &self.observations {
-            observation.validate()?;
-        }
-        self.endpoint_observation.validate()?;
-        self.catalog.validate()?;
-        expiry(&self.profile.0, now)?;
-        Ok(())
+        self.reads.validate()?;
+        self.login.validate(now)
     }
     pub(crate) fn session_type(&self) -> &str {
         &self.session_type
     }
-    pub(crate) fn metadata(
-        &self,
-        model: &str,
-        config: &Value,
-        selected: &Value,
-    ) -> Result<Value, ModelError> {
-        let m = config["models"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .find(|v| v["id"] == selected["modelProviderId"])
-            .ok_or_else(invalid)?;
-        let c = config["channels"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .find(|v| v["id"] == m["groupId"])
-            .ok_or_else(invalid)?;
-        self.catalog.metadata(
-            model,
-            m.get("modelOptions").or_else(|| c.get("modelOptions")),
-        )
+    pub(crate) fn metadata(&self) -> Option<&Value> {
+        match &self.mode {
+            Mode::Prepared(prepared) => Some(&prepared.metadata),
+            Mode::Legacy => None,
+        }
+    }
+    pub(crate) fn dialect(&self) -> QoderDialect {
+        match self.mode {
+            Mode::Prepared(_) => QoderDialect::Prepared,
+            Mode::Legacy => QoderDialect::Legacy,
+        }
     }
     pub(crate) fn endpoint(&self) -> &reqwest::Url {
         &self.endpoint
@@ -397,22 +133,26 @@ impl Account {
         if Environment::capture()?.fingerprint() != self.environment {
             return Err(ModelError::new("qoder_auth_changed"));
         }
-        let model = body["model_config"]["key"].as_str().ok_or_else(invalid)?;
-        let source = body["model_config"]["source"]
-            .as_str()
-            .ok_or_else(invalid)?;
-        authentication::Request {
-            profile: &self.profile.0,
-            machine: &self.machine,
-            fields: &self.fields,
-            runtime: &self.runtime,
-            model,
-            source,
-            encoded,
+        match &self.mode {
+            Mode::Prepared(prepared) => {
+                let (profile, machine) = self.login.prepared()?;
+                let invalid = || ModelError::new("qoder_auth_invalid");
+                authentication::Request {
+                    profile,
+                    machine,
+                    fields: &prepared.fields,
+                    runtime: &prepared.runtime,
+                    model: body["model_config"]["key"].as_str().ok_or_else(invalid)?,
+                    source: body["model_config"]["source"]
+                        .as_str()
+                        .ok_or_else(invalid)?,
+                    encoded,
+                }
+                .headers(now()?)
+            }
+            Mode::Legacy => authentication::legacy_headers(self.login.token(), body),
         }
-        .headers(now()?)
     }
 }
-
 #[cfg(test)]
 mod tests;

@@ -23,6 +23,13 @@ pub enum Wire {
     #[serde(rename = "qoder-private")]
     Qoder,
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum QoderDialect {
+    #[default]
+    Prepared,
+    Legacy,
+}
 fn default_effort() -> String {
     "default".into()
 }
@@ -56,6 +63,8 @@ pub struct GenerationOptions {
     pub user_prompt_id: Option<String>,
     pub session_id: Option<String>,
     pub qoder_metadata: Option<Value>,
+    #[serde(default)]
+    pub qoder_dialect: QoderDialect,
     pub model_option_values: Option<Value>,
     pub qoder_session_type: Option<String>,
 }

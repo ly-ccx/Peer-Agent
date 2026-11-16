@@ -58,6 +58,7 @@ fn command_plan(f: &Fixture, plan: &str) -> Command {
         "QODER_BUSINESS_TYPE",
         "QODER_SCENE",
         "QODER_SESSION_TYPE",
+        "QODER_MODEL_SERVER_HOST",
     ] {
         command.env_remove(name);
     }
@@ -398,3 +399,7 @@ fn qoder_outer_business_error_cannot_hide_behind_an_inner_executable_tool() {
         assert!(f.history().iter().all(|v| !v["segments"].is_array()));
     }
 }
+
+mod legacy;
+
+mod network;

@@ -47,6 +47,9 @@ pub(super) fn context(metadata: &Value, values: &Value) -> (Value, Option<Value>
     (context, tier)
 }
 pub(super) fn encode(input: &WireInput<'_>) -> Result<Value, ModelError> {
+    if input.options.qoder_dialect == QoderDialect::Legacy {
+        return legacy(input);
+    }
     let empty = json!({});
     let metadata = input.options.qoder_metadata.as_ref().unwrap_or(&empty);
     let values = input.options.model_option_values.as_ref().unwrap_or(&empty);
@@ -111,9 +114,63 @@ pub(super) fn encode(input: &WireInput<'_>) -> Result<Value, ModelError> {
     }))
 }
 
+fn legacy(input: &WireInput<'_>) -> Result<Value, ModelError> {
+    let mut messages = vec![json!({"role":"system","content":input.system})];
+    messages.extend_from_slice(input.messages);
+    let id = uuid::Uuid::new_v4().to_string();
+    let model = if input.model.trim().is_empty() || input.model.trim().eq_ignore_ascii_case("auto")
+    {
+        "auto"
+    } else {
+        input.model.trim()
+    };
+    let mut body = json!({
+        "model":model,"messages":messages::normalize(&messages)?,"stream":true,"stream_options":{"include_usage":true},"tools":schema::tools(input.tools),
+        "metadata":{"context":{"request_id":id,"request_set_id":id,"session_id":uuid::Uuid::new_v4().to_string(),"task_id":"peer-agent","client_type":"5"}}
+    });
+    if let Some(n) = token_limit(input.options.max_output_tokens) {
+        body["max_tokens"] = token_json(n);
+    }
+    Ok(body)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn legacy_requests_match_actual_ts_without_encoding_or_prepared_only_fields() {
+        let data: Value = serde_json::from_str(include_str!(
+            "../../../../../packages/protocol/contracts/native-cli/qoder-legacy.json"
+        ))
+        .unwrap();
+        for case in data["cases"].as_array().unwrap() {
+            let i = &case["input"];
+            let mut options: GenerationOptions = serde_json::from_value(i.clone()).unwrap();
+            options.qoder_dialect = QoderDialect::Legacy;
+            let mut body = encode(&WireInput {
+                model: i["model"].as_str().unwrap(),
+                system: i["system"].as_str().unwrap(),
+                stable_system: None,
+                messages: i["messages"].as_array().unwrap(),
+                tools: i["tools"].as_array().map(Vec::as_slice),
+                options: &options,
+            })
+            .unwrap();
+            assert_eq!(
+                body["metadata"]["context"]["request_id"],
+                body["metadata"]["context"]["request_set_id"]
+            );
+            for key in ["request_id", "request_set_id", "session_id"] {
+                assert!(
+                    uuid::Uuid::parse_str(body["metadata"]["context"][key].as_str().unwrap())
+                        .is_ok()
+                );
+                body["metadata"]["context"][key] =
+                    case["expected"]["metadata"]["context"][key].clone();
+            }
+            assert_eq!(body, case["expected"]);
+        }
+    }
     #[test]
     fn qoder_builder_matches_actual_ts_history_schema_effort_and_context_vectors() {
         let data: Value = serde_json::from_str(include_str!(
