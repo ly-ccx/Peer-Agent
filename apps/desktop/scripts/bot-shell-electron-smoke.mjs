@@ -466,7 +466,20 @@ const updaterTimer=setInterval(()=>{
   try {
     const windows=BrowserWindow.getAllWindows();
     if(!windows.length)return;
-    for(const window of windows)window.webContents.send('updater:event',command.event);
+    if(command.operation==='install-download-fixture') {
+      globalThis.rcUpdateDownloadCalls=0;
+      ipcMain.removeHandler('updater:download');
+      ipcMain.handle('updater:download',async()=>{
+        const call=++globalThis.rcUpdateDownloadCalls;
+        await new Promise(resolve=>setTimeout(resolve,call===4?20:700));
+        return {currentVersion:'0.1.0-rc.9',channel:'beta',preference:'auto',enabled:true,
+          phase:call===4?'downloaded':'downloading',availableVersion:'0.1.0-rc.99',percent:call===4?100:42};
+      });
+    } else if(command.operation==='download-count') {
+      // Read the actual main-process counter without an inspector Promise.
+    } else if(!command.operation && command.event) {
+      for(const window of windows)window.webContents.send('updater:event',command.event);
+    } else {throw Error('Unknown isolated updater operation');}
     receipt={seq:command.seq,ok:true,windows:windows.length,downloadCalls:globalThis.rcUpdateDownloadCalls||0};
   }catch(error){receipt={seq:command.seq,ok:false,error:error.message};}
   updaterSequence=command.seq;
@@ -525,13 +538,13 @@ const until = async (read, predicate, timeout = 30000) => {
 const quickNative = createQuickChatNativeController({ commandFile: quickCommand, receiptFile: quickReceipt, until });
 const attentionNative = createAttentionNativeController({ commandFile: attentionCommand, receiptFile: attentionReceipt, until });
 let updaterSequence = 0;
-const emitUpdaterEvent = async (event, { afterDownloadCall } = {}) => {
+const emitUpdaterEvent = async (event, { afterDownloadCall, operation } = {}) => {
   const seq = ++updaterSequence;
-  writeFileSync(updaterCommand + '.next', JSON.stringify({ seq, event, ...(afterDownloadCall ? { afterDownloadCall } : {}) }));
+  writeFileSync(updaterCommand + '.next', JSON.stringify({ seq, event, ...(operation ? { operation } : {}), ...(afterDownloadCall ? { afterDownloadCall } : {}) }));
   renameSync(updaterCommand + '.next', updaterCommand);
   const receipt = await until(() => JSON.parse(readFileSync(updaterReceipt, 'utf8')), value => value.seq === seq, 5000);
   assert.equal(receipt.ok, true, receipt.error || 'isolated main must acknowledge synthetic event delivery');
-  (report.updaterReceipts ??= []).push({ ...receipt, type: event.type });
+  (report.updaterReceipts ??= []).push({ ...receipt, type: event?.type ?? operation });
   return receipt;
 };
 try {
