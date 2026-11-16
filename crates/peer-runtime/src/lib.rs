@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 mod effect_admission;
 mod mcp;
+mod mcp_auth;
+pub mod mcp_oauth;
 
 pub mod access_policy;
 pub mod canonical_history;

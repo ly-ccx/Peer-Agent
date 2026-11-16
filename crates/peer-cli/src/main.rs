@@ -25,7 +25,7 @@ fn run() -> io::Result<CliExit> {
         Command::Version => writeln!(out, "peer {}", VERSION.trim())?,
         Command::Help => writeln!(
             out,
-            "Peer native CLI migration candidate\n\nUsage: peer-native [--help|--version|doctor|--classic|bots]\n       peer-native exec --plan <canonical-goal-id> [--max-turns N]\n       peer-native recover --plan <canonical-goal-id>\n\nNative exec supports fresh delegated worker admissions on openai-chat compatible\nchannels. Unsupported context, checkpoints and auth require their migration adapter.\nThe interactive TUI edits drafts. No Bun/Node sidecar is started."
+            "Peer native CLI migration candidate\n\nUsage: peer-native [--help|--version|doctor|--classic|bots]\n       peer-native exec --plan <canonical-goal-id> [--max-turns N]\n       peer-native recover --plan <canonical-goal-id>\n       peer-native mcp auth <server-id>\n       peer-native mcp refresh <server-id>\n\nNative exec supports fresh delegated worker admissions with native model and MCP\ntransports. Unsupported configuration is rejected. OAuth commands update configured\nVault credentials; they do not grant tools. The interactive TUI edits drafts.\nNo Bun/Node sidecar is started."
         )?,
         Command::Doctor => writeln!(
             out,
@@ -51,6 +51,10 @@ fn run() -> io::Result<CliExit> {
         Command::Recover(plan) => {
             drop(out);
             return peer_cli::native_exec::run(&plan, 0, true);
+        }
+        Command::McpAuth { server, refresh } => {
+            drop(out);
+            return peer_cli::mcp::run(&server, refresh);
         }
         Command::Interactive => {
             drop(out);

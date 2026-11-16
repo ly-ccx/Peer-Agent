@@ -22,6 +22,8 @@ pub use resources::{
 mod context_accounting;
 mod mcp_inventory;
 pub use mcp_inventory::{McpRegistrySnapshot, McpRegistryStore};
+mod mcp_credentials;
+pub use mcp_credentials::{McpCredentialBinding, McpCredentialStore, McpCredentialTransaction};
 mod conversation_preview;
 mod conversation_write;
 pub use context_accounting::context_model_key;
@@ -53,6 +55,9 @@ use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoreError {
+    McpCredentialInvalid,
+    McpCredentialMigrationRequired,
+    McpCredentialMissing,
     McpInventoryInvalid,
     ContextInvalid,
     ContextConflict,
@@ -92,6 +97,9 @@ pub enum StoreError {
 impl StoreError {
     pub fn code(self) -> &'static str {
         match self {
+            Self::McpCredentialInvalid => "mcp_credential_invalid",
+            Self::McpCredentialMigrationRequired => "mcp_credential_migration_required",
+            Self::McpCredentialMissing => "mcp_credential_missing",
             Self::McpInventoryInvalid => "MCP_INVENTORY_INVALID",
             Self::ContextInvalid => "CONTEXT_SNAPSHOT_INVALID",
             Self::ContextConflict => "CONTEXT_SNAPSHOT_CHANGED",

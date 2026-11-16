@@ -15,7 +15,7 @@ use tokio::sync::watch;
 #[derive(Clone)]
 enum Ready {
     Starting,
-    Connected(McpPeer),
+    Connected(McpPeer, Arc<crate::mcp_auth::SensitiveConfig>),
     Failed(&'static str),
 }
 struct Cell {
@@ -24,6 +24,7 @@ struct Cell {
 pub(super) struct McpProvider {
     manifests: Vec<Value>,
     configs: HashMap<String, Value>,
+    bindings: HashMap<String, Option<peer_store::McpCredentialBinding>>,
     revision: String,
     resource: HostResourcePlan,
     owner: Recorder,
@@ -34,10 +35,12 @@ impl McpProvider {
         snapshot: &McpRegistrySnapshot,
         resource: &HostResourcePlan,
         owner: &Value,
+        home: &Path,
     ) -> Result<Self, HostError> {
         let owner: Recorder = serde_json::from_value(owner["recorder"].clone())
             .map_err(|_| HostError("native_recorder_unavailable"))?;
         let mut configs = HashMap::new();
+        let mut bindings = HashMap::new();
         for manifest in &snapshot.inventory.manifests {
             let id = manifest["providerId"]
                 .as_str()
@@ -47,9 +50,10 @@ impl McpProvider {
             }
             let mut config = snapshot.server(id).ok_or(HostError("mcp_config_invalid"))?;
             config["transport"] = manifest["origin"]["transport"].clone();
-            if manifest["origin"]["authMode"] != "none" {
-                return Err(HostError("native_mcp_credential_adapter_unsupported"));
-            }
+            bindings.insert(
+                id.into(),
+                crate::mcp_auth::binding(home, &config).map_err(HostError)?,
+            );
             if let Some(args) = config["args"].as_array()
                 && (args.len() > 1024
                     || args.iter().any(|v| {
@@ -88,6 +92,7 @@ impl McpProvider {
         Ok(Self {
             manifests: snapshot.inventory.manifests.clone(),
             configs,
+            bindings,
             revision: snapshot.source_revision.clone(),
             resource: resource.clone(),
             owner,
@@ -98,6 +103,7 @@ impl McpProvider {
 struct McpEffect {
     args: Value,
     config: Value,
+    binding: Option<peer_store::McpCredentialBinding>,
     metadata: Value,
     revision: String,
     resource: HostResourcePlan,
@@ -139,6 +145,7 @@ impl CapabilityProvider for McpProvider {
         Ok(Box::new(McpEffect {
             args,
             config,
+            binding: self.bindings[id].clone(),
             metadata: json!({"evidenceKind":"local_mcp_tool_call","serverId":id,"providerId":id,"transport":manifest["origin"]["transport"],"toolName":manifest["origin"]["toolName"]}),
             revision: self.revision.clone(),
             resource: self.resource.clone(),
@@ -191,6 +198,7 @@ impl PreparedEffect for McpEffect {
         if McpRegistryStore::new(&self.home).read()?.source_revision != self.revision {
             return Err(HostError("native_capability_inventory_changed"));
         }
+        crate::mcp_auth::check(&self.home, self.binding.as_ref()).map_err(HostError)?;
         let port = self
             .port
             .clone()
@@ -216,12 +224,14 @@ impl PreparedEffect for McpEffect {
                     .to_owned();
                 host.resources.mark_handle(&self.resource,&json!({"handleId":handle,"toolCallId":call,"state":"active","nativeMcp":native_mcp_metadata(self.metadata["transport"].as_str().unwrap(),&self.revision,&json!(self.owner),"connection")}),now)?;
                 let owned_handle = handle.clone();
-                let (config, owner, port, ready, owned) = (
+                let (config, owner, port, ready, owned, home, binding) = (
                     self.config.clone(),
                     self.owner.clone(),
                     port.clone(),
                     cell.ready.clone(),
                     cancel.clone(),
+                    self.home.clone(),
+                    self.binding.clone(),
                 );
                 let slot = host.live.track_handle(
                     &self.resource.execution,
@@ -229,10 +239,22 @@ impl PreparedEffect for McpEffect {
                     &call,
                     cancel.clone(),
                     async move {
-                        match Connection::open(&config, &owned, &port, &owned_handle, &owner).await
-                        {
-                            Ok((peer, connection)) => {
-                                ready.send_replace(Ready::Connected(peer));
+                        let resolved = async {
+                            let config = Arc::new(
+                                crate::mcp_auth::resolve(&home, config, binding.as_ref(), &owned)
+                                    .await?,
+                            );
+                            port.check().await.map_err(|e| e.0)?;
+                            crate::mcp_auth::check_access(&home, binding.as_ref())?;
+                            let (peer, connection) =
+                                Connection::open(&config.0, &owned, &port, &owned_handle, &owner)
+                                    .await?;
+                            Ok::<_, &'static str>((peer, connection, config))
+                        }
+                        .await;
+                        match resolved {
+                            Ok((peer, connection, config)) => {
+                                ready.send_replace(Ready::Connected(peer, config));
                                 connection.run(owned).await
                             }
                             Err(code) => {
@@ -260,10 +282,10 @@ impl PreparedEffect for McpEffect {
         };
         Ok(Box::pin(async move {
             let mut ready = cell.ready.subscribe();
-            let peer = loop {
+            let (peer, config) = loop {
                 let state = ready.borrow().clone();
                 match state {
-                    Ready::Connected(peer) => break peer,
+                    Ready::Connected(peer, config) => break (peer, config),
                     Ready::Failed(code) => return EffectOutcome::not_dispatched(code),
                     Ready::Starting => {
                         tokio::select! {biased;_=cancel.cancelled()=>return EffectOutcome::not_dispatched("CANCELLED"),value=ready.changed()=>if value.is_err(){return EffectOutcome::not_dispatched("mcp_connection_closed")}}
@@ -274,11 +296,14 @@ impl PreparedEffect for McpEffect {
             if let Err(code) = port.check().await {
                 return EffectOutcome::not_dispatched(code.0);
             }
+            if let Err(code) = crate::mcp_auth::check_access(&self.home, self.binding.as_ref()) {
+                return EffectOutcome::not_dispatched(code);
+            }
             let name = self.metadata["toolName"].as_str().unwrap().to_owned();
             let result = peer
                 .call(name, self.args.clone(), &cancel)
                 .await
-                .and_then(|raw| crate::mcp::prepare_result(raw, &self.config));
+                .and_then(|raw| crate::mcp::prepare_result(raw, &config.0));
             match result {
                 Ok(output) => EffectOutcome {
                     status: if output["isError"] == true {

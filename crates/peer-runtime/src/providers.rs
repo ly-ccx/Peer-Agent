@@ -118,11 +118,12 @@ impl ProviderRegistry {
         snapshot: &peer_store::McpRegistrySnapshot,
         resource: &peer_store::HostResourcePlan,
         owner: &Value,
+        home: &Path,
     ) -> Result<Self, HostError> {
         let mut registry = Self::default();
-        registry
-            .providers
-            .push(Box::new(mcp::McpProvider::new(snapshot, resource, owner)?));
+        registry.providers.push(Box::new(mcp::McpProvider::new(
+            snapshot, resource, owner, home,
+        )?));
         Ok(registry)
     }
     pub fn project(&self) -> Result<RuntimeProjection, HostError> {

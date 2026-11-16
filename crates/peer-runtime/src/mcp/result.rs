@@ -94,6 +94,15 @@ pub(crate) fn prepare_result(raw: Value, config: &Value) -> Result<Value, &'stat
 /// Sanitize before any Tool Result, model context or Evidence persistence.
 pub(crate) fn redact(mut value: Value, config: &Value) -> Value {
     let mut secrets = Vec::new();
+    if let Some(values) = config["_credentialRedaction"].as_array() {
+        secrets.extend(
+            values
+                .iter()
+                .filter_map(|v| v.as_str())
+                .filter(|v| !v.is_empty())
+                .map(str::to_owned),
+        );
+    }
     for key in ["headers", "env"] {
         if let Some(map) = config[key].as_object() {
             for v in map.values() {

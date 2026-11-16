@@ -248,7 +248,7 @@ export interface McpCredentialMetadataView {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly lastFour?: string;
-  readonly storage?: 'safeStorage' | 'file-fallback';
+  readonly storage?: 'safeStorage' | 'file-fallback' | 'vault';
 }
 
 export interface McpCredentialPutRequest {

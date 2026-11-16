@@ -58,6 +58,25 @@ fn validate_key(key: &str) -> Result<(), &'static str> {
     if key.is_empty() || key.len() > MAX_KEY_LEN {
         return Err("credential_key_invalid");
     }
+    if key.starts_with("mcp/") {
+        let parts: Vec<_> = key.split('/').collect();
+        return if parts.len() == 3
+            && parts[1].len() == 64
+            && parts[1]
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            && parts[2].len() == 36
+            && parts[2].bytes().enumerate().all(|(i, b)| match i {
+                8 | 13 | 18 | 23 => b == b'-',
+                14 => b == b'4',
+                19 => matches!(b, b'8' | b'9' | b'a' | b'b'),
+                _ => b.is_ascii_digit() || (b'a'..=b'f').contains(&b),
+            }) {
+            Ok(())
+        } else {
+            Err("credential_key_invalid")
+        };
+    }
     if !key.starts_with("model/") {
         return Err("credential_key_namespace_denied");
     }
@@ -151,5 +170,23 @@ mod tests {
 
         let future = Request::Ping { version: 2 };
         assert_eq!(future.validate(), Err("protocol_version_unsupported"));
+    }
+
+    #[test]
+    fn mcp_slots_have_an_exact_hash_and_rfc4122_v4_generation() {
+        let key = format!(
+            "mcp/{}/12345678-1234-4123-8123-123456789abc",
+            "a".repeat(64)
+        );
+        assert!(validate_key(&key).is_ok());
+        for invalid in [
+            key.replace("4123", "5123"),
+            key.replace("8123", "c123"),
+            format!("{key}/extra"),
+            key.to_uppercase(),
+            "mcp/arbitrary/token".into(),
+        ] {
+            assert!(validate_key(&invalid).is_err(), "{invalid}");
+        }
     }
 }

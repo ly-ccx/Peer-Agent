@@ -164,7 +164,9 @@ fn remote_error_is_known_but_lost_or_oversized_results_preserve_unknown_effects(
     }
 }
 
+mod credentials;
 mod http;
+mod oauth;
 #[test]
 fn streamable_json_sse_and_legacy_endpoint_sse_have_real_native_tool_loops() {
     for (legacy, sse) in [(false, false), (false, true), (true, true)] {

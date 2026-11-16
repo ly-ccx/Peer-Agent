@@ -86,6 +86,7 @@ impl NativeSessionHost {
             }
         }
         let mcp_inventory = peer_store::McpRegistryStore::new(&self.home).read()?;
+        let mcp_credential_revision = peer_store::McpCredentialStore::new(&self.home).revision()?;
         if origin["capabilityAdmission"]["required"]
             .as_array()
             .into_iter()
@@ -217,8 +218,12 @@ impl NativeSessionHost {
             .await
             .ok_or(HostError("native_recorder_unavailable"))?;
         let native_recorder = json!({"schemaVersion":1,"runtime":"peer-native","execution":facts["execution"],"recorder":recorder});
-        let mut providers =
-            ProviderRegistry::with_mcp(&mcp_inventory, &current.resource, &native_recorder)?;
+        let mut providers = ProviderRegistry::with_mcp(
+            &mcp_inventory,
+            &current.resource,
+            &native_recorder,
+            &self.home,
+        )?;
         let projection = providers.project()?;
         if self.resources.has_claim(&current.resource)?
             && !self.resources.admitted(&current.resource, &epoch)?
@@ -263,6 +268,7 @@ impl NativeSessionHost {
         let definitions = projection.definitions();
         let frame = super::context_pipeline::RequestFrame {
             mcp_revision: &mcp_inventory.source_revision,
+            mcp_credential_revision: &mcp_credential_revision,
             plan: plan_id,
             goal_revision: &current.goal.source_revision,
             goal: &raw,

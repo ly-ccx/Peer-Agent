@@ -208,6 +208,10 @@ impl NativeSessionHost {
         let mut sources = vec![json!([call.plan_id, current.goal.source_revision])];
         if call.permission == ProviderPermission::Mcp {
             sources.push(json!([
+                "mcp-credentials",
+                peer_store::McpCredentialStore::new(&self.home).revision()?
+            ]));
+            sources.push(json!([
                 "mcp-registry",
                 peer_store::McpRegistryStore::new(&self.home)
                     .read()?

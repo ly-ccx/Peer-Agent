@@ -65,7 +65,15 @@ fn main() {
         }
         _ => {}
     }
-    let saved = root.join("synthetic-secret.txt");
+    let saved = if let Some(key) = request["key"].as_str().filter(|v| v.starts_with("mcp/")) {
+        use sha2::{Digest, Sha256};
+        root.join(format!(
+            "synthetic-{:x}.txt",
+            Sha256::digest(key.as_bytes())
+        ))
+    } else {
+        root.join("synthetic-secret.txt")
+    };
     let data = match request["action"].as_str().unwrap() {
         "ping" => json!({"status":"ready","platform":"fixture"}),
         "get" => json!({"secret":fs::read_to_string(saved).ok()}),

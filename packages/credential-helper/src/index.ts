@@ -6,6 +6,7 @@ export const CREDENTIAL_HELPER_PROTOCOL_VERSION = 1 as const;
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_BUFFER_BYTES = 1024 * 1024;
 const KEY_PATTERN = /^model\/[A-Za-z0-9._:-]+\/[A-Za-z0-9._:-]+$/;
+const MCP_KEY_PATTERN = /^mcp\/[a-f0-9]{64}\/[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 
 export type CredentialHelperRequest =
   | { readonly version: 1; readonly action: 'ping' }
@@ -232,7 +233,7 @@ function validateRequest(request: CredentialHelperRequest): void {
 }
 
 function validateCredentialKey(key: string): void {
-  if (!KEY_PATTERN.test(key) || key.includes('..')) {
+  if (key.length > 240 || (!KEY_PATTERN.test(key) && !MCP_KEY_PATTERN.test(key)) || key.includes('..')) {
     throw new CredentialHelperError(
       'credential_key_invalid',
       'The credential key is invalid.',

@@ -87,7 +87,23 @@ fn key_valid(key: &str) -> bool {
         return false;
     }
     let mut parts = key.split('/');
-    if parts.next() != Some("model") {
+    let namespace = parts.next();
+    if namespace == Some("mcp") {
+        let (Some(hash), Some(generation)) = (parts.next(), parts.next()) else {
+            return false;
+        };
+        return parts.next().is_none()
+            && hash.len() == 64
+            && hash
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            && uuid::Uuid::parse_str(generation).is_ok_and(|id| {
+                id.get_version_num() == 4
+                    && id.get_variant() == uuid::Variant::RFC4122
+                    && id.to_string() == generation
+            });
+    }
+    if namespace != Some("model") {
         return false;
     }
     for _ in 0..2 {
@@ -120,6 +136,17 @@ impl std::io::Write for RequestWriter {
 }
 
 impl HelperClient {
+    pub(crate) fn for_home(home: &Path) -> Result<Self, CredentialError> {
+        let path = match std::env::var_os("PEER_CREDENTIAL_HELPER_PATH") {
+            Some(path) => PathBuf::from(path),
+            None => std::env::current_exe()
+                .map_err(|_| CredentialError::Unavailable)?
+                .parent()
+                .ok_or(CredentialError::Unavailable)?
+                .join("peer-credential-helper"),
+        };
+        Self::new(&path, home, Duration::from_secs(10))
+    }
     /// The host resolves the existing explicit-path/adjacent executable policy.
     /// Absolute paths avoid searching PATH or invoking a shell.
     pub fn new(
@@ -342,7 +369,7 @@ impl HelperClient {
     }
 }
 
-fn scrub(value: &mut Value) {
+pub(crate) fn scrub(value: &mut Value) {
     use zeroize::Zeroize;
     match value {
         Value::String(s) => s.zeroize(),

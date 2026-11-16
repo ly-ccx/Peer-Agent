@@ -40,7 +40,7 @@ for(const receipt of roots){const root=receipt.root;assert.ok(existsSync(join(ro
    assert.equal(segment.result.evidence.evidenceKind,'local_mcp_tool_call');assert.equal(segment.result.evidence.serverId,'s');assert.ok(segment.result.evidence.projectionId);assert.ok(segment.result.evidence.permissionGrantId);
    const indexed=readFileSync(join(root,'goal-plans/evidence-index.jsonl'),'utf8').trim().split('\n').map(s=>JSON.parse(s));assert.ok(indexed.some((row:any)=>row.evidenceRef===`tool-result://${segment.toolCallId}`));cases++;
   }}
-  assert.ok(!JSON.stringify(history).includes('fixture-sensitive-secret'));cases++;
+  for(const secret of ['fixture-sensitive-secret','oauth-refreshed-secret','oauth-new-refresh-secret','registered-client-secret'])assert.ok(!JSON.stringify(history).includes(secret),`Credential redaction: ${receipt.case}`);cases++;
  }
  // These roots were created by the actual native executable. Re-save each
  // original Work through the current TS writer, including future opaque facts.

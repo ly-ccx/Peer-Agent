@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod cancellation;
+pub mod mcp;
 pub mod native_exec;
 pub mod terminal;
 
@@ -13,6 +15,7 @@ pub enum Command {
     Interactive,
     Exec { plan: String, max_turns: usize },
     Recover(String),
+    McpAuth { server: String, refresh: bool },
     Unavailable(String),
 }
 
@@ -31,6 +34,12 @@ pub fn command(argv: &[String]) -> Command {
         return Command::Help;
     }
     match argv.first().map(String::as_str) {
+        Some("mcp") if argv.len() == 3 && matches!(argv[1].as_str(), "auth" | "refresh") => {
+            Command::McpAuth {
+                server: argv[2].clone(),
+                refresh: argv[1] == "refresh",
+            }
+        }
         Some("recover") if argv.len() == 3 && argv[1] == "--plan" => {
             Command::Recover(argv[2].clone())
         }

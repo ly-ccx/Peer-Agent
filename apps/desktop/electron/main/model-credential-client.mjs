@@ -9,7 +9,7 @@ import {
 const MODULE_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_ROOT = path.resolve(MODULE_DIRECTORY, '../../../..');
 
-export function createDesktopModelCredentialClient({ dataHome, timeoutMs }) {
+export function createDesktopCredentialClient({ dataHome, timeoutMs }) {
   return new CredentialHelperClient(createSubprocessCredentialTransport({
     dataHome,
     timeoutMs,
@@ -21,3 +21,5 @@ export function createDesktopModelCredentialClient({ dataHome, timeoutMs }) {
     buildProfile: process.env.NODE_ENV === 'production' ? 'release' : 'debug',
   }));
 }
+
+export const createDesktopModelCredentialClient = createDesktopCredentialClient;

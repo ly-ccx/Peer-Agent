@@ -17,6 +17,7 @@ use std::path::Path;
 
 pub(super) struct RequestFrame<'a> {
     pub mcp_revision: &'a str,
+    pub mcp_credential_revision: &'a str,
     pub plan: &'a str,
     pub goal_revision: &'a str,
     pub goal: &'a Value,
@@ -94,6 +95,10 @@ impl ContextPipeline {
             != f.mcp_revision
         {
             return Err(HostError("native_capability_inventory_changed"));
+        }
+        if peer_store::McpCredentialStore::new(&host.home).revision()? != f.mcp_credential_revision
+        {
+            return Err(HostError("mcp_credential_changed"));
         }
         let fresh = host.current(f.plan, &now())?;
         if fresh.goal.source_revision != f.goal_revision {

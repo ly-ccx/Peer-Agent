@@ -43,8 +43,13 @@ fn read(s: &mut TcpStream) -> Option<(String, Value)> {
         },
     ))
 }
-fn result(v: &Value) -> Value {
-    json!({"jsonrpc":"2.0","id":v["id"],"result":if v["method"]=="initialize"{json!({"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"native-http-fixture","version":"1"}})}else{json!({"content":[{"type":"text","text":"native HTTP MCP fact"}],"extra":{"preserved":true},"protocolVersion":"untrusted-result-not-negotiation"})}})
+fn result(v: &Value, headers: &str) -> Value {
+    let echo = if headers.contains("fixture-sensitive-secret") {
+        "fixture-sensitive-secret"
+    } else {
+        "synthetic-http-secret"
+    };
+    json!({"jsonrpc":"2.0","id":v["id"],"result":if v["method"]=="initialize"{json!({"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"native-http-fixture","version":"1"}})}else{json!({"content":[{"type":"text","text":"native HTTP MCP fact"}],"extra":{"preserved":true},"echo":echo,"protocolVersion":"untrusted-result-not-negotiation"})}})
 }
 impl Http {
     pub fn new(legacy: bool, sse: bool) -> Self {
@@ -101,12 +106,12 @@ impl Http {
                 let _=write!(socket,"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nMcp-Session-Id: native-fixture-session\r\nConnection: close\r\n\r\nevent: message\ndata: {}\n\n",json!({"jsonrpc":"2.0","id":id,"method":"ping"}));let _=socket.flush();
                 let deadline=Instant::now()+Duration::from_secs(5);
                 while !pong.load(Ordering::Acquire) && !stop.load(Ordering::Acquire) && Instant::now()<deadline {thread::sleep(Duration::from_millis(5));}
-                if pong.load(Ordering::Acquire){if write!(socket,"event: message\ndata: {}\n\n",result(&v)).and_then(|_|socket.flush()).is_ok(){events.lock().unwrap().push("tool_result_sent");}}else{events.lock().unwrap().push(if stop.load(Ordering::Acquire){"fixture_stopped"}else{"server_wait_expired"});}
+                if pong.load(Ordering::Acquire){if write!(socket,"event: message\ndata: {}\n\n",result(&v,&headers)).and_then(|_|socket.flush()).is_ok(){events.lock().unwrap().push("tool_result_sent");}}else{events.lock().unwrap().push(if stop.load(Ordering::Acquire){"fixture_stopped"}else{"server_wait_expired"});}
             }else if legacy {
-                if !v["id"].is_null(){let _=sender.send(result(&v).to_string());}
+                if !v["id"].is_null(){let _=sender.send(result(&v,&headers).to_string());}
                 let _=write!(socket,"HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
             }else if v["id"].is_null(){let _=write!(socket,"HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");}
-            else {let body=result(&v).to_string();let(body,kind)=if sse{(format!("event: message\r\ndata: {body}\r\n\r\n"),"text/event-stream")}else{(body,"application/json")};let _=write!(socket,"HTTP/1.1 200 OK\r\nContent-Type: {kind}\r\nMcp-Session-Id: native-fixture-session\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len());}
+            else {let body=result(&v,&headers).to_string();let(body,kind)=if sse{(format!("event: message\r\ndata: {body}\r\n\r\n"),"text/event-stream")}else{(body,"application/json")};let _=write!(socket,"HTTP/1.1 200 OK\r\nContent-Type: {kind}\r\nMcp-Session-Id: native-fixture-session\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len());}
         }));
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {

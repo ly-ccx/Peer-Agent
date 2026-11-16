@@ -209,6 +209,9 @@ fn read_vault(path: &Path) -> Result<VaultFile> {
 fn write_vault_atomic(data_home: &Path, path: &Path, vault: &VaultFile) -> Result<()> {
     ensure_private_directory(data_home)?;
     let encoded = serde_json::to_vec(vault).map_err(|_| HelperError::VaultInvalid)?;
+    if encoded.len() as u64 > MAX_VAULT_BYTES {
+        return Err(HelperError::VaultInvalid);
+    }
     let temp_path = data_home.join(format!(".{VAULT_FILENAME}.{}.tmp", std::process::id()));
     let write_result = (|| -> Result<()> {
         let mut file = OpenOptions::new()
@@ -293,6 +296,54 @@ mod tests {
                 .get("model/openai/api-key")
                 .expect("missing")
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn mcp_slots_are_encrypted_under_the_same_vault_and_bound_to_their_key() {
+        let directory = tempdir().unwrap();
+        let protector = MemoryKeyStore::default();
+        let vault = CredentialVault::new(directory.path(), &protector);
+        let key = format!(
+            "mcp/{}/12345678-1234-4123-8123-123456789abc",
+            "a".repeat(64)
+        );
+        vault.set(&key, "synthetic-mcp-envelope").unwrap();
+        assert_eq!(
+            vault.get(&key).unwrap().unwrap().as_str(),
+            "synthetic-mcp-envelope"
+        );
+        let raw = fs::read_to_string(vault.path()).unwrap();
+        assert!(!raw.contains("synthetic-mcp-envelope"));
+        fs::write(
+            vault.path(),
+            raw.replace(&key, &key.replace("8123", "9123")),
+        )
+        .unwrap();
+        assert!(vault.get(&key.replace("8123", "9123")).is_err());
+    }
+
+    #[test]
+    fn capacity_rejection_preserves_existing_readable_credentials() {
+        let directory = tempdir().unwrap();
+        let protector = MemoryKeyStore::default();
+        let vault = CredentialVault::new(directory.path(), &protector);
+        vault
+            .set("model/fixture/api-key", "original-value")
+            .unwrap();
+        let before = fs::read(vault.path()).unwrap();
+        let mut candidate = read_vault(&vault.path()).unwrap();
+        let row = candidate.records.get_mut("model/fixture/api-key").unwrap();
+        row.ciphertext = "x".repeat(MAX_VAULT_BYTES as usize);
+        assert!(write_vault_atomic(directory.path(), &vault.path(), &candidate).is_err());
+        assert_eq!(fs::read(vault.path()).unwrap(), before);
+        assert_eq!(
+            vault
+                .get("model/fixture/api-key")
+                .unwrap()
+                .unwrap()
+                .as_str(),
+            "original-value"
         );
     }
 

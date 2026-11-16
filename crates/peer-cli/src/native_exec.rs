@@ -8,10 +8,6 @@ use std::{
     future::Future,
     io::{self, IsTerminal, Write},
     pin::Pin,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
     time::Duration,
 };
 struct TerminalPermission;
@@ -77,46 +73,27 @@ impl PermissionInput for TerminalPermission {
 pub fn run(plan: &str, max_turns: usize, recover: bool) -> io::Result<CliExit> {
     let home =
         peer_protocol::data_home().ok_or_else(|| io::Error::other("data home unavailable"))?;
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-    let flag = Arc::new(AtomicBool::new(false));
-    let mut signals = Vec::new();
-    for signal in [
-        signal_hook::consts::SIGINT,
-        signal_hook::consts::SIGTERM,
-        signal_hook::consts::SIGHUP,
-    ] {
-        signals.push(signal_hook::flag::register(signal, flag.clone())?)
-    }
-    let result = runtime.block_on(async {
-        let cancel = CancellationToken::new();
-        let stop = cancel.clone();
-        let watcher = tokio::spawn(async move {
-            loop {
-                if flag.load(Ordering::Relaxed) {
-                    stop.cancel();
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(25)).await
-            }
-        });
-        let result = if recover{peer_runtime::native_exec::recover_plan(&home,plan,&cancel).await.map(|facts|(json!({"status":"recovery_observed","facts":facts}),CliExit::Ok))}else{peer_runtime::native_exec::execute_plan(
+    let result = crate::cancellation::run(|cancel| async move {
+        if recover {
+            peer_runtime::native_exec::recover_plan(&home, plan, &cancel)
+                .await
+                .map(|facts| {
+                    (
+                        json!({"status":"recovery_observed","facts":facts}),
+                        CliExit::Ok,
+                    )
+                })
+        } else {
+            peer_runtime::native_exec::execute_plan(
             &home,
             plan,
             &mut TerminalPermission,
             max_turns,
             &cancel,
         )
-        .await.map(|outcome|{let code=if outcome.status=="max_turns"{CliExit::MaxTurns}else{CliExit::Ok};(json!({"status":outcome.status,"content":outcome.content,"toolCalls":outcome.tool_calls,"goalAcceptance":"pending","stop":outcome.stop,"usage":outcome.usage.turn_total,"lastRequestUsage":outcome.usage.last_request,"lifetimeUsage":outcome.lifetime_usage,"contextAccounting":outcome.context_accounting}),code)})};
-        watcher.abort();
-        let _ = watcher.await;
-        result
-    });
-    runtime.shutdown_timeout(Duration::from_secs(2));
-    for s in signals {
-        signal_hook::low_level::unregister(s);
-    }
+        .await.map(|outcome|{let code=if outcome.status=="max_turns"{CliExit::MaxTurns}else{CliExit::Ok};(json!({"status":outcome.status,"content":outcome.content,"toolCalls":outcome.tool_calls,"goalAcceptance":"pending","stop":outcome.stop,"usage":outcome.usage.turn_total,"lastRequestUsage":outcome.usage.last_request,"lifetimeUsage":outcome.lifetime_usage,"contextAccounting":outcome.context_accounting}),code)})
+        }
+    })?;
     match result {
         Ok((outcome, code)) => {
             writeln!(io::stdout(), "{}", outcome)?;

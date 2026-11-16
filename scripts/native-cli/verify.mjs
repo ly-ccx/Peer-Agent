@@ -12,6 +12,8 @@ const output = process.argv[2] ?? mkdtempSync(join(tmpdir(), 'peer-native-check-
 const run = (command, args,extraEnv) => execFileSync(command, args, { cwd: root, stdio: 'inherit',env:extraEnv?{...process.env,...extraEnv}:process.env });
 const episodes=join(output,'episodes');mkdirSync(episodes,{recursive:true});writeFileSync(join(episodes,'.native-cli-fixture'),'isolated');
 if(!existsSync(join(root,'packages/runtime-core/dist/index.js')))run('pnpm',['--filter','@peer-agent/runtime-core','build']);
+run('pnpm',['--filter','@peer-agent/credential-helper','build']);
+run('node',['--test','apps/desktop/electron/main/mcp-credential-store.test.mjs']);
 run('bun', ['scripts/native-cli/contracts.ts']);
 run('bun', ['scripts/native-cli/control-contracts.ts']);
 run('bun', ['scripts/native-cli/work-contracts.ts']);
