@@ -37,6 +37,34 @@ function createStore() {
 }
 
 describe('MCP credential store', () => {
+  it('keeps native refresh recovery state closed to cold readers, patches and stale callbacks', async () => {
+    for (const refreshState of [{schemaVersion:1,operationId:'owned-intent'}, {schemaVersion:99}, null]) {
+      const store = createStore();
+      const credential = store.putCredential({id:'pending',kind:'oauth2',oauth:{clientId:'client',tokens:{access_token:'old-access',refresh_token:'old-refresh'}}});
+      const previous = store.getOAuthCredential(credential.credentialRef);
+      store.updateOAuthCredential(credential.credentialRef,{clientId:'client'});
+      const file = path.join(tmpDir,'mcp-credentials.json');
+      const data = JSON.parse(readFileSync(file,'utf8'));
+      const entry = data.credentials.find(item => item.credentialRef === credential.credentialRef);
+      const payload = JSON.parse(secrets.get(entry.vaultKey));
+      payload.refreshState = refreshState;
+      delete payload.oauth.tokens;
+      secrets.set(entry.vaultKey,JSON.stringify(payload));
+      entry.oauth.tokenStatus = 'recovery_required';
+      writeFileSync(file,JSON.stringify(data));
+      const before = readFileSync(file);
+      assert.equal(store.getCredential(credential.credentialRef).oauth.tokenStatus,'recovery_required');
+      assert.throws(() => store.getOAuthCredential(credential.credentialRef), /mcp_oauth_recovery_required/);
+      await assert.rejects(() => resolveMcpCredentialInjection(store,{mode:'oauth2',credentialRef:credential.credentialRef},{transport:'streamable_http'}), /mcp_oauth_recovery_required/);
+      assert.throws(() => store.updateOAuthCredential(credential.credentialRef,{tokens:{access_token:'patch'}}), /mcp_oauth_recovery_required/);
+      assert.throws(() => previous.updateOAuth({tokens:{access_token:'late'}}), /mcp_credential_changed/);
+      assert.deepEqual(readFileSync(file),before);
+      assert.equal(readFileSync(file,'utf8').includes('old-refresh'),false);
+      // Delete only this synthetic fixture entry between independent variants.
+      store.deleteCredential(credential.credentialRef);
+    }
+  });
+
   it('stores encrypted credential values and returns only redacted metadata', () => {
     const store = createStore();
     const credential = store.putCredential({

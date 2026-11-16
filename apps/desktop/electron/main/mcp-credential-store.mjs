@@ -235,6 +235,7 @@ export function createMcpCredentialStore({ credentialFile = pathOf('mcpCredentia
       const kind = normalizeKind(input.kind ?? old?.kind);
       if (old && kind !== old.kind) throw new Error('mcp_credential_kind_invalid');
       const previous = old ? envelope(old) : {};
+      if ('refreshState' in previous) throw new Error('mcp_oauth_recovery_required');
       const payload = kind === 'oauth2' ? { oauth: normalizeOAuth(input.oauth, previous.oauth) } : { secret: input.secret ?? previous.secret };
       if (kind !== 'oauth2' && (typeof payload.secret !== 'string' || !payload.secret.length)) throw new Error('MCP credential secret is required.');
       const entry = {
@@ -275,8 +276,10 @@ export function createMcpCredentialStore({ credentialFile = pathOf('mcpCredentia
       const entry = find(ref);
       if (!entry) throw new Error('MCP credential not found.');
       if (entry.kind !== 'oauth2') throw new Error('MCP credential is not OAuth 2.0.');
+      const payload = envelope(entry);
+      if ('refreshState' in payload) throw new Error('mcp_oauth_recovery_required');
       let revision=entry.vaultKey;
-      return { metadata: metadata(entry), oauth: envelope(entry).oauth, updateOAuth(patch) {
+      return { metadata: metadata(entry), oauth: payload.oauth, updateOAuth(patch) {
         const result=writeCredential({credentialRef:entry.credentialRef,kind:'oauth2',oauth:patch},revision);
         revision=result.revision;
         return result.metadata;

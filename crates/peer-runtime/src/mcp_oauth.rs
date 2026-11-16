@@ -47,6 +47,7 @@ impl Flow {
         home: &Path,
         server: &str,
         cancel: &CancellationToken,
+        recovery: bool,
     ) -> Result<Self, &'static str> {
         let registry = McpRegistryStore::new(home).read().map_err(|e| e.code())?;
         let mut config = registry.server(server).ok_or("mcp_server_missing")?;
@@ -61,6 +62,17 @@ impl Flow {
             .transaction(&binding)
             .map_err(|e| e.code())?;
         let payload = mcp_auth::load_payload(home, &binding, cancel).await?;
+        if let Some(state) = payload.0.get("refreshState") {
+            let known = state["schemaVersion"] == 1
+                && state["previousTokens"].is_object()
+                && state["operationId"].as_str().is_some_and(|id| {
+                    uuid::Uuid::parse_str(id)
+                        .is_ok_and(|u| u.get_version_num() == 4 && u.to_string() == id)
+                });
+            if !recovery || !known {
+                return Err("mcp_oauth_recovery_required");
+            }
+        }
         let raw = config["url"]
             .as_str()
             .or_else(|| config["serverUrl"].as_str())
@@ -191,6 +203,40 @@ impl Commit {
             self.payload.0["oauth"]["scopes"] = json!(stored.granted_scopes);
         }
         self.payload.0["oauth"]["codeVerifier"] = json!("");
+        self.payload
+            .0
+            .as_object_mut()
+            .unwrap()
+            .remove("refreshState");
+        let metadata = self.stage(home, cancel).await?;
+        // Commit cannot be cancelled after rename; an uncertain receipt preserves it.
+        self.transaction.commit(metadata).map_err(|e| e.code())?;
+        Ok(())
+    }
+    async fn reserve_refresh(
+        &mut self,
+        home: &Path,
+        cancel: &CancellationToken,
+    ) -> Result<(), &'static str> {
+        let previous = self.payload.0["oauth"]
+            .as_object_mut()
+            .ok_or("mcp_oauth_token_invalid")?
+            .remove("tokens")
+            .ok_or("mcp_oauth_token_invalid")?;
+        self.payload.0["refreshState"] = json!({
+            "schemaVersion":1,"operationId":uuid::Uuid::new_v4().to_string(),
+            "previousTokens":previous
+        });
+        let mut metadata = self.stage(home, cancel).await?;
+        metadata["oauth"]["tokenStatus"] = json!("recovery_required");
+        self.binding = self.transaction.publish(metadata).map_err(|e| e.code())?;
+        Ok(())
+    }
+    async fn stage(
+        &mut self,
+        home: &Path,
+        cancel: &CancellationToken,
+    ) -> Result<serde_json::Value, &'static str> {
         let raw = zeroize::Zeroizing::new(
             serde_json::to_string(&self.payload.0).map_err(|_| "mcp_oauth_token_invalid")?,
         );
@@ -267,7 +313,6 @@ impl Commit {
                     .map_err(|_| "mcp_oauth_token_invalid")?
             );
         }
-        // Commit cannot be cancelled after rename; an uncertain receipt preserves it.
         if McpRegistryStore::new(home)
             .read()
             .map_err(|e| e.code())?
@@ -276,8 +321,7 @@ impl Commit {
         {
             return Err("mcp_oauth_binding_changed");
         }
-        self.transaction.commit(metadata).map_err(|e| e.code())?;
-        Ok(())
+        Ok(metadata)
     }
 }
 
@@ -288,7 +332,7 @@ pub async fn authorize(
     cancel: &CancellationToken,
     on_url: impl FnOnce(&str) -> Result<(), &'static str>,
 ) -> Result<(), &'static str> {
-    let mut flow = Flow::load(home, server, cancel).await?;
+    let mut flow = Flow::load(home, server, cancel, true).await?;
     let oauth = &flow.commit.payload.0["oauth"];
     let has_client = [&oauth["clientId"], &oauth["clientInformation"]["client_id"]]
         .iter()
@@ -330,7 +374,13 @@ pub async fn refresh(
     server: &str,
     cancel: &CancellationToken,
 ) -> Result<(), &'static str> {
-    let mut flow = Flow::load(home, server, cancel).await?;
+    let mut flow = Flow::load(home, server, cancel, false).await?;
+    if flow.commit.payload.0["oauth"]["tokens"]["refresh_token"]
+        .as_str()
+        .is_none_or(|s| s.is_empty())
+    {
+        return Err("mcp_oauth_authorization_required");
+    }
     let redirect = flow.commit.payload.0["oauth"]["redirectUrl"]
         .as_str()
         .filter(|v| !v.is_empty())
@@ -361,6 +411,7 @@ pub async fn refresh(
         .save(stored)
         .await
         .map_err(|_| "mcp_oauth_store_failed")?;
+    flow.commit.reserve_refresh(home, cancel).await?;
     bounded(cancel, flow.manager.refresh_token(), 30)
         .await?
         .map_err(|_| "mcp_oauth_refresh_failed")?;

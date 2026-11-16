@@ -25,7 +25,7 @@ pub fn run(server: &str, refresh: bool) -> io::Result<CliExit> {
         Err(code) => {
             writeln!(
                 io::stderr(),
-                "peer-native: {code}; credential metadata and previous Vault generation preserved on pre-commit failure"
+                "peer-native: {code}; credential state preserved; an uncertain refresh requires explicit mcp auth"
             )?;
             Ok(if code == "CANCELLED" {
                 CliExit::Cancelled

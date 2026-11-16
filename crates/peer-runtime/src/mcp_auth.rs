@@ -55,6 +55,9 @@ pub(crate) fn check_access(
     if let Some(binding) = binding
         && binding.metadata["kind"] == "oauth2"
     {
+        if binding.metadata["oauth"]["tokenStatus"] == "recovery_required" {
+            return Err("mcp_oauth_recovery_required");
+        }
         if !binding.metadata["oauth"]["expiresAt"].is_null()
             && !binding.metadata["oauth"]["expiresAt"].is_string()
         {
@@ -87,6 +90,9 @@ pub(crate) async fn resolve(
     };
     check_access(home, Some(binding))?;
     let mut payload = load_payload(home, binding, cancel).await?;
+    if payload.0.get("refreshState").is_some() {
+        return Err("mcp_oauth_recovery_required");
+    }
     let mode = binding.metadata["kind"]
         .as_str()
         .ok_or("mcp_credential_invalid")?;

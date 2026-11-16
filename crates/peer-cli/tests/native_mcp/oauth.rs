@@ -100,7 +100,10 @@ impl OAuth {
                             .unwrap();
                         let deadline = Instant::now() + Duration::from_secs(10);
                         let mut byte = [0];
-                        while !stopped.load(Ordering::Acquire) && Instant::now() < deadline {
+                        while stalled.load(Ordering::Acquire)
+                            && !stopped.load(Ordering::Acquire)
+                            && Instant::now() < deadline
+                        {
                             match socket.read(&mut byte) {
                                 Ok(0) => break,
                                 Err(e)
@@ -112,7 +115,9 @@ impl OAuth {
                                 _ => break,
                             }
                         }
-                        continue;
+                        if stalled.load(Ordering::Acquire) {
+                            continue;
+                        }
                     }
                     if mode == "redirect" {
                         let _ = write!(
@@ -226,6 +231,51 @@ fn command(f: &Fixture, action: &str) -> Command {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     c
+}
+fn assert_refresh_recovery(f: &Fixture, before: &[u8]) {
+    use sha2::{Digest, Sha256};
+    let before: Value = serde_json::from_slice(before).unwrap();
+    let metadata = get(f.root.path().join("mcp-credentials.json"));
+    let old = before["credentials"][0]["vaultKey"].as_str().unwrap();
+    let new = metadata["credentials"][0]["vaultKey"].as_str().unwrap();
+    assert_ne!(new, old);
+    assert_eq!(
+        metadata["credentials"][0]["oauth"]["tokenStatus"],
+        "recovery_required"
+    );
+    let slot = |key: &str| {
+        f.root.path().join(format!(
+            "synthetic-{:x}.txt",
+            Sha256::digest(key.as_bytes())
+        ))
+    };
+    let original = get(slot(old));
+    let pending = get(slot(new));
+    assert_eq!(
+        pending["refreshState"]["previousTokens"],
+        original["oauth"]["tokens"]
+    );
+    assert_eq!(pending["refreshState"]["schemaVersion"], 1);
+    assert!(pending["oauth"].get("tokens").is_none());
+    for secret in [
+        "fixture-sensitive-secret",
+        "fixture-refresh-secret",
+        "oauth-refreshed-secret",
+    ] {
+        assert!(!metadata.to_string().contains(secret));
+    }
+    let read = Command::new("node")
+        .arg(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../scripts/native-cli/mcp-credential-peer.mjs"),
+        )
+        .arg(f.root.path())
+        .arg(env!("CARGO_BIN_EXE_mcp-helper-test-fixture"))
+        .args(["oauth2", "read"])
+        .output()
+        .unwrap();
+    assert!(!read.status.success());
+    assert!(String::from_utf8_lossy(&read.stderr).contains("mcp_oauth_recovery_required"));
 }
 struct Pending {
     child: Option<OwnedChild>,
@@ -390,7 +440,7 @@ fn native_oauth_login_pkce_vault_cold_read_and_authorized_tool_loop() {
     assert_eq!(read["oauth"]["tokenStatus"], "available");
 }
 #[test]
-fn explicit_native_refresh_rotates_vault_and_rejection_preserves_previous_generation() {
+fn explicit_native_refresh_rotates_vault_and_rejection_preserves_a_recovery_intent() {
     for mode in ["", "reject", "redirect", "oversize"] {
         let server = Server::new(vec![]);
         let f = Fixture::new(&server);
@@ -410,7 +460,7 @@ fn explicit_native_refresh_rotates_vault_and_rejection_preserves_previous_genera
         assert!(tokens[0].contains("grant_type=refresh_token"));
         assert!(tokens[0].contains("fixture-refresh-secret"));
         if !mode.is_empty() {
-            assert_eq!(std::fs::read(&file).unwrap(), before);
+            assert_refresh_recovery(&f, &before);
         } else {
             assert_ne!(std::fs::read(&file).unwrap(), before);
         }
@@ -510,3 +560,5 @@ fn wrong_issuer_and_signal_cancellation_preserve_credentials_and_close_callback(
 }
 
 mod network;
+
+mod refresh;

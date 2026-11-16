@@ -24,6 +24,13 @@ fn main() {
     let marker = root.join(format!("last-request-{}.tmp", std::process::id()));
     fs::write(&marker, &bytes).unwrap();
     fs::rename(marker, root.join("last-request.json")).unwrap();
+    if mode == "fail-set" && request["action"] == "set" {
+        println!(
+            "{}",
+            json!({"version":1,"ok":false,"error":{"code":"secure_storage_unavailable","message":"synthetic failure"}})
+        );
+        std::process::exit(1);
+    }
     match mode.as_str() {
         "sleep" => std::thread::sleep(Duration::from_secs(20)),
         "stdout-flood" => {

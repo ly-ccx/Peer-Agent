@@ -180,7 +180,11 @@ fn oauth_tls_or_discovered_address_failures_and_token_redirects_preserve_vault_w
         }
         let out = command.output().unwrap();
         assert!(!out.status.success(), "{mode} must fail");
-        assert_eq!(std::fs::read(&file).unwrap(), before);
+        if matches!(mode, "redirect" | "oversize") {
+            assert_refresh_recovery(&f, &before);
+        } else {
+            assert_eq!(std::fs::read(&file).unwrap(), before);
+        }
         assert_eq!(f.history(), history);
         assert!(!f.root.path().join("mcp-credentials.json.lock").exists());
         let count = if matches!(mode, "redirect" | "oversize") {
@@ -325,9 +329,13 @@ fn cancellation_of_proxied_token_exchange_preserves_generation_closes_socket_and
     }
     let out = child.output();
     assert_eq!(out.status.code(), Some(4));
-    assert_eq!(std::fs::read(&file).unwrap(), before);
+    assert_refresh_recovery(&f, &before);
     assert_eq!(f.history(), history);
     assert!(!f.root.path().join("mcp-credentials.json.lock").exists());
+    assert_eq!(oauth.tokens().len(), 1);
+    let blocked = routed(&f, "refresh", &proxy).output().unwrap();
+    assert!(!blocked.status.success());
+    assert!(String::from_utf8_lossy(&blocked.stderr).contains("mcp_oauth_recovery_required"));
     assert_eq!(oauth.tokens().len(), 1);
     let deadline = Instant::now() + Duration::from_secs(1);
     while proxy.closed.load(Ordering::Acquire) < proxy.headers.lock().unwrap().len() {

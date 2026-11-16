@@ -72,6 +72,7 @@ fn tls_proxy_keeps_a_tunnel_open_within_the_real_five_second_connect_budget() {
         }
     });
     let front = TlsFront::for_url(&format!("http://{address}"), false);
+    let proxy = ConnectProxy::new(front.address);
     let result = (|| -> std::io::Result<()> {
         let mut roots = rustls::RootCertStore::empty();
         roots
@@ -89,9 +90,21 @@ fn tls_proxy_keeps_a_tunnel_open_within_the_real_five_second_connect_budget() {
             rustls::pki_types::ServerName::try_from("localhost").unwrap(),
         )
         .unwrap();
-        let socket = TcpStream::connect(front.address)?;
+        let socket = TcpStream::connect(
+            url::Url::parse(&proxy.url)
+                .unwrap()
+                .socket_addrs(|| None)
+                .unwrap()[0],
+        )?;
         socket.set_read_timeout(Some(Duration::from_secs(6)))?;
         socket.set_write_timeout(Some(Duration::from_secs(6)))?;
+        let mut socket = socket;
+        write!(
+            socket,
+            "CONNECT {} HTTP/1.1\r\nHost: {}\r\n\r\n",
+            front.address, front.address
+        )?;
+        assert!(request(&mut socket)?.starts_with(b"HTTP/1.1 200"));
         let mut tls = rustls::StreamOwned::new(connection, socket);
         write!(tls, "CONNECT {address} HTTP/1.1\r\nHost: {address}\r\n\r\n")?;
         tls.flush()?;
@@ -106,6 +119,7 @@ fn tls_proxy_keeps_a_tunnel_open_within_the_real_five_second_connect_budget() {
         assert_eq!(&bytes, b"ping");
         Ok(())
     })();
+    drop(proxy);
     drop(front);
     stop.store(true, std::sync::atomic::Ordering::Release);
     backend.join().unwrap();
@@ -206,8 +220,59 @@ pub(crate) struct ConnectProxy {
     pub url: String,
     pub headers: Arc<Mutex<Vec<String>>>,
     pub closed: Arc<std::sync::atomic::AtomicUsize>,
-    stop: Arc<std::sync::atomic::AtomicBool>,
+    stop: peer_runtime::CancellationToken,
     worker: Option<thread::JoinHandle<()>>,
+}
+
+#[test]
+fn proxy_observes_an_abrupt_client_reset_as_closed_without_an_idle_timeout() {
+    let backend = TcpListener::bind("127.0.0.1:0").unwrap();
+    let proxy = ConnectProxy::new(backend.local_addr().unwrap());
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let address = url::Url::parse(&proxy.url)
+            .unwrap()
+            .socket_addrs(|| None)
+            .unwrap()[0];
+        let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
+        client
+            .write_all(b"CONNECT 127.0.0.1:443 HTTP/1.1\r\nHost: 127.0.0.1:443\r\n\r\n")
+            .await
+            .unwrap();
+        assert!(
+            async_request(&mut client)
+                .await
+                .unwrap()
+                .starts_with(b"HTTP/1.1 200")
+        );
+        let (upstream, _) = backend.accept().unwrap();
+        drop(upstream);
+        let eof = tokio::time::timeout(Duration::from_secs(1), client.read_u8())
+            .await
+            .unwrap();
+        assert_eq!(eof.unwrap_err().kind(), std::io::ErrorKind::UnexpectedEof);
+        assert_eq!(
+            proxy.closed.load(std::sync::atomic::Ordering::Acquire),
+            0,
+            "upstream half-close is not client closure"
+        );
+        // SO_LINGER=0 forces TCP RST. This is a real closed peer, not an EOF
+        // or the fixture's read/write idle timeout.
+        client.set_linger(Some(Duration::ZERO)).unwrap();
+        drop(client);
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while proxy.closed.load(std::sync::atomic::Ordering::Acquire) != 1 {
+            assert!(
+                Instant::now() < deadline,
+                "reset client was not observed as closed"
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    });
 }
 impl ConnectProxy {
     pub fn new(target: std::net::SocketAddr) -> Self {
@@ -218,43 +283,48 @@ impl ConnectProxy {
         let captured = headers.clone();
         let closed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let observed_close = closed.clone();
-        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop = peer_runtime::CancellationToken::new();
         let ended = stop.clone();
-        let worker = listeners(listener, ended, move |mut client| {
-            client
-                .set_read_timeout(Some(Duration::from_secs(3)))
+        let worker = thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
                 .unwrap();
-            client
-                .set_write_timeout(Some(Duration::from_secs(3)))
-                .unwrap();
-            let Ok(bytes) = request(&mut client) else {
-                return;
-            };
-            let header = String::from_utf8(bytes).unwrap();
-            assert!(header.starts_with("CONNECT "));
-            captured.lock().unwrap().push(header);
-            let mut upstream = TcpStream::connect(target).unwrap();
-            upstream
-                .set_read_timeout(Some(Duration::from_secs(3)))
-                .unwrap();
-            upstream
-                .set_write_timeout(Some(Duration::from_secs(3)))
-                .unwrap();
-            client
-                .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
-                .unwrap();
-            let mut read_client = client.try_clone().unwrap();
-            let mut write_upstream = upstream.try_clone().unwrap();
-            let observed_close = observed_close.clone();
-            let copy = thread::spawn(move || {
-                if std::io::copy(&mut read_client, &mut write_upstream).is_ok() {
-                    observed_close.fetch_add(1, std::sync::atomic::Ordering::Release);
+            runtime.block_on(async move {
+                let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+                let mut clients = tokio::task::JoinSet::new();
+                loop {
+                    tokio::select! {biased;
+                        _=ended.cancelled()=>break,
+                        result=clients.join_next(),if !clients.is_empty()=>{assert!(result.unwrap().is_ok());},
+                        accepted=listener.accept()=>{
+                            let Ok((socket,_))=accepted else {break};
+                            assert!(clients.len()<16,"synthetic connection bound");
+                            let captured=captured.clone();let closed=observed_close.clone();let cancel=ended.child_token();
+                            clients.spawn(async move {
+                                let serve=async move {
+                                    use tokio::io::AsyncWriteExt;
+                                    let mut client=ObservedClient{socket,closed,ended:false};
+                                    let bytes=async_request(&mut client).await?;
+                                    let header=String::from_utf8(bytes).map_err(std::io::Error::other)?;
+                                    assert!(header.starts_with("CONNECT "));
+                                    captured.lock().unwrap().push(header);
+                                    let mut upstream=tokio::net::TcpStream::connect(target).await?;
+                                    client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n").await?;
+                                    // Propagate each half-close, keeping the opposite direction
+                                    // owned until its actual EOF/reset, cancellation or deadline.
+                                    tokio::io::copy_bidirectional(&mut client,&mut upstream).await
+                                };
+                                tokio::select! {biased;
+                                    _=cancel.cancelled()=>{},
+                                    _=tokio::time::timeout(Duration::from_secs(30),serve)=>{},
+                                }
+                            });
+                        }
+                    }
                 }
-                let _ = write_upstream.shutdown(std::net::Shutdown::Write);
+                while let Some(result)=clients.join_next().await {assert!(result.is_ok());}
             });
-            let _ = std::io::copy(&mut upstream, &mut client);
-            let _ = client.shutdown(std::net::Shutdown::Both);
-            copy.join().unwrap();
         });
         Self {
             url: format!("http://synthetic-user:synthetic-proxy-secret@{address}"),
@@ -267,47 +337,57 @@ impl ConnectProxy {
 }
 impl Drop for ConnectProxy {
     fn drop(&mut self) {
-        self.stop.store(true, std::sync::atomic::Ordering::Release);
+        self.stop.cancel();
         self.worker.take().unwrap().join().unwrap();
     }
 }
 
-// Legacy SSE and Streamable HTTP control POSTs require simultaneous sockets.
-// Every fixture worker is bounded and joined; no detached test servers.
-fn listeners(
-    listener: TcpListener,
-    stop: Arc<std::sync::atomic::AtomicBool>,
-    serve: impl Fn(TcpStream) + Send + Sync + 'static,
-) -> thread::JoinHandle<()> {
-    let serve = Arc::new(serve);
-    thread::spawn(move || {
-        let mut workers: Vec<thread::JoinHandle<()>> = vec![];
-        while !stop.load(std::sync::atomic::Ordering::Acquire) {
-            let mut i = 0;
-            while i < workers.len() {
-                if workers[i].is_finished() {
-                    workers.swap_remove(i).join().unwrap();
-                } else {
-                    i += 1;
-                }
-            }
-            match listener.accept() {
-                Ok((socket, _)) => {
-                    assert!(workers.len() < 16, "synthetic connection bound");
-                    socket.set_nonblocking(false).unwrap();
-                    let serve = serve.clone();
-                    workers.push(thread::spawn(move || serve(socket)));
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    thread::sleep(Duration::from_millis(5))
-                }
-                Err(_) => break,
-            }
+// A client read owns closure evidence. A write failure, fixture timeout or
+// local socket teardown cannot manufacture an observed closed remote client.
+struct ObservedClient {
+    socket: tokio::net::TcpStream,
+    closed: Arc<std::sync::atomic::AtomicUsize>,
+    ended: bool,
+}
+impl tokio::io::AsyncRead for ObservedClient {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        let before = buf.filled().len();
+        let capacity = buf.remaining();
+        let result = std::pin::Pin::new(&mut self.socket).poll_read(cx, buf);
+        let closed = matches!(&result,std::task::Poll::Ready(Ok(())) if capacity>0 && buf.filled().len()==before)
+            || matches!(&result,std::task::Poll::Ready(Err(e)) if e.kind()==std::io::ErrorKind::ConnectionReset);
+        if closed && !self.ended {
+            self.ended = true;
+            self.closed
+                .fetch_add(1, std::sync::atomic::Ordering::Release);
         }
-        for worker in workers {
-            worker.join().unwrap();
-        }
-    })
+        result
+    }
+}
+impl tokio::io::AsyncWrite for ObservedClient {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        std::pin::Pin::new(&mut self.socket).poll_write(cx, buf)
+    }
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.socket).poll_flush(cx)
+    }
+    fn poll_shutdown(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.socket).poll_shutdown(cx)
+    }
 }
 
 // Same bounded request shape as the synchronous proxy fixtures, with owned

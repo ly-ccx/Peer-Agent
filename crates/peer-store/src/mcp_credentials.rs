@@ -170,6 +170,13 @@ pub struct McpCredentialTransaction {
 impl McpCredentialTransaction {
     /// Only a verified immutable Vault slot may be published by the Host.
     pub fn commit(mut self, metadata: Value) -> Result<McpCredentialBinding, StoreError> {
+        let committed = self.publish(metadata)?;
+        self.lock.release()?;
+        Ok(committed)
+    }
+    /// Publish an intermediate credential generation without releasing ownership.
+    /// The same owner must compare against this generation on its next publication.
+    pub fn publish(&mut self, metadata: Value) -> Result<McpCredentialBinding, StoreError> {
         self.lock.check_owned()?;
         let store = McpCredentialStore {
             file: self.file.clone(),
@@ -198,7 +205,7 @@ impl McpCredentialTransaction {
             self.binding.metadata["credentialRef"].as_str().unwrap(),
             self.binding.metadata["kind"].as_str().unwrap(),
         )?;
-        self.lock.release()?;
+        self.binding = committed.clone();
         Ok(committed)
     }
 }
