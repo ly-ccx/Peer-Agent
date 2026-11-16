@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync} from 'node:fs';
-import {rootCertificates} from 'node:tls';
 import {X509Certificate} from 'node:crypto';
 import {proxyForUrl,resolveExtraCaPath} from '../../apps/tui/src/provider-transport.ts';
 import {parseSystemProxyConfig} from '../../apps/tui/src/macos-system-proxy.ts';
@@ -24,7 +23,9 @@ route('extra-ca-precedence','https://api.example.com',{PEER_EXTRA_CA_CERTS:' cho
 route('extra-ca-fallback','https://api.example.com',{PEER_EXTRA_CA_CERTS:' ',NODE_EXTRA_CA_CERTS:'fallback.pem'});
 const system=['<dictionary> {\n HTTPEnable : 1\n HTTPProxy : 127.0.0.1\n HTTPPort : 8899\n HTTPSEnable : 1\n HTTPSProxy : proxy.test\n HTTPSPort : 8080\n}', 'HTTPEnable : 0\nHTTPProxy : disabled\nSOCKSEnable : 1\nSOCKSProxy : ignored', 'HTTPEnable : 1\nHTTPProxy : host-only', 'HTTPEnable : 1\nHTTPPort : 80'].map(raw=>({raw,expected:parseSystemProxyConfig(raw)}));
 const fingerprint=(pem:string)=>new X509Certificate(pem).fingerprint.replaceAll(':','').toUpperCase();
-const first=rootCertificates[0]!,second=rootCertificates[1]!;
+// Fixed public inputs: runtime root catalogs change across Bun versions.
+// Expected values still come from the actual production TS selector.
+const first=readFileSync('crates/peer-cli/tests/fixtures/network/ca.pem','utf8').trim(),second=readFileSync('crates/peer-cli/tests/fixtures/network/server.pem','utf8').trim();
 const trust=[{xml:`<dict><key>${fingerprint(first)}</key><dict></dict><key>${fingerprint(second)}</key><dict><key>kSecTrustSettingsResult</key>\n<integer>3</integer></dict></dict>`,pem:`${first}\n${second}\n${first}\nnot a certificate`},{xml:'<dict/>',pem:first},{xml:`<key>${fingerprint(second).toLowerCase()}</key><dict/>`,pem:`${first}\n${second}`}].map(value=>({...value,expected:certificatesMatchingFingerprints(value.pem,trustedFingerprintsFromXml(value.xml))}));
 const text=JSON.stringify({version:1,routes:cases,system,trust},null,2)+'\n';const file='packages/protocol/contracts/native-cli/network.json';
 if(process.argv.includes('--write'))writeFileSync(file,text);else assert.equal(readFileSync(file,'utf8'),text,'regenerate native network contracts with actual TS');
