@@ -1,7 +1,7 @@
 import electron from 'electron';
 import { createPredictionCredentialResolver } from './input-prediction/credential-resolver.mjs';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
-import { readModelConfigFile, replaceModelConfigFile, withModelConfigLock } from '@peer-agent/runtime-node/storage';
+import { readModelConfigFile, replaceModelConfigFile, withModelConfigLock, modelConfigBinding } from '@peer-agent/runtime-node/storage';
 import {
   modelApiKeyCredentialKey,
   modelOauthCredentialKey,
@@ -313,10 +313,10 @@ export function createLlmConfigStore({
   async function refreshOAuthTokens(id, tokens, refresh, options = {}) {
     const item = readAll().find((entry) => entry.id === id);
     if (!item || !isOAuthAuthMethod(item.authMethod)) throw new Error('credential_oauth_configuration_changed');
-    const original = JSON.stringify(item);
+    const original = modelConfigBinding(item);
     const validate = () => {
       const matches = readAll().filter((entry) => entry.id === id);
-      if (matches.length !== 1 || matches[0].enabled === false || JSON.stringify(matches[0]) !== original) {
+      if (matches.length !== 1 || matches[0].enabled === false || modelConfigBinding(matches[0]) !== original) {
         throw new Error('credential_oauth_configuration_changed');
       }
     };

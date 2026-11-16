@@ -7,7 +7,7 @@ use crate::{
     oauth_callback,
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use peer_protocol::{ModelAccountState, ModelAccountStatus};
+use peer_protocol::{ModelAccountState, ModelAccountStatus, ModelMetadataState};
 use reqwest::Url;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -88,7 +88,12 @@ impl Account {
         self.validate_value(&config)
     }
     fn validate_value(&self, config: &Value) -> Result<(), ModelError> {
-        if Self::channel(config, &self.id)? != self.channel {
+        let current = Self::channel(config, &self.id)?;
+        if peer_protocol::model_config_binding(&current)
+            .ok()
+            .zip(peer_protocol::model_config_binding(&self.channel).ok())
+            .is_none_or(|(a, b)| a != b)
+        {
             return Err(ModelError::new("model_configuration_changed"));
         }
         Ok(())
@@ -175,7 +180,11 @@ pub async fn status(
         expires,
     })
 }
-pub async fn logout(home: &Path, id: &str, cancel: &CancellationToken) -> Result<(), ModelError> {
+pub async fn logout(
+    home: &Path,
+    id: &str,
+    cancel: &CancellationToken,
+) -> Result<ModelMetadataState, ModelError> {
     let account = Account::load(home, id)?;
     let guard = account.transaction(cancel).await?;
     let snapshot = account.snapshot(cancel).await?;
@@ -195,10 +204,26 @@ pub async fn logout(home: &Path, id: &str, cancel: &CancellationToken) -> Result
     if after.secret.is_some() {
         return Err(ModelError::new("model_credential_changed"));
     }
-    guard
-        .finish()
-        .map_err(|_| ModelError::new("model_oauth_commit_unknown"))?;
-    Ok(())
+    crate::model_oauth::projection::persist(guard, id, &account.auth, None, cancel)
+}
+pub async fn reconcile(
+    home: &Path,
+    id: &str,
+    cancel: &CancellationToken,
+) -> Result<ModelMetadataState, ModelError> {
+    let account = Account::load(home, id)?;
+    let guard = account.transaction(cancel).await?;
+    let before = account.snapshot(cancel).await?;
+    let token = before
+        .secret
+        .as_ref()
+        .map(|secret| Token::parse(secret.expose()))
+        .transpose()?;
+    let current = account.snapshot(cancel).await?;
+    if current.revision != before.revision {
+        return Err(ModelError::new("model_credential_changed"));
+    }
+    crate::model_oauth::projection::persist(guard, id, &account.auth, token.as_ref(), cancel)
 }
 fn callback_error(error: oauth_callback::Error) -> ModelError {
     use oauth_callback::Error;
@@ -227,7 +252,7 @@ pub async fn authorize(
     id: &str,
     cancel: &CancellationToken,
     present: impl FnOnce(&str) -> Result<(), ModelError>,
-) -> Result<(), ModelError> {
+) -> Result<ModelMetadataState, ModelError> {
     let account = Account::load(home, id)?;
     let guard = account.transaction(cancel).await?;
     let before = account.snapshot(cancel).await?;
@@ -320,7 +345,8 @@ pub async fn authorize(
         .map_err(|_| ModelError::new("model_configuration_changed"))?;
     let client = token_http::client()?;
     let response = tokio::select! {biased;_=cancel.cancelled()=>return Err(ModelError::new("CANCELLED")), result=token_http::request(&client,&config.token,&form)=>result.map_err(|_|ModelError::new("model_oauth_exchange_failed"))?};
-    let tokens = Token::login(&response, &account.auth, now_ms()?)?.serialize()?;
+    let token = Token::login(&response, &account.auth, now_ms()?)?;
+    let tokens = token.serialize()?;
     let guard = account.transaction(cancel).await?;
     if !account
         .helper
@@ -346,11 +372,10 @@ pub async fn authorize(
     {
         return Err(ModelError::new("model_oauth_commit_unknown"));
     }
-    account
-        .validate()
-        .map_err(|_| ModelError::new("model_oauth_configuration_changed_after_commit"))?;
-    guard
-        .finish()
-        .map_err(|_| ModelError::new("model_oauth_commit_unknown"))?;
-    Ok(())
+    // The Vault readback already proved the credential update. A later config
+    // incident cannot turn that fact into a claim that login did not commit.
+    if account.validate().is_err() {
+        return Ok(ModelMetadataState::CommitUnknown);
+    }
+    crate::model_oauth::projection::persist(guard, id, &account.auth, Some(&token), cancel)
 }

@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "hintFields": [
+    "oauthConfigured",
+    "oauthExpires",
+    "oauthAccountId"
+  ],
+  "cases": [
+    {
+      "value": {
+        "id": "account",
+        "authMethod": "oauth_chatgpt",
+        "enabled": true,
+        "customHeaders": {
+          "X-Key": "first",
+          "x-key": "last"
+        }
+      },
+      "expected": "{\"id\":\"account\",\"authMethod\":\"oauth_chatgpt\",\"enabled\":true,\"customHeaders\":{\"X-Key\":\"first\",\"x-key\":\"last\"}}"
+    },
+    {
+      "value": {
+        "id": "account",
+        "authMethod": "oauth_chatgpt",
+        "enabled": true,
+        "customHeaders": {
+          "X-Key": "first",
+          "x-key": "last"
+        },
+        "oauthConfigured": true,
+        "oauthExpires": 123,
+        "oauthAccountId": "hint"
+      },
+      "expected": "{\"id\":\"account\",\"authMethod\":\"oauth_chatgpt\",\"enabled\":true,\"customHeaders\":{\"X-Key\":\"first\",\"x-key\":\"last\"}}"
+    },
+    {
+      "value": {
+        "id": "account",
+        "authMethod": "oauth_google",
+        "enabled": true,
+        "customHeaders": {
+          "X-Key": "first",
+          "x-key": "last"
+        }
+      },
+      "expected": "{\"id\":\"account\",\"authMethod\":\"oauth_google\",\"enabled\":true,\"customHeaders\":{\"X-Key\":\"first\",\"x-key\":\"last\"}}"
+    },
+    {
+      "value": {
+        "id": "account",
+        "authMethod": "oauth_chatgpt",
+        "enabled": false,
+        "customHeaders": {
+          "X-Key": "first",
+          "x-key": "last"
+        }
+      },
+      "expected": "{\"id\":\"account\",\"authMethod\":\"oauth_chatgpt\",\"enabled\":false,\"customHeaders\":{\"X-Key\":\"first\",\"x-key\":\"last\"}}"
+    },
+    {
+      "value": {
+        "id": "account",
+        "authMethod": "oauth_chatgpt",
+        "enabled": true,
+        "customHeaders": {
+          "x-key": "last",
+          "X-Key": "first"
+        }
+      },
+      "expected": "{\"id\":\"account\",\"authMethod\":\"oauth_chatgpt\",\"enabled\":true,\"customHeaders\":{\"x-key\":\"last\",\"X-Key\":\"first\"}}"
+    }
+  ]
+}

@@ -2,6 +2,12 @@
 use super::*;
 /// CLI defaults live at the wire seam rather than in the HTTP transport.
 pub(crate) fn encode(wire: Wire, input: &WireInput<'_>) -> Result<Value, ModelError> {
+    if input.options.chat_dialect == ChatDialect::Environment {
+        if wire != Wire::Chat {
+            return Err(ModelError::new("model_environment_wire_invalid"));
+        }
+        return super::environment::encode(input);
+    }
     let mut body = super::encode(wire, input)?;
     if wire == Wire::Chat
         && input

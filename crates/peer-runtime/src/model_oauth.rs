@@ -9,6 +9,7 @@ use crate::{
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{path::Path, sync::OnceLock, time::Duration};
+pub(crate) mod projection;
 #[cfg(test)]
 mod tests;
 pub(crate) mod token;
@@ -280,7 +281,29 @@ impl ModelOAuth {
                 return Err(ModelError::new("model_credential_changed"));
             }
             *expected = stamp(&current_secret, current.revision.as_deref());
-            write_guard
+            let _metadata = projection::persist(
+                write_guard,
+                self.binding.channel_id(),
+                &self.auth,
+                Some(&token),
+                cancel,
+            );
+            // A failed hint cannot invalidate a proven credential. Re-admit
+            // only against the actual operational config and Vault generation.
+            let verify_guard = self.binding.transaction(cancel).await?;
+            let actual = self
+                .helper
+                .get_snapshot(&self.key, cancel)
+                .await
+                .map_err(|_| ModelError::new("model_oauth_commit_unknown"))?;
+            if actual
+                .secret
+                .as_ref()
+                .is_none_or(|s| stamp(s, actual.revision.as_deref()) != *expected)
+            {
+                return Err(ModelError::new("model_credential_changed"));
+            }
+            verify_guard
                 .finish()
                 .map_err(|_| ModelError::new("model_oauth_commit_unknown"))?;
         } else {

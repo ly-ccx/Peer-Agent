@@ -2685,6 +2685,8 @@ fn canonical_usage_recovery_is_bounded_and_later_batches_do_not_duplicate_charge
 #[cfg(feature = "test-fixtures")]
 #[path = "native_mcp/mod.rs"]
 mod native_mcp;
+#[path = "native_model_environment/mod.rs"]
+mod native_model_environment;
 #[cfg(feature = "test-fixtures")]
 #[path = "native_model_oauth/mod.rs"]
 mod native_model_oauth;

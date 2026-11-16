@@ -1,0 +1,579 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "empty",
+      "expected": {
+        "exitCode": 0,
+        "stdout": [],
+        "stderr": [
+          "No model configured."
+        ],
+        "catalog": []
+      }
+    },
+    {
+      "name": "environment-defaults",
+      "env": {
+        "PEER_MODEL_API_KEY": "not-a-real-secret"
+      },
+      "expected": {
+        "exitCode": 0,
+        "stdout": [
+          "openai-compatible\tgpt-4o-mini\tgpt-4o-mini"
+        ],
+        "stderr": [],
+        "catalog": [
+          {
+            "providerId": "openai-compatible",
+            "modelId": "gpt-4o-mini",
+            "displayName": "gpt-4o-mini",
+            "supportsTools": true,
+            "supportedReasoningEfforts": [
+              "off",
+              "low",
+              "default",
+              "high"
+            ],
+            "defaultReasoningEffort": "default",
+            "available": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "environment-trimmed-model",
+      "env": {
+        "PEER_MODEL_API_KEY": "  not-a-real-secret ",
+        "PEER_MODEL_ID": "  chosen-model  ",
+        "PEER_MODEL_BASE_URL": " http://127.0.0.1:9/v1 "
+      },
+      "expected": {
+        "exitCode": 0,
+        "stdout": [
+          "openai-compatible\tchosen-model\tchosen-model"
+        ],
+        "stderr": [],
+        "catalog": [
+          {
+            "providerId": "openai-compatible",
+            "modelId": "chosen-model",
+            "displayName": "chosen-model",
+            "supportsTools": true,
+            "supportedReasoningEfforts": [
+              "off",
+              "low",
+              "default",
+              "high"
+            ],
+            "defaultReasoningEffort": "default",
+            "available": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "configured-v2",
+      "document": {
+        "version": 2,
+        "channels": [
+          {
+            "id": "group",
+            "channelId": "openai",
+            "provider": "openai",
+            "authMethod": "api_key",
+            "name": "Fixture Provider",
+            "apiKeyConfigured": true
+          }
+        ],
+        "models": [
+          {
+            "id": "model-row",
+            "groupId": "group",
+            "model": "fixture-model",
+            "modelLabel": "Readable Model",
+            "enabled": true,
+            "isDefault": true
+          }
+        ]
+      },
+      "expected": {
+        "exitCode": 0,
+        "stdout": [
+          "group\tfixture-model\tReadable Model · Fixture Provider"
+        ],
+        "stderr": [],
+        "catalog": [
+          {
+            "providerId": "group",
+            "modelId": "fixture-model",
+            "entryId": "model-row",
+            "displayName": "Readable Model · Fixture Provider",
+            "supportsTools": true,
+            "supportedReasoningEfforts": [
+              "off",
+              "low",
+              "default",
+              "high"
+            ],
+            "defaultReasoningEffort": "high",
+            "available": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "environment-overrides-file",
+      "env": {
+        "PEER_MODEL_API_KEY": "not-a-real-secret",
+        "PEER_MODEL_ID": "explicit-env"
+      },
+      "document": {
+        "version": 2,
+        "channels": [
+          {
+            "id": "group",
+            "channelId": "openai",
+            "provider": "openai",
+            "authMethod": "api_key",
+            "name": "Fixture Provider",
+            "apiKeyConfigured": true
+          }
+        ],
+        "models": [
+          {
+            "id": "model-row",
+            "groupId": "group",
+            "model": "fixture-model",
+            "modelLabel": "Readable Model",
+            "enabled": true,
+            "isDefault": true
+          }
+        ]
+      },
+      "expected": {
+        "exitCode": 0,
+        "stdout": [
+          "openai-compatible\texplicit-env\texplicit-env"
+        ],
+        "stderr": [],
+        "catalog": [
+          {
+            "providerId": "openai-compatible",
+            "modelId": "explicit-env",
+            "displayName": "explicit-env",
+            "supportsTools": true,
+            "supportedReasoningEfforts": [
+              "off",
+              "low",
+              "default",
+              "high"
+            ],
+            "defaultReasoningEffort": "default",
+            "available": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "blank-key-uses-file",
+      "env": {
+        "PEER_MODEL_API_KEY": "  "
+      },
+      "document": {
+        "version": 2,
+        "channels": [
+          {
+            "id": "group",
+            "channelId": "openai",
+            "provider": "openai",
+            "authMethod": "api_key",
+            "name": "Fixture Provider",
+            "apiKeyConfigured": true
+          }
+        ],
+        "models": [
+          {
+            "id": "model-row",
+            "groupId": "group",
+            "model": "fixture-model",
+            "modelLabel": "Readable Model",
+            "enabled": true,
+            "isDefault": true
+          }
+        ]
+      },
+      "expected": {
+        "exitCode": 0,
+        "stdout": [
+          "group\tfixture-model\tReadable Model · Fixture Provider"
+        ],
+        "stderr": [],
+        "catalog": [
+          {
+            "providerId": "group",
+            "modelId": "fixture-model",
+            "entryId": "model-row",
+            "displayName": "Readable Model · Fixture Provider",
+            "supportsTools": true,
+            "supportedReasoningEfforts": [
+              "off",
+              "low",
+              "default",
+              "high"
+            ],
+            "defaultReasoningEffort": "high",
+            "available": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "legacy-array",
+      "document": [
+        {
+          "id": "model-row",
+          "channelId": "openai",
+          "provider": "openai",
+          "authMethod": "api_key",
+          "name": "Fixture Provider",
+          "apiKeyConfigured": true,
+          "groupId": "group",
+          "model": "fixture-model",
+          "modelLabel": "Readable Model",
+          "enabled": true,
+          "isDefault": true
+        }
+      ],
+      "expected": {
+        "exitCode": 0,
+        "stdout": [
+          "group\tfixture-model\tReadable Model · Fixture Provider"
+        ],
+        "stderr": [],
+        "catalog": [
+          {
+            "providerId": "group",
+            "modelId": "fixture-model",
+            "entryId": "model-row",
+            "displayName": "Readable Model · Fixture Provider",
+            "supportsTools": true,
+            "supportedReasoningEfforts": [
+              "off",
+              "low",
+              "default",
+              "high"
+            ],
+            "defaultReasoningEffort": "high",
+            "available": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "legacy-envelope",
+      "document": {
+        "providers": [
+          {
+            "id": "model-row",
+            "channelId": "openai",
+            "provider": "openai",
+            "authMethod": "api_key",
+            "name": "Fixture Provider",
+            "apiKeyConfigured": true,
+            "groupId": "group",
+            "model": "fixture-model",
+            "modelLabel": "Readable Model",
+            "enabled": true,
+            "isDefault": true
+          }
+        ]
+      },
+      "expected": {
+        "exitCode": 0,
+        "stdout": [
+          "group\tfixture-model\tReadable Model · Fixture Provider"
+        ],
+        "stderr": [],
+        "catalog": [
+          {
+            "providerId": "group",
+            "modelId": "fixture-model",
+            "entryId": "model-row",
+            "displayName": "Readable Model · Fixture Provider",
+            "supportsTools": true,
+            "supportedReasoningEfforts": [
+              "off",
+              "low",
+              "default",
+              "high"
+            ],
+            "defaultReasoningEffort": "high",
+            "available": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "missing-key-hint",
+      "document": {
+        "version": 2,
+        "channels": [
+          {
+            "id": "group",
+            "channelId": "openai",
+            "provider": "openai",
+            "authMethod": "api_key",
+            "name": "Fixture Provider",
+            "apiKeyConfigured": false
+          }
+        ],
+        "models": [
+          {
+            "id": "model-row",
+            "groupId": "group",
+            "model": "fixture-model",
+            "modelLabel": "Readable Model",
+            "enabled": true,
+            "isDefault": true
+          }
+        ]
+      },
+      "expected": {
+        "exitCode": 0,
+        "stdout": [],
+        "stderr": [
+          "No model configured."
+        ],
+        "catalog": []
+      }
+    },
+    {
+      "name": "disabled-model",
+      "document": {
+        "version": 2,
+        "channels": [
+          {
+            "id": "group",
+            "channelId": "openai",
+            "provider": "openai",
+            "authMethod": "api_key",
+            "name": "Fixture Provider",
+            "apiKeyConfigured": true
+          }
+        ],
+        "models": [
+          {
+            "id": "model-row",
+            "groupId": "group",
+            "model": "fixture-model",
+            "modelLabel": "Readable Model",
+            "enabled": false,
+            "isDefault": true
+          }
+        ]
+      },
+      "expected": {
+        "exitCode": 0,
+        "stdout": [],
+        "stderr": [
+          "No model configured."
+        ],
+        "catalog": []
+      }
+    },
+    {
+      "name": "multiple-models-and-whitespace-label",
+      "document": {
+        "version": 2,
+        "channels": [
+          {
+            "id": "group",
+            "channelId": "openai",
+            "provider": "openai",
+            "authMethod": "api_key",
+            "name": "Fixture Provider",
+            "apiKeyConfigured": true
+          }
+        ],
+        "models": [
+          {
+            "id": "model-row",
+            "groupId": "group",
+            "model": "fixture-model",
+            "modelLabel": "Readable Model",
+            "enabled": true,
+            "isDefault": true
+          },
+          {
+            "id": "second",
+            "groupId": "group",
+            "model": "another",
+            "modelLabel": "A\tB\nC",
+            "enabled": true,
+            "isDefault": false
+          }
+        ]
+      },
+      "expected": {
+        "exitCode": 0,
+        "stdout": [
+          "group\tfixture-model\tReadable Model · Fixture Provider\ngroup\tanother\tA B C · Fixture Provider"
+        ],
+        "stderr": [],
+        "catalog": [
+          {
+            "providerId": "group",
+            "modelId": "fixture-model",
+            "entryId": "model-row",
+            "displayName": "Readable Model · Fixture Provider",
+            "supportsTools": true,
+            "supportedReasoningEfforts": [
+              "off",
+              "low",
+              "default",
+              "high"
+            ],
+            "defaultReasoningEffort": "high",
+            "available": true
+          },
+          {
+            "providerId": "group",
+            "modelId": "another",
+            "entryId": "second",
+            "displayName": "A\tB\nC · Fixture Provider",
+            "supportsTools": true,
+            "supportedReasoningEfforts": [
+              "off",
+              "low",
+              "default",
+              "high"
+            ],
+            "defaultReasoningEffort": "high",
+            "available": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "oauth-configured-hint",
+      "document": {
+        "version": 2,
+        "channels": [
+          {
+            "id": "group",
+            "channelId": "openai",
+            "provider": "openai",
+            "authMethod": "oauth_chatgpt",
+            "name": "Fixture Provider",
+            "apiKeyConfigured": false,
+            "oauthConfigured": true
+          }
+        ],
+        "models": [
+          {
+            "id": "model-row",
+            "groupId": "group",
+            "model": "fixture-model",
+            "modelLabel": "Readable Model",
+            "enabled": true,
+            "isDefault": true
+          }
+        ]
+      },
+      "expected": {
+        "exitCode": 0,
+        "stdout": [
+          "group\tfixture-model\tReadable Model · Fixture Provider"
+        ],
+        "stderr": [],
+        "catalog": [
+          {
+            "providerId": "group",
+            "modelId": "fixture-model",
+            "entryId": "model-row",
+            "displayName": "Readable Model · Fixture Provider",
+            "supportsTools": true,
+            "supportedReasoningEfforts": [
+              "off",
+              "low",
+              "default",
+              "high"
+            ],
+            "defaultReasoningEffort": "high",
+            "available": true
+          }
+        ]
+      }
+    }
+  ],
+  "environmentRequests": [
+    {
+      "reasoningEffort": "off",
+      "expected": {
+        "model": "fixture-env",
+        "messages": [
+          {
+            "role": "user",
+            "content": "hello"
+          }
+        ],
+        "stream": true,
+        "stream_options": {
+          "include_usage": true
+        },
+        "reasoning_effort": "off"
+      }
+    },
+    {
+      "reasoningEffort": "low",
+      "expected": {
+        "model": "fixture-env",
+        "messages": [
+          {
+            "role": "user",
+            "content": "hello"
+          }
+        ],
+        "stream": true,
+        "stream_options": {
+          "include_usage": true
+        },
+        "reasoning_effort": "low"
+      }
+    },
+    {
+      "reasoningEffort": "default",
+      "expected": {
+        "model": "fixture-env",
+        "messages": [
+          {
+            "role": "user",
+            "content": "hello"
+          }
+        ],
+        "stream": true,
+        "stream_options": {
+          "include_usage": true
+        }
+      }
+    },
+    {
+      "reasoningEffort": "high",
+      "expected": {
+        "model": "fixture-env",
+        "messages": [
+          {
+            "role": "user",
+            "content": "hello"
+          }
+        ],
+        "stream": true,
+        "stream_options": {
+          "include_usage": true
+        },
+        "reasoning_effort": "high"
+      }
+    }
+  ]
+}

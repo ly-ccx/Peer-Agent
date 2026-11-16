@@ -1,4 +1,35 @@
 use serde::Serialize;
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelMetadataState {
+    Synced,
+    RebuildRequired,
+    CommitUnknown,
+}
+pub fn model_oauth_hint_fields() -> &'static [String] {
+    static FIELDS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    FIELDS.get_or_init(|| {
+        let data: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../packages/protocol/contracts/native-cli/model-binding.json"
+        ))
+        .expect("verified model binding contract");
+        data["hintFields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_owned())
+            .collect()
+    })
+}
+pub fn model_config_binding(value: &serde_json::Value) -> Result<String, crate::DigestError> {
+    let mut value = value.clone();
+    if let Some(object) = value.as_object_mut() {
+        for field in model_oauth_hint_fields() {
+            object.remove(field);
+        }
+    }
+    crate::javascript_json_string(&value)
+}
 #[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelAccountState {
@@ -18,6 +49,19 @@ pub struct ModelAccountStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn operational_bindings_match_actual_typescript_serialization() {
+        let data: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../packages/protocol/contracts/native-cli/model-binding.json"
+        ))
+        .unwrap();
+        for case in data["cases"].as_array().unwrap() {
+            assert_eq!(
+                model_config_binding(&case["value"]).unwrap(),
+                case["expected"].as_str().unwrap()
+            );
+        }
+    }
     #[test]
     fn account_states_match_the_language_neutral_contract() {
         let data: serde_json::Value = serde_json::from_str(include_str!(

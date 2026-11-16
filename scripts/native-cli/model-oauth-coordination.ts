@@ -161,6 +161,35 @@ try {
   reset(); const staleConfig = tuiSelection(); store.updateProvider(model.id, { enabled: false });
   await assert.rejects(staleConfig.refreshOAuthTokens(staleConfig.oauthTokens!, callback), /credential_oauth_configuration_changed/);
   store.updateProvider(model.id, { enabled: true });
+
+  // Actual Desktop and TUI hosts admit hint-only changes during HTTP, while
+  // endpoint/auth/header changes still reject the late credential commit.
+  const configurationFile=join(home,'llm-providers.json');
+  const baseConfiguration=readFileSync(configurationFile,'utf8');
+  let bindingCases=0;
+  for(const host of ['desktop','tui']) for(const change of ['hints','endpoint','auth','headers']) {
+    withModelConfigLock(configurationFile,()=>writeFileSync(configurationFile,baseConfiguration));
+    reset();
+    const selection=host==='tui'?tuiSelection():null;
+    const pending=selection?selection.refreshOAuthTokens(selection.oauthTokens!,callback):renew(credential());
+    const settled=pending.then(value=>({value,error:null}),error=>({value:null,error}));
+    await waitStarted();
+    withModelConfigLock(configurationFile,()=>{
+      const config=JSON.parse(readFileSync(configurationFile,'utf8'));
+      const channel=config.channels.find((row:any)=>row.id==='fixture');assert.ok(channel);
+      if(change==='hints') Object.assign(channel,{oauthConfigured:false,oauthExpires:42,oauthAccountId:'stale-hint'});
+      if(change==='endpoint') channel.baseUrl='https://changed.invalid/v1';
+      if(change==='auth') channel.authMethod='oauth_google';
+      if(change==='headers') channel.customHeaders={'X-Synthetic':'changed'};
+      writeFileSync(configurationFile,JSON.stringify(config));
+    });
+    finish.open();const outcome=await settled;
+    if(change==='hints') {assert.equal(outcome.error,null);assert.equal(outcome.value!.tokens.access,'refreshed-access');}
+    else {assert.match(String(outcome.error),/credential_oauth_configuration_changed/);assert.ok(JSON.parse(client.getSnapshot(key).secret!).peerModelRefresh);}
+    bindingCases++;
+  }
+  withModelConfigLock(configurationFile,()=>writeFileSync(configurationFile,baseConfiguration));
+  console.log(JSON.stringify({operationalBindingHostCases:bindingCases}));
   assert.ok(readFileSync(join(home, 'credentials.vault.json')).length);
   assert.ok(guardedCas >= 10, 'actual Desktop and TUI refresh CAS calls must use the guarded client');
   console.log(JSON.stringify({configurationGuardedVaultCas:guardedCas,httpWaitReleasedConfigLock:true}));

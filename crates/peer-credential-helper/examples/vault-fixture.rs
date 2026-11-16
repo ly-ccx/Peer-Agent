@@ -16,6 +16,17 @@ fn main() {
     let request = serde_json::from_slice(&bytes).expect("fixture protocol");
     let compare = matches!(&request,peer_credential_helper::Request::CompareSet {secret:Some(secret),..} if serde_json::from_str::<serde_json::Value>(secret).is_ok_and(|v|v.get("peerModelRefresh").is_none()));
     let response = peer_credential_helper::handle_fixture_request(request, &home, &key);
+    // Displace only this isolated fixture's actual config owner after a known
+    // encrypted credential commit. Exercise the production ownership check.
+    if compare && response.ok && home.join(".displace-config-after-compare").is_file() {
+        std::fs::remove_file(home.join(".displace-config-after-compare")).unwrap();
+        std::fs::rename(
+            home.join("llm-providers.json.lock"),
+            home.join("displaced-config-lock"),
+        )
+        .unwrap();
+        std::fs::create_dir(home.join("llm-providers.json.lock")).unwrap();
+    }
     // Commit the actual encrypted transaction, then lose only its receipt.
     // This executable is never part of the product's featureless build.
     if compare && response.ok && home.join(".lose-compare-receipt").is_file() {

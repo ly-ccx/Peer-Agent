@@ -33,11 +33,16 @@ def check(binary, output, name, args=(), action='exit', expected=0, size=(40, 12
     guardian = """import fcntl, json, os, pathlib, signal, subprocess, sys, termios, time
 fcntl.ioctl(0, termios.TIOCSCTTY, 0)
 signal.signal(signal.SIGINT, signal.SIG_IGN)
+def publish(path, value):
+    target = pathlib.Path(path)
+    temporary = target.with_suffix('.tmp')
+    temporary.write_text(json.dumps(value))
+    os.replace(temporary, target)
 p = subprocess.Popen(sys.argv[4:], env={**os.environ, 'HOME': sys.argv[3], 'PEER_AGENT_HOME': sys.argv[3] + '/data'})
 try:
-    pathlib.Path(sys.argv[1]).write_text(json.dumps({'pid': p.pid}))
+    publish(sys.argv[1], {'pid': p.pid})
     code = p.wait()
-    pathlib.Path(sys.argv[2]).write_text(json.dumps({'exitCode': code}))
+    publish(sys.argv[2], {'exitCode': code})
     time.sleep(20)
 finally:
     if p.poll() is None:
@@ -127,15 +132,19 @@ finally:
         result = {'case': name, 'exitCode': code, 'termiosRestored': restored, 'terminalBytes': len(captured),
                   'binarySha256': hashlib.sha256(binary.read_bytes()).hexdigest(), 'passed': True}
     finally:
-        if process.poll() is None:
-            os.killpg(process.pid, signal.SIGTERM)
-            try:
-                process.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait(timeout=3)
-        os.close(master); os.close(slave)
-        (output / (name + '.ansi')).write_bytes(captured)
+        try:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGTERM)
+                try:
+                    process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait(timeout=3)
+        finally:
+            # Preserve the observation and close the descriptors even when a
+            # cleanup deadline fails. Such a failure still fails this check.
+            os.close(master); os.close(slave)
+            (output / (name + '.ansi')).write_bytes(captured)
     return result
 
 

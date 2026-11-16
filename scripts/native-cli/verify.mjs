@@ -35,6 +35,7 @@ run('bun', ['scripts/native-cli/mcp-inventory-contracts.ts']);
 run('bun', ['scripts/native-cli/wire-contracts.ts']);
 run('node', ['scripts/native-cli/channel-contracts.mjs']);
 run('bun', ['scripts/native-cli/model-oauth-contracts.ts']);
+run('bun', ['scripts/native-cli/model-catalog-contracts.ts']);
 run('bun', ['scripts/native-cli/count-contracts.ts']);
 run('bun', ['scripts/native-cli/context-accounting-contracts.ts']);
 run('bun', ['scripts/native-cli/stream-contracts.ts']);

@@ -8,6 +8,11 @@ pub(crate) struct ModelBinding {
     model: Value,
 }
 impl ModelBinding {
+    pub(crate) fn channel_id(&self) -> &str {
+        self.channel["id"]
+            .as_str()
+            .expect("validated channel identity")
+    }
     pub(crate) fn new(home: &Path, config: &Value, selected: &Value) -> Result<Self, ModelError> {
         let model = config["models"]
             .as_array()
@@ -45,7 +50,12 @@ impl ModelBinding {
         let matches = |field: &str, original: &Value| {
             config[field].as_array().is_some_and(|values| {
                 let mut values = values.iter().filter(|v| v["id"] == original["id"]);
-                values.next() == Some(original) && values.next().is_none()
+                values.next().is_some_and(|current| {
+                    peer_protocol::model_config_binding(current)
+                        .ok()
+                        .zip(peer_protocol::model_config_binding(original).ok())
+                        .is_some_and(|(a, b)| a == b)
+                }) && values.next().is_none()
             })
         };
         if config["version"] != 2

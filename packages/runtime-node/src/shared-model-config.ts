@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { readModelConfigFile, replaceModelConfigFile, withModelConfigLock } from './model-config-file.mjs';
+import { readModelConfigFile, replaceModelConfigFile, withModelConfigLock, modelConfigBinding } from './model-config-file.mjs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -537,7 +537,7 @@ export function loadSharedModelSelection(
       const validate = () => {
         const matches = parseProviders(read(configFile)).filter((provider) => provider.id === selected.id);
         if (matches.length !== 1 || matches[0].enabled === false
-          || JSON.stringify(matches[0]) !== JSON.stringify(selected)) throw new Error('credential_oauth_configuration_changed');
+          || modelConfigBinding(matches[0]) !== modelConfigBinding(selected)) throw new Error('credential_oauth_configuration_changed');
       };
       return store.refreshOAuthTokens(credentialId, tokens, authMethod, refresh, validate, force,
         action => withModelConfigLock(configFile, action));
@@ -551,7 +551,7 @@ export function loadSharedModelSelection(
       return withModelConfigLock(configFile, () => {
         const current = parseProviders(read(configFile));
         const matches = current.filter(provider => provider.id === selected.id);
-        if (matches.length !== 1 || JSON.stringify(matches[0]) !== JSON.stringify(selected)) {
+        if (matches.length !== 1 || modelConfigBinding(matches[0]) !== modelConfigBinding(selected)) {
           throw new Error('credential_oauth_configuration_changed');
         }
         const previousTokens = options.credentialStore?.getOAuthTokens(credentialId) ?? null;

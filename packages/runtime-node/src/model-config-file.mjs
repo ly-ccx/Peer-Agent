@@ -5,6 +5,13 @@ import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 const MAX_BYTES = 1024 * 1024;
+export const MODEL_OAUTH_HINT_FIELDS = Object.freeze(['oauthConfigured', 'oauthExpires', 'oauthAccountId']);
+export function modelConfigBinding(value) {
+  const operational = { ...value };
+  for (const field of MODEL_OAUTH_HINT_FIELDS) delete operational[field];
+  // Retain all other ordering, including case-overlapping custom HTTP headers.
+  return JSON.stringify(operational);
+}
 const owners = new Map();
 const pause = new Int32Array(new SharedArrayBuffer(4));
 /** @param {string} code @returns {never} */

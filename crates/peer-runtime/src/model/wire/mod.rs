@@ -4,6 +4,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 mod anthropic;
 mod content;
+mod environment;
 mod gemini;
 mod responses;
 use content::*;
@@ -22,9 +23,18 @@ pub enum Wire {
 fn default_effort() -> String {
     "default".into()
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatDialect {
+    #[default]
+    Runtime,
+    Environment,
+}
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerationOptions {
+    #[serde(default)]
+    pub chat_dialect: ChatDialect,
     #[serde(default = "default_effort")]
     pub effort: String,
     #[serde(default)]

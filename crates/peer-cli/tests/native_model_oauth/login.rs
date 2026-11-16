@@ -1,3 +1,4 @@
+mod reconcile;
 use super::*;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use sha2::{Digest, Sha256};
@@ -283,10 +284,7 @@ fn native_browser_login_then_real_tool_loop_uses_vault_instead_of_stale_configur
         let tool = history.iter().find(|v| v["segments"].is_array()).unwrap();
         assert_eq!(tool["segments"][0]["result"]["status"], "success");
         assert!(tool["segments"][0]["result"]["evidence"].is_object());
-        assert_eq!(
-            std::fs::read(f.root.path().join("llm-providers.json")).unwrap(),
-            source
-        );
+        assert_hints(&f, &source, Some(&raw_token(&f)));
         assert_eq!(idp.requests.lock().unwrap().len(), 1);
     }
 }
@@ -310,10 +308,7 @@ fn explicit_reauthorization_replaces_unknown_refresh_state_and_logout_is_idempot
     }
     assert!(vault(&f, "get-snapshot", None)["secret"].is_null());
     assert!(model.requests.lock().unwrap().is_empty());
-    assert_eq!(
-        std::fs::read(f.root.path().join("llm-providers.json")).unwrap(),
-        source
-    );
+    assert_hints(&f, &source, None);
 }
 #[test]
 fn late_browser_exchange_cannot_overwrite_new_login_logout_or_changed_channel() {

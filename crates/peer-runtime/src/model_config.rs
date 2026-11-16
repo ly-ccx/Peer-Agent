@@ -196,6 +196,9 @@ pub async fn load_model(
     selected: &Value,
     cancel: &CancellationToken,
 ) -> Result<NativeModel, ModelError> {
+    if let Some(model) = crate::model_catalog::environment::selected(selected)? {
+        return Ok(model);
+    }
     let config = read(&home.join("llm-providers.json"))?;
     let mut resolved = resolve_model(&config, selected)?;
     let oauth = if resolved.auth_method != "api_key" {

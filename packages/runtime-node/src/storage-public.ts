@@ -1,5 +1,5 @@
 /** Stable storage entry; implementations do not re-export the aggregate root. */
-export { readModelConfigFile, replaceModelConfigFile, withModelConfigLock } from './model-config-file.mjs';
+export { readModelConfigFile, replaceModelConfigFile, withModelConfigLock, modelConfigBinding } from './model-config-file.mjs';
 export {
   DATA_STORE_ENTRIES,
   exportBundle,

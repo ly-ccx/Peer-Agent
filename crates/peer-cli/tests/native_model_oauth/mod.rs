@@ -2,6 +2,35 @@
 use super::*;
 use std::sync::mpsc;
 mod login;
+
+// Exact full-document comparison: only the accepted three hint projections
+// may change. Every other root/channel/model field stays present and equal.
+fn assert_hints(f: &Fixture, source: &[u8], token: Option<&Value>) {
+    let mut expected: Value = serde_json::from_slice(source).unwrap();
+    let channel = expected["channels"][0].as_object_mut().unwrap();
+    channel.insert("oauthConfigured".into(), json!(token.is_some()));
+    for key in ["oauthExpires", "oauthAccountId"] {
+        channel.remove(key);
+    }
+    if let Some(token) = token {
+        channel.insert("oauthExpires".into(), token["expires"].clone());
+        if let Some(account) = token.get("accountId") {
+            channel.insert("oauthAccountId".into(), account.clone());
+        }
+    }
+    for model in expected["models"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .filter(|v| v["groupId"] == "provider")
+    {
+        for key in ["oauthConfigured", "oauthExpires", "oauthAccountId"] {
+            model.as_object_mut().unwrap().remove(key);
+        }
+    }
+    assert_eq!(get(f.root.path().join("llm-providers.json")), expected);
+}
+
 #[test]
 fn unknown_refresh_intent_is_preserved_and_blocks_before_any_remote_request() {
     let idp = Idp::new(refreshed(), "200 OK", false, false);
@@ -305,10 +334,14 @@ fn pinned_model_oauth_refresh_commits_encrypted_tokens_before_real_tools_and_pre
                 }
             );
             assert_eq!(saved["projectId"], "fixture-project");
-            assert_eq!(
-                std::fs::read(f.root.path().join("llm-providers.json")).unwrap(),
-                source
-            );
+            if fresh {
+                assert_eq!(
+                    std::fs::read(f.root.path().join("llm-providers.json")).unwrap(),
+                    source
+                );
+            } else {
+                assert_hints(&f, &source, Some(&saved));
+            }
             let persisted = serde_json::to_string(&history).unwrap();
             assert!(!persisted.contains("synthetic-new-access"));
             assert!(!persisted.contains("synthetic-new-refresh"));
