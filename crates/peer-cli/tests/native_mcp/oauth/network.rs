@@ -233,6 +233,31 @@ fn oauth_https_proxy_and_explicit_no_proxy_use_the_same_strict_origin_trust() {
             .env("HTTPS_PROXY", url.as_str())
             .env("NO_PROXY", if bypass { "localhost" } else { "" });
         let out = command.output().unwrap();
+        let trace = json!({
+            "synthetic":true,"bypass":bypass,"origin":oauth.base,
+            "proxyConnects":*proxy.headers.lock().unwrap(),"originRequests":*oauth.requests.lock().unwrap(),
+            "exitCode":out.status.code(),"stderr":String::from_utf8_lossy(&out.stderr)
+        });
+        put(f.root.path().join("oauth-https-proxy-trace.json"), &trace);
+        if let Some(output) = std::env::var_os("PEER_NATIVE_P3_EVIDENCE_ROOT") {
+            let output = std::path::PathBuf::from(output);
+            assert!(output.join(".native-cli-fixture").is_file());
+            put(
+                output.join(format!("oauth-https-proxy-{bypass}.json")),
+                &trace,
+            );
+        }
+        if !out.status.success() {
+            let last = trace["originRequests"]
+                .as_array()
+                .and_then(|a| a.last())
+                .and_then(|v| v[0].as_str())
+                .and_then(|s| s.lines().next());
+            eprintln!(
+                "Synthetic HTTPS proxy failure: bypass={bypass}, connects={}, last origin={last:?}",
+                proxy.headers.lock().unwrap().len()
+            );
+        }
         assert!(
             out.status.success(),
             "bypass={bypass}: {}",

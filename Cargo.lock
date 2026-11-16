@@ -1682,6 +1682,7 @@ dependencies = [
  "signal-hook",
  "tempfile",
  "tokio",
+ "tokio-rustls",
  "url",
 ]
 

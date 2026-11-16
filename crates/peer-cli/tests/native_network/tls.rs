@@ -5,7 +5,7 @@ pub(crate) const CA: &str = include_str!("../fixtures/network/ca.pem");
 pub(crate) struct TlsFront {
     pub url: String,
     pub address: std::net::SocketAddr,
-    stop: Arc<std::sync::atomic::AtomicBool>,
+    stop: peer_runtime::CancellationToken,
     worker: Option<thread::JoinHandle<()>>,
 }
 pub(crate) fn request(stream: &mut impl Read) -> std::io::Result<Vec<u8>> {
@@ -34,6 +34,85 @@ pub(crate) fn request(stream: &mut impl Read) -> std::io::Result<Vec<u8>> {
     bytes.resize(start + length, 0);
     stream.read_exact(&mut bytes[start..])?;
     Ok(bytes)
+}
+
+#[test]
+fn tls_proxy_keeps_a_tunnel_open_within_the_real_five_second_connect_budget() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stopped = stop.clone();
+    let backend = thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(8);
+        while !stopped.load(std::sync::atomic::Ordering::Acquire) && Instant::now() < deadline {
+            match listener.accept() {
+                Ok((mut socket, _)) => {
+                    socket.set_nonblocking(false).unwrap();
+                    socket
+                        .set_read_timeout(Some(Duration::from_secs(6)))
+                        .unwrap();
+                    socket
+                        .set_write_timeout(Some(Duration::from_secs(6)))
+                        .unwrap();
+                    if request(&mut socket).is_ok() {
+                        let _ = socket.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n");
+                        let mut bytes = [0; 4];
+                        if socket.read_exact(&mut bytes).is_ok() {
+                            let _ = socket.write_all(&bytes);
+                        }
+                    }
+                    return;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(5))
+                }
+                Err(_) => return,
+            }
+        }
+    });
+    let front = TlsFront::for_url(&format!("http://{address}"), false);
+    let result = (|| -> std::io::Result<()> {
+        let mut roots = rustls::RootCertStore::empty();
+        roots
+            .add(CertificateDer::from_pem_slice(CA.as_bytes()).unwrap())
+            .unwrap();
+        let config = rustls::ClientConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+        let connection = rustls::ClientConnection::new(
+            Arc::new(config),
+            rustls::pki_types::ServerName::try_from("localhost").unwrap(),
+        )
+        .unwrap();
+        let socket = TcpStream::connect(front.address)?;
+        socket.set_read_timeout(Some(Duration::from_secs(6)))?;
+        socket.set_write_timeout(Some(Duration::from_secs(6)))?;
+        let mut tls = rustls::StreamOwned::new(connection, socket);
+        write!(tls, "CONNECT {address} HTTP/1.1\r\nHost: {address}\r\n\r\n")?;
+        tls.flush()?;
+        let header = request(&mut tls)?;
+        assert!(header.starts_with(b"HTTP/1.1 200"));
+        // A legal connect/handshake pause, shorter than the product's 5s limit.
+        thread::sleep(Duration::from_secs(4));
+        tls.write_all(b"ping")?;
+        tls.flush()?;
+        let mut bytes = [0; 4];
+        tls.read_exact(&mut bytes)?;
+        assert_eq!(&bytes, b"ping");
+        Ok(())
+    })();
+    drop(front);
+    stop.store(true, std::sync::atomic::Ordering::Release);
+    backend.join().unwrap();
+    assert!(
+        result.is_ok(),
+        "fixture truncated a valid tunnel: {result:?}"
+    );
 }
 impl TlsFront {
     pub fn new(server: &Server, wrong_name: bool) -> Self {
@@ -67,51 +146,47 @@ impl TlsFront {
         let address = listener.local_addr().unwrap();
         listener.set_nonblocking(true).unwrap();
         let upstream = url::Url::parse(url).unwrap().socket_addrs(|| None).unwrap()[0];
-        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop = peer_runtime::CancellationToken::new();
         let ended = stop.clone();
-        let tunnel_stop = ended.clone();
-        let worker = listeners(listener, ended, move |socket| {
-            socket
-                .set_read_timeout(Some(Duration::from_secs(3)))
+        let worker = thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
                 .unwrap();
-            socket
-                .set_write_timeout(Some(Duration::from_secs(3)))
-                .unwrap();
-            let mut tls = rustls::StreamOwned::new(
-                rustls::ServerConnection::new(config.clone()).unwrap(),
-                socket,
-            );
-            // TLS rejection/cancellation is an expected fixture input.
-            if let Ok(body) = request(&mut tls) {
-                let mut backend = TcpStream::connect(upstream).unwrap();
-                backend
-                    .set_read_timeout(Some(Duration::from_secs(3)))
-                    .unwrap();
-                backend
-                    .set_write_timeout(Some(Duration::from_secs(3)))
-                    .unwrap();
-                if backend.write_all(&body).is_ok() {
-                    if body.starts_with(b"CONNECT ") {
-                        bridge(&mut tls, &mut backend, &tunnel_stop);
-                        tls.conn.send_close_notify();
-                        let _ = tls.flush();
-                        return;
-                    }
-                    let mut bytes = [0; 8192];
-                    while let Ok(count) = backend.read(&mut bytes) {
-                        if count == 0
-                            || tls
-                                .write_all(&bytes[..count])
-                                .and_then(|_| tls.flush())
-                                .is_err()
-                        {
-                            break;
+            runtime.block_on(async move {
+                let listener=tokio::net::TcpListener::from_std(listener).unwrap();
+                let mut clients=tokio::task::JoinSet::new();
+                loop {
+                    tokio::select! {biased;
+                        _=ended.cancelled()=>break,
+                        result=clients.join_next(),if !clients.is_empty()=>{assert!(result.unwrap().is_ok());},
+                        accepted=listener.accept()=>{
+                            let Ok((socket,_))=accepted else {break};
+                            assert!(clients.len()<16,"synthetic connection bound");
+                            let config=config.clone();let cancel=ended.child_token();
+                            clients.spawn(async move {
+                                let serve=async move {
+                                    use tokio::io::AsyncWriteExt;
+                                    let mut tls=tokio_rustls::TlsAcceptor::from(config).accept(socket).await?;
+                                    let body=async_request(&mut tls).await?;
+                                    let mut backend=tokio::net::TcpStream::connect(upstream).await?;
+                                    backend.write_all(&body).await?;
+                                    // Both directions remain alive through CONNECT, streamed
+                                    // responses and client EOF. Never poll TLS with short
+                                    // blocking read timeouts or truncate after one EOF.
+                                    tokio::io::copy_bidirectional(&mut tls,&mut backend).await?;
+                                    tls.shutdown().await
+                                };
+                                tokio::select! {biased;
+                                    _=cancel.cancelled()=>{},
+                                    _=tokio::time::timeout(Duration::from_secs(30),serve)=>{},
+                                }
+                            });
                         }
                     }
                 }
-                tls.conn.send_close_notify();
-                let _ = tls.flush();
-            }
+                while let Some(result)=clients.join_next().await {assert!(result.is_ok());}
+            });
         });
         Self {
             url: format!("https://{address}/v1"),
@@ -123,7 +198,7 @@ impl TlsFront {
 }
 impl Drop for TlsFront {
     fn drop(&mut self) {
-        self.stop.store(true, std::sync::atomic::Ordering::Release);
+        self.stop.cancel();
         self.worker.take().unwrap().join().unwrap();
     }
 }
@@ -235,56 +310,33 @@ fn listeners(
     })
 }
 
-// TLS forward proxies need both directions after CONNECT, unlike a finite
-// ordinary HTTP response. Poll both owned sockets; no detached copy thread.
-fn bridge(
-    tls: &mut rustls::StreamOwned<rustls::ServerConnection, TcpStream>,
-    backend: &mut TcpStream,
-    stop: &std::sync::atomic::AtomicBool,
-) {
-    tls.sock
-        .set_read_timeout(Some(Duration::from_millis(10)))
-        .unwrap();
-    backend
-        .set_read_timeout(Some(Duration::from_millis(10)))
-        .unwrap();
-    let mut bytes = [0; 8192];
-    let mut deadline = Instant::now() + Duration::from_secs(3);
-    while !stop.load(std::sync::atomic::Ordering::Acquire) && Instant::now() < deadline {
-        match tls.read(&mut bytes) {
-            Ok(0) => break,
-            Ok(n) => {
-                if backend.write_all(&bytes[..n]).is_err() {
-                    break;
-                }
-                deadline = Instant::now() + Duration::from_secs(3);
-            }
-            Err(e)
-                if matches!(
-                    e.kind(),
-                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-                ) => {}
-            Err(_) => break,
+// Same bounded request shape as the synchronous proxy fixtures, with owned
+// asynchronous TLS IO. All live server work belongs to the parent's JoinSet.
+async fn async_request(
+    stream: &mut (impl tokio::io::AsyncRead + Unpin),
+) -> std::io::Result<Vec<u8>> {
+    use tokio::io::AsyncReadExt;
+    let mut bytes = Vec::new();
+    while !bytes.ends_with(b"\r\n\r\n") {
+        if bytes.len() > 32768 {
+            return Err(std::io::Error::other("fixture header limit"));
         }
-        match backend.read(&mut bytes) {
-            Ok(0) => break,
-            Ok(n) => {
-                if tls
-                    .write_all(&bytes[..n])
-                    .and_then(|_| tls.flush())
-                    .is_err()
-                {
-                    break;
-                }
-                deadline = Instant::now() + Duration::from_secs(3);
-            }
-            Err(e)
-                if matches!(
-                    e.kind(),
-                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-                ) => {}
-            Err(_) => break,
-        }
+        bytes.push(stream.read_u8().await?);
     }
-    let _ = backend.shutdown(std::net::Shutdown::Both);
+    let header = String::from_utf8_lossy(&bytes);
+    let length = header
+        .lines()
+        .find_map(|line| {
+            line.to_lowercase()
+                .strip_prefix("content-length:")
+                .and_then(|s| s.trim().parse::<usize>().ok())
+        })
+        .unwrap_or(0);
+    if length > 2 * 1024 * 1024 {
+        return Err(std::io::Error::other("fixture body limit"));
+    }
+    let start = bytes.len();
+    bytes.resize(start + length, 0);
+    stream.read_exact(&mut bytes[start..]).await?;
+    Ok(bytes)
 }
