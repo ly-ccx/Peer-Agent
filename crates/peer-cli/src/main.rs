@@ -6,6 +6,8 @@ use std::{
     io::{self, IsTerminal, Write},
     process::ExitCode,
 };
+const SHELL_CONTRACT: &str =
+    include_str!("../../../packages/protocol/contracts/native-cli/shell-completions.json");
 
 fn main() -> ExitCode {
     let result = run();
@@ -25,8 +27,22 @@ fn run() -> io::Result<CliExit> {
         Command::Version => writeln!(out, "peer {}", VERSION.trim())?,
         Command::Help => writeln!(
             out,
-            "Peer native CLI migration candidate\n\nUsage: peer-native [--help|--version|doctor|--classic|bots]\n       peer-native exec --plan <canonical-goal-id> [--max-turns N]\n       peer-native recover --plan <canonical-goal-id>\n       peer-native mcp auth <server-id>\n       peer-native mcp refresh <server-id>\n       peer-native models\n       peer-native models <auth|logout|status|reconcile> <configured-channel-id>\n\nNative exec supports fresh delegated worker admissions with native model and MCP\ntransports. Unsupported configuration is rejected. OAuth commands update configured\nVault credentials; they do not grant tools. The interactive TUI edits drafts.\nPEER_MODEL_API_KEY, PEER_MODEL_BASE_URL and PEER_MODEL_ID configure the independent\nenvironment model source. No Bun/Node sidecar is started."
+            "Peer native CLI migration candidate\n\nUsage: peer-native [--help|--version|doctor|--classic|bots]\n       peer-native exec --plan <canonical-goal-id> [--max-turns N]\n       peer-native recover --plan <canonical-goal-id>\n       peer-native mcp auth <server-id>\n       peer-native mcp refresh <server-id>\n       peer-native completions <bash|zsh|fish>\n       peer-native models\n       peer-native models <auth|logout|status|reconcile> <configured-channel-id>\n\nNative exec supports fresh delegated worker admissions with native model and MCP\ntransports. Unsupported configuration is rejected. OAuth commands update configured\nVault credentials; they do not grant tools. The interactive TUI edits drafts.\nPEER_MODEL_API_KEY, PEER_MODEL_BASE_URL and PEER_MODEL_ID configure the independent\nenvironment model source. No Bun/Node sidecar is started."
         )?,
+        Command::Completions(shell) => {
+            let data: serde_json::Value =
+                serde_json::from_str(SHELL_CONTRACT).expect("verified shell contract");
+            write!(out, "{}", data["scripts"][&shell].as_str().unwrap())?;
+        }
+        Command::CompletionsHelp => {
+            let data: serde_json::Value =
+                serde_json::from_str(SHELL_CONTRACT).expect("verified shell contract");
+            writeln!(out, "{}", data["help"].as_str().unwrap())?;
+        }
+        Command::Usage(message) => {
+            writeln!(io::stderr(), "{message}")?;
+            return Ok(CliExit::Usage);
+        }
         Command::Doctor => writeln!(
             out,
             "{}",

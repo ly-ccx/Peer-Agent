@@ -6,6 +6,7 @@ use sha2::{Digest, Sha256};
 use std::time::Duration;
 mod continuation;
 mod count;
+mod grok;
 pub use count::ProviderTokenCount;
 mod sse;
 pub use continuation::LiveHistory;
@@ -28,6 +29,7 @@ pub struct NativeModel {
     context_window: Option<u64>,
     headers: reqwest::header::HeaderMap,
     oauth: Option<crate::model_oauth::ModelOAuth>,
+    compatibility: Option<grok::Compatibility>,
 }
 /// An encoded request bound to the exact provider instance that built it.
 /// Counting can borrow it; sending consumes its original immutable wire bytes.
@@ -76,6 +78,16 @@ impl NativeModel {
         self.oauth = oauth;
         self
     }
+    pub(crate) fn with_compatibility(
+        mut self,
+        home: &std::path::Path,
+        auth: &str,
+    ) -> Result<Self, ModelError> {
+        if auth == "oauth_grok" {
+            self.compatibility = Some(grok::Compatibility::new(home)?);
+        }
+        Ok(self)
+    }
     pub fn model_id(&self) -> &str {
         &self.model
     }
@@ -122,6 +134,7 @@ impl NativeModel {
             context_window: None,
             headers: reqwest::header::HeaderMap::new(),
             oauth: None,
+            compatibility: None,
         })
     }
     pub async fn turn(
@@ -215,16 +228,19 @@ impl NativeModel {
             Some(oauth) => Some(oauth.access(cancel).await?),
             None => None,
         };
-        if let Some(account) = oauth.as_ref().and_then(|v| v.account.as_ref()) {
+        if let Some((account, name)) = oauth
+            .as_ref()
+            .and_then(|v| v.account.as_deref().zip(v.account_header.as_deref()))
+        {
             if account.len() > 512 {
                 return Err(ModelError::new("model_oauth_account_invalid"));
             }
             let mut value = reqwest::header::HeaderValue::from_str(account)
                 .map_err(|_| ModelError::new("model_oauth_account_invalid"))?;
             value.set_sensitive(true);
-            if self.wire == wire::Wire::Responses {
-                headers.insert("chatgpt-account-id", value);
-            }
+            let name = reqwest::header::HeaderName::from_bytes(name.as_bytes())
+                .map_err(|_| ModelError::new("model_header_invalid"))?;
+            headers.insert(name, value);
         }
         if let Some(s) = oauth.as_ref().map(|v| &v.secret).or(self.secret.as_ref()) {
             let bearer = zeroize::Zeroizing::new(
@@ -273,20 +289,25 @@ impl PreparedRequest<'_> {
     pub async fn send(self, cancel: &CancellationToken) -> Result<ModelTurn, ModelError> {
         let model = self.owner;
         let request_fingerprint = self.fingerprint;
-        let request = model
-            .request_builder(model.endpoint.clone(), "text/event-stream", cancel)
-            .await?
-            .body(self.bytes);
         let mut stream = Some(stream::Stream::new(model.wire));
         let mut final_observation = None;
         let read = async {
-            let mut response = request.send().await.map_err(|e| {
-                if e.is_timeout() {
-                    ModelError::new("model_timeout")
-                } else {
-                    ModelError::new("model_transport_failed")
-                }
-            })?;
+            let mut response = match &model.compatibility {
+                Some(adapter) => adapter.send(model, &self.bytes, cancel).await?,
+                None => model
+                    .request_builder(model.endpoint.clone(), "text/event-stream", cancel)
+                    .await?
+                    .body(self.bytes)
+                    .send()
+                    .await
+                    .map_err(|e| {
+                        if e.is_timeout() {
+                            ModelError::new("model_timeout")
+                        } else {
+                            ModelError::new("model_transport_failed")
+                        }
+                    })?,
+            };
             if !response.status().is_success() {
                 let status = response.status().as_u16();
                 let mut body = Vec::new();

@@ -19,7 +19,8 @@
       },
       "headers": {
         "originator": "peer-agent"
-      }
+      },
+      "accountHeader": "chatgpt-account-id"
     },
     {
       "authMethod": "oauth_google",
@@ -37,6 +38,40 @@
           "access_type": "offline",
           "prompt": "consent"
         }
+      }
+    },
+    {
+      "authMethod": "oauth_grok",
+      "channelId": "grok",
+      "wire": "openai-responses",
+      "baseUrl": "https://cli-chat-proxy.grok.com/v1",
+      "tokenUrl": "https://auth.x.ai/oauth2/token",
+      "clientId": "b1a00492-073a-47ea-816f-4c329264a828",
+      "issuer": "https://auth.x.ai",
+      "headers": {
+        "X-XAI-Token-Auth": "xai-grok-cli",
+        "x-grok-client-surface": "grok-build",
+        "originator": "peer-agent"
+      },
+      "login": {
+        "kind": "device",
+        "deviceUrl": "https://auth.x.ai/oauth2/device/code",
+        "userinfoUrl": "https://auth.x.ai/oauth2/userinfo",
+        "scope": "openid profile email offline_access grok-cli:access api:access",
+        "verificationOrigins": [
+          "https://auth.x.ai",
+          "https://accounts.x.ai",
+          "https://grok.com",
+          "https://x.ai"
+        ]
+      },
+      "compatibility": {
+        "releaseUrl": "https://x.ai/cli/stable",
+        "timeoutMs": 4000,
+        "cacheTtlMs": 21600000,
+        "maxStaleMs": 86400000,
+        "bodyBytes": 64,
+        "supportedMajor": "1"
       }
     }
   ],
@@ -243,6 +278,124 @@
         "refresh": "synthetic-old-refresh",
         "expires": 1800003600000,
         "accountId": "fixture-account"
+      }
+    },
+    {
+      "authMethod": "oauth_grok",
+      "variant": "rotate",
+      "tokens": {
+        "access": "synthetic-old-access",
+        "refresh": "synthetic-old-refresh",
+        "expires": 1799999999999,
+        "scope": "api:access grok-cli:access",
+        "issuer": "https://auth.x.ai",
+        "clientId": "b1a00492-073a-47ea-816f-4c329264a828",
+        "provider": "grok"
+      },
+      "response": {
+        "access_token": "synthetic-new-access",
+        "token_type": "Bearer",
+        "expires_in": 7200,
+        "refresh_token": "synthetic-new-refresh",
+        "scope": "grok-cli:access api:access"
+      },
+      "request": {
+        "url": "https://auth.x.ai/oauth2/token",
+        "method": "POST",
+        "headers": {
+          "content-type": "application/x-www-form-urlencoded"
+        },
+        "form": {
+          "grant_type": "refresh_token",
+          "refresh_token": "synthetic-old-refresh",
+          "client_id": "b1a00492-073a-47ea-816f-4c329264a828"
+        }
+      },
+      "expected": {
+        "access": "synthetic-new-access",
+        "refresh": "synthetic-new-refresh",
+        "expires": 1800007200000,
+        "scope": "grok-cli:access api:access",
+        "issuer": "https://auth.x.ai",
+        "clientId": "b1a00492-073a-47ea-816f-4c329264a828",
+        "provider": "grok"
+      }
+    },
+    {
+      "authMethod": "oauth_grok",
+      "variant": "retain",
+      "tokens": {
+        "access": "synthetic-old-access",
+        "refresh": "synthetic-old-refresh",
+        "expires": 1799999999999,
+        "scope": "api:access grok-cli:access",
+        "issuer": "https://auth.x.ai",
+        "clientId": "b1a00492-073a-47ea-816f-4c329264a828",
+        "provider": "grok"
+      },
+      "response": {
+        "access_token": "synthetic-new-access",
+        "token_type": "Bearer",
+        "expires_in": 7200
+      },
+      "request": {
+        "url": "https://auth.x.ai/oauth2/token",
+        "method": "POST",
+        "headers": {
+          "content-type": "application/x-www-form-urlencoded"
+        },
+        "form": {
+          "grant_type": "refresh_token",
+          "refresh_token": "synthetic-old-refresh",
+          "client_id": "b1a00492-073a-47ea-816f-4c329264a828"
+        }
+      },
+      "expected": {
+        "access": "synthetic-new-access",
+        "refresh": "synthetic-old-refresh",
+        "expires": 1800007200000,
+        "scope": "api:access grok-cli:access",
+        "issuer": "https://auth.x.ai",
+        "clientId": "b1a00492-073a-47ea-816f-4c329264a828",
+        "provider": "grok"
+      }
+    },
+    {
+      "authMethod": "oauth_grok",
+      "variant": "default-expiry",
+      "tokens": {
+        "access": "synthetic-old-access",
+        "refresh": "synthetic-old-refresh",
+        "expires": 1799999999999,
+        "scope": "api:access grok-cli:access",
+        "issuer": "https://auth.x.ai",
+        "clientId": "b1a00492-073a-47ea-816f-4c329264a828",
+        "provider": "grok"
+      },
+      "response": {
+        "access_token": "synthetic-new-access",
+        "token_type": "Bearer"
+      },
+      "request": {
+        "url": "https://auth.x.ai/oauth2/token",
+        "method": "POST",
+        "headers": {
+          "content-type": "application/x-www-form-urlencoded"
+        },
+        "form": {
+          "grant_type": "refresh_token",
+          "refresh_token": "synthetic-old-refresh",
+          "client_id": "b1a00492-073a-47ea-816f-4c329264a828"
+        }
+      },
+      "expected": {
+        "access": "synthetic-new-access",
+        "refresh": "synthetic-old-refresh",
+        "expires": 1800003600000,
+        "scope": "api:access grok-cli:access",
+        "issuer": "https://auth.x.ai",
+        "clientId": "b1a00492-073a-47ea-816f-4c329264a828",
+        "provider": "grok"
       }
     }
   ],
@@ -665,6 +818,471 @@
         },
         "body": {
           "model": "gpt-6-astra",
+          "instructions": "shared system",
+          "input": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "input_text",
+                  "text": "hello"
+                }
+              ]
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              },
+              "strict": false
+            }
+          ],
+          "tool_choice": "auto",
+          "parallel_tool_calls": true,
+          "reasoning": {
+            "effort": "max"
+          },
+          "service_tier": "priority",
+          "stream": true,
+          "store": false
+        }
+      }
+    },
+    {
+      "effort": "off",
+      "input": {
+        "model": "grok-4.5",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "user",
+            "content": "hello"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "options": {
+          "authMethod": "oauth_grok",
+          "effort": "off",
+          "supportsReasoning": true,
+          "omitMaxOutputTokens": true,
+          "maxOutputTokens": 16384,
+          "fastMode": false
+        }
+      },
+      "expected": {
+        "url": "https://cli-chat-proxy.grok.com/v1/responses",
+        "headers": {
+          "accept": "text/event-stream",
+          "authorization": "Bearer synthetic-access",
+          "content-type": "application/json",
+          "openai-beta": "responses=experimental",
+          "originator": "peer-agent",
+          "x-grok-client-surface": "grok-build",
+          "x-xai-token-auth": "xai-grok-cli"
+        },
+        "body": {
+          "model": "grok-4.5",
+          "instructions": "shared system",
+          "input": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "input_text",
+                  "text": "hello"
+                }
+              ]
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              },
+              "strict": false
+            }
+          ],
+          "tool_choice": "auto",
+          "parallel_tool_calls": true,
+          "stream": true,
+          "store": false
+        }
+      }
+    },
+    {
+      "effort": "default",
+      "input": {
+        "model": "grok-4.5",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "user",
+            "content": "hello"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "options": {
+          "authMethod": "oauth_grok",
+          "effort": "default",
+          "supportsReasoning": true,
+          "omitMaxOutputTokens": true,
+          "maxOutputTokens": 16384,
+          "fastMode": false
+        }
+      },
+      "expected": {
+        "url": "https://cli-chat-proxy.grok.com/v1/responses",
+        "headers": {
+          "accept": "text/event-stream",
+          "authorization": "Bearer synthetic-access",
+          "content-type": "application/json",
+          "openai-beta": "responses=experimental",
+          "originator": "peer-agent",
+          "x-grok-client-surface": "grok-build",
+          "x-xai-token-auth": "xai-grok-cli"
+        },
+        "body": {
+          "model": "grok-4.5",
+          "instructions": "shared system",
+          "input": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "input_text",
+                  "text": "hello"
+                }
+              ]
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              },
+              "strict": false
+            }
+          ],
+          "tool_choice": "auto",
+          "parallel_tool_calls": true,
+          "stream": true,
+          "store": false
+        }
+      }
+    },
+    {
+      "effort": "high",
+      "input": {
+        "model": "grok-4.5",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "user",
+            "content": "hello"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "options": {
+          "authMethod": "oauth_grok",
+          "effort": "high",
+          "supportsReasoning": true,
+          "omitMaxOutputTokens": true,
+          "maxOutputTokens": 16384,
+          "fastMode": false
+        }
+      },
+      "expected": {
+        "url": "https://cli-chat-proxy.grok.com/v1/responses",
+        "headers": {
+          "accept": "text/event-stream",
+          "authorization": "Bearer synthetic-access",
+          "content-type": "application/json",
+          "openai-beta": "responses=experimental",
+          "originator": "peer-agent",
+          "x-grok-client-surface": "grok-build",
+          "x-xai-token-auth": "xai-grok-cli"
+        },
+        "body": {
+          "model": "grok-4.5",
+          "instructions": "shared system",
+          "input": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "input_text",
+                  "text": "hello"
+                }
+              ]
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              },
+              "strict": false
+            }
+          ],
+          "tool_choice": "auto",
+          "parallel_tool_calls": true,
+          "reasoning": {
+            "effort": "high"
+          },
+          "stream": true,
+          "store": false
+        }
+      }
+    },
+    {
+      "effort": "xhigh",
+      "input": {
+        "model": "grok-4.5",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "user",
+            "content": "hello"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "options": {
+          "authMethod": "oauth_grok",
+          "effort": "xhigh",
+          "supportsReasoning": true,
+          "omitMaxOutputTokens": true,
+          "maxOutputTokens": 16384,
+          "fastMode": false
+        }
+      },
+      "expected": {
+        "url": "https://cli-chat-proxy.grok.com/v1/responses",
+        "headers": {
+          "accept": "text/event-stream",
+          "authorization": "Bearer synthetic-access",
+          "content-type": "application/json",
+          "openai-beta": "responses=experimental",
+          "originator": "peer-agent",
+          "x-grok-client-surface": "grok-build",
+          "x-xai-token-auth": "xai-grok-cli"
+        },
+        "body": {
+          "model": "grok-4.5",
+          "instructions": "shared system",
+          "input": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "input_text",
+                  "text": "hello"
+                }
+              ]
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              },
+              "strict": false
+            }
+          ],
+          "tool_choice": "auto",
+          "parallel_tool_calls": true,
+          "reasoning": {
+            "effort": "xhigh"
+          },
+          "stream": true,
+          "store": false
+        }
+      }
+    },
+    {
+      "effort": "max",
+      "input": {
+        "model": "grok-4.5",
+        "system": "shared system",
+        "messages": [
+          {
+            "role": "user",
+            "content": "hello"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "description": "Read a file",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        ],
+        "options": {
+          "authMethod": "oauth_grok",
+          "effort": "max",
+          "supportsReasoning": true,
+          "omitMaxOutputTokens": true,
+          "maxOutputTokens": 16384,
+          "fastMode": true
+        }
+      },
+      "expected": {
+        "url": "https://cli-chat-proxy.grok.com/v1/responses",
+        "headers": {
+          "accept": "text/event-stream",
+          "authorization": "Bearer synthetic-access",
+          "content-type": "application/json",
+          "openai-beta": "responses=experimental",
+          "originator": "peer-agent",
+          "x-grok-client-surface": "grok-build",
+          "x-xai-token-auth": "xai-grok-cli"
+        },
+        "body": {
+          "model": "grok-4.5",
           "instructions": "shared system",
           "input": [
             {
@@ -1311,6 +1929,16 @@
         "expires": 1800007200000,
         "accountId": "fixture@example.invalid"
       }
+    }
+  ],
+  "authorizationPrompts": [
+    {
+      "authorizationUrl": "https://auth.example/authorize"
+    },
+    {
+      "authorizationUrl": "https://auth.x.ai/activate",
+      "userCode": "TEST-CODE",
+      "expiresAt": "2026-11-17T00:15:00Z"
     }
   ],
   "accountStates": [

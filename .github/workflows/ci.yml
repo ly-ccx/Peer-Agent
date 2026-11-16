@@ -23,7 +23,9 @@ jobs:
   test:
     name: ${{ matrix.check_name }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    # Native conformance now shares this job with the full JS and Electron gates.
+    # Keep their assertions and per-step/action limits; budget for all gates.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:

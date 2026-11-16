@@ -1,6 +1,7 @@
 //! Child module of the real Host suite; synthetic IdP and encrypted Vault only.
 use super::*;
 use std::sync::mpsc;
+mod grok;
 mod login;
 mod network;
 
@@ -189,7 +190,7 @@ impl Idp {
                 socket
                     .set_write_timeout(Some(Duration::from_secs(3)))
                     .unwrap();
-                let (request, _, headers) = read_request(&mut socket);
+                let (request, _, headers, _) = read_request(&mut socket);
                 assert!(headers.starts_with("POST /token HTTP/"));
                 captured.lock().unwrap().push(request);
                 if let Some(gate) = gate.take()

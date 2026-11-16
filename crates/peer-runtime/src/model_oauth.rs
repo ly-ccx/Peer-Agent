@@ -96,6 +96,7 @@ fn stamp(secret: &Secret, revision: Option<&str>) -> String {
 pub(crate) struct Access {
     pub secret: Secret,
     pub account: Option<String>,
+    pub account_header: Option<String>,
 }
 pub(crate) struct ModelOAuth {
     helper: HelperClient,
@@ -328,6 +329,9 @@ impl ModelOAuth {
         Ok(Access {
             secret: token.access()?,
             account,
+            account_header: provider(&self.auth)
+                .and_then(|v| v["accountHeader"].as_str())
+                .map(str::to_owned),
         })
     }
 }

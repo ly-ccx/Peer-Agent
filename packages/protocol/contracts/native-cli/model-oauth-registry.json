@@ -18,7 +18,8 @@
       },
       "headers": {
         "originator": "peer-agent"
-      }
+      },
+      "accountHeader": "chatgpt-account-id"
     },
     {
       "authMethod": "oauth_google",
@@ -36,6 +37,40 @@
           "access_type": "offline",
           "prompt": "consent"
         }
+      }
+    },
+    {
+      "authMethod": "oauth_grok",
+      "channelId": "grok",
+      "wire": "openai-responses",
+      "baseUrl": "https://cli-chat-proxy.grok.com/v1",
+      "tokenUrl": "https://auth.x.ai/oauth2/token",
+      "clientId": "b1a00492-073a-47ea-816f-4c329264a828",
+      "issuer": "https://auth.x.ai",
+      "headers": {
+        "X-XAI-Token-Auth": "xai-grok-cli",
+        "x-grok-client-surface": "grok-build",
+        "originator": "peer-agent"
+      },
+      "login": {
+        "kind": "device",
+        "deviceUrl": "https://auth.x.ai/oauth2/device/code",
+        "userinfoUrl": "https://auth.x.ai/oauth2/userinfo",
+        "scope": "openid profile email offline_access grok-cli:access api:access",
+        "verificationOrigins": [
+          "https://auth.x.ai",
+          "https://accounts.x.ai",
+          "https://grok.com",
+          "https://x.ai"
+        ]
+      },
+      "compatibility": {
+        "releaseUrl": "https://x.ai/cli/stable",
+        "timeoutMs": 4000,
+        "cacheTtlMs": 21600000,
+        "maxStaleMs": 86400000,
+        "bodyBytes": 64,
+        "supportedMajor": "1"
       }
     }
   ],

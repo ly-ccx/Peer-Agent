@@ -144,6 +144,9 @@ impl TlsFront {
                 include_bytes!("../fixtures/network/server.key").as_slice(),
             )
         };
+        Self::with_certificate(url, certificate, key)
+    }
+    pub(crate) fn with_certificate(url: &str, certificate: &[u8], key: &[u8]) -> Self {
         let config = rustls::ServerConfig::builder_with_provider(Arc::new(
             rustls::crypto::ring::default_provider(),
         ))

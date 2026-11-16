@@ -8,6 +8,17 @@ pub(crate) async fn request(
     form: &str,
     started: Option<&std::sync::atomic::AtomicBool>,
 ) -> Result<Token, ModelError> {
+    let (_, token) = exchange(network, cancel, url, form, started, false).await?;
+    Ok(token)
+}
+pub(crate) async fn exchange(
+    network: &crate::network::Network,
+    cancel: &crate::CancellationToken,
+    url: &reqwest::Url,
+    form: &str,
+    started: Option<&std::sync::atomic::AtomicBool>,
+    allow_oauth_error: bool,
+) -> Result<(reqwest::StatusCode, Token), ModelError> {
     let client = network
         .prepare(url, cancel)
         .await
@@ -29,7 +40,8 @@ pub(crate) async fn request(
         .send()
         .await
         .map_err(|_| ModelError::new("model_oauth_refresh_transport_failed"))?;
-    if !response.status().is_success() {
+    let status = response.status();
+    if !status.is_success() && !(allow_oauth_error && status == reqwest::StatusCode::BAD_REQUEST) {
         return Err(ModelError::new("model_oauth_refresh_rejected"));
     }
     if !response
@@ -55,7 +67,11 @@ pub(crate) async fn request(
         }
         body.extend_from_slice(&chunk);
     }
-    Token::parse(
-        std::str::from_utf8(&body).map_err(|_| ModelError::new("model_oauth_refresh_invalid"))?,
-    )
+    Ok((
+        status,
+        Token::parse(
+            std::str::from_utf8(&body)
+                .map_err(|_| ModelError::new("model_oauth_refresh_invalid"))?,
+        )?,
+    ))
 }

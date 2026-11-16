@@ -3,8 +3,8 @@ mod model_catalog;
 pub use model_catalog::ModelCatalogEntry;
 mod model_auth;
 pub use model_auth::{
-    ModelAccountState, ModelAccountStatus, ModelMetadataState, model_config_binding,
-    model_oauth_hint_fields,
+    ModelAccountState, ModelAccountStatus, ModelAuthorizationPrompt, ModelMetadataState,
+    model_config_binding, model_oauth_hint_fields,
 };
 mod mcp_inventory;
 pub use mcp_inventory::{McpInventory, project_mcp_inventory};

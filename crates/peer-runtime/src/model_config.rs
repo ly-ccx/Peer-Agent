@@ -263,11 +263,12 @@ pub async fn load_model(
         secret,
         Duration::from_secs(120),
     )
-    .map(|model| {
+    .and_then(|model| {
         model
             .with_context_window(resolved.context_window)
             .with_headers(resolved.headers)
             .with_oauth(oauth)
+            .with_compatibility(home, &resolved.auth_method)
     })
 }
 

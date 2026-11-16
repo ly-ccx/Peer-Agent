@@ -80,7 +80,17 @@ pub(crate) fn encode(wire: Wire, input: &WireInput<'_>) -> Result<Value, ModelEr
         if o.fast_mode {
             body["service_tier"] = json!("priority");
         }
-        if o.auth_method.as_deref() == Some("oauth_chatgpt") && o.effort == "default" {
+        if o.auth_method.as_deref() == Some("oauth_grok") {
+            body.as_object_mut().unwrap().remove("reasoning");
+            if !o.effort.is_empty() && !matches!(o.effort.as_str(), "off" | "default") {
+                body["reasoning"] = json!({"effort":o.effort});
+            }
+        }
+        if matches!(
+            o.auth_method.as_deref(),
+            Some("oauth_chatgpt" | "oauth_grok")
+        ) && o.effort == "default"
+        {
             body.as_object_mut().unwrap().remove("reasoning");
         }
     }

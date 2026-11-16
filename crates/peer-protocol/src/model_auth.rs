@@ -1,4 +1,15 @@
 use serde::Serialize;
+/// Human-facing account-management facts; never contains a device code or token.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelAuthorizationPrompt {
+    pub authorization_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelMetadataState {
@@ -61,6 +72,29 @@ mod tests {
                 case["expected"].as_str().unwrap()
             );
         }
+    }
+    #[test]
+    fn browser_and_device_prompts_match_the_machine_output_contract_without_secret_fields() {
+        let data: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../packages/protocol/contracts/native-cli/model-oauth.json"
+        ))
+        .unwrap();
+        let examples = [
+            ModelAuthorizationPrompt {
+                authorization_url: "https://auth.example/authorize".into(),
+                user_code: None,
+                expires_at: None,
+            },
+            ModelAuthorizationPrompt {
+                authorization_url: "https://auth.x.ai/activate".into(),
+                user_code: Some("TEST-CODE".into()),
+                expires_at: Some("2026-11-17T00:15:00Z".into()),
+            },
+        ];
+        assert_eq!(
+            serde_json::to_value(examples).unwrap(),
+            data["authorizationPrompts"]
+        );
     }
     #[test]
     fn account_states_match_the_language_neutral_contract() {

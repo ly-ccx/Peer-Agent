@@ -291,7 +291,7 @@ pub(super) fn resolve(flat: &Value, selected: &Value) -> Result<Channel, ModelEr
         max_output_tokens: flat["maxOutputTokens"].as_f64(),
         fast_mode: selected["fastMode"] == true,
         auth_method: oauth.map(|_| auth.to_owned()),
-        omit_max_output_tokens: auth == "oauth_chatgpt",
+        omit_max_output_tokens: matches!(auth, "oauth_chatgpt" | "oauth_grok"),
         project_id: if auth == "oauth_google" {
             text(flat, "oauthProjectId").map(str::to_owned)
         } else {

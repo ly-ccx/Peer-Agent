@@ -33,18 +33,45 @@ impl Token {
     pub(crate) fn text(&self, field: &str) -> Option<&str> {
         self.0[field].as_str().filter(|v| !v.is_empty())
     }
+    pub(crate) fn has(&self, field: &str) -> bool {
+        self.0.get(field).is_some()
+    }
+    pub(crate) fn number(&self, field: &str) -> Option<u64> {
+        self.0[field].as_u64()
+    }
     pub(super) fn account(&self) -> Option<String> {
         self.text("accountId").map(str::to_owned)
     }
     pub(crate) fn validate_provider(&self, auth: &str) -> Result<(), ModelError> {
         if let Some(value) = self.0.get("provider") {
-            let valid = if auth == "oauth_google" {
-                value == "google"
-            } else {
-                value == "openai" || value == "chatgpt"
+            let valid = match auth {
+                "oauth_google" => value == "google",
+                "oauth_grok" => value == "grok",
+                _ => value == "openai" || value == "chatgpt",
             };
             if !valid {
                 return Err(ModelError::new("model_oauth_provider_mismatch"));
+            }
+        }
+        if auth == "oauth_grok" {
+            let descriptor = provider(auth).unwrap();
+            for (field, expected) in [
+                ("issuer", descriptor["issuer"].as_str().unwrap()),
+                ("clientId", descriptor["clientId"].as_str().unwrap()),
+            ] {
+                if self
+                    .0
+                    .get(field)
+                    .is_some_and(|v| v.as_str() != Some(expected))
+                {
+                    return Err(ModelError::new("model_oauth_provider_mismatch"));
+                }
+            }
+            if !self
+                .text("scope")
+                .is_some_and(|s| s.split_whitespace().any(|s| s == "api:access"))
+            {
+                return Err(ModelError::new("grok_oauth_scope_upgrade_required"));
             }
         }
         Ok(())
@@ -163,6 +190,29 @@ impl Token {
             }
             self.replace("accountId", json!(account));
         }
+        if auth == "oauth_grok" {
+            if response
+                .0
+                .get("scope")
+                .is_some_and(|v| v.as_str().is_none_or(|s| s.trim().is_empty()))
+            {
+                return Err(ModelError::new("grok_oauth_scope_upgrade_required"));
+            }
+            if let Some(scope) = response.text("scope") {
+                if let Some(old) = self.text("scope") {
+                    let old: std::collections::BTreeSet<_> = old.split_whitespace().collect();
+                    let next: std::collections::BTreeSet<_> = scope.split_whitespace().collect();
+                    if old != next {
+                        return Err(ModelError::new("model_oauth_scope_changed"));
+                    }
+                }
+                self.replace("scope", json!(scope));
+            }
+            self.replace("issuer", provider(auth).unwrap()["issuer"].clone());
+            self.replace("clientId", provider(auth).unwrap()["clientId"].clone());
+            self.replace("provider", json!("grok"));
+            self.validate_provider(auth)?;
+        }
         self.replace("access", json!(access));
         if let Some(refresh) = response.text("refresh_token") {
             self.replace("refresh", json!(refresh));
@@ -172,6 +222,16 @@ impl Token {
             self.replace("provider", json!("google"));
         }
         Ok(())
+    }
+    pub(crate) fn with_profile(&mut self, profile: &Token) {
+        for (source, target) in [("email", "email"), ("sub", "userId")] {
+            if let Some(text) = profile
+                .text(source)
+                .filter(|s| s.len() <= 512 && !s.chars().any(char::is_control))
+            {
+                self.replace(target, json!(text));
+            }
+        }
     }
     pub(crate) fn serialize(&self) -> Result<zeroize::Zeroizing<String>, ModelError> {
         let bytes = zeroize::Zeroizing::new(
@@ -186,6 +246,9 @@ impl Token {
     pub(crate) fn login(response: &Token, auth: &str, now: u64) -> Result<Self, ModelError> {
         use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
         let mut token = Self(json!({}));
+        if auth == "oauth_grok" && response.0.get("scope").is_none() {
+            token.replace("scope", provider(auth).unwrap()["login"]["scope"].clone());
+        }
         token.updated(response, auth, now)?;
         if token.account().is_none()
             && let Some(payload) = response.text("id_token").and_then(|s| s.split('.').nth(1))

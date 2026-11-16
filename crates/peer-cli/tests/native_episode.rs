@@ -46,6 +46,7 @@ struct Server {
     requests: Arc<Mutex<Vec<Value>>>,
     count_requests: Arc<Mutex<Vec<Value>>>,
     request_headers: Arc<Mutex<Vec<String>>>,
+    request_bytes: Arc<Mutex<Vec<Vec<u8>>>>,
     trace: Arc<Mutex<Vec<Value>>>,
     stop: Arc<std::sync::atomic::AtomicBool>,
     closed: Arc<std::sync::atomic::AtomicBool>,
@@ -79,6 +80,8 @@ impl Server {
         let counts = count_requests.clone();
         let request_headers = Arc::new(Mutex::new(Vec::new()));
         let captured_headers = request_headers.clone();
+        let request_bytes = Arc::new(Mutex::new(Vec::new()));
+        let captured_bytes = request_bytes.clone();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let ended = stop.clone();
         let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -96,7 +99,8 @@ impl Server {
                         s.set_nonblocking(false).unwrap();
                         s.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
                         s.set_write_timeout(Some(Duration::from_secs(3))).unwrap();
-                        let (request, is_count, headers) = read_request(&mut s);
+                        let (request, is_count, headers, raw) = read_request(&mut s);
+                        captured_bytes.lock().unwrap().push(raw);
                         captured_headers.lock().unwrap().push(headers);
                         captured_trace.lock().unwrap().push(json!({"event":"request","count":is_count,"elapsedMs":started.elapsed().as_millis()}));
                         if is_count {
@@ -171,6 +175,7 @@ impl Server {
             requests,
             count_requests,
             request_headers,
+            request_bytes,
             trace,
             stop,
             closed,
@@ -189,7 +194,7 @@ impl Drop for Server {
         }
     }
 }
-fn read_request(s: &mut TcpStream) -> (Value, bool, String) {
+fn read_request(s: &mut TcpStream) -> (Value, bool, String, Vec<u8>) {
     let mut bytes = Vec::new();
     let mut one = [0; 1];
     while !bytes.ends_with(b"\r\n\r\n") {
@@ -205,13 +210,18 @@ fn read_request(s: &mut TcpStream) -> (Value, bool, String) {
                 .strip_prefix("content-length:")
                 .map(|s| s.trim().parse::<usize>().unwrap())
         })
-        .unwrap();
+        .unwrap_or_else(|| {
+            assert!(headers.starts_with("GET "));
+            0
+        });
     assert!(n <= 2 * 1024 * 1024);
     let mut body = vec![0; n];
     s.read_exact(&mut body).unwrap();
     let path = headers.lines().next().unwrap();
     (
-        if headers
+        if headers.starts_with("GET ") && n == 0 {
+            Value::Null
+        } else if headers
             .to_ascii_lowercase()
             .contains("content-type: application/x-www-form-urlencoded")
         {
@@ -225,6 +235,7 @@ fn read_request(s: &mut TcpStream) -> (Value, bool, String) {
         },
         path.contains("/count_tokens HTTP/") || path.contains(":countTokens HTTP/"),
         headers,
+        body,
     )
 }
 fn reply_tool(name: &str, args: Value) -> String {

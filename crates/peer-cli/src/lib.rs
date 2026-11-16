@@ -16,6 +16,9 @@ pub enum Command {
     Doctor,
     Interactive,
     Models,
+    Completions(String),
+    CompletionsHelp,
+    Usage(&'static str),
     Exec { plan: String, max_turns: usize },
     Recover(String),
     McpAuth { server: String, refresh: bool },
@@ -35,9 +38,19 @@ pub fn command(argv: &[String]) -> Command {
         .iter()
         .any(|arg| matches!(arg.as_str(), "--help" | "-h"))
     {
+        if argv.first().is_some_and(|s| s == "completions") {
+            return Command::CompletionsHelp;
+        }
         return Command::Help;
     }
     match argv.first().map(String::as_str) {
+        Some("completions") => {
+            if argv.len() == 2 && matches!(argv[1].as_str(), "bash" | "zsh" | "fish") {
+                Command::Completions(argv[1].clone())
+            } else {
+                Command::Usage("Usage: peer completions <bash|zsh|fish>")
+            }
+        }
         Some("models") if argv.len() == 1 => Command::Models,
         Some("models")
             if argv.len() == 3
