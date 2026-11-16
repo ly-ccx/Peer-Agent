@@ -164,7 +164,7 @@ fn headers(
     }
     Ok(headers)
 }
-pub(super) fn resolve(flat: &Value, selected: &Value) -> Result<Channel, ModelError> {
+fn descriptor(flat: &Value) -> Result<(&str, &'static Value), ModelError> {
     let provider = text(flat, "channelId")
         .unwrap_or_else(|| {
             if flat["provider"] == "anthropic" {
@@ -175,18 +175,36 @@ pub(super) fn resolve(flat: &Value, selected: &Value) -> Result<Channel, ModelEr
         })
         .trim();
     let provider = go::normalize(provider);
-    let is_go = provider == "opencode-go";
     let d = registry()["descriptors"]
         .as_array()
         .unwrap()
         .iter()
         .find(|d| d["id"] == provider)
         .ok_or(ModelError::new("native_model_channel_unsupported"))?;
+    Ok((provider, d))
+}
+fn auth_method<'a>(flat: &'a Value, d: &Value) -> Result<&'a str, ModelError> {
     let auth = text(flat, "authMethod").unwrap_or("api_key");
-    let oauth = crate::model_oauth::provider(auth);
-    if (auth != "api_key" && oauth.is_none()) || d["authMethods"][auth].is_null() {
+    if (auth != "api_key" && crate::model_oauth::provider(auth).is_none())
+        || d["authMethods"][auth].is_null()
+    {
         return Err(ModelError::new("native_model_auth_unsupported"));
     }
+    Ok(auth)
+}
+pub(super) fn account_auth(flat: &Value) -> Result<String, ModelError> {
+    let (_, d) = descriptor(flat)?;
+    let auth = auth_method(flat, d)?;
+    if crate::model_oauth::provider(auth).is_none() {
+        return Err(ModelError::new("native_model_auth_unsupported"));
+    }
+    Ok(auth.into())
+}
+pub(super) fn resolve(flat: &Value, selected: &Value) -> Result<Channel, ModelError> {
+    let (provider, d) = descriptor(flat)?;
+    let is_go = provider == "opencode-go";
+    let auth = auth_method(flat, d)?;
+    let oauth = crate::model_oauth::provider(auth);
     let model = text(flat, "model").ok_or(ModelError::new("model_selection_invalid"))?;
     let wire_name = text(flat, "wireOverride")
         .or_else(|| text(flat, "wire"))

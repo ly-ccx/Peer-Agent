@@ -9,6 +9,14 @@
       "baseUrl": "https://chatgpt.com/backend-api/codex",
       "tokenUrl": "https://auth.openai.com/oauth/token",
       "clientId": "app_EMoamEEZ73f0CkXaXp7hrann",
+      "login": {
+        "authorizationUrl": "https://auth.openai.com/oauth/authorize",
+        "redirectUri": "http://localhost:1455/auth/callback",
+        "scope": "openid profile email offline_access",
+        "parameters": {
+          "id_token_add_organizations": "true"
+        }
+      },
       "headers": {
         "originator": "peer-agent"
       }
@@ -20,7 +28,16 @@
       "baseUrl": "https://cloudcode-pa.googleapis.com",
       "tokenUrl": "https://oauth2.googleapis.com/token",
       "clientId": "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
-      "clientSecret": "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"
+      "clientSecret": "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",
+      "login": {
+        "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
+        "redirectUri": "http://localhost:1456/auth/google/callback",
+        "scope": "openid email profile https://www.googleapis.com/auth/cloud-platform",
+        "parameters": {
+          "access_type": "offline",
+          "prompt": "consent"
+        }
+      }
     }
   ],
   "cases": [
@@ -1231,5 +1248,75 @@
       },
       "expected": 400000
     }
+  ],
+  "loginCases": [
+    {
+      "authMethod": "oauth_chatgpt",
+      "response": {
+        "access_token": "synthetic-login-access",
+        "refresh_token": "synthetic-login-refresh",
+        "token_type": "Bearer",
+        "expires_in": 7200,
+        "id_token": "e30.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiZml4dHVyZS1hY2NvdW50In19.fixture"
+      },
+      "request": {
+        "url": "https://auth.openai.com/oauth/token",
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        "form": {
+          "grant_type": "authorization_code",
+          "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
+          "code": "synthetic-code",
+          "redirect_uri": "http://localhost:1455/auth/callback",
+          "code_verifier": "<verifier>"
+        }
+      },
+      "expected": {
+        "access": "synthetic-login-access",
+        "refresh": "synthetic-login-refresh",
+        "expires": 1800007200000,
+        "accountId": "fixture-account"
+      }
+    },
+    {
+      "authMethod": "oauth_google",
+      "response": {
+        "access_token": "synthetic-login-access",
+        "refresh_token": "synthetic-login-refresh",
+        "token_type": "Bearer",
+        "expires_in": 7200,
+        "id_token": "e30.eyJlbWFpbCI6ImZpeHR1cmVAZXhhbXBsZS5pbnZhbGlkIn0.fixture"
+      },
+      "request": {
+        "url": "https://oauth2.googleapis.com/token",
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        "form": {
+          "grant_type": "authorization_code",
+          "client_id": "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
+          "client_secret": "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",
+          "code": "synthetic-code",
+          "redirect_uri": "http://localhost:1456/auth/google/callback",
+          "code_verifier": "<verifier>"
+        }
+      },
+      "expected": {
+        "provider": "google",
+        "access": "synthetic-login-access",
+        "refresh": "synthetic-login-refresh",
+        "expires": 1800007200000,
+        "accountId": "fixture@example.invalid"
+      }
+    }
+  ],
+  "accountStates": [
+    "not_logged_in",
+    "authenticated",
+    "refresh_required",
+    "recovery_required"
   ]
 }

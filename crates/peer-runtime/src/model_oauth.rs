@@ -11,7 +11,8 @@ use sha2::{Digest, Sha256};
 use std::{path::Path, sync::OnceLock, time::Duration};
 #[cfg(test)]
 mod tests;
-mod token;
+pub(crate) mod token;
+pub(crate) mod token_http;
 use token::Token;
 fn registry() -> &'static Value {
     static DATA: OnceLock<Value> = OnceLock::new();
@@ -78,7 +79,7 @@ pub(crate) fn context_window(
         .and_then(|v| v["contextWindow"].as_u64())
         .or_else(|| metadata["contextWindow"].as_u64()))
 }
-fn now_ms() -> Result<u64, ModelError> {
+pub(crate) fn now_ms() -> Result<u64, ModelError> {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|v| v.as_millis() as u64)
@@ -152,15 +153,7 @@ impl ModelOAuth {
         let token = Token::parse(secret.expose())?;
         token.validate_provider(auth)?;
         token.ensure_ready()?;
-        let client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .retry(reqwest::retry::never())
-            .no_proxy()
-            .connect_timeout(Duration::from_secs(5))
-            .read_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(15))
-            .build()
-            .map_err(|_| ModelError::new("model_oauth_transport_unavailable"))?;
+        let client = token_http::client()?;
         let (_, token_url) = endpoints(home, auth, provider["baseUrl"].as_str().unwrap())?;
         Ok(Self {
             helper,
@@ -237,44 +230,7 @@ impl ModelOAuth {
             let started = std::sync::atomic::AtomicBool::new(false);
             let refresh = async {
                 started.store(true, std::sync::atomic::Ordering::Release);
-                let mut response = self
-                    .client
-                    .post(self.token_url.clone())
-                    .header("content-type", "application/x-www-form-urlencoded")
-                    .body(form.to_string())
-                    .send()
-                    .await
-                    .map_err(|_| ModelError::new("model_oauth_refresh_transport_failed"))?;
-                if !response.status().is_success() {
-                    return Err(ModelError::new("model_oauth_refresh_rejected"));
-                }
-                if !response
-                    .headers()
-                    .get("content-type")
-                    .and_then(|v| v.to_str().ok())
-                    .is_some_and(|v| {
-                        v.split(';')
-                            .next()
-                            .is_some_and(|v| v.trim().eq_ignore_ascii_case("application/json"))
-                    })
-                {
-                    return Err(ModelError::new("model_oauth_refresh_content_type"));
-                }
-                let mut body = zeroize::Zeroizing::new(Vec::new());
-                while let Some(chunk) = response
-                    .chunk()
-                    .await
-                    .map_err(|_| ModelError::new("model_oauth_refresh_interrupted"))?
-                {
-                    if body.len() + chunk.len() > 65536 {
-                        return Err(ModelError::new("model_oauth_refresh_limit"));
-                    }
-                    body.extend_from_slice(&chunk);
-                }
-                Token::parse(
-                    std::str::from_utf8(&body)
-                        .map_err(|_| ModelError::new("model_oauth_refresh_invalid"))?,
-                )
+                token_http::request(&self.client, &self.token_url, &form).await
             };
             let response = tokio::select! { biased; _=cancel.cancelled()=>Err(ModelError::new("CANCELLED")), result=tokio::time::timeout(Duration::from_secs(15),refresh)=>result.unwrap_or_else(|_|Err(ModelError::new("model_oauth_refresh_timeout"))) };
             if response.is_err() && !started.load(std::sync::atomic::Ordering::Acquire) {

@@ -210,6 +210,10 @@ test('independent review sends the same grok identity headers as chat', async t 
     supportsVision: true, supportsReasoning: false, contextWindow: 100000, apiKeyConfigured: true, isDefault: true };
   const llm = createLlmChatService({ goalPlanStore: f.store, llmConfigStore: {
     listProviders: () => [config], getDecryptedApiKey: () => 'fixture-not-a-secret',
+    refreshOAuthTokens: async (_id, tokens) => {
+      assert.ok(tokens.expires > Date.now() + 60_000, 'this model-wire fixture supplies fresh credentials');
+      return { tokens, refreshed: false };
+    },
     getCredential: () => ({ tokens: { access: 'fixture-not-a-secret', scope: 'api:access', expires: Date.now() + 3_600_000 } }),
   }, conversationStore: { getConversation() { return null; }, saveConversation() { throw new Error('must not persist review'); } } });
   await assert.rejects(runPlanVisualVerifier({ plan: f.plan, verifierRunId: `review:${randomUUID()}`,

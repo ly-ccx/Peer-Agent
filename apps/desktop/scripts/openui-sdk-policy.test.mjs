@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { createServer } from 'vite';
+import { createServer, searchForWorkspaceRoot } from 'vite';
 import { peerOpenuiSdkPolicy } from './openui-sdk-policy.mjs';
 
 test('the SDK transform removes the development bootstrap from the actual public entry', async () => {
@@ -30,7 +30,11 @@ test('the actual Vite dev transform applies the policy before import analysis, w
       // no-watch setting after that merge so shutdown cannot race a root scan.
       config.server.watch = null;
     } }],
-    optimizeDeps: { noDiscovery: true }, server: { middlewareMode: true, hmr: false, watch: null }, appType: 'custom', logLevel: 'silent' });
+    // A worktree can share a dependency store outside its workspace. Allow only
+    // this resolved public entry in the fixture, preserving the normal workspace
+    // allowance. Production server filesystem policy remains in vite.config.ts.
+    optimizeDeps: { noDiscovery: true }, server: { middlewareMode: true, hmr: false, watch: null,
+      fs: { allow: [searchForWorkspaceRoot(root), file] } }, appType: 'custom', logLevel: 'silent' });
   try {
     assert.ok(server.config.optimizeDeps.exclude.includes('@openuidev/react-lang'));
     assert.deepEqual(server.config.optimizeDeps.include, []);

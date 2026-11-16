@@ -1397,6 +1397,10 @@ describe('llm chat service tool materialization', () => {
             apiKeyConfigured: true,
             maxOutputTokens: 4096,
           }],
+          refreshOAuthTokens: async (_id, tokens) => {
+            assert.ok(tokens.expires > Date.now() + 60_000, 'this model-wire fixture supplies fresh credentials');
+            return { tokens, refreshed: false };
+          },
           getCredential: () => ({
             tokens: {
               access: 'oauth-access',
@@ -1576,6 +1580,10 @@ describe('llm chat service tool materialization', () => {
         llmConfigStore: {
           listProviders: () => providers,
           getDecryptedApiKey: (id) => `key-${id}`,
+          refreshOAuthTokens: async (_id, tokens) => {
+            assert.ok(tokens.expires > Date.now() + 60_000, 'this model-wire fixture supplies fresh credentials');
+            return { tokens, refreshed: false };
+          },
           getCredential: () => ({
             tokens: {
               access: 'oauth-access',
@@ -1664,6 +1672,10 @@ describe('llm chat service tool materialization', () => {
         llmConfigStore: {
           listProviders: () => providers,
           getDecryptedApiKey: (id) => `key-${id}`,
+          refreshOAuthTokens: async (_id, tokens) => {
+            assert.ok(tokens.expires > Date.now() + 60_000, 'this model-wire fixture supplies fresh credentials');
+            return { tokens, refreshed: false };
+          },
           getCredential: () => ({
             tokens: {
               access: 'oauth-access',
@@ -2690,6 +2702,10 @@ describe('llm chat service tool materialization', () => {
         llmConfigStore: {
           listProviders: () => providers,
           getDecryptedApiKey: (id) => `key-${id}`,
+          refreshOAuthTokens: async (_id, tokens) => {
+            assert.ok(tokens.expires > Date.now() + 60_000, 'this model-wire fixture supplies fresh credentials');
+            return { tokens, refreshed: false };
+          },
           getCredential: () => ({
             tokens: {
               access: 'oauth-access',

@@ -8,6 +8,14 @@
       "baseUrl": "https://chatgpt.com/backend-api/codex",
       "tokenUrl": "https://auth.openai.com/oauth/token",
       "clientId": "app_EMoamEEZ73f0CkXaXp7hrann",
+      "login": {
+        "authorizationUrl": "https://auth.openai.com/oauth/authorize",
+        "redirectUri": "http://localhost:1455/auth/callback",
+        "scope": "openid profile email offline_access",
+        "parameters": {
+          "id_token_add_organizations": "true"
+        }
+      },
       "headers": {
         "originator": "peer-agent"
       }
@@ -19,7 +27,16 @@
       "baseUrl": "https://cloudcode-pa.googleapis.com",
       "tokenUrl": "https://oauth2.googleapis.com/token",
       "clientId": "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
-      "clientSecret": "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"
+      "clientSecret": "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",
+      "login": {
+        "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
+        "redirectUri": "http://localhost:1456/auth/google/callback",
+        "scope": "openid email profile https://www.googleapis.com/auth/cloud-platform",
+        "parameters": {
+          "access_type": "offline",
+          "prompt": "consent"
+        }
+      }
     }
   ],
   "subscriptionCatalog": [

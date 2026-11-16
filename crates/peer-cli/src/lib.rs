@@ -2,6 +2,7 @@
 
 mod cancellation;
 pub mod mcp;
+pub mod model_auth;
 pub mod native_exec;
 pub mod terminal;
 
@@ -16,6 +17,7 @@ pub enum Command {
     Exec { plan: String, max_turns: usize },
     Recover(String),
     McpAuth { server: String, refresh: bool },
+    ModelAuth { action: String, channel: String },
     Unavailable(String),
 }
 
@@ -34,6 +36,14 @@ pub fn command(argv: &[String]) -> Command {
         return Command::Help;
     }
     match argv.first().map(String::as_str) {
+        Some("models")
+            if argv.len() == 3 && matches!(argv[1].as_str(), "auth" | "logout" | "status") =>
+        {
+            Command::ModelAuth {
+                action: argv[1].clone(),
+                channel: argv[2].clone(),
+            }
+        }
         Some("mcp") if argv.len() == 3 && matches!(argv[1].as_str(), "auth" | "refresh") => {
             Command::McpAuth {
                 server: argv[2].clone(),

@@ -1,6 +1,7 @@
 //! Child module of the real Host suite; synthetic IdP and encrypted Vault only.
 use super::*;
 use std::sync::mpsc;
+mod login;
 #[test]
 fn unknown_refresh_intent_is_preserved_and_blocks_before_any_remote_request() {
     let idp = Idp::new(refreshed(), "200 OK", false, false);

@@ -170,7 +170,7 @@ const CALLBACK_HTML = (ok) => {
 
 // 启动一次 browser 模式登录。返回 { promise, cancel }。
 // promise resolve 为 token 集合;cancel() 关闭 server 并 reject。
-export function startBrowserLogin() {
+export function startBrowserLogin({ openExternal = openInBrowser, fetchImpl = fetchWithConnectionRecovery } = {}) {
   const { verifier, challenge } = createPkce();
   const state = base64url(randomBytes(16));
 
@@ -225,7 +225,7 @@ export function startBrowserLogin() {
     }
 
     try {
-      const tokens = await exchangeCode({ code, verifier });
+      const tokens = await exchangeCode({ code, verifier, fetchImpl });
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(CALLBACK_HTML(true));
       finish(resolveFn, tokens);
@@ -246,7 +246,7 @@ export function startBrowserLogin() {
     authorizeUrl.searchParams.set('code_challenge_method', 'S256');
     authorizeUrl.searchParams.set('state', state);
     authorizeUrl.searchParams.set('id_token_add_organizations', 'true');
-    openInBrowser(authorizeUrl.toString()).catch((err) => finish(rejectFn, err));
+    Promise.resolve(openExternal(authorizeUrl.toString())).catch((err) => finish(rejectFn, err));
   }
 
   // 端口 1455 是注册死的 OAuth 回调端口,不能换。占用多半来自上一次

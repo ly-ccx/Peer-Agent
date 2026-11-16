@@ -14,7 +14,10 @@ use std::{io::Read, path::Path, time::Duration};
 mod binding;
 mod channel;
 pub(crate) use binding::ModelBinding;
-fn read(path: &Path) -> Result<Value, ModelError> {
+pub(crate) fn account_auth(channel: &Value) -> Result<String, ModelError> {
+    channel::account_auth(channel)
+}
+pub(crate) fn read(path: &Path) -> Result<Value, ModelError> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -194,9 +197,6 @@ pub async fn load_model(
     let config = read(&home.join("llm-providers.json"))?;
     let mut resolved = resolve_model(&config, selected)?;
     let oauth = if resolved.auth_method != "api_key" {
-        if !resolved.key_configured {
-            return Err(ModelError::new("model_credential_missing"));
-        }
         let oauth = crate::model_oauth::ModelOAuth::load(
             home,
             &resolved.credential_key,

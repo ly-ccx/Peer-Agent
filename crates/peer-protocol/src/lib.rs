@@ -1,4 +1,6 @@
 #![forbid(unsafe_code)]
+mod model_auth;
+pub use model_auth::{ModelAccountState, ModelAccountStatus};
 mod mcp_inventory;
 pub use mcp_inventory::{McpInventory, project_mcp_inventory};
 mod compaction;

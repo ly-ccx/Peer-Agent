@@ -1,5 +1,5 @@
 use super::*;
-pub(super) struct Token(Value);
+pub(crate) struct Token(Value);
 impl Drop for Token {
     fn drop(&mut self) {
         crate::credentials::scrub(&mut self.0);
@@ -12,7 +12,7 @@ impl Token {
         }
         self.0[field] = value;
     }
-    pub(super) fn parse(raw: &str) -> Result<Self, ModelError> {
+    pub(crate) fn parse(raw: &str) -> Result<Self, ModelError> {
         let value = peer_protocol::decode_json_bounded(
             raw.as_bytes(),
             peer_protocol::JsonLimits {
@@ -30,13 +30,13 @@ impl Token {
         }
         Ok(token)
     }
-    pub(super) fn text(&self, field: &str) -> Option<&str> {
+    pub(crate) fn text(&self, field: &str) -> Option<&str> {
         self.0[field].as_str().filter(|v| !v.is_empty())
     }
     pub(super) fn account(&self) -> Option<String> {
         self.text("accountId").map(str::to_owned)
     }
-    pub(super) fn validate_provider(&self, auth: &str) -> Result<(), ModelError> {
+    pub(crate) fn validate_provider(&self, auth: &str) -> Result<(), ModelError> {
         if let Some(value) = self.0.get("provider") {
             let valid = if auth == "oauth_google" {
                 value == "google"
@@ -49,7 +49,7 @@ impl Token {
         }
         Ok(())
     }
-    pub(super) fn ensure_ready(&self) -> Result<(), ModelError> {
+    pub(crate) fn ensure_ready(&self) -> Result<(), ModelError> {
         if let Some(marker) = self.0.get("peerModelRefresh") {
             let valid = marker["schemaVersion"] == 1
                 && marker["authMethod"]
@@ -87,11 +87,14 @@ impl Token {
             .or_else(|| self.text("project_id"))
             .map(str::to_owned)
     }
-    pub(super) fn current(&self, now: u64) -> bool {
+    pub(crate) fn current(&self, now: u64) -> bool {
         self.text("access").is_some()
             && self.0["expires"]
                 .as_u64()
                 .is_some_and(|expires| expires > now.saturating_add(60_000))
+    }
+    pub(crate) fn expires(&self) -> Option<u64> {
+        self.0["expires"].as_u64()
     }
     pub(super) fn access(&self) -> Result<Secret, ModelError> {
         Secret::from_string(
@@ -127,15 +130,21 @@ impl Token {
         auth: &str,
         now: u64,
     ) -> Result<(), ModelError> {
-        if response
-            .text("token_type")
-            .is_some_and(|v| !v.eq_ignore_ascii_case("bearer"))
-        {
+        if response.0.get("token_type").is_some_and(|value| {
+            !value
+                .as_str()
+                .is_some_and(|v| v.eq_ignore_ascii_case("bearer"))
+        }) {
             return Err(ModelError::new("model_oauth_token_type_unsupported"));
         }
         let access = response
             .text("access_token")
             .ok_or(ModelError::new("model_oauth_refresh_invalid"))?;
+        if access.trim().is_empty()
+            || reqwest::header::HeaderValue::from_str(&format!("Bearer {access}")).is_err()
+        {
+            return Err(ModelError::new("model_oauth_refresh_invalid"));
+        }
         let seconds = match response.0.get("expires_in") {
             None => 3600.,
             Some(Value::Number(v)) => v.as_f64().unwrap_or(f64::NAN),
@@ -164,7 +173,7 @@ impl Token {
         }
         Ok(())
     }
-    pub(super) fn serialize(&self) -> Result<zeroize::Zeroizing<String>, ModelError> {
+    pub(crate) fn serialize(&self) -> Result<zeroize::Zeroizing<String>, ModelError> {
         let bytes = zeroize::Zeroizing::new(
             serde_json::to_string(&self.0)
                 .map_err(|_| ModelError::new("model_oauth_token_invalid"))?,
@@ -174,11 +183,102 @@ impl Token {
         }
         Ok(bytes)
     }
+    pub(crate) fn login(response: &Token, auth: &str, now: u64) -> Result<Self, ModelError> {
+        use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+        let mut token = Self(json!({}));
+        token.updated(response, auth, now)?;
+        if token.account().is_none()
+            && let Some(payload) = response.text("id_token").and_then(|s| s.split('.').nth(1))
+        {
+            if payload.len() > 22000 {
+                return Err(ModelError::new("model_oauth_identity_limit"));
+            }
+            if let Ok(bytes) = URL_SAFE_NO_PAD.decode(payload) {
+                let bytes = zeroize::Zeroizing::new(bytes);
+                if let Ok(raw) = std::str::from_utf8(&bytes)
+                    && let Ok(claims) = Token::parse(raw)
+                {
+                    let account = if auth == "oauth_google" {
+                        claims.text("email").or_else(|| claims.text("sub"))
+                    } else {
+                        claims.0["https://api.openai.com/auth"]["chatgpt_account_id"]
+                            .as_str()
+                            .or_else(|| {
+                                claims.0["https://api.openai.com/auth"]["organization_id"].as_str()
+                            })
+                    };
+                    if let Some(account) = account.filter(|s| !s.is_empty()) {
+                        token.replace("accountId", json!(account));
+                    }
+                }
+            }
+        }
+        if auth == "oauth_chatgpt" && token.account().is_none() {
+            return Err(ModelError::new("model_oauth_account_required"));
+        }
+        if let Some(account) = token.account()
+            && (account.len() > 512 || reqwest::header::HeaderValue::from_str(&account).is_err())
+        {
+            return Err(ModelError::new("model_oauth_account_invalid"));
+        }
+        Ok(token)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn malformed_explicit_token_type_or_header_value_cannot_be_committed_as_login() {
+        for token_type in [
+            json!(null),
+            json!(false),
+            json!(7),
+            json!({}),
+            json!([]),
+            json!(""),
+        ] {
+            let response=Token::parse(&json!({"access_token":"valid","expires_in":3600,"account_id":"account","token_type":token_type}).to_string()).unwrap();
+            assert_eq!(
+                Token::login(&response, "oauth_chatgpt", 1)
+                    .err()
+                    .unwrap()
+                    .code,
+                "model_oauth_token_type_unsupported"
+            );
+        }
+        for access in [" ", "bad\r\nheader"] {
+            let response=Token::parse(&json!({"access_token":access,"expires_in":3600,"account_id":"account","token_type":"Bearer"}).to_string()).unwrap();
+            assert!(Token::login(&response, "oauth_chatgpt", 1).is_err());
+        }
+    }
+    #[test]
+    fn native_login_tokens_match_the_actual_ts_browser_exchange_flows() {
+        let data: Value = serde_json::from_str(include_str!(
+            "../../../../packages/protocol/contracts/native-cli/model-oauth.json"
+        ))
+        .unwrap();
+        for case in data["loginCases"].as_array().unwrap() {
+            let response = Token::parse(&case["response"].to_string()).unwrap();
+            let token = Token::login(
+                &response,
+                case["authMethod"].as_str().unwrap(),
+                data["now"].as_u64().unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                serde_json::from_str::<Value>(&token.serialize().unwrap()).unwrap(),
+                case["expected"]
+            );
+        }
+        use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+        assert_eq!(
+            URL_SAFE_NO_PAD.encode(Sha256::digest(
+                b"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+            )),
+            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+        );
+    }
     #[test]
     fn refresh_forms_and_known_fields_match_actual_ts_and_preserve_unknown_token_fields() {
         let data: Value = serde_json::from_str(include_str!(

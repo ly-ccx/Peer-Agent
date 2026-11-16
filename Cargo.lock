@@ -1668,6 +1668,7 @@ dependencies = [
 name = "peer-cli"
 version = "0.1.0-rc.40"
 dependencies = [
+ "base64 0.22.1",
  "crossterm",
  "peer-protocol",
  "peer-runtime",
@@ -1716,6 +1717,7 @@ version = "0.1.0-rc.40"
 dependencies = [
  "aho-corasick",
  "base64 0.22.1",
+ "getrandom 0.3.4",
  "http",
  "peer-protocol",
  "peer-store",
