@@ -114,13 +114,28 @@ pub(super) struct BoundedHttp {
     network: Network,
     cancel: CancellationToken,
     addresses: Addresses,
+    admission: Option<crate::effect_admission::EffectAdmission>,
 }
 impl BoundedHttp {
+    pub fn with_admission(
+        mut self,
+        admission: Option<crate::effect_admission::EffectAdmission>,
+    ) -> Self {
+        self.admission = admission;
+        self
+    }
+    async fn check_admission(&self) -> Result<(), &'static str> {
+        if let Some(port) = &self.admission {
+            port.check().await.map_err(|e| e.0)?;
+        }
+        Ok(())
+    }
     pub async fn challenge(&self, base: &Url) -> Result<Option<String>, &'static str> {
         if !self.addresses.url(base) {
             return Err("mcp_oauth_address_denied");
         }
         let approved = self.addresses.approved(base).await?;
+        self.check_admission().await?;
         let request = http::Request::builder()
             .uri(base.as_str())
             .header("MCP-Protocol-Version", "2025-11-25")
@@ -165,6 +180,7 @@ impl BoundedHttp {
             network,
             cancel: cancel.clone(),
             addresses,
+            admission: None,
         })
     }
 }
@@ -183,6 +199,7 @@ impl OAuthHttpClient for BoundedHttp {
                         return Err("mcp_oauth_address_denied");
                     }
                     let approved = self.addresses.approved(&url).await?;
+                    self.check_admission().await?;
                     let mut request = http::Request::builder()
                         .method(operation.request.method().clone())
                         .uri(url.as_str())

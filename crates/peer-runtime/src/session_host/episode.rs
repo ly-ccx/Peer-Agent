@@ -50,6 +50,7 @@ impl NativeSessionHost {
         max_turns: usize,
         cancel: &CancellationToken,
     ) -> Result<EpisodeOutcome, HostError> {
+        self.mcp_credentials = None;
         if max_turns == 0 || max_turns > 1000 {
             return Err(HostError("invalid_max_turns"));
         }
@@ -86,7 +87,13 @@ impl NativeSessionHost {
             }
         }
         let mcp_inventory = peer_store::McpRegistryStore::new(&self.home).read()?;
-        let mcp_credential_revision = peer_store::McpCredentialStore::new(&self.home).revision()?;
+        let mcp_credentials = crate::mcp_oauth::CredentialEpoch::open(
+            &self.home,
+            &current.resource.execution,
+            &mcp_inventory.source_revision,
+        )
+        .map_err(HostError)?;
+        self.mcp_credentials = Some(mcp_credentials.clone());
         if origin["capabilityAdmission"]["required"]
             .as_array()
             .into_iter()
@@ -223,6 +230,7 @@ impl NativeSessionHost {
             &current.resource,
             &native_recorder,
             &self.home,
+            mcp_credentials.clone(),
         )?;
         let projection = providers.project()?;
         if self.resources.has_claim(&current.resource)?
@@ -268,7 +276,7 @@ impl NativeSessionHost {
         let definitions = projection.definitions();
         let frame = super::context_pipeline::RequestFrame {
             mcp_revision: &mcp_inventory.source_revision,
-            mcp_credential_revision: &mcp_credential_revision,
+            mcp_credentials: &mcp_credentials,
             plan: plan_id,
             goal_revision: &current.goal.source_revision,
             goal: &raw,

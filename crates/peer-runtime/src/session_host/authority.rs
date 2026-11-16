@@ -209,7 +209,13 @@ impl NativeSessionHost {
         if call.permission == ProviderPermission::Mcp {
             sources.push(json!([
                 "mcp-credentials",
-                peer_store::McpCredentialStore::new(&self.home).revision()?
+                match &self.mcp_credentials {
+                    Some(epoch) => epoch
+                        .normalized(&current.resource.execution)
+                        .map_err(HostError)?
+                        .unwrap_or(peer_store::McpCredentialStore::new(&self.home).revision()?),
+                    None => peer_store::McpCredentialStore::new(&self.home).revision()?,
+                }
             ]));
             sources.push(json!([
                 "mcp-registry",

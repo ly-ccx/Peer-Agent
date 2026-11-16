@@ -114,15 +114,20 @@ impl Default for ProviderRegistry {
     }
 }
 impl ProviderRegistry {
-    pub fn with_mcp(
+    pub(crate) fn with_mcp(
         snapshot: &peer_store::McpRegistrySnapshot,
         resource: &peer_store::HostResourcePlan,
         owner: &Value,
         home: &Path,
+        credentials: crate::mcp_oauth::CredentialEpoch,
     ) -> Result<Self, HostError> {
         let mut registry = Self::default();
         registry.providers.push(Box::new(mcp::McpProvider::new(
-            snapshot, resource, owner, home,
+            snapshot,
+            resource,
+            owner,
+            home,
+            credentials,
         )?));
         Ok(registry)
     }

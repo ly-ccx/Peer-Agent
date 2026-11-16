@@ -143,7 +143,7 @@ impl OAuth {
                     } else {
                         (
                             "200 OK",
-                            json!({"access_token":"oauth-refreshed-secret","refresh_token":"oauth-new-refresh-secret","token_type":"Bearer","expires_in":3600,"scope":"mcp.read"}),
+                            json!({"access_token":if mode=="short-lived"{format!("rotated-access-{}",captured.lock().unwrap().iter().filter(|(h,_)|h.starts_with("POST /token ")).count())}else{"oauth-refreshed-secret".into()},"refresh_token":"oauth-new-refresh-secret","token_type":"Bearer","expires_in":if mode=="short-lived"{45}else{3600},"scope":if mode=="scope-expansion"{"mcp.read mcp.write"}else if mode=="scope-narrowing"{""}else{"mcp.read"}}),
                         )
                     }
                 } else if path == "/register" {
@@ -154,12 +154,24 @@ impl OAuth {
                     )
                 } else if path == "/mcp" && line.starts_with("POST ") {
                     let v: Value = serde_json::from_str(&body).unwrap();
+                    if mode == "short-lived"
+                        && v["method"] == "tools/call"
+                        && captured
+                            .lock()
+                            .unwrap()
+                            .iter()
+                            .filter(|(_, b)| b.contains("tools/call"))
+                            .count()
+                            == 1
+                    {
+                        thread::sleep(Duration::from_secs(16));
+                    }
                     if v["id"].is_null() {
                         ("202 Accepted", Value::Null)
                     } else {
                         (
                             "200 OK",
-                            json!({"jsonrpc":"2.0","id":v["id"],"result":if v["method"]=="initialize"{json!({"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"oauth-fixture","version":"1"}})}else{json!({"content":[{"type":"text","text":"oauth-refreshed-secret"}]})}}),
+                            json!({"jsonrpc":"2.0","id":v["id"],"result":if v["method"]=="initialize"{json!({"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"oauth-fixture","version":"1"}})}else{json!({"content":[{"type":"text","text":if mode=="short-lived"{let n=captured.lock().unwrap().iter().filter(|(h,_)|h.starts_with("POST /token ")).count();format!("fixture-sensitive-secret rotated-access-1 rotated-access-{n}")}else{"oauth-refreshed-secret".into()}}]})}}),
                         )
                     }
                 } else {
@@ -562,3 +574,5 @@ fn wrong_issuer_and_signal_cancellation_preserve_credentials_and_close_callback(
 mod network;
 
 mod refresh;
+
+mod runtime;

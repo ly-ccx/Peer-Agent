@@ -40,6 +40,33 @@ struct WireState {
     error: Option<&'static str>,
     protocol: Option<String>,
 }
+#[derive(Default)]
+pub(crate) struct Protection(zeroize::Zeroizing<Vec<String>>);
+impl Protection {
+    pub(crate) fn extend(&mut self, selected: &[String]) -> Result<(), &'static str> {
+        bounded_protection(&mut self.0, selected)
+    }
+    pub(crate) fn values(&self) -> &[String] {
+        &self.0
+    }
+}
+fn bounded_protection(values: &mut Vec<String>, selected: &[String]) -> Result<(), &'static str> {
+    let mut added = Vec::new();
+    for value in selected {
+        if !value.is_empty() && !values.contains(value) && !added.contains(&value) {
+            added.push(value);
+        }
+    }
+    if values.len() + added.len() > 64
+        || values.iter().map(String::len).sum::<usize>()
+            + added.iter().map(|v| v.len()).sum::<usize>()
+            > 262144
+    {
+        return Err("mcp_network_protection_limit");
+    }
+    values.extend(added.into_iter().cloned());
+    Ok(())
+}
 impl McpState {
     fn new() -> Arc<Self> {
         Arc::new(Self {
@@ -58,18 +85,28 @@ impl McpState {
             }),
         })
     }
-    fn protect(&self, selected: &[String]) -> Result<(), &'static str> {
+    pub(crate) fn protect(&self, selected: &[String]) -> Result<(), &'static str> {
         let mut values = self.transport_secrets.lock().unwrap();
-        let added: Vec<_> = selected.iter().filter(|s| !values.contains(s)).collect();
-        if values.len() + added.len() > 64
-            || values.iter().map(String::len).sum::<usize>()
-                + added.iter().map(|s| s.len()).sum::<usize>()
-                > 262144
-        {
-            return Err("mcp_network_protection_limit");
+        bounded_protection(&mut values, selected)
+    }
+    pub(crate) fn retain_protection(&self, config: &Value) -> Result<Protection, &'static str> {
+        let mut protection = Protection::default();
+        protection.extend(&self.transport_secrets.lock().unwrap())?;
+        let mut dynamic = zeroize::Zeroizing::new(Vec::new());
+        if let Some(values) = config["_credentialRedaction"].as_array() {
+            dynamic.extend(values.iter().filter_map(Value::as_str).map(str::to_owned));
         }
-        values.extend(added.into_iter().cloned());
-        Ok(())
+        if let Some(headers) = config["headers"].as_object() {
+            dynamic.extend(
+                headers
+                    .iter()
+                    .filter(|(k, _)| k.eq_ignore_ascii_case("authorization"))
+                    .filter_map(|(_, v)| v.as_str())
+                    .map(str::to_owned),
+            );
+        }
+        protection.extend(&dynamic)?;
+        Ok(protection)
     }
     pub(crate) fn prepare_result(&self, raw: Value, config: &Value) -> Result<Value, &'static str> {
         result::prepare_result(raw, config, &self.transport_secrets.lock().unwrap())
@@ -137,7 +174,7 @@ impl McpState {
     pub fn error(&self) -> Option<&'static str> {
         self.inner.lock().unwrap().error
     }
-    async fn stopped(&self) {
+    pub(crate) async fn stopped(&self) {
         while !self.closed.load(Ordering::Acquire) {
             self.notify.notified().await;
         }
@@ -183,7 +220,6 @@ pub(crate) struct Connection {
     child: Option<Child>,
     stderr: Option<tokio::task::JoinHandle<()>>,
     cancel: CancellationToken,
-    state: Arc<McpState>,
 }
 impl Connection {
     pub async fn open(
@@ -236,7 +272,6 @@ impl Connection {
                         child,
                         stderr,
                         cancel: stop,
-                        state,
                     },
                 ))
             }
@@ -253,8 +288,7 @@ impl Connection {
             }
         }
     }
-    pub async fn run(mut self, owned: CancellationToken) -> Result<(), ()> {
-        tokio::select! {biased;_=owned.cancelled()=>{},_=self.state.stopped()=>{}}
+    pub async fn close(mut self) -> Result<(), ()> {
         self.cancel.cancel();
         let service = self
             .service

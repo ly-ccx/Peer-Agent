@@ -236,7 +236,7 @@ fn helper_cancellation_reaps_the_secret_reader_before_any_mcp_startup() {
 }
 
 #[test]
-fn expired_oauth_and_mismatched_or_future_vault_envelopes_never_start_mcp() {
+fn unbound_expired_oauth_and_mismatched_or_future_vault_envelopes_never_start_mcp() {
     use sha2::{Digest, Sha256};
     for mode in ["expired", "future", "mismatch"] {
         let server = Server::new(vec![
@@ -277,7 +277,7 @@ fn expired_oauth_and_mismatched_or_future_vault_envelopes_never_start_mcp() {
         assert!(!f.root.path().join("mcp.pid").exists());
         let history = serde_json::to_string(&f.history()).unwrap();
         assert!(history.contains(if mode == "expired" {
-            "mcp_oauth_refresh_required"
+            "mcp_oauth_authorization_required"
         } else {
             "mcp_credential_invalid"
         }));

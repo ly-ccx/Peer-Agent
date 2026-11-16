@@ -33,6 +33,7 @@ pub struct NativeSessionHost {
     pub resources: ExecutionResourceStore,
     pub live: ExecutionRegistry,
     permissions: std::sync::Arc<tokio::sync::Semaphore>,
+    mcp_credentials: Option<crate::mcp_oauth::CredentialEpoch>,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HostError(pub &'static str);
@@ -84,6 +85,7 @@ impl NativeSessionHost {
             journal,
             live,
             permissions: std::sync::Arc::new(tokio::sync::Semaphore::new(128)),
+            mcp_credentials: None,
         })
     }
     fn current(&self, plan_id: &str, now: &str) -> Result<Current, HostError> {

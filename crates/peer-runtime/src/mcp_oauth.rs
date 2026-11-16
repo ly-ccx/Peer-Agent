@@ -16,7 +16,9 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{future::Future, path::Path, sync::Arc, time::Duration};
 mod callback;
+mod epoch;
 mod http;
+pub(crate) use epoch::CredentialEpoch;
 
 async fn bounded<T>(
     cancel: &CancellationToken,
@@ -37,6 +39,7 @@ struct Commit {
     transaction: McpCredentialTransaction,
     payload: SensitiveConfig,
     memory: InMemoryCredentialStore,
+    epoch: Option<CredentialEpoch>,
 }
 struct Flow {
     commit: Commit,
@@ -48,6 +51,8 @@ impl Flow {
         server: &str,
         cancel: &CancellationToken,
         recovery: bool,
+        expected: Option<&McpCredentialBinding>,
+        admission: Option<&crate::effect_admission::EffectAdmission>,
     ) -> Result<Self, &'static str> {
         let registry = McpRegistryStore::new(home).read().map_err(|e| e.code())?;
         let mut config = registry.server(server).ok_or("mcp_server_missing")?;
@@ -58,10 +63,22 @@ impl Flow {
             config["transport"] = json!("streamable_http");
         }
         let binding = mcp_auth::binding(home, &config)?.ok_or("mcp_oauth_binding_required")?;
+        if expected
+            .is_some_and(|v| v.revision != binding.revision || v.metadata != binding.metadata)
+        {
+            return Err("mcp_credential_changed");
+        }
         let transaction = McpCredentialStore::new(home)
             .transaction(&binding)
             .map_err(|e| e.code())?;
         let payload = mcp_auth::load_payload(home, &binding, cancel).await?;
+        if admission.is_some()
+            && ["nativeIssuer", "authorizationServerUrl"]
+                .into_iter()
+                .all(|key| payload.0["oauth"][key].as_str().is_none_or(str::is_empty))
+        {
+            return Err("mcp_oauth_authorization_required");
+        }
         if let Some(state) = payload.0.get("refreshState") {
             let known = state["schemaVersion"] == 1
                 && state["previousTokens"].is_object()
@@ -78,7 +95,8 @@ impl Flow {
             .or_else(|| config["serverUrl"].as_str())
             .ok_or("mcp_url_invalid")?;
         let url = Url::parse(raw).map_err(|_| "mcp_url_invalid")?;
-        let client = Arc::new(http::BoundedHttp::new(&url, cancel)?);
+        let client =
+            Arc::new(http::BoundedHttp::new(&url, cancel)?.with_admission(admission.cloned()));
         let challenge = bounded(cancel, client.challenge(&url), 30).await??;
         let mut manager = AuthorizationManager::new_with_oauth_http_client(raw, client)
             .await
@@ -116,6 +134,7 @@ impl Flow {
                 transaction,
                 payload,
                 memory,
+                epoch: None,
             },
             manager,
         })
@@ -137,7 +156,7 @@ impl Flow {
             .filter_map(|v| v.as_str())
             .map(str::to_owned)
             .collect::<Vec<_>>();
-        if scopes.is_empty() {
+        if scopes.is_empty() && self.commit.epoch.is_none() {
             scopes = self.manager.select_initial_scopes(&[]).await;
         }
         let client = if let Some(id) = id {
@@ -169,7 +188,11 @@ impl Flow {
     }
 }
 impl Commit {
-    async fn save(mut self, home: &Path, cancel: &CancellationToken) -> Result<(), &'static str> {
+    async fn save(
+        mut self,
+        home: &Path,
+        cancel: &CancellationToken,
+    ) -> Result<zeroize::Zeroizing<Vec<String>>, &'static str> {
         if McpRegistryStore::new(home)
             .read()
             .map_err(|e| e.code())?
@@ -188,6 +211,24 @@ impl Commit {
             serde_json::to_value(stored.token_response.ok_or("mcp_oauth_token_missing")?)
                 .map_err(|_| "mcp_oauth_token_invalid")?,
         );
+        if self.epoch.is_some()
+            && let Some(scope) = tokens.0.get("scope")
+        {
+            let returned: std::collections::BTreeSet<_> = scope
+                .as_str()
+                .ok_or("mcp_oauth_scope_changed")?
+                .split_whitespace()
+                .collect();
+            let expected: std::collections::BTreeSet<_> = self.payload.0["oauth"]["scopes"]
+                .as_array()
+                .ok_or("mcp_oauth_scope_changed")?
+                .iter()
+                .filter_map(|v| v.as_str())
+                .collect();
+            if returned != expected {
+                return Err("mcp_oauth_scope_changed");
+            }
+        }
         if let Some(seconds) = tokens.0["expires_in"].as_u64() {
             let expires = stored
                 .token_received_at
@@ -208,10 +249,14 @@ impl Commit {
             .as_object_mut()
             .unwrap()
             .remove("refreshState");
+        let protection = oauth_secrets(&self.payload.0["oauth"]);
         let metadata = self.stage(home, cancel).await?;
         // Commit cannot be cancelled after rename; an uncertain receipt preserves it.
-        self.transaction.commit(metadata).map_err(|e| e.code())?;
-        Ok(())
+        let binding = self.transaction.commit(metadata).map_err(|e| e.code())?;
+        if let Some(epoch) = &self.epoch {
+            epoch.published(&self.binding.revision, &binding)?;
+        }
+        Ok(protection)
     }
     async fn reserve_refresh(
         &mut self,
@@ -229,7 +274,11 @@ impl Commit {
         });
         let mut metadata = self.stage(home, cancel).await?;
         metadata["oauth"]["tokenStatus"] = json!("recovery_required");
-        self.binding = self.transaction.publish(metadata).map_err(|e| e.code())?;
+        let binding = self.transaction.publish(metadata).map_err(|e| e.code())?;
+        if let Some(epoch) = &self.epoch {
+            epoch.published(&self.binding.revision, &binding)?;
+        }
+        self.binding = binding;
         Ok(())
     }
     async fn stage(
@@ -332,7 +381,7 @@ pub async fn authorize(
     cancel: &CancellationToken,
     on_url: impl FnOnce(&str) -> Result<(), &'static str>,
 ) -> Result<(), &'static str> {
-    let mut flow = Flow::load(home, server, cancel, true).await?;
+    let mut flow = Flow::load(home, server, cancel, true, None, None).await?;
     let oauth = &flow.commit.payload.0["oauth"];
     let has_client = [&oauth["clientId"], &oauth["clientInformation"]["client_id"]]
         .iter()
@@ -365,7 +414,7 @@ pub async fn authorize(
     bounded(cancel, session.handle_callback_url(&callback), 30)
         .await?
         .map_err(|_| "mcp_oauth_callback_rejected")?;
-    flow.commit.save(home, cancel).await
+    flow.commit.save(home, cancel).await.map(|_| ())
 }
 
 /// Explicit refresh never replays a tool, initialize, or authorization code.
@@ -374,7 +423,51 @@ pub async fn refresh(
     server: &str,
     cancel: &CancellationToken,
 ) -> Result<(), &'static str> {
-    let mut flow = Flow::load(home, server, cancel, false).await?;
+    let flow = Flow::load(home, server, cancel, false, None, None).await?;
+    refresh_flow(flow, home, cancel).await.map(|_| ())
+}
+
+pub(crate) async fn refresh_runtime(
+    home: &Path,
+    server: &str,
+    binding: &McpCredentialBinding,
+    epoch: &CredentialEpoch,
+    admission: &crate::effect_admission::EffectAdmission,
+    cancel: &CancellationToken,
+) -> Result<zeroize::Zeroizing<Vec<String>>, &'static str> {
+    epoch.check()?;
+    admission.check().await.map_err(|e| e.0)?;
+    let mut flow = Flow::load(home, server, cancel, false, Some(binding), Some(admission)).await?;
+    epoch.check()?;
+    let oauth = &flow.commit.payload.0["oauth"];
+    let mut protection = oauth_secrets(oauth);
+    if oauth["scopes"]
+        .as_array()
+        .is_none_or(|s| s.iter().any(|v| !v.is_string()))
+    {
+        return Err("mcp_oauth_authorization_required");
+    }
+    if [
+        oauth["clientId"].as_str(),
+        oauth["clientInformation"]["client_id"].as_str(),
+    ]
+    .into_iter()
+    .flatten()
+    .all(str::is_empty)
+    {
+        return Err("mcp_oauth_authorization_required");
+    }
+    flow.commit.epoch = Some(epoch.clone());
+    protection.extend(refresh_flow(flow, home, cancel).await?.iter().cloned());
+    epoch.check()?;
+    Ok(protection)
+}
+
+async fn refresh_flow(
+    mut flow: Flow,
+    home: &Path,
+    cancel: &CancellationToken,
+) -> Result<zeroize::Zeroizing<Vec<String>>, &'static str> {
     if flow.commit.payload.0["oauth"]["tokens"]["refresh_token"]
         .as_str()
         .is_none_or(|s| s.is_empty())
@@ -416,4 +509,19 @@ pub async fn refresh(
         .await?
         .map_err(|_| "mcp_oauth_refresh_failed")?;
     flow.commit.save(home, cancel).await
+}
+fn oauth_secrets(oauth: &serde_json::Value) -> zeroize::Zeroizing<Vec<String>> {
+    zeroize::Zeroizing::new(
+        [
+            &oauth["tokens"]["access_token"],
+            &oauth["tokens"]["refresh_token"],
+            &oauth["clientSecret"],
+            &oauth["clientInformation"]["client_secret"],
+        ]
+        .into_iter()
+        .filter_map(|v| v.as_str())
+        .filter(|v| !v.is_empty())
+        .map(str::to_owned)
+        .collect(),
+    )
 }
