@@ -38,6 +38,19 @@ impl NativeSessionHost {
                 _=tick.tick()=>{if !self.journal.lease().holds().unwrap_or(false)||self.journal.lease().takeover_requested().unwrap_or(true)||self.journal.heartbeat(milliseconds(&episode_time())?).is_err(){lost=true;owned.cancel();}},
                 request=async{authorization.as_mut().unwrap().receiver.recv().await},if authorization.is_some()=>{
                     if let Some(request)=request {
+                        #[cfg(feature="test-fixtures")]
+                        if self.home.join(".native-cli-fixture").is_file() && std::env::var("PEER_NATIVE_AUTH_CONTROL_BARRIER").as_deref()==Ok("slow") {
+                            // A controlled expensive synchronous validator; the
+                            // signal registration and watcher code stay unchanged.
+                            std::thread::sleep(Duration::from_millis(100));
+                        }
+                        // Several workers can keep this receiver continuously
+                        // ready. A cooperative budget can then cover many slow
+                        // synchronous authority reads before the signal watcher
+                        // runs. Yield per control request, then propagate the
+                        // latest cancellation before issuing its reply.
+                        tokio::task::yield_now().await;
+                        if external.is_cancelled() { owned.cancel();cancelled=true; }
                         let a=authorization.as_ref().unwrap();
                         let valid=if lost{Err(HostError("HOST_LEASE_LOST"))}else if owned.is_cancelled(){Err(HostError("CANCELLED"))}else{self.validate_permission(a.grant,a.args,&episode_time())};
                         match request {

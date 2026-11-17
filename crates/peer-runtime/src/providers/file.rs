@@ -5,7 +5,9 @@ use std::{
     io::{Read, Seek, SeekFrom, Write},
     sync::{Arc, Mutex},
 };
+mod batch;
 mod edit;
+pub(super) use batch::BatchSearchProvider;
 mod locale;
 mod scan;
 mod target;

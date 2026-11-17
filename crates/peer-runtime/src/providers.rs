@@ -114,6 +114,7 @@ impl Default for ProviderRegistry {
         Self {
             providers: vec![
                 Box::<file::FileProvider>::default(),
+                Box::new(file::BatchSearchProvider),
                 Box::new(shell::ShellProvider),
                 Box::new(tool_artifact::ToolArtifactProvider),
             ],

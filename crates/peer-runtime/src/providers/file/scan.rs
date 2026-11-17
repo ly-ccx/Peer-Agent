@@ -39,11 +39,14 @@ pub(super) fn display(workspace: &Path, path: &Path) -> String {
     }
 }
 pub(super) fn bounded(result: &Value) -> Result<(), HostError> {
-    struct Counter(usize);
+    bounded_to(result, RESULT_BYTES)
+}
+pub(super) fn bounded_to(result: &Value, limit: usize) -> Result<(), HostError> {
+    struct Counter(usize, usize);
     impl std::io::Write for Counter {
         fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
             self.0 = self.0.saturating_add(b.len());
-            if self.0 > RESULT_BYTES {
+            if self.0 > self.1 {
                 return Err(std::io::Error::other("file_result_limit"));
             }
             Ok(b.len())
@@ -52,7 +55,7 @@ pub(super) fn bounded(result: &Value) -> Result<(), HostError> {
             Ok(())
         }
     }
-    serde_json::to_writer(Counter(0), result).map_err(|_| HostError("file_result_limit"))
+    serde_json::to_writer(Counter(0, limit), result).map_err(|_| HostError("file_result_limit"))
 }
 pub(super) fn list(path: &Path, workspace: &Path, run: &RunGuard) -> Result<Value, HostError> {
     run.check()?;
