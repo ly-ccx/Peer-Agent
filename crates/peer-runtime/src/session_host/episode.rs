@@ -220,7 +220,7 @@ impl NativeSessionHost {
         let projection = if current.resource.read_only {
             providers.project_read_only()?
         } else {
-            providers.project()?
+            providers.project_for_mode(crate::providers::RuntimeMode::Goal, None)?
         };
         if current.resource.read_only
             && origin["capabilityAdmission"]["required"]

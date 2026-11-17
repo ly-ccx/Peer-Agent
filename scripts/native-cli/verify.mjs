@@ -24,6 +24,7 @@ run('bun',['scripts/native-cli/model-oauth-coordination.ts']);
 run('node',['--test','apps/desktop/electron/main/mcp-credential-store.test.mjs','apps/desktop/electron/main/mcp-client.test.mjs','apps/desktop/electron/main/mcp-oauth-ownership.test.mjs','apps/desktop/electron/main/mcp-application-service.test.mjs']);
 run('bun', ['scripts/native-cli/contracts.ts']);
 run('bun', ['scripts/native-cli/control-contracts.ts']);
+run('bun', ['scripts/native-cli/projection-contracts.ts']);
 run('bun', ['scripts/native-cli/native-process-contracts.ts']);
 run('bun', ['scripts/native-cli/work-contracts.ts']);
 run('bun', ['scripts/native-cli/kernel-contracts.ts']);

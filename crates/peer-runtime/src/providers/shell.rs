@@ -16,7 +16,7 @@ impl CapabilityProvider for ShellProvider {
     fn manifests(&self) -> Vec<(String, Value)> {
         vec![(
             "bash".into(),
-            json!({"capabilityId":"local.shell.exec","displayName":"Run shell command","description":"Run a bounded foreground shell command in the active workspace with governed approval. This native migration adapter starts a fresh shell per call; background and persistent shell sessions are unavailable.","riskLevel":"L3_sensitive","modeScopes":["goal"],"inputSchema":{"type":"object","properties":{"command":{"type":"string"},"cwd":{"type":"string"},"timeoutMs":{"type":"number"},"background":{"type":"boolean"}},"required":["command"],"additionalProperties":false}}),
+            json!({"capabilityId":"local.shell.exec","displayName":"Run shell command","description":"Run a bounded foreground shell command in the active workspace with governed approval. This native migration adapter starts a fresh shell per call; background and persistent shell sessions are unavailable.","riskLevel":"L3_sensitive","modeScopes":["chat","goal"],"inputSchema":{"type":"object","properties":{"command":{"type":"string"},"cwd":{"type":"string"},"timeoutMs":{"type":"number"},"background":{"type":"boolean"}},"required":["command"],"additionalProperties":false}}),
         )]
     }
     fn prepare(

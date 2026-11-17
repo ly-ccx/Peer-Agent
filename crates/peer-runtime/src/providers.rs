@@ -14,6 +14,8 @@ use std::{
 mod file;
 mod git;
 mod mcp;
+mod projection;
+pub use projection::RuntimeMode;
 mod shell;
 mod tool_artifact;
 mod web;
@@ -160,7 +162,7 @@ impl Default for ProviderRegistry {
 }
 impl ProviderRegistry {
     pub(crate) fn project_read_only(&self) -> Result<RuntimeProjection, HostError> {
-        let mut p = self.project()?;
+        let mut p = self.project_for_mode(RuntimeMode::Goal, None)?;
         p.tools
             .retain(|t| crate::capability::read_capability(&t.capability));
         p.id = peer_protocol::javascript_json_digest(&json!(
@@ -216,6 +218,15 @@ impl ProviderRegistry {
         ))
         .map_err(|_| HostError("projection_limit"))?;
         Ok(RuntimeProjection { tools, id })
+    }
+    /// The caller owns the actual turn mode and canonical capability allowlist.
+    /// Filtering never grants a visible capability or installs a Provider.
+    pub fn project_for_mode(
+        &self,
+        mode: RuntimeMode,
+        allowlist: Option<&[String]>,
+    ) -> Result<RuntimeProjection, HostError> {
+        self.project()?.restrict(mode, allowlist)
     }
     pub fn prepare(
         &mut self,
