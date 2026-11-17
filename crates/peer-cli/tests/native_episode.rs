@@ -11,6 +11,7 @@ mod native_network;
 mod native_parent_controls;
 mod native_parents;
 mod native_result_encoding;
+mod native_web;
 use peer_store::{
     AcquireLease, CoordinationStore, ExecutionResourceStore, HostIdentity, HostLeaseStore,
     HostSurface, PolicyStore,

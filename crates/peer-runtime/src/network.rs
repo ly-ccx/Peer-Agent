@@ -83,7 +83,10 @@ impl Network {
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
             .retry(reqwest::retry::never())
-            .pool_max_idle_per_host(0);
+            .pool_max_idle_per_host(0)
+            .no_gzip()
+            .no_brotli()
+            .no_deflate();
         let mut tls = url.scheme() == "https";
         let mut secrets = Zeroizing::new(Vec::new());
         if let Some(proxy) = route {

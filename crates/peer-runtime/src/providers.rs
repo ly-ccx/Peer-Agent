@@ -17,6 +17,7 @@ mod file;
 mod mcp;
 mod shell;
 mod tool_artifact;
+mod web;
 pub use crate::effect_admission::EffectAdmission;
 pub(crate) use shell::group_absent;
 mod shell_risk;
@@ -115,6 +116,7 @@ impl Default for ProviderRegistry {
             providers: vec![
                 Box::<file::FileProvider>::default(),
                 Box::new(file::BatchSearchProvider),
+                Box::new(web::WebProvider),
                 Box::new(shell::ShellProvider),
                 Box::new(tool_artifact::ToolArtifactProvider),
             ],

@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "manifest": {
+    "capabilityId": "local.web.fetch",
+    "displayName": "Fetch web page",
+    "description": "Fetch an http(s) page, extract readable content, and return a summary plus local artifact references.",
+    "riskLevel": "L3_sensitive",
+    "modeScopes": [
+      "chat",
+      "plan",
+      "goal"
+    ],
+    "metadata": {
+      "modelToolName": "web_fetch"
+    },
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "Absolute http(s) URL to fetch."
+        },
+        "waitForRender": {
+          "type": "boolean",
+          "description": "Accepted for cross-host compatibility; CLI static HTTP fetch cannot render client JavaScript."
+        },
+        "timeoutMs": {
+          "type": "number",
+          "description": "Fetch timeout in milliseconds (default 30000, maximum 120000)."
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "limits": {
+    "urlBytes": 16384,
+    "responseBytes": 5000000,
+    "contentUnits": 2000000,
+    "summaryUnits": 4000,
+    "titleBytes": 65536,
+    "contentTypeBytes": 8192,
+    "artifactBytes": 536870912,
+    "artifactEntries": 16384,
+    "artifactPathBytes": 4194304,
+    "artifactDepth": 4
+  },
+  "provenance": "Actual existing TS static HTTP engine, Provider and ArtifactStore. Native explicit deltas retain safe scalar boundaries and report prior engine truncation; stable HTTP/content errors do not disclose transport secrets."
+}
