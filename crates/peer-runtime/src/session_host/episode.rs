@@ -9,10 +9,7 @@ use crate::{
     providers::{EffectFuture, EffectOutcome, PreparedEffect, ProviderRegistry},
     usage_accounting::{RuntimeUsageAccounting, UsageSnapshot},
 };
-use peer_store::{
-    ConversationStore, EvidenceIndexStore, HostFileMaterialization, HostToolEvidence,
-    ResourceReservation,
-};
+use peer_store::{ConversationStore, ResourceReservation};
 use std::{future::Future, pin::Pin, time::Duration};
 pub trait PermissionInput {
     fn decide<'a>(
@@ -32,6 +29,7 @@ pub struct EpisodeOutcome {
     pub context_accounting: Value,
 }
 pub(crate) use crate::capability::now;
+mod turn_host;
 impl NativeSessionHost {
     pub async fn run_episode(
         &mut self,
@@ -287,66 +285,24 @@ impl NativeSessionHost {
             owned: &cancellation,
             external: cancel,
         };
-        let run=async {
-            let mut count=0;let mut content=String::new();
-            for _ in 0..max_turns {
-                if cancel.is_cancelled() || cancellation.is_cancelled(){return Err(HostError("CANCELLED"))}
-                let fresh=self.current(plan_id,&now())?;
-                let policy=peer_store::PolicyStore::new(&self.home).read_existing(&fresh.resource.workspace_id)?;
-                if policy.conversation_id!=origin["parentConversationId"]{return Err(HostError("out_of_scope"))}
-                if fresh.goal.source_revision!=current.goal.source_revision || !crate::coordination::execution_binding_current(&fresh.journal.state["mandates"][work_id],&fresh.journal.state["transitions"][transition["operationId"].as_str().unwrap_or("")],binding){return Err(HostError("execution_revision_stale"))}
-                let response=context_pipeline.request(self,&frame,&mut usage_accounting).await?;
-                let turn=response.turn;let system=response.system;
-                if !turn.content.is_empty(){self.append_episode_message(&conversation,&json!({"id":uuid::Uuid::new_v4().to_string(),"role":"assistant","content":turn.content,"createdAt":now(),"streamId":stream,"contextSnapshot":system["snapshot"],"requestFingerprint":turn.request_fingerprint}))?;content=turn.content;}
-                if turn.calls.is_empty(){return Ok(("replied",content,count))}
-                let mut completed_ids=Vec::new();
-                for call in turn.calls {
-                    if cancel.is_cancelled() || cancellation.is_cancelled(){return Err(HostError("CANCELLED"))}
-                    let effect=providers.prepare(&projection,&call.name,call.arguments,&workspace,&self.home)?;
-                    let capability=projection.capability(&call.name).ok_or(HostError("tool_not_projected"))?.to_owned();
-                    let call_id=format!("call-{}",uuid::Uuid::new_v4());let args=effect.args().clone();let scopes=effect.scopes()?;let provider_evidence=effect.evidence();let output_kind=effect.output_kind();let command_effect=effect.owned_command();
-                    let current=self.current(plan_id,&now())?;
-                    let reserved=self.resources.reserve(&current.resource,ResourceReservation{host_epoch:&epoch,scopes:&scopes,record_conflict:false},&now())?;
-                    if reserved["allowed"]!=true{return Err(HostError("execution_resource_busy"))}
-                    let identity=||HostCallIdentity{plan_id,session_id:&budget.session,conversation_id:&conversation,tool_call_id:&call_id,stream_id:&stream,capability_id:&capability,permission:effect.permission(),role:HostExecutionRole::Worker,shell_risk:effect.risk()};
-                    let mut authorization=self.authorize_tool(super::tool_authorization::ToolAuthorizationRequest{identity:identity(),args:&args,tool:&call.name,scopes:&scopes,read_path:effect.read_scope(),workspace:&workspace},permission,&cancellation,cancel).await?;
-                    let started_at=now();let dispatch=budget.dispatch(self,crate::execution_budget::DispatchFacts{call:&call_id,capability:&capability,scopes:&scopes,stream:&stream,conversation:&conversation},&now())?;
-                    let grant_facts=authorization.grant.as_ref().map(|g|g.facts().clone()).unwrap_or_else(||authorization.denied_facts(&call_id,&capability));
-                    let outcome=if let Some(error)=authorization.failure {EffectOutcome::not_dispatched(error.0)}else if let Some(grant)=authorization.grant.as_ref() {
-                        self.launch_effect(effect,super::effect_wait::EffectHost{grant,resource:&current.resource,input:permission,reads:authorization.reads.as_mut(),budget:&budget,dispatch:&dispatch},&cancellation,cancel).await?
-                    }else{EffectOutcome{status:match authorization.terminal {Some(HostError("CANCELLED"))=>"cancelled",Some(_)=>"failed",None=>"denied"},output:json!({}),error:Some(authorization.terminal.map(|e|e.0).unwrap_or("permission_denied")),artifacts:vec![],ended:true,materialization:None,not_dispatched:true}};
-                    let permission_terminal=authorization.terminal.or_else(||authorization.reads.as_ref().and_then(|r|r.terminal));
-                    let additional=authorization.reads.as_ref().map(|r|r.grants.iter().map(|g|g.facts().clone()).chain(r.decisions.iter().cloned()).collect::<Vec<_>>()).unwrap_or_default();
-                    #[cfg(feature="test-fixtures")]
-                    if std::env::var("PEER_NATIVE_EPISODE_FAULT_AFTER_EFFECT").ok().as_deref()==Some(&call.name) && self.home.join(".native-cli-fixture").is_file(){std::process::exit(77)}
-                    let mut result=json!({"toolCallId":call_id,"capabilityId":capability,"status":outcome.status,"output":outcome.output,"outputPreview":{"kind":"json"},"completedAt":now(),"evidence":{"evidenceId":format!("evidence-{}",uuid::Uuid::new_v4()),"toolCallId":call_id,"summary":format!("{}: {}",call.name,outcome.status),"artifactRefs":outcome.artifacts}});
-                    if let Some(metadata)=provider_evidence {let target=result["evidence"].as_object_mut().unwrap();target.extend(metadata.as_object().unwrap().clone());target.insert("permissionGrantId".into(),grant_facts["grantId"].clone());target.insert("status".into(),json!(outcome.status));target.insert("startedAt".into(),json!(started_at));target.insert("endedAt".into(),json!(now()));}
-                    if outcome.not_dispatched {result["evidence"]["dispatchOutcome"]=json!("not_dispatched");}
-                    if !additional.is_empty(){result["evidence"]["readScopeDecisions"]=json!(additional);}
-                    if command_effect && authorization.grant.is_some() && authorization.failure.is_none(){result["evidence"]["nativeProcess"]=json!(budget.read_process(self,&call_id,&dispatch)?);}
-                    if let Some(error)=outcome.error{result["error"]=json!({"code":error,"message":error,"recoverable":true})}
-                    let result=self.archive_tool_result(&conversation,result,output_kind,&cancellation,cancel).await?;
-                    let all_grants=std::iter::once(grant_facts.clone()).chain(additional).collect::<Vec<_>>();
-                    self.append_episode_message(&conversation,&json!({"id":uuid::Uuid::new_v4().to_string(),"role":"assistant","content":"","createdAt":now(),"streamId":stream,"segments":[{"type":"tool-call","tool":call.name,"toolCallId":call_id,"args":args,"result":result}],"permissionGrants":all_grants}))?;
-                    let evidence=EvidenceIndexStore::new(&self.home).register(&HostToolEvidence{conversation_id:&conversation,plan_id:Some(plan_id),stream_id:Some(&stream),tool_name:&call.name,capability_id:&capability,tool_call_id:&call_id,grant:&grant_facts,result:&result},None)?;
-                    budget.settle(self,&call_id,&dispatch,&result,&now())?;count+=1;
-                    if let Some(identity)=&outcome.materialization {
-                        let reference=format!("tool-result://{call_id}");
-                        if outcome.status!="success" || !evidence.iter().any(|e|e["evidenceRef"]==reference){return Err(HostError("native_materialization_receipt_invalid"))}
-                        self.resources.confirm_file_materialization(&current.resource,HostFileMaterialization{host_epoch:&epoch,identity,tool_call_id:&call_id},&now())?;
-                    }
-                    if !outcome.ended || outcome.error==Some("execution_outcome_unknown"){return Err(HostError("execution_outcome_unknown"))}
-                    // Expiry/cancellation closes this run after saving the real
-                    // not-dispatched result. A late stdin answer cannot approve
-                    // another prompt in the same episode.
-                    if let Some(error)=permission_terminal{return Err(error)}
-                    completed_ids.push(call_id);
-                }
-                let committed=ConversationStore::new(&self.home).read_committed(&conversation,None,8*1024*1024)?;
-                let projected=project_history(&committed.history.messages).map_err(HostError)?;
-                context_pipeline.live.remember(&projected,&completed_ids,turn.continuation).map_err(|e|HostError(e.code))?;
-            }Ok(("max_turns",content,count))
-        }.await;
+        let run = {
+            let mut host = turn_host::GoalTurnHost {
+                host: self,
+                frame: &frame,
+                pipeline: &mut context_pipeline,
+                providers: &mut providers,
+                projection: &projection,
+                permission,
+                epoch: &epoch,
+                stream: &stream,
+                origin,
+                transition,
+                binding,
+                usage: &mut usage_accounting,
+                system: None,
+            };
+            crate::turn_loop::run(&mut host, Some(max_turns), &cancellation, cancel).await
+        };
         // Completion owns the actual attempt. Stop drains its real handles;
         // errors leave canonical pending dispatches/unknown intact.
         let latest_usage = billing_scope.snapshot(&budget, usage_accounting.snapshot().turn_total);
@@ -399,12 +355,12 @@ impl NativeSessionHost {
         if cancel.is_cancelled() {
             return Err(HostError("CANCELLED"));
         }
-        let (status, content, tool_calls) = run?;
+        let outcome = run?;
         context_pipeline.finish(&self.home)?;
         Ok(EpisodeOutcome {
-            status,
-            content,
-            tool_calls,
+            status: outcome.stop.as_str(),
+            content: outcome.content,
+            tool_calls: outcome.tool_calls,
             stop,
             usage: usage_accounting.snapshot(),
             lifetime_usage,

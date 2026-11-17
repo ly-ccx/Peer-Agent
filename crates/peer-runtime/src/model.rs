@@ -6,6 +6,7 @@ use sha2::{Digest, Sha256};
 use std::time::Duration;
 mod authentication;
 mod continuation;
+pub(crate) use continuation::Continuation as ModelContinuation;
 mod media;
 mod tool_results;
 pub(crate) use tool_results::ToolResultEncoding;

@@ -1,0 +1,289 @@
+//! Goal-specific authority and canonical settlement behind the shared loop.
+use super::*;
+use crate::model::{ModelContinuation, ModelToolCall, ModelTurn};
+use crate::session_host::context_pipeline::{ContextPipeline, RequestFrame};
+use crate::turn_loop::TurnHost;
+use peer_store::{EvidenceIndexStore, HostFileMaterialization, HostToolEvidence};
+
+pub(super) struct GoalTurnHost<'a, 'f> {
+    pub host: &'a mut NativeSessionHost,
+    pub frame: &'a RequestFrame<'f>,
+    pub pipeline: &'a mut ContextPipeline,
+    pub providers: &'a mut ProviderRegistry,
+    pub projection: &'a crate::providers::RuntimeProjection,
+    pub permission: &'a mut dyn PermissionInput,
+    pub epoch: &'a str,
+    pub stream: &'a str,
+    pub origin: &'a Value,
+    pub transition: &'a Value,
+    pub binding: &'a Value,
+    pub usage: &'a mut RuntimeUsageAccounting,
+    pub system: Option<Value>,
+}
+impl TurnHost for GoalTurnHost<'_, '_> {
+    async fn request(&mut self) -> Result<ModelTurn, HostError> {
+        let f = self.frame;
+        let fresh = self.host.current(f.plan, &now())?;
+        let policy = peer_store::PolicyStore::new(&self.host.home)
+            .read_existing(&fresh.resource.workspace_id)?;
+        if policy.conversation_id != self.origin["parentConversationId"] {
+            return Err(HostError("out_of_scope"));
+        }
+        if fresh.goal.source_revision != f.goal_revision
+            || !crate::coordination::execution_binding_current(
+                &fresh.journal.state["mandates"][f.budget.work.as_str()],
+                &fresh.journal.state["transitions"]
+                    [self.transition["operationId"].as_str().unwrap_or("")],
+                self.binding,
+            )
+        {
+            return Err(HostError("execution_revision_stale"));
+        }
+        let response = self.pipeline.request(self.host, f, self.usage).await?;
+        self.system = Some(response.system);
+        Ok(response.turn)
+    }
+    async fn record_assistant(&mut self, turn: &ModelTurn) -> Result<(), HostError> {
+        let system = self
+            .system
+            .take()
+            .ok_or(HostError("context_response_unavailable"))?;
+        self.host.append_episode_message(self.frame.billing.conversation,&json!({"id":uuid::Uuid::new_v4().to_string(),"role":"assistant","content":turn.content,"createdAt":now(),"streamId":self.stream,"contextSnapshot":system["snapshot"],"requestFingerprint":turn.request_fingerprint}))
+    }
+    async fn execute_call(&mut self, call: ModelToolCall) -> Result<String, HostError> {
+        let host = &mut *self.host;
+        let frame = self.frame;
+        let plan_id = frame.plan;
+        let conversation = frame.billing.conversation;
+        let workspace = frame.workspace;
+        let budget = frame.budget;
+        let cancellation = frame.owned;
+        let cancel = frame.external;
+        let providers = &mut *self.providers;
+        let projection = self.projection;
+        let permission = &mut *self.permission;
+        let epoch = self.epoch;
+        let stream = self.stream;
+        let effect = providers.prepare(
+            projection,
+            &call.name,
+            call.arguments,
+            workspace,
+            &host.home,
+        )?;
+        let capability = projection
+            .capability(&call.name)
+            .ok_or(HostError("tool_not_projected"))?
+            .to_owned();
+        let call_id = format!("call-{}", uuid::Uuid::new_v4());
+        let args = effect.args().clone();
+        let scopes = effect.scopes()?;
+        let provider_evidence = effect.evidence();
+        let output_kind = effect.output_kind();
+        let command_effect = effect.owned_command();
+        let current = host.current(plan_id, &now())?;
+        let reserved = host.resources.reserve(
+            &current.resource,
+            ResourceReservation {
+                host_epoch: epoch,
+                scopes: &scopes,
+                record_conflict: false,
+            },
+            &now(),
+        )?;
+        if reserved["allowed"] != true {
+            return Err(HostError("execution_resource_busy"));
+        }
+        let identity = || HostCallIdentity {
+            plan_id,
+            session_id: &budget.session,
+            conversation_id: conversation,
+            tool_call_id: &call_id,
+            stream_id: stream,
+            capability_id: &capability,
+            permission: effect.permission(),
+            role: HostExecutionRole::Worker,
+            shell_risk: effect.risk(),
+        };
+        let mut authorization = host
+            .authorize_tool(
+                crate::session_host::tool_authorization::ToolAuthorizationRequest {
+                    identity: identity(),
+                    args: &args,
+                    tool: &call.name,
+                    scopes: &scopes,
+                    read_path: effect.read_scope(),
+                    workspace,
+                },
+                permission,
+                cancellation,
+                cancel,
+            )
+            .await?;
+        let started_at = now();
+        let dispatch = budget.dispatch(
+            host,
+            crate::execution_budget::DispatchFacts {
+                call: &call_id,
+                capability: &capability,
+                scopes: &scopes,
+                stream,
+                conversation,
+            },
+            &now(),
+        )?;
+        let grant_facts = authorization
+            .grant
+            .as_ref()
+            .map(|g| g.facts().clone())
+            .unwrap_or_else(|| authorization.denied_facts(&call_id, &capability));
+        let outcome = if let Some(error) = authorization.failure {
+            EffectOutcome::not_dispatched(error.0)
+        } else if let Some(grant) = authorization.grant.as_ref() {
+            host.launch_effect(
+                effect,
+                crate::session_host::effect_wait::EffectHost {
+                    grant,
+                    resource: &current.resource,
+                    input: permission,
+                    reads: authorization.reads.as_mut(),
+                    budget,
+                    dispatch: &dispatch,
+                },
+                cancellation,
+                cancel,
+            )
+            .await?
+        } else {
+            EffectOutcome {
+                status: match authorization.terminal {
+                    Some(HostError("CANCELLED")) => "cancelled",
+                    Some(_) => "failed",
+                    None => "denied",
+                },
+                output: json!({}),
+                error: Some(
+                    authorization
+                        .terminal
+                        .map(|e| e.0)
+                        .unwrap_or("permission_denied"),
+                ),
+                artifacts: vec![],
+                ended: true,
+                materialization: None,
+                not_dispatched: true,
+            }
+        };
+        let permission_terminal = authorization
+            .terminal
+            .or_else(|| authorization.reads.as_ref().and_then(|r| r.terminal));
+        let additional = authorization
+            .reads
+            .as_ref()
+            .map(|r| {
+                r.grants
+                    .iter()
+                    .map(|g| g.facts().clone())
+                    .chain(r.decisions.iter().cloned())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        #[cfg(feature = "test-fixtures")]
+        if std::env::var("PEER_NATIVE_EPISODE_FAULT_AFTER_EFFECT")
+            .ok()
+            .as_deref()
+            == Some(&call.name)
+            && host.home.join(".native-cli-fixture").is_file()
+        {
+            std::process::exit(77)
+        }
+        let mut result = json!({"toolCallId":call_id,"capabilityId":capability,"status":outcome.status,"output":outcome.output,"outputPreview":{"kind":"json"},"completedAt":now(),"evidence":{"evidenceId":format!("evidence-{}",uuid::Uuid::new_v4()),"toolCallId":call_id,"summary":format!("{}: {}",call.name,outcome.status),"artifactRefs":outcome.artifacts}});
+        if let Some(metadata) = provider_evidence {
+            let target = result["evidence"].as_object_mut().unwrap();
+            target.extend(metadata.as_object().unwrap().clone());
+            target.insert("permissionGrantId".into(), grant_facts["grantId"].clone());
+            target.insert("status".into(), json!(outcome.status));
+            target.insert("startedAt".into(), json!(started_at));
+            target.insert("endedAt".into(), json!(now()));
+        }
+        if outcome.not_dispatched {
+            result["evidence"]["dispatchOutcome"] = json!("not_dispatched");
+        }
+        if !additional.is_empty() {
+            result["evidence"]["readScopeDecisions"] = json!(additional);
+        }
+        if command_effect && authorization.grant.is_some() && authorization.failure.is_none() {
+            result["evidence"]["nativeProcess"] =
+                json!(budget.read_process(host, &call_id, &dispatch)?);
+        }
+        if let Some(error) = outcome.error {
+            result["error"] = json!({"code":error,"message":error,"recoverable":true})
+        }
+        let result = host
+            .archive_tool_result(conversation, result, output_kind, cancellation, cancel)
+            .await?;
+        let all_grants = std::iter::once(grant_facts.clone())
+            .chain(additional)
+            .collect::<Vec<_>>();
+        host.append_episode_message(conversation,&json!({"id":uuid::Uuid::new_v4().to_string(),"role":"assistant","content":"","createdAt":now(),"streamId":stream,"segments":[{"type":"tool-call","tool":call.name,"toolCallId":call_id,"args":args,"result":result}],"permissionGrants":all_grants}))?;
+        let evidence = EvidenceIndexStore::new(&host.home).register(
+            &HostToolEvidence {
+                conversation_id: conversation,
+                plan_id: Some(plan_id),
+                stream_id: Some(stream),
+                tool_name: &call.name,
+                capability_id: &capability,
+                tool_call_id: &call_id,
+                grant: &grant_facts,
+                result: &result,
+            },
+            None,
+        )?;
+        budget.settle(host, &call_id, &dispatch, &result, &now())?;
+        if let Some(identity) = &outcome.materialization {
+            let reference = format!("tool-result://{call_id}");
+            if outcome.status != "success"
+                || !evidence.iter().any(|e| e["evidenceRef"] == reference)
+            {
+                return Err(HostError("native_materialization_receipt_invalid"));
+            }
+            host.resources.confirm_file_materialization(
+                &current.resource,
+                HostFileMaterialization {
+                    host_epoch: epoch,
+                    identity,
+                    tool_call_id: &call_id,
+                },
+                &now(),
+            )?;
+        }
+        if !outcome.ended || outcome.error == Some("execution_outcome_unknown") {
+            return Err(HostError("execution_outcome_unknown"));
+        }
+        // Expiry/cancellation closes this run after saving the real
+        // not-dispatched result. A late stdin answer cannot approve
+        // another prompt in the same episode.
+        if let Some(error) = permission_terminal {
+            return Err(error);
+        }
+
+        Ok(call_id)
+    }
+    async fn completed(
+        &mut self,
+        continuation: Option<ModelContinuation>,
+        ids: &[String],
+    ) -> Result<(), HostError> {
+        let committed = ConversationStore::new(&self.host.home).read_committed(
+            self.frame.billing.conversation,
+            None,
+            8 * 1024 * 1024,
+        )?;
+        let projected = project_history(&committed.history.messages).map_err(HostError)?;
+        self.system = None;
+        self.pipeline
+            .live
+            .remember(&projected, ids, continuation)
+            .map_err(|e| HostError(e.code))
+    }
+}
