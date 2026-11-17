@@ -12,6 +12,7 @@ pub mod coordination;
 pub mod credentials;
 mod execution_budget;
 pub mod git_probe;
+pub mod git_read;
 pub mod goal_facts;
 pub mod live_execution;
 pub mod model;

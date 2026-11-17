@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "manifest": {
+    "capabilityId": "local.git.query",
+    "displayName": "Read Git repository",
+    "description": "Read current local Git facts without shell or repository writes. snapshot (default) returns origin, branch, full HEAD, latest commit and tracked/untracked status; status returns working-tree state; log returns up to limit commits. Detached/unborn HEAD, truncation and changes during sampling are explicit. This is a timed observation, not an atomic snapshot. Submodules are counted but never inspected recursively. External content filters are disabled; filtersDisabled means status counts reflect this restricted observation. clean is null when a clean claim cannot be established. Use this in read-only work instead of bash/git commands or parsing .git files. It does not fetch or prove the remote is current. Use read_file on artifactPath for omitted entries; do not treat truncated output as complete.",
+    "riskLevel": "L1_readonly",
+    "modeScopes": [
+      "chat",
+      "plan",
+      "goal",
+      "explorer",
+      "project_agent"
+    ],
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repository directory, absolute or relative to the workspace."
+        },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "snapshot",
+            "status",
+            "log"
+          ]
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200,
+          "description": "Maximum status entries or commits returned inline. Counts cover the observed top-level status; disabled external filters and uninspected submodules are explicit."
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "defaults": {
+    "operation": "snapshot",
+    "limit": 40
+  },
+  "limits": {
+    "executionMs": 15000,
+    "rawBytes": 8388608,
+    "pathBytes": 8192,
+    "statusEntries": 16384,
+    "statusPathBytes": 4194304,
+    "configSources": 128,
+    "originEntries": 128,
+    "filterKeys": 128,
+    "filterKeyBytes": 512,
+    "observationJsonBytes": 8388608,
+    "previewUnits": 4000
+  },
+  "provenance": "Actual legacy TS GitRead and LocalGitProvider over real synthetic Git repositories; system configuration isolated by test-only Git wrapper. No Node/Bun engine is shipped."
+}

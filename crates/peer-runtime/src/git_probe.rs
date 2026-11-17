@@ -1,18 +1,10 @@
 //! ADR-127 bounded, read-only Git status. Fixed argv, clean Git environment,
 //! disabled hooks/fsmonitor/filters, scope checks and re-observed identity/status.
+use crate::git_read::{AuthorityFuture, GitReadAuthority, command};
 use serde_json::{Value, json};
 use std::{
     path::{Path, PathBuf},
-    process::Stdio,
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
     time::{Duration, Instant},
-};
-use tokio::{
-    io::{AsyncRead, AsyncReadExt},
-    process::Command,
 };
 use tokio_util::sync::CancellationToken;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,32 +33,15 @@ struct Output {
     code: i32,
     out: String,
 }
-async fn collect(
-    mut stream: impl AsyncRead + Unpin,
-    budget: Arc<AtomicUsize>,
-) -> Result<Vec<u8>, GitProbeError> {
-    let mut bytes = Vec::new();
-    let mut chunk = [0u8; 4096];
-    loop {
-        let n = stream
-            .read(&mut chunk)
-            .await
-            .map_err(|_| GitProbeError("git_query_failed"))?;
-        if n == 0 {
-            return Ok(bytes);
-        }
-        let mut remaining = budget.load(Ordering::Acquire);
-        loop {
-            let next = remaining
-                .checked_sub(n)
-                .ok_or(GitProbeError("git_query_output_limit"))?;
-            match budget.compare_exchange_weak(remaining, next, Ordering::AcqRel, Ordering::Acquire)
-            {
-                Ok(_) => break,
-                Err(actual) => remaining = actual,
-            }
-        }
-        bytes.extend_from_slice(&chunk[..n]);
+// Reconciliation is not a tool authorization source. Its original restrictive
+// authorize() below remains authoritative; the common runner owns processes.
+struct ProbeAuthority;
+impl GitReadAuthority for ProbeAuthority {
+    fn check(&self) -> AuthorityFuture<'_> {
+        Box::pin(async { Ok(()) })
+    }
+    fn authorize<'a>(&'a self, _: &'a Path) -> AuthorityFuture<'a> {
+        self.check()
     }
 }
 impl Query<'_> {
@@ -77,107 +52,31 @@ impl Query<'_> {
         let wait = Duration::from_secs(10)
             .checked_sub(self.started.elapsed())
             .ok_or(GitProbeError("git_query_timeout"))?;
-        let mut command = Command::new(self.binary);
-        command
-            .args([
-                "--no-pager",
-                "--no-optional-locks",
-                "-c",
-                "core.fsmonitor=false",
-                "-c",
-                "core.untrackedCache=false",
-                "-c",
-                "core.hooksPath=/dev/null",
-                "-c",
-                "gc.auto=0",
-                "-c",
-                "maintenance.auto=false",
-                "-c",
-                "core.quotePath=false",
-                "-c",
-                "log.showSignature=false",
-                "-c",
-                "status.submoduleSummary=false",
-            ])
-            .args(&self.binding)
-            .args(&self.filters)
-            .args(args)
-            .current_dir(&self.root)
-            .env_clear()
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-        for (key, value) in std::env::vars_os() {
-            let name = key.to_string_lossy().to_ascii_uppercase();
-            if !name.starts_with("GIT_") && !["PAGER", "LESS", "LV"].contains(&name.as_str()) {
-                command.env(key, value);
-            }
-        }
-        for (key, value) in [
-            ("GIT_OPTIONAL_LOCKS", "0"),
-            ("GIT_TERMINAL_PROMPT", "0"),
-            ("GIT_NO_LAZY_FETCH", "1"),
-            ("GIT_ATTR_NOSYSTEM", "1"),
-            ("GIT_ALLOW_PROTOCOL", ""),
-            ("GIT_NO_REPLACE_OBJECTS", "1"),
-            ("LC_ALL", "C"),
-            ("LANG", "C"),
-        ] {
-            command.env(key, value);
-        }
-        if let Some(common) = &self.common {
-            command.env("GIT_COMMON_DIR", common);
-        }
-        #[cfg(unix)]
-        command.process_group(0);
-        let mut child = command
-            .spawn()
-            .map_err(|_| GitProbeError("git_unavailable"))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or(GitProbeError("git_query_failed"))?;
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or(GitProbeError("git_query_failed"))?;
-        let budget = Arc::new(AtomicUsize::new(self.remaining));
-        let work = async {
-            let wait = async {
-                child
-                    .wait()
-                    .await
-                    .map_err(|_| GitProbeError("git_query_failed"))
-            };
-            let (out, err, status) = tokio::try_join!(
-                collect(stdout, budget.clone()),
-                collect(stderr, budget.clone()),
-                wait
-            )?;
-            Ok::<_, GitProbeError>((out, err, status))
-        };
-        let result = tokio::select! {r=tokio::time::timeout(wait,work)=>r.map_err(|_|GitProbeError("git_query_timeout")).and_then(|r|r), _=self.cancel.cancelled()=>Err(GitProbeError("git_query_cancelled"))};
-        self.remaining = budget.load(Ordering::Acquire);
-        let (out, err, status) = match result {
-            Ok(r) => r,
-            Err(e) => {
-                #[cfg(unix)]
-                if let Some(pid) = child
-                    .id()
-                    .and_then(|p| rustix::process::Pid::from_raw(p as i32))
-                {
-                    let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
-                }
-                let _ = child.kill().await;
-                let _ = child.wait().await;
-                return Err(e);
-            }
-        };
+        let raw = command::run(command::Request {
+            binary: self.binary,
+            cwd: &self.root,
+            binding: &self.binding,
+            filters: &self.filters,
+            common: self.common.as_deref(),
+            args,
+            budget: &mut self.remaining,
+            wait,
+            authority: &ProbeAuthority,
+            cancel: self.cancel,
+        })
+        .await
+        .map_err(|e| {
+            GitProbeError(match e.code {
+                "git_execution_permission_denied" | "git_query_spawn_failed" => "git_unavailable",
+                _ => e.code,
+            })
+        })?;
         if self.cancel.is_cancelled() {
             return Err(GitProbeError("git_query_cancelled"));
         }
-        let code = status.code().ok_or(GitProbeError("git_query_failed"))?;
+        let code = raw.code;
+        let out = raw.stdout;
+        let err = raw.stderr;
         if !codes.contains(&code) {
             let err = String::from_utf8_lossy(&err);
             return Err(GitProbeError(if err.contains("not a git repository") {

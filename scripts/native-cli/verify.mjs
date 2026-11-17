@@ -35,6 +35,7 @@ run('node', ['scripts/native-cli/file-operation-contracts.mjs']);
 run('node', ['scripts/native-cli/file-parent-contracts.mjs']);
 run('node', ['scripts/native-cli/batch-search-contracts.mjs']);
 run('node', ['scripts/native-cli/web-fetch-contracts.mjs']);
+run('node', ['scripts/native-cli/git-query-contracts.mjs']);
 run('node', ['scripts/native-cli/tool-artifact-contracts.mjs']);
 run('node', ['scripts/native-cli/model-tool-result-contracts.mjs']);
 run('node', ['scripts/native-cli/attachment-contracts.mjs']);
