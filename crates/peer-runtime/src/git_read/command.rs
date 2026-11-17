@@ -42,11 +42,23 @@ async fn collect(
         if count == 0 {
             return Ok(output);
         }
-        budget
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
-                n.checked_sub(count)
-            })
-            .map_err(|_| GitReadError::new("git_query_output_limit"))?;
+        // Keep the shared stdout/stderr reservation atomic without depending
+        // on the newer try_update API (the CLI's MSRV remains 1.88).
+        let mut available = budget.load(Ordering::Acquire);
+        loop {
+            let remaining = available
+                .checked_sub(count)
+                .ok_or_else(|| GitReadError::new("git_query_output_limit"))?;
+            match budget.compare_exchange_weak(
+                available,
+                remaining,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => break,
+                Err(current) => available = current,
+            }
+        }
         output.extend_from_slice(&buf[..count]);
     }
 }

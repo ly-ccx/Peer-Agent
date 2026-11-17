@@ -21,10 +21,13 @@ const binary=join(root,'owned-git');
 writeFileSync(binary,'#!/bin/sh\nexport GIT_CONFIG_NOSYSTEM=1\nexec /usr/bin/git "$@"\n',{mode:0o700});
 process.env.HOME=home;process.env.XDG_CONFIG_HOME=join(home,'config');
 process.env.PATH='/usr/bin:/bin';
+// Git versions spell UTC's %cI as either Z or +00:00. A fixed nonzero
+// committer offset keeps the actual raw timestamp contract portable; no
+// production timestamp is rewritten or ignored by the oracle comparison.
 const env={PATH:'/usr/bin:/bin',HOME:home,XDG_CONFIG_HOME:join(home,'config'),
   GIT_CONFIG_NOSYSTEM:'1',GIT_AUTHOR_NAME:'Native Fixture',GIT_AUTHOR_EMAIL:'native@example.invalid',
   GIT_COMMITTER_NAME:'Native Fixture',GIT_COMMITTER_EMAIL:'native@example.invalid',
-  GIT_AUTHOR_DATE:'2026-11-17T00:00:00+00:00',GIT_COMMITTER_DATE:'2026-11-17T00:00:00+00:00',TZ:'UTC'};
+  GIT_AUTHOR_DATE:'2026-11-17T00:00:00+05:30',GIT_COMMITTER_DATE:'2026-11-17T00:00:00+05:30',TZ:'UTC'};
 const base=[{git:['init','--initial-branch=main','repo']},
   {write:'repo/tracked.txt',content:'original\n'},
   {git:['add','tracked.txt'],cwd:'repo'},{git:['commit','-m','base'],cwd:'repo'}];

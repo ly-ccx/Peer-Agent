@@ -41,8 +41,8 @@ impl Fixture {
             .env("GIT_AUTHOR_EMAIL", "native@example.invalid")
             .env("GIT_COMMITTER_NAME", "Native Fixture")
             .env("GIT_COMMITTER_EMAIL", "native@example.invalid")
-            .env("GIT_AUTHOR_DATE", "2026-11-17T00:00:00+00:00")
-            .env("GIT_COMMITTER_DATE", "2026-11-17T00:00:00+00:00")
+            .env("GIT_AUTHOR_DATE", "2026-11-17T00:00:00+05:30")
+            .env("GIT_COMMITTER_DATE", "2026-11-17T00:00:00+05:30")
             .env("TZ", "UTC")
             .output()
             .unwrap();
