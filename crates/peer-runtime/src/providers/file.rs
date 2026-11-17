@@ -8,6 +8,8 @@ use std::{
 mod edit;
 mod locale;
 mod scan;
+mod target;
+mod write;
 const READ_BYTES: usize = 2_000_000;
 const WRITE_BYTES: usize = 128 * 1024;
 const SNAPSHOT_ENTRIES: usize = 128;
@@ -35,6 +37,7 @@ struct FileEffect {
     workspace: PathBuf,
     operation: Operation,
     snapshots: Snapshots,
+    target: Option<target::Target>,
     port: Option<EffectAdmission>,
     #[cfg(feature = "test-fixtures")]
     test_root: PathBuf,
@@ -57,23 +60,17 @@ impl RunGuard {
         self.runtime.block_on(self.port.check())
     }
 }
-fn open_file(path: &Path, write: bool, create: bool) -> Result<std::fs::File, HostError> {
-    let mut flags =
-        rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NONBLOCK;
-    flags |= if write {
-        rustix::fs::OFlags::RDWR
-    } else {
-        rustix::fs::OFlags::RDONLY
-    };
-    if create {
-        flags |= rustix::fs::OFlags::CREATE | rustix::fs::OFlags::EXCL;
-    }
+fn open_file(path: &Path) -> Result<std::fs::File, HostError> {
+    let flags = rustix::fs::OFlags::RDONLY
+        | rustix::fs::OFlags::NOFOLLOW
+        | rustix::fs::OFlags::CLOEXEC
+        | rustix::fs::OFlags::NONBLOCK;
     rustix::fs::open(path, flags, rustix::fs::Mode::from_raw_mode(0o666))
         .map(std::fs::File::from)
         .map_err(|_| HostError("file_unavailable"))
 }
 fn read_bytes(path: &Path, limit: usize) -> Result<Vec<u8>, HostError> {
-    read_handle_bytes(&mut open_file(path, false, false)?, limit)
+    read_handle_bytes(&mut open_file(path)?, limit)
 }
 fn read_handle_bytes(file: &mut std::fs::File, limit: usize) -> Result<Vec<u8>, HostError> {
     if !file
@@ -102,7 +99,7 @@ fn read_handle(file: &mut std::fs::File) -> Result<(String, String), HostError> 
     ))
 }
 fn read(path: &Path) -> Result<(String, String), HostError> {
-    read_handle(&mut open_file(path, false, false)?)
+    read_handle(&mut open_file(path)?)
 }
 pub(super) fn slice_lines(content: &str, args: &Value) -> Result<Value, HostError> {
     let mut lines: Vec<_> = if content.is_empty() {
@@ -184,6 +181,11 @@ impl CapabilityProvider for FileProvider {
                 Operation::Write => &["path", "content", "allow_overwrite"],
             },
         )?;
+        let resolve = if operation == Operation::Write {
+            target::resolve_write
+        } else {
+            resolve
+        };
         let path = resolve(
             workspace,
             if operation == Operation::Search && args.get("path").is_none() {
@@ -235,6 +237,10 @@ impl CapabilityProvider for FileProvider {
             }
             Operation::List => {}
         }
+        let target = operation
+            .write()
+            .then(|| target::Target::inspect(&path))
+            .transpose()?;
         Ok(Box::new(FileEffect {
             args,
             path,
@@ -244,6 +250,7 @@ impl CapabilityProvider for FileProvider {
                 .map_err(|_| HostError("file_unavailable"))?,
             operation,
             snapshots: self.snapshots.clone(),
+            target,
             port: None,
             #[cfg(feature = "test-fixtures")]
             test_root: _home.into(),
@@ -306,82 +313,7 @@ impl FileEffect {
             }
             Operation::Write | Operation::Edit => {}
         }
-        let previous = if self.path.exists() {
-            Some(read(&self.path)?)
-        } else {
-            None
-        };
-        if self.operation == Operation::Edit && previous.is_none() {
-            return Err(HostError("file_not_found"));
-        }
-        if let Some((_, hash)) = &previous {
-            let snapshots = self
-                .snapshots
-                .lock()
-                .map_err(|_| HostError("file_snapshot_unavailable"))?;
-            if self.operation == Operation::Edit {
-                let before = snapshots
-                    .get(&self.path)
-                    .ok_or(HostError("read_required"))?;
-                if before != hash {
-                    return Err(HostError("file_changed_since_read"));
-                }
-            } else if self.args["allow_overwrite"] != true
-                || snapshots.get(&self.path) != Some(hash)
-            {
-                return Err(HostError("file_read_required_or_changed"));
-            }
-        }
-        let content = if self.operation == Operation::Edit {
-            edit::replace(&previous.as_ref().unwrap().0, &self.args)?
-        } else {
-            string(&self.args, "content")?.into()
-        };
-        run.check()?;
-        let mut file = open_file(&self.path, true, previous.is_none())?;
-        if let Some((_, hash)) = &previous {
-            if read_handle(&mut file)?.1 != *hash {
-                return Err(HostError("file_changed"));
-            }
-            file.seek(SeekFrom::Start(0))
-                .map_err(|_| HostError("file_write_failed"))?;
-        }
-        if let Err(error) = run.check() {
-            // CREATE|EXCL is already a filesystem effect. A revocation after
-            // that point must preserve its possible empty file, not report a
-            // clean refusal or remove it to manufacture recovery.
-            return Err(if previous.is_none() {
-                HostError("execution_outcome_unknown")
-            } else {
-                error
-            });
-        }
-        // Keep the original in-place target/claim semantics. Failures after truncate
-        // remain unknown; no replacement path or automatically replayable intent.
-        file.set_len(0)
-            .and_then(|_| file.write_all(content.as_bytes()))
-            .and_then(|_| file.sync_all())
-            .map_err(|_| HostError("execution_outcome_unknown"))?;
-        std::fs::File::open(self.path.parent().unwrap())
-            .and_then(|d| d.sync_all())
-            .map_err(|_| HostError("execution_outcome_unknown"))?;
-        if previous.is_none() {
-            use std::os::unix::fs::MetadataExt;
-            let meta = file
-                .metadata()
-                .map_err(|_| HostError("execution_outcome_unknown"))?;
-            let observed = peer_store::file_resource(&self.path, false)
-                .map_err(|_| HostError("execution_outcome_unknown"))?;
-            if observed.identity != format!("{}:{}", meta.dev(), meta.ino()) {
-                return Err(HostError("execution_outcome_unknown"));
-            }
-            *materialization = Some(observed);
-        }
-        let hash = format!("{:x}", Sha256::digest(content.as_bytes()));
-        self.remember(hash.clone(), true)?;
-        Ok(
-            json!({"path":scan::display(&self.workspace,&self.path),"bytes":content.len(),"contentHash":hash}),
-        )
+        self.write(run, materialization)
     }
 }
 impl PreparedEffect for FileEffect {
@@ -408,7 +340,10 @@ impl PreparedEffect for FileEffect {
     }
     fn scopes(&self) -> Result<Vec<ExecutionResourceScope>, HostError> {
         if self.operation.write() {
-            peer_store::provider_file_scopes(&self.path).map_err(Into::into)
+            self.target
+                .as_ref()
+                .ok_or(HostError("file_parent_unavailable"))?
+                .scopes(&self.path)
         } else {
             Ok(vec![])
         }
@@ -490,13 +425,16 @@ mod tests {
     #[tokio::test]
     async fn revocation_after_create_preserves_the_empty_file_as_unknown() {
         let home = tempfile::tempdir().unwrap();
-        let target = home.path().join("created.txt");
+        let target = std::fs::canonicalize(home.path())
+            .unwrap()
+            .join("created.txt");
         let effect = FileEffect {
             args: json!({"path":"created.txt","content":"never written"}),
             path: target.clone(),
             workspace: home.path().into(),
             operation: Operation::Write,
             snapshots: Default::default(),
+            target: Some(target::Target::inspect(&target).unwrap()),
             port: None,
             #[cfg(feature = "test-fixtures")]
             test_root: home.path().into(),
@@ -545,6 +483,7 @@ mod tests {
             workspace: home.path().into(),
             operation: Operation::Read,
             snapshots,
+            target: None,
             port: None,
             #[cfg(feature = "test-fixtures")]
             test_root: home.path().into(),

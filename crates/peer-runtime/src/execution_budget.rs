@@ -220,8 +220,11 @@ impl EpisodeBudget {
             let mut row=json!({"toolCallId":call,"capabilityId":capability,"dispatchId":id,"registeredAt":now,"streamId":stream,"conversationId":conversation,"nativeRecorder":self.native_recorder});
             // Canonical dispatch scope grammar accepts file/git_ref/remote_object;
             // Shell directory scopes are not falsely narrowed to file proofs.
-            let declared:Vec<_>=scopes.iter().filter(|s|matches!(s,ExecutionResourceScope::File{..})).collect();
-            if !declared.is_empty(){row["declaredScopes"]=json!(declared)}
+            // A directory preparation effect cannot become a file-only proof
+            // merely by filtering out the scopes this grammar cannot express.
+            if !scopes.is_empty() && scopes.len() <= 16 && scopes.iter().all(|s|matches!(s,ExecutionResourceScope::File{..})) {
+                row["declaredScopes"]=json!(scopes);
+            }
             attempt["pendingTools"].as_array_mut().unwrap().push(row);
             b["toolCalls"]=json!(b["toolCalls"].as_u64().unwrap_or(0)+1);Ok(())
         })?;

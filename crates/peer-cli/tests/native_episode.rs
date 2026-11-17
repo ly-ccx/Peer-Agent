@@ -5,6 +5,9 @@ mod native_artifacts;
 mod native_file_controls;
 mod native_files;
 mod native_network;
+#[cfg(feature = "test-fixtures")]
+mod native_parent_controls;
+mod native_parents;
 mod native_result_encoding;
 use peer_store::{
     AcquireLease, CoordinationStore, ExecutionResourceStore, HostIdentity, HostLeaseStore,
