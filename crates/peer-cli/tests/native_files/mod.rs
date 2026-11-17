@@ -211,7 +211,7 @@ fn file_scan_limits_fail_explicitly_and_special_files_do_not_block_later_work() 
 }
 
 #[test]
-fn failed_oversized_read_does_not_create_an_edit_snapshot_and_denial_preserves_content() {
+fn failed_read_does_not_create_an_edit_snapshot_and_denial_preserves_content() {
     for denial in [false, true] {
         let server = Server::new(if denial {
             vec![
@@ -224,7 +224,7 @@ fn failed_oversized_read_does_not_create_an_edit_snapshot_and_denial_preserves_c
             ]
         } else {
             vec![
-                reply_tool("read_file", json!({"path":"input.txt"})),
+                reply_tool("read_file", json!({"path":"input.txt","start_line":2})),
                 reply_tool(
                     "edit_file",
                     json!({"path":"input.txt","old_string":"tail","new_string":"end"}),
@@ -236,7 +236,7 @@ fn failed_oversized_read_does_not_create_an_edit_snapshot_and_denial_preserves_c
         let original = if denial {
             "source fact".to_owned()
         } else {
-            format!("{}tail", "\u{1}".repeat(60000))
+            "unread tail".to_owned()
         };
         std::fs::write(f.root.path().join("workspace/input.txt"), &original).unwrap();
         if denial {
@@ -269,7 +269,10 @@ fn failed_oversized_read_does_not_create_an_edit_snapshot_and_denial_preserves_c
         if denial {
             assert_eq!(tools[1]["result"]["status"], "denied");
         } else {
-            assert_eq!(tools[0]["result"]["error"]["code"], "file_result_limit");
+            assert_eq!(
+                tools[0]["result"]["error"]["code"],
+                "start_line_out_of_range"
+            );
             assert_eq!(tools[1]["result"]["error"]["code"], "read_required");
         }
     }

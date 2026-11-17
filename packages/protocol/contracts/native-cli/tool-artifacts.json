@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "limits": {
+    "artifactBytes": 134217728,
+    "conversationBytes": 268435456,
+    "entries": 4096,
+    "pathBytes": 4194304,
+    "chunkBytes": 65536,
+    "windowBytes": 262144,
+    "inlineChars": 6000,
+    "previewChars": 1200
+  },
+  "formats": [
+    "utf8",
+    "json"
+  ],
+  "errors": [
+    "artifact_invalid",
+    "artifact_missing",
+    "artifact_corrupt",
+    "artifact_changed",
+    "artifact_limit",
+    "artifact_busy",
+    "artifact_unavailable",
+    "artifact_commit_unknown",
+    "cancelled"
+  ],
+  "storage": "conversations/<conversationId>.tool-results/<sha256>.<txt|json>",
+  "retention": "Immutable canonical tool-result content; no automatic eviction or tool replay.",
+  "readerManifest": {
+    "capabilityId": "local.tool-result.read",
+    "displayName": "Read saved tool result",
+    "description": "Read a verified immutable tool-result snapshot from this conversation. Never reruns its original tool. Offset and length are byte ranges; length is at most 262144 bytes. A preview is not the full result.",
+    "riskLevel": "L1_readonly",
+    "modeScopes": [
+      "goal"
+    ],
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "reference": {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "type": "integer",
+              "const": 1
+            },
+            "conversationId": {
+              "type": "string"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 134217728
+            },
+            "format": {
+              "type": "string",
+              "enum": [
+                "utf8",
+                "json"
+              ]
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "conversationId",
+            "sha256",
+            "bytes",
+            "format"
+          ],
+          "additionalProperties": false
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "length": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 262144
+        }
+      },
+      "required": [
+        "reference"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

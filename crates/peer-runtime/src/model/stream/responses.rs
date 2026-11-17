@@ -35,7 +35,7 @@ impl Responses {
                 }
                 let item = &v["item"];
                 let args = item["arguments"].as_str().unwrap_or("").to_owned();
-                if args.len() > 65536 {
+                if args.len() > super::super::TOOL_ARGUMENT_BYTES {
                     return Err(ModelError::new("model_tool_limit"));
                 }
                 self.items.insert(
@@ -51,7 +51,11 @@ impl Responses {
             }
             Some("response.function_call_arguments.delta") => {
                 let item = self.item(v)?;
-                append(&mut item.args, &v["delta"], 65536)?;
+                append(
+                    &mut item.args,
+                    &v["delta"],
+                    super::super::TOOL_ARGUMENT_BYTES,
+                )?;
             }
             Some("response.function_call_arguments.done") => {
                 let item = self.item(v)?;

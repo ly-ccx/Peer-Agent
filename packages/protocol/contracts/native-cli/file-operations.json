@@ -916,10 +916,10 @@
     }
   ],
   "nativeRuntime": {
-    "version": 1,
+    "version": 2,
     "limits": {
-      "readBytes": 131072,
-      "writeBytes": 32768,
+      "readBytes": 2000000,
+      "writeBytes": 131072,
       "snapshotEntries": 128,
       "collectionItems": 16384,
       "collectionPathBytes": 4194304,

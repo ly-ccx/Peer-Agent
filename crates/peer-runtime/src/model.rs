@@ -11,6 +11,7 @@ mod grok;
 pub(crate) mod qoder_retry;
 mod retry_seed;
 pub use count::ProviderTokenCount;
+const TOOL_ARGUMENT_BYTES: usize = 1024 * 1024;
 mod sse;
 pub use continuation::LiveHistory;
 mod error;

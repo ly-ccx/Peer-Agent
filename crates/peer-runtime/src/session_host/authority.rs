@@ -94,6 +94,9 @@ impl HostPermissionGrant {
     pub fn facts(&self) -> &Value {
         &self.facts
     }
+    pub(crate) fn conversation_id(&self) -> &str {
+        &self.authority.conversation
+    }
 }
 impl NativeSessionHost {
     fn authority(
@@ -444,6 +447,7 @@ fn read_capability(capability: &str) -> bool {
     matches!(
         capability,
         "local.file.read"
+            | "local.tool-result.read"
             | "local.file.list"
             | "local.file.search"
             | "local.search.aggregate"

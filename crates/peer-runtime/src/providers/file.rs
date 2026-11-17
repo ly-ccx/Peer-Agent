@@ -8,8 +8,8 @@ use std::{
 mod edit;
 mod locale;
 mod scan;
-const READ_BYTES: usize = 128 * 1024;
-const WRITE_BYTES: usize = 32768;
+const READ_BYTES: usize = 2_000_000;
+const WRITE_BYTES: usize = 128 * 1024;
 const SNAPSHOT_ENTRIES: usize = 128;
 type Snapshots = Arc<Mutex<HashMap<PathBuf, String>>>;
 #[derive(Default)]
@@ -301,7 +301,6 @@ impl FileEffect {
                     output["end_line"] = slice["endLine"].clone();
                     output["total_lines"] = slice["totalLines"].clone();
                 }
-                scan::bounded(&output)?;
                 self.remember(hash, false)?;
                 return Ok(output);
             }
@@ -386,6 +385,14 @@ impl FileEffect {
     }
 }
 impl PreparedEffect for FileEffect {
+    fn output_kind(&self) -> ToolOutputKind {
+        if self.operation == Operation::Read {
+            ToolOutputKind::FileRead
+        } else {
+            ToolOutputKind::Structured
+        }
+    }
+
     fn admission(&mut self, port: EffectAdmission) {
         self.port = Some(port);
     }
@@ -424,11 +431,14 @@ impl PreparedEffect for FileEffect {
             runtime: tokio::runtime::Handle::current(),
         };
         let write = self.operation.write();
+        let is_read = self.operation == Operation::Read;
         Ok(Box::pin(async move {
             let task = tokio::task::spawn_blocking(move || {
                 let mut materialization = None;
                 let result = self.perform(&run, &mut materialization).and_then(|v| {
-                    scan::bounded(&v)?;
+                    if !is_read {
+                        scan::bounded(&v)?;
+                    }
                     Ok(v)
                 });
                 match result {
@@ -471,7 +481,7 @@ mod tests {
             "../../../../packages/protocol/contracts/native-cli/file-operations.json"
         ))
         .unwrap();
-        assert_eq!(data["nativeRuntime"]["version"], 1);
+        assert_eq!(data["nativeRuntime"]["version"], 2);
         assert_eq!(
             data["nativeRuntime"]["limits"],
             json!({"readBytes":READ_BYTES,"writeBytes":WRITE_BYTES,"snapshotEntries":SNAPSHOT_ENTRIES,"collectionItems":scan::ITEMS,"collectionPathBytes":scan::PATH_BYTES,"searchFileBytes":scan::SEARCH_BYTES,"resultBytes":scan::RESULT_BYTES})
@@ -521,6 +531,50 @@ mod tests {
         assert_eq!(result.unwrap().unwrap_err().0, "execution_outcome_unknown");
         assert!(target.exists());
         assert_eq!(std::fs::read(target).unwrap(), Vec::<u8>::new());
+    }
+    #[tokio::test]
+    async fn oversized_v2_read_never_creates_a_write_snapshot() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("oversized.txt");
+        std::fs::write(&path, vec![b'x'; READ_BYTES + 1]).unwrap();
+        let snapshots: Snapshots = Default::default();
+        let observed = snapshots.clone();
+        let effect = FileEffect {
+            args: json!({"path":"oversized.txt"}),
+            path,
+            workspace: home.path().into(),
+            operation: Operation::Read,
+            snapshots,
+            port: None,
+            #[cfg(feature = "test-fixtures")]
+            test_root: home.path().into(),
+        };
+        let cancel = CancellationToken::new();
+        let (port, mut receive) = EffectAdmission::channel(&cancel);
+        let runtime = tokio::runtime::Handle::current();
+        let task = tokio::task::spawn_blocking(move || {
+            effect.perform(
+                &RunGuard {
+                    cancel,
+                    port,
+                    runtime,
+                },
+                &mut None,
+            )
+        });
+        let authority = async move {
+            while let Some(request) = receive.recv().await {
+                match request {
+                    crate::effect_admission::AdmissionRequest::Check(reply) => {
+                        let _ = reply.send(Ok(()));
+                    }
+                    _ => panic!("unexpected read control"),
+                }
+            }
+        };
+        let (result, ()) = tokio::join!(task, authority);
+        assert_eq!(result.unwrap().unwrap_err().0, "file_too_large");
+        assert!(observed.lock().unwrap().is_empty());
     }
     #[test]
     fn actual_node_locale_order_and_case_mapping_match() {

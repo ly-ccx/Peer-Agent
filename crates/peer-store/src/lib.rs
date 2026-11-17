@@ -5,6 +5,10 @@ mod coordination;
 mod coordination_fence;
 pub use coordination::{CoordinationError, CoordinationSnapshot, CoordinationStore};
 mod durable_jsonl;
+mod tool_artifacts;
+pub use tool_artifacts::{
+    ToolArtifactError, ToolArtifactFormat, ToolArtifactRef, ToolArtifactStore, ToolArtifactWindow,
+};
 mod evidence;
 mod files;
 mod model_config;

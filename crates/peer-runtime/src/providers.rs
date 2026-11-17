@@ -16,6 +16,7 @@ use std::{
 mod file;
 mod mcp;
 mod shell;
+mod tool_artifact;
 pub use crate::effect_admission::EffectAdmission;
 pub(crate) use shell::group_absent;
 mod shell_risk;
@@ -52,7 +53,17 @@ impl EffectOutcome {
     }
 }
 pub type EffectFuture = Pin<Box<dyn Future<Output = EffectOutcome> + Send>>;
+/// Chosen by the trusted Provider adapter, never decoded from tool output.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ToolOutputKind {
+    Structured,
+    FileRead,
+}
 pub trait PreparedEffect {
+    fn output_kind(&self) -> ToolOutputKind {
+        ToolOutputKind::Structured
+    }
+
     fn admission(&mut self, _port: crate::effect_admission::EffectAdmission) {}
     fn evidence(&self) -> Option<Value> {
         None
@@ -109,6 +120,7 @@ impl Default for ProviderRegistry {
             providers: vec![
                 Box::<file::FileProvider>::default(),
                 Box::new(shell::ShellProvider),
+                Box::new(tool_artifact::ToolArtifactProvider),
             ],
         }
     }

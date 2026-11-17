@@ -105,7 +105,7 @@ impl ChatStream {
                     call.name.push_str(n)
                 }
                 if let Some(a) = t["function"]["arguments"].as_str() {
-                    if call.args.len() + a.len() > 65536 {
+                    if call.args.len() + a.len() > TOOL_ARGUMENT_BYTES {
                         return Err(ModelError::new("model_tool_limit"));
                     }
                     call.args.push_str(a)
@@ -158,7 +158,7 @@ impl ChatStream {
             if index != calls.len() || c.id.is_empty() || !ids.insert(c.id) || c.name.is_empty() {
                 return Err(ModelError::new("model_call_id_invalid"));
             }
-            let arguments = decode(c.args.as_bytes(), 65536)?;
+            let arguments = decode(c.args.as_bytes(), TOOL_ARGUMENT_BYTES)?;
             if !arguments.is_object() {
                 return Err(ModelError::new("model_arguments_invalid"));
             }

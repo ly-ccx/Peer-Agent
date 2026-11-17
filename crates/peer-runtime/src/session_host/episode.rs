@@ -306,7 +306,7 @@ impl NativeSessionHost {
                     if cancel.is_cancelled() || cancellation.is_cancelled(){return Err(HostError("CANCELLED"))}
                     let effect=providers.prepare(&projection,&call.name,call.arguments,&workspace,&self.home)?;
                     let capability=projection.capability(&call.name).ok_or(HostError("tool_not_projected"))?.to_owned();
-                    let call_id=format!("call-{}",uuid::Uuid::new_v4());let args=effect.args().clone();let scopes=effect.scopes()?;let provider_evidence=effect.evidence();
+                    let call_id=format!("call-{}",uuid::Uuid::new_v4());let args=effect.args().clone();let scopes=effect.scopes()?;let provider_evidence=effect.evidence();let output_kind=effect.output_kind();
                     let current=self.current(plan_id,&now())?;
                     let reserved=self.resources.reserve(&current.resource,ResourceReservation{host_epoch:&epoch,scopes:&scopes,record_conflict:false},&now())?;
                     if reserved["allowed"]!=true{return Err(HostError("execution_resource_busy"))}
@@ -329,6 +329,7 @@ impl NativeSessionHost {
                     if let Some(metadata)=provider_evidence {let target=result["evidence"].as_object_mut().unwrap();target.extend(metadata.as_object().unwrap().clone());target.insert("permissionGrantId".into(),grant_facts["grantId"].clone());target.insert("status".into(),json!(outcome.status));target.insert("startedAt".into(),json!(started_at));target.insert("endedAt".into(),json!(now()));}
                     if outcome.not_dispatched {result["evidence"]["dispatchOutcome"]=json!("not_dispatched");}
                     if let Some(error)=outcome.error{result["error"]=json!({"code":error,"message":error,"recoverable":true})}
+                    let result=self.archive_tool_result(&conversation,result,output_kind,&cancellation,cancel).await?;
                     self.append_episode_message(&conversation,&json!({"id":uuid::Uuid::new_v4().to_string(),"role":"assistant","content":"","createdAt":now(),"streamId":stream,"segments":[{"type":"tool-call","tool":call.name,"toolCallId":call_id,"args":args,"result":result}],"permissionGrants":[grant_facts]}))?;
                     let evidence=EvidenceIndexStore::new(&self.home).register(&HostToolEvidence{conversation_id:&conversation,plan_id:Some(plan_id),stream_id:Some(&stream),tool_name:&call.name,capability_id:&capability,tool_call_id:&call_id,grant:&grant_facts,result:&result},None)?;
                     budget.settle(self,&call_id,&dispatch,&result,&now())?;count+=1;

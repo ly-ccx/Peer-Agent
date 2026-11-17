@@ -118,7 +118,7 @@ fn name(value: &Value, limit: usize) -> Result<String, ModelError> {
         .ok_or(ModelError::new("model_call_id_invalid"))
 }
 fn call(name: String, args: &str) -> Result<ModelToolCall, ModelError> {
-    let arguments = decode(args.as_bytes(), 65536)?;
+    let arguments = decode(args.as_bytes(), super::TOOL_ARGUMENT_BYTES)?;
     if !arguments.is_object() {
         return Err(ModelError::new("model_arguments_invalid"));
     }
@@ -227,5 +227,40 @@ mod tests {
             let mut stream = Stream::new(wire);
             assert!(stream.push(&vec![b'x'; 1024 * 1024 + 1]).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod argument_budget_tests {
+    use super::*;
+    #[test]
+    fn all_four_decoders_accept_complete_arguments_above_the_previous_64k_limit() {
+        let data: Value = serde_json::from_str(include_str!(
+            "../../../../packages/protocol/contracts/native-cli/model-streams.json"
+        ))
+        .unwrap();
+        for c in data["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|c| c["kind"] == "tool")
+        {
+            let path = "x".repeat(90 * 1024);
+            let bytes = c["stream"].as_str().unwrap().replace("input.txt", &path);
+            let mut stream = Stream::new(serde_json::from_value(c["wire"].clone()).unwrap());
+            for chunk in bytes.as_bytes().chunks(16381) {
+                stream.push(chunk).unwrap();
+            }
+            let turn = stream.finish("frozen-fingerprint".into()).unwrap();
+            assert_eq!(turn.calls.len(), 1);
+            assert_eq!(turn.calls[0].arguments["path"], path, "{}", c["wire"]);
+        }
+    }
+    #[test]
+    fn argument_limit_is_explicit_and_does_not_accept_a_partial_object() {
+        let args = serde_json::json!({"content":"a".repeat(super::super::TOOL_ARGUMENT_BYTES)})
+            .to_string();
+        assert!(call("write_file".into(), &args).is_err());
+        assert!(call("write_file".into(), "{\"content\":").is_err());
     }
 }

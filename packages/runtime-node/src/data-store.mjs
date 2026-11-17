@@ -47,6 +47,8 @@ export const DATA_STORE_ENTRIES = {
   developerSettings: { rel: 'developer-settings.json', kind: 'file', scope: 'portable' },
   settings:          { rel: 'settings.json',           kind: 'file', scope: 'portable' },
   llmProviders:      { rel: 'llm-providers.json',      kind: 'file', scope: 'portable' },
+  // Includes <conversationId>.tool-results/: immutable native tool-result content,
+  // not cache or authorization; keep with its canonical conversation on export/recovery.
   conversations:     { rel: 'conversations',            kind: 'dir',  scope: 'portable' },
   usageRequests:     { rel: 'usage/requests.jsonl',    kind: 'file', scope: 'portable' },
   goalPlans:         { rel: 'goal-plans',               kind: 'dir',  scope: 'portable' },

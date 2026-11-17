@@ -17,6 +17,7 @@ mod billing;
 mod context_pipeline;
 mod effect_wait;
 mod episode;
+mod tool_result;
 pub(crate) use episode::now as episode_time;
 pub use episode::{EpisodeOutcome, PermissionInput};
 mod recovery;

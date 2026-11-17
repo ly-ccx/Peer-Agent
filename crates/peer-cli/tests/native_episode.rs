@@ -1,6 +1,7 @@
 //! Public native executable, real HTTP/SSE, actual files and child processes.
 //! All data is synthetic; PATH cannot find Node/Bun, and no OS secret is read.
 use peer_runtime::coordination::NativeCoordinationReducer;
+mod native_artifacts;
 mod native_file_controls;
 mod native_files;
 mod native_network;

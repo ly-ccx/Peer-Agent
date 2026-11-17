@@ -112,7 +112,7 @@ impl Anthropic {
                     (Block::Tool { args, initial, .. }, Some("input_json_delta"))
                         if initial.as_object().is_some_and(|a| a.is_empty()) =>
                     {
-                        append(args, &d["partial_json"], 65536)?
+                        append(args, &d["partial_json"], super::super::TOOL_ARGUMENT_BYTES)?
                     }
                     _ => return Err(ModelError::new("model_stream_invalid")),
                 }
