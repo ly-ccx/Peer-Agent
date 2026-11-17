@@ -56,8 +56,9 @@ fn complete_public_sender_metadata_vectors_reach_native_requests_tools_and_evide
         assert_eq!(receipt["contextAccounting"]["authoritativeInputTokens"], 12);
         if case["expectation"]["dialect"] == "prepared" {
             assert_eq!(
-                receipt["contextAccounting"]["contextWindow"],
-                case["expectation"]["window"]
+                receipt["contextAccounting"]["contextWindow"], case["expectation"]["window"],
+                "{}",
+                case["name"]
             );
         }
         let history = f.history();

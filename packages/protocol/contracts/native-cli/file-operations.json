@@ -1,0 +1,935 @@
+{
+  "schemaVersion": 1,
+  "provenance": {
+    "reference": "Actual current createNodeFileProvider over isolated files, plus actual Node Intl locale observations. Not native/Host authorization acceptance."
+  },
+  "cases": [
+    {
+      "name": "list-and-search",
+      "files": {
+        "a.txt": "Needle one\r\nneedle two\nalpha beta beta",
+        "B.txt": "needle three",
+        "docs/z.txt": "a Needle\nlast\r",
+        "node_modules/dependency": "needle ignored",
+        ".git/object": "needle ignored",
+        "binary.bin": {
+          "hex": "004e6565646c65"
+        },
+        "bad-utf8.txt": {
+          "hex": "ff4e6565646c65"
+        }
+      },
+      "steps": [
+        {
+          "capability": "local.file.list",
+          "args": {
+            "path": "."
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "path": ".",
+              "entries": [
+                {
+                  "name": ".git",
+                  "path": ".git",
+                  "type": "directory"
+                },
+                {
+                  "name": "a.txt",
+                  "path": "a.txt",
+                  "type": "file"
+                },
+                {
+                  "name": "B.txt",
+                  "path": "B.txt",
+                  "type": "file"
+                },
+                {
+                  "name": "bad-utf8.txt",
+                  "path": "bad-utf8.txt",
+                  "type": "file"
+                },
+                {
+                  "name": "binary.bin",
+                  "path": "binary.bin",
+                  "type": "file"
+                },
+                {
+                  "name": "docs",
+                  "path": "docs",
+                  "type": "directory"
+                },
+                {
+                  "name": "node_modules",
+                  "path": "node_modules",
+                  "type": "directory"
+                }
+              ]
+            },
+            "error": null
+          }
+        },
+        {
+          "capability": "local.file.search",
+          "args": {
+            "query": "needle"
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "query": "needle",
+              "path": ".",
+              "matches": [
+                {
+                  "path": "B.txt",
+                  "line": 1,
+                  "text": "needle three"
+                },
+                {
+                  "path": "a.txt",
+                  "line": 1,
+                  "text": "Needle one"
+                },
+                {
+                  "path": "a.txt",
+                  "line": 2,
+                  "text": "needle two"
+                },
+                {
+                  "path": "bad-utf8.txt",
+                  "line": 1,
+                  "text": "�Needle"
+                },
+                {
+                  "path": "docs/z.txt",
+                  "line": 1,
+                  "text": "a Needle"
+                }
+              ],
+              "matchCount": 5,
+              "truncated": false
+            },
+            "error": null
+          }
+        },
+        {
+          "capability": "local.file.search",
+          "args": {
+            "query": "Needle",
+            "case_sensitive": true
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "query": "Needle",
+              "path": ".",
+              "matches": [
+                {
+                  "path": "a.txt",
+                  "line": 1,
+                  "text": "Needle one"
+                },
+                {
+                  "path": "bad-utf8.txt",
+                  "line": 1,
+                  "text": "�Needle"
+                },
+                {
+                  "path": "docs/z.txt",
+                  "line": 1,
+                  "text": "a Needle"
+                }
+              ],
+              "matchCount": 3,
+              "truncated": false
+            },
+            "error": null
+          }
+        },
+        {
+          "capability": "local.file.search",
+          "args": {
+            "path": "a.txt",
+            "query": "needle",
+            "max_results": 1
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "query": "needle",
+              "path": "a.txt",
+              "matches": [
+                {
+                  "path": "a.txt",
+                  "line": 1,
+                  "text": "Needle one"
+                }
+              ],
+              "matchCount": 1,
+              "truncated": true
+            },
+            "error": null
+          }
+        },
+        {
+          "capability": "local.file.search",
+          "args": {
+            "path": "docs",
+            "query": "\r",
+            "case_sensitive": true
+          },
+          "expected": {
+            "status": "failed",
+            "output": null,
+            "error": "invalid_query"
+          }
+        }
+      ]
+    },
+    {
+      "name": "edit-unique",
+      "files": {
+        "a.txt": "before alpha after"
+      },
+      "steps": [
+        {
+          "capability": "local.file.read",
+          "args": {
+            "path": "a.txt"
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "path": "a.txt",
+              "content": "before alpha after",
+              "bytes": 18,
+              "contentHash": "cafd32d2231082ca6cf70f25a48e6b92d8f9f1ff369a0eb294db578fe4b01e99"
+            },
+            "error": null
+          }
+        },
+        {
+          "capability": "local.file.edit",
+          "args": {
+            "path": "a.txt",
+            "old_string": "alpha",
+            "new_string": "omega"
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "path": "a.txt",
+              "bytes": 18,
+              "contentHash": "0d1fdee9b90995acc4911f6f3e90dbe11f9894c39e7382019779470b2b4e4d03"
+            },
+            "error": null
+          }
+        },
+        {
+          "capability": "local.file.read",
+          "args": {
+            "path": "a.txt"
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "path": "a.txt",
+              "content": "before omega after",
+              "bytes": 18,
+              "contentHash": "0d1fdee9b90995acc4911f6f3e90dbe11f9894c39e7382019779470b2b4e4d03"
+            },
+            "error": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "edit-all",
+      "files": {
+        "a.txt": "alpha beta beta"
+      },
+      "steps": [
+        {
+          "capability": "local.file.read",
+          "args": {
+            "path": "a.txt"
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "path": "a.txt",
+              "content": "alpha beta beta",
+              "bytes": 15,
+              "contentHash": "c65bf419c2b0cd31b9e901fe29d4f3eb7007dbce59b26206ac03fa71446c1bdf"
+            },
+            "error": null
+          }
+        },
+        {
+          "capability": "local.file.edit",
+          "args": {
+            "path": "a.txt",
+            "old_string": "beta",
+            "new_string": "gamma",
+            "replace_all": true
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "path": "a.txt",
+              "bytes": 17,
+              "contentHash": "9e934c65241d1873496b7089169908427bc06938de967c5c6318f737b2702e2b"
+            },
+            "error": null
+          }
+        },
+        {
+          "capability": "local.file.read",
+          "args": {
+            "path": "a.txt"
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "path": "a.txt",
+              "content": "alpha gamma gamma",
+              "bytes": 17,
+              "contentHash": "9e934c65241d1873496b7089169908427bc06938de967c5c6318f737b2702e2b"
+            },
+            "error": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "edit-ambiguous",
+      "files": {
+        "a.txt": "alpha beta beta"
+      },
+      "steps": [
+        {
+          "capability": "local.file.read",
+          "args": {
+            "path": "a.txt"
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "path": "a.txt",
+              "content": "alpha beta beta",
+              "bytes": 15,
+              "contentHash": "c65bf419c2b0cd31b9e901fe29d4f3eb7007dbce59b26206ac03fa71446c1bdf"
+            },
+            "error": null
+          }
+        },
+        {
+          "capability": "local.file.edit",
+          "args": {
+            "path": "a.txt",
+            "old_string": "beta",
+            "new_string": "gamma"
+          },
+          "expected": {
+            "status": "failed",
+            "output": null,
+            "error": "old_string_not_unique"
+          }
+        },
+        {
+          "capability": "local.file.read",
+          "args": {
+            "path": "a.txt"
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "path": "a.txt",
+              "content": "alpha beta beta",
+              "bytes": 15,
+              "contentHash": "c65bf419c2b0cd31b9e901fe29d4f3eb7007dbce59b26206ac03fa71446c1bdf"
+            },
+            "error": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "edit-missing",
+      "files": {
+        "a.txt": "alpha"
+      },
+      "steps": [
+        {
+          "capability": "local.file.read",
+          "args": {
+            "path": "a.txt"
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "path": "a.txt",
+              "content": "alpha",
+              "bytes": 5,
+              "contentHash": "8ed3f6ad685b959ead7022518e1af76cd816f8e8ec7ccdda1ed4018e8f2223f8"
+            },
+            "error": null
+          }
+        },
+        {
+          "capability": "local.file.edit",
+          "args": {
+            "path": "a.txt",
+            "old_string": "beta",
+            "new_string": "gamma"
+          },
+          "expected": {
+            "status": "failed",
+            "output": null,
+            "error": "old_string_not_found"
+          }
+        },
+        {
+          "capability": "local.file.read",
+          "args": {
+            "path": "a.txt"
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "path": "a.txt",
+              "content": "alpha",
+              "bytes": 5,
+              "contentHash": "8ed3f6ad685b959ead7022518e1af76cd816f8e8ec7ccdda1ed4018e8f2223f8"
+            },
+            "error": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "edit-unicode",
+      "files": {
+        "a.txt": "你好🙂 café\r\nΓΟΣ"
+      },
+      "steps": [
+        {
+          "capability": "local.file.read",
+          "args": {
+            "path": "a.txt"
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "path": "a.txt",
+              "content": "你好🙂 café\r\nΓΟΣ",
+              "bytes": 25,
+              "contentHash": "fa7ef81073bbc53c9d936f1d170a996cb41557c34be9efc6a51b415f76033402"
+            },
+            "error": null
+          }
+        },
+        {
+          "capability": "local.file.edit",
+          "args": {
+            "path": "a.txt",
+            "old_string": "🙂",
+            "new_string": "🧪"
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "path": "a.txt",
+              "bytes": 25,
+              "contentHash": "d28b9264e4f1c11b0525c61e8908050bc3f1a0c31ab3528ba6ec38218936e3f8"
+            },
+            "error": null
+          }
+        },
+        {
+          "capability": "local.file.read",
+          "args": {
+            "path": "a.txt"
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "path": "a.txt",
+              "content": "你好🧪 café\r\nΓΟΣ",
+              "bytes": 25,
+              "contentHash": "d28b9264e4f1c11b0525c61e8908050bc3f1a0c31ab3528ba6ec38218936e3f8"
+            },
+            "error": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "edit-delete",
+      "files": {
+        "a.txt": "alpha beta"
+      },
+      "steps": [
+        {
+          "capability": "local.file.read",
+          "args": {
+            "path": "a.txt"
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "path": "a.txt",
+              "content": "alpha beta",
+              "bytes": 10,
+              "contentHash": "1a989ea86150171c687b0727f218eedbb94c4665a7da9b0add1bf5de607f2bf1"
+            },
+            "error": null
+          }
+        },
+        {
+          "capability": "local.file.edit",
+          "args": {
+            "path": "a.txt",
+            "old_string": "beta",
+            "new_string": ""
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "path": "a.txt",
+              "bytes": 6,
+              "contentHash": "0bd0509bafa4223a02ad82a903d73ab47b6e5407b0674336534a9f5fc6837d03"
+            },
+            "error": null
+          }
+        },
+        {
+          "capability": "local.file.read",
+          "args": {
+            "path": "a.txt"
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "path": "a.txt",
+              "content": "alpha ",
+              "bytes": 6,
+              "contentHash": "0bd0509bafa4223a02ad82a903d73ab47b6e5407b0674336534a9f5fc6837d03"
+            },
+            "error": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "edit-dollar",
+      "files": {
+        "a.txt": "before alpha after"
+      },
+      "steps": [
+        {
+          "capability": "local.file.read",
+          "args": {
+            "path": "a.txt"
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "path": "a.txt",
+              "content": "before alpha after",
+              "bytes": 18,
+              "contentHash": "cafd32d2231082ca6cf70f25a48e6b92d8f9f1ff369a0eb294db578fe4b01e99"
+            },
+            "error": null
+          }
+        },
+        {
+          "capability": "local.file.edit",
+          "args": {
+            "path": "a.txt",
+            "old_string": "alpha",
+            "new_string": "$$ $& $` $' $1 $<name>"
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "path": "a.txt",
+              "bytes": 46,
+              "contentHash": "ae212a16a0481c08ce080ed36b4d31b097d564e0c245199a0f129d1efb974edf"
+            },
+            "error": null
+          }
+        },
+        {
+          "capability": "local.file.read",
+          "args": {
+            "path": "a.txt"
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "path": "a.txt",
+              "content": "before $ alpha before   after $1 $<name> after",
+              "bytes": 46,
+              "contentHash": "ae212a16a0481c08ce080ed36b4d31b097d564e0c245199a0f129d1efb974edf"
+            },
+            "error": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "edit-all-literal",
+      "files": {
+        "a.txt": "x x"
+      },
+      "steps": [
+        {
+          "capability": "local.file.read",
+          "args": {
+            "path": "a.txt"
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "path": "a.txt",
+              "content": "x x",
+              "bytes": 3,
+              "contentHash": "ccf4d509af52c1857ce922424b4ec0c2f7e25c0097a7f0bbac5b005ed6b1a900"
+            },
+            "error": null
+          }
+        },
+        {
+          "capability": "local.file.edit",
+          "args": {
+            "path": "a.txt",
+            "old_string": "x",
+            "new_string": "$$ $& $` $'",
+            "replace_all": true
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "path": "a.txt",
+              "bytes": 23,
+              "contentHash": "d78d055e55b2dfd55ec3c6fc5af1cfa834b94c2e92dad6ac747dc06f2694f022"
+            },
+            "error": null
+          }
+        },
+        {
+          "capability": "local.file.read",
+          "args": {
+            "path": "a.txt"
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "path": "a.txt",
+              "content": "$$ $& $` $' $$ $& $` $'",
+              "bytes": 23,
+              "contentHash": "d78d055e55b2dfd55ec3c6fc5af1cfa834b94c2e92dad6ac747dc06f2694f022"
+            },
+            "error": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "edit-unread",
+      "files": {
+        "a.txt": "alpha"
+      },
+      "steps": [
+        {
+          "capability": "local.file.edit",
+          "args": {
+            "path": "a.txt",
+            "old_string": "alpha",
+            "new_string": "omega"
+          },
+          "expected": {
+            "status": "failed",
+            "output": null,
+            "error": "read_required"
+          }
+        }
+      ]
+    },
+    {
+      "name": "edit-absent",
+      "files": {},
+      "steps": [
+        {
+          "capability": "local.file.edit",
+          "args": {
+            "path": "absent.txt",
+            "old_string": "alpha",
+            "new_string": "omega"
+          },
+          "expected": {
+            "status": "failed",
+            "output": null,
+            "error": "file_not_found"
+          }
+        }
+      ]
+    },
+    {
+      "name": "search-limits",
+      "files": {
+        "a.txt": "needle\nNeedle\nneedle\nNeedle",
+        "z.txt": {
+          "repeat": "needle",
+          "count": 170000
+        }
+      },
+      "steps": [
+        {
+          "capability": "local.file.search",
+          "args": {
+            "query": "needle",
+            "max_results": 2.8
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "query": "needle",
+              "path": ".",
+              "matches": [
+                {
+                  "path": "a.txt",
+                  "line": 1,
+                  "text": "needle"
+                },
+                {
+                  "path": "a.txt",
+                  "line": 2,
+                  "text": "Needle"
+                }
+              ],
+              "matchCount": 2,
+              "truncated": true
+            },
+            "error": null
+          }
+        },
+        {
+          "capability": "local.file.search",
+          "args": {
+            "query": "needle",
+            "max_results": 0
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "query": "needle",
+              "path": ".",
+              "matches": [
+                {
+                  "path": "a.txt",
+                  "line": 1,
+                  "text": "needle"
+                }
+              ],
+              "matchCount": 1,
+              "truncated": true
+            },
+            "error": null
+          }
+        },
+        {
+          "capability": "local.file.search",
+          "args": {
+            "query": "absent",
+            "max_results": 201
+          },
+          "expected": {
+            "status": "completed",
+            "output": {
+              "query": "absent",
+              "path": ".",
+              "matches": [],
+              "matchCount": 0,
+              "truncated": false
+            },
+            "error": null
+          }
+        }
+      ]
+    }
+  ],
+  "locales": [
+    {
+      "env": {},
+      "expected": {
+        "locale": "en-US",
+        "lower": "ii̇σος",
+        "sort": [
+          "🙂",
+          "a",
+          "A",
+          "Å",
+          "ä",
+          "é",
+          "Z",
+          "中"
+        ]
+      }
+    },
+    {
+      "env": {
+        "LANG": "sv_SE.UTF-8"
+      },
+      "expected": {
+        "locale": "sv-SE",
+        "lower": "ii̇σος",
+        "sort": [
+          "🙂",
+          "a",
+          "A",
+          "é",
+          "Z",
+          "Å",
+          "ä",
+          "中"
+        ]
+      }
+    },
+    {
+      "env": {
+        "LANG": "tr_TR.UTF-8"
+      },
+      "expected": {
+        "locale": "tr-TR",
+        "lower": "ıiσος",
+        "sort": [
+          "🙂",
+          "a",
+          "A",
+          "Å",
+          "ä",
+          "é",
+          "Z",
+          "中"
+        ]
+      }
+    },
+    {
+      "env": {
+        "LANG": "zh_CN.UTF-8"
+      },
+      "expected": {
+        "locale": "zh-CN",
+        "lower": "ii̇σος",
+        "sort": [
+          "🙂",
+          "中",
+          "a",
+          "A",
+          "Å",
+          "ä",
+          "é",
+          "Z"
+        ]
+      }
+    },
+    {
+      "env": {
+        "LANG": "en_US.UTF-8",
+        "LC_MESSAGES": "tr_TR.UTF-8"
+      },
+      "expected": {
+        "locale": "tr-TR",
+        "lower": "ıiσος",
+        "sort": [
+          "🙂",
+          "a",
+          "A",
+          "Å",
+          "ä",
+          "é",
+          "Z",
+          "中"
+        ]
+      }
+    },
+    {
+      "env": {
+        "LANG": "tr_TR.UTF-8",
+        "LC_ALL": "sv_SE.UTF-8"
+      },
+      "expected": {
+        "locale": "sv-SE",
+        "lower": "ii̇σος",
+        "sort": [
+          "🙂",
+          "a",
+          "A",
+          "é",
+          "Z",
+          "Å",
+          "ä",
+          "中"
+        ]
+      }
+    },
+    {
+      "env": {
+        "LANG": "C.UTF-8"
+      },
+      "expected": {
+        "locale": "en-US",
+        "lower": "ii̇σος",
+        "sort": [
+          "🙂",
+          "a",
+          "A",
+          "Å",
+          "ä",
+          "é",
+          "Z",
+          "中"
+        ]
+      }
+    },
+    {
+      "env": {
+        "LANG": "not_real"
+      },
+      "expected": {
+        "locale": "not-Real",
+        "lower": "ii̇σος",
+        "sort": [
+          "🙂",
+          "a",
+          "A",
+          "Å",
+          "ä",
+          "é",
+          "Z",
+          "中"
+        ]
+      }
+    }
+  ],
+  "nativeRuntime": {
+    "version": 1,
+    "limits": {
+      "readBytes": 131072,
+      "writeBytes": 32768,
+      "snapshotEntries": 128,
+      "collectionItems": 16384,
+      "collectionPathBytes": 4194304,
+      "searchFileBytes": 1000000,
+      "resultBytes": 262144
+    },
+    "pressureErrors": [
+      "file_collection_limit",
+      "file_result_limit"
+    ],
+    "onPressure": "Fail explicitly without publishing a partial success; preserve effects/history/Evidence and unknown dispatches."
+  }
+}

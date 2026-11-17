@@ -94,19 +94,19 @@ impl NativeSessionHost {
         )
         .map_err(HostError)?;
         self.mcp_credentials = Some(mcp_credentials.clone());
+        let local_capabilities = ProviderRegistry::local_capabilities();
         if origin["capabilityAdmission"]["required"]
             .as_array()
             .into_iter()
             .flatten()
             .any(|v| {
-                !matches!(
-                    v.as_str(),
-                    Some("local.file.read" | "local.file.write" | "local.shell.exec")
-                ) && !mcp_inventory
-                    .inventory
-                    .manifests
-                    .iter()
-                    .any(|m| m["capabilityId"] == *v)
+                !v.as_str()
+                    .is_some_and(|id| local_capabilities.iter().any(|c| c == id))
+                    && !mcp_inventory
+                        .inventory
+                        .manifests
+                        .iter()
+                        .any(|m| m["capabilityId"] == *v)
             })
         {
             return Err(HostError("native_capability_inventory_unsupported"));

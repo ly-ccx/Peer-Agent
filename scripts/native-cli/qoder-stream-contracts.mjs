@@ -12,6 +12,10 @@ const cases=[];
 function add(name,events,expectation,wrapped=false){cases.push({name,stream:sse(events,wrapped),expectation});}
 for(const wrapped of[false,true]){
  const prefix=wrapped?'envelope':'plain';
+ add(`${prefix}-labelled-chat`,[{type:'chat.completion.chunk',...chunk({content:'Native complete.'})},{usage},'[DONE]'],{content:'Native complete.',thinking:'',calls:[],totalTokens:16},wrapped);
+ add(`${prefix}-labelled-tool`,[{type:'vendor.tool-delta',...chunk({tool_calls:[tool]})},{usage},'[DONE]'],{content:'',thinking:'',calls:[{name:'write_file',arguments:args}],totalTokens:16},wrapped);
+ add(`${prefix}-labelled-usage`,[chunk({content:'Native complete.'}),{type:'usage',usage},'[DONE]'],{content:'Native complete.',thinking:'',calls:[],totalTokens:16},wrapped);
+
  add(`${prefix}-unicode-fragments`,[chunk({content:[{text:'你好，👩🏽‍💻'},{output_text:' é'}],thinking:'真实思考。'}),{usage},'[DONE]'],{content:'你好，👩🏽‍💻 é',thinking:'真实思考。',calls:[],totalTokens:16},wrapped);
  add(`${prefix}-thinking-text-tool`,[chunk({content:'Inspecting.',thinking:'Observed thought.',tool_calls:[tool]}),{usage},'[DONE]'],{content:'Inspecting.',thinking:'Observed thought.',calls:[{name:'write_file',arguments:args}],totalTokens:16},wrapped);
 

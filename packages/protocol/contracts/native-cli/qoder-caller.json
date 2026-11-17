@@ -550,6 +550,349 @@
         }
       },
       "effort": "off"
+    },
+    {
+      "name": "unicode-case-model-id",
+      "model": "ämodel",
+      "catalog": {
+        "chat": [
+          {
+            "key": "ÄModel",
+            "display_name": "Catalog model",
+            "source": "system",
+            "format": "openai",
+            "max_input_tokens": 180000,
+            "max_output_tokens": 32768,
+            "is_vl": false,
+            "is_reasoning": false,
+            "context_config": {
+              "200K": {
+                "token_count": 200000,
+                "is_default": true
+              },
+              "400K": {
+                "token_count": 400000
+              }
+            }
+          }
+        ]
+      },
+      "modelOptionValues": {},
+      "maxOutputTokens": 1234,
+      "expectation": {
+        "dialect": "prepared",
+        "window": 200000,
+        "tier": "200K",
+        "vision": false
+      },
+      "expected": {
+        "modelConfig": {
+          "key": "ÄModel",
+          "display_name": "Catalog model",
+          "model": "",
+          "format": "openai",
+          "is_vl": false,
+          "is_reasoning": false,
+          "api_key": "",
+          "url": "",
+          "source": "system",
+          "max_input_tokens": 200000,
+          "contextTier": "200K"
+        },
+        "parameters": {
+          "max_tokens": 1234,
+          "reasoning_effort": "none"
+        }
+      },
+      "effort": "off"
+    },
+    {
+      "name": "unicode-expanded-case-model-id",
+      "model": "i̇model",
+      "catalog": {
+        "chat": [
+          {
+            "key": "İModel",
+            "display_name": "Catalog model",
+            "source": "system",
+            "format": "openai",
+            "max_input_tokens": 180000,
+            "max_output_tokens": 32768,
+            "is_vl": false,
+            "is_reasoning": false,
+            "context_config": {
+              "200K": {
+                "token_count": 200000,
+                "is_default": true
+              },
+              "400K": {
+                "token_count": 400000
+              }
+            }
+          }
+        ]
+      },
+      "modelOptionValues": {},
+      "maxOutputTokens": 1234,
+      "expectation": {
+        "dialect": "prepared",
+        "window": 200000,
+        "tier": "200K",
+        "vision": false
+      },
+      "expected": {
+        "modelConfig": {
+          "key": "İModel",
+          "display_name": "Catalog model",
+          "model": "",
+          "format": "openai",
+          "is_vl": false,
+          "is_reasoning": false,
+          "api_key": "",
+          "url": "",
+          "source": "system",
+          "max_input_tokens": 200000,
+          "contextTier": "200K"
+        },
+        "parameters": {
+          "max_tokens": 1234,
+          "reasoning_effort": "none"
+        }
+      },
+      "effort": "off"
+    },
+    {
+      "name": "unicode-contextual-case-model-id",
+      "model": "ος",
+      "catalog": {
+        "chat": [
+          {
+            "key": "ΟΣ",
+            "display_name": "Catalog model",
+            "source": "system",
+            "format": "openai",
+            "max_input_tokens": 180000,
+            "max_output_tokens": 32768,
+            "is_vl": false,
+            "is_reasoning": false,
+            "context_config": {
+              "200K": {
+                "token_count": 200000,
+                "is_default": true
+              },
+              "400K": {
+                "token_count": 400000
+              }
+            }
+          }
+        ]
+      },
+      "modelOptionValues": {},
+      "maxOutputTokens": 1234,
+      "expectation": {
+        "dialect": "prepared",
+        "window": 200000,
+        "tier": "200K",
+        "vision": false
+      },
+      "expected": {
+        "modelConfig": {
+          "key": "ΟΣ",
+          "display_name": "Catalog model",
+          "model": "",
+          "format": "openai",
+          "is_vl": false,
+          "is_reasoning": false,
+          "api_key": "",
+          "url": "",
+          "source": "system",
+          "max_input_tokens": 200000,
+          "contextTier": "200K"
+        },
+        "parameters": {
+          "max_tokens": 1234,
+          "reasoning_effort": "none"
+        }
+      },
+      "effort": "off"
+    },
+    {
+      "name": "bom-trimmed-catalog-model-id",
+      "model": "trim-model",
+      "catalog": {
+        "chat": [
+          {
+            "key": "﻿trim-model﻿",
+            "display_name": "Catalog model",
+            "source": "system",
+            "format": "openai",
+            "max_input_tokens": 180000,
+            "max_output_tokens": 32768,
+            "is_vl": false,
+            "is_reasoning": false,
+            "context_config": {
+              "200K": {
+                "token_count": 200000,
+                "is_default": true
+              },
+              "400K": {
+                "token_count": 400000
+              }
+            }
+          }
+        ]
+      },
+      "modelOptionValues": {},
+      "maxOutputTokens": 1234,
+      "expectation": {
+        "dialect": "prepared",
+        "window": 200000,
+        "tier": "200K",
+        "vision": false
+      },
+      "expected": {
+        "modelConfig": {
+          "key": "trim-model",
+          "display_name": "Catalog model",
+          "model": "",
+          "format": "openai",
+          "is_vl": false,
+          "is_reasoning": false,
+          "api_key": "",
+          "url": "",
+          "source": "system",
+          "max_input_tokens": 200000,
+          "contextTier": "200K"
+        },
+        "parameters": {
+          "max_tokens": 1234,
+          "reasoning_effort": "none"
+        }
+      },
+      "effort": "off"
+    },
+    {
+      "name": "bom-context-option-filter",
+      "model": "catalog-model",
+      "catalog": {
+        "chat": [
+          {
+            "key": "catalog-model",
+            "display_name": "Catalog model",
+            "source": "system",
+            "format": "openai",
+            "max_input_tokens": 180000,
+            "max_output_tokens": 32768,
+            "is_vl": false,
+            "is_reasoning": false,
+            "context_config": {
+              "﻿": {
+                "token_count": 1000,
+                "is_default": true
+              },
+              "200K": {
+                "token_count": 200000,
+                "is_default": true
+              },
+              "400K": {
+                "token_count": 400000
+              }
+            }
+          }
+        ]
+      },
+      "modelOptionValues": {},
+      "maxOutputTokens": 1234,
+      "expectation": {
+        "dialect": "prepared",
+        "window": 200000,
+        "tier": "200K",
+        "vision": false
+      },
+      "expected": {
+        "modelConfig": {
+          "key": "catalog-model",
+          "display_name": "Catalog model",
+          "model": "",
+          "format": "openai",
+          "is_vl": false,
+          "is_reasoning": false,
+          "api_key": "",
+          "url": "",
+          "source": "system",
+          "max_input_tokens": 200000,
+          "contextTier": "200K"
+        },
+        "parameters": {
+          "max_tokens": 1234,
+          "reasoning_effort": "none"
+        }
+      },
+      "effort": "off"
+    },
+    {
+      "name": "bom-thinking-effort",
+      "model": "catalog-model",
+      "catalog": {
+        "chat": [
+          {
+            "key": "catalog-model",
+            "display_name": "Catalog model",
+            "source": "system",
+            "format": "openai",
+            "max_input_tokens": 180000,
+            "max_output_tokens": 32768,
+            "is_vl": false,
+            "is_reasoning": false,
+            "context_config": {
+              "200K": {
+                "token_count": 200000,
+                "is_default": true
+              },
+              "400K": {
+                "token_count": 400000
+              }
+            },
+            "thinking_config": {
+              "enabled": {
+                "efforts": {
+                  "﻿HIGH﻿": {
+                    "is_default": true
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "modelOptionValues": {},
+      "maxOutputTokens": 1234,
+      "expectation": {
+        "dialect": "prepared",
+        "window": 200000,
+        "tier": "200K",
+        "vision": false
+      },
+      "expected": {
+        "modelConfig": {
+          "key": "catalog-model",
+          "display_name": "Catalog model",
+          "model": "",
+          "format": "openai",
+          "is_vl": false,
+          "is_reasoning": true,
+          "api_key": "",
+          "url": "",
+          "source": "system",
+          "max_input_tokens": 200000,
+          "contextTier": "200K"
+        },
+        "parameters": {
+          "max_tokens": 1234,
+          "reasoning_effort": "high"
+        }
+      },
+      "effort": "high"
     }
   ]
 }

@@ -1,6 +1,6 @@
 //! Local catalog decoding is read-only and bound to the prepared account.
 use super::{CACHE_LIMIT, account_files::ReadSet, sensitive_json::SensitiveJson};
-use crate::{CancellationToken, model::ModelError};
+use crate::{CancellationToken, model::ModelError, model_catalog::trim};
 use serde_json::{Value, json};
 use std::{collections::HashSet, path::Path};
 fn invalid() -> ModelError {
@@ -56,7 +56,7 @@ impl Catalog {
                         v["id"]
                             .as_str()
                             .zip(model["id"].as_str())
-                            .is_some_and(|(a, b)| a.eq_ignore_ascii_case(b))
+                            .is_some_and(|(a, b)| a.to_lowercase() == b.to_lowercase())
                     })
                     && let Some(limit) = other.get("maxOutputTokens")
                 {
@@ -78,17 +78,18 @@ impl Catalog {
         if options.is_some_and(|v| !v.is_array()) {
             return Err(invalid());
         }
+        let selected_id = trim(model).to_lowercase();
         let mut metadata = match self.models.iter().find(|v| {
             v["id"]
                 .as_str()
-                .is_some_and(|id| id.eq_ignore_ascii_case(model.trim()))
+                .is_some_and(|id| id.to_lowercase() == selected_id)
         }) {
             Some(value) => value.clone(),
             None if options
                 .and_then(Value::as_array)
                 .is_some_and(|a| !a.is_empty()) =>
             {
-                json!({"id":model.trim(),"label":model,"source":"system","format":"openai","supportsVision":true,"supportsReasoning":false})
+                json!({"id":trim(model),"label":model,"source":"system","format":"openai","supportsVision":true,"supportsReasoning":false})
             }
             None => return Ok(None),
         };
@@ -125,7 +126,7 @@ fn parse(bytes: &[u8]) -> Result<Vec<Value>, ModelError> {
         let Some(id) = ["key", "id", "model"]
             .iter()
             .find_map(|key| raw[*key].as_str().filter(|s| !s.is_empty()))
-            .map(str::trim)
+            .map(trim)
         else {
             continue;
         };
@@ -167,7 +168,7 @@ fn context_option(raw: &Value) -> Option<Value> {
     let entries: Vec<_> = raw["context_config"]
         .as_object()?
         .iter()
-        .filter(|(name, v)| !name.trim().is_empty() && positive(&v["token_count"]).is_some())
+        .filter(|(name, v)| !trim(name).is_empty() && positive(&v["token_count"]).is_some())
         .collect();
     let (default_name, default) = entries
         .iter()
@@ -209,7 +210,7 @@ fn thinking(raw: &Value, model: &mut Value) {
     let keys: Vec<_> = efforts
         .into_iter()
         .flatten()
-        .map(|(key, _)| key.trim().to_lowercase())
+        .map(|(key, _)| trim(key).to_lowercase())
         .filter(|s| !s.is_empty())
         .collect();
     let mut levels: Vec<String> = if disabled {
@@ -238,7 +239,7 @@ fn thinking(raw: &Value, model: &mut Value) {
         .into_iter()
         .flatten()
         .find(|(_, v)| v["is_default"] == true)
-        .map(|(k, _)| k.trim().to_lowercase());
+        .map(|(k, _)| trim(k).to_lowercase());
     let mut default = explicit.unwrap_or_else(|| {
         if config["enabled"]["is_default"] == true {
             first.clone()

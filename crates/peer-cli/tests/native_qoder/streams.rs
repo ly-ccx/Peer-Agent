@@ -9,65 +9,78 @@ fn vectors() -> Value {
 #[test]
 fn complete_sparse_qoder_streams_execute_only_their_validated_tools_and_keep_evidence() {
     for c in vectors()["cases"].as_array().unwrap() {
-        let calls = c["expected"]["calls"].as_array().unwrap();
-        let mut replies = vec![c["stream"].as_str().unwrap().to_owned()];
-        if !calls.is_empty() {
-            replies.push(reply_text("Native variant complete."));
-        }
-        let server = Server::new(replies);
-        let f = Fixture::new(&server);
-        configure(&f, &server);
-        let output = command(&f).output().unwrap();
-        assert!(
-            output.status.success(),
-            "{}: {}",
-            c["name"],
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let r: Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(r["toolCalls"], calls.len());
-        assert_eq!(
-            server.requests.lock().unwrap().len(),
-            if calls.is_empty() { 1 } else { 2 }
-        );
-        for call in calls {
-            assert_eq!(
-                std::fs::read_to_string(
-                    f.root
-                        .path()
-                        .join("workspace")
-                        .join(call["arguments"]["path"].as_str().unwrap())
-                )
-                .unwrap(),
-                "native"
-            );
-        }
-        let history = f.history();
-        let tools = history
-            .iter()
-            .filter(|m| m["segments"].is_array())
-            .collect::<Vec<_>>();
-        assert_eq!(tools.len(), calls.len());
-        for tool in tools {
-            assert_eq!(tool["permissionGrants"][0]["granted"], true);
-            assert_eq!(tool["segments"][0]["result"]["status"], "success");
-            assert!(tool["segments"][0]["result"]["evidence"].is_object());
-        }
-        if c["expected"]["usage"].is_null() {
-            assert_eq!(f.budget(|_| {})["unknownUsage"], true);
-        } else {
-            assert_eq!(
-                r["usage"]["totalTokens"],
-                c["expected"]["usage"]["totalTokens"].as_u64().unwrap()
-                    + if calls.is_empty() { 0 } else { 16 }
-            );
-        }
-        if !c["expected"]["thinking"].as_str().unwrap().is_empty() {
-            let persisted = serde_json::to_string(&history).unwrap();
+        for legacy in [false, true] {
+            let calls = c["expected"]["calls"].as_array().unwrap();
+            let mut replies = vec![c["stream"].as_str().unwrap().to_owned()];
+            if !calls.is_empty() {
+                replies.push(reply_text("Native variant complete."));
+            }
+            let server = Server::new(replies);
+            let f = Fixture::new(&server);
+            configure(&f, &server);
+            if legacy {
+                super::legacy::select(&f, "unknown-model");
+            }
+            let output = command(&f).output().unwrap();
             assert!(
-                !persisted.contains("Observed thought."),
-                "thinking is live continuation, not persisted history"
+                output.status.success(),
+                "{} (legacy={}): {}",
+                c["name"],
+                legacy,
+                String::from_utf8_lossy(&output.stderr)
             );
+            let r: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(r["toolCalls"], calls.len());
+            assert_eq!(
+                server.requests.lock().unwrap().len(),
+                if calls.is_empty() { 1 } else { 2 }
+            );
+            for call in calls {
+                assert_eq!(
+                    std::fs::read_to_string(
+                        f.root
+                            .path()
+                            .join("workspace")
+                            .join(call["arguments"]["path"].as_str().unwrap())
+                    )
+                    .unwrap(),
+                    "native"
+                );
+            }
+            for header in server.request_headers.lock().unwrap().iter() {
+                assert!(header.starts_with(if legacy {
+                    "POST /v1/chat/completions "
+                } else {
+                    "POST /algo/api/v2/service/pro/sse/agent_chat_generation?"
+                }));
+            }
+            let history = f.history();
+            let tools = history
+                .iter()
+                .filter(|m| m["segments"].is_array())
+                .collect::<Vec<_>>();
+            assert_eq!(tools.len(), calls.len());
+            for tool in tools {
+                assert_eq!(tool["permissionGrants"][0]["granted"], true);
+                assert_eq!(tool["segments"][0]["result"]["status"], "success");
+                assert!(tool["segments"][0]["result"]["evidence"].is_object());
+            }
+            if c["expected"]["usage"].is_null() {
+                assert_eq!(f.budget(|_| {})["unknownUsage"], true);
+            } else {
+                assert_eq!(
+                    r["usage"]["totalTokens"],
+                    c["expected"]["usage"]["totalTokens"].as_u64().unwrap()
+                        + if calls.is_empty() { 0 } else { 16 }
+                );
+            }
+            if !c["expected"]["thinking"].as_str().unwrap().is_empty() {
+                let persisted = serde_json::to_string(&history).unwrap();
+                assert!(
+                    !persisted.contains("Observed thought."),
+                    "thinking is live continuation, not persisted history"
+                );
+            }
         }
     }
 }

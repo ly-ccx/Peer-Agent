@@ -31,6 +31,7 @@ run('bun', ['scripts/native-cli/admission-contracts.ts']);
 run('bun', ['scripts/native-cli/history-plan-contracts.ts']);
 run('bun', ['scripts/native-cli/access-policy-contracts.ts']);
 run('bun', ['scripts/native-cli/context-contracts.ts']);
+run('node', ['scripts/native-cli/file-operation-contracts.mjs']);
 run('bun', ['scripts/native-cli/compaction-contracts.ts']);
 run('bun', ['scripts/native-cli/mcp-inventory-contracts.ts']);
 run('bun', ['scripts/native-cli/wire-contracts.ts']);

@@ -5,6 +5,85 @@
   },
   "cases": [
     {
+      "name": "plain-labelled-chat",
+      "stream": "data: {\"type\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Native complete.\"}}]}\n\ndata: {\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "plain-labelled-tool",
+      "stream": "data: {\"type\":\"vendor.tool-delta\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"upstream\",\"type\":\"function\",\"function\":{\"name\":\"write_file\",\"arguments\":\"{\\\"path\\\":\\\"stream.txt\\\",\\\"content\\\":\\\"native\\\"}\"}}]}}]}\n\ndata: {\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "plain-labelled-usage",
+      "stream": "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Native complete.\"}}]}\n\ndata: {\"type\":\"usage\",\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
       "name": "plain-unicode-fragments",
       "stream": "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":[{\"text\":\"你好，👩🏽‍💻\"},{\"output_text\":\" é\"}],\"thinking\":\"真实思考。\"}}]}\n\ndata: {\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":4}}\n\ndata: [DONE]\n\n",
       "expectation": {
@@ -429,6 +508,85 @@
             }
           }
         ],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "envelope-labelled-chat",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"chat.completion.chunk\\\",\\\"choices\\\":[{\\\"index\\\":0,\\\"delta\\\":{\\\"content\\\":\\\"Native complete.\\\"}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"usage\\\":{\\\"prompt_tokens\\\":12,\\\"completion_tokens\\\":4}}\"}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "envelope-labelled-tool",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"vendor.tool-delta\\\",\\\"choices\\\":[{\\\"index\\\":0,\\\"delta\\\":{\\\"tool_calls\\\":[{\\\"index\\\":0,\\\"id\\\":\\\"upstream\\\",\\\"type\\\":\\\"function\\\",\\\"function\\\":{\\\"name\\\":\\\"write_file\\\",\\\"arguments\\\":\\\"{\\\\\\\"path\\\\\\\":\\\\\\\"stream.txt\\\\\\\",\\\\\\\"content\\\\\\\":\\\\\\\"native\\\\\\\"}\\\"}}]}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"usage\\\":{\\\"prompt_tokens\\\":12,\\\"completion_tokens\\\":4}}\"}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "",
+        "thinking": "",
+        "calls": [
+          {
+            "name": "write_file",
+            "arguments": {
+              "path": "stream.txt",
+              "content": "native"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 4,
+          "cacheReadTokens": 0,
+          "totalTokens": 16
+        }
+      }
+    },
+    {
+      "name": "envelope-labelled-usage",
+      "stream": "data: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"choices\\\":[{\\\"index\\\":0,\\\"delta\\\":{\\\"content\\\":\\\"Native complete.\\\"}}]}\"}\n\ndata: {\"statusCodeValue\":200,\"statusCode\":\"OK\",\"body\":\"{\\\"type\\\":\\\"usage\\\",\\\"usage\\\":{\\\"prompt_tokens\\\":12,\\\"completion_tokens\\\":4}}\"}\n\ndata: [DONE]\n\n",
+      "expectation": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
+        "totalTokens": 16
+      },
+      "expected": {
+        "content": "Native complete.",
+        "thinking": "",
+        "calls": [],
         "usage": {
           "inputTokens": 12,
           "outputTokens": 4,

@@ -131,6 +131,14 @@ impl ProviderRegistry {
         )?));
         Ok(registry)
     }
+    pub(crate) fn local_capabilities() -> Vec<String> {
+        Self::default()
+            .providers
+            .iter()
+            .flat_map(|p| p.manifests())
+            .filter_map(|(_, m)| m["capabilityId"].as_str().map(str::to_owned))
+            .collect()
+    }
     pub fn project(&self) -> Result<RuntimeProjection, HostError> {
         let mut tools = Vec::new();
         for (provider, p) in self.providers.iter().enumerate() {

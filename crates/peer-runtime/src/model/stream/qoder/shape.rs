@@ -70,7 +70,11 @@ impl Shape {
                 self.blocks.event(chat, event)?;
                 return Ok(false);
             }
-            return Err(ModelError::new("model_event_unsupported"));
+            // Optional labels do not replace a recognized Chat payload. A
+            // future control event without choices/usage remains unsupported.
+            if !event["choices"].is_array() && !event["usage"].is_object() {
+                return Err(ModelError::new("model_event_unsupported"));
+            }
         }
         let mut v = event.clone();
         if v.get("choices").is_none() && v["usage"].is_object() {

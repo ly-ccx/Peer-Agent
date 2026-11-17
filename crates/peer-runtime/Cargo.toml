@@ -26,6 +26,9 @@ rustls = { version = "=0.23.46", default-features = false, features = ["std"] }
 base64 = "=0.22.1"
 percent-encoding = "=2.3.2"
 aho-corasick = "=1.1.4"
+icu_collator = "=2.1.1"
+icu_casemap = "=2.1.1"
+icu_locale_core = "=2.1.1"
 aes = { version = "=0.8.4", features = ["zeroize"] }
 cbc = { version = "=0.1.2", features = ["zeroize"] }
 aes-gcm = { version = "=0.10.3", features = ["zeroize"] }

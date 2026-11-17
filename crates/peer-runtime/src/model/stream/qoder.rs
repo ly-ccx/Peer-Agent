@@ -84,6 +84,10 @@ mod tests {
         let mut excessive = start.clone();
         excessive["index"] = 128.into();
         let cases = vec![
+            vec![json!({"type":"control.future","command":"execute"})],
+            vec![
+                json!({"type":"vendor.chunk","error":{"message":"denied"},"choices":[{"index":0,"delta":{"content":"not success"}}]}),
+            ],
             vec![json!({"choices":[{"delta":{"thinking":"cognition without an answer"}}]})],
             vec![json!({"choices":[null]})],
             vec![json!({"choices":[{"delta":{"tool_calls":[true]}}]})],
