@@ -5,7 +5,7 @@ import {mkdtempSync,readFileSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createServer} from 'node:http';
-import {gzipSync,brotliCompressSync,deflateSync} from 'node:zlib';
+import {gzipSync,brotliCompressSync,deflateSync,gunzipSync,brotliDecompressSync,inflateSync} from 'node:zlib';
 import {createNodeWebFetchProvider,NODE_WEB_FETCH_CAPABILITY_MANIFESTS} from '../../packages/runtime-node/src/web-fetch-provider.ts';
 import {fetchNodeWebPage,normalizeWebUrl} from '../../packages/runtime-node/src/web-fetch-engine.ts';
 const root=mkdtempSync(join(tmpdir(),'peer-web-oracle-'));const base='http://fixture.invalid/';
@@ -47,9 +47,17 @@ const artifact={output:result.output,content:readFileSync(join(root,'web-artifac
 const contract={schemaVersion:1,manifest:NODE_WEB_FETCH_CAPABILITY_MANIFESTS[0],limits:{urlBytes:16384,responseBytes:5000000,contentUnits:2000000,summaryUnits:4000,titleBytes:65536,contentTypeBytes:8192,artifactBytes:536870912,artifactEntries:16384,artifactPathBytes:4194304,artifactDepth:4},provenance:'Actual existing TS static HTTP engine, Provider and ArtifactStore. Native explicit deltas retain safe scalar boundaries and report prior engine truncation; stable HTTP/content errors do not disclose transport secrets.'};
 // Real Node HTTP decoding is separate from controlled Response extraction.
 const compressed=[];
-for(const [encoding,compress] of [['gzip',gzipSync],['br',brotliCompressSync],['deflate',deflateSync]])for(const oversized of [false,true]){
+// Compressed streams are fixed HTTP input fixtures, not encoder goldens.
+// In particular, gzip's OS byte differs across Darwin and Linux Node builds.
+const saved=process.argv.includes('--write')?null:JSON.parse(readFileSync(new URL('../../packages/protocol/contracts/native-cli/web-fetch-cases.json',import.meta.url),'utf8')).realHttp.compressed;
+assert.ok(saved===null||saved.length===6);
+for(const [encoding,compress,decompress] of [['gzip',gzipSync,gunzipSync],['br',brotliCompressSync,brotliDecompressSync],['deflate',deflateSync,inflateSync]])for(const oversized of [false,true]){
  const body=oversized?'x'.repeat(5000001):'Compressed 🦀 fact.\n'.repeat(1000);
- compressed.push({name:`${encoding}-${oversized?'limit':'ok'}`,encoding,encoded:compress(Buffer.from(body)).toString('base64'),oversized,contentBytes:Buffer.byteLength(body),contentSha256:sha(body)});
+ const name=`${encoding}-${oversized?'limit':'ok'}`;
+ const encoded=saved?Buffer.from(saved.find(c=>c.name===name).encoded,'base64'):compress(Buffer.from(body));
+ assert.deepEqual(decompress(encoded,{maxOutputLength:5000002}),Buffer.from(body));
+ if(encoding==='gzip')for(const os of [3,19]){const variant=Buffer.from(encoded);variant[9]=os;assert.deepEqual(gunzipSync(variant,{maxOutputLength:5000002}),Buffer.from(body));}
+ compressed.push({name,encoding,encoded:encoded.toString('base64'),oversized,contentBytes:Buffer.byteLength(body),contentSha256:sha(body)});
 }
 let requests=0;
 const http=createServer((req,res)=>{requests++;const c=compressed.find(c=>`/${c.name}`===req.url);assert.ok(c);res.writeHead(200,{'content-type':'text/plain','content-encoding':c.encoding});res.end(Buffer.from(c.encoded,'base64'));});
