@@ -314,18 +314,17 @@ impl NativeSessionHost {
                     let reserved=self.resources.reserve(&current.resource,ResourceReservation{host_epoch:&epoch,scopes:&scopes,record_conflict:false},&now())?;
                     if reserved["allowed"]!=true{return Err(HostError("execution_resource_busy"))}
                     let identity=||HostCallIdentity{plan_id,session_id:&budget.session,conversation_id:&conversation,tool_call_id:&call_id,stream_id:&stream,capability_id:&capability,permission:effect.permission(),role:HostExecutionRole::Worker,shell_risk:effect.risk()};
-                    let grant=if let Some(g)=self.automatic_permission(identity(),&args,&now())?{Some(g)}else{
+                    let (grant,permission_reason,permission_terminal)=if let Some(g)=self.automatic_permission(identity(),&args,&now())?{(Some(g),None,None)}else{
                         let pending=self.request_permission(identity(),&args,&now())?;
-                        let decision=self.wait_owned(permission.decide(json!({"approval":pending.record(),"tool":call.name,"arguments":args,"scopes":scopes}),&cancellation),&cancellation,cancel).await?;
-                        let cancelled=matches!(decision,LocalPermissionDecision::Cancel);
-                        let grant=self.decide_permission(pending,decision,&args,&now())?;
-                        if cancelled{return Err(HostError("CANCELLED"))}grant
+                        let decision=self.wait_owned(pending.wait(permission,json!({"approval":pending.record(),"tool":call.name,"arguments":args,"scopes":scopes}),&cancellation),&cancellation,cancel).await?;
+                        let resolution=self.settle_permission(pending,decision,&args,&now())?;
+                        (resolution.grant,resolution.reason,resolution.terminal)
                     };
                     let started_at=now();let dispatch=budget.dispatch(self,crate::execution_budget::DispatchFacts{call:&call_id,capability:&capability,scopes:&scopes,stream:&stream,conversation:&conversation},&now())?;
-                    let grant_facts=grant.as_ref().map(|g|g.facts().clone()).unwrap_or_else(||json!({"grantId":format!("grant-{}",uuid::Uuid::new_v4()),"toolCallId":call_id,"granted":false,"scope":capability,"duration":"denied","decidedAt":now(),"reason":"local_permission_denied"}));
+                    let grant_facts=grant.as_ref().map(|g|g.facts().clone()).unwrap_or_else(||json!({"grantId":format!("grant-{}",uuid::Uuid::new_v4()),"toolCallId":call_id,"granted":false,"scope":capability,"duration":"denied","decidedAt":now(),"reason":permission_reason.unwrap_or("local_permission_denied")}));
                     let outcome=if let Some(grant)=grant {
                         self.launch_effect(effect,&grant,&current.resource,&call_id,&cancellation,cancel).await?
-                    }else{EffectOutcome{status:"denied",output:json!({}),error:Some("permission_denied"),artifacts:vec![],ended:true,materialization:None,not_dispatched:true}};
+                    }else{EffectOutcome{status:match permission_terminal {Some(HostError("CANCELLED"))=>"cancelled",Some(_)=>"failed",None=>"denied"},output:json!({}),error:Some(permission_terminal.map(|e|e.0).unwrap_or("permission_denied")),artifacts:vec![],ended:true,materialization:None,not_dispatched:true}};
                     #[cfg(feature="test-fixtures")]
                     if std::env::var("PEER_NATIVE_EPISODE_FAULT_AFTER_EFFECT").ok().as_deref()==Some(&call.name) && self.home.join(".native-cli-fixture").is_file(){std::process::exit(77)}
                     let mut result=json!({"toolCallId":call_id,"capabilityId":capability,"status":outcome.status,"output":outcome.output,"outputPreview":{"kind":"json"},"completedAt":now(),"evidence":{"evidenceId":format!("evidence-{}",uuid::Uuid::new_v4()),"toolCallId":call_id,"summary":format!("{}: {}",call.name,outcome.status),"artifactRefs":outcome.artifacts}});
@@ -342,6 +341,10 @@ impl NativeSessionHost {
                         self.resources.confirm_file_materialization(&current.resource,HostFileMaterialization{host_epoch:&epoch,identity,tool_call_id:&call_id},&now())?;
                     }
                     if !outcome.ended || outcome.error==Some("execution_outcome_unknown"){return Err(HostError("execution_outcome_unknown"))}
+                    // Expiry/cancellation closes this run after saving the real
+                    // not-dispatched result. A late stdin answer cannot approve
+                    // another prompt in the same episode.
+                    if let Some(error)=permission_terminal{return Err(error)}
                     completed_ids.push(call_id);
                 }
                 let committed=ConversationStore::new(&self.home).read_committed(&conversation,None,8*1024*1024)?;

@@ -19,12 +19,12 @@ impl PermissionInput for TerminalPermission {
     ) -> Pin<Box<dyn Future<Output = LocalPermissionDecision> + 'a>> {
         Box::pin(async move {
             if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
-                return LocalPermissionDecision::Deny;
+                return LocalPermissionDecision::Unavailable;
             }
             let details = json!({"arguments":prompt["arguments"],"scopes":prompt["scopes"]});
             let _ = writeln!(
                 io::stderr(),
-                "需要一次本地授权：{}\n操作与范围：{}\n只允许本次调用？[y/N]；Ctrl-C 暂停本轮执行。",
+                "需要一次本地授权：{}\n操作与范围：{}\n只允许本次调用？[y/N]；5 分钟内未决定将暂停本轮执行；Ctrl-C 暂停本轮执行。",
                 peer_tui::terminal_text(prompt["tool"].as_str().unwrap_or("tool")),
                 peer_tui::terminal_text(&details.to_string())
             );
@@ -51,8 +51,11 @@ impl PermissionInput for TerminalPermission {
                     continue;
                 }
                 let r = rustix::io::read(&input, &mut b);
-                if r.ok() != Some(1) || bytes.len() >= 1024 {
-                    return LocalPermissionDecision::Deny;
+                if r.ok() != Some(1) {
+                    return LocalPermissionDecision::Unavailable;
+                }
+                if bytes.len() >= 1024 {
+                    return LocalPermissionDecision::Unavailable;
                 }
                 if b[0] == b'\n' {
                     break;

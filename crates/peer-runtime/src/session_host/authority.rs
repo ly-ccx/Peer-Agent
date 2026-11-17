@@ -74,16 +74,43 @@ pub struct PendingPermission {
     authority: Authority,
     record: Value,
     permit: OwnedSemaphorePermit,
+    deadline: tokio::time::Instant,
 }
 impl PendingPermission {
     pub fn record(&self) -> &Value {
         &self.record
     }
+    /// The same live request owns its timer and the borrowed input future.
+    /// Dropping the wait drops the reader; no stdin task survives this request.
+    pub(super) async fn wait(
+        &self,
+        input: &mut impl PermissionInput,
+        prompt: Value,
+        cancel: &crate::CancellationToken,
+    ) -> LocalPermissionDecision {
+        tokio::select! {biased;
+            _=cancel.cancelled()=>LocalPermissionDecision::Cancel,
+            _=tokio::time::sleep_until(self.deadline)=>LocalPermissionDecision::Timeout,
+            decision=input.decide(prompt,cancel)=>{
+                if cancel.is_cancelled(){LocalPermissionDecision::Cancel}
+                else if tokio::time::Instant::now()>=self.deadline{LocalPermissionDecision::Timeout}
+                else{decision}
+            }
+        }
+    }
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LocalPermissionDecision {
     Approve,
     Deny,
     Cancel,
+    Unavailable,
+    Timeout,
+}
+pub(super) struct PermissionResolution {
+    pub grant: Option<HostPermissionGrant>,
+    pub reason: Option<&'static str>,
+    pub terminal: Option<HostError>,
 }
 pub struct HostPermissionGrant {
     authority: Authority,
@@ -313,6 +340,34 @@ impl NativeSessionHost {
         let authority = self.authority(&call, args, now)?;
         let approval_id = format!("approval-{}", uuid::Uuid::new_v4());
         let stamp = policy_stamp(&authority.policy);
+        let wait = std::time::Duration::from_secs(300);
+        // A shorter clock is accepted only by the fixture-enabled owned Host.
+        // Featureless binaries have neither the variable nor this adapter.
+        #[cfg(feature = "test-fixtures")]
+        let wait = if self.home.join(".native-cli-fixture").is_file() {
+            std::env::var("PEER_NATIVE_PERMISSION_WAIT_MS")
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .filter(|n| (1..=300_000).contains(n))
+                .map(std::time::Duration::from_millis)
+                .unwrap_or(wait)
+        } else {
+            wait
+        };
+        let at = time::OffsetDateTime::parse(now, &time::format_description::well_known::Rfc3339)
+            .map_err(|_| HostError("invalid_host_time"))?;
+        let deadline_at = at
+            .checked_add(time::Duration::milliseconds(wait.as_millis() as i64))
+            .ok_or(HostError("invalid_host_time"))?
+            .to_offset(time::UtcOffset::UTC)
+            .format(
+                &time::format_description::parse_borrowed::<2>(
+                    "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z",
+                )
+                .expect("timestamp format"),
+            )
+            .map_err(|_| HostError("invalid_host_time"))?;
+        let deadline = tokio::time::Instant::now() + wait;
         let record = ApprovalStore::new(&self.home).open(
             &HostApproval {
                 approval_id: &approval_id,
@@ -325,7 +380,7 @@ impl NativeSessionHost {
                 args_digest: &authority.digest,
                 policy_revision: &stamp,
                 created_at: now,
-                deadline_at: None,
+                deadline_at: Some(&deadline_at),
             },
             None,
         )?;
@@ -333,6 +388,7 @@ impl NativeSessionHost {
             authority,
             record,
             permit,
+            deadline,
         })
     }
     fn validate_authority(&self, a: &Authority, args: &Value, now: &str) -> Result<(), HostError> {
@@ -366,35 +422,113 @@ impl NativeSessionHost {
         args: &Value,
         now: &str,
     ) -> Result<Option<HostPermissionGrant>, HostError> {
-        let valid = self.validate_authority(&pending.authority, args, now);
-        let state = if valid.is_err() {
-            ApprovalState::Expired
+        let resolution = self.settle_permission(pending, decision, args, now)?;
+        if let Some(error) = resolution.terminal {
+            return Err(error);
+        }
+        Ok(resolution.grant)
+    }
+    pub(super) fn settle_permission(
+        &self,
+        pending: PendingPermission,
+        decision: LocalPermissionDecision,
+        args: &Value,
+        now: &str,
+    ) -> Result<PermissionResolution, HostError> {
+        // Monotonic time also rejects late replies when the wall clock regresses.
+        let expired = tokio::time::Instant::now() >= pending.deadline
+            || milliseconds(now)?
+                >= milliseconds(
+                    pending.record["deadlineAt"]
+                        .as_str()
+                        .ok_or(HostError("invalid_host_time"))?,
+                )?;
+        let valid = if expired {
+            Err(HostError("permission_timeout"))
+        } else if milliseconds(now)?
+            < milliseconds(
+                pending.record["createdAt"]
+                    .as_str()
+                    .ok_or(HostError("invalid_host_time"))?,
+            )?
+        {
+            Err(HostError("invalid_host_time"))
+        } else {
+            self.validate_authority(&pending.authority, args, now)
+        };
+        let (state, decider, reason, terminal) = if let Err(error) = valid {
+            (
+                ApprovalState::Expired,
+                ApprovalDecision::Policy,
+                match error.0 {
+                    "permission_timeout" | "permission_policy_changed" => Some(error.0),
+                    _ => None,
+                },
+                Some(error),
+            )
         } else {
             match decision {
-                LocalPermissionDecision::Approve => ApprovalState::Approved,
-                LocalPermissionDecision::Deny => ApprovalState::Denied,
-                LocalPermissionDecision::Cancel => ApprovalState::Cancelled,
+                LocalPermissionDecision::Approve => (
+                    ApprovalState::Approved,
+                    ApprovalDecision::LocalUser,
+                    None,
+                    None,
+                ),
+                LocalPermissionDecision::Deny => (
+                    ApprovalState::Denied,
+                    ApprovalDecision::LocalUser,
+                    Some("local_user_denied"),
+                    None,
+                ),
+                LocalPermissionDecision::Cancel => (
+                    ApprovalState::Cancelled,
+                    ApprovalDecision::Policy,
+                    Some("permission_cancelled"),
+                    Some(HostError("CANCELLED")),
+                ),
+                LocalPermissionDecision::Unavailable => (
+                    ApprovalState::Denied,
+                    ApprovalDecision::Policy,
+                    Some("permission_unavailable"),
+                    None,
+                ),
+                LocalPermissionDecision::Timeout => (
+                    ApprovalState::Expired,
+                    ApprovalDecision::Policy,
+                    Some("permission_timeout"),
+                    Some(HostError("permission_timeout")),
+                ),
             }
         };
         ApprovalStore::new(&self.home).decide(
             &pending.record,
             state,
-            ApprovalDecision::LocalUser,
+            decider,
             now,
-            valid.as_ref().err().map(|e| e.0),
+            reason,
             None,
         )?;
-        valid?;
-        if !matches!(decision, LocalPermissionDecision::Approve) {
-            return Ok(None);
+        if state != ApprovalState::Approved {
+            return Ok(PermissionResolution {
+                grant: None,
+                reason: terminal
+                    .map(|e| e.0)
+                    .filter(|s| *s != "CANCELLED")
+                    .or(reason),
+                terminal,
+            });
         }
         self.validate_authority(&pending.authority, args, now)?;
         let facts = json!({"grantId":format!("grant-{}",uuid::Uuid::new_v4()),"toolCallId":pending.authority.tool_call,"granted":true,"scope":pending.authority.capability,"duration":"once","decidedAt":now,"reason":"approved_once_in_tui","policyRevision":policy_stamp(&pending.authority.policy)});
-        Ok(Some(HostPermissionGrant {
-            authority: pending.authority,
-            facts,
-            _permit: pending.permit,
-        }))
+        Ok(PermissionResolution {
+            grant: Some(HostPermissionGrant {
+                authority: pending.authority,
+                facts,
+                _permit: pending.permit,
+            }),
+            reason: None,
+            terminal: None,
+        })
     }
     /// The actual Provider must call this immediately at the effect seam, with
     /// the same immutable operation. Owning the grant is not a durable lease.

@@ -917,6 +917,19 @@ fn denial_is_a_real_persisted_result_without_effect() {
             .join("project-runtime/w/approvals.jsonl")
             .exists()
     );
+    let approvals = peer_store::ApprovalStore::new(f.root.path())
+        .list(Some("w"), None)
+        .unwrap();
+    assert_eq!(approvals.len(), 1);
+    assert_eq!(approvals[0]["decidedBy"], "policy");
+    assert_eq!(approvals[0]["decisionReason"], "permission_unavailable");
+    let created = approvals[0]["createdAt"].as_str().unwrap();
+    let deadline = approvals[0]["deadlineAt"].as_str().unwrap();
+    assert!(deadline > created);
+    assert_eq!(
+        f.history()[1]["permissionGrants"][0]["reason"],
+        "permission_unavailable"
+    );
 }
 
 #[test]
@@ -2223,6 +2236,12 @@ fn inactive_bot_and_foreign_conversation_cannot_dispatch_cognition() {
 }
 
 fn permission_pty(f: &Fixture) -> (std::os::fd::OwnedFd, OwnedChild) {
+    permission_pty_deadline(f, None)
+}
+fn permission_pty_deadline(
+    f: &Fixture,
+    wait_ms: Option<u64>,
+) -> (std::os::fd::OwnedFd, OwnedChild) {
     let master =
         rustix::pty::openpt(rustix::pty::OpenptFlags::RDWR | rustix::pty::OpenptFlags::NOCTTY)
             .unwrap();
@@ -2236,8 +2255,12 @@ fn permission_pty(f: &Fixture) -> (std::os::fd::OwnedFd, OwnedChild) {
         rustix::fs::Mode::empty(),
     )
     .unwrap();
+    let mut command = f.command("exec", "p");
+    if let Some(wait) = wait_ms {
+        command.env("PEER_NATIVE_PERMISSION_WAIT_MS", wait.to_string());
+    }
     let child = OwnedChild(Some(
-        f.command("exec", "p")
+        command
             .stdin(Stdio::from(rustix::io::dup(&slave).unwrap()))
             .stderr(Stdio::from(slave))
             .spawn()
@@ -2361,7 +2384,174 @@ fn real_pty_permission_accept_deny_and_signal_have_no_stuck_stdin_reader() {
             get(f.root.path().join("goal-plans/p.json"))["status"],
             "paused"
         );
+        let rows = peer_store::ApprovalStore::new(f.root.path())
+            .list(Some("w"), None)
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0]["decidedBy"],
+            if answer.is_some() {
+                "local_ui"
+            } else {
+                "policy"
+            }
+        );
+        assert!(rows[0]["deadlineAt"].is_string());
+        let message = f
+            .history()
+            .into_iter()
+            .find(|m| m["permissionGrants"].is_array())
+            .unwrap();
+        assert_eq!(
+            message["permissionGrants"][0]["granted"],
+            answer == Some(true)
+        );
+        if answer.is_none() {
+            assert_eq!(rows[0]["decisionReason"], "permission_cancelled");
+            let result = &message["segments"][0]["result"];
+            assert_eq!(result["status"], "cancelled");
+            assert_eq!(result["evidence"]["dispatchOutcome"], "not_dispatched");
+            assert_eq!(server.requests.lock().unwrap().len(), 1);
+        }
     }
+}
+
+#[cfg(feature = "test-fixtures")]
+#[test]
+fn expired_pty_permission_persists_no_dispatch_and_late_yes_cannot_start_another_tool() {
+    let server = Server::new(vec![
+        reply_tool(
+            "write_file",
+            json!({"path":"expired.txt","content":"never"}),
+        ),
+        reply_tool("write_file", json!({"path":"late.txt","content":"never"})),
+    ]);
+    let f = Fixture::new(&server);
+    let store = PolicyStore::new(f.root.path());
+    let old = store.read_existing("w").unwrap();
+    store
+        .update_existing(
+            "w",
+            old.revision,
+            peer_protocol::LocalAccessLevel::AskBeforeLocal,
+            AT,
+        )
+        .unwrap();
+    let started = Instant::now();
+    let (master, child) = permission_pty_deadline(&f, Some(2500));
+    // Darwin can discard unread PTY output when the last slave closes. Keep a
+    // test-owned slave open for the terminal error/late-answer observation;
+    // this does not replace or feed the product's stdin reader.
+    let slave_path = rustix::pty::ptsname(&master, Vec::new()).unwrap();
+    let _terminal_capture = rustix::fs::open(
+        slave_path.as_c_str(),
+        rustix::fs::OFlags::RDWR | rustix::fs::OFlags::NOCTTY | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::empty(),
+    )
+    .unwrap();
+    wait_permission_prompt(&master);
+    wait_permission_decision(&f, "expired");
+    // The original pending request has ended. Its raw answer may still arrive
+    // on the PTY, but this run must not ask for or dispatch a subsequent tool.
+    let _ = rustix::io::write(&master, b"y\n");
+    let r = wait_permission_episode(child);
+    assert!(
+        !r.status.success(),
+        "{}",
+        String::from_utf8_lossy(&r.stdout)
+    );
+    // stderr belongs to the real PTY slave, not Child::Output.stderr.
+    let mut terminal = Vec::new();
+    loop {
+        let mut poll = [rustix::event::PollFd::new(
+            &master,
+            rustix::event::PollFlags::IN,
+        )];
+        if rustix::event::poll(
+            &mut poll,
+            Some(&rustix::event::Timespec {
+                tv_sec: 0,
+                tv_nsec: 20_000_000,
+            }),
+        )
+        .unwrap()
+            == 0
+        {
+            break;
+        }
+        let mut chunk = [0; 4096];
+        match rustix::io::read(&master, &mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                terminal.extend_from_slice(&chunk[..n]);
+                assert!(terminal.len() <= 65536);
+            }
+        }
+    }
+    assert!(
+        String::from_utf8_lossy(&terminal).contains("permission_timeout"),
+        "{}",
+        String::from_utf8_lossy(&terminal)
+    );
+    assert!(started.elapsed() < Duration::from_secs(15));
+    assert!(!f.root.path().join("workspace/expired.txt").exists());
+    assert!(!f.root.path().join("workspace/late.txt").exists());
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
+    let rows = peer_store::ApprovalStore::new(f.root.path())
+        .list(Some("w"), None)
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["state"], "expired");
+    assert_eq!(rows[0]["decidedBy"], "policy");
+    assert_eq!(rows[0]["decisionReason"], "permission_timeout");
+    let message = f
+        .history()
+        .into_iter()
+        .find(|m| m["permissionGrants"].is_array())
+        .unwrap();
+    assert_eq!(message["permissionGrants"][0]["granted"], false);
+    assert_eq!(
+        message["permissionGrants"][0]["reason"],
+        "permission_timeout"
+    );
+    let result = &message["segments"][0]["result"];
+    assert_eq!(result["status"], "failed");
+    assert_eq!(result["error"]["code"], "permission_timeout");
+    assert_eq!(result["evidence"]["dispatchOutcome"], "not_dispatched");
+    assert_eq!(
+        get(f.root.path().join("goal-plans/p.json"))["status"],
+        "paused"
+    );
+    let budget = f.budget(|_| {});
+    assert_eq!(budget["toolCalls"], 1);
+    assert!(
+        budget["uncertainDispatches"]
+            .as_array()
+            .is_none_or(Vec::is_empty)
+    );
+    let prior_history = std::fs::read(f.root.path().join("conversations/c.jsonl")).unwrap();
+    f.seed("p2", "c2", "s2", "work2", "epoch2");
+    let later = f.command("exec", "p2").output().unwrap();
+    assert!(
+        later.status.success(),
+        "{}",
+        String::from_utf8_lossy(&later.stderr)
+    );
+    assert!(!f.root.path().join("workspace/late.txt").exists());
+    assert_eq!(server.requests.lock().unwrap().len(), 3);
+    let approvals = peer_store::ApprovalStore::new(f.root.path())
+        .list(Some("w"), None)
+        .unwrap();
+    assert_eq!(
+        approvals
+            .iter()
+            .find(|r| r["approvalId"] == rows[0]["approvalId"]),
+        Some(&rows[0])
+    );
+    assert_eq!(
+        std::fs::read(f.root.path().join("conversations/c.jsonl")).unwrap(),
+        prior_history
+    );
 }
 
 #[test]

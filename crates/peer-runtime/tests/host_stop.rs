@@ -360,6 +360,128 @@ fn call() -> peer_runtime::session_host::HostCallIdentity<'static> {
         shell_risk: None,
     }
 }
+#[tokio::test(start_paused = true)]
+async fn pending_permission_has_a_five_minute_deadline_and_late_approval_cannot_grant() {
+    use peer_runtime::session_host::LocalPermissionDecision;
+    let mut f = fixture();
+    prepare_authority(&mut f);
+    let attempt = f.host.live.begin(&f.execution).unwrap();
+    let args = json!({"path":"example.txt"});
+    let pending = f.host.request_permission(call(), &args, NOW).unwrap();
+    assert_eq!(pending.record()["deadlineAt"], "2026-11-14T04:05:00.000Z");
+    tokio::time::advance(Duration::from_secs(300)).await;
+    let error = f
+        .host
+        .decide_permission(pending, LocalPermissionDecision::Approve, &args, NOW);
+    assert!(matches!(
+        error,
+        Err(peer_runtime::session_host::HostError("permission_timeout"))
+    ));
+    let rows = peer_store::ApprovalStore::new(f.root.path())
+        .list(Some("w"), None)
+        .unwrap();
+    assert_eq!(rows[0]["state"], "expired");
+    assert_eq!(rows[0]["decidedBy"], "policy");
+    assert_eq!(rows[0]["decisionReason"], "permission_timeout");
+    attempt.finish();
+}
+#[tokio::test]
+async fn changed_permission_arguments_expire_the_original_request_without_invalid_store_reason() {
+    use peer_runtime::session_host::LocalPermissionDecision;
+    let mut f = fixture();
+    prepare_authority(&mut f);
+    let attempt = f.host.live.begin(&f.execution).unwrap();
+    let pending = f
+        .host
+        .request_permission(call(), &json!({"path":"original.txt"}), NOW)
+        .unwrap();
+    let error = f.host.decide_permission(
+        pending,
+        LocalPermissionDecision::Approve,
+        &json!({"path":"other.txt"}),
+        NOW,
+    );
+    assert!(matches!(
+        error,
+        Err(peer_runtime::session_host::HostError(
+            "permission_authority_changed"
+        ))
+    ));
+    let rows = peer_store::ApprovalStore::new(f.root.path())
+        .list(Some("w"), None)
+        .unwrap();
+    assert_eq!(rows[0]["state"], "expired");
+    assert_eq!(rows[0]["decidedBy"], "policy");
+    assert!(rows[0].get("decisionReason").is_none());
+    attempt.finish();
+}
+#[tokio::test]
+async fn pending_wall_expiry_does_not_expire_an_already_issued_once_grant() {
+    use peer_runtime::session_host::LocalPermissionDecision;
+    let mut f = fixture();
+    prepare_authority(&mut f);
+    let attempt = f.host.live.begin(&f.execution).unwrap();
+    let args = json!({"path":"example.txt"});
+    let pending = f.host.request_permission(call(), &args, NOW).unwrap();
+    let error = f.host.decide_permission(
+        pending,
+        LocalPermissionDecision::Approve,
+        &args,
+        "2026-11-14T04:05:00.000Z",
+    );
+    assert!(matches!(
+        error,
+        Err(peer_runtime::session_host::HostError("permission_timeout"))
+    ));
+    let pending = f.host.request_permission(call(), &args, NOW).unwrap();
+    let grant = f
+        .host
+        .decide_permission(
+            pending,
+            LocalPermissionDecision::Approve,
+            &args,
+            "2026-11-14T04:04:59.999Z",
+        )
+        .unwrap()
+        .unwrap();
+    f.host
+        .validate_permission(&grant, &args, "2026-11-14T04:05:00.001Z")
+        .unwrap();
+    let rows = peer_store::ApprovalStore::new(f.root.path())
+        .list(Some("w"), None)
+        .unwrap();
+    assert_eq!(rows.iter().filter(|r| r["state"] == "approved").count(), 1);
+    assert_eq!(rows.iter().filter(|r| r["state"] == "expired").count(), 1);
+    attempt.finish();
+}
+#[tokio::test]
+async fn a_previously_closed_pending_request_cannot_be_approved_by_a_late_reply() {
+    use peer_runtime::session_host::LocalPermissionDecision;
+    use peer_store::{ApprovalDecision, ApprovalState, ApprovalStore};
+    let mut f = fixture();
+    prepare_authority(&mut f);
+    let attempt = f.host.live.begin(&f.execution).unwrap();
+    let args = json!({"path":"example.txt"});
+    let pending = f.host.request_permission(call(), &args, NOW).unwrap();
+    let store = ApprovalStore::new(f.root.path());
+    let closed = store
+        .decide(
+            pending.record(),
+            ApprovalState::Cancelled,
+            ApprovalDecision::Policy,
+            NOW,
+            Some("permission_cancelled"),
+            None,
+        )
+        .unwrap();
+    assert!(
+        f.host
+            .decide_permission(pending, LocalPermissionDecision::Approve, &args, NOW)
+            .is_err()
+    );
+    assert_eq!(store.list(Some("w"), None).unwrap(), vec![closed]);
+    attempt.finish();
+}
 #[tokio::test]
 async fn live_approval_is_bound_to_args_and_current_policy_at_dispatch() {
     use peer_protocol::LocalAccessLevel;
