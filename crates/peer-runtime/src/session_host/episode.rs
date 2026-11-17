@@ -31,16 +31,7 @@ pub struct EpisodeOutcome {
     pub lifetime_usage: Option<Value>,
     pub context_accounting: Value,
 }
-pub(crate) fn now() -> String {
-    time::OffsetDateTime::now_utc()
-        .format(
-            &time::format_description::parse_borrowed::<2>(
-                "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z",
-            )
-            .expect("timestamp format"),
-        )
-        .expect("UTC timestamp")
-}
+pub(crate) use crate::capability::now;
 impl NativeSessionHost {
     pub async fn run_episode(
         &mut self,
@@ -222,7 +213,6 @@ impl NativeSessionHost {
         let native_recorder = json!({"schemaVersion":1,"runtime":"peer-native","execution":facts["execution"],"recorder":recorder});
         let mut providers = ProviderRegistry::with_mcp(
             &mcp_inventory,
-            &current.resource,
             &native_recorder,
             &self.home,
             mcp_credentials.clone(),
@@ -535,7 +525,10 @@ impl NativeSessionHost {
             }
             // Registry capacity and the actual completion owner exist BEFORE
             // spawn. No rejected registration can leave an unowned child.
-            let future = match effect.start(self, grant, owned.clone(), &now()) {
+            let future = match effect.start(
+                crate::providers::ProviderCall::new(grant.conversation_id(), call, &now()),
+                owned.clone(),
+            ) {
                 Ok(future) => future,
                 Err(e) => Box::pin(async move { EffectOutcome::failed(e.0) }),
             };
@@ -574,7 +567,10 @@ impl NativeSessionHost {
             }
             Ok(outcome)
         } else {
-            match effect.start(self, grant, owned.clone(), &now()) {
+            match effect.start(
+                crate::providers::ProviderCall::new(grant.conversation_id(), call, &now()),
+                owned.clone(),
+            ) {
                 Ok(future) => {
                     self.wait_effect(
                         future,

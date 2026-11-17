@@ -352,12 +352,9 @@ impl PreparedEffect for FileEffect {
     }
     fn start(
         mut self: Box<Self>,
-        host: &mut NativeSessionHost,
-        grant: &HostPermissionGrant,
+        _call: ProviderCall,
         cancel: CancellationToken,
-        now: &str,
     ) -> Result<EffectFuture, HostError> {
-        host.validate_permission(grant, &self.args, now)?;
         let port = self
             .port
             .take()

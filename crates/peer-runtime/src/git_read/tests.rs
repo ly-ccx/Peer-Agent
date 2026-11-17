@@ -1,5 +1,65 @@
 use super::*;
+use std::time::Instant;
 use std::{fs, os::unix::fs::PermissionsExt, process::Command, sync::Mutex};
+struct SlowAdmission;
+impl GitReadAuthority for SlowAdmission {
+    fn check(&self) -> AuthorityFuture<'_> {
+        Box::pin(async { Ok(()) })
+    }
+    fn authorize<'a>(&'a self, _: &'a Path) -> AuthorityFuture<'a> {
+        self.check()
+    }
+    fn starting(&self) -> AuthorityFuture<'_> {
+        Box::pin(async {
+            tokio::time::sleep(Duration::from_millis(2200)).await;
+            Ok(())
+        })
+    }
+}
+#[tokio::test]
+async fn host_admission_wait_does_not_consume_the_actual_git_execution_window() {
+    let f = Fixture::new();
+    let mut budget = 1024;
+    let started = Instant::now();
+    let output = command::run(command::Request {
+        binary: Path::new("/usr/bin/git"),
+        cwd: &f.path,
+        binding: &[],
+        filters: &[],
+        common: None,
+        args: &["--version"],
+        budget: &mut budget,
+        deadline: command::Deadline::Execution(Duration::from_secs(2)),
+        authority: &SlowAdmission,
+        cancel: &CancellationToken::new(),
+    })
+    .await
+    .unwrap();
+    assert_eq!(output.code, 0);
+    assert!(String::from_utf8_lossy(&output.stdout).contains("git version"));
+    assert!(started.elapsed() >= Duration::from_millis(2200));
+    assert!(output.execution_elapsed < Duration::from_secs(2));
+}
+
+#[tokio::test]
+async fn reconciliation_deadline_still_includes_the_same_admission_wait() {
+    let f = Fixture::new();
+    let mut budget = 1024;
+    let result = command::run(command::Request {
+        binary: Path::new("/usr/bin/git"),
+        cwd: &f.path,
+        binding: &[],
+        filters: &[],
+        common: None,
+        args: &["--version"],
+        budget: &mut budget,
+        deadline: command::Deadline::Total(tokio::time::Instant::now() + Duration::from_secs(2)),
+        authority: &SlowAdmission,
+        cancel: &CancellationToken::new(),
+    })
+    .await;
+    assert_eq!(result.err().unwrap().code, "git_query_timeout");
+}
 struct Fixture {
     root: Option<tempfile::TempDir>,
     path: PathBuf,
@@ -303,7 +363,9 @@ async fn command_cancellation_timeout_revocation_and_output_limit_reap_the_real_
             // The real owned interpreter must be observed before checking its
             // group. A150ms deadline can expire during macOS exec startup.
             // Keep the separate3s readiness assertion; product remains15s.
-            wait: Duration::from_secs(5),
+            deadline: command::Deadline::Total(
+                tokio::time::Instant::now() + Duration::from_secs(5),
+            ),
             authority: &authority,
             cancel: &cancel,
         });

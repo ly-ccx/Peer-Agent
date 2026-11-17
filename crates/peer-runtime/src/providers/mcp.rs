@@ -1,12 +1,9 @@
 //! MCP Adapter at the same Provider/Projection/Grant seam as native file/Shell.
 use super::*;
 use crate::{effect_admission::native_mcp_metadata, recorder::Recorder};
-use peer_store::{HostResourcePlan, McpRegistrySnapshot, McpRegistryStore};
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
-use tokio::sync::{mpsc, oneshot};
+use peer_store::{McpRegistrySnapshot, McpRegistryStore};
+use std::{collections::HashMap, sync::Arc};
+use tokio::sync::{Mutex, mpsc, oneshot};
 mod session;
 struct Cell {
     requests: mpsc::Sender<session::Request>,
@@ -16,14 +13,12 @@ pub(super) struct McpProvider {
     configs: HashMap<String, Value>,
     credentials: crate::mcp_oauth::CredentialEpoch,
     revision: String,
-    resource: HostResourcePlan,
     owner: Recorder,
     pool: Arc<Mutex<HashMap<String, Arc<Cell>>>>,
 }
 impl McpProvider {
     pub fn new(
         snapshot: &McpRegistrySnapshot,
-        resource: &HostResourcePlan,
         owner: &Value,
         _home: &Path,
         credentials: crate::mcp_oauth::CredentialEpoch,
@@ -82,7 +77,6 @@ impl McpProvider {
             configs,
             credentials,
             revision: snapshot.source_revision.clone(),
-            resource: resource.clone(),
             owner,
             pool: Arc::new(Mutex::new(HashMap::new())),
         })
@@ -94,7 +88,6 @@ struct McpEffect {
     credentials: crate::mcp_oauth::CredentialEpoch,
     metadata: Value,
     revision: String,
-    resource: HostResourcePlan,
     owner: Recorder,
     pool: Arc<Mutex<HashMap<String, Arc<Cell>>>>,
     port: Option<EffectAdmission>,
@@ -136,7 +129,6 @@ impl CapabilityProvider for McpProvider {
             credentials: self.credentials.clone(),
             metadata: json!({"evidenceKind":"local_mcp_tool_call","serverId":id,"providerId":id,"transport":manifest["origin"]["transport"],"toolName":manifest["origin"]["toolName"]}),
             revision: self.revision.clone(),
-            resource: self.resource.clone(),
             owner: self.owner.clone(),
             pool: self.pool.clone(),
             port: None,
@@ -177,12 +169,9 @@ impl PreparedEffect for McpEffect {
     }
     fn start(
         self: Box<Self>,
-        host: &mut NativeSessionHost,
-        grant: &HostPermissionGrant,
+        _call: ProviderCall,
         cancel: CancellationToken,
-        now: &str,
     ) -> Result<EffectFuture, HostError> {
-        host.validate_permission(grant, &self.args, now)?;
         if McpRegistryStore::new(&self.home).read()?.source_revision != self.revision {
             return Err(HostError("native_capability_inventory_changed"));
         }
@@ -191,56 +180,83 @@ impl PreparedEffect for McpEffect {
             .port
             .clone()
             .ok_or(HostError("execution_admission_closed"))?;
-        let server = self.metadata["serverId"].as_str().unwrap().to_owned();
-        let cell = {
-            let mut pool = self
-                .pool
-                .lock()
-                .map_err(|_| HostError("mcp_pool_unavailable"))?;
-            if let Some(cell) = pool.get(&server) {
-                cell.clone()
-            } else {
-                if pool.len() >= crate::mcp::LIMITS["maxConnections"].as_u64().unwrap() as usize {
-                    return Err(HostError("mcp_connection_limit"));
-                }
-                let (sender, receiver) = mpsc::channel(8);
-                let cell = Arc::new(Cell { requests: sender });
-                let handle = format!("mcp-connection-{}", uuid::Uuid::new_v4());
-                let call = grant.facts()["toolCallId"]
-                    .as_str()
-                    .ok_or(HostError("access_identity_invalid"))?
-                    .to_owned();
-                host.resources.mark_handle(&self.resource,&json!({"handleId":handle,"toolCallId":call,"state":"active","nativeMcp":native_mcp_metadata(self.metadata["transport"].as_str().unwrap(),&self.revision,&json!(self.owner),"connection")}),now)?;
-                let session = session::Session {
-                    config: self.config.clone(),
-                    home: self.home.clone(),
-                    credentials: self.credentials.clone(),
-                    server: server.clone(),
-                    handle: handle.clone(),
-                    owner: self.owner.clone(),
-                    receiver,
-                };
-                let owned = cancel.child_token();
-                let slot = host.live.track_handle(
-                    &self.resource.execution,
-                    &handle,
-                    &call,
-                    owned.clone(),
-                    session.run(owned),
-                );
-                if slot.is_err() {
-                    host.resources.mark_handle(
-                        &self.resource,
-                        &json!({"handleId":handle,"toolCallId":call,"state":"ended"}),
-                        now,
-                    )?;
-                    return Err(HostError("mcp_connection_owner_unavailable"));
-                }
-                pool.insert(server, cell.clone());
-                cell
-            }
-        };
         Ok(Box::pin(async move {
+            if let Err(error) = port.check().await {
+                return EffectOutcome::not_dispatched(error.0);
+            }
+            let server = self.metadata["serverId"].as_str().unwrap().to_owned();
+            let cell = {
+                let mut pool = tokio::select! { biased;
+                    _=cancel.cancelled()=>return EffectOutcome::not_dispatched("CANCELLED"),
+                    pool=self.pool.lock()=>pool,
+                };
+                if let Some(cell) = pool.get(&server) {
+                    cell.clone()
+                } else {
+                    if pool.len() >= crate::mcp::LIMITS["maxConnections"].as_u64().unwrap() as usize
+                    {
+                        return EffectOutcome::not_dispatched("mcp_connection_limit");
+                    }
+                    let (sender, receiver) = mpsc::channel(8);
+                    let cell = Arc::new(Cell { requests: sender });
+                    let handle = format!("mcp-connection-{}", uuid::Uuid::new_v4());
+                    let session = session::Session {
+                        config: self.config.clone(),
+                        home: self.home.clone(),
+                        credentials: self.credentials.clone(),
+                        server: server.clone(),
+                        handle: handle.clone(),
+                        owner: self.owner.clone(),
+                        receiver,
+                    };
+                    let owned = cancel.child_token();
+                    let metadata = native_mcp_metadata(
+                        self.metadata["transport"].as_str().unwrap(),
+                        &self.revision,
+                        &json!(self.owner),
+                        "connection",
+                    );
+                    #[cfg(feature = "test-fixtures")]
+                    let metadata = {
+                        let mut metadata = metadata;
+                        if self.home.join(".native-cli-fixture").is_file() {
+                            match std::env::var("PEER_NATIVE_CONNECTION_FAULT").as_deref() {
+                                Ok("owner") => {
+                                    metadata["ownerRecorder"]["hostId"] =
+                                        json!("fixture-wrong-owner")
+                                }
+                                Ok("owner-start") => {
+                                    metadata["ownerRecorder"]["pidStart"] =
+                                        json!("fixture-wrong-start")
+                                }
+                                Ok("owner-boot") => {
+                                    metadata["ownerRecorder"]["bootId"] =
+                                        json!("fixture-wrong-boot")
+                                }
+                                Ok("role") => metadata["role"] = json!("tool"),
+                                Ok("transport") => metadata["transport"] = json!("unsupported"),
+                                Ok("known-transport") => metadata["transport"] = json!("sse"),
+                                Ok("revision") => metadata["registryRevision"] = json!("changed"),
+                                _ => (),
+                            }
+                        }
+                        metadata
+                    };
+                    if let Err(error) = port
+                        .connection(
+                            handle,
+                            metadata,
+                            owned.clone(),
+                            Box::pin(session.run(owned)),
+                        )
+                        .await
+                    {
+                        return EffectOutcome::not_dispatched(error.0);
+                    }
+                    pool.insert(server, cell.clone());
+                    cell
+                }
+            };
             let (reply, receive) = oneshot::channel();
             let request = session::Request {
                 args: self.args.clone(),

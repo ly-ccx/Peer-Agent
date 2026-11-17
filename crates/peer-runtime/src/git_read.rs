@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
     pin::Pin,
     sync::OnceLock,
-    time::{Duration, Instant},
+    time::Duration,
 };
 pub(crate) mod command;
 #[cfg(test)]
@@ -166,7 +166,6 @@ impl Query<'_> {
         if wait.is_zero() {
             return Err(GitReadError::new("git_query_timeout"));
         }
-        let started = Instant::now();
         let result = command::run(command::Request {
             binary: self.binary,
             cwd: &self.path,
@@ -175,13 +174,13 @@ impl Query<'_> {
             common: self.common.as_deref(),
             args,
             budget: &mut self.remaining,
-            wait,
+            deadline: command::Deadline::Execution(wait),
             authority: self.authority,
             cancel: self.cancel,
         })
         .await;
-        self.execution += started.elapsed();
         let raw = result?;
+        self.execution += raw.execution_elapsed;
         let output = Output {
             code: raw.code,
             stdout: String::from_utf8_lossy(&raw.stdout).into_owned(),
@@ -235,7 +234,7 @@ impl GitRead {
         cancel: &CancellationToken,
     ) -> Result<Value, GitReadError> {
         let input = input(value)?;
-        let started = crate::session_host::episode_time();
+        let started = crate::capability::now();
         if cancel.is_cancelled() {
             return Err(GitReadError::new("git_query_cancelled"));
         }
@@ -434,7 +433,7 @@ impl GitRead {
         if let Some(raw) = &raw {
             consistent = consistent && *raw == q.run(&status_args, &[0]).await?.stdout;
         }
-        let mut result = json!({"repositoryPath":repository,"gitDirectory":git,"commonDirectory":common,"configurationSources":sources,"operation":input.operation,"startedAt":started,"finishedAt":crate::session_host::episode_time(),"head":before["head"],"branch":before["branch"],"unborn":before["head"].is_null(),"origin":origin,"consistent":consistent,"atomic":false,"commits":commits});
+        let mut result = json!({"repositoryPath":repository,"gitDirectory":git,"commonDirectory":common,"configurationSources":sources,"operation":input.operation,"startedAt":started,"finishedAt":crate::capability::now(),"head":before["head"],"branch":before["branch"],"unborn":before["head"].is_null(),"origin":origin,"consistent":consistent,"atomic":false,"commits":commits});
         if let Some(raw) = raw {
             let mut fields = raw.split('\0').filter(|s| !s.is_empty());
             let mut entries = Vec::new();

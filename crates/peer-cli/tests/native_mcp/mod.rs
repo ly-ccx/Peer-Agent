@@ -71,6 +71,75 @@ fn stdio_grant_transport_result_evidence_and_owned_stop_are_native() {
         0
     );
 }
+
+#[cfg(feature = "test-fixtures")]
+#[test]
+fn host_rejects_unbound_connection_metadata_before_polling_a_transport_driver() {
+    for fault in [
+        "owner",
+        "owner-start",
+        "owner-boot",
+        "role",
+        "transport",
+        "known-transport",
+        "revision",
+    ] {
+        let server = Server::new(vec![
+            reply_tool("mcp__s__read_fact", json!({})),
+            reply_text("Rejected before transport."),
+            reply_tool("mcp__s__read_fact", json!({})),
+            reply_text("Later real transport."),
+        ]);
+        let f = Fixture::new(&server);
+        registry(&f, "");
+        let output = f
+            .command("exec", "p")
+            .env("PEER_NATIVE_CONNECTION_FAULT", fault)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{fault}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            !f.root.path().join("mcp.pid").exists(),
+            "unregistered driver must never be polled/spawned"
+        );
+        assert!(requests(&f).is_empty());
+        let history = f.history();
+        let message = history
+            .iter()
+            .find(|m| m["segments"][0]["tool"] == "mcp__s__read_fact")
+            .unwrap();
+        assert_eq!(message["permissionGrants"][0]["granted"], true);
+        let result = &message["segments"][0]["result"];
+        assert_eq!(result["error"]["code"], "mcp_handle_invalid");
+        assert_eq!(result["evidence"]["dispatchOutcome"], "not_dispatched");
+        assert_eq!(
+            f.budget(|_| {})["uncertainDispatches"]
+                .as_array()
+                .map_or(0, Vec::len),
+            0
+        );
+        f.seed("p2", "c2", "s2", "work2", "epoch2");
+        let later = f.command("exec", "p2").output().unwrap();
+        assert!(
+            later.status.success(),
+            "{}",
+            String::from_utf8_lossy(&later.stderr)
+        );
+        assert_eq!(
+            requests(&f)
+                .iter()
+                .filter(|v| v["method"] == "tools/call")
+                .count(),
+            1
+        );
+        assert_eq!(f.history(), history);
+        assert_eq!(server.requests.lock().unwrap().len(), 4);
+    }
+}
 #[test]
 fn ask_denies_before_transport_and_does_not_turn_visibility_into_permission() {
     let server = Server::new(vec![

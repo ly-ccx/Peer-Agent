@@ -49,9 +49,9 @@ impl Query<'_> {
         if self.cancel.is_cancelled() {
             return Err(GitProbeError("git_query_cancelled"));
         }
-        let wait = Duration::from_secs(10)
-            .checked_sub(self.started.elapsed())
-            .ok_or(GitProbeError("git_query_timeout"))?;
+        if self.started.elapsed() >= Duration::from_secs(10) {
+            return Err(GitProbeError("git_query_timeout"));
+        }
         let raw = command::run(command::Request {
             binary: self.binary,
             cwd: &self.root,
@@ -60,7 +60,9 @@ impl Query<'_> {
             common: self.common.as_deref(),
             args,
             budget: &mut self.remaining,
-            wait,
+            deadline: command::Deadline::Total(tokio::time::Instant::from_std(
+                self.started + Duration::from_secs(10),
+            )),
             authority: &ProbeAuthority,
             cancel: self.cancel,
         })

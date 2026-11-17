@@ -11,6 +11,7 @@ mod native_network;
 #[cfg(feature = "test-fixtures")]
 mod native_parent_controls;
 mod native_parents;
+mod native_provider_host;
 mod native_result_encoding;
 mod native_web;
 use peer_store::{

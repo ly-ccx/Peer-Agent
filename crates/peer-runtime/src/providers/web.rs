@@ -107,21 +107,15 @@ impl PreparedEffect for Fetch {
     }
     fn start(
         mut self: Box<Self>,
-        host: &mut NativeSessionHost,
-        grant: &HostPermissionGrant,
+        call: ProviderCall,
         cancel: CancellationToken,
-        now: &str,
     ) -> Result<EffectFuture, HostError> {
-        host.validate_permission(grant, &self.args, now)?;
         let port = self
             .port
             .take()
             .ok_or(HostError("execution_admission_closed"))?;
-        let conversation = grant.conversation_id().to_owned();
-        let call = grant.facts()["toolCallId"]
-            .as_str()
-            .ok_or(HostError("access_identity_invalid"))?
-            .to_owned();
+        let conversation = call.conversation_id().to_owned();
+        let call = call.tool_call_id().to_owned();
         Ok(Box::pin(async move {
             let pool = MEMORY.get_or_init(|| Arc::new(Semaphore::new(1))).clone();
             let permit = tokio::select! {biased;_=cancel.cancelled()=>return EffectOutcome::not_dispatched("CANCELLED"),p=pool.acquire_owned()=>match p{Ok(p)=>p,Err(_)=>return EffectOutcome::not_dispatched("web_fetch_unavailable")}};

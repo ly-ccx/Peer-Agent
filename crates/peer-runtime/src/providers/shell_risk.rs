@@ -1,5 +1,5 @@
 //! Port of the existing Node shell classifier, including wrapper/segment rules.
-use crate::session_host::HostShellRisk;
+use crate::capability::ShellRisk as HostShellRisk;
 fn has(set: &str, name: &str) -> bool {
     set.split(' ').any(|s| s == name)
 }

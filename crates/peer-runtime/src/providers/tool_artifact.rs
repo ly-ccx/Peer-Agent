@@ -67,13 +67,10 @@ impl PreparedEffect for ReadArtifact {
     }
     fn start(
         mut self: Box<Self>,
-        host: &mut NativeSessionHost,
-        grant: &HostPermissionGrant,
+        call: ProviderCall,
         cancel: CancellationToken,
-        now: &str,
     ) -> Result<EffectFuture, HostError> {
-        host.validate_permission(grant, &self.args, now)?;
-        let conversation = grant.conversation_id().to_owned();
+        let conversation = call.conversation_id().to_owned();
         if self.reference.conversation_id != conversation {
             return Ok(Box::pin(async {
                 EffectOutcome::not_dispatched("artifact_invalid")

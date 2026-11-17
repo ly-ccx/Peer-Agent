@@ -7,14 +7,6 @@ use peer_store::{
 };
 use tokio::sync::OwnedSemaphorePermit;
 
-/// Trusted Provider manifest classification, never deserialized from call args.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum ProviderPermission {
-    Read,
-    FileWrite,
-    Shell,
-    Mcp,
-}
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum HostExecutionRole {
     Worker,
@@ -22,27 +14,6 @@ pub enum HostExecutionRole {
     Explorer,
     Verifier,
     VisualVerifier,
-}
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum HostShellRisk {
-    Inert,
-    LocalRead,
-    LocalWrite,
-    ExternalWrite,
-    Privileged,
-    Destructive,
-}
-impl HostShellRisk {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Inert => "L0_inert",
-            Self::LocalRead => "L1_local_read",
-            Self::LocalWrite => "L2_local_write",
-            Self::ExternalWrite => "L3_external_write",
-            Self::Privileged => "L4_privileged",
-            Self::Destructive => "L5_destructive",
-        }
-    }
 }
 #[derive(Clone, Copy)]
 pub struct HostCallIdentity<'a> {
@@ -698,17 +669,5 @@ fn policy_stamp(policy: &BotAccessPolicy) -> String {
     format!(
         "bot:{}:{}:{}",
         policy.workspace_id, policy.conversation_id, policy.revision
-    )
-}
-pub(crate) fn read_capability(capability: &str) -> bool {
-    matches!(
-        capability,
-        "local.file.read"
-            | "local.tool-result.read"
-            | "local.file.list"
-            | "local.file.search"
-            | "local.search.aggregate"
-            | "local.image.read"
-            | "local.git.query"
     )
 }

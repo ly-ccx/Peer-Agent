@@ -106,7 +106,7 @@ pub(super) async fn fetch(
         port.check().await.map_err(|e| e.0)?;
         let mut current = normalize(args["url"].as_str().unwrap(), None)?;
         let requested = current.to_string();
-        let started_at = crate::session_host::episode_time();
+        let started_at = crate::capability::now();
         let timeout = args["timeoutMs"]
             .as_f64()
             .unwrap_or(30000.0)

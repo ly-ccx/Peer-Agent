@@ -93,6 +93,10 @@ impl NativeSessionHost {
                                     let mut raw=raw;raw["nativeMcp"]["childRecorder"]=serde_json::to_value(recorder).map_err(|_|HostError("mcp_handle_invalid"))?;
                                     self.resources.mark_handle(a.resource,&raw,&episode_time())?;Ok(())
                                 });let _=reply.send(result);
+                            },
+                            AdmissionRequest::Connection{handle,metadata,cancel,driver,reply}=>{
+                                let result=valid.and_then(|_|self.register_connection(a,handle,metadata,cancel,driver));
+                                let _=reply.send(result);
                             }
                         }
                     }else{authorization=None;}

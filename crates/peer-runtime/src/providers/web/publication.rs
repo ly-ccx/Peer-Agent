@@ -52,7 +52,7 @@ pub(super) fn save(
         known = Some(reference.clone());
         guard.check()?;
         let fetch_id = uuid::Uuid::new_v4().to_string();
-        let at = crate::session_host::episode_time();
+        let at = crate::capability::now();
         let date = &at[..10];
         let metadata = json!({"schemaVersion":1,"fetchId":fetch_id,"toolCallId":call,"requestedUrl":requested,"finalUrl":final_url,"title":title,"contentType":mime,"httpStatus":status,"fetchMode":"http","startedAt":started_at,"completedAt":at,"contentTruncated":text.truncated,"contentChars":content.encode_utf16().count(),"contentLines":content.split('\n').count(),"sourceContentChars":text.source_units,"redacted":redacted,"nativeContentRef":reference,"contentHash":reference.sha256});
         let published = WebArtifactStore::new(home)

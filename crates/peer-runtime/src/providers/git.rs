@@ -109,18 +109,15 @@ impl PreparedEffect for ReadGit {
     }
     fn start(
         mut self: Box<Self>,
-        host: &mut NativeSessionHost,
-        grant: &HostPermissionGrant,
+        call: ProviderCall,
         cancel: CancellationToken,
-        now: &str,
     ) -> Result<EffectFuture, HostError> {
-        host.validate_permission(grant, &self.args, now)?;
         let path = self.path.as_ref().map_err(|e| *e)?.clone();
         let port = self
             .port
             .take()
             .ok_or(HostError("execution_admission_closed"))?;
-        let conversation = grant.conversation_id().to_owned();
+        let conversation = call.conversation_id().to_owned();
         let limit = crate::git_read::input(&self.args)
             .map_err(|e| HostError(e.code))?
             .limit;

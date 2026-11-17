@@ -6,6 +6,7 @@ use std::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     },
+    time::Instant,
 };
 use tokio::{
     io::{AsyncRead, AsyncReadExt},
@@ -15,6 +16,14 @@ pub(crate) struct Output {
     pub code: i32,
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
+    pub execution_elapsed: Duration,
+}
+/// Reconciliation keeps its absolute total deadline. A tool separately owns
+/// bounded Host admission, then charges only its real launched command window.
+#[derive(Clone, Copy)]
+pub(crate) enum Deadline {
+    Total(tokio::time::Instant),
+    Execution(Duration),
 }
 pub(crate) struct Request<'a> {
     pub binary: &'a Path,
@@ -24,7 +33,7 @@ pub(crate) struct Request<'a> {
     pub common: Option<&'a Path>,
     pub args: &'a [&'a str],
     pub budget: &'a mut usize,
-    pub wait: Duration,
+    pub deadline: Deadline,
     pub authority: &'a dyn GitReadAuthority,
     pub cancel: &'a CancellationToken,
 }
@@ -63,7 +72,6 @@ async fn collect(
     }
 }
 pub(crate) async fn run(request: Request<'_>) -> Result<Output, GitReadError> {
-    let deadline = tokio::time::Instant::now() + request.wait;
     let mut command = Command::new(request.binary);
     command
         .args([
@@ -118,14 +126,26 @@ pub(crate) async fn run(request: Request<'_>) -> Result<Output, GitReadError> {
     }
     command.process_group(0);
     request.authority.check().await?;
-    tokio::time::timeout_at(deadline, request.authority.starting())
+    let (admission_deadline, admission_error) = match request.deadline {
+        Deadline::Total(deadline) => (deadline, "git_query_timeout"),
+        Deadline::Execution(_) => (
+            tokio::time::Instant::now() + Duration::from_secs(5),
+            "git_query_admission_timeout",
+        ),
+    };
+    tokio::time::timeout_at(admission_deadline, request.authority.starting())
         .await
-        .map_err(|_| GitReadError::new("git_query_timeout"))??;
+        .map_err(|_| GitReadError::new(admission_error))??;
     request.authority.check().await?;
     if request.cancel.is_cancelled() {
         return Err(GitReadError::new("git_query_cancelled"));
     }
-    if tokio::time::Instant::now() >= deadline {
+    let execution_start = tokio::time::Instant::now();
+    let deadline = match request.deadline {
+        Deadline::Total(deadline) => deadline,
+        Deadline::Execution(wait) => execution_start + wait,
+    };
+    if execution_start >= deadline {
         return Err(GitReadError::new("git_query_timeout"));
     }
     let mut child = command.spawn().map_err(|e| {
@@ -196,6 +216,7 @@ pub(crate) async fn run(request: Request<'_>) -> Result<Output, GitReadError> {
                     .ok_or_else(|| GitReadError::new("git_query_failed"))?,
                 stdout: out,
                 stderr: err,
+                execution_elapsed: execution_start.elapsed(),
             })
         }
         Err(e) => {

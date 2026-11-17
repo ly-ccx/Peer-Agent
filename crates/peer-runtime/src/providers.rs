@@ -2,9 +2,7 @@
 //! The model selects an alias in a projection, never a Provider or permission.
 use crate::{
     CancellationToken,
-    session_host::{
-        HostError, HostPermissionGrant, HostShellRisk, NativeSessionHost, ProviderPermission,
-    },
+    capability::{CapabilityError as HostError, ProviderPermission, ShellRisk as HostShellRisk},
 };
 use peer_protocol::ExecutionResourceScope;
 use serde_json::{Value, json};
@@ -22,6 +20,8 @@ mod web;
 pub use crate::effect_admission::EffectAdmission;
 pub(crate) use shell::group_absent;
 mod shell_risk;
+#[cfg(test)]
+mod tests;
 pub struct EffectOutcome {
     pub status: &'static str,
     pub output: Value,
@@ -55,6 +55,31 @@ impl EffectOutcome {
     }
 }
 pub type EffectFuture = Pin<Box<dyn Future<Output = EffectOutcome> + Send>>;
+/// Host-issued correlation facts, never an execution grant. All actual effects
+/// require a live response from the separately bound EffectAdmission port.
+pub struct ProviderCall {
+    conversation: String,
+    tool_call: String,
+    started_at: String,
+}
+impl ProviderCall {
+    pub(crate) fn new(conversation: &str, tool_call: &str, started_at: &str) -> Self {
+        Self {
+            conversation: conversation.into(),
+            tool_call: tool_call.into(),
+            started_at: started_at.into(),
+        }
+    }
+    pub fn conversation_id(&self) -> &str {
+        &self.conversation
+    }
+    pub fn tool_call_id(&self) -> &str {
+        &self.tool_call
+    }
+    pub fn started_at(&self) -> &str {
+        &self.started_at
+    }
+}
 pub use crate::tool_result_content::ToolOutputKind;
 pub trait PreparedEffect {
     fn output_kind(&self) -> ToolOutputKind {
@@ -88,14 +113,12 @@ pub trait PreparedEffect {
     fn owned_command(&self) -> bool {
         false
     }
-    /// Start owns the effect. It must revalidate the immutable grant directly
-    /// before open/rename/spawn and return an owned completion future.
+    /// Start owns a future, not permission. Before open/rename/spawn the actual
+    /// worker must obtain fresh admission from its Host-bound control port.
     fn start(
         self: Box<Self>,
-        host: &mut NativeSessionHost,
-        grant: &HostPermissionGrant,
+        call: ProviderCall,
         cancel: CancellationToken,
-        now: &str,
     ) -> Result<EffectFuture, HostError>;
 }
 pub trait CapabilityProvider {
@@ -139,7 +162,7 @@ impl ProviderRegistry {
     pub(crate) fn project_read_only(&self) -> Result<RuntimeProjection, HostError> {
         let mut p = self.project()?;
         p.tools
-            .retain(|t| crate::session_host::read_capability(&t.capability));
+            .retain(|t| crate::capability::read_capability(&t.capability));
         p.id = peer_protocol::javascript_json_digest(&json!(
             p.tools.iter().map(|t| &t.manifest).collect::<Vec<_>>()
         ))
@@ -148,7 +171,6 @@ impl ProviderRegistry {
     }
     pub(crate) fn with_mcp(
         snapshot: &peer_store::McpRegistrySnapshot,
-        resource: &peer_store::HostResourcePlan,
         owner: &Value,
         home: &Path,
         credentials: crate::mcp_oauth::CredentialEpoch,
@@ -156,7 +178,6 @@ impl ProviderRegistry {
         let mut registry = Self::default();
         registry.providers.push(Box::new(mcp::McpProvider::new(
             snapshot,
-            resource,
             owner,
             home,
             credentials,

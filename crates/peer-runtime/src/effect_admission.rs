@@ -1,7 +1,9 @@
 //! Bounded Host control port. An async Provider cannot mint a permission fact.
-use crate::{CancellationToken, recorder::Recorder, session_host::HostError};
+use crate::{CancellationToken, capability::CapabilityError as HostError, recorder::Recorder};
 use serde_json::Value;
+use std::{future::Future, pin::Pin};
 use tokio::sync::{mpsc, oneshot};
+pub(crate) type ConnectionDriver = Pin<Box<dyn Future<Output = Result<(), ()>> + Send>>;
 pub(crate) enum AdmissionRequest {
     Check(oneshot::Sender<Result<(), HostError>>),
     ReadScope {
@@ -16,6 +18,13 @@ pub(crate) enum AdmissionRequest {
     Child {
         handle: String,
         recorder: Recorder,
+        reply: oneshot::Sender<Result<(), HostError>>,
+    },
+    Connection {
+        handle: String,
+        metadata: Value,
+        cancel: CancellationToken,
+        driver: ConnectionDriver,
         reply: oneshot::Sender<Result<(), HostError>>,
     },
 }
@@ -97,6 +106,33 @@ impl EffectAdmission {
         self.request(|reply| AdmissionRequest::Child {
             handle,
             recorder,
+            reply,
+        })
+        .await
+    }
+    /// An unpolled transport belongs to the Host only after durable handle and
+    /// live-owner registration. A rejected/dropped request cannot start it.
+    pub(crate) async fn connection(
+        &self,
+        handle: String,
+        metadata: Value,
+        cancel: CancellationToken,
+        driver: ConnectionDriver,
+    ) -> Result<(), HostError> {
+        if handle.is_empty()
+            || handle.len() > 512
+            || serde_json::to_vec(&metadata)
+                .map_err(|_| HostError("mcp_handle_invalid"))?
+                .len()
+                > 64 * 1024
+        {
+            return Err(HostError("mcp_handle_invalid"));
+        }
+        self.request(|reply| AdmissionRequest::Connection {
+            handle,
+            metadata,
+            cancel,
+            driver,
             reply,
         })
         .await

@@ -15,21 +15,22 @@ use std::path::{Path, PathBuf};
 mod authority;
 mod billing;
 mod command_process;
+mod connection;
 mod context_pipeline;
 mod effect_wait;
 mod episode;
 mod read_scope;
 mod tool_authorization;
 mod tool_result;
-pub(crate) use episode::now as episode_time;
+pub(crate) use crate::capability::now as episode_time;
 pub use episode::{EpisodeOutcome, PermissionInput};
 mod recovery;
 mod stop;
 mod unknown;
-pub(crate) use authority::read_capability;
+pub(crate) use crate::capability::read_capability;
 pub use authority::{
-    HostCallIdentity, HostExecutionRole, HostPermissionGrant, HostShellRisk,
-    LocalPermissionDecision, PendingPermission, ProviderPermission,
+    HostCallIdentity, HostExecutionRole, HostPermissionGrant, LocalPermissionDecision,
+    PendingPermission,
 };
 pub struct NativeSessionHost {
     home: PathBuf,
@@ -40,34 +41,9 @@ pub struct NativeSessionHost {
     permissions: std::sync::Arc<tokio::sync::Semaphore>,
     mcp_credentials: Option<crate::mcp_oauth::CredentialEpoch>,
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct HostError(pub &'static str);
-impl std::fmt::Display for HostError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.0)
-    }
-}
-impl std::error::Error for HostError {}
-impl From<peer_store::StoreError> for HostError {
-    fn from(e: peer_store::StoreError) -> Self {
-        Self(e.code())
-    }
-}
-impl From<peer_store::GoalError> for HostError {
-    fn from(e: peer_store::GoalError) -> Self {
-        Self(e.code())
-    }
-}
-impl From<peer_store::CoordinationError> for HostError {
-    fn from(e: peer_store::CoordinationError) -> Self {
-        Self(e.code())
-    }
-}
-impl From<peer_store::ResourceError> for HostError {
-    fn from(e: peer_store::ResourceError) -> Self {
-        Self(e.code())
-    }
-}
+pub use crate::capability::{
+    CapabilityError as HostError, ProviderPermission, ShellRisk as HostShellRisk,
+};
 pub(super) struct Current {
     goal: GoalSnapshot,
     journal: CoordinationSnapshot,

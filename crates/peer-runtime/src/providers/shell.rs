@@ -10,6 +10,7 @@ struct ShellEffect {
     handle: String,
     home: PathBuf,
     risk: HostShellRisk,
+    port: Option<EffectAdmission>,
 }
 impl CapabilityProvider for ShellProvider {
     fn manifests(&self) -> Vec<(String, Value)> {
@@ -62,10 +63,14 @@ impl CapabilityProvider for ShellProvider {
             handle: format!("shell_{}", uuid::Uuid::new_v4()),
             home: home.into(),
             risk,
+            port: None,
         }))
     }
 }
 impl PreparedEffect for ShellEffect {
+    fn admission(&mut self, port: EffectAdmission) {
+        self.port = Some(port);
+    }
     fn args(&self) -> &Value {
         &self.args
     }
@@ -82,12 +87,31 @@ impl PreparedEffect for ShellEffect {
         Some(&self.handle)
     }
     fn start(
-        self: Box<Self>,
-        host: &mut NativeSessionHost,
-        grant: &HostPermissionGrant,
+        mut self: Box<Self>,
+        call: ProviderCall,
         cancel: CancellationToken,
-        now: &str,
     ) -> Result<EffectFuture, HostError> {
+        let port = self
+            .port
+            .take()
+            .ok_or(HostError("execution_admission_closed"))?;
+        Ok(Box::pin(async move {
+            match self.run(call, cancel, port).await {
+                Ok(outcome) => outcome,
+                Err(error) => EffectOutcome::failed(error.0),
+            }
+        }))
+    }
+}
+impl ShellEffect {
+    async fn run(
+        self: Box<Self>,
+        call: ProviderCall,
+        cancel: CancellationToken,
+        port: EffectAdmission,
+    ) -> Result<EffectOutcome, HostError> {
+        let now = call.started_at();
+        port.check().await?;
         if cancel.is_cancelled() {
             return Err(HostError("CANCELLED"));
         }
@@ -97,13 +121,13 @@ impl PreparedEffect for ShellEffect {
             .join(&now[..10])
             .join(&self.handle);
         std::fs::create_dir_all(&directory).map_err(|_| HostError("shell_artifact_unavailable"))?;
-        let metadata = json!({"taskId":self.handle,"toolCallId":grant.facts()["toolCallId"],"command":self.command,"cwd":self.cwd,"startedAt":now,"status":"running"});
+        let metadata = json!({"taskId":self.handle,"toolCallId":call.tool_call_id(),"command":self.command,"cwd":self.cwd,"startedAt":now,"status":"running"});
         std::fs::write(
             directory.join("metadata.json"),
             serde_json::to_vec(&metadata).map_err(|_| HostError("shell_artifact_unavailable"))?,
         )
         .map_err(|_| HostError("shell_artifact_unavailable"))?;
-        host.validate_permission(grant, &self.args, now)?;
+        port.check().await?;
         let mut command = tokio::process::Command::new("/bin/sh");
         command
             .arg("-c")
@@ -127,7 +151,7 @@ impl PreparedEffect for ShellEffect {
             .stderr
             .take()
             .expect("spawned stderr was configured as piped");
-        Ok(Box::pin(async move {
+        Ok(async move {
             async fn read(
                 r: &mut (impl tokio::io::AsyncRead + Unpin),
             ) -> Result<Vec<u8>, &'static str> {
@@ -141,6 +165,7 @@ impl PreparedEffect for ShellEffect {
                 }
                 Ok(out)
             }
+            let outcome = {
             let completion = async {
                 let (out, err, status) =
                     tokio::try_join!(read(&mut stdout), read(&mut stderr), async {
@@ -148,7 +173,18 @@ impl PreparedEffect for ShellEffect {
                     })?;
                 Ok::<_, &'static str>((out, err, status))
             };
-            let outcome = tokio::select! {biased;_=cancel.cancelled()=>Err("CANCELLED"),r=tokio::time::timeout(self.timeout,completion)=>r.unwrap_or(Err("shell_timeout"))};
+            let completion = tokio::time::timeout(self.timeout, completion);
+            tokio::pin!(completion);
+            let mut tick = tokio::time::interval(Duration::from_millis(100));
+            tick.tick().await;
+            loop {
+                tokio::select! {biased;
+                    _=cancel.cancelled()=>break Err("CANCELLED"),
+                    _=tick.tick()=>if let Err(error)=port.check().await { break Err(error.0) },
+                    result=&mut completion=>break result.unwrap_or(Err("shell_timeout")),
+                }
+            }
+            };
             let mut ended = group_absent(pid);
             if outcome.is_err() || !ended {
                 if let Some(pid) = rustix::process::Pid::from_raw(pid as i32) {
@@ -238,7 +274,7 @@ impl PreparedEffect for ShellEffect {
                 materialization: None,
                 not_dispatched: false,
             }
-        }))
+        }.await)
     }
 }
 pub(crate) fn group_absent(pid: u32) -> bool {

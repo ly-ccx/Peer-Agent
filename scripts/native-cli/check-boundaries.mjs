@@ -21,6 +21,11 @@ for (const name of names) {
     if (/\bunsafe\s*\{/.test(source)) throw Error(`${path}: unreviewed unsafe block`);
     if (/Command::new\s*\(\s*"(?:bun|node|electron)"/.test(source)) throw Error(`${path}: forbidden JS sidecar`);
     if (name === 'peer-tui' && /std::(?:fs|process)|tokio::(?:fs|process)/.test(source)) throw Error(`${path}: concrete I/O in View`);
+    const providerRoot = resolve(directory, 'providers');
+    if (name === 'peer-runtime' && (path === resolve(directory, 'providers.rs') || path.startsWith(providerRoot + '/'))
+      && /\b(?:NativeSessionHost|HostPermissionGrant|HostResourcePlan)\b|\bsession_host\s*::/.test(source)) {
+      throw Error(`${path}: Provider depends on a concrete Goal Host instead of bound admission`);
+    }
   }
 }
-process.stdout.write('Native crate versions, publish flags, UI dependency direction and sidecar bans passed.\n');
+process.stdout.write('Native crate versions, publish flags, UI/Provider dependency direction and sidecar bans passed.\n');
