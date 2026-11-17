@@ -25,6 +25,8 @@ run('node',['--test','apps/desktop/electron/main/mcp-credential-store.test.mjs',
 run('bun', ['scripts/native-cli/contracts.ts']);
 run('bun', ['scripts/native-cli/control-contracts.ts']);
 run('bun', ['scripts/native-cli/projection-contracts.ts']);
+run('cargo', ['build', '--locked', '-p', 'peer-store', '--features', 'test-fixtures', '--example', 'terminal-conformance']);
+run('node', ['scripts/native-cli/terminal-store-conformance.mjs']);
 run('bun', ['scripts/native-cli/native-process-contracts.ts']);
 run('bun', ['scripts/native-cli/work-contracts.ts']);
 run('bun', ['scripts/native-cli/kernel-contracts.ts']);

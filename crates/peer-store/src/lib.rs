@@ -33,6 +33,7 @@ pub use mcp_inventory::{McpRegistrySnapshot, McpRegistryStore};
 mod mcp_credentials;
 pub use mcp_credentials::{McpCredentialBinding, McpCredentialStore, McpCredentialTransaction};
 mod conversation_preview;
+mod conversation_terminal;
 mod conversation_write;
 pub use context_accounting::context_model_key;
 mod goal;

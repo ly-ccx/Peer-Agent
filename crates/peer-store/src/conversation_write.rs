@@ -24,7 +24,7 @@ pub struct MessageCommit {
     pub snapshot: HistorySnapshot,
     pub already_committed: bool,
 }
-fn timestamp(at: &str) -> bool {
+pub(super) fn timestamp(at: &str) -> bool {
     at.len() <= 64
         && time::OffsetDateTime::parse(at, &time::format_description::well_known::Rfc3339).is_ok()
 }
@@ -47,13 +47,13 @@ pub(crate) fn locks(
     }
     Ok(held)
 }
-fn revision(meta: &Value) -> Result<u64, StoreError> {
+pub(super) fn revision(meta: &Value) -> Result<u64, StoreError> {
     meta["contentRevision"]
         .as_u64()
         .filter(|v| *v < 9_007_199_254_740_991)
         .ok_or(StoreError::HistoryCorrupt)
 }
-fn position(index: &[Value], id: &str) -> Result<usize, StoreError> {
+pub(super) fn position(index: &[Value], id: &str) -> Result<usize, StoreError> {
     let mut found = None;
     for (i, row) in index.iter().enumerate() {
         if row["id"] == id && found.replace(i).is_some() {
@@ -62,7 +62,7 @@ fn position(index: &[Value], id: &str) -> Result<usize, StoreError> {
     }
     found.ok_or(StoreError::NotFound)
 }
-fn validate_messages(rows: &[Value]) -> Result<(), StoreError> {
+pub(super) fn validate_messages(rows: &[Value]) -> Result<(), StoreError> {
     let mut seen = HashSet::new();
     for row in rows {
         let id = row["id"]

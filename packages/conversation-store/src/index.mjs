@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, readdirSync, rmSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, readdirSync, rmSync, openSync, closeSync, fsyncSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
@@ -35,12 +35,13 @@ function readJsonl(filePath) {
     .filter(Boolean);
 }
 
-function writeJsonl(filePath, rows) {
+function writeJsonl(filePath, rows, { durable = false } = {}) {
   mkdirSync(path.dirname(filePath), { recursive: true });
   const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
-  writeFileSync(temporaryPath, rows.map((row) => JSON.stringify(row)).join('\n') + (rows.length ? '\n' : ''), 'utf8');
+  writeFileSync(temporaryPath, rows.map((row) => JSON.stringify(row)).join('\n') + (rows.length ? '\n' : ''), {encoding:'utf8',flush:durable});
   try {
     renameSync(temporaryPath, filePath);
+    if (durable) syncDirectory(path.dirname(filePath));
   } catch (error) {
     try { unlinkSync(temporaryPath); } catch {}
     throw error;
@@ -61,12 +62,18 @@ function readJson(filePath) {
   }
 }
 
-function writeJson(filePath, value) {
+function syncDirectory(directory) {
+  const fd = openSync(directory, 'r');
+  try { fsyncSync(fd); } finally { closeSync(fd); }
+}
+
+function writeJson(filePath, value, { durable = false } = {}) {
   mkdirSync(path.dirname(filePath), { recursive: true });
   const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
-  writeFileSync(temporaryPath, JSON.stringify(value), 'utf8');
+  writeFileSync(temporaryPath, JSON.stringify(value), {encoding:'utf8',flush:durable});
   try {
     renameSync(temporaryPath, filePath);
+    if (durable) syncDirectory(path.dirname(filePath));
   } catch (error) {
     try { unlinkSync(temporaryPath); } catch {}
     throw error;
@@ -371,9 +378,9 @@ export function createConversationStore(options = {}) {
     previewIndexToken = null;
     previewIndexTurn = null;
   }
-  function writeIndex(rows) {
+  function writeIndex(rows, options) {
     forgetPreviewIndex();
-    writeJsonl(indexFile, rows);
+    writeJsonl(indexFile, rows, options);
   }
   function appendIndex(row) {
     forgetPreviewIndex();
@@ -1296,7 +1303,9 @@ export function createConversationStore(options = {}) {
    */
   function patchStreamingMessage(id, messageId, patch) {
     if (!id || !messageId || !patch || typeof patch !== 'object') return false;
+    const previous = readStreamPatchForCommit(id, messageId);
     writeJson(streamPatchFile(id), {
+      ...previous,
       version: 1,
       conversationId: id,
       messageId,
@@ -1310,8 +1319,26 @@ export function createConversationStore(options = {}) {
   function clearStreamPatch(id) {
     try {
       const filePath = streamPatchFile(id);
-      if (existsSync(filePath)) unlinkSync(filePath);
-    } catch {}
+      if (existsSync(filePath)) {
+        readStreamPatchForCommit(id);
+        unlinkSync(filePath);
+        syncDirectory(storeDir);
+      }
+    } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
+
+  function readStreamPatchForCommit(id, messageId) {
+    const file = streamPatchFile(id);
+    if (!existsSync(file)) return null;
+    let marker;
+    try { marker = JSON.parse(readFileSync(file, 'utf8')); }
+    catch { throw Object.assign(new Error('Invalid streaming state'), {code:'BACKGROUND_STREAM_STATE_INVALID'}); }
+    if (marker?.version !== 1 || marker.conversationId !== id || typeof marker.messageId !== 'string'
+      || !marker.messageId || !marker.patch || typeof marker.patch !== 'object' || Array.isArray(marker.patch)
+      || messageId !== undefined && marker.messageId !== messageId) {
+      throw Object.assign(new Error('Streaming state does not belong to this commit'), {code:'BACKGROUND_STREAM_STATE_INVALID'});
+    }
+    return marker;
   }
 
   /**
@@ -1541,12 +1568,21 @@ export function createConversationStore(options = {}) {
         const index = readIndex(), meta = index.find(row => row.id === prepared.id);
         if (!meta) throw Object.assign(new Error('Conversation was deleted'), { code: 'CONVERSATION_COMMIT_DELETED' });
         if (conversationFileVersion(prepared.historyFile) !== prepared.sourceVersion) return false;
-        renameSync(prepared.temporaryFile, prepared.historyFile);
-        meta.contentRevision = (Number.isSafeInteger(Number(meta.contentRevision)) ? Number(meta.contentRevision) : 0) + 1;
-        meta.messageCount = prepared.messageCount; meta.contextSnapshot = null; meta.updatedAt = new Date().toISOString();
-        assignSessionPreview(meta, readJsonlByteWindow(prepared.historyFile, { limit: 40 }).messages);
-        writeIndex(index);
-        if (readJson(streamPatchFile(prepared.id))?.messageId === prepared.messageId) clearStreamPatch(prepared.id);
+        const marker = readStreamPatchForCommit(prepared.id, prepared.messageId);
+        // The target stays provisional across body/index/cleanup failures. An
+        // empty patch protects visibility without publishing unconfirmed text.
+        try {
+          writeJson(streamPatchFile(prepared.id), marker ?? {version:1,conversationId:prepared.id,messageId:prepared.messageId,patch:{},patchedAt:new Date().toISOString()}, {durable:true});
+          renameSync(prepared.temporaryFile, prepared.historyFile);
+          syncDirectory(storeDir);
+          meta.contentRevision = (Number.isSafeInteger(Number(meta.contentRevision)) ? Number(meta.contentRevision) : 0) + 1;
+          meta.messageCount = prepared.messageCount; meta.contextSnapshot = null; meta.updatedAt = new Date().toISOString();
+          assignSessionPreview(meta, readJsonlByteWindow(prepared.historyFile, { limit: 40 }).messages);
+          writeIndex(index, {durable:true});
+          clearStreamPatch(prepared.id);
+        } catch (cause) {
+          throw Object.assign(new Error('Conversation terminal commit is uncertain', {cause}), {code:'STORE_COMMIT_UNCERTAIN'});
+        }
         return { meta, receipt: { id: prepared.id, messageId: prepared.messageId, contentRevision: meta.contentRevision } };
       });
       if (result === false) return false;
@@ -1839,8 +1875,9 @@ export function createConversationStore(options = {}) {
     commitStreamingMessage: terminalCommitter.commit,
     drainPendingCommits: terminalCommitter.drain,
     // 流式 sidecar 通道：高频、无广播（终态由 updateMessageById 收口并清理）。
-    patchStreamingMessage,
-    clearStreamPatch,
+    patchStreamingMessage: (...args) => !args[0] || !args[1] || !args[2] || typeof args[2] !== 'object'
+      ? false : messageWrite(patchStreamingMessage)(...args),
+    clearStreamPatch: id => id ? messageWrite(clearStreamPatch)(id) : undefined,
     replaceMessages: changed(messageWrite(replaceMessages), 'messages-updated'),
     addUsage: metadataWrite(addUsage),
     recordRuntimeTurnUsage: metadataWrite(recordRuntimeTurnUsage),
