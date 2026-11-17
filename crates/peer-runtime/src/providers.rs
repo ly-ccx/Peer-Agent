@@ -14,6 +14,7 @@ use std::{
     pin::Pin,
 };
 mod file;
+mod git;
 mod mcp;
 mod shell;
 mod tool_artifact;
@@ -67,6 +68,11 @@ pub trait PreparedEffect {
     fn projection(&mut self, _id: &str) {}
     fn args(&self) -> &Value;
     fn permission(&self) -> ProviderPermission;
+    /// A trusted read Provider asks the Host to authorize this concrete target,
+    /// and each additional discovered target, before issuing its operation.
+    fn read_scope(&self) -> Result<Option<&Path>, HostError> {
+        Ok(None)
+    }
     fn risk(&self) -> Option<HostShellRisk> {
         None
     }
@@ -76,6 +82,11 @@ pub trait PreparedEffect {
     }
     fn handle(&self) -> Option<&str> {
         None
+    }
+    /// A fixed local command must journal its spawn intent and real child
+    /// identity through the Host before its owned completion can settle.
+    fn owned_command(&self) -> bool {
+        false
     }
     /// Start owns the effect. It must revalidate the immutable grant directly
     /// before open/rename/spawn and return an owned completion future.
@@ -117,6 +128,7 @@ impl Default for ProviderRegistry {
                 Box::<file::FileProvider>::default(),
                 Box::new(file::BatchSearchProvider),
                 Box::new(web::WebProvider),
+                Box::new(git::GitProvider),
                 Box::new(shell::ShellProvider),
                 Box::new(tool_artifact::ToolArtifactProvider),
             ],
@@ -124,6 +136,16 @@ impl Default for ProviderRegistry {
     }
 }
 impl ProviderRegistry {
+    pub(crate) fn project_read_only(&self) -> Result<RuntimeProjection, HostError> {
+        let mut p = self.project()?;
+        p.tools
+            .retain(|t| crate::session_host::read_capability(&t.capability));
+        p.id = peer_protocol::javascript_json_digest(&json!(
+            p.tools.iter().map(|t| &t.manifest).collect::<Vec<_>>()
+        ))
+        .map_err(|_| HostError("projection_limit"))?;
+        Ok(p)
+    }
     pub(crate) fn with_mcp(
         snapshot: &peer_store::McpRegistrySnapshot,
         resource: &peer_store::HostResourcePlan,
@@ -197,6 +219,9 @@ impl ProviderRegistry {
     }
 }
 impl RuntimeProjection {
+    pub(crate) fn has_capability(&self, capability: &str) -> bool {
+        self.tools.iter().any(|t| t.capability == capability)
+    }
     pub fn capability(&self, alias: &str) -> Option<&str> {
         self.tools
             .iter()

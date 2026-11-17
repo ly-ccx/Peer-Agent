@@ -1,5 +1,12 @@
 #![forbid(unsafe_code)]
+mod local_read;
+mod native_process;
+pub use native_process::{
+    NativeOwnedProcess, NativeProcessKind, NativeProcessRecorder, NativeProcessState,
+    NativeProcessStop, native_processes_in_work,
+};
 mod model_catalog;
+pub use local_read::{LocalReadPermissionScope, LocalReadScopeKind};
 pub use model_catalog::ModelCatalogEntry;
 mod model_auth;
 pub use model_auth::{

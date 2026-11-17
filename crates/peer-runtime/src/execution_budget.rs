@@ -5,6 +5,7 @@ use crate::{
 };
 use peer_protocol::{ExecutionResourceScope, javascript_json_digest};
 use serde_json::{Value, json};
+mod process;
 pub(crate) struct EpisodeBudget {
     pub work: String,
     pub attempt: String,

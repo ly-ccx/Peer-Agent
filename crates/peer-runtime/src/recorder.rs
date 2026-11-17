@@ -1,32 +1,9 @@
 //! OS observations of the complete recording-process tuple. Missing runtime
 //! tokens, a bare PID, permission errors and a failed query are never death proof.
-use serde::{Deserialize, Serialize};
+pub use peer_protocol::NativeProcessRecorder as Recorder;
 #[cfg(target_os = "linux")]
 use std::io::Read;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Recorder {
-    pub boot_id: String,
-    pub pid: u32,
-    pub pid_start: String,
-    pub host_id: String,
-    pub acquired_at: String,
-}
-impl Recorder {
-    pub fn complete(&self) -> bool {
-        self.pid > 0
-            && self.pid <= i32::MAX as u32
-            && [
-                &self.boot_id,
-                &self.pid_start,
-                &self.host_id,
-                &self.acquired_at,
-            ]
-            .into_iter()
-            .all(|s| !s.is_empty() && s.len() <= 8192)
-    }
-}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecorderProof {
     Alive,

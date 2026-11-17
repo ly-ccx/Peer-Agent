@@ -1,0 +1,2743 @@
+{
+  "version": 1,
+  "semanticFloor": 13,
+  "cases": [
+    {
+      "name": "not-started",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 0,
+                    "state": "not_started",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    }
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": true,
+        "count": 1
+      }
+    },
+    {
+      "name": "starting",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 1,
+                    "state": "starting",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    }
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": true,
+        "count": 1
+      }
+    },
+    {
+      "name": "running",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 1,
+                    "state": "running",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "child": {
+                      "bootId": "b",
+                      "pid": 102,
+                      "pidStart": "child-start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    }
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": true,
+        "count": 1
+      }
+    },
+    {
+      "name": "owned-completion-no-child",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 0,
+                    "state": "ended",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "stopObservation": "owned_completion"
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": true,
+        "count": 1
+      }
+    },
+    {
+      "name": "owner-dead-not-started",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 0,
+                    "state": "ended",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "stopObservation": "owner_dead_not_started"
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": true,
+        "count": 1
+      }
+    },
+    {
+      "name": "owner-dead-group-absent",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 64,
+                    "state": "ended",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "child": {
+                      "bootId": "b",
+                      "pid": 102,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "stopObservation": "owner_dead_group_absent"
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": true,
+        "count": 1
+      }
+    },
+    {
+      "name": "uncertain-row-retained",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": []
+            }
+          },
+          "uncertainDispatches": [
+            {
+              "toolCallId": "call",
+              "dispatchId": "dispatch",
+              "nativeRecorder": {
+                "schemaVersion": 1,
+                "runtime": "peer-native",
+                "recorder": {
+                  "bootId": "b",
+                  "pid": 101,
+                  "pidStart": "start",
+                  "hostId": "host",
+                  "acquiredAt": "2026-11-17T00:00:00.000Z"
+                },
+                "execution": {
+                  "planId": "p",
+                  "sessionId": "s",
+                  "executionEpoch": "epoch",
+                  "generation": "g",
+                  "goalRevision": 2
+                }
+              },
+              "nativeProcess": {
+                "schemaVersion": 1,
+                "kind": "command",
+                "handleId": "git-h",
+                "toolCallId": "call",
+                "dispatchId": "dispatch",
+                "execution": {
+                  "planId": "p",
+                  "sessionId": "s",
+                  "executionEpoch": "epoch",
+                  "generation": "g",
+                  "goalRevision": 2
+                },
+                "generation": 0,
+                "state": "not_started",
+                "owner": {
+                  "bootId": "b",
+                  "pid": 101,
+                  "pidStart": "start",
+                  "hostId": "host",
+                  "acquiredAt": "2026-11-17T00:00:00.000Z"
+                }
+              },
+              "future": {
+                "keep": true
+              }
+            }
+          ]
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": true,
+        "count": 1
+      }
+    },
+    {
+      "name": "opaque-owner-facts-retained",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 0,
+                    "state": "not_started",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z",
+                      "futureIdentity": {
+                        "keep": true
+                      }
+                    }
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": true,
+        "count": 1
+      }
+    },
+    {
+      "name": "normalized-execution-order",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "goalRevision": 2,
+                      "generation": "g",
+                      "executionEpoch": "epoch",
+                      "sessionId": "s",
+                      "planId": "p"
+                    },
+                    "generation": 0,
+                    "state": "not_started",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    }
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": true,
+        "count": 1
+      }
+    },
+    {
+      "name": "no-process-old-work",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": true,
+        "count": 0
+      }
+    },
+    {
+      "name": "unknown-version",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 2,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 0,
+                    "state": "not_started",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    }
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "native_process_invalid"
+      }
+    },
+    {
+      "name": "unknown-kind",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "future",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 0,
+                    "state": "not_started",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    }
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "native_process_invalid"
+      }
+    },
+    {
+      "name": "unknown-field",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 0,
+                    "state": "not_started",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "future": true
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "native_process_invalid"
+      }
+    },
+    {
+      "name": "null-process",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": null,
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "native_process_invalid"
+      }
+    },
+    {
+      "name": "bad-owner-pid",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 0,
+                    "state": "not_started",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 0,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    }
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "native_process_invalid"
+      }
+    },
+    {
+      "name": "large-owner-pid",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 0,
+                    "state": "not_started",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 2147483648,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    }
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "native_process_invalid"
+      }
+    },
+    {
+      "name": "empty-owner-boot",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 0,
+                    "state": "not_started",
+                    "owner": {
+                      "bootId": "",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    }
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "native_process_invalid"
+      }
+    },
+    {
+      "name": "changed-owner",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "other",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 0,
+                    "state": "not_started",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    }
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "native_process_invalid"
+      }
+    },
+    {
+      "name": "changed-execution",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 3
+                    },
+                    "generation": 0,
+                    "state": "not_started",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    }
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "native_process_invalid"
+      }
+    },
+    {
+      "name": "missing-recorded-execution",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 0,
+                    "state": "not_started",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    }
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "native_process_invalid"
+      }
+    },
+    {
+      "name": "changed-call",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "other",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 0,
+                    "state": "not_started",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    }
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "native_process_invalid"
+      }
+    },
+    {
+      "name": "changed-dispatch",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "other",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 0,
+                    "state": "not_started",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    }
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "native_process_invalid"
+      }
+    },
+    {
+      "name": "empty-handle",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 0,
+                    "state": "not_started",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    }
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "native_process_invalid"
+      }
+    },
+    {
+      "name": "byte-limit-handle",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 0,
+                    "state": "not_started",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    }
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "native_process_invalid"
+      }
+    },
+    {
+      "name": "generation-negative",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": -1,
+                    "state": "not_started",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    }
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "native_process_invalid"
+      }
+    },
+    {
+      "name": "generation-fraction",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 0.5,
+                    "state": "not_started",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    }
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "native_process_invalid"
+      }
+    },
+    {
+      "name": "generation-limit",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 65,
+                    "state": "not_started",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    }
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "native_process_invalid"
+      }
+    },
+    {
+      "name": "not-started-positive-generation",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 1,
+                    "state": "not_started",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    }
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "native_process_invalid"
+      }
+    },
+    {
+      "name": "starting-zero-generation",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 0,
+                    "state": "starting",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    }
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "native_process_invalid"
+      }
+    },
+    {
+      "name": "running-no-child",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 1,
+                    "state": "running",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    }
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "native_process_invalid"
+      }
+    },
+    {
+      "name": "running-wrong-child-boot",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 1,
+                    "state": "running",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "child": {
+                      "bootId": "other",
+                      "pid": 102,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    }
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "native_process_invalid"
+      }
+    },
+    {
+      "name": "running-with-stop",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 1,
+                    "state": "running",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "child": {
+                      "bootId": "b",
+                      "pid": 102,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "stopObservation": "owned_completion"
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "native_process_invalid"
+      }
+    },
+    {
+      "name": "ended-no-stop",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 0,
+                    "state": "ended",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    }
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "native_process_invalid"
+      }
+    },
+    {
+      "name": "ended-unknown-stop",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 0,
+                    "state": "ended",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "stopObservation": "guessed"
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "native_process_invalid"
+      }
+    },
+    {
+      "name": "not-started-stop-after-launch",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 1,
+                    "state": "ended",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "stopObservation": "owner_dead_not_started"
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "native_process_invalid"
+      }
+    },
+    {
+      "name": "group-absent-no-child",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 1,
+                    "state": "ended",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "stopObservation": "owner_dead_group_absent"
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": []
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "native_process_invalid"
+      }
+    },
+    {
+      "name": "duplicate-across-pending-unknown",
+      "input": {
+        "workId": "native-child",
+        "state": "running",
+        "budget": {
+          "attempts": {
+            "a": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "recorder": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    },
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    }
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "git-h",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "p",
+                      "sessionId": "s",
+                      "executionEpoch": "epoch",
+                      "generation": "g",
+                      "goalRevision": 2
+                    },
+                    "generation": 0,
+                    "state": "not_started",
+                    "owner": {
+                      "bootId": "b",
+                      "pid": 101,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-17T00:00:00.000Z"
+                    }
+                  },
+                  "future": {
+                    "keep": true
+                  }
+                }
+              ]
+            }
+          },
+          "uncertainDispatches": [
+            {
+              "toolCallId": "call",
+              "dispatchId": "dispatch",
+              "nativeRecorder": {
+                "schemaVersion": 1,
+                "runtime": "peer-native",
+                "recorder": {
+                  "bootId": "b",
+                  "pid": 101,
+                  "pidStart": "start",
+                  "hostId": "host",
+                  "acquiredAt": "2026-11-17T00:00:00.000Z"
+                },
+                "execution": {
+                  "planId": "p",
+                  "sessionId": "s",
+                  "executionEpoch": "epoch",
+                  "generation": "g",
+                  "goalRevision": 2
+                }
+              },
+              "nativeProcess": {
+                "schemaVersion": 1,
+                "kind": "command",
+                "handleId": "git-h",
+                "toolCallId": "call",
+                "dispatchId": "dispatch",
+                "execution": {
+                  "planId": "p",
+                  "sessionId": "s",
+                  "executionEpoch": "epoch",
+                  "generation": "g",
+                  "goalRevision": 2
+                },
+                "generation": 0,
+                "state": "not_started",
+                "owner": {
+                  "bootId": "b",
+                  "pid": 101,
+                  "pidStart": "start",
+                  "hostId": "host",
+                  "acquiredAt": "2026-11-17T00:00:00.000Z"
+                }
+              },
+              "future": {
+                "keep": true
+              }
+            }
+          ]
+        },
+        "opaque": {
+          "evidence": [
+            "unchanged"
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "native_process_invalid"
+      }
+    }
+  ]
+}

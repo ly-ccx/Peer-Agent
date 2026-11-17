@@ -8,6 +8,17 @@ pub(super) struct AuthorizationWait<'a> {
     pub grant: &'a HostPermissionGrant,
     pub args: &'a Value,
     pub resource: &'a HostResourcePlan,
+    pub input: &'a mut dyn PermissionInput,
+    pub reads: Option<&'a mut super::read_scope::ReadScopes>,
+    pub command: Option<&'a super::command_process::CommandOwner<'a>>,
+}
+pub(super) struct EffectHost<'a> {
+    pub grant: &'a HostPermissionGrant,
+    pub resource: &'a HostResourcePlan,
+    pub input: &'a mut dyn PermissionInput,
+    pub reads: Option<&'a mut super::read_scope::ReadScopes>,
+    pub budget: &'a crate::execution_budget::EpisodeBudget,
+    pub dispatch: &'a str,
 }
 impl NativeSessionHost {
     pub(super) async fn wait_effect<F: Future>(
@@ -52,9 +63,29 @@ impl NativeSessionHost {
                         tokio::task::yield_now().await;
                         if external.is_cancelled() { owned.cancel();cancelled=true; }
                         let a=authorization.as_ref().unwrap();
-                        let valid=if lost{Err(HostError("HOST_LEASE_LOST"))}else if owned.is_cancelled(){Err(HostError("CANCELLED"))}else{self.validate_permission(a.grant,a.args,&episode_time())};
+                        let valid=if lost{Err(HostError("HOST_LEASE_LOST"))}else if owned.is_cancelled(){Err(HostError("CANCELLED"))}else if let Some(reads)=a.reads.as_ref(){reads.check(self,a.grant,a.args)}else{self.validate_permission(a.grant,a.args,&episode_time())};
                         match request {
                             AdmissionRequest::Check(reply)=>{let _=reply.send(valid);},
+                            AdmissionRequest::CommandStarting(reply)=>{
+                                let result=if let Err(error)=valid{Err(error)}else if let Some(command)=a.command{
+                                    Box::pin(self.command_starting(command,owned,external)).await
+                                }else{Err(HostError("native_process_owner_unknown"))};let _=reply.send(result);
+                            },
+                            AdmissionRequest::CommandStarted{recorder,reply}=>{
+                                // Persist the actual child's identity even when
+                                // dispatch permission was just withdrawn. The
+                                // caller receives that withdrawal after recording.
+                                let result=a.command.ok_or(HostError("native_process_owner_unknown")).and_then(|command|self.command_started(command,recorder)).and(valid);
+                                let _=reply.send(result);
+                            },
+                            AdmissionRequest::ReadScope{path,reply}=>{
+                                let result=if let Err(error)=valid{Err(error)}else{
+                                    let a=authorization.as_mut().unwrap();
+                                    if let Some(reads)=a.reads.as_mut(){
+                                        Box::pin(self.authorize_read_scope(super::read_scope::ScopeAuthorization{primary:a.grant,args:a.args,reads,input:a.input},path,owned,external)).await
+                                    }else{Err(HostError("read_scope_not_admitted"))}
+                                };let _=reply.send(result);
+                            },
                             AdmissionRequest::Child{handle,recorder,reply}=>{
                                 let result=valid.and_then(|_|{
                                     let raw=self.resources.unsettled_handles(a.resource)?.into_iter().find(|h|h["handleId"]==handle).ok_or(HostError("mcp_handle_invalid"))?;

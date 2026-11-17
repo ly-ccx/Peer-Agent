@@ -190,6 +190,7 @@ fn reduce_inner(state: &Value, entry: &Value) -> Result<Value, &'static str> {
         }
         "work" => {
             let work = &entry["work"];
+            peer_protocol::native_processes_in_work(work)?;
             put(&mut next, "works", id(&work["workId"])?, work.clone())?;
         }
         "work_updated" => {

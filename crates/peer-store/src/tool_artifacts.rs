@@ -143,6 +143,21 @@ impl ToolArtifactStore {
             serde_json::to_writer(out, value).map_err(io::Error::other)
         })
     }
+    /// Content identity only: no directory/file is created and this is not a
+    /// publication receipt. Retrieval still verifies the actual saved bytes.
+    pub fn describe_json(
+        &self,
+        conversation: &str,
+        value: &serde_json::Value,
+        cancel: &impl Fn() -> bool,
+    ) -> Result<ToolArtifactRef, Error> {
+        Self::describe(
+            conversation,
+            ToolArtifactFormat::Json,
+            cancel,
+            &mut |out: &mut dyn Write| serde_json::to_writer(out, value).map_err(io::Error::other),
+        )
+    }
     /// Two streaming passes keep a 100MiB text observation out of the heap.
     pub fn publish_utf8_reader(
         &self,
@@ -171,22 +186,8 @@ impl ToolArtifactStore {
         cancel: &impl Fn() -> bool,
         mut emit: impl FnMut(&mut dyn Write) -> io::Result<()>,
     ) -> Result<ToolArtifactRef, Error> {
-        if !valid_id(conversation, false) {
-            return Err(Error::Invalid);
-        }
-        check(cancel)?;
-        let mut count = Sink::new(io::sink(), cancel);
-        if emit(&mut count).is_err() {
-            return Err(count.error.unwrap_or(Error::Unavailable));
-        }
-        let (bytes, hash) = count.finish()?;
-        let reference = ToolArtifactRef {
-            schema_version: 1,
-            conversation_id: conversation.into(),
-            sha256: hash,
-            bytes,
-            format,
-        };
+        let reference = Self::describe(conversation, format, cancel, &mut emit)?;
+        let bytes = reference.bytes;
         let dir = storage::Directory::open(&self.home, conversation, true, cancel)?;
         if dir.exists(&reference.name())? {
             self.verify(&dir, conversation, &reference, cancel)?;
@@ -215,6 +216,29 @@ impl ToolArtifactStore {
         self.verify(&dir, conversation, &reference, cancel)
             .map_err(|_| Error::CommitUnknown)?;
         Ok(reference)
+    }
+    fn describe(
+        conversation: &str,
+        format: ToolArtifactFormat,
+        cancel: &impl Fn() -> bool,
+        emit: &mut impl FnMut(&mut dyn Write) -> io::Result<()>,
+    ) -> Result<ToolArtifactRef, Error> {
+        if !valid_id(conversation, false) {
+            return Err(Error::Invalid);
+        }
+        check(cancel)?;
+        let mut count = Sink::new(io::sink(), cancel);
+        if emit(&mut count).is_err() {
+            return Err(count.error.unwrap_or(Error::Unavailable));
+        }
+        let (bytes, hash) = count.finish()?;
+        Ok(ToolArtifactRef {
+            schema_version: 1,
+            conversation_id: conversation.into(),
+            sha256: hash,
+            bytes,
+            format,
+        })
     }
     fn verify(
         &self,

@@ -14,15 +14,19 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 mod authority;
 mod billing;
+mod command_process;
 mod context_pipeline;
 mod effect_wait;
 mod episode;
+mod read_scope;
+mod tool_authorization;
 mod tool_result;
 pub(crate) use episode::now as episode_time;
 pub use episode::{EpisodeOutcome, PermissionInput};
 mod recovery;
 mod stop;
 mod unknown;
+pub(crate) use authority::read_capability;
 pub use authority::{
     HostCallIdentity, HostExecutionRole, HostPermissionGrant, HostShellRisk,
     LocalPermissionDecision, PendingPermission, ProviderPermission,

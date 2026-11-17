@@ -63,6 +63,7 @@ async fn collect(
     }
 }
 pub(crate) async fn run(request: Request<'_>) -> Result<Output, GitReadError> {
+    let deadline = tokio::time::Instant::now() + request.wait;
     let mut command = Command::new(request.binary);
     command
         .args([
@@ -117,8 +118,15 @@ pub(crate) async fn run(request: Request<'_>) -> Result<Output, GitReadError> {
     }
     command.process_group(0);
     request.authority.check().await?;
+    tokio::time::timeout_at(deadline, request.authority.starting())
+        .await
+        .map_err(|_| GitReadError::new("git_query_timeout"))??;
+    request.authority.check().await?;
     if request.cancel.is_cancelled() {
         return Err(GitReadError::new("git_query_cancelled"));
+    }
+    if tokio::time::Instant::now() >= deadline {
+        return Err(GitReadError::new("git_query_timeout"));
     }
     let mut child = command.spawn().map_err(|e| {
         GitReadError::new(match e.kind() {
@@ -132,6 +140,23 @@ pub(crate) async fn run(request: Request<'_>) -> Result<Output, GitReadError> {
     let pid = child.id().expect("spawned process has pid");
     let stdout = child.stdout.take().expect("piped stdout");
     let stderr = child.stderr.take().expect("piped stderr");
+    let mut registration = Box::pin(request.authority.spawned(pid));
+    let mut registered = false;
+    let recorded = tokio::select! {biased;
+        _=request.cancel.cancelled()=>Err(GitReadError::new("git_query_cancelled")),
+        _=tokio::time::sleep_until(deadline)=>Err(GitReadError::new("git_query_timeout")),
+        result=&mut registration=>{registered=true;result}
+    };
+    if let Err(error) = recorded {
+        let stopped = stop_group(pid, &mut child).await;
+        // Join the recorder/ack owner after stopping Git. Cancelling an input
+        // future must not abandon its own OS observation subprocess or reply.
+        if !registered {
+            let _ = registration.await;
+        }
+        stopped?;
+        return Err(error);
+    }
     let budget = Arc::new(AtomicUsize::new(*request.budget));
     let result = {
         let work = async {
@@ -147,7 +172,6 @@ pub(crate) async fn run(request: Request<'_>) -> Result<Output, GitReadError> {
             )
         };
         tokio::pin!(work);
-        let deadline = tokio::time::Instant::now() + request.wait;
         let mut tick = tokio::time::interval(Duration::from_millis(100));
         tick.tick().await;
         loop {

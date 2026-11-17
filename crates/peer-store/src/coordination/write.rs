@@ -11,6 +11,17 @@ use std::{
 };
 pub(super) fn semantic_floor(entry: &Value, state: &Value) -> u64 {
     let kind = entry["kind"].as_str().unwrap_or("");
+    if (kind == "work"
+        && peer_protocol::native_processes_in_work(&entry["work"]).is_ok_and(|p| !p.is_empty()))
+        || (kind == "history_reconciled"
+            && state["works"].as_object().is_some_and(|works| {
+                works.values().any(|work| {
+                    peer_protocol::native_processes_in_work(work).is_ok_and(|p| !p.is_empty())
+                })
+            }))
+    {
+        return 13;
+    }
     if ["obligation_grant", "execution_obligation"].contains(&kind) {
         return 11;
     }
@@ -131,7 +142,7 @@ impl CoordinationStore {
         crate::coordination_fence::check_head(&manifest, &durable_head)?;
         let head_floor = durable_head["minimumWriterVersion"].as_u64().unwrap_or(2);
         if head_floor > floor {
-            if ![3, 4, 5, 6, 7, 8, 9, 11, 12].contains(&head_floor) {
+            if ![3, 4, 5, 6, 7, 8, 9, 11, 12, 13].contains(&head_floor) {
                 return Err(Error::Schema);
             }
             let mut raised = manifest.clone();
@@ -359,6 +370,20 @@ mod tests {
         assert_eq!(
             semantic_floor(&json!({"kind":"work"}), &json!({"agentMessages":{"m":{}}})),
             5
+        );
+    }
+    #[test]
+    fn history_seeding_native_child_keeps_its_process_semantic_floor() {
+        let contract: Value = serde_json::from_str(include_str!(
+            "../../../../packages/protocol/contracts/native-cli/native-process.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            semantic_floor(
+                &json!({"kind":"history_reconciled"}),
+                &json!({"works":{"native-child":contract["cases"][2]["input"]}})
+            ),
+            13
         );
     }
 }

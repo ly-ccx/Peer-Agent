@@ -194,12 +194,7 @@ impl NativeSessionHost {
         model
             .validate_saved_media(&projected)
             .map_err(|e| HostError(e.code))?;
-        let workspace = current
-            .resource
-            .directory
-            .as_ref()
-            .ok_or(HostError("execution_resource_scope_unknown"))?
-            .clone();
+        let workspace = self.read_workspace(plan_id, &now())?;
         // The registered Source owns prompt settings and workspace guidance.
         // Unported settings and Context inventories remain explicit blockers.
         let instructions = crate::system_context::instructions::ProjectInstructions::observe_host(
@@ -210,9 +205,6 @@ impl NativeSessionHost {
             if workspace.join(name).exists() {
                 return Err(HostError("native_project_context_source_unsupported"));
             }
-        }
-        if current.resource.read_only {
-            return Err(HostError("native_readonly_episode_unsupported"));
         }
         let mut context_pipeline = super::context_pipeline::ContextPipeline::open(
             &self.home,
@@ -235,7 +227,20 @@ impl NativeSessionHost {
             &self.home,
             mcp_credentials.clone(),
         )?;
-        let projection = providers.project()?;
+        let projection = if current.resource.read_only {
+            providers.project_read_only()?
+        } else {
+            providers.project()?
+        };
+        if current.resource.read_only
+            && origin["capabilityAdmission"]["required"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|v| !projection.has_capability(v.as_str().unwrap_or("")))
+        {
+            return Err(HostError("read_only"));
+        }
         if self.resources.has_claim(&current.resource)?
             && !self.resources.admitted(&current.resource, &epoch)?
         {
@@ -309,30 +314,30 @@ impl NativeSessionHost {
                     if cancel.is_cancelled() || cancellation.is_cancelled(){return Err(HostError("CANCELLED"))}
                     let effect=providers.prepare(&projection,&call.name,call.arguments,&workspace,&self.home)?;
                     let capability=projection.capability(&call.name).ok_or(HostError("tool_not_projected"))?.to_owned();
-                    let call_id=format!("call-{}",uuid::Uuid::new_v4());let args=effect.args().clone();let scopes=effect.scopes()?;let provider_evidence=effect.evidence();let output_kind=effect.output_kind();
+                    let call_id=format!("call-{}",uuid::Uuid::new_v4());let args=effect.args().clone();let scopes=effect.scopes()?;let provider_evidence=effect.evidence();let output_kind=effect.output_kind();let command_effect=effect.owned_command();
                     let current=self.current(plan_id,&now())?;
                     let reserved=self.resources.reserve(&current.resource,ResourceReservation{host_epoch:&epoch,scopes:&scopes,record_conflict:false},&now())?;
                     if reserved["allowed"]!=true{return Err(HostError("execution_resource_busy"))}
                     let identity=||HostCallIdentity{plan_id,session_id:&budget.session,conversation_id:&conversation,tool_call_id:&call_id,stream_id:&stream,capability_id:&capability,permission:effect.permission(),role:HostExecutionRole::Worker,shell_risk:effect.risk()};
-                    let (grant,permission_reason,permission_terminal)=if let Some(g)=self.automatic_permission(identity(),&args,&now())?{(Some(g),None,None)}else{
-                        let pending=self.request_permission(identity(),&args,&now())?;
-                        let decision=self.wait_owned(pending.wait(permission,json!({"approval":pending.record(),"tool":call.name,"arguments":args,"scopes":scopes}),&cancellation),&cancellation,cancel).await?;
-                        let resolution=self.settle_permission(pending,decision,&args,&now())?;
-                        (resolution.grant,resolution.reason,resolution.terminal)
-                    };
+                    let mut authorization=self.authorize_tool(super::tool_authorization::ToolAuthorizationRequest{identity:identity(),args:&args,tool:&call.name,scopes:&scopes,read_path:effect.read_scope(),workspace:&workspace},permission,&cancellation,cancel).await?;
                     let started_at=now();let dispatch=budget.dispatch(self,crate::execution_budget::DispatchFacts{call:&call_id,capability:&capability,scopes:&scopes,stream:&stream,conversation:&conversation},&now())?;
-                    let grant_facts=grant.as_ref().map(|g|g.facts().clone()).unwrap_or_else(||json!({"grantId":format!("grant-{}",uuid::Uuid::new_v4()),"toolCallId":call_id,"granted":false,"scope":capability,"duration":"denied","decidedAt":now(),"reason":permission_reason.unwrap_or("local_permission_denied")}));
-                    let outcome=if let Some(grant)=grant {
-                        self.launch_effect(effect,&grant,&current.resource,&call_id,&cancellation,cancel).await?
-                    }else{EffectOutcome{status:match permission_terminal {Some(HostError("CANCELLED"))=>"cancelled",Some(_)=>"failed",None=>"denied"},output:json!({}),error:Some(permission_terminal.map(|e|e.0).unwrap_or("permission_denied")),artifacts:vec![],ended:true,materialization:None,not_dispatched:true}};
+                    let grant_facts=authorization.grant.as_ref().map(|g|g.facts().clone()).unwrap_or_else(||authorization.denied_facts(&call_id,&capability));
+                    let outcome=if let Some(error)=authorization.failure {EffectOutcome::not_dispatched(error.0)}else if let Some(grant)=authorization.grant.as_ref() {
+                        self.launch_effect(effect,super::effect_wait::EffectHost{grant,resource:&current.resource,input:permission,reads:authorization.reads.as_mut(),budget:&budget,dispatch:&dispatch},&cancellation,cancel).await?
+                    }else{EffectOutcome{status:match authorization.terminal {Some(HostError("CANCELLED"))=>"cancelled",Some(_)=>"failed",None=>"denied"},output:json!({}),error:Some(authorization.terminal.map(|e|e.0).unwrap_or("permission_denied")),artifacts:vec![],ended:true,materialization:None,not_dispatched:true}};
+                    let permission_terminal=authorization.terminal.or_else(||authorization.reads.as_ref().and_then(|r|r.terminal));
+                    let additional=authorization.reads.as_ref().map(|r|r.grants.iter().map(|g|g.facts().clone()).chain(r.decisions.iter().cloned()).collect::<Vec<_>>()).unwrap_or_default();
                     #[cfg(feature="test-fixtures")]
                     if std::env::var("PEER_NATIVE_EPISODE_FAULT_AFTER_EFFECT").ok().as_deref()==Some(&call.name) && self.home.join(".native-cli-fixture").is_file(){std::process::exit(77)}
                     let mut result=json!({"toolCallId":call_id,"capabilityId":capability,"status":outcome.status,"output":outcome.output,"outputPreview":{"kind":"json"},"completedAt":now(),"evidence":{"evidenceId":format!("evidence-{}",uuid::Uuid::new_v4()),"toolCallId":call_id,"summary":format!("{}: {}",call.name,outcome.status),"artifactRefs":outcome.artifacts}});
                     if let Some(metadata)=provider_evidence {let target=result["evidence"].as_object_mut().unwrap();target.extend(metadata.as_object().unwrap().clone());target.insert("permissionGrantId".into(),grant_facts["grantId"].clone());target.insert("status".into(),json!(outcome.status));target.insert("startedAt".into(),json!(started_at));target.insert("endedAt".into(),json!(now()));}
                     if outcome.not_dispatched {result["evidence"]["dispatchOutcome"]=json!("not_dispatched");}
+                    if !additional.is_empty(){result["evidence"]["readScopeDecisions"]=json!(additional);}
+                    if command_effect && authorization.grant.is_some() && authorization.failure.is_none(){result["evidence"]["nativeProcess"]=json!(budget.read_process(self,&call_id,&dispatch)?);}
                     if let Some(error)=outcome.error{result["error"]=json!({"code":error,"message":error,"recoverable":true})}
                     let result=self.archive_tool_result(&conversation,result,output_kind,&cancellation,cancel).await?;
-                    self.append_episode_message(&conversation,&json!({"id":uuid::Uuid::new_v4().to_string(),"role":"assistant","content":"","createdAt":now(),"streamId":stream,"segments":[{"type":"tool-call","tool":call.name,"toolCallId":call_id,"args":args,"result":result}],"permissionGrants":[grant_facts]}))?;
+                    let all_grants=std::iter::once(grant_facts.clone()).chain(additional).collect::<Vec<_>>();
+                    self.append_episode_message(&conversation,&json!({"id":uuid::Uuid::new_v4().to_string(),"role":"assistant","content":"","createdAt":now(),"streamId":stream,"segments":[{"type":"tool-call","tool":call.name,"toolCallId":call_id,"args":args,"result":result}],"permissionGrants":all_grants}))?;
                     let evidence=EvidenceIndexStore::new(&self.home).register(&HostToolEvidence{conversation_id:&conversation,plan_id:Some(plan_id),stream_id:Some(&stream),tool_name:&call.name,capability_id:&capability,tool_call_id:&call_id,grant:&grant_facts,result:&result},None)?;
                     budget.settle(self,&call_id,&dispatch,&result,&now())?;count+=1;
                     if let Some(identity)=&outcome.materialization {
@@ -459,17 +464,46 @@ impl NativeSessionHost {
     async fn launch_effect(
         &mut self,
         mut effect: Box<dyn PreparedEffect>,
-        grant: &HostPermissionGrant,
-        resource: &HostResourcePlan,
-        call: &str,
+        context: super::effect_wait::EffectHost<'_>,
         owned: &CancellationToken,
         external: &CancellationToken,
     ) -> Result<EffectOutcome, HostError> {
+        let super::effect_wait::EffectHost {
+            grant,
+            resource,
+            input,
+            reads,
+            budget,
+            dispatch,
+        } = context;
+        let call = grant.facts()["toolCallId"]
+            .as_str()
+            .ok_or(HostError("access_identity_invalid"))?;
         let args = effect.args().clone();
-        let (port, mut receiver) = crate::effect_admission::EffectAdmission::channel(owned);
-        effect.admission(port);
         let metadata = effect.handle_metadata();
         let handle = effect.handle().map(str::to_owned);
+        let command = if effect.owned_command() {
+            let process = budget.prepare_process(
+                self,
+                call,
+                dispatch,
+                handle
+                    .as_deref()
+                    .ok_or(HostError("native_process_owner_unknown"))?,
+                &now(),
+            )?;
+            Some(super::command_process::CommandOwner {
+                budget,
+                call,
+                dispatch,
+                owner: process.owner,
+            })
+        } else {
+            None
+        };
+        let (mut port, mut receiver) = crate::effect_admission::EffectAdmission::channel(owned);
+        port.owner = command.as_ref().map(|c| c.owner.clone());
+        effect.admission(port);
         if let Some(handle) = handle.as_deref() {
             let mut record = json!({"handleId":handle,"toolCallId":call,"state":"active"});
             if let Some(metadata) = metadata {
@@ -518,11 +552,17 @@ impl NativeSessionHost {
                         grant,
                         args: &args,
                         resource,
+                        input,
+                        reads,
+                        command: command.as_ref(),
                     }),
                 )
                 .await?
                 .map_err(|_| HostError("execution_outcome_unknown"))?;
             if outcome.ended {
+                if let Some(command) = &command {
+                    self.command_completed(command)?;
+                }
                 self.resources.mark_handle(
                     resource,
                     &json!({"handleId":handle,"toolCallId":call,"state":"ended"}),
@@ -545,6 +585,9 @@ impl NativeSessionHost {
                             grant,
                             args: &args,
                             resource,
+                            input,
+                            reads,
+                            command: command.as_ref(),
                         }),
                     )
                     .await

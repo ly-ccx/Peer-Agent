@@ -251,6 +251,9 @@ impl NativeSessionHost {
             }
         }
         let claims = self.resources.claims_for(&fresh.resource)?;
+        if !self.command_processes_stopped(&fresh)? {
+            return Err(HostError("native_execution_stop_unproven"));
+        }
         let open = claims
             .iter()
             .flat_map(|c| {

@@ -30,10 +30,22 @@ pub(crate) fn preview(text: &str) -> String {
 pub(crate) fn archive(
     home: &Path,
     conversation: &str,
-    mut result: Value,
+    result: Value,
     kind: ToolOutputKind,
     policy: ArchivePolicy,
     cancel: &CancellationToken,
+) -> Result<Value, &'static str> {
+    archive_with_check(home, conversation, result, kind, policy, &|| {
+        cancel.is_cancelled()
+    })
+}
+pub(crate) fn archive_with_check(
+    home: &Path,
+    conversation: &str,
+    mut result: Value,
+    kind: ToolOutputKind,
+    policy: ArchivePolicy,
+    interrupted: &impl Fn() -> bool,
 ) -> Result<Value, &'static str> {
     let output = &result["output"];
     // Provider output is already bounded at its seam. This temporary encoding is
@@ -47,7 +59,7 @@ pub(crate) fn archive(
     let (reference, mut replacement) = if is_file {
         let content = output["content"].as_str().unwrap();
         let r = store
-            .publish_utf8(conversation, content, &|| cancel.is_cancelled())
+            .publish_utf8(conversation, content, interrupted)
             .map_err(|e| e.code())?;
         let mut v = json!({"kind":"local_file_ref","tool":"read_file","path":output["path"],"chars":content.encode_utf16().count(),"bytes":output["bytes"],"contentHash":output["contentHash"],"preview":preview(content),"truncated":content.encode_utf16().count()>PREVIEW});
         for name in ["start_line", "end_line", "total_lines"] {
@@ -58,7 +70,7 @@ pub(crate) fn archive(
         (r, v)
     } else {
         let r = store
-            .publish_json(conversation, output, &|| cancel.is_cancelled())
+            .publish_json(conversation, output, interrupted)
             .map_err(|e| e.code())?;
         (
             r,

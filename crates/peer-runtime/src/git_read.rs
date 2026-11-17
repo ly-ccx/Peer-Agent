@@ -59,6 +59,14 @@ pub type AuthorityFuture<'a> = Pin<Box<dyn Future<Output = Result<(), GitReadErr
 pub trait GitReadAuthority: Sync {
     fn check(&self) -> AuthorityFuture<'_>;
     fn authorize<'a>(&'a self, path: &'a Path) -> AuthorityFuture<'a>;
+    /// The public capability Adapter journals every real command through its
+    /// Host port. Private recovery probes retain their existing narrower owner.
+    fn starting(&self) -> AuthorityFuture<'_> {
+        Box::pin(async { Ok(()) })
+    }
+    fn spawned(&self, _pid: u32) -> AuthorityFuture<'_> {
+        Box::pin(async { Ok(()) })
+    }
 }
 pub struct GitRead {
     binary: PathBuf,
@@ -70,17 +78,17 @@ impl Default for GitRead {
         }
     }
 }
-struct Input {
-    path: PathBuf,
-    operation: String,
-    limit: u64,
+pub(crate) struct Input {
+    pub path: PathBuf,
+    pub operation: String,
+    pub limit: u64,
 }
 struct Output {
     code: i32,
     stdout: String,
     stderr: String,
 }
-fn input(value: &Value) -> Result<Input, GitReadError> {
+pub(crate) fn input(value: &Value) -> Result<Input, GitReadError> {
     let invalid = || GitReadError::new("git_query_invalid_input");
     let map = value.as_object().ok_or_else(invalid)?;
     if map

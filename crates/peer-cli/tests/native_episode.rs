@@ -6,6 +6,7 @@ mod native_attachments;
 mod native_batch;
 mod native_file_controls;
 mod native_files;
+mod native_git;
 mod native_network;
 #[cfg(feature = "test-fixtures")]
 mod native_parent_controls;
@@ -129,8 +130,11 @@ impl Server {
                             write!(s,"HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
                             continue;
                         }
+                        let reply = native_git::next_reply(
+                            replies.next().unwrap_or_else(|| reply_text("done")),
+                            &request,
+                        );
                         captured.lock().unwrap().push(request);
-                        let reply = replies.next().unwrap_or_else(|| reply_text("done"));
                         if reply == "FIXTURE_CLOSE_WITHOUT_HEADERS" {
                             continue;
                         }

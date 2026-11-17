@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { nativeProcessesInWork } from '@peer-agent/protocol';
 import { reduceCoordinationDecision } from './coordination-kernel.mjs';
 import { applyWorkUpdate } from './work-delta.mjs';
 import { admitHistoryResumption, retainHistoricalWork, retainHistoricalSession } from './history-resumption.mjs';
@@ -47,6 +48,7 @@ export function reduceCoordination(state, entry) {
       next.works[entry.workId] = { ...work, budget };
     }
   } else if (entry.kind === 'work') {
+    nativeProcessesInWork(entry.work);
     next.works[entry.work.workId] = structuredClone(entry.work);
   } else if (entry.kind === 'continuations_coalesced') {
     if (!entry.owner?.workId || !Array.isArray(entry.retired) || entry.retired.some(work => work.state !== 'coalesced'
@@ -107,6 +109,7 @@ export function reduceCoordination(state, entry) {
       || createHash('sha256').update(canonical(entry.state)).digest('hex') !== entry.stateHash
       || !['events', 'works', 'deliveries'].every(key => entry.state[key] && typeof entry.state[key] === 'object' && !Array.isArray(entry.state[key])))
       throw new Error('coordination_repair_state_invalid');
+    for (const work of Object.values(entry.state.works)) nativeProcessesInWork(work);
     next = { ...structuredClone(entry.state), revision: entry.revision,
       lastRecovery: { ...structuredClone(entry.recovery), at: entry.at } };
   } else if (entry.kind === 'history_resume_admitted') {

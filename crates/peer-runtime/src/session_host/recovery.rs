@@ -6,6 +6,9 @@ impl NativeSessionHost {
     /// ADR 131 native recorder v1: canonical provenance + unanimous complete
     /// identities + actual OS proof + no unresolved capability handles.
     pub(super) async fn dead_native_episode(&self, current: &Current) -> bool {
+        if !self.command_processes_stopped(current).unwrap_or(false) {
+            return false;
+        }
         if self.live.ownership(&current.resource.execution).ok()
             == Some(crate::live_execution::Ownership::Live)
             || self
@@ -17,7 +20,7 @@ impl NativeSessionHost {
         }
         self.dead_native_owner(current).await.is_some()
     }
-    async fn dead_native_owner(&self, current: &Current) -> Option<recorder::Recorder> {
+    pub(super) async fn dead_native_owner(&self, current: &Current) -> Option<recorder::Recorder> {
         let plan = &current.resource.execution.plan_id;
         let work = current.goal.facts["delegationOrigin"]["workId"]
             .as_str()
@@ -176,6 +179,8 @@ impl NativeSessionHost {
             return Ok(existing);
         }
         self.recover_native_mcp_handles(&current, cancel).await?;
+        self.recover_command_processes(&current, cancel).await?;
+        let current = self.current(plan, &super::episode_time())?;
         if !self.dead_native_episode(&current).await {
             return Err(HostError("native_execution_stop_unproven"));
         }

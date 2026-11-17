@@ -44,6 +44,7 @@ impl HostShellRisk {
         }
     }
 }
+#[derive(Clone, Copy)]
 pub struct HostCallIdentity<'a> {
     pub plan_id: &'a str,
     pub session_id: &'a str,
@@ -56,6 +57,7 @@ pub struct HostCallIdentity<'a> {
     /// Derived by the actual Shell Provider, never a model-declared risk label.
     pub shell_risk: Option<HostShellRisk>,
 }
+#[derive(PartialEq, Eq)]
 struct Authority {
     plan_id: String,
     session_id: String,
@@ -75,6 +77,7 @@ pub struct PendingPermission {
     record: Value,
     permit: OwnedSemaphorePermit,
     deadline: tokio::time::Instant,
+    scope: Option<super::read_scope::ResolvedReadScope>,
 }
 impl PendingPermission {
     pub fn record(&self) -> &Value {
@@ -84,7 +87,7 @@ impl PendingPermission {
     /// Dropping the wait drops the reader; no stdin task survives this request.
     pub(super) async fn wait(
         &self,
-        input: &mut impl PermissionInput,
+        input: &mut (impl PermissionInput + ?Sized),
         prompt: Value,
         cancel: &crate::CancellationToken,
     ) -> LocalPermissionDecision {
@@ -116,6 +119,7 @@ pub struct HostPermissionGrant {
     authority: Authority,
     facts: Value,
     _permit: OwnedSemaphorePermit,
+    scope: Option<super::read_scope::ResolvedReadScope>,
 }
 impl HostPermissionGrant {
     pub fn facts(&self) -> &Value {
@@ -123,6 +127,29 @@ impl HostPermissionGrant {
     }
     pub(crate) fn conversation_id(&self) -> &str {
         &self.authority.conversation
+    }
+    pub(super) fn identity(&self) -> HostCallIdentity<'_> {
+        let a = &self.authority;
+        HostCallIdentity {
+            plan_id: &a.plan_id,
+            session_id: &a.session_id,
+            conversation_id: &a.conversation,
+            tool_call_id: &a.tool_call,
+            stream_id: &a.stream,
+            capability_id: &a.capability,
+            permission: a.permission,
+            role: a.role,
+            shell_risk: a.shell_risk,
+        }
+    }
+    pub(super) fn same_authority(&self, other: &Self) -> bool {
+        self.authority == other.authority
+    }
+    pub(super) fn covers_read_scope(&self, path: &Path) -> bool {
+        self.scope.as_ref().is_some_and(|s| s.covers(path))
+    }
+    pub(super) fn validate_read_scope(&self) -> Result<(), HostError> {
+        self.scope.as_ref().map_or(Ok(()), |s| s.validate())
     }
 }
 impl NativeSessionHost {
@@ -332,12 +359,39 @@ impl NativeSessionHost {
         args: &Value,
         now: &str,
     ) -> Result<PendingPermission, HostError> {
+        self.request_permission_scope(call, args, None, now)
+    }
+    pub(super) fn request_read_permission(
+        &self,
+        call: HostCallIdentity<'_>,
+        args: &Value,
+        scope: super::read_scope::ResolvedReadScope,
+        now: &str,
+    ) -> Result<PendingPermission, HostError> {
+        self.request_permission_scope(call, args, Some(scope), now)
+    }
+    fn request_permission_scope(
+        &self,
+        call: HostCallIdentity<'_>,
+        args: &Value,
+        scope: Option<super::read_scope::ResolvedReadScope>,
+        now: &str,
+    ) -> Result<PendingPermission, HostError> {
         let permit = self
             .permissions
             .clone()
             .try_acquire_owned()
             .map_err(|_| HostError("permission_resource_limit"))?;
         let authority = self.authority(&call, args, now)?;
+        validate_scope(&scope, &call)?;
+        if let Some(scope) = &scope {
+            self.validate_scope_workspace(scope, call.plan_id, now)?;
+        }
+        let digest = scope
+            .as_ref()
+            .map(|s| s.approval_digest(&authority.digest))
+            .transpose()?
+            .unwrap_or_else(|| authority.digest.clone());
         let approval_id = format!("approval-{}", uuid::Uuid::new_v4());
         let stamp = policy_stamp(&authority.policy);
         let wait = std::time::Duration::from_secs(300);
@@ -377,7 +431,7 @@ impl NativeSessionHost {
                 plan_id: Some(&authority.plan_id),
                 session_id: Some(&authority.session_id),
                 capability_id: &authority.capability,
-                args_digest: &authority.digest,
+                args_digest: &digest,
                 policy_revision: &stamp,
                 created_at: now,
                 deadline_at: Some(&deadline_at),
@@ -389,6 +443,7 @@ impl NativeSessionHost {
             record,
             permit,
             deadline,
+            scope,
         })
     }
     fn validate_authority(&self, a: &Authority, args: &Value, now: &str) -> Result<(), HostError> {
@@ -455,6 +510,12 @@ impl NativeSessionHost {
             Err(HostError("invalid_host_time"))
         } else {
             self.validate_authority(&pending.authority, args, now)
+                .and_then(|_| pending.scope.as_ref().map_or(Ok(()), |s| s.validate()))
+                .and_then(|_| {
+                    pending.scope.as_ref().map_or(Ok(()), |s| {
+                        self.validate_scope_workspace(s, &pending.authority.plan_id, now)
+                    })
+                })
         };
         let (state, decider, reason, terminal) = if let Err(error) = valid {
             (
@@ -519,12 +580,18 @@ impl NativeSessionHost {
             });
         }
         self.validate_authority(&pending.authority, args, now)?;
-        let facts = json!({"grantId":format!("grant-{}",uuid::Uuid::new_v4()),"toolCallId":pending.authority.tool_call,"granted":true,"scope":pending.authority.capability,"duration":"once","decidedAt":now,"reason":"approved_once_in_tui","policyRevision":policy_stamp(&pending.authority.policy)});
+        let scope = pending
+            .scope
+            .as_ref()
+            .map(|s| s.value())
+            .unwrap_or_else(|| json!(pending.authority.capability));
+        let facts = json!({"grantId":format!("grant-{}",uuid::Uuid::new_v4()),"toolCallId":pending.authority.tool_call,"granted":true,"scope":scope,"duration":"once","decidedAt":now,"reason":"approved_once_in_tui","policyRevision":policy_stamp(&pending.authority.policy)});
         Ok(PermissionResolution {
             grant: Some(HostPermissionGrant {
                 authority: pending.authority,
                 facts,
                 _permit: pending.permit,
+                scope: pending.scope,
             }),
             reason: None,
             terminal: None,
@@ -538,7 +605,12 @@ impl NativeSessionHost {
         args: &Value,
         now: &str,
     ) -> Result<(), HostError> {
-        self.validate_authority(&grant.authority, args, now)
+        self.validate_authority(&grant.authority, args, now)?;
+        grant.validate_read_scope()?;
+        if let Some(scope) = &grant.scope {
+            self.validate_scope_workspace(scope, &grant.authority.plan_id, now)?;
+        }
+        Ok(())
     }
     /// Current policy is an approval factor only. Fresh Goal/role/binding/lease/
     /// resource admission is evaluated first, then again at the Provider seam.
@@ -548,28 +620,79 @@ impl NativeSessionHost {
         args: &Value,
         now: &str,
     ) -> Result<Option<HostPermissionGrant>, HostError> {
+        self.automatic_permission_scope(call, args, None, false, now)
+    }
+    pub(super) fn automatic_read_permission(
+        &self,
+        call: HostCallIdentity<'_>,
+        args: &Value,
+        scope: super::read_scope::ResolvedReadScope,
+        admitted: bool,
+        now: &str,
+    ) -> Result<Option<HostPermissionGrant>, HostError> {
+        self.automatic_permission_scope(call, args, Some(scope), admitted, now)
+    }
+    fn automatic_permission_scope(
+        &self,
+        call: HostCallIdentity<'_>,
+        args: &Value,
+        scope: Option<super::read_scope::ResolvedReadScope>,
+        admitted: bool,
+        now: &str,
+    ) -> Result<Option<HostPermissionGrant>, HostError> {
         let permit = self
             .permissions
             .clone()
             .try_acquire_owned()
             .map_err(|_| HostError("permission_resource_limit"))?;
         let authority = self.authority(&call, args, now)?;
+        validate_scope(&scope, &call)?;
+        if let Some(scope) = &scope {
+            self.validate_scope_workspace(scope, call.plan_id, now)?;
+        }
+        if admitted && scope.is_none() {
+            return Err(HostError("read_scope_invalid"));
+        }
         let prompt = json!({"confirmation":{"kind":"capability-approval","approvalKind":match call.permission{ProviderPermission::Read|ProviderPermission::Mcp=>"other",ProviderPermission::FileWrite=>"file-write",ProviderPermission::Shell=>"shell-exec"}},"riskLevel":call.shell_risk.map(HostShellRisk::as_str)});
-        let Some(decision) = crate::access_policy::automatic_access_decision(
-            authority.policy.access_level.as_str(),
-            &prompt,
-            true,
-        ) else {
+        let Some(decision) = (if admitted {
+            Some(json!({"reason":"admitted_read_root"}))
+        } else {
+            crate::access_policy::automatic_access_decision(
+                authority.policy.access_level.as_str(),
+                &prompt,
+                true,
+            )
+        }) else {
             return Ok(None);
         };
         self.validate_authority(&authority, args, now)?;
-        let facts = json!({"grantId":format!("grant-{}",uuid::Uuid::new_v4()),"toolCallId":authority.tool_call,"granted":true,"scope":authority.capability,"duration":"once","decidedAt":now,"reason":decision["reason"],"policyRevision":policy_stamp(&authority.policy)});
+        let scope_facts = scope
+            .as_ref()
+            .map(|s| s.value())
+            .unwrap_or_else(|| json!(authority.capability));
+        let facts = json!({"grantId":format!("grant-{}",uuid::Uuid::new_v4()),"toolCallId":authority.tool_call,"granted":true,"scope":scope_facts,"duration":"once","decidedAt":now,"reason":decision["reason"],"policyRevision":policy_stamp(&authority.policy)});
         Ok(Some(HostPermissionGrant {
             authority,
             facts,
             _permit: permit,
+            scope,
         }))
     }
+}
+fn validate_scope(
+    scope: &Option<super::read_scope::ResolvedReadScope>,
+    call: &HostCallIdentity<'_>,
+) -> Result<(), HostError> {
+    if let Some(scope) = scope {
+        if call.permission != ProviderPermission::Read
+            || !read_capability(call.capability_id)
+            || scope.facts.capability_id != call.capability_id
+        {
+            return Err(HostError("read_scope_capability_denied"));
+        }
+        scope.validate()?;
+    }
+    Ok(())
 }
 fn policy_stamp(policy: &BotAccessPolicy) -> String {
     format!(
@@ -577,7 +700,7 @@ fn policy_stamp(policy: &BotAccessPolicy) -> String {
         policy.workspace_id, policy.conversation_id, policy.revision
     )
 }
-fn read_capability(capability: &str) -> bool {
+pub(crate) fn read_capability(capability: &str) -> bool {
     matches!(
         capability,
         "local.file.read"

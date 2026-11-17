@@ -40,6 +40,9 @@ pub(super) fn reduce(previous: &Value, e: &Value) -> Result<Value, &'static str>
             {
                 return Err("coordination_repair_state_invalid");
             }
+            for work in e["state"]["works"].as_object().unwrap().values() {
+                peer_protocol::native_processes_in_work(work)?;
+            }
             next = e["state"].clone();
             next["lastRecovery"] = merge(&e["recovery"], &json!({"at":e["at"]}));
         }
