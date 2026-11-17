@@ -70,6 +70,14 @@ fn public_native_git_snapshot_keeps_the_real_child_artifact_and_evidence_chain()
     ]);
     let f = Fixture::new(&server);
     let head = repository(&f);
+    // Explicitly reproduce runners with an existing global Git filter. The
+    // actual product strips GIT_* overrides, so fixture-only NOSYSTEM during
+    // repository setup cannot imply a filter-free query environment.
+    std::fs::write(
+        f.root.path().join(".gitconfig"),
+        "[filter \"native-fixture\"]\nclean = touch never-run-filter\n",
+    )
+    .unwrap();
     std::fs::write(
         f.root.path().join("workspace/untracked🦀.txt"),
         "owned fact",
@@ -100,7 +108,11 @@ fn public_native_git_snapshot_keeps_the_real_child_artifact_and_evidence_chain()
     assert_eq!(out["atomic"], false);
     assert_eq!(out["consistent"], true);
     assert_eq!(out["status"]["untracked"], 1);
-    assert_eq!(out["status"]["clean"], false);
+    // A disabled configured filter makes final cleanliness unknown, even when
+    // the restricted observation sees an untracked file (ADR106).
+    assert_eq!(out["status"]["filtersDisabled"], true);
+    assert!(out["status"]["clean"].is_null());
+    assert!(!f.root.path().join("workspace/never-run-filter").exists());
     assert_eq!(message["permissionGrants"][0]["granted"], true);
     assert_eq!(message["permissionGrants"][0]["scope"]["kind"], "file-read");
     let process = &result["evidence"]["nativeProcess"];
