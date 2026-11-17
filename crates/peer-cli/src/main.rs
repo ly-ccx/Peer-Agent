@@ -27,7 +27,7 @@ fn run() -> io::Result<CliExit> {
         Command::Version => writeln!(out, "peer {}", VERSION.trim())?,
         Command::Help => writeln!(
             out,
-            "Peer native CLI migration candidate\n\nUsage: peer-native [--help|--version|doctor|--classic|bots]\n       peer-native exec --plan <canonical-goal-id> [--max-turns N]\n       peer-native recover --plan <canonical-goal-id>\n       peer-native sessions [list]\n       peer-native export <session-id> [--output <path>] [--force]\n       peer-native mcp auth <server-id>\n       peer-native mcp refresh <server-id>\n       peer-native completions <bash|zsh|fish>\n       peer-native models\n       peer-native models <auth|logout|status|reconcile> <configured-channel-id>\n\nNative exec supports fresh delegated worker admissions with native model and MCP\ntransports. Unsupported configuration is rejected. OAuth commands update configured\nVault credentials; they do not grant tools. The interactive TUI edits drafts.\nPEER_MODEL_API_KEY, PEER_MODEL_BASE_URL and PEER_MODEL_ID configure the independent\nenvironment model source. No Bun/Node sidecar is started."
+            "Peer native CLI migration candidate\n\nUsage: peer-native [--help|--version|doctor|--classic|bots]\n       peer-native exec [options] [prompt]\n       peer-native exec --plan <canonical-goal-id> [--max-turns N]\n       peer-native recover --plan <canonical-goal-id>\n       peer-native sessions [list]\n       peer-native export <session-id> [--output <path>] [--force]\n       peer-native mcp auth <server-id>\n       peer-native mcp refresh <server-id>\n       peer-native completions <bash|zsh|fish>\n       peer-native models\n       peer-native models <auth|logout|status|reconcile> <configured-channel-id>\n\nNative exec supports ordinary conversations and delegated worker admissions\nwith native model and MCP transports. Unsupported configuration is rejected. OAuth commands update configured\nVault credentials; they do not grant tools. The interactive TUI edits drafts.\nPEER_MODEL_API_KEY, PEER_MODEL_BASE_URL and PEER_MODEL_ID configure the independent\nenvironment model source. No Bun/Node sidecar is started."
         )?,
         Command::Completions(shell) => {
             let data: serde_json::Value =
@@ -72,6 +72,13 @@ fn run() -> io::Result<CliExit> {
         Command::Exec { plan, max_turns } => {
             drop(out);
             return peer_cli::native_exec::run(&plan, max_turns, false);
+        }
+        Command::OrdinaryExec(options) => {
+            drop(out);
+            return peer_cli::ordinary_exec::run(&options);
+        }
+        Command::ExecHelp => {
+            writeln!(out, "{}", peer_cli::ordinary_exec::HELP)?;
         }
         Command::Recover(plan) => {
             drop(out);

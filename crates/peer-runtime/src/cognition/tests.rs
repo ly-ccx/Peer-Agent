@@ -39,7 +39,7 @@ impl CognitionHost for Host {
     fn check_request(&self) -> Result<(), HostError> {
         Ok(())
     }
-    fn admit_request(&mut self) -> Result<(), HostError> {
+    fn admit_request(&mut self, _capacity_bearing: bool) -> Result<(), HostError> {
         self.admitted += 1;
         Ok(())
     }
@@ -231,6 +231,9 @@ fn exchanges(responses: Vec<String>) -> (String, std::thread::JoinHandle<Capture
                     other => panic!("controlled cognition socket: {other:?}"),
                 }
             };
+            // Accepted sockets may inherit O_NONBLOCK on Darwin. This fixture
+            // deliberately uses bounded blocking request reads.
+            socket.set_nonblocking(false).unwrap();
             socket
                 .set_read_timeout(Some(Duration::from_secs(2)))
                 .unwrap();

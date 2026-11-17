@@ -10,7 +10,7 @@ use std::{
     pin::Pin,
     time::Duration,
 };
-struct TerminalPermission;
+pub(crate) struct TerminalPermission;
 impl PermissionInput for TerminalPermission {
     fn decide<'a>(
         &'a mut self,

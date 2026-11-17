@@ -301,7 +301,7 @@ impl ConversationStore {
         at: &str,
     ) -> Result<ConversationMetadataPublication, StoreError> {
         self.mutate_execution(token, at, None, |run, _| {
-            if run.stop.is_some() || run.phase == Phase::Stopped {
+            if run.phase != Phase::Active {
                 return Err(StoreError::ExecutionChanged);
             }
             if let Some(old) = &run.usage
@@ -454,6 +454,41 @@ impl ConversationStore {
             Ok(())
         })
     }
+    /// Called by the actual owned MCP transport after observing its child tuple.
+    /// A late cancellation does not discard the child needed for accountability.
+    pub fn record_conversation_handle_child(
+        &self,
+        token: &mut ConversationExecutionToken,
+        handle: &str,
+        child: &NativeProcessRecorder,
+        at: &str,
+    ) -> Result<ConversationMetadataPublication, StoreError> {
+        self.mutate_execution(token, at, None, |run, _| {
+            if !child.complete()
+                || child.boot_id != run.owner.boot_id
+                || child.host_id != run.owner.host_id
+                || child.acquired_at != run.owner.acquired_at
+            {
+                return Err(StoreError::ExecutionInvalid);
+            }
+            let h = run
+                .handles
+                .iter_mut()
+                .find(|h| h["handleId"] == handle)
+                .ok_or(StoreError::ExecutionChanged)?;
+            let n = &mut h["metadata"]["nativeMcp"];
+            let raw = serde_json::to_value(child).map_err(|_| StoreError::ExecutionInvalid)?;
+            if n["role"] != "connection"
+                || n["transport"] != "stdio"
+                || n["ownerRecorder"] != serde_json::to_value(&run.owner).unwrap()
+                || n.get("childRecorder").is_some_and(|old| old != &raw)
+            {
+                return Err(StoreError::ExecutionInvalid);
+            }
+            n["childRecorder"] = raw;
+            Ok(())
+        })
+    }
     pub fn settle_conversation_tool(
         &self,
         token: &mut ConversationExecutionToken,
@@ -504,7 +539,24 @@ impl ConversationStore {
                 || grant["capabilityId"]
                     .as_str()
                     .is_some_and(|c| c != pending.capability_id)
-                || run.handles.iter().any(|h| h["toolCallId"] == call_id)
+                || run.handles.iter().any(|h| {
+                    if h["toolCallId"] != call_id {
+                        return false;
+                    }
+                    let n = &h["metadata"]["nativeMcp"];
+                    !(pending.capability_id.starts_with("local.mcp.")
+                        && h["metadata"]["kind"] == "mcp_connection"
+                        && n["schemaVersion"] == 1
+                        && n["role"] == "connection"
+                        && n["ownerRecorder"] == serde_json::to_value(&run.owner).unwrap()
+                        && n["registryRevision"]
+                            .as_str()
+                            .is_some_and(|s| !s.is_empty())
+                        && matches!(
+                            n["transport"].as_str(),
+                            Some("stdio" | "streamable_http" | "sse")
+                        ))
+                })
                 || peer_protocol::approval_args_digest(&segment["args"])
                     .ok()
                     .as_deref()
@@ -592,7 +644,7 @@ impl ConversationStore {
         if run.identity != token.identity
             || run.owner != token.owner
             || run.revision != token.revision
-            || run.stop.is_none()
+            || run.phase == Phase::Active
         {
             return Err(StoreError::ExecutionChanged);
         }
@@ -629,7 +681,7 @@ impl ConversationStore {
                 || run.identity != receipt.identity
                 || run.usage != receipt.usage
                 || run.attribution != receipt.attribution
-                || run.stop.is_none()
+                || run.phase == Phase::Active
             {
                 return Err(StoreError::UsageConflict);
             }

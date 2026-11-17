@@ -1,10 +1,12 @@
 #![forbid(unsafe_code)]
 pub mod capability;
 mod cognition;
+pub mod conversation_host;
 mod effect_admission;
 mod mcp;
 mod mcp_auth;
 pub mod mcp_oauth;
+mod read_scope;
 mod tool_result_content;
 mod turn_loop;
 

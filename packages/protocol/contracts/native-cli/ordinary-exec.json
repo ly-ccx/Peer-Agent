@@ -1,0 +1,967 @@
+{
+  "version": 1,
+  "argvCases": [
+    {
+      "args": [],
+      "expected": {
+        "kind": "exec",
+        "options": {
+          "access": "session",
+          "outputFormat": "text",
+          "mode": "chat",
+          "fast": false,
+          "promptParts": []
+        }
+      }
+    },
+    {
+      "args": [
+        "question"
+      ],
+      "expected": {
+        "kind": "exec",
+        "options": {
+          "access": "session",
+          "outputFormat": "text",
+          "mode": "chat",
+          "fast": false,
+          "promptParts": [
+            "question"
+          ]
+        }
+      }
+    },
+    {
+      "args": [
+        "one",
+        "two"
+      ],
+      "expected": {
+        "kind": "exec",
+        "options": {
+          "access": "session",
+          "outputFormat": "text",
+          "mode": "chat",
+          "fast": false,
+          "promptParts": [
+            "one",
+            "two"
+          ]
+        }
+      }
+    },
+    {
+      "args": [
+        "-"
+      ],
+      "expected": {
+        "kind": "exec",
+        "options": {
+          "access": "session",
+          "outputFormat": "text",
+          "mode": "chat",
+          "fast": false,
+          "promptParts": [
+            "-"
+          ]
+        }
+      }
+    },
+    {
+      "args": [
+        "--",
+        "--help"
+      ],
+      "expected": {
+        "kind": "exec",
+        "options": {
+          "access": "session",
+          "outputFormat": "text",
+          "mode": "chat",
+          "fast": false,
+          "promptParts": [
+            "--help"
+          ]
+        }
+      }
+    },
+    {
+      "args": [
+        "--help"
+      ],
+      "expected": {
+        "kind": "help",
+        "topic": "exec"
+      }
+    },
+    {
+      "args": [
+        "--access",
+        "ask",
+        "question"
+      ],
+      "expected": {
+        "kind": "exec",
+        "options": {
+          "access": "ask",
+          "outputFormat": "text",
+          "mode": "chat",
+          "fast": false,
+          "promptParts": [
+            "question"
+          ]
+        }
+      }
+    },
+    {
+      "args": [
+        "--access=session",
+        "q"
+      ],
+      "expected": {
+        "kind": "exec",
+        "options": {
+          "access": "session",
+          "outputFormat": "text",
+          "mode": "chat",
+          "fast": false,
+          "promptParts": [
+            "q"
+          ]
+        }
+      }
+    },
+    {
+      "args": [
+        "--access=full",
+        "q"
+      ],
+      "expected": {
+        "kind": "exec",
+        "options": {
+          "access": "full",
+          "outputFormat": "text",
+          "mode": "chat",
+          "fast": false,
+          "promptParts": [
+            "q"
+          ]
+        }
+      }
+    },
+    {
+      "args": [
+        "--access",
+        "restricted",
+        "q"
+      ],
+      "expected": {
+        "kind": "error",
+        "message": "peer exec: --access must be ask, session, or full",
+        "exitCode": 2
+      }
+    },
+    {
+      "args": [
+        "--output-format=json",
+        "q"
+      ],
+      "expected": {
+        "kind": "exec",
+        "options": {
+          "access": "session",
+          "outputFormat": "json",
+          "mode": "chat",
+          "fast": false,
+          "promptParts": [
+            "q"
+          ]
+        }
+      }
+    },
+    {
+      "args": [
+        "--output-format",
+        "yaml",
+        "q"
+      ],
+      "expected": {
+        "kind": "error",
+        "message": "peer exec: --output-format must be text or json",
+        "exitCode": 2
+      }
+    },
+    {
+      "args": [
+        "--provider",
+        "channel",
+        "--model",
+        "channel::model/id",
+        "q"
+      ],
+      "expected": {
+        "kind": "exec",
+        "options": {
+          "access": "session",
+          "outputFormat": "text",
+          "provider": "channel",
+          "model": "channel::model/id",
+          "mode": "chat",
+          "fast": false,
+          "promptParts": [
+            "q"
+          ]
+        }
+      }
+    },
+    {
+      "args": [
+        "--effort=off",
+        "q"
+      ],
+      "expected": {
+        "kind": "exec",
+        "options": {
+          "access": "session",
+          "outputFormat": "text",
+          "effort": "off",
+          "mode": "chat",
+          "fast": false,
+          "promptParts": [
+            "q"
+          ]
+        }
+      }
+    },
+    {
+      "args": [
+        "--mode=plan",
+        "q"
+      ],
+      "expected": {
+        "kind": "exec",
+        "options": {
+          "access": "session",
+          "outputFormat": "text",
+          "mode": "plan",
+          "fast": false,
+          "promptParts": [
+            "q"
+          ]
+        }
+      }
+    },
+    {
+      "args": [
+        "--mode=bad",
+        "q"
+      ],
+      "expected": {
+        "kind": "error",
+        "message": "peer exec: --mode must be chat, plan, or goal",
+        "exitCode": 2
+      }
+    },
+    {
+      "args": [
+        "--fast",
+        "q"
+      ],
+      "expected": {
+        "kind": "exec",
+        "options": {
+          "access": "session",
+          "outputFormat": "text",
+          "mode": "chat",
+          "fast": true,
+          "promptParts": [
+            "q"
+          ]
+        }
+      }
+    },
+    {
+      "args": [
+        "--fast=true",
+        "q"
+      ],
+      "expected": {
+        "kind": "error",
+        "message": "peer exec: --fast does not take a value",
+        "exitCode": 2
+      }
+    },
+    {
+      "args": [
+        "--workspace",
+        "/repo",
+        "q"
+      ],
+      "expected": {
+        "kind": "exec",
+        "options": {
+          "access": "session",
+          "outputFormat": "text",
+          "mode": "chat",
+          "fast": false,
+          "workspace": "/repo",
+          "promptParts": [
+            "q"
+          ]
+        }
+      }
+    },
+    {
+      "args": [
+        "--max-turns",
+        "1",
+        "q"
+      ],
+      "expected": {
+        "kind": "exec",
+        "options": {
+          "access": "session",
+          "outputFormat": "text",
+          "mode": "chat",
+          "fast": false,
+          "maxTurns": 1,
+          "promptParts": [
+            "q"
+          ]
+        }
+      }
+    },
+    {
+      "args": [
+        "--max-turns",
+        "1e3",
+        "q"
+      ],
+      "expected": {
+        "kind": "exec",
+        "options": {
+          "access": "session",
+          "outputFormat": "text",
+          "mode": "chat",
+          "fast": false,
+          "maxTurns": 1000,
+          "promptParts": [
+            "q"
+          ]
+        }
+      }
+    },
+    {
+      "args": [
+        "--max-turns",
+        "1.0",
+        "q"
+      ],
+      "expected": {
+        "kind": "exec",
+        "options": {
+          "access": "session",
+          "outputFormat": "text",
+          "mode": "chat",
+          "fast": false,
+          "maxTurns": 1,
+          "promptParts": [
+            "q"
+          ]
+        }
+      }
+    },
+    {
+      "args": [
+        "--max-turns",
+        "0x10",
+        "q"
+      ],
+      "expected": {
+        "kind": "exec",
+        "options": {
+          "access": "session",
+          "outputFormat": "text",
+          "mode": "chat",
+          "fast": false,
+          "maxTurns": 16,
+          "promptParts": [
+            "q"
+          ]
+        }
+      }
+    },
+    {
+      "args": [
+        "--max-turns",
+        "0",
+        "q"
+      ],
+      "expected": {
+        "kind": "error",
+        "message": "peer exec: --max-turns must be a positive integer",
+        "exitCode": 2
+      }
+    },
+    {
+      "args": [
+        "--max-turns",
+        "2.5",
+        "q"
+      ],
+      "expected": {
+        "kind": "error",
+        "message": "peer exec: --max-turns must be a positive integer",
+        "exitCode": 2
+      }
+    },
+    {
+      "args": [
+        "--max-turns",
+        "bad",
+        "q"
+      ],
+      "expected": {
+        "kind": "error",
+        "message": "peer exec: --max-turns must be a positive integer",
+        "exitCode": 2
+      }
+    },
+    {
+      "args": [
+        "--max-turns"
+      ],
+      "expected": {
+        "kind": "error",
+        "message": "peer exec: --max-turns requires a value",
+        "exitCode": 2
+      }
+    },
+    {
+      "args": [
+        "--tools=file,bash",
+        "q"
+      ],
+      "expected": {
+        "kind": "exec",
+        "options": {
+          "access": "session",
+          "tools": [
+            "file",
+            "bash"
+          ],
+          "outputFormat": "text",
+          "mode": "chat",
+          "fast": false,
+          "promptParts": [
+            "q"
+          ]
+        }
+      }
+    },
+    {
+      "args": [
+        "--tools",
+        ",,",
+        "q"
+      ],
+      "expected": {
+        "kind": "error",
+        "message": "peer exec: --tools requires a value",
+        "exitCode": 2
+      }
+    },
+    {
+      "args": [
+        "--unknown",
+        "q"
+      ],
+      "expected": {
+        "kind": "error",
+        "message": "peer exec: unknown option --unknown",
+        "exitCode": 2
+      }
+    },
+    {
+      "args": [
+        "--provider=",
+        "q"
+      ],
+      "expected": {
+        "kind": "error",
+        "message": "peer exec: --provider requires a value",
+        "exitCode": 2
+      }
+    },
+    {
+      "args": [
+        "--provider",
+        "--model",
+        "q"
+      ],
+      "expected": {
+        "kind": "error",
+        "message": "peer exec: --provider requires a value",
+        "exitCode": 2
+      }
+    }
+  ],
+  "toolAliases": {
+    "file": [
+      "local.file.read",
+      "local.file.list",
+      "local.file.search",
+      "local.file.edit",
+      "local.file.write"
+    ],
+    "bash": [
+      "local.shell.exec",
+      "local.shell.stop"
+    ],
+    "local.file.read": [
+      "local.file.read"
+    ],
+    "read_file": [
+      "local.file.read"
+    ],
+    "local.file.list": [
+      "local.file.list"
+    ],
+    "list_files": [
+      "local.file.list"
+    ],
+    "local.file.search": [
+      "local.file.search"
+    ],
+    "search_files": [
+      "local.file.search"
+    ],
+    "local.file.edit": [
+      "local.file.edit"
+    ],
+    "edit_file": [
+      "local.file.edit"
+    ],
+    "local.file.write": [
+      "local.file.write"
+    ],
+    "write_file": [
+      "local.file.write"
+    ],
+    "local.shell.exec": [
+      "local.shell.exec"
+    ],
+    "local.shell.stop": [
+      "local.shell.stop"
+    ],
+    "shell_stop": [
+      "local.shell.stop"
+    ],
+    "local.search.aggregate": [
+      "local.search.aggregate"
+    ],
+    "batch_search": [
+      "local.search.aggregate"
+    ],
+    "local.web.fetch": [
+      "local.web.fetch"
+    ],
+    "web_fetch": [
+      "local.web.fetch"
+    ],
+    "local.interaction.request_user_input": [
+      "local.interaction.request_user_input"
+    ],
+    "request_user_input": [
+      "local.interaction.request_user_input"
+    ],
+    "local.goal.create_plan": [
+      "local.goal.create_plan"
+    ],
+    "goal_create_plan": [
+      "local.goal.create_plan"
+    ],
+    "local.goal.update_task": [
+      "local.goal.update_task"
+    ],
+    "goal_update_task": [
+      "local.goal.update_task"
+    ],
+    "local.goal.get_plan": [
+      "local.goal.get_plan"
+    ],
+    "goal_get_plan": [
+      "local.goal.get_plan"
+    ],
+    "local.goal.explore": [
+      "local.goal.explore"
+    ],
+    "request_explorer": [
+      "local.goal.explore"
+    ],
+    "local.goal.create": [
+      "local.goal.create_plan"
+    ],
+    "local.goal.update": [
+      "local.goal.update_task"
+    ],
+    "local.goal.read": [
+      "local.goal.get_plan"
+    ],
+    "local.search.content": [
+      "local.file.search"
+    ],
+    "local_shell_exec": [
+      "local.shell.exec"
+    ]
+  },
+  "modelCases": [
+    {
+      "catalog": [
+        {
+          "providerId": "a",
+          "modelId": "model/id",
+          "entryId": "entry-a",
+          "available": true
+        },
+        {
+          "providerId": "b",
+          "modelId": "model/id",
+          "entryId": "entry-b",
+          "available": true
+        },
+        {
+          "providerId": "c",
+          "modelId": "unique",
+          "entryId": "entry-c",
+          "available": true
+        }
+      ],
+      "ref": {
+        "model": "model/id"
+      },
+      "expected": {
+        "ok": false,
+        "message": "peer exec: --model model/id is ambiguous. Use --provider <id> or --model <provider>::<model>:\n  a::model/id\n  b::model/id"
+      }
+    },
+    {
+      "catalog": [
+        {
+          "providerId": "a",
+          "modelId": "model/id",
+          "entryId": "entry-a",
+          "available": true
+        },
+        {
+          "providerId": "b",
+          "modelId": "model/id",
+          "entryId": "entry-b",
+          "available": true
+        },
+        {
+          "providerId": "c",
+          "modelId": "unique",
+          "entryId": "entry-c",
+          "available": true
+        }
+      ],
+      "ref": {
+        "provider": "a",
+        "model": "model/id"
+      },
+      "expected": {
+        "ok": true,
+        "entry": {
+          "providerId": "a",
+          "modelId": "model/id",
+          "entryId": "entry-a",
+          "available": true
+        }
+      }
+    },
+    {
+      "catalog": [
+        {
+          "providerId": "a",
+          "modelId": "model/id",
+          "entryId": "entry-a",
+          "available": true
+        },
+        {
+          "providerId": "b",
+          "modelId": "model/id",
+          "entryId": "entry-b",
+          "available": true
+        },
+        {
+          "providerId": "c",
+          "modelId": "unique",
+          "entryId": "entry-c",
+          "available": true
+        }
+      ],
+      "ref": {
+        "model": "a::model/id"
+      },
+      "expected": {
+        "ok": true,
+        "entry": {
+          "providerId": "a",
+          "modelId": "model/id",
+          "entryId": "entry-a",
+          "available": true
+        }
+      }
+    },
+    {
+      "catalog": [
+        {
+          "providerId": "a",
+          "modelId": "model/id",
+          "entryId": "entry-a",
+          "available": true
+        },
+        {
+          "providerId": "b",
+          "modelId": "model/id",
+          "entryId": "entry-b",
+          "available": true
+        },
+        {
+          "providerId": "c",
+          "modelId": "unique",
+          "entryId": "entry-c",
+          "available": true
+        }
+      ],
+      "ref": {
+        "provider": "entry-a",
+        "model": "model/id"
+      },
+      "expected": {
+        "ok": true,
+        "entry": {
+          "providerId": "a",
+          "modelId": "model/id",
+          "entryId": "entry-a",
+          "available": true
+        }
+      }
+    },
+    {
+      "catalog": [
+        {
+          "providerId": "a",
+          "modelId": "model/id",
+          "entryId": "entry-a",
+          "available": true
+        },
+        {
+          "providerId": "b",
+          "modelId": "model/id",
+          "entryId": "entry-b",
+          "available": true
+        },
+        {
+          "providerId": "c",
+          "modelId": "unique",
+          "entryId": "entry-c",
+          "available": true
+        }
+      ],
+      "ref": {
+        "provider": "b",
+        "model": "a::model/id"
+      },
+      "expected": {
+        "ok": false,
+        "message": "peer exec: --provider b conflicts with --model a::model/id"
+      }
+    },
+    {
+      "catalog": [
+        {
+          "providerId": "a",
+          "modelId": "model/id",
+          "entryId": "entry-a",
+          "available": true
+        },
+        {
+          "providerId": "b",
+          "modelId": "model/id",
+          "entryId": "entry-b",
+          "available": true
+        },
+        {
+          "providerId": "c",
+          "modelId": "unique",
+          "entryId": "entry-c",
+          "available": true
+        }
+      ],
+      "ref": {
+        "model": "unique"
+      },
+      "expected": {
+        "ok": true,
+        "entry": {
+          "providerId": "c",
+          "modelId": "unique",
+          "entryId": "entry-c",
+          "available": true
+        }
+      }
+    },
+    {
+      "catalog": [
+        {
+          "providerId": "a",
+          "modelId": "model/id",
+          "entryId": "entry-a",
+          "available": true
+        },
+        {
+          "providerId": "b",
+          "modelId": "model/id",
+          "entryId": "entry-b",
+          "available": true
+        },
+        {
+          "providerId": "c",
+          "modelId": "unique",
+          "entryId": "entry-c",
+          "available": true
+        }
+      ],
+      "ref": {
+        "provider": "missing"
+      },
+      "expected": {
+        "ok": false,
+        "message": "peer exec: unknown --provider missing"
+      }
+    },
+    {
+      "catalog": [
+        {
+          "providerId": "a",
+          "modelId": "model/id",
+          "entryId": "entry-a",
+          "available": true
+        },
+        {
+          "providerId": "b",
+          "modelId": "model/id",
+          "entryId": "entry-b",
+          "available": true
+        },
+        {
+          "providerId": "c",
+          "modelId": "unique",
+          "entryId": "entry-c",
+          "available": true
+        }
+      ],
+      "ref": {
+        "provider": "a"
+      },
+      "expected": {
+        "ok": true,
+        "entry": {
+          "providerId": "a",
+          "modelId": "model/id",
+          "entryId": "entry-a",
+          "available": true
+        }
+      }
+    },
+    {
+      "catalog": [
+        {
+          "providerId": "a",
+          "modelId": "model/id",
+          "entryId": "entry-a",
+          "available": true
+        },
+        {
+          "providerId": "b",
+          "modelId": "model/id",
+          "entryId": "entry-b",
+          "available": true
+        },
+        {
+          "providerId": "c",
+          "modelId": "unique",
+          "entryId": "entry-c",
+          "available": true
+        }
+      ],
+      "ref": {
+        "model": "missing"
+      },
+      "expected": {
+        "ok": false,
+        "message": "peer exec: unknown --model missing"
+      }
+    },
+    {
+      "catalog": [
+        {
+          "providerId": "a",
+          "modelId": "model/id",
+          "entryId": "entry-a",
+          "available": true
+        },
+        {
+          "providerId": "b",
+          "modelId": "model/id",
+          "entryId": "entry-b",
+          "available": true
+        },
+        {
+          "providerId": "c",
+          "modelId": "unique",
+          "entryId": "entry-c",
+          "available": true
+        }
+      ],
+      "ref": {
+        "model": "::model/id"
+      },
+      "expected": {
+        "ok": false,
+        "message": "peer exec: unknown --model ::model/id"
+      }
+    },
+    {
+      "catalog": [
+        {
+          "providerId": "a",
+          "modelId": "model/id",
+          "entryId": "entry-a",
+          "available": true
+        },
+        {
+          "providerId": "b",
+          "modelId": "model/id",
+          "entryId": "entry-b",
+          "available": true
+        },
+        {
+          "providerId": "c",
+          "modelId": "unique",
+          "entryId": "entry-c",
+          "available": true
+        }
+      ],
+      "ref": {
+        "model": "a::"
+      },
+      "expected": {
+        "ok": false,
+        "message": "peer exec: unknown --model a::"
+      }
+    }
+  ]
+}

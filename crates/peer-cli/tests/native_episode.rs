@@ -4,6 +4,7 @@ use peer_runtime::coordination::NativeCoordinationReducer;
 mod native_artifacts;
 mod native_attachments;
 mod native_batch;
+mod native_conversation;
 mod native_file_controls;
 mod native_files;
 mod native_git;
@@ -2247,6 +2248,13 @@ fn permission_pty_deadline(
     f: &Fixture,
     wait_ms: Option<u64>,
 ) -> (std::os::fd::OwnedFd, OwnedChild) {
+    let mut command = f.command("exec", "p");
+    if let Some(wait) = wait_ms {
+        command.env("PEER_NATIVE_PERMISSION_WAIT_MS", wait.to_string());
+    }
+    permission_command_pty(command)
+}
+fn permission_command_pty(mut command: Command) -> (std::os::fd::OwnedFd, OwnedChild) {
     let master =
         rustix::pty::openpt(rustix::pty::OpenptFlags::RDWR | rustix::pty::OpenptFlags::NOCTTY)
             .unwrap();
@@ -2260,10 +2268,6 @@ fn permission_pty_deadline(
         rustix::fs::Mode::empty(),
     )
     .unwrap();
-    let mut command = f.command("exec", "p");
-    if let Some(wait) = wait_ms {
-        command.env("PEER_NATIVE_PERMISSION_WAIT_MS", wait.to_string());
-    }
     let child = OwnedChild(Some(
         command
             .stdin(Stdio::from(rustix::io::dup(&slave).unwrap()))

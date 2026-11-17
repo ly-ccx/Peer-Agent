@@ -57,7 +57,7 @@ impl CognitionHost for GoalCognitionHost<'_, '_> {
     fn check_request(&self) -> Result<(), HostError> {
         self.frame.budget.check_request(self.host)
     }
-    fn admit_request(&mut self) -> Result<(), HostError> {
+    fn admit_request(&mut self, _capacity_bearing: bool) -> Result<(), HostError> {
         self.frame.budget.request(self.host, &now())
     }
     fn assemble(&self, continuity: &[Value]) -> Result<Value, HostError> {

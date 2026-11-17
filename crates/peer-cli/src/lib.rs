@@ -7,6 +7,7 @@ pub mod mcp;
 pub mod model_auth;
 pub mod models;
 pub mod native_exec;
+pub mod ordinary_exec;
 pub mod sessions;
 mod shell_args;
 pub mod terminal;
@@ -28,6 +29,8 @@ pub enum Command {
     ShellHelp(&'static str),
     Export(export::Options),
     Exec { plan: String, max_turns: usize },
+    OrdinaryExec(ordinary_exec::Options),
+    ExecHelp,
     Recover(String),
     McpAuth { server: String, refresh: bool },
     ModelAuth { action: String, channel: String },
@@ -41,6 +44,9 @@ pub fn command(argv: &[String]) -> Command {
         .any(|arg| matches!(arg.as_str(), "--version" | "-v"))
     {
         return Command::Version;
+    }
+    if argv.first().is_some_and(|s| s == "exec") && argv.get(1).is_none_or(|s| s != "--plan") {
+        return ordinary_exec::parse(&argv[1..]);
     }
     if argv
         .iter()
@@ -120,7 +126,7 @@ mod tests {
         assert_eq!(command(&[]), Command::Interactive);
         assert_eq!(
             command(&["exec".into()]),
-            Command::Unavailable("exec".into())
+            Command::OrdinaryExec(ordinary_exec::Options::default())
         );
     }
 }

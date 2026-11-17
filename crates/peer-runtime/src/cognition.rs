@@ -28,7 +28,7 @@ pub(crate) struct CognitionRequest<'a> {
 pub(crate) trait CognitionHost {
     fn authority(&self) -> Result<(), HostError>;
     fn check_request(&self) -> Result<(), HostError>;
-    fn admit_request(&mut self) -> Result<(), HostError>;
+    fn admit_request(&mut self, _capacity_bearing: bool) -> Result<(), HostError>;
     fn assemble(&self, continuity: &[Value]) -> Result<Value, HostError>;
     fn observe(
         &mut self,
@@ -46,6 +46,7 @@ pub(crate) trait CognitionHost {
 pub(crate) struct RequestResult {
     pub turn: ModelTurn,
     pub system: Value,
+    pub history: HistorySnapshot,
 }
 pub(crate) struct ContextPipeline {
     pub capacity: ContextCapacity,
@@ -195,20 +196,23 @@ impl ContextPipeline {
                 compacted = true;
                 continue;
             }
-            let turn = self
+            let (turn, checked) = self
                 .send_attempts(host, f, accounting, prepared, &history, true)
                 .await?;
             let turn = match turn {
                 Err(error) if error.context_overflow_status.is_some() && !compacted => {
-                    let fresh = store.read_committed(&self.conversation, None, 8 * 1024 * 1024)?;
-                    self.compact(host, f, accounting, &fresh, &projected)
+                    self.compact(host, f, accounting, &checked, &projected)
                         .await?;
                     compacted = true;
                     continue;
                 }
                 other => other.map_err(|e| HostError(e.code))?,
             };
-            return Ok(RequestResult { turn, system });
+            return Ok(RequestResult {
+                turn,
+                system,
+                history: checked,
+            });
         }
     }
     async fn compact(
@@ -294,7 +298,7 @@ impl ContextPipeline {
                 &LiveHistory::default(),
             )
             .map_err(|e| HostError(e.code))?;
-        let result = self
+        let (result, checked) = self
             .send_attempts(host, f, accounting, prepared, history, false)
             .await?;
         Self::authority(host, f)?;
@@ -324,7 +328,7 @@ impl ContextPipeline {
             .ok_or(HostError("context_revision_limit"))?;
         let marker=peer_protocol::build_compaction_marker(&json!({"method":method,"summary":summary,"originalMessageCount":messages.len(),"beforeTokens":before["authoritativeInputTokens"],"historySelection":{"version":1,"compactionEpoch":epoch,"retainedMessageIds":[retained]}})).map_err(HostError)?;
         let store = ConversationStore::new(f.home);
-        let committed=store.commit_message(history,&json!({"id":uuid::Uuid::new_v4().to_string(),"role":"user","content":summary,"createdAt":now(),"_compaction":marker}),&now(),None)?;
+        let committed=store.commit_message(&checked,&json!({"id":uuid::Uuid::new_v4().to_string(),"role":"user","content":summary,"createdAt":now(),"_compaction":marker}),&now(),None)?;
         #[cfg(feature = "test-fixtures")]
         if std::env::var("PEER_NATIVE_CONTEXT_FAULT").ok().as_deref() == Some("after_marker")
             && f.home.join(".native-cli-fixture").is_file()

@@ -12,14 +12,21 @@ impl ContextPipeline {
         mut prepared: PreparedRequest<'_>,
         history: &HistorySnapshot,
         capacity_bearing: bool,
-    ) -> Result<Result<ModelTurn, ModelError>, HostError> {
+    ) -> Result<(Result<ModelTurn, ModelError>, HistorySnapshot), HostError> {
         let seed = prepared.retry_seed();
         let mut policy = Policy::default();
         let store = ConversationStore::new(f.home);
         let mut revision = history.source_revision.clone();
         loop {
             Self::guard(host, f)?;
-            host.admit_request()?;
+            if store
+                .read_committed(&self.conversation, None, 8 * 1024 * 1024)?
+                .source_revision
+                != revision
+            {
+                return Err(peer_store::StoreError::ContextConflict.into());
+            }
+            host.admit_request(capacity_bearing)?;
             let fingerprint = prepared.fingerprint().to_owned();
             let mut observed = None;
             let turn = host
@@ -54,7 +61,7 @@ impl ContextPipeline {
             // Preserve factual late usage before ownership/cancellation failures.
             let turn = turn?;
             Self::authority(host, f)?;
-            {
+            let checked = {
                 let fresh = store.read_committed(&self.conversation, None, 8 * 1024 * 1024)?;
                 if fresh.source_revision != revision {
                     return Err(peer_store::StoreError::ContextConflict.into());
@@ -69,17 +76,19 @@ impl ContextPipeline {
                     self.capacity.overflow(status);
                 }
                 if capacity_bearing {
-                    revision = self
-                        .persist(&store, &fresh, "turn_complete")?
-                        .source_revision;
+                    let committed = self.persist(&store, &fresh, "turn_complete")?;
+                    revision = committed.source_revision.clone();
+                    committed
+                } else {
+                    fresh
                 }
-            }
+            };
             let delay = match (&turn, &seed) {
                 (Err(error), Some(_)) => policy.next(error).map_err(|e| HostError(e.code))?,
                 _ => None,
             };
             let Some(delay) = delay else {
-                return Ok(turn);
+                return Ok((turn, checked));
             };
             Self::guard(host, f)?;
             host.wait(async {

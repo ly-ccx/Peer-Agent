@@ -4,6 +4,8 @@ use peer_protocol::ModelCatalogEntry;
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, path::Path};
 pub(crate) mod environment;
+mod exec;
+pub use exec::{ExecSelection, ExecSelectionError, resolve_catalog, resolve_exec};
 pub(crate) fn trim(s: &str) -> &str {
     // ECMAScript String.trim, including BOM and excluding NEL.
     s.trim_matches(|c: char| c == '\u{feff}' || (c.is_whitespace() && c != '\u{85}'))

@@ -10,6 +10,15 @@ pub struct McpRegistrySnapshot {
     servers: Vec<serde_json::Value>,
 }
 impl McpRegistrySnapshot {
+    /// Redacted existing MCP-host Source observations; never transport config,
+    /// credentialRef, command, headers, environment values or remote tool text.
+    pub fn host_context_servers(&self) -> Vec<serde_json::Value> {
+        self.servers.iter().map(|s| {
+            let id=s["id"].as_str().or_else(||s["mcpId"].as_str()).unwrap_or("");
+            let name=s["displayName"].as_str().filter(|v|!v.is_empty()).or_else(||s["name"].as_str()).unwrap_or(id);
+            serde_json::json!({"id":id,"displayName":name,"enabled":s["enabled"]!=false,"transport":s["transport"].as_str().unwrap_or("streamable_http"),"toolsCount":s["tools"].as_array().map_or(0,Vec::len)})
+        }).collect()
+    }
     /// Host transport configuration only. Never return this to a renderer/model.
     pub fn server(&self, id: &str) -> Option<serde_json::Value> {
         self.servers

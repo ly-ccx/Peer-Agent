@@ -39,6 +39,8 @@ run('bun', ['scripts/native-cli/admission-contracts.ts']);
 run('bun', ['scripts/native-cli/history-plan-contracts.ts']);
 run('bun', ['scripts/native-cli/access-policy-contracts.ts']);
 run('bun', ['scripts/native-cli/context-contracts.ts']);
+run('bun', ['scripts/native-cli/ordinary-context-contracts.ts']);
+run('bun', ['scripts/native-cli/ordinary-exec-contracts.ts']);
 run('node', ['scripts/native-cli/file-operation-contracts.mjs']);
 run('node', ['scripts/native-cli/file-parent-contracts.mjs']);
 run('node', ['scripts/native-cli/batch-search-contracts.mjs']);

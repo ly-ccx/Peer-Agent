@@ -83,12 +83,36 @@ impl Drop for Attempt {
         }
     }
 }
-fn key(execution: &SessionExecutionIdentity) -> Result<String, LiveError> {
-    let value = serde_json::to_value(execution).map_err(|_| LiveError::Unknown)?;
-    if peer_protocol::normalize_session_execution_identity(&value).as_ref() != Some(execution) {
-        return Err(LiveError::Unknown);
+mod sealed {
+    pub trait Sealed {}
+    impl Sealed for peer_protocol::SessionExecutionIdentity {}
+    impl Sealed for peer_protocol::ConversationExecutionIdentity {}
+}
+/// Only the two canonical execution principals can own native live resources.
+/// Validation identifies a principal; it cannot grant or prove local ownership.
+pub trait LiveExecutionIdentity: sealed::Sealed {
+    fn registry_key(&self) -> Result<String, LiveError>;
+}
+impl LiveExecutionIdentity for SessionExecutionIdentity {
+    fn registry_key(&self) -> Result<String, LiveError> {
+        let value = serde_json::to_value(self).map_err(|_| LiveError::Unknown)?;
+        if peer_protocol::normalize_session_execution_identity(&value).as_ref() != Some(self) {
+            return Err(LiveError::Unknown);
+        }
+        peer_protocol::javascript_json_string(&value).map_err(|_| LiveError::Unknown)
     }
-    peer_protocol::javascript_json_string(&value).map_err(|_| LiveError::Unknown)
+}
+impl LiveExecutionIdentity for peer_protocol::ConversationExecutionIdentity {
+    fn registry_key(&self) -> Result<String, LiveError> {
+        if !self.valid() {
+            return Err(LiveError::Unknown);
+        }
+        let value = serde_json::to_value(self).map_err(|_| LiveError::Unknown)?;
+        peer_protocol::javascript_json_string(&value).map_err(|_| LiveError::Unknown)
+    }
+}
+fn key(execution: &impl LiveExecutionIdentity) -> Result<String, LiveError> {
+    execution.registry_key()
 }
 fn ownership(entry: Option<&Entry>) -> Ownership {
     let Some(e) = entry else {
@@ -103,7 +127,26 @@ fn ownership(entry: Option<&Entry>) -> Ownership {
     }
 }
 impl ExecutionRegistry {
-    pub fn admission_open(&self, execution: &SessionExecutionIdentity) -> Result<bool, LiveError> {
+    /// Called only by a Runtime Host after canonical stop/settlement acknowledgment.
+    /// Missing entries remain unknown; active/uncertain resources cannot be evicted.
+    pub(crate) fn forget_ended(
+        &self,
+        execution: &impl LiveExecutionIdentity,
+    ) -> Result<(), LiveError> {
+        let key = key(execution)?;
+        let mut state = self.inner.state.lock().map_err(|_| LiveError::Unknown)?;
+        let entry = state.entries.get(&key).ok_or(LiveError::Unknown)?;
+        if !entry.closed || ownership(Some(entry)) != Ownership::Ended || !entry.handles.is_empty()
+        {
+            return Err(LiveError::StopUnconfirmed);
+        }
+        state.entries.remove(&key);
+        Ok(())
+    }
+    pub fn admission_open(
+        &self,
+        execution: &impl LiveExecutionIdentity,
+    ) -> Result<bool, LiveError> {
         let key = key(execution)?;
         let state = self.inner.state.lock().map_err(|_| LiveError::Unknown)?;
         Ok(state.entries.get(&key).is_some_and(|e| {
@@ -113,12 +156,15 @@ impl ExecutionRegistry {
                 && !e.handles.values().any(|h| h.state == HandleState::Unknown)
         }))
     }
-    pub fn ownership(&self, execution: &SessionExecutionIdentity) -> Result<Ownership, LiveError> {
+    pub fn ownership(
+        &self,
+        execution: &impl LiveExecutionIdentity,
+    ) -> Result<Ownership, LiveError> {
         let key = key(execution)?;
         let state = self.inner.state.lock().map_err(|_| LiveError::Unknown)?;
         Ok(ownership(state.entries.get(&key)))
     }
-    pub fn begin(&self, execution: &SessionExecutionIdentity) -> Result<Attempt, LiveError> {
+    pub fn begin(&self, execution: &impl LiveExecutionIdentity) -> Result<Attempt, LiveError> {
         let key = key(execution)?;
         let mut state = self.inner.state.lock().map_err(|_| LiveError::Unknown)?;
         if !state.entries.contains_key(&key) && state.entries.len() >= 1024 {
@@ -162,7 +208,7 @@ impl ExecutionRegistry {
     /// ended observation. Failed completion remains unknown for reconciliation.
     pub fn track_handle(
         &self,
-        execution: &SessionExecutionIdentity,
+        execution: &impl LiveExecutionIdentity,
         handle_id: &str,
         tool_call: &str,
         cancellation: CancellationToken,
@@ -212,7 +258,7 @@ impl ExecutionRegistry {
         });
         Ok(())
     }
-    pub fn close_admission(&self, execution: &SessionExecutionIdentity) -> Result<(), LiveError> {
+    pub fn close_admission(&self, execution: &impl LiveExecutionIdentity) -> Result<(), LiveError> {
         let key = key(execution)?;
         let mut state = self.inner.state.lock().map_err(|_| LiveError::Unknown)?;
         if !state.entries.contains_key(&key) {
@@ -245,7 +291,7 @@ impl ExecutionRegistry {
     /// idle; the admission fence and unknown handles survive the timeout.
     pub async fn drain(
         &self,
-        execution: &SessionExecutionIdentity,
+        execution: &impl LiveExecutionIdentity,
         deadline: Duration,
     ) -> Result<(), LiveError> {
         self.close_admission(execution)?;
@@ -267,7 +313,7 @@ impl ExecutionRegistry {
     }
     pub fn handle_observations(
         &self,
-        execution: &SessionExecutionIdentity,
+        execution: &impl LiveExecutionIdentity,
     ) -> Result<Vec<(String, String, &'static str)>, LiveError> {
         let key = key(execution)?;
         let state = self.inner.state.lock().map_err(|_| LiveError::Unknown)?;
@@ -296,7 +342,7 @@ impl ExecutionRegistry {
     /// Active and unknown handles cannot be evicted to manufacture idle.
     pub fn acknowledge_ended_handle(
         &self,
-        execution: &SessionExecutionIdentity,
+        execution: &impl LiveExecutionIdentity,
         handle_id: &str,
     ) -> Result<(), LiveError> {
         let key = key(execution)?;
@@ -334,5 +380,49 @@ impl Drop for HandleGuard {
             }
             self.inner.changed.notify_waiters();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use peer_protocol::ConversationExecutionIdentity;
+    fn conversation(stream: &str) -> ConversationExecutionIdentity {
+        ConversationExecutionIdentity {
+            conversation_id: "c".into(),
+            stream_id: stream.into(),
+        }
+    }
+    #[tokio::test]
+    async fn ordinary_principals_are_isolated_and_only_real_completed_owners_can_be_evicted() {
+        let registry = ExecutionRegistry::default();
+        let a = conversation("a");
+        let b = conversation("b");
+        let first = registry.begin(&a).unwrap();
+        let second = registry.begin(&b).unwrap();
+        let cancelled_a = first.cancellation();
+        let cancelled_b = second.cancellation();
+        assert_eq!(registry.forget_ended(&a), Err(LiveError::StopUnconfirmed));
+        registry.close_admission(&a).unwrap();
+        assert!(cancelled_a.is_cancelled());
+        assert!(!cancelled_b.is_cancelled());
+        first.finish();
+        registry.drain(&a, Duration::from_secs(1)).await.unwrap();
+        registry.forget_ended(&a).unwrap();
+        assert_eq!(registry.ownership(&a).unwrap(), Ownership::Unknown);
+        assert!(registry.admission_open(&b).unwrap());
+        drop(second);
+        registry.close_admission(&b).unwrap();
+        assert_eq!(registry.forget_ended(&b), Err(LiveError::StopUnconfirmed));
+        assert_eq!(registry.ownership(&b).unwrap(), Ownership::Unknown);
+        // Repeated healthy streams cannot accumulate an unbounded registry.
+        for i in 0..1024 {
+            let execution = conversation(&format!("healthy-{i}"));
+            let attempt = registry.begin(&execution).unwrap();
+            registry.close_admission(&execution).unwrap();
+            attempt.finish();
+            registry.forget_ended(&execution).unwrap();
+        }
+        assert_eq!(registry.inner.state.lock().unwrap().entries.len(), 1);
     }
 }

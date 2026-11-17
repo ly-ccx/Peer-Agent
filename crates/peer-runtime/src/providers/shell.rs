@@ -86,6 +86,9 @@ impl PreparedEffect for ShellEffect {
     fn handle(&self) -> Option<&str> {
         Some(&self.handle)
     }
+    fn owned_command(&self) -> bool {
+        true
+    }
     fn start(
         mut self: Box<Self>,
         call: ProviderCall,
@@ -98,12 +101,29 @@ impl PreparedEffect for ShellEffect {
         Ok(Box::pin(async move {
             match self.run(call, cancel, port).await {
                 Ok(outcome) => outcome,
+                Err(error) if error.0 == "CANCELLED" => EffectOutcome::not_dispatched(error.0),
                 Err(error) => EffectOutcome::failed(error.0),
             }
         }))
     }
 }
 impl ShellEffect {
+    async fn spawn(&self, port: &EffectAdmission) -> Result<tokio::process::Child, HostError> {
+        port.check().await?;
+        let mut command = tokio::process::Command::new("/bin/sh");
+        command
+            .arg("-c")
+            .arg(&self.command)
+            .current_dir(&self.cwd)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        #[cfg(unix)]
+        command.process_group(0);
+        port.command_starting().await?;
+        command.spawn().map_err(|_| HostError("shell_spawn_failed"))
+    }
     async fn run(
         self: Box<Self>,
         call: ProviderCall,
@@ -127,22 +147,79 @@ impl ShellEffect {
             serde_json::to_vec(&metadata).map_err(|_| HostError("shell_artifact_unavailable"))?,
         )
         .map_err(|_| HostError("shell_artifact_unavailable"))?;
-        port.check().await?;
-        let mut command = tokio::process::Command::new("/bin/sh");
-        command
-            .arg("-c")
-            .arg(&self.command)
-            .current_dir(&self.cwd)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-        #[cfg(unix)]
-        command.process_group(0);
-        let mut child = command
-            .spawn()
-            .map_err(|_| HostError("shell_spawn_failed"))?;
+        let mut child = match self.spawn(&port).await {
+            Ok(child) => child,
+            Err(error) => {
+                // The spawn seam returned before creating a child. Its actual
+                // completion proves no command dispatch, including cancellation
+                // while the Host was persisting the starting intent.
+                let mut outcome = EffectOutcome::not_dispatched(error.0);
+                outcome.output =
+                    json!({"taskId":self.handle,"interrupted":true,"stopReason":error.0});
+                let mut metadata = metadata;
+                metadata["status"] = json!(outcome.status);
+                metadata["managedProcessEnded"] = json!(true);
+                metadata["notDispatched"] = json!(true);
+                metadata["error"] = json!(error.0);
+                if std::fs::write(
+                    directory.join("metadata.json"),
+                    serde_json::to_vec(&metadata)
+                        .map_err(|_| HostError("shell_artifact_unavailable"))?,
+                )
+                .is_err()
+                {
+                    outcome.status = "failed";
+                    outcome.error = Some("execution_outcome_unknown");
+                    outcome.output["artifactError"] = json!("shell_artifact_unavailable");
+                }
+                return Ok(outcome);
+            }
+        };
         let pid = child.id().expect("newly spawned child has a PID");
+        if let Err(error) = port.command_started(pid).await {
+            if let Some(pid) = rustix::process::Pid::from_raw(pid as i32) {
+                let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+            }
+            let _ = child.start_kill();
+            let reaped = tokio::time::timeout(Duration::from_secs(2), child.wait())
+                .await
+                .is_ok_and(|r| r.is_ok());
+            for _ in 0..20 {
+                if group_absent(pid) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            let ended = reaped && group_absent(pid);
+            let mut metadata = metadata;
+            metadata["status"] = json!(if ended && error.0 == "CANCELLED" {
+                "cancelled"
+            } else {
+                "failed"
+            });
+            metadata["managedProcessEnded"] = json!(ended);
+            metadata["error"] = json!(error.0);
+            let published = std::fs::write(
+                directory.join("metadata.json"),
+                serde_json::to_vec(&metadata)
+                    .map_err(|_| HostError("shell_artifact_unavailable"))?,
+            )
+            .is_ok();
+            let mut outcome = EffectOutcome::failed(if ended && published {
+                error.0
+            } else {
+                "execution_outcome_unknown"
+            });
+            if ended && published && error.0 == "CANCELLED" {
+                outcome.status = "cancelled";
+            }
+            outcome.ended = ended;
+            outcome.output = json!({"taskId":self.handle,"interrupted":true,"stopReason":error.0});
+            if !published {
+                outcome.output["artifactError"] = json!("shell_artifact_unavailable");
+            }
+            return Ok(outcome);
+        }
         let mut stdout = child
             .stdout
             .take()
@@ -281,4 +358,66 @@ pub(crate) fn group_absent(pid: u32) -> bool {
     rustix::process::Pid::from_raw(pid as i32).is_some_and(|p| {
         rustix::process::test_kill_process_group(p) == Err(rustix::io::Errno::SRCH)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::effect_admission::AdmissionRequest;
+    #[tokio::test]
+    async fn cancellation_at_durable_starting_is_cancelled_without_spawn_and_seals_its_artifact() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let mut effect = ShellProvider
+            .prepare(
+                "local.shell.exec",
+                json!({"command":"printf forbidden > should-not-exist"}),
+                workspace.path(),
+                root.path(),
+            )
+            .unwrap();
+        let handle = effect.handle().unwrap().to_owned();
+        let cancel = CancellationToken::new();
+        let (port, mut requests) = EffectAdmission::channel(&cancel);
+        effect.admission(port);
+        let at = "2026-11-18T00:00:00.000Z";
+        let outcome = effect
+            .start(ProviderCall::new("ordinary", "call", at), cancel)
+            .unwrap();
+        let host = async {
+            let mut starting = 0;
+            while let Some(request) = requests.recv().await {
+                match request {
+                    AdmissionRequest::Check(reply) => {
+                        reply.send(Ok(())).unwrap();
+                    }
+                    AdmissionRequest::CommandStarting(reply) => {
+                        starting += 1;
+                        reply.send(Err(HostError("CANCELLED"))).unwrap();
+                    }
+                    _ => panic!("no child or connection may be started after denied starting"),
+                }
+            }
+            starting
+        };
+        let (outcome, starting) = tokio::join!(outcome, host);
+        assert_eq!(starting, 1);
+        assert_eq!(outcome.status, "cancelled");
+        assert_eq!(outcome.error, Some("CANCELLED"));
+        assert!(outcome.ended && outcome.not_dispatched);
+        assert!(!workspace.path().join("should-not-exist").exists());
+        let metadata: Value = serde_json::from_slice(
+            &std::fs::read(
+                root.path()
+                    .join("shell-artifacts/2026-11-18")
+                    .join(handle)
+                    .join("metadata.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(metadata["status"], "cancelled");
+        assert_eq!(metadata["notDispatched"], true);
+        assert_eq!(metadata["managedProcessEnded"], true);
+    }
 }

@@ -285,6 +285,143 @@ fn actual_ledger_receipt_deduplicates_final_aggregate_and_only_then_allows_next_
     );
 }
 #[test]
+fn known_charges_commit_after_cognition_closes_even_while_tool_stop_remains_unproven() {
+    let (root, store, id) = seed();
+    let mut token = claim(&store, &id, "stream");
+    store
+        .observe_conversation_usage(&mut token, &usage(17, 3, 2), true, AT)
+        .unwrap();
+    store
+        .prepare_conversation_tool(&mut token, &call(), AT, None)
+        .unwrap();
+    store
+        .dispatch_conversation_tool(&mut token, "call", AT, None)
+        .unwrap();
+    store.register_conversation_handle(&mut token, &json!({"handleId":"still-owned","toolCallId":"call","state":"active","metadata":{"kind":"effect"}}), AT).unwrap();
+    store.stop_conversation_admission(&mut token, AT).unwrap();
+    // Closing cognition freezes the aggregate; neither a late callback nor a
+    // usage receipt can reopen execution or declare a still-owned handle ended.
+    assert_eq!(
+        store
+            .observe_conversation_usage(&mut token, &usage(18, 4, 3), false, AT)
+            .err(),
+        Some(StoreError::ExecutionChanged)
+    );
+    let receipt = store.commit_conversation_usage(&token).unwrap();
+    store
+        .acknowledge_conversation_usage(&mut token, receipt, AT)
+        .unwrap();
+    let run = store.read_conversation_execution(&id).unwrap().unwrap();
+    assert_eq!(run.phase, Phase::Stopping);
+    assert!(run.stop.is_none());
+    assert!(run.usage_committed && run.unknown_usage);
+    assert_eq!(run.handles.len(), 1);
+    assert_eq!(run.pending_tools[0].phase, Dispatch::Dispatching);
+    assert!(!run.permits_new_run());
+    assert_eq!(
+        fs::read_to_string(root.path().join("usage/requests.jsonl"))
+            .unwrap()
+            .lines()
+            .count(),
+        1
+    );
+    let again = store.commit_conversation_usage(&token).unwrap();
+    store
+        .acknowledge_conversation_usage(&mut token, again, AT)
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(root.path().join("usage/requests.jsonl"))
+            .unwrap()
+            .lines()
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn only_bound_mcp_connections_may_outlive_known_tool_settlement_and_still_block_stop() {
+    for valid_connection in [false, true] {
+        let (root, store, id) = seed();
+        let mut token = claim(&store, &id, "stream");
+        let mut pending = call();
+        pending.capability_id = "local.mcp.fixture.read".into();
+        store
+            .prepare_conversation_tool(&mut token, &pending, AT, None)
+            .unwrap();
+        store
+            .dispatch_conversation_tool(&mut token, "call", AT, None)
+            .unwrap();
+        let mut recorder = token.owner().clone();
+        if !valid_connection {
+            recorder.pid_start = "foreign-owner".into();
+        }
+        let handle = json!({"handleId":"connection","toolCallId":"call","state":"active","metadata":{"kind":"mcp_connection","nativeMcp":{"schemaVersion":1,"role":"connection","ownerRecorder":recorder,"registryRevision":"registry","transport":"streamable_http"}}});
+        store
+            .register_conversation_handle(&mut token, &handle, AT)
+            .unwrap();
+        let grant = json!({"grantId":"grant","toolCallId":"call","granted":true,"duration":"once","decidedAt":AT});
+        let result = json!({"toolCallId":"call","capabilityId":pending.capability_id,"status":"success","outputPreview":{"text":"observed remote reply"},"evidence":{"toolCallId":"call","evidenceId":"mcp-result","summary":"completed","artifactRefs":[]},"completedAt":AT});
+        let message = json!({"id":"answer","role":"assistant","streamId":"stream","content":"","permissionGrants":[grant],"segments":[{"type":"tool-call","toolCallId":"call","tool":"mcp_read","args":{"path":"a"},"result":result}]});
+        let h = store.read_committed(&id, None, 8 * 1024 * 1024).unwrap();
+        store.commit_message(&h, &message, AT, None).unwrap();
+        EvidenceIndexStore::new(root.path())
+            .register(
+                &HostToolEvidence {
+                    conversation_id: &id,
+                    plan_id: None,
+                    stream_id: Some("stream"),
+                    tool_name: "mcp_read",
+                    capability_id: &pending.capability_id,
+                    tool_call_id: "call",
+                    grant: &grant,
+                    result: &result,
+                },
+                None,
+            )
+            .unwrap();
+        let settled = store.settle_conversation_tool(&mut token, "call", "answer", AT);
+        assert_eq!(settled.is_ok(), valid_connection);
+        store.stop_conversation_admission(&mut token, AT).unwrap();
+        let observation = ConversationStopObservation {
+            owner: token.owner().clone(),
+            observed_at: AT.into(),
+            runner_idle: true,
+            admission_closed: true,
+            handles_ended: true,
+        };
+        assert_eq!(
+            store
+                .finish_conversation_execution(&mut token, &observation, AT)
+                .err(),
+            Some(StoreError::ExecutionBusy)
+        );
+        assert_eq!(
+            store
+                .read_conversation_execution(&id)
+                .unwrap()
+                .unwrap()
+                .handles
+                .len(),
+            1
+        );
+        if valid_connection {
+            store
+                .end_conversation_handle(&mut token, "connection", AT)
+                .unwrap();
+            store
+                .finish_conversation_execution(&mut token, &observation, AT)
+                .unwrap();
+            assert!(
+                store
+                    .read_conversation_execution(&id)
+                    .unwrap()
+                    .unwrap()
+                    .permits_new_run()
+            );
+        }
+    }
+}
+#[test]
 fn dispatched_unknown_blocks_same_conversation_without_blocking_independent_work() {
     let (_root, store, id) = seed();
     let mut token = claim(&store, &id, "stream");
