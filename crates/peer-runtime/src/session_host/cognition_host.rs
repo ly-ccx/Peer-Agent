@@ -78,11 +78,11 @@ impl CognitionHost for GoalCognitionHost<'_, '_> {
         accounting: &mut RuntimeUsageAccounting,
         observed: ModelObservation,
         capacity_bearing: bool,
-    ) -> Result<(), HostError> {
+    ) -> Result<Option<peer_store::ConversationMetadataPublication>, HostError> {
         let f = self.frame;
         if capacity_bearing {
             self.host
-                .observe_model_usage(f.budget, accounting, observed, f.billing)
+                .observe_model_usage(f.budget, accounting, observed, f.billing)?;
         } else {
             self.host.observe_usage_for(
                 f.budget,
@@ -91,8 +91,9 @@ impl CognitionHost for GoalCognitionHost<'_, '_> {
                 f.billing,
                 peer_protocol::UsagePurpose::CompactionSummary,
                 false,
-            )
+            )?;
         }
+        Ok(None)
     }
     async fn wait<F: std::future::Future>(
         &mut self,

@@ -25,6 +25,8 @@ struct Host {
     revoke_after_wait: bool,
     cancel_after_wait: bool,
     mutate_after_wait: bool,
+    mutate_model_after_wait: bool,
+    run: peer_store::ConversationExecutionToken,
 }
 impl CognitionHost for Host {
     fn authority(&self) -> Result<(), HostError> {
@@ -54,8 +56,9 @@ impl CognitionHost for Host {
         accounting: &mut RuntimeUsageAccounting,
         observed: ModelObservation,
         capacity_bearing: bool,
-    ) -> Result<(), HostError> {
+    ) -> Result<Option<ConversationMetadataPublication>, HostError> {
         let invalid = observed.invalid;
+        let unknown = observed.usage.is_none() || invalid;
         accounting
             .observe(
                 observed.usage,
@@ -73,7 +76,14 @@ impl CognitionHost for Host {
         if invalid {
             return Err(HostError("native_usage_invalid"));
         }
-        Ok(())
+        Ok(Some(
+            ConversationStore::new(&self.home).observe_conversation_usage(
+                &mut self.run,
+                &accounting.snapshot().turn_total,
+                unknown,
+                &now(),
+            )?,
+        ))
     }
     async fn wait<F: std::future::Future>(
         &mut self,
@@ -96,6 +106,13 @@ impl CognitionHost for Host {
                 &now(),
                 None,
             )?;
+        }
+        if self.mutate_model_after_wait {
+            self.mutate_model_after_wait = false;
+            let path = self.home.join("conversations/index.jsonl");
+            let mut row: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            row["modelProviderId"] = json!("foreign-model");
+            std::fs::write(path, format!("{row}\n")).unwrap();
         }
         if self.cancel_after_wait {
             owned.cancel();
@@ -130,6 +147,29 @@ fn host() -> (tempfile::TempDir, Host) {
             None,
         )
         .unwrap();
+    let fresh = store
+        .read_committed(&conversation, None, 8 * 1024 * 1024)
+        .unwrap();
+    let owner = peer_protocol::NativeProcessRecorder {
+        boot_id: "test-boot".into(),
+        pid: std::process::id(),
+        pid_start: "test-start".into(),
+        host_id: "test-host".into(),
+        acquired_at: now(),
+    };
+    let (run, _) = store
+        .claim_conversation_execution(
+            &fresh,
+            &peer_store::NewConversationExecution {
+                stream_id: "actual-fixture-stream",
+                engine: "peer-native",
+                owner: &owner,
+                attribution: &json!({"id":"actual-fixture-stream"}),
+                at: &now(),
+            },
+            None,
+        )
+        .unwrap();
     let host = Host {
         home: root.path().into(),
         conversation,
@@ -139,6 +179,8 @@ fn host() -> (tempfile::TempDir, Host) {
         revoke_after_wait: false,
         cancel_after_wait: false,
         mutate_after_wait: false,
+        mutate_model_after_wait: false,
+        run,
     };
     (root, host)
 }
@@ -437,4 +479,70 @@ async fn concurrent_canonical_input_is_not_overwritten_and_a_fresh_host_request_
             .messages,
         history.history.messages
     );
+}
+
+#[tokio::test]
+async fn real_response_usage_is_durable_but_its_receipt_cannot_span_foreign_body_or_model() {
+    for metadata in [false, true] {
+        let (root, mut host) = host();
+        let (base, server) = exchanges(vec![response(
+            "text/event-stream",
+            &text_stream(Wire::Chat),
+        )]);
+        let model = native_model(&base, Wire::Chat);
+        let mut pipeline =
+            ContextPipeline::open(root.path(), &host.conversation, "fixture", &model).unwrap();
+        let store = ConversationStore::new(root.path());
+        let history = store
+            .read_committed(&host.conversation, None, 8 * 1024 * 1024)
+            .unwrap();
+        let projected = project_history(&history.history.messages).unwrap();
+        let system = host.assemble(&[]).unwrap();
+        let tools = json!([]);
+        let live = LiveHistory::default();
+        let prepared = model
+            .prepare_request(
+                system["rendered"].as_str().unwrap(),
+                &projected,
+                &tools,
+                &live,
+            )
+            .unwrap();
+        host.mutate_after_wait = !metadata;
+        host.mutate_model_after_wait = metadata;
+        let cancel = CancellationToken::new();
+        let frame = request(root.path(), &model, &tools, &cancel, &cancel);
+        let mut accounting = RuntimeUsageAccounting::default();
+        let result = pipeline
+            .send_attempts(&mut host, &frame, &mut accounting, prepared, &history, true)
+            .await;
+        assert!(matches!(result, Err(HostError("CONTEXT_SNAPSHOT_CHANGED"))));
+        assert_eq!(server.join().unwrap().len(), 1);
+        let saved = store
+            .read_conversation_execution(&host.conversation)
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved.usage, Some(accounting.snapshot().turn_total));
+        assert!(saved.usage.unwrap().amounts.total_tokens > 0);
+        assert!(!saved.usage_committed);
+        if metadata {
+            assert_eq!(
+                store
+                    .read_metadata(&host.conversation)
+                    .unwrap()
+                    .metadata
+                    .unwrap()["modelProviderId"],
+                "foreign-model"
+            );
+        } else {
+            assert_eq!(
+                store
+                    .read_committed(&host.conversation, None, 8 * 1024 * 1024)
+                    .unwrap()
+                    .history
+                    .messages[1]["id"],
+                "external-user"
+            );
+        }
+    }
 }

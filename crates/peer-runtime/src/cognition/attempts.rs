@@ -41,7 +41,15 @@ impl ContextPipeline {
             } else {
                 Ok(())
             };
-            host.observe(accounting, observed, capacity_bearing)?;
+            if let Some(publication) = host.observe(accounting, observed, capacity_bearing)? {
+                revision = publication
+                    .advance(
+                        &self.conversation,
+                        history.history.content_revision,
+                        &revision,
+                    )?
+                    .to_owned();
+            }
             capacity?;
             // Preserve factual late usage before ownership/cancellation failures.
             let turn = turn?;

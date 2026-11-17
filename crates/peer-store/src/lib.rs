@@ -32,10 +32,15 @@ mod mcp_inventory;
 pub use mcp_inventory::{McpRegistrySnapshot, McpRegistryStore};
 mod mcp_credentials;
 pub use mcp_credentials::{McpCredentialBinding, McpCredentialStore, McpCredentialTransaction};
+mod conversation_execution;
 mod conversation_preview;
 mod conversation_terminal;
 mod conversation_write;
 pub use context_accounting::context_model_key;
+pub use conversation_execution::{
+    ConversationExecutionToken, ConversationMetadataPublication, ConversationUsageReceipt,
+    NewConversationExecution,
+};
 mod goal;
 mod goal_source;
 pub use goal::{
@@ -66,6 +71,9 @@ use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoreError {
+    ExecutionInvalid,
+    ExecutionBusy,
+    ExecutionChanged,
     McpCredentialInvalid,
     McpCredentialMigrationRequired,
     McpCredentialMissing,
@@ -108,6 +116,9 @@ pub enum StoreError {
 impl StoreError {
     pub fn code(self) -> &'static str {
         match self {
+            Self::ExecutionInvalid => "conversation_execution_invalid",
+            Self::ExecutionBusy => "conversation_execution_busy",
+            Self::ExecutionChanged => "conversation_execution_changed",
             Self::McpCredentialInvalid => "mcp_credential_invalid",
             Self::McpCredentialMigrationRequired => "mcp_credential_migration_required",
             Self::McpCredentialMissing => "mcp_credential_missing",

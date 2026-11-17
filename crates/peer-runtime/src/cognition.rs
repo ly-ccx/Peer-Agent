@@ -10,7 +10,7 @@ use crate::{
     model::{LiveHistory, ModelObservation, ModelTurn, NativeModel},
     usage_accounting::RuntimeUsageAccounting,
 };
-use peer_store::{ConversationStore, HistorySnapshot};
+use peer_store::{ConversationMetadataPublication, ConversationStore, HistorySnapshot};
 use serde_json::{Value, json};
 use std::path::Path;
 
@@ -35,7 +35,7 @@ pub(crate) trait CognitionHost {
         accounting: &mut RuntimeUsageAccounting,
         observed: ModelObservation,
         capacity_bearing: bool,
-    ) -> Result<(), HostError>;
+    ) -> Result<Option<ConversationMetadataPublication>, HostError>;
     async fn wait<F: std::future::Future>(
         &mut self,
         future: F,

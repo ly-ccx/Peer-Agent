@@ -64,6 +64,10 @@ pub struct NativeOwnedProcess {
 }
 impl NativeOwnedProcess {
     pub fn valid(&self) -> bool {
+        self.valid_envelope()
+            && crate::normalize_session_execution_identity(&self.execution).is_some()
+    }
+    pub(crate) fn valid_envelope(&self) -> bool {
         let child = self.child.as_ref().is_none_or(|c| {
             c.complete()
                 && c.host_id == self.owner.host_id
@@ -96,7 +100,6 @@ impl NativeOwnedProcess {
             && self.owner.complete()
             && child
             && state
-            && crate::normalize_session_execution_identity(&self.execution).is_some()
             && [&self.handle_id, &self.tool_call_id, &self.dispatch_id]
                 .iter()
                 .all(|s| !s.is_empty() && s.len() <= 200)
