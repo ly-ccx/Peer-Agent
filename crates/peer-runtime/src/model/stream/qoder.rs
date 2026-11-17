@@ -1,16 +1,22 @@
 use super::*;
+mod shape;
 #[derive(Default)]
 pub(in crate::model) struct Qoder {
     frames: Frames,
     pub chat: ChatStream,
+    shape: shape::Shape,
 }
 impl Qoder {
     pub fn push(&mut self, chunk: &[u8]) -> Result<(), ModelError> {
-        self.frames
+        let Self {
+            frames,
+            chat,
+            shape,
+        } = self;
+        frames
             .push(chunk, |bytes| {
                 if bytes == b"[DONE]" {
-                    self.chat.event(bytes)?;
-                    return Ok(true);
+                    return shape.terminal(chat);
                 }
                 let envelope = decode(bytes, 1024 * 1024)?;
                 reject_business_error(&envelope)?;
@@ -20,10 +26,7 @@ impl Qoder {
                     .transpose()?;
                 let event = inner.as_ref().unwrap_or(&envelope);
                 reject_business_error(event)?;
-                let bytes = serde_json::to_vec(event)
-                    .map_err(|_| ModelError::new("model_stream_invalid"))?;
-                self.chat.event(&bytes)?;
-                Ok(self.chat.terminal())
+                shape.event(chat, event)
             })
             .map(|_| ())
     }
@@ -70,6 +73,107 @@ fn reject_business_error(event: &Value) -> Result<(), ModelError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn invalid_sparse_block_lifecycles_and_limits_never_complete_a_call() {
+        use serde_json::json;
+        let start = json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool","name":"write_file","input":{}}});
+        let delta = json!({"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{}"}});
+        let stop = json!({"type":"content_block_stop","index":0});
+        let mut changed = delta.clone();
+        changed["index"] = 1.into();
+        let mut excessive = start.clone();
+        excessive["index"] = 128.into();
+        let cases = vec![
+            vec![json!({"choices":[{"delta":{"thinking":"cognition without an answer"}}]})],
+            vec![json!({"choices":[null]})],
+            vec![json!({"choices":[{"delta":{"tool_calls":[true]}}]})],
+            vec![json!({"choices":[{"delta":{"tool_calls":[{"index":0,"id":"t","function":3}]}}]})],
+            vec![start.clone(), start.clone()],
+            vec![changed],
+            vec![excessive],
+            vec![start.clone(), delta.clone(), stop.clone(), stop.clone()],
+            vec![start.clone(), delta.clone(), stop.clone(), delta.clone()],
+            vec![start.clone(), delta.clone()],
+            vec![
+                start.clone(),
+                json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"wrong block"}}),
+            ],
+            vec![
+                start.clone(),
+                json!({"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"x".repeat(65537)}}),
+            ],
+            vec![json!({"choices":[{"delta":{"content":"x".repeat(512*1024+1)}}]})],
+            vec![
+                json!({"choices":[{"delta":{"content":"text"}}]}),
+                start.clone(),
+            ],
+            vec![
+                start,
+                delta,
+                stop,
+                json!({"type":"message_delta","delta":{"stop_reason":"max_tokens"}}),
+            ],
+        ];
+        for events in cases {
+            let mut bytes = events
+                .iter()
+                .map(|v| format!("data: {v}\n\n"))
+                .collect::<String>();
+            bytes.push_str("data: [DONE]\n\n");
+            for width in [17, 4096] {
+                let mut decoder = Qoder::default();
+                let mut failed = false;
+                for chunk in bytes.as_bytes().chunks(width) {
+                    if decoder.push(chunk).is_err() {
+                        failed = true;
+                        break;
+                    }
+                }
+                assert!(failed || decoder.finish("actual-request".into()).is_err());
+            }
+        }
+    }
+    #[test]
+    fn actual_ts_qoder_stream_variants_match_before_exposing_tools() {
+        let data: Value = serde_json::from_str(include_str!(
+            "../../../../../packages/protocol/contracts/native-cli/qoder-streams.json"
+        ))
+        .unwrap();
+        for c in data["cases"].as_array().unwrap() {
+            for width in [1, 7, 4096] {
+                let mut decoder = Qoder::default();
+                for chunk in c["stream"].as_str().unwrap().as_bytes().chunks(width) {
+                    decoder
+                        .push(chunk)
+                        .unwrap_or_else(|e| panic!("{}: {}", c["name"], e.code));
+                }
+                let r = decoder
+                    .finish("physical-body".into())
+                    .unwrap_or_else(|e| panic!("{}: {}", c["name"], e.code));
+                assert_eq!(r.content, c["expected"]["content"].as_str().unwrap());
+                assert_eq!(
+                    serde_json::json!(
+                        r.calls
+                            .iter()
+                            .map(|x| serde_json::json!({"name":x.name,"arguments":x.arguments}))
+                            .collect::<Vec<_>>()
+                    ),
+                    c["expected"]["calls"]
+                );
+                assert_eq!(r.usage.unwrap_or(Value::Null), c["expected"]["usage"]);
+                let thought = r
+                    .continuation
+                    .map(|x| {
+                        x.blocks[0]["reasoning_content"]
+                            .as_str()
+                            .unwrap()
+                            .to_owned()
+                    })
+                    .unwrap_or_default();
+                assert_eq!(thought, c["expected"]["thinking"].as_str().unwrap());
+            }
+        }
+    }
     #[test]
     fn business_errors_and_truncated_envelopes_never_expose_partial_tools() {
         let data: Value = serde_json::from_str(include_str!(
