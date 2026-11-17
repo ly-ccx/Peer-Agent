@@ -190,7 +190,10 @@ impl NativeSessionHost {
         if history.history.excluded_from_message_id.is_some() {
             return Err(HostError("native_execution_recovery_required"));
         }
-        project_history(&history.history.messages).map_err(HostError)?;
+        let projected = project_history(&history.history.messages).map_err(HostError)?;
+        model
+            .validate_saved_media(&projected)
+            .map_err(|e| HostError(e.code))?;
         let workspace = current
             .resource
             .directory

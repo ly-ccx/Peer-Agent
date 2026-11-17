@@ -1,5 +1,6 @@
 //! Public CLI, synthetic official-format login files and actual HTTP/tool/store.
 use super::*;
+mod attachments;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use md5::{Digest, Md5};
 fn configure(f: &Fixture, server: &Server) -> Vec<u8> {

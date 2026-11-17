@@ -2,6 +2,7 @@
 //! All data is synthetic; PATH cannot find Node/Bun, and no OS secret is read.
 use peer_runtime::coordination::NativeCoordinationReducer;
 mod native_artifacts;
+mod native_attachments;
 mod native_file_controls;
 mod native_files;
 mod native_network;

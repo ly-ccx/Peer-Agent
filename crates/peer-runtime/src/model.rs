@@ -6,6 +6,7 @@ use sha2::{Digest, Sha256};
 use std::time::Duration;
 mod authentication;
 mod continuation;
+mod media;
 mod tool_results;
 pub(crate) use tool_results::ToolResultEncoding;
 mod count;
@@ -101,6 +102,9 @@ impl NativeModel {
         }
         Ok(self)
     }
+    pub(crate) fn validate_saved_media(&self, history: &Value) -> Result<(), ModelError> {
+        media::admit(history, self.wire)
+    }
     pub fn model_id(&self) -> &str {
         &self.model
     }
@@ -192,15 +196,7 @@ impl NativeModel {
         live: &LiveHistory,
         encoding: &ToolResultEncoding,
     ) -> Result<PreparedRequest<'a>, ModelError> {
-        if self.wire != wire::Wire::Qoder
-            && history["messages"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .any(|m| m["content"].is_array())
-        {
-            return Err(ModelError::new("native_model_images_unsupported"));
-        }
+        media::admit(history, self.wire)?;
         let mut messages = continuation::lower(history)?;
         live.apply(&self.binding, &mut messages);
         encoding.apply_lowered(&mut messages)?;

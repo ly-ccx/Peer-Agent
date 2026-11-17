@@ -32,7 +32,7 @@ impl NativeModel {
                 .map_err(|_| ModelError::new("model_request_invalid"))?;
             let encoded = crate::qoder::encode_body(raw)
                 .map_err(|_| ModelError::new("model_request_limit"))?;
-            if encoded.expose().len() > 2 * 1024 * 1024 {
+            if encoded.expose().len() > wire::REQUEST_BYTES {
                 return Err(ModelError::new("model_request_limit"));
             }
             encoded.expose().as_bytes().to_vec()

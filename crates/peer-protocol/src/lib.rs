@@ -49,8 +49,9 @@ pub use bounded_json::{
     ProjectionLimits, decode_json_bounded, project_json_reader, project_json_selected_reader,
 };
 pub use permission_digest::{
-    DigestError, PermissionOperation, approval_args_digest, javascript_json_digest,
-    javascript_json_string, javascript_object_keys, permission_operation_key,
+    DigestError, PermissionOperation, approval_args_digest,
+    javascript_json_array_string_with_limit, javascript_json_digest, javascript_json_string,
+    javascript_json_string_with_limit, javascript_object_keys, permission_operation_key,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

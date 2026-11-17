@@ -9,6 +9,7 @@ mod gemini;
 pub(super) mod qoder;
 mod responses;
 use content::*;
+pub(super) const REQUEST_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub enum Wire {
@@ -97,7 +98,7 @@ pub(super) fn check_limit(body: &Value) -> Result<(), ModelError> {
     if serde_json::to_vec(body)
         .map_err(|_| ModelError::new("model_request_invalid"))?
         .len()
-        > 2 * 1024 * 1024
+        > REQUEST_BYTES
     {
         return Err(ModelError::new("model_request_limit"));
     }

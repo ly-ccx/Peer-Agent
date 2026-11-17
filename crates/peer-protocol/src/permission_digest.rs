@@ -15,7 +15,7 @@ const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 /// Exact existing JS digest for admitted JSON; never issues authority by itself.
 pub fn approval_args_digest(value: &Value) -> Result<String, DigestError> {
     let mut encoded = String::new();
-    encode(value, &mut encoded, 0, KeyOrder::Stable)?;
+    encode(value, &mut encoded, 0, KeyOrder::Stable, MAX_BYTES)?;
     Ok(format!("{:x}", Sha256::digest(encoded.as_bytes())))
 }
 
@@ -32,7 +32,7 @@ pub struct PermissionOperation<'a> {
 pub fn permission_operation_key(input: PermissionOperation<'_>) -> Result<String, DigestError> {
     let mut output = String::new();
     append(&mut output, "{\"args\":")?;
-    encode(input.args, &mut output, 1, KeyOrder::Stable)?;
+    encode(input.args, &mut output, 1, KeyOrder::Stable, MAX_BYTES)?;
     append(&mut output, ",\"capabilityId\":")?;
     encode_string(input.capability_id, &mut output)?;
     for (key, value) in [
@@ -55,20 +55,30 @@ pub fn permission_operation_key(input: PermissionOperation<'_>) -> Result<String
 }
 
 fn encode_string(value: &str, output: &mut String) -> Result<(), DigestError> {
-    if value.len() > MAX_BYTES {
+    encode_string_with_limit(value, output, MAX_BYTES)
+}
+fn append(output: &mut String, text: &str) -> Result<(), DigestError> {
+    append_with_limit(output, text, MAX_BYTES)
+}
+fn encode_string_with_limit(
+    value: &str,
+    output: &mut String,
+    limit: usize,
+) -> Result<(), DigestError> {
+    if value.len() > limit {
         return Err(DigestError::TooLarge);
     }
-    append(output, "\"")?;
+    append_with_limit(output, "\"", limit)?;
     for character in value.chars() {
         let mut buffer = [0u8; 4];
         match character {
-            '"' => append(output, "\\\"")?,
-            '\\' => append(output, "\\\\")?,
-            '\u{8}' => append(output, "\\b")?,
-            '\u{c}' => append(output, "\\f")?,
-            '\n' => append(output, "\\n")?,
-            '\r' => append(output, "\\r")?,
-            '\t' => append(output, "\\t")?,
+            '"' => append_with_limit(output, "\\\"", limit)?,
+            '\\' => append_with_limit(output, "\\\\", limit)?,
+            '\u{8}' => append_with_limit(output, "\\b", limit)?,
+            '\u{c}' => append_with_limit(output, "\\f", limit)?,
+            '\n' => append_with_limit(output, "\\n", limit)?,
+            '\r' => append_with_limit(output, "\\r", limit)?,
+            '\t' => append_with_limit(output, "\\t", limit)?,
             control if (control as u32) < 32 => {
                 const HEX: &[u8; 16] = b"0123456789abcdef";
                 let encoded = [
@@ -79,16 +89,20 @@ fn encode_string(value: &str, output: &mut String) -> Result<(), DigestError> {
                     HEX[(control as usize) >> 4],
                     HEX[(control as usize) & 15],
                 ];
-                append(output, std::str::from_utf8(&encoded).expect("ASCII escape"))?;
+                append_with_limit(
+                    output,
+                    std::str::from_utf8(&encoded).expect("ASCII escape"),
+                    limit,
+                )?;
             }
-            other => append(output, other.encode_utf8(&mut buffer))?,
+            other => append_with_limit(output, other.encode_utf8(&mut buffer), limit)?,
         }
     }
-    append(output, "\"")
+    append_with_limit(output, "\"", limit)
 }
 
-fn append(output: &mut String, text: &str) -> Result<(), DigestError> {
-    if output.len().saturating_add(text.len()) > MAX_BYTES {
+fn append_with_limit(output: &mut String, text: &str, limit: usize) -> Result<(), DigestError> {
+    if output.len().saturating_add(text.len()) > limit {
         return Err(DigestError::TooLarge);
     }
     output.push_str(text);
@@ -108,8 +122,19 @@ pub fn javascript_json_digest(value: &Value) -> Result<String, DigestError> {
     Ok(format!("{:x}", Sha256::digest(encoded.as_bytes())))
 }
 pub fn javascript_json_string(value: &Value) -> Result<String, DigestError> {
+    javascript_json_string_with_limit(value, MAX_BYTES)
+}
+/// Factual-context encoding only. Permission/control digests retain MAX_BYTES.
+/// The caller owns its explicit budget; no caller may exceed the 8MiB ceiling.
+pub fn javascript_json_string_with_limit(
+    value: &Value,
+    limit: usize,
+) -> Result<String, DigestError> {
+    if limit == 0 || limit > 8 * 1024 * 1024 {
+        return Err(DigestError::TooLarge);
+    }
     let mut encoded = String::new();
-    encode(value, &mut encoded, 0, KeyOrder::JavaScript)?;
+    encode(value, &mut encoded, 0, KeyOrder::JavaScript, limit)?;
     Ok(encoded)
 }
 /// Object.keys order used by existing JS reducers: integer indices, then insertion.
@@ -148,14 +173,17 @@ fn encode(
     output: &mut String,
     depth: usize,
     order: KeyOrder,
+    limit: usize,
 ) -> Result<(), DigestError> {
     if depth > MAX_DEPTH {
         return Err(DigestError::TooDeep);
     }
     match value {
-        Value::Null => append(output, "null"),
-        Value::Bool(value) => append(output, if *value { "true" } else { "false" }),
-        Value::String(value) => encode_string(value, output),
+        Value::Null => append_with_limit(output, "null", limit),
+        Value::Bool(value) => {
+            append_with_limit(output, if *value { "true" } else { "false" }, limit)
+        }
+        Value::String(value) => encode_string_with_limit(value, output, limit),
         Value::Number(number) => {
             if number.as_u64().is_some_and(|n| n > MAX_SAFE_INTEGER)
                 || number
@@ -166,18 +194,9 @@ fn encode(
             }
             let number = number.as_f64().ok_or(DigestError::UnsafeInteger)?;
             let mut buffer = ryu_js::Buffer::new();
-            append(output, buffer.format(number))
+            append_with_limit(output, buffer.format(number), limit)
         }
-        Value::Array(values) => {
-            append(output, "[")?;
-            for (index, value) in values.iter().enumerate() {
-                if index != 0 {
-                    append(output, ",")?;
-                }
-                encode(value, output, depth + 1, order)?;
-            }
-            append(output, "]")
-        }
+        Value::Array(values) => encode_array(values, output, depth, order, limit),
         Value::Object(values) => {
             if values.len() > 65_536 {
                 return Err(DigestError::TooLarge);
@@ -197,23 +216,104 @@ fn encode(
                     })
                 }
             }
-            append(output, "{")?;
+            append_with_limit(output, "{", limit)?;
             for (index, key) in keys.into_iter().enumerate() {
                 if index != 0 {
-                    append(output, ",")?;
+                    append_with_limit(output, ",", limit)?;
                 }
-                encode_string(key, output)?;
-                append(output, ":")?;
-                encode(&values[key], output, depth + 1, order)?;
+                encode_string_with_limit(key, output, limit)?;
+                append_with_limit(output, ":", limit)?;
+                encode(&values[key], output, depth + 1, order, limit)?;
             }
-            append(output, "}")
+            append_with_limit(output, "}", limit)
         }
     }
+}
+
+fn encode_array(
+    values: &[Value],
+    output: &mut String,
+    depth: usize,
+    order: KeyOrder,
+    limit: usize,
+) -> Result<(), DigestError> {
+    append_with_limit(output, "[", limit)?;
+    for (index, value) in values.iter().enumerate() {
+        if index != 0 {
+            append_with_limit(output, ",", limit)?;
+        }
+        encode(value, output, depth + 1, order, limit)?;
+    }
+    append_with_limit(output, "]", limit)
+}
+/// Borrow a factual history slice without copying it into a Value::Array first.
+/// Default permission/control APIs do not use this context budget.
+pub fn javascript_json_array_string_with_limit(
+    values: &[Value],
+    limit: usize,
+) -> Result<String, DigestError> {
+    if limit == 0 || limit > 8 * 1024 * 1024 {
+        return Err(DigestError::TooLarge);
+    }
+    let mut output = String::new();
+    encode_array(values, &mut output, 0, KeyOrder::JavaScript, limit)?;
+    Ok(output)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn factual_context_budget_never_expands_permission_or_control_digest_budgets() {
+        let data: Value = serde_json::from_str(include_str!(
+            "../../../packages/protocol/contracts/native-cli/attachment-images.json"
+        ))
+        .unwrap();
+        let value = serde_json::json!({"body":"🦀".repeat(data["largeFact"]["scalars"].as_u64().unwrap() as usize),"escapes":"\n\"\0"});
+        assert_eq!(data["permissionJsonBytes"], MAX_BYTES);
+        let array =
+            javascript_json_array_string_with_limit(std::slice::from_ref(&value), 2 * 1024 * 1024)
+                .unwrap();
+        assert_eq!(
+            array.len(),
+            data["largeFact"]["arrayBytes"].as_u64().unwrap() as usize
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(array.as_bytes())),
+            data["largeFact"]["arraySha256"]
+        );
+        let encoded = javascript_json_string_with_limit(&value, 2 * 1024 * 1024).unwrap();
+        assert_eq!(
+            encoded.len(),
+            data["largeFact"]["bytes"].as_u64().unwrap() as usize
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(encoded.as_bytes())),
+            data["largeFact"]["sha256"]
+        );
+        assert_eq!(javascript_json_string(&value), Err(DigestError::TooLarge));
+        assert_eq!(javascript_json_digest(&value), Err(DigestError::TooLarge));
+        assert_eq!(approval_args_digest(&value), Err(DigestError::TooLarge));
+        assert_eq!(
+            permission_operation_key(PermissionOperation {
+                capability_id: "local.file.write",
+                args: &value,
+                conversation_id: None,
+                workspace_path: None,
+                session_id: None,
+                plan_id: None
+            }),
+            Err(DigestError::TooLarge)
+        );
+        assert_eq!(
+            javascript_json_string_with_limit(&Value::Null, 0),
+            Err(DigestError::TooLarge)
+        );
+        assert_eq!(
+            javascript_json_string_with_limit(&Value::Null, 8 * 1024 * 1024 + 1),
+            Err(DigestError::TooLarge)
+        );
+    }
 
     #[test]
     fn matches_real_typescript_digest_vectors() {

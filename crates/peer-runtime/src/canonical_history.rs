@@ -449,7 +449,8 @@ fn assistant(m: &Value, out: &mut Vec<Value>) -> Result<(), &'static str> {
 }
 pub fn project_history(values: &[Value]) -> Result<Value, &'static str> {
     // Bound before cloning/expanding; Runtime never holds the entire transcript.
-    javascript_json_string(&json!(values)).map_err(|_| "history_projection_limit")?;
+    peer_protocol::javascript_json_array_string_with_limit(values, 8 * 1024 * 1024)
+        .map_err(|_| "history_projection_limit")?;
     let boundary = values.iter().rposition(|m| marker(m).is_some());
     let mut continuity = None;
     if let Some(i) = boundary {
@@ -496,7 +497,8 @@ pub fn project_history(values: &[Value]) -> Result<Value, &'static str> {
     }
     let index = boundary.map_or(-1, |i| i as i64);
     let input = json!({"projectorVersion":peer_protocol::CANONICAL_HISTORY_PROJECTOR_VERSION,"compactionBoundaryIndex":index,"continuity":continuity,"messages":messages});
-    let bytes = javascript_json_string(&input).map_err(|_| "history_projection_limit")?;
+    let bytes = peer_protocol::javascript_json_string_with_limit(&input, 8 * 1024 * 1024)
+        .map_err(|_| "history_projection_limit")?;
     let hash = bytes.encode_utf16().fold(0x811c9dc5u32, |h, c| {
         (h ^ u32::from(c)).wrapping_mul(0x01000193)
     });
