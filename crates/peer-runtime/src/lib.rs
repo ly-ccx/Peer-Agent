@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 pub mod capability;
+mod cognition;
 mod effect_admission;
 mod mcp;
 mod mcp_auth;

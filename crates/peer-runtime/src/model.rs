@@ -5,6 +5,8 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::time::Duration;
 mod authentication;
+mod observation;
+pub(crate) use observation::ModelObservation;
 mod continuation;
 pub(crate) use continuation::Continuation as ModelContinuation;
 mod media;

@@ -3,62 +3,16 @@ use super::{HostError, NativeSessionHost};
 use crate::CancellationToken;
 use crate::{
     execution_budget::EpisodeBudget,
-    model::{ModelError, ModelTurn},
+    model::ModelObservation,
     usage_accounting::{RequestMetadata, RuntimeUsageAccounting},
 };
-use peer_protocol::{RuntimeTurnUsage, UsageAmounts};
+use peer_protocol::RuntimeTurnUsage;
 use peer_store::ConversationStore;
 use serde_json::Value;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
-
-/// Captured before the ownership wait can reject a late result. Known provider
-/// facts survive lease loss; executable calls still require the ownership gate.
-#[derive(Default)]
-pub(super) struct ModelObservation {
-    usage: Option<UsageAmounts>,
-    fingerprint: Option<String>,
-    invalid: bool,
-}
-impl ModelObservation {
-    pub(super) fn usage(&self) -> Option<&UsageAmounts> {
-        self.usage.as_ref()
-    }
-    pub(super) fn capture(result: &Result<ModelTurn, ModelError>) -> Self {
-        match result {
-            Ok(turn) => {
-                let usage = turn
-                    .usage
-                    .as_ref()
-                    .filter(|v| !v.is_null())
-                    .map(|v| serde_json::from_value(v.clone()))
-                    .transpose();
-                match usage {
-                    Ok(usage) => Self {
-                        usage,
-                        fingerprint: Some(turn.request_fingerprint.clone()),
-                        invalid: false,
-                    },
-                    Err(_) => Self {
-                        invalid: true,
-                        ..Self::default()
-                    },
-                }
-            }
-            Err(error) => error
-                .observation
-                .as_ref()
-                .map(|o| Self {
-                    usage: o.usage.clone(),
-                    fingerprint: Some(o.request_fingerprint.clone()),
-                    invalid: false,
-                })
-                .unwrap_or_default(),
-        }
-    }
-}
 
 pub(super) struct BillingScope<'a> {
     pub conversation: &'a str,

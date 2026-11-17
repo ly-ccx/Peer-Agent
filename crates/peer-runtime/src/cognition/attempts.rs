@@ -6,8 +6,8 @@ use crate::model::{ModelError, PreparedRequest, qoder_retry::Policy};
 impl ContextPipeline {
     pub(super) async fn send_attempts(
         &mut self,
-        host: &mut NativeSessionHost,
-        f: &RequestFrame<'_>,
+        host: &mut impl CognitionHost,
+        f: &CognitionRequest<'_>,
         accounting: &mut RuntimeUsageAccounting,
         mut prepared: PreparedRequest<'_>,
         history: &HistorySnapshot,
@@ -15,15 +15,15 @@ impl ContextPipeline {
     ) -> Result<Result<ModelTurn, ModelError>, HostError> {
         let seed = prepared.retry_seed();
         let mut policy = Policy::default();
-        let store = ConversationStore::new(&host.home);
+        let store = ConversationStore::new(f.home);
         let mut revision = history.source_revision.clone();
         loop {
             Self::guard(host, f)?;
-            f.budget.request(host, &now())?;
+            host.admit_request()?;
             let fingerprint = prepared.fingerprint().to_owned();
             let mut observed = None;
             let turn = host
-                .wait_owned(
+                .wait(
                     async {
                         let result = prepared.send(f.owned).await;
                         observed = Some(ModelObservation::capture(&result));
@@ -41,18 +41,7 @@ impl ContextPipeline {
             } else {
                 Ok(())
             };
-            if capacity_bearing {
-                host.observe_model_usage(f.budget, accounting, observed, f.billing)?;
-            } else {
-                host.observe_usage_for(
-                    f.budget,
-                    accounting,
-                    observed,
-                    f.billing,
-                    peer_protocol::UsagePurpose::CompactionSummary,
-                    false,
-                )?;
-            }
+            host.observe(accounting, observed, capacity_bearing)?;
             capacity?;
             // Preserve factual late usage before ownership/cancellation failures.
             let turn = turn?;
@@ -85,7 +74,7 @@ impl ContextPipeline {
                 return Ok(turn);
             };
             Self::guard(host, f)?;
-            host.wait_owned(async {
+            host.wait(async {
                 tokio::select! { biased; _ = f.owned.cancelled() => {}, _ = tokio::time::sleep(delay) => {} }
             }, f.owned, f.external).await?;
             Self::guard(host, f)?;

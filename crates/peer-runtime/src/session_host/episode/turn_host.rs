@@ -1,13 +1,14 @@
 //! Goal-specific authority and canonical settlement behind the shared loop.
 use super::*;
+use crate::cognition::ContextPipeline;
 use crate::model::{ModelContinuation, ModelToolCall, ModelTurn};
-use crate::session_host::context_pipeline::{ContextPipeline, RequestFrame};
+use crate::session_host::cognition_host::GoalRequestFrame;
 use crate::turn_loop::TurnHost;
 use peer_store::{EvidenceIndexStore, HostFileMaterialization, HostToolEvidence};
 
 pub(super) struct GoalTurnHost<'a, 'f> {
     pub host: &'a mut NativeSessionHost,
-    pub frame: &'a RequestFrame<'f>,
+    pub frame: &'a GoalRequestFrame<'f>,
     pub pipeline: &'a mut ContextPipeline,
     pub providers: &'a mut ProviderRegistry,
     pub projection: &'a crate::providers::RuntimeProjection,
@@ -39,7 +40,22 @@ impl TurnHost for GoalTurnHost<'_, '_> {
         {
             return Err(HostError("execution_revision_stale"));
         }
-        let response = self.pipeline.request(self.host, f, self.usage).await?;
+        let home = self.host.home.clone();
+        let request = crate::cognition::CognitionRequest {
+            home: &home,
+            model: f.model,
+            tools: f.tools,
+            owned: f.owned,
+            external: f.external,
+        };
+        let mut host = crate::session_host::cognition_host::GoalCognitionHost {
+            host: self.host,
+            frame: f,
+        };
+        let response = self
+            .pipeline
+            .request(&mut host, &request, self.usage)
+            .await?;
         self.system = Some(response.system);
         Ok(response.turn)
     }

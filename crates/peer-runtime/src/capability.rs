@@ -82,3 +82,10 @@ pub(crate) fn now() -> String {
         )
         .expect("UTC timestamp")
 }
+
+pub(crate) fn milliseconds(now: &str) -> Result<i64, CapabilityError> {
+    let at = time::OffsetDateTime::parse(now, &time::format_description::well_known::Rfc3339)
+        .map_err(|_| CapabilityError("invalid_host_time"))?;
+    i64::try_from(at.unix_timestamp_nanos() / 1_000_000)
+        .map_err(|_| CapabilityError("invalid_host_time"))
+}

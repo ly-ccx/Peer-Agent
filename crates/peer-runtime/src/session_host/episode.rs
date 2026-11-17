@@ -195,7 +195,7 @@ impl NativeSessionHost {
                 return Err(HostError("native_project_context_source_unsupported"));
             }
         }
-        let mut context_pipeline = super::context_pipeline::ContextPipeline::open(
+        let mut context_pipeline = crate::cognition::ContextPipeline::open(
             &self.home,
             &conversation,
             origin["modelSelection"]["worker"]["providerId"]
@@ -270,7 +270,7 @@ impl NativeSessionHost {
         };
         let mut usage_accounting = RuntimeUsageAccounting::default();
         let definitions = projection.definitions();
-        let frame = super::context_pipeline::RequestFrame {
+        let frame = super::cognition_host::GoalRequestFrame {
             mcp_revision: &mcp_inventory.source_revision,
             mcp_credentials: &mcp_credentials,
             plan: plan_id,

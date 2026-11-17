@@ -1,42 +1,53 @@
-//! NR-04 owns durable compaction, request reconstruction and capacity recovery.
+//! One native cognition pipeline: durable compaction, reconstruction and capacity recovery.
 //! All cognition goes through NativeModel; this module cannot execute tools.
 mod attempts;
 mod result_views;
-use super::billing::{BillingScope, ModelObservation};
-use super::{HostError, NativeSessionHost, episode_time as now, milliseconds};
+use crate::capability::{CapabilityError as HostError, milliseconds, now};
 use crate::{
     CancellationToken,
     canonical_history::project_history,
     context_accounting::ContextCapacity,
-    execution_budget::EpisodeBudget,
-    model::{LiveHistory, ModelTurn, NativeModel},
-    system_context::{assemble_work_context_with_continuity, instructions::ProjectInstructions},
+    model::{LiveHistory, ModelObservation, ModelTurn, NativeModel},
     usage_accounting::RuntimeUsageAccounting,
 };
 use peer_store::{ConversationStore, HistorySnapshot};
 use serde_json::{Value, json};
 use std::path::Path;
 
-pub(super) struct RequestFrame<'a> {
-    pub mcp_revision: &'a str,
-    pub mcp_credentials: &'a crate::mcp_oauth::CredentialEpoch,
-    pub plan: &'a str,
-    pub goal_revision: &'a str,
-    pub goal: &'a Value,
-    pub workspace: &'a Path,
-    pub instructions: &'a ProjectInstructions,
-    pub budget: &'a EpisodeBudget,
-    pub billing: &'a BillingScope<'a>,
+/// Immutable request inputs shared by every native cognition Host.
+pub(crate) struct CognitionRequest<'a> {
+    pub home: &'a Path,
     pub model: &'a NativeModel,
     pub tools: &'a Value,
     pub owned: &'a CancellationToken,
     pub external: &'a CancellationToken,
 }
-pub(super) struct RequestResult {
+/// The actual Host owns authority, request budget, registered Context Sources,
+/// managed waiting and durable usage attribution. None of these is inferred from
+/// model text or a storage snapshot. This seam cannot execute a capability.
+pub(crate) trait CognitionHost {
+    fn authority(&self) -> Result<(), HostError>;
+    fn check_request(&self) -> Result<(), HostError>;
+    fn admit_request(&mut self) -> Result<(), HostError>;
+    fn assemble(&self, continuity: &[Value]) -> Result<Value, HostError>;
+    fn observe(
+        &mut self,
+        accounting: &mut RuntimeUsageAccounting,
+        observed: ModelObservation,
+        capacity_bearing: bool,
+    ) -> Result<(), HostError>;
+    async fn wait<F: std::future::Future>(
+        &mut self,
+        future: F,
+        owned: &CancellationToken,
+        external: &CancellationToken,
+    ) -> Result<F::Output, HostError>;
+}
+pub(crate) struct RequestResult {
     pub turn: ModelTurn,
     pub system: Value,
 }
-pub(super) struct ContextPipeline {
+pub(crate) struct ContextPipeline {
     pub capacity: ContextCapacity,
     pub live: LiveHistory,
     conversation: String,
@@ -83,32 +94,15 @@ impl ContextPipeline {
             conversation: conversation.into(),
         })
     }
-    fn guard(host: &NativeSessionHost, f: &RequestFrame<'_>) -> Result<(), HostError> {
+    fn guard(host: &impl CognitionHost, f: &CognitionRequest<'_>) -> Result<(), HostError> {
         Self::authority(host, f)?;
-        f.budget.check_request(host)
+        host.check_request()
     }
-    fn authority(host: &NativeSessionHost, f: &RequestFrame<'_>) -> Result<(), HostError> {
+    fn authority(host: &impl CognitionHost, f: &CognitionRequest<'_>) -> Result<(), HostError> {
         if f.owned.is_cancelled() || f.external.is_cancelled() {
             return Err(HostError("CANCELLED"));
         }
-        if peer_store::McpRegistryStore::new(&host.home)
-            .read()?
-            .source_revision
-            != f.mcp_revision
-        {
-            return Err(HostError("native_capability_inventory_changed"));
-        }
-        f.mcp_credentials.check().map_err(HostError)?;
-        let fresh = host.current(f.plan, &now())?;
-        if fresh.goal.source_revision != f.goal_revision {
-            return Err(HostError("execution_revision_stale"));
-        }
-        let policy =
-            peer_store::PolicyStore::new(&host.home).read_existing(&fresh.resource.workspace_id)?;
-        if policy.conversation_id != f.goal["delegationOrigin"]["parentConversationId"] {
-            return Err(HostError("out_of_scope"));
-        }
-        Ok(())
+        host.authority()
     }
     fn persist(
         &mut self,
@@ -134,14 +128,14 @@ impl ContextPipeline {
     }
     pub async fn request(
         &mut self,
-        host: &mut NativeSessionHost,
-        f: &RequestFrame<'_>,
+        host: &mut impl CognitionHost,
+        f: &CognitionRequest<'_>,
         accounting: &mut RuntimeUsageAccounting,
     ) -> Result<RequestResult, HostError> {
         let mut compacted = false;
         loop {
             Self::guard(host, f)?;
-            let store = ConversationStore::new(&host.home);
+            let store = ConversationStore::new(f.home);
             let history = store.read_committed(&self.conversation, None, 8 * 1024 * 1024)?;
             if history.history.excluded_from_message_id.is_some() {
                 return Err(HostError("native_execution_recovery_required"));
@@ -152,16 +146,7 @@ impl ContextPipeline {
                 .cloned()
                 .into_iter()
                 .collect::<Vec<_>>();
-            let system = assemble_work_context_with_continuity(
-                f.workspace.to_str().ok_or(HostError("invalid_workspace"))?,
-                f.model.provider(),
-                f.model.model_id(),
-                f.goal,
-                &now(),
-                f.instructions,
-                &continuity,
-            )
-            .map_err(HostError)?;
+            let system = host.assemble(&continuity)?;
             let encoding = self.result_views(host, f, &history, &projected).await?;
             let prepared = f
                 .model
@@ -176,7 +161,7 @@ impl ContextPipeline {
             let fingerprint = prepared.fingerprint().to_owned();
             let counted = if self.capacity.should_count() {
                 match host
-                    .wait_owned(prepared.count_input_tokens(f.owned), f.owned, f.external)
+                    .wait(prepared.count_input_tokens(f.owned), f.owned, f.external)
                     .await?
                 {
                     Ok(v) => Ok(v),
@@ -228,8 +213,8 @@ impl ContextPipeline {
     }
     async fn compact(
         &mut self,
-        host: &mut NativeSessionHost,
-        f: &RequestFrame<'_>,
+        host: &mut impl CognitionHost,
+        f: &CognitionRequest<'_>,
         accounting: &mut RuntimeUsageAccounting,
         history: &HistorySnapshot,
         projected: &Value,
@@ -294,7 +279,7 @@ impl ContextPipeline {
             return Err(HostError("context_summary_limit"));
         }
         let prompts: Value = serde_json::from_str(include_str!(
-            "../../../../packages/protocol/contracts/native-cli/compaction-prompts.json"
+            "../../../packages/protocol/contracts/native-cli/compaction-prompts.json"
         ))
         .map_err(|_| HostError("context_resource_invalid"))?;
         let source =
@@ -338,11 +323,11 @@ impl ContextPipeline {
             .checked_add(1)
             .ok_or(HostError("context_revision_limit"))?;
         let marker=peer_protocol::build_compaction_marker(&json!({"method":method,"summary":summary,"originalMessageCount":messages.len(),"beforeTokens":before["authoritativeInputTokens"],"historySelection":{"version":1,"compactionEpoch":epoch,"retainedMessageIds":[retained]}})).map_err(HostError)?;
-        let store = ConversationStore::new(&host.home);
+        let store = ConversationStore::new(f.home);
         let committed=store.commit_message(history,&json!({"id":uuid::Uuid::new_v4().to_string(),"role":"user","content":summary,"createdAt":now(),"_compaction":marker}),&now(),None)?;
         #[cfg(feature = "test-fixtures")]
         if std::env::var("PEER_NATIVE_CONTEXT_FAULT").ok().as_deref() == Some("after_marker")
-            && host.home.join(".native-cli-fixture").is_file()
+            && f.home.join(".native-cli-fixture").is_file()
         {
             std::process::exit(77)
         }
@@ -357,3 +342,6 @@ impl ContextPipeline {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;

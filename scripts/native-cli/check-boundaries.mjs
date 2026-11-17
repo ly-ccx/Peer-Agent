@@ -22,9 +22,9 @@ for (const name of names) {
     if (/Command::new\s*\(\s*"(?:bun|node|electron)"/.test(source)) throw Error(`${path}: forbidden JS sidecar`);
     if (name === 'peer-tui' && /std::(?:fs|process)|tokio::(?:fs|process)/.test(source)) throw Error(`${path}: concrete I/O in View`);
     const providerRoot = resolve(directory, 'providers');
-    const sharedLoop = path === resolve(directory, 'turn_loop.rs') || path.startsWith(resolve(directory, 'turn_loop') + '/');
+    const sharedLoop = ['turn_loop', 'cognition'].some(module => path === resolve(directory, module + '.rs') || path.startsWith(resolve(directory, module) + '/'));
     if (name === 'peer-runtime' && (sharedLoop || path === resolve(directory, 'providers.rs') || path.startsWith(providerRoot + '/'))
-      && /\b(?:NativeSessionHost|HostPermissionGrant|HostResourcePlan)\b|\bsession_host\s*::/.test(source)) {
+      && /\b(?:NativeSessionHost|HostPermissionGrant|HostResourcePlan|GoalCognitionHost|GoalRequestFrame)\b|\bsession_host\s*::/.test(source)) {
       throw Error(`${path}: shared execution Module depends on a concrete Goal Host instead of its Host seam`);
     }
   }

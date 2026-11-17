@@ -14,9 +14,9 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 mod authority;
 mod billing;
+mod cognition_host;
 mod command_process;
 mod connection;
-mod context_pipeline;
 mod effect_wait;
 mod episode;
 mod read_scope;
@@ -247,8 +247,4 @@ fn claim_refs(claims: &[Value]) -> Vec<Value> {
         .map(|c| json!({"claimId":c["claimId"],"revision":c["revision"]}))
         .collect()
 }
-pub(crate) fn milliseconds(now: &str) -> Result<i64, HostError> {
-    let at = time::OffsetDateTime::parse(now, &time::format_description::well_known::Rfc3339)
-        .map_err(|_| HostError("invalid_host_time"))?;
-    i64::try_from(at.unix_timestamp_nanos() / 1_000_000).map_err(|_| HostError("invalid_host_time"))
-}
+pub(crate) use crate::capability::milliseconds;
