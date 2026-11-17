@@ -33,6 +33,7 @@ run('bun', ['scripts/native-cli/access-policy-contracts.ts']);
 run('bun', ['scripts/native-cli/context-contracts.ts']);
 run('node', ['scripts/native-cli/file-operation-contracts.mjs']);
 run('node', ['scripts/native-cli/tool-artifact-contracts.mjs']);
+run('node', ['scripts/native-cli/model-tool-result-contracts.mjs']);
 run('bun', ['scripts/native-cli/compaction-contracts.ts']);
 run('bun', ['scripts/native-cli/mcp-inventory-contracts.ts']);
 run('bun', ['scripts/native-cli/wire-contracts.ts']);

@@ -5,6 +5,7 @@ mod native_artifacts;
 mod native_file_controls;
 mod native_files;
 mod native_network;
+mod native_result_encoding;
 use peer_store::{
     AcquireLease, CoordinationStore, ExecutionResourceStore, HostIdentity, HostLeaseStore,
     HostSurface, PolicyStore,

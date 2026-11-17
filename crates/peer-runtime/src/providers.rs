@@ -53,12 +53,7 @@ impl EffectOutcome {
     }
 }
 pub type EffectFuture = Pin<Box<dyn Future<Output = EffectOutcome> + Send>>;
-/// Chosen by the trusted Provider adapter, never decoded from tool output.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum ToolOutputKind {
-    Structured,
-    FileRead,
-}
+pub use crate::tool_result_content::ToolOutputKind;
 pub trait PreparedEffect {
     fn output_kind(&self) -> ToolOutputKind {
         ToolOutputKind::Structured

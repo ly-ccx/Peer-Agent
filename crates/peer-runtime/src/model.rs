@@ -6,6 +6,8 @@ use sha2::{Digest, Sha256};
 use std::time::Duration;
 mod authentication;
 mod continuation;
+mod tool_results;
+pub(crate) use tool_results::ToolResultEncoding;
 mod count;
 mod grok;
 pub(crate) mod qoder_retry;
@@ -179,6 +181,17 @@ impl NativeModel {
         tools: &Value,
         live: &LiveHistory,
     ) -> Result<PreparedRequest<'a>, ModelError> {
+        let encoding = ToolResultEncoding::collect(history)?.inline()?;
+        self.prepare_request_with_tool_results(context, history, tools, live, &encoding)
+    }
+    pub(crate) fn prepare_request_with_tool_results<'a>(
+        &'a self,
+        context: &str,
+        history: &Value,
+        tools: &Value,
+        live: &LiveHistory,
+        encoding: &ToolResultEncoding,
+    ) -> Result<PreparedRequest<'a>, ModelError> {
         if self.wire != wire::Wire::Qoder
             && history["messages"]
                 .as_array()
@@ -190,6 +203,7 @@ impl NativeModel {
         }
         let mut messages = continuation::lower(history)?;
         live.apply(&self.binding, &mut messages);
+        encoding.apply_lowered(&mut messages)?;
         let body = wire::encode_runtime(
             self.wire,
             &wire::WireInput {

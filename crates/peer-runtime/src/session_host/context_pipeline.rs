@@ -1,6 +1,7 @@
 //! NR-04 owns durable compaction, request reconstruction and capacity recovery.
 //! All cognition goes through NativeModel; this module cannot execute tools.
 mod attempts;
+mod result_views;
 use super::billing::{BillingScope, ModelObservation};
 use super::{HostError, NativeSessionHost, episode_time as now, milliseconds};
 use crate::{
@@ -161,13 +162,15 @@ impl ContextPipeline {
                 &continuity,
             )
             .map_err(HostError)?;
+            let encoding = self.result_views(host, f, &history, &projected).await?;
             let prepared = f
                 .model
-                .prepare_request(
+                .prepare_request_with_tool_results(
                     system["rendered"].as_str().unwrap(),
                     &projected,
                     f.tools,
                     &self.live,
+                    &encoding,
                 )
                 .map_err(|e| HostError(e.code))?;
             let fingerprint = prepared.fingerprint().to_owned();
@@ -278,6 +281,11 @@ impl ContextPipeline {
         if old.is_empty() {
             return Err(HostError("native_context_pressure"));
         }
+        let encoding = self.result_views(host, f, history, projected).await?;
+        let mut old = old;
+        encoding
+            .apply_projected(&mut old)
+            .map_err(|e| HostError(e.code))?;
         let facts = json!({"continuity":projected.get("continuity"),"messages":old});
         let input = peer_protocol::javascript_json_string(&facts)
             .map_err(|_| HostError("context_summary_limit"))?;

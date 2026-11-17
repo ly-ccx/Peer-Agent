@@ -3,6 +3,7 @@ mod effect_admission;
 mod mcp;
 mod mcp_auth;
 pub mod mcp_oauth;
+mod tool_result_content;
 
 pub mod access_policy;
 pub mod canonical_history;
