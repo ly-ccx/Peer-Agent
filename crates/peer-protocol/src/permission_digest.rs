@@ -6,6 +6,7 @@ pub enum DigestError {
     UnsafeInteger,
     TooDeep,
     TooLarge,
+    ReservedKey,
 }
 
 const MAX_BYTES: usize = 1_048_576;
@@ -113,6 +114,15 @@ fn append_with_limit(output: &mut String, text: &str, limit: usize) -> Result<()
 enum KeyOrder {
     Stable,
     JavaScript,
+    Interactive,
+}
+
+/// Canonical bytes of an existing Interactive Result store record.
+/// Unlike permission arguments, its source permits all finite JS numbers.
+pub(crate) fn interactive_json(value: &Value) -> Result<String, DigestError> {
+    let mut encoded = String::new();
+    encode(value, &mut encoded, 0, KeyOrder::Interactive, 2 * MAX_BYTES)?;
+    Ok(encoded)
 }
 
 /// Existing controlDigest uses JSON.stringify order, unlike approval's sorted keys.
@@ -185,10 +195,11 @@ fn encode(
         }
         Value::String(value) => encode_string_with_limit(value, output, limit),
         Value::Number(number) => {
-            if number.as_u64().is_some_and(|n| n > MAX_SAFE_INTEGER)
-                || number
-                    .as_i64()
-                    .is_some_and(|n| n.unsigned_abs() > MAX_SAFE_INTEGER)
+            if !matches!(order, KeyOrder::Interactive)
+                && (number.as_u64().is_some_and(|n| n > MAX_SAFE_INTEGER)
+                    || number
+                        .as_i64()
+                        .is_some_and(|n| n.unsigned_abs() > MAX_SAFE_INTEGER))
             {
                 return Err(DigestError::UnsafeInteger);
             }
@@ -204,7 +215,7 @@ fn encode(
             let mut keys: Vec<_> = values.keys().collect();
             // JavaScript Object.keys(...).sort() compares UTF-16 code units.
             match order {
-                KeyOrder::Stable => {
+                KeyOrder::Stable | KeyOrder::Interactive => {
                     keys.sort_by(|left, right| left.encode_utf16().cmp(right.encode_utf16()))
                 }
                 KeyOrder::JavaScript => {
@@ -218,6 +229,11 @@ fn encode(
             }
             append_with_limit(output, "{", limit)?;
             for (index, key) in keys.into_iter().enumerate() {
+                if matches!(order, KeyOrder::Interactive)
+                    && matches!(key.as_str(), "__proto__" | "prototype" | "constructor")
+                {
+                    return Err(DigestError::ReservedKey);
+                }
                 if index != 0 {
                     append_with_limit(output, ",", limit)?;
                 }

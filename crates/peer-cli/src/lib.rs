@@ -4,6 +4,7 @@ pub mod acp;
 mod cancellation;
 pub mod doctor;
 pub mod export;
+pub mod interactive_result;
 pub mod mcp;
 pub mod model_auth;
 pub mod models;
@@ -31,6 +32,8 @@ pub enum Command {
     Usage(String),
     ShellHelp(&'static str),
     Export(export::Options),
+    Result { reference: String, json: bool },
+    ResultHelp,
     Exec { plan: String, max_turns: usize },
     OrdinaryExec(Box<ordinary_exec::Options>),
     ExecHelp,
@@ -58,6 +61,9 @@ pub fn command(argv: &[String]) -> Command {
     }
     if argv.first().is_some_and(|s| s == "exec") && argv.get(1).is_none_or(|s| s != "--plan") {
         return ordinary_exec::parse(&argv[1..]);
+    }
+    if argv.first().is_some_and(|s| s == "result") {
+        return interactive_result::parse(&argv[1..]);
     }
     if argv
         .iter()

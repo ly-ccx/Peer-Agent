@@ -96,6 +96,7 @@ run('bun', ['scripts/native-cli/mcp-runtime-contracts.ts']);
 run('bun',['scripts/native-cli/episode-conformance.ts',episodes]);
 run('cargo', ['build', '--release', '--locked', '-p', 'peer-cli', '--bins', '--examples']);
 run('cargo', ['build', '--release', '--locked', '-p', 'peer-credential-helper', '--bin', 'peer-credential-helper']);
+run('bun', ['test', 'apps/tui/src/cli-result.integration.test.ts'], {PEER_TEST_NATIVE_RESULT_BINARY:join(root,'target/release/peer-native')});
 run('cargo', ['build', '--locked', '-p', 'peer-store', '--example', 'conformance']);
 run('bun', ['scripts/native-cli/store-conformance.ts', 'target/debug/examples/conformance']);
 run('bun', ['scripts/native-cli/policy-initialization.ts', 'target/debug/examples/conformance']);

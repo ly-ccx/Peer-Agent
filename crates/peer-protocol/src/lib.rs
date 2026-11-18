@@ -51,6 +51,7 @@ pub use execution_identity::{
 };
 
 mod bounded_json;
+pub mod interactive_result;
 mod permission_digest;
 mod store;
 mod transcript;

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { interactiveArtifactRef } from '@peer-agent/protocol';
@@ -8,12 +8,13 @@ import { createInteractiveResultStore, createInteractiveRetention, createInterac
   runInteractiveValidation } from '@peer-agent/runtime-node/interactive-results';
 
 const entry = path.join(import.meta.dir, 'index.tsx');
-async function withPublication(check: (fixture: Awaited<ReturnType<typeof publication>>) => void) {
-  const fixture = await publication();
+const nativeResult = process.env.PEER_TEST_NATIVE_RESULT_BINARY;
+async function withPublication(check: (fixture: Awaited<ReturnType<typeof publication>>) => void, fallback?: string) {
+  const fixture = await publication(fallback);
   try { check(fixture); }
   finally { fixture.stateStore.close(); fixture.resultStore.close(); rmSync(fixture.root, { recursive: true, force: true }); }
 }
-async function publication() {
+async function publication(fallback = 'Unverified.\u001b[31m ' + 'sample '.repeat(1800)) {
   const root = mkdtempSync(path.join(tmpdir(), 'peer-result-cli-'));
   const owner = { workspaceId: 'bot-a', conversationId: 'parent-a' };
   const resultStore = createInteractiveResultStore({ rootDir: path.join(root, 'project-runtime'), assertCompatibility: () => true });
@@ -21,7 +22,7 @@ async function publication() {
   try {
     const profiles = createBotProfileStore({ rootDir: root } as never);
     expect(profiles.create({ ...owner, displayName: 'Local Bot', agentConversationId: owner.conversationId }).ok).toBe(true);
-    const draft = { publication: { kind: 'create' as const }, title: 'Fixed CLI trial', textFallback: 'Unverified.\u001b[31m ' + 'sample '.repeat(1800),
+    const draft = { publication: { kind: 'create' as const }, title: 'Fixed CLI trial', textFallback: fallback,
       inputs: [], program: 'root=Text("Stored program that must not be exported")' };
     const content = await runInteractiveValidation({ operation: 'validate', draft });
     const source = { conversationId: 'worker-a', planId: 'plan-a', sessionId: 'session-a', toolCallId: 'publish-a', executionEpoch: 'epoch-a' };
@@ -34,7 +35,27 @@ async function publication() {
         { cwd: root, env: { ...process.env, PEER_AGENT_HOME: root }, stdin: input === undefined ? 'ignore' : Buffer.from(input), stdout: 'pipe', stderr: 'pipe' });
       return { status: result.exitCode, stdout: result.stdout.toString(), stderr: result.stderr.toString() };
     };
-    const run = (...args: string[]) => runWithInput(undefined, ...args);
+    const database = path.join(root, 'project-runtime', owner.workspaceId, 'interactive-results');
+    const readDbFiles = () => Object.fromEntries(readdirSync(database).sort().map(name => [name, readFileSync(path.join(database, name))]));
+    const run = (...args: string[]) => {
+      const legacy = runWithInput(undefined, ...args);
+      if (!nativeResult || args[0] !== 'result') return legacy;
+      const before = readDbFiles();
+      const result = Bun.spawnSync([nativeResult, ...args], {
+        cwd: root, env: { HOME: root, PEER_AGENT_HOME: root, PATH: '/nonexistent' }, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
+      });
+      expect(readDbFiles()).toEqual(before);
+      expect(result.exitCode).toBe(legacy.status);
+      expect(result.stderr.toString()).toBe(legacy.stderr);
+      if (legacy.status === 0 && args.includes('--json')) {
+        expect(JSON.parse(result.stdout.toString())).toEqual(JSON.parse(legacy.stdout));
+      } else if (args[1] === '--help') {
+        expect(result.stdout.toString()).toContain('Read a fixed result summary from the local Bot.');
+      } else {
+        expect(result.stdout.toString()).toBe(legacy.stdout);
+      }
+      return legacy;
+    };
     const markIndexed = () => resultStore.markIndexed(published.callRef, published.indexEntry);
     const retirement = createInteractiveRetention({ resultStore, stateStore, assertOwner: () => true,
       acquireRoots: () => ({ sources: Object.fromEntries(INTERACTIVE_RETENTION_SOURCES.map(source => [source, 'sha256:' + '0'.repeat(64)])),
@@ -101,3 +122,34 @@ test('fixed-result CLI retains the same reference and source before and after cl
 test('fixed-result CLI plain output retains cleaned availability', () => withPublication(f => {
   f.markIndexed(); f.cleanup(); expect(f.run('result', f.ref).stdout).toContain('Availability: cleaned');
 }));
+test('fixed-result CLI preserves the UTF-16 cutoff of a saved available summary', () => withPublication(f => {
+  f.markIndexed();
+  expect(JSON.parse(f.run('result', f.ref, '--json').stdout).textFallback).toBe('a'.repeat(8191) + '\ud83d');
+  expect(f.run('result', f.ref).stdout.endsWith('\ufffd\n')).toBe(true);
+}, 'a'.repeat(8191) + '😀 trailing'));
+test('fixed-result CLI preserves the UTF-16 cutoff stored in an authentic cleanup receipt', () => withPublication(f => {
+  f.markIndexed(); f.cleanup();
+  expect(JSON.parse(f.run('result', f.ref, '--json').stdout).textFallback).toBe('a'.repeat(255) + '\ud83d');
+  expect(f.run('result', f.ref).stdout.endsWith('\ufffd\n')).toBe(true);
+}, 'a'.repeat(255) + '😀 trailing'));
+if (nativeResult) {
+  test('native fixed-result CLI reads a committed WAL after SQLite rebuilds its missing shared-memory index', () => withPublication(f => {
+    f.markIndexed();
+    const home = mkdtempSync(path.join(tmpdir(), 'peer-result-cold-wal-'));
+    try {
+      cpSync(f.root, home, { recursive: true, filter: source => !source.endsWith('store.sqlite-shm') });
+      const database = path.join(home, 'project-runtime', f.owner.workspaceId, 'interactive-results', 'store.sqlite');
+      const databaseBytes = readFileSync(database);
+      const walBytes = readFileSync(`${database}-wal`);
+      expect(walBytes.length).toBeGreaterThan(0);
+      const result = Bun.spawnSync([nativeResult, 'result', f.ref, '--json'], {
+        cwd: home, env: { HOME: home, PEER_AGENT_HOME: home, PATH: '/nonexistent' }, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
+      });
+      expect(result.stderr.toString()).toBe('');
+      expect(result.exitCode).toBe(0);
+      expect(JSON.parse(result.stdout.toString())).toMatchObject({ ref: f.ref, availability: 'available', source: f.source });
+      expect(readFileSync(database)).toEqual(databaseBytes);
+      expect(readFileSync(`${database}-wal`)).toEqual(walBytes);
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  }));
+}

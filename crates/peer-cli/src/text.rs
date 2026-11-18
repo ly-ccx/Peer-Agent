@@ -1,4 +1,10 @@
 use std::io;
+pub(crate) fn strip_terminal_controls(value: &mut String) {
+    value.retain(|c| {
+        matches!(c, '\t' | '\n')
+            || !(c.is_control() || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'))
+    });
+}
 pub(crate) fn diagnostic(value: &str) -> String {
     if value
         .chars()

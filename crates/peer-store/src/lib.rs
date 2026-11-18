@@ -17,11 +17,13 @@ mod model_config;
 pub use approvals::{ApprovalDecision, ApprovalState, ApprovalStore, HostApproval};
 pub use evidence::{EvidenceIndexStore, HostToolEvidence};
 pub use model_config::{ModelConfigSnapshot, ModelConfigStore, ModelConfigTransaction};
+mod interactive_result;
 mod resources;
 mod sqlite_file;
 #[cfg(feature = "test-fixtures")]
 pub use coordination_fence::protect_coordination_writer_fixture;
 pub use coordination_fence::{FenceError, FenceOutcome, FenceStep, protect_coordination_writer};
+pub use interactive_result::{InteractiveReadError, read_interactive_result};
 pub use resources::{
     ExecutionResourceStore, HostClaimClosure, HostDispatchScopes, HostFileMaterialization,
     HostResourcePlan, ResourceError, ResourceIdentity, ResourceReservation, directory_resource,
