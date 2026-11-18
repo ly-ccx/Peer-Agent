@@ -144,16 +144,30 @@ fn create_conversation(root: &Path, workspace: &Path) -> String {
         .into()
 }
 async fn running_child(root: &Path, conversation: &str) -> peer_protocol::NativeProcessRecorder {
+    use peer_protocol::{NativeProcessState, NativeShellSession};
     let deadline = Instant::now() + Duration::from_secs(8);
     loop {
-        if let Some(child) = ConversationStore::new(root)
+        let run = ConversationStore::new(root)
             .read_conversation_execution(conversation)
-            .unwrap()
-            .and_then(|r| r.pending_tools.into_iter().find_map(|p| p.native_process))
-            .filter(|p| p.state == peer_protocol::NativeProcessState::Running)
-            .and_then(|p| p.child)
-        {
-            return child;
+            .unwrap();
+        if let Some(run) = run {
+            let foreground = run
+                .handles
+                .iter()
+                .filter_map(NativeShellSession::from_handle)
+                .filter(|shell| shell.command.is_some())
+                .map(|shell| shell.process);
+            if let Some(child) = foreground
+                .chain(
+                    run.pending_tools
+                        .into_iter()
+                        .filter_map(|p| p.native_process),
+                )
+                .find(|p| p.state == NativeProcessState::Running)
+                .and_then(|p| p.child)
+            {
+                return child;
+            }
         }
         assert!(
             Instant::now() < deadline,
@@ -162,6 +176,7 @@ async fn running_child(root: &Path, conversation: &str) -> peer_protocol::Native
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
+
 fn canonical_tool(root: &Path, conversation: &str) -> Value {
     ConversationStore::new(root)
         .read_committed(conversation, None, 8 * 1024 * 1024)
@@ -273,7 +288,7 @@ async fn actual_shell_interruptions_drain_owned_child_keep_facts_and_admit_later
         let conversation = create_conversation(root.path(), workspace.path());
         let (endpoint, served) = server(vec![tool_stream(
             "bash",
-            json!({"command":"/bin/sleep 30"}),
+            json!({"command":"printf entered > entered; /bin/sleep 30"}),
         )]);
         let first_model = model(endpoint);
         let access = ConversationAccess::new(LocalAccessLevel::FullLocal);
@@ -295,6 +310,16 @@ async fn actual_shell_interruptions_drain_owned_child_keep_facts_and_admit_later
         let run = runtime.execute(&options, &first_model, &mut permission, &cancel);
         let interrupt = async {
             let child = running_child(root.path(), &conversation).await;
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !std::fs::read(workspace.path().join("entered"))
+                .is_ok_and(|bytes| bytes == b"entered")
+            {
+                assert!(
+                    Instant::now() < deadline,
+                    "command did not really enter the interpreter"
+                );
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
             let original = canonical_tool(root.path(), &conversation);
             let store = ConversationStore::new(root.path());
             match interruption {
@@ -372,15 +397,24 @@ async fn actual_shell_interruptions_drain_owned_child_keep_facts_and_admit_later
             assert!(!stopped.permits_new_run());
             assert_eq!(stopped.pending_tools.len(), 1);
         } else {
-            assert!(
-                stopped.permits_new_run(),
-                "{interruption:?}: known ended result should settle"
+            assert!(!stopped.permits_new_run());
+            assert_eq!(stopped.pending_tools.len(), 1);
+            let pending = &stopped.pending_tools[0];
+            assert_eq!(
+                pending.phase,
+                peer_protocol::ConversationDispatchPhase::OutcomeUnknown
             );
             assert_eq!(facts["permissionGrants"], original["permissionGrants"]);
-            assert!(matches!(
-                result["status"].as_str(),
-                Some("cancelled" | "failed")
-            ));
+            assert_eq!(result["status"], "failed");
+            assert_eq!(result["error"]["code"], "execution_outcome_unknown");
+            assert_eq!(
+                result["evidence"]["shellSession"]["dispatchId"],
+                pending.dispatch_id
+            );
+            assert_eq!(
+                result["evidence"]["permissionGrantId"],
+                original["permissionGrants"][0]["grantId"]
+            );
             let call = result["toolCallId"].as_str().unwrap();
             assert!(
                 !peer_store::EvidenceIndexStore::new(root.path())
@@ -403,15 +437,10 @@ async fn actual_shell_interruptions_drain_owned_child_keep_facts_and_admit_later
                     )
             );
         }
-        // A blocked old intent cannot poison a separate new cancellation domain.
-        // Known settled executions can also continue their original conversation.
+        // An unresolved old effect does not block an independent conversation.
         let (endpoint, served) = server(vec![stream("text")]);
         let next = ConversationOptions {
-            conversation_id: if matches!(interruption, Interruption::ForeignGrant) {
-                None
-            } else {
-                Some(&conversation)
-            },
+            conversation_id: None,
             prompt: "A new independent task",
             image_paths: &[],
             ..options
