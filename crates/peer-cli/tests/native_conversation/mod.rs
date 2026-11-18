@@ -11,6 +11,7 @@ mod hooks;
 mod input_media;
 mod model_errors;
 mod recovery;
+mod session_delete;
 mod shell_artifacts;
 mod shell_background;
 mod shell_session;

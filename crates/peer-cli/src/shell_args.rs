@@ -71,6 +71,12 @@ fn sessions(argv: &[String]) -> Command {
     if action.as_str() == "resume" && yes {
         return error("peer sessions: --yes is only valid with delete");
     }
+    if action.as_str() == "delete" {
+        return Command::SessionsDelete {
+            id: args[1].clone(),
+            yes,
+        };
+    }
     Command::Unavailable(format!("sessions {action}"))
 }
 fn export(argv: &[String]) -> Command {

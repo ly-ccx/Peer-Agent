@@ -169,7 +169,7 @@ impl ConversationUsageReceipt {
         self.receipt.as_ref()
     }
 }
-pub(super) fn decode(
+pub(crate) fn decode(
     meta: &Value,
     conversation: &str,
 ) -> Result<Option<ConversationExecution>, StoreError> {

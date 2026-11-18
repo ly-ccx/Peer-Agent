@@ -1,5 +1,5 @@
 use peer_protocol::CliExit;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 pub fn list() -> io::Result<CliExit> {
     let Some(home) = peer_protocol::data_home() else {
         writeln!(io::stderr(), "peer sessions: data home unavailable")?;
@@ -41,4 +41,49 @@ pub fn list() -> io::Result<CliExit> {
     }
     writeln!(io::stdout(), "{}", lines.join("\n"))?;
     Ok(CliExit::Ok)
+}
+
+pub fn delete(id: &str, yes: bool) -> io::Result<CliExit> {
+    let Some(home) = peer_protocol::data_home() else {
+        writeln!(io::stderr(), "peer sessions: data home unavailable")?;
+        return Ok(CliExit::Runtime);
+    };
+    match peer_store::session_delete_exists(&home, id) {
+        Ok(true) => (),
+        Ok(false) => {
+            writeln!(io::stderr(), "peer sessions: session not found: {id}")?;
+            return Ok(CliExit::Runtime);
+        }
+        Err(error) => return delete_error(error, id),
+    }
+    if !yes {
+        if !io::stdin().is_terminal() {
+            writeln!(io::stderr(), "peer sessions delete needs a TTY or --yes.")?;
+            return Ok(CliExit::Usage);
+        }
+        write!(io::stderr(), "Delete session {id}? [y/N] ")?;
+        io::stderr().flush()?;
+        let mut answer = String::new();
+        io::stdin().read_line(&mut answer)?;
+        if !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+            writeln!(io::stderr(), "Delete cancelled.")?;
+            return Ok(CliExit::Ok);
+        }
+    }
+    match peer_store::delete_session(&home, id) {
+        Ok(()) => {
+            writeln!(io::stdout(), "Deleted session {id}.")?;
+            Ok(CliExit::Ok)
+        }
+        Err(error) => delete_error(error, id),
+    }
+}
+
+fn delete_error(error: peer_store::StoreError, id: &str) -> io::Result<CliExit> {
+    if error == peer_store::StoreError::NotFound {
+        writeln!(io::stderr(), "peer sessions: session not found: {id}")?;
+    } else {
+        writeln!(io::stderr(), "peer sessions: {}", error.code())?;
+    }
+    Ok(CliExit::Runtime)
 }

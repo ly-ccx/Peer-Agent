@@ -1,7 +1,10 @@
 //! Raw, read-only Goal field snapshots. These deliberately do not implement
 //! normalizePlan, runner-progress merging, execution admission or recovery.
 use crate::{StoreError, files, valid_id};
-use peer_protocol::{JsonLimits, ProjectionError, ProjectionLimits, project_json_reader};
+use peer_protocol::{
+    JsonLimits, JsonSelection as S, ProjectionError, ProjectionLimits, project_json_reader,
+    project_json_selected_reader,
+};
 use serde_json::Value;
 use std::{
     path::{Path, PathBuf},
@@ -32,12 +35,44 @@ fn projection(
     max: u64,
     cancelled: Option<&AtomicBool>,
 ) -> Result<Option<(Value, u64)>, StoreError> {
+    project(path, max, cancelled, |file, limits, cancel| {
+        project_json_reader(file, fields, limits, cancel)
+    })
+}
+
+pub(crate) fn deletion_plan(path: &Path, max: u64) -> Result<Option<Value>, StoreError> {
+    const RUNNER: S<'static> = S::Object(&[
+        ("status", S::Full),
+        ("nativeVerifierId", S::Full),
+        ("blockedReason", S::Full),
+        ("explorers", S::Each(&S::Object(&[("status", S::Full)]))),
+    ]);
+    static PLAN: S<'static> = S::Object(&[
+        ("planId", S::Full),
+        ("conversationId", S::Full),
+        ("runner", RUNNER),
+    ]);
+    project(path, max, None, |file, limits, cancel| {
+        project_json_selected_reader(file, &PLAN, limits, cancel)
+    })
+    .map(|output| output.map(|(value, _)| value))
+}
+
+fn project(
+    path: &Path,
+    max: u64,
+    cancelled: Option<&AtomicBool>,
+    read: impl FnOnce(
+        &std::fs::File,
+        ProjectionLimits,
+        Option<&AtomicBool>,
+    ) -> Result<peer_protocol::ProjectedJson, ProjectionError>,
+) -> Result<Option<(Value, u64)>, StoreError> {
     let Some((file, before)) = files::open(path, max).map_err(error)? else {
         return Ok(None);
     };
-    let output = project_json_reader(
+    let output = read(
         &file,
-        fields,
         ProjectionLimits {
             source_bytes: max,
             selected: JsonLimits {

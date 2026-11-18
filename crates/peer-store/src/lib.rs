@@ -19,6 +19,8 @@ pub use evidence::{EvidenceIndexStore, HostToolEvidence};
 pub use model_config::{ModelConfigSnapshot, ModelConfigStore, ModelConfigTransaction};
 mod interactive_result;
 mod resources;
+mod session_delete;
+pub use session_delete::{delete_session, session_delete_exists};
 mod shell_artifacts;
 mod sqlite_file;
 #[cfg(feature = "test-fixtures")]
