@@ -2,6 +2,7 @@
 //! All cognition goes through NativeModel; this module cannot execute tools.
 mod attempts;
 mod result_views;
+mod summary_input;
 use crate::capability::{CapabilityError as HostError, milliseconds, now};
 use crate::{
     CancellationToken,
@@ -297,13 +298,7 @@ impl ContextPipeline {
         encoding
             .apply_projected(&mut old)
             .map_err(|e| HostError(e.code))?;
-        let facts = json!({"continuity":projected.get("continuity"),"messages":old});
-        let input = peer_protocol::javascript_json_string(&facts)
-            .map_err(|_| HostError("context_summary_limit"))?;
-        // Explicit bound, no silent truncation of factual Tool Results.
-        if input.len() > 256 * 1024 {
-            return Err(HostError("context_summary_limit"));
-        }
+        let input = summary_input::build(projected.get("continuity"), old)?;
         let prompts: Value = serde_json::from_str(include_str!(
             "../../../packages/protocol/contracts/native-cli/compaction-prompts.json"
         ))
@@ -335,12 +330,7 @@ impl ContextPipeline {
             Err(e) if e.code == crate::model::ModelError::AUTH_REJECTED => {
                 return Err(HostError(e.code));
             }
-            _ => (
-                "structured",
-                format!(
-                    "Compaction fallback: original structured facts remain in conversation JSONL. Re-read Tool Result / Evidence before claiming completion.\n{input}"
-                ),
-            ),
+            _ => ("structured", summary_input::structural_fallback(&input)?),
         };
         if summary.len() > 384 * 1024 {
             return Err(HostError("context_summary_limit"));

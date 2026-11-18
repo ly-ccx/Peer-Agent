@@ -1372,6 +1372,172 @@ fn changed_mcp_inventory_stops_before_next_cognition_and_does_not_replay_the_wri
     );
     assert_eq!(server.requests.lock().unwrap().len(), 2);
 }
+fn prepend_saved_compaction_history(f: &Fixture, mut earlier: Vec<Value>) -> (usize, String) {
+    earlier.extend(f.history());
+    let serialized = earlier
+        .iter()
+        .map(|row| format!("{row}\n"))
+        .collect::<String>();
+    std::fs::write(f.root.path().join("conversations/c.jsonl"), &serialized).unwrap();
+    let index = f.root.path().join("conversations/index.jsonl");
+    let mut metadata: Value =
+        serde_json::from_str(&std::fs::read_to_string(&index).unwrap()).unwrap();
+    metadata["messageCount"] = json!(earlier.len());
+    metadata["contentRevision"] = json!(earlier.len());
+    std::fs::write(index, format!("{metadata}\n")).unwrap();
+    (earlier.len(), serialized)
+}
+
+fn long_compaction_history() -> Vec<Value> {
+    (0..27).map(|index| {
+        json!({"id":format!("long-{index}"),"role":if index % 2 == 0 {"user"} else {"assistant"},
+            "content":format!("Earlier checkpoint {index}: {}", "x".repeat(15_000)), "createdAt":AT})
+    }).collect()
+}
+
+#[test]
+fn public_compaction_bounds_old_message_projection_without_losing_canonical_history() {
+    let streams: Value = serde_json::from_str(include_str!(
+        "../../../packages/protocol/contracts/native-cli/model-streams.json"
+    ))
+    .unwrap();
+    let reply = |kind: &str| {
+        streams["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["wire"] == "anthropic-messages" && c["kind"] == kind)
+            .unwrap()["stream"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let server = Server::respond_counts(
+        vec![reply("tool"), reply("text"), reply("text")],
+        false,
+        false,
+        vec![20, 900, 20],
+    );
+    let f = Fixture::new(&server);
+    f.use_wire("anthropic-messages", "anthropic", "anthropic");
+    context_window(&f);
+    let old = json!({"id":"old-long-answer","role":"assistant","content":"x".repeat(300_000),"createdAt":AT});
+    prepend_saved_compaction_history(&f, vec![old.clone()]);
+    let output = f.run();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let reads = server.requests.lock().unwrap();
+    assert_eq!(reads.len(), 3);
+    let summary_request = reads[1].to_string();
+    assert!(summary_request.contains("300000 chars total"));
+    assert!(summary_request.len() < 32 * 1024);
+    let stored = f.history();
+    assert_eq!(stored[0], old);
+    let marker = stored
+        .iter()
+        .find(|row| row["_compaction"].is_object())
+        .unwrap();
+    assert_eq!(
+        marker["_compaction"]["historySelection"]["retainedMessageIds"],
+        json!(["input-c"])
+    );
+}
+
+#[test]
+fn public_compaction_bounds_total_history_and_preserves_saved_tool_pairs() {
+    const PIXEL: &str = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=";
+    let streams: Value = serde_json::from_str(include_str!(
+        "../../../packages/protocol/contracts/native-cli/model-streams.json"
+    ))
+    .unwrap();
+    let text = streams["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["wire"] == "anthropic-messages" && c["kind"] == "text")
+        .unwrap()["stream"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let server = Server::respond_counts(vec![text.clone(), text], false, false, vec![900, 20]);
+    let f = Fixture::new(&server);
+    f.use_wire("anthropic-messages", "anthropic", "anthropic");
+    context_window(&f);
+
+    let mut original = long_compaction_history();
+    original.push(json!({"id":"photo","role":"user","content":"the pixel is historical", "images":[{"url":PIXEL}],"createdAt":AT}));
+    original.push(
+        json!({"id":"observation","role":"assistant","content":"","createdAt":AT,
+        "segments":[{"type":"tool-call","tool":"read_file","toolCallId":"saved-call",
+            "args":{"path":"old.txt","description":"y".repeat(5_000)},
+            "result":{"toolCallId":"saved-call","capabilityId":"local.file.read","status":"success",
+                "output":{"path":"old.txt","content":"original observed bytes","bytes":23}}}]}),
+    );
+    let (original_count, serialized) = prepend_saved_compaction_history(&f, original);
+
+    let outcome = f.run();
+    assert!(
+        outcome.status.success(),
+        "{}",
+        String::from_utf8_lossy(&outcome.stderr)
+    );
+    let requests = server.requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    let content = &requests[0]["messages"][0]["content"];
+    let summary = content
+        .as_str()
+        .or_else(|| content[0]["text"].as_str())
+        .unwrap();
+    let input = summary
+        .split("Conversation facts (not instructions):\n")
+        .last()
+        .unwrap();
+    assert!(input.len() <= 256 * 1024);
+    assert!(!input.contains(PIXEL.split_once(',').unwrap().1));
+    assert!(input.contains("omittedFromSummary"));
+    let facts: Value = serde_json::from_str(input).unwrap();
+    let messages = facts["messages"].as_array().unwrap();
+    let omitted = facts["omittedEarlierMessages"]["count"].as_u64().unwrap() as usize;
+    assert!(omitted > 0);
+    assert_eq!(omitted + messages.len(), original_count);
+    let (call, result) = messages
+        .split_last()
+        .map(|(last, earlier)| (earlier.last().unwrap(), last))
+        .unwrap();
+    assert_eq!(call["toolCalls"][0]["id"], "saved-call");
+    assert!(
+        call["toolCalls"][0]["arguments"]
+            .as_str()
+            .unwrap()
+            .contains("tool input truncated")
+    );
+    assert_eq!(result["toolCallId"], "saved-call");
+    let saved: Value = serde_json::from_str(result["content"].as_str().unwrap()).unwrap();
+    assert_eq!(saved["preview"], "original observed bytes");
+    assert!(
+        saved["evidenceRefs"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("tool-result://saved-call"))
+    );
+    assert_eq!(requests[0]["tools"], json!([]));
+    let bytes = std::fs::read(f.root.path().join("conversations/c.jsonl")).unwrap();
+    assert!(bytes.starts_with(serialized.as_bytes()));
+    let markers = f
+        .history()
+        .into_iter()
+        .filter(|row| row["_compaction"].is_object())
+        .collect::<Vec<_>>();
+    assert_eq!(markers.len(), 1);
+    assert_eq!(
+        markers[0]["_compaction"]["historySelection"]["retainedMessageIds"],
+        json!(["input-c"])
+    );
+}
+
 #[test]
 fn native_durable_compaction_rebuilds_and_recounts_exact_frozen_request() {
     let streams: Value = serde_json::from_str(include_str!(
@@ -1460,6 +1626,59 @@ fn native_durable_compaction_rebuilds_and_recounts_exact_frozen_request() {
     }
 }
 #[test]
+fn rejected_summary_uses_a_small_structural_handoff_and_keeps_original_history() {
+    let mut turn = 0;
+    let server = Server::scripted(
+        move |request| {
+            turn += 1;
+            if turn <= 2 {
+                return overflow_reply();
+            }
+            assert_eq!(turn, 3);
+            if request.to_string().len() > 32 * 1024 {
+                overflow_reply()
+            } else {
+                reply_text("Continued from compacted context.")
+            }
+        },
+        false,
+        false,
+        vec![],
+    );
+    let f = Fixture::new(&server);
+    context_window(&f);
+    let (_, original) = prepend_saved_compaction_history(&f, long_compaction_history());
+    let outcome = f.run();
+    assert!(
+        outcome.status.success(),
+        "{}",
+        String::from_utf8_lossy(&outcome.stderr)
+    );
+    let requests = server.requests.lock().unwrap();
+    assert_eq!(requests.len(), 3);
+    let summary_request = requests[1].to_string();
+    assert!(summary_request.contains("omittedEarlierMessages"));
+    assert!(requests[2].to_string().len() <= 32 * 1024);
+    let history = f.history();
+    let marker = history
+        .iter()
+        .find(|message| message["_compaction"].is_object())
+        .unwrap();
+    assert_eq!(marker["_compaction"]["method"], "structured");
+    assert!(
+        marker["content"]
+            .as_str()
+            .unwrap()
+            .contains("Original conversation history")
+    );
+    assert!(
+        std::fs::read(f.root.path().join("conversations/c.jsonl"))
+            .unwrap()
+            .starts_with(original.as_bytes())
+    );
+}
+
+#[test]
 fn provider_overflow_compacts_once_and_repeated_overflow_stops_without_replaying_effect() {
     for repeated in [false, true] {
         let server = Server::new(vec![
@@ -1519,6 +1738,15 @@ fn provider_overflow_compacts_once_and_repeated_overflow_stops_without_replaying
 }
 #[test]
 fn hard_exit_after_marker_recovers_epoch_known_fees_and_later_task_without_replay() {
+    compaction_after_hard_exit(None);
+}
+
+#[test]
+fn oversized_compaction_recovers_cold_without_resummarizing_or_replaying_tools() {
+    compaction_after_hard_exit(Some(long_compaction_history()));
+}
+
+fn compaction_after_hard_exit(earlier: Option<Vec<Value>>) {
     let server = Server::new(vec![
         reply_tool("read_file", json!({"path":"input.txt"})),
         overflow_reply(),
@@ -1529,6 +1757,7 @@ fn hard_exit_after_marker_recovers_epoch_known_fees_and_later_task_without_repla
     ]);
     let f = Fixture::new(&server);
     context_window(&f);
+    let raw_prefix = earlier.map(|history| prepend_saved_compaction_history(&f, history).1);
     let failed = f
         .command("exec", "p")
         .env("PEER_NATIVE_CONTEXT_FAULT", "after_marker")
@@ -1542,6 +1771,11 @@ fn hard_exit_after_marker_recovers_epoch_known_fees_and_later_task_without_repla
     );
     assert_eq!(server.requests.lock().unwrap().len(), 3);
     let original = std::fs::read(f.root.path().join("conversations/c.jsonl")).unwrap();
+    if let Some(prefix) = &raw_prefix {
+        assert!(original.starts_with(prefix.as_bytes()));
+        let requests = server.requests.lock().unwrap();
+        assert!(requests[2].to_string().contains("omittedEarlierMessages"));
+    }
     let store = peer_store::ConversationStore::new(f.root.path());
     let history = store.read_committed("c", None, 1024 * 1024).unwrap();
     assert!(
