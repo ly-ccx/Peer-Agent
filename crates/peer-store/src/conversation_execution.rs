@@ -84,6 +84,11 @@ pub struct ConversationExecutionToken {
     recovery_control: Option<ConversationExecution>,
     recovery_directory: Option<(u64, u64)>,
 }
+fn directory_identity(file: &std::fs::File) -> std::io::Result<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = file.metadata()?;
+    Ok((metadata.dev(), metadata.ino()))
+}
 impl ConversationExecutionToken {
     fn check_recovery_directory(&self) -> Result<(), StoreError> {
         if let Some(expected) = self.recovery_directory {
@@ -94,8 +99,10 @@ impl ConversationExecutionToken {
                 Mode::empty(),
             )
             .map_err(|_| StoreError::ExecutionChanged)?;
-            let stat = rustix::fs::fstat(&named).map_err(|_| StoreError::ExecutionChanged)?;
-            if (stat.st_dev as u64, stat.st_ino as u64) != expected {
+            if directory_identity(&std::fs::File::from(named))
+                .map_err(|_| StoreError::ExecutionChanged)?
+                != expected
+            {
                 return Err(StoreError::ExecutionChanged);
             }
         }
@@ -254,8 +261,8 @@ impl ConversationStore {
                         rustix::fs::Mode::empty(),
                     )
                     .map_err(|_| StoreError::ReadFailed)?;
-                    let stat = rustix::fs::fstat(&fd).map_err(|_| StoreError::ReadFailed)?;
-                    (stat.st_dev as u64, stat.st_ino as u64)
+                    directory_identity(&std::fs::File::from(fd))
+                        .map_err(|_| StoreError::ReadFailed)?
                 },
                 run: run.clone(),
             }));

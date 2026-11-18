@@ -39,7 +39,7 @@ impl ConversationStore {
         let run = self
             .read_conversation_execution(id)?
             .ok_or(StoreError::ExecutionChanged)?;
-        let stat = rustix::fs::fstat(&directory).map_err(|_| StoreError::ReadFailed)?;
+        let location = directory_identity(&directory).map_err(|_| StoreError::ReadFailed)?;
         let recovery = ConversationRecovery {
             directory,
             token: ConversationExecutionToken {
@@ -48,7 +48,7 @@ impl ConversationStore {
                 owner: run.owner.clone(),
                 revision: run.revision,
                 recovery_control: Some(run),
-                recovery_directory: Some((stat.st_dev as u64, stat.st_ino as u64)),
+                recovery_directory: Some(location),
             },
         };
         recovery.current(self)?;
