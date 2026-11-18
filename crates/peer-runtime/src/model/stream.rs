@@ -191,6 +191,41 @@ mod tests {
         }
     }
     #[test]
+    fn anthropic_compatible_tool_blocks_without_an_initial_input_require_complete_deltas() {
+        let fixtures = fixtures();
+        let original = fixtures["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["wire"] == "anthropic-messages" && row["kind"] == "tool")
+            .unwrap()["stream"]
+            .as_str()
+            .unwrap();
+        let omitted = original.replace(",\"input\":{}", "");
+        assert_ne!(omitted, original);
+        let parse = |input: &str| {
+            let mut stream = Stream::new(Wire::Anthropic);
+            for chunk in input.as_bytes().chunks(7) {
+                stream.push(chunk)?;
+            }
+            stream.finish("fingerprint".into())
+        };
+        let expected = parse(original).unwrap();
+        let accepted = parse(&omitted).unwrap();
+        assert_eq!(accepted.calls.len(), 1);
+        assert_eq!(accepted.calls[0].name, expected.calls[0].name);
+        assert_eq!(accepted.calls[0].arguments, expected.calls[0].arguments);
+        let no_delta = omitted
+            .lines()
+            .filter(|line| !line.contains("\"input_json_delta\""))
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        assert!(parse(&no_delta).is_err());
+        assert!(parse(&original.replace("\"input\":{}", "\"input\":null")).is_err());
+        assert!(parse(&original.replace("\"input\":{}", "\"input\":{\"unexpected\":1}")).is_err());
+    }
+    #[test]
     fn malformed_or_failed_typed_streams_never_produce_executable_calls() {
         for c in fixtures()["cases"]
             .as_array()

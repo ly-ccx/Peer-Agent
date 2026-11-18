@@ -10,7 +10,7 @@ enum Block {
         id: String,
         name: String,
         args: String,
-        initial: Value,
+        initial: Option<serde_json::Map<String, Value>>,
     },
     Redacted {
         data: String,
@@ -75,14 +75,17 @@ impl Anthropic {
                         {
                             return Err(ModelError::new("model_tool_limit"));
                         }
-                        if !b["input"].is_object() {
-                            return Err(ModelError::new("model_arguments_invalid"));
-                        }
+                        // Some compatible streams supply input only in JSON deltas.
+                        let initial = match b.get("input") {
+                            None => None,
+                            Some(Value::Object(input)) => Some(input.clone()),
+                            Some(_) => return Err(ModelError::new("model_arguments_invalid")),
+                        };
                         Block::Tool {
                             id: name(&b["id"], 512)?,
                             name: name(&b["name"], 200)?,
                             args: String::new(),
-                            initial: b["input"].clone(),
+                            initial,
                         }
                     }
                     _ => return Err(ModelError::new("model_block_unsupported")),
@@ -110,7 +113,7 @@ impl Anthropic {
                         append(signature, &d["signature"], 65536)?
                     }
                     (Block::Tool { args, initial, .. }, Some("input_json_delta"))
-                        if initial.as_object().is_some_and(|a| a.is_empty()) =>
+                        if initial.as_ref().is_none_or(serde_json::Map::is_empty) =>
                     {
                         append(args, &d["partial_json"], super::super::TOOL_ARGUMENT_BYTES)?
                     }
@@ -188,14 +191,14 @@ impl Anthropic {
                 if !ids.insert(id) {
                     return Err(ModelError::new("model_call_id_invalid"));
                 }
-                calls.push(call(
-                    name,
-                    &if args.is_empty() {
-                        initial.to_string()
-                    } else {
-                        args
-                    },
-                )?);
+                let args = if args.is_empty() {
+                    // Omission is safe only when the provider supplies an entire input.
+                    Value::Object(initial.ok_or(ModelError::new("model_arguments_invalid"))?)
+                        .to_string()
+                } else {
+                    args
+                };
+                calls.push(call(name, &args)?);
             }
         }
         if (self.reason.as_deref() == Some("tool_use")) == calls.is_empty() {
