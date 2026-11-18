@@ -6,6 +6,8 @@ import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,symlinkSync} fro
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {createTuiLanguageStore} from '../../apps/tui/src/tui-language.ts';
+import {createTuiThemeStore} from '../../apps/tui/src/tui-theme.ts';
+import {createTuiLocalAccessStore} from '../../apps/tui/src/tui-local-access-store.ts';
 import {buildHostConfigInstructions} from '../../packages/system-context/src/host-config-instructions.mjs';
 import {createProjectInstructionsPromptSource} from '../../packages/system-context/src/sources/project-instructions-source.mjs';
 import {createPromptSourceRegistry} from '../../packages/system-context/src/prompt-source-registry.mjs';
@@ -74,6 +76,24 @@ try {
   compare({host:true},buildHostConfigInstructions(prompt));
   assert.equal(settings===null?null:readFileSync(file,'utf8'),original);
  }
+ const legacyHome=join(root,'actual-legacy-v3-settings');
+ mkdirSync(legacyHome);
+ createTuiThemeStore({userDataPath:legacyHome,systemThemeWatch:false}).setMode('light');
+ const legacyLanguage=createTuiLanguageStore({userDataPath:legacyHome});
+ legacyLanguage.setLanguage('en-US');
+ createTuiLocalAccessStore({userDataPath:legacyHome}).setAccessLevel('full_local');
+ const legacySettings=readFileSync(join(legacyHome,'settings.json'),'utf8');
+ const sharedFixture=readFileSync(new URL('../../packages/protocol/contracts/native-cli/settings-v3-from-tui.json',import.meta.url),'utf8');
+ assert.equal(legacySettings,sharedFixture);
+ const nativeSettings=join(home,'settings.json');
+ writeFileSync(nativeSettings,legacySettings);
+ compare({host:true},buildHostConfigInstructions(legacyLanguage.getPromptSettings()));
+ assert.equal(readFileSync(nativeSettings,'utf8'),legacySettings);
+ const withOnboarding=JSON.parse(legacySettings);
+ withOnboarding.projectAgent.shellIntroPending=true;
+ withOnboarding.projectAgent.shellIntroDismissed=false;
+ writeFileSync(nativeSettings,JSON.stringify(withOnboarding));
+ compare({host:true},buildHostConfigInstructions(legacyLanguage.getPromptSettings()));
  assert.deepEqual(run({cancel:true}),{error:'cancelled'});cases++;
  console.log(JSON.stringify({ok:true,cases,scope:'actual TS Source / TUI prompt settings -> native, owned files and unchanged original settings'}));
 }finally{rmSync(root,{recursive:true,force:true});}

@@ -2,7 +2,8 @@
 //! Other settings remain explicit admission blockers until their adapters exist.
 use super::{ConfigInstruction, files};
 use crate::CancellationToken;
-use peer_protocol::{JsonLimits, decode_json_bounded, javascript_trim};
+use peer_protocol::{JsonLimits, LocalAccessLevel, decode_json_bounded, javascript_trim};
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::path::Path;
 
@@ -72,12 +73,47 @@ fn item(id: &str, title: &str, content: String) -> ConfigInstruction {
         priority: 0,
     }
 }
+fn validate_legacy_metadata(settings: &Value) -> Result<(), &'static str> {
+    if settings
+        .get("themeMode")
+        .is_some_and(|value| !matches!(value.as_str(), Some("light" | "dark" | "system")))
+        || settings.get("localAccessLevel").is_some_and(|value| {
+            !value.is_string() || LocalAccessLevel::deserialize(value).is_err()
+        })
+    {
+        return Err("context_settings_invalid");
+    }
+
+    if let Some(project) = settings.get("projectAgent") {
+        let project = project.as_object().ok_or("context_settings_invalid")?;
+        for (key, value) in project {
+            match key.as_str() {
+                "shell" if value == "bots" => {}
+                "shell" if !value.is_string() => return Err("context_settings_invalid"),
+                "shellIntroPending" | "shellIntroDismissed" if value.is_boolean() => {}
+                "shellIntroPending" | "shellIntroDismissed" => {
+                    return Err("context_settings_invalid");
+                }
+                _ => return Err("native_capability_inventory_unsupported"),
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn project(settings: &Value) -> Result<Vec<ConfigInstruction>, &'static str> {
     let object = settings.as_object().ok_or("context_settings_invalid")?;
     if object.keys().any(|k| {
         !matches!(
             k.as_str(),
-            "schemaVersion" | "locale" | "replyLanguage" | "systemInstructions" | "gitBranchPrefix"
+            "schemaVersion"
+                | "locale"
+                | "replyLanguage"
+                | "systemInstructions"
+                | "gitBranchPrefix"
+                | "themeMode"
+                | "localAccessLevel"
+                | "projectAgent"
         )
     }) {
         return Err("native_capability_inventory_unsupported");
@@ -88,6 +124,9 @@ pub(super) fn project(settings: &Value) -> Result<Vec<ConfigInstruction>, &'stat
     }) {
         return Err("context_settings_schema_unsupported");
     }
+    // Both execution hosts already receive their effective permission policy
+    // from the active authority. These settings remain read-only metadata.
+    validate_legacy_metadata(settings)?;
     for field in [
         "locale",
         "replyLanguage",

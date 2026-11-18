@@ -361,6 +361,54 @@ fn public_ordinary_sigterm_during_open_stdin_has_no_unowned_reader_or_data_effec
 }
 
 #[test]
+fn public_ordinary_legacy_v3_settings_never_override_explicit_ask_policy() {
+    let fixture = Ordinary::new();
+    std::fs::create_dir_all(fixture.home()).unwrap();
+    let settings = fixture.home().join("settings.json");
+    std::fs::write(&settings, LEGACY_V3_SETTINGS).unwrap();
+    let server = Server::new(vec![
+        reply_tool(
+            "write_file",
+            json!({"path":"not-approved.txt","content":"must not be written"}),
+        ),
+        reply_text("Write denied."),
+    ]);
+    let mut command = fixture.command(Some(&server));
+    command.args([
+        "--output-format",
+        "json",
+        "--access",
+        "ask",
+        "Write only if approved",
+    ]);
+    let (master, child) = permission_command_pty(command);
+    wait_permission_prompt(&master);
+    rustix::io::write(&master, b"n\n").unwrap();
+    let out = wait_permission_episode(child);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    fixture.assert_settled(&out, 2, 1);
+    assert!(!fixture.workspace().join("not-approved.txt").exists());
+    assert_eq!(std::fs::read(settings).unwrap(), LEGACY_V3_SETTINGS);
+    let approvals = peer_store::ApprovalStore::new(fixture.home())
+        .list(None, None)
+        .unwrap();
+    assert_eq!(approvals.len(), 1);
+    assert_eq!(approvals[0]["state"], "denied");
+    assert_eq!(approvals[0]["decidedBy"], "local_ui");
+
+    let requests = server.requests.lock().unwrap();
+    let system = requests[0]["messages"][0]["content"].as_str().unwrap();
+    assert!(system.contains("Always write your replies to the user in English"));
+    for metadata in ["themeMode", "projectAgent", "full_local"] {
+        assert!(!system.contains(metadata));
+    }
+}
+
+#[test]
 fn public_ordinary_real_pty_approve_deny_and_cancel_have_canonical_decision_ownership() {
     for answer in [Some(true), Some(false), None] {
         let fixture = Ordinary::new();

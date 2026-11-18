@@ -130,9 +130,23 @@ fn settings_are_read_only_and_unsupported_values_do_not_become_defaults() {
             "context_settings_schema_unsupported",
         ),
         ("{\"replyLanguage\":true}", "context_settings_invalid"),
+        ("{\"themeMode\":false}", "context_settings_invalid"),
         (
-            "{\"localAccessLevel\":\"full_local\"}",
+            "{\"localAccessLevel\":\"unknown\"}",
+            "context_settings_invalid",
+        ),
+        ("{\"projectAgent\":true}", "context_settings_invalid"),
+        (
+            "{\"projectAgent\":{\"shell\":\"classic\"}}",
             "native_capability_inventory_unsupported",
+        ),
+        (
+            "{\"projectAgent\":{\"interactiveResults\":true}}",
+            "native_capability_inventory_unsupported",
+        ),
+        (
+            "{\"projectAgent\":{\"shellIntroDismissed\":\"yes\"}}",
+            "context_settings_invalid",
         ),
     ] {
         std::fs::write(&file, raw).unwrap();

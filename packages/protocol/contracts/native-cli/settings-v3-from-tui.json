@@ -1,0 +1,10 @@
+{
+  "themeMode": "light",
+  "schemaVersion": 3,
+  "projectAgent": {
+    "shell": "bots"
+  },
+  "locale": "en-US",
+  "replyLanguage": "en-US",
+  "localAccessLevel": "full_local"
+}

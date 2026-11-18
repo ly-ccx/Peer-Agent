@@ -2297,6 +2297,61 @@ fn missing_read_and_destructive_or_unprojected_tools_cannot_write() {
         }
     }
 }
+const LEGACY_V3_SETTINGS: &[u8] =
+    include_bytes!("../../../packages/protocol/contracts/native-cli/settings-v3-from-tui.json");
+
+#[test]
+fn public_work_with_legacy_v3_settings_keeps_the_workspace_policy_authoritative() {
+    let server = Server::new(vec![
+        reply_tool(
+            "write_file",
+            json!({"path":"unapproved","content":"must not be written"}),
+        ),
+        reply_text("Write denied."),
+    ]);
+    let fixture = Fixture::new(&server);
+    let policy = PolicyStore::new(fixture.root.path());
+    let old = policy.read_existing("w").unwrap();
+    policy
+        .update_existing(
+            "w",
+            old.revision,
+            peer_protocol::LocalAccessLevel::AskBeforeLocal,
+            AT,
+        )
+        .unwrap();
+    let settings = fixture.root.path().join("settings.json");
+    std::fs::write(&settings, LEGACY_V3_SETTINGS).unwrap();
+    let out = fixture.run();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!fixture.root.path().join("workspace/unapproved").exists());
+    assert_eq!(std::fs::read(settings).unwrap(), LEGACY_V3_SETTINGS);
+    assert_eq!(
+        policy.read_existing("w").unwrap().access_level,
+        peer_protocol::LocalAccessLevel::AskBeforeLocal
+    );
+    let message = fixture
+        .history()
+        .into_iter()
+        .find(|m| m["segments"][0]["tool"] == "write_file")
+        .unwrap();
+    assert_eq!(message["permissionGrants"][0]["granted"], false);
+    assert_eq!(message["segments"][0]["result"]["status"], "denied");
+    assert!(message["segments"][0]["result"]["evidence"]["evidenceId"].is_string());
+
+    let requests = server.requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    let system = requests[0]["messages"][0]["content"].as_str().unwrap();
+    assert!(system.contains("Always write your replies to the user in English"));
+    for metadata in ["themeMode", "projectAgent", "full_local"] {
+        assert!(!system.contains(metadata));
+    }
+}
+
 #[test]
 fn unsupported_context_is_a_visible_blocker_before_model_dispatch() {
     let server = Server::new(vec![]);
