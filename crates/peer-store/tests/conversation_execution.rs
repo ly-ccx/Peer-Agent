@@ -16,6 +16,8 @@ use std::{
     time::{Duration, Instant},
 };
 const AT: &str = "2026-11-18T00:00:00.000Z";
+#[path = "conversation_execution/persistent_shell.rs"]
+mod persistent_shell;
 #[path = "conversation_execution/recovery.rs"]
 mod recovery;
 fn owner() -> NativeProcessRecorder {

@@ -2306,19 +2306,22 @@ fn wait_permission_prompt(master: &std::os::fd::OwnedFd) {
             master,
             rustix::event::PollFlags::IN,
         )];
-        if rustix::event::poll(
+        match rustix::event::poll(
             &mut poll,
             Some(&rustix::event::Timespec {
                 tv_sec: 0,
                 tv_nsec: 20_000_000,
             }),
-        )
-        .unwrap()
-            > 0
-        {
-            let mut chunk = [0; 8192];
-            let n = rustix::io::read(master, &mut chunk).unwrap();
-            bytes.extend_from_slice(&chunk[..n]);
+        ) {
+            Ok(0) | Err(rustix::io::Errno::INTR) => continue,
+            Ok(_) => {}
+            Err(error) => panic!("approval PTY polling failed: {error}"),
+        }
+        let mut chunk = [0; 8192];
+        match rustix::io::read(master, &mut chunk) {
+            Ok(n) => bytes.extend_from_slice(&chunk[..n]),
+            Err(rustix::io::Errno::INTR) => continue,
+            Err(error) => panic!("approval PTY read failed: {error}"),
         }
     }
 }

@@ -128,7 +128,13 @@ fn public_ordinary_owner_death_after_actual_effect_preserves_unknown_and_bills_o
 #[test]
 fn public_ordinary_recovery_rejects_live_owner_without_mutation_or_killing_its_child() {
     let fixture = Ordinary::new();
-    let server = Server::new(vec![reply_tool("bash", json!({"command":"/bin/sleep 30"}))]);
+    let server = Server::new(vec![
+        reply_tool(
+            "bash",
+            json!({"command":"printf live > entered; while [ ! -f release ]; do /bin/sleep 0.025; done"}),
+        ),
+        reply_text("Owned command returned."),
+    ]);
     let mut cmd = fixture.command(Some(&server));
     let mut child = cmd
         .args(["--access", "full", "Wait in an owned shell"])
@@ -141,11 +147,9 @@ fn public_ordinary_recovery_rejects_live_owner_without_mutation_or_killing_its_c
             && let Ok(meta) = serde_json::from_str::<Value>(raw.trim())
             && let Ok(run) =
                 peer_protocol::normalize_conversation_execution(&meta["runtimeExecution"])
-            && run.pending_tools.iter().any(|p| {
-                p.native_process
-                    .as_ref()
-                    .is_some_and(|p| p.state == peer_protocol::NativeProcessState::Running)
-            })
+            && active_foreground_shell(&run).is_some()
+            && std::fs::read(fixture.workspace().join("entered"))
+                .is_ok_and(|bytes| bytes == b"live")
         {
             break run;
         }
@@ -167,24 +171,14 @@ fn public_ordinary_recovery_rejects_live_owner_without_mutation_or_killing_its_c
         before
     );
     assert!(child.try_wait().unwrap().is_none());
-    let recorded = before.pending_tools[0]
-        .native_process
-        .as_ref()
-        .unwrap()
-        .child
-        .as_ref()
-        .unwrap();
-    let pid = rustix::process::Pid::from_raw(recorded.pid as i32).unwrap();
+    let process = active_foreground_shell(&before).unwrap();
+    let pid = rustix::process::Pid::from_raw(process.child.unwrap().pid as i32).unwrap();
     assert!(rustix::process::test_kill_process(pid).is_ok());
-    rustix::process::kill_process(
-        rustix::process::Pid::from_raw(child.id() as i32).unwrap(),
-        rustix::process::Signal::TERM,
-    )
-    .unwrap();
+    std::fs::write(fixture.workspace().join("release"), "").unwrap();
     let output = wait(child);
     assert_eq!(
         output.status.code(),
-        Some(4),
+        Some(0),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -204,7 +198,13 @@ fn public_ordinary_recovery_invalid_or_missing_session_creates_no_data() {
 #[test]
 fn public_ordinary_timezone_change_cannot_take_over_or_stop_a_live_native_owner() {
     let fixture = Ordinary::new();
-    let server = Server::new(vec![reply_tool("bash", json!({"command":"/bin/sleep 60"}))]);
+    let server = Server::new(vec![
+        reply_tool(
+            "bash",
+            json!({"command":"printf live > entered; while [ ! -f release ]; do /bin/sleep 0.025; done"}),
+        ),
+        reply_text("Owned command returned."),
+    ]);
     let mut cmd = fixture.command(Some(&server));
     let mut child = cmd
         .env("TZ", "UTC")
@@ -218,11 +218,9 @@ fn public_ordinary_timezone_change_cannot_take_over_or_stop_a_live_native_owner(
             && let Ok(meta) = serde_json::from_str::<Value>(raw.trim())
             && let Ok(run) =
                 peer_protocol::normalize_conversation_execution(&meta["runtimeExecution"])
-            && run.pending_tools.iter().any(|p| {
-                p.native_process
-                    .as_ref()
-                    .is_some_and(|p| p.state == peer_protocol::NativeProcessState::Running)
-            })
+            && active_foreground_shell(&run).is_some()
+            && std::fs::read(fixture.workspace().join("entered"))
+                .is_ok_and(|bytes| bytes == b"live")
         {
             break run;
         }
@@ -246,11 +244,8 @@ fn public_ordinary_timezone_change_cannot_take_over_or_stop_a_live_native_owner(
             .unwrap(),
     );
     let actual = run_facts(&fixture, &before.identity.conversation_id);
-    let pid = rustix::process::Pid::from_raw(child.id() as i32).unwrap();
     let alive = child.try_wait().unwrap().is_none();
-    if alive {
-        rustix::process::kill_process(pid, rustix::process::Signal::TERM).unwrap();
-    }
+    std::fs::write(fixture.workspace().join("release"), "").unwrap();
     let stopped = wait(child);
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
@@ -260,9 +255,9 @@ fn public_ordinary_timezone_change_cannot_take_over_or_stop_a_live_native_owner(
         "live owner was mutated by a different TZ/locale"
     );
     assert!(alive, "live CLI was incorrectly stopped by recovery");
-    assert_eq!(stopped.status.code(), Some(4));
+    assert_eq!(stopped.status.code(), Some(0));
     assert!(run_facts(&fixture, &before.identity.conversation_id).permits_new_run());
-    assert_eq!(server.requests.lock().unwrap().len(), 1);
+    assert_eq!(server.requests.lock().unwrap().len(), 2);
 }
 
 #[cfg(target_os = "macos")]
@@ -480,28 +475,27 @@ fn fixture_ordinary_recovery_keeps_starting_gap_unproven_and_future_schema_untou
         json!({"command":"printf actual-effect"}),
     )]);
     let mut cmd = fixture.command(Some(&server));
-    cmd.env("PEER_NATIVE_ORDINARY_FAULT", "after_effect")
+    cmd.env("PEER_NATIVE_ORDINARY_FAULT", "foreground_before_spawn")
         .args(["--access", "full", "One shell"]);
     assert_eq!(wait(cmd.spawn().unwrap()).status.code(), Some(88));
     let mut metadata = fixture.metadata();
     let id = metadata["id"].as_str().unwrap().to_owned();
-    let process = metadata["runtimeExecution"]["pendingTools"][0]["nativeProcess"]
-        .as_object_mut()
-        .unwrap();
-    process.insert("state".into(), json!("starting"));
-    process.remove("child");
-    process.remove("stopObservation");
+    let run = run_facts(&fixture, &id);
+    let session = peer_protocol::NativeShellSession::from_handle(&run.handles[0]).unwrap();
+    assert_eq!(
+        session.process.state,
+        peer_protocol::NativeProcessState::Starting
+    );
+    assert!(session.process.child.is_none() && session.command.is_none());
     let index = fixture.home().join("conversations/index.jsonl");
-    std::fs::write(&index, format!("{metadata}\n")).unwrap();
     let output = recover(&fixture, &id);
     assert_eq!(output.status.code(), Some(1));
     let facts = run_facts(&fixture, &id);
     assert!(facts.stop.is_none() && facts.usage_committed);
     assert_eq!(
-        facts.pending_tools[0]
-            .native_process
-            .as_ref()
+        peer_protocol::NativeShellSession::from_handle(&facts.handles[0])
             .unwrap()
+            .process
             .state,
         peer_protocol::NativeProcessState::Starting
     );
@@ -712,13 +706,73 @@ fn fixture_ordinary_recovery_prepared_grant_result_and_billing_crash_windows() {
 }
 
 #[test]
-fn public_ordinary_recovery_stops_only_recorded_shell_after_actual_owner_kill() {
-    recovery_retains_shell_outcome_unknown(false);
-}
-
-#[test]
-fn public_ordinary_recovery_reaps_a_background_shell_handle_and_keeps_unknown_effect() {
-    recovery_retains_shell_outcome_unknown(true);
+fn public_recover_proves_the_persistent_shell_group_gone_without_settling_a_pending_command() {
+    let fixture = Ordinary::new();
+    let server = Server::new(vec![reply_tool(
+        "bash",
+        json!({"command":"printf dispatched > entered; /bin/sleep 60"}),
+    )]);
+    let mut child = fixture
+        .command(Some(&server))
+        .args(["--access", "full", "Wait in fixture"])
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(8);
+    let (before, process) = loop {
+        if let Ok(raw) = std::fs::read_to_string(fixture.home().join("conversations/index.jsonl"))
+            && let Ok(metadata) = serde_json::from_str::<Value>(raw.trim())
+            && let Ok(run) =
+                peer_protocol::normalize_conversation_execution(&metadata["runtimeExecution"])
+            && let Some(process) = active_foreground_shell(&run)
+            && std::fs::read(fixture.workspace().join("entered"))
+                .is_ok_and(|bytes| bytes == b"dispatched")
+        {
+            break (run, process);
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+            panic!(
+                "actual shell never became durable: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+    let id = &before.identity.conversation_id;
+    kill_after_store_publication(&fixture, id, &mut child);
+    let mut cleanup = RecoverOwnedShellFixture {
+        fixture: &fixture,
+        id,
+        armed: true,
+    };
+    let pid = rustix::process::Pid::from_raw(process.child.as_ref().unwrap().pid as i32).unwrap();
+    assert!(rustix::process::test_kill_process(pid).is_ok());
+    let output = recover(&fixture, id);
+    cleanup.armed = false;
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "{} {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        rustix::process::test_kill_process_group(pid),
+        Err(rustix::io::Errno::SRCH)
+    );
+    let after = run_facts(&fixture, id);
+    assert!(after.handles.is_empty() && after.stop.is_some() && after.usage_committed);
+    assert_eq!(
+        after.pending_tools[0].phase,
+        peer_protocol::ConversationDispatchPhase::OutcomeUnknown
+    );
+    assert_eq!(
+        after.pending_tools[0].tool_call_id,
+        before.pending_tools[0].tool_call_id
+    );
+    assert!(!after.permits_new_run());
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
 }
 
 struct RecoverOwnedShellFixture<'a> {
@@ -735,37 +789,34 @@ impl Drop for RecoverOwnedShellFixture<'_> {
     }
 }
 
-fn recovery_retains_shell_outcome_unknown(background_mirror: bool) {
+#[test]
+fn public_ordinary_recovery_reaps_a_background_shell_handle_and_keeps_unknown_effect() {
     let fixture = Ordinary::new();
     let (seen_start, started) = std::sync::mpsc::channel();
     let (resume_server, paused) = std::sync::mpsc::channel();
-    let server = if background_mirror {
-        let mut requests = 0;
-        Server::scripted(
-            move |_| {
-                requests += 1;
-                match requests {
-                    1 => reply_tool(
-                        "bash",
-                        json!({"command":"exec /bin/sleep 60","background":true}),
-                    ),
-                    2 => {
-                        // The next actual model request proves that the original
-                        // startup facts and Evidence were returned by the Host.
-                        seen_start.send(()).unwrap();
-                        let _ = paused.recv_timeout(Duration::from_secs(12));
-                        "FIXTURE_CLOSE_WITHOUT_HEADERS".into()
-                    }
-                    _ => panic!("unexpected recovery model request"),
+    let mut requests = 0;
+    let server = Server::scripted(
+        move |_| {
+            requests += 1;
+            match requests {
+                1 => reply_tool(
+                    "bash",
+                    json!({"command":"exec /bin/sleep 60","background":true}),
+                ),
+                2 => {
+                    // The next actual model request proves that the original
+                    // startup facts and Evidence were returned by the Host.
+                    seen_start.send(()).unwrap();
+                    let _ = paused.recv_timeout(Duration::from_secs(12));
+                    "FIXTURE_CLOSE_WITHOUT_HEADERS".into()
                 }
-            },
-            false,
-            false,
-            vec![],
-        )
-    } else {
-        Server::new(vec![reply_tool("bash", json!({"command":"/bin/sleep 60"}))])
-    };
+                _ => panic!("unexpected recovery model request"),
+            }
+        },
+        false,
+        false,
+        vec![],
+    );
     let mut cmd = fixture.command(Some(&server));
     let mut child = cmd
         .args(["--access", "full", "Wait in shell"])
@@ -795,7 +846,7 @@ fn recovery_retains_shell_outcome_unknown(background_mirror: bool) {
         }
         thread::sleep(Duration::from_millis(10));
     };
-    if background_mirror && started.recv_timeout(Duration::from_secs(8)).is_err() {
+    if started.recv_timeout(Duration::from_secs(8)).is_err() {
         kill_after_store_publication(&fixture, &before.identity.conversation_id, &mut child);
         let _ = recover(&fixture, &before.identity.conversation_id);
         panic!("real startup never reached the model continuation");
@@ -811,7 +862,7 @@ fn recovery_retains_shell_outcome_unknown(background_mirror: bool) {
         id: &before.identity.conversation_id,
         armed: true,
     };
-    let startup_receipt = if background_mirror {
+    let startup_receipt = {
         assert!(before.handles.iter().any(|handle| {
             peer_protocol::background_shell_process(handle).as_ref() == Some(process)
         }));
@@ -828,9 +879,7 @@ fn recovery_retains_shell_outcome_unknown(background_mirror: bool) {
         let receipt = &message["segments"][0]["result"];
         assert_eq!(receipt["output"]["status"], "running");
         assert_eq!(receipt["output"]["taskId"], process.handle_id);
-        Some(receipt.clone())
-    } else {
-        None
+        receipt.clone()
     };
     let output = recover(&fixture, &before.identity.conversation_id);
     // Always clean up this test-owned group before reporting an assertion.
@@ -877,7 +926,7 @@ fn recovery_retains_shell_outcome_unknown(background_mirror: bool) {
         pending.native_process.as_ref().unwrap().stop_observation,
         Some(peer_protocol::NativeProcessStop::OwnerDeadGroupAbsent)
     );
-    if let Some(receipt) = startup_receipt {
+    {
         let store = ConversationStore::new(fixture.home());
         let history = store
             .read_committed(&before.identity.conversation_id, None, 8 * 1024 * 1024)
@@ -888,13 +937,10 @@ fn recovery_retains_shell_outcome_unknown(background_mirror: bool) {
             .iter()
             .find(|m| m["id"] == before.pending_tools[0].message_id)
             .unwrap();
-        assert_eq!(message["segments"][0]["result"], receipt);
+        assert_eq!(message["segments"][0]["result"], startup_receipt);
         assert!(!facts.permits_new_run());
     }
-    assert_eq!(
-        server.requests.lock().unwrap().len(),
-        if background_mirror { 2 } else { 1 }
-    );
+    assert_eq!(server.requests.lock().unwrap().len(), 2);
 }
 
 #[test]

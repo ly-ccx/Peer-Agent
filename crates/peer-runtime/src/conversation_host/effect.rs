@@ -31,6 +31,7 @@ impl Host<'_> {
         let handle = effect.handle().map(str::to_owned);
         let command = effect.owned_command();
         let background = effect.background_shell();
+        let foreground = effect.foreground_shell();
         if background && !self.can_start_background_shell() {
             return Ok((
                 EffectOutcome::not_dispatched("shell_background_limit"),
@@ -162,7 +163,28 @@ impl Host<'_> {
                         },
                         Some(AdmissionRequest::CommandStarted{recorder,reply})=>{
                             // The real child is accountability even after withdrawal.
-                            let result=if command{self.command_spawned(&grant.call,recorder)}else{Err(HostError("native_process_owner_unknown"))};let _=reply.send(result.and(valid));
+                            let result = if foreground {
+                                self.foreground_shell_spawned(&grant.call, dispatch, recorder)
+                            } else if command {
+                                self.command_spawned(&grant.call, recorder)
+                            } else {
+                                Err(HostError("native_process_owner_unknown"))
+                            };
+                            let _=reply.send(result.and(valid));
+                        },
+                        Some(AdmissionRequest::ForegroundShellOpen{handle,cancel,driver,reply})=>{
+                            let result = valid.and_then(|_| {
+                                if !foreground { return Err(HostError("native_foreground_shell_unsupported")); }
+                                self.foreground_shell_open(grant, dispatch, handle, cancel, driver)
+                            });
+                            let _=reply.send(result);
+                        },
+                        Some(AdmissionRequest::ForegroundShellBind{handle,reply})=>{
+                            let result = valid.and_then(|_| {
+                                if !foreground { return Err(HostError("native_foreground_shell_unsupported")); }
+                                self.foreground_shell_bind(grant, dispatch, &handle)
+                            });
+                            let _=reply.send(result);
                         },
                         Some(AdmissionRequest::BackgroundShellStarted{observation,reply})=>{
                             let result = valid.and_then(|_| {
@@ -314,8 +336,10 @@ impl Host<'_> {
             .record_conversation_process(&mut self.run, &p, &now())?;
         self.publication(receipt)
     }
-    fn command_spawned(&mut self, call: &str, child: recorder::Recorder) -> Result<(), HostError> {
-        let mut p = self.process(call)?;
+    pub(super) fn observe_spawned_process(
+        p: &mut NativeOwnedProcess,
+        child: recorder::Recorder,
+    ) -> Result<(), HostError> {
         if p.state != Process::Starting
             || !child.complete()
             || child.boot_id != p.owner.boot_id
@@ -333,6 +357,11 @@ impl Host<'_> {
         }
         p.child = Some(child);
         p.state = Process::Running;
+        Ok(())
+    }
+    fn command_spawned(&mut self, call: &str, child: recorder::Recorder) -> Result<(), HostError> {
+        let mut p = self.process(call)?;
+        Self::observe_spawned_process(&mut p, child)?;
         let receipt = self
             .store
             .record_conversation_process(&mut self.run, &p, &now())?;

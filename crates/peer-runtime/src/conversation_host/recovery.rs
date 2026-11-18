@@ -135,6 +135,30 @@ impl NativeConversationRuntime {
                 }
                 continue;
             }
+            if let Some(session) = peer_protocol::NativeShellSession::from_handle(handle) {
+                let process = session.process;
+                let observation = match process.state {
+                    Process::NotStarted => Some(NativeProcessStop::OwnerDeadNotStarted),
+                    Process::Running => {
+                        let child = process
+                            .child
+                            .as_ref()
+                            .expect("validated running shell child");
+                        recorder::stop_recorded_group(&initial.owner, child, cancel)
+                            .await
+                            .then_some(NativeProcessStop::OwnerDeadGroupAbsent)
+                    }
+                    Process::Starting => None,
+                    Process::Ended => {
+                        guard.handle_ended(&store, handle, &now())?;
+                        None
+                    }
+                };
+                if let Some(observation) = observation {
+                    guard.shell_session_ended(&store, handle, observation, &now())?;
+                }
+                continue;
+            }
             if handle_stopped(&initial, &current, handle, cancel).await {
                 guard.handle_ended(&store, handle, &now())?;
             }

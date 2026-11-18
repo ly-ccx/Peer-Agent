@@ -30,6 +30,7 @@ use std::{
 };
 mod background_shell;
 mod effect;
+mod foreground_shell;
 mod hooks;
 mod permission;
 mod recovery;
@@ -374,6 +375,7 @@ impl NativeConversationRuntime {
             request_admitted: false,
             background_shells: BTreeMap::new(),
             completed_shells: BTreeMap::new(),
+            foreground_authority: None,
             cognition_source: None,
         };
         let result = async {
@@ -457,6 +459,7 @@ struct Host<'a> {
     request_admitted: bool,
     background_shells: BTreeMap<String, background_shell::BackgroundShell>,
     completed_shells: BTreeMap<String, crate::providers::EffectOutcome>,
+    foreground_authority: Option<foreground_shell::ForegroundAuthority>,
     cognition_source: Option<CognitionSource>,
 }
 struct CognitionSource {
@@ -466,7 +469,8 @@ struct CognitionSource {
 impl Host<'_> {
     async fn publish(&mut self, event: ConversationEvent<'_>) -> Result<(), HostError> {
         if let Some(output) = self.output.take() {
-            let result = if self.background_shells.is_empty() {
+            let result = if self.background_shells.is_empty() && self.foreground_authority.is_none()
+            {
                 output.publish(event).await
             } else {
                 self.wait_owned(output.publish(event)).await.and_then(|r| r)
@@ -512,7 +516,7 @@ impl Host<'_> {
             return Err(HostError("conversation_scope_changed"));
         }
         self.credentials.check().map_err(HostError)?;
-        Ok(())
+        self.validate_foreground_authority()
     }
     fn source_current(&self) -> Result<(), HostError> {
         self.source_matches(
@@ -598,6 +602,7 @@ impl Host<'_> {
                 if state != "ended" {
                     return Err(HostError("native_execution_stop_unproven"));
                 }
+                self.record_foreground_shell_end(&handle, false)?;
                 self.store
                     .end_conversation_handle(&mut self.run, &handle, &now())?;
                 self.live

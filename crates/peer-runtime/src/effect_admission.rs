@@ -15,6 +15,16 @@ pub(crate) enum AdmissionRequest {
         recorder: Recorder,
         reply: oneshot::Sender<Result<(), HostError>>,
     },
+    ForegroundShellOpen {
+        handle: String,
+        cancel: CancellationToken,
+        driver: ConnectionDriver,
+        reply: oneshot::Sender<Result<(), HostError>>,
+    },
+    ForegroundShellBind {
+        handle: String,
+        reply: oneshot::Sender<Result<(), HostError>>,
+    },
     BackgroundShellStarted {
         observation: crate::providers::EffectOutcome,
         reply: oneshot::Sender<Result<(), HostError>>,
@@ -88,6 +98,26 @@ impl EffectAdmission {
     }
     pub(crate) async fn command_starting(&self) -> Result<(), HostError> {
         self.request(AdmissionRequest::CommandStarting).await
+    }
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    pub(crate) async fn foreground_shell_open(
+        &self,
+        handle: String,
+        cancel: CancellationToken,
+        driver: ConnectionDriver,
+    ) -> Result<(), HostError> {
+        self.request(|reply| AdmissionRequest::ForegroundShellOpen {
+            handle,
+            cancel,
+            driver,
+            reply,
+        })
+        .await
+    }
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    pub(crate) async fn foreground_shell_bind(&self, handle: String) -> Result<(), HostError> {
+        self.request(|reply| AdmissionRequest::ForegroundShellBind { handle, reply })
+            .await
     }
     pub(crate) async fn background_shell_started(
         &self,

@@ -122,6 +122,9 @@ pub trait PreparedEffect {
     fn background_shell(&self) -> bool {
         false
     }
+    fn foreground_shell(&self) -> bool {
+        false
+    }
     /// Start owns a future, not permission. Before open/rename/spawn the actual
     /// worker must obtain fresh admission from its Host-bound control port.
     fn start(
@@ -166,9 +169,7 @@ impl ProviderRegistry {
                 Box::new(file::BatchSearchProvider),
                 Box::new(web::WebProvider),
                 Box::new(git::GitProvider),
-                Box::new(shell::ShellProvider {
-                    background: background_shell,
-                }),
+                Box::new(shell::ShellProvider::new(background_shell)),
                 Box::new(tool_artifact::ToolArtifactProvider(skill_result_reader)),
             ],
         }

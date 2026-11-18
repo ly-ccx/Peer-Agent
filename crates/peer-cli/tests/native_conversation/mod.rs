@@ -7,6 +7,7 @@ mod model_errors;
 mod recovery;
 mod shell_artifacts;
 mod shell_background;
+mod shell_session;
 mod skills;
 struct Ordinary {
     root: tempfile::TempDir,
@@ -120,6 +121,19 @@ impl Ordinary {
         reply
     }
 }
+fn active_foreground_shell(
+    run: &peer_protocol::ConversationExecution,
+) -> Option<peer_protocol::NativeOwnedProcess> {
+    run.handles
+        .iter()
+        .filter_map(peer_protocol::NativeShellSession::from_handle)
+        .find(|session| {
+            session.process.state == peer_protocol::NativeProcessState::Running
+                && session.command.is_some()
+        })
+        .map(|session| session.process)
+}
+
 fn wait(mut child: std::process::Child) -> Output {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
@@ -419,7 +433,10 @@ fn public_ordinary_real_pty_approve_deny_and_cancel_have_canonical_decision_owne
 #[test]
 fn public_ordinary_sigterm_drains_actual_shell_group_and_keeps_known_charges_and_evidence() {
     let fixture = Ordinary::new();
-    let server = Server::new(vec![reply_tool("bash", json!({"command":"/bin/sleep 30"}))]);
+    let server = Server::new(vec![reply_tool(
+        "bash",
+        json!({"command":"printf dispatched > entered; /bin/sleep 30"}),
+    )]);
     let mut cmd = fixture.command(Some(&server));
     cmd.args([
         "--output-format",
@@ -438,8 +455,11 @@ fn public_ordinary_sigterm_drains_actual_shell_group_and_keeps_known_charges_and
             .and_then(|m| {
                 peer_protocol::normalize_conversation_execution(&m["runtimeExecution"]).ok()
             })
-            .and_then(|r| r.pending_tools.into_iter().find_map(|p| p.native_process))
-            .filter(|p| p.state == peer_protocol::NativeProcessState::Running);
+            .and_then(|r| active_foreground_shell(&r))
+            .filter(|_| {
+                std::fs::read(fixture.workspace().join("entered"))
+                    .is_ok_and(|bytes| bytes == b"dispatched")
+            });
         if let Some(process) = process {
             break process;
         }
@@ -464,13 +484,53 @@ fn public_ordinary_sigterm_drains_actual_shell_group_and_keeps_known_charges_and
     assert!(interrupted.elapsed() < Duration::from_secs(8));
     assert_eq!(
         output.status.code(),
-        Some(4),
-        "{}",
+        Some(1),
+        "{} {}",
+        String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    let reply = fixture.assert_settled(&output, 1, 1);
-    assert_eq!(reply["error"], "CANCELLED");
+    let reply: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(reply["error"], "execution_outcome_unknown");
     assert_eq!(reply["usage"]["totalTokens"], 16);
+    let id = reply["sessionId"].as_str().unwrap();
+    let store = ConversationStore::new(fixture.home());
+    let run = store.read_conversation_execution(id).unwrap().unwrap();
+    assert!(run.handles.is_empty() && run.usage_committed && run.stop.is_some());
+    assert!(!run.permits_new_run());
+    let pending = &run.pending_tools[0];
+    assert_eq!(
+        pending.phase,
+        peer_protocol::ConversationDispatchPhase::OutcomeUnknown
+    );
+    let history = store.read_committed(id, None, 8 * 1024 * 1024).unwrap();
+    let message = history
+        .history
+        .messages
+        .iter()
+        .find(|row| row["id"] == pending.message_id)
+        .unwrap();
+    let tool = message["segments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["toolCallId"] == pending.tool_call_id)
+        .unwrap();
+    assert_eq!(
+        tool["result"]["evidence"]["shellSession"]["handleId"],
+        process.handle_id
+    );
+    assert_eq!(tool["result"]["error"]["code"], "execution_outcome_unknown");
+    let grant = &message["permissionGrants"][0];
+    assert_eq!(
+        tool["result"]["evidence"]["permissionGrantId"],
+        grant["grantId"]
+    );
+    assert!(
+        !peer_store::EvidenceIndexStore::new(fixture.home())
+            .find(&[format!("tool-result://{}", pending.tool_call_id)], None)
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(server.requests.lock().unwrap().len(), 1);
     let pid = rustix::process::Pid::from_raw(managed.pid as i32).unwrap();
     assert_eq!(

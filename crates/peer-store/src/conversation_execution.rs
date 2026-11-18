@@ -18,6 +18,7 @@ mod hooks;
 pub use hooks::{ConversationHookRecord, conversation_hook_observation, conversation_hook_process};
 mod recovery;
 pub use recovery::ConversationRecovery;
+mod shell_session;
 
 /// Host intent, not a deserializable command or a reusable permission.
 pub struct NewConversationExecution<'a> {
@@ -566,6 +567,7 @@ impl ConversationStore {
     ) -> Result<ConversationMetadataPublication, StoreError> {
         self.mutate_execution(token, at, None, |run, _| {
             if run.phase != Phase::Active
+                || handle["metadata"]["kind"] == "shell_session"
                 || !run.pending_tools.iter().any(|p| {
                     p.tool_call_id == handle["toolCallId"] && p.phase == DispatchPhase::Dispatching
                 })
@@ -592,6 +594,13 @@ impl ConversationStore {
                 .iter()
                 .position(|h| h["handleId"] == handle)
                 .ok_or(StoreError::ExecutionChanged)?;
+            if run.handles[i]["metadata"]["kind"] == "shell_session"
+                && peer_protocol::NativeShellSession::from_handle(&run.handles[i]).is_none_or(
+                    |session| session.process.state != peer_protocol::NativeProcessState::Ended,
+                )
+            {
+                return Err(StoreError::ExecutionBusy);
+            }
             // Runtime calls this only after the actual owned driver has ended.
             run.handles.remove(i);
             Ok(())
@@ -683,6 +692,9 @@ impl ConversationStore {
                     .as_str()
                     .is_some_and(|c| c != pending.capability_id)
                 || run.handles.iter().any(|h| {
+                    if let Some(session) = peer_protocol::NativeShellSession::from_handle(h) {
+                        return !shell_session::shell_result_matches(&session, call_id, result);
+                    }
                     if h["toolCallId"] != call_id {
                         return false;
                     }
@@ -743,6 +755,7 @@ impl ConversationStore {
             }) {
                 return Err(StoreError::EvidenceInvalid);
             }
+            shell_session::clear_settled_command(run, call_id);
             run.handles.retain(|handle| {
                 handle["toolCallId"] != call_id
                     || !(hooks::hook_handle(handle)

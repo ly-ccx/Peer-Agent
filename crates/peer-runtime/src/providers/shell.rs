@@ -2,8 +2,23 @@ use super::*;
 use peer_store::ShellArtifacts;
 use std::{process::Stdio, time::Duration};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod foreground;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod session;
 pub(super) struct ShellProvider {
-    pub(super) background: bool,
+    background: bool,
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    foreground: Option<foreground::ForegroundShell>,
+}
+impl ShellProvider {
+    pub(super) fn new(ordinary: bool) -> Self {
+        Self {
+            background: ordinary,
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            foreground: ordinary.then(foreground::ForegroundShell::new),
+        }
+    }
 }
 struct ShellEffect {
     args: Value,
@@ -15,6 +30,8 @@ struct ShellEffect {
     home: PathBuf,
     risk: HostShellRisk,
     port: Option<EffectAdmission>,
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    foreground: Option<(foreground::ForegroundShell, foreground::ShellScope)>,
 }
 impl CapabilityProvider for ShellProvider {
     fn manifests(&self) -> Vec<(String, Value)> {
@@ -62,14 +79,30 @@ impl CapabilityProvider for ShellProvider {
             return Err(HostError("invalid_command"));
         }
         let risk = shell_risk::classify(&command).map_err(HostError)?;
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        let foreground = if background {
+            None
+        } else {
+            self.foreground.clone()
+        };
         let cwd = if let Some(c) = args.get("cwd") {
             resolve(workspace, c.as_str().ok_or(HostError("invalid_cwd"))?)?
         } else {
-            workspace.to_owned()
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            let remembered = foreground
+                .as_ref()
+                .and_then(foreground::ForegroundShell::cwd);
+            #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+            let remembered: Option<PathBuf> = None;
+            remembered.unwrap_or_else(|| workspace.to_owned())
         };
         if !cwd.is_dir() {
             return Err(HostError("invalid_cwd"));
         }
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        let foreground = foreground
+            .map(|actor| foreground::ShellScope::observe(&cwd).map(|scope| (actor, scope)))
+            .transpose()?;
         let timeout = args
             .get("timeoutMs")
             .map(|v| {
@@ -89,6 +122,8 @@ impl CapabilityProvider for ShellProvider {
             home: home.into(),
             risk,
             port: None,
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            foreground,
         }))
     }
 }
@@ -106,16 +141,26 @@ impl PreparedEffect for ShellEffect {
         Some(self.risk)
     }
     fn scopes(&self) -> Result<Vec<ExecutionResourceScope>, HostError> {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        if let Some((_, scope)) = &self.foreground {
+            return Ok(scope.declared().to_vec());
+        }
         peer_store::provider_execution_scopes(&self.cwd).map_err(Into::into)
     }
     fn handle(&self) -> Option<&str> {
-        Some(&self.handle)
+        (!self.foreground_shell()).then_some(&self.handle)
     }
     fn owned_command(&self) -> bool {
-        true
+        !self.foreground_shell()
     }
     fn background_shell(&self) -> bool {
         self.background
+    }
+    fn foreground_shell(&self) -> bool {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        return self.foreground.is_some();
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        return false;
     }
     fn start(
         mut self: Box<Self>,
@@ -126,6 +171,10 @@ impl PreparedEffect for ShellEffect {
             .port
             .take()
             .ok_or(HostError("execution_admission_closed"))?;
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        if let Some((foreground, scope)) = self.foreground.take() {
+            return Ok(Box::pin(foreground.run(*self, scope, call, cancel, port)));
+        }
         Ok(Box::pin(async move {
             match self.run(call, cancel, port).await {
                 Ok(outcome) => outcome,
@@ -455,18 +504,25 @@ impl CapturedStream {
             if count == 0 {
                 return Ok(());
             }
-            let preview = count.min(PREVIEW_BYTES.saturating_sub(self.preview.len()));
-            self.preview.extend_from_slice(&chunk[..preview]);
-            let stored = count.min(ARTIFACT_BYTES.saturating_sub(self.stored));
-            if stored != 0 {
-                self.file
-                    .write_all(&chunk[..stored])
-                    .await
-                    .map_err(|_| "shell_artifact_unavailable")?;
-                self.stored += stored;
-            }
-            self.artifact_truncated |= stored < count;
+            self.append(&chunk[..count]).await?;
         }
+    }
+
+    async fn append(&mut self, bytes: &[u8]) -> Result<(), &'static str> {
+        let preview = bytes
+            .len()
+            .min(PREVIEW_BYTES.saturating_sub(self.preview.len()));
+        self.preview.extend_from_slice(&bytes[..preview]);
+        let stored = bytes.len().min(ARTIFACT_BYTES.saturating_sub(self.stored));
+        if stored != 0 {
+            self.file
+                .write_all(&bytes[..stored])
+                .await
+                .map_err(|_| "shell_artifact_unavailable")?;
+            self.stored += stored;
+        }
+        self.artifact_truncated |= stored < bytes.len();
+        Ok(())
     }
 
     fn preview(&self) -> String {
@@ -500,7 +556,7 @@ mod tests {
     async fn cancellation_at_durable_starting_is_cancelled_without_spawn_and_seals_its_artifact() {
         let root = tempfile::tempdir().unwrap();
         let workspace = tempfile::tempdir().unwrap();
-        let mut effect = ShellProvider { background: false }
+        let mut effect = ShellProvider::new(false)
             .prepare(
                 "local.shell.exec",
                 json!({"command":"printf forbidden > should-not-exist"}),

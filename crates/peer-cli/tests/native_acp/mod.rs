@@ -414,6 +414,157 @@ fn native_acp_eof_at_approval_stops_original_run_without_tool_effect() {
 }
 
 #[test]
+fn native_acp_foreground_shell_rechecks_two_grants_and_reaps_one_interpreter() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = root.path().join("repo");
+    std::fs::create_dir_all(workspace.join("nested")).unwrap();
+    let server = Server::new(vec![
+        reply_tool(
+            "bash",
+            json!({"command":"cd nested; export PEER_ACP_FIXTURE=retained; printf '%s' \"$$\" > first.pid"}),
+        ),
+        reply_tool(
+            "bash",
+            json!({"command":"printf '%s' \"$PEER_ACP_FIXTURE\" > retained; printf '%s' \"$$\" > second.pid"}),
+        ),
+        reply_text("Native foreground finished."),
+    ]);
+    let mut client = Client::start(root.path(), &server);
+    client.request(1, "initialize", json!({"protocolVersion":1}));
+    let session = client.create(2, &workspace);
+    client.prompt(3, &session, "Run both shell calls");
+    let mut permissions = 0;
+    loop {
+        let message = client.next();
+        if message["method"] == "session/request_permission" {
+            permissions += 1;
+            assert!(permissions <= 2);
+            if permissions == 2 {
+                assert!(!workspace.join("nested/second.pid").exists());
+            }
+            client.send(json!({"id": message["id"], "result": {
+                "outcome": {"outcome":"selected", "optionId":"allow-once"}
+            }}));
+        } else if message["id"] == 3 {
+            assert!(message["result"].is_object(), "{message}");
+            break;
+        }
+    }
+    client.finish();
+    assert_eq!(permissions, 2);
+    assert_eq!(server.requests.lock().unwrap().len(), 3);
+    let first = std::fs::read_to_string(workspace.join("nested/first.pid")).unwrap();
+    let second = std::fs::read_to_string(workspace.join("nested/second.pid")).unwrap();
+    assert_eq!(first, second);
+    assert_eq!(
+        std::fs::read_to_string(workspace.join("nested/retained")).unwrap(),
+        "retained"
+    );
+    let pid = rustix::process::Pid::from_raw(first.parse().unwrap()).unwrap();
+    assert_eq!(
+        rustix::process::test_kill_process_group(pid),
+        Err(rustix::io::Errno::SRCH)
+    );
+    let data = root.path().join("data");
+    let index = std::fs::read_to_string(data.join("conversations/index.jsonl")).unwrap();
+    let row: Value = serde_json::from_str(index.trim()).unwrap();
+    let conversation = row["id"].as_str().unwrap();
+    let store = peer_store::ConversationStore::new(data);
+    let run = store
+        .read_conversation_execution(conversation)
+        .unwrap()
+        .unwrap();
+    assert!(run.permits_new_run());
+    let history = store
+        .read_committed(conversation, None, 8 * 1024 * 1024)
+        .unwrap();
+    let mut bound = Vec::new();
+    for row in history.history.messages {
+        for segment in row["segments"].as_array().into_iter().flatten() {
+            if segment["type"] != "tool-call" {
+                continue;
+            }
+            let result = &segment["result"];
+            let call = result["toolCallId"].as_str().unwrap();
+            let grant = row["permissionGrants"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|grant| grant["toolCallId"] == call)
+                .unwrap();
+            assert_eq!(grant["granted"], true);
+            assert_eq!(result["evidence"]["permissionGrantId"], grant["grantId"]);
+            bound.push((
+                result["evidence"]["shellSession"].clone(),
+                grant["grantId"].clone(),
+            ));
+        }
+    }
+    assert_eq!(bound.len(), 2);
+    assert!(bound[0].0["handleId"].is_string());
+    assert_eq!(bound[0].0["handleId"], bound[1].0["handleId"]);
+    assert_ne!(bound[0].0["dispatchId"], bound[1].0["dispatchId"]);
+    assert_ne!(bound[0].1, bound[1].1);
+}
+
+#[test]
+fn native_acp_foreground_scope_replacement_blocks_previously_prepared_write() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = root.path().join("repo");
+    std::fs::create_dir_all(workspace.join("nested")).unwrap();
+    let server = Server::new(vec![
+        reply_tool(
+            "bash",
+            json!({"command":"cd nested; printf initial > original"}),
+        ),
+        reply_tool("bash", json!({"command":"printf unexpected > unexpected"})),
+        reply_text("The replaced directory was rejected."),
+    ]);
+    let mut client = Client::start(root.path(), &server);
+    client.request(1, "initialize", json!({"protocolVersion":1}));
+    let session = client.create(2, &workspace);
+    client.prompt(3, &session, "Check concrete scope");
+    let mut approvals = 0;
+    loop {
+        let message = client.next();
+        if message["method"] == "session/request_permission" {
+            approvals += 1;
+            assert!(approvals <= 2);
+            if approvals == 2 {
+                std::fs::rename(workspace.join("nested"), workspace.join("original")).unwrap();
+                std::fs::create_dir(workspace.join("nested")).unwrap();
+            }
+            client.send(json!({"id":message["id"],"result":{
+                "outcome":{"outcome":"selected","optionId":"allow-once"}
+            }}));
+        } else if message["id"] == 3 {
+            assert!(message["result"].is_object(), "{message}");
+            break;
+        }
+    }
+    client.finish();
+    assert_eq!(approvals, 2);
+    assert!(!workspace.join("nested/unexpected").exists());
+    assert!(!workspace.join("original/unexpected").exists());
+    assert_eq!(
+        std::fs::read(workspace.join("original/original")).unwrap(),
+        b"initial"
+    );
+    let requests = server.requests.lock().unwrap();
+    assert_eq!(requests.len(), 3);
+    assert!(
+        requests[2]["messages"]
+            .to_string()
+            .contains("shell_session_scope_changed")
+    );
+    let index =
+        std::fs::read_to_string(root.path().join("data/conversations/index.jsonl")).unwrap();
+    let row: Value = serde_json::from_str(index.trim()).unwrap();
+    let run = peer_protocol::normalize_conversation_execution(&row["runtimeExecution"]).unwrap();
+    assert!(run.permits_new_run());
+}
+
+#[test]
 fn native_acp_disconnect_drains_actual_shell_group_and_keeps_known_usage() {
     let root = tempfile::tempdir().unwrap();
     let command = "printf '%s\\n' \"$$\" > pid.partial && /bin/mv pid.partial ready.pid; /bin/sleep 30; printf unexpected > late.txt";
@@ -459,10 +610,13 @@ fn native_acp_disconnect_drains_actual_shell_group_and_keeps_known_usage() {
     )
     .unwrap();
     let run = &row["runtimeExecution"];
-    assert_eq!(run["phase"], "stopped");
+    assert_eq!(run["phase"], "recovery_required");
+    assert_eq!(run["handles"], json!([]));
+    assert_eq!(run["stop"]["handlesEnded"], true);
     assert_eq!(run["usageCommitted"], true);
     assert_eq!(run["usage"]["totalTokens"], 16);
-    assert_eq!(run["pendingTools"], json!([]));
+    assert_eq!(run["pendingTools"].as_array().unwrap().len(), 1);
+    assert_eq!(run["pendingTools"][0]["phase"], "outcome_unknown");
 }
 
 #[test]

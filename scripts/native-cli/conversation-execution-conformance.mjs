@@ -36,5 +36,36 @@ for(const unknown of [false,true]){
  assert.equal(native(w,{op:'claim',stream:'replacement'}).code,unknown?'conversation_execution_invalid':'conversation_execution_busy');
  assert.equal(readFileSync(w.index,'utf8'),before);assert.deepEqual(JSON.parse(before).futureMetadata,{keep:true});cases+=4;
 }
+for (const name of [
+  'persistent-shell-idle-outlives-its-first-call',
+  'persistent-shell-binds-separate-command',
+  'persistent-shell-rejects-stale-command-generation',
+]) {
+  const fixture = JSON.parse(readFileSync(new URL('../../packages/protocol/contracts/native-cli/conversation-execution.json', import.meta.url), 'utf8'));
+  const entry = fixture.cases.find(value => value.name === name);
+  const w = world(name);
+  const run = structuredClone(entry.input);
+  run.identity.conversationId = w.id;
+  run.handles[0].metadata.nativeShellSession.process.execution.conversationId = w.id;
+  const row = JSON.parse(readFileSync(w.index, 'utf8'));
+  row.runtimeExecution = run;
+  writeFileSync(w.index, JSON.stringify(row) + '\n');
+  if (entry.valid) {
+    assert.deepEqual(normalizeConversationExecution(run), run);
+  } else {
+    assert.throws(() => normalizeConversationExecution(run), /conversation_execution_invalid/);
+  }
+  w.store.updateTitle(w.id, 'TS metadata update preserves the native Shell owner');
+  const cold = createConversationStore({storeDir: join(w.root, 'conversations')});
+  assert.deepEqual(cold.getConversation(w.id).runtimeExecution, run);
+  const before = readFileSync(w.index, 'utf8');
+  const read = native(w, {op: 'read'});
+  if (entry.valid) assert.deepEqual(read.run, run);
+  else assert.equal(read.code, 'conversation_execution_invalid');
+  assert.equal(native(w, {op: 'claim', stream: 'replacement'}).code,
+    entry.valid ? 'conversation_execution_busy' : 'conversation_execution_invalid');
+  assert.equal(readFileSync(w.index, 'utf8'), before);
+  cases += 5;
+}
 writeFileSync(join(evidence,'result.json'),JSON.stringify({cases,limits:'Store/decoder interoperability only; no TS production execution guard, owner-death reconciliation, ordinary CLI send, ACP or P4 total claim.'},null,2)+'\n');
 console.log(`${cases} real TS Store/native decoder and owner-preservation checks passed (${evidence}).`);

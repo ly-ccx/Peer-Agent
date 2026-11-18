@@ -182,6 +182,10 @@ impl Host<'_> {
         {
             result["evidence"]["nativeProcess"] = json!(process);
         }
+        if let Some(binding) = self.foreground_shell_evidence(&call_id, &dispatch)? {
+            result["evidence"]["shellSession"] = binding;
+            result["evidence"]["permissionGrantId"] = grant.facts["grantId"].clone();
+        }
         if let Some(error) = outcome.error {
             result["error"] = json!({"code":error,"message":error,"recoverable":true});
         }

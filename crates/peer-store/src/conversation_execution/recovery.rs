@@ -314,6 +314,23 @@ impl ConversationRecovery {
         )?;
         Ok(())
     }
+    pub fn shell_session_ended(
+        &mut self,
+        store: &ConversationStore,
+        before: &Value,
+        observation: NativeProcessStop,
+        at: &str,
+    ) -> Result<(), StoreError> {
+        if !self.current(store)?.handles.contains(before) {
+            return Err(StoreError::ExecutionChanged);
+        }
+        let mut session = peer_protocol::NativeShellSession::from_handle(before)
+            .ok_or(StoreError::ExecutionInvalid)?;
+        session.process.state = NativeProcessState::Ended;
+        session.process.stop_observation = Some(observation);
+        store.record_conversation_shell_process(&mut self.token, &session.process, at)?;
+        self.handle_ended(store, &session.handle(), at)
+    }
     /// Uses the very same canonical Grant/Result/Evidence settlement gate.
     pub fn settle_tool(
         &mut self,

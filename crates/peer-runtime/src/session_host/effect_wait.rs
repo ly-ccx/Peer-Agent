@@ -100,6 +100,10 @@ impl NativeSessionHost {
                                 let result=valid.and_then(|_|self.register_connection(a,handle,metadata,cancel,driver));
                                 let _=reply.send(result);
                             }
+                            AdmissionRequest::ForegroundShellOpen{reply,..}
+                            | AdmissionRequest::ForegroundShellBind{reply,..}=>{
+                                let _=reply.send(Err(HostError("native_foreground_shell_unsupported")));
+                            },
                             AdmissionRequest::BackgroundShellStarted{reply,..}=>{
                                 let _=reply.send(Err(HostError("native_background_shell_unsupported")));
                             }

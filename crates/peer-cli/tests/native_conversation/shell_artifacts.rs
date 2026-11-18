@@ -65,7 +65,7 @@ fn public_shell_keeps_complete_artifact_under_quota_and_continues_after_preview_
         reply_tool(
             "bash",
             json!({
-                "command": "printf '%0100000d' 0; printf '%02010000d' 0 >&2; printf done > finished",
+                "command": "printf '%0100000d' 0; printf '%02010000d' 0 >&2; printf done > finished; printf '%s' \"$$\" > interpreter.pid",
                 "timeoutMs": 10000,
             }),
         ),
@@ -106,7 +106,14 @@ fn public_shell_keeps_complete_artifact_under_quota_and_continues_after_preview_
     assert_eq!(&raw[2_000_000..], b"\n...[artifact truncated]\n");
     let metadata = get(dir.join("metadata.json"));
     assert_eq!(metadata["status"], "success");
-    assert_eq!(metadata["managedProcessEnded"], true);
+    assert_eq!(metadata["captureStatus"], "complete");
+    assert_eq!(metadata["managedProcessEnded"], false);
+    let raw_pid = fs::read_to_string(fixture.workspace().join("interpreter.pid")).unwrap();
+    let pid = rustix::process::Pid::from_raw(raw_pid.parse().unwrap()).unwrap();
+    assert_eq!(
+        rustix::process::test_kill_process_group(pid),
+        Err(rustix::io::Errno::SRCH)
+    );
     assert_eq!(metadata["truncated"], true);
     assert!(
         result["evidence"]["artifactRefs"]

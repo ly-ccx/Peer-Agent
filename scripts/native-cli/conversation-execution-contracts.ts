@@ -94,6 +94,47 @@ add('background-shell-mirror-must-advance-with-process',r=>{
   shellRun(r,'running');r.pendingTools[0].nativeProcess.child.pid=103;
 },false);
 add('background-shell-future-version-blocks',r=>{shellRun(r,'running');r.handles[0].metadata.nativeShell.schemaVersion=2;},false);
+function persistentShell(r: any, state: 'not_started'|'starting'|'running'|'ended', current = false) {
+  const process={...commandProcess, handleId:'shell-session_12345678-1234-4abc-8def-123456789012',
+    state,generation:state==='not_started'?0:1,
+    ...(state==='running'||state==='ended'?{child:{...owner,pid:102}}:{}),
+    ...(state==='ended'?{stopObservation:'owner_dead_group_absent'}:{})};
+  if (state==='not_started'||state==='starting') r.pendingTools=[{...pending,capabilityId:'local.shell.exec'}];
+  const command=current?{toolCallId:'session-command',dispatchId:'session-dispatch',generation:1}:null;
+  if(command) r.pendingTools.push({...pending,toolCallId:command.toolCallId,dispatchId:command.dispatchId,
+    capabilityId:'local.shell.exec'});
+  const session={schemaVersion:1,process,command};
+  r.handles=[{handleId:process.handleId,toolCallId:process.toolCallId,state:state==='ended'?'ended':'active',
+    metadata:{kind:'shell_session',nativeShellSession:session}}];
+  return session;
+}
+add('persistent-shell-spawn-matches-first-dispatch',r=>persistentShell(r,'not_started'));
+add('persistent-shell-starting-keeps-original-dispatch',r=>persistentShell(r,'starting'));
+add('persistent-shell-idle-outlives-its-first-call',r=>persistentShell(r,'running'));
+add('persistent-shell-binds-separate-command',r=>persistentShell(r,'running',true));
+add('persistent-shell-ended-keeps-unknown-command',r=>{
+  persistentShell(r,'ended',true);r.phase='recovery_required';r.stop=stop;r.pendingTools[0].phase='outcome_unknown';
+});
+add('persistent-shell-rejects-missing-command-shape',r=>{const s=persistentShell(r,'running');delete (s as any).command;},false);
+add('persistent-shell-rejects-process-on-host-pid',r=>{persistentShell(r,'running').process.child={...owner};},false);
+add('persistent-shell-rejects-unknown-owner-fact',r=>{
+  const process=persistentShell(r,'running').process;
+  process.owner={...process.owner,future:true} as typeof owner;
+},false);
+add('persistent-shell-rejects-unknown-child-fact',r=>{
+  const process=persistentShell(r,'running').process;
+  process.child={...owner,pid:102,future:true} as typeof owner;
+},false);
+add('persistent-shell-rejects-stale-command-generation',r=>{persistentShell(r,'running',true).command!.generation=0;},false);
+add('persistent-shell-rejects-unprepared-command',r=>{persistentShell(r,'running',true);r.pendingTools[0].phase='prepared';},false);
+add('persistent-shell-rejects-foreign-dispatch',r=>{persistentShell(r,'running',true).command!.dispatchId='foreign';},false);
+add('persistent-shell-rejects-no-first-dispatch-while-starting',r=>{persistentShell(r,'starting');r.pendingTools=[];},false);
+add('persistent-shell-rejects-two-session-processes',r=>{
+  persistentShell(r,'running');
+  const another=structuredClone(r.handles[0]);
+  another.handleId=another.metadata.nativeShellSession.process.handleId='shell-session_12345678-1234-4abc-8def-123456789013';
+  r.handles.push(another);
+},false);
 for (const [name,modify] of [
  ['future-schema',(r:any)=>{r.schemaVersion=2;}],['extra-root',(r:any)=>{r.extra=true;}],
  ['fake-goal',(r:any)=>{r.identity={planId:'p',sessionId:'s',executionEpoch:'e',generation:'g',goalRevision:1};}],

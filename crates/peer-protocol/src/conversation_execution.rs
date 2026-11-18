@@ -240,10 +240,20 @@ impl ConversationExecution {
             }
         }
         let mut handles = HashSet::new();
+        let mut shell_sessions = 0;
         if self.handles.len() > 128 {
             return false;
         }
         for h in &self.handles {
+            if h["metadata"]["kind"] == "shell_session" {
+                shell_sessions += 1;
+                if shell_sessions > 1
+                    || crate::NativeShellSession::from_handle(h)
+                        .is_none_or(|session| !session.valid_for_run(self))
+                {
+                    return false;
+                }
+            }
             if h.as_object().is_none_or(|m| m.len() != 4)
                 || !h["handleId"]
                     .as_str()

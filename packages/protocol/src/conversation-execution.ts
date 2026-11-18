@@ -79,6 +79,33 @@ function validBackgroundShellHandle(
     return equalsRecord(comparable(call.nativeProcess), comparable(process));
   });
 }
+function validPersistentShellHandle(
+  h: Record<string, unknown>, metadata: Record<string, unknown>, run: Record<string, unknown>,
+  runIdentity: ConversationExecutionIdentity, owner: Recorder, pending: readonly unknown[],
+): boolean {
+  const session = metadata.nativeShellSession;
+  if (run.engine !== 'peer-native' || Object.keys(metadata).length !== 2 || !object(session)
+    || Object.keys(session).length !== 3 || !keys(session, ['schemaVersion', 'process', 'command'])
+    || session.schemaVersion !== 1 || !Object.hasOwn(session, 'command')) return false;
+  const process = session.process;
+  if (!object(process) || !nativeProcessEnvelopeValid(process) || !recorder(process.owner)
+    || !sameRecorder(process.owner, owner) || !identity(process.execution) || !equalsRecord(process.execution, runIdentity)
+    || typeof process.handleId !== 'string' || !process.handleId.startsWith('shell-session_')
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(process.handleId.slice('shell-session_'.length))
+    || (process.generation as number) > 1 || process.child != null && (!recorder(process.child) || process.child.pid === owner.pid)
+    || h.handleId !== process.handleId || h.toolCallId !== process.toolCallId
+    || h.state !== (process.state === 'ended' ? 'ended' : 'active')) return false;
+  const bound = (callId: unknown, dispatchId: unknown): boolean => pending.some(call =>
+    object(call) && call.toolCallId === callId && call.dispatchId === dispatchId
+      && call.capabilityId === 'local.shell.exec' && call.phase !== 'prepared' && call.nativeProcess == null);
+  if ((process.state === 'not_started' || process.state === 'starting')
+    && !bound(process.toolCallId, process.dispatchId)) return false;
+  const command = session.command;
+  return command === null || object(command) && Object.keys(command).length === 3
+    && keys(command, ['toolCallId', 'dispatchId', 'generation'])
+    && ['running', 'ended'].some(state => state === process.state) && process.child != null
+    && command.generation === process.generation && bound(command.toolCallId, command.dispatchId);
+}
 function validHookHandle(
   h: Record<string, unknown>, metadata: Record<string, unknown>,
   runIdentity: ConversationExecutionIdentity, owner: Recorder, pending: readonly unknown[],
@@ -152,12 +179,17 @@ export function normalizeConversationExecution(raw: unknown): ConversationExecut
     }
   }
   const handles = new Set<string>();
+  let shellSessionSeen = false;
   for (const h of raw.handles) {
     if (!object(h) || Object.keys(h).length !== 4 || !keys(h, ['handleId', 'toolCallId', 'state', 'metadata'])
       || !text(h.handleId, 512) || handles.has(h.handleId) || !text(h.toolCallId, 200) || !object(h.metadata)
       || !['active', 'ended'].some(v => v === h.state) || raw.phase === 'stopped' && h.state !== 'ended') return invalid();
     if (h.metadata.kind === 'hook' && !validHookHandle(h, h.metadata, raw.identity, raw.owner, raw.pendingTools)) return invalid();
     if (h.metadata.kind === 'shell_background' && !validBackgroundShellHandle(h, h.metadata, raw, raw.identity, raw.owner, raw.pendingTools)) return invalid();
+    if (h.metadata.kind === 'shell_session') {
+      if (shellSessionSeen || !validPersistentShellHandle(h, h.metadata, raw, raw.identity, raw.owner, raw.pendingTools)) return invalid();
+      shellSessionSeen = true;
+    }
     handles.add(h.handleId);
   }
   return structuredClone(raw) as unknown as ConversationExecution;
