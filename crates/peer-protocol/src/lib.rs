@@ -1,6 +1,10 @@
 #![forbid(unsafe_code)]
+mod conversation_shell;
 mod local_read;
 mod native_process;
+pub use conversation_shell::{
+    background_shell_handle, background_shell_process, shell_task_id_valid,
+};
 mod work_hook;
 pub use native_process::{
     NativeOwnedProcess, NativeProcessKind, NativeProcessRecorder, NativeProcessState,

@@ -12,6 +12,7 @@ pub(super) struct PermissionCall<'a> {
     pub tool: &'a str,
     pub args: &'a Value,
 }
+#[derive(Clone)]
 pub(super) struct ToolGrant {
     pub facts: Value,
     pub additional: Vec<Value>,
@@ -29,7 +30,7 @@ fn automatic(
     risk: Option<ShellRisk>,
     inside: Option<bool>,
 ) -> bool {
-    if level == LocalAccessLevel::FullLocal {
+    if level == LocalAccessLevel::FullLocal || permission == ProviderPermission::ShellStop {
         return true;
     }
     if permission == ProviderPermission::Read {
@@ -51,6 +52,13 @@ fn automatic(
 impl Host<'_> {
     pub(super) fn validate_grant(&self, grant: &ToolGrant, args: &Value) -> Result<(), HostError> {
         self.source_current()?;
+        self.validate_grant_binding(grant, args)
+    }
+    pub(super) fn validate_grant_binding(
+        &self,
+        grant: &ToolGrant,
+        args: &Value,
+    ) -> Result<(), HostError> {
         if grant.facts["granted"] != true
             || self.access.snapshot()?.1 != grant.revision
             || peer_protocol::approval_args_digest(args)
@@ -125,7 +133,9 @@ impl Host<'_> {
         } else if permitted && hook == HookDecision::Allow {
             (
                 true,
-                if level == LocalAccessLevel::FullLocal {
+                if permission == ProviderPermission::ShellStop {
+                    "shell_task_stop_same_scope"
+                } else if level == LocalAccessLevel::FullLocal {
                     "local_access_level_full"
                 } else if permission == ProviderPermission::Read {
                     "host_policy_read"

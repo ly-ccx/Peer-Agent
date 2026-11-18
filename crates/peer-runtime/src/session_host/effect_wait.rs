@@ -100,6 +100,12 @@ impl NativeSessionHost {
                                 let result=valid.and_then(|_|self.register_connection(a,handle,metadata,cancel,driver));
                                 let _=reply.send(result);
                             }
+                            AdmissionRequest::BackgroundShellStarted{reply,..}=>{
+                                let _=reply.send(Err(HostError("native_background_shell_unsupported")));
+                            }
+                            AdmissionRequest::StopBackgroundShell{reply,..}=>{
+                                let _=reply.send(Err(HostError("native_background_shell_unsupported")));
+                            }
                         }
                     }else{authorization=None;}
                 },

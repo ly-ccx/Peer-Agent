@@ -251,6 +251,8 @@ impl ConversationRecovery {
             }
             process.state = NativeProcessState::Ended;
             process.stop_observation = Some(observation);
+            let ended = process.clone();
+            super::update_background_shell_mirror(run, &ended);
             Ok(())
         })?;
         Ok(())

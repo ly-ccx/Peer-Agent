@@ -45,9 +45,25 @@ struct Entry {
     handles: BTreeMap<String, Handle>,
 }
 struct Handle {
+    registration: u64,
     tool_call: String,
     cancel: CancellationToken,
     state: HandleState,
+}
+impl Handle {
+    fn request_stop(&self) -> bool {
+        if self.state == HandleState::Ended || self.cancel.is_cancelled() {
+            return false;
+        }
+        self.cancel.cancel();
+        true
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandleStop {
+    Stopped,
+    AlreadyStoppingOrEnded,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum HandleState {
@@ -231,6 +247,8 @@ impl ExecutionRegistry {
         {
             return Err(LiveError::Limit);
         }
+        state.next = state.next.checked_add(1).ok_or(LiveError::Limit)?;
+        let registration = state.next;
         let entry = state.entries.get_mut(&key).ok_or(LiveError::Unknown)?;
         if entry.closed || entry.uncertain {
             return Err(LiveError::Closed);
@@ -241,6 +259,7 @@ impl ExecutionRegistry {
         entry.handles.insert(
             handle_id.into(),
             Handle {
+                registration,
                 tool_call: tool_call.into(),
                 cancel: cancellation,
                 state: HandleState::Active,
@@ -250,6 +269,7 @@ impl ExecutionRegistry {
             inner: self.inner.clone(),
             key,
             handle_id: handle_id.into(),
+            registration,
             ended: false,
         };
         tokio::spawn(async move {
@@ -280,12 +300,59 @@ impl ExecutionRegistry {
             token.cancel();
         }
         for handle in entry.handles.values() {
-            if handle.state != HandleState::Ended {
-                handle.cancel.cancel();
-            }
+            handle.request_stop();
         }
         self.inner.changed.notify_waiters();
         Ok(())
+    }
+    /// Call only after current Host authorization for this exact handle. A
+    /// stop request signals the original owner and awaits its real observation.
+    /// The caller still owns Store publication and ended-handle acknowledgement.
+    pub async fn stop_owned_handle(
+        &self,
+        execution: &impl LiveExecutionIdentity,
+        handle_id: &str,
+        original_tool_call: &str,
+        deadline: Duration,
+    ) -> Result<HandleStop, LiveError> {
+        let key = key(execution)?;
+        let mut requested = false;
+        let mut registration = None;
+        let wait = async {
+            loop {
+                let changed = self.inner.changed.notified();
+                tokio::pin!(changed);
+                changed.as_mut().enable();
+                {
+                    let state = self.inner.state.lock().map_err(|_| LiveError::Unknown)?;
+                    let handle = state
+                        .entries
+                        .get(&key)
+                        .and_then(|entry| entry.handles.get(handle_id))
+                        .filter(|handle| handle.tool_call == original_tool_call)
+                        .ok_or(LiveError::Unknown)?;
+                    if registration.is_some_and(|previous| previous != handle.registration) {
+                        return Err(LiveError::Unknown);
+                    }
+                    registration = Some(handle.registration);
+                    match handle.state {
+                        HandleState::Ended => {
+                            return Ok(if requested {
+                                HandleStop::Stopped
+                            } else {
+                                HandleStop::AlreadyStoppingOrEnded
+                            });
+                        }
+                        HandleState::Unknown => return Err(LiveError::StopUnconfirmed),
+                        HandleState::Active => requested |= handle.request_stop(),
+                    }
+                }
+                changed.await;
+            }
+        };
+        tokio::time::timeout(deadline, wait)
+            .await
+            .map_err(|_| LiveError::StopUnconfirmed)?
     }
     /// Deadline never aborts the completion owner. A later call can observe real
     /// idle; the admission fence and unknown handles survive the timeout.
@@ -362,6 +429,7 @@ struct HandleGuard {
     inner: Arc<Inner>,
     key: String,
     handle_id: String,
+    registration: u64,
     ended: bool,
 }
 impl Drop for HandleGuard {
@@ -371,6 +439,7 @@ impl Drop for HandleGuard {
                 .entries
                 .get_mut(&self.key)
                 .and_then(|e| e.handles.get_mut(&self.handle_id))
+                .filter(|h| h.registration == self.registration)
             {
                 handle.state = if self.ended {
                     HandleState::Ended
@@ -392,6 +461,98 @@ mod tests {
             conversation_id: "c".into(),
             stream_id: stream.into(),
         }
+    }
+    #[tokio::test]
+    async fn scoped_stop_awaits_the_real_owner_without_cancelling_another_stream() {
+        let registry = ExecutionRegistry::default();
+        let first = conversation("first");
+        let second = conversation("second");
+        let first_attempt = registry.begin(&first).unwrap();
+        let second_attempt = registry.begin(&second).unwrap();
+        let first_cancel = CancellationToken::new();
+        let second_cancel = CancellationToken::new();
+        let (release, released) = tokio::sync::oneshot::channel();
+        let cleanup = first_cancel.clone();
+        let mut child = tokio::process::Command::new("/bin/sleep")
+            .arg("20")
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        registry
+            .track_handle(
+                &first,
+                "shell",
+                "origin",
+                first_cancel.clone(),
+                async move {
+                    cleanup.cancelled().await;
+                    released.await.map_err(|_| ())?;
+                    child.start_kill().map_err(|_| ())?;
+                    child.wait().await.map_err(|_| ())?;
+                    Ok(())
+                },
+            )
+            .unwrap();
+        let background = second_cancel.clone();
+        registry
+            .track_handle(
+                &second,
+                "shell",
+                "origin",
+                second_cancel.clone(),
+                async move {
+                    background.cancelled().await;
+                    Ok(())
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            registry
+                .stop_owned_handle(&first, "shell", "foreign", Duration::from_secs(1))
+                .await,
+            Err(LiveError::Unknown)
+        );
+        assert!(!first_cancel.is_cancelled() && !second_cancel.is_cancelled());
+        assert_eq!(
+            registry
+                .stop_owned_handle(&first, "shell", "origin", Duration::from_millis(15))
+                .await,
+            Err(LiveError::StopUnconfirmed)
+        );
+        assert!(first_cancel.is_cancelled() && !second_cancel.is_cancelled());
+        assert_eq!(registry.handle_observations(&first).unwrap()[0].2, "active");
+        release.send(()).unwrap();
+        assert_eq!(
+            registry
+                .stop_owned_handle(&first, "shell", "origin", Duration::from_secs(2))
+                .await,
+            Ok(HandleStop::AlreadyStoppingOrEnded)
+        );
+        assert_eq!(registry.handle_observations(&first).unwrap()[0].2, "ended");
+        assert_eq!(
+            registry.handle_observations(&second).unwrap()[0].2,
+            "active"
+        );
+        registry.acknowledge_ended_handle(&first, "shell").unwrap();
+        assert_eq!(
+            registry
+                .stop_owned_handle(&first, "shell", "origin", Duration::from_secs(1))
+                .await,
+            Err(LiveError::Unknown)
+        );
+        assert!(registry.admission_open(&first).unwrap());
+        assert_eq!(
+            registry
+                .stop_owned_handle(&second, "shell", "origin", Duration::from_secs(1))
+                .await,
+            Ok(HandleStop::Stopped),
+        );
+        first_attempt.finish();
+        second_attempt.finish();
+        registry
+            .drain(&second, Duration::from_secs(1))
+            .await
+            .unwrap();
     }
     #[tokio::test]
     async fn ordinary_principals_are_isolated_and_only_real_completed_owners_can_be_evicted() {

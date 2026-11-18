@@ -23,10 +23,12 @@ use peer_store::{
 };
 use serde_json::{Value, json};
 use std::{
+    collections::BTreeMap,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Duration,
 };
+mod background_shell;
 mod effect;
 mod hooks;
 mod permission;
@@ -280,6 +282,7 @@ impl NativeConversationRuntime {
             &self.home,
             credentials.clone(),
             skills.clone(),
+            true,
         )?;
         let projection = providers.project_for_mode(options.mode, options.allowlist)?;
         let pipeline = if selected.is_some() {
@@ -369,6 +372,9 @@ impl NativeConversationRuntime {
             system: None,
             turns: 0,
             request_admitted: false,
+            background_shells: BTreeMap::new(),
+            completed_shells: BTreeMap::new(),
+            cognition_source: None,
         };
         let result = async {
             host.append(&user_message)?;
@@ -449,11 +455,24 @@ struct Host<'a> {
     system: Option<Value>,
     turns: usize,
     request_admitted: bool,
+    background_shells: BTreeMap<String, background_shell::BackgroundShell>,
+    completed_shells: BTreeMap<String, crate::providers::EffectOutcome>,
+    cognition_source: Option<CognitionSource>,
+}
+struct CognitionSource {
+    revision: String,
+    content_revision: u64,
 }
 impl Host<'_> {
     async fn publish(&mut self, event: ConversationEvent<'_>) -> Result<(), HostError> {
-        if let Some(output) = &mut self.output {
-            output.publish(event).await?;
+        if let Some(output) = self.output.take() {
+            let result = if self.background_shells.is_empty() {
+                output.publish(event).await
+            } else {
+                self.wait_owned(output.publish(event)).await.and_then(|r| r)
+            };
+            self.output = Some(output);
+            result?;
         }
         Ok(())
     }
@@ -496,13 +515,17 @@ impl Host<'_> {
         Ok(())
     }
     fn source_current(&self) -> Result<(), HostError> {
+        self.source_matches(
+            &self.expected.source_revision,
+            self.expected.history.content_revision,
+        )
+    }
+    fn source_matches(&self, revision: &str, content_revision: u64) -> Result<(), HostError> {
         self.authority()?;
         let fresh =
             self.store
                 .read_committed(&self.identity.conversation_id, None, 8 * 1024 * 1024)?;
-        if fresh.source_revision != self.expected.source_revision
-            || fresh.history.content_revision != self.expected.history.content_revision
-        {
+        if fresh.source_revision != revision || fresh.history.content_revision != content_revision {
             return Err(HostError("CONTEXT_SNAPSHOT_CHANGED"));
         }
         Ok(())
@@ -536,7 +559,10 @@ impl Host<'_> {
         loop {
             tokio::select! {biased;
                 _=self.external.cancelled(),if stopped.is_none()=>{self.owned.cancel();stopped=Some(HostError("CANCELLED"));},
-                _=tick.tick(),if stopped.is_none()=>{if let Err(e)=self.authority(){self.owned.cancel();stopped=Some(e);}},
+                _=tick.tick(),if stopped.is_none()=>{
+                    self.check_background_shells();
+                    if let Err(e)=self.authority(){self.owned.cancel();stopped=Some(e);}
+                },
                 result=&mut future=>return match stopped {Some(e)=>Err(e),None=>Ok(result)},
             }
         }
@@ -563,6 +589,7 @@ impl Host<'_> {
             closing?;
             closed?;
             drained.map_err(|_| HostError("native_execution_stop_unproven"))?;
+            self.reap_background_shells(false).await?;
             for (handle, _, state) in self
                 .live
                 .handle_observations(&self.identity)
@@ -688,6 +715,22 @@ impl CognitionHost for Host<'_> {
         }
         Ok(Some(receipt))
     }
+    fn advance_owned_source(
+        &mut self,
+        previous: &str,
+        revision: &str,
+        content_revision: u64,
+    ) -> Result<(), HostError> {
+        if let Some(current) = &mut self.cognition_source {
+            if current.revision != previous {
+                self.owned.cancel();
+                return Err(HostError("CONTEXT_SNAPSHOT_CHANGED"));
+            }
+            current.revision = revision.into();
+            current.content_revision = content_revision;
+        }
+        Ok(())
+    }
     async fn wait<F: std::future::Future>(
         &mut self,
         future: F,
@@ -711,6 +754,10 @@ impl crate::turn_loop::TurnHost for Host<'_> {
         let tools = self.projection.definitions();
         let owned = self.owned.clone();
         let external = self.external.clone();
+        self.cognition_source = (!self.background_shells.is_empty()).then(|| CognitionSource {
+            revision: self.expected.source_revision.clone(),
+            content_revision: self.expected.history.content_revision,
+        });
         let response = pipeline
             .request(
                 self,
@@ -724,6 +771,7 @@ impl crate::turn_loop::TurnHost for Host<'_> {
                 &mut usage,
             )
             .await;
+        self.cognition_source = None;
         self.pipeline = Some(pipeline);
         self.usage = usage;
         let response = response?;

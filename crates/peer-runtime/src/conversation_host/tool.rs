@@ -10,6 +10,7 @@ use peer_store::{EvidenceIndexStore, HostToolEvidence};
 impl Host<'_> {
     pub(super) async fn tool(&mut self, call: ModelToolCall) -> Result<String, HostError> {
         self.source_current()?;
+        self.reap_background_shells(true).await?;
         let effect = self.providers.prepare(
             &self.projection,
             &call.name,
@@ -106,7 +107,7 @@ impl Host<'_> {
         }
         #[cfg(feature = "test-fixtures")]
         super::fixture_fault(&self.home, "after_grant");
-        let (outcome, interrupted) = if grant.facts["granted"] == true {
+        let (outcome, interrupted, background) = if grant.facts["granted"] == true {
             let receipt =
                 self.store
                     .dispatch_conversation_tool(&mut self.run, &call_id, &now(), None)?;
@@ -144,6 +145,7 @@ impl Host<'_> {
                     not_dispatched: true,
                 },
                 None,
+                false,
             )
         };
         #[cfg(feature = "test-fixtures")]
@@ -186,7 +188,7 @@ impl Host<'_> {
         let mut hook_interrupted = None;
         let mut hook_unproven = None;
         if grant.facts["granted"] == true
-            && outcome.ended
+            && (outcome.ended || background)
             && !outcome.not_dispatched
             && interrupted.is_none()
             && !self.owned.is_cancelled()
@@ -216,14 +218,38 @@ impl Host<'_> {
         // Effect completion has already been observed. Content publication is a
         // separately owned task; caller cancellation cannot discard its result.
         let task = tokio::task::spawn_blocking(move || {
-            archive(
+            let shell_start = background.then(|| {
+                [
+                    "taskId",
+                    "backgroundTaskId",
+                    "toolCallId",
+                    "status",
+                    "startedAt",
+                    "timeoutMs",
+                    "artifactRef",
+                    "artifactRefs",
+                ]
+                .into_iter()
+                .map(|key| (key.to_owned(), result["output"][key].clone()))
+                .collect::<serde_json::Map<String, Value>>()
+            });
+            let mut result = archive(
                 &home,
                 &conversation,
                 result,
                 kind,
                 ArchivePolicy::LargeOnly,
                 &CancellationToken::new(),
-            )
+            )?;
+            if let Some(start) = shell_start
+                && result["output"]["nativeContentRef"].is_object()
+            {
+                result["output"]
+                    .as_object_mut()
+                    .ok_or("artifact_invalid")?
+                    .extend(start);
+            }
+            Ok::<_, &'static str>(result)
         });
         let result = task
             .await
@@ -257,6 +283,18 @@ impl Host<'_> {
         )?;
         if let Some(error) = hook_unproven {
             return Err(error);
+        }
+        if background {
+            self.acknowledge_background_start(&call_id)?;
+            self.publish(ConversationEvent::ToolSettled {
+                call_id: &call_id,
+                status: outcome.status,
+            })
+            .await?;
+            if let Some(error) = hook_interrupted.or(grant.terminal) {
+                return Err(error);
+            }
+            return Ok(call_id);
         }
         if !outcome.ended || outcome.error == Some("execution_outcome_unknown") {
             return Err(HostError("execution_outcome_unknown"));

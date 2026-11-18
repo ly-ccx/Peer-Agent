@@ -53,6 +53,47 @@ add('hook-observed-end-requires-a-receipt',r=>{hookRun(r,'observed');delete r.ha
 add('hook-recovery-cannot-invent-observed-decision',r=>{hookRun(r,'unknown');r.handles[0].metadata.nativeHook.observation=hookObservation;},false);
 add('hook-observation-must-match-rule',r=>{hookRun(r,'observed');r.handles[0].metadata.nativeHook.observation.ruleDigest='2'.repeat(64);},false);
 add('hook-cannot-retain-raw-stdout',r=>{hookRun(r,'observed');r.handles[0].metadata.nativeHook.observation.stdout='unexpected';},false);
+function shellRun(r: any, state: 'not_started'|'starting'|'running'|'ended') {
+  const process = {...commandProcess, handleId:'shell_12345678-1234-4abc-8def-123456789012', state,
+    generation:state==='not_started'?0:1,
+    ...(state==='running'||state==='ended'?{child:{...owner,pid:102}}:{}),
+    ...(state==='ended'?{stopObservation:'owner_dead_group_absent'}:{})};
+  r.pendingTools=[{...pending,capabilityId:'local.shell.exec',nativeProcess:structuredClone(process)}];
+  r.handles=[{handleId:process.handleId,toolCallId:process.toolCallId,state:state==='ended'?'ended':'active',
+    metadata:{kind:'shell_background',nativeShell:{schemaVersion:1,process:structuredClone(process)}}}];
+}
+add('background-shell-registered-before-spawn',r=>shellRun(r,'not_started'));
+add('background-shell-starting-keeps-the-dispatch',r=>shellRun(r,'starting'));
+add('background-shell-running-keeps-exact-child',r=>shellRun(r,'running'));
+add('background-shell-can-coexist-with-other-original-dispatches',r=>{
+  shellRun(r,'running');
+  const first=r.handles[0], second=structuredClone(first);
+  const p=second.metadata.nativeShell.process;
+  p.handleId=second.handleId='shell_12345678-1234-4abc-8def-123456789013';
+  p.toolCallId=second.toolCallId='background-second-call';
+  p.dispatchId='background-second-dispatch';
+  p.child.pid=103;
+  r.handles.push(second);
+  r.pendingTools.push({...r.pendingTools[0],toolCallId:p.toolCallId,dispatchId:p.dispatchId,
+    messageId:'background-second-message',nativeProcess:structuredClone(p)});
+  r.pendingTools.push({...pending,toolCallId:'new-tool-call',dispatchId:'new-tool-dispatch',messageId:'new-tool-message',phase:'prepared'});
+});
+add('background-shell-null-optional-process-fields-roundtrip',r=>{
+  shellRun(r,'starting');r.handles[0].metadata.nativeShell.process.child=null;r.pendingTools[0].nativeProcess.stopObservation=null;
+});
+add('background-shell-group-ended-retains-unknown',r=>{
+  shellRun(r,'ended');r.phase='recovery_required';r.stop=stop;r.pendingTools[0].phase='outcome_unknown';
+});
+add('background-shell-rejects-foreign-run',r=>{shellRun(r,'running');r.handles[0].metadata.nativeShell.process.execution={...identity,streamId:'other'};},false);
+add('background-shell-rejects-unrelated-claim',r=>{shellRun(r,'starting');r.pendingTools[0].capabilityId='local.file.read';},false);
+add('background-shell-requires-original-dispatch',r=>{shellRun(r,'running');r.pendingTools=[];},false);
+add('background-shell-rejects-own-host-as-child',r=>{
+  shellRun(r,'running');r.handles[0].metadata.nativeShell.process.child={...owner};r.pendingTools[0].nativeProcess.child={...owner};
+},false);
+add('background-shell-mirror-must-advance-with-process',r=>{
+  shellRun(r,'running');r.pendingTools[0].nativeProcess.child.pid=103;
+},false);
+add('background-shell-future-version-blocks',r=>{shellRun(r,'running');r.handles[0].metadata.nativeShell.schemaVersion=2;},false);
 for (const [name,modify] of [
  ['future-schema',(r:any)=>{r.schemaVersion=2;}],['extra-root',(r:any)=>{r.extra=true;}],
  ['fake-goal',(r:any)=>{r.identity={planId:'p',sessionId:'s',executionEpoch:'e',generation:'g',goalRevision:1};}],

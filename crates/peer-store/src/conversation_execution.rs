@@ -9,10 +9,11 @@ use peer_protocol::{
     ConversationDispatchPhase as DispatchPhase, ConversationExecution,
     ConversationExecutionIdentity, ConversationExecutionPhase as Phase, ConversationPendingTool,
     ConversationStopObservation, NativeOwnedProcess, NativeProcessRecorder, RuntimeTurnUsage,
-    normalize_conversation_execution,
+    background_shell_handle, normalize_conversation_execution,
 };
 use serde_json::Value;
 use std::{path::PathBuf, sync::atomic::AtomicBool};
+mod background_shell;
 mod hooks;
 pub use hooks::{ConversationHookRecord, conversation_hook_observation, conversation_hook_process};
 mod recovery;
@@ -464,11 +465,14 @@ impl ConversationStore {
         at: &str,
         cancel: Option<&AtomicBool>,
     ) -> Result<ConversationMetadataPublication, StoreError> {
-        self.mutate_execution(token, at, cancel, |run, _| {
+        let evidence = crate::EvidenceIndexStore::new(
+            token.directory.parent().ok_or(StoreError::InvalidInput)?,
+        );
+        self.mutate_execution(token, at, cancel, |run, history| {
             if run.phase != Phase::Active
                 || call.phase != DispatchPhase::Prepared
                 || call.native_process.is_some()
-                || !run.pending_tools.is_empty()
+                || !background_shell::shall_allow_next_tool(run, history, &evidence, cancel)?
             {
                 return Err(StoreError::ExecutionBusy);
             }
@@ -550,6 +554,7 @@ impl ConversationStore {
                 return Err(StoreError::ExecutionChanged);
             }
             call.native_process = Some(process.clone());
+            update_background_shell_mirror(run, process);
             Ok(())
         })
     }
@@ -688,6 +693,21 @@ impl ConversationStore {
                                 .is_some_and(|records| records.contains(expected))
                         });
                     }
+                    if let Some(process) = peer_protocol::background_shell_process(h) {
+                        let mut startup = process.clone();
+                        startup.state = peer_protocol::NativeProcessState::Running;
+                        startup.stop_observation = None;
+                        return pending.native_process.as_ref() != Some(&process)
+                            || process.state != peer_protocol::NativeProcessState::Ended
+                            || segment["args"]["background"] != true
+                            || result["status"] != "success"
+                            || serde_json::from_value::<NativeOwnedProcess>(
+                                result["evidence"]["nativeProcess"].clone(),
+                            )
+                            .ok()
+                            .as_ref()
+                                != Some(&startup);
+                    }
                     let n = &h["metadata"]["nativeMcp"];
                     !(pending.capability_id.starts_with("local.mcp.")
                         && h["metadata"]["kind"] == "mcp_connection"
@@ -723,8 +743,11 @@ impl ConversationStore {
             }) {
                 return Err(StoreError::EvidenceInvalid);
             }
-            run.handles
-                .retain(|handle| handle["toolCallId"] != call_id || !hooks::hook_handle(handle));
+            run.handles.retain(|handle| {
+                handle["toolCallId"] != call_id
+                    || !(hooks::hook_handle(handle)
+                        || peer_protocol::background_shell_process(handle).is_some())
+            });
             run.pending_tools.remove(i);
             if run.stop.is_some()
                 && run.pending_tools.is_empty()
@@ -850,5 +873,14 @@ impl ConversationStore {
             }
             Ok(())
         })
+    }
+}
+fn update_background_shell_mirror(run: &mut ConversationExecution, process: &NativeOwnedProcess) {
+    if let Some(handle) = run.handles.iter_mut().find(|h| {
+        h["metadata"]["kind"] == "shell_background"
+            && h["handleId"] == process.handle_id
+            && h["toolCallId"] == process.tool_call_id
+    }) {
+        *handle = background_shell_handle(process);
     }
 }

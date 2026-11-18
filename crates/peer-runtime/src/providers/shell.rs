@@ -2,11 +2,14 @@ use super::*;
 use peer_store::ShellArtifacts;
 use std::{process::Stdio, time::Duration};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
-pub(super) struct ShellProvider;
+pub(super) struct ShellProvider {
+    pub(super) background: bool,
+}
 struct ShellEffect {
     args: Value,
     cwd: PathBuf,
     command: String,
+    background: bool,
     timeout: Duration,
     handle: String,
     home: PathBuf,
@@ -15,10 +18,22 @@ struct ShellEffect {
 }
 impl CapabilityProvider for ShellProvider {
     fn manifests(&self) -> Vec<(String, Value)> {
-        vec![(
+        let description = if self.background {
+            "Run a bounded foreground or background shell command with governed approval. Use shell_stop with the returned task ID to stop a background command."
+        } else {
+            "Run a bounded foreground shell command in the active workspace with governed approval."
+        };
+        let mut manifests = vec![(
             "bash".into(),
-            json!({"capabilityId":"local.shell.exec","displayName":"Run shell command","description":"Run a bounded foreground shell command in the active workspace with governed approval. This native migration adapter starts a fresh shell per call; background and persistent shell sessions are unavailable.","riskLevel":"L3_sensitive","modeScopes":["chat","goal"],"inputSchema":{"type":"object","properties":{"command":{"type":"string"},"cwd":{"type":"string"},"timeoutMs":{"type":"number"},"background":{"type":"boolean"}},"required":["command"],"additionalProperties":false}}),
-        )]
+            json!({"capabilityId":"local.shell.exec","displayName":"Run shell command","description":description,"riskLevel":"L3_sensitive","modeScopes":["chat","goal"],"inputSchema":{"type":"object","properties":{"command":{"type":"string"},"cwd":{"type":"string"},"timeoutMs":{"type":"number"},"background":{"type":"boolean"}},"required":["command"],"additionalProperties":false}}),
+        )];
+        if self.background {
+            manifests.push((
+                "shell_stop".into(),
+                json!({"capabilityId":"local.shell.stop","displayName":"Stop shell task","description":"Stop a background shell task owned by this execution using its opaque task ID.","riskLevel":"L2_low_write","modeScopes":["chat","goal"],"inputSchema":{"type":"object","properties":{"taskId":{"type":"string","minLength":43,"maxLength":43},"reason":{"type":"string"}},"required":["taskId"],"additionalProperties":false}}),
+            ));
+        }
+        manifests
     }
     fn prepare(
         &mut self,
@@ -27,11 +42,19 @@ impl CapabilityProvider for ShellProvider {
         workspace: &Path,
         home: &Path,
     ) -> Result<Box<dyn PreparedEffect>, HostError> {
+        if self.background && capability == "local.shell.stop" {
+            return ShellStop::prepare(args, workspace);
+        }
         if capability != "local.shell.exec" {
             return Err(HostError("tool_not_projected"));
         }
         validate_shape(&args, &["command", "cwd", "timeoutMs", "background"])?;
-        if args.get("background").is_some_and(|v| v != false) {
+        let background = args
+            .get("background")
+            .map(|value| value.as_bool().ok_or(HostError("invalid_background")))
+            .transpose()?
+            .unwrap_or(false);
+        if background && !self.background {
             return Err(HostError("native_background_shell_unsupported"));
         }
         let command = string(&args, "command")?.trim().to_owned();
@@ -60,6 +83,7 @@ impl CapabilityProvider for ShellProvider {
             args,
             cwd,
             command,
+            background,
             timeout: Duration::from_millis(timeout),
             handle: format!("shell_{}", uuid::Uuid::new_v4()),
             home: home.into(),
@@ -89,6 +113,9 @@ impl PreparedEffect for ShellEffect {
     }
     fn owned_command(&self) -> bool {
         true
+    }
+    fn background_shell(&self) -> bool {
+        self.background
     }
     fn start(
         mut self: Box<Self>,
@@ -170,7 +197,31 @@ impl ShellEffect {
             }
         };
         let pid = child.id().expect("newly spawned child has a PID");
-        if let Err(error) = port.command_started(pid).await {
+        let registered = async {
+            port.command_started(pid).await?;
+            if !self.background {
+                return Ok(());
+            }
+            let reference = format!("local-shell-artifact://{}", self.handle);
+            let artifacts = artifact_refs(&reference);
+            port.background_shell_started(EffectOutcome {
+                status: "success",
+                output: json!({
+                    "taskId":self.handle, "backgroundTaskId":self.handle,
+                    "toolCallId":call.tool_call_id(), "command":self.command, "cwd":self.cwd,
+                    "status":"running", "startedAt":now, "timeoutMs":self.timeout.as_millis(),
+                    "artifactRef":reference, "artifactRefs":artifacts,
+                }),
+                error: None,
+                artifacts,
+                ended: false,
+                materialization: None,
+                not_dispatched: false,
+            })
+            .await
+        }
+        .await;
+        if let Err(error) = registered {
             let ended = terminate(&mut child, pid).await;
             let mut outcome = EffectOutcome::failed(if ended {
                 error.0
@@ -209,7 +260,7 @@ impl ShellEffect {
             loop {
                 tokio::select! { biased;
                     _ = cancel.cancelled() => break Err("CANCELLED"),
-                    _ = tick.tick() => if let Err(error) = port.check().await { break Err(error.0) },
+                    _ = tick.tick(), if !self.background => if let Err(error) = port.check().await { break Err(error.0) },
                     result = &mut completion => break result.unwrap_or(Err("shell_timeout")),
                 }
             }
@@ -249,6 +300,7 @@ impl ShellEffect {
                 failed.output = json!({
                     "taskId": self.handle, "timedOut": reason == "shell_timeout",
                     "cancelled": reason == "CANCELLED", "interrupted": true, "stopReason": reason,
+                    "stdout":out.preview(), "stderr":err.preview(), "exitCode":null,
                 });
                 failed
             }
@@ -271,11 +323,82 @@ impl ShellEffect {
             return Ok(outcome);
         }
         let reference = format!("local-shell-artifact://{}", self.handle);
-        outcome.artifacts = ["stdout", "stderr", "metadata"]
-            .into_iter()
-            .map(|name| format!("{reference}/{name}"))
-            .collect();
+        outcome.artifacts = artifact_refs(&reference);
         Ok(outcome)
+    }
+}
+
+fn artifact_refs(reference: &str) -> Vec<String> {
+    ["stdout", "stderr", "metadata"]
+        .into_iter()
+        .map(|name| format!("{reference}/{name}"))
+        .collect()
+}
+
+struct ShellStop {
+    args: Value,
+    task_id: String,
+    workspace: PathBuf,
+    port: Option<EffectAdmission>,
+}
+
+impl ShellStop {
+    fn prepare(args: Value, workspace: &Path) -> Result<Box<dyn PreparedEffect>, HostError> {
+        validate_shape(&args, &["taskId", "reason"])?;
+        let task_id = string(&args, "taskId")?.trim();
+        if !peer_protocol::shell_task_id_valid(task_id) {
+            return Err(HostError("invalid_task_id"));
+        }
+        if args
+            .get("reason")
+            .is_some_and(|reason| reason.as_str().is_none_or(|reason| reason.len() > 512))
+        {
+            return Err(HostError("invalid_stop_reason"));
+        }
+        Ok(Box::new(Self {
+            task_id: task_id.into(),
+            args,
+            workspace: workspace.into(),
+            port: None,
+        }))
+    }
+}
+
+impl PreparedEffect for ShellStop {
+    fn admission(&mut self, port: EffectAdmission) {
+        self.port = Some(port);
+    }
+    fn args(&self) -> &Value {
+        &self.args
+    }
+    fn permission(&self) -> ProviderPermission {
+        ProviderPermission::ShellStop
+    }
+    fn scopes(&self) -> Result<Vec<ExecutionResourceScope>, HostError> {
+        peer_store::provider_execution_scopes(&self.workspace).map_err(Into::into)
+    }
+    fn start(
+        mut self: Box<Self>,
+        _: ProviderCall,
+        _: CancellationToken,
+    ) -> Result<EffectFuture, HostError> {
+        let port = self
+            .port
+            .take()
+            .ok_or(HostError("execution_admission_closed"))?;
+        Ok(Box::pin(async move {
+            port.stop_background_shell(self.task_id)
+                .await
+                .unwrap_or_else(|error| {
+                    if error.0 == "execution_outcome_unknown" {
+                        let mut outcome = EffectOutcome::failed(error.0);
+                        outcome.ended = false;
+                        outcome
+                    } else {
+                        EffectOutcome::not_dispatched(error.0)
+                    }
+                })
+        }))
     }
 }
 
@@ -377,7 +500,7 @@ mod tests {
     async fn cancellation_at_durable_starting_is_cancelled_without_spawn_and_seals_its_artifact() {
         let root = tempfile::tempdir().unwrap();
         let workspace = tempfile::tempdir().unwrap();
-        let mut effect = ShellProvider
+        let mut effect = ShellProvider { background: false }
             .prepare(
                 "local.shell.exec",
                 json!({"command":"printf forbidden > should-not-exist"}),

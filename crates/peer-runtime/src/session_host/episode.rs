@@ -214,6 +214,7 @@ impl NativeSessionHost {
             &self.home,
             mcp_credentials.clone(),
             skills.clone(),
+            false,
         )?;
         let projection = if current.resource.read_only {
             providers.project_read_only()?

@@ -35,6 +35,12 @@ fn stream(kind: &str) -> String {
         .into()
 }
 fn server(streams: Vec<String>) -> (String, std::thread::JoinHandle<Vec<Value>>) {
+    server_with_reply_gate(streams, |_| {})
+}
+fn server_with_reply_gate(
+    streams: Vec<String>,
+    mut before_reply: impl FnMut(usize) + Send + 'static,
+) -> (String, std::thread::JoinHandle<Vec<Value>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let endpoint = format!(
         "http://{}/v1/chat/completions",
@@ -94,6 +100,7 @@ fn server(streams: Vec<String>) -> (String, std::thread::JoinHandle<Vec<Value>>)
             let mut bytes = vec![0; n];
             socket.read_exact(&mut bytes).unwrap();
             requests.push(serde_json::from_slice(&bytes).unwrap());
+            before_reply(request_index);
             write!(socket,"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
         }
         requests
@@ -169,6 +176,83 @@ fn canonical_tool(root: &Path, conversation: &str) -> Value {
         })
         .expect("actual canonical tool intent")
 }
+
+#[tokio::test]
+async fn original_grant_revocation_stops_background_shell_during_the_next_model_request() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    let conversation = create_conversation(root.path(), workspace.path());
+    let (continued, observed) = std::sync::mpsc::channel();
+    let (reply, paused) = std::sync::mpsc::channel();
+    let (endpoint, served) = server_with_reply_gate(
+        vec![
+            tool_stream(
+                "bash",
+                json!({"command":"exec /bin/sleep 20","background":true,"timeoutMs":15000}),
+            ),
+            stream("text"),
+        ],
+        move |index| {
+            if index == 1 {
+                continued.send(()).unwrap();
+                paused.recv_timeout(Duration::from_secs(4)).unwrap();
+            }
+        },
+    );
+    let first_model = model(endpoint);
+    let access = ConversationAccess::new(LocalAccessLevel::FullLocal);
+    let runtime = NativeConversationRuntime::new(root.path(), access.clone());
+    let cancel = CancellationToken::new();
+    let options = ConversationOptions {
+        workspace: workspace.path(),
+        conversation_id: Some(&conversation),
+        prompt: "Launch one bounded background operation",
+        image_paths: &[],
+        provider_id: "fixture",
+        mode: RuntimeMode::Chat,
+        effort: "default",
+        persist_model_selection: false,
+        allowlist: None,
+        max_turns: None,
+    };
+    let mut permission = NoInput;
+    let run = runtime.execute(&options, &first_model, &mut permission, &cancel);
+    let revoke = async {
+        tokio::task::spawn_blocking(move || observed.recv_timeout(Duration::from_secs(4)))
+            .await
+            .unwrap()
+            .unwrap();
+        let child = running_child(root.path(), &conversation).await;
+        let saved = canonical_tool(root.path(), &conversation);
+        assert_eq!(
+            saved["segments"][0]["result"]["output"]["status"],
+            "running"
+        );
+        tokio::time::sleep(Duration::from_millis(350)).await;
+        assert!(!crate::providers::group_absent(child.pid));
+        access.set(LocalAccessLevel::AskBeforeLocal).unwrap();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !crate::providers::group_absent(child.pid) {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        reply.send(()).unwrap();
+        saved
+    };
+    let (outcome, saved) = tokio::join!(run, revoke);
+    assert!(outcome.unwrap().error.is_none());
+    assert_eq!(served.join().unwrap().len(), 2);
+    let store = ConversationStore::new(root.path());
+    let settled = store
+        .read_conversation_execution(&conversation)
+        .unwrap()
+        .unwrap();
+    assert!(settled.permits_new_run() && settled.handles.is_empty());
+    assert_eq!(canonical_tool(root.path(), &conversation), saved);
+}
+
 #[derive(Clone, Copy, Debug)]
 enum Interruption {
     Cancel,

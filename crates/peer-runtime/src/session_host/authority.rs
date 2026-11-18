@@ -157,6 +157,9 @@ impl NativeSessionHost {
             ProviderPermission::Read => "",
             ProviderPermission::FileWrite => "file-write",
             ProviderPermission::Shell => "shell",
+            ProviderPermission::ShellStop => {
+                return Err(HostError("native_background_shell_unsupported"));
+            }
             ProviderPermission::Mcp => "mcp-tool",
         };
         let mode = crate::access_policy::evaluate_project_agent_turn(
@@ -633,7 +636,7 @@ impl NativeSessionHost {
         if admitted && scope.is_none() {
             return Err(HostError("read_scope_invalid"));
         }
-        let prompt = json!({"confirmation":{"kind":"capability-approval","approvalKind":match call.permission{ProviderPermission::Read|ProviderPermission::Mcp=>"other",ProviderPermission::FileWrite=>"file-write",ProviderPermission::Shell=>"shell-exec"}},"riskLevel":call.shell_risk.map(HostShellRisk::as_str)});
+        let prompt = json!({"confirmation":{"kind":"capability-approval","approvalKind":match call.permission{ProviderPermission::Read|ProviderPermission::Mcp=>"other",ProviderPermission::FileWrite=>"file-write",ProviderPermission::Shell=>"shell-exec",ProviderPermission::ShellStop=>return Err(HostError("native_background_shell_unsupported"))}},"riskLevel":call.shell_risk.map(HostShellRisk::as_str)});
         let Some(decision) = (if admitted {
             Some(json!({"reason":"admitted_read_root"}))
         } else {

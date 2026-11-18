@@ -50,6 +50,35 @@ const amountKeys = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWrit
 const identity = (v: unknown): v is ConversationExecutionIdentity => object(v)
   && Object.keys(v).length === 3 && keys(v, ['kind', 'conversationId', 'streamId']) && v.kind === 'conversation'
   && typeof v.conversationId === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(v.conversationId) && text(v.streamId, 200);
+function equalsRecord(a: unknown, b: unknown): boolean {
+  if (!object(a) || !object(b)) return a === b;
+  const fields = Object.keys(a);
+  return fields.length === Object.keys(b).length && fields.every(k => Object.hasOwn(b, k) && equalsRecord(a[k], b[k]));
+}
+function validBackgroundShellHandle(
+  h: Record<string, unknown>, metadata: Record<string, unknown>, run: Record<string, unknown>,
+  runIdentity: ConversationExecutionIdentity, owner: Recorder, pending: readonly unknown[],
+): boolean {
+  const shell = metadata.nativeShell;
+  if (run.engine !== 'peer-native' || Object.keys(metadata).length !== 2 || !object(shell)
+    || Object.keys(shell).length !== 2 || shell.schemaVersion !== 1) return false;
+  const process = shell.process;
+  if (!object(process) || !nativeProcessEnvelopeValid(process) || !recorder(process.owner) || !sameRecorder(process.owner, owner)
+    || !identity(process.execution) || !equalsRecord(process.execution, runIdentity)
+    || typeof process.handleId !== 'string' || !/^shell_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(process.handleId)
+    || !process.handleId.startsWith('shell_') || (process.generation as number) > 1
+    || process.child != null && (!recorder(process.child) || process.child.pid === owner.pid)
+    || h.handleId !== process.handleId || h.toolCallId !== process.toolCallId
+    || h.state !== (process.state === 'ended' ? 'ended' : 'active')) return false;
+  return pending.some(call => {
+    if (!object(call) || !object(call.nativeProcess) || call.toolCallId !== process.toolCallId || call.dispatchId !== process.dispatchId
+      || call.capabilityId !== 'local.shell.exec' || call.phase === 'prepared') return false;
+    const comparable = (value: Record<string, unknown>) => ({
+      ...value, child: value.child ?? null, stopObservation: value.stopObservation ?? null,
+    });
+    return equalsRecord(comparable(call.nativeProcess), comparable(process));
+  });
+}
 function validHookHandle(
   h: Record<string, unknown>, metadata: Record<string, unknown>,
   runIdentity: ConversationExecutionIdentity, owner: Recorder, pending: readonly unknown[],
@@ -128,6 +157,7 @@ export function normalizeConversationExecution(raw: unknown): ConversationExecut
       || !text(h.handleId, 512) || handles.has(h.handleId) || !text(h.toolCallId, 200) || !object(h.metadata)
       || !['active', 'ended'].some(v => v === h.state) || raw.phase === 'stopped' && h.state !== 'ended') return invalid();
     if (h.metadata.kind === 'hook' && !validHookHandle(h, h.metadata, raw.identity, raw.owner, raw.pendingTools)) return invalid();
+    if (h.metadata.kind === 'shell_background' && !validBackgroundShellHandle(h, h.metadata, raw, raw.identity, raw.owner, raw.pendingTools)) return invalid();
     handles.add(h.handleId);
   }
   return structuredClone(raw) as unknown as ConversationExecution;

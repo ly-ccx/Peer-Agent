@@ -231,6 +231,163 @@ fn native_acp_two_prompts_keep_permission_and_conversation_isolated() {
 }
 
 #[test]
+fn native_acp_eof_after_background_start_reaps_the_published_task_and_keeps_evidence() {
+    let root = tempfile::tempdir().unwrap();
+    let (continuation, entered) = mpsc::channel();
+    let (release, paused) = mpsc::channel();
+    let mut turn = 0;
+    let server = Server::scripted(
+        move |request| {
+            turn += 1;
+            match turn {
+                1 => reply_tool(
+                    "bash",
+                    json!({
+                        "command":"printf ready; exec /bin/sleep 20", "background":true, "timeoutMs":15000,
+                    }),
+                ),
+                2 => {
+                    assert!(request.to_string().contains("backgroundTaskId"));
+                    continuation.send(()).unwrap();
+                    let _ = paused.recv_timeout(Duration::from_secs(10));
+                    "FIXTURE_CLOSE_WITHOUT_HEADERS".into()
+                }
+                _ => panic!("unexpected ACP cognition"),
+            }
+        },
+        false,
+        false,
+        vec![],
+    );
+    let mut client = Client::start(root.path(), &server);
+    client.request(1, "initialize", json!({"protocolVersion":1}));
+    let session = client.create(2, root.path());
+    client.prompt(3, &session, "Launch one bounded background command");
+    let call = loop {
+        let message = client.next();
+        if message["method"] == "session/request_permission" {
+            client.send(json!({"id":message["id"],"result":{
+                "outcome":{"outcome":"selected","optionId":"allow-once"}
+            }}));
+        }
+        let update = &message["params"]["update"];
+        if update["sessionUpdate"] == "tool_call_update" && update["status"] == "completed" {
+            break update["toolCallId"].as_str().unwrap().to_owned();
+        }
+    };
+    entered.recv_timeout(Duration::from_secs(6)).unwrap();
+    let home = root.path().join("data");
+    let store = peer_store::ConversationStore::new(&home);
+    let index = get(home.join("conversations/index.jsonl"));
+    let conversation = index["id"].as_str().unwrap();
+    let run = store
+        .read_conversation_execution(conversation)
+        .unwrap()
+        .unwrap();
+    let process = run
+        .handles
+        .iter()
+        .find_map(peer_protocol::background_shell_process)
+        .unwrap();
+    assert_eq!(process.tool_call_id, call);
+    let pid = rustix::process::Pid::from_raw(process.child.unwrap().pid as i32).unwrap();
+    assert!(rustix::process::test_kill_process(pid).is_ok());
+    client.finish();
+    let _ = release.send(());
+    assert_eq!(
+        rustix::process::test_kill_process_group(pid),
+        Err(rustix::io::Errno::SRCH)
+    );
+    let run = store
+        .read_conversation_execution(conversation)
+        .unwrap()
+        .unwrap();
+    assert!(run.permits_new_run() && run.usage_committed && run.handles.is_empty());
+    let evidence = peer_store::EvidenceIndexStore::new(home)
+        .find(&[format!("tool-result://{call}")], None)
+        .unwrap();
+    assert_eq!(evidence[0]["capabilityId"], "local.shell.exec");
+}
+
+#[test]
+fn native_acp_shell_stop_records_a_same_scope_grant_without_another_prompt() {
+    let root = tempfile::tempdir().unwrap();
+    let mut turn = 0;
+    let server = Server::scripted(
+        move |request| {
+            turn += 1;
+            match turn {
+                1 => reply_tool(
+                    "bash",
+                    json!({
+                        "command":"exec /bin/sleep 20", "background":true, "timeoutMs":15000,
+                    }),
+                ),
+                2 => {
+                    let message = request["messages"].as_array().unwrap().last().unwrap();
+                    assert_eq!(message["role"], "tool");
+                    let startup: Value =
+                        serde_json::from_str(message["content"].as_str().unwrap()).unwrap();
+                    assert_eq!(startup["output"]["status"], "running");
+                    reply_tool("shell_stop", json!({"taskId":startup["output"]["taskId"]}))
+                }
+                3 => reply_text("Stopped as requested."),
+                _ => panic!("unexpected ACP cognition"),
+            }
+        },
+        false,
+        false,
+        vec![],
+    );
+    let mut client = Client::start(root.path(), &server);
+    client.request(1, "initialize", json!({"protocolVersion":1}));
+    let session = client.create(2, root.path());
+    client.prompt(3, &session, "Exercise same-scope Shell stop");
+    let mut approvals = 0;
+    loop {
+        let message = client.next();
+        if message["id"] == 3 {
+            assert_eq!(message["result"]["stopReason"], "end_turn", "{message}");
+            break;
+        }
+        if message["method"] == "session/request_permission" {
+            approvals += 1;
+            client.send(json!({"id":message["id"],"result":{
+                "outcome":{"outcome":"selected","optionId":"allow-once"}
+            }}));
+        }
+    }
+    client.finish();
+    assert_eq!(approvals, 1);
+    let home = root.path().join("data");
+    let row = get(home.join("conversations/index.jsonl"));
+    let conversation = row["id"].as_str().unwrap();
+    let store = peer_store::ConversationStore::new(&home);
+    let snapshot = store
+        .read_committed(conversation, None, 8 * 1024 * 1024)
+        .unwrap();
+    let stopped = snapshot
+        .history
+        .messages
+        .iter()
+        .find(|message| message["segments"][0]["tool"] == "shell_stop")
+        .unwrap();
+    let result = &stopped["segments"][0]["result"];
+    assert_eq!(
+        stopped["permissionGrants"][0]["reason"],
+        "shell_task_stop_same_scope"
+    );
+    assert_eq!(result["output"]["stopped"], true);
+    assert!(
+        store
+            .read_conversation_execution(conversation)
+            .unwrap()
+            .unwrap()
+            .permits_new_run()
+    );
+}
+
+#[test]
 fn native_acp_eof_at_approval_stops_original_run_without_tool_effect() {
     let root = tempfile::tempdir().unwrap();
     let server = Server::new(vec![reply_tool(

@@ -713,8 +713,59 @@ fn fixture_ordinary_recovery_prepared_grant_result_and_billing_crash_windows() {
 
 #[test]
 fn public_ordinary_recovery_stops_only_recorded_shell_after_actual_owner_kill() {
+    recovery_retains_shell_outcome_unknown(false);
+}
+
+#[test]
+fn public_ordinary_recovery_reaps_a_background_shell_handle_and_keeps_unknown_effect() {
+    recovery_retains_shell_outcome_unknown(true);
+}
+
+struct RecoverOwnedShellFixture<'a> {
+    fixture: &'a Ordinary,
+    id: &'a str,
+    armed: bool,
+}
+
+impl Drop for RecoverOwnedShellFixture<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = recovery_command(self.fixture, self.id).output();
+        }
+    }
+}
+
+fn recovery_retains_shell_outcome_unknown(background_mirror: bool) {
     let fixture = Ordinary::new();
-    let server = Server::new(vec![reply_tool("bash", json!({"command":"/bin/sleep 60"}))]);
+    let (seen_start, started) = std::sync::mpsc::channel();
+    let (resume_server, paused) = std::sync::mpsc::channel();
+    let server = if background_mirror {
+        let mut requests = 0;
+        Server::scripted(
+            move |_| {
+                requests += 1;
+                match requests {
+                    1 => reply_tool(
+                        "bash",
+                        json!({"command":"exec /bin/sleep 60","background":true}),
+                    ),
+                    2 => {
+                        // The next actual model request proves that the original
+                        // startup facts and Evidence were returned by the Host.
+                        seen_start.send(()).unwrap();
+                        let _ = paused.recv_timeout(Duration::from_secs(12));
+                        "FIXTURE_CLOSE_WITHOUT_HEADERS".into()
+                    }
+                    _ => panic!("unexpected recovery model request"),
+                }
+            },
+            false,
+            false,
+            vec![],
+        )
+    } else {
+        Server::new(vec![reply_tool("bash", json!({"command":"/bin/sleep 60"}))])
+    };
     let mut cmd = fixture.command(Some(&server));
     let mut child = cmd
         .args(["--access", "full", "Wait in shell"])
@@ -744,17 +795,51 @@ fn public_ordinary_recovery_stops_only_recorded_shell_after_actual_owner_kill() 
         }
         thread::sleep(Duration::from_millis(10));
     };
+    if background_mirror && started.recv_timeout(Duration::from_secs(8)).is_err() {
+        kill_after_store_publication(&fixture, &before.identity.conversation_id, &mut child);
+        let _ = recover(&fixture, &before.identity.conversation_id);
+        panic!("real startup never reached the model continuation");
+    }
     kill_after_store_publication(&fixture, &before.identity.conversation_id, &mut child);
+    let _ = resume_server.send(());
     let process = before.pending_tools[0].native_process.as_ref().unwrap();
     let recorded = process.child.as_ref().unwrap();
     let pid = rustix::process::Pid::from_raw(recorded.pid as i32).unwrap();
     assert!(rustix::process::test_kill_process(pid).is_ok());
+    let mut cleanup = RecoverOwnedShellFixture {
+        fixture: &fixture,
+        id: &before.identity.conversation_id,
+        armed: true,
+    };
+    let startup_receipt = if background_mirror {
+        assert!(before.handles.iter().any(|handle| {
+            peer_protocol::background_shell_process(handle).as_ref() == Some(process)
+        }));
+        let store = ConversationStore::new(fixture.home());
+        let history = store
+            .read_committed(&before.identity.conversation_id, None, 8 * 1024 * 1024)
+            .unwrap();
+        let message = history
+            .history
+            .messages
+            .iter()
+            .find(|message| message["id"] == before.pending_tools[0].message_id)
+            .unwrap();
+        let receipt = &message["segments"][0]["result"];
+        assert_eq!(receipt["output"]["status"], "running");
+        assert_eq!(receipt["output"]["taskId"], process.handle_id);
+        Some(receipt.clone())
+    } else {
+        None
+    };
     let output = recover(&fixture, &before.identity.conversation_id);
     // Always clean up this test-owned group before reporting an assertion.
     let absent = rustix::process::test_kill_process_group(pid) == Err(rustix::io::Errno::SRCH);
     if !absent {
         let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
     }
+    cleanup.armed = false;
+    drop(cleanup);
     assert_eq!(
         output.status.code(),
         Some(1),
@@ -792,7 +877,24 @@ fn public_ordinary_recovery_stops_only_recorded_shell_after_actual_owner_kill() 
         pending.native_process.as_ref().unwrap().stop_observation,
         Some(peer_protocol::NativeProcessStop::OwnerDeadGroupAbsent)
     );
-    assert_eq!(server.requests.lock().unwrap().len(), 1);
+    if let Some(receipt) = startup_receipt {
+        let store = ConversationStore::new(fixture.home());
+        let history = store
+            .read_committed(&before.identity.conversation_id, None, 8 * 1024 * 1024)
+            .unwrap();
+        let message = history
+            .history
+            .messages
+            .iter()
+            .find(|m| m["id"] == before.pending_tools[0].message_id)
+            .unwrap();
+        assert_eq!(message["segments"][0]["result"], receipt);
+        assert!(!facts.permits_new_run());
+    }
+    assert_eq!(
+        server.requests.lock().unwrap().len(),
+        if background_mirror { 2 } else { 1 }
+    );
 }
 
 #[test]

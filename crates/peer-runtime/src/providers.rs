@@ -119,6 +119,9 @@ pub trait PreparedEffect {
     fn owned_command(&self) -> bool {
         false
     }
+    fn background_shell(&self) -> bool {
+        false
+    }
     /// Start owns a future, not permission. Before open/rename/spawn the actual
     /// worker must obtain fresh admission from its Host-bound control port.
     fn start(
@@ -152,18 +155,20 @@ pub struct ProviderRegistry {
 }
 impl Default for ProviderRegistry {
     fn default() -> Self {
-        Self::builtins(false)
+        Self::builtins(false, false)
     }
 }
 impl ProviderRegistry {
-    fn builtins(skill_result_reader: bool) -> Self {
+    fn builtins(skill_result_reader: bool, background_shell: bool) -> Self {
         Self {
             providers: vec![
                 Box::<file::FileProvider>::default(),
                 Box::new(file::BatchSearchProvider),
                 Box::new(web::WebProvider),
                 Box::new(git::GitProvider),
-                Box::new(shell::ShellProvider),
+                Box::new(shell::ShellProvider {
+                    background: background_shell,
+                }),
                 Box::new(tool_artifact::ToolArtifactProvider(skill_result_reader)),
             ],
         }
@@ -184,6 +189,7 @@ impl ProviderRegistry {
         home: &Path,
         credentials: crate::mcp_oauth::CredentialEpoch,
         skills: Arc<peer_store::SkillCatalog>,
+        background_shell: bool,
     ) -> Result<Self, HostError> {
         if skills
             .mounted
@@ -192,7 +198,7 @@ impl ProviderRegistry {
         {
             return Err(HostError("skill_identity_invalid"));
         }
-        let mut registry = Self::builtins(!skills.mounted.is_empty());
+        let mut registry = Self::builtins(!skills.mounted.is_empty(), background_shell);
         if !skills.mounted.is_empty() {
             registry
                 .providers

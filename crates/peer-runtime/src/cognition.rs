@@ -36,6 +36,16 @@ pub(crate) trait CognitionHost {
         observed: ModelObservation,
         capacity_bearing: bool,
     ) -> Result<Option<ConversationMetadataPublication>, HostError>;
+    /// Called after this pipeline's own checked canonical write. Hosts with
+    /// live effects use the exact predecessor and successor during long waits.
+    fn advance_owned_source(
+        &mut self,
+        _previous: &str,
+        _revision: &str,
+        _content_revision: u64,
+    ) -> Result<(), HostError> {
+        Ok(())
+    }
     async fn wait<F: std::future::Future>(
         &mut self,
         future: F,
@@ -193,7 +203,7 @@ impl ContextPipeline {
                     milliseconds(&now())?,
                 )
                 .map_err(HostError)?;
-            let history = self.persist(&store, &history, "request_preflight")?;
+            let history = self.persist_for_host(host, &store, &history, "request_preflight")?;
             if self
                 .capacity
                 .decision()
@@ -357,8 +367,29 @@ impl ContextPipeline {
         }
         self.capacity.compacted().map_err(HostError)?;
         self.live = LiveHistory::default();
-        self.persist(&store, &committed.snapshot, "post_compaction")?;
+        host.advance_owned_source(
+            &checked.source_revision,
+            &committed.snapshot.source_revision,
+            committed.snapshot.history.content_revision,
+        )?;
+        self.persist_for_host(host, &store, &committed.snapshot, "post_compaction")?;
         Ok(())
+    }
+
+    fn persist_for_host(
+        &mut self,
+        host: &mut impl CognitionHost,
+        store: &ConversationStore,
+        history: &HistorySnapshot,
+        phase: &'static str,
+    ) -> Result<HistorySnapshot, HostError> {
+        let committed = self.persist(store, history, phase)?;
+        host.advance_owned_source(
+            &history.source_revision,
+            &committed.source_revision,
+            committed.history.content_revision,
+        )?;
+        Ok(committed)
     }
 }
 

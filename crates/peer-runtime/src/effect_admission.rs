@@ -15,6 +15,14 @@ pub(crate) enum AdmissionRequest {
         recorder: Recorder,
         reply: oneshot::Sender<Result<(), HostError>>,
     },
+    BackgroundShellStarted {
+        observation: crate::providers::EffectOutcome,
+        reply: oneshot::Sender<Result<(), HostError>>,
+    },
+    StopBackgroundShell {
+        task_id: String,
+        reply: oneshot::Sender<Result<crate::providers::EffectOutcome, HostError>>,
+    },
     Child {
         handle: String,
         recorder: Recorder,
@@ -58,6 +66,12 @@ impl EffectAdmission {
         &self,
         make: impl FnOnce(oneshot::Sender<Result<(), HostError>>) -> AdmissionRequest,
     ) -> Result<(), HostError> {
+        self.exchange(make).await
+    }
+    async fn exchange<T>(
+        &self,
+        make: impl FnOnce(oneshot::Sender<Result<T, HostError>>) -> AdmissionRequest,
+    ) -> Result<T, HostError> {
         let (send, receive) = oneshot::channel();
         tokio::select! {biased;_=self.cancel.cancelled()=>return Err(HostError("CANCELLED")),result=self.sender.send(make(send))=>result.map_err(|_|HostError("execution_admission_closed"))?};
         tokio::select! {biased;_=self.cancel.cancelled()=>Err(HostError("CANCELLED")),result=receive=>result.map_err(|_|HostError("execution_admission_closed"))?}
@@ -74,6 +88,20 @@ impl EffectAdmission {
     }
     pub(crate) async fn command_starting(&self) -> Result<(), HostError> {
         self.request(AdmissionRequest::CommandStarting).await
+    }
+    pub(crate) async fn background_shell_started(
+        &self,
+        observation: crate::providers::EffectOutcome,
+    ) -> Result<(), HostError> {
+        self.request(|reply| AdmissionRequest::BackgroundShellStarted { observation, reply })
+            .await
+    }
+    pub(crate) async fn stop_background_shell(
+        &self,
+        task_id: String,
+    ) -> Result<crate::providers::EffectOutcome, HostError> {
+        self.exchange(|reply| AdmissionRequest::StopBackgroundShell { task_id, reply })
+            .await
     }
     pub(crate) async fn command_started(&self, pid: u32) -> Result<(), HostError> {
         let owner = self

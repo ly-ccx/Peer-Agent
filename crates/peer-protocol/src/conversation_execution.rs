@@ -253,6 +253,8 @@ impl ConversationExecution {
                 || !h["metadata"].is_object()
                 || h["metadata"]["kind"] == "hook"
                     && !crate::conversation_hook::valid_hook_handle(h, self)
+                || h["metadata"]["kind"] == "shell_background"
+                    && !crate::conversation_shell::valid_background_shell_handle(h, self)
                 || self.phase == ConversationExecutionPhase::Stopped && h["state"] != "ended"
             {
                 return false;

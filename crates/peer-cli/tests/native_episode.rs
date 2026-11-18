@@ -82,6 +82,25 @@ impl Server {
         fail_count: bool,
         counts_sequence: Vec<u64>,
     ) -> Self {
+        let mut replies = replies.into_iter();
+        Self::scripted(
+            move |request| {
+                native_git::next_reply(
+                    replies.next().unwrap_or_else(|| reply_text("done")),
+                    request,
+                )
+            },
+            stall,
+            fail_count,
+            counts_sequence,
+        )
+    }
+    fn scripted(
+        mut reply_for: impl FnMut(&Value) -> String + Send + 'static,
+        stall: bool,
+        fail_count: bool,
+        counts_sequence: Vec<u64>,
+    ) -> Self {
         let trace = Arc::new(Mutex::new(Vec::new()));
         let captured_trace = trace.clone();
         let started = Instant::now();
@@ -101,7 +120,6 @@ impl Server {
         let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let observed_close = closed.clone();
         let thread = thread::spawn(move || {
-            let mut replies = replies.into_iter();
             let mut counts_sequence = counts_sequence.into_iter();
             // The fixture owner controls listener lifetime across slow human
             // decisions/recovery. Socket waits remain independently bounded.
@@ -133,10 +151,7 @@ impl Server {
                             write!(s,"HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
                             continue;
                         }
-                        let reply = native_git::next_reply(
-                            replies.next().unwrap_or_else(|| reply_text("done")),
-                            &request,
-                        );
+                        let reply = reply_for(&request);
                         captured.lock().unwrap().push(request);
                         if reply == "FIXTURE_CLOSE_WITHOUT_HEADERS" {
                             continue;

@@ -192,6 +192,7 @@ impl HookProcessOwner for RuleHost<'_, '_> {
     }
 
     fn current(&mut self) -> Result<(), HostError> {
+        self.host.check_background_shells();
         if self.host.external.is_cancelled() {
             return Err(HostError("CANCELLED"));
         }

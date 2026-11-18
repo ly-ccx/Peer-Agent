@@ -122,6 +122,19 @@ impl NativeConversationRuntime {
                 }
                 continue;
             }
+            if handle["metadata"]["kind"] == "shell_background" {
+                // The pending process has already been reaped or retained as
+                // unproven above. Only its matching terminal mirror may go.
+                if let Some(done) = current.handles.iter().find(|sample| {
+                    sample["handleId"] == handle["handleId"]
+                        && sample["toolCallId"] == handle["toolCallId"]
+                        && peer_protocol::background_shell_process(sample)
+                            .is_some_and(|p| p.state == Process::Ended)
+                }) {
+                    guard.handle_ended(&store, done, &now())?;
+                }
+                continue;
+            }
             if handle_stopped(&initial, &current, handle, cancel).await {
                 guard.handle_ended(&store, handle, &now())?;
             }
@@ -233,6 +246,9 @@ impl NativeConversationRuntime {
             if result["toolCallId"] != pending.tool_call_id
                 || result["capabilityId"] != pending.capability_id
                 || result["error"]["code"] == "execution_outcome_unknown"
+                || pending.capability_id == "local.shell.exec"
+                    && segment["args"]["background"] == true
+                    && result["status"] == "success"
                 || !matches!(
                     result["status"].as_str(),
                     Some("success" | "failed" | "denied" | "cancelled")

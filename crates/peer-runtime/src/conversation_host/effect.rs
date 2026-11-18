@@ -10,7 +10,7 @@ use peer_protocol::{
     NativeOwnedProcess, NativeProcessKind, NativeProcessState as Process, NativeProcessStop,
 };
 impl Host<'_> {
-    fn factual_publication(
+    pub(super) fn factual_publication(
         &mut self,
         receipt: ConversationMetadataPublication,
     ) -> Result<(), HostError> {
@@ -25,11 +25,25 @@ impl Host<'_> {
         mut effect: Box<dyn PreparedEffect>,
         grant: &mut ToolGrant,
         dispatch: &str,
-    ) -> Result<(EffectOutcome, Option<HostError>), HostError> {
+    ) -> Result<(EffectOutcome, Option<HostError>, bool), HostError> {
         self.validate_grant(grant, effect.args())?;
         let args = effect.args().clone();
         let handle = effect.handle().map(str::to_owned);
         let command = effect.owned_command();
+        let background = effect.background_shell();
+        if background && !self.can_start_background_shell() {
+            return Ok((
+                EffectOutcome::not_dispatched("shell_background_limit"),
+                None,
+                false,
+            ));
+        }
+        let effect_cancel = if background {
+            self.owned.child_token()
+        } else {
+            self.owned.clone()
+        };
+        let mut handle_metadata = None;
         if command {
             let process = NativeOwnedProcess {
                 schema_version: 1,
@@ -50,14 +64,22 @@ impl Host<'_> {
                 self.store
                     .record_conversation_process(&mut self.run, &process, &now())?;
             self.publication(receipt)?;
+            if background {
+                handle_metadata = Some(peer_protocol::background_shell_handle(&process));
+            }
         }
-        let (mut port, mut requests) = EffectAdmission::channel(&self.owned);
+        let (mut port, mut requests) = EffectAdmission::channel(&effect_cancel);
         port.owner = Some(self.run.owner().clone());
         effect.admission(port);
         let primary = handle.clone();
-        let future: EffectFuture = if let Some(handle) = &primary {
-            let metadata = json!({"kind":"effect","nativeMcp":effect.handle_metadata()});
-            let receipt=self.store.register_conversation_handle(&mut self.run,&json!({"handleId":handle,"toolCallId":grant.call,"state":"active","metadata":metadata}),&now())?;
+        let mut future: EffectFuture = if let Some(handle) = &primary {
+            let record = handle_metadata.unwrap_or_else(|| {
+                let metadata = json!({"kind":"effect","nativeMcp":effect.handle_metadata()});
+                json!({"handleId":handle,"toolCallId":grant.call,"state":"active","metadata":metadata})
+            });
+            let receipt =
+                self.store
+                    .register_conversation_handle(&mut self.run, &record, &now())?;
             self.publication(receipt)?;
             let (start, started) = tokio::sync::oneshot::channel::<EffectFuture>();
             let (send, receive) = tokio::sync::oneshot::channel();
@@ -67,7 +89,7 @@ impl Host<'_> {
                     &self.identity,
                     handle,
                     &grant.call,
-                    self.owned.clone(),
+                    effect_cancel.clone(),
                     async move {
                         let future = started.await.map_err(|_| ())?;
                         let outcome = future.await;
@@ -82,15 +104,19 @@ impl Host<'_> {
                     .store
                     .end_conversation_handle(&mut self.run, handle, &now())?;
                 self.publication(receipt)?;
+                if command {
+                    self.record_command_end(&grant.call, true)?;
+                }
                 return Ok((
                     EffectOutcome::not_dispatched("native_execution_owner_unavailable"),
                     None,
+                    false,
                 ));
             }
             let effect = effect
                 .start(
                     ProviderCall::new(&self.identity.conversation_id, &grant.call, &now()),
-                    self.owned.clone(),
+                    effect_cancel.clone(),
                 )
                 .unwrap_or_else(|e| Box::pin(async move { EffectOutcome::not_dispatched(e.0) }));
             start
@@ -106,10 +132,9 @@ impl Host<'_> {
         } else {
             effect.start(
                 ProviderCall::new(&self.identity.conversation_id, &grant.call, &now()),
-                self.owned.clone(),
+                effect_cancel.clone(),
             )?
         };
-        tokio::pin!(future);
         let mut stopped = None;
         let mut closed = false;
         let mut tick = tokio::time::interval(Duration::from_millis(100));
@@ -117,7 +142,10 @@ impl Host<'_> {
         let mut outcome = loop {
             tokio::select! {biased;
                 _=self.external.cancelled(),if stopped.is_none()=>{self.owned.cancel();stopped=Some(HostError("CANCELLED"));},
-                _=tick.tick(),if stopped.is_none()=>if let Err(e)=self.validate_grant(grant,&args){self.owned.cancel();stopped=Some(e);},
+                _=tick.tick(),if stopped.is_none()=>{
+                    self.check_background_shells();
+                    if let Err(e)=self.validate_grant(grant,&args){self.owned.cancel();stopped=Some(e);}
+                },
                 request=requests.recv(),if !closed=>{
                     tokio::task::yield_now().await;
                     let valid=self.validate_grant(grant,&args);
@@ -135,6 +163,34 @@ impl Host<'_> {
                         Some(AdmissionRequest::CommandStarted{recorder,reply})=>{
                             // The real child is accountability even after withdrawal.
                             let result=if command{self.command_spawned(&grant.call,recorder)}else{Err(HostError("native_process_owner_unknown"))};let _=reply.send(result.and(valid));
+                        },
+                        Some(AdmissionRequest::BackgroundShellStarted{observation,reply})=>{
+                            let result = valid.and_then(|_| {
+                                if !background { return Err(HostError("native_background_shell_unsupported")); }
+                                let process = self.process(&grant.call)?;
+                                self.verify_background_start(&process, &observation)?;
+                                Ok(process.handle_id)
+                            });
+                            match result {
+                                Ok(handle) => {
+                                    if reply.send(Ok(())).is_ok() {
+                                        self.track_background_shell(handle, grant.clone(), args, effect_cancel, future);
+                                        return Ok((observation, None, true));
+                                    }
+                                    effect_cancel.cancel();
+                                }
+                                Err(error) => { let _ = reply.send(Err(error)); }
+                            }
+                        },
+                        Some(AdmissionRequest::StopBackgroundShell{task_id,reply})=>{
+                            let result = match valid {
+                                Ok(()) if grant.capability == "local.shell.stop"
+                                    && args["taskId"].as_str().map(str::trim) == Some(&task_id) =>
+                                        self.stop_background_shell(&task_id, grant, &args).await,
+                                Ok(()) => Err(HostError("shell_task_stop_invalid")),
+                                Err(error) => Err(error),
+                            };
+                            let _ = reply.send(result);
                         },
                         Some(AdmissionRequest::Connection{handle,metadata,cancel,driver,reply})=>{
                             let result=valid.and_then(|_|self.connection(grant,handle,metadata,cancel,driver));let _=reply.send(result);
@@ -189,21 +245,32 @@ impl Host<'_> {
                     outcome.error = Some("execution_outcome_unknown");
                 }
             }
-            if command && outcome.ended {
-                let mut process = self.process(&grant.call)?;
-                process.state = Process::Ended;
-                process.stop_observation = Some(NativeProcessStop::OwnedCompletion);
-                let receipt =
-                    self.store
-                        .record_conversation_process(&mut self.run, &process, &now())?;
-                if let Err(e) = self.factual_publication(receipt) {
-                    stopped = stopped.or(Some(e));
-                }
+            if command
+                && outcome.ended
+                && let Err(e) = self.record_command_end(&grant.call, true)
+            {
+                stopped = stopped.or(Some(e));
             }
         }
-        Ok((outcome, stopped))
+        Ok((outcome, stopped, false))
     }
-    fn process(&self, call: &str) -> Result<NativeOwnedProcess, HostError> {
+    pub(super) fn record_command_end(
+        &mut self,
+        call: &str,
+        advance: bool,
+    ) -> Result<(), HostError> {
+        let mut process = self.process(call)?;
+        process.state = Process::Ended;
+        process.stop_observation = Some(NativeProcessStop::OwnedCompletion);
+        let receipt = self
+            .store
+            .record_conversation_process(&mut self.run, &process, &now())?;
+        if advance {
+            self.factual_publication(receipt)?;
+        }
+        Ok(())
+    }
+    pub(super) fn process(&self, call: &str) -> Result<NativeOwnedProcess, HostError> {
         self.store
             .read_conversation_execution(&self.identity.conversation_id)?
             .ok_or(HostError("conversation_execution_changed"))?

@@ -34,6 +34,7 @@ pub enum ProviderPermission {
     Read,
     FileWrite,
     Shell,
+    ShellStop,
     Mcp,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]

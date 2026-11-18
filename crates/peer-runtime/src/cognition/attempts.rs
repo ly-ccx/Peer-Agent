@@ -49,13 +49,15 @@ impl ContextPipeline {
                 Ok(())
             };
             if let Some(publication) = host.observe(accounting, observed, capacity_bearing)? {
-                revision = publication
+                let next = publication
                     .advance(
                         &self.conversation,
                         history.history.content_revision,
                         &revision,
                     )?
                     .to_owned();
+                host.advance_owned_source(&revision, &next, history.history.content_revision)?;
+                revision = next;
             }
             capacity?;
             // Preserve factual late usage before ownership/cancellation failures.
@@ -76,7 +78,7 @@ impl ContextPipeline {
                     self.capacity.overflow(status);
                 }
                 if capacity_bearing {
-                    let committed = self.persist(&store, &fresh, "turn_complete")?;
+                    let committed = self.persist_for_host(host, &store, &fresh, "turn_complete")?;
                     revision = committed.source_revision.clone();
                     committed
                 } else {
@@ -116,7 +118,7 @@ impl ContextPipeline {
                         )
                         .map_err(HostError)?;
                     revision = self
-                        .persist(&store, &fresh, "request_preflight")?
+                        .persist_for_host(host, &store, &fresh, "request_preflight")?
                         .source_revision;
                 }
             }

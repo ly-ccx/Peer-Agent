@@ -6,6 +6,7 @@ mod input_media;
 mod model_errors;
 mod recovery;
 mod shell_artifacts;
+mod shell_background;
 mod skills;
 struct Ordinary {
     root: tempfile::TempDir,
