@@ -308,6 +308,9 @@ impl GoalStore {
         if plan["status"] != "completed" {
             return Ok(("blocked", Some("goal_verification_incomplete")));
         }
+        if waits_for_manual_dod(plan) {
+            return Ok(("waiting_user", Some("manual_dod_confirmation_required")));
+        }
         let mut leaves = 0;
         let mut stack: Vec<_> = plan["tasks"].as_array().into_iter().flatten().collect();
         let mut refs = std::collections::BTreeSet::new();
@@ -333,12 +336,10 @@ impl GoalStore {
         if leaves == 0 {
             return Ok(("blocked", Some("goal_verification_incomplete")));
         }
-        let mut manual = Vec::new();
         for criterion in plan["successCriteria"].as_array().into_iter().flatten() {
             let id = criterion["id"].as_str().ok_or(GoalError::Invalid)?;
             match criterion["kind"].as_str() {
-                Some("manual") => manual.push(id),
-                Some("model_review") => {}
+                Some("manual" | "model_review") => {}
                 Some("test" | "command" | "file-exists" | "file-contains") => {
                     let evidence = plan["criterionResults"]
                         .as_array()
@@ -368,26 +369,31 @@ impl GoalStore {
         {
             return Ok(("blocked", Some("goal_verification_evidence_unavailable")));
         }
-        if !manual.is_empty()
-            && plan["manualConfirmations"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter(|entry| {
-                    entry["kind"] == "manual_dod"
-                        && manual.iter().all(|id| {
-                            entry["criterionIds"]
-                                .as_array()
-                                .is_some_and(|ids| ids.iter().any(|value| value == *id))
-                        })
-                })
-                .max_by_key(|entry| entry["decidedAt"].as_str().unwrap_or(""))
-                .is_none_or(|entry| entry["decision"] != "approve")
-        {
-            return Ok(("waiting_user", Some("manual_dod_confirmation_required")));
-        }
         Ok(("blocked", Some("goal_verifier_required")))
     }
+}
+
+fn waits_for_manual_dod(plan: &Value) -> bool {
+    let manual = plan["successCriteria"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|criterion| criterion["kind"] == "manual")
+        .map(|criterion| &criterion["id"])
+        .collect::<Vec<_>>();
+    !manual.is_empty()
+        && plan["manualConfirmations"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|entry| {
+                entry["kind"] == "manual_dod"
+                    && entry["criterionIds"]
+                        .as_array()
+                        .is_some_and(|ids| manual.iter().all(|id| ids.contains(id)))
+            })
+            .max_by_key(|entry| entry["decidedAt"].as_str().unwrap_or(""))
+            .is_none_or(|entry| entry["decision"] != "approve")
 }
 
 pub(super) fn reopen_unverified(plan: &mut Value) {

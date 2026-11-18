@@ -174,7 +174,7 @@ fn public_goal_runner_rejects_a_stale_model_reply_and_recovers_an_interrupted_ow
 
 #[test]
 fn public_goal_runner_requires_independent_verifier_evidence_to_complete() {
-    for case in ["valid", "forged", "manual", "missing"] {
+    for case in ["valid", "forged", "manual", "manual_and_missing", "missing"] {
         let fixture = Ordinary::new();
         std::fs::write(
             fixture.workspace().join("actual.txt"),
@@ -193,8 +193,10 @@ fn public_goal_runner_requires_independent_verifier_evidence_to_complete() {
                         json!({
                             "title":"Complete an evidenced Goal", "goal":"Read one file",
                             "tasks":[{"taskId":"read","title":"Inspect the current file"}],
-                            "successCriteria":if case == "manual" { json!(["Check manually"]) } else {
-                                json!([{"id":"found","kind":"file-exists","path":"actual.txt"}])
+                            "successCriteria":match case {
+                                "manual" => json!(["Check manually"]),
+                                "manual_and_missing" => json!([{"id":"found","kind":"file-exists","path":"actual.txt"}, "Check manually"]),
+                                _ => json!([{"id":"found","kind":"file-exists","path":"actual.txt"}]),
                             }
                         }),
                     ),
@@ -224,6 +226,10 @@ fn public_goal_runner_requires_independent_verifier_evidence_to_complete() {
                             json!([grounded])
                         );
                         reply_text("The task used real evidence.")
+                    }
+                    6 | 7 if case == "missing" => {
+                        assert_tick(request, turns - 4, "repair");
+                        reply_text("The missing check still needs work.")
                     }
                     6 => {
                         assert_verifier(request);
@@ -266,14 +272,18 @@ fn public_goal_runner_requires_independent_verifier_evidence_to_complete() {
             "{case}: {output:?}"
         );
         let dispatched = matches!(case, "valid" | "forged");
-        let reply = fixture.assert_settled(&output, 5, if dispatched { 4 } else { 3 });
+        let reply = fixture.assert_settled(
+            &output,
+            if case == "missing" { 7 } else { 5 },
+            if dispatched { 4 } else { 3 },
+        );
         let status = match case {
             "valid" => "completed",
-            "manual" => "waiting_user",
+            "manual" | "manual_and_missing" => "waiting_user",
             _ => "blocked",
         };
         assert_eq!(reply["goal"]["runnerStatus"], status);
-        if case == "manual" {
+        if matches!(case, "manual" | "manual_and_missing") {
             assert_eq!(
                 reply["goal"]["exitReason"],
                 "manual_dod_confirmation_required"
@@ -301,7 +311,10 @@ fn public_goal_runner_requires_independent_verifier_evidence_to_complete() {
         assert_eq!(user_rows[0]["content"], "Read the actual file");
         let id = reply["goal"]["planId"].as_str().unwrap();
         let plan = get(fixture.home().join("goal-plans").join(format!("{id}.json")));
-        assert_eq!(plan["runner"]["turnCount"], 1);
+        assert_eq!(
+            plan["runner"]["turnCount"],
+            if case == "missing" { 3 } else { 1 }
+        );
         assert_eq!(plan["runner"]["toolCallCount"], 2);
         assert_eq!(plan["runner"]["status"], status);
         assert_eq!(plan["runner"]["enabled"], false);
@@ -335,6 +348,15 @@ fn public_goal_runner_requires_independent_verifier_evidence_to_complete() {
                 run["evidenceRefs"].as_array().unwrap().len(),
                 usize::from(case == "valid")
             );
+        } else if case == "missing" {
+            let checks = plan["runner"]["verifierRuns"].as_array().unwrap();
+            assert_eq!(checks.len(), 2);
+            for check in checks {
+                assert_eq!(check["nativeCheck"], "completion_gate");
+                assert_eq!(check["status"], "failed");
+                assert!(check["nativeRepair"]["settledAt"].is_string());
+                assert!(check["report"].is_null());
+            }
         } else {
             assert!(plan["runner"]["verifierRuns"].is_null());
         }
@@ -1105,6 +1127,148 @@ fn public_goal_verifier_formats_once_without_reopening_evidence_collection() {
         assert_eq!(
             model.requests.lock().unwrap().len(),
             if case == "budget" { 7 } else { 8 }
+        );
+    }
+}
+
+#[test]
+fn public_goal_completion_gate_repairs_actual_evidence_and_shares_the_attempt_limit() {
+    for passed in [true, false] {
+        let fixture = Ordinary::new();
+        std::fs::write(
+            fixture.workspace().join("actual.txt"),
+            "Fixture checked during repair",
+        )
+        .unwrap();
+        let mut turns = 0;
+        let mut plan_id = Value::Null;
+        let mut observed = Value::Null;
+        let model = Server::scripted(
+            move |request| {
+                turns += 1;
+                match turns {
+                    1 => reply_tool(
+                        "goal_create_plan",
+                        json!({"title":"Check the fixture","goal":"Verify actual.txt",
+                        "tasks":[{"taskId":"read","title":"Read the fixture"}],
+                        "successCriteria":[{"id":"found","kind":"file-exists","path":"actual.txt"}]}),
+                    ),
+                    2 => {
+                        plan_id = last_tool(request)["output"]["planId"].clone();
+                        reply_text("Begin the goal.")
+                    }
+                    3 => reply_tool("read_file", json!({"path":"actual.txt"})),
+                    4 => {
+                        observed = last_tool(request)["evidenceRefs"][0].clone();
+                        reply_tool(
+                            "goal_update_task",
+                            json!({"planId":plan_id,"taskId":"read",
+                            "status":"completed","evidenceRefs":[observed]}),
+                        )
+                    }
+                    5 => reply_text("The leaf is recorded."),
+                    6 => {
+                        assert_tick(request, 2, "repair");
+                        let system = request["messages"][0]["content"].as_str().unwrap();
+                        assert!(system.contains(
+                            "Completion gate failed: goal_verification_criterion_evidence_required"
+                        ));
+                        assert!(system.contains(observed.as_str().unwrap()));
+                        reply_tool("read_file", json!({"path":"actual.txt"}))
+                    }
+                    7 => {
+                        let checked = &last_tool(request)["evidenceRefs"][0];
+                        assert_ne!(checked, &observed);
+                        reply_tool(
+                            "goal_update_task",
+                            json!({"planId":plan_id,"taskId":"read",
+                            "status":"completed","evidenceRefs":[checked],
+                            "criterionResults":[{"criterionId":"found","passed":true,"evidenceRef":checked}]}),
+                        )
+                    }
+                    8 => {
+                        assert_eq!(last_tool(request)["status"], "success");
+                        reply_text("The automatic check has direct evidence.")
+                    }
+                    9 | 12 => {
+                        assert_verifier(request);
+                        reply_tool("read_file", json!({"path":"actual.txt"}))
+                    }
+                    10 | 13 => {
+                        let tool = last_tool(request);
+                        assert_eq!(tool["preview"], "Fixture checked during repair");
+                        reply_text(
+                            &json!({"passed":passed,"evidenceRefs":tool["evidenceRefs"]})
+                                .to_string(),
+                        )
+                    }
+                    11 if !passed => {
+                        assert_tick(request, 3, "repair");
+                        assert!(
+                            request["messages"][0]["content"]
+                                .as_str()
+                                .unwrap()
+                                .contains("Independent verification failed")
+                        );
+                        reply_text("No further changes.")
+                    }
+                    _ => panic!("unexpected completion check request {turns}"),
+                }
+            },
+            false,
+            false,
+            vec![],
+        );
+        let output = fixture.run(
+            Some(&model),
+            &[
+                "--mode",
+                "goal",
+                "--output-format",
+                "json",
+                "Verify the declared check",
+            ],
+            None,
+        );
+        assert_eq!(
+            output.status.code(),
+            Some(if passed { 0 } else { 6 }),
+            "{output:?}"
+        );
+        let reply = fixture.assert_settled(
+            &output,
+            if passed { 8 } else { 9 },
+            if passed { 6 } else { 7 },
+        );
+        let id = reply["goal"]["planId"].as_str().unwrap();
+        let plan = get(fixture.home().join("goal-plans").join(format!("{id}.json")));
+        let runs = plan["runner"]["verifierRuns"].as_array().unwrap();
+        assert_eq!(runs.len(), if passed { 2 } else { 3 });
+        assert_eq!(runs[0]["nativeCheck"], "completion_gate");
+        assert_eq!(
+            runs[0]["failureReason"],
+            "goal_verification_criterion_evidence_required"
+        );
+        assert!(runs[0]["report"].is_null());
+        assert_eq!(runs[1]["status"], if passed { "passed" } else { "failed" });
+        assert_ne!(runs[0]["sourceRevision"], runs[1]["sourceRevision"]);
+        assert_eq!(plan["criterionResults"][0]["passed"], true);
+        assert_ne!(
+            plan["criterionResults"][0]["evidenceRef"],
+            runs[0]["evidenceRefs"][0]
+        );
+        assert_ne!(
+            plan["criterionResults"][0]["evidenceRef"],
+            runs[1]["evidenceRefs"][0]
+        );
+        let repair_count = runs
+            .iter()
+            .filter(|row| row["nativeRepair"]["settledAt"].is_string())
+            .count();
+        assert_eq!(repair_count, if passed { 1 } else { 2 });
+        assert_eq!(
+            model.requests.lock().unwrap().len(),
+            if passed { 10 } else { 13 }
         );
     }
 }

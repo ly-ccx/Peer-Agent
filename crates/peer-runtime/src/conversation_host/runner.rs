@@ -125,14 +125,23 @@ impl Host<'_> {
                     verifier_turns = verifier_turns
                         .checked_add(turns)
                         .ok_or(HostError("runtime_counter_limit"))?;
-                    if let Some(receipt) = &result
-                        && remaining(self.turns, verifier_turns) != Some(0)
-                        && store.begin_verification_repair(lease, receipt, &now(), || {
-                            self.check_worker_settled(true).map_err(|error| error.0)
-                        })?
-                    {
-                        phase = RunnerPhase::Repair;
-                        continue;
+                    if remaining(self.turns, verifier_turns) != Some(0) {
+                        let admit = || self.check_worker_settled(true).map_err(|error| error.0);
+                        let repairing = match &result {
+                            Some(receipt) => {
+                                store.begin_verification_repair(lease, receipt, &now(), admit)?
+                            }
+                            None => store.begin_completion_gate_repair(
+                                lease,
+                                &format!("gate-{}", uuid::Uuid::new_v4()),
+                                &now(),
+                                admit,
+                            )?,
+                        };
+                        if repairing {
+                            phase = RunnerPhase::Repair;
+                            continue;
+                        }
                     }
                     self.runner.as_mut().expect("owned Runner").verification = result;
                     return Ok(RunnerStop::Verify);

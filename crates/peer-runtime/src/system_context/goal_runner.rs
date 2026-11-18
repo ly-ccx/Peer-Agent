@@ -170,10 +170,12 @@ pub(super) fn sections(plan: &Value) -> Result<[Value; 2], &'static str> {
                     && review["nativeRepair"]["settledAt"].is_null()
             })
     {
-        lines.push(format!(
-            "Independent verification failed: {}",
-            observed(&review["summary"])
-        ));
+        let source = if review["nativeCheck"] == "completion_gate" {
+            "Completion gate"
+        } else {
+            "Independent verification"
+        };
+        lines.push(format!("{source} failed: {}", observed(&review["summary"])));
         for issue in ["failedCriteria", "missingEvidence"]
             .into_iter()
             .flat_map(|key| review["report"][key].as_array().into_iter().flatten())
@@ -200,10 +202,7 @@ pub(super) fn sections(plan: &Value) -> Result<[Value; 2], &'static str> {
             .map(observed)
             .collect::<Vec<_>>();
         if !references.is_empty() {
-            lines.push(format!(
-                "Independent verification evidence: {}",
-                references.join(", ")
-            ));
+            lines.push(format!("{source} evidence: {}", references.join(", ")));
         }
     }
     let inspect = &runner["inspectPlan"];
