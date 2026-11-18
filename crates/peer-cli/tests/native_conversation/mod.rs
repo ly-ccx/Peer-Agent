@@ -5,6 +5,7 @@ mod goal_create;
 mod goal_explorer;
 mod goal_intake;
 mod goal_read;
+mod goal_runner;
 mod goal_update;
 mod hooks;
 mod input_media;

@@ -1,8 +1,9 @@
 //! Headless Goal intake schedules the existing read-only Explorer when the
 //! canonical plan needs repository grounding.
 use super::*;
+use crate::goal_facts::leaf_tasks;
 use crate::providers::goal::{CREATE_CAPABILITY, explorer::ExplorerRequest};
-use peer_store::{AutomaticInspect, GoalStore};
+use peer_store::{AutomaticInspect, GoalStore, LocalGoalIntake};
 use std::collections::HashSet;
 
 fn strings(values: &Value) -> impl Iterator<Item = &str> {
@@ -31,19 +32,7 @@ fn questions(plan: &Value) -> Vec<Value> {
     {
         return Vec::new();
     }
-    let mut leaves = Vec::new();
-    let mut tasks: std::collections::VecDeque<_> =
-        plan["tasks"].as_array().into_iter().flatten().collect();
-    while let Some(task) = tasks.pop_front() {
-        if let Some(children) = task["subtasks"]
-            .as_array()
-            .filter(|tasks| !tasks.is_empty())
-        {
-            tasks.extend(children);
-        } else {
-            leaves.push(task);
-        }
-    }
+    let leaves = leaf_tasks(plan).collect::<Vec<_>>();
     let known = unique(
         strings(&plan["involvedFiles"]).chain(
             leaves
@@ -117,8 +106,7 @@ fn questions(plan: &Value) -> Vec<Value> {
 }
 
 impl Host<'_> {
-    pub(super) async fn drive_new_goal_inspect(&mut self) -> Result<Option<Value>, HostError> {
-        self.source_current()?;
+    pub(super) fn newly_created_goal(&self) -> Result<Option<LocalGoalIntake>, HostError> {
         let new_goals = explorer::settled_parent_calls(
             &self.expected,
             &self.identity.stream_id,
@@ -135,21 +123,24 @@ impl Host<'_> {
         }
         let store = GoalStore::new(&self.home);
         let projector = crate::goal_facts::TuiGoalProjector::new(&now()).map_err(HostError)?;
-        let Some(mut goal) = store
+        Ok(store
             .observe_local_intake(
                 &self.identity.conversation_id,
                 &self.workspace,
                 &projector,
                 None,
             )?
-            .filter(|goal| new_goals.contains(goal.plan_id()))
-        else {
-            return Ok(None);
-        };
-        let plan = store.read_local_goal(&goal)?;
-        let questions = questions(&plan);
+            .filter(|goal| new_goals.contains(goal.plan_id())))
+    }
+
+    pub(super) async fn drive_deterministic_inspect(
+        &mut self,
+        mut goal: LocalGoalIntake,
+        plan: &Value,
+    ) -> Result<bool, HostError> {
+        let questions = questions(plan);
         if questions.is_empty() {
-            return Ok(None);
+            return Ok(false);
         }
         let requests = questions
             .iter()
@@ -178,25 +169,7 @@ impl Host<'_> {
                 .await?
                 .ok_or(HostError("explorer_goal_changed"))?;
         }
-        let plan = store.read_local_goal(&goal)?;
-        let confirmations = plan["manualConfirmations"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|entry| entry["criterionId"].as_str())
-            .collect::<HashSet<_>>();
-        let pending_manual = plan["successCriteria"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|criterion| criterion["kind"] == "manual")
-            .filter_map(|criterion| criterion["id"].as_str())
-            .filter(|id| !confirmations.contains(id))
-            .collect::<Vec<_>>();
-        Ok(Some(json!({
-            "planId": goal.plan_id(), "planStatus": plan["status"], "runnerStatus": plan["runner"]["status"],
-            "exitReason": "runner_continuation_required", "blockedReason": null, "waitingQuestion": null,
-            "pendingManualDoD": pending_manual, "progress": plan["progress"],
-        })))
+        GoalStore::new(&self.home).check_local_intake(&goal)?;
+        Ok(true)
     }
 }

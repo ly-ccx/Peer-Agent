@@ -31,6 +31,9 @@ pub(crate) trait CognitionHost {
     fn check_request(&self) -> Result<(), HostError>;
     fn admit_request(&mut self, _capacity_bearing: bool) -> Result<(), HostError>;
     fn assemble(&self, continuity: &[Value]) -> Result<Value, HostError>;
+    fn request_input(&self, _projected: &Value) -> Option<(usize, &str)> {
+        None
+    }
     fn observe(
         &mut self,
         accounting: &mut RuntimeUsageAccounting,
@@ -198,7 +201,7 @@ impl ContextPipeline {
             if history.history.excluded_from_message_id.is_some() {
                 return Err(HostError("native_execution_recovery_required"));
             }
-            let projected = project_history(&history.history.messages).map_err(HostError)?;
+            let mut projected = project_history(&history.history.messages).map_err(HostError)?;
             let continuity = projected
                 .get("continuity")
                 .cloned()
@@ -206,6 +209,16 @@ impl ContextPipeline {
                 .collect::<Vec<_>>();
             let system = host.assemble(&continuity)?;
             let encoding = self.result_views(host, f, &history, &projected).await?;
+            // Host continuation input is scoped to the wire request. The
+            // compactor and durable history retain only authentic messages.
+            let inserted = host.request_input(&projected).map(|(index, content)| {
+                let messages = projected["messages"]
+                    .as_array_mut()
+                    .expect("canonical history");
+                let index = index.min(messages.len());
+                messages.insert(index, json!({"role":"user","content":content}));
+                index
+            });
             let prepared = f
                 .model
                 .prepare_request_with_tool_results(
@@ -216,6 +229,12 @@ impl ContextPipeline {
                     &encoding,
                 )
                 .map_err(|e| HostError(e.code))?;
+            if let Some(index) = inserted {
+                projected["messages"]
+                    .as_array_mut()
+                    .expect("canonical history")
+                    .remove(index);
+            }
             let fingerprint = prepared.fingerprint().to_owned();
             let counted = if self.capacity.should_count() {
                 match host

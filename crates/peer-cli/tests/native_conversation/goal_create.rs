@@ -1,5 +1,6 @@
 use super::*;
 use crate::native_conversation::goal_read::{CONTRACT, last_tool};
+use crate::native_conversation::goal_runner::assert_tick;
 
 fn plans(fixture: &Ordinary) -> Vec<Value> {
     std::fs::read_to_string(fixture.home().join("goal-plans/index.jsonl"))
@@ -11,17 +12,25 @@ fn plans(fixture: &Ordinary) -> Vec<Value> {
 
 fn inspection_reply(request: &Value, step: usize) -> String {
     match step {
-        1 | 3 => {
+        1 => {
+            assert_tick(request, 1, "orient");
+            reply_text("Pending repository grounding.")
+        }
+        2 | 4 => {
             assert!(request.to_string().contains("Explorer readonly contract"));
             reply_tool("read_file", json!({"path":"fixture.txt"}))
         }
-        2 | 4 => {
+        3 | 5 => {
             let observed = last_tool(request);
             assert_eq!(observed["preview"], "Fixture contents");
             reply_text(
                 &json!({"summary":"Observed the fixture","evidenceRefs":observed["evidenceRefs"]})
                     .to_string(),
             )
+        }
+        6 => {
+            assert_tick(request, 2, "plan_scaffold");
+            reply_text("Tasks remain pending.")
         }
         _ => panic!("unexpected model request during inspection"),
     }
@@ -105,17 +114,17 @@ fn public_goal_create_matches_old_store_across_modes_and_keeps_execution_gates()
             ],
             None,
         );
-        let auto_inspect = mode != "plan";
+        let auto_inspect = mode == "goal";
         assert_eq!(
             output.status.code(),
-            Some(if auto_inspect { 6 } else { 0 }),
+            Some(if mode == "plan" { 0 } else { 6 }),
             "{mode}: {}",
             String::from_utf8_lossy(&output.stdout)
         );
         let extra = usize::from(mode == "goal");
         fixture.assert_settled(
             &output,
-            3 + extra,
+            3 + extra + 2 * usize::from(auto_inspect),
             2 + extra + 2 * usize::from(auto_inspect),
         );
         let rows = plans(&fixture);
@@ -128,6 +137,14 @@ fn public_goal_create_matches_old_store_across_modes_and_keeps_execution_gates()
         assert_eq!(draft["status"], rows[0]["status"]);
         assert_eq!(draft["tasks"][0]["status"], "pending");
         assert_eq!(draft["runner"]["inspectPlan"].is_object(), auto_inspect);
+        if mode == "chat" {
+            assert_eq!(server.requests.lock().unwrap().len(), 3);
+            assert_eq!(
+                draft["runner"]["blockedReason"],
+                "goal_runner_approval_required"
+            );
+            assert!(draft["runner"]["nativeRunnerOwner"].is_null());
+        }
         assert_eq!(
             fixture.workspace().join("effect.txt").exists(),
             mode == "goal"
@@ -175,7 +192,7 @@ fn public_goal_create_reuses_duplicate_and_keeps_original_plan_on_conflict() {
     );
     let output = fixture.run(
         Some(&server),
-        &["--output-format", "json", "Create a plan"],
+        &["--mode", "goal", "--output-format", "json", "Create a plan"],
         None,
     );
     assert_eq!(
@@ -184,7 +201,7 @@ fn public_goal_create_reuses_duplicate_and_keeps_original_plan_on_conflict() {
         "{}",
         String::from_utf8_lossy(&output.stdout)
     );
-    fixture.assert_settled(&output, 4, 5);
+    fixture.assert_settled(&output, 6, 5);
     assert_eq!(plans(&fixture).len(), 1);
     let notifications =
         std::fs::read_to_string(fixture.home().join("goal-plans/.changes.jsonl")).unwrap();
@@ -199,7 +216,7 @@ fn public_goal_create_reuses_duplicate_and_keeps_original_plan_on_conflict() {
             .count(),
         1
     );
-    assert_eq!(changes.len(), 5);
+    assert_eq!(changes.len(), 10);
     assert_eq!(plans(&fixture)[0]["version"], 1);
 }
 

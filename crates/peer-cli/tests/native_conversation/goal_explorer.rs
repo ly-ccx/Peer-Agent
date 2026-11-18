@@ -1,5 +1,6 @@
 use super::*;
 use crate::native_conversation::goal_read::last_tool;
+use crate::native_conversation::goal_runner::assert_tick;
 
 fn plan(fixture: &Ordinary) -> Value {
     let root = fixture.home().join("goal-plans");
@@ -84,6 +85,8 @@ fn public_goal_explorer_runs_readonly_with_its_own_history_and_authoritative_evi
         &[
             "--access",
             "full",
+            "--max-turns",
+            "3",
             "--output-format",
             "json",
             "private parent request",
@@ -159,6 +162,8 @@ fn public_goal_explorer_denies_outside_git_and_file_reads_even_under_full_access
         &[
             "--access",
             "full",
+            "--max-turns",
+            "3",
             "--output-format",
             "json",
             "Run the bounded Explorer",
@@ -277,6 +282,8 @@ fn public_goal_explorer_inherits_the_explicit_tool_allowlist() {
         &[
             "--tools",
             "goal_create_plan,request_explorer,read_file",
+            "--max-turns",
+            "3",
             "--output-format",
             "json",
             "Use only these tools",
@@ -300,12 +307,17 @@ fn public_goal_explorer_waits_for_real_worker_stop_and_recovers_a_dead_owner_wit
             .enumerate()
             .filter(move |(index, _)| !automatic || *index != 1)
             .map(|(_, reply)| reply);
+        let mut orient = automatic;
         let (entered, worker_waiting) = std::sync::mpsc::channel();
         let (release, worker_release) = std::sync::mpsc::channel();
         let model = Server::scripted(
-            move |_| {
+            move |request| {
                 if let Some(reply) = replies.next() {
                     return reply;
+                }
+                if std::mem::take(&mut orient) {
+                    assert_tick(request, 1, "orient");
+                    return reply_text("Ground the open task.");
                 }
                 entered.send(()).unwrap();
                 let _ = worker_release.recv_timeout(Duration::from_secs(8));
@@ -316,6 +328,9 @@ fn public_goal_explorer_waits_for_real_worker_stop_and_recovers_a_dead_owner_wit
             vec![],
         );
         let mut command = fixture.command(Some(&model));
+        if automatic {
+            command.args(["--mode", "goal"]);
+        }
         let mut child = command
             .args(["--output-format", "json", "Start the owned Explorer"])
             .spawn()
@@ -361,10 +376,7 @@ fn public_goal_explorer_waits_for_real_worker_stop_and_recovers_a_dead_owner_wit
         assert!(facts.permits_new_run());
         assert_eq!(recovery::recover(&fixture, id).status.code(), Some(0));
         assert_eq!(plan(&fixture), after);
-        assert_eq!(
-            model.requests.lock().unwrap().len(),
-            if automatic { 3 } else { 4 }
-        );
+        assert_eq!(model.requests.lock().unwrap().len(), 4);
     }
 }
 
@@ -386,9 +398,13 @@ fn public_goal_automatic_inspect_discards_late_worker_output_after_plan_changes(
                 return reply;
             }
             if turns == 3 {
+                assert_tick(request, 1, "orient");
+                return reply_text("Ground this work first.");
+            }
+            if turns == 4 {
                 return reply_tool("read_file", json!({"path":"actual.txt"}));
             }
-            assert_eq!(turns, 4, "a stale second question was sent");
+            assert_eq!(turns, 5, "a stale second question was sent");
             let evidence = last_tool(request);
             assert_eq!(evidence["preview"], "one settled read");
             let goals = home.join("goal-plans");
@@ -410,11 +426,17 @@ fn public_goal_automatic_inspect_discards_late_worker_output_after_plan_changes(
     );
     let output = fixture.run(
         Some(&model),
-        &["--output-format", "json", "Inspect the current plan"],
+        &[
+            "--mode",
+            "goal",
+            "--output-format",
+            "json",
+            "Inspect the current plan",
+        ],
         None,
     );
     assert_eq!(output.status.code(), Some(1), "{output:?}");
-    let reply = fixture.assert_settled(&output, 2, 2);
+    let reply = fixture.assert_settled(&output, 3, 2);
     assert_eq!(reply["error"], "GOAL_SOURCE_CHANGED");
     let interrupted = plan(&fixture);
     assert_eq!(interrupted["title"], "Changed during repository inspection");
@@ -434,5 +456,5 @@ fn public_goal_automatic_inspect_discards_late_worker_output_after_plan_changes(
     assert!(recovered["runner"]["explorers"][0]["report"].is_null());
     assert_eq!(recovery::recover(&fixture, id).status.code(), Some(0));
     assert_eq!(plan(&fixture), recovered);
-    assert_eq!(model.requests.lock().unwrap().len(), 4);
+    assert_eq!(model.requests.lock().unwrap().len(), 5);
 }

@@ -19,11 +19,11 @@ use peer_protocol::{
 use peer_store::{
     ConversationExecutionToken, ConversationMetadataPublication, ConversationModelSelection,
     ConversationStore, HistorySnapshot, McpRegistryStore, NewConversation,
-    NewConversationExecution,
+    NewConversationExecution, RunnerStop,
 };
 use serde_json::{Value, json};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Duration,
@@ -37,9 +37,11 @@ mod goal_intake;
 mod hooks;
 mod permission;
 mod recovery;
+mod runner;
 mod tool;
 mod user_input;
 use permission::ToolGrant;
+use runner::RunnerOutcome;
 
 /// Host-owned live access revision. UI/ACP commands change this actual authority;
 /// persisted approval history alone never constructs it or a ToolGrant.
@@ -397,8 +399,10 @@ impl NativeConversationRuntime {
             foreground_authority: None,
             cognition_source: None,
             explorer: None,
+            explorer_requests: BTreeSet::new(),
+            runner: None,
         };
-        let mut goal = None;
+        let mut runner_stop = None;
         let result = async {
             host.append(&user_message)?;
             drop(user_message);
@@ -411,18 +415,33 @@ impl NativeConversationRuntime {
             if result.stop == crate::turn_loop::LoopStop::Replied {
                 host.drive_requested_explorers().await?;
                 if headless {
-                    goal = host.drive_new_goal_inspect().await?;
+                    runner_stop = host.drive_new_goal(options.max_turns).await?;
                 }
             }
             Ok::<_, HostError>(result)
         }
         .await;
         let cleanup = host.finish().await;
+        let goal = if cleanup.is_ok() {
+            match runner_stop {
+                Some(RunnerOutcome::Stop(stop)) => host.settle_runner(stop),
+                Some(RunnerOutcome::Waiting(report)) => Ok(Some(report)),
+                None => host.settle_runner(RunnerStop::Blocked(
+                    result
+                        .as_ref()
+                        .err()
+                        .map_or("goal_runner_interrupted", |error| error.0),
+                )),
+            }
+        } else {
+            Ok(None)
+        };
         let error = cleanup
             .as_ref()
             .err()
             .copied()
             .or_else(|| result.as_ref().err().copied())
+            .or_else(|| goal.as_ref().err().copied())
             .or_else(|| {
                 result
                     .as_ref()
@@ -441,7 +460,7 @@ impl NativeConversationRuntime {
             usage: host.usage.snapshot(),
             lifetime_usage: cleanup.ok().flatten(),
             error: error.map(|e| e.0),
-            goal: goal.filter(|_| error.is_none()),
+            goal: goal.ok().flatten().filter(|_| error.is_none()),
         })
     }
 }
@@ -493,6 +512,8 @@ struct Host<'a> {
     foreground_authority: Option<foreground_shell::ForegroundAuthority>,
     cognition_source: Option<CognitionSource>,
     explorer: Option<explorer::Worker>,
+    explorer_requests: BTreeSet<String>,
+    runner: Option<runner::Runner>,
 }
 struct CognitionSource {
     revision: String,
@@ -549,6 +570,7 @@ impl Host<'_> {
         }
         self.credentials.check().map_err(HostError)?;
         self.check_explorer()?;
+        self.check_runner()?;
         self.validate_foreground_authority()
     }
     fn source_current(&self) -> Result<(), HostError> {
@@ -738,11 +760,18 @@ impl CognitionHost for Host<'_> {
                 servers: &self.servers,
                 skill_names: &self.projection.skill_names(),
                 instructions: &self.instructions,
+                goal_runner: self
+                    .runner
+                    .as_ref()
+                    .and_then(|runner| runner.frame.as_ref().map(|(_, plan)| plan)),
             },
             continuity,
             &now(),
         )
         .map_err(HostError)
+    }
+    fn request_input(&self, projected: &Value) -> Option<(usize, &str)> {
+        self.runner_request_input(projected)
     }
     fn observe(
         &mut self,
@@ -805,6 +834,7 @@ impl CognitionHost for Host<'_> {
 impl crate::turn_loop::TurnHost for Host<'_> {
     async fn request(&mut self) -> Result<ModelTurn, HostError> {
         self.source_current()?;
+        self.prepare_runner_frame()?;
         self.request_admitted = false;
         let mut pipeline = self
             .pipeline
@@ -851,6 +881,9 @@ impl crate::turn_loop::TurnHost for Host<'_> {
         }
         .await;
         self.cognition_source = None;
+        if let Some(runner) = &mut self.runner {
+            runner.frame = None;
+        }
         self.pipeline = Some(pipeline);
         self.usage = usage;
         let response = response?;

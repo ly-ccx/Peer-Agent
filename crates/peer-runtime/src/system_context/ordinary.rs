@@ -13,6 +13,7 @@ pub struct ConversationContext<'a> {
     pub servers: &'a [Value],
     pub skill_names: &'a [&'a str],
     pub instructions: &'a instructions::ProjectInstructions,
+    pub goal_runner: Option<&'a Value>,
 }
 pub fn assemble_conversation_context(
     input: &ConversationContext<'_>,
@@ -47,6 +48,9 @@ pub fn assemble_conversation_context(
     ));
     sections.extend(input.instructions.sections());
     sections.extend(skill_catalog_section(input.skill_names));
+    if let Some(plan) = input.goal_runner {
+        sections.extend(goal_runner::sections(plan)?);
+    }
     if let Some(section) = continuity::render(continuity) {
         sections.push(section);
     }
@@ -169,6 +173,7 @@ mod tests {
                 skill_names: &[],
                 servers: c["servers"].as_array().unwrap(),
                 instructions: &instructions::ProjectInstructions::default(),
+                goal_runner: None,
             };
             assert_eq!(
                 assemble_conversation_context(&input, &[], c["now"].as_str().unwrap()).unwrap(),

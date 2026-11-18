@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 mod continuity;
 pub(crate) mod explorer;
+pub(crate) mod goal_runner;
 mod ordinary;
 pub use ordinary::{ConversationContext, assemble_conversation_context};
 pub mod instructions;

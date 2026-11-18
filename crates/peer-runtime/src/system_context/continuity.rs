@@ -2,7 +2,7 @@
 use super::{Value, json, section};
 use peer_protocol::{javascript_json_string, javascript_trim};
 
-fn neutralize(text: &str) -> String {
+pub(super) fn neutralize(text: &str) -> String {
     let mut out = String::new();
     let mut rest = text;
     while let Some(i) = rest.find('<') {

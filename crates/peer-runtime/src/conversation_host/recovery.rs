@@ -333,13 +333,16 @@ fn recovered_explorer(
     guard: &ConversationRecovery,
 ) -> Result<ConversationExecution, HostError> {
     let run = guard.current(store)?;
-    peer_store::GoalStore::new(home).recover_stopped_explorer(&run, &now(), || {
+    let confirm = || {
         let current = guard.current(store).map_err(|error| error.code())?;
         if current.identity != run.identity || current.stop != run.stop {
             return Err("explorer_owner_changed");
         }
         Ok(())
-    })?;
+    };
+    let goals = peer_store::GoalStore::new(home);
+    goals.recover_stopped_explorer(&run, &now(), confirm)?;
+    goals.recover_stopped_runner(&run, &now(), confirm)?;
     Ok(run)
 }
 

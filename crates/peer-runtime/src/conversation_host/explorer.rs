@@ -62,6 +62,7 @@ impl Host<'_> {
     pub(super) async fn drive_requested_explorers(&mut self) -> Result<(), HostError> {
         self.source_current()?;
         let requests = settled_parent_calls(&self.expected, &self.identity.stream_id, CAPABILITY)
+            .filter(|(id, _)| !self.explorer_requests.contains(*id))
             .filter_map(|(id, segment)| {
                 ExplorerRequest::parse(&segment["args"])
                     .ok()
@@ -69,11 +70,12 @@ impl Host<'_> {
             })
             .take(4)
             .collect::<Vec<_>>();
-        if requests.len() > 3 {
+        if self.explorer_requests.len() + requests.len() > 3 {
             return Err(HostError("explorer_dispatch_limit"));
         }
         for (id, request) in requests {
             self.run_requested_explorer(&id, request, None).await?;
+            self.explorer_requests.insert(id);
         }
         Ok(())
     }
@@ -111,6 +113,7 @@ impl Host<'_> {
                 request: &request,
                 at: &now(),
                 inspect,
+                runner: self.runner.as_ref().map(|runner| &runner.lease),
             },
             &projector,
             || self.source_current().map_err(|err| err.0),
@@ -175,7 +178,7 @@ impl Host<'_> {
             .live = old_live;
         let worker = self
             .explorer
-            .take()
+            .as_ref()
             .ok_or(HostError("explorer_owner_unavailable"))?;
         let failure = work.as_ref().err().copied();
         let settlement = match work {
@@ -185,8 +188,9 @@ impl Host<'_> {
         let next = store.finish_explorer(&worker.lease, settlement, &now(), || {
             self.check_worker_settled(failure.is_none())
                 .map_err(|e| e.0)
-        })?;
-        failure.map_or(Ok(next), Err)
+        });
+        self.explorer = None;
+        failure.map_or(Ok(next?), Err)
     }
 
     fn check_worker_settled(&self, success: bool) -> Result<(), HostError> {

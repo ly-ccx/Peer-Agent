@@ -11,6 +11,7 @@ pub struct GoalTaskPublication<'a> {
     pub workspace: &'a Path,
     pub tool_call_id: &'a str,
     pub at: &'a str,
+    pub runner: Option<&'a OrdinaryRunner>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -316,7 +317,7 @@ fn apply_criteria(
     Ok(rows)
 }
 
-fn observed_evidence(
+pub(super) fn observed_evidence(
     home: &Path,
     conversation: &str,
     plan: &str,
@@ -496,9 +497,13 @@ impl GoalStore {
         {
             return Err(missing);
         }
+        let live_runner = publication
+            .runner
+            .is_some_and(|runner| runner.owns(&plan) && plan["runner"]["status"] == "running");
         if !plan["parentPlanId"].is_null()
             || !plan["delegationOrigin"].is_null()
             || snapshot.facts["runner"].is_object()
+                && !live_runner
                 && (snapshot.facts["runner"]["status"] != "idle"
                     || !super::explorer::retired(&plan["runner"]))
             || !matches!(

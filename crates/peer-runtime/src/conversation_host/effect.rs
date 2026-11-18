@@ -74,6 +74,9 @@ impl Host<'_> {
         port.confined_reads = self.explorer.is_some();
         effect.admission(port);
         let primary = handle.clone();
+        let mut provider_call =
+            ProviderCall::new(&self.identity.conversation_id, &grant.call, &now());
+        provider_call.goal_runner = self.runner.as_ref().map(|runner| runner.lease.clone());
         let mut future: EffectFuture = if let Some(handle) = &primary {
             let record = handle_metadata.unwrap_or_else(|| {
                 let metadata = json!({"kind":"effect","nativeMcp":effect.handle_metadata()});
@@ -116,10 +119,7 @@ impl Host<'_> {
                 ));
             }
             let effect = effect
-                .start(
-                    ProviderCall::new(&self.identity.conversation_id, &grant.call, &now()),
-                    effect_cancel.clone(),
-                )
+                .start(provider_call, effect_cancel.clone())
                 .unwrap_or_else(|e| Box::pin(async move { EffectOutcome::not_dispatched(e.0) }));
             start
                 .send(effect)
@@ -132,10 +132,7 @@ impl Host<'_> {
                 })
             })
         } else {
-            effect.start(
-                ProviderCall::new(&self.identity.conversation_id, &grant.call, &now()),
-                effect_cancel.clone(),
-            )?
+            effect.start(provider_call, effect_cancel.clone())?
         };
         let mut stopped = None;
         let mut closed = false;

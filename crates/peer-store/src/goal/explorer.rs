@@ -27,6 +27,7 @@ pub struct ExplorerDispatch<'a> {
     pub request: &'a Value,
     pub at: &'a str,
     pub inspect: Option<AutomaticInspect<'a>>,
+    pub runner: Option<&'a OrdinaryRunner>,
 }
 
 pub struct AutomaticInspect<'a> {
@@ -44,6 +45,7 @@ pub struct ExplorerLease {
     stream: String,
     index: Option<files::FileIdentity>,
     intake: Option<LocalGoalIntake>,
+    parent_phase: Option<String>,
 }
 
 pub enum ExplorerSettlement {
@@ -51,7 +53,7 @@ pub enum ExplorerSettlement {
     Failed(&'static str),
 }
 
-struct PlanWrite<'a> {
+pub(super) struct PlanWrite<'a> {
     store: &'a GoalStore,
     index: PathBuf,
     before: Option<files::FileIdentity>,
@@ -60,7 +62,7 @@ struct PlanWrite<'a> {
 }
 
 impl<'a> PlanWrite<'a> {
-    fn lock(store: &'a GoalStore) -> Result<Self, GoalError> {
+    pub(super) fn lock(store: &'a GoalStore) -> Result<Self, GoalError> {
         let directory = log::directory(&store.directory)?;
         let index = directory.join("index.jsonl");
         let lock = DirectoryLock::acquire(&index, Duration::from_millis(100), None)?;
@@ -74,7 +76,7 @@ impl<'a> PlanWrite<'a> {
         })
     }
 
-    fn publish(
+    pub(super) fn publish(
         self,
         id: &str,
         revision: &str,
@@ -89,6 +91,7 @@ impl<'a> PlanWrite<'a> {
             return Err(GoalError::Changed);
         }
         row["updatedAt"] = json!(at);
+        row["status"] = plan["status"].clone();
         let index = log::encode(&index)?;
         let bytes = serde_json::to_vec(plan).map_err(|_| GoalError::Invalid)?;
         if bytes.len() > PLAN_BYTES {
@@ -156,11 +159,20 @@ impl GoalStore {
         let plan_id = intake.plan_id.clone();
         let snapshot = self.read_bounded(&plan_id, projector, None, PLAN_BYTES as u64)?;
         let mut plan = self.read_context(&plan_id, &snapshot.source_revision)?;
+        let parent_phase = dispatch
+            .runner
+            .filter(|runner| {
+                runner.owns(&plan) && super::runner::valid_runner_owner(&plan, dispatch.stream)
+            })
+            .and_then(|_| plan["runner"]["phase"].as_str())
+            .map(str::to_owned);
         if plan["conversationId"] != dispatch.conversation
             || plan["originWorkspacePath"].as_str().map(Path::new) != Some(dispatch.workspace)
             || !plan["parentPlanId"].is_null()
             || !plan["delegationOrigin"].is_null()
+            || dispatch.runner.is_some() && parent_phase.is_none()
             || snapshot.facts["runner"].is_object()
+                && parent_phase.is_none()
                 && (snapshot.facts["runner"]["status"] != "idle" || !retired(&plan["runner"]))
         {
             return Err(GoalError::Projection(
@@ -217,6 +229,7 @@ impl GoalStore {
             stream: dispatch.stream.into(),
             index,
             intake: dispatch.inspect.map(|_| intake),
+            parent_phase,
         }))
     }
 
@@ -258,17 +271,29 @@ impl GoalStore {
             ExplorerSettlement::Completed(report) => {
                 worker["status"] = json!("completed");
                 worker["report"] = report;
-                runner["status"] = json!("idle");
-                runner["enabled"] = json!(false);
+                runner["status"] = json!(if lease.parent_phase.is_some() {
+                    "running"
+                } else {
+                    "idle"
+                });
+                runner["enabled"] = json!(lease.parent_phase.is_some());
                 runner["intent"] = json!("execute");
-                runner["phase"] = json!("plan_scaffold");
+                runner["phase"] = json!(lease.parent_phase.as_deref().unwrap_or("plan_scaffold"));
             }
             ExplorerSettlement::Failed(reason) => {
                 worker["status"] = json!("failed");
                 worker["failureReason"] = json!(reason);
-                runner["status"] = json!("blocked");
-                runner["intent"] = json!("block");
-                runner["phase"] = json!("blocked");
+                runner["status"] = json!(if lease.parent_phase.is_some() {
+                    "running"
+                } else {
+                    "blocked"
+                });
+                runner["intent"] = json!(if lease.parent_phase.is_some() {
+                    "execute"
+                } else {
+                    "block"
+                });
+                runner["phase"] = json!(lease.parent_phase.as_deref().unwrap_or("blocked"));
                 runner["blockedReason"] = json!(reason);
             }
         }
@@ -336,6 +361,8 @@ impl GoalStore {
                 stream: run.identity.stream_id.clone(),
                 index: before.clone(),
                 intake: None,
+                parent_phase: (runner["nativeRunnerOwner"] == run.identity.stream_id)
+                    .then(|| "inspect".to_owned()),
             });
         }
         if let Some(lease) = owned {

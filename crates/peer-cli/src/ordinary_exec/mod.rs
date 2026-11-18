@@ -237,13 +237,18 @@ pub fn run(options: &Options) -> io::Result<CliExit> {
             .await;
         match run {
             Ok(outcome) => {
-                let code = outcome.error.map(exit).unwrap_or_else(|| {
-                    if outcome.goal.is_some() {
-                        CliExit::WaitingUser
-                    } else {
-                        CliExit::Ok
-                    }
-                });
+                let code = outcome
+                    .error
+                    .map(exit)
+                    .unwrap_or_else(|| match outcome.goal.as_ref() {
+                        None => CliExit::Ok,
+                        Some(goal) => match goal["runnerStatus"].as_str() {
+                            Some("completed") => CliExit::Ok,
+                            Some("failed") => CliExit::GoalFailed,
+                            Some("budget_exhausted") => CliExit::MaxTurns,
+                            _ => CliExit::WaitingUser,
+                        },
+                    });
                 if options.output_format == "json" {
                     let mut payload = json!({"sessionId":outcome.session_id,"ok":outcome.error.is_none(),"result":if outcome.error.is_none(){json!(outcome.content)}else{Value::Null},"error":outcome.error,"turns":outcome.turns,"durationMs":started.elapsed().as_millis(),"usage":outcome.usage.turn_total});
                     if let Some(goal) = outcome.goal {

@@ -70,6 +70,7 @@ pub struct ProviderCall {
     conversation: String,
     tool_call: String,
     started_at: String,
+    pub(crate) goal_runner: Option<peer_store::OrdinaryRunner>,
 }
 impl ProviderCall {
     pub(crate) fn new(conversation: &str, tool_call: &str, started_at: &str) -> Self {
@@ -77,6 +78,7 @@ impl ProviderCall {
             conversation: conversation.into(),
             tool_call: tool_call.into(),
             started_at: started_at.into(),
+            goal_runner: None,
         }
     }
     pub fn conversation_id(&self) -> &str {

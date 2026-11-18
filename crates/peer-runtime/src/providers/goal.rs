@@ -128,6 +128,7 @@ impl PreparedEffect for UpdateGoal {
                     workspace: &self.workspace,
                     tool_call_id: call.tool_call_id(),
                     at: call.started_at(),
+                    runner: call.goal_runner.as_ref(),
                 },
                 projector,
                 Some(flag),

@@ -6,6 +6,20 @@ use peer_protocol::{
 };
 use serde_json::{Value, json};
 mod origin;
+pub(crate) fn leaf_tasks(plan: &Value) -> impl Iterator<Item = &Value> {
+    let mut queue: std::collections::VecDeque<_> =
+        plan["tasks"].as_array().into_iter().flatten().collect();
+    std::iter::from_fn(move || {
+        while let Some(task) = queue.pop_front() {
+            if let Some(children) = task["subtasks"].as_array().filter(|rows| !rows.is_empty()) {
+                queue.extend(children);
+            } else if task.is_object() {
+                return Some(task);
+            }
+        }
+        None
+    })
+}
 pub struct TuiGoalProjector {
     now: String,
 }

@@ -15,6 +15,7 @@ mod context;
 mod explorer;
 mod mirror;
 mod ordinary_create;
+mod runner;
 mod task_update;
 mod tool_view;
 pub use explorer::{
@@ -23,6 +24,7 @@ pub use explorer::{
 };
 pub use mirror::{GoalExecutionFact, GoalMirrorCommit, GoalMirrorTransaction};
 pub use ordinary_create::{GoalPublication, OrdinaryGoalDraft, OrdinaryGoalKind};
+pub use runner::{OrdinaryRunner, RunnerAdmission, RunnerPhase, RunnerStop};
 pub use task_update::GoalTaskPublication;
 static TASK: S<'static> = S::Object(&[("status", S::Full), ("subtasks", S::Each(&TASK))]);
 const RUNNER: S<'static> = S::Object(&[
