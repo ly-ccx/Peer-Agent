@@ -420,6 +420,33 @@ async fn command_cancellation_timeout_revocation_and_output_limit_reap_the_real_
         };
         let (observed, ()) = tokio::join!(observed_future, control);
         let e = observed.err().unwrap();
+        let pid = fs::read_to_string(ready)
+            .unwrap()
+            .trim()
+            .parse::<u32>()
+            .unwrap();
+        if !e.ended {
+            let group = rustix::process::Pid::from_raw(pid as i32).unwrap();
+            eprintln!(
+                "{mode} owned Git group {pid}, signal-zero probe: {:?}",
+                rustix::process::test_kill_process_group(group)
+            );
+            if let Ok(snapshot) = std::process::Command::new("/bin/ps")
+                .args(["-axo", "pid=,ppid=,pgid=,state=,comm="])
+                .output()
+            {
+                let rows = String::from_utf8_lossy(&snapshot.stdout);
+                for line in rows
+                    .lines()
+                    .filter(|line| {
+                        line.split_whitespace().nth(2).and_then(|v| v.parse().ok()) == Some(pid)
+                    })
+                    .take(16)
+                {
+                    eprintln!("{mode} owned Git member (PID PPID PGID STATE COMMAND): {line}");
+                }
+            }
+        }
         assert!(e.ended, "{mode}: {e:?}");
         assert_eq!(
             e.code,
@@ -430,11 +457,6 @@ async fn command_cancellation_timeout_revocation_and_output_limit_reap_the_real_
                 _ => "git_query_output_limit",
             }
         );
-        let pid = fs::read_to_string(ready)
-            .unwrap()
-            .trim()
-            .parse::<u32>()
-            .unwrap();
         assert!(
             crate::providers::group_absent(pid),
             "{mode} group remains after observation returned"
