@@ -2,12 +2,14 @@
 use super::*;
 use crate::goal_facts::TuiGoalProjector;
 use peer_protocol::javascript_trim;
-use peer_store::{GoalStore, StoreError};
+use peer_store::{GoalStore, OrdinaryGoalKind, StoreError};
 use std::sync::atomic::{AtomicBool, Ordering};
+
+mod create;
 
 const ALIAS: &str = "goal_get_plan";
 const CAPABILITY: &str = "local.goal.get_plan";
-pub(super) struct GoalReadProvider;
+pub(super) struct GoalProvider(pub(super) RuntimeMode);
 
 struct ReadGoal {
     args: Value,
@@ -16,22 +18,34 @@ struct ReadGoal {
     admission: Option<EffectAdmission>,
 }
 
-impl CapabilityProvider for GoalReadProvider {
+impl CapabilityProvider for GoalProvider {
     fn manifests(&self) -> Vec<(String, Value)> {
         let fixture: Value = serde_json::from_str(include_str!(
             "../../../../packages/protocol/contracts/native-cli/goal-read-tool.json"
         ))
         .expect("compiled Goal read manifest");
-        vec![(ALIAS.into(), fixture["manifest"].clone())]
+        vec![
+            (ALIAS.into(), fixture["manifest"].clone()),
+            ("goal_create_plan".into(), fixture["createManifest"].clone()),
+        ]
     }
 
     fn prepare(
         &mut self,
         capability: &str,
         args: Value,
-        _workspace: &Path,
+        workspace: &Path,
         home: &Path,
     ) -> Result<Box<dyn PreparedEffect>, HostError> {
+        if capability == create::CAPABILITY {
+            let kind = match self.0 {
+                RuntimeMode::Chat => OrdinaryGoalKind::Chat,
+                RuntimeMode::Plan => OrdinaryGoalKind::Plan,
+                RuntimeMode::Goal => OrdinaryGoalKind::SelfDriven,
+                _ => return Err(HostError("tool_not_projected")),
+            };
+            return create::CreateGoal::prepare(args, workspace, home, kind);
+        }
         if capability != CAPABILITY {
             return Err(HostError("tool_not_projected"));
         }

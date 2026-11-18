@@ -12,6 +12,7 @@ const PLAN_FIELDS: &[&str] = &[
     "workflowKind",
     "activation",
     "approval",
+    "executionPolicy",
     "version",
     "createdAt",
     "originWorkspacePath",

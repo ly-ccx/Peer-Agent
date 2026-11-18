@@ -33,7 +33,12 @@ fn automatic(
     risk: Option<ShellRisk>,
     inside: Option<bool>,
 ) -> bool {
-    if level == LocalAccessLevel::FullLocal || permission == ProviderPermission::ShellStop {
+    if level == LocalAccessLevel::FullLocal
+        || matches!(
+            permission,
+            ProviderPermission::ConversationGoal | ProviderPermission::ShellStop
+        )
+    {
         return true;
     }
     if permission == ProviderPermission::Read {
@@ -145,6 +150,8 @@ impl Host<'_> {
                 true,
                 if permission == ProviderPermission::ShellStop {
                     "shell_task_stop_same_scope"
+                } else if permission == ProviderPermission::ConversationGoal {
+                    "host_policy_conversation_goal"
                 } else if level == LocalAccessLevel::FullLocal {
                     "local_access_level_full"
                 } else if permission == ProviderPermission::Read {

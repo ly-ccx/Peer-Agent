@@ -50,8 +50,8 @@ pub use conversation_execution::{
 mod goal;
 mod goal_source;
 pub use goal::{
-    GoalError, GoalExecutionFact, GoalMirrorCommit, GoalMirrorTransaction, GoalSelection,
-    GoalSnapshot, GoalStore, LocalGoalIntake,
+    GoalError, GoalExecutionFact, GoalMirrorCommit, GoalMirrorTransaction, GoalPublication,
+    GoalSelection, GoalSnapshot, GoalStore, LocalGoalIntake, OrdinaryGoalDraft, OrdinaryGoalKind,
 };
 mod history;
 mod hook_config;

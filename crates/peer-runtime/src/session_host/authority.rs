@@ -176,6 +176,7 @@ impl NativeSessionHost {
         let current = self.current(call.plan_id, now)?;
         let kind = match call.permission {
             ProviderPermission::Read => "",
+            ProviderPermission::ConversationGoal => return Err(HostError("out_of_scope")),
             ProviderPermission::FileWrite => "file-write",
             ProviderPermission::Shell | ProviderPermission::ShellStop => "shell",
             ProviderPermission::Mcp => "mcp-tool",
@@ -650,7 +651,7 @@ impl NativeSessionHost {
         if admitted && scope.is_none() {
             return Err(HostError("read_scope_invalid"));
         }
-        let prompt = json!({"confirmation":{"kind":"capability-approval","approvalKind":match call.permission{ProviderPermission::Read|ProviderPermission::Mcp|ProviderPermission::ShellStop=>"other",ProviderPermission::FileWrite=>"file-write",ProviderPermission::Shell=>"shell-exec"}},"riskLevel":call.shell_risk.map(HostShellRisk::as_str)});
+        let prompt = json!({"confirmation":{"kind":"capability-approval","approvalKind":match call.permission{ProviderPermission::Read|ProviderPermission::ConversationGoal|ProviderPermission::Mcp|ProviderPermission::ShellStop=>"other",ProviderPermission::FileWrite=>"file-write",ProviderPermission::Shell=>"shell-exec"}},"riskLevel":call.shell_risk.map(HostShellRisk::as_str)});
         let Some(decision) = (if admitted {
             Some(json!({"reason":"admitted_read_root"}))
         } else if call.permission == ProviderPermission::ShellStop {

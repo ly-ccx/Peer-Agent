@@ -1,6 +1,6 @@
 use super::*;
 
-const CONTRACT: &str =
+pub(super) const CONTRACT: &str =
     include_str!("../../../../packages/protocol/contracts/native-cli/goal-read-tool.json");
 
 fn conversation(home: &Path) -> Value {
@@ -8,7 +8,7 @@ fn conversation(home: &Path) -> Value {
     serde_json::from_str::<Value>(index.lines().next().unwrap()).unwrap()["id"].clone()
 }
 
-fn last_tool(request: &Value) -> Value {
+pub(super) fn last_tool(request: &Value) -> Value {
     request["messages"]
         .as_array()
         .unwrap()

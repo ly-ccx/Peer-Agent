@@ -19,6 +19,297 @@
       "additionalProperties": false
     }
   },
+  "createManifest": {
+    "capabilityId": "local.goal.create_plan",
+    "description": "Create a persistent, trackable goal/plan. In Plan mode, call this before side-effecting work so the user can review and approve the draft plan. In Goal mode, use it to establish the objective, success criteria, boundaries, and trackable subtasks for autonomous execution; Goal mode does not require a plan-approval gate before every side-effecting step. Provide a clear goal and a complete list of ordered subtasks (each subtask: title, optional dependsOn). Write every subtask title and the goal in plain language the user can skim: lead with what the step is actually for, keep it to one action per subtask, and prefer everyday words over jargon. Do not cram multiple points into one title with inline numbering like (1)(2)(3) or ①②③ — split them into separate subtasks instead. Symbols, file paths, line numbers, function and field names may stay, but as trailing detail in parentheses, never as the opening of the title. Avoid buzzwords such as \"byte-exact\", \"contract\", \"anchor\", \"invariant\" when a plain phrase (e.g. \"don't break the callers\") says the same thing. The reader should understand the point of each subtask from its first few words. Always provide a short, human-readable title for the plan itself (a few words; verb + object) — it is required and shown verbatim in the plan panel / home task card; do not leave it empty. Never use the user raw message, confirmation phrases (e.g. 好/就这么做/认可/ok), command output, or file paths as the plan title. After you analyze the user intent, set/refresh plan.title to that short intent title (verb + object). Do not leave the first-utterance / placeholder title in place once the main intent is clear. Keep the title stable afterward unless the goal itself materially changes; do not overwrite it with later chat turns. After the tool succeeds, end the user-facing reply with the available next steps in plain language: start execution, adjust the plan, or cancel the plan. The plan panel provides the same governed actions as clickable controls; do not replace these choices with a vague confirmation-only reply. If the user is following up on a recently completed plan in this conversation (same theme, a refinement, a fix, or another round of the same goal), do NOT create a new top-level plan. Pass parentPlanId (the completed plan's planId) AND sourceTaskId (a taskId that exists on that parent plan — typically the last listed task). The store requires the pair and rejects a sourceTaskId that is not on the parent. This makes the new plan the next derived round of the same Goal Thread. Only omit both fields when the user is clearly starting a new, unrelated request. If the conversation context lists a recently completed plan, use that planId and one of its taskIds.",
+    "modeScopes": [
+      "chat",
+      "plan",
+      "goal"
+    ],
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Short, human-readable plan title (a few words). Required — do not omit; the plan panel and floating bar surface this verbatim."
+        },
+        "goal": {
+          "type": "string",
+          "description": "The concrete goal this plan aims to achieve, in one or two sentences."
+        },
+        "targetWorkspacePath": {
+          "type": "string",
+          "description": "Optional absolute path of the code repository this plan will modify, when it differs from the current conversation workspace (e.g. a knowledge-base workspace driving changes in a separate code repo). If the workspace AGENTS.md documents a linked/associated repository path, extract and pass it here so explorers can locate the target code across repositories. Omit when the goal targets the current workspace."
+        },
+        "parentPlanId": {
+          "type": "string",
+          "description": "Optional parent plan id when this is a follow-up / derived round of an existing Goal Thread. Must be paired with sourceTaskId (a taskId that exists on that parent plan). Omit both when the user is clearly starting an unrelated new request."
+        },
+        "sourceTaskId": {
+          "type": "string",
+          "description": "Required together with parentPlanId. Pass a taskId from the parent plan (typically the task that triggered this follow-up). The store rejects either field without the other, and rejects a sourceTaskId that is not on the parent plan."
+        },
+        "tasks": {
+          "type": "array",
+          "description": "Ordered list of subtasks that make up the plan.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "taskId": {
+                "type": "string",
+                "description": "Optional stable id for the subtask; generated if omitted."
+              },
+              "title": {
+                "type": "string",
+                "description": "What this subtask delivers, written in plain language. Lead with the point of the step in everyday words, keep it to one action, and put any file paths, line numbers, function or field names as trailing detail in parentheses rather than at the start. Do not pack several points into one title with ①②③ / (1)(2)(3)."
+              },
+              "dependsOn": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "taskIds this subtask depends on (must run after them)."
+              }
+            },
+            "required": [
+              "title"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "successCriteria": {
+          "type": "array",
+          "description": "Optional Definition-of-Done for the goal. Each item is a verifiable success criterion. Prefer machine-verifiable kinds (command/test/file-contains/file-exists) so the runtime can auto-verify after acting; use \"manual\" only when no automated check exists. Plain strings are accepted for backward compatibility and treated as manual criteria. When you can express the goal as executable checks, do so — the completion gate requires non-manual criteria to have a passed verification result with an evidence ref before the plan can complete.",
+          "items": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "Optional stable id for this criterion; generated if omitted."
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "command",
+                      "test",
+                      "file-contains",
+                      "file-exists",
+                      "manual"
+                    ],
+                    "description": "How this criterion is verified. command: run a shell command (exit 0 = pass). test: run a test command. file-contains: a file must contain expect text. file-exists: a path must exist. manual: needs human confirmation."
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": "Human-readable statement of what \"done\" means for this criterion."
+                  },
+                  "command": {
+                    "type": "string",
+                    "description": "Shell/test command to run (for kind=command/test)."
+                  },
+                  "path": {
+                    "type": "string",
+                    "description": "Target file path (for kind=file-contains/file-exists)."
+                  },
+                  "expect": {
+                    "type": "string",
+                    "description": "Expected substring the file must contain (for kind=file-contains)."
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        }
+      },
+      "required": [
+        "title",
+        "goal",
+        "tasks"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "draft": {
+    "title": "Record fixture tasks",
+    "goal": "Track the actual plan state.",
+    "tasks": [
+      {
+        "taskId": "inspect",
+        "title": "Inspect the fixture"
+      },
+      {
+        "title": "Check the result",
+        "dependsOn": [
+          "inspect"
+        ]
+      }
+    ],
+    "successCriteria": [
+      "Confirm the observation",
+      {
+        "kind": "file-exists",
+        "path": "fixture.txt"
+      }
+    ]
+  },
+  "expectedCreation": {
+    "chat": {
+      "title": "Record fixture tasks",
+      "goal": "Track the actual plan state.",
+      "status": "accepted",
+      "workflowKind": "plan_approval",
+      "executionPolicy": {
+        "autonomy": "approval_gated",
+        "irreversibleRequiresConfirmation": true,
+        "writeScope": "workspace_and_boundaries",
+        "askUserOn": [
+          "ambiguous_goal",
+          "product_decision",
+          "high_risk",
+          "irreversible",
+          "missing_permission",
+          "missing_credentials",
+          "verification_conflict",
+          "scope_drift"
+        ]
+      },
+      "tasks": [
+        {
+          "taskId": "inspect",
+          "title": "Inspect the fixture",
+          "status": "pending"
+        },
+        {
+          "taskId": "task-2",
+          "title": "Check the result",
+          "dependsOn": [
+            "inspect"
+          ],
+          "status": "pending"
+        }
+      ],
+      "successCriteria": [
+        {
+          "id": "c1",
+          "kind": "manual",
+          "description": "Confirm the observation"
+        },
+        {
+          "id": "c2",
+          "kind": "file-exists",
+          "description": "fixture.txt",
+          "path": "fixture.txt"
+        }
+      ]
+    },
+    "plan": {
+      "title": "Record fixture tasks",
+      "goal": "Track the actual plan state.",
+      "status": "awaiting_approval",
+      "workflowKind": "plan_approval",
+      "executionPolicy": {
+        "autonomy": "approval_gated",
+        "irreversibleRequiresConfirmation": true,
+        "writeScope": "workspace_and_boundaries",
+        "askUserOn": [
+          "ambiguous_goal",
+          "product_decision",
+          "high_risk",
+          "irreversible",
+          "missing_permission",
+          "missing_credentials",
+          "verification_conflict",
+          "scope_drift"
+        ]
+      },
+      "tasks": [
+        {
+          "taskId": "inspect",
+          "title": "Inspect the fixture",
+          "status": "pending"
+        },
+        {
+          "taskId": "task-2",
+          "title": "Check the result",
+          "dependsOn": [
+            "inspect"
+          ],
+          "status": "pending"
+        }
+      ],
+      "successCriteria": [
+        {
+          "id": "c1",
+          "kind": "manual",
+          "description": "Confirm the observation"
+        },
+        {
+          "id": "c2",
+          "kind": "file-exists",
+          "description": "fixture.txt",
+          "path": "fixture.txt"
+        }
+      ]
+    },
+    "goal": {
+      "title": "Record fixture tasks",
+      "goal": "Track the actual plan state.",
+      "status": "accepted",
+      "workflowKind": "goal_self_driven",
+      "executionPolicy": {
+        "autonomy": "self_driven",
+        "irreversibleRequiresConfirmation": true,
+        "writeScope": "workspace_and_boundaries",
+        "askUserOn": [
+          "ambiguous_goal",
+          "product_decision",
+          "high_risk",
+          "irreversible",
+          "missing_permission",
+          "missing_credentials",
+          "verification_conflict",
+          "scope_drift"
+        ]
+      },
+      "tasks": [
+        {
+          "taskId": "inspect",
+          "title": "Inspect the fixture",
+          "status": "pending"
+        },
+        {
+          "taskId": "task-2",
+          "title": "Check the result",
+          "dependsOn": [
+            "inspect"
+          ],
+          "status": "pending"
+        }
+      ],
+      "successCriteria": [
+        {
+          "id": "c1",
+          "kind": "manual",
+          "description": "Confirm the observation"
+        },
+        {
+          "id": "c2",
+          "kind": "file-exists",
+          "description": "fixture.txt",
+          "path": "fixture.txt"
+        }
+      ]
+    }
+  },
   "canonicalPlan": {
     "planId": "fixture-goal",
     "conversationId": "fixture-conversation",

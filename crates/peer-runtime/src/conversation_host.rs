@@ -278,7 +278,7 @@ impl NativeConversationRuntime {
             &inventory.source_revision,
         )
         .map_err(HostError)?;
-        let providers = ProviderRegistry::with_extensions(
+        let mut providers = ProviderRegistry::with_extensions(
             &inventory,
             &json!({"recorder":owner}),
             &self.home,
@@ -286,6 +286,7 @@ impl NativeConversationRuntime {
             skills.clone(),
             crate::providers::ShellHostMode::Conversation,
         )?;
+        providers.add_ordinary_goal_tools(options.mode);
         let projection = providers.project_for_mode(options.mode, options.allowlist)?;
         let pipeline = if selected.is_some() {
             ContextPipeline::open_bound(&self.home, &conversation, options.provider_id, model)?

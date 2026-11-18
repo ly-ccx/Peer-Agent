@@ -213,9 +213,6 @@ impl ProviderRegistry {
         }
         let ordinary = matches!(shell_mode, ShellHostMode::Conversation);
         let mut registry = Self::builtins(ordinary || !skills.mounted.is_empty(), shell_mode);
-        if ordinary {
-            registry.providers.push(Box::new(goal::GoalReadProvider));
-        }
         if !skills.mounted.is_empty() {
             registry
                 .providers
@@ -228,6 +225,9 @@ impl ProviderRegistry {
             credentials,
         )?));
         Ok(registry)
+    }
+    pub(crate) fn add_ordinary_goal_tools(&mut self, mode: RuntimeMode) {
+        self.providers.push(Box::new(goal::GoalProvider(mode)));
     }
     pub fn project(&self) -> Result<RuntimeProjection, HostError> {
         let mut tools = Vec::new();
