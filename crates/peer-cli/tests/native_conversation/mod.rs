@@ -2,6 +2,7 @@
 use super::*;
 use peer_store::ConversationStore;
 mod goal_intake;
+mod goal_read;
 mod hooks;
 mod input_media;
 mod model_errors;

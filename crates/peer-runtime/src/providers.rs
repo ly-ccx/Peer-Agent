@@ -14,6 +14,7 @@ use std::{
 };
 mod file;
 mod git;
+mod goal;
 mod mcp;
 mod projection;
 pub use projection::RuntimeMode;
@@ -171,7 +172,7 @@ impl Default for ProviderRegistry {
     }
 }
 impl ProviderRegistry {
-    fn builtins(skill_result_reader: bool, shell_mode: ShellHostMode) -> Self {
+    fn builtins(result_reader_in_all_chat_modes: bool, shell_mode: ShellHostMode) -> Self {
         Self {
             providers: vec![
                 Box::<file::FileProvider>::default(),
@@ -179,7 +180,9 @@ impl ProviderRegistry {
                 Box::new(web::WebProvider),
                 Box::new(git::GitProvider),
                 Box::new(shell::ShellProvider::new(shell_mode)),
-                Box::new(tool_artifact::ToolArtifactProvider(skill_result_reader)),
+                Box::new(tool_artifact::ToolArtifactProvider(
+                    result_reader_in_all_chat_modes,
+                )),
             ],
         }
     }
@@ -208,7 +211,11 @@ impl ProviderRegistry {
         {
             return Err(HostError("skill_identity_invalid"));
         }
-        let mut registry = Self::builtins(!skills.mounted.is_empty(), shell_mode);
+        let ordinary = matches!(shell_mode, ShellHostMode::Conversation);
+        let mut registry = Self::builtins(ordinary || !skills.mounted.is_empty(), shell_mode);
+        if ordinary {
+            registry.providers.push(Box::new(goal::GoalReadProvider));
+        }
         if !skills.mounted.is_empty() {
             registry
                 .providers

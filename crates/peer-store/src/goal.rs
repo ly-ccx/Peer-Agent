@@ -13,6 +13,7 @@ use std::{
 };
 mod context;
 mod mirror;
+mod tool_view;
 pub use mirror::{GoalExecutionFact, GoalMirrorCommit, GoalMirrorTransaction};
 static TASK: S<'static> = S::Object(&[("status", S::Full), ("subtasks", S::Each(&TASK))]);
 const RUNNER: S<'static> = S::Object(&[
@@ -330,6 +331,16 @@ impl GoalStore {
         projector: &impl GoalFactProjector,
         cancel: Option<&AtomicBool>,
     ) -> Result<GoalSnapshot, GoalError> {
+        self.read_bounded(id, projector, cancel, 1024 * 1024 * 1024)
+    }
+
+    fn read_bounded(
+        &self,
+        id: &str,
+        projector: &impl GoalFactProjector,
+        cancel: Option<&AtomicBool>,
+        max_plan_bytes: u64,
+    ) -> Result<GoalSnapshot, GoalError> {
         crate::durable_jsonl::check_cancel(cancel)?;
         if !valid_id(id, false) {
             return Err(GoalError::Invalid);
@@ -345,7 +356,7 @@ impl GoalStore {
             .map(|p| files::identity(p))
             .collect::<Result<_, _>>()?;
         let (plan, bytes) =
-            read(&paths[0], &PLAN, 1024 * 1024 * 1024, cancel)?.ok_or(StoreError::NotFound)?;
+            read(&paths[0], &PLAN, max_plan_bytes, cancel)?.ok_or(StoreError::NotFound)?;
         if plan["planId"] != id {
             return Err(GoalError::Invalid);
         }

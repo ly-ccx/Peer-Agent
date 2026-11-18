@@ -36,6 +36,7 @@ run('node', ['scripts/native-cli/conversation-execution-conformance.mjs', 'targe
 run('bun', ['scripts/native-cli/work-contracts.ts']);
 run('bun', ['scripts/native-cli/kernel-contracts.ts']);
 run('bun', ['scripts/native-cli/goal-contracts.ts']);
+run('bun', ['scripts/native-cli/goal-read-contracts.ts']);
 run('bun', ['scripts/native-cli/admission-contracts.ts']);
 run('bun', ['scripts/native-cli/history-plan-contracts.ts']);
 run('bun', ['scripts/native-cli/access-policy-contracts.ts']);
