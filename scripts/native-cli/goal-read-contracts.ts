@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTuiGoalBridge } from '../../apps/tui/src/goal-bridge.ts';
+import { createExplorerPromptSource } from '../../packages/system-context/src/sources/explorer-source.mjs';
 
 const directory = mkdtempSync(join(tmpdir(), 'peer-goal-read-contract-'));
 const RealDate = Date;
@@ -40,6 +41,21 @@ try {
     modeScopes: updateTool.modeScopes,
     inputSchema: updateTool.inputSchema,
   };
+  const exploreTool = bridge.toolDefinitions.find(tool => tool.name === 'request_explorer');
+  assert.ok(exploreTool);
+  const explorerManifest = {
+    capabilityId: exploreTool.capabilityId,
+    description: exploreTool.description,
+    modeScopes: exploreTool.modeScopes,
+    inputSchema: exploreTool.inputSchema,
+  };
+  const explorerSource = createExplorerPromptSource();
+  const explorerContext = {
+    explorerId: 'fixture-explorer', planId: 'fixture-goal', planTitle: 'Compare tool results',
+    request: { question: 'Where is the example?', reason: 'Find the observed file.',
+      scope: { include: ['src'], exclude: ['dist'] }, budget: { maxToolCalls: 4 } },
+  };
+  const explorerSections = explorerSource.render(explorerSource.observe({ mode: 'explorer', explorerContext }));
 
   const draft = {
     title: 'Record fixture tasks',
@@ -100,6 +116,9 @@ try {
     manifest,
     createManifest,
     updateManifest,
+    explorerManifest,
+    explorerContext,
+    explorerSections,
     draft,
     expectedCreation,
     canonicalPlan,

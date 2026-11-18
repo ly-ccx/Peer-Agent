@@ -4,6 +4,7 @@ use peer_protocol::javascript_json_string;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 mod continuity;
+pub(crate) mod explorer;
 mod ordinary;
 pub use ordinary::{ConversationContext, assemble_conversation_context};
 pub mod instructions;

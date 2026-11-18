@@ -10,16 +10,25 @@ use peer_store::{EvidenceIndexStore, HostToolEvidence};
 impl Host<'_> {
     pub(super) async fn tool(&mut self, call: ModelToolCall) -> Result<String, HostError> {
         self.source_current()?;
+        if let Some(worker) = &mut self.explorer {
+            if worker.calls >= peer_store::EXPLORER_TOOL_LIMIT {
+                return Err(HostError("explorer_tool_limit"));
+            }
+            worker.calls += 1;
+        }
         self.reap_background_shells(true).await?;
+        let projection = self
+            .explorer
+            .as_ref()
+            .map_or(&self.projection, |worker| &worker.projection);
         let effect = self.providers.prepare(
-            &self.projection,
+            projection,
             &call.name,
             call.arguments,
             &self.workspace,
             &self.home,
         )?;
-        let capability = self
-            .projection
+        let capability = projection
             .capability(&call.name)
             .ok_or(HostError("tool_not_projected"))?
             .to_owned();
@@ -33,7 +42,12 @@ impl Host<'_> {
         let permission = effect.permission();
         let goal_intake = self.observe_goal_intake(permission).await?;
         let risk = effect.risk();
-        let read_path = effect.read_scope()?.map(Path::to_owned);
+        let read_path = if self.explorer.is_some() {
+            effect.confined_read_scope()?
+        } else {
+            effect.read_scope()?
+        }
+        .map(Path::to_owned);
         self.append(&json!({"id":message_id,"role":"assistant","content":"","createdAt":now(),"streamId":self.identity.stream_id,"segments":[{"type":"tool-call","tool":call.name,"toolCallId":call_id,"args":args}],"permissionGrants":[]}))?;
         let receipt = self.store.prepare_conversation_tool(
             &mut self.run,
@@ -65,7 +79,7 @@ impl Host<'_> {
             args: &args,
             tool: &call.name,
         };
-        let mut hook = if goal_intake.denial(&self.home).is_some() {
+        let mut hook = if self.explorer.is_some() || goal_intake.denial(&self.home).is_some() {
             hooks::Hooks::default()
         } else {
             self.tool_hooks(
@@ -198,7 +212,8 @@ impl Host<'_> {
         }
         let mut hook_interrupted = None;
         let mut hook_unproven = None;
-        if grant.facts["granted"] == true
+        if self.explorer.is_none()
+            && grant.facts["granted"] == true
             && (outcome.ended || background)
             && !outcome.not_dispatched
             && interrupted.is_none()
@@ -263,7 +278,10 @@ impl Host<'_> {
         EvidenceIndexStore::new(&self.home).register(
             &HostToolEvidence {
                 conversation_id: &self.identity.conversation_id,
-                plan_id: None,
+                plan_id: self
+                    .explorer
+                    .as_ref()
+                    .map(|worker| worker.lease.plan.as_str()),
                 stream_id: Some(&self.identity.stream_id),
                 tool_name: &call.name,
                 capability_id: &capability,

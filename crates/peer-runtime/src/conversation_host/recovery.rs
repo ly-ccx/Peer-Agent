@@ -53,7 +53,7 @@ impl NativeConversationRuntime {
             self.settle_confirmed(&store, &mut guard, cancel, deadline)
                 .await?;
             guard.commit_usage(&store, &now())?;
-            return Ok(guard.current(&store)?);
+            return recovered_explorer(&self.home, &store, &guard);
         }
         if self.live.ownership(&initial.identity).ok() == Some(Ownership::Live) {
             return Err(HostError("native_execution_owner_live"));
@@ -178,7 +178,7 @@ impl NativeConversationRuntime {
         {
             guard.finish_stop(&store, &now())?;
         }
-        Ok(guard.current(&store)?)
+        recovered_explorer(&self.home, &store, &guard)
     }
     async fn cancel_prepared(
         &self,
@@ -327,6 +327,22 @@ impl NativeConversationRuntime {
         Ok(())
     }
 }
+fn recovered_explorer(
+    home: &Path,
+    store: &ConversationStore,
+    guard: &ConversationRecovery,
+) -> Result<ConversationExecution, HostError> {
+    let run = guard.current(store)?;
+    peer_store::GoalStore::new(home).recover_stopped_explorer(&run, &now(), || {
+        let current = guard.current(store).map_err(|error| error.code())?;
+        if current.identity != run.identity || current.stop != run.stop {
+            return Err("explorer_owner_changed");
+        }
+        Ok(())
+    })?;
+    Ok(run)
+}
+
 fn control(cancel: &CancellationToken, deadline: Instant) -> Result<(), HostError> {
     if cancel.is_cancelled() {
         Err(HostError("CANCELLED"))

@@ -314,18 +314,22 @@ fn scope_prompt(master: &std::os::fd::OwnedFd) -> Value {
             master,
             rustix::event::PollFlags::IN,
         )];
-        if rustix::event::poll(
+        let ready = match rustix::event::poll(
             &mut poll,
             Some(&rustix::event::Timespec {
                 tv_sec: 0,
                 tv_nsec: 20_000_000,
             }),
-        )
-        .unwrap()
-            > 0
-        {
+        ) {
+            Err(rustix::io::Errno::INTR) => continue,
+            result => result.unwrap(),
+        };
+        if ready > 0 {
             let mut chunk = [0; 8192];
-            let count = rustix::io::read(master, &mut chunk).unwrap();
+            let count = match rustix::io::read(master, &mut chunk) {
+                Err(rustix::io::Errno::INTR) => continue,
+                result => result.unwrap(),
+            };
             assert!(bytes.len() + count <= 65536, "bounded displayed prompt");
             bytes.extend_from_slice(&chunk[..count]);
         }

@@ -24,7 +24,7 @@ fn flags() -> rustix::fs::OFlags {
     use rustix::fs::OFlags as O;
     O::RDONLY | O::DIRECTORY | O::NOFOLLOW | O::CLOEXEC | O::NONBLOCK
 }
-fn directory(path: &Path) -> Result<std::fs::File, HostError> {
+pub(super) fn directory(path: &Path) -> Result<std::fs::File, HostError> {
     let mut file = std::fs::File::from(
         rustix::fs::open("/", flags(), rustix::fs::Mode::empty())
             .map_err(|_| HostError("file_parent_unavailable"))?,

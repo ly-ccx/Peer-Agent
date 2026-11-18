@@ -50,6 +50,7 @@ pub use conversation_execution::{
 mod goal;
 mod goal_source;
 pub use goal::{
+    EXPLORER_TIMEOUT_MS, EXPLORER_TOOL_LIMIT, ExplorerDispatch, ExplorerLease, ExplorerSettlement,
     GoalError, GoalExecutionFact, GoalMirrorCommit, GoalMirrorTransaction, GoalPublication,
     GoalSelection, GoalSnapshot, GoalStore, GoalTaskPublication, LocalGoalIntake,
     OrdinaryGoalDraft, OrdinaryGoalKind,

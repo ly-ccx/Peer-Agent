@@ -14,7 +14,7 @@ use std::{
 };
 mod file;
 mod git;
-mod goal;
+pub(crate) mod goal;
 mod mcp;
 mod projection;
 pub use projection::RuntimeMode;
@@ -106,6 +106,9 @@ pub trait PreparedEffect {
     /// and each additional discovered target, before issuing its operation.
     fn read_scope(&self) -> Result<Option<&Path>, HostError> {
         Ok(None)
+    }
+    fn confined_read_scope(&self) -> Result<Option<&Path>, HostError> {
+        self.read_scope()
     }
     fn risk(&self) -> Option<HostShellRisk> {
         None

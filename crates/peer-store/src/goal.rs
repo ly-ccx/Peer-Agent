@@ -12,10 +12,14 @@ use std::{
     sync::atomic::AtomicBool,
 };
 mod context;
+mod explorer;
 mod mirror;
 mod ordinary_create;
 mod task_update;
 mod tool_view;
+pub use explorer::{
+    EXPLORER_TIMEOUT_MS, EXPLORER_TOOL_LIMIT, ExplorerDispatch, ExplorerLease, ExplorerSettlement,
+};
 pub use mirror::{GoalExecutionFact, GoalMirrorCommit, GoalMirrorTransaction};
 pub use ordinary_create::{GoalPublication, OrdinaryGoalDraft, OrdinaryGoalKind};
 pub use task_update::GoalTaskPublication;

@@ -6,6 +6,7 @@ use peer_store::{GoalError, GoalStore, GoalTaskPublication, OrdinaryGoalKind, St
 use std::sync::atomic::{AtomicBool, Ordering};
 
 mod create;
+pub(crate) mod explorer;
 
 const ALIAS: &str = "goal_get_plan";
 const CAPABILITY: &str = "local.goal.get_plan";
@@ -35,6 +36,10 @@ impl CapabilityProvider for GoalProvider {
             (ALIAS.into(), fixture["manifest"].clone()),
             ("goal_create_plan".into(), fixture["createManifest"].clone()),
             ("goal_update_task".into(), fixture["updateManifest"].clone()),
+            (
+                "request_explorer".into(),
+                fixture["explorerManifest"].clone(),
+            ),
         ]
     }
 
@@ -64,6 +69,9 @@ impl CapabilityProvider for GoalProvider {
                 workspace: workspace.into(),
                 admission: None,
             }));
+        }
+        if capability == explorer::CAPABILITY {
+            return Ok(explorer::RegisterExplorer::prepare(args));
         }
         if capability != CAPABILITY {
             return Err(HostError("tool_not_projected"));

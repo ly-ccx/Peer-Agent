@@ -50,6 +50,33 @@ struct RunGuard {
     runtime: tokio::runtime::Handle,
 }
 impl RunGuard {
+    fn authorize_path(&self, path: &Path) -> Result<(), HostError> {
+        if self.port.confined_reads {
+            self.runtime.block_on(self.port.read_scope(path.into()))?;
+        }
+        Ok(())
+    }
+
+    fn open_read(&self, path: &Path) -> Result<std::fs::File, HostError> {
+        if !self.port.confined_reads {
+            return open_file(path);
+        }
+        use rustix::fs::OFlags as O;
+        let Some(parent) = path.parent() else {
+            return target::directory(path);
+        };
+        let directory = target::directory(parent)?;
+        let leaf = path.file_name().ok_or(HostError("invalid_path"))?;
+        rustix::fs::openat(
+            &directory,
+            leaf,
+            O::RDONLY | O::NOFOLLOW | O::CLOEXEC | O::NONBLOCK,
+            rustix::fs::Mode::empty(),
+        )
+        .map(std::fs::File::from)
+        .map_err(|_| HostError("file_unavailable"))
+    }
+
     fn cancel(&self) -> Result<(), HostError> {
         if self.cancel.is_cancelled() {
             Err(HostError("CANCELLED"))
@@ -70,9 +97,6 @@ fn open_file(path: &Path) -> Result<std::fs::File, HostError> {
     rustix::fs::open(path, flags, rustix::fs::Mode::from_raw_mode(0o666))
         .map(std::fs::File::from)
         .map_err(|_| HostError("file_unavailable"))
-}
-fn read_bytes(path: &Path, limit: usize) -> Result<Vec<u8>, HostError> {
-    read_handle_bytes(&mut open_file(path)?, limit)
 }
 fn read_handle_bytes(file: &mut std::fs::File, limit: usize) -> Result<Vec<u8>, HostError> {
     if !file
@@ -301,7 +325,7 @@ impl FileEffect {
             Operation::List => return scan::list(&self.path, &self.workspace, run),
             Operation::Search => return scan::search(&self.path, &self.workspace, &self.args, run),
             Operation::Read => {
-                let (text, hash) = read(&self.path)?;
+                let (text, hash) = read_handle(&mut run.open_read(&self.path)?)?;
                 let slice = slice_lines(&text, &self.args)?;
                 run.check()?;
                 let mut output = json!({"path":scan::display(&self.workspace,&self.path),"content":slice["content"],"bytes":text.len(),"contentHash":hash});
@@ -319,6 +343,10 @@ impl FileEffect {
     }
 }
 impl PreparedEffect for FileEffect {
+    fn confined_read_scope(&self) -> Result<Option<&Path>, HostError> {
+        Ok((!self.operation.write()).then_some(self.path.as_path()))
+    }
+
     fn output_kind(&self) -> ToolOutputKind {
         if self.operation == Operation::Read {
             ToolOutputKind::FileRead

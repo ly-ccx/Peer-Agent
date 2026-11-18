@@ -499,6 +499,8 @@ impl GoalStore {
         if !plan["parentPlanId"].is_null()
             || !plan["delegationOrigin"].is_null()
             || snapshot.facts["runner"].is_object()
+                && (snapshot.facts["runner"]["status"] != "idle"
+                    || !super::explorer::retired(&plan["runner"]))
             || !matches!(
                 snapshot.facts["status"].as_str(),
                 Some("drafting" | "awaiting_approval" | "accepted" | "approved" | "executing")

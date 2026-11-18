@@ -65,6 +65,40 @@ pub(crate) struct ContextPipeline {
     conversation: String,
 }
 impl ContextPipeline {
+    /// Bounded Explorer analysis reuses the same encoder, retries, ownership
+    /// and accounting, with its own short history and no parent compaction.
+    pub async fn request_explorer(
+        &mut self,
+        host: &mut impl CognitionHost,
+        f: &CognitionRequest<'_>,
+        accounting: &mut RuntimeUsageAccounting,
+        history: &HistorySnapshot,
+        projected: &Value,
+    ) -> Result<RequestResult, HostError> {
+        Self::guard(host, f)?;
+        let system = host.assemble(&[])?;
+        let encoding = self.result_views(host, f, history, projected).await?;
+        let prepared = f
+            .model
+            .prepare_request_with_tool_results(
+                system["rendered"]
+                    .as_str()
+                    .ok_or(HostError("context_resource_invalid"))?,
+                projected,
+                f.tools,
+                &self.live,
+                &encoding,
+            )
+            .map_err(|error| HostError(error.code))?;
+        let (turn, history) = self
+            .send_attempts(host, f, accounting, prepared, history, false)
+            .await?;
+        Ok(RequestResult {
+            turn: turn.map_err(|error| HostError(error.code))?,
+            system,
+            history,
+        })
+    }
     pub fn open(
         home: &Path,
         conversation: &str,

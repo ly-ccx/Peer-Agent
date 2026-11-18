@@ -245,6 +245,7 @@ impl PreparedEffect for Batch {
                                 #[cfg(feature = "test-fixtures")]
                                 barrier(&home, i, &run)?;
                                 let path = resolve(&workspace, lane.args["path"].as_str().unwrap_or("."))?;
+                                run.authorize_path(&path)?;
                                 scan::search(&path, &workspace, &lane.args, &run)
                             })();
                             match result {

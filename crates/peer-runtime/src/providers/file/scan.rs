@@ -57,6 +57,69 @@ pub(super) fn bounded_to(result: &Value, limit: usize) -> Result<(), HostError> 
     }
     serde_json::to_writer(Counter(0, limit), result).map_err(|_| HostError("file_result_limit"))
 }
+enum EntryType {
+    Dir,
+    File,
+    Other,
+}
+
+fn visit_entries(
+    path: &Path,
+    run: &RunGuard,
+    mut visit: impl FnMut(std::ffi::OsString, EntryType) -> Result<(), HostError>,
+) -> Result<(), HostError> {
+    let unavailable = |_| HostError("file_unavailable");
+    if run.port.confined_reads {
+        use rustix::fs::{AtFlags, Dir, FileType, statat};
+        use std::os::unix::ffi::OsStrExt;
+        let directory = target::directory(path)?;
+        let entries = Dir::read_from(&directory).map_err(unavailable)?;
+        for entry in entries {
+            run.cancel()?;
+            let entry = entry.map_err(unavailable)?;
+            let name = entry.file_name();
+            if matches!(name.to_bytes(), b"." | b"..") {
+                continue;
+            }
+            let kind = match entry.file_type() {
+                FileType::Unknown => FileType::from_raw_mode(
+                    statat(&directory, name, AtFlags::SYMLINK_NOFOLLOW)
+                        .map_err(unavailable)?
+                        .st_mode,
+                ),
+                kind => kind,
+            };
+            visit(
+                std::ffi::OsStr::from_bytes(name.to_bytes()).into(),
+                match kind {
+                    FileType::Directory => EntryType::Dir,
+                    FileType::RegularFile => EntryType::File,
+                    _ => EntryType::Other,
+                },
+            )?;
+        }
+    } else {
+        for entry in std::fs::read_dir(path).map_err(|_| HostError("file_unavailable"))? {
+            run.cancel()?;
+            let entry = entry.map_err(|_| HostError("file_unavailable"))?;
+            let kind = entry
+                .file_type()
+                .map_err(|_| HostError("file_unavailable"))?;
+            visit(
+                entry.file_name(),
+                if kind.is_dir() {
+                    EntryType::Dir
+                } else if kind.is_file() {
+                    EntryType::File
+                } else {
+                    EntryType::Other
+                },
+            )?;
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn list(path: &Path, workspace: &Path, run: &RunGuard) -> Result<Value, HostError> {
     run.check()?;
     if !std::fs::metadata(path)
@@ -67,20 +130,15 @@ pub(super) fn list(path: &Path, workspace: &Path, run: &RunGuard) -> Result<Valu
     }
     let mut budget = Budget::default();
     let mut entries = Vec::new();
-    for entry in std::fs::read_dir(path).map_err(|_| HostError("file_unavailable"))? {
-        run.cancel()?;
-        let entry = entry.map_err(|_| HostError("file_unavailable"))?;
-        let target = entry.path();
+    visit_entries(path, run, |name, kind| {
+        let target = path.join(&name);
         budget.path(&target)?;
-        let name = entry
-            .file_name()
+        let name = name
             .into_string()
             .map_err(|_| HostError("file_path_encoding"))?;
-        let kind = entry
-            .file_type()
-            .map_err(|_| HostError("file_unavailable"))?;
-        entries.push(json!({"name":name,"path":display(workspace,&target),"type":if kind.is_dir(){"directory"}else if kind.is_file(){"file"}else{"other"}}));
-    }
+        entries.push(json!({"name":name,"path":display(workspace,&target),"type":match kind { EntryType::Dir=>"directory",EntryType::File=>"file",EntryType::Other=>"other"}}));
+        Ok(())
+    })?;
     let locale = FileLocale::current()?;
     entries
         .sort_by(|a, b| locale.compare(a["name"].as_str().unwrap(), b["name"].as_str().unwrap()));
@@ -103,26 +161,22 @@ fn files(path: &Path, run: &RunGuard) -> Result<Vec<PathBuf>, HostError> {
     let mut files = Vec::new();
     while let Some(dir) = pending.pop() {
         run.check()?;
-        for entry in std::fs::read_dir(dir).map_err(|_| HostError("file_unavailable"))? {
-            run.cancel()?;
-            let entry = entry.map_err(|_| HostError("file_unavailable"))?;
-            if entry.file_name() == ".git" || entry.file_name() == "node_modules" {
-                continue;
+        visit_entries(&dir, run, |name, kind| {
+            if name == ".git" || name == "node_modules" {
+                return Ok(());
             }
-            let path = entry.path();
+            let path = dir.join(&name);
             budget.path(&path)?;
             if path.to_str().is_none() {
                 return Err(HostError("file_path_encoding"));
             }
-            let kind = entry
-                .file_type()
-                .map_err(|_| HostError("file_unavailable"))?;
-            if kind.is_dir() {
+            if matches!(kind, EntryType::Dir) {
                 pending.push(path);
-            } else if kind.is_file() {
+            } else if matches!(kind, EntryType::File) {
                 files.push(path);
             }
-        }
+            Ok(())
+        })?;
     }
     files.sort_by(|a, b| {
         a.to_str()
@@ -163,7 +217,10 @@ pub(super) fn search(
         }
         // Per-file read errors are skipped by the original search algorithm.
         // Cancellation and the overall result budget stay outside this branch.
-        let Ok(raw) = read_bytes(&file, SEARCH_BYTES) else {
+        let Ok(raw) = run
+            .open_read(&file)
+            .and_then(|mut file| read_handle_bytes(&mut file, SEARCH_BYTES))
+        else {
             continue;
         };
         let content = String::from_utf8_lossy(&raw);

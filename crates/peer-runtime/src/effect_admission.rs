@@ -67,6 +67,7 @@ pub struct EffectAdmission {
     cancel: CancellationToken,
     revocation: Option<EffectRevocation>,
     pub(crate) owner: Option<Recorder>,
+    pub(crate) confined_reads: bool,
 }
 impl EffectAdmission {
     pub(crate) fn blocking_guard(&self) -> BlockingAdmission {
@@ -85,6 +86,7 @@ impl EffectAdmission {
                 cancel: cancel.clone(),
                 revocation: None,
                 owner: None,
+                confined_reads: false,
             },
             receiver,
         )

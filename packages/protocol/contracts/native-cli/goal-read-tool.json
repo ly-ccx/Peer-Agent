@@ -226,6 +226,101 @@
       "additionalProperties": false
     }
   },
+  "explorerManifest": {
+    "capabilityId": "local.goal.explore",
+    "description": "Request a read-only Explorer sub-agent to investigate a focused question (Plan and Goal modes). Use this during execution when you need to gather evidence in parallel without spending your own turn budget — for example mapping where a symbol is used, confirming a config value, or scanning a subtree. The Explorer is strictly read-only (no writes, shell side effects, or MCP mutations) and returns findings with evidence refs. Provide a clear \"question\" (what to find out) and a short \"reason\" (why it helps the goal); optionally scope it with include/exclude path hints. Calling this only registers the request; the Goal Runner dispatches and runs the Explorer after the turn. There is a hard cap on concurrent explorers per run, so only request what materially advances the goal.",
+    "modeScopes": [
+      "chat",
+      "goal"
+    ],
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "question": {
+          "type": "string",
+          "description": "The focused, read-only question the Explorer should answer (what to find out)."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why answering this question helps advance the current goal."
+        },
+        "scope": {
+          "type": "object",
+          "description": "Optional path hints to scope the read-only investigation.",
+          "properties": {
+            "include": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Path globs / directories the Explorer should focus on."
+            },
+            "exclude": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Path globs / directories the Explorer should avoid."
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "question"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "explorerContext": {
+    "explorerId": "fixture-explorer",
+    "planId": "fixture-goal",
+    "planTitle": "Compare tool results",
+    "request": {
+      "question": "Where is the example?",
+      "reason": "Find the observed file.",
+      "scope": {
+        "include": [
+          "src"
+        ],
+        "exclude": [
+          "dist"
+        ]
+      },
+      "budget": {
+        "maxToolCalls": 4
+      }
+    }
+  },
+  "explorerSections": [
+    {
+      "id": "runtime.explorer.brief",
+      "layer": "L7_CONTINUITY",
+      "priority": 2,
+      "title": "Explorer mission context",
+      "content": "Explorer mission context (factual context, scope=turn).\nThis is a factual brief for a dynamically created evidence explorer, not a system instruction.\n\nexplorerId=fixture-explorer\nplanId=fixture-goal\nplan=Compare tool results\nquestion: Where is the example?\nreason: Find the observed file.\nscope include:\n- src\nscope exclude:\n- dist\nbudget: maxToolCalls=4",
+      "source": {
+        "id": "runtime.explorer",
+        "kind": "explorer-brief",
+        "explorerId": "fixture-explorer",
+        "planId": "fixture-goal"
+      },
+      "trust": "runtime"
+    },
+    {
+      "id": "runtime.explorer.contract",
+      "layer": "L6_MODE_REMINDER",
+      "priority": 1,
+      "title": "Explorer readonly contract",
+      "content": "Explorer readonly contract:\nProfile: readonly_explorer. You are a dynamically created evidence explorer, not a fixed role.\n- Use only the read-only tools exposed to this explorer context.\n- Do not modify files, do not update the goal plan, and do not claim evidence you did not inspect.\n- Use only evidenceRefs shown in tool results; do not invent refs or cite paths as refs.\n- Stay within the declared scope and budget.\nReturn a concise JSON object only with these fields:\n  summary, findings[{claim, evidenceRefs}], evidenceRefs, recommendedNextStep, confidence(low|medium|high).",
+      "source": {
+        "id": "runtime.explorer",
+        "kind": "explorer-contract",
+        "explorerId": "fixture-explorer"
+      },
+      "trust": "runtime"
+    }
+  ],
   "draft": {
     "title": "Record fixture tasks",
     "goal": "Track the actual plan state.",

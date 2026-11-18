@@ -24,6 +24,7 @@ pub(super) struct ToolGrant {
     pub revision: u64,
     pub scopes: Vec<ResolvedReadScope>,
     pub credential_revision: String,
+    explorer_id: Option<String>,
     goal_intake: GoalIntake,
     pub goal_denial: Option<&'static str>,
 }
@@ -67,12 +68,23 @@ impl Host<'_> {
         grant: &ToolGrant,
         args: &Value,
     ) -> Result<(), HostError> {
+        let projection = match &grant.explorer_id {
+            None => &self.projection,
+            Some(id) => {
+                &self
+                    .explorer
+                    .as_ref()
+                    .filter(|worker| worker.lease.id == *id)
+                    .ok_or(HostError("permission_policy_changed"))?
+                    .projection
+            }
+        };
         if grant.facts["granted"] != true
             || self.access.snapshot()?.1 != grant.revision
             || peer_protocol::approval_args_digest(args)
                 .map_err(|_| HostError("permission_arguments_invalid"))?
                 != grant.digest
-            || !self.projection.has_capability(&grant.capability)
+            || !projection.has_capability(&grant.capability)
             || self
                 .credentials
                 .normalized_conversation(&self.identity)
@@ -139,7 +151,11 @@ impl Host<'_> {
             .unwrap_or_else(|| json!(capability));
         let permitted = automatic(level, permission, risk, inside);
         let mut goal_denial = goal_intake.denial(&self.home);
-        let (mut granted, mut reason, terminal) = if let Some(interruption) = hook_interrupted {
+        let (mut granted, mut reason, terminal) = if self.explorer.is_some()
+            && (permission != ProviderPermission::Read || inside == Some(false))
+        {
+            (false, "explorer_scope_denied", None)
+        } else if let Some(interruption) = hook_interrupted {
             (false, "hook_interrupted", Some(interruption))
         } else if let Some(reason) = goal_denial {
             (false, reason, None)
@@ -188,6 +204,7 @@ impl Host<'_> {
             revision,
             scopes: scope.into_iter().collect(),
             credential_revision,
+            explorer_id: self.explorer.as_ref().map(|worker| worker.lease.id.clone()),
             goal_intake,
             goal_denial,
         };
@@ -359,7 +376,9 @@ impl Host<'_> {
         let inside = root.covers(Path::new(&target.facts.path));
         let scope = if inside { root } else { target };
         let level = self.access.snapshot()?.0;
-        let (granted, reason, terminal) = if level == LocalAccessLevel::FullLocal || inside {
+        let (granted, reason, terminal) = if self.explorer.is_some() && !inside {
+            (false, "explorer_scope_denied", None)
+        } else if level == LocalAccessLevel::FullLocal || inside {
             (true, "host_policy_read", None)
         } else {
             self.decide(

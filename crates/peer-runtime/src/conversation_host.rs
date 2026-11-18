@@ -30,6 +30,7 @@ use std::{
 };
 mod background_shell;
 mod effect;
+mod explorer;
 mod foreground_shell;
 mod goal_intake;
 mod hooks;
@@ -370,6 +371,7 @@ impl NativeConversationRuntime {
             credentials,
             providers,
             projection,
+            allowlist: options.allowlist.map(<[String]>::to_vec),
             pipeline: Some(pipeline),
             usage: RuntimeUsageAccounting::default(),
             system: None,
@@ -379,6 +381,7 @@ impl NativeConversationRuntime {
             completed_shells: BTreeMap::new(),
             foreground_authority: None,
             cognition_source: None,
+            explorer: None,
         };
         let result = async {
             host.append(&user_message)?;
@@ -387,7 +390,12 @@ impl NativeConversationRuntime {
                 conversation_id: &conversation,
             })
             .await?;
-            crate::turn_loop::run(&mut host, options.max_turns, &owned, external).await
+            let result =
+                crate::turn_loop::run(&mut host, options.max_turns, &owned, external).await?;
+            if result.stop == crate::turn_loop::LoopStop::Replied {
+                host.drive_requested_explorers().await?;
+            }
+            Ok::<_, HostError>(result)
         }
         .await;
         let cleanup = host.finish().await;
@@ -454,6 +462,7 @@ struct Host<'a> {
     credentials: crate::mcp_oauth::CredentialEpoch,
     providers: ProviderRegistry,
     projection: RuntimeProjection,
+    allowlist: Option<Vec<String>>,
     pipeline: Option<ContextPipeline>,
     usage: RuntimeUsageAccounting,
     system: Option<Value>,
@@ -463,6 +472,7 @@ struct Host<'a> {
     completed_shells: BTreeMap<String, crate::providers::EffectOutcome>,
     foreground_authority: Option<foreground_shell::ForegroundAuthority>,
     cognition_source: Option<CognitionSource>,
+    explorer: Option<explorer::Worker>,
 }
 struct CognitionSource {
     revision: String,
@@ -518,6 +528,7 @@ impl Host<'_> {
             return Err(HostError("conversation_scope_changed"));
         }
         self.credentials.check().map_err(HostError)?;
+        self.check_explorer()?;
         self.validate_foreground_authority()
     }
     fn source_current(&self) -> Result<(), HostError> {
@@ -548,9 +559,20 @@ impl Host<'_> {
     }
     fn append(&mut self, message: &Value) -> Result<(), HostError> {
         self.source_current()?;
+        let tagged = self.explorer.as_ref().map(|worker| {
+            let mut message = message.clone();
+            message["kind"] = json!("agent_activity");
+            message["nativeExplorerId"] = json!(worker.lease.id);
+            message
+        });
         self.expected = self
             .store
-            .commit_message(&self.expected, message, &now(), None)?
+            .commit_message(
+                &self.expected,
+                tagged.as_ref().unwrap_or(message),
+                &now(),
+                None,
+            )?
             .snapshot;
         Ok(())
     }
@@ -664,6 +686,19 @@ impl CognitionHost for Host<'_> {
         Ok(())
     }
     fn assemble(&self, continuity: &[Value]) -> Result<Value, HostError> {
+        if let Some(worker) = &self.explorer {
+            return crate::system_context::explorer::assemble(
+                self.workspace
+                    .to_str()
+                    .ok_or(HostError("invalid_workspace"))?,
+                self.model.provider(),
+                self.model.model_id(),
+                &self.identity.conversation_id,
+                &worker.lease,
+                &now(),
+            )
+            .map_err(HostError);
+        }
         let registry_path = std::path::absolute(self.home.join("mcp-registry.json"))
             .map_err(|_| HostError("invalid_data_home"))?;
         assemble_conversation_context(
@@ -702,7 +737,7 @@ impl CognitionHost for Host<'_> {
                 observed.usage,
                 RequestMetadata {
                     fingerprint: observed.fingerprint.as_deref(),
-                    purpose: if capacity {
+                    purpose: if capacity || self.explorer.is_some() {
                         UsagePurpose::Agent
                     } else {
                         UsagePurpose::CompactionSummary
@@ -758,26 +793,43 @@ impl crate::turn_loop::TurnHost for Host<'_> {
         let mut usage = std::mem::take(&mut self.usage);
         let home = self.home.clone();
         let model = self.model;
-        let tools = self.projection.definitions();
+        let tools = self
+            .explorer
+            .as_ref()
+            .map_or(&self.projection, |worker| &worker.projection)
+            .definitions();
         let owned = self.owned.clone();
         let external = self.external.clone();
         self.cognition_source = (!self.background_shells.is_empty()).then(|| CognitionSource {
             revision: self.expected.source_revision.clone(),
             content_revision: self.expected.history.content_revision,
         });
-        let response = pipeline
-            .request(
-                self,
-                &CognitionRequest {
-                    home: &home,
-                    model,
-                    tools: &tools,
-                    owned: &owned,
-                    external: &external,
-                },
-                &mut usage,
-            )
-            .await;
+        let request = CognitionRequest {
+            home: &home,
+            model,
+            tools: &tools,
+            owned: &owned,
+            external: &external,
+        };
+        let response = async {
+            if self.explorer.is_some() {
+                let projected = self.project_active_history()?;
+                let history = self.store.read_committed(
+                    &self.identity.conversation_id,
+                    None,
+                    8 * 1024 * 1024,
+                )?;
+                if history.source_revision != self.expected.source_revision {
+                    return Err(HostError("CONTEXT_SNAPSHOT_CHANGED"));
+                }
+                pipeline
+                    .request_explorer(self, &request, &mut usage, &history, &projected)
+                    .await
+            } else {
+                pipeline.request(self, &request, &mut usage).await
+            }
+        }
+        .await;
         self.cognition_source = None;
         self.pipeline = Some(pipeline);
         self.usage = usage;
@@ -807,8 +859,7 @@ impl crate::turn_loop::TurnHost for Host<'_> {
         ids: &[String],
     ) -> Result<(), HostError> {
         self.source_current()?;
-        let projected = crate::canonical_history::project_history(&self.expected.history.messages)
-            .map_err(HostError)?;
+        let projected = self.project_active_history()?;
         self.pipeline
             .as_mut()
             .ok_or(HostError("native_pipeline_unavailable"))?
