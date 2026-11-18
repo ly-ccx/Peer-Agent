@@ -366,3 +366,47 @@ fn fixture_session_delete_retains_actual_unresolved_dispatch_even_after_recovery
     );
     assert_eq!(model.requests.lock().unwrap().len(), 1);
 }
+
+#[test]
+fn closed_stdout_preserves_the_outcome_of_shell_commands_and_file_publications() {
+    let fixture = Ordinary::new();
+    seed(&fixture);
+    let destination = fixture.workspace().join("saved.md");
+    let exported = destination.to_str().unwrap();
+    let commands: &[&[&str]] = &[
+        &["--help"],
+        &["sessions", "list"],
+        &["export", SELECTED],
+        &["export", SELECTED, "--output", exported],
+        &["sessions", "delete", SELECTED, "--yes"],
+    ];
+    for args in commands {
+        let specimen = fixture.command(None);
+        let mut child = Command::new(specimen.get_program())
+            .env_clear()
+            .envs(
+                specimen
+                    .get_envs()
+                    .filter_map(|(key, value)| value.map(|value| (key, value))),
+            )
+            .current_dir(fixture.workspace())
+            .args(*args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        drop(child.stdout.take().unwrap());
+        let output = wait(child);
+        assert!(
+            output.status.success() && output.stderr.is_empty(),
+            "{args:?}: {output:?}"
+        );
+    }
+    assert!(
+        std::fs::read_to_string(&destination)
+            .unwrap()
+            .contains(SELECTED)
+    );
+    assert_deleted(&fixture);
+}

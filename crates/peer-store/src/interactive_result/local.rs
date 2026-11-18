@@ -7,13 +7,15 @@ use peer_protocol::interactive_result::{
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::{
     fs::{self, Metadata},
+    io::{self, Read as _},
     os::unix::fs::MetadataExt,
     path::PathBuf,
 };
 
-mod tombstone;
+pub(super) mod tombstone;
 
 const LIMIT: usize = INTERACTIVE_MANIFEST_BYTES;
 const STORAGE: InteractiveReadError = InteractiveReadError("interactive_storage_unavailable");
@@ -103,26 +105,70 @@ impl Snapshot {
         Ok(db)
     }
 
-    fn check_current(&self, mode: SqliteReadSnapshot) -> Read<()> {
-        let after = Self::capture(self.directory.clone())
+    fn current(&self) -> Read<Self> {
+        Self::capture(self.directory.clone())
             .map_err(|_| CHANGED)?
-            .ok_or(CHANGED)?;
-        let changed = self.entries.iter().zip(&after.entries).enumerate().any(
-            |(index, (before, current))| {
-                if index == 2 && matches!(mode, SqliteReadSnapshot::RebuildWalIndex) {
-                    return before.as_ref().is_some_and(|old| {
-                        current
-                            .as_ref()
-                            .is_none_or(|new| old.dev != new.dev || old.ino != new.ino)
-                    });
-                }
-                before != current
-            },
-        );
-        if changed || after.directories != self.directories {
+            .ok_or(CHANGED)
+    }
+
+    fn check_current(&self, mode: SqliteReadSnapshot) -> Read<()> {
+        self.compare(&self.current()?, mode, None)
+    }
+
+    fn compare(
+        &self,
+        after: &Self,
+        mode: SqliteReadSnapshot,
+        rebuild_wal_digest: Option<[u8; 32]>,
+    ) -> Read<()> {
+        if after.directories != self.directories {
             return Err(CHANGED);
         }
+        for (index, (before, current)) in self.entries.iter().zip(&after.entries).enumerate() {
+            let unchanged = if let (1, Some(digest), Some(old), Some(new)) =
+                (index, rebuild_wal_digest, before, current)
+            {
+                // Linux SQLite may update the WAL's ctime when rebuilding its
+                // index. Prove identical bytes before adopting that metadata.
+                old.dev == new.dev
+                    && old.ino == new.ino
+                    && old.size == new.size
+                    && old.modified_ns == new.modified_ns
+                    && after.wal_digest()? == digest
+            } else if index == 2 && matches!(mode, SqliteReadSnapshot::RebuildWalIndex) {
+                before.as_ref().is_none_or(|old| {
+                    current
+                        .as_ref()
+                        .is_some_and(|new| old.dev == new.dev && old.ino == new.ino)
+                })
+            } else {
+                before == current
+            };
+            if !unchanged {
+                return Err(CHANGED);
+            }
+        }
         Ok(())
+    }
+
+    fn wal_digest(&self) -> Read<[u8; 32]> {
+        let expected = self.entries[1].as_ref().ok_or(CHANGED)?;
+        let path = self.directory.join("store.sqlite-wal");
+        let (file, identity) = files::open(&path, expected.size)
+            .map_err(|_| CHANGED)?
+            .ok_or(CHANGED)?;
+        if &identity != expected {
+            return Err(CHANGED);
+        }
+        let mut digest = Sha256::new();
+        let read = io::copy(&mut file.take(expected.size.saturating_add(1)), &mut digest)
+            .map_err(|_| CHANGED)?;
+        if read != expected.size
+            || files::identity(&path).map_err(|_| CHANGED)?.as_ref() != Some(expected)
+        {
+            return Err(CHANGED);
+        }
+        Ok(digest.finalize().into())
     }
 }
 
@@ -149,21 +195,34 @@ pub(super) fn read_local(
     home: &Path,
     reference: &InteractiveResultReference,
 ) -> Read<Option<InteractiveResultSummary>> {
+    read_snapshot(home, &reference.owner, |db| read_fixed(db, reference))
+}
+
+pub(super) fn read_snapshot<T>(
+    home: &Path,
+    owner: &InteractiveOwner,
+    read: impl FnOnce(&Connection) -> Read<Option<T>>,
+) -> Read<Option<T>> {
     let runtime = home.join("project-runtime");
     if stat(&runtime, Metadata::is_dir)?.is_none() {
         return Ok(None);
     }
     let directory = runtime
-        .join(&reference.owner.workspace_id)
+        .join(&owner.workspace_id)
         .join("interactive-results");
     let Some(snapshot) = Snapshot::capture(directory)? else {
         return Ok(None);
     };
     let mode = snapshot.mode()?;
+    let rebuild_wal_digest = (cfg!(target_os = "linux")
+        && matches!(mode, SqliteReadSnapshot::RebuildWalIndex))
+    .then(|| snapshot.wal_digest())
+    .transpose()?;
     let db = snapshot.connect(mode)?;
-    snapshot.check_current(mode)?;
-    let saved = read_fixed(&db, reference);
-    snapshot.check_current(mode)?;
+    let admitted = snapshot.current()?;
+    snapshot.compare(&admitted, mode, rebuild_wal_digest)?;
+    let saved = read(&db);
+    admitted.check_current(mode)?;
     saved
 }
 
@@ -400,4 +459,37 @@ fn read_fixed(
     result.content_schema_version = Some(schema);
     result.library_version = Some(library.into());
     Ok(Some(result))
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wal_rebuild_checks_bytes_when_only_ctime_changes() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("bot").join("interactive-results");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("store.sqlite"), b"database").unwrap();
+        let wal = directory.join("store.sqlite-wal");
+        fs::write(&wal, b"committed").unwrap();
+        let before = Snapshot::capture(directory.clone()).unwrap().unwrap();
+        let digest = before.wal_digest().unwrap();
+        let modified = fs::metadata(&wal).unwrap().modified().unwrap();
+
+        fs::write(&wal, b"different").unwrap();
+        fs::File::open(&wal)
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+        let after = Snapshot::capture(directory).unwrap().unwrap();
+        assert_eq!(
+            after.entries[1].as_ref().unwrap().modified_ns,
+            before.entries[1].as_ref().unwrap().modified_ns
+        );
+        assert_eq!(
+            before.compare(&after, SqliteReadSnapshot::RebuildWalIndex, Some(digest)),
+            Err(CHANGED)
+        );
+    }
 }

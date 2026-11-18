@@ -46,16 +46,7 @@ fn exit(code: &str) -> CliExit {
 }
 fn json_output(value: &Value) -> io::Result<String> {
     let encoded = serde_json::to_string(value).map_err(io::Error::other)?;
-    Ok(encoded
-        .chars()
-        .map(|c| {
-            if c.is_control() || matches!(c,'\u{202a}'..='\u{202e}'|'\u{2066}'..='\u{2069}') {
-                format!("\\u{:04x}", c as u32)
-            } else {
-                c.to_string()
-            }
-        })
-        .collect())
+    Ok(crate::text::escape_json_controls(&encoded))
 }
 async fn stdin_prompt(cancel: &CancellationToken) -> Result<String, &'static str> {
     let input = io::stdin();
@@ -249,23 +240,25 @@ pub fn run(options: &Options) -> io::Result<CliExit> {
                             _ => CliExit::WaitingUser,
                         },
                     });
-                if options.output_format == "json" {
+                let stdout = if options.output_format == "json" {
                     let result = (outcome.error.is_none() && !outcome.content.is_empty())
                         .then_some(outcome.content);
                     let mut payload = json!({"sessionId":outcome.session_id,"ok":outcome.error.is_none(),"result":result,"error":outcome.error,"turns":outcome.turns,"durationMs":started.elapsed().as_millis(),"usage":outcome.usage.turn_total});
                     if let Some(goal) = outcome.goal {
                         payload["goal"] = goal;
                     }
-                    writeln!(io::stdout(), "{}", json_output(&payload)?)?;
+                    writeln!(io::stdout(), "{}", json_output(&payload)?)
                 } else if let Some(error) = outcome.error {
                     writeln!(io::stderr(), "peer exec: {error}")?;
+                    Ok(())
                 } else {
                     writeln!(
                         io::stdout(),
                         "{}",
                         peer_tui::terminal_text(&outcome.content)
-                    )?;
-                }
+                    )
+                };
+                crate::finish_stdout(stdout)?;
                 Ok(code)
             }
             Err(error) => {

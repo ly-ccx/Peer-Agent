@@ -11,12 +11,44 @@ pub(super) fn read(
     db: &Connection,
     reference: &InteractiveResultReference,
 ) -> Read<InteractiveResultSummary> {
+    read_saved(db, reference)?
+        .map(|saved| saved.summary)
+        .ok_or(CLEANUP_CORRUPT)
+}
+
+pub(in crate::interactive_result) struct SavedReceipt {
+    pub head: InteractiveResultReference,
+    pub request_id: String,
+    pub expected_digest: String,
+    raw: String,
+    decoded: Option<Value>,
+    summary: InteractiveResultSummary,
+}
+
+impl SavedReceipt {
+    pub(in crate::interactive_result) fn into_json(self) -> Read<String> {
+        let Some(mut receipt) = self.decoded else {
+            return Ok(self.raw);
+        };
+        receipt["receiptDigest"] =
+            json!(interactive_json_digest(&receipt).map_err(|_| CLEANUP_CORRUPT)?);
+        interactive_canonical_json(&receipt).map_err(|_| CLEANUP_CORRUPT)
+    }
+}
+
+pub(in crate::interactive_result) fn read_saved(
+    db: &Connection,
+    reference: &InteractiveResultReference,
+) -> Read<Option<SavedReceipt>> {
     let owner = owner_json(reference)?;
-    let raw: String = db.query_row(
+    let raw: Option<String> = db.query_row(
         "SELECT body FROM presentation WHERE category='interactive-cleanup' AND id=? AND owner=?",
         params![reference.result_id, owner],
         |r| r.get(0),
-    ).optional().map_err(|_| CLEANUP_CORRUPT)?.ok_or(CLEANUP_CORRUPT)?;
+    ).optional().map_err(|_| CLEANUP_CORRUPT)?;
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
     let (receipt, partial) = decode_receipt(&raw).ok_or(CLEANUP_CORRUPT)?;
     if receipt.as_object().is_none_or(|fields| fields.len() != 9)
         || receipt["schemaVersion"] != 1
@@ -117,11 +149,28 @@ pub(super) fn read(
         .map_err(|_| CLEANUP_CORRUPT)?;
     if count != seen.len()
         || !seen.contains(&head.content_version)
-        || result != (owner, head.content_version)
+        || result.0 != owner
+        || result.1 != head.content_version
     {
         return Err(CLEANUP_CORRUPT);
     }
-    summary_row.ok_or(CLEANUP_CORRUPT)
+    let summary = summary_row.ok_or(CLEANUP_CORRUPT)?;
+    let request_id = receipt["requestId"]
+        .as_str()
+        .ok_or(CLEANUP_CORRUPT)?
+        .to_owned();
+    let expected_digest = receipt["expectedDigest"]
+        .as_str()
+        .ok_or(CLEANUP_CORRUPT)?
+        .to_owned();
+    Ok(Some(SavedReceipt {
+        head,
+        request_id,
+        expected_digest,
+        raw,
+        decoded: partial.is_empty().then_some(receipt),
+        summary,
+    }))
 }
 
 type PartialCharacters = BTreeMap<usize, u16>;

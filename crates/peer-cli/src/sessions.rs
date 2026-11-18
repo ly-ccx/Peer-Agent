@@ -39,7 +39,7 @@ pub fn list() -> io::Result<CliExit> {
         };
         lines.push(format!("{updated}\t{}\t{title}{role}", row.id));
     }
-    writeln!(io::stdout(), "{}", lines.join("\n"))?;
+    crate::finish_stdout(writeln!(io::stdout(), "{}", lines.join("\n")))?;
     Ok(CliExit::Ok)
 }
 
@@ -72,7 +72,7 @@ pub fn delete(id: &str, yes: bool) -> io::Result<CliExit> {
     }
     match peer_store::delete_session(&home, id) {
         Ok(()) => {
-            writeln!(io::stdout(), "Deleted session {id}.")?;
+            crate::finish_stdout(writeln!(io::stdout(), "Deleted session {id}."))?;
             Ok(CliExit::Ok)
         }
         Err(error) => delete_error(error, id),

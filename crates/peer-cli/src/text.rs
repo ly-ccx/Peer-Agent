@@ -35,3 +35,25 @@ pub(crate) fn field(value: &str, label: bool) -> io::Result<String> {
     }
     Ok(output)
 }
+
+/// JSON must retain field meaning without emitting terminal controls.
+pub(crate) fn escape_json_controls(encoded: &str) -> String {
+    encoded
+        .chars()
+        .map(|c| {
+            if c.is_control() || matches!(c,'\u{202a}'..='\u{202e}'|'\u{2066}'..='\u{2069}') {
+                format!("\\u{:04x}", c as u32)
+            } else {
+                c.to_string()
+            }
+        })
+        .collect()
+}
+
+/// A final stdout write cannot change the outcome of a settled command.
+pub fn finish_stdout(write: io::Result<()>) -> io::Result<()> {
+    match write {
+        Err(error) if error.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+        other => other,
+    }
+}

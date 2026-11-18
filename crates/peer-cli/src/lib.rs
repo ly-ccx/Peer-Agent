@@ -15,6 +15,7 @@ pub mod sessions;
 mod shell_args;
 pub mod terminal;
 mod text;
+pub use text::finish_stdout;
 
 pub const VERSION: &str = include_str!("../../../VERSION");
 
@@ -35,6 +36,7 @@ pub enum Command {
     Export(export::Options),
     Result { reference: String, json: bool },
     ResultHelp,
+    ResultCleanupReceipt,
     Exec { plan: String, max_turns: usize },
     OrdinaryExec(Box<ordinary_exec::Options>),
     ExecHelp,
@@ -65,6 +67,13 @@ pub fn command(argv: &[String]) -> Command {
     }
     if argv.first().is_some_and(|s| s == "result") {
         return interactive_result::parse(&argv[1..]);
+    }
+    if argv.first().is_some_and(|s| s == "result-cleanup-receipt") {
+        return if argv.len() == 1 {
+            Command::ResultCleanupReceipt
+        } else {
+            Command::Usage("Usage: peer result-cleanup-receipt < request.json".into())
+        };
     }
     if argv
         .iter()

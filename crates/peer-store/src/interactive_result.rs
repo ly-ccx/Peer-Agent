@@ -3,15 +3,18 @@ use crate::{files, valid_id};
 use peer_protocol::{
     JsonLimits, decode_json_bounded,
     interactive_result::{
-        INTERACTIVE_FALLBACK_BYTES, InteractiveAvailability, InteractiveResultReference,
-        InteractiveResultSource, InteractiveResultSummary, InteractiveSummaryText,
+        INTERACTIVE_FALLBACK_BYTES, InteractiveAvailability, InteractiveOwner,
+        InteractiveResultReference, InteractiveResultSource, InteractiveResultSummary,
+        InteractiveSummaryText,
     },
     javascript_trim,
 };
 use serde_json::Value;
 use std::path::Path;
 
+mod cleanup;
 mod local;
+pub use cleanup::{InteractiveCleanupRequest, read_interactive_cleanup_receipt};
 mod portable;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,7 +41,7 @@ pub fn read_interactive_result(
     if !reference.is_valid() {
         return Err(InteractiveReadError("interactive_reference_invalid"));
     }
-    let profile = profile_identity(home, reference).ok_or(DENIED)?;
+    let profile = profile_identity(home, &reference.owner).ok_or(DENIED)?;
     let result = match local::read_local(home, reference)? {
         Some(summary) => summary,
         None => {
@@ -48,17 +51,13 @@ pub fn read_interactive_result(
             local::read_local(home, reference)?.unwrap_or(portable)
         }
     };
-    if profile_identity(home, reference).as_ref() != Some(&profile) {
+    if profile_identity(home, &reference.owner).as_ref() != Some(&profile) {
         return Err(DENIED);
     }
     Ok(result)
 }
 
-fn profile_identity(
-    home: &Path,
-    reference: &InteractiveResultReference,
-) -> Option<files::FileIdentity> {
-    let owner = &reference.owner;
+fn profile_identity(home: &Path, owner: &InteractiveOwner) -> Option<files::FileIdentity> {
     if !valid_id(&owner.workspace_id, true) {
         return None;
     }

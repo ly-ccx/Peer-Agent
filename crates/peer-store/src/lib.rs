@@ -26,7 +26,10 @@ mod sqlite_file;
 #[cfg(feature = "test-fixtures")]
 pub use coordination_fence::protect_coordination_writer_fixture;
 pub use coordination_fence::{FenceError, FenceOutcome, FenceStep, protect_coordination_writer};
-pub use interactive_result::{InteractiveReadError, read_interactive_result};
+pub use interactive_result::{
+    InteractiveCleanupRequest, InteractiveReadError, read_interactive_cleanup_receipt,
+    read_interactive_result,
+};
 pub use resources::{
     ExecutionResourceStore, HostClaimClosure, HostDispatchScopes, HostFileMaterialization,
     HostResourcePlan, ResourceError, ResourceIdentity, ResourceReservation, directory_resource,

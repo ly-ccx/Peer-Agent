@@ -5,7 +5,8 @@ use peer_protocol::{
         INTERACTIVE_RESULT_PREFIX, InteractiveAvailability, InteractiveResultReference,
     },
 };
-use std::io::{self, Write};
+use peer_store::{InteractiveCleanupRequest, read_interactive_cleanup_receipt};
+use std::io::{self, Read, Write};
 
 const USAGE: &str = "Usage: peer result <interactive-result://…> [--json]";
 
@@ -88,4 +89,40 @@ pub fn run(out: &mut impl Write, locator: &str, json: bool) -> io::Result<CliExi
         )?;
     }
     Ok(CliExit::Ok)
+}
+
+pub fn cleanup_receipt(out: &mut impl Write, input: impl Read) -> io::Result<CliExit> {
+    let mut bytes = Vec::new();
+    input
+        .take((InteractiveCleanupRequest::MAX_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)?;
+    let request = match InteractiveCleanupRequest::parse(&bytes) {
+        Ok(request) => request,
+        Err(error) => return cleanup_error(error.code()),
+    };
+    let Some(home) = data_home() else {
+        return cleanup_error("interactive_retention_unavailable");
+    };
+    match read_interactive_cleanup_receipt(&home, &request) {
+        Ok(Some(receipt)) => writeln!(out, "{}", crate::text::escape_json_controls(&receipt))?,
+        Ok(None) => writeln!(out, "null")?,
+        Err(error) => return cleanup_error(error.code()),
+    }
+    Ok(CliExit::Ok)
+}
+
+fn cleanup_error(code: &str) -> io::Result<CliExit> {
+    // The legacy maintenance CLI exposes only interactive errors and the
+    // existing material-unavailable code.
+    let code = if code.starts_with("interactive_") || code == "material_snapshot_unavailable" {
+        code
+    } else {
+        "interactive_retention_unavailable"
+    };
+    writeln!(io::stderr(), "peer interactive maintenance: {code}")?;
+    Ok(match code {
+        "interactive_cleanup_invalid" => CliExit::Usage,
+        "interactive_scope_denied" | "interactive_retention_unavailable" => CliExit::Auth,
+        _ => CliExit::Runtime,
+    })
 }

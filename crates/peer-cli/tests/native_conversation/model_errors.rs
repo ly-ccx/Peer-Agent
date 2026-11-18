@@ -125,3 +125,69 @@ fn public_exec_preserves_confirmed_effect_when_compaction_request_loses_model_ac
         "once"
     );
 }
+
+#[test]
+fn closed_stdout_preserves_the_settled_exit_and_does_not_retry_an_effect() {
+    for (last_reply, exit) in [
+        (reply_text("Delivered."), 0),
+        (
+            "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".into(),
+            3,
+        ),
+    ] {
+        let fixture = Ordinary::new();
+        let model = Server::new(vec![
+            reply_tool(
+                "write_file",
+                json!({"path":"effect.txt","content":"confirmed"}),
+            ),
+            last_reply,
+        ]);
+        let mut child = fixture
+            .command(Some(&model))
+            .args([
+                "--mode",
+                "chat",
+                "--access",
+                "full",
+                "--output-format",
+                "json",
+                "Write the fixture exactly once",
+            ])
+            .spawn()
+            .unwrap();
+        drop(child.stdout.take().unwrap());
+        let output = wait(child);
+        assert_eq!(output.status.code(), Some(exit), "{output:?}");
+        assert!(output.stderr.is_empty(), "{output:?}");
+        assert_eq!(model.requests.lock().unwrap().len(), 2);
+        assert_eq!(
+            std::fs::read_to_string(fixture.workspace().join("effect.txt")).unwrap(),
+            "confirmed"
+        );
+        let metadata = fixture.metadata();
+        let id = metadata["id"].as_str().unwrap();
+        let store = ConversationStore::new(fixture.home());
+        let run = store.read_conversation_execution(id).unwrap().unwrap();
+        assert!(run.permits_new_run() && run.usage_committed && run.pending_tools.is_empty());
+        let history = store.read_committed(id, None, 1024 * 1024).unwrap();
+        let calls = history
+            .history
+            .messages
+            .iter()
+            .filter_map(|row| row["segments"].as_array())
+            .flatten()
+            .filter(|segment| segment["type"] == "tool-call")
+            .collect::<Vec<_>>();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["result"]["status"], "success");
+        let call_id = calls[0]["toolCallId"].as_str().unwrap();
+        assert_eq!(
+            peer_store::EvidenceIndexStore::new(fixture.home())
+                .find(&[format!("tool-result://{call_id}")], None)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+}
