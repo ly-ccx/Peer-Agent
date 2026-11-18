@@ -32,6 +32,7 @@ mod background_shell;
 mod effect;
 mod explorer;
 mod foreground_shell;
+mod goal_inspect;
 mod goal_intake;
 mod hooks;
 mod permission;
@@ -89,6 +90,7 @@ pub struct ConversationOutcome {
     pub usage: UsageSnapshot,
     pub lifetime_usage: Option<Value>,
     pub error: Option<&'static str>,
+    pub goal: Option<Value>,
 }
 /// Facts already accepted by the ordinary Host. Rendering these events does
 /// not own the execution or grant permission.
@@ -141,7 +143,7 @@ impl NativeConversationRuntime {
         permission: &mut dyn PermissionInput,
         external: &CancellationToken,
     ) -> Result<ConversationOutcome, HostError> {
-        self.execute_observed(options, model, permission, None, external)
+        self.execute_owned(options, model, permission, None, external, true)
             .await
     }
     pub async fn execute_observed<'a>(
@@ -151,6 +153,18 @@ impl NativeConversationRuntime {
         permission: &'a mut dyn PermissionInput,
         output: Option<&'a mut dyn ConversationOutput>,
         external: &CancellationToken,
+    ) -> Result<ConversationOutcome, HostError> {
+        self.execute_owned(options, model, permission, output, external, false)
+            .await
+    }
+    async fn execute_owned<'a>(
+        &self,
+        options: &ConversationOptions<'_>,
+        model: &'a NativeModel,
+        permission: &'a mut dyn PermissionInput,
+        output: Option<&'a mut dyn ConversationOutput>,
+        external: &CancellationToken,
+        headless: bool,
     ) -> Result<ConversationOutcome, HostError> {
         if external.is_cancelled() {
             return Err(HostError("CANCELLED"));
@@ -331,6 +345,7 @@ impl NativeConversationRuntime {
                         usage: RuntimeUsageAccounting::default().snapshot(),
                         lifetime_usage: None,
                         error: Some(original.code()),
+                        goal: None,
                     });
                 }
                 return Err(original.into());
@@ -383,6 +398,7 @@ impl NativeConversationRuntime {
             cognition_source: None,
             explorer: None,
         };
+        let mut goal = None;
         let result = async {
             host.append(&user_message)?;
             drop(user_message);
@@ -394,6 +410,9 @@ impl NativeConversationRuntime {
                 crate::turn_loop::run(&mut host, options.max_turns, &owned, external).await?;
             if result.stop == crate::turn_loop::LoopStop::Replied {
                 host.drive_requested_explorers().await?;
+                if headless {
+                    goal = host.drive_new_goal_inspect().await?;
+                }
             }
             Ok::<_, HostError>(result)
         }
@@ -422,6 +441,7 @@ impl NativeConversationRuntime {
             usage: host.usage.snapshot(),
             lifetime_usage: cleanup.ok().flatten(),
             error: error.map(|e| e.0),
+            goal: goal.filter(|_| error.is_none()),
         })
     }
 }

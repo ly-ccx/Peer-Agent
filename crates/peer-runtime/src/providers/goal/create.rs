@@ -1,7 +1,7 @@
 use super::*;
 use peer_store::{GoalPublication, OrdinaryGoalDraft};
 
-pub(super) const CAPABILITY: &str = "local.goal.create_plan";
+pub(crate) const CAPABILITY: &str = "local.goal.create_plan";
 
 pub(super) struct CreateGoal {
     args: Value,

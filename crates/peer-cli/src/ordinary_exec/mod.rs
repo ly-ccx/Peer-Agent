@@ -237,15 +237,19 @@ pub fn run(options: &Options) -> io::Result<CliExit> {
             .await;
         match run {
             Ok(outcome) => {
-                let code = outcome.error.map(exit).unwrap_or(CliExit::Ok);
+                let code = outcome.error.map(exit).unwrap_or_else(|| {
+                    if outcome.goal.is_some() {
+                        CliExit::WaitingUser
+                    } else {
+                        CliExit::Ok
+                    }
+                });
                 if options.output_format == "json" {
-                    writeln!(
-                        io::stdout(),
-                        "{}",
-                        json_output(
-                            &json!({"sessionId":outcome.session_id,"ok":outcome.error.is_none(),"result":if outcome.error.is_none(){json!(outcome.content)}else{Value::Null},"error":outcome.error,"turns":outcome.turns,"durationMs":started.elapsed().as_millis(),"usage":outcome.usage.turn_total})
-                        )?
-                    )?;
+                    let mut payload = json!({"sessionId":outcome.session_id,"ok":outcome.error.is_none(),"result":if outcome.error.is_none(){json!(outcome.content)}else{Value::Null},"error":outcome.error,"turns":outcome.turns,"durationMs":started.elapsed().as_millis(),"usage":outcome.usage.turn_total});
+                    if let Some(goal) = outcome.goal {
+                        payload["goal"] = goal;
+                    }
+                    writeln!(io::stdout(), "{}", json_output(&payload)?)?;
                 } else if let Some(error) = outcome.error {
                     writeln!(io::stderr(), "peer exec: {error}")?;
                 } else {

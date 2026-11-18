@@ -72,7 +72,7 @@ fn public_goal_update_uses_an_actual_file_observation_for_the_owned_leaf() {
                     assert_eq!(std::fs::read(body).unwrap(), published);
                     reply_tool("goal_get_plan", json!({"planId":id}))
                 }
-                _ => {
+                7 => {
                     let plan = last_tool(request)["output"]["plan"].clone();
                     assert_eq!(plan["tasks"][0]["status"], "completed");
                     assert_eq!(plan["tasks"][0]["evidenceRefs"], json!([observation]));
@@ -82,6 +82,49 @@ fn public_goal_update_uses_an_actual_file_observation_for_the_owned_leaf() {
                     assert_eq!(plan["progress"]["completed"], 1);
                     reply_text("One leaf verified.")
                 }
+                8 | 10 => {
+                    let tools = request["tools"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .filter_map(|tool| tool["function"]["name"].as_str())
+                        .collect::<std::collections::BTreeSet<_>>();
+                    assert_eq!(
+                        tools,
+                        [
+                            "batch_search",
+                            "git_query",
+                            "list_files",
+                            "read_file",
+                            "search_files"
+                        ]
+                        .into_iter()
+                        .collect()
+                    );
+                    let body = request.to_string();
+                    let mission = if turn == 8 {
+                        "Identify the primary files"
+                    } else {
+                        "Identify the read-only verification path"
+                    };
+                    assert!(body.contains(mission), "{body}");
+                    assert!(!body.contains("Read the actual fixture"));
+                    assert!(!body.contains("First worker report"));
+                    assert!(!body.contains("request_explorer"));
+                    reply_tool("read_file", json!({"path":"actual.txt"}))
+                }
+                9 | 11 => {
+                    let actual = last_tool(request);
+                    assert_eq!(actual["preview"], "Observed content\n");
+                    assert_ne!(actual["evidenceRefs"][0], observation);
+                    let summary = if turn == 9 {
+                        "First worker report"
+                    } else {
+                        "Second worker report"
+                    };
+                    reply_text(&json!({"summary": summary,"evidenceRefs":[actual["evidenceRefs"][0],"tool-result://fabricated"]}).to_string())
+                }
+                _ => panic!("unexpected model request {turn}"),
             }
         },
         false,
@@ -99,8 +142,50 @@ fn public_goal_update_uses_an_actual_file_observation_for_the_owned_leaf() {
         ],
         None,
     );
-    assert!(output.status.success(), "{output:?}");
-    fixture.assert_settled(&output, 7, 6);
+    assert_eq!(output.status.code(), Some(6), "{output:?}");
+    let outcome = fixture.assert_settled(&output, 7, 8);
+    assert_eq!(outcome["result"], "One leaf verified.");
+    assert_eq!(outcome["usage"]["providerRequestCount"], 11);
+    assert_eq!(
+        outcome["goal"]["exitReason"],
+        "runner_continuation_required"
+    );
+    assert_eq!(outcome["goal"]["runnerStatus"], "idle");
+    let plan_id = outcome["goal"]["planId"].as_str().unwrap();
+    let plan = get(fixture
+        .home()
+        .join("goal-plans")
+        .join(format!("{plan_id}.json")));
+    let runner = &plan["runner"];
+    assert_eq!(runner["inspectPlan"]["requiredBeforeAct"], true);
+    assert_eq!(
+        runner["inspectPlan"]["questions"].as_array().unwrap().len(),
+        2
+    );
+    assert_eq!(runner["phase"], "plan_scaffold");
+    let workers = runner["explorers"].as_array().unwrap();
+    assert_eq!(workers.len(), 2);
+    assert_eq!(plan["tasks"][1]["status"], "pending");
+    assert_eq!(
+        plan["tasks"][0]["evidenceRefs"].as_array().unwrap().len(),
+        1
+    );
+    let evidence_index = peer_store::EvidenceIndexStore::new(fixture.home());
+    for worker in workers {
+        assert_eq!(worker["status"], "completed");
+        let refs = worker["report"]["evidenceRefs"].as_array().unwrap();
+        assert_eq!(refs.len(), 1);
+        let reference = refs[0].as_str().unwrap();
+        assert_ne!(reference, "tool-result://fabricated");
+        let evidence = evidence_index.find(&[reference.into()], None).unwrap();
+        assert_eq!(evidence[0]["planId"], plan_id);
+        assert_eq!(evidence[0]["toolName"], "read_file");
+        assert_ne!(plan["tasks"][0]["evidenceRefs"][0], reference);
+    }
+    assert_ne!(
+        workers[0]["report"]["evidenceRefs"],
+        workers[1]["report"]["evidenceRefs"]
+    );
 }
 
 #[test]
@@ -167,7 +252,7 @@ fn public_goal_update_refuses_foreign_plan_ids_and_foreign_observations() {
     .unwrap();
     let mut setup_turn = 0;
     let setup = Server::scripted(
-        move |_| {
+        move |request| {
             setup_turn += 1;
             match setup_turn {
                 1 => reply_tool(
@@ -176,7 +261,10 @@ fn public_goal_update_refuses_foreign_plan_ids_and_foreign_observations() {
                     "tasks":[{"taskId":"read","title":"Read the fixture"}]}),
                 ),
                 2 => reply_tool("read_file", json!({"path":"actual.txt"})),
-                _ => reply_text("Original conversation finished."),
+                3 => reply_text("Original conversation finished."),
+                4 => reply_tool("read_file", json!({"path":"actual.txt"})),
+                5 => reply_text(&json!({"summary":"Fixture read","evidenceRefs":last_tool(request)["evidenceRefs"]}).to_string()),
+                _ => panic!("unexpected original conversation request {setup_turn}"),
             }
         },
         false,
@@ -188,7 +276,7 @@ fn public_goal_update_refuses_foreign_plan_ids_and_foreign_observations() {
         &["--output-format", "json", "Create the foreign plan"],
         None,
     );
-    assert!(output.status.success(), "{output:?}");
+    assert_eq!(output.status.code(), Some(6), "{output:?}");
     let sent = setup.requests.lock().unwrap();
     let foreign = last_tool(&sent[1])["output"]["planId"].clone();
     assert!(foreign.is_string());
@@ -237,13 +325,16 @@ fn public_goal_update_refuses_foreign_plan_ids_and_foreign_observations() {
                         json!({"planId":current,"taskId":"read","status":"completed","evidenceRefs":[observation]}),
                     )
                 }
-                _ => {
+                5 => {
                     assert_eq!(
                         last_tool(request)["error"]["message"],
                         "goal_task_completion_requires_evidence"
                     );
                     reply_text("No unrelated goal facts changed.")
                 }
+                6 => reply_tool("read_file", json!({"path":"actual.txt"})),
+                7 => reply_text(&json!({"summary":"Current fixture read","evidenceRefs":last_tool(request)["evidenceRefs"]}).to_string()),
+                _ => panic!("unexpected new conversation request {turn}"),
             }
         },
         false,
@@ -259,9 +350,9 @@ fn public_goal_update_refuses_foreign_plan_ids_and_foreign_observations() {
         ],
         None,
     );
-    assert!(output.status.success(), "{output:?}");
+    assert_eq!(output.status.code(), Some(6), "{output:?}");
     assert_eq!(std::fs::read(&path).unwrap(), before);
-    assert_eq!(server.requests.lock().unwrap().len(), 5);
+    assert_eq!(server.requests.lock().unwrap().len(), 7);
 }
 
 #[cfg(feature = "test-fixtures")]

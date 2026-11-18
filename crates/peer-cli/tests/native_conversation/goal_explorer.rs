@@ -13,7 +13,8 @@ fn parent_replies() -> [String; 3] {
         reply_tool(
             "goal_create_plan",
             json!({"title":"Inspect fixture","goal":"Use only actual read evidence",
-            "tasks":[{"taskId":"inspect","title":"Keep the parent goal pending"}]}),
+            "tasks":[{"taskId":"inspect","title":"Keep the parent goal pending"}],
+            "successCriteria":[{"id":"actual","kind":"file-exists","path":"actual.txt"}]}),
         ),
         reply_tool(
             "request_explorer",
@@ -93,8 +94,10 @@ fn public_goal_explorer_runs_readonly_with_its_own_history_and_authoritative_evi
     let result = fixture.assert_settled(&output, 3, 3);
     assert_eq!(result["result"], "Explorer was requested.");
     assert_eq!(result["usage"]["providerRequestCount"], 5);
+    assert!(result["goal"].is_null());
     let plan = plan(&fixture);
     let worker = &plan["runner"]["explorers"][0];
+    assert!(plan["runner"]["inspectPlan"].is_null());
     assert_eq!(plan["tasks"][0]["status"], "pending");
     assert_eq!(worker["status"], "completed");
     assert_eq!(worker["report"]["findings"].as_array().unwrap().len(), 1);
@@ -290,9 +293,13 @@ fn public_goal_explorer_inherits_the_explicit_tool_allowlist() {
 
 #[test]
 fn public_goal_explorer_waits_for_real_worker_stop_and_recovers_a_dead_owner_without_replay() {
-    for hard_exit in [false, true] {
+    for (automatic, hard_exit) in [(false, false), (false, true), (true, false), (true, true)] {
         let fixture = Ordinary::new();
-        let mut replies = parent_replies().into_iter();
+        let mut replies = parent_replies()
+            .into_iter()
+            .enumerate()
+            .filter(move |(index, _)| !automatic || *index != 1)
+            .map(|(_, reply)| reply);
         let (entered, worker_waiting) = std::sync::mpsc::channel();
         let (release, worker_release) = std::sync::mpsc::channel();
         let model = Server::scripted(
@@ -316,6 +323,7 @@ fn public_goal_explorer_waits_for_real_worker_stop_and_recovers_a_dead_owner_wit
         worker_waiting.recv_timeout(Duration::from_secs(8)).unwrap();
         let before = plan(&fixture);
         assert_eq!(before["runner"]["explorers"][0]["status"], "running");
+        assert_eq!(before["runner"]["inspectPlan"].is_object(), automatic);
         if hard_exit {
             child.kill().unwrap();
         } else {
@@ -353,6 +361,78 @@ fn public_goal_explorer_waits_for_real_worker_stop_and_recovers_a_dead_owner_wit
         assert!(facts.permits_new_run());
         assert_eq!(recovery::recover(&fixture, id).status.code(), Some(0));
         assert_eq!(plan(&fixture), after);
-        assert_eq!(model.requests.lock().unwrap().len(), 4);
+        assert_eq!(
+            model.requests.lock().unwrap().len(),
+            if automatic { 3 } else { 4 }
+        );
     }
+}
+
+#[test]
+fn public_goal_automatic_inspect_discards_late_worker_output_after_plan_changes() {
+    let fixture = Ordinary::new();
+    std::fs::write(fixture.workspace().join("actual.txt"), "one settled read").unwrap();
+    let mut replies = parent_replies()
+        .into_iter()
+        .enumerate()
+        .filter(|(index, _)| *index != 1)
+        .map(|(_, reply)| reply);
+    let home = fixture.home();
+    let mut turns = 0;
+    let model = Server::scripted(
+        move |request| {
+            turns += 1;
+            if let Some(reply) = replies.next() {
+                return reply;
+            }
+            if turns == 3 {
+                return reply_tool("read_file", json!({"path":"actual.txt"}));
+            }
+            assert_eq!(turns, 4, "a stale second question was sent");
+            let evidence = last_tool(request);
+            assert_eq!(evidence["preview"], "one settled read");
+            let goals = home.join("goal-plans");
+            let index: Value =
+                serde_json::from_str(&std::fs::read_to_string(goals.join("index.jsonl")).unwrap())
+                    .unwrap();
+            let path = goals.join(format!("{}.json", index["planId"].as_str().unwrap()));
+            let mut changed = get(&path);
+            changed["title"] = json!("Changed during repository inspection");
+            std::fs::write(path, serde_json::to_vec(&changed).unwrap()).unwrap();
+            reply_text(
+                &json!({"summary":"stale confidence","evidenceRefs":evidence["evidenceRefs"]})
+                    .to_string(),
+            )
+        },
+        false,
+        false,
+        vec![],
+    );
+    let output = fixture.run(
+        Some(&model),
+        &["--output-format", "json", "Inspect the current plan"],
+        None,
+    );
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let reply = fixture.assert_settled(&output, 2, 2);
+    assert_eq!(reply["error"], "GOAL_SOURCE_CHANGED");
+    let interrupted = plan(&fixture);
+    assert_eq!(interrupted["title"], "Changed during repository inspection");
+    assert_eq!(
+        interrupted["runner"]["explorers"].as_array().unwrap().len(),
+        1
+    );
+    assert!(interrupted["runner"]["explorers"][0]["report"].is_null());
+    let id = reply["sessionId"].as_str().unwrap();
+    assert_eq!(recovery::recover(&fixture, id).status.code(), Some(0));
+    let recovered = plan(&fixture);
+    assert_eq!(recovered["title"], interrupted["title"]);
+    assert_eq!(
+        recovered["runner"]["explorers"][0]["failureReason"],
+        "explorer_owner_interrupted"
+    );
+    assert!(recovered["runner"]["explorers"][0]["report"].is_null());
+    assert_eq!(recovery::recover(&fixture, id).status.code(), Some(0));
+    assert_eq!(plan(&fixture), recovered);
+    assert_eq!(model.requests.lock().unwrap().len(), 4);
 }

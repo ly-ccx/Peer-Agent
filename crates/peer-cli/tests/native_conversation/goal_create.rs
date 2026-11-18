@@ -9,10 +9,29 @@ fn plans(fixture: &Ordinary) -> Vec<Value> {
         .collect()
 }
 
+fn inspection_reply(request: &Value, step: usize) -> String {
+    match step {
+        1 | 3 => {
+            assert!(request.to_string().contains("Explorer readonly contract"));
+            reply_tool("read_file", json!({"path":"fixture.txt"}))
+        }
+        2 | 4 => {
+            let observed = last_tool(request);
+            assert_eq!(observed["preview"], "Fixture contents");
+            reply_text(
+                &json!({"summary":"Observed the fixture","evidenceRefs":observed["evidenceRefs"]})
+                    .to_string(),
+            )
+        }
+        _ => panic!("unexpected model request during inspection"),
+    }
+}
+
 #[test]
 fn public_goal_create_matches_old_store_across_modes_and_keeps_execution_gates() {
     for mode in ["chat", "plan", "goal"] {
         let fixture = Ordinary::new();
+        std::fs::write(fixture.workspace().join("fixture.txt"), "Fixture contents").unwrap();
         let contract: Value = serde_json::from_str(CONTRACT).unwrap();
         let expected = contract["expectedCreation"][mode].clone();
         let draft = contract["draft"].clone();
@@ -62,10 +81,11 @@ fn public_goal_create_matches_old_store_across_modes_and_keeps_execution_gates()
                         }
                         reply_text("Plan recorded.")
                     }
-                    _ => {
+                    4 if mode == "goal" => {
                         assert_eq!(last_tool(request)["status"], "success");
                         reply_text("Fixture finished.")
                     }
+                    _ => inspection_reply(request, turn - if mode == "goal" { 4 } else { 3 }),
                 }
             },
             false,
@@ -85,13 +105,19 @@ fn public_goal_create_matches_old_store_across_modes_and_keeps_execution_gates()
             ],
             None,
         );
-        assert!(
-            output.status.success(),
+        let auto_inspect = mode != "plan";
+        assert_eq!(
+            output.status.code(),
+            Some(if auto_inspect { 6 } else { 0 }),
             "{mode}: {}",
             String::from_utf8_lossy(&output.stdout)
         );
         let extra = usize::from(mode == "goal");
-        fixture.assert_settled(&output, 3 + extra, 2 + extra);
+        fixture.assert_settled(
+            &output,
+            3 + extra,
+            2 + extra + 2 * usize::from(auto_inspect),
+        );
         let rows = plans(&fixture);
         assert_eq!(rows.len(), 1);
         let draft = get(fixture
@@ -101,6 +127,7 @@ fn public_goal_create_matches_old_store_across_modes_and_keeps_execution_gates()
         assert_eq!(draft["conversationId"], fixture.metadata()["id"]);
         assert_eq!(draft["status"], rows[0]["status"]);
         assert_eq!(draft["tasks"][0]["status"], "pending");
+        assert_eq!(draft["runner"]["inspectPlan"].is_object(), auto_inspect);
         assert_eq!(
             fixture.workspace().join("effect.txt").exists(),
             mode == "goal"
@@ -111,6 +138,7 @@ fn public_goal_create_matches_old_store_across_modes_and_keeps_execution_gates()
 #[test]
 fn public_goal_create_reuses_duplicate_and_keeps_original_plan_on_conflict() {
     let fixture = Ordinary::new();
+    std::fs::write(fixture.workspace().join("fixture.txt"), "Fixture contents").unwrap();
     let contract: Value = serde_json::from_str(CONTRACT).unwrap();
     let draft = contract["draft"].clone();
     let mut different = draft.clone();
@@ -131,13 +159,14 @@ fn public_goal_create_reuses_duplicate_and_keeps_original_plan_on_conflict() {
                     assert_eq!(last_tool(request)["output"]["planId"], first_id);
                     reply_tool("goal_create_plan", different.clone())
                 }
-                _ => {
+                4 => {
                     assert_eq!(
                         last_tool(request)["error"]["message"],
                         "goal_active_requires_reconciliation"
                     );
                     reply_text("Original retained.")
                 }
+                _ => inspection_reply(request, turn - 4),
             }
         },
         false,
@@ -149,16 +178,28 @@ fn public_goal_create_reuses_duplicate_and_keeps_original_plan_on_conflict() {
         &["--output-format", "json", "Create a plan"],
         None,
     );
-    assert!(
-        output.status.success(),
+    assert_eq!(
+        output.status.code(),
+        Some(6),
         "{}",
         String::from_utf8_lossy(&output.stdout)
     );
-    fixture.assert_settled(&output, 4, 3);
+    fixture.assert_settled(&output, 4, 5);
     assert_eq!(plans(&fixture).len(), 1);
     let notifications =
         std::fs::read_to_string(fixture.home().join("goal-plans/.changes.jsonl")).unwrap();
-    assert_eq!(notifications.lines().count(), 1);
+    let changes = notifications
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        changes
+            .iter()
+            .filter(|change| change["changeKind"] != "runner-state")
+            .count(),
+        1
+    );
+    assert_eq!(changes.len(), 5);
     assert_eq!(plans(&fixture)[0]["version"], 1);
 }
 

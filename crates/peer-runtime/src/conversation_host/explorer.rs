@@ -3,7 +3,8 @@ use super::*;
 use crate::providers::goal::explorer::{CAPABILITY, ExplorerRequest};
 use peer_protocol::{JsonLimits, collect_tool_result_evidence_refs, decode_json_bounded};
 use peer_store::{
-    EvidenceIndexStore, ExplorerDispatch, ExplorerLease, ExplorerSettlement, GoalStore,
+    AutomaticInspect, EvidenceIndexStore, ExplorerDispatch, ExplorerLease, ExplorerSettlement,
+    GoalStore, LocalGoalIntake,
 };
 use std::collections::BTreeSet;
 
@@ -23,58 +24,66 @@ const READ_CAPABILITIES: &[&str] = &[
     "local.search.aggregate",
 ];
 
-fn registrations(history: &HistorySnapshot, stream: &str) -> Vec<(String, ExplorerRequest)> {
-    let mut requests = Vec::new();
-    for message in &history.history.messages {
-        if message["streamId"] != stream || message["nativeExplorerId"].is_string() {
-            continue;
-        }
-        for segment in message["segments"].as_array().into_iter().flatten() {
-            let result = &segment["result"];
-            let Some(id) = segment["toolCallId"].as_str() else {
-                continue;
-            };
-            if segment["type"] != "tool-call"
-                || result["toolCallId"] != id
-                || result["capabilityId"] != CAPABILITY
-                || result["status"] != "success"
-                || !message["permissionGrants"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .any(|grant| grant["toolCallId"] == id && grant["granted"] == true)
-            {
-                continue;
-            }
-            if let Ok(request) = ExplorerRequest::parse(&segment["args"]) {
-                requests.push((id.to_owned(), request));
-            }
-        }
-    }
-    requests
+pub(super) fn settled_parent_calls<'a>(
+    history: &'a HistorySnapshot,
+    stream: &'a str,
+    capability: &'a str,
+) -> impl Iterator<Item = (&'a str, &'a Value)> {
+    history
+        .history
+        .messages
+        .iter()
+        .filter(move |message| {
+            message["streamId"] == stream && !message["nativeExplorerId"].is_string()
+        })
+        .flat_map(move |message| {
+            message["segments"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(move |segment| {
+                    let result = &segment["result"];
+                    let id = segment["toolCallId"].as_str()?;
+                    (segment["type"] == "tool-call"
+                        && result["toolCallId"] == id
+                        && result["capabilityId"] == capability
+                        && result["status"] == "success"
+                        && message["permissionGrants"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .any(|grant| grant["toolCallId"] == id && grant["granted"] == true))
+                    .then_some((id, segment))
+                })
+        })
 }
 
 impl Host<'_> {
     pub(super) async fn drive_requested_explorers(&mut self) -> Result<(), HostError> {
         self.source_current()?;
-        let mut requests = registrations(&self.expected, &self.identity.stream_id);
+        let requests = settled_parent_calls(&self.expected, &self.identity.stream_id, CAPABILITY)
+            .filter_map(|(id, segment)| {
+                ExplorerRequest::parse(&segment["args"])
+                    .ok()
+                    .map(|request| (id.to_owned(), request))
+            })
+            .take(4)
+            .collect::<Vec<_>>();
         if requests.len() > 3 {
             return Err(HostError("explorer_dispatch_limit"));
         }
-        if requests.is_empty() {
-            return Ok(());
-        }
-        for (id, request) in requests.drain(..) {
-            self.run_requested_explorer(&id, request).await?;
+        for (id, request) in requests {
+            self.run_requested_explorer(&id, request, None).await?;
         }
         Ok(())
     }
 
-    async fn run_requested_explorer(
+    pub(super) async fn run_requested_explorer(
         &mut self,
         id: &str,
         request: ExplorerRequest,
-    ) -> Result<(), HostError> {
+        inspect: Option<AutomaticInspect<'_>>,
+    ) -> Result<Option<LocalGoalIntake>, HostError> {
         let store = GoalStore::new(&self.home);
         let projector = crate::goal_facts::TuiGoalProjector::new(&now()).map_err(HostError)?;
         let request =
@@ -101,13 +110,14 @@ impl Host<'_> {
                 workspace: &self.workspace,
                 request: &request,
                 at: &now(),
+                inspect,
             },
             &projector,
             || self.source_current().map_err(|err| err.0),
         )?
         else {
             // A registered request can await a real Goal and its approval.
-            return Ok(());
+            return Ok(None);
         };
         let old_live = std::mem::take(
             &mut self
@@ -172,11 +182,11 @@ impl Host<'_> {
             Ok(report) => ExplorerSettlement::Completed(report),
             Err(error) => ExplorerSettlement::Failed(error.0),
         };
-        store.finish_explorer(&worker.lease, settlement, &now(), || {
+        let next = store.finish_explorer(&worker.lease, settlement, &now(), || {
             self.check_worker_settled(failure.is_none())
                 .map_err(|e| e.0)
         })?;
-        failure.map_or(Ok(()), Err)
+        failure.map_or(Ok(next), Err)
     }
 
     fn check_worker_settled(&self, success: bool) -> Result<(), HostError> {

@@ -26,6 +26,12 @@ pub struct ExplorerDispatch<'a> {
     pub workspace: &'a Path,
     pub request: &'a Value,
     pub at: &'a str,
+    pub inspect: Option<AutomaticInspect<'a>>,
+}
+
+pub struct AutomaticInspect<'a> {
+    pub goal: &'a LocalGoalIntake,
+    pub schedule: &'a Value,
 }
 
 pub struct ExplorerLease {
@@ -37,6 +43,7 @@ pub struct ExplorerLease {
     conversation: String,
     stream: String,
     index: Option<files::FileIdentity>,
+    intake: Option<LocalGoalIntake>,
 }
 
 pub enum ExplorerSettlement {
@@ -74,7 +81,7 @@ impl<'a> PlanWrite<'a> {
         plan: &Value,
         at: &str,
         admit: impl FnOnce() -> Result<(), &'static str>,
-    ) -> Result<String, GoalError> {
+    ) -> Result<(String, Option<files::FileIdentity>), GoalError> {
         let mut index = log::read(&self.index, None)?;
         let mut rows = index.iter_mut().filter(|row| row["planId"] == id);
         let row = rows.next().ok_or(GoalError::Changed)?;
@@ -109,8 +116,9 @@ impl<'a> PlanWrite<'a> {
             .store
             .revision(id)
             .map_err(|_| GoalError::Store(StoreError::CommitUncertain))?;
+        let index = files::identity(&self.index).map_err(uncertain)?;
         self.lock.release().map_err(uncertain)?;
-        Ok(revision)
+        Ok((revision, index))
     }
 }
 
@@ -127,14 +135,25 @@ impl GoalStore {
         {
             return Err(GoalError::Invalid);
         }
-        let Some(intake) =
-            self.observe_local_intake(dispatch.conversation, dispatch.workspace, projector, None)?
-        else {
-            return Ok(None);
+        let intake = match &dispatch.inspect {
+            Some(inspect) if inspect.goal.workspace == dispatch.workspace => inspect.goal.clone(),
+            Some(_) => return Err(GoalError::Changed),
+            None => {
+                let Some(intake) = self.observe_local_intake(
+                    dispatch.conversation,
+                    dispatch.workspace,
+                    projector,
+                    None,
+                )?
+                else {
+                    return Ok(None);
+                };
+                intake
+            }
         };
         let transaction = PlanWrite::lock(self)?;
         self.check_local_intake(&intake)?;
-        let plan_id = intake.plan_id;
+        let plan_id = intake.plan_id.clone();
         let snapshot = self.read_bounded(&plan_id, projector, None, PLAN_BYTES as u64)?;
         let mut plan = self.read_context(&plan_id, &snapshot.source_revision)?;
         if plan["conversationId"] != dispatch.conversation
@@ -174,11 +193,14 @@ impl GoalStore {
         runner["status"] = json!("exploring");
         runner["intent"] = json!("explore");
         runner["phase"] = json!("inspect");
+        if let Some(inspect) = &dispatch.inspect {
+            runner["inspectPlan"] = inspect.schedule.clone();
+        }
         runner["nativeExplorerOwner"] = json!(dispatch.stream);
         runner["updatedAt"] = json!(dispatch.at);
         plan["updatedAt"] = json!(dispatch.at);
         let title = plan["title"].as_str().ok_or(GoalError::Invalid)?.to_owned();
-        let revision = transaction.publish(
+        let (revision, index) = transaction.publish(
             &plan_id,
             &snapshot.source_revision,
             &plan,
@@ -193,7 +215,8 @@ impl GoalStore {
             revision,
             conversation: dispatch.conversation.into(),
             stream: dispatch.stream.into(),
-            index: files::identity(&self.directory.join("index.jsonl"))?,
+            index,
+            intake: dispatch.inspect.map(|_| intake),
         }))
     }
 
@@ -212,8 +235,9 @@ impl GoalStore {
         result: ExplorerSettlement,
         at: &str,
         admit: impl FnOnce() -> Result<(), &'static str>,
-    ) -> Result<(), GoalError> {
+    ) -> Result<Option<LocalGoalIntake>, GoalError> {
         let transaction = PlanWrite::lock(self)?;
+        self.check_explorer(lease)?;
         let mut plan = self.read_context(&lease.plan, &lease.revision)?;
         if plan["conversationId"] != lease.conversation
             || plan["runner"]["status"] != "exploring"
@@ -250,8 +274,13 @@ impl GoalStore {
         }
         runner["updatedAt"] = json!(at);
         plan["updatedAt"] = json!(at);
-        transaction.publish(&lease.plan, &lease.revision, &plan, at, admit)?;
-        Ok(())
+        let (plan_revision, index) =
+            transaction.publish(&lease.plan, &lease.revision, &plan, at, admit)?;
+        Ok(lease.intake.clone().map(|intake| LocalGoalIntake {
+            plan_revision,
+            index_revision: files::fingerprint(&[index]),
+            ..intake
+        }))
     }
 
     pub fn recover_stopped_explorer(
@@ -306,6 +335,7 @@ impl GoalStore {
                 conversation: run.identity.conversation_id.clone(),
                 stream: run.identity.stream_id.clone(),
                 index: before.clone(),
+                intake: None,
             });
         }
         if let Some(lease) = owned {

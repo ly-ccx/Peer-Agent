@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 mod create;
 pub(crate) mod explorer;
+pub(crate) use create::CAPABILITY as CREATE_CAPABILITY;
 
 const ALIAS: &str = "goal_get_plan";
 const CAPABILITY: &str = "local.goal.get_plan";

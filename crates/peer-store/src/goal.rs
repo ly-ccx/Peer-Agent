@@ -18,7 +18,8 @@ mod ordinary_create;
 mod task_update;
 mod tool_view;
 pub use explorer::{
-    EXPLORER_TIMEOUT_MS, EXPLORER_TOOL_LIMIT, ExplorerDispatch, ExplorerLease, ExplorerSettlement,
+    AutomaticInspect, EXPLORER_TIMEOUT_MS, EXPLORER_TOOL_LIMIT, ExplorerDispatch, ExplorerLease,
+    ExplorerSettlement,
 };
 pub use mirror::{GoalExecutionFact, GoalMirrorCommit, GoalMirrorTransaction};
 pub use ordinary_create::{GoalPublication, OrdinaryGoalDraft, OrdinaryGoalKind};
@@ -123,6 +124,11 @@ pub struct LocalGoalIntake {
     index_revision: String,
     workspace: PathBuf,
     plan_directory: PathBuf,
+}
+impl LocalGoalIntake {
+    pub fn plan_id(&self) -> &str {
+        &self.plan_id
+    }
 }
 pub struct GoalStore {
     directory: PathBuf,
@@ -247,6 +253,13 @@ impl GoalStore {
             return Err(GoalError::Changed);
         }
         Ok(())
+    }
+
+    pub fn read_local_goal(&self, intake: &LocalGoalIntake) -> Result<Value, GoalError> {
+        self.check_local_intake(intake)?;
+        let plan = self.read_context(&intake.plan_id, &intake.plan_revision)?;
+        self.check_local_intake(intake)?;
+        Ok(plan)
     }
 
     fn select_by_conversation(
