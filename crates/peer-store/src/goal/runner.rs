@@ -326,7 +326,7 @@ impl GoalStore {
             let id = criterion["id"].as_str().ok_or(GoalError::Invalid)?;
             match criterion["kind"].as_str() {
                 Some("manual") => manual.push(id),
-                Some("model_review") => return Ok(("blocked", Some("goal_model_review_required"))),
+                Some("model_review") => {}
                 Some("test" | "command" | "file-exists" | "file-contains") => {
                     let evidence = plan["criterionResults"]
                         .as_array()

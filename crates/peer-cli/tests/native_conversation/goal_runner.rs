@@ -368,6 +368,125 @@ fn assert_verifier(request: &Value) {
 }
 
 #[test]
+fn public_goal_model_review_is_written_only_by_the_independent_verifier() {
+    for passed in [true, false] {
+        let fixture = Ordinary::new();
+        std::fs::write(
+            fixture.workspace().join("actual.txt"),
+            "Inspect the real result",
+        )
+        .unwrap();
+        let mut requests = 0;
+        let mut id = Value::Null;
+        let mut observation = Value::Null;
+        let model = Server::scripted(
+            move |request| {
+                requests += 1;
+                match requests {
+                    1 => reply_tool(
+                        "goal_create_plan",
+                        json!({"title":"Judge the result","goal":"Ground the review",
+                    "tasks":[{"taskId":"read","title":"Read actual.txt"}],
+                    "successCriteria":[{"id":"quality","kind":"model_review","description":"Judge result quality"},
+                                       {"id":"coverage","kind":"model_review","description":"Judge coverage"}]}),
+                    ),
+                    2 => {
+                        id = last_tool(request)["output"]["planId"].clone();
+                        assert!(id.is_string());
+                        assert_eq!(
+                            last_tool(request)["output"]["plan"]["successCriteria"][0]["kind"],
+                            "model_review"
+                        );
+                        reply_text("Review criteria recorded.")
+                    }
+                    3 => {
+                        assert_tick(request, 1, "orient");
+                        reply_tool("read_file", json!({"path":"actual.txt"}))
+                    }
+                    4 => {
+                        observation = last_tool(request)["evidenceRefs"][0].clone();
+                        reply_tool(
+                            "goal_update_task",
+                            json!({"planId":id,"taskId":"read","status":"completed",
+                        "evidenceRefs":[observation],
+                        "criterionResults":[{"criterionId":"quality","passed":true,"evidenceRef":observation}]}),
+                        )
+                    }
+                    5 => {
+                        assert_eq!(
+                            last_tool(request)["error"]["message"],
+                            "model_review_requires_host_verifier"
+                        );
+                        reply_tool(
+                            "goal_update_task",
+                            json!({"planId":id,"taskId":"read","status":"completed","evidenceRefs":[observation]}),
+                        )
+                    }
+                    6 => {
+                        assert_eq!(
+                            last_tool(request)["output"]["plan"]["tasks"][0]["evidenceRefs"],
+                            json!([observation])
+                        );
+                        reply_text("The reader settled the actual task.")
+                    }
+                    7 => {
+                        assert_verifier(request);
+                        let system = request["messages"][0]["content"].as_str().unwrap();
+                        assert!(
+                            system.contains("quality (model_review) review=pending_this_verifier")
+                        );
+                        assert!(
+                            system.contains("coverage (model_review) review=pending_this_verifier")
+                        );
+                        reply_tool("read_file", json!({"path":"actual.txt"}))
+                    }
+                    8 => {
+                        let real = last_tool(request)["evidenceRefs"][0].clone();
+                        assert_ne!(real, observation);
+                        reply_text(&json!({"passed":passed,"evidenceRefs":[real],
+                        "failedCriteria":if passed {json!([])} else {json!([{"criterionId":"coverage","reason":"Coverage was insufficient","evidenceRefs":[real]}])}}).to_string())
+                    }
+                    _ => panic!("unexpected semantic review request {requests}"),
+                }
+            },
+            false,
+            false,
+            vec![],
+        );
+        let result = fixture.run(
+            Some(&model),
+            &[
+                "--mode",
+                "goal",
+                "--output-format",
+                "json",
+                "Judge the actual result",
+            ],
+            None,
+        );
+        assert_eq!(
+            result.status.code(),
+            Some(if passed { 0 } else { 6 }),
+            "{result:?}"
+        );
+        let output = fixture.assert_settled(&result, 6, 5);
+        let id = output["goal"]["planId"].as_str().unwrap();
+        let plan = get(fixture.home().join("goal-plans").join(format!("{id}.json")));
+        assert_eq!(plan["criterionResults"], json!([]));
+        let verifier = &plan["runner"]["verifierRuns"][0];
+        let reviews = plan["modelReviews"].as_array().unwrap();
+        assert_eq!(reviews.len(), 2);
+        for (row, id) in reviews.iter().zip(["quality", "coverage"]) {
+            assert_eq!(row["criterionId"], id);
+            assert_eq!(row["sourceRevision"], verifier["sourceRevision"]);
+            assert_eq!(row["verifierRunId"], verifier["verifierRunId"]);
+            assert_eq!(row["evidenceRefs"], verifier["evidenceRefs"]);
+            assert_eq!(row["passed"], passed);
+        }
+    }
+}
+
+#[test]
 fn public_goal_verifier_owns_completed_intake_and_rejects_late_or_unprojected_results() {
     for case in ["valid", "write", "stale", "hard", "budget", "review_budget"] {
         let fixture = Ordinary::new();

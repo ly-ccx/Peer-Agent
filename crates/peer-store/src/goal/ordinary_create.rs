@@ -132,7 +132,7 @@ fn criteria(input: Option<&Value>) -> Result<Vec<Value>, GoalError> {
                 "command" | "test" => &["command"][..],
                 "file-contains" => &["path", "expect"][..],
                 "file-exists" => &["path"][..],
-                "manual" => &[][..],
+                "manual" | "model_review" => &[][..],
                 _ => return Err(GoalError::Invalid),
             };
             let description = item

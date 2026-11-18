@@ -7,6 +7,8 @@ use super::{
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
+const MODEL_REVIEW_HISTORY: usize = 64;
+
 pub struct VerifierLease {
     pub id: String,
     pub plan: Value,
@@ -23,6 +25,45 @@ pub enum VerifierSettlement {
 pub struct VerifierReceipt {
     source: LocalGoalIntake,
     id: String,
+}
+
+fn model_review_ids(plan: &Value) -> impl Iterator<Item = &str> {
+    plan["successCriteria"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|criterion| criterion["kind"] == "model_review")
+        .filter_map(|criterion| criterion["id"].as_str())
+}
+
+fn record_model_reviews(
+    plan: &mut Value,
+    lease: &VerifierLease,
+    passed: bool,
+    refs: &Value,
+    at: &str,
+) -> Result<(), GoalError> {
+    let new = model_review_ids(plan)
+        .map(|id| {
+            json!({"criterionId":id,
+        "sourceRevision":lease.criterion_revision,"verifierRunId":lease.id,
+        "passed":passed,"evidenceRefs":refs,"checkedAt":at})
+        })
+        .collect::<Vec<_>>();
+    if new.is_empty() {
+        return Ok(());
+    }
+    let rows = plan
+        .as_object_mut()
+        .ok_or(GoalError::Invalid)?
+        .entry("modelReviews")
+        .or_insert_with(|| json!([]))
+        .as_array_mut()
+        .ok_or(GoalError::Invalid)?;
+    rows.extend(new);
+    let older = rows.len().saturating_sub(MODEL_REVIEW_HISTORY);
+    rows.drain(..older);
+    Ok(())
 }
 
 // Existing criterion-review.mjs shape. Optional object properties are absent;
@@ -139,6 +180,7 @@ impl GoalStore {
         {
             return Err(GoalError::Changed);
         }
+        let has_report = matches!(&result, VerifierSettlement::Report(_));
         let (mut report, mut reason) = match result {
             VerifierSettlement::Report(report) => (report, "goal_verifier_failed"),
             VerifierSettlement::Interrupted(reason) => {
@@ -167,6 +209,7 @@ impl GoalStore {
             report["passed"] = json!(false);
         }
         let passed = report["passed"] == true;
+        let used = report["evidenceRefs"].clone();
         let row = running_review(&mut plan, &lease.id)?;
         row["status"] = json!(if passed { "passed" } else { "failed" });
         row["failureReason"] = json!((!passed).then_some(reason));
@@ -176,6 +219,9 @@ impl GoalStore {
         row["evidenceRefs"] = report["evidenceRefs"].clone();
         row["report"] = report;
         row["updatedAt"] = json!(at);
+        if has_report {
+            record_model_reviews(&mut plan, lease, passed, &used, at)?;
+        }
         plan["runner"]
             .as_object_mut()
             .ok_or(GoalError::Invalid)?
@@ -264,6 +310,22 @@ impl GoalStore {
             || !self.verifier_refs_exist(plan, &receipt.id, runner.stream_id(), &refs)?
         {
             return Ok(("blocked", Some("goal_verifier_evidence_unavailable")));
+        }
+        if model_review_ids(plan).any(|id| {
+            plan["modelReviews"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .rev()
+                .find(|entry| entry["criterionId"] == id)
+                .is_none_or(|entry| {
+                    entry["passed"] != true
+                        || entry["sourceRevision"] != row["sourceRevision"]
+                        || entry["verifierRunId"] != receipt.id
+                        || entry["evidenceRefs"] != row["evidenceRefs"]
+                })
+        }) {
+            return Ok(("blocked", Some("goal_model_review_required")));
         }
         Ok(("completed", None))
     }
