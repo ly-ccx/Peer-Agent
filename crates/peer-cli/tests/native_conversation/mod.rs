@@ -5,6 +5,7 @@ mod hooks;
 mod input_media;
 mod model_errors;
 mod recovery;
+mod shell_artifacts;
 mod skills;
 struct Ordinary {
     root: tempfile::TempDir,

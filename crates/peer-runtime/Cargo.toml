@@ -13,7 +13,7 @@ peer-store = { path = "../peer-store" }
 peer-protocol = { path = "../peer-protocol" }
 serde.workspace = true
 serde_json.workspace = true
-tokio = { version = "=1.48.0", features = ["rt", "macros", "process", "io-util", "sync", "time", "net"] }
+tokio = { version = "=1.48.0", features = ["rt", "macros", "process", "io-util", "sync", "time", "net", "fs"] }
 tokio-util = { version = "=0.7.17", features = ["rt"] }
 zeroize = "1.8.2"
 time = { version = "=0.3.55", features = ["parsing", "formatting"] }

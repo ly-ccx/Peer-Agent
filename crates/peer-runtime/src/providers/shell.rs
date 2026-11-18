@@ -1,6 +1,7 @@
 use super::*;
+use peer_store::ShellArtifacts;
 use std::{process::Stdio, time::Duration};
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 pub(super) struct ShellProvider;
 struct ShellEffect {
     args: Value,
@@ -108,7 +109,11 @@ impl PreparedEffect for ShellEffect {
     }
 }
 impl ShellEffect {
-    async fn spawn(&self, port: &EffectAdmission) -> Result<tokio::process::Child, HostError> {
+    async fn spawn(
+        &self,
+        port: &EffectAdmission,
+        artifacts: &ShellArtifacts,
+    ) -> Result<tokio::process::Child, HostError> {
         port.check().await?;
         let mut command = tokio::process::Command::new("/bin/sh");
         command
@@ -122,6 +127,9 @@ impl ShellEffect {
         #[cfg(unix)]
         command.process_group(0);
         port.command_starting().await?;
+        artifacts
+            .check_current()
+            .map_err(|_| HostError("shell_artifact_unavailable"))?;
         command.spawn().map_err(|_| HostError("shell_spawn_failed"))
     }
     async fn run(
@@ -135,225 +143,226 @@ impl ShellEffect {
         if cancel.is_cancelled() {
             return Err(HostError("CANCELLED"));
         }
-        let directory = self
-            .home
-            .join("shell-artifacts")
-            .join(&now[..10])
-            .join(&self.handle);
-        std::fs::create_dir_all(&directory).map_err(|_| HostError("shell_artifact_unavailable"))?;
-        let metadata = json!({"taskId":self.handle,"toolCallId":call.tool_call_id(),"command":self.command,"cwd":self.cwd,"startedAt":now,"status":"running"});
-        std::fs::write(
-            directory.join("metadata.json"),
-            serde_json::to_vec(&metadata).map_err(|_| HostError("shell_artifact_unavailable"))?,
-        )
-        .map_err(|_| HostError("shell_artifact_unavailable"))?;
-        let mut child = match self.spawn(&port).await {
+        let mut metadata = json!({
+            "taskId": self.handle, "toolCallId": call.tool_call_id(),
+            "command": self.command, "cwd": self.cwd, "startedAt": now, "status": "running"
+        });
+        let (mut artifacts, out, err) =
+            match ShellArtifacts::begin(&self.home, now, &self.handle, &metadata) {
+                Ok(artifacts) => artifacts,
+                Err(_) => return Ok(EffectOutcome::not_dispatched("shell_artifact_unavailable")),
+            };
+        let mut child = match self.spawn(&port, &artifacts).await {
             Ok(child) => child,
             Err(error) => {
-                // The spawn seam returned before creating a child. Its actual
-                // completion proves no command dispatch, including cancellation
-                // while the Host was persisting the starting intent.
+                // The spawn seam returned before creating a child.
                 let mut outcome = EffectOutcome::not_dispatched(error.0);
                 outcome.output =
                     json!({"taskId":self.handle,"interrupted":true,"stopReason":error.0});
-                let mut metadata = metadata;
                 metadata["status"] = json!(outcome.status);
                 metadata["managedProcessEnded"] = json!(true);
                 metadata["notDispatched"] = json!(true);
                 metadata["error"] = json!(error.0);
-                if std::fs::write(
-                    directory.join("metadata.json"),
-                    serde_json::to_vec(&metadata)
-                        .map_err(|_| HostError("shell_artifact_unavailable"))?,
-                )
-                .is_err()
-                {
-                    outcome.status = "failed";
-                    outcome.error = Some("execution_outcome_unknown");
-                    outcome.output["artifactError"] = json!("shell_artifact_unavailable");
+                if artifacts.finish(&metadata).is_err() {
+                    artifact_failed(&mut outcome);
                 }
                 return Ok(outcome);
             }
         };
         let pid = child.id().expect("newly spawned child has a PID");
         if let Err(error) = port.command_started(pid).await {
-            if let Some(pid) = rustix::process::Pid::from_raw(pid as i32) {
-                let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
-            }
-            let _ = child.start_kill();
-            let reaped = tokio::time::timeout(Duration::from_secs(2), child.wait())
-                .await
-                .is_ok_and(|r| r.is_ok());
-            for _ in 0..20 {
-                if group_absent(pid) {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-            let ended = reaped && group_absent(pid);
-            let mut metadata = metadata;
-            metadata["status"] = json!(if ended && error.0 == "CANCELLED" {
-                "cancelled"
-            } else {
-                "failed"
-            });
-            metadata["managedProcessEnded"] = json!(ended);
-            metadata["error"] = json!(error.0);
-            let published = std::fs::write(
-                directory.join("metadata.json"),
-                serde_json::to_vec(&metadata)
-                    .map_err(|_| HostError("shell_artifact_unavailable"))?,
-            )
-            .is_ok();
-            let mut outcome = EffectOutcome::failed(if ended && published {
+            let ended = terminate(&mut child, pid).await;
+            let mut outcome = EffectOutcome::failed(if ended {
                 error.0
             } else {
                 "execution_outcome_unknown"
             });
-            if ended && published && error.0 == "CANCELLED" {
+            if ended && error.0 == "CANCELLED" {
                 outcome.status = "cancelled";
             }
             outcome.ended = ended;
             outcome.output = json!({"taskId":self.handle,"interrupted":true,"stopReason":error.0});
-            if !published {
-                outcome.output["artifactError"] = json!("shell_artifact_unavailable");
+            metadata["status"] = json!(outcome.status);
+            metadata["managedProcessEnded"] = json!(ended);
+            metadata["error"] = json!(error.0);
+            if artifacts.finish(&metadata).is_err() {
+                artifact_failed(&mut outcome);
             }
             return Ok(outcome);
         }
-        let mut stdout = child
-            .stdout
-            .take()
-            .expect("spawned stdout was configured as piped");
-        let mut stderr = child
-            .stderr
-            .take()
-            .expect("spawned stderr was configured as piped");
-        Ok(async move {
-            async fn read(
-                r: &mut (impl tokio::io::AsyncRead + Unpin),
-            ) -> Result<Vec<u8>, &'static str> {
-                let mut out = Vec::new();
-                r.take(65537)
-                    .read_to_end(&mut out)
-                    .await
-                    .map_err(|_| "shell_output_failed")?;
-                if out.len() > 65536 {
-                    return Err("shell_output_limit");
-                }
-                Ok(out)
-            }
-            let outcome = {
+        let mut stdout = child.stdout.take().expect("configured piped stdout");
+        let mut stderr = child.stderr.take().expect("configured piped stderr");
+        let mut out = CapturedStream::new(out);
+        let mut err = CapturedStream::new(err);
+        let result = {
             let completion = async {
-                let (out, err, status) =
-                    tokio::try_join!(read(&mut stdout), read(&mut stderr), async {
+                let (_, _, exit) =
+                    tokio::try_join!(out.drain(&mut stdout), err.drain(&mut stderr), async {
                         child.wait().await.map_err(|_| "shell_wait_failed")
-                    })?;
-                Ok::<_, &'static str>((out, err, status))
+                    },)?;
+                Ok::<_, &'static str>(exit)
             };
             let completion = tokio::time::timeout(self.timeout, completion);
             tokio::pin!(completion);
             let mut tick = tokio::time::interval(Duration::from_millis(100));
             tick.tick().await;
             loop {
-                tokio::select! {biased;
-                    _=cancel.cancelled()=>break Err("CANCELLED"),
-                    _=tick.tick()=>if let Err(error)=port.check().await { break Err(error.0) },
-                    result=&mut completion=>break result.unwrap_or(Err("shell_timeout")),
+                tokio::select! { biased;
+                    _ = cancel.cancelled() => break Err("CANCELLED"),
+                    _ = tick.tick() => if let Err(error) = port.check().await { break Err(error.0) },
+                    result = &mut completion => break result.unwrap_or(Err("shell_timeout")),
                 }
             }
-            };
-            let mut ended = group_absent(pid);
-            if outcome.is_err() || !ended {
-                if let Some(pid) = rustix::process::Pid::from_raw(pid as i32) {
-                    let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
-                }
-                let _ = child.start_kill();
-                let reaped = tokio::time::timeout(Duration::from_secs(2), child.wait())
-                    .await
-                    .is_ok_and(|r| r.is_ok());
-                for _ in 0..20 {
-                    if group_absent(pid) {
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                }
-                ended = reaped && group_absent(pid);
-            }
-            let (status, output, error) = match outcome {
-                Ok((out, err, exit)) if ended => (
-                    if exit.success() { "success" } else { "failed" },
-                    json!({"taskId":self.handle,"stdout":String::from_utf8_lossy(&out),"stderr":String::from_utf8_lossy(&err),"exitCode":exit.code(),"timedOut":false,"cancelled":false}),
-                    None,
-                ),
-                Ok(_) => (
-                    "failed",
-                    json!({"taskId":self.handle}),
-                    Some("execution_outcome_unknown"),
-                ),
-                Err(reason) => (
-                    if reason == "CANCELLED" {
-                        "cancelled"
-                    } else {
-                        "failed"
-                    },
-                    json!({"taskId":self.handle,"timedOut":reason=="shell_timeout","cancelled":reason=="CANCELLED","interrupted":true,"stopReason":reason}),
-                    Some(if ended {
-                        reason
-                    } else {
-                        "execution_outcome_unknown"
-                    }),
-                ),
-            };
-            let mut metadata = metadata;
-            metadata["status"] = json!(status);
-            metadata["output"] = output.clone();
-            metadata["managedProcessEnded"] = json!(ended);
-            let artifact = || -> std::io::Result<()> {
-                for (name, bytes) in [
-                    (
-                        "stdout.txt",
-                        output["stdout"].as_str().unwrap_or("").as_bytes().to_vec(),
-                    ),
-                    (
-                        "stderr.txt",
-                        output["stderr"].as_str().unwrap_or("").as_bytes().to_vec(),
-                    ),
-                    ("metadata.json", serde_json::to_vec(&metadata)?),
-                ] {
-                    let mut f = std::fs::File::create(directory.join(name))?;
-                    std::io::Write::write_all(&mut f, &bytes)?;
-                    f.sync_all()?;
-                }
-                std::fs::File::open(&directory)?.sync_all()
-            };
-            if artifact().is_err() {
-                return EffectOutcome {
-                    status: "failed",
-                    output,
-                    error: Some("execution_outcome_unknown"),
-                    artifacts: vec![],
-                    ended,
-                    materialization: None,
-                    not_dispatched: false,
-                };
-            }
-            let reference = format!("local-shell-artifact://{}", self.handle);
-            EffectOutcome {
-                status,
-                output,
-                error,
-                artifacts: vec![
-                    format!("{reference}/stdout"),
-                    format!("{reference}/stderr"),
-                    format!("{reference}/metadata"),
-                ],
+        };
+        let ended = if result.is_err() || !group_absent(pid) {
+            terminate(&mut child, pid).await
+        } else {
+            true
+        };
+        let mut outcome = match result {
+            Ok(exit) if ended => EffectOutcome {
+                status: if exit.success() { "success" } else { "failed" },
+                output: json!({
+                    "taskId": self.handle, "stdout": out.preview(), "stderr": err.preview(),
+                    "exitCode": exit.code(), "timedOut": false, "cancelled": false,
+                }),
+                error: None,
+                artifacts: vec![],
                 ended,
                 materialization: None,
                 not_dispatched: false,
+            },
+            Ok(_) => {
+                let mut unknown = EffectOutcome::failed("execution_outcome_unknown");
+                unknown.output = json!({"taskId":self.handle});
+                unknown
             }
-        }.await)
+            Err(reason) => {
+                let mut failed = EffectOutcome::failed(if ended {
+                    reason
+                } else {
+                    "execution_outcome_unknown"
+                });
+                if reason == "CANCELLED" {
+                    failed.status = "cancelled";
+                }
+                failed.output = json!({
+                    "taskId": self.handle, "timedOut": reason == "shell_timeout",
+                    "cancelled": reason == "CANCELLED", "interrupted": true, "stopReason": reason,
+                });
+                failed
+            }
+        };
+        outcome.ended = ended;
+        if out.preview_truncated() || err.preview_truncated() {
+            outcome.output["truncated"] = json!(true);
+        }
+        metadata["status"] = json!(outcome.status);
+        metadata["output"] = outcome.output.clone();
+        metadata["managedProcessEnded"] = json!(ended);
+        metadata["truncated"] = json!(out.artifact_truncated || err.artifact_truncated);
+        let streams = tokio::join!(out.finish(), err.finish());
+        if streams.0.is_err()
+            || streams.1.is_err()
+            || artifacts.finish(&metadata).is_err()
+            || outcome.error == Some("shell_artifact_unavailable")
+        {
+            artifact_failed(&mut outcome);
+            return Ok(outcome);
+        }
+        let reference = format!("local-shell-artifact://{}", self.handle);
+        outcome.artifacts = ["stdout", "stderr", "metadata"]
+            .into_iter()
+            .map(|name| format!("{reference}/{name}"))
+            .collect();
+        Ok(outcome)
     }
 }
+
+fn artifact_failed(outcome: &mut EffectOutcome) {
+    outcome.status = "failed";
+    outcome.error = Some("execution_outcome_unknown");
+    outcome.output["artifactError"] = json!("shell_artifact_unavailable");
+}
+
+async fn terminate(child: &mut tokio::process::Child, pid: u32) -> bool {
+    if let Some(pid) = rustix::process::Pid::from_raw(pid as i32) {
+        let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+    }
+    let _ = child.start_kill();
+    let reaped = tokio::time::timeout(Duration::from_secs(2), child.wait())
+        .await
+        .is_ok_and(|result| result.is_ok());
+    for _ in 0..20 {
+        if group_absent(pid) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    reaped && group_absent(pid)
+}
+
+const PREVIEW_BYTES: usize = 65_536;
+const ARTIFACT_BYTES: usize = 2_000_000;
+
+struct CapturedStream {
+    file: tokio::fs::File,
+    preview: Vec<u8>,
+    stored: usize,
+    artifact_truncated: bool,
+}
+
+impl CapturedStream {
+    fn new(file: std::fs::File) -> Self {
+        Self {
+            file: tokio::fs::File::from_std(file),
+            preview: Vec::new(),
+            stored: 0,
+            artifact_truncated: false,
+        }
+    }
+
+    async fn drain(&mut self, stream: &mut (impl AsyncRead + Unpin)) -> Result<(), &'static str> {
+        let mut chunk = [0; 16_384];
+        loop {
+            let count = stream
+                .read(&mut chunk)
+                .await
+                .map_err(|_| "shell_output_failed")?;
+            if count == 0 {
+                return Ok(());
+            }
+            let preview = count.min(PREVIEW_BYTES.saturating_sub(self.preview.len()));
+            self.preview.extend_from_slice(&chunk[..preview]);
+            let stored = count.min(ARTIFACT_BYTES.saturating_sub(self.stored));
+            if stored != 0 {
+                self.file
+                    .write_all(&chunk[..stored])
+                    .await
+                    .map_err(|_| "shell_artifact_unavailable")?;
+                self.stored += stored;
+            }
+            self.artifact_truncated |= stored < count;
+        }
+    }
+
+    fn preview(&self) -> String {
+        String::from_utf8_lossy(&self.preview).into_owned()
+    }
+
+    fn preview_truncated(&self) -> bool {
+        self.stored > self.preview.len() || self.artifact_truncated
+    }
+
+    async fn finish(&mut self) -> std::io::Result<()> {
+        if self.artifact_truncated {
+            self.file.write_all(b"\n...[artifact truncated]\n").await?;
+        }
+        self.file.flush().await?;
+        self.file.sync_all().await
+    }
+}
+
 pub(crate) fn group_absent(pid: u32) -> bool {
     rustix::process::Pid::from_raw(pid as i32).is_some_and(|p| {
         rustix::process::test_kill_process_group(p) == Err(rustix::io::Errno::SRCH)

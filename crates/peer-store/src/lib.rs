@@ -19,6 +19,7 @@ pub use evidence::{EvidenceIndexStore, HostToolEvidence};
 pub use model_config::{ModelConfigSnapshot, ModelConfigStore, ModelConfigTransaction};
 mod interactive_result;
 mod resources;
+mod shell_artifacts;
 mod sqlite_file;
 #[cfg(feature = "test-fixtures")]
 pub use coordination_fence::protect_coordination_writer_fixture;
@@ -29,6 +30,7 @@ pub use resources::{
     HostResourcePlan, ResourceError, ResourceIdentity, ResourceReservation, directory_resource,
     file_resource, provider_execution_scopes, provider_file_scopes, resource_conflicts,
 };
+pub use shell_artifacts::ShellArtifacts;
 mod context_accounting;
 mod mcp_inventory;
 pub use mcp_inventory::{McpRegistrySnapshot, McpRegistryStore};
