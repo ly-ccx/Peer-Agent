@@ -1,7 +1,7 @@
 // Cold-read the public native executable's real synthetic stores using the
 // current TS implementations. This development process is never a CLI sidecar.
 import assert from 'node:assert/strict';
-import {readFileSync,existsSync} from 'node:fs';
+import {readFileSync,existsSync,readdirSync} from 'node:fs';
 import {join,resolve} from 'node:path';
 import {createGoalPlanStore} from '../../packages/runtime-node/src/goal-plan-store.mjs';
 import {createCoordinationStorageV2} from '../../packages/runtime-node/src/project-agent/coordination-storage-v2.mjs';
@@ -12,9 +12,66 @@ import {Database} from 'bun:sqlite';
 import {createWorkCoordinationStore} from '../../packages/runtime-node/src/project-agent/work-coordination-store.mjs';
 import {spawnSync} from 'node:child_process';
 const output=resolve(process.argv[2]);assert.ok(existsSync(join(output,'.native-cli-fixture')));const roots=readFileSync(join(output,'roots.jsonl'),'utf8').trim().split('\n').map(s=>JSON.parse(s));let cases=0;
+// ADR 131 requires the current TS store to refuse the native Work Shell floor.
+const workShellFloor = 15;
+let nativeOnlyRoots = 0;
+
+function readNative(root: string) {
+ const run = spawnSync(resolve('target/debug/examples/coordination-conformance'), [], {
+  input: JSON.stringify({ now: Date.now() + 1_000_000 }), encoding: 'utf8', timeout: 30000,
+  env: { PATH: '/nonexistent', PEER_NATIVE_CONFORMANCE_ROOT: root },
+ });
+ assert.ifError(run.error);
+ assert.equal(run.status, 0, run.stderr);
+ const result = JSON.parse(run.stdout);
+ assert.equal(result.ok, true, JSON.stringify(result));
+ return result;
+}
+
+function canonicalFiles(directory: string) {
+ return Object.fromEntries(['manifest.json', 'head.json', 'segments', 'blobs'].flatMap(name => {
+  const path = join(directory, name);
+  if (name === 'manifest.json' || name === 'head.json') return [[name, readFileSync(path)]];
+  if (name === 'blobs' && !existsSync(path)) return [];
+  return readdirSync(path).map(file => [`${name}/${file}`, readFileSync(join(path, file))]);
+ }));
+}
+
+async function readFencedWorkShell(root: string, directory: string, storage: ReturnType<typeof createCoordinationStorageV2>) {
+ const before = canonicalFiles(directory);
+ const head = JSON.parse(before['head.json'].toString());
+ assert.equal(head.minimumWriterVersion, workShellFloor);
+ const unsupported = { code: 'coordination_schema_unsupported' };
+ await assert.rejects(() => storage.prepare(), unsupported);
+ assert.throws(() => storage.readSnapshot(), unsupported);
+ assert.throws(() => storage.commitEntry({ kind: 'work', work: { workId: 'old-writer', state: 'queued' } }), unsupported);
+ assert.deepEqual(canonicalFiles(directory), before);
+ const native = readNative(root);
+ assert.equal(native.fenced, true);
+ assert.equal(native.headRevision, head.revision);
+ assert.equal(native.hash, head.hash);
+ assert.deepEqual(canonicalFiles(directory), before);
+ nativeOnlyRoots++;
+ cases += 5;
+ return native.state;
+}
+
 for(const receipt of roots){const root=receipt.root;assert.ok(existsSync(join(root,'.native-cli-fixture')));const plans=createGoalPlanStore({storeDir:join(root,'goal-plans')});const conversations=createConversationStore({storeDir:join(root,'conversations')});
  const storage=createCoordinationStorageV2({directory:join(root,'project-runtime/w'),legacyFile:join(root,'project-runtime/w/coordination.jsonl'),assertOwner(){}});
- try{await storage.prepare();const state=storage.read();const raw=JSON.parse(readFileSync(join(root,'goal-plans/p.json'),'utf8'));const plan=plans.getPlan('p');assert.equal(plan.planId,raw.planId);assert.equal(plan.delegationOrigin.executionControl?.phase,raw.delegationOrigin.executionControl?.phase);assert.deepEqual(plan.future,{opaque:'preserved'});cases++;
+ const directory = join(root, 'project-runtime/w/coordination-v2');
+ const manifest = JSON.parse(readFileSync(join(directory, 'manifest.json'), 'utf8'));
+ const workShell = manifest.minimumReaderVersion === workShellFloor;
+ try{
+  let state;
+  if (workShell) {
+   assert.equal(manifest.schemaVersion, 2);
+   assert.equal(manifest.minimumWriterVersion, workShellFloor);
+   state = await readFencedWorkShell(root, directory, storage);
+  } else {
+   await storage.prepare();
+   state = storage.read();
+  }
+ const raw=JSON.parse(readFileSync(join(root,'goal-plans/p.json'),'utf8'));const plan=plans.getPlan('p');assert.equal(plan.planId,raw.planId);assert.equal(plan.delegationOrigin.executionControl?.phase,raw.delegationOrigin.executionControl?.phase);assert.deepEqual(plan.future,{opaque:'preserved'});cases++;
  const history=conversations.getPersistedConversationHistory('c');const projected=projectConversationHistory(history.messages);for(const message of projected.messages.filter(m=>m.role==='tool')){assert.ok(projected.messages.some(m=>m.toolCalls?.some(c=>c.id===message.toolCallId)));}cases++;
  const resources=createExecutionResources({rootDir:join(root,'project-runtime')});try{
   const db=new Database(join(root,'project-runtime/execution-resources.sqlite'),{readonly:true});try{
@@ -42,15 +99,16 @@ for(const receipt of roots){const root=receipt.root;assert.ok(existsSync(join(ro
   }}
   for(const secret of ['fixture-sensitive-secret','oauth-refreshed-secret','oauth-new-refresh-secret','registered-client-secret'])assert.ok(!JSON.stringify(history).includes(secret),`Credential redaction: ${receipt.case}`);cases++;
  }
- // These roots were created by the actual native executable. Re-save each
- // original Work through the current TS writer, including future opaque facts.
+ if (workShell) continue;
+ // Re-save each compatible Work through the current TS writer, including future opaque facts.
  const writer=createWorkCoordinationStore({rootDir:join(root,'project-runtime'),workspaceId:'w',holdsLease:()=>true,leaseEpoch:()=> 'owned-fixture-roundtrip',formatVersion:2,fenceLegacyWrites:true});
  let expected:any;
  try{await writer.prepare();for(const work of Object.values(writer.read().works) as any[]){const budget=structuredClone(work.budget);writer.saveWork({...work,roundtrip:'current-ts-writer'});assert.deepEqual(writer.readWork(work.workId).budget,budget);cases++;}expected=writer.read();}
  finally{writer.close();}
  // All public test children have exited. Use the existing real Rust Host/Store
  // fixture seam to re-read the TS write; it cannot dispatch models or tools.
- const native=spawnSync(resolve('target/debug/examples/coordination-conformance'),[],{input:JSON.stringify({now:Date.now()+1_000_000}),encoding:'utf8',timeout:30000,env:{PATH:'/nonexistent',PEER_NATIVE_CONFORMANCE_ROOT:root}});
- assert.equal(native.status,0,native.stderr);const read=JSON.parse(native.stdout);assert.equal(read.ok,true,JSON.stringify(read));assert.deepEqual(read.state,expected);cases++;
+ assert.deepEqual(readNative(root).state, expected);cases++;
 }
-assert.ok(roots.length>=6);console.log(JSON.stringify({ok:true,roots:roots.length,cases,coverage:'Actual native exec -> current TS Goal/Conversation/canonical coordination, native recorder retention, pending/receipt history and later task; no model execution by TS.'}));
+assert.ok(roots.length >= 6);
+assert.ok(nativeOnlyRoots > 0 && nativeOnlyRoots < roots.length, 'Expected both fenced Work Shell and TS-compatible roots');
+console.log(JSON.stringify({ok:true,roots:roots.length,nativeOnlyRoots,cases,coverage:'Actual native exec, TS Goal/Conversation/Resources, compatible TS coordination round trips, fenced Work Shell TS refusal and native cold-read.'}));
