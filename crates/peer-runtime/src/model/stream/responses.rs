@@ -9,7 +9,7 @@ struct Item {
 }
 #[derive(Default)]
 pub(super) struct Responses {
-    text: String,
+    pub(super) text: String,
     thought: String,
     items: BTreeMap<usize, Item>,
     pub(super) usage: Option<Value>,

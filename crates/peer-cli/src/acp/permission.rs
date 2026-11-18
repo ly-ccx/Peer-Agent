@@ -86,6 +86,7 @@ pub(super) struct OutputPort {
     connection: Rc<Connection>,
     session: String,
     conversation: Rc<RefCell<Option<String>>>,
+    shown_text_bytes: usize,
 }
 impl OutputPort {
     pub(super) fn new(
@@ -97,6 +98,7 @@ impl OutputPort {
             connection,
             session,
             conversation,
+            shown_text_bytes: 0,
         }
     }
 }
@@ -111,9 +113,20 @@ impl ConversationOutput for OutputPort {
                     self.conversation.replace(Some(conversation_id.to_owned()));
                     return Ok(());
                 }
-                ConversationEvent::AssistantText(text) => json!({
-                    "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":text}
-                }),
+                ConversationEvent::AssistantDelta(text) => {
+                    self.shown_text_bytes += text.len();
+                    assistant_text(text)
+                }
+                ConversationEvent::AssistantText(text) => {
+                    let shown = std::mem::take(&mut self.shown_text_bytes);
+                    let remainder = text
+                        .get(shown..)
+                        .ok_or(CapabilityError("acp_text_mismatch"))?;
+                    if remainder.is_empty() {
+                        return Ok(());
+                    }
+                    assistant_text(remainder)
+                }
                 ConversationEvent::ToolPrepared { call_id, tool } => json!({
                     "sessionUpdate":"tool_call","toolCallId":call_id,"title":tool,"status":"pending"
                 }),
@@ -132,4 +145,8 @@ impl ConversationOutput for OutputPort {
                 .map_err(|_| CapabilityError("acp_output_unavailable"))
         })
     }
+}
+
+fn assistant_text(text: &str) -> Value {
+    json!({"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":text}})
 }

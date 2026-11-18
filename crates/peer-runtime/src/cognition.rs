@@ -8,7 +8,7 @@ use crate::{
     CancellationToken,
     canonical_history::project_history,
     context_accounting::ContextCapacity,
-    model::{LiveHistory, ModelObservation, ModelTurn, NativeModel},
+    model::{LiveHistory, ModelError, ModelObservation, ModelTurn, NativeModel, PreparedRequest},
     usage_accounting::RuntimeUsageAccounting,
 };
 use peer_store::{ConversationMetadataPublication, ConversationStore, HistorySnapshot};
@@ -56,6 +56,24 @@ pub(crate) trait CognitionHost {
         owned: &CancellationToken,
         external: &CancellationToken,
     ) -> Result<F::Output, HostError>;
+    async fn send_prepared(
+        &mut self,
+        prepared: PreparedRequest<'_>,
+        request: &CognitionRequest<'_>,
+        observed: &mut Option<ModelObservation>,
+        _primary: bool,
+    ) -> Result<Result<ModelTurn, ModelError>, HostError> {
+        self.wait(
+            async {
+                let result = prepared.send(request.owned).await;
+                *observed = Some(ModelObservation::capture(&result));
+                result
+            },
+            request.owned,
+            request.external,
+        )
+        .await
+    }
 }
 pub(crate) struct RequestResult {
     pub turn: ModelTurn,

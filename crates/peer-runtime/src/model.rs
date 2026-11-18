@@ -268,6 +268,16 @@ impl NativeModel {
 }
 impl PreparedRequest<'_> {
     pub async fn send(self, cancel: &CancellationToken) -> Result<ModelTurn, ModelError> {
+        self.send_with_text(cancel, async |_: &str| Ok(())).await
+    }
+
+    /// Observe only newly decoded assistant text. The terminal validation below
+    /// still controls the returned turn and all tool intent.
+    pub(crate) async fn send_with_text(
+        self,
+        cancel: &CancellationToken,
+        mut publish: impl std::ops::AsyncFnMut(&str) -> Result<(), ModelError>,
+    ) -> Result<ModelTurn, ModelError> {
         let model = self.owner;
         let request_fingerprint = self.fingerprint;
         let mut stream = Some(stream::Stream::new(model.wire));
@@ -333,6 +343,7 @@ impl PreparedRequest<'_> {
                 return Err(ModelError::new("model_content_type_invalid"));
             }
             let decoder = stream.as_mut().expect("one request decoder");
+            let mut shown = 0;
             while let Some(chunk) = response.chunk().await.map_err(|e| {
                 let mut error = ModelError::new("model_stream_interrupted");
                 if model.wire == wire::Wire::Qoder && !e.is_timeout() {
@@ -341,6 +352,11 @@ impl PreparedRequest<'_> {
                 error
             })? {
                 decoder.push(&chunk)?;
+                let text = decoder.preview_text();
+                if text.len() > shown {
+                    publish(&text[shown..]).await?;
+                    shown = text.len();
+                }
                 if decoder.terminal() {
                     break;
                 }

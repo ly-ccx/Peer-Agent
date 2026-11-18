@@ -5,7 +5,10 @@ use crate::{
     capability::{CapabilityError as HostError, now},
     cognition::{CognitionHost, CognitionRequest, ContextPipeline},
     live_execution::{Attempt, ExecutionRegistry},
-    model::{ModelContinuation, ModelObservation, ModelToolCall, ModelTurn, NativeModel},
+    model::{
+        ModelContinuation, ModelError, ModelObservation, ModelToolCall, ModelTurn, NativeModel,
+        PreparedRequest,
+    },
     providers::{ProviderRegistry, RuntimeMode, RuntimeProjection},
     session_host::{LocalPermissionDecision, PermissionInput},
     system_context::{
@@ -96,10 +99,11 @@ pub struct ConversationOutcome {
     pub error: Option<&'static str>,
     pub goal: Option<Value>,
 }
-/// Facts already accepted by the ordinary Host. Rendering these events does
-/// not own the execution or grant permission.
+/// Presentation events from the ordinary Host. Assistant deltas are provisional
+/// display text; AssistantText is published after the complete text is committed.
 pub enum ConversationEvent<'a> {
     Started { conversation_id: &'a str },
+    AssistantDelta(&'a str),
     AssistantText(&'a str),
     ToolPrepared { call_id: &'a str, tool: &'a str },
     ToolSettled { call_id: &'a str, status: &'a str },
@@ -858,6 +862,35 @@ impl CognitionHost for Host<'_> {
         _external: &CancellationToken,
     ) -> Result<F::Output, HostError> {
         self.wait_owned(future).await
+    }
+    async fn send_prepared(
+        &mut self,
+        prepared: PreparedRequest<'_>,
+        request: &CognitionRequest<'_>,
+        observed: &mut Option<ModelObservation>,
+        primary: bool,
+    ) -> Result<Result<ModelTurn, ModelError>, HostError> {
+        let mut output = self.output.take();
+        let show_delta = primary && self.worker.is_none();
+        let result = self
+            .wait_owned(async {
+                let result = prepared
+                    .send_with_text(request.owned, async |text: &str| {
+                        if show_delta && let Some(output) = output.as_mut() {
+                            output
+                                .publish(ConversationEvent::AssistantDelta(text))
+                                .await
+                                .map_err(|error| ModelError::new(error.0))?;
+                        }
+                        Ok(())
+                    })
+                    .await;
+                *observed = Some(ModelObservation::capture(&result));
+                result
+            })
+            .await;
+        self.output = output;
+        result
     }
 }
 impl crate::turn_loop::TurnHost for Host<'_> {

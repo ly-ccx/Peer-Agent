@@ -10,7 +10,7 @@ struct Call {
 #[derive(Default)]
 pub(super) struct ChatStream {
     frames: super::sse_frame::Frames,
-    text: String,
+    pub(super) text: String,
     calls: BTreeMap<usize, Call>,
     pub(super) usage: Option<Value>,
     reason: Option<String>,

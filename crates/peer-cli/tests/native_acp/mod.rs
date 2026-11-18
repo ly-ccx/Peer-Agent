@@ -14,14 +14,32 @@ struct Client {
 }
 impl Client {
     fn start(root: &Path, server: &Server) -> Self {
-        Self::spawn(root, |command| {
-            command
-                .env("PEER_MODEL_BASE_URL", &server.url)
-                .env("PEER_MODEL_API_KEY", "isolated-test-only")
-                .env("PEER_MODEL_ID", "model");
-        })
+        Self::start_until(root, server, |_| false)
+    }
+    fn start_until(
+        root: &Path,
+        server: &Server,
+        close_output: impl Fn(&str) -> bool + Send + 'static,
+    ) -> Self {
+        Self::spawn_until(
+            root,
+            |command| {
+                command
+                    .env("PEER_MODEL_BASE_URL", &server.url)
+                    .env("PEER_MODEL_API_KEY", "isolated-test-only")
+                    .env("PEER_MODEL_ID", "model");
+            },
+            close_output,
+        )
     }
     fn spawn(root: &Path, configure: impl FnOnce(&mut Command)) -> Self {
+        Self::spawn_until(root, configure, |_| false)
+    }
+    fn spawn_until(
+        root: &Path,
+        configure: impl FnOnce(&mut Command),
+        close_output: impl Fn(&str) -> bool + Send + 'static,
+    ) -> Self {
         let mut command = Command::new(native_test_binary());
         command
             .arg("acp")
@@ -39,7 +57,9 @@ impl Client {
         let (send, output) = mpsc::channel();
         let pump = thread::spawn(move || {
             for line in reader.lines() {
-                if send.send(line.unwrap()).is_err() {
+                let line = line.unwrap();
+                let done = close_output(&line);
+                if send.send(line).is_err() || done {
                     break;
                 }
             }
@@ -78,16 +98,16 @@ impl Client {
     }
     fn finish(&mut self) {
         self.input.take();
+        self.wait_for_exit("ACP did not reap after stdin EOF");
+    }
+    fn wait_for_exit(&mut self, failure: &str) {
         let deadline = Instant::now() + Duration::from_secs(8);
         loop {
             if let Some(status) = self.child.try_wait().unwrap() {
                 assert!(status.success(), "{status}");
                 return;
             }
-            assert!(
-                Instant::now() < deadline,
-                "ACP did not reap after stdin EOF"
-            );
+            assert!(Instant::now() < deadline, "{failure}");
             thread::sleep(Duration::from_millis(10));
         }
     }
@@ -617,6 +637,194 @@ fn native_acp_disconnect_drains_actual_shell_group_and_keeps_known_usage() {
     assert_eq!(run["usage"]["totalTokens"], 16);
     assert_eq!(run["pendingTools"].as_array().unwrap().len(), 1);
     assert_eq!(run["pendingTools"][0]["phase"], "outcome_unknown");
+}
+
+#[test]
+fn native_acp_output_reader_close_drains_other_sessions_with_input_still_open() {
+    let root = tempfile::tempdir().unwrap();
+    let shell_workspace = root.path().join("shell");
+    let approval_workspace = root.path().join("approval");
+    std::fs::create_dir(&shell_workspace).unwrap();
+    std::fs::create_dir(&approval_workspace).unwrap();
+    let command = "printf '%s\\n' \"$$\" > pid.partial && /bin/mv pid.partial ready.pid; /bin/sleep 12; printf unexpected > late.txt";
+    let server = Server::new(vec![
+        reply_tool("bash", json!({"command":command})),
+        reply_tool("write_file", json!({"path":"denied.txt","content":"no"})),
+        reply_text("A new session works."),
+    ]);
+    let mut client = Client::start_until(root.path(), &server, |line| {
+        let frame: Value = serde_json::from_str(line).unwrap();
+        frame["method"] == "session/request_permission"
+            && frame["params"]["toolCall"]["title"] == "write_file"
+    });
+    client.request(1, "initialize", json!({"protocolVersion":1}));
+    let shell = client.create(2, &shell_workspace);
+    let approval = client.create(3, &approval_workspace);
+    client.prompt(4, &shell, "Run a long owned command.");
+    loop {
+        let frame = client.next();
+        if frame["method"] == "session/request_permission" {
+            client.send(json!({"id":frame["id"],"result":{
+                "outcome":{"outcome":"selected","optionId":"allow-once"}
+            }}));
+            break;
+        }
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(8);
+    let pid = loop {
+        if let Ok(raw) = std::fs::read_to_string(shell_workspace.join("ready.pid")) {
+            break rustix::process::Pid::from_raw(raw.trim().parse::<i32>().unwrap()).unwrap();
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the owned Shell never published its PID"
+        );
+        thread::sleep(Duration::from_millis(10));
+    };
+    assert!(rustix::process::test_kill_process_group(pid).is_ok());
+    client.prompt(5, &approval, "Ask for a write.");
+    loop {
+        let frame = client.next();
+        if frame["method"] == "session/request_permission" {
+            assert_eq!(frame["params"]["sessionId"], approval);
+            break;
+        }
+    }
+    client.pump.take().unwrap().join().unwrap();
+    client.wait_for_exit(
+        "ACP retained an active Shell and pending approval after stdout lost its reader",
+    );
+    assert!(client.input.is_some());
+    assert_eq!(
+        rustix::process::test_kill_process_group(pid),
+        Err(rustix::io::Errno::SRCH)
+    );
+    assert!(!shell_workspace.join("late.txt").exists());
+    assert!(!approval_workspace.join("denied.txt").exists());
+    assert_eq!(server.requests.lock().unwrap().len(), 2);
+
+    let raw = std::fs::read_to_string(root.path().join("data/conversations/index.jsonl")).unwrap();
+    let records: Vec<_> = raw
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .collect();
+    let executions: Vec<_> = records.iter().map(|row| &row["runtimeExecution"]).collect();
+    assert_eq!(executions.len(), 2);
+    for run in &executions {
+        assert_eq!(run["handles"], json!([]));
+        assert_eq!(run["stop"]["handlesEnded"], true);
+        assert_eq!(run["usageCommitted"], true);
+        assert_eq!(run["usage"]["totalTokens"], 16);
+    }
+    let shell_run = executions
+        .iter()
+        .find(|run| run["phase"] == "recovery_required")
+        .unwrap();
+    assert_eq!(shell_run["pendingTools"].as_array().unwrap().len(), 1);
+    assert_eq!(shell_run["pendingTools"][0]["phase"], "outcome_unknown");
+    let approval_run = executions
+        .iter()
+        .find(|run| run["phase"] == "stopped")
+        .unwrap();
+    assert_eq!(approval_run["pendingTools"], json!([]));
+
+    let mut next = Client::start(root.path(), &server);
+    next.request(1, "initialize", json!({"protocolVersion":1}));
+    let session = next.create(2, &approval_workspace);
+    next.prompt(3, &session, "Can a new session start?");
+    assert_eq!(
+        next.next()["params"]["update"]["content"]["text"],
+        "A new session works."
+    );
+    assert_eq!(next.next()["result"]["stopReason"], "end_turn");
+    next.finish();
+    assert_eq!(server.requests.lock().unwrap().len(), 3);
+}
+
+#[test]
+fn native_acp_publishes_assistant_deltas_before_terminal_validation() {
+    for complete in [true, false] {
+        let root = tempfile::tempdir().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/v1", listener.local_addr().unwrap());
+        let (allow_finish, finish) = mpsc::channel();
+        let model = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            read_request(&mut stream);
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n"
+            )
+            .unwrap();
+            let first =
+                json!({"choices":[{"index":0,"delta":{"content":"第一段"},"finish_reason":null}]});
+            writeln!(stream, "data: {first}\n").unwrap();
+            stream.flush().unwrap();
+            finish.recv_timeout(Duration::from_secs(8)).unwrap();
+            if complete {
+                let terminal = json!({"choices":[{"index":0,"delta":{"content":"第二段"},"finish_reason":"stop"}]});
+                write!(stream, "data: {terminal}\n\ndata: [DONE]\n\n").unwrap();
+            } else {
+                // A declared tool without a valid terminal response cannot
+                // turn already displayed assistant text into execution input.
+                let unfinished = json!({"choices":[{"index":0,"delta":{"tool_calls":[{
+                    "index":0,"id":"unvalidated","function":{"name":"write_file",
+                    "arguments":json!({"path":"unexpected.txt","content":"no"}).to_string()}
+                }]},"finish_reason":null}]});
+                writeln!(stream, "data: {unfinished}\n").unwrap();
+            }
+        });
+        let mut client = Client::spawn(root.path(), |command| {
+            command
+                .env("PEER_MODEL_BASE_URL", endpoint)
+                .env("PEER_MODEL_API_KEY", "isolated-test-only")
+                .env("PEER_MODEL_ID", "model");
+        });
+        client.request(1, "initialize", json!({"protocolVersion":1}));
+        let session = client.create(2, root.path());
+        client.prompt(3, &session, "Receive a split assistant reply.");
+        assert_eq!(
+            client.next()["params"]["update"]["content"]["text"],
+            "第一段"
+        );
+        let conversations = root.path().join("data/conversations");
+        let index = std::fs::read_to_string(conversations.join("index.jsonl")).unwrap();
+        let row: Value = serde_json::from_str(index.trim()).unwrap();
+        let transcript = conversations.join(format!("{}.jsonl", row["id"].as_str().unwrap()));
+        assert!(
+            !std::fs::read_to_string(&transcript)
+                .unwrap()
+                .contains("第一段")
+        );
+        allow_finish.send(()).unwrap();
+        if complete {
+            assert_eq!(
+                client.next()["params"]["update"]["content"]["text"],
+                "第二段"
+            );
+        }
+        let done = client.next();
+        assert_eq!(done["id"], 3, "{done}");
+        if complete {
+            assert_eq!(done["result"]["stopReason"], "end_turn");
+            let final_transcript = std::fs::read_to_string(&transcript).unwrap();
+            assert_eq!(final_transcript.matches("第一段第二段").count(), 1);
+        } else {
+            assert_eq!(done["error"]["code"], -32603);
+            assert!(
+                !std::fs::read_to_string(&transcript)
+                    .unwrap()
+                    .contains("第一段")
+            );
+            assert!(!root.path().join("unexpected.txt").exists());
+        }
+        client.finish();
+        model.join().unwrap();
+    }
 }
 
 #[test]

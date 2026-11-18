@@ -55,6 +55,58 @@ async fn ready(fd: &impl AsFd, flag: PollFlags, shutdown: &CancellationToken) ->
     }
 }
 
+fn output_disconnected(events: PollFlags) -> io::Result<bool> {
+    if events.contains(PollFlags::NVAL) {
+        return Err(Errno::BADF.into());
+    }
+    Ok(events.intersects(PollFlags::ERR | PollFlags::HUP))
+}
+
+fn output_open(output: &impl AsFd) -> io::Result<bool> {
+    // Darwin pipes report HUP after the last reader closes when OUT is requested.
+    let mut requests = [PollFd::new(output, PollFlags::OUT)];
+    loop {
+        match poll(&mut requests, Some(&EMPTY_POLL)) {
+            Ok(_) => return Ok(!output_disconnected(requests[0].revents())?),
+            Err(Errno::INTR) => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+}
+
+async fn ready_to_read(
+    input: &impl AsFd,
+    output: &impl AsFd,
+    shutdown: &CancellationToken,
+) -> io::Result<bool> {
+    loop {
+        if shutdown.is_cancelled() {
+            return Ok(false);
+        }
+        let mut requests = [
+            PollFd::new(input, PollFlags::IN),
+            PollFd::new(output, PollFlags::OUT),
+        ];
+        match poll(&mut requests, Some(&EMPTY_POLL)) {
+            Ok(_) => {
+                if output_disconnected(requests[1].revents())? {
+                    return Ok(false);
+                }
+                if !requests[0].revents().is_empty() {
+                    return Ok(true);
+                }
+            }
+            Err(Errno::INTR) => continue,
+            Err(error) => return Err(error.into()),
+        }
+        tokio::select! {
+            biased;
+            _ = shutdown.cancelled() => return Ok(false),
+            _ = tokio::time::sleep(IO_POLL) => {}
+        }
+    }
+}
+
 pub(super) struct Reader<F: AsFd> {
     input: Nonblocking<F>,
     retained: Vec<u8>,
@@ -71,6 +123,7 @@ impl<F: AsFd> Reader<F> {
 
     pub(super) async fn next_frame(
         &mut self,
+        output: &impl AsFd,
         shutdown: &CancellationToken,
     ) -> io::Result<Option<Vec<u8>>> {
         let mut searched = 0;
@@ -80,6 +133,9 @@ impl<F: AsFd> Reader<F> {
             }
             let remaining = &self.retained[self.cursor..];
             if let Some(next) = remaining[searched..].iter().position(|b| *b == b'\n') {
+                if !output_open(output)? {
+                    return Ok(None);
+                }
                 let newline = searched + next;
                 if newline > MAX_FRAME {
                     return Err(io::Error::new(
@@ -102,7 +158,7 @@ impl<F: AsFd> Reader<F> {
                 self.retained.drain(..self.cursor);
                 self.cursor = 0;
             }
-            if !ready(&self.input.source, PollFlags::IN, shutdown).await? {
+            if !ready_to_read(&self.input.source, output, shutdown).await? {
                 return Ok(None);
             }
             let mut buffer = [0u8; 4096];

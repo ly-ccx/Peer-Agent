@@ -30,15 +30,7 @@ impl ContextPipeline {
             let fingerprint = prepared.fingerprint().to_owned();
             let mut observed = None;
             let turn = host
-                .wait(
-                    async {
-                        let result = prepared.send(f.owned).await;
-                        observed = Some(ModelObservation::capture(&result));
-                        result
-                    },
-                    f.owned,
-                    f.external,
-                )
+                .send_prepared(prepared, f, &mut observed, capacity_bearing)
                 .await;
             let observed = observed.unwrap_or_default();
             let capacity = if capacity_bearing {

@@ -83,6 +83,19 @@ impl Stream {
             },
         }
     }
+    pub fn preview_text(&self) -> &str {
+        match self {
+            Self::Chat(s) => &s.text,
+            // The original Qoder adapter buffers assistant text on retryable
+            // streams so a failed attempt cannot become a second reply.
+            Self::Qoder(_) => "",
+            Self::Other(s) => match &s.decoder {
+                Decoder::Anthropic(d) => &d.text,
+                Decoder::Responses(d) => &d.text,
+                Decoder::Gemini(d) => &d.text,
+            },
+        }
+    }
     pub fn finish(self, fingerprint: String) -> Result<ModelTurn, ModelError> {
         match self {
             Self::Chat(s) => s.finish(fingerprint),
@@ -166,12 +179,17 @@ mod tests {
                 .into_bytes();
             for size in [1, 2, 17, bytes.len()] {
                 let mut stream = Stream::new(wire);
+                let mut shown = String::new();
                 for chunk in bytes.chunks(size) {
                     stream.push(chunk).unwrap();
+                    let current = stream.preview_text();
+                    assert!(current.starts_with(&shown));
+                    shown.push_str(&current[shown.len()..]);
                 }
                 assert!(stream.terminal());
                 let turn = stream.finish("fingerprint".into()).unwrap();
                 assert_eq!(turn.content, c["expected"]["content"]);
+                assert_eq!(shown, turn.content);
             }
             let raw = c["stream"].as_str().unwrap();
             let last = raw.rfind("data:").unwrap();

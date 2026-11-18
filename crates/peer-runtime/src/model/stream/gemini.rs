@@ -1,7 +1,7 @@
 use super::*;
 #[derive(Default)]
 pub(super) struct Gemini {
-    text: String,
+    pub(super) text: String,
     thought: String,
     calls: Vec<ModelToolCall>,
     pub(super) usage: Option<Value>,

@@ -20,7 +20,7 @@ enum Block {
 pub(super) struct Anthropic {
     blocks: BTreeMap<usize, Block>,
     closed: HashSet<usize>,
-    text: String,
+    pub(super) text: String,
     pub(super) usage: Option<Value>,
     reason: Option<String>,
     started: bool,

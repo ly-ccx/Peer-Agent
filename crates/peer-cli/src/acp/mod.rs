@@ -83,6 +83,7 @@ pub fn run() -> io::Result<CliExit> {
                     sessions: RefCell::default(),
                 });
                 let mut reader = stdio::Reader::new(io::stdin())?;
+                let output = io::stdout();
                 let mut tasks = JoinSet::new();
                 let mut initialized = false;
                 let exit = loop {
@@ -95,7 +96,7 @@ pub fn run() -> io::Result<CliExit> {
                             }
                             continue;
                         }
-                        frame = reader.next_frame(&cancel) => match frame {
+                        frame = reader.next_frame(&output, &cancel) => match frame {
                             Ok(Some(frame)) => frame,
                             Ok(None) => break Ok(CliExit::Ok),
                             Err(error) => break Err(error),
