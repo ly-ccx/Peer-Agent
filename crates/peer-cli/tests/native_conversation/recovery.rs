@@ -17,6 +17,67 @@ fn recovery_command(fixture: &Ordinary, id: &str) -> Command {
 pub(super) fn recover(fixture: &Ordinary, id: &str) -> Output {
     wait(recovery_command(fixture, id).spawn().unwrap())
 }
+
+#[test]
+fn ordinary_recovery_settles_billing_only_after_a_canonical_legacy_stop() {
+    let fixture = Ordinary::new();
+    std::fs::create_dir_all(fixture.home().join("conversations")).unwrap();
+    let stamp = "2026-11-19T00:00:00.000Z";
+    let store = ConversationStore::new(fixture.home());
+    let mut meta = store
+        .create(
+            &peer_store::NewConversation {
+                title: "Legacy usage",
+                workspace_path: None,
+                mode: "chat",
+                created_at: stamp,
+            },
+            None,
+        )
+        .unwrap();
+    let id = meta["id"].as_str().unwrap().to_owned();
+    let stream = "legacy-original-stream";
+    let owner = json!({"bootId":"legacy-boot","pid":std::process::id(),"pidStart":"legacy-start","hostId":"legacy-test","acquiredAt":stamp});
+    meta["runtimeExecution"] = json!({
+        "schemaVersion":1, "engine":"peer-ts", "identity":{"kind":"conversation","conversationId":id,"streamId":stream},
+        "owner":owner, "revision":1, "phase":"active", "pendingTools":[], "handles":[],
+        "usage":{"usageScope":"runtime_turn","providerRequestCount":1,"inputTokens":8,"outputTokens":2,
+            "cacheReadTokens":0,"cacheWriteTokens":0,"totalTokens":10},
+        "unknownUsage":true, "attribution":{"id":stream,"streamId":stream,"at":stamp},
+        "usageCommitted":false, "stop":null, "updatedAt":stamp,
+    });
+    let index = fixture.home().join("conversations/index.jsonl");
+    let ledger = fixture.home().join("usage/requests.jsonl");
+    let active = format!("{meta}\n");
+    std::fs::write(&index, &active).unwrap();
+    let blocked = recover(&fixture, &id);
+    assert_eq!(blocked.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&blocked.stderr).contains("native_execution_owner_unknown"));
+    assert_eq!(std::fs::read_to_string(&index).unwrap(), active);
+    assert!(!ledger.exists());
+
+    let stop = json!({"owner":owner,"observedAt":stamp,"runnerIdle":true,"admissionClosed":true,"handlesEnded":true});
+    let run = &mut meta["runtimeExecution"];
+    run["phase"] = json!("recovery_required");
+    run["revision"] = json!(2);
+    run["stop"] = stop.clone();
+    std::fs::write(&index, format!("{meta}\n")).unwrap();
+    let repaired = recover(&fixture, &id);
+    assert!(repaired.status.success(), "{repaired:?}");
+    let facts: Value = serde_json::from_slice(&repaired.stdout).unwrap();
+    assert_eq!(facts["facts"]["phase"], "stopped");
+    assert_eq!(facts["facts"]["stop"], stop);
+    assert_eq!(facts["facts"]["unknownUsage"], true);
+    let repaired_index = std::fs::read(&index).unwrap();
+    let repaired_ledger = std::fs::read(&ledger).unwrap();
+    let row: Value = serde_json::from_slice(&repaired_ledger).unwrap();
+    assert_eq!(row["id"], stream);
+    assert_eq!(row["totalTokens"], 10);
+    assert!(recover(&fixture, &id).status.success());
+    assert_eq!(std::fs::read(index).unwrap(), repaired_index);
+    assert_eq!(std::fs::read(ledger).unwrap(), repaired_ledger);
+}
+
 fn run_facts(fixture: &Ordinary, id: &str) -> peer_protocol::ConversationExecution {
     ConversationStore::new(fixture.home())
         .read_conversation_execution(id)
