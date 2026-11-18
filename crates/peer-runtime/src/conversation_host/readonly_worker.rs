@@ -51,6 +51,7 @@ pub(super) struct Worker {
     pub lease: WorkerLease,
     pub projection: RuntimeProjection,
     pub calls: usize,
+    pub turns: usize,
     expires: tokio::time::Instant,
     access_revision: u64,
     seen_observations: VecDeque<String>,
@@ -124,6 +125,7 @@ impl Host<'_> {
             lease,
             projection,
             calls: 0,
+            turns: 0,
             expires,
             access_revision,
             seen_observations: VecDeque::new(),
@@ -214,6 +216,21 @@ impl Host<'_> {
             })
             .collect::<Vec<_>>();
         crate::canonical_history::project_history(&rows).map_err(HostError)
+    }
+
+    pub(super) fn worker_was_denied(&self, worker: &Worker) -> bool {
+        self.expected
+            .history
+            .messages
+            .iter()
+            .filter(|row| worker.includes(row))
+            .flat_map(|message| message["segments"].as_array().into_iter().flatten())
+            .any(|segment| {
+                matches!(
+                    segment["result"]["status"].as_str(),
+                    Some("denied" | "cancelled")
+                )
+            })
     }
 
     pub(super) fn worker_evidence(&self, worker: &Worker) -> Result<BTreeSet<String>, HostError> {

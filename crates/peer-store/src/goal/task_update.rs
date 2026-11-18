@@ -457,7 +457,7 @@ fn timestamp(value: &str) -> Result<i128, GoalError> {
         .map_err(|_| GoalError::Projection("GOAL_TIMESTAMP_UNSUPPORTED"))
 }
 
-fn transition_plan(plan: &mut Value, at: &str) -> Result<(), GoalError> {
+pub(super) fn transition_plan(plan: &mut Value, at: &str) -> Result<(), GoalError> {
     let next = next_status(plan)?;
     if plan["status"] == next {
         return Ok(());

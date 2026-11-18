@@ -721,9 +721,15 @@ impl CognitionHost for Host<'_> {
     fn admit_request(&mut self, capacity_bearing: bool) -> Result<(), HostError> {
         // Called only for a real physical request. Model retries are still one
         // logical turn; accounting independently counts every physical response.
-        if capacity_bearing && !self.request_admitted {
-            self.turns = self
-                .turns
+        if !self.request_admitted {
+            let counter = if capacity_bearing {
+                &mut self.turns
+            } else if let Some(worker) = &mut self.worker {
+                &mut worker.turns
+            } else {
+                return Ok(());
+            };
+            *counter = counter
                 .checked_add(1)
                 .ok_or(HostError("runtime_counter_limit"))?;
             self.request_admitted = true;

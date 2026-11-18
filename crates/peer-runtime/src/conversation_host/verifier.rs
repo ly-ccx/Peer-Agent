@@ -11,13 +11,13 @@ impl Host<'_> {
         store: &GoalStore,
         runner: &OrdinaryRunner,
         max_turns: Option<usize>,
-    ) -> Result<Option<VerifierReceipt>, HostError> {
+    ) -> Result<(Option<VerifierReceipt>, usize), HostError> {
         let id = format!("verifier-{}", uuid::Uuid::new_v4());
         let Some(lease) = store.begin_verifier(runner, &id, &now(), || {
             self.source_current().map_err(|error| error.0)
         })?
         else {
-            return Ok(None);
+            return Ok((None, 0));
         };
         let mission = verifier::mission(&lease);
         let work = self
@@ -33,9 +33,13 @@ impl Host<'_> {
         let report = work.and_then(|content| {
             decode_report(&content, self.worker_evidence(worker)?, worker.calls)
         });
+        let turns = worker.turns;
         let failure = report.as_ref().err().copied();
         let settlement = match report {
-            Ok(report) => VerifierSettlement::Report(report),
+            Ok((report, explicitly_failed)) => VerifierSettlement::Report {
+                report,
+                allows_repair: explicitly_failed && !self.worker_was_denied(worker),
+            },
             Err(reason) => VerifierSettlement::Interrupted(reason.0),
         };
         let saved = store.finish_verifier(lease, settlement, &now(), || {
@@ -44,7 +48,7 @@ impl Host<'_> {
         });
         self.worker = None;
         let saved = saved?;
-        failure.map_or(Ok(Some(saved)), Err)
+        failure.map_or(Ok((Some(saved), turns)), Err)
     }
 }
 
@@ -59,7 +63,7 @@ fn decode_report(
     content: &str,
     actual: BTreeSet<String>,
     calls: usize,
-) -> Result<Value, HostError> {
+) -> Result<(Value, bool), HostError> {
     let invalid = HostError("goal_verifier_report_invalid");
     let parsed = decode_json_bounded(
         content.as_bytes(),
@@ -126,10 +130,9 @@ fn decode_report(
         .filter_map(bounded_text)
         .collect::<Vec<_>>();
     let passed = claimed && !evidence.is_empty() && failed.is_empty() && missing.is_empty();
-    Ok(
-        json!({"passed":passed,"failedCriteria":failed,"missingEvidence":missing,
+    let report = json!({"passed":passed,"failedCriteria":failed,"missingEvidence":missing,
         "summary":bounded_text(&parsed["summary"]).unwrap_or(if passed {"Verifier passed."} else {"Verifier found issues."}),
         "risks":risks,"evidenceRefs":evidence,"toolEvidenceRefs":actual,"rejectedReferenceCount":rejected,
-        "recommendedNextAction":if passed {"complete"} else {"repair"},"toolCallCount":calls}),
-    )
+        "recommendedNextAction":if passed {"complete"} else {"repair"},"toolCallCount":calls});
+    Ok((report, !claimed))
 }

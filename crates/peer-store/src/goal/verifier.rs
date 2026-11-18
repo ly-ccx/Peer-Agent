@@ -8,6 +8,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 
 const MODEL_REVIEW_HISTORY: usize = 64;
+const VERIFICATION_REPAIR_ATTEMPTS: usize = 2;
 
 pub struct VerifierLease {
     pub id: String,
@@ -18,13 +19,14 @@ pub struct VerifierLease {
 }
 
 pub enum VerifierSettlement {
-    Report(Value),
+    Report { report: Value, allows_repair: bool },
     Interrupted(&'static str),
 }
 
 pub struct VerifierReceipt {
     source: LocalGoalIntake,
     id: String,
+    allows_repair: bool,
 }
 
 fn model_review_ids(plan: &Value) -> impl Iterator<Item = &str> {
@@ -180,11 +182,14 @@ impl GoalStore {
         {
             return Err(GoalError::Changed);
         }
-        let has_report = matches!(&result, VerifierSettlement::Report(_));
-        let (mut report, mut reason) = match result {
-            VerifierSettlement::Report(report) => (report, "goal_verifier_failed"),
+        let has_report = matches!(&result, VerifierSettlement::Report { .. });
+        let (mut report, mut reason, allows_repair) = match result {
+            VerifierSettlement::Report {
+                report,
+                allows_repair,
+            } => (report, "goal_verifier_failed", allows_repair),
             VerifierSettlement::Interrupted(reason) => {
-                (json!({"passed":false,"evidenceRefs":[]}), reason)
+                (json!({"passed":false,"evidenceRefs":[]}), reason, false)
             }
         };
         let refs = report["evidenceRefs"]
@@ -237,12 +242,74 @@ impl GoalStore {
         )?;
         Ok(VerifierReceipt {
             id: lease.id.clone(),
+            allows_repair: allows_repair
+                && !passed
+                && used.as_array().is_some_and(|refs| !refs.is_empty()),
             source: LocalGoalIntake {
                 plan_revision,
                 index_revision: files::fingerprint(&[index]),
                 ..lease.source.clone()
             },
         })
+    }
+
+    pub fn begin_verification_repair(
+        &self,
+        owner: &OrdinaryRunner,
+        receipt: &VerifierReceipt,
+        at: &str,
+        admit: impl FnOnce() -> Result<(), &'static str>,
+    ) -> Result<bool, GoalError> {
+        if !receipt.allows_repair {
+            return Ok(false);
+        }
+        let transaction = PlanWrite::lock(self)?;
+        let (source, mut plan) = self.read_ordinary_runner(owner)?;
+        self.check_local_intake(&receipt.source)?;
+        if receipt.source.plan_id() != owner.plan_id() || plan["runner"]["phase"] != "verify" {
+            return Err(GoalError::Changed);
+        }
+        let self_driven = plan["workflowKind"] == "goal_self_driven"
+            || plan["executionPolicy"]["autonomy"] == "self_driven"
+            || plan["activation"]["kind"] == "accepted_goal";
+        if !self_driven
+            || repairs(&plan, owner.stream_id()).count() >= VERIFICATION_REPAIR_ATTEMPTS
+            || self.ordinary_goal_verification(&plan)?.1 != Some("goal_verifier_required")
+        {
+            return Ok(false);
+        }
+        let revision = criterion_revision(&plan)?;
+        let row = verifier_runs(&plan)
+            .find(|row| row["verifierRunId"] == receipt.id)
+            .ok_or(GoalError::Changed)?;
+        let refs = report_refs(row)?;
+        if row["status"] != "failed"
+            || row["sourceRevision"] != revision
+            || row["failureReason"] != "goal_verifier_failed"
+            || row["report"]["passed"] != false
+            || !row["nativeRepair"].is_null()
+            || refs.is_empty()
+            || !self.verifier_refs_exist(&plan, &receipt.id, owner.stream_id(), &refs)?
+        {
+            return Ok(false);
+        }
+        let row = plan["runner"]["verifierRuns"]
+            .as_array_mut()
+            .and_then(|rows| {
+                rows.iter_mut()
+                    .find(|row| row["verifierRunId"] == receipt.id)
+            })
+            .ok_or(GoalError::Changed)?;
+        row["nativeRepair"] = json!({"streamId":owner.stream_id(),"startedAt":at});
+        super::runner::reopen_unverified(&mut plan);
+        super::runner::timing_started(&mut plan, at);
+        let runner = &mut plan["runner"];
+        runner["phase"] = json!("repair");
+        runner["intent"] = json!("execute");
+        runner["updatedAt"] = json!(at);
+        plan["updatedAt"] = json!(at);
+        transaction.publish(source.plan_id(), &source.plan_revision, &plan, at, admit)?;
+        Ok(true)
     }
 
     fn verifier_refs_exist(
@@ -293,17 +360,7 @@ impl GoalStore {
         if row["status"] != "passed" {
             return Ok(("blocked", Some("goal_verifier_failed")));
         }
-        let refs = row["evidenceRefs"]
-            .as_array()
-            .ok_or(GoalError::Invalid)?
-            .iter()
-            .map(|reference| {
-                reference
-                    .as_str()
-                    .map(str::to_owned)
-                    .ok_or(GoalError::Invalid)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let refs = report_refs(row)?;
         if refs.is_empty()
             || row["sourceRevision"] != criterion_revision(plan)?
             || row["report"]["passed"] != true
@@ -329,6 +386,51 @@ impl GoalStore {
         }
         Ok(("completed", None))
     }
+}
+
+fn verifier_runs(plan: &Value) -> impl Iterator<Item = &Value> {
+    plan["runner"]["verifierRuns"]
+        .as_array()
+        .into_iter()
+        .flatten()
+}
+
+pub(super) fn repairs<'a>(plan: &'a Value, stream: &'a str) -> impl Iterator<Item = &'a Value> {
+    verifier_runs(plan).filter(move |row| row["nativeRepair"]["streamId"] == stream)
+}
+
+pub(super) fn settle_repair(
+    plan: &mut Value,
+    stream: &str,
+    at: &str,
+    reason: Option<&str>,
+) -> Result<(), GoalError> {
+    if plan["runner"]["phase"] != "repair" {
+        return Ok(());
+    }
+    let repair = plan["runner"]["verifierRuns"]
+        .as_array_mut()
+        .and_then(|rows| {
+            rows.iter_mut().rev().find(|row| {
+                row["nativeRepair"]["streamId"] == stream
+                    && row["nativeRepair"]["settledAt"].is_null()
+            })
+        })
+        .ok_or(GoalError::Changed)?;
+    repair["nativeRepair"]["settledAt"] = json!(at);
+    if let Some(reason) = reason {
+        repair["nativeRepair"]["stopReason"] = json!(reason);
+    }
+    Ok(())
+}
+
+fn report_refs(row: &Value) -> Result<Vec<String>, GoalError> {
+    row["evidenceRefs"]
+        .as_array()
+        .ok_or(GoalError::Invalid)?
+        .iter()
+        .map(|value| value.as_str().map(str::to_owned).ok_or(GoalError::Invalid))
+        .collect()
 }
 
 fn running_review<'a>(plan: &'a mut Value, id: &str) -> Result<&'a mut Value, GoalError> {

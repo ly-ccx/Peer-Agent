@@ -336,6 +336,9 @@ impl Host<'_> {
         if let Some(error) = interrupted.or(hook_interrupted).or(grant.terminal) {
             return Err(error);
         }
+        if outcome.status == "denied" && self.repairing_goal() {
+            return Err(HostError("permission_denied"));
+        }
         if self.owned.is_cancelled() || self.external.is_cancelled() {
             return Err(HostError("CANCELLED"));
         }

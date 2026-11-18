@@ -460,6 +460,8 @@ fn public_goal_model_review_is_written_only_by_the_independent_verifier() {
                 "goal",
                 "--output-format",
                 "json",
+                "--max-turns",
+                "8",
                 "Judge the actual result",
             ],
             None,
@@ -658,6 +660,243 @@ fn public_goal_verifier_owns_completed_intake_and_rejects_late_or_unprojected_re
                 "budget" => 5,
                 "write" | "review_budget" => 6,
                 _ => 7,
+            }
+        );
+    }
+}
+
+#[test]
+fn public_goal_repairs_grounded_review_under_the_same_owner() {
+    for case in ["success", "exhausted", "budget", "denied", "hard"] {
+        let fixture = Ordinary::new();
+        let file = fixture.workspace().join("actual.txt");
+        std::fs::write(&file, "initial result").unwrap();
+        if case == "denied" {
+            let directory = fixture.workspace().join(".peer");
+            std::fs::create_dir(&directory).unwrap();
+            std::fs::write(directory.join("hooks.json"), json!({"hooks":{"PreToolUse":[
+                {"id":"deny-repair","command":r#"printf '%s' '{"decision":"deny","reason":"fixture policy"}'"#,
+                 "timeoutMs":3000,"match":{"capabilityId":"local.file.write"}}
+            ]}}).to_string()).unwrap();
+        }
+        let (entered, waiting) = std::sync::mpsc::channel();
+        let (release, proceed) = std::sync::mpsc::channel();
+        let mut requests = 0;
+        let mut plan_id = Value::Null;
+        let model = Server::scripted(
+            move |request| {
+                requests += 1;
+                match requests {
+                    1 => reply_tool(
+                        "goal_create_plan",
+                        json!({"title":"Repair the verified result","goal":"The work must contain the repair marker.",
+                            "tasks":[{"taskId":"check","title":"Check actual.txt"}],
+                            "successCriteria":[{"id":"marker","kind":"model_review","description":"Independently verify the repaired marker"}]}),
+                    ),
+                    2 => {
+                        plan_id = last_tool(request)["output"]["planId"].clone();
+                        reply_text("Start the goal.")
+                    }
+                    3 => reply_tool("read_file", json!({"path":"actual.txt"})),
+                    4 => reply_tool(
+                        "goal_update_task",
+                        json!({"planId":plan_id,"taskId":"check","status":"completed",
+                               "evidenceRefs":last_tool(request)["evidenceRefs"]}),
+                    ),
+                    5 => reply_text("The initial check is recorded."),
+                    6 => {
+                        assert_verifier(request);
+                        reply_tool("read_file", json!({"path":"actual.txt"}))
+                    }
+                    7 | 10 | 13 if requests == 7 || case == "exhausted" => {
+                        let refs = &last_tool(request)["evidenceRefs"];
+                        assert!(refs[0].is_string());
+                        reply_text(&json!({"passed":false,"summary":"The repair marker was absent",
+                            "failedCriteria":[{"criterionId":"marker","reason":"Expected revised content","evidenceRefs":refs}],
+                            "evidenceRefs":refs}).to_string())
+                    }
+                    8 | 11 if requests == 8 || case == "exhausted" => {
+                        assert_tick(request, if requests == 8 { 2 } else { 3 }, "repair");
+                        let system = request["messages"][0]["content"].as_str().unwrap();
+                        assert!(system.contains(
+                            "Independent verification failed: The repair marker was absent"
+                        ));
+                        assert!(system.contains("Expected revised content"));
+                        if case == "exhausted" {
+                            reply_text("The result could not be repaired.")
+                        } else {
+                            reply_tool(
+                                "write_file",
+                                json!({
+                                    "path":"actual.txt","content":"repaired result","allow_overwrite":true
+                                }),
+                            )
+                        }
+                    }
+                    9 if case == "hard" => {
+                        assert_eq!(last_tool(request)["status"], "success");
+                        entered.send(()).unwrap();
+                        let _ = proceed.recv_timeout(Duration::from_secs(8));
+                        reply_text("This result must not be consumed after exit.")
+                    }
+                    9 | 12 if case == "exhausted" => {
+                        assert_verifier(request);
+                        reply_tool("read_file", json!({"path":"actual.txt"}))
+                    }
+                    9 => {
+                        assert_eq!(last_tool(request)["status"], "success");
+                        reply_tool("read_file", json!({"path":"actual.txt"}))
+                    }
+                    10 => reply_tool(
+                        "goal_update_task",
+                        json!({"planId":plan_id,"taskId":"check","status":"completed","result":"File repaired",
+                               "evidenceRefs":last_tool(request)["evidenceRefs"]}),
+                    ),
+                    11 => {
+                        assert_eq!(last_tool(request)["status"], "success");
+                        reply_text("The repair happened.")
+                    }
+                    12 => {
+                        assert_verifier(request);
+                        reply_tool("read_file", json!({"path":"actual.txt"}))
+                    }
+                    13 => {
+                        let tool = last_tool(request);
+                        assert_eq!(tool["preview"], "repaired result", "{tool}");
+                        reply_text(
+                            &json!({"passed":true,"evidenceRefs":tool["evidenceRefs"]}).to_string(),
+                        )
+                    }
+                    _ => panic!("unexpected repair request {requests} in {case}"),
+                }
+            },
+            false,
+            false,
+            vec![],
+        );
+        let mut command = fixture.command(Some(&model));
+        if case == "budget" {
+            command.args(["--max-turns", "8"]);
+        }
+        let mut child = command
+            .args([
+                "--mode",
+                "goal",
+                "--access",
+                "full",
+                "--output-format",
+                "json",
+                "Repair after grounded verification",
+            ])
+            .spawn()
+            .unwrap();
+        if case == "hard" {
+            waiting.recv_timeout(Duration::from_secs(8)).unwrap();
+            child.kill().unwrap();
+        }
+        let result = wait(child);
+        if case == "hard" {
+            release.send(()).unwrap();
+        }
+        let expected_reason = match case {
+            "success" => Value::Null,
+            "exhausted" => json!("goal_verifier_failed"),
+            "budget" => json!("max_turns"),
+            "denied" => json!("permission_denied"),
+            "hard" => json!("goal_runner_owner_interrupted"),
+            _ => unreachable!(),
+        };
+        if case != "hard" {
+            let (code, turns, tools) = match case {
+                "success" => (0, 9, 8),
+                "exhausted" => (6, 7, 6),
+                "budget" => (5, 6, 5),
+                "denied" => (1, 6, 5),
+                _ => unreachable!(),
+            };
+            assert_eq!(result.status.code(), Some(code), "{case}: {result:?}");
+            let reply = fixture.assert_settled(&result, turns, tools);
+            if case == "denied" {
+                assert_eq!(reply["error"], expected_reason);
+            } else {
+                assert_eq!(
+                    reply["goal"]["exitReason"], expected_reason,
+                    "{case}: {reply}"
+                );
+            }
+        }
+        let session = fixture.metadata()["id"].as_str().unwrap().to_owned();
+        assert_eq!(recovery::recover(&fixture, &session).status.code(), Some(0));
+        let goals = fixture.home().join("goal-plans");
+        let index = get(goals.join("index.jsonl"));
+        let path = goals.join(format!("{}.json", index["planId"].as_str().unwrap()));
+        let plan = get(&path);
+        let runs = plan["runner"]["verifierRuns"].as_array().unwrap();
+        assert_eq!(
+            runs.len(),
+            match case {
+                "success" => 2,
+                "exhausted" => 3,
+                _ => 1,
+            }
+        );
+        let repairs = runs
+            .iter()
+            .filter(|row| row["nativeRepair"].is_object())
+            .collect::<Vec<_>>();
+        assert_eq!(repairs.len(), if case == "exhausted" { 2 } else { 1 });
+        let execution = ConversationStore::new(fixture.home())
+            .read_conversation_execution(&session)
+            .unwrap()
+            .unwrap();
+        for row in repairs {
+            assert_eq!(row["status"], "failed");
+            assert_eq!(
+                row["nativeRepair"]["streamId"],
+                execution.identity.stream_id
+            );
+            assert!(row["nativeRepair"]["startedAt"].is_string());
+            assert!(
+                row["nativeRepair"]["settledAt"].is_string(),
+                "{case}: {row}"
+            );
+            if matches!(case, "budget" | "denied" | "hard") {
+                assert_eq!(
+                    row["nativeRepair"]["stopReason"], expected_reason,
+                    "{case}: {row}"
+                );
+            }
+        }
+        assert_eq!(plan["runner"]["blockedReason"], expected_reason);
+        if case == "success" {
+            assert_eq!(plan["status"], "completed");
+            assert_eq!(runs[1]["status"], "passed");
+            assert_ne!(runs[0]["verifierRunId"], runs[1]["verifierRunId"]);
+            assert_ne!(runs[0]["sourceRevision"], runs[1]["sourceRevision"]);
+            assert_ne!(runs[0]["evidenceRefs"], runs[1]["evidenceRefs"]);
+            assert_eq!(
+                plan["modelReviews"][1]["verifierRunId"],
+                runs[1]["verifierRunId"]
+            );
+        } else {
+            assert_eq!(plan["status"], "executing");
+        }
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            if matches!(case, "budget" | "hard" | "success") {
+                "repaired result"
+            } else {
+                "initial result"
+            }
+        );
+        assert_eq!(recovery::recover(&fixture, &session).status.code(), Some(0));
+        assert_eq!(get(&path), plan);
+        assert_eq!(
+            model.requests.lock().unwrap().len(),
+            match case {
+                "success" | "exhausted" => 13,
+                "hard" => 9,
+                _ => 8,
             }
         );
     }

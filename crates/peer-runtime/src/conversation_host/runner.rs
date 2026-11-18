@@ -25,6 +25,7 @@ struct Tick {
     content: String,
     after_messages: usize,
     compaction_boundary: i64,
+    repair: bool,
 }
 
 #[derive(Default)]
@@ -100,23 +101,39 @@ impl Host<'_> {
     ) -> Result<RunnerStop, HostError> {
         let mut progress = Progress::default();
         let mut phase = RunnerPhase::Orient;
+        let mut verifier_turns = 0usize;
+        let remaining = |turns: usize, reviews| {
+            max_turns.map(|max| max.saturating_sub(turns).saturating_sub(reviews))
+        };
         let owned = self.owned.clone();
         let external = self.external.clone();
         loop {
             self.source_current()?;
             let (source, plan) = store.read_ordinary_runner(lease)?;
             match plan["status"].as_str() {
-                Some("completed") => {
-                    let remaining = max_turns.map(|max| max.saturating_sub(self.turns));
-                    if remaining == Some(0) {
+                Some("completed") if !matches!(phase, RunnerPhase::Repair) => {
+                    let budget = remaining(self.turns, verifier_turns);
+                    if budget == Some(0) {
                         return Ok(RunnerStop::BudgetExhausted);
                     }
-                    let result = match self.run_goal_verifier(store, lease, remaining).await {
+                    let (result, turns) = match self.run_goal_verifier(store, lease, budget).await {
                         Err(HostError("goal_verifier_budget_exhausted")) => {
                             return Ok(RunnerStop::BudgetExhausted);
                         }
                         result => result?,
                     };
+                    verifier_turns = verifier_turns
+                        .checked_add(turns)
+                        .ok_or(HostError("runtime_counter_limit"))?;
+                    if let Some(receipt) = &result
+                        && remaining(self.turns, verifier_turns) != Some(0)
+                        && store.begin_verification_repair(lease, receipt, &now(), || {
+                            self.check_worker_settled(true).map_err(|error| error.0)
+                        })?
+                    {
+                        phase = RunnerPhase::Repair;
+                        continue;
+                    }
                     self.runner.as_mut().expect("owned Runner").verification = result;
                     return Ok(RunnerStop::Verify);
                 }
@@ -126,24 +143,26 @@ impl Host<'_> {
             if leaf_tasks(&plan).any(|task| task["status"] == "waiting_user") {
                 return Ok(RunnerStop::Waiting("requested_user_input"));
             }
-            let remaining = max_turns.map(|max| max.saturating_sub(self.turns));
-            if remaining == Some(0) {
+            let budget = remaining(self.turns, verifier_turns);
+            if budget == Some(0) {
                 return Ok(RunnerStop::BudgetExhausted);
             }
-            if progress.stalled(&plan) {
+            if !matches!(phase, RunnerPhase::Repair) && progress.stalled(&plan) {
                 return Ok(RunnerStop::Blocked("no_progress"));
             }
             let next = match phase {
                 RunnerPhase::Orient => RunnerPhase::Inspect,
                 RunnerPhase::Inspect => RunnerPhase::PlanScaffold,
-                RunnerPhase::PlanScaffold | RunnerPhase::Act => RunnerPhase::Act,
+                RunnerPhase::PlanScaffold | RunnerPhase::Act | RunnerPhase::Repair => {
+                    RunnerPhase::Act
+                }
             };
             let mut tool_calls = None;
             if !matches!(phase, RunnerPhase::Inspect)
                 || !self.drive_deterministic_inspect(source, &plan).await?
             {
                 self.begin_runner_tick(&plan)?;
-                let turn = turn_loop::run(self, remaining, &owned, &external).await;
+                let turn = turn_loop::run(self, budget, &owned, &external).await;
                 self.runner.as_mut().expect("owned Runner").tick = None;
                 let turn = turn?;
                 tool_calls = Some(turn.tool_calls);
@@ -175,6 +194,7 @@ impl Host<'_> {
             content: goal_runner::tick(plan, number),
             after_messages: projected["messages"].as_array().map_or(0, Vec::len),
             compaction_boundary: projected["compactionBoundaryIndex"].as_i64().unwrap_or(-1),
+            repair: plan["runner"]["phase"] == "repair",
         });
         Ok(())
     }
@@ -188,6 +208,15 @@ impl Host<'_> {
             1
         };
         Some((index, &tick.content))
+    }
+
+    pub(super) fn repairing_goal(&self) -> bool {
+        self.worker.is_none()
+            && self
+                .runner
+                .as_ref()
+                .and_then(|runner| runner.tick.as_ref())
+                .is_some_and(|tick| tick.repair)
     }
 
     pub(super) fn check_runner(&self) -> Result<(), HostError> {

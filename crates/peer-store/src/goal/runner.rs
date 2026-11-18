@@ -23,6 +23,7 @@ pub enum RunnerPhase {
     Inspect,
     PlanScaffold,
     Act,
+    Repair,
 }
 impl RunnerPhase {
     pub fn as_str(self) -> &'static str {
@@ -31,6 +32,7 @@ impl RunnerPhase {
             Self::Inspect => "inspect",
             Self::PlanScaffold => "plan_scaffold",
             Self::Act => "act",
+            Self::Repair => "repair",
         }
     }
 }
@@ -71,7 +73,7 @@ fn is_stopped(run: &ConversationExecution) -> bool {
         && run.handles.is_empty()
 }
 
-fn timing_started(plan: &mut Value, at: &str) {
+pub(super) fn timing_started(plan: &mut Value, at: &str) {
     if !plan["timing"].is_object() {
         plan["timing"] = json!({"activeAccumulatedMs":0});
     }
@@ -171,7 +173,11 @@ impl GoalStore {
         };
         let plan = self.read_local_goal(&goal)?;
         if !runner.owns(&plan)
-            || runner.verify_only && plan["status"] != "completed"
+            || runner.verify_only
+                && plan["status"] != "completed"
+                && super::verifier::repairs(&plan, runner.stream_id())
+                    .next()
+                    .is_none()
             || !valid_runner_owner(&plan, &runner.identity.stream_id)
             || plan["originWorkspacePath"].as_str().map(Path::new) != Some(&goal.workspace)
             || !plan["parentPlanId"].is_null()
@@ -196,6 +202,10 @@ impl GoalStore {
     ) -> Result<(), GoalError> {
         let transaction = PlanWrite::lock(self)?;
         let (source, mut plan) = self.read_ordinary_runner(runner)?;
+        if plan["runner"]["phase"] == "repair" && next.as_str() != "repair" {
+            super::verifier::settle_repair(&mut plan, runner.stream_id(), at, None)?;
+            super::task_update::transition_plan(&mut plan, at)?;
+        }
         let runner = &mut plan["runner"];
         if let Some(tool_calls) = tool_calls {
             for (key, increment) in [("turnCount", 1), ("toolCallCount", tool_calls as u64)] {
@@ -244,6 +254,7 @@ impl GoalStore {
             reopen_unverified(&mut plan);
         }
         super::verifier::interrupt_verifier(&mut plan, at)?;
+        super::verifier::settle_repair(&mut plan, runner.stream_id(), at, reason)?;
         set_stopped(&mut plan, status, reason, at);
         transaction.publish(source.plan_id(), &source.plan_revision, &plan, at, admit)?;
         Ok(plan)
@@ -282,6 +293,7 @@ impl GoalStore {
                 "execution_outcome_unknown"
             };
             super::verifier::interrupt_verifier(&mut plan, at)?;
+            super::verifier::settle_repair(&mut plan, &run.identity.stream_id, at, Some(reason))?;
             reopen_unverified(&mut plan);
             set_stopped(&mut plan, "blocked", Some(reason), at);
             transaction.publish(&id, &revision, &plan, at, admit)?;
@@ -378,7 +390,7 @@ impl GoalStore {
     }
 }
 
-fn reopen_unverified(plan: &mut Value) {
+pub(super) fn reopen_unverified(plan: &mut Value) {
     if plan["status"] == "completed" {
         // Settled leaves are provisional until an independent review passes.
         plan["status"] = json!("executing");

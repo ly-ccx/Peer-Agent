@@ -159,6 +159,53 @@ pub(super) fn sections(plan: &Value) -> Result<[Value; 2], &'static str> {
         text(&runner["intent"]),
         text(&runner["phase"])
     ));
+    if runner["phase"] == "repair"
+        && let Some(review) = runner["verifierRuns"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .rev()
+            .find(|review| {
+                review["nativeRepair"]["startedAt"].is_string()
+                    && review["nativeRepair"]["settledAt"].is_null()
+            })
+    {
+        lines.push(format!(
+            "Independent verification failed: {}",
+            observed(&review["summary"])
+        ));
+        for issue in ["failedCriteria", "missingEvidence"]
+            .into_iter()
+            .flat_map(|key| review["report"][key].as_array().into_iter().flatten())
+            .take(6)
+        {
+            let reason = if issue.is_object() {
+                &issue["reason"]
+            } else {
+                issue
+            };
+            let criterion = observed(&issue["criterionId"]);
+            let reason = observed(reason);
+            lines.push(if criterion.is_empty() {
+                format!("- {reason}")
+            } else {
+                format!("- {criterion}: {reason}")
+            });
+        }
+        let references = review["evidenceRefs"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .take(6)
+            .map(observed)
+            .collect::<Vec<_>>();
+        if !references.is_empty() {
+            lines.push(format!(
+                "Independent verification evidence: {}",
+                references.join(", ")
+            ));
+        }
+    }
     let inspect = &runner["inspectPlan"];
     if let Some(questions) = inspect["questions"].as_array() {
         let count = questions.len().min(4);
