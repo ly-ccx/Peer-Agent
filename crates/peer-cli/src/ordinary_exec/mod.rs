@@ -6,6 +6,7 @@ use peer_protocol::{CliExit, LocalAccessLevel};
 use peer_runtime::{
     CancellationToken,
     conversation_host::{ConversationAccess, ConversationOptions, NativeConversationRuntime},
+    model_catalog::ExecSelectionErrorKind,
 };
 use serde_json::{Value, json};
 use std::{
@@ -15,6 +16,9 @@ use std::{
 };
 pub const HELP: &str = "Usage: peer exec [options] [prompt]\n\nRead a prompt from arguments or stdin and run the native conversation Host.\n\n  --access ask|session|full   This-run policy (default: session); ask requires a TTY\n  --tools file,bash,...      Mode projection intersected with capability allowlist\n  --output-format text|json Final text or structured result (default: text)\n  --provider <id>           This-run configured channel or catalog entry\n  --model <id>              Model id or provider::model; model ids may contain /\n  --effort <level>          This-run supported reasoning effort\n  --mode chat|plan|goal     Existing runtime mode (default: chat)\n  --fast                   ChatGPT/Grok OAuth priority service\n  --workspace <path>        Existing directory; overrides PEER_WORKSPACE_ROOT\n  --max-turns <n>           Positive hard cap; omitted means no implicit cap\n  --                       Treat remaining arguments as prompt text\n\nUse --access full explicitly for trusted tasks requiring unrestricted local actions.\nGrants and Evidence remain mandatory. Runtime completion does not mean task acceptance.";
 fn auth_error(code: &str) -> bool {
+    if code == peer_runtime::model::ModelError::AUTH_REJECTED {
+        return true;
+    }
     let c = code.to_ascii_lowercase();
     [
         "credential",
@@ -178,10 +182,9 @@ pub fn run(options: &Options) -> io::Result<CliExit> {
                     "peer exec: {}",
                     peer_tui::terminal_text(&e.detail)
                 )?;
-                return Ok(if auth_error(e.code) {
-                    CliExit::Auth
-                } else {
-                    CliExit::Usage
+                return Ok(match e.kind {
+                    ExecSelectionErrorKind::ConfigurationUnavailable => CliExit::Auth,
+                    ExecSelectionErrorKind::InvalidSelection => CliExit::Usage,
                 });
             }
         };
@@ -191,7 +194,11 @@ pub fn run(options: &Options) -> io::Result<CliExit> {
                 Ok(m) => m,
                 Err(e) => {
                     writeln!(io::stderr(), "peer exec: {}", e.code)?;
-                    return Ok(exit(e.code));
+                    return Ok(if cancel.is_cancelled() || e.code == "CANCELLED" {
+                        CliExit::Cancelled
+                    } else {
+                        CliExit::Auth
+                    });
                 }
             };
         let access = match options.access.as_str() {

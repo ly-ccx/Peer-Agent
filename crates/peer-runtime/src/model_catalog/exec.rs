@@ -5,11 +5,25 @@ use super::*;
 pub struct ExecSelectionError {
     pub code: &'static str,
     pub detail: String,
+    pub kind: ExecSelectionErrorKind,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExecSelectionErrorKind {
+    InvalidSelection,
+    ConfigurationUnavailable,
 }
 fn error(code: &'static str, detail: impl Into<String>) -> ExecSelectionError {
     ExecSelectionError {
         code,
         detail: detail.into(),
+        kind: ExecSelectionErrorKind::InvalidSelection,
+    }
+}
+fn configuration_error(code: &'static str, detail: impl Into<String>) -> ExecSelectionError {
+    ExecSelectionError {
+        code,
+        detail: detail.into(),
+        kind: ExecSelectionErrorKind::ConfigurationUnavailable,
     }
 }
 pub struct ExecSelection {
@@ -23,23 +37,26 @@ pub fn resolve_exec(
     effort: Option<&str>,
     fast: bool,
 ) -> Result<ExecSelection, ExecSelectionError> {
-    let catalog = load(Some(home)).map_err(|e| error(e.code, e.code))?;
+    let catalog = load(Some(home)).map_err(|e| configuration_error(e.code, e.code))?;
     if catalog.is_empty() {
-        return Err(error("model_not_configured", "model is not configured"));
+        return Err(configuration_error(
+            "model_not_configured",
+            "model is not configured",
+        ));
     }
     let document = if catalog.iter().all(|e| e.entry_id.is_none()) {
         None
     } else {
         Some(
             model_config::read(&home.join("llm-providers.json"))
-                .map_err(|e| error(e.code, e.code))?,
+                .map_err(|e| configuration_error(e.code, e.code))?,
         )
     };
     let flat = document
         .as_ref()
         .map(rows)
         .transpose()
-        .map_err(|e| error(e.code, e.code))?
+        .map_err(|e| configuration_error(e.code, e.code))?
         .unwrap_or_default();
     let preferred = flat
         .iter()
@@ -99,7 +116,7 @@ pub fn resolve_catalog<'a>(
             .iter()
             .find(|e| e.available && e.entry_id.as_deref() == preferred && preferred.is_some())
             .or_else(|| catalog.iter().find(|e| e.available))
-            .ok_or_else(|| error("model_not_configured", "model is not configured"));
+            .ok_or_else(|| configuration_error("model_not_configured", "model is not configured"));
     }
     let model = model.map(trim);
     let qualified = model

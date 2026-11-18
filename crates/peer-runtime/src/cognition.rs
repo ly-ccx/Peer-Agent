@@ -310,6 +310,9 @@ impl ContextPipeline {
                 ("llm", turn.content)
             }
             Err(e) if e.code == "CANCELLED" => return Err(HostError("CANCELLED")),
+            Err(e) if e.code == crate::model::ModelError::AUTH_REJECTED => {
+                return Err(HostError(e.code));
+            }
             _ => (
                 "structured",
                 format!(

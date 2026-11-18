@@ -15,6 +15,8 @@ pub struct ModelError {
     pub(crate) retry: Option<super::qoder_retry::Hint>,
 }
 impl ModelError {
+    pub const AUTH_REJECTED: &'static str = "model_auth_rejected";
+
     pub const fn new(code: &'static str) -> Self {
         Self {
             code,
@@ -22,6 +24,9 @@ impl ModelError {
             context_overflow_status: None,
             retry: None,
         }
+    }
+    pub(super) fn http_access_rejection(status: u16) -> Option<Self> {
+        matches!(status, 401 | 403).then(|| Self::new(Self::AUTH_REJECTED))
     }
     pub(super) fn http(status: u16, body: &[u8]) -> Self {
         let text = std::str::from_utf8(body).unwrap_or("").to_ascii_lowercase();

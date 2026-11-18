@@ -122,7 +122,7 @@ async fn provider_rejections_and_truncated_tool_streams_remain_errors() {
         (
             "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                 .to_owned(),
-            "model_http_rejected",
+            "model_auth_rejected",
         ),
         (
             format!(

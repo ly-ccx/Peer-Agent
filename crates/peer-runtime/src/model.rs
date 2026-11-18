@@ -301,6 +301,11 @@ impl PreparedRequest<'_> {
             };
             if !response.status().is_success() {
                 let status = response.status().as_u16();
+                // The status is sufficient for access rejection. An error body
+                // cannot turn it into context pressure or a retry.
+                if let Some(error) = ModelError::http_access_rejection(status) {
+                    return Err(error);
+                }
                 let mut body = Vec::new();
                 while let Some(chunk) = response
                     .chunk()

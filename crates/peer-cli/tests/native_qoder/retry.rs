@@ -150,7 +150,7 @@ fn duplicate_and_transient_limits_are_finite_and_http_auth_does_not_retry() {
         (
             "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".into(),
             1,
-            "model_http_rejected",
+            "model_auth_rejected",
         ),
     ] {
         let server = Server::new(vec![reply; count]);
