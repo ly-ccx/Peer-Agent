@@ -2,7 +2,7 @@
 use super::*;
 use crate::goal_facts::TuiGoalProjector;
 use peer_protocol::javascript_trim;
-use peer_store::{GoalStore, OrdinaryGoalKind, StoreError};
+use peer_store::{GoalError, GoalStore, GoalTaskPublication, OrdinaryGoalKind, StoreError};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 mod create;
@@ -18,6 +18,13 @@ struct ReadGoal {
     admission: Option<EffectAdmission>,
 }
 
+struct UpdateGoal {
+    args: Value,
+    home: PathBuf,
+    workspace: PathBuf,
+    admission: Option<EffectAdmission>,
+}
+
 impl CapabilityProvider for GoalProvider {
     fn manifests(&self) -> Vec<(String, Value)> {
         let fixture: Value = serde_json::from_str(include_str!(
@@ -27,6 +34,7 @@ impl CapabilityProvider for GoalProvider {
         vec![
             (ALIAS.into(), fixture["manifest"].clone()),
             ("goal_create_plan".into(), fixture["createManifest"].clone()),
+            ("goal_update_task".into(), fixture["updateManifest"].clone()),
         ]
     }
 
@@ -46,6 +54,17 @@ impl CapabilityProvider for GoalProvider {
             };
             return create::CreateGoal::prepare(args, workspace, home, kind);
         }
+        if capability == "local.goal.update_task" {
+            if !args.is_object() {
+                return Err(HostError("tool_arguments_invalid"));
+            }
+            return Ok(Box::new(UpdateGoal {
+                args,
+                home: home.into(),
+                workspace: workspace.into(),
+                admission: None,
+            }));
+        }
         if capability != CAPABILITY {
             return Err(HostError("tool_not_projected"));
         }
@@ -64,6 +83,104 @@ impl CapabilityProvider for GoalProvider {
             admission: None,
         }))
     }
+}
+
+impl PreparedEffect for UpdateGoal {
+    fn admission(&mut self, port: EffectAdmission) {
+        self.admission = Some(port);
+    }
+
+    fn args(&self) -> &Value {
+        &self.args
+    }
+
+    fn permission(&self) -> ProviderPermission {
+        ProviderPermission::ConversationGoal
+    }
+
+    fn scopes(&self) -> Result<Vec<ExecutionResourceScope>, HostError> {
+        Ok(vec![])
+    }
+
+    fn start(
+        mut self: Box<Self>,
+        call: ProviderCall,
+        cancel: CancellationToken,
+    ) -> Result<EffectFuture, HostError> {
+        let port = self
+            .admission
+            .take()
+            .ok_or(HostError("execution_admission_closed"))?;
+        goal_mutation(port, call, cancel, move |call, projector, flag, admit| {
+            GoalStore::new(self.home).publish_ordinary_task_change(
+                &self.args,
+                GoalTaskPublication {
+                    conversation: call.conversation_id(),
+                    workspace: &self.workspace,
+                    tool_call_id: call.tool_call_id(),
+                    at: call.started_at(),
+                },
+                projector,
+                Some(flag),
+                admit,
+            )
+        })
+    }
+}
+
+fn goal_mutation(
+    port: EffectAdmission,
+    call: ProviderCall,
+    cancel: CancellationToken,
+    publish: impl FnOnce(
+        &ProviderCall,
+        &TuiGoalProjector,
+        &AtomicBool,
+        &dyn Fn() -> Result<(), &'static str>,
+    ) -> Result<Value, GoalError>
+    + Send
+    + 'static,
+) -> Result<EffectFuture, HostError> {
+    let projector = TuiGoalProjector::new(call.started_at()).map_err(HostError)?;
+    Ok(Box::pin(async move {
+        if let Err(error) = port.check().await {
+            return EffectOutcome::not_dispatched(error.0);
+        }
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let flag = cancelled.clone();
+        let runtime = tokio::runtime::Handle::current();
+        let mut worker = tokio::task::spawn_blocking(move || {
+            publish(&call, &projector, &flag, &|| {
+                runtime.block_on(port.check()).map_err(|error| error.0)
+            })
+        });
+        let observed = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => {
+                cancelled.store(true, Ordering::Release);
+                worker.await
+            }
+            outcome = &mut worker => outcome,
+        };
+        match observed {
+            Ok(Ok(output)) => EffectOutcome {
+                status: "success",
+                output,
+                error: None,
+                artifacts: vec![],
+                ended: true,
+                materialization: None,
+                not_dispatched: false,
+            },
+            Ok(Err(GoalError::Store(StoreError::CommitUncertain))) | Err(_) => {
+                EffectOutcome::failed("execution_outcome_unknown")
+            }
+            Ok(Err(GoalError::Store(StoreError::Cancelled))) => {
+                EffectOutcome::not_dispatched("CANCELLED")
+            }
+            Ok(Err(error)) => EffectOutcome::not_dispatched(error.code()),
+        }
+    }))
 }
 
 impl PreparedEffect for ReadGoal {

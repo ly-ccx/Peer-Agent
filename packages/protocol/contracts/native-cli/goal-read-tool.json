@@ -138,6 +138,94 @@
       "additionalProperties": false
     }
   },
+  "updateManifest": {
+    "capabilityId": "local.goal.update_task",
+    "description": "Record execution evidence for a goal/plan subtask (Plan and Goal modes). Call this after you finish, fail, or get blocked on a subtask during execution. In Plan mode this usually happens after the approved plan starts running; in Goal mode it is the normal progress ledger for autonomous work. Mark a subtask \"completed\" only when you can supply the evidenceRefs (artifact refs / tool-result refs) that prove it is done — the store rejects a \"completed\" status without evidenceRefs. Progress is recomputed bottom-up from leaf subtasks; do not hand-maintain progress.",
+    "modeScopes": [
+      "chat",
+      "plan",
+      "goal"
+    ],
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "planId": {
+          "type": "string",
+          "description": "Target goal plan id (planId)."
+        },
+        "taskId": {
+          "type": "string",
+          "description": "Target subtask id (taskId) within the plan. Must reference a leaf subtask when setting completion."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "running",
+            "completed",
+            "failed",
+            "cancelled",
+            "waiting_user"
+          ],
+          "description": "New execution status for the subtask. Use \"completed\" only with evidenceRefs."
+        },
+        "evidenceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Artifact refs / tool-result refs that prove the subtask outcome. Required to mark completed."
+        },
+        "result": {
+          "type": "string",
+          "description": "Short factual summary of what was produced (optional)."
+        },
+        "failureReason": {
+          "type": "string",
+          "description": "Why the subtask failed (when status=failed)."
+        },
+        "blockedReason": {
+          "type": "string",
+          "description": "Why the subtask is blocked / waiting (when status=waiting_user)."
+        },
+        "criterionResults": {
+          "type": "array",
+          "description": "Optional verification results for the plan's success criteria (DoD-as-Code). After acting, run each auto-verifiable criterion's check (command/test/file) and record the outcome here so the completion gate can pass. Each result references a criterion id declared in the plan's successCriteria; unknown ids are ignored.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "criterionId": {
+                "type": "string",
+                "description": "The id of the success criterion this result verifies."
+              },
+              "passed": {
+                "type": "boolean",
+                "description": "Whether the criterion check passed."
+              },
+              "evidenceRef": {
+                "type": "string",
+                "description": "Artifact/tool-result ref proving the check outcome (e.g. the shell result ref)."
+              },
+              "detail": {
+                "type": "string",
+                "description": "Short human-readable detail of what was checked / observed."
+              }
+            },
+            "required": [
+              "criterionId",
+              "passed"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "planId",
+        "taskId"
+      ],
+      "additionalProperties": false
+    }
+  },
   "draft": {
     "title": "Record fixture tasks",
     "goal": "Track the actual plan state.",

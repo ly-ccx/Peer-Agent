@@ -32,6 +32,14 @@ try {
     modeScopes: createTool.modeScopes,
     inputSchema: createTool.inputSchema,
   };
+  const updateTool = bridge.toolDefinitions.find(tool => tool.name === 'goal_update_task');
+  assert.ok(updateTool);
+  const updateManifest = {
+    capabilityId: updateTool.capabilityId,
+    description: updateTool.description,
+    modeScopes: updateTool.modeScopes,
+    inputSchema: updateTool.inputSchema,
+  };
 
   const draft = {
     title: 'Record fixture tasks',
@@ -91,6 +99,7 @@ try {
   const fixture = {
     manifest,
     createManifest,
+    updateManifest,
     draft,
     expectedCreation,
     canonicalPlan,

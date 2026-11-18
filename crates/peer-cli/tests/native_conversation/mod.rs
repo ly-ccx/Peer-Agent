@@ -4,6 +4,7 @@ use peer_store::ConversationStore;
 mod goal_create;
 mod goal_intake;
 mod goal_read;
+mod goal_update;
 mod hooks;
 mod input_media;
 mod model_errors;

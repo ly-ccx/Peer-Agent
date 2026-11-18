@@ -264,10 +264,9 @@ fn uncertain(_: StoreError) -> GoalError {
     GoalError::Store(StoreError::CommitUncertain)
 }
 
-fn notification_exists(
+pub(super) fn notification_exists(
     path: &Path,
-    request: &GoalPublication<'_>,
-    repairing: bool,
+    repairing: Option<(&str, &str)>,
     cancel: Option<&AtomicBool>,
 ) -> Result<bool, StoreError> {
     let Some((mut file, identity)) = files::open(path, u64::MAX)? else {
@@ -290,9 +289,9 @@ fn notification_exists(
     if byte[0] != b'\n' {
         return Err(StoreError::HistoryCorrupt);
     }
-    if !repairing {
+    let Some((plan_id, conversation)) = repairing else {
         return Ok(false);
-    }
+    };
     // The legacy watcher appends indefinitely. Only repair needs historical
     // deduplication, and it must prove absence before appending again.
     if identity.size > 64 * 1024 * 1024 {
@@ -317,8 +316,8 @@ fn notification_exists(
         }
         let event: Value = serde_json::from_slice(&line).map_err(|_| StoreError::HistoryCorrupt)?;
         if event["reason"] == "persist"
-            && event["planId"] == request.plan_id
-            && event["conversationId"] == request.conversation
+            && event["planId"] == plan_id
+            && event["conversationId"] == conversation
         {
             found = true;
             break;
@@ -421,7 +420,13 @@ impl GoalStore {
         let changes = directory.join(".changes.jsonl");
         let repeated = active.as_deref().filter(|id| *id != request.plan_id);
         let already_notified = repeated.is_none()
-            && notification_exists(&changes, &request, body_before.is_some(), cancel)?;
+            && notification_exists(
+                &changes,
+                body_before
+                    .is_some()
+                    .then_some((request.plan_id, request.conversation)),
+                cancel,
+            )?;
         let fingerprint = format!(
             "{}-{}",
             at.unix_timestamp_nanos() / 1_000_000,

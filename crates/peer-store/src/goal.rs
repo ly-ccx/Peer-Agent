@@ -14,9 +14,11 @@ use std::{
 mod context;
 mod mirror;
 mod ordinary_create;
+mod task_update;
 mod tool_view;
 pub use mirror::{GoalExecutionFact, GoalMirrorCommit, GoalMirrorTransaction};
 pub use ordinary_create::{GoalPublication, OrdinaryGoalDraft, OrdinaryGoalKind};
+pub use task_update::GoalTaskPublication;
 static TASK: S<'static> = S::Object(&[("status", S::Full), ("subtasks", S::Each(&TASK))]);
 const RUNNER: S<'static> = S::Object(&[
     ("enabled", S::Full),
