@@ -16,6 +16,8 @@ use std::{
     time::{Duration, Instant},
 };
 const AT: &str = "2026-11-18T00:00:00.000Z";
+#[path = "conversation_execution/recovery.rs"]
+mod recovery;
 fn owner() -> NativeProcessRecorder {
     NativeProcessRecorder {
         boot_id: "fixture-boot".into(),
@@ -686,7 +688,19 @@ fn claim_child() {
         root.join(format!("result-{name}")),
         match result {
             Ok(_) => "claimed",
-            Err(StoreError::VersionChanged | StoreError::ExecutionBusy) => "blocked",
+            Err(e)
+                if matches!(
+                    e.error(),
+                    StoreError::VersionChanged | StoreError::ExecutionBusy | StoreError::LockBusy
+                ) =>
+            {
+                // The original short Store lock has a bounded wait. Its real
+                // timeout denies this claimant; it never minted execution.
+                if e.error() == StoreError::LockBusy {
+                    assert!(e.into_cleanup().is_none());
+                }
+                "blocked"
+            }
             Err(e) => panic!("unexpected {e:?}"),
         },
     )
@@ -704,7 +718,8 @@ fn actual_competing_processes_cannot_claim_the_same_source_twice() {
                 .env("PEER_EXECUTION_TEST_ROOT", root.path())
                 .env("PEER_EXECUTION_TEST_ID", &id)
                 .env("PEER_EXECUTION_TEST_CHILD", name)
-                .stdout(std::process::Stdio::null())
+                .stdout(fs::File::create(root.path().join(format!("child-{name}.stdout"))).unwrap())
+                .stderr(fs::File::create(root.path().join(format!("child-{name}.stderr"))).unwrap())
                 .spawn()
                 .unwrap()
         })
@@ -718,8 +733,20 @@ fn actual_competing_processes_cannot_claim_the_same_source_twice() {
         std::thread::sleep(Duration::from_millis(5));
     }
     fs::write(root.path().join("go"), b"go").unwrap();
-    for child in &mut children {
-        assert!(child.wait().unwrap().success());
+    let statuses: Vec<_> = children
+        .iter_mut()
+        .map(|child| child.wait().unwrap())
+        .collect();
+    if statuses.iter().any(|s| !s.success()) {
+        let diagnostics = ["one", "two"].map(|name| {
+            format!(
+                "{name}: stdout={} stderr={}",
+                fs::read_to_string(root.path().join(format!("child-{name}.stdout"))).unwrap(),
+                fs::read_to_string(root.path().join(format!("child-{name}.stderr"))).unwrap()
+            )
+        });
+        let retained = root.keep();
+        panic!("claim subprocess failed: {statuses:?}; retained={retained:?}; {diagnostics:?}");
     }
     let mut results: Vec<_> = ["one", "two"]
         .into_iter()

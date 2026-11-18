@@ -1,6 +1,7 @@
 //! Public ordinary exec, independent of the delegated Goal fixture.
 use super::*;
 use peer_store::ConversationStore;
+mod recovery;
 struct Ordinary {
     root: tempfile::TempDir,
 }

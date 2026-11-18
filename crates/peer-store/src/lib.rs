@@ -38,7 +38,8 @@ mod conversation_terminal;
 mod conversation_write;
 pub use context_accounting::context_model_key;
 pub use conversation_execution::{
-    ConversationExecutionToken, ConversationMetadataPublication, ConversationUsageReceipt,
+    ConversationClaimFailure, ConversationExecutionToken, ConversationMetadataPublication,
+    ConversationRecovery, ConversationUsageReceipt, EmptyConversationClaim,
     NewConversationExecution,
 };
 mod goal;

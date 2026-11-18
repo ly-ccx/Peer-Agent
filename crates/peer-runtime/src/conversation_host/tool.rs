@@ -50,6 +50,8 @@ impl Host<'_> {
             None,
         )?;
         self.publication(receipt)?;
+        #[cfg(feature = "test-fixtures")]
+        super::fixture_fault(&self.home, "after_prepared");
         let mut grant = self
             .authorize(
                 permission::PermissionCall {
@@ -77,6 +79,8 @@ impl Host<'_> {
                 )?
                 .snapshot;
         }
+        #[cfg(feature = "test-fixtures")]
+        super::fixture_fault(&self.home, "after_grant");
         let (outcome, interrupted) = if grant.facts["granted"] == true {
             let receipt =
                 self.store
@@ -102,11 +106,7 @@ impl Host<'_> {
             )
         };
         #[cfg(feature = "test-fixtures")]
-        if self.home.join(".native-cli-fixture").is_file()
-            && std::env::var("PEER_NATIVE_ORDINARY_FAULT").as_deref() == Ok("after_effect")
-        {
-            std::process::exit(88);
-        }
+        super::fixture_fault(&self.home, "after_effect");
         let mut result = json!({"toolCallId":call_id,"capabilityId":capability,"status":outcome.status,"output":outcome.output,"outputPreview":{"kind":"json"},"completedAt":now(),"evidence":{"evidenceId":format!("evidence-{}",uuid::Uuid::new_v4()),"toolCallId":call_id,"summary":format!("{}: {}",call.name,outcome.status),"artifactRefs":outcome.artifacts}});
         if let Some(extra) = evidence {
             result["evidence"]
@@ -171,6 +171,8 @@ impl Host<'_> {
             &result,
             &all_grants,
         )?;
+        #[cfg(feature = "test-fixtures")]
+        super::fixture_fault(&self.home, "after_tool_facts");
         EvidenceIndexStore::new(&self.home).register(
             &HostToolEvidence {
                 conversation_id: &self.identity.conversation_id,

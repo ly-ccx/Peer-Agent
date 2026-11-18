@@ -118,29 +118,7 @@ impl NativeSessionHost {
                 {
                     continue;
                 }
-                let proof = recorder::prove(&child).await;
-                if proof == recorder::RecorderProof::Alive {
-                    let Some(pid) = rustix::process::Pid::from_raw(child.pid as i32) else {
-                        continue;
-                    };
-                    if rustix::process::getpgid(Some(pid)).ok() != Some(pid) {
-                        continue;
-                    }
-                    if rustix::process::kill_process_group(pid, rustix::process::Signal::KILL)
-                        .is_err()
-                    {
-                        continue;
-                    }
-                    for _ in 0..20 {
-                        if crate::providers::group_absent(child.pid) {
-                            break;
-                        }
-                        tokio::time::sleep(Duration::from_millis(50)).await;
-                    }
-                } else if !proof.allows_settlement() {
-                    continue;
-                }
-                if !crate::providers::group_absent(child.pid) {
+                if !recorder::stop_recorded_group(&owner, &child, cancel).await {
                     continue;
                 }
                 handle["nativeMcp"]["childStopObservation"] = json!("group_absent");

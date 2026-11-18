@@ -47,6 +47,7 @@ tokio-rustls = { version = "=0.26.6", default-features = false, features = ["rin
 webpki-roots = "=1.0.12"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+libproc = "=0.14.11"
 tempfile = "3.23.0"
 
 [dev-dependencies]

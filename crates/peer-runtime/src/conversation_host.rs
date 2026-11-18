@@ -28,6 +28,7 @@ use std::{
 };
 mod effect;
 mod permission;
+mod recovery;
 mod tool;
 use permission::ToolGrant;
 
@@ -251,7 +252,19 @@ impl NativeConversationRuntime {
                 let _ = self.live.close_admission(&identity);
                 attempt.finish();
                 let _ = self.live.forget_ended(&identity);
-                return Err(error.into());
+                let original = error.error();
+                if let Some(cleanup) = error.into_cleanup() {
+                    cleanup.close_unstarted(&store, &now())?;
+                    return Ok(ConversationOutcome {
+                        session_id: conversation,
+                        content: String::new(),
+                        turns: 0,
+                        usage: RuntimeUsageAccounting::default().snapshot(),
+                        lifetime_usage: None,
+                        error: Some(original.code()),
+                    });
+                }
+                return Err(original.into());
             }
         };
         let owned = attempt.cancellation();
@@ -321,6 +334,14 @@ impl NativeConversationRuntime {
             lifetime_usage: cleanup.ok().flatten(),
             error: error.map(|e| e.0),
         })
+    }
+}
+#[cfg(feature = "test-fixtures")]
+fn fixture_fault(home: &Path, stage: &str) {
+    if home.join(".native-cli-fixture").is_file()
+        && std::env::var("PEER_NATIVE_ORDINARY_FAULT").as_deref() == Ok(stage)
+    {
+        std::process::exit(88);
     }
 }
 fn binding(meta: &Value) -> Result<String, HostError> {
@@ -486,6 +507,8 @@ impl Host<'_> {
             Ok::<_, HostError>(())
         }
         .await;
+        #[cfg(feature = "test-fixtures")]
+        fixture_fault(&self.home, "before_billing");
         // Known charges remain accountable even if a tool/connection stop is unproven.
         let billing = (|| -> Result<Option<Value>, HostError> {
             let receipt = self.store.commit_conversation_usage(&self.run)?;

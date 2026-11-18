@@ -13,6 +13,8 @@ use peer_protocol::{
 };
 use serde_json::Value;
 use std::{path::PathBuf, sync::atomic::AtomicBool};
+mod recovery;
+pub use recovery::ConversationRecovery;
 
 /// Host intent, not a deserializable command or a reusable permission.
 pub struct NewConversationExecution<'a> {
@@ -22,6 +24,54 @@ pub struct NewConversationExecution<'a> {
     pub attribution: &'a Value,
     pub at: &'a str,
 }
+/// A failed initial publication retains only the genuinely minted, empty
+/// claim. This capability can close that exact unstarted claim, never dispatch.
+pub struct EmptyConversationClaim {
+    directory: PathBuf,
+    location: (u64, u64),
+    run: ConversationExecution,
+}
+pub struct ConversationClaimFailure {
+    error: StoreError,
+    cleanup: Option<Box<EmptyConversationClaim>>,
+}
+impl std::fmt::Debug for ConversationClaimFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConversationClaimFailure")
+            .field("error", &self.error)
+            .finish_non_exhaustive()
+    }
+}
+impl ConversationClaimFailure {
+    pub fn code(&self) -> &'static str {
+        self.error.code()
+    }
+    pub fn error(&self) -> StoreError {
+        self.error
+    }
+    pub fn into_cleanup(self) -> Option<EmptyConversationClaim> {
+        self.cleanup.map(|claim| *claim)
+    }
+}
+impl EmptyConversationClaim {
+    pub fn close_unstarted(self, store: &ConversationStore, at: &str) -> Result<(), StoreError> {
+        if std::fs::canonicalize(&store.directory).map_err(|_| StoreError::ExecutionChanged)?
+            != self.directory
+        {
+            return Err(StoreError::ExecutionChanged);
+        }
+        let mut guard = store.try_conversation_recovery(&self.run.identity.conversation_id)?;
+        if guard.token.recovery_directory != Some(self.location)
+            || guard.current(store)? != self.run
+        {
+            return Err(StoreError::ExecutionChanged);
+        }
+        guard.close_admission(store, at)?;
+        guard.finish_stop(store, at)?;
+        guard.commit_usage(store, at)?;
+        Ok(())
+    }
+}
 /// An owned run can be reopened after a Store-only uncertain publication. No
 /// public fields, Clone or Deserialize permit another run to mint this token.
 pub struct ConversationExecutionToken {
@@ -29,8 +79,28 @@ pub struct ConversationExecutionToken {
     identity: ConversationExecutionIdentity,
     owner: NativeProcessRecorder,
     revision: u64,
+    // Present only inside the non-dispatchable recovery guard. This binds all
+    // control facts, including edits by writers that fail to bump revision.
+    recovery_control: Option<ConversationExecution>,
+    recovery_directory: Option<(u64, u64)>,
 }
 impl ConversationExecutionToken {
+    fn check_recovery_directory(&self) -> Result<(), StoreError> {
+        if let Some(expected) = self.recovery_directory {
+            use rustix::fs::{Mode, OFlags};
+            let named = rustix::fs::open(
+                &self.directory,
+                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Mode::empty(),
+            )
+            .map_err(|_| StoreError::ExecutionChanged)?;
+            let stat = rustix::fs::fstat(&named).map_err(|_| StoreError::ExecutionChanged)?;
+            if (stat.st_dev as u64, stat.st_ino as u64) != expected {
+                return Err(StoreError::ExecutionChanged);
+            }
+        }
+        Ok(())
+    }
     pub fn identity(&self) -> &ConversationExecutionIdentity {
         &self.identity
     }
@@ -113,68 +183,104 @@ impl ConversationStore {
         expected: &HistorySnapshot,
         intent: &NewConversationExecution<'_>,
         cancel: Option<&AtomicBool>,
-    ) -> Result<(ConversationExecutionToken, ConversationMetadataPublication), StoreError> {
-        let id = &expected.history.conversation_id;
-        let directory = self.write_directory()?;
-        let _held = locks(&directory, Some(id), cancel)?;
-        let current = self.read_committed(id, None, log::MAX_BYTES)?;
-        if current.source_revision != expected.source_revision
-            || current.history.content_revision != expected.history.content_revision
-        {
-            return Err(StoreError::VersionChanged);
-        }
-        if current.history.excluded_from_message_id.is_some() {
-            return Err(StoreError::StreamStateInvalid);
-        }
-        let mut index = log::read(&directory.join("index.jsonl"), cancel)?;
-        let pos = position(&index, id)?;
-        if index[pos]
-            .get("role")
-            .is_some_and(|v| !v.is_null() && v != "chat")
-            || index[pos]
-                .get("parentConversationId")
-                .is_some_and(|v| !v.is_null())
-        {
-            return Err(StoreError::OutOfScope);
-        }
-        if decode(&index[pos], id)?
-            .is_some_and(|run| !run.permits_new_run() || run.identity.stream_id == intent.stream_id)
-        {
-            return Err(StoreError::ExecutionBusy);
-        }
-        if !timestamp(intent.at) {
-            return Err(StoreError::InvalidInput);
-        }
-        let run = ConversationExecution {
-            schema_version: 1,
-            identity: ConversationExecutionIdentity {
-                conversation_id: id.clone(),
-                stream_id: intent.stream_id.into(),
-            },
-            engine: intent.engine.into(),
-            owner: intent.owner.clone(),
-            revision: 1,
-            phase: Phase::Active,
-            pending_tools: vec![],
-            handles: vec![],
-            usage: None,
-            unknown_usage: false,
-            attribution: intent.attribution.clone(),
-            usage_committed: true,
-            stop: None,
-            updated_at: intent.at.into(),
-        };
-        let raw = serde_json::to_value(&run).map_err(|_| StoreError::ExecutionInvalid)?;
-        normalize_conversation_execution(&raw).map_err(|_| StoreError::ExecutionInvalid)?;
-        index[pos]["runtimeExecution"] = raw;
-        let receipt = self.publish_execution_metadata(&directory, &current, &index, cancel)?;
-        let token = ConversationExecutionToken {
-            directory,
-            identity: run.identity,
-            owner: run.owner,
-            revision: 1,
-        };
-        Ok((token, receipt))
+    ) -> Result<
+        (ConversationExecutionToken, ConversationMetadataPublication),
+        ConversationClaimFailure,
+    > {
+        let mut cleanup = None;
+        let result = (|| {
+            let id = &expected.history.conversation_id;
+            let directory = self.write_directory()?;
+            let _held = locks(&directory, Some(id), cancel)?;
+            let current = self.read_committed(id, None, log::MAX_BYTES)?;
+            if current.source_revision != expected.source_revision
+                || current.history.content_revision != expected.history.content_revision
+            {
+                return Err(StoreError::VersionChanged);
+            }
+            if current.history.excluded_from_message_id.is_some() {
+                return Err(StoreError::StreamStateInvalid);
+            }
+            let mut index = log::read(&directory.join("index.jsonl"), cancel)?;
+            let pos = position(&index, id)?;
+            if index[pos]
+                .get("role")
+                .is_some_and(|v| !v.is_null() && v != "chat")
+                || index[pos]
+                    .get("parentConversationId")
+                    .is_some_and(|v| !v.is_null())
+            {
+                return Err(StoreError::OutOfScope);
+            }
+            if decode(&index[pos], id)?.is_some_and(|run| {
+                !run.permits_new_run() || run.identity.stream_id == intent.stream_id
+            }) {
+                return Err(StoreError::ExecutionBusy);
+            }
+            if !timestamp(intent.at) {
+                return Err(StoreError::InvalidInput);
+            }
+            let run = ConversationExecution {
+                schema_version: 1,
+                identity: ConversationExecutionIdentity {
+                    conversation_id: id.clone(),
+                    stream_id: intent.stream_id.into(),
+                },
+                engine: intent.engine.into(),
+                owner: intent.owner.clone(),
+                revision: 1,
+                phase: Phase::Active,
+                pending_tools: vec![],
+                handles: vec![],
+                usage: None,
+                unknown_usage: false,
+                attribution: intent.attribution.clone(),
+                usage_committed: true,
+                stop: None,
+                updated_at: intent.at.into(),
+            };
+            let raw = serde_json::to_value(&run).map_err(|_| StoreError::ExecutionInvalid)?;
+            normalize_conversation_execution(&raw).map_err(|_| StoreError::ExecutionInvalid)?;
+            index[pos]["runtimeExecution"] = raw;
+            cleanup = Some(Box::new(EmptyConversationClaim {
+                directory: directory.clone(),
+                location: {
+                    let fd = rustix::fs::open(
+                        &directory,
+                        rustix::fs::OFlags::RDONLY
+                            | rustix::fs::OFlags::DIRECTORY
+                            | rustix::fs::OFlags::NOFOLLOW
+                            | rustix::fs::OFlags::CLOEXEC,
+                        rustix::fs::Mode::empty(),
+                    )
+                    .map_err(|_| StoreError::ReadFailed)?;
+                    let stat = rustix::fs::fstat(&fd).map_err(|_| StoreError::ReadFailed)?;
+                    (stat.st_dev as u64, stat.st_ino as u64)
+                },
+                run: run.clone(),
+            }));
+            let receipt = self.publish_execution_metadata(&directory, &current, &index, cancel)?;
+            #[cfg(feature = "test-fixtures")]
+            if directory
+                .parent()
+                .is_some_and(|p| p.join(".native-cli-fixture").is_file())
+                && std::env::var("PEER_CONVERSATION_EXECUTION_FAULT").as_deref()
+                    == Ok("uncertain_claim")
+            {
+                return Err(StoreError::CommitUncertain);
+            }
+            cleanup = None;
+            let token = ConversationExecutionToken {
+                directory,
+                identity: run.identity,
+                owner: run.owner,
+                revision: 1,
+                recovery_control: None,
+                recovery_directory: None,
+            };
+            Ok((token, receipt))
+        })();
+        result.map_err(|error| ConversationClaimFailure { error, cleanup })
     }
     fn publish_execution_metadata(
         &self,
@@ -242,12 +348,14 @@ impl ConversationStore {
         cancel: Option<&AtomicBool>,
         change: impl FnOnce(&mut ConversationExecution, &HistorySnapshot) -> Result<(), StoreError>,
     ) -> Result<ConversationMetadataPublication, StoreError> {
+        token.check_recovery_directory()?;
         if !timestamp(at) || self.write_directory()? != token.directory {
             return Err(StoreError::ExecutionChanged);
         }
         let id = &token.identity.conversation_id;
         let directory = &token.directory;
         let _held = locks(directory, Some(id), cancel)?;
+        token.check_recovery_directory()?;
         let current = self.read_committed(id, None, log::MAX_BYTES)?;
         let mut index = log::read(&directory.join("index.jsonl"), cancel)?;
         let pos = position(&index, id)?;
@@ -255,6 +363,10 @@ impl ConversationStore {
         if run.identity != token.identity
             || run.owner != token.owner
             || run.revision != token.revision
+            || token
+                .recovery_control
+                .as_ref()
+                .is_some_and(|expected| expected != &run)
         {
             return Err(StoreError::ExecutionChanged);
         }
@@ -268,8 +380,12 @@ impl ConversationStore {
         let raw = serde_json::to_value(&run).map_err(|_| StoreError::ExecutionInvalid)?;
         normalize_conversation_execution(&raw).map_err(|_| StoreError::ExecutionInvalid)?;
         index[pos]["runtimeExecution"] = raw;
+        token.check_recovery_directory()?;
         let receipt = self.publish_execution_metadata(directory, &current, &index, cancel)?;
         token.revision = run.revision;
+        if token.recovery_control.is_some() {
+            token.recovery_control = Some(run);
+        }
         Ok(receipt)
     }
     /// Re-read only the same owned run after indeterminate Store publication.
@@ -579,6 +695,13 @@ impl ConversationStore {
                 return Err(StoreError::EvidenceInvalid);
             }
             run.pending_tools.remove(i);
+            if run.stop.is_some()
+                && run.pending_tools.is_empty()
+                && run.handles.is_empty()
+                && run.usage_committed
+            {
+                run.phase = Phase::Stopped;
+            }
             Ok(())
         })
     }
@@ -635,6 +758,7 @@ impl ConversationStore {
         &self,
         token: &ConversationExecutionToken,
     ) -> Result<ConversationUsageReceipt, StoreError> {
+        token.check_recovery_directory()?;
         if self.write_directory()? != token.directory {
             return Err(StoreError::ExecutionChanged);
         }
@@ -644,6 +768,10 @@ impl ConversationStore {
         if run.identity != token.identity
             || run.owner != token.owner
             || run.revision != token.revision
+            || token
+                .recovery_control
+                .as_ref()
+                .is_some_and(|expected| expected != &run)
             || run.phase == Phase::Active
         {
             return Err(StoreError::ExecutionChanged);

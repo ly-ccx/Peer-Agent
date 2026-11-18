@@ -338,7 +338,9 @@ async fn command_cancellation_timeout_revocation_and_output_limit_reap_the_real_
         fs::write(
             &f.binary,
             format!(
-                "#!/bin/sh\nprintf '%s\\n' \"$$\" > {}\n{body}\n",
+                "#!/bin/sh\nprintf '%s\\n' \"$$\" > {}\n/bin/mv -f {} {}\n{body}\n",
+                quote(&ready.with_extension("partial")),
+                quote(&ready.with_extension("partial")),
                 quote(&ready)
             ),
         )

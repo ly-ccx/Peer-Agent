@@ -63,29 +63,13 @@ impl NativeSessionHost {
                         .child
                         .as_ref()
                         .ok_or(HostError("native_process_invalid"))?;
-                    let proof =
-                        Box::pin(self.wait_owned(recorder::prove(child), cancel, cancel)).await?;
-                    if proof == recorder::RecorderProof::Alive {
-                        let pid = rustix::process::Pid::from_raw(child.pid as i32)
-                            .ok_or(HostError("native_process_invalid"))?;
-                        if rustix::process::getpgid(Some(pid)).ok() != Some(pid) {
-                            continue;
-                        }
-                        if rustix::process::kill_process_group(pid, rustix::process::Signal::KILL)
-                            .is_err()
-                        {
-                            continue;
-                        }
-                        for _ in 0..20 {
-                            if crate::providers::group_absent(child.pid) {
-                                break;
-                            }
-                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                        }
-                    } else if !proof.allows_settlement() {
-                        continue;
-                    }
-                    if !crate::providers::group_absent(child.pid) {
+                    if !Box::pin(self.wait_owned(
+                        recorder::stop_recorded_group(&owner, child, cancel),
+                        cancel,
+                        cancel,
+                    ))
+                    .await?
+                    {
                         continue;
                     }
                     Some(NativeProcessStop::OwnerDeadGroupAbsent)

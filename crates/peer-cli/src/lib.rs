@@ -8,6 +8,7 @@ pub mod model_auth;
 pub mod models;
 pub mod native_exec;
 pub mod ordinary_exec;
+pub mod ordinary_recovery;
 pub mod sessions;
 mod shell_args;
 pub mod terminal;
@@ -32,6 +33,7 @@ pub enum Command {
     OrdinaryExec(ordinary_exec::Options),
     ExecHelp,
     Recover(String),
+    RecoverSession(String),
     McpAuth { server: String, refresh: bool },
     ModelAuth { action: String, channel: String },
     Unavailable(String),
@@ -93,6 +95,12 @@ pub fn command(argv: &[String]) -> Command {
         Some("recover") if argv.len() == 3 && argv[1] == "--plan" => {
             Command::Recover(argv[2].clone())
         }
+        Some("recover") if argv.len() == 3 && argv[1] == "--session" => {
+            Command::RecoverSession(argv[2].clone())
+        }
+        Some("recover") => Command::Usage(
+            "Usage: peer recover --session <conversation-id> | --plan <goal-id>".into(),
+        ),
         Some("exec") if argv.len() == 3 && argv[1] == "--plan" => Command::Exec {
             plan: argv[2].clone(),
             max_turns: 16,

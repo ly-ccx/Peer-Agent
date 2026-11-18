@@ -1,6 +1,10 @@
 //! OS observations of the complete recording-process tuple. Missing runtime
 //! tokens, a bare PID, permission errors and a failed query are never death proof.
 pub use peer_protocol::NativeProcessRecorder as Recorder;
+#[cfg(target_os = "macos")]
+mod mac;
+mod recovery;
+pub(crate) use recovery::stop_recorded_group;
 #[cfg(target_os = "linux")]
 use std::io::Read;
 
@@ -37,6 +41,15 @@ pub struct RecorderObservation {
     pub process: ProcessStart,
     pub boot_after: Option<String>,
 }
+// The value stays opaque in persisted v1 records. Only this OS Adapter can
+// interpret its current version; old local-time display strings remain unknown.
+fn macos_start(value: &str) -> Option<(u64, u64)> {
+    let (sec, micros) = value.strip_prefix("macos-v2:")?.split_once(':')?;
+    let sec = sec.parse::<u64>().ok()?;
+    let micros = micros.parse::<u64>().ok()?;
+    (sec > 0 && micros < 1_000_000 && value == format!("macos-v2:{sec}:{micros}"))
+        .then_some((sec, micros))
+}
 /// Pure proof classifier over an actual host observation. A failed observation
 /// is distinct from an observed missing process; boot changes during probing fail.
 pub fn classify(recorded: &Recorder, observed: &RecorderObservation) -> RecorderProof {
@@ -53,6 +66,15 @@ pub fn classify(recorded: &Recorder, observed: &RecorderObservation) -> Recorder
         return RecorderProof::DifferentBoot;
     }
     match &observed.process {
+        ProcessStart::Present(start)
+            if start.starts_with("macos") || recorded.pid_start.starts_with("macos") =>
+        {
+            match (macos_start(&recorded.pid_start), macos_start(start)) {
+                (Some(old), Some(current)) if old == current => RecorderProof::Alive,
+                (Some(_), Some(_)) => RecorderProof::Reused,
+                _ => RecorderProof::Unproven,
+            }
+        }
         ProcessStart::Present(start) if start == &recorded.pid_start => RecorderProof::Alive,
         ProcessStart::Present(start) if !start.is_empty() => RecorderProof::Reused,
         ProcessStart::Absent => RecorderProof::Dead,
@@ -167,11 +189,7 @@ async fn process_start(pid: u32) -> ProcessStart {
     }
     #[cfg(target_os = "macos")]
     {
-        match command("/bin/ps", &["-o", "lstart=", "-p", &pid.to_string()]).await {
-            Some(s) if !s.trim().is_empty() => ProcessStart::Present(format!("macos:{}", s.trim())),
-            _ if confirmed_absent(pid) => ProcessStart::Absent,
-            _ => ProcessStart::Unavailable,
-        }
+        mac::process_start(pid)
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
@@ -217,6 +235,69 @@ pub async fn prove(recorded: &Recorder) -> RecorderProof {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn macos_start_versions_and_invalid_values_never_masquerade_as_pid_reuse() {
+        for (old, current, expected) in [
+            (
+                "macos:Tue Nov 17 23:50:38 2026",
+                "macos-v2:1794959438:123456",
+                RecorderProof::Unproven,
+            ),
+            (
+                "macos:Tue Nov 17 23:50:38 2026",
+                "macos:Tue Nov 17 23:50:38 2026",
+                RecorderProof::Unproven,
+            ),
+            (
+                "macos-v3:future",
+                "macos-v2:1794959438:123456",
+                RecorderProof::Unproven,
+            ),
+            (
+                "macos-v2:1794959438:123456",
+                "macos-v2:1794959438:123456",
+                RecorderProof::Alive,
+            ),
+            (
+                "macos-v2:1794959438:123456",
+                "macos-v2:1794959438:123457",
+                RecorderProof::Reused,
+            ),
+            (
+                "macos-v2:1794959438:1000000",
+                "macos-v2:1794959438:123456",
+                RecorderProof::Unproven,
+            ),
+            (
+                "macos-v2:0:1",
+                "macos-v2:1794959438:123456",
+                RecorderProof::Unproven,
+            ),
+            (
+                "macos-v2:1794959438:123456",
+                "macos-v2:1794959438:bad",
+                RecorderProof::Unproven,
+            ),
+        ] {
+            let recorder = Recorder {
+                boot_id: "boot".into(),
+                pid: 123,
+                pid_start: old.into(),
+                host_id: "host".into(),
+                acquired_at: "at".into(),
+            };
+            let observation = RecorderObservation {
+                boot_before: Some("boot".into()),
+                process: ProcessStart::Present(current.into()),
+                boot_after: Some("boot".into()),
+            };
+            assert_eq!(
+                classify(&recorder, &observation),
+                expected,
+                "{old} -> {current}"
+            );
+        }
+    }
     #[test]
     fn absence_requires_complete_tuple_and_available_stable_boot() {
         let r = Recorder {
@@ -278,7 +359,11 @@ mod tests {
             .expect("native recorder observation");
         assert_eq!(prove(&r).await, RecorderProof::Alive);
         let mut changed = r;
-        changed.pid_start = "not-the-current-start".into();
+        changed.pid_start = if let Some((sec, micros)) = macos_start(&changed.pid_start) {
+            format!("macos-v2:{}:{micros}", sec + 1)
+        } else {
+            "not-the-current-start".into()
+        };
         assert_eq!(prove(&changed).await, RecorderProof::Reused);
     }
 }
