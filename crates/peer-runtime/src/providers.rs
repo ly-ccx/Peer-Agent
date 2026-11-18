@@ -28,6 +28,7 @@ pub use crate::effect_admission::EffectAdmission;
 pub(crate) use shell::{
     background_start_fields, group_absent, restore_background_start_fields, shell_stop_outcome,
 };
+pub(crate) mod interaction;
 mod shell_risk;
 #[cfg(test)]
 mod tests;
@@ -231,8 +232,10 @@ impl ProviderRegistry {
         )?));
         Ok(registry)
     }
-    pub(crate) fn add_ordinary_goal_tools(&mut self, mode: RuntimeMode) {
+    pub(crate) fn add_ordinary_tools(&mut self, mode: RuntimeMode) {
         self.providers.push(Box::new(goal::GoalProvider(mode)));
+        self.providers
+            .push(Box::new(interaction::UnavailableInputProvider));
     }
     pub fn project(&self) -> Result<RuntimeProjection, HostError> {
         let mut tools = Vec::new();

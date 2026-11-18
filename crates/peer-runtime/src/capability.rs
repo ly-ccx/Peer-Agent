@@ -33,6 +33,7 @@ impl From<peer_store::ResourceError> for CapabilityError {
 pub enum ProviderPermission {
     Read,
     ConversationGoal,
+    UserInput,
     FileWrite,
     Shell,
     ShellStop,

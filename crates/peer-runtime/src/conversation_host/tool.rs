@@ -2,14 +2,16 @@
 //! decisions become canonical Tool Result/Grant/Evidence facts.
 use super::*;
 use crate::{
-    providers::EffectOutcome,
+    capability::ProviderPermission,
+    providers::{EffectOutcome, interaction},
     tool_result_content::{ArchivePolicy, archive},
+    turn_loop::ToolStep,
 };
 use peer_protocol::{ConversationDispatchPhase, ConversationPendingTool};
 use peer_store::{EvidenceIndexStore, HostToolEvidence};
 use sha2::{Digest, Sha256};
 impl Host<'_> {
-    pub(super) async fn tool(&mut self, call: ModelToolCall) -> Result<String, HostError> {
+    pub(super) async fn tool(&mut self, call: ModelToolCall) -> Result<ToolStep, HostError> {
         self.source_current()?;
         if let Some(worker) = &mut self.worker {
             worker.admit_tool()?;
@@ -38,6 +40,7 @@ impl Host<'_> {
         let evidence = effect.evidence();
         let kind = effect.output_kind();
         let permission = effect.permission();
+        let input_unavailable = permission == ProviderPermission::UserInput;
         let goal_intake = self.observe_goal_intake(permission).await?;
         let risk = effect.risk();
         let read_path = if self.worker.is_some() {
@@ -77,7 +80,10 @@ impl Host<'_> {
             args: &args,
             tool: &call.name,
         };
-        let mut hook = if self.worker.is_some() || goal_intake.denial(&self.home).is_some() {
+        let mut hook = if input_unavailable
+            || self.worker.is_some()
+            || goal_intake.denial(&self.home).is_some()
+        {
             hooks::Hooks::default()
         } else {
             self.tool_hooks(
@@ -143,6 +149,8 @@ impl Host<'_> {
                         hook.error
                             .map(|error| error.0)
                             .unwrap_or("hook_interrupted")
+                    } else if input_unavailable {
+                        interaction::UNAVAILABLE
                     } else if let Some(reason) = grant.goal_denial {
                         reason
                     } else if hook.decision == crate::hook_policy::HookDecision::Deny {
@@ -196,6 +204,9 @@ impl Host<'_> {
                 );
             result["evidence"]["permissionGrantId"] = grant.facts["grantId"].clone();
             result["evidence"]["status"] = json!(outcome.status);
+        }
+        if input_unavailable {
+            result["evidence"]["permissionGrantId"] = grant.facts["grantId"].clone();
         }
         if outcome.not_dispatched {
             result["evidence"]["dispatchOutcome"] = json!("not_dispatched");
@@ -313,7 +324,7 @@ impl Host<'_> {
             if let Some(error) = hook_interrupted.or(grant.terminal) {
                 return Err(error);
             }
-            return Ok(call_id);
+            return Ok(ToolStep::Continue(call_id));
         }
         if !outcome.ended || outcome.error == Some("execution_outcome_unknown") {
             return Err(HostError("execution_outcome_unknown"));
@@ -336,13 +347,16 @@ impl Host<'_> {
         if let Some(error) = interrupted.or(hook_interrupted).or(grant.terminal) {
             return Err(error);
         }
-        if outcome.status == "denied" && self.repairing_goal() {
-            return Err(HostError("permission_denied"));
-        }
         if self.owned.is_cancelled() || self.external.is_cancelled() {
             return Err(HostError("CANCELLED"));
         }
-        Ok(call_id)
+        if input_unavailable {
+            return Ok(ToolStep::UserInputUnavailable);
+        }
+        if outcome.status == "denied" && self.repairing_goal() {
+            return Err(HostError("permission_denied"));
+        }
+        Ok(ToolStep::Continue(call_id))
     }
     fn tool_facts(
         &mut self,

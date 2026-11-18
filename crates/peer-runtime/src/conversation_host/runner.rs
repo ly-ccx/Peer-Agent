@@ -175,11 +175,15 @@ impl Host<'_> {
                 self.runner.as_mut().expect("owned Runner").tick = None;
                 let turn = turn?;
                 tool_calls = Some(turn.tool_calls);
-                if turn.stop == turn_loop::LoopStop::MaxTurns {
+                if turn.stop != turn_loop::LoopStop::Replied {
                     store.record_ordinary_runner_step(lease, phase, tool_calls, &now(), || {
                         self.source_current().map_err(|error| error.0)
                     })?;
-                    return Ok(RunnerStop::BudgetExhausted);
+                    return Ok(if turn.stop == turn_loop::LoopStop::MaxTurns {
+                        RunnerStop::BudgetExhausted
+                    } else {
+                        RunnerStop::Blocked(turn.stop.as_str())
+                    });
                 }
                 self.drive_requested_explorers().await?;
             }

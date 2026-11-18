@@ -11,9 +11,9 @@ pub(crate) trait TurnHost {
     /// including errors. Revalidate the live principal before returning calls.
     async fn request(&mut self) -> Result<ModelTurn, CapabilityError>;
     async fn record_assistant(&mut self, turn: &ModelTurn) -> Result<(), CapabilityError>;
-    /// Return the original canonical Tool Result id only after the actual Host
-    /// has settled its grant, result and Evidence. Unknown effects remain errors.
-    async fn execute_call(&mut self, call: ModelToolCall) -> Result<String, CapabilityError>;
+    /// Return only after the Host has settled the grant, result and Evidence.
+    /// Unknown effects remain errors.
+    async fn execute_call(&mut self, call: ModelToolCall) -> Result<ToolStep, CapabilityError>;
     /// Bind authentic provider continuation to the committed canonical history.
     async fn completed(
         &mut self,
@@ -22,15 +22,22 @@ pub(crate) trait TurnHost {
     ) -> Result<(), CapabilityError>;
 }
 
+pub(crate) enum ToolStep {
+    Continue(String),
+    UserInputUnavailable,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum LoopStop {
     Replied,
+    UserInputUnavailable,
     MaxTurns,
 }
 impl LoopStop {
     pub(crate) fn as_str(&self) -> &'static str {
         match self {
             Self::Replied => "replied",
+            Self::UserInputUnavailable => crate::providers::interaction::UNAVAILABLE,
             Self::MaxTurns => "max_turns",
         }
     }
@@ -80,10 +87,20 @@ pub(crate) async fn run(
         let mut ids = Vec::with_capacity(turn.calls.len());
         for call in std::mem::take(&mut turn.calls) {
             current(owned, external)?;
-            ids.push(host.execute_call(call).await?);
+            let step = host.execute_call(call).await?;
             tool_calls = tool_calls
                 .checked_add(1)
                 .ok_or(CapabilityError("runtime_counter_limit"))?;
+            match step {
+                ToolStep::Continue(id) => ids.push(id),
+                ToolStep::UserInputUnavailable => {
+                    return Ok(LoopOutcome {
+                        stop: LoopStop::UserInputUnavailable,
+                        content,
+                        tool_calls,
+                    });
+                }
+            }
         }
         host.completed(turn.continuation, &ids).await?;
     }

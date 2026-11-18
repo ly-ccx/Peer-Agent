@@ -250,7 +250,9 @@ pub fn run(options: &Options) -> io::Result<CliExit> {
                         },
                     });
                 if options.output_format == "json" {
-                    let mut payload = json!({"sessionId":outcome.session_id,"ok":outcome.error.is_none(),"result":if outcome.error.is_none(){json!(outcome.content)}else{Value::Null},"error":outcome.error,"turns":outcome.turns,"durationMs":started.elapsed().as_millis(),"usage":outcome.usage.turn_total});
+                    let result = (outcome.error.is_none() && !outcome.content.is_empty())
+                        .then_some(outcome.content);
+                    let mut payload = json!({"sessionId":outcome.session_id,"ok":outcome.error.is_none(),"result":result,"error":outcome.error,"turns":outcome.turns,"durationMs":started.elapsed().as_millis(),"usage":outcome.usage.turn_total});
                     if let Some(goal) = outcome.goal {
                         payload["goal"] = goal;
                     }

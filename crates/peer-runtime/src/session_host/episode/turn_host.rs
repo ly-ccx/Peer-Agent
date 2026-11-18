@@ -5,7 +5,7 @@ use super::*;
 use crate::cognition::ContextPipeline;
 use crate::model::{ModelContinuation, ModelToolCall, ModelTurn};
 use crate::session_host::cognition_host::GoalRequestFrame;
-use crate::turn_loop::TurnHost;
+use crate::turn_loop::{ToolStep, TurnHost};
 use crate::{hook_policy::HookDecision, hook_process::decision_name};
 use peer_store::HookPhase;
 use peer_store::{EvidenceIndexStore, HostFileMaterialization, HostToolEvidence};
@@ -74,7 +74,7 @@ impl TurnHost for GoalTurnHost<'_, '_> {
             .ok_or(HostError("context_response_unavailable"))?;
         self.host.append_episode_message(self.frame.billing.conversation,&json!({"id":uuid::Uuid::new_v4().to_string(),"role":"assistant","content":turn.content,"createdAt":now(),"streamId":self.stream,"contextSnapshot":system["snapshot"],"requestFingerprint":turn.request_fingerprint}))
     }
-    async fn execute_call(&mut self, call: ModelToolCall) -> Result<String, HostError> {
+    async fn execute_call(&mut self, call: ModelToolCall) -> Result<ToolStep, HostError> {
         let host = &mut *self.host;
         let frame = self.frame;
         frame
@@ -477,7 +477,7 @@ impl TurnHost for GoalTurnHost<'_, '_> {
             return Err(error);
         }
 
-        Ok(call_id)
+        Ok(ToolStep::Continue(call_id))
     }
     async fn completed(
         &mut self,

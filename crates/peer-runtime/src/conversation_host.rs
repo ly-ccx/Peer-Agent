@@ -305,7 +305,7 @@ impl NativeConversationRuntime {
             skills.clone(),
             crate::providers::ShellHostMode::Conversation,
         )?;
-        providers.add_ordinary_goal_tools(options.mode);
+        providers.add_ordinary_tools(options.mode);
         let projection = providers.project_for_mode(options.mode, options.allowlist)?;
         let pipeline = if selected.is_some() {
             ContextPipeline::open_bound(&self.home, &conversation, options.provider_id, model)?
@@ -417,7 +417,7 @@ impl NativeConversationRuntime {
             if result.stop == crate::turn_loop::LoopStop::Replied {
                 host.drive_requested_explorers().await?;
             }
-            if headless {
+            if headless && result.stop != crate::turn_loop::LoopStop::UserInputUnavailable {
                 runner_stop = host.drive_new_goal(options.max_turns).await?;
             }
             Ok::<_, HostError>(result)
@@ -932,7 +932,10 @@ impl crate::turn_loop::TurnHost for Host<'_> {
         }
         Ok(())
     }
-    async fn execute_call(&mut self, call: ModelToolCall) -> Result<String, HostError> {
+    async fn execute_call(
+        &mut self,
+        call: ModelToolCall,
+    ) -> Result<crate::turn_loop::ToolStep, HostError> {
         self.tool(call).await
     }
     async fn completed(

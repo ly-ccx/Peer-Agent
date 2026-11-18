@@ -155,6 +155,8 @@ impl Host<'_> {
             && (permission != ProviderPermission::Read || inside == Some(false))
         {
             (false, "explorer_scope_denied", None)
+        } else if permission == ProviderPermission::UserInput {
+            (false, crate::providers::interaction::UNAVAILABLE, None)
         } else if let Some(interruption) = hook_interrupted {
             (false, "hook_interrupted", Some(interruption))
         } else if let Some(reason) = goal_denial {

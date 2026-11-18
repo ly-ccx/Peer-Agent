@@ -9,6 +9,7 @@ mod goal_runner;
 mod goal_update;
 mod hooks;
 mod input_media;
+mod interaction;
 mod model_errors;
 mod recovery;
 mod session_delete;

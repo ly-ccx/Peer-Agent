@@ -42,7 +42,7 @@ impl TurnHost for Host {
         self.assistant_error
             .map_or(Ok(()), |e| Err(CapabilityError(e)))
     }
-    async fn execute_call(&mut self, call: ModelToolCall) -> Result<String, CapabilityError> {
+    async fn execute_call(&mut self, call: ModelToolCall) -> Result<ToolStep, CapabilityError> {
         assert_eq!(call.arguments, json!({"original":true}));
         self.events.push(format!("call:{}", call.name));
         if let Some(cancel) = self.call_cancel.take() {
@@ -51,7 +51,7 @@ impl TurnHost for Host {
         if let Some(error) = self.call_error {
             return Err(CapabilityError(error));
         }
-        Ok(format!("committed:{}", call.name))
+        Ok(ToolStep::Continue(format!("committed:{}", call.name)))
     }
     async fn completed(
         &mut self,

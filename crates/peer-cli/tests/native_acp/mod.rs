@@ -915,3 +915,46 @@ fn native_acp_hook_ask_uses_real_editor_approval_and_canonical_evidence() {
     assert_eq!(records.len(), 1);
     assert_eq!(records[0]["capabilityId"], "local.file.read");
 }
+
+#[test]
+fn native_acp_settles_an_unavailable_question_and_accepts_a_later_prompt() {
+    let root = tempfile::tempdir().unwrap();
+    let server = Server::new(vec![
+        reply_tool("request_user_input", json!({"question":"Which fixture?"})),
+        reply_text("A later task completed."),
+    ]);
+    let mut client = Client::start(root.path(), &server);
+    client.request(1, "initialize", json!({"protocolVersion":1}));
+    let session = client.create(2, root.path());
+    client.prompt(3, &session, "Run the first task");
+
+    let prepared = client.next();
+    let call = &prepared["params"]["update"];
+    assert_eq!(call["sessionUpdate"], "tool_call");
+    assert_eq!(call["title"], "request_user_input");
+    let settled = client.next();
+    let update = &settled["params"]["update"];
+    assert_eq!(update["sessionUpdate"], "tool_call_update");
+    assert_eq!(update["status"], "failed");
+    assert_eq!(update["toolCallId"], call["toolCallId"]);
+    let reference = update["_meta"]["peer"]["evidenceRef"].as_str().unwrap();
+    let rows = peer_store::EvidenceIndexStore::new(root.path().join("data"))
+        .find(&[reference.to_owned()], None)
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["toolCallId"], call["toolCallId"]);
+
+    let end = client.next();
+    assert_eq!(end["id"], 3);
+    assert_eq!(end["result"]["stopReason"], "end_turn");
+    client.prompt(4, &session, "Run the next task");
+    assert_eq!(
+        client.next()["params"]["update"]["content"]["text"],
+        "A later task completed."
+    );
+    let end = client.next();
+    assert_eq!(end["id"], 4);
+    assert_eq!(end["result"]["stopReason"], "end_turn");
+    client.finish();
+    assert_eq!(server.requests.lock().unwrap().len(), 2);
+}
