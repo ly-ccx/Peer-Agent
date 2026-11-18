@@ -56,6 +56,10 @@ pub use conversation_write::{ConversationModelSelection, MessageCommit, NewConve
 mod lease;
 mod lock;
 mod policy;
+mod skill_catalog;
+pub use skill_catalog::{MountedSkill, SkillCatalog, SkillScope};
+mod skill_manifest;
+pub use skill_manifest::SkillManifest;
 mod transcript;
 pub use transcript::{TranscriptError, TranscriptLimit, TranscriptLimits, TranscriptReader};
 

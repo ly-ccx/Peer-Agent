@@ -53,6 +53,23 @@ fn runtime_sections(workspace: &str, provider: &str, model: &str) -> Vec<Value> 
     sections.push(section("runtime.provider","L2_RUNTIME",10,"Provider target",format!("Provider target: {provider} / {model}.\n{rules}\nProvider-specific request formatting is handled by the runtime encoder; do not describe provider wire-format details in the answer."),json!({"id":"runtime.provider","kind":"provider-selection","provider":provider,"model":model}),"runtime"));
     sections
 }
+fn skill_catalog_section(names: &[&str]) -> Option<Value> {
+    if names.is_empty() {
+        return None;
+    }
+    Some(section(
+        "native.skill-catalog",
+        "L4_CAPABILITIES",
+        0,
+        "Mounted Skills",
+        format!(
+            "Mounted Skills for this request: {}. Use the projected tool to load its instructions.",
+            names.join(", ")
+        ),
+        json!({"id":"native.skill-catalog","kind":"runtime-projection","toolNames":names}),
+        "runtime",
+    ))
+}
 /// Explicit NR-04 Source adapter; factual history is a separate user payload.
 pub(crate) fn compaction_summary_context(prompt: &str) -> String {
     let s = section(
@@ -89,12 +106,32 @@ pub fn assemble_work_context_with_continuity(
     instructions: &instructions::ProjectInstructions,
     continuity: &[Value],
 ) -> Result<Value, &'static str> {
+    assemble_work_context_for_turn(
+        workspace,
+        provider,
+        model,
+        goal,
+        now,
+        instructions,
+        (continuity, &[]),
+    )
+}
+pub(crate) fn assemble_work_context_for_turn(
+    workspace: &str,
+    provider: &str,
+    model: &str,
+    goal: &Value,
+    now: &str,
+    instructions: &instructions::ProjectInstructions,
+    (continuity, skill_names): (&[Value], &[&str]),
+) -> Result<Value, &'static str> {
     let resources: Value = serde_json::from_str(include_str!(
         "../../../packages/protocol/contracts/native-cli/context-static.json"
     ))
     .map_err(|_| "context_resource_invalid")?;
     let mut sections = Vec::new();
     sections.extend(instructions.sections());
+    sections.extend(skill_catalog_section(skill_names));
     if let Some(section) = self::continuity::render(continuity) {
         sections.push(section)
     }

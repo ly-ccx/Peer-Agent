@@ -3,6 +3,7 @@ use super::*;
 use peer_store::ConversationStore;
 mod model_errors;
 mod recovery;
+mod skills;
 struct Ordinary {
     root: tempfile::TempDir,
 }
@@ -247,13 +248,8 @@ fn public_ordinary_invalid_inputs_and_non_tty_ask_have_no_data_or_model_effects(
     }
 }
 #[test]
-fn public_ordinary_unmigrated_skill_or_hook_config_is_preserved_and_blocks_before_model_send() {
-    for path in [
-        "data/hooks/hooks.json",
-        "workspace/.peer/hooks.json",
-        "data/skills/example/SKILL.md",
-        "workspace/skills/example/SKILL.md",
-    ] {
+fn public_ordinary_unmigrated_hook_config_is_preserved_and_blocks_before_model_send() {
+    for path in ["data/hooks/hooks.json", "workspace/.peer/hooks.json"] {
         let fixture = Ordinary::new();
         let file = fixture.root.path().join(path);
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();

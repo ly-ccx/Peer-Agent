@@ -1,7 +1,7 @@
 //! Immutable result retrieval uses the same live Host admission as file reads.
 use super::*;
 use peer_store::{ToolArtifactRef, ToolArtifactStore};
-pub(super) struct ToolArtifactProvider;
+pub(super) struct ToolArtifactProvider(pub bool);
 struct ReadArtifact {
     args: Value,
     reference: ToolArtifactRef,
@@ -16,7 +16,11 @@ impl CapabilityProvider for ToolArtifactProvider {
             "../../../../packages/protocol/contracts/native-cli/tool-artifacts.json"
         ))
         .expect("compiled artifact manifest");
-        vec![("read_tool_result".into(), v["readerManifest"].clone())]
+        let mut manifest = v["readerManifest"].clone();
+        if self.0 {
+            manifest["modeScopes"] = json!(["chat", "plan", "goal"]);
+        }
+        vec![("read_tool_result".into(), manifest)]
     }
     fn prepare(
         &mut self,

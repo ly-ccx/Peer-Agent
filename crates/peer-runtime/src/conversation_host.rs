@@ -103,33 +103,6 @@ pub struct NativeConversationRuntime {
     live: ExecutionRegistry,
     access: ConversationAccess,
 }
-// These are the actual legacy CLI discovery roots (SkillStore and Node hooks).
-// Until their native adapters are wired, an existing configuration must not be
-// silently omitted from an ordinary request or tool execution.
-fn require_migrated_extensions(home: &Path, workspace: &Path) -> Result<(), HostError> {
-    for file in [
-        home.join("hooks/hooks.json"),
-        workspace.join(".peer/hooks.json"),
-    ] {
-        match std::fs::symlink_metadata(file) {
-            Ok(_) => return Err(HostError("native_hooks_not_migrated")),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => return Err(HostError("native_extension_inventory_unavailable")),
-        }
-    }
-    for directory in [home.join("skills"), workspace.join("skills")] {
-        match std::fs::read_dir(directory) {
-            Ok(mut entries) => {
-                if entries.next().is_some() {
-                    return Err(HostError("native_skills_not_migrated"));
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => return Err(HostError("native_extension_inventory_unavailable")),
-        }
-    }
-    Ok(())
-}
 impl NativeConversationRuntime {
     pub fn new(home: impl AsRef<Path>, access: ConversationAccess) -> Self {
         Self {
@@ -191,7 +164,8 @@ impl NativeConversationRuntime {
         if !workspace.is_dir() || workspace.to_str().is_none() {
             return Err(HostError("invalid_workspace"));
         }
-        require_migrated_extensions(&self.home, &workspace)?;
+        crate::providers::require_migrated_hooks(&self.home, &workspace)?;
+        let skills = Arc::new(peer_store::SkillCatalog::observe(&self.home, &workspace)?);
         let instructions = ProjectInstructions::observe_host(&workspace, &self.home, external)
             .map_err(HostError)?;
         let inventory = McpRegistryStore::new(&self.home).read()?;
@@ -273,11 +247,12 @@ impl NativeConversationRuntime {
             &inventory.source_revision,
         )
         .map_err(HostError)?;
-        let providers = ProviderRegistry::with_mcp(
+        let providers = ProviderRegistry::with_extensions(
             &inventory,
             &json!({"recorder":owner}),
             &self.home,
             credentials.clone(),
+            skills.clone(),
         )?;
         let projection = providers.project_for_mode(options.mode, options.allowlist)?;
         let pipeline = if selected.is_some() {
@@ -357,6 +332,7 @@ impl NativeConversationRuntime {
             instructions,
             servers: inventory.host_context_servers(),
             registry: inventory.source_revision,
+            skills,
             credentials,
             providers,
             projection,
@@ -430,6 +406,7 @@ struct Host<'a> {
     instructions: ProjectInstructions,
     servers: Vec<Value>,
     registry: String,
+    skills: Arc<peer_store::SkillCatalog>,
     credentials: crate::mcp_oauth::CredentialEpoch,
     providers: ProviderRegistry,
     projection: RuntimeProjection,
@@ -450,7 +427,10 @@ impl Host<'_> {
         if self.owned.is_cancelled() || self.external.is_cancelled() {
             return Err(HostError("CANCELLED"));
         }
-        require_migrated_extensions(&self.home, &self.workspace)?;
+        crate::providers::require_migrated_hooks(&self.home, &self.workspace)?;
+        self.skills
+            .check_current()
+            .map_err(|_| HostError("native_skill_source_changed"))?;
         let run = self
             .store
             .read_conversation_execution(&self.identity.conversation_id)?
@@ -631,6 +611,7 @@ impl CognitionHost for Host<'_> {
                     .to_str()
                     .ok_or(HostError("invalid_data_home"))?,
                 servers: &self.servers,
+                skill_names: &self.projection.skill_names(),
                 instructions: &self.instructions,
             },
             continuity,

@@ -10,6 +10,7 @@ use std::{
     future::Future,
     path::{Path, PathBuf},
     pin::Pin,
+    sync::Arc,
 };
 mod file;
 mod git;
@@ -17,6 +18,9 @@ mod mcp;
 mod projection;
 pub use projection::RuntimeMode;
 mod shell;
+mod skill;
+pub(crate) use skill::PREFIX as SKILL_PREFIX;
+pub use skill::{skill_id, wire_skill_name};
 mod tool_artifact;
 mod web;
 pub use crate::effect_admission::EffectAdmission;
@@ -148,6 +152,11 @@ pub struct ProviderRegistry {
 }
 impl Default for ProviderRegistry {
     fn default() -> Self {
+        Self::builtins(false)
+    }
+}
+impl ProviderRegistry {
+    fn builtins(skill_result_reader: bool) -> Self {
         Self {
             providers: vec![
                 Box::<file::FileProvider>::default(),
@@ -155,12 +164,10 @@ impl Default for ProviderRegistry {
                 Box::new(web::WebProvider),
                 Box::new(git::GitProvider),
                 Box::new(shell::ShellProvider),
-                Box::new(tool_artifact::ToolArtifactProvider),
+                Box::new(tool_artifact::ToolArtifactProvider(skill_result_reader)),
             ],
         }
     }
-}
-impl ProviderRegistry {
     pub(crate) fn project_read_only(&self) -> Result<RuntimeProjection, HostError> {
         let mut p = self.project_for_mode(RuntimeMode::Goal, None)?;
         p.tools
@@ -171,13 +178,26 @@ impl ProviderRegistry {
         .map_err(|_| HostError("projection_limit"))?;
         Ok(p)
     }
-    pub(crate) fn with_mcp(
+    pub(crate) fn with_extensions(
         snapshot: &peer_store::McpRegistrySnapshot,
         owner: &Value,
         home: &Path,
         credentials: crate::mcp_oauth::CredentialEpoch,
+        skills: Arc<peer_store::SkillCatalog>,
     ) -> Result<Self, HostError> {
-        let mut registry = Self::default();
+        if skills
+            .mounted
+            .iter()
+            .any(|entry| !skill::skill_id(&entry.manifest.id))
+        {
+            return Err(HostError("skill_identity_invalid"));
+        }
+        let mut registry = Self::builtins(!skills.mounted.is_empty());
+        if !skills.mounted.is_empty() {
+            registry
+                .providers
+                .push(Box::new(skill::SkillProvider(skills)));
+        }
         registry.providers.push(Box::new(mcp::McpProvider::new(
             snapshot,
             owner,
@@ -185,14 +205,6 @@ impl ProviderRegistry {
             credentials,
         )?));
         Ok(registry)
-    }
-    pub(crate) fn local_capabilities() -> Vec<String> {
-        Self::default()
-            .providers
-            .iter()
-            .flat_map(|p| p.manifests())
-            .filter_map(|(_, m)| m["capabilityId"].as_str().map(str::to_owned))
-            .collect()
     }
     pub fn project(&self) -> Result<RuntimeProjection, HostError> {
         let mut tools = Vec::new();
@@ -250,6 +262,21 @@ impl ProviderRegistry {
         Ok(effect)
     }
 }
+/// Block configured hooks until their original governed provider is ported.
+pub(crate) fn require_migrated_hooks(home: &Path, workspace: &Path) -> Result<(), HostError> {
+    for file in [
+        home.join("hooks/hooks.json"),
+        workspace.join(".peer/hooks.json"),
+    ] {
+        match std::fs::symlink_metadata(file) {
+            Ok(_) => return Err(HostError("native_hooks_not_migrated")),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(HostError("native_extension_inventory_unavailable")),
+        }
+    }
+    Ok(())
+}
+
 impl RuntimeProjection {
     pub(crate) fn has_capability(&self, capability: &str) -> bool {
         self.tools.iter().any(|t| t.capability == capability)
@@ -259,6 +286,13 @@ impl RuntimeProjection {
             .iter()
             .find(|t| t.alias == alias)
             .map(|t| t.capability.as_str())
+    }
+    pub(crate) fn skill_names(&self) -> Vec<&str> {
+        self.tools
+            .iter()
+            .filter(|tool| tool.capability.starts_with(SKILL_PREFIX))
+            .map(|tool| tool.alias.as_str())
+            .collect()
     }
     pub fn definitions(&self) -> Value {
         json!(self.tools.iter().map(|t|json!({"type":"function","function":{"name":t.alias,"description":t.manifest["description"],"parameters":t.manifest["inputSchema"]}})).collect::<Vec<_>>())

@@ -171,6 +171,22 @@ pub(super) fn tools(tokens: Option<&[String]>) -> Result<Option<Vec<String>>, St
         if token.is_empty() {
             continue;
         }
+        let skill = token.strip_prefix("local.skill.");
+        let selected = if skill.is_some_and(peer_runtime::providers::skill_id)
+            || peer_runtime::providers::wire_skill_name(token)
+        {
+            Some(token)
+        } else if matches!(token, "read_tool_result" | "local.tool-result.read") {
+            Some("local.tool-result.read")
+        } else {
+            None
+        };
+        if let Some(id) = selected {
+            if !out.iter().any(|value| value == id) {
+                out.push(id.to_owned());
+            }
+            continue;
+        }
         let ids = resources["toolAliases"][token]
             .as_array()
             .ok_or_else(|| format!("peer exec: unknown --tools token \"{token}\""))?;

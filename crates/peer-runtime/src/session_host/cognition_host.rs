@@ -6,7 +6,7 @@ use crate::{
     CancellationToken,
     execution_budget::EpisodeBudget,
     model::{ModelObservation, NativeModel},
-    system_context::{assemble_work_context_with_continuity, instructions::ProjectInstructions},
+    system_context::{assemble_work_context_for_turn, instructions::ProjectInstructions},
     usage_accounting::RuntimeUsageAccounting,
 };
 use serde_json::Value;
@@ -23,6 +23,8 @@ pub(super) struct GoalRequestFrame<'a> {
     pub billing: &'a BillingScope<'a>,
     pub model: &'a NativeModel,
     pub tools: &'a Value,
+    pub skills: &'a peer_store::SkillCatalog,
+    pub skill_names: &'a [&'a str],
     pub owned: &'a CancellationToken,
     pub external: &'a CancellationToken,
 }
@@ -43,6 +45,10 @@ impl CognitionHost for GoalCognitionHost<'_, '_> {
             return Err(HostError("native_capability_inventory_changed"));
         }
         f.mcp_credentials.check().map_err(HostError)?;
+        crate::providers::require_migrated_hooks(&host.home, f.workspace)?;
+        f.skills
+            .check_current()
+            .map_err(|_| HostError("native_skill_source_changed"))?;
         let fresh = host.current(f.plan, &now())?;
         if fresh.goal.source_revision != f.goal_revision {
             return Err(HostError("execution_revision_stale"));
@@ -62,14 +68,14 @@ impl CognitionHost for GoalCognitionHost<'_, '_> {
     }
     fn assemble(&self, continuity: &[Value]) -> Result<Value, HostError> {
         let f = self.frame;
-        assemble_work_context_with_continuity(
+        assemble_work_context_for_turn(
             f.workspace.to_str().ok_or(HostError("invalid_workspace"))?,
             f.model.provider(),
             f.model.model_id(),
             f.goal,
             &now(),
             f.instructions,
-            continuity,
+            (continuity, f.skill_names),
         )
         .map_err(HostError)
     }

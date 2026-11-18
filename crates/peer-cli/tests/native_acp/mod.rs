@@ -504,3 +504,51 @@ fn native_acp_model_effort_and_window_are_session_local_in_wire_and_store() {
     assert_eq!(records[2]["reasoning_effort"], "high");
     assert_eq!(std::fs::read(&config).unwrap(), original);
 }
+
+#[test]
+fn native_acp_skill_uses_the_ordinary_host_and_keeps_evidence() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = root.path().join("workspace");
+    let dir = workspace.join("skills/notes");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("SKILL.md"),
+        "---\ndescription: Local test package\n---\nACP-SKILL-BODY",
+    )
+    .unwrap();
+    let server = Server::new(vec![
+        reply_tool("skill__notes", json!({})),
+        reply_text("Done"),
+    ]);
+    let mut client = Client::start(root.path(), &server);
+    client.request(1, "initialize", json!({"protocolVersion":1}));
+    let session = client.create(2, &workspace);
+    client.prompt(3, &session, "Load notes");
+    let mut call = None;
+    while call.is_none() {
+        let message = client.next();
+        if message["params"]["update"]["sessionUpdate"] == "tool_call" {
+            call = message["params"]["update"]["toolCallId"]
+                .as_str()
+                .map(str::to_owned);
+        }
+        assert_ne!(message["id"], 3, "{message}");
+    }
+    loop {
+        let message = client.next();
+        if message["id"] == 3 {
+            assert_eq!(message["result"]["stopReason"], "end_turn");
+            break;
+        }
+    }
+    client.finish();
+    let requests = server.requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(!requests[0].to_string().contains("ACP-SKILL-BODY"));
+    assert!(requests[1].to_string().contains("ACP-SKILL-BODY"));
+    let id = call.unwrap();
+    let evidence = peer_store::EvidenceIndexStore::new(root.path().join("data"))
+        .find(&[format!("tool-result://{id}")], None)
+        .unwrap();
+    assert_eq!(evidence[0]["capabilityId"], "local.skill.notes");
+}

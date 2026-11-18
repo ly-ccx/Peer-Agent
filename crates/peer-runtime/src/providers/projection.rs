@@ -75,7 +75,10 @@ impl RuntimeProjection {
         let mut selected = Vec::with_capacity(self.tools.len());
         for tool in self.tools {
             if available(&tool.manifest, mode)?
-                && allowlist.is_none_or(|ids| ids.contains(&tool.capability))
+                && allowlist.is_none_or(|ids| {
+                    ids.contains(&tool.capability)
+                        || tool.capability.starts_with(SKILL_PREFIX) && ids.contains(&tool.alias)
+                })
             {
                 selected.push(tool);
             }

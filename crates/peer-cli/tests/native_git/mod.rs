@@ -10,7 +10,9 @@ fn success(output: &Output) {
 pub(super) fn next_reply(reply: String, request: &Value) -> String {
     if !matches!(
         reply.as_str(),
-        "FIXTURE_GIT_READ_SAVED_REFERENCE" | "FIXTURE_GIT_READ_LEGACY_PATH"
+        "FIXTURE_GIT_READ_SAVED_REFERENCE"
+            | "FIXTURE_GIT_READ_LEGACY_PATH"
+            | "FIXTURE_READ_SKILL_REFERENCE"
     ) {
         return reply;
     }
@@ -24,6 +26,14 @@ pub(super) fn next_reply(reply: String, request: &Value) -> String {
         .as_str()
         .unwrap();
     let view: Value = serde_json::from_str(content).unwrap();
+    if reply == "FIXTURE_READ_SKILL_REFERENCE" {
+        let reference = &view["nativeContentRef"];
+        let offset = reference["bytes"].as_u64().unwrap().saturating_sub(1024);
+        return reply_tool(
+            "read_tool_result",
+            json!({"reference":reference,"offset":offset,"length":1024}),
+        );
+    }
     if reply == "FIXTURE_GIT_READ_SAVED_REFERENCE" {
         reply_tool(
             "read_tool_result",

@@ -11,6 +11,7 @@ pub struct ConversationContext<'a> {
     pub effort: &'a str,
     pub registry_path: &'a str,
     pub servers: &'a [Value],
+    pub skill_names: &'a [&'a str],
     pub instructions: &'a instructions::ProjectInstructions,
 }
 pub fn assemble_conversation_context(
@@ -45,6 +46,7 @@ pub fn assemble_conversation_context(
         input.model,
     ));
     sections.extend(input.instructions.sections());
+    sections.extend(skill_catalog_section(input.skill_names));
     if let Some(section) = continuity::render(continuity) {
         sections.push(section);
     }
@@ -164,6 +166,7 @@ mod tests {
                 mode: c["mode"].as_str().unwrap().parse().unwrap(),
                 effort: c["effort"].as_str().unwrap(),
                 registry_path: c["registryPath"].as_str().unwrap(),
+                skill_names: &[],
                 servers: c["servers"].as_array().unwrap(),
                 instructions: &instructions::ProjectInstructions::default(),
             };

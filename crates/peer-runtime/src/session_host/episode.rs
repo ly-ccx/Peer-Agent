@@ -70,7 +70,7 @@ impl NativeSessionHost {
         let raw = self
             .goals
             .read_context(plan_id, &current.goal.source_revision)?;
-        for name in ["developer-settings.json", "skills", "permissions"] {
+        for name in ["developer-settings.json", "permissions"] {
             if self.home.join(name).exists() {
                 return Err(HostError("native_capability_inventory_unsupported"));
             }
@@ -83,23 +83,6 @@ impl NativeSessionHost {
         )
         .map_err(HostError)?;
         self.mcp_credentials = Some(mcp_credentials.clone());
-        let local_capabilities = ProviderRegistry::local_capabilities();
-        if origin["capabilityAdmission"]["required"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .any(|v| {
-                !v.as_str()
-                    .is_some_and(|id| local_capabilities.iter().any(|c| c == id))
-                    && !mcp_inventory
-                        .inventory
-                        .manifests
-                        .iter()
-                        .any(|m| m["capabilityId"] == *v)
-            })
-        {
-            return Err(HostError("native_capability_inventory_unsupported"));
-        }
         if !raw["deliveryBinding"].is_null()
             || !raw["requestedUserInput"].is_null()
             || !raw["runner"]["verificationContinuation"].is_null()
@@ -184,6 +167,9 @@ impl NativeSessionHost {
             .validate_saved_media(&projected)
             .map_err(|e| HostError(e.code))?;
         let workspace = self.read_workspace(plan_id, &now())?;
+        crate::providers::require_migrated_hooks(&self.home, &workspace)?;
+        let skills =
+            std::sync::Arc::new(peer_store::SkillCatalog::observe(&self.home, &workspace)?);
         // The registered Source owns prompt settings and workspace guidance.
         // Unported settings and Context inventories remain explicit blockers.
         let instructions = crate::system_context::instructions::ProjectInstructions::observe_host(
@@ -209,25 +195,29 @@ impl NativeSessionHost {
             .await
             .ok_or(HostError("native_recorder_unavailable"))?;
         let native_recorder = json!({"schemaVersion":1,"runtime":"peer-native","execution":facts["execution"],"recorder":recorder});
-        let mut providers = ProviderRegistry::with_mcp(
+        let mut providers = ProviderRegistry::with_extensions(
             &mcp_inventory,
             &native_recorder,
             &self.home,
             mcp_credentials.clone(),
+            skills.clone(),
         )?;
         let projection = if current.resource.read_only {
             providers.project_read_only()?
         } else {
             providers.project_for_mode(crate::providers::RuntimeMode::Goal, None)?
         };
-        if current.resource.read_only
-            && origin["capabilityAdmission"]["required"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .any(|v| !projection.has_capability(v.as_str().unwrap_or("")))
+        if origin["capabilityAdmission"]["required"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|v| !projection.has_capability(v.as_str().unwrap_or("")))
         {
-            return Err(HostError("read_only"));
+            return Err(HostError(if current.resource.read_only {
+                "read_only"
+            } else {
+                "native_capability_inventory_unsupported"
+            }));
         }
         if self.resources.has_claim(&current.resource)?
             && !self.resources.admitted(&current.resource, &epoch)?
@@ -270,6 +260,7 @@ impl NativeSessionHost {
         };
         let mut usage_accounting = RuntimeUsageAccounting::default();
         let definitions = projection.definitions();
+        let skill_names = projection.skill_names();
         let frame = super::cognition_host::GoalRequestFrame {
             mcp_revision: &mcp_inventory.source_revision,
             mcp_credentials: &mcp_credentials,
@@ -282,6 +273,8 @@ impl NativeSessionHost {
             billing: &billing_scope,
             model,
             tools: &definitions,
+            skills: &skills,
+            skill_names: &skill_names,
             owned: &cancellation,
             external: cancel,
         };
