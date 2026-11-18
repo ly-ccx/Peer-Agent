@@ -108,6 +108,7 @@ pub(crate) fn floor(value: &Value) -> Result<u64, FenceError> {
             12,
             13,
             peer_protocol::WORK_HOOK_SEMANTIC_FLOOR,
+            peer_protocol::WORK_SHELL_SEMANTIC_FLOOR,
         ]
         .contains(&reader)
         || value["minimumWriterVersion"].as_u64() != Some(reader)

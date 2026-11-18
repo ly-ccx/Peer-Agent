@@ -21,6 +21,7 @@ impl NativeSessionHost {
                 .map_err(HostError)?;
         let execution = json!(current.resource.execution);
         Ok(self.work_hooks_stopped(current)?
+            && self.work_shell_stopped(current)?
             && processes
                 .iter()
                 .filter(|p| p.execution == execution)

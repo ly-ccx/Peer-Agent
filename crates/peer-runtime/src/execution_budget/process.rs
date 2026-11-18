@@ -32,6 +32,7 @@ impl EpisodeBudget {
         call: &str,
         dispatch: &str,
         handle: &str,
+        background_grant: Option<&Value>,
         at: &str,
     ) -> Result<NativeOwnedProcess, HostError> {
         let owner: NativeProcessRecorder =
@@ -66,6 +67,9 @@ impl EpisodeBudget {
                 return Err(HostError("native_process_owner_unknown"));
             }
             row["nativeProcess"] = json!(process);
+            if let Some(grant) = background_grant {
+                row["nativeBackgroundShell"] = json!({"schemaVersion":1,"grant":grant});
+            }
             Ok(())
         })?;
         Ok(process)

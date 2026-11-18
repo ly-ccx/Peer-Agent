@@ -12,11 +12,12 @@ pub(super) struct ShellProvider {
     foreground: Option<foreground::ForegroundShell>,
 }
 impl ShellProvider {
-    pub(super) fn new(ordinary: bool) -> Self {
+    pub(super) fn new(mode: ShellHostMode) -> Self {
         Self {
-            background: ordinary,
+            background: matches!(mode, ShellHostMode::Conversation | ShellHostMode::Work),
             #[cfg(any(target_os = "macos", target_os = "linux"))]
-            foreground: ordinary.then(foreground::ForegroundShell::new),
+            foreground: (!matches!(mode, ShellHostMode::OneShot))
+                .then(foreground::ForegroundShell::new),
         }
     }
 }
@@ -99,6 +100,12 @@ impl CapabilityProvider for ShellProvider {
         if !cwd.is_dir() {
             return Err(HostError("invalid_cwd"));
         }
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        let cwd = if foreground.is_some() {
+            std::fs::canonicalize(cwd).map_err(|_| HostError("invalid_cwd"))?
+        } else {
+            cwd
+        };
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         let foreground = foreground
             .map(|actor| foreground::ShellScope::observe(&cwd).map(|scope| (actor, scope)))
@@ -548,6 +555,76 @@ pub(crate) fn group_absent(pid: u32) -> bool {
     })
 }
 
+pub(crate) fn shell_stop_outcome(
+    handle: &str,
+    args: &Value,
+    stopped: bool,
+    outcome: &EffectOutcome,
+) -> Result<EffectOutcome, HostError> {
+    if outcome.error == Some("execution_outcome_unknown") {
+        return Err(HostError("execution_outcome_unknown"));
+    }
+    let reason = if stopped {
+        args["reason"]
+            .as_str()
+            .map(str::trim)
+            .filter(|reason| !reason.is_empty())
+            .unwrap_or("cancelled")
+    } else {
+        "already_ended"
+    };
+    let status = match (outcome.status, outcome.output["timedOut"].as_bool()) {
+        ("success", _) => "completed",
+        (_, Some(true)) => "timeout",
+        (status, _) => status,
+    };
+    Ok(EffectOutcome {
+        status: "success",
+        output: json!({
+            "taskId":handle, "stopped":stopped, "status":status, "reason":reason,
+            "originalToolCallId":outcome.output["toolCallId"],
+            "artifactRef":format!("local-shell-artifact://{handle}"), "artifactRefs":outcome.artifacts,
+            "task":outcome.output,
+        }),
+        error: None,
+        artifacts: outcome.artifacts.clone(),
+        ended: true,
+        materialization: None,
+        not_dispatched: false,
+    })
+}
+
+pub(crate) fn background_start_fields(result: &Value) -> serde_json::Map<String, Value> {
+    [
+        "taskId",
+        "backgroundTaskId",
+        "toolCallId",
+        "status",
+        "startedAt",
+        "timeoutMs",
+        "artifactRef",
+        "artifactRefs",
+    ]
+    .into_iter()
+    .map(|key| (key.to_owned(), result["output"][key].clone()))
+    .collect()
+}
+
+pub(crate) fn restore_background_start_fields(
+    result: &mut Value,
+    startup: Option<serde_json::Map<String, Value>>,
+) -> Result<(), HostError> {
+    if let Some(startup) = startup
+        && result["output"]["nativeContentRef"].is_object()
+    {
+        result["output"]
+            .as_object_mut()
+            .ok_or(HostError("artifact_invalid"))?
+            .extend(startup);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -556,7 +633,7 @@ mod tests {
     async fn cancellation_at_durable_starting_is_cancelled_without_spawn_and_seals_its_artifact() {
         let root = tempfile::tempdir().unwrap();
         let workspace = tempfile::tempdir().unwrap();
-        let mut effect = ShellProvider::new(false)
+        let mut effect = ShellProvider::new(ShellHostMode::OneShot)
             .prepare(
                 "local.shell.exec",
                 json!({"command":"printf forbidden > should-not-exist"}),

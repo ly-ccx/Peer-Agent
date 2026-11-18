@@ -35,6 +35,12 @@ impl ToolAuthorization {
         }
     }
 
+    pub(super) fn not_dispatched(error: HostError) -> Self {
+        let mut result = Self::hook_block(error.0, None);
+        result.failure = Some(error);
+        result
+    }
+
     pub(super) fn denied_facts(&self, call: &str, capability: &str) -> Value {
         denied(
             call,

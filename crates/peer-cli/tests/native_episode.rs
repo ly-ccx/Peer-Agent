@@ -587,6 +587,81 @@ fn native_model_file_shell_result_evidence_and_pause_use_the_public_composition_
     assert_eq!(server.requests.lock().unwrap().len(), 4);
 }
 #[test]
+fn public_work_keeps_one_foreground_shell_under_the_original_claim() {
+    let server = Server::new(vec![
+        reply_tool(
+            "bash",
+            json!({
+                "command":"cd nested; export PEER_WORK_FIXTURE=retained; printf '%s' \"$$\" > first.pid; printf first"
+            }),
+        ),
+        reply_tool(
+            "bash",
+            json!({
+                "command":"printf '%s:%s' \"${PEER_WORK_FIXTURE:-empty}\" \"${PWD##*/}\"; printf '%s' \"$$\" > second.pid"
+            }),
+        ),
+        reply_text("Both claimed calls returned."),
+    ]);
+    let fixture = Fixture::new(&server);
+    let nested = fixture.root.path().join("workspace/nested");
+    std::fs::create_dir(&nested).unwrap();
+    let output = fixture.run();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{} {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["toolCalls"], 2);
+    assert_eq!(result["goalAcceptance"], "pending");
+    let history = fixture.history();
+    let tools: Vec<_> = history
+        .iter()
+        .flat_map(|message| message["segments"].as_array().into_iter().flatten())
+        .filter(|segment| segment["type"] == "tool-call")
+        .map(|segment| &segment["result"])
+        .collect();
+    assert_eq!(tools.len(), 2);
+    assert_eq!(tools[0]["output"]["stdout"], "first");
+    assert_eq!(tools[1]["output"]["stdout"], "retained:nested");
+    let first_evidence = &tools[0]["evidence"]["shellSession"];
+    let second_evidence = &tools[1]["evidence"]["shellSession"];
+    assert!(first_evidence["handleId"].is_string());
+    assert_eq!(first_evidence["handleId"], second_evidence["handleId"]);
+    assert_ne!(first_evidence["dispatchId"], second_evidence["dispatchId"]);
+    let budget = fixture.budget(|_| {});
+    assert_eq!(budget["attempts"], json!({}));
+    assert_eq!(budget["uncertainDispatches"], json!([]));
+    for evidence in [first_evidence, second_evidence] {
+        let dispatch = evidence["dispatchId"].as_str().unwrap();
+        assert_eq!(budget["dispatchReceipts"][dispatch]["outcome"], "resulted");
+    }
+    let manifest = get(fixture
+        .root
+        .path()
+        .join("project-runtime/w/coordination-v2/manifest.json"));
+    assert_eq!(
+        manifest["minimumReaderVersion"],
+        peer_protocol::WORK_SHELL_SEMANTIC_FLOOR
+    );
+    assert_eq!(
+        manifest["minimumWriterVersion"],
+        peer_protocol::WORK_SHELL_SEMANTIC_FLOOR
+    );
+    let first = std::fs::read_to_string(nested.join("first.pid")).unwrap();
+    let second = std::fs::read_to_string(nested.join("second.pid")).unwrap();
+    assert_eq!(first, second);
+    let pid = rustix::process::Pid::from_raw(first.parse().unwrap()).unwrap();
+    assert_eq!(
+        rustix::process::test_kill_process_group(pid),
+        Err(rustix::io::Errno::SRCH)
+    );
+    assert_eq!(server.requests.lock().unwrap().len(), 3);
+}
+#[test]
 fn four_native_wires_execute_real_tools_and_preserve_only_live_provider_continuation() {
     let fixtures: Value = serde_json::from_str(include_str!(
         "../../../packages/protocol/contracts/native-cli/model-streams.json"
@@ -1037,29 +1112,44 @@ fn truncated_stream_cannot_dispatch_a_partial_tool_and_next_task_can_run() {
     assert_eq!(receipt["lastRequestUsage"]["requestIndex"], 1);
 }
 #[test]
-fn foreground_timeout_is_reaped_and_persisted_as_failed() {
-    let server = Server::new(vec![
-        reply_tool(
-            "bash",
-            json!({"command":"exec /bin/sleep 10","timeoutMs":20}),
-        ),
-        reply_text("Timed out, not verified."),
-    ]);
+fn foreground_timeout_reaps_the_claimed_shell_and_retains_its_unknown_effect() {
+    let server = Server::new(vec![reply_tool(
+        "bash",
+        json!({"command":"printf '%s' \"$$\" > interpreter.pid; printf before-timeout; /bin/sleep 10","timeoutMs":450}),
+    )]);
     let f = Fixture::new(&server);
     let r = f.run();
     assert_eq!(
         r.status.code(),
-        Some(0),
+        Some(1),
         "{}",
         String::from_utf8_lossy(&r.stderr)
     );
-    let h = f.history();
-    assert_eq!(h[1]["segments"][0]["result"]["status"], "failed");
+    let history = f.history();
+    let result = &history[1]["segments"][0]["result"];
+    assert_eq!(result["status"], "failed");
+    assert_eq!(result["error"]["code"], "execution_outcome_unknown");
+    assert_eq!(result["output"]["timedOut"], true);
+    assert_eq!(result["output"]["stdout"], "before-timeout");
+    let pid = std::fs::read_to_string(f.root.path().join("workspace/interpreter.pid"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    let pid = rustix::process::Pid::from_raw(pid).unwrap();
     assert_eq!(
-        h[1]["segments"][0]["result"]["error"]["code"],
-        "shell_timeout"
+        rustix::process::test_kill_process_group(pid),
+        Err(rustix::io::Errno::SRCH)
     );
-    assert_eq!(h[1]["segments"][0]["result"]["output"]["timedOut"], true);
+    let budget = f.budget(|_| {});
+    assert_eq!(
+        budget["uncertainDispatches"][0]["toolCallId"],
+        result["toolCallId"]
+    );
+    assert_eq!(
+        budget["uncertainDispatches"][0]["nativeShellGrant"]["grantId"],
+        result["evidence"]["permissionGrantId"]
+    );
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
 }
 
 #[test]
@@ -2582,56 +2672,497 @@ fn expired_pty_permission_persists_no_dispatch_and_late_yes_cannot_start_another
     );
 }
 
-#[test]
-fn actual_signal_cancels_owned_shell_and_later_task_is_admitted() {
-    let server = Server::new(vec![
-        reply_tool(
-            "bash",
-            json!({"command":"printf started; exec /bin/sleep 10","timeoutMs":15000}),
-        ),
-        reply_text("later"),
-    ]);
-    let f = Fixture::new(&server);
-    let mut child = f.command("exec", "p").spawn().unwrap();
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while Instant::now() < deadline
-        && std::fs::read_dir(f.root.path().join("shell-artifacts")).is_err()
-    {
-        thread::sleep(Duration::from_millis(10))
+fn observed_work_shell_pid(fixture: &Fixture, child: &mut OwnedChild) -> rustix::process::Pid {
+    let deadline = Instant::now() + Duration::from_secs(8);
+    loop {
+        if let Ok(raw) =
+            std::fs::read_to_string(fixture.root.path().join("workspace/interpreter.pid"))
+            && let Ok(id) = raw.parse()
+            && let Some(pid) = rustix::process::Pid::from_raw(id)
+        {
+            assert!(rustix::process::test_kill_process_group(pid).is_ok());
+            return pid;
+        }
+        assert!(child.child().try_wait().unwrap().is_none() && Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(10));
     }
-    assert!(f.root.path().join("shell-artifacts").is_dir());
-    thread::sleep(Duration::from_millis(50));
+}
+
+#[test]
+fn actual_signal_drains_the_owned_work_shell_without_clearing_unknown() {
+    let server = Server::new(vec![reply_tool(
+        "bash",
+        json!({"command":"printf '%s' \"$$\" > pid.partial && /bin/mv pid.partial interpreter.pid; /bin/sleep 10","timeoutMs":15000}),
+    )]);
+    let f = Fixture::new(&server);
+    let mut child = OwnedChild(Some(f.command("exec", "p").spawn().unwrap()));
+    let pid = observed_work_shell_pid(&f, &mut child);
     rustix::process::kill_process(
-        rustix::process::Pid::from_raw(child.id() as i32).unwrap(),
+        rustix::process::Pid::from_raw(child.child().id() as i32).unwrap(),
         rustix::process::Signal::TERM,
     )
     .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(6);
-    while child.try_wait().unwrap().is_none() {
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while child.child().try_wait().unwrap().is_none() {
         assert!(Instant::now() < deadline, "native process did not stop");
-        thread::sleep(Duration::from_millis(10))
+        thread::sleep(Duration::from_millis(10));
     }
-    let r = child.wait_with_output().unwrap();
+    let r = child.output();
     assert_eq!(
         r.status.code(),
-        Some(4),
+        Some(1),
         "{}",
         String::from_utf8_lossy(&r.stderr)
     );
-    let h = f.history();
-    assert_eq!(h[1]["segments"][0]["result"]["status"], "cancelled");
     assert_eq!(
-        get(f.root.path().join("goal-plans/p.json"))["status"],
-        "paused"
+        rustix::process::test_kill_process_group(pid),
+        Err(rustix::io::Errno::SRCH)
     );
-    f.seed("p2", "c2", "s2", "work2", "epoch2");
-    let r = f.command("exec", "p2").output().unwrap();
+    let budget = f.budget(|_| {});
+    let pending = &budget["uncertainDispatches"][0];
+    assert!(pending["nativeShellGrant"]["grantId"].is_string());
+    assert_eq!(ledger_rows(&f)[0]["totalTokens"], 16);
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn public_work_background_shell_releases_only_the_selected_task() {
+    let workspace = Arc::new(Mutex::new(None::<std::path::PathBuf>));
+    let observed = workspace.clone();
+    let mut first = String::new();
+    let mut turn = 0;
+    let server = Server::scripted(
+        move |request| {
+            turn += 1;
+            let last_result = || {
+                let content = request["messages"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .rev()
+                    .find(|message| message["role"] == "tool")
+                    .unwrap()["content"]
+                    .as_str()
+                    .unwrap();
+                let wire: Value = serde_json::from_str(content).unwrap();
+                wire["output"].clone()
+            };
+            let pid = |file: &str| {
+                let path = observed.lock().unwrap().as_ref().unwrap().join(file);
+                let deadline = Instant::now() + Duration::from_secs(3);
+                loop {
+                    if let Ok(raw) = std::fs::read_to_string(&path)
+                        && let Ok(id) = raw.parse()
+                        && let Some(pid) = rustix::process::Pid::from_raw(id)
+                    {
+                        break pid;
+                    }
+                    assert!(Instant::now() < deadline, "missing process marker {file}");
+                    thread::sleep(Duration::from_millis(10));
+                }
+            };
+            match turn {
+                1 => reply_tool(
+                    "bash",
+                    json!({"command":"printf '%s' \"$$\" > first.pending; /bin/mv first.pending first.pid; exec /bin/sleep 20", "background":true}),
+                ),
+                2 => {
+                    let output = last_result();
+                    assert_eq!(output["status"], "running");
+                    first = output["taskId"].as_str().unwrap().to_owned();
+                    assert!(peer_protocol::shell_task_id_valid(&first));
+                    assert!(rustix::process::test_kill_process_group(pid("first.pid")).is_ok());
+                    reply_tool(
+                        "bash",
+                        json!({"command":"printf '%s' \"$$\" > second.pending; /bin/mv second.pending second.pid; exec /bin/sleep 20", "background":true}),
+                    )
+                }
+                3 => {
+                    let output = last_result();
+                    assert_eq!(output["status"], "running");
+                    assert_ne!(output["taskId"], first);
+                    assert!(rustix::process::test_kill_process_group(pid("second.pid")).is_ok());
+                    reply_tool(
+                        "shell_stop",
+                        json!({"taskId":"shell_12345678-1234-4abc-8def-123456789012"}),
+                    )
+                }
+                4 => {
+                    let error = request["messages"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .rev()
+                        .find(|message| message["role"] == "tool")
+                        .unwrap()["content"]
+                        .as_str()
+                        .unwrap();
+                    assert!(error.contains("shell_task_not_found"), "{error}");
+                    assert!(rustix::process::test_kill_process_group(pid("first.pid")).is_ok());
+                    assert!(rustix::process::test_kill_process_group(pid("second.pid")).is_ok());
+                    reply_tool(
+                        "shell_stop",
+                        json!({"taskId":first, "reason":"selected job"}),
+                    )
+                }
+                5 => {
+                    let output = last_result();
+                    assert_eq!(output["taskId"], first);
+                    assert_eq!(output["stopped"], true);
+                    assert_eq!(
+                        rustix::process::test_kill_process_group(pid("first.pid")),
+                        Err(rustix::io::Errno::SRCH)
+                    );
+                    assert!(rustix::process::test_kill_process_group(pid("second.pid")).is_ok());
+                    reply_tool("shell_stop", json!({"taskId":first}))
+                }
+                6 => {
+                    let output = last_result();
+                    assert_eq!(output["stopped"], false);
+                    assert_eq!(output["reason"], "already_ended");
+                    reply_text("Observed original task stop.")
+                }
+                _ => panic!("unexpected extra request"),
+            }
+        },
+        false,
+        false,
+        vec![],
+    );
+    let f = Fixture::new(&server);
+    let work = f.root.path().join("workspace");
+    *workspace.lock().unwrap() = Some(work.clone());
+    let output = f.run();
     assert_eq!(
-        r.status.code(),
+        output.status.code(),
         Some(0),
         "{}",
-        String::from_utf8_lossy(&r.stderr)
+        String::from_utf8_lossy(&output.stderr)
     );
+    let second_pid = std::fs::read_to_string(work.join("second.pid"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    let second_pid = rustix::process::Pid::from_raw(second_pid).unwrap();
+    assert_eq!(
+        rustix::process::test_kill_process_group(second_pid),
+        Err(rustix::io::Errno::SRCH)
+    );
+    let budget = f.budget(|_| {});
+    assert_eq!(budget["uncertainDispatches"], json!([]));
+    let receipts = budget["dispatchReceipts"].as_object().unwrap();
+    assert_eq!(receipts.len(), 5);
+    assert_eq!(
+        receipts
+            .values()
+            .filter(|row| row["outcome"] == "not_dispatched")
+            .count(),
+        1
+    );
+    assert_eq!(server.requests.lock().unwrap().len(), 6);
+}
+
+#[test]
+fn public_work_background_shell_reports_timeout_from_the_original_worker() {
+    let work = Arc::new(Mutex::new(None::<std::path::PathBuf>));
+    let observed = work.clone();
+    let mut turns = 0;
+    let server = Server::scripted(
+        move |request| {
+            turns += 1;
+            if turns == 1 {
+                return reply_tool(
+                    "bash",
+                    json!({"command":"printf '%s' \"$$\" > pid.partial && /bin/mv pid.partial timed.pid; exec /bin/sleep 20","timeoutMs":1000,"background":true}),
+                );
+            }
+            let last = request["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .rev()
+                .find(|message| message["role"] == "tool")
+                .unwrap();
+            let wire: Value = serde_json::from_str(last["content"].as_str().unwrap()).unwrap();
+            let output = &wire["output"];
+            if turns == 2 {
+                assert_eq!(output["status"], "running");
+                let marker = observed.lock().unwrap().as_ref().unwrap().join("timed.pid");
+                let deadline = Instant::now() + Duration::from_secs(5);
+                loop {
+                    if let Ok(raw) = std::fs::read_to_string(&marker)
+                        && let Ok(id) = raw.parse()
+                        && let Some(pid) = rustix::process::Pid::from_raw(id)
+                        && rustix::process::test_kill_process_group(pid)
+                            == Err(rustix::io::Errno::SRCH)
+                    {
+                        break;
+                    }
+                    assert!(Instant::now() < deadline, "timed-out group remained live");
+                    thread::sleep(Duration::from_millis(10));
+                }
+                return reply_tool("shell_stop", json!({"taskId":output["taskId"]}));
+            }
+            assert_eq!(turns, 3);
+            assert_eq!(output["status"], "timeout");
+            assert_eq!(output["task"]["timedOut"], true);
+            assert_eq!(output["reason"], "already_ended");
+            assert_eq!(output["stopped"], false);
+            reply_text("Observed timeout.")
+        },
+        false,
+        false,
+        vec![],
+    );
+    let f = Fixture::new(&server);
+    *work.lock().unwrap() = Some(f.root.path().join("workspace"));
+    let output = f.run();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let budget = f.budget(|_| {});
+    assert_eq!(budget["uncertainDispatches"], json!([]));
+    assert_eq!(budget["dispatchReceipts"].as_object().unwrap().len(), 2);
+    assert_eq!(server.requests.lock().unwrap().len(), 3);
+}
+
+#[test]
+fn work_shell_authority_revocation_drains_the_idle_interpreter_during_model_wait() {
+    work_shell_revoked_during_model_wait(false);
+}
+
+#[test]
+fn work_background_shell_authority_revocation_drains_the_running_process_during_model_wait() {
+    work_shell_revoked_during_model_wait(true);
+}
+
+fn work_shell_revoked_during_model_wait(background: bool) {
+    let (request_seen, next_request) = std::sync::mpsc::channel();
+    let (release, wait_for_release) = std::sync::mpsc::channel();
+    let mut turns = 0;
+    let server = Server::scripted(
+        move |_| {
+            turns += 1;
+            if turns == 1 {
+                let command = if background {
+                    "printf '%s' \"$$\" > pid.partial && /bin/mv pid.partial interpreter.pid; exec /bin/sleep 25"
+                } else {
+                    "printf '%s' \"$$\" > interpreter.pid; printf first"
+                };
+                reply_tool("bash", json!({"command":command,"background":background}))
+            } else if turns == 2 {
+                request_seen.send(()).unwrap();
+                let _ = wait_for_release.recv_timeout(Duration::from_secs(12));
+                reply_tool("bash", json!({"command":"printf forbidden > forbidden"}))
+            } else {
+                reply_text("Unexpected continuation.")
+            }
+        },
+        false,
+        false,
+        vec![],
+    );
+    let f = Fixture::new(&server);
+    let mut child = OwnedChild(Some(f.command("exec", "p").spawn().unwrap()));
+    next_request.recv_timeout(Duration::from_secs(10)).unwrap();
+    let pid = observed_work_shell_pid(&f, &mut child);
+    let policy = PolicyStore::new(f.root.path());
+    let current = policy.read_existing("w").unwrap();
+    policy
+        .update_existing(
+            "w",
+            current.revision,
+            peer_protocol::LocalAccessLevel::AskBeforeLocal,
+            AT,
+        )
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let stopped = loop {
+        let stopped = rustix::process::test_kill_process_group(pid) == Err(rustix::io::Errno::SRCH);
+        if stopped || Instant::now() >= deadline {
+            break stopped;
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+    if !stopped {
+        rustix::process::kill_process(
+            rustix::process::Pid::from_raw(child.child().id() as i32).unwrap(),
+            rustix::process::Signal::TERM,
+        )
+        .unwrap();
+    }
+    release.send(()).unwrap();
+    let exit_deadline = Instant::now() + Duration::from_secs(8);
+    while child.child().try_wait().unwrap().is_none() {
+        assert!(
+            Instant::now() < exit_deadline,
+            "revoked Work did not finish"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    let output = child.output();
+    assert!(
+        stopped,
+        "the idle Shell remained live while the second model request waited"
+    );
+    assert!(!output.status.success());
+    assert!(!f.root.path().join("workspace/forbidden").exists());
+    let budget = f.budget(|_| {});
+    assert_eq!(budget["uncertainDispatches"], json!([]));
+    assert_eq!(budget["dispatchReceipts"].as_object().unwrap().len(), 1);
+}
+
+#[test]
+fn public_work_shell_recovery_drains_a_real_orphan_and_preserves_the_original_grant() {
+    let server = Server::new(vec![reply_tool(
+        "bash",
+        json!({"command":"printf '%s' \"$$\" > pid.partial && /bin/mv pid.partial interpreter.pid; /bin/sleep 30","timeoutMs":45000}),
+    )]);
+    let f = Fixture::new(&server);
+    let mut child = OwnedChild(Some(f.command("exec", "p").spawn().unwrap()));
+    let pid = observed_work_shell_pid(&f, &mut child);
+    child.child().kill().unwrap();
+    let r = child.output();
+    assert!(!r.status.success());
+    f.age_dead_lease();
+    let before = f.budget(|_| {});
+    let attempt = before["attempts"]
+        .as_object()
+        .unwrap()
+        .values()
+        .next()
+        .unwrap();
+    let binding = &attempt["nativeShellSession"]["command"];
+    let original = attempt["pendingTools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["dispatchId"] == binding["dispatchId"])
+        .unwrap();
+    assert_eq!(
+        attempt["nativeShellSession"]["process"]["child"]["pid"],
+        pid.as_raw_nonzero().get()
+    );
+    assert!(original["nativeShellGrant"]["grantId"].is_string());
+    let recovered = f.command("recover", "p").output().unwrap();
+    // Clean the fixture-owned process if a regression leaves it live.
+    let absent = rustix::process::test_kill_process_group(pid) == Err(rustix::io::Errno::SRCH);
+    if !absent {
+        let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+    }
+    assert_eq!(
+        recovered.status.code(),
+        Some(0),
+        "{} {}",
+        String::from_utf8_lossy(&recovered.stdout),
+        String::from_utf8_lossy(&recovered.stderr)
+    );
+    assert!(absent);
+    let budget = f.budget(|_| {});
+    let uncertain = &budget["uncertainDispatches"][0];
+    assert_eq!(uncertain["toolCallId"], original["toolCallId"]);
+    assert_eq!(uncertain["nativeShellGrant"], original["nativeShellGrant"]);
+    let facts: Value = serde_json::from_slice(&recovered.stdout).unwrap();
+    assert_eq!(facts["facts"]["control"]["phase"], "reconciling");
+    assert_eq!(
+        facts["facts"]["control"]["stopReceipt"]["unknownCalls"],
+        json!([original["toolCallId"]])
+    );
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn public_work_background_shell_recovery_drains_a_real_orphan_without_replaying_startup() {
+    let (request_seen, next_request) = std::sync::mpsc::channel();
+    let (release, wait_for_release) = std::sync::mpsc::channel();
+    let mut turns = 0;
+    let server = Server::scripted(
+        move |_| {
+            turns += 1;
+            if turns == 1 {
+                reply_tool(
+                    "bash",
+                    json!({"command":"printf '%s' \"$$\" > pid.partial && /bin/mv pid.partial interpreter.pid; exec /bin/sleep 30","timeoutMs":45000,"background":true}),
+                )
+            } else {
+                request_seen.send(()).unwrap();
+                let _ = wait_for_release.recv_timeout(Duration::from_secs(12));
+                reply_text("Released the interrupted response.")
+            }
+        },
+        false,
+        false,
+        vec![],
+    );
+    let f = Fixture::new(&server);
+    let mut child = OwnedChild(Some(f.command("exec", "p").spawn().unwrap()));
+    next_request.recv_timeout(Duration::from_secs(12)).unwrap();
+    let pid = observed_work_shell_pid(&f, &mut child);
+    child.child().kill().unwrap();
+    let output = child.output();
+    assert!(!output.status.success());
+    release.send(()).unwrap();
+    f.age_dead_lease();
+    let before = f.budget(|_| {});
+    let dispatch = before["attempts"]
+        .as_object()
+        .unwrap()
+        .values()
+        .next()
+        .unwrap()["pendingTools"][0]
+        .clone();
+    let original = &dispatch["nativeBackgroundShell"];
+    assert!(original["grant"]["grantId"].is_string());
+    assert_eq!(
+        dispatch["nativeProcess"]["child"]["pid"],
+        pid.as_raw_nonzero().get()
+    );
+    assert!(original["startup"]["evidenceId"].is_string());
+    let paired_result = || {
+        f.history()
+            .into_iter()
+            .find(|message| {
+                message["segments"][0]["result"]["toolCallId"] == dispatch["toolCallId"]
+            })
+            .expect("paired startup result")
+    };
+    let pair = paired_result();
+    assert_eq!(pair["permissionGrants"][0], original["grant"]);
+    assert_eq!(
+        pair["segments"][0]["result"]["evidence"]["evidenceId"],
+        original["startup"]["evidenceId"]
+    );
+
+    let recovered = f.command("recover", "p").output().unwrap();
+    let absent = rustix::process::test_kill_process_group(pid) == Err(rustix::io::Errno::SRCH);
+    if !absent {
+        let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+    }
+    assert!(
+        recovered.status.success(),
+        "{} {}",
+        String::from_utf8_lossy(&recovered.stdout),
+        String::from_utf8_lossy(&recovered.stderr)
+    );
+    assert!(absent);
+    let budget = f.budget(|_| {});
+    let unknown = &budget["uncertainDispatches"][0];
+    assert_eq!(unknown["toolCallId"], dispatch["toolCallId"]);
+    assert_eq!(unknown["nativeBackgroundShell"], *original);
+    assert_eq!(
+        unknown["nativeProcess"]["stopObservation"],
+        "owner_dead_group_absent"
+    );
+    assert_eq!(paired_result(), pair);
+    let facts: Value = serde_json::from_slice(&recovered.stdout).unwrap();
+    assert_eq!(facts["facts"]["control"]["phase"], "reconciling");
+    assert_eq!(
+        facts["facts"]["control"]["stopReceipt"]["unknownCalls"],
+        json!([dispatch["toolCallId"]])
+    );
+    assert_eq!(server.requests.lock().unwrap().len(), 2);
 }
 
 #[cfg(feature = "test-fixtures")]

@@ -239,6 +239,9 @@ impl NativeSessionHost {
             .handle_observations(&fresh.resource.execution)
             .map_err(|_| HostError("execution_stop_unconfirmed"))?
         {
+            if state == "ended" {
+                self.mark_owned_work_shell_ended(&fresh, &id, &call)?;
+            }
             self.resources.mark_handle(
                 &fresh.resource,
                 &json!({"handleId":id,"toolCallId":call,"state":state,"completedAt":now}),
@@ -250,6 +253,7 @@ impl NativeSessionHost {
                     .map_err(|_| HostError("execution_stop_unconfirmed"))?;
             }
         }
+        let fresh = self.current(plan_id, now)?;
         let claims = self.resources.claims_for(&fresh.resource)?;
         if !self.command_processes_stopped(&fresh)? {
             return Err(HostError("native_execution_stop_unproven"));

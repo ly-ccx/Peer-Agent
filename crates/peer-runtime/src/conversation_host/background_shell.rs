@@ -205,36 +205,6 @@ impl Host<'_> {
             missing.output = json!({"taskId":handle, "found":false, "stopped":false});
             return Ok(missing);
         };
-        if outcome.error == Some("execution_outcome_unknown") {
-            return Err(HostError("execution_outcome_unknown"));
-        }
-        let reason = if stopped {
-            args["reason"]
-                .as_str()
-                .map(str::trim)
-                .filter(|reason| !reason.is_empty())
-                .unwrap_or("cancelled")
-        } else {
-            "already_ended"
-        };
-        let status = match (outcome.status, outcome.output["timedOut"].as_bool()) {
-            ("success", _) => "completed",
-            (_, Some(true)) => "timeout",
-            (status, _) => status,
-        };
-        Ok(EffectOutcome {
-            status: "success",
-            output: json!({
-                "taskId":handle, "stopped":stopped, "status":status, "reason":reason,
-                "originalToolCallId":outcome.output["toolCallId"],
-                "artifactRef":format!("local-shell-artifact://{handle}"), "artifactRefs":outcome.artifacts,
-                "task":outcome.output,
-            }),
-            error: None,
-            artifacts: outcome.artifacts.clone(),
-            ended: true,
-            materialization: None,
-            not_dispatched: false,
-        })
+        crate::providers::shell_stop_outcome(handle, args, stopped, outcome)
     }
 }

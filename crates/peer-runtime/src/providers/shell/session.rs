@@ -28,6 +28,7 @@ use tokio::{
 const CONTROL: u8 = 3;
 const OUTPUT_FENCE: u8 = 4;
 const ERROR_FENCE: u8 = 5;
+const ADMISSION_LIMIT: Duration = Duration::from_secs(5);
 const FIFO_READ_RECHECK: Duration = Duration::from_millis(100);
 const MAX_DRAINING_OUTPUTS: usize = 32;
 
@@ -155,7 +156,7 @@ impl ShellSession {
             CommandPipes::new().map_err(|_| before_write("shell_session_output_unavailable"))?;
         let (stdout, stderr) = pipes.paths();
         let frame = frame::CommandFrame::new(call.command, stdout, stderr).map_err(before_write)?;
-        let deadline = tokio::time::Instant::now() + call.timeout;
+        let deadline = tokio::time::Instant::now() + ADMISSION_LIMIT;
         let admitted_cwd = if call.change_cwd && original != call.cwd {
             let change = frame::CommandFrame::change_directory(call.cwd).map_err(before_write)?;
             authorize(
@@ -195,7 +196,7 @@ impl ShellSession {
             return Err(before_write(if call.cancel.is_cancelled() {
                 "CANCELLED"
             } else {
-                "shell_timeout"
+                "shell_session_admission_timeout"
             }));
         }
         pipes
@@ -203,6 +204,7 @@ impl ShellSession {
             .map_err(|_| before_write("shell_session_output_changed"))?;
         let output = call.output.claim().map_err(before_write)?;
         let mut capture = output.capture(pipes, frame.marker.clone(), &mut self.drains);
+        let deadline = tokio::time::Instant::now() + call.timeout;
         let result = self
             .run_frame(frame, Some(&mut capture), call.cancel, deadline)
             .await;
@@ -291,6 +293,6 @@ async fn authorize<F: Future<Output = Result<(), &'static str>>>(
         biased;
         _ = cancel.cancelled() => Err("CANCELLED"),
         result = tokio::time::timeout_at(deadline, admit(point)) =>
-            result.unwrap_or(Err("shell_timeout")),
+            result.unwrap_or(Err("shell_session_admission_timeout")),
     }
 }

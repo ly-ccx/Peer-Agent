@@ -5,8 +5,11 @@ use crate::{
 };
 use peer_protocol::{ExecutionResourceScope, javascript_json_digest};
 use serde_json::{Value, json};
+mod background_shell;
 mod hooks;
 mod process;
+mod shell;
+#[derive(Clone)]
 pub(crate) struct EpisodeBudget {
     pub work: String,
     pub attempt: String,
@@ -131,19 +134,7 @@ impl EpisodeBudget {
         }
         let b = &work["budget"];
         Self::validate_existing(b)?;
-        let relevant = |r: &Value| r["planId"].as_str().is_none_or(|p| p == self.plan);
-        if b["uncertainDispatches"]
-            .as_array()
-            .is_some_and(|a| a.iter().any(relevant))
-            || b["attempts"]
-                .as_object()
-                .into_iter()
-                .flat_map(|m| m.values())
-                .filter(|a| relevant(a))
-                .any(|a| a["pendingTools"].as_array().is_some_and(|p| !p.is_empty()))
-        {
-            return Err(HostError("execution_outcome_unknown"));
-        }
+        self.check_pending(b, &host.background_dispatches(self))?;
         for (m, c) in [
             ("modelRequests", "maxModelRequests"),
             ("tokens", "maxTokens"),
@@ -154,9 +145,9 @@ impl EpisodeBudget {
         Ok(())
     }
     pub fn request(&self, host: &mut NativeSessionHost, now: &str) -> Result<(), HostError> {
+        let background = host.background_dispatches(self);
         self.change(host,now,true,|b|{
-            let relevant=|r:&Value|r["planId"].as_str().is_none_or(|p|p==self.plan);
-            if b["uncertainDispatches"].as_array().is_some_and(|a|a.iter().any(relevant)) || b["attempts"].as_object().into_iter().flat_map(|m|m.values()).filter(|a|relevant(a)).any(|a|a["pendingTools"].as_array().is_some_and(|p|!p.is_empty())){return Err(HostError("execution_outcome_unknown"))}
+            self.check_pending(b, &background)?;
             for (m,c) in [("modelRequests","maxModelRequests"),("tokens","maxTokens"),("costUsd","maxCostUsd")] {Self::boundary(b,m,c)?}
             let n=b["modelRequests"].as_u64().unwrap_or(0).checked_add(1).filter(|n|*n<=9_007_199_254_740_991).ok_or(HostError("work_budget_limited"))?;b["modelRequests"]=json!(n);
             if !b["attempts"].is_object(){b["attempts"]=json!({})}
@@ -249,8 +240,10 @@ impl EpisodeBudget {
             return Ok(());
         }
         self.change(host,now,false,|b|{
-            let a=&mut b["attempts"][&self.attempt];let pending=a["pendingTools"].as_array_mut().ok_or(HostError("work_budget_invalid"))?;
-            if !pending.iter().any(|r|r["toolCallId"]==call && r["dispatchId"]==dispatch){return Err(HostError("work_budget_invalid"))}
+            let a=&mut b["attempts"][&self.attempt];
+            Self::settle_shell_command(a, call, dispatch, result)?;
+            let pending=a["pendingTools"].as_array_mut().ok_or(HostError("work_budget_invalid"))?;
+            if !pending.iter().any(|r|r["toolCallId"]==call && r["dispatchId"]==dispatch && r["nativeBackgroundShell"]["startup"].is_null()){return Err(HostError("work_budget_invalid"))}
             pending.retain(|r|r["toolCallId"]!=call);
             if !a["settledTools"].is_array(){a["settledTools"]=json!([])}
             let refs=peer_protocol::collect_tool_result_evidence_refs(Some(call),result).map_err(|_|HostError("work_budget_invalid"))?;

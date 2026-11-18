@@ -283,7 +283,7 @@ impl NativeConversationRuntime {
             &self.home,
             credentials.clone(),
             skills.clone(),
-            true,
+            crate::providers::ShellHostMode::Conversation,
         )?;
         let projection = providers.project_for_mode(options.mode, options.allowlist)?;
         let pipeline = if selected.is_some() {

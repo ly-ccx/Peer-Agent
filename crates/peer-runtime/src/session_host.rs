@@ -13,6 +13,7 @@ use peer_store::{
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 mod authority;
+mod background_shell;
 mod billing;
 mod cognition_host;
 mod command_process;
@@ -24,6 +25,7 @@ mod tool_authorization;
 mod tool_result;
 pub(crate) use crate::capability::now as episode_time;
 pub use episode::{EpisodeOutcome, PermissionInput};
+mod foreground_shell;
 mod hook_recovery;
 mod recovery;
 mod stop;
@@ -41,6 +43,8 @@ pub struct NativeSessionHost {
     pub live: ExecutionRegistry,
     permissions: std::sync::Arc<tokio::sync::Semaphore>,
     mcp_credentials: Option<crate::mcp_oauth::CredentialEpoch>,
+    shell_watch: Option<foreground_shell::WorkShellWatch>,
+    background_shells: background_shell::WorkBackgroundShells,
 }
 pub use crate::capability::{
     CapabilityError as HostError, ProviderPermission, ShellRisk as HostShellRisk,
@@ -68,6 +72,8 @@ impl NativeSessionHost {
             live,
             permissions: std::sync::Arc::new(tokio::sync::Semaphore::new(128)),
             mcp_credentials: None,
+            shell_watch: None,
+            background_shells: Default::default(),
         })
     }
     fn current(&self, plan_id: &str, now: &str) -> Result<Current, HostError> {

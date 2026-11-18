@@ -28,7 +28,7 @@ pub struct HostCallIdentity<'a> {
     /// Derived by the actual Shell Provider, never a model-declared risk label.
     pub shell_risk: Option<HostShellRisk>,
 }
-#[derive(PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 struct Authority {
     plan_id: String,
     session_id: String,
@@ -41,7 +41,36 @@ struct Authority {
     shell_risk: Option<HostShellRisk>,
     digest: String,
     policy: BotAccessPolicy,
+    ownership_digest: String,
     source_digest: String,
+}
+
+pub(super) struct ShellLifetimeAuthority(Authority);
+
+impl Authority {
+    fn identity(&self) -> HostCallIdentity<'_> {
+        HostCallIdentity {
+            plan_id: &self.plan_id,
+            session_id: &self.session_id,
+            conversation_id: &self.conversation,
+            tool_call_id: &self.tool_call,
+            stream_id: &self.stream,
+            capability_id: &self.capability,
+            permission: self.permission,
+            role: self.role,
+            shell_risk: self.shell_risk,
+        }
+    }
+}
+
+impl ShellLifetimeAuthority {
+    pub(super) fn check(&self, host: &NativeSessionHost, now: &str) -> Result<(), HostError> {
+        let fresh = host.authority(&self.0.identity(), &Value::Null, now)?;
+        if fresh.policy != self.0.policy || fresh.ownership_digest != self.0.ownership_digest {
+            return Err(HostError("permission_authority_changed"));
+        }
+        Ok(())
+    }
 }
 pub struct PendingPermission {
     authority: Authority,
@@ -100,18 +129,10 @@ impl HostPermissionGrant {
         &self.authority.conversation
     }
     pub(super) fn identity(&self) -> HostCallIdentity<'_> {
-        let a = &self.authority;
-        HostCallIdentity {
-            plan_id: &a.plan_id,
-            session_id: &a.session_id,
-            conversation_id: &a.conversation,
-            tool_call_id: &a.tool_call,
-            stream_id: &a.stream,
-            capability_id: &a.capability,
-            permission: a.permission,
-            role: a.role,
-            shell_risk: a.shell_risk,
-        }
+        self.authority.identity()
+    }
+    pub(super) fn shell_lifetime_authority(&self) -> ShellLifetimeAuthority {
+        ShellLifetimeAuthority(self.authority.clone())
     }
     pub(super) fn same_authority(&self, other: &Self) -> bool {
         self.authority == other.authority
@@ -156,10 +177,7 @@ impl NativeSessionHost {
         let kind = match call.permission {
             ProviderPermission::Read => "",
             ProviderPermission::FileWrite => "file-write",
-            ProviderPermission::Shell => "shell",
-            ProviderPermission::ShellStop => {
-                return Err(HostError("native_background_shell_unsupported"));
-            }
+            ProviderPermission::Shell | ProviderPermission::ShellStop => "shell",
             ProviderPermission::Mcp => "mcp-tool",
         };
         let mode = crate::access_policy::evaluate_project_agent_turn(
@@ -234,6 +252,11 @@ impl NativeSessionHost {
         if call.capability_id.starts_with("local.interactive.") {
             return Err(HostError("interactive_role_denied"));
         }
+        if call.permission == ProviderPermission::ShellStop
+            && !self.work_background_shell_owned(&current.resource, &args["taskId"], call.stream_id)
+        {
+            return Err(HostError("shell_task_not_found"));
+        }
         let lease = self.journal.lease().record();
         let epoch = format!("{}:{}", lease.host_id, lease.acquired_at);
         if !self.resources.admitted(&current.resource, &epoch)? {
@@ -245,9 +268,10 @@ impl NativeSessionHost {
             .ok_or(HostError("out_of_scope"))?
             .to_owned();
         let mut conversation = call.conversation_id.to_owned();
-        let mut sources = vec![json!([call.plan_id, current.goal.source_revision])];
+        let mut ownership_sources = vec![json!([call.plan_id, current.goal.source_revision])];
+        let mut conversation_sources = Vec::new();
         if call.permission == ProviderPermission::Mcp {
-            sources.push(json!([
+            ownership_sources.push(json!([
                 "mcp-credentials",
                 match &self.mcp_credentials {
                     Some(epoch) => epoch
@@ -257,7 +281,7 @@ impl NativeSessionHost {
                     None => peer_store::McpCredentialStore::new(&self.home).revision()?,
                 }
             ]));
-            sources.push(json!([
+            ownership_sources.push(json!([
                 "mcp-registry",
                 peer_store::McpRegistryStore::new(&self.home)
                     .read()?
@@ -271,7 +295,7 @@ impl NativeSessionHost {
                 return Err(HostError("out_of_scope"));
             }
             let meta = ConversationStore::new(&self.home).read_metadata(&conversation)?;
-            sources.push(json!(["conversation-index", meta.source_revision]));
+            conversation_sources.push(json!([conversation, meta.source_revision]));
             if let Some(meta) = meta.metadata {
                 if meta["workspaceId"] != policy.workspace_id || meta["role"] != "work_session" {
                     return Err(HostError("out_of_scope"));
@@ -288,7 +312,7 @@ impl NativeSessionHost {
             let ancestor = self
                 .goals
                 .active_by_conversation(&parent, &projector, None)?;
-            sources.push(json!([parent, ancestor.source_revision]));
+            ownership_sources.push(json!([parent, ancestor.source_revision]));
             let ancestor = ancestor.snapshot.ok_or(HostError("out_of_scope"))?;
             if ancestor.facts["inheritanceStopped"] == true
                 || ancestor.facts["delegationOrigin"]["workspaceId"] != policy.workspace_id
@@ -311,13 +335,16 @@ impl NativeSessionHost {
         {
             return Err(HostError("permission_authority_changed"));
         }
-        let source_digest = javascript_json_digest(&json!([
-            sources,
+        let ownership_digest = javascript_json_digest(&json!([
+            ownership_sources,
             origin["coordinationBinding"],
             control,
             epoch
         ]))
         .map_err(|_| HostError("permission_resource_limit"))?;
+        let source_digest =
+            javascript_json_digest(&json!([ownership_digest, conversation_sources]))
+                .map_err(|_| HostError("permission_resource_limit"))?;
         Ok(Authority {
             plan_id: call.plan_id.into(),
             session_id: call.session_id.into(),
@@ -331,6 +358,7 @@ impl NativeSessionHost {
             digest: approval_args_digest(args)
                 .map_err(|_| HostError("permission_arguments_invalid"))?,
             policy,
+            ownership_digest,
             source_digest,
         })
     }
@@ -430,21 +458,7 @@ impl NativeSessionHost {
         })
     }
     fn validate_authority(&self, a: &Authority, args: &Value, now: &str) -> Result<(), HostError> {
-        let fresh = self.authority(
-            &HostCallIdentity {
-                plan_id: &a.plan_id,
-                session_id: &a.session_id,
-                conversation_id: &a.conversation,
-                tool_call_id: &a.tool_call,
-                stream_id: &a.stream,
-                capability_id: &a.capability,
-                permission: a.permission,
-                role: a.role,
-                shell_risk: a.shell_risk,
-            },
-            args,
-            now,
-        )?;
+        let fresh = self.authority(&a.identity(), args, now)?;
         if fresh.policy != a.policy {
             return Err(HostError("permission_policy_changed"));
         }
@@ -636,9 +650,11 @@ impl NativeSessionHost {
         if admitted && scope.is_none() {
             return Err(HostError("read_scope_invalid"));
         }
-        let prompt = json!({"confirmation":{"kind":"capability-approval","approvalKind":match call.permission{ProviderPermission::Read|ProviderPermission::Mcp=>"other",ProviderPermission::FileWrite=>"file-write",ProviderPermission::Shell=>"shell-exec",ProviderPermission::ShellStop=>return Err(HostError("native_background_shell_unsupported"))}},"riskLevel":call.shell_risk.map(HostShellRisk::as_str)});
+        let prompt = json!({"confirmation":{"kind":"capability-approval","approvalKind":match call.permission{ProviderPermission::Read|ProviderPermission::Mcp|ProviderPermission::ShellStop=>"other",ProviderPermission::FileWrite=>"file-write",ProviderPermission::Shell=>"shell-exec"}},"riskLevel":call.shell_risk.map(HostShellRisk::as_str)});
         let Some(decision) = (if admitted {
             Some(json!({"reason":"admitted_read_root"}))
+        } else if call.permission == ProviderPermission::ShellStop {
+            Some(json!({"reason":"shell_task_stop_same_scope"}))
         } else {
             crate::access_policy::automatic_access_decision(
                 authority.policy.access_level.as_str(),

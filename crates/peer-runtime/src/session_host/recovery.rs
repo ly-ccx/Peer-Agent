@@ -157,6 +157,7 @@ impl NativeSessionHost {
             return Ok(existing);
         }
         self.recover_native_mcp_handles(&current, cancel).await?;
+        self.recover_work_shell(&current, cancel).await?;
         self.recover_work_hook_processes(&current, cancel).await?;
         self.recover_command_processes(&current, cancel).await?;
         let current = self.current(plan, &super::episode_time())?;

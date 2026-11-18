@@ -50,6 +50,20 @@ impl NativeShellSession {
             return None;
         }
         let raw = metadata.get("nativeShellSession")?;
+        let session = Self::from_record(raw)?;
+        let process = &session.process;
+        (handle["handleId"] == process.handle_id
+            && handle["toolCallId"] == process.tool_call_id
+            && handle["state"]
+                == if process.state == NativeProcessState::Ended {
+                    "ended"
+                } else {
+                    "active"
+                })
+        .then_some(session)
+    }
+
+    pub(crate) fn from_record(raw: &Value) -> Option<Self> {
         if raw.as_object()?.len() != 3 || raw.get("command").is_none() {
             return None;
         }
@@ -68,14 +82,6 @@ impl NativeShellSession {
                 .child
                 .as_ref()
                 .is_none_or(|child| child.pid != process.owner.pid)
-            && handle["handleId"] == process.handle_id
-            && handle["toolCallId"] == process.tool_call_id
-            && handle["state"]
-                == if process.state == NativeProcessState::Ended {
-                    "ended"
-                } else {
-                    "active"
-                }
             && session.command.as_ref().is_none_or(|command| {
                 matches!(
                     process.state,

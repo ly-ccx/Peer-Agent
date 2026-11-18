@@ -133,9 +133,57 @@ for (const writer of ['typescript', 'native-interrupted']) {
   floor(f, hookContract.semanticFloor);
   cases += 7;
 }
+for (const [mode, interrupted] of [["foreground", false], ["foreground", true], ["background", false], ["background", true]]) {
+  const f = fixture(`work-shell-${mode}-${interrupted ? 'interrupted' : 'committed'}`);
+  const setup = await store(f);
+  setup.saveWork({ workId: 'existing', state: 'delivered' });
+  setup.close();
+  const old = createCoordinationStorageV2({ directory: f.directory, legacyFile: join(f.directory, 'coordination.jsonl'), assertOwner() {} });
+  assert.equal(old.readSnapshot().works.existing.state, 'delivered');
+
+  const work = structuredClone(contract.cases.find(c => c.name === 'running').input);
+  const attempt = work.budget.attempts.a;
+  const pending = attempt.pendingTools[0];
+  const { nativeProcess, nativeRecorder } = pending;
+  delete pending.nativeProcess;
+  pending.capabilityId = 'local.shell.exec';
+  const { child: _child, ...process } = nativeProcess;
+  Object.assign(attempt, {
+    role: 'work_session', planId: process.execution.planId, sessionId: process.execution.sessionId, nativeRecorder,
+  });
+  if (mode === 'foreground') {
+    attempt.nativeShellSession = {
+      schemaVersion: 1, command: null,
+      process: { ...process, handleId: 'shell-session_12345678-1234-4abc-8def-123456789012', state: 'not_started', generation: 0 },
+    };
+  } else {
+    pending.nativeProcess = { ...process, handleId: 'shell_12345678-1234-4abc-8def-123456789012', state: 'not_started', generation: 0 };
+    pending.nativeBackgroundShell = {
+      schemaVersion: 1,
+      grant: {
+        grantId: 'original-grant', toolCallId: pending.toolCallId, granted: true, scope: pending.capabilityId,
+        duration: 'once', decidedAt: '2026-11-18T00:00:00Z', reason: 'fixture', policyRevision: 'original-policy',
+      },
+    };
+  }
+  const write = native(f, { event: { kind: 'work', work }, interrupt: interrupted });
+  if (interrupted) assert.equal(write.code, 'coordination_durable_pending_projection', JSON.stringify(write));
+  else assert.equal(write.ok, true, JSON.stringify(write));
+
+  floor(f, 15);
+  const before = segments(f);
+  assert.throws(() => old.readSnapshot(), /coordination_schema_unsupported/);
+  assert.throws(() => old.commitEntry({ kind: 'work', work: { workId: 'old', state: 'queued' } }), /coordination_schema_unsupported/);
+  old.close();
+  assert.deepEqual(segments(f), before);
+  const read = native(f, interrupted ? { checkpoint: true } : {});
+  assert.equal(read.ok, true, JSON.stringify(read));
+  assert.deepEqual(read.state.works[work.workId].budget, work.budget);
+  cases += 6;
+}
 // An unknown future floor must still refuse access.
 const bad = fixture('future-floor'); const s = await store(bad); s.close();
-put(bad.manifest, { ...json(bad.manifest), minimumReaderVersion: 15, minimumWriterVersion: 15 });
+put(bad.manifest, { ...json(bad.manifest), minimumReaderVersion: 16, minimumWriterVersion: 16 });
 const unchanged = readFileSync(bad.manifest);
 assert.equal(native(bad).code, 'coordination_schema_unsupported');
 assert.throws(() => createCoordinationStorageV2({ directory: bad.directory, legacyFile: join(bad.directory, 'coordination.jsonl'), assertOwner() {} }).readSnapshot(), /coordination_schema_unsupported/);

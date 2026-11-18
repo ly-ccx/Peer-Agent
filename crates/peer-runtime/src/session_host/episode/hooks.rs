@@ -13,6 +13,7 @@ use peer_protocol::{
 };
 use peer_store::{HookConfig, HookDefinition, HookPhase};
 
+#[derive(Default)]
 pub(super) struct SelectedHooks<'a> {
     pub pre: Vec<&'a HookDefinition>,
     pub post: Vec<&'a HookDefinition>,

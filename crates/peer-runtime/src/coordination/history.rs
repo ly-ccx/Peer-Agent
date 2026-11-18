@@ -43,6 +43,7 @@ pub(super) fn reduce(previous: &Value, e: &Value) -> Result<Value, &'static str>
             for work in e["state"]["works"].as_object().unwrap().values() {
                 peer_protocol::native_processes_in_work(work)?;
                 peer_protocol::native_work_has_hook_facts(work)?;
+                peer_protocol::native_work_has_shell_facts(work)?;
             }
             next = e["state"].clone();
             next["lastRecovery"] = merge(&e["recovery"], &json!({"at":e["at"]}));

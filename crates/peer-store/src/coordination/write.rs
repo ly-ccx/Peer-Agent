@@ -11,6 +11,20 @@ use std::{
 };
 pub(super) fn semantic_floor(entry: &Value, state: &Value) -> u64 {
     let kind = entry["kind"].as_str().unwrap_or("");
+    let has_shell =
+        |work: &Value| peer_protocol::native_work_has_shell_facts(work).is_ok_and(|has| has);
+    if match kind {
+        "work" => has_shell(&entry["work"]),
+        "work_updated" => entry["workId"]
+            .as_str()
+            .is_some_and(|id| has_shell(&state["works"][id])),
+        "history_reconciled" | "continuations_coalesced" => state["works"]
+            .as_object()
+            .is_some_and(|works| works.values().any(has_shell)),
+        _ => false,
+    } {
+        return peer_protocol::WORK_SHELL_SEMANTIC_FLOOR;
+    }
     let has_hooks =
         |work: &Value| peer_protocol::native_work_has_hook_facts(work).is_ok_and(|has| has);
     if match kind {
@@ -168,6 +182,7 @@ impl CoordinationStore {
                 12,
                 13,
                 peer_protocol::WORK_HOOK_SEMANTIC_FLOOR,
+                peer_protocol::WORK_SHELL_SEMANTIC_FLOOR,
             ]
             .contains(&head_floor)
             {

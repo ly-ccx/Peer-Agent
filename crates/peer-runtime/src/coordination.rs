@@ -192,12 +192,15 @@ fn reduce_inner(state: &Value, entry: &Value) -> Result<Value, &'static str> {
             let work = &entry["work"];
             peer_protocol::native_processes_in_work(work)?;
             peer_protocol::native_work_has_hook_facts(work)?;
-            put(&mut next, "works", id(&work["workId"])?, work.clone())?;
+            let key = id(&work["workId"])?;
+            peer_protocol::validate_native_work_shell_change(&next["works"][key], work)?;
+            put(&mut next, "works", key, work.clone())?;
         }
         "work_updated" => {
             let work_id = id(&entry["workId"])?;
             let work = apply_delta(&next["works"][work_id], entry)?;
             peer_protocol::native_work_has_hook_facts(&work)?;
+            peer_protocol::validate_native_work_shell_change(&next["works"][work_id], &work)?;
             put(&mut next, "works", work_id, work)?;
         }
         "transfer" => {
@@ -259,7 +262,9 @@ fn reduce_inner(state: &Value, entry: &Value) -> Result<Value, &'static str> {
             }
             for work in std::iter::once(owner).chain(retired) {
                 peer_protocol::native_work_has_hook_facts(work)?;
-                put(&mut next, "works", id(&work["workId"])?, work.clone())?;
+                let key = id(&work["workId"])?;
+                peer_protocol::validate_native_work_shell_change(&next["works"][key], work)?;
+                put(&mut next, "works", key, work.clone())?;
             }
         }
         "reply_deferred" | "reply_prepared" => {

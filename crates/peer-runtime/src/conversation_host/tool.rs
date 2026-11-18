@@ -222,21 +222,8 @@ impl Host<'_> {
         // Effect completion has already been observed. Content publication is a
         // separately owned task; caller cancellation cannot discard its result.
         let task = tokio::task::spawn_blocking(move || {
-            let shell_start = background.then(|| {
-                [
-                    "taskId",
-                    "backgroundTaskId",
-                    "toolCallId",
-                    "status",
-                    "startedAt",
-                    "timeoutMs",
-                    "artifactRef",
-                    "artifactRefs",
-                ]
-                .into_iter()
-                .map(|key| (key.to_owned(), result["output"][key].clone()))
-                .collect::<serde_json::Map<String, Value>>()
-            });
+            let shell_start =
+                background.then(|| crate::providers::background_start_fields(&result));
             let mut result = archive(
                 &home,
                 &conversation,
@@ -245,14 +232,8 @@ impl Host<'_> {
                 ArchivePolicy::LargeOnly,
                 &CancellationToken::new(),
             )?;
-            if let Some(start) = shell_start
-                && result["output"]["nativeContentRef"].is_object()
-            {
-                result["output"]
-                    .as_object_mut()
-                    .ok_or("artifact_invalid")?
-                    .extend(start);
-            }
+            crate::providers::restore_background_start_fields(&mut result, shell_start)
+                .map_err(|error| error.0)?;
             Ok::<_, &'static str>(result)
         });
         let result = task

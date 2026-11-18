@@ -6,6 +6,11 @@ pub use conversation_shell::{
     NativeShellCommandBinding, NativeShellSession, background_shell_handle,
     background_shell_process, shell_task_id_valid,
 };
+mod work_shell;
+pub use work_shell::{
+    NativeWorkShellSession, WORK_SHELL_SEMANTIC_FLOOR, native_work_has_shell_facts,
+    native_work_shell_sessions, validate_native_work_shell_change,
+};
 mod work_hook;
 pub use native_process::{
     NativeOwnedProcess, NativeProcessKind, NativeProcessRecorder, NativeProcessState,

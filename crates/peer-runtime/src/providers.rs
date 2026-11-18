@@ -24,7 +24,9 @@ pub use skill::{skill_id, wire_skill_name};
 mod tool_artifact;
 mod web;
 pub use crate::effect_admission::EffectAdmission;
-pub(crate) use shell::group_absent;
+pub(crate) use shell::{
+    background_start_fields, group_absent, restore_background_start_fields, shell_stop_outcome,
+};
 mod shell_risk;
 #[cfg(test)]
 mod tests;
@@ -156,20 +158,27 @@ pub struct RuntimeProjection {
 pub struct ProviderRegistry {
     providers: Vec<Box<dyn CapabilityProvider>>,
 }
+#[derive(Clone, Copy)]
+pub(crate) enum ShellHostMode {
+    OneShot,
+    Work,
+    Conversation,
+}
+
 impl Default for ProviderRegistry {
     fn default() -> Self {
-        Self::builtins(false, false)
+        Self::builtins(false, ShellHostMode::OneShot)
     }
 }
 impl ProviderRegistry {
-    fn builtins(skill_result_reader: bool, background_shell: bool) -> Self {
+    fn builtins(skill_result_reader: bool, shell_mode: ShellHostMode) -> Self {
         Self {
             providers: vec![
                 Box::<file::FileProvider>::default(),
                 Box::new(file::BatchSearchProvider),
                 Box::new(web::WebProvider),
                 Box::new(git::GitProvider),
-                Box::new(shell::ShellProvider::new(background_shell)),
+                Box::new(shell::ShellProvider::new(shell_mode)),
                 Box::new(tool_artifact::ToolArtifactProvider(skill_result_reader)),
             ],
         }
@@ -190,7 +199,7 @@ impl ProviderRegistry {
         home: &Path,
         credentials: crate::mcp_oauth::CredentialEpoch,
         skills: Arc<peer_store::SkillCatalog>,
-        background_shell: bool,
+        shell_mode: ShellHostMode,
     ) -> Result<Self, HostError> {
         if skills
             .mounted
@@ -199,7 +208,7 @@ impl ProviderRegistry {
         {
             return Err(HostError("skill_identity_invalid"));
         }
-        let mut registry = Self::builtins(!skills.mounted.is_empty(), background_shell);
+        let mut registry = Self::builtins(!skills.mounted.is_empty(), shell_mode);
         if !skills.mounted.is_empty() {
             registry
                 .providers

@@ -11,6 +11,9 @@ pub(super) struct AuthorizationWait<'a> {
     pub input: &'a mut dyn PermissionInput,
     pub reads: Option<&'a mut super::read_scope::ReadScopes>,
     pub command: Option<&'a super::command_process::CommandOwner<'a>>,
+    pub shell: Option<&'a super::foreground_shell::ShellDispatch<'a>>,
+    pub background_start:
+        Option<&'a mut Option<tokio::sync::oneshot::Sender<crate::providers::EffectOutcome>>>,
     pub hooks: Option<&'a peer_store::HookConfig>,
 }
 pub(super) struct EffectHost<'a> {
@@ -33,6 +36,9 @@ impl NativeSessionHost {
         tokio::pin!(future);
         let mut tick = tokio::time::interval(Duration::from_secs(5));
         tick.tick().await;
+        let shell_poll_interval = Duration::from_millis(100);
+        let shell_poll = tokio::time::sleep(shell_poll_interval);
+        tokio::pin!(shell_poll);
         let mut cancelled = false;
         let at = milliseconds(&episode_time())?;
         let mut lost = !self.journal.lease().holds().unwrap_or(false)
@@ -42,13 +48,33 @@ impl NativeSessionHost {
         {
             lost = self.journal.heartbeat(at).is_err();
         }
-        if lost {
+        if lost
+            || self
+                .shell_watch
+                .as_ref()
+                .is_some_and(|watch| watch.check(self).is_err())
+        {
             owned.cancel();
         }
+        self.check_work_background_shells(owned);
         loop {
             tokio::select! {biased;
                 _=external.cancelled(),if !cancelled=>{owned.cancel();cancelled=true},
                 _=tick.tick()=>{if !self.journal.lease().holds().unwrap_or(false)||self.journal.lease().takeover_requested().unwrap_or(true)||self.journal.heartbeat(milliseconds(&episode_time())?).is_err(){lost=true;owned.cancel();}},
+                _=&mut shell_poll,if !owned.is_cancelled()
+                    && (self.shell_watch.is_some() || self.has_work_background_shells()
+                        || authorization.as_ref().is_some_and(|a| a.shell.is_some()))=>{
+                    self.check_work_background_shells(owned);
+                    let invalid = match authorization.as_ref().filter(|a| a.shell.is_some()) {
+                        Some(a) => a.hooks.is_some_and(|hooks|hooks.check_current().is_err())
+                            || self.validate_permission(a.grant,a.args,&episode_time()).is_err(),
+                        None => self.shell_watch.as_ref().is_some_and(|watch|watch.check(self).is_err()),
+                    };
+                    if invalid { owned.cancel(); }
+                    // Work authority reads durable state synchronously. Resume
+                    // the I/O lane after each observation even under slow I/O.
+                    shell_poll.as_mut().reset(tokio::time::Instant::now() + shell_poll_interval);
+                },
                 request=async{authorization.as_mut().unwrap().receiver.recv().await},if authorization.is_some()=>{
                     if let Some(request)=request {
                         #[cfg(feature="test-fixtures")]
@@ -77,8 +103,12 @@ impl NativeSessionHost {
                                 // Persist the actual child's identity even when
                                 // dispatch permission was just withdrawn. The
                                 // caller receives that withdrawal after recording.
-                                let result=a.command.ok_or(HostError("native_process_owner_unknown")).and_then(|command|self.command_started(command,recorder)).and(valid);
-                                let _=reply.send(result);
+                                let result=if let Some(shell)=a.shell{
+                                    self.work_shell_spawned(shell,recorder)
+                                }else{
+                                    a.command.ok_or(HostError("native_process_owner_unknown")).and_then(|command|self.command_started(command,recorder))
+                                };
+                                let _=reply.send(result.and(valid));
                             },
                             AdmissionRequest::ReadScope{path,reply}=>{
                                 let result=if let Err(error)=valid{Err(error)}else{
@@ -100,15 +130,32 @@ impl NativeSessionHost {
                                 let result=valid.and_then(|_|self.register_connection(a,handle,metadata,cancel,driver));
                                 let _=reply.send(result);
                             }
-                            AdmissionRequest::ForegroundShellOpen{reply,..}
-                            | AdmissionRequest::ForegroundShellBind{reply,..}=>{
-                                let _=reply.send(Err(HostError("native_foreground_shell_unsupported")));
+                            AdmissionRequest::ForegroundShellOpen{handle,cancel,driver,reply}=>{
+                                let result=valid.and_then(|_|self.work_shell_open(a,handle,cancel,driver));
+                                let _=reply.send(result);
                             },
-                            AdmissionRequest::BackgroundShellStarted{reply,..}=>{
-                                let _=reply.send(Err(HostError("native_background_shell_unsupported")));
+                            AdmissionRequest::ForegroundShellBind{handle,reply}=>{
+                                let result=valid.and_then(|_|self.work_shell_bind(a,&handle));
+                                let _=reply.send(result);
+                            },
+                            AdmissionRequest::BackgroundShellStarted{observation,reply}=>{
+                                let result = valid.and_then(|_| {
+                                    let command = a.command.ok_or(HostError("shell_background_start_unproven"))?;
+                                    self.verify_work_background_start(command, a.resource, &observation)
+                                });
+                                let result = result.and_then(|_| {
+                                    let start = authorization.as_mut().and_then(|a| a.background_start.as_deref_mut())
+                                        .and_then(Option::take).ok_or(HostError("shell_background_start_unproven"))?;
+                                    start.send(observation).map_err(|_| HostError("CANCELLED"))
+                                });
+                                let _=reply.send(result);
                             }
-                            AdmissionRequest::StopBackgroundShell{reply,..}=>{
-                                let _=reply.send(Err(HostError("native_background_shell_unsupported")));
+                            AdmissionRequest::StopBackgroundShell{task_id,reply}=>{
+                                let result = match valid {
+                                    Err(error) => Err(error),
+                                    Ok(()) => Box::pin(self.stop_work_background_shell(a.resource, a.grant, a.args, &task_id, owned, external)).await,
+                                };
+                                let _=reply.send(result);
                             }
                         }
                     }else{authorization=None;}

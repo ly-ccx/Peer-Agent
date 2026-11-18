@@ -28,6 +28,10 @@ pub(super) struct GoalTurnHost<'a, 'f> {
 impl TurnHost for GoalTurnHost<'_, '_> {
     async fn request(&mut self) -> Result<ModelTurn, HostError> {
         let f = self.frame;
+        if self.host.has_work_background_shells() {
+            let resource = self.host.current(f.plan, &now())?.resource;
+            self.host.reap_work_background_shells(&resource).await?;
+        }
         let fresh = self.host.current(f.plan, &now())?;
         let policy = peer_store::PolicyStore::new(&self.host.home)
             .read_existing(&fresh.resource.workspace_id)?;
@@ -105,7 +109,12 @@ impl TurnHost for GoalTurnHost<'_, '_> {
         let provider_evidence = effect.evidence();
         let output_kind = effect.output_kind();
         let command_effect = effect.owned_command();
+        let foreground_shell = effect.foreground_shell();
         let current = host.current(plan_id, &now())?;
+        host.reap_work_background_shells(&current.resource).await?;
+        let unowned_stop = effect.permission() == ProviderPermission::ShellStop
+            && !host.work_background_shell_owned(&current.resource, &args["taskId"], stream);
+        let background = effect.background_shell();
         let reserved = host.resources.reserve(
             &current.resource,
             ResourceReservation {
@@ -130,7 +139,11 @@ impl TurnHost for GoalTurnHost<'_, '_> {
             shell_risk: effect.risk(),
         };
         let identity = identity();
-        let selected = SelectedHooks::select(frame.hooks, &capability, &args)?;
+        let selected = if unowned_stop {
+            SelectedHooks::default()
+        } else {
+            SelectedHooks::select(frame.hooks, &capability, &args)?
+        };
         let intent = selected
             .any()
             .then(|| {
@@ -184,7 +197,11 @@ impl TurnHost for GoalTurnHost<'_, '_> {
         } else {
             HookResults::default()
         };
-        let mut authorization = if let Some(error) = hooks.interrupted {
+        let mut authorization = if unowned_stop {
+            crate::session_host::tool_authorization::ToolAuthorization::not_dispatched(HostError(
+                "shell_task_not_found",
+            ))
+        } else if let Some(error) = hooks.interrupted {
             crate::session_host::tool_authorization::ToolAuthorization::hook_block(
                 error.0,
                 Some(error),
@@ -276,6 +293,8 @@ impl TurnHost for GoalTurnHost<'_, '_> {
                 not_dispatched: true,
             }
         };
+        let background_started =
+            background && outcome.status == "success" && !outcome.ended && outcome.error.is_none();
         let permission_terminal = admission_error
             .or(authorization.terminal)
             .or_else(|| authorization.reads.as_ref().and_then(|r| r.terminal));
@@ -318,9 +337,19 @@ impl TurnHost for GoalTurnHost<'_, '_> {
             && authorization.grant.is_some()
             && authorization.failure.is_none()
             && admission_error.is_none()
+            && (!background || outcome.error != Some("shell_task_limit"))
         {
             result["evidence"]["nativeProcess"] =
                 json!(budget.read_process(host, &call_id, &dispatch)?);
+        }
+        if background_started {
+            result["evidence"]["permissionGrantId"] = grant_facts["grantId"].clone();
+        }
+        if foreground_shell
+            && let Some(binding) = budget.shell_evidence(host, &call_id, &dispatch)?
+        {
+            result["evidence"]["shellSession"] = binding;
+            result["evidence"]["permissionGrantId"] = grant_facts["grantId"].clone();
         }
         if let Some(error) = outcome.error {
             result["error"] = json!({"code":error,"message":error,"recoverable":true})
@@ -349,12 +378,14 @@ impl TurnHost for GoalTurnHost<'_, '_> {
         let mut post_unknown = None;
         if !selected.post.is_empty()
             && authorization.grant.is_some()
-            && outcome.ended
+            && (outcome.ended || background_started)
             && !outcome.not_dispatched
             && !cancellation.is_cancelled()
             && !cancel.is_cancelled()
         {
-            let observed = host
+            let startup =
+                background_started.then(|| crate::providers::background_start_fields(&result));
+            let mut observed = host
                 .archive_tool_result(
                     conversation,
                     result.clone(),
@@ -363,6 +394,7 @@ impl TurnHost for GoalTurnHost<'_, '_> {
                     cancel,
                 )
                 .await?;
+            crate::providers::restore_background_start_fields(&mut observed, startup)?;
             message
                 .as_ref()
                 .ok_or(HostError("native_work_hooks_invalid"))?
@@ -389,8 +421,13 @@ impl TurnHost for GoalTurnHost<'_, '_> {
         let mut result = match archived {
             Some(result) => result,
             None => {
-                host.archive_tool_result(conversation, result, output_kind, cancellation, cancel)
-                    .await?
+                let startup =
+                    background_started.then(|| crate::providers::background_start_fields(&result));
+                let mut result = host
+                    .archive_tool_result(conversation, result, output_kind, cancellation, cancel)
+                    .await?;
+                crate::providers::restore_background_start_fields(&mut result, startup)?;
+                result
             }
         };
         if !hooks.records.is_empty() {
@@ -406,7 +443,11 @@ impl TurnHost for GoalTurnHost<'_, '_> {
         if let Some(error) = post_unknown {
             return Err(error);
         }
-        budget.settle(host, &call_id, &dispatch, &result, &now())?;
+        if background_started {
+            host.confirm_work_background_start(&result, &evidence)?;
+        } else {
+            budget.settle(host, &call_id, &dispatch, &result, &now())?;
+        }
         if let Some(identity) = &outcome.materialization {
             let reference = format!("tool-result://{call_id}");
             if outcome.status != "success"
@@ -424,7 +465,9 @@ impl TurnHost for GoalTurnHost<'_, '_> {
                 &now(),
             )?;
         }
-        if !outcome.ended || outcome.error == Some("execution_outcome_unknown") {
+        if (!outcome.ended && !background_started)
+            || outcome.error == Some("execution_outcome_unknown")
+        {
             return Err(HostError("execution_outcome_unknown"));
         }
         // Expiry/cancellation closes this run after saving the real

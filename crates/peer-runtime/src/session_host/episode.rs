@@ -214,7 +214,7 @@ impl NativeSessionHost {
             &self.home,
             mcp_credentials.clone(),
             skills.clone(),
-            false,
+            crate::providers::ShellHostMode::Work,
         )?;
         let projection = if current.resource.read_only {
             providers.project_read_only()?
@@ -313,6 +313,9 @@ impl NativeSessionHost {
         };
         // Completion owns the actual attempt. Stop drains its real handles;
         // errors leave canonical pending dispatches/unknown intact.
+        let background = self
+            .drain_work_background_shells(&current.resource, &cancellation, cancel)
+            .await;
         let latest_usage = billing_scope.snapshot(&budget, usage_accounting.snapshot().turn_total);
         let finished = budget.finish(
             self,
@@ -357,6 +360,7 @@ impl NativeSessionHost {
         let stop = stopped?;
         // Neither a budget-write error nor a billing-write error may skip stop.
         finished?;
+        background?;
         latest_usage?;
         acknowledged?;
         let lifetime_usage = recorded?.map(|receipt| receipt["lifetimeUsage"].clone());
@@ -437,6 +441,10 @@ impl NativeSessionHost {
         let args = effect.args().clone();
         let metadata = effect.handle_metadata();
         let handle = effect.handle().map(str::to_owned);
+        let background = effect.background_shell();
+        if background && !self.can_start_work_background_shell() {
+            return Ok(EffectOutcome::not_dispatched("shell_task_limit"));
+        }
         let command = if effect.owned_command() {
             let process = budget.prepare_process(
                 self,
@@ -445,6 +453,7 @@ impl NativeSessionHost {
                 handle
                     .as_deref()
                     .ok_or(HostError("native_process_owner_unknown"))?,
+                background.then(|| grant.facts()),
                 &now(),
             )?;
             Some(super::command_process::CommandOwner {
@@ -456,8 +465,25 @@ impl NativeSessionHost {
         } else {
             None
         };
-        let (mut port, mut receiver) = crate::effect_admission::EffectAdmission::channel(owned);
-        port.owner = command.as_ref().map(|c| c.owner.clone());
+        let shell = effect
+            .foreground_shell()
+            .then_some(super::foreground_shell::ShellDispatch {
+                budget,
+                call,
+                dispatch,
+            });
+        let effect_cancel = if background {
+            owned.child_token()
+        } else {
+            owned.clone()
+        };
+        let (mut port, mut receiver) =
+            crate::effect_admission::EffectAdmission::channel(&effect_cancel);
+        port.owner = if shell.is_some() {
+            Some(budget.shell_owner()?)
+        } else {
+            command.as_ref().map(|c| c.owner.clone())
+        };
         effect.admission(port);
         if let Some(handle) = handle.as_deref() {
             let mut record = json!({"handleId":handle,"toolCallId":call,"state":"active"});
@@ -465,13 +491,16 @@ impl NativeSessionHost {
                 record["nativeMcp"] = metadata;
             }
             self.resources.mark_handle(resource, &record, &now())?;
-            let (send, recv) = tokio::sync::oneshot::channel();
+            let (send, mut recv) = tokio::sync::oneshot::channel();
+            let (startup, mut started_background) = tokio::sync::oneshot::channel();
+            let mut startup = background.then_some(startup);
+            let mut cancel_if_untracked = background.then(|| effect_cancel.clone().drop_guard());
             let (start, started) = tokio::sync::oneshot::channel::<EffectFuture>();
             let registration = self.live.track_handle(
                 &resource.execution,
                 handle,
                 call,
-                owned.clone(),
+                effect_cancel.clone(),
                 async move {
                     let future = started.await.map_err(|_| ())?;
                     let outcome = future.await;
@@ -486,13 +515,19 @@ impl NativeSessionHost {
                     &json!({"handleId":handle,"toolCallId":call,"state":"ended"}),
                     &now(),
                 )?;
+                if background && let Some(command) = &command {
+                    self.command_completed(command)?;
+                    return Ok(EffectOutcome::not_dispatched(
+                        "execution_resource_owner_unknown",
+                    ));
+                }
                 return Ok(EffectOutcome::failed("execution_resource_owner_unknown"));
             }
             // Registry capacity and the actual completion owner exist BEFORE
             // spawn. No rejected registration can leave an unowned child.
             let future = match effect.start(
                 crate::providers::ProviderCall::new(grant.conversation_id(), call, &now()),
-                owned.clone(),
+                effect_cancel.clone(),
             ) {
                 Ok(future) => future,
                 Err(e) => Box::pin(async move { EffectOutcome::failed(e.0) }),
@@ -500,9 +535,15 @@ impl NativeSessionHost {
             start
                 .send(future)
                 .map_err(|_| HostError("execution_outcome_unknown"))?;
-            let outcome = self
+            let (outcome, started) = self
                 .wait_effect(
-                    recv,
+                    async {
+                        tokio::select! {
+                            biased;
+                            Ok(started) = &mut started_background, if background => Ok((started, true)),
+                            result = &mut recv => result.map(|ended| (ended, false)),
+                        }
+                    },
                     owned,
                     external,
                     Some(super::effect_wait::AuthorizationWait {
@@ -513,11 +554,30 @@ impl NativeSessionHost {
                         input,
                         reads,
                         command: command.as_ref(),
+                        shell: shell.as_ref(),
+                        background_start: background.then_some(&mut startup),
                         hooks,
                     }),
                 )
                 .await?
                 .map_err(|_| HostError("execution_outcome_unknown"))?;
+            if started {
+                let command = command.ok_or(HostError("shell_background_start_unproven"))?;
+                self.track_work_background_shell(
+                    handle,
+                    &command,
+                    grant,
+                    resource,
+                    super::background_shell::BackgroundWorker {
+                        cancel: effect_cancel,
+                        _cancel_if_dropped: cancel_if_untracked
+                            .take()
+                            .expect("background worker guard"),
+                        completion: recv,
+                    },
+                );
+                return Ok(outcome);
+            }
             if outcome.ended {
                 if let Some(command) = &command {
                     self.command_completed(command)?;
@@ -550,6 +610,8 @@ impl NativeSessionHost {
                             input,
                             reads,
                             command: command.as_ref(),
+                            shell: shell.as_ref(),
+                            background_start: None,
                             hooks,
                         }),
                     )
