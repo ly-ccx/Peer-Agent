@@ -4,10 +4,48 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(feature = "test-fixtures")]
 mod recovery;
 mod transport;
+#[derive(Debug, PartialEq, Eq)]
+enum SocketObservation {
+    Eof,
+    Reset,
+    Bytes,
+    Error(std::io::ErrorKind, Option<i32>),
+    StillOpen,
+}
+impl SocketObservation {
+    fn closed(&self) -> bool {
+        matches!(self, Self::Eof | Self::Reset)
+    }
+}
+fn observe_socket(
+    stream: &mut TcpStream,
+    stop: &AtomicBool,
+    deadline: Instant,
+) -> SocketObservation {
+    while Instant::now() < deadline && !stop.load(Ordering::Acquire) {
+        match stream.read(&mut [0]) {
+            Ok(0) => return SocketObservation::Eof,
+            Ok(_) => return SocketObservation::Bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => {
+                return SocketObservation::Reset;
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock
+                        | std::io::ErrorKind::TimedOut
+                        | std::io::ErrorKind::Interrupted
+                ) => {}
+            Err(error) => return SocketObservation::Error(error.kind(), error.raw_os_error()),
+        }
+    }
+    SocketObservation::StillOpen
+}
 struct Page {
     url: String,
     headers: Arc<Mutex<Vec<String>>>,
-    closed: Arc<AtomicBool>,
+    body_sent: Arc<AtomicBool>,
+    socket: Arc<Mutex<Option<SocketObservation>>>,
     stop: Arc<AtomicBool>,
     owner: Option<thread::JoinHandle<()>>,
 }
@@ -18,10 +56,12 @@ impl Page {
         let url = format!("http://{}", listener.local_addr().unwrap());
         let headers = Arc::new(Mutex::new(Vec::new()));
         let captured = headers.clone();
+        let body_sent = Arc::new(AtomicBool::new(false));
+        let sent = body_sent.clone();
         let stop = Arc::new(AtomicBool::new(false));
         let end = stop.clone();
-        let closed = Arc::new(AtomicBool::new(false));
-        let observed_close = closed.clone();
+        let socket = Arc::new(Mutex::new(None));
+        let observed = socket.clone();
         let owner = thread::spawn(move || {
             let mut responses = responses.into_iter();
             while !end.load(Ordering::Acquire) {
@@ -53,26 +93,16 @@ impl Page {
                         }
                         captured.lock().unwrap().push(String::from_utf8(h).unwrap());
                         let response = responses.next().unwrap_or_else(|| http(200, &[], b"later"));
-                        let _ = s.write_all(&response);
-                        let _ = s.flush();
+                        if s.write_all(&response).and_then(|_| s.flush()).is_ok() {
+                            sent.store(true, Ordering::Release);
+                        }
                         if stall {
-                            let deadline = Instant::now() + Duration::from_secs(15);
-                            while Instant::now() < deadline && !end.load(Ordering::Acquire) {
-                                let mut byte = [0];
-                                match s.read(&mut byte) {
-                                    Ok(0) => {
-                                        observed_close.store(true, Ordering::Release);
-                                        break;
-                                    }
-                                    Err(e)
-                                        if matches!(
-                                            e.kind(),
-                                            std::io::ErrorKind::WouldBlock
-                                                | std::io::ErrorKind::TimedOut
-                                        ) => {}
-                                    _ => break,
-                                }
-                            }
+                            let result = observe_socket(
+                                &mut s,
+                                &end,
+                                Instant::now() + Duration::from_secs(15),
+                            );
+                            observed.lock().unwrap().get_or_insert(result);
                         }
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -85,17 +115,18 @@ impl Page {
         Self {
             url,
             headers,
-            closed,
+            body_sent,
+            socket,
             stop,
             owner: Some(owner),
         }
     }
-    fn requested(&self, child: &mut OwnedChild) {
+    fn wait_for_body(&self, child: &mut OwnedChild) {
         let deadline = Instant::now() + Duration::from_secs(8);
-        while self.headers.lock().unwrap().is_empty() {
+        while !self.body_sent.load(Ordering::Acquire) {
             assert!(
                 child.child().try_wait().unwrap().is_none(),
-                "exited before HTTP request"
+                "exited before the fixture wrote the HTTP body"
             );
             assert!(Instant::now() < deadline);
             thread::sleep(Duration::from_millis(5));
@@ -111,6 +142,54 @@ fn finish(mut child: OwnedChild) -> Output {
     child.output()
 }
 #[test]
+fn web_socket_probe_distinguishes_peer_reset_eof_and_live_connection() {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            for (mode, expected) in [
+                ("eof", SocketObservation::Eof),
+                ("reset", SocketObservation::Reset),
+                ("bytes", SocketObservation::Bytes),
+                ("live", SocketObservation::StillOpen),
+            ] {
+                let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+                let peer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+                let (mut observed, _) = listener.accept().unwrap();
+                observed
+                    .set_read_timeout(Some(Duration::from_millis(25)))
+                    .unwrap();
+                peer.set_nonblocking(true).unwrap();
+                let mut peer = Some(tokio::net::TcpStream::from_std(peer).unwrap());
+                match mode {
+                    "reset" => {
+                        peer.as_ref()
+                            .unwrap()
+                            .set_linger(Some(Duration::ZERO))
+                            .unwrap();
+                        drop(peer.take());
+                    }
+                    "eof" => drop(peer.take()),
+                    "bytes" => {
+                        let peer = peer.as_ref().unwrap();
+                        peer.writable().await.unwrap();
+                        assert_eq!(peer.try_write(b"x").unwrap(), 1);
+                    }
+                    _ => {}
+                }
+                let seen = observe_socket(
+                    &mut observed,
+                    &AtomicBool::new(false),
+                    Instant::now() + Duration::from_millis(100),
+                );
+                assert_eq!(seen, expected, "{mode}");
+                assert_eq!(seen.closed(), matches!(mode, "eof" | "reset"));
+                drop(peer);
+            }
+        });
+}
+#[test]
 fn native_web_timeout_cancel_and_revocation_close_the_actual_body_socket() {
     for kind in ["timeout", "cancel", "revoke"] {
         let page = Page::new(vec![b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 100000\r\nConnection: close\r\n\r\npartial".to_vec()], true);
@@ -124,7 +203,7 @@ fn native_web_timeout_cancel_and_revocation_close_the_actual_body_socket() {
         ]);
         let f = Fixture::new(&server);
         let mut child = OwnedChild(Some(f.command("exec", "p").spawn().unwrap()));
-        page.requested(&mut child);
+        page.wait_for_body(&mut child);
         if kind == "cancel" {
             rustix::process::kill_process(
                 rustix::process::Pid::from_raw(child.child().id() as i32).unwrap(),
@@ -149,10 +228,18 @@ fn native_web_timeout_cancel_and_revocation_close_the_actual_body_socket() {
             success(&out);
         }
         let deadline = Instant::now() + Duration::from_secs(2);
-        while !page.closed.load(Ordering::Acquire) {
+        loop {
+            if let Some(observation) = page.socket.lock().unwrap().as_ref() {
+                assert!(
+                    observation.closed(),
+                    "{kind}: socket observation {observation:?}"
+                );
+                break;
+            }
             assert!(
                 Instant::now() < deadline,
-                "body socket still owned after CLI exit"
+                "{kind}: no closure observation after CLI exit ({:?})",
+                out.status,
             );
             thread::sleep(Duration::from_millis(5));
         }
