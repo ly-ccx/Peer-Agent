@@ -28,6 +28,7 @@ run('bun', ['scripts/native-cli/projection-contracts.ts']);
 run('cargo', ['build', '--locked', '-p', 'peer-store', '--features', 'test-fixtures', '--example', 'terminal-conformance']);
 run('node', ['scripts/native-cli/terminal-store-conformance.mjs']);
 run('bun', ['scripts/native-cli/native-process-contracts.ts']);
+run('bun', ['scripts/native-cli/work-hook-contracts.ts']);
 run('bun', ['scripts/native-cli/conversation-execution-contracts.ts']);
 run('pnpm', ['--filter', '@peer-agent/protocol', 'build']);
 run('cargo', ['build', '--locked', '-p', 'peer-store', '--example', 'conversation-execution-conformance']);

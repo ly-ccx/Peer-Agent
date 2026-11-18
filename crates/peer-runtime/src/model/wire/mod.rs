@@ -9,7 +9,7 @@ mod gemini;
 pub(super) mod qoder;
 mod responses;
 use content::*;
-pub(super) const REQUEST_BYTES: usize = 2 * 1024 * 1024;
+pub(crate) const REQUEST_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub enum Wire {

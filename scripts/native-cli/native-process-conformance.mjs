@@ -22,6 +22,14 @@ const storagePath = 'packages/runtime-node/src/project-agent/coordination-storag
 const source = execFileSync('git', ['show', `${previous}:${storagePath}`], { cwd: repository, maxBuffer: 1024 * 1024 });
 const previousFile = join(root, 'previous-storage.mjs');
 await build({ stdin: { contents: source.toString(), resolveDir: dirname(join(repository, storagePath)), sourcefile: 'coordination-v12.mjs' }, bundle: true, platform: 'node', format: 'esm', outfile: previousFile, logLevel: 'silent' });
+// Load the actual <=13 storage before publishing the first Work Hook.
+const previousHookReader = 'a2b99935714ff3970220b8094db767009dc89dd0';
+const hookReaderSource = execFileSync('git', ['show', `${previousHookReader}:${storagePath}`],
+  { cwd: repository, maxBuffer: 1024 * 1024 });
+const previousHookFile = join(root, 'previous-hook-storage.mjs');
+await build({ stdin: { contents: hookReaderSource.toString(), resolveDir: dirname(join(repository, storagePath)), sourcefile: 'coordination-v13.mjs' },
+  bundle: true, platform: 'node', format: 'esm', outfile: previousHookFile, logLevel: 'silent' });
+const previousHookStorage = (await import(pathToFileURL(previousHookFile).href)).createCoordinationStorageV2;
 const previousStorage = (await import(pathToFileURL(previousFile).href)).createCoordinationStorageV2;
 function fixture(name) {
   const home = join(root, name); mkdirSync(home); writeFileSync(join(home, '.native-cli-fixture'), 'isolated');
@@ -39,7 +47,7 @@ function native(f, extra = {}) {
   assert.ifError(run.error); assert.equal(run.status, 0, run.stderr?.toString()); return json(file);
 }
 async function store(f) { const s = createWorkCoordinationStore(f.options); await s.prepare(); return s; }
-function floor(f) { assert.equal(json(f.manifest).minimumReaderVersion, 13); assert.equal(json(f.manifest).minimumWriterVersion, 13); assert.equal(json(f.head).minimumWriterVersion, 13); cases++; }
+function floor(f, expected = 13) { assert.equal(json(f.manifest).minimumReaderVersion, expected); assert.equal(json(f.manifest).minimumWriterVersion, expected); assert.equal(json(f.head).minimumWriterVersion, expected); cases++; }
 function segments(f) { const dir = join(f.directory, 'coordination-v2/segments'); return readdirSync(dir).sort().map(n => [n, readFileSync(join(dir, n)).toString('base64')]); }
 for (const writer of ['typescript', 'native', 'native-interrupted']) {
   const f = fixture(writer); let s = await store(f); s.saveWork({ workId: 'existing', state: 'delivered', opaque: { evidence: 'preserved' } });
@@ -78,11 +86,58 @@ for (const recovering of ['typescript', 'native']) {
   else { const repaired = await store(f); assert.deepEqual(repaired.read(), expected); repaired.close(); }
   floor(f); cases++;
 }
-// Refuse unknown14 rather than treating all later versions as13.
+const hookContract = JSON.parse(readFileSync(new URL('../../packages/protocol/contracts/native-cli/work-hook.json', import.meta.url)));
+for (const writer of ['typescript', 'native-interrupted']) {
+  const f = fixture(`hook-${writer}`);
+  let s = await store(f);
+  s.saveWork({ workId: 'existing', state: 'delivered' });
+  s.close();
+  const old = previousHookStorage({ directory: f.directory, legacyFile: join(f.directory, 'coordination.jsonl'), assertOwner() {} });
+  assert.equal(old.readSnapshot().works.existing.state, 'delivered');
+  const adopted = structuredClone(hookContract.cases.find(row => row.name === 'known Pre result').work);
+  const work = { workId: 'native-hook', state: 'awaiting_outcome', budget: adopted.budget };
+  const event = { kind: 'work', work };
+  let original = work;
+  if (writer === 'typescript') {
+    s = await store(f);
+    s.saveWork(work);
+    original = s.readWork(work.workId);
+    assert.equal(original.state, work.state);
+    assert.deepEqual(original.budget, work.budget);
+    s.close();
+  } else {
+    const response = native(f, { event, interrupt: true });
+    assert.equal(response.code, 'coordination_durable_pending_projection', JSON.stringify(response));
+  }
+  floor(f, hookContract.semanticFloor);
+  const before = segments(f);
+  assert.throws(() => old.readSnapshot(), /coordination_schema_unsupported/);
+  assert.throws(() => old.commitEntry({ kind: 'work', work: { workId: 'old', state: 'queued' } }), /coordination_schema_unsupported/);
+  assert.deepEqual(segments(f), before);
+  old.close();
+  let current = native(f, writer === 'native-interrupted' ? { checkpoint: true } : {});
+  assert.equal(current.ok, true, JSON.stringify(current));
+  assert.deepEqual(current.state.works[work.workId], original);
+  s = await store(f);
+  const remembered = s.readWork(work.workId);
+  const dispatch = remembered.budget.attempts.attempt.pendingTools[0];
+  s.saveWork({ ...remembered, budget: { attempts: {}, uncertainDispatches: [dispatch] } });
+  s.close();
+  current = native(f);
+  assert.equal(current.ok, true, JSON.stringify(current));
+  assert.deepEqual(current.state.works[work.workId].budget.uncertainDispatches, [dispatch]);
+  rmSync(join(f.directory, '.read-models'), { recursive: true, force: true });
+  s = await store(f);
+  assert.deepEqual(s.read(), current.state);
+  s.close();
+  floor(f, hookContract.semanticFloor);
+  cases += 7;
+}
+// An unknown future floor must still refuse access.
 const bad = fixture('future-floor'); const s = await store(bad); s.close();
-put(bad.manifest, { ...json(bad.manifest), minimumReaderVersion: 14, minimumWriterVersion: 14 });
+put(bad.manifest, { ...json(bad.manifest), minimumReaderVersion: 15, minimumWriterVersion: 15 });
 const unchanged = readFileSync(bad.manifest);
 assert.equal(native(bad).code, 'coordination_schema_unsupported');
 assert.throws(() => createCoordinationStorageV2({ directory: bad.directory, legacyFile: join(bad.directory, 'coordination.jsonl'), assertOwner() {} }).readSnapshot(), /coordination_schema_unsupported/);
 assert.deepEqual(readFileSync(bad.manifest), unchanged); cases += 3;
-console.log(JSON.stringify({ ok: true, cases, root, previous, previousStorageSha256: createHash('sha256').update(source).digest('hex'), limits: 'Isolated actual storage implementations; no installed old-host drain or personal data.' }));
+console.log(JSON.stringify({ ok: true, cases, root, previous, previousHookReader, previousStorageSha256: createHash('sha256').update(source).digest('hex'), limits: 'Isolated actual storage implementations; no installed old-host drain or personal data.' }));

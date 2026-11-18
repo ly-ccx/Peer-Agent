@@ -32,7 +32,7 @@ pub enum Command {
     ShellHelp(&'static str),
     Export(export::Options),
     Exec { plan: String, max_turns: usize },
-    OrdinaryExec(ordinary_exec::Options),
+    OrdinaryExec(Box<ordinary_exec::Options>),
     ExecHelp,
     Recover(String),
     RecoverSession(String),
@@ -146,7 +146,7 @@ mod tests {
         assert_eq!(command(&[]), Command::Interactive);
         assert_eq!(
             command(&["exec".into()]),
-            Command::OrdinaryExec(ordinary_exec::Options::default())
+            Command::OrdinaryExec(Box::default())
         );
     }
 }

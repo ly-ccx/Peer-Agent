@@ -20,10 +20,11 @@ impl NativeSessionHost {
             peer_protocol::native_processes_in_work(&current.journal.state["works"][work])
                 .map_err(HostError)?;
         let execution = json!(current.resource.execution);
-        Ok(processes
-            .iter()
-            .filter(|p| p.execution == execution)
-            .all(|p| p.state == NativeProcessState::Ended))
+        Ok(self.work_hooks_stopped(current)?
+            && processes
+                .iter()
+                .filter(|p| p.execution == execution)
+                .all(|p| p.state == NativeProcessState::Ended))
     }
     pub(super) async fn recover_command_processes(
         &mut self,

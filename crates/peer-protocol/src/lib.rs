@@ -1,9 +1,14 @@
 #![forbid(unsafe_code)]
 mod local_read;
 mod native_process;
+mod work_hook;
 pub use native_process::{
     NativeOwnedProcess, NativeProcessKind, NativeProcessRecorder, NativeProcessState,
     NativeProcessStop, native_processes_in_work,
+};
+pub use work_hook::{
+    NativeWorkHook, NativeWorkHooks, WORK_HOOK_SEMANTIC_FLOOR, WorkHookIntent, WorkProviderPhase,
+    native_work_has_hook_facts,
 };
 mod model_catalog;
 pub use local_read::{LocalReadPermissionScope, LocalReadScopeKind};

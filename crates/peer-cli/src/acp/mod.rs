@@ -420,6 +420,7 @@ impl Connection {
                             workspace: &workspace,
                             conversation_id: existing.as_deref(),
                             prompt: &prompt,
+                            image_paths: &[],
                             provider_id: &provider,
                             mode: RuntimeMode::Chat,
                             effort: selection["reasoningEffort"].as_str().unwrap_or("default"),

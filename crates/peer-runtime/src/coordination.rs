@@ -191,11 +191,13 @@ fn reduce_inner(state: &Value, entry: &Value) -> Result<Value, &'static str> {
         "work" => {
             let work = &entry["work"];
             peer_protocol::native_processes_in_work(work)?;
+            peer_protocol::native_work_has_hook_facts(work)?;
             put(&mut next, "works", id(&work["workId"])?, work.clone())?;
         }
         "work_updated" => {
             let work_id = id(&entry["workId"])?;
             let work = apply_delta(&next["works"][work_id], entry)?;
+            peer_protocol::native_work_has_hook_facts(&work)?;
             put(&mut next, "works", work_id, work)?;
         }
         "transfer" => {
@@ -256,6 +258,7 @@ fn reduce_inner(state: &Value, entry: &Value) -> Result<Value, &'static str> {
                 return Err("invalid_continuation_custody");
             }
             for work in std::iter::once(owner).chain(retired) {
+                peer_protocol::native_work_has_hook_facts(work)?;
                 put(&mut next, "works", id(&work["workId"])?, work.clone())?;
             }
         }

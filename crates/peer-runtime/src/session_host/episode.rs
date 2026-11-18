@@ -29,6 +29,8 @@ pub struct EpisodeOutcome {
     pub context_accounting: Value,
 }
 pub(crate) use crate::capability::now;
+pub(super) mod hook_message;
+mod hooks;
 mod turn_host;
 impl NativeSessionHost {
     pub async fn run_episode(
@@ -167,7 +169,8 @@ impl NativeSessionHost {
             .validate_saved_media(&projected)
             .map_err(|e| HostError(e.code))?;
         let workspace = self.read_workspace(plan_id, &now())?;
-        crate::providers::require_migrated_hooks(&self.home, &workspace)?;
+        let hooks = peer_store::HookConfig::observe(&self.home, &workspace)
+            .map_err(|_| HostError("native_hook_config_invalid"))?;
         let skills =
             std::sync::Arc::new(peer_store::SkillCatalog::observe(&self.home, &workspace)?);
         // The registered Source owns prompt settings and workspace guidance.
@@ -176,7 +179,17 @@ impl NativeSessionHost {
             &workspace, &self.home, cancel,
         )
         .map_err(HostError)?;
-        for name in [".peer", ".claude", ".agents"] {
+        let peer_settings = workspace.join(".peer");
+        if peer_settings.exists()
+            && std::fs::read_dir(peer_settings)
+                .map_err(|_| HostError("native_project_context_source_unsupported"))?
+                .any(|entry| {
+                    entry.is_err() || entry.is_ok_and(|entry| entry.file_name() != "hooks.json")
+                })
+        {
+            return Err(HostError("native_project_context_source_unsupported"));
+        }
+        for name in [".claude", ".agents"] {
             if workspace.join(name).exists() {
                 return Err(HostError("native_project_context_source_unsupported"));
             }
@@ -274,6 +287,7 @@ impl NativeSessionHost {
             model,
             tools: &definitions,
             skills: &skills,
+            hooks: &hooks,
             skill_names: &skill_names,
             owned: &cancellation,
             external: cancel,
@@ -414,6 +428,7 @@ impl NativeSessionHost {
             reads,
             budget,
             dispatch,
+            hooks,
         } = context;
         let call = grant.facts()["toolCallId"]
             .as_str()
@@ -497,6 +512,7 @@ impl NativeSessionHost {
                         input,
                         reads,
                         command: command.as_ref(),
+                        hooks,
                     }),
                 )
                 .await?
@@ -533,6 +549,7 @@ impl NativeSessionHost {
                             input,
                             reads,
                             command: command.as_ref(),
+                            hooks,
                         }),
                     )
                     .await

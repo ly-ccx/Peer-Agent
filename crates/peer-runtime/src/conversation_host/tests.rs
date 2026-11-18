@@ -199,6 +199,7 @@ async fn actual_shell_interruptions_drain_owned_child_keep_facts_and_admit_later
             workspace: workspace.path(),
             conversation_id: Some(&conversation),
             prompt: "Run the bounded foreground command",
+            image_paths: &[],
             provider_id: "fixture",
             mode: RuntimeMode::Chat,
             effort: "default",
@@ -328,6 +329,7 @@ async fn actual_shell_interruptions_drain_owned_child_keep_facts_and_admit_later
                 Some(&conversation)
             },
             prompt: "A new independent task",
+            image_paths: &[],
             ..options
         };
         let later = runtime
@@ -371,6 +373,7 @@ async fn actual_ask_denial_and_explicit_full_grant_have_real_evidence_and_effect
                     workspace: workspace.path(),
                     conversation_id: None,
                     prompt: "Run the requested command",
+                    image_paths: &[],
                     provider_id: "fixture",
                     mode: RuntimeMode::Chat,
                     effort: "default",
@@ -422,6 +425,7 @@ async fn actual_ordinary_model_file_grant_evidence_usage_stop_and_subsequent_run
         workspace: workspace.path(),
         conversation_id: None,
         prompt: "Read input.txt and answer",
+        image_paths: &[],
         provider_id: "fixture",
         mode: RuntimeMode::Chat,
         effort: "default",
@@ -480,6 +484,7 @@ async fn actual_ordinary_model_file_grant_evidence_usage_stop_and_subsequent_run
     let options = ConversationOptions {
         conversation_id: Some(&outcome.session_id),
         prompt: "Continue independently",
+        image_paths: &[],
         ..options
     };
     let second = runtime

@@ -24,6 +24,7 @@ pub(super) struct GoalRequestFrame<'a> {
     pub model: &'a NativeModel,
     pub tools: &'a Value,
     pub skills: &'a peer_store::SkillCatalog,
+    pub hooks: &'a peer_store::HookConfig,
     pub skill_names: &'a [&'a str],
     pub owned: &'a CancellationToken,
     pub external: &'a CancellationToken,
@@ -45,7 +46,9 @@ impl CognitionHost for GoalCognitionHost<'_, '_> {
             return Err(HostError("native_capability_inventory_changed"));
         }
         f.mcp_credentials.check().map_err(HostError)?;
-        crate::providers::require_migrated_hooks(&host.home, f.workspace)?;
+        f.hooks
+            .check_current()
+            .map_err(|_| HostError("native_hook_source_changed"))?;
         f.skills
             .check_current()
             .map_err(|_| HostError("native_skill_source_changed"))?;

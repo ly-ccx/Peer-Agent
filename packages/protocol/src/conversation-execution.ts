@@ -1,6 +1,7 @@
 /** Ordinary execution facts in the original Conversation index. Shape is never
  * permission, process-death proof, or authority to replay a pending dispatch. */
 import { normalizeExecutionResourceScope, type SessionControlOperation } from './session-control.ts';
+import { isHookObservation } from './hook-observation.ts';
 import { nativeProcessEnvelopeValid } from './native-process.ts';
 type Recorder = NonNullable<SessionControlOperation['recorder']>;
 export interface ConversationExecutionIdentity {
@@ -69,17 +70,7 @@ function validHookHandle(
       && (hook.event === 'PreToolUse' || row.phase !== 'prepared'))) return false;
   if (p.stopObservation !== 'owned_completion') return !Object.hasOwn(hook, 'observation');
 
-  const v = hook.observation;
-  const note = (x: unknown) => typeof x === 'string'
-    && new TextEncoder().encode(x).length <= 1024
-    && !/[\u0000-\u001f\u007f-\u009f]/u.test(x);
-  return object(v) && Object.keys(v).length === 10
-    && v.event === hook.event && v.ruleDigest === hook.ruleDigest && v.handleId === p.handleId
-    && ['allow', 'ask', 'deny'].some(d => d === v.decision)
-    && typeof v.outcome === 'string' && v.outcome.length > 0 && new TextEncoder().encode(v.outcome).length <= 128
-    && (v.exitCode === null || typeof v.exitCode === 'number' && Number.isInteger(v.exitCode)
-      && v.exitCode >= -2147483648 && v.exitCode <= 2147483647)
-    && safe(v.durationMs) && note(v.id) && v.hookId === v.id && (v.reason === null || note(v.reason));
+  return isHookObservation(hook.observation, hook.event, hook.ruleDigest, p.handleId);
 }
 /** Strict decoding: unknown versions/fields are preserved by the caller and block
  * execution. Return a clone so a parser consumer cannot change the stored fact. */

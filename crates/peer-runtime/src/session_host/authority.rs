@@ -124,6 +124,15 @@ impl HostPermissionGrant {
     }
 }
 impl NativeSessionHost {
+    pub(super) fn hook_authority_revision(
+        &self,
+        call: &HostCallIdentity<'_>,
+        args: &Value,
+    ) -> Result<(String, BotAccessPolicy), HostError> {
+        let authority = self.authority(call, args, &episode_time())?;
+        Ok((authority.source_digest, authority.policy))
+    }
+
     fn authority(
         &self,
         call: &HostCallIdentity<'_>,

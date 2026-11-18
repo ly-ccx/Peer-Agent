@@ -26,6 +26,7 @@ mod stream;
 mod usage;
 pub use error::{ModelError, ModelRequestObservation};
 pub mod wire;
+pub(crate) use wire::REQUEST_BYTES;
 pub struct NativeModel {
     network: crate::network::Network,
     endpoint: reqwest::Url,

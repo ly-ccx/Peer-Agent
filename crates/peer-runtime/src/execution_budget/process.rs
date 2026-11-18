@@ -4,7 +4,7 @@ use super::*;
 use peer_protocol::{
     NativeOwnedProcess, NativeProcessKind, NativeProcessRecorder, NativeProcessState,
 };
-fn row<'a>(
+pub(super) fn row<'a>(
     budget: &'a mut Value,
     attempt: &str,
     call: &str,

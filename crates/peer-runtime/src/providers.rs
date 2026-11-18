@@ -262,21 +262,6 @@ impl ProviderRegistry {
         Ok(effect)
     }
 }
-/// Block configured hooks until their original governed provider is ported.
-pub(crate) fn require_migrated_hooks(home: &Path, workspace: &Path) -> Result<(), HostError> {
-    for file in [
-        home.join("hooks/hooks.json"),
-        workspace.join(".peer/hooks.json"),
-    ] {
-        match std::fs::symlink_metadata(file) {
-            Ok(_) => return Err(HostError("native_hooks_not_migrated")),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => return Err(HostError("native_extension_inventory_unavailable")),
-        }
-    }
-    Ok(())
-}
-
 impl RuntimeProjection {
     pub(crate) fn id(&self) -> &str {
         &self.id

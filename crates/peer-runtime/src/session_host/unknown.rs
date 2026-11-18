@@ -110,15 +110,21 @@ impl NativeSessionHost {
                 .copied()
                 .find(|r| r["toolCallId"] == *id)
                 .unwrap_or(&Value::Null);
-            fenced &= row["capabilityId"]
-                .as_str()
-                .is_some_and(|s| s.starts_with("local.") && !s.starts_with("local.mcp."));
+            // A configured Hook may act outside the Provider's declared file
+            // scopes. A workspace diff cannot settle its unobserved effect.
+            let unresolved_hook = peer_protocol::NativeWorkHooks::read(row)
+                .map_err(HostError)?
+                .is_some_and(|hooks| hooks.handles.iter().any(|h| h.observation.is_none()));
+            fenced &= !unresolved_hook
+                && row["capabilityId"]
+                    .as_str()
+                    .is_some_and(|s| s.starts_with("local.") && !s.starts_with("local.mcp."));
             all_not_dispatched &= receipt["outcome"] == "not_dispatched";
             probe(
                 &mut probes,
                 "receipt",
                 &format!("receipt:{id}"),
-                json!({"answered":receipt.get("outcome").unwrap_or(&Value::Null),"capabilityId":row["capabilityId"],"dispatchId":row.get("dispatchId").or_else(||receipt.get("dispatchId")).unwrap_or(&Value::Null),"registeredAt":row["registeredAt"]}),
+                json!({"answered":receipt.get("outcome").unwrap_or(&Value::Null),"capabilityId":row["capabilityId"],"dispatchId":row.get("dispatchId").or_else(||receipt.get("dispatchId")).unwrap_or(&Value::Null),"registeredAt":row["registeredAt"],"unresolvedHook":unresolved_hook}),
                 now,
             )?;
         }
@@ -288,16 +294,18 @@ impl NativeSessionHost {
                 .find(|p| p["kind"] == "receipt" && p["ref"] == format!("receipt:{id}"))
                 .and_then(parse)
                 .ok_or(HostError("capability_not_confined"))?;
-            if !matches!(
-                result["capabilityId"].as_str(),
-                Some(
-                    "local.file.read"
-                        | "local.file.list"
-                        | "local.file.search"
-                        | "local.file.write"
-                        | "local.file.edit"
+            if result["unresolvedHook"] == true
+                || !matches!(
+                    result["capabilityId"].as_str(),
+                    Some(
+                        "local.file.read"
+                            | "local.file.list"
+                            | "local.file.search"
+                            | "local.file.write"
+                            | "local.file.edit"
+                    )
                 )
-            ) {
+            {
                 return Err(HostError("capability_not_confined"));
             }
         }

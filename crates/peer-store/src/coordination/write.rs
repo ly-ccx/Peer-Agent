@@ -11,6 +11,20 @@ use std::{
 };
 pub(super) fn semantic_floor(entry: &Value, state: &Value) -> u64 {
     let kind = entry["kind"].as_str().unwrap_or("");
+    let has_hooks =
+        |work: &Value| peer_protocol::native_work_has_hook_facts(work).is_ok_and(|has| has);
+    if match kind {
+        "work" => has_hooks(&entry["work"]),
+        "work_updated" => entry["workId"]
+            .as_str()
+            .is_some_and(|id| has_hooks(&state["works"][id])),
+        "history_reconciled" | "continuations_coalesced" => state["works"]
+            .as_object()
+            .is_some_and(|works| works.values().any(has_hooks)),
+        _ => false,
+    } {
+        return peer_protocol::WORK_HOOK_SEMANTIC_FLOOR;
+    }
     if (kind == "work"
         && peer_protocol::native_processes_in_work(&entry["work"]).is_ok_and(|p| !p.is_empty()))
         || (kind == "history_reconciled"
@@ -142,7 +156,21 @@ impl CoordinationStore {
         crate::coordination_fence::check_head(&manifest, &durable_head)?;
         let head_floor = durable_head["minimumWriterVersion"].as_u64().unwrap_or(2);
         if head_floor > floor {
-            if ![3, 4, 5, 6, 7, 8, 9, 11, 12, 13].contains(&head_floor) {
+            if ![
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                11,
+                12,
+                13,
+                peer_protocol::WORK_HOOK_SEMANTIC_FLOOR,
+            ]
+            .contains(&head_floor)
+            {
                 return Err(Error::Schema);
             }
             let mut raised = manifest.clone();

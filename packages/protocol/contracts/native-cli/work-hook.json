@@ -1,0 +1,1820 @@
+{
+  "semanticFloor": 14,
+  "cases": [
+    {
+      "name": "legacy row has no Hook facts",
+      "work": {
+        "budget": {
+          "attempts": {
+            "attempt": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expected": false
+    },
+    {
+      "name": "prepared original call",
+      "work": {
+        "budget": {
+          "attempts": {
+            "attempt": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "execution": {
+                      "planId": "plan",
+                      "sessionId": "session",
+                      "executionEpoch": "epoch"
+                    },
+                    "recorder": {
+                      "bootId": "boot",
+                      "pid": 123,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-18T01:00:00Z"
+                    },
+                    "futureOpaque": {
+                      "keep": true
+                    }
+                  },
+                  "nativeHooks": {
+                    "schemaVersion": 1,
+                    "providerPhase": "prepared",
+                    "handles": []
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expected": true
+    },
+    {
+      "name": "known Pre result",
+      "work": {
+        "budget": {
+          "attempts": {
+            "attempt": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "execution": {
+                      "planId": "plan",
+                      "sessionId": "session",
+                      "executionEpoch": "epoch"
+                    },
+                    "recorder": {
+                      "bootId": "boot",
+                      "pid": 123,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-18T01:00:00Z"
+                    },
+                    "futureOpaque": {
+                      "keep": true
+                    }
+                  },
+                  "nativeHooks": {
+                    "schemaVersion": 1,
+                    "providerPhase": "prepared",
+                    "handles": [
+                      {
+                        "event": "PreToolUse",
+                        "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "process": {
+                          "schemaVersion": 1,
+                          "kind": "command",
+                          "handleId": "hook-1",
+                          "toolCallId": "call",
+                          "dispatchId": "dispatch",
+                          "execution": {
+                            "planId": "plan",
+                            "sessionId": "session",
+                            "executionEpoch": "epoch"
+                          },
+                          "generation": 1,
+                          "state": "ended",
+                          "owner": {
+                            "bootId": "boot",
+                            "pid": 123,
+                            "pidStart": "start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "child": {
+                            "bootId": "boot",
+                            "pid": 456,
+                            "pidStart": "child-start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "stopObservation": "owned_completion"
+                        },
+                        "observation": {
+                          "id": "rule",
+                          "hookId": "rule",
+                          "event": "PreToolUse",
+                          "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                          "handleId": "hook-1",
+                          "decision": "deny",
+                          "reason": "actual local policy",
+                          "outcome": "ok",
+                          "exitCode": 0,
+                          "durationMs": 12
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expected": true
+    },
+    {
+      "name": "reviewable Post result on dispatching row",
+      "work": {
+        "budget": {
+          "attempts": {
+            "attempt": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "execution": {
+                      "planId": "plan",
+                      "sessionId": "session",
+                      "executionEpoch": "epoch"
+                    },
+                    "recorder": {
+                      "bootId": "boot",
+                      "pid": 123,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-18T01:00:00Z"
+                    },
+                    "futureOpaque": {
+                      "keep": true
+                    }
+                  },
+                  "nativeHooks": {
+                    "schemaVersion": 1,
+                    "providerPhase": "dispatching",
+                    "handles": [
+                      {
+                        "event": "PostToolUse",
+                        "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "process": {
+                          "schemaVersion": 1,
+                          "kind": "command",
+                          "handleId": "hook-1",
+                          "toolCallId": "call",
+                          "dispatchId": "dispatch",
+                          "execution": {
+                            "planId": "plan",
+                            "sessionId": "session",
+                            "executionEpoch": "epoch"
+                          },
+                          "generation": 1,
+                          "state": "ended",
+                          "owner": {
+                            "bootId": "boot",
+                            "pid": 123,
+                            "pidStart": "start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "child": {
+                            "bootId": "boot",
+                            "pid": 456,
+                            "pidStart": "child-start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "stopObservation": "owned_completion"
+                        },
+                        "observation": {
+                          "id": "rule",
+                          "hookId": "rule",
+                          "event": "PostToolUse",
+                          "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                          "handleId": "hook-1",
+                          "decision": "deny",
+                          "reason": "actual local policy",
+                          "outcome": "ok",
+                          "exitCode": 0,
+                          "durationMs": 12
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expected": true
+    },
+    {
+      "name": "process group gone but Hook result unknown in uncertain row",
+      "work": {
+        "budget": {
+          "uncertainDispatches": [
+            {
+              "toolCallId": "call",
+              "dispatchId": "dispatch",
+              "nativeRecorder": {
+                "schemaVersion": 1,
+                "runtime": "peer-native",
+                "execution": {
+                  "planId": "plan",
+                  "sessionId": "session",
+                  "executionEpoch": "epoch"
+                },
+                "recorder": {
+                  "bootId": "boot",
+                  "pid": 123,
+                  "pidStart": "start",
+                  "hostId": "host",
+                  "acquiredAt": "2026-11-18T01:00:00Z"
+                },
+                "futureOpaque": {
+                  "keep": true
+                }
+              },
+              "nativeHooks": {
+                "schemaVersion": 1,
+                "providerPhase": "prepared",
+                "handles": [
+                  {
+                    "event": "PreToolUse",
+                    "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "process": {
+                      "schemaVersion": 1,
+                      "kind": "command",
+                      "handleId": "hook-1",
+                      "toolCallId": "call",
+                      "dispatchId": "dispatch",
+                      "execution": {
+                        "planId": "plan",
+                        "sessionId": "session",
+                        "executionEpoch": "epoch"
+                      },
+                      "generation": 1,
+                      "state": "ended",
+                      "owner": {
+                        "bootId": "boot",
+                        "pid": 123,
+                        "pidStart": "start",
+                        "hostId": "host",
+                        "acquiredAt": "2026-11-18T01:00:00Z"
+                      },
+                      "child": {
+                        "bootId": "boot",
+                        "pid": 456,
+                        "pidStart": "child-start",
+                        "hostId": "host",
+                        "acquiredAt": "2026-11-18T01:00:00Z"
+                      },
+                      "stopObservation": "owner_dead_group_absent"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "expected": true
+    },
+    {
+      "name": "Post cannot precede Provider dispatch",
+      "work": {
+        "budget": {
+          "attempts": {
+            "attempt": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "execution": {
+                      "planId": "plan",
+                      "sessionId": "session",
+                      "executionEpoch": "epoch"
+                    },
+                    "recorder": {
+                      "bootId": "boot",
+                      "pid": 123,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-18T01:00:00Z"
+                    },
+                    "futureOpaque": {
+                      "keep": true
+                    }
+                  },
+                  "nativeHooks": {
+                    "schemaVersion": 1,
+                    "providerPhase": "prepared",
+                    "handles": [
+                      {
+                        "event": "PostToolUse",
+                        "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "process": {
+                          "schemaVersion": 1,
+                          "kind": "command",
+                          "handleId": "hook-1",
+                          "toolCallId": "call",
+                          "dispatchId": "dispatch",
+                          "execution": {
+                            "planId": "plan",
+                            "sessionId": "session",
+                            "executionEpoch": "epoch"
+                          },
+                          "generation": 1,
+                          "state": "ended",
+                          "owner": {
+                            "bootId": "boot",
+                            "pid": 123,
+                            "pidStart": "start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "child": {
+                            "bootId": "boot",
+                            "pid": 456,
+                            "pidStart": "child-start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "stopObservation": "owned_completion"
+                        },
+                        "observation": {
+                          "id": "rule",
+                          "hookId": "rule",
+                          "event": "PostToolUse",
+                          "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                          "handleId": "hook-1",
+                          "decision": "deny",
+                          "reason": "actual local policy",
+                          "outcome": "ok",
+                          "exitCode": 0,
+                          "durationMs": 12
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expected": "native_work_hooks_invalid"
+    },
+    {
+      "name": "owned completion requires observation",
+      "work": {
+        "budget": {
+          "attempts": {
+            "attempt": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "execution": {
+                      "planId": "plan",
+                      "sessionId": "session",
+                      "executionEpoch": "epoch"
+                    },
+                    "recorder": {
+                      "bootId": "boot",
+                      "pid": 123,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-18T01:00:00Z"
+                    },
+                    "futureOpaque": {
+                      "keep": true
+                    }
+                  },
+                  "nativeHooks": {
+                    "schemaVersion": 1,
+                    "providerPhase": "prepared",
+                    "handles": [
+                      {
+                        "event": "PreToolUse",
+                        "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "process": {
+                          "schemaVersion": 1,
+                          "kind": "command",
+                          "handleId": "hook-1",
+                          "toolCallId": "call",
+                          "dispatchId": "dispatch",
+                          "execution": {
+                            "planId": "plan",
+                            "sessionId": "session",
+                            "executionEpoch": "epoch"
+                          },
+                          "generation": 1,
+                          "state": "ended",
+                          "owner": {
+                            "bootId": "boot",
+                            "pid": 123,
+                            "pidStart": "start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "child": {
+                            "bootId": "boot",
+                            "pid": 456,
+                            "pidStart": "child-start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "stopObservation": "owned_completion"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expected": "native_work_hooks_invalid"
+    },
+    {
+      "name": "group absence cannot manufacture a known result",
+      "work": {
+        "budget": {
+          "attempts": {
+            "attempt": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "execution": {
+                      "planId": "plan",
+                      "sessionId": "session",
+                      "executionEpoch": "epoch"
+                    },
+                    "recorder": {
+                      "bootId": "boot",
+                      "pid": 123,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-18T01:00:00Z"
+                    },
+                    "futureOpaque": {
+                      "keep": true
+                    }
+                  },
+                  "nativeHooks": {
+                    "schemaVersion": 1,
+                    "providerPhase": "prepared",
+                    "handles": [
+                      {
+                        "event": "PreToolUse",
+                        "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "process": {
+                          "schemaVersion": 1,
+                          "kind": "command",
+                          "handleId": "hook-1",
+                          "toolCallId": "call",
+                          "dispatchId": "dispatch",
+                          "execution": {
+                            "planId": "plan",
+                            "sessionId": "session",
+                            "executionEpoch": "epoch"
+                          },
+                          "generation": 1,
+                          "state": "ended",
+                          "owner": {
+                            "bootId": "boot",
+                            "pid": 123,
+                            "pidStart": "start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "child": {
+                            "bootId": "boot",
+                            "pid": 456,
+                            "pidStart": "child-start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "stopObservation": "owner_dead_group_absent"
+                        },
+                        "observation": {
+                          "id": "rule",
+                          "hookId": "rule",
+                          "event": "PreToolUse",
+                          "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                          "handleId": "hook-1",
+                          "decision": "deny",
+                          "reason": "actual local policy",
+                          "outcome": "ok",
+                          "exitCode": 0,
+                          "durationMs": 12
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expected": "native_work_hooks_invalid"
+    },
+    {
+      "name": "observation belongs to same Hook digest",
+      "work": {
+        "budget": {
+          "attempts": {
+            "attempt": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "execution": {
+                      "planId": "plan",
+                      "sessionId": "session",
+                      "executionEpoch": "epoch"
+                    },
+                    "recorder": {
+                      "bootId": "boot",
+                      "pid": 123,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-18T01:00:00Z"
+                    },
+                    "futureOpaque": {
+                      "keep": true
+                    }
+                  },
+                  "nativeHooks": {
+                    "schemaVersion": 1,
+                    "providerPhase": "prepared",
+                    "handles": [
+                      {
+                        "event": "PreToolUse",
+                        "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "process": {
+                          "schemaVersion": 1,
+                          "kind": "command",
+                          "handleId": "hook-1",
+                          "toolCallId": "call",
+                          "dispatchId": "dispatch",
+                          "execution": {
+                            "planId": "plan",
+                            "sessionId": "session",
+                            "executionEpoch": "epoch"
+                          },
+                          "generation": 1,
+                          "state": "ended",
+                          "owner": {
+                            "bootId": "boot",
+                            "pid": 123,
+                            "pidStart": "start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "child": {
+                            "bootId": "boot",
+                            "pid": 456,
+                            "pidStart": "child-start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "stopObservation": "owned_completion"
+                        },
+                        "observation": {
+                          "id": "rule",
+                          "hookId": "rule",
+                          "event": "PreToolUse",
+                          "ruleDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                          "handleId": "hook-1",
+                          "decision": "deny",
+                          "reason": "actual local policy",
+                          "outcome": "ok",
+                          "exitCode": 0,
+                          "durationMs": 12
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expected": "native_work_hooks_invalid"
+    },
+    {
+      "name": "process is bound to original Tool Call",
+      "work": {
+        "budget": {
+          "attempts": {
+            "attempt": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "execution": {
+                      "planId": "plan",
+                      "sessionId": "session",
+                      "executionEpoch": "epoch"
+                    },
+                    "recorder": {
+                      "bootId": "boot",
+                      "pid": 123,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-18T01:00:00Z"
+                    },
+                    "futureOpaque": {
+                      "keep": true
+                    }
+                  },
+                  "nativeHooks": {
+                    "schemaVersion": 1,
+                    "providerPhase": "prepared",
+                    "handles": [
+                      {
+                        "event": "PreToolUse",
+                        "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "process": {
+                          "schemaVersion": 1,
+                          "kind": "command",
+                          "handleId": "hook-1",
+                          "toolCallId": "wrong",
+                          "dispatchId": "dispatch",
+                          "execution": {
+                            "planId": "plan",
+                            "sessionId": "session",
+                            "executionEpoch": "epoch"
+                          },
+                          "generation": 1,
+                          "state": "ended",
+                          "owner": {
+                            "bootId": "boot",
+                            "pid": 123,
+                            "pidStart": "start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "child": {
+                            "bootId": "boot",
+                            "pid": 456,
+                            "pidStart": "child-start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "stopObservation": "owned_completion"
+                        },
+                        "observation": {
+                          "id": "rule",
+                          "hookId": "rule",
+                          "event": "PreToolUse",
+                          "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                          "handleId": "hook-1",
+                          "decision": "deny",
+                          "reason": "actual local policy",
+                          "outcome": "ok",
+                          "exitCode": 0,
+                          "durationMs": 12
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expected": "native_work_hooks_invalid"
+    },
+    {
+      "name": "process is bound to original dispatch",
+      "work": {
+        "budget": {
+          "attempts": {
+            "attempt": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "execution": {
+                      "planId": "plan",
+                      "sessionId": "session",
+                      "executionEpoch": "epoch"
+                    },
+                    "recorder": {
+                      "bootId": "boot",
+                      "pid": 123,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-18T01:00:00Z"
+                    },
+                    "futureOpaque": {
+                      "keep": true
+                    }
+                  },
+                  "nativeHooks": {
+                    "schemaVersion": 1,
+                    "providerPhase": "prepared",
+                    "handles": [
+                      {
+                        "event": "PreToolUse",
+                        "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "process": {
+                          "schemaVersion": 1,
+                          "kind": "command",
+                          "handleId": "hook-1",
+                          "toolCallId": "call",
+                          "dispatchId": "wrong",
+                          "execution": {
+                            "planId": "plan",
+                            "sessionId": "session",
+                            "executionEpoch": "epoch"
+                          },
+                          "generation": 1,
+                          "state": "ended",
+                          "owner": {
+                            "bootId": "boot",
+                            "pid": 123,
+                            "pidStart": "start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "child": {
+                            "bootId": "boot",
+                            "pid": 456,
+                            "pidStart": "child-start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "stopObservation": "owned_completion"
+                        },
+                        "observation": {
+                          "id": "rule",
+                          "hookId": "rule",
+                          "event": "PreToolUse",
+                          "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                          "handleId": "hook-1",
+                          "decision": "deny",
+                          "reason": "actual local policy",
+                          "outcome": "ok",
+                          "exitCode": 0,
+                          "durationMs": 12
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expected": "native_work_hooks_invalid"
+    },
+    {
+      "name": "execution epoch must match original recorder",
+      "work": {
+        "budget": {
+          "attempts": {
+            "attempt": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "execution": {
+                      "planId": "plan",
+                      "sessionId": "session",
+                      "executionEpoch": "epoch"
+                    },
+                    "recorder": {
+                      "bootId": "boot",
+                      "pid": 123,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-18T01:00:00Z"
+                    },
+                    "futureOpaque": {
+                      "keep": true
+                    }
+                  },
+                  "nativeHooks": {
+                    "schemaVersion": 1,
+                    "providerPhase": "prepared",
+                    "handles": [
+                      {
+                        "event": "PreToolUse",
+                        "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "process": {
+                          "schemaVersion": 1,
+                          "kind": "command",
+                          "handleId": "hook-1",
+                          "toolCallId": "call",
+                          "dispatchId": "dispatch",
+                          "execution": {
+                            "planId": "plan",
+                            "sessionId": "session",
+                            "executionEpoch": "replaced"
+                          },
+                          "generation": 1,
+                          "state": "ended",
+                          "owner": {
+                            "bootId": "boot",
+                            "pid": 123,
+                            "pidStart": "start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "child": {
+                            "bootId": "boot",
+                            "pid": 456,
+                            "pidStart": "child-start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "stopObservation": "owned_completion"
+                        },
+                        "observation": {
+                          "id": "rule",
+                          "hookId": "rule",
+                          "event": "PreToolUse",
+                          "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                          "handleId": "hook-1",
+                          "decision": "deny",
+                          "reason": "actual local policy",
+                          "outcome": "ok",
+                          "exitCode": 0,
+                          "durationMs": 12
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expected": "native_work_hooks_invalid"
+    },
+    {
+      "name": "owner is bound to current attempt",
+      "work": {
+        "budget": {
+          "attempts": {
+            "attempt": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "execution": {
+                      "planId": "plan",
+                      "sessionId": "session",
+                      "executionEpoch": "epoch"
+                    },
+                    "recorder": {
+                      "bootId": "boot",
+                      "pid": 123,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-18T01:00:00Z"
+                    },
+                    "futureOpaque": {
+                      "keep": true
+                    }
+                  },
+                  "nativeHooks": {
+                    "schemaVersion": 1,
+                    "providerPhase": "prepared",
+                    "handles": [
+                      {
+                        "event": "PreToolUse",
+                        "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "process": {
+                          "schemaVersion": 1,
+                          "kind": "command",
+                          "handleId": "hook-1",
+                          "toolCallId": "call",
+                          "dispatchId": "dispatch",
+                          "execution": {
+                            "planId": "plan",
+                            "sessionId": "session",
+                            "executionEpoch": "epoch"
+                          },
+                          "generation": 1,
+                          "state": "ended",
+                          "owner": {
+                            "bootId": "boot",
+                            "pid": 333,
+                            "pidStart": "start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "child": {
+                            "bootId": "boot",
+                            "pid": 456,
+                            "pidStart": "child-start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "stopObservation": "owned_completion"
+                        },
+                        "observation": {
+                          "id": "rule",
+                          "hookId": "rule",
+                          "event": "PreToolUse",
+                          "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                          "handleId": "hook-1",
+                          "decision": "deny",
+                          "reason": "actual local policy",
+                          "outcome": "ok",
+                          "exitCode": 0,
+                          "durationMs": 12
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expected": "native_work_hooks_invalid"
+    },
+    {
+      "name": "already prepared call cannot carry Provider child",
+      "work": {
+        "budget": {
+          "attempts": {
+            "attempt": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "execution": {
+                      "planId": "plan",
+                      "sessionId": "session",
+                      "executionEpoch": "epoch"
+                    },
+                    "recorder": {
+                      "bootId": "boot",
+                      "pid": 123,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-18T01:00:00Z"
+                    },
+                    "futureOpaque": {
+                      "keep": true
+                    }
+                  },
+                  "nativeHooks": {
+                    "schemaVersion": 1,
+                    "providerPhase": "prepared",
+                    "handles": []
+                  },
+                  "nativeProcess": {
+                    "schemaVersion": 1,
+                    "kind": "command",
+                    "handleId": "hook-1",
+                    "toolCallId": "call",
+                    "dispatchId": "dispatch",
+                    "execution": {
+                      "planId": "plan",
+                      "sessionId": "session",
+                      "executionEpoch": "epoch"
+                    },
+                    "generation": 1,
+                    "state": "ended",
+                    "owner": {
+                      "bootId": "boot",
+                      "pid": 123,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-18T01:00:00Z"
+                    },
+                    "child": {
+                      "bootId": "boot",
+                      "pid": 456,
+                      "pidStart": "child-start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-18T01:00:00Z"
+                    },
+                    "stopObservation": "owned_completion"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expected": "native_work_hooks_invalid"
+    },
+    {
+      "name": "duplicate handles cannot survive settlement",
+      "work": {
+        "budget": {
+          "attempts": {
+            "attempt": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "execution": {
+                      "planId": "plan",
+                      "sessionId": "session",
+                      "executionEpoch": "epoch"
+                    },
+                    "recorder": {
+                      "bootId": "boot",
+                      "pid": 123,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-18T01:00:00Z"
+                    },
+                    "futureOpaque": {
+                      "keep": true
+                    }
+                  },
+                  "nativeHooks": {
+                    "schemaVersion": 1,
+                    "providerPhase": "prepared",
+                    "handles": [
+                      {
+                        "event": "PreToolUse",
+                        "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "process": {
+                          "schemaVersion": 1,
+                          "kind": "command",
+                          "handleId": "hook-1",
+                          "toolCallId": "call",
+                          "dispatchId": "dispatch",
+                          "execution": {
+                            "planId": "plan",
+                            "sessionId": "session",
+                            "executionEpoch": "epoch"
+                          },
+                          "generation": 1,
+                          "state": "ended",
+                          "owner": {
+                            "bootId": "boot",
+                            "pid": 123,
+                            "pidStart": "start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "child": {
+                            "bootId": "boot",
+                            "pid": 456,
+                            "pidStart": "child-start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "stopObservation": "owned_completion"
+                        },
+                        "observation": {
+                          "id": "rule",
+                          "hookId": "rule",
+                          "event": "PreToolUse",
+                          "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                          "handleId": "hook-1",
+                          "decision": "deny",
+                          "reason": "actual local policy",
+                          "outcome": "ok",
+                          "exitCode": 0,
+                          "durationMs": 12
+                        }
+                      },
+                      {
+                        "event": "PreToolUse",
+                        "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "process": {
+                          "schemaVersion": 1,
+                          "kind": "command",
+                          "handleId": "hook-1",
+                          "toolCallId": "call",
+                          "dispatchId": "dispatch",
+                          "execution": {
+                            "planId": "plan",
+                            "sessionId": "session",
+                            "executionEpoch": "epoch"
+                          },
+                          "generation": 1,
+                          "state": "ended",
+                          "owner": {
+                            "bootId": "boot",
+                            "pid": 123,
+                            "pidStart": "start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "child": {
+                            "bootId": "boot",
+                            "pid": 456,
+                            "pidStart": "child-start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "stopObservation": "owned_completion"
+                        },
+                        "observation": {
+                          "id": "rule",
+                          "hookId": "rule",
+                          "event": "PreToolUse",
+                          "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                          "handleId": "hook-1",
+                          "decision": "deny",
+                          "reason": "actual local policy",
+                          "outcome": "ok",
+                          "exitCode": 0,
+                          "durationMs": 12
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expected": "native_work_hooks_invalid"
+    },
+    {
+      "name": "future known-field revision stays blocked",
+      "work": {
+        "budget": {
+          "attempts": {
+            "attempt": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "execution": {
+                      "planId": "plan",
+                      "sessionId": "session",
+                      "executionEpoch": "epoch"
+                    },
+                    "recorder": {
+                      "bootId": "boot",
+                      "pid": 123,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-18T01:00:00Z"
+                    },
+                    "futureOpaque": {
+                      "keep": true
+                    }
+                  },
+                  "nativeHooks": {
+                    "schemaVersion": 2,
+                    "providerPhase": "prepared",
+                    "handles": []
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expected": "native_work_hooks_invalid"
+    },
+    {
+      "name": "original Work tool intent is durable before a Hook",
+      "work": {
+        "budget": {
+          "attempts": {
+            "attempt": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "execution": {
+                      "planId": "plan",
+                      "sessionId": "session",
+                      "executionEpoch": "epoch"
+                    },
+                    "recorder": {
+                      "bootId": "boot",
+                      "pid": 123,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-18T01:00:00Z"
+                    },
+                    "futureOpaque": {
+                      "keep": true
+                    }
+                  },
+                  "nativeHooks": {
+                    "schemaVersion": 1,
+                    "providerPhase": "prepared",
+                    "handles": [
+                      {
+                        "event": "PreToolUse",
+                        "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "process": {
+                          "schemaVersion": 1,
+                          "kind": "command",
+                          "handleId": "hook-1",
+                          "toolCallId": "call",
+                          "dispatchId": "dispatch",
+                          "execution": {
+                            "planId": "plan",
+                            "sessionId": "session",
+                            "executionEpoch": "epoch"
+                          },
+                          "generation": 1,
+                          "state": "ended",
+                          "owner": {
+                            "bootId": "boot",
+                            "pid": 123,
+                            "pidStart": "start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "child": {
+                            "bootId": "boot",
+                            "pid": 456,
+                            "pidStart": "child-start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "stopObservation": "owned_completion"
+                        },
+                        "observation": {
+                          "id": "rule",
+                          "hookId": "rule",
+                          "event": "PreToolUse",
+                          "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                          "handleId": "hook-1",
+                          "decision": "deny",
+                          "reason": "actual local policy",
+                          "outcome": "ok",
+                          "exitCode": 0,
+                          "durationMs": 12
+                        }
+                      }
+                    ],
+                    "intent": {
+                      "messageId": "original-tool-message",
+                      "argsDigest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expected": true
+    },
+    {
+      "name": "null is not an original Tool Call identity",
+      "work": {
+        "budget": {
+          "attempts": {
+            "attempt": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "execution": {
+                      "planId": "plan",
+                      "sessionId": "session",
+                      "executionEpoch": "epoch"
+                    },
+                    "recorder": {
+                      "bootId": "boot",
+                      "pid": 123,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-18T01:00:00Z"
+                    },
+                    "futureOpaque": {
+                      "keep": true
+                    }
+                  },
+                  "nativeHooks": {
+                    "schemaVersion": 1,
+                    "providerPhase": "prepared",
+                    "handles": [
+                      {
+                        "event": "PreToolUse",
+                        "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "process": {
+                          "schemaVersion": 1,
+                          "kind": "command",
+                          "handleId": "hook-1",
+                          "toolCallId": "call",
+                          "dispatchId": "dispatch",
+                          "execution": {
+                            "planId": "plan",
+                            "sessionId": "session",
+                            "executionEpoch": "epoch"
+                          },
+                          "generation": 1,
+                          "state": "ended",
+                          "owner": {
+                            "bootId": "boot",
+                            "pid": 123,
+                            "pidStart": "start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "child": {
+                            "bootId": "boot",
+                            "pid": 456,
+                            "pidStart": "child-start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "stopObservation": "owned_completion"
+                        },
+                        "observation": {
+                          "id": "rule",
+                          "hookId": "rule",
+                          "event": "PreToolUse",
+                          "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                          "handleId": "hook-1",
+                          "decision": "deny",
+                          "reason": "actual local policy",
+                          "outcome": "ok",
+                          "exitCode": 0,
+                          "durationMs": 12
+                        }
+                      }
+                    ],
+                    "intent": null
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expected": "native_work_hooks_invalid"
+    },
+    {
+      "name": "foreign arguments digest remains blocked",
+      "work": {
+        "budget": {
+          "attempts": {
+            "attempt": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "execution": {
+                      "planId": "plan",
+                      "sessionId": "session",
+                      "executionEpoch": "epoch"
+                    },
+                    "recorder": {
+                      "bootId": "boot",
+                      "pid": 123,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-18T01:00:00Z"
+                    },
+                    "futureOpaque": {
+                      "keep": true
+                    }
+                  },
+                  "nativeHooks": {
+                    "schemaVersion": 1,
+                    "providerPhase": "prepared",
+                    "handles": [
+                      {
+                        "event": "PreToolUse",
+                        "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "process": {
+                          "schemaVersion": 1,
+                          "kind": "command",
+                          "handleId": "hook-1",
+                          "toolCallId": "call",
+                          "dispatchId": "dispatch",
+                          "execution": {
+                            "planId": "plan",
+                            "sessionId": "session",
+                            "executionEpoch": "epoch"
+                          },
+                          "generation": 1,
+                          "state": "ended",
+                          "owner": {
+                            "bootId": "boot",
+                            "pid": 123,
+                            "pidStart": "start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "child": {
+                            "bootId": "boot",
+                            "pid": 456,
+                            "pidStart": "child-start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "stopObservation": "owned_completion"
+                        },
+                        "observation": {
+                          "id": "rule",
+                          "hookId": "rule",
+                          "event": "PreToolUse",
+                          "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                          "handleId": "hook-1",
+                          "decision": "deny",
+                          "reason": "actual local policy",
+                          "outcome": "ok",
+                          "exitCode": 0,
+                          "durationMs": 12
+                        }
+                      }
+                    ],
+                    "intent": {
+                      "messageId": "original-tool-message",
+                      "argsDigest": "wrong"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expected": "native_work_hooks_invalid"
+    },
+    {
+      "name": "real once Grant survives Provider admission",
+      "work": {
+        "budget": {
+          "attempts": {
+            "attempt": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "execution": {
+                      "planId": "plan",
+                      "sessionId": "session",
+                      "executionEpoch": "epoch"
+                    },
+                    "recorder": {
+                      "bootId": "boot",
+                      "pid": 123,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-18T01:00:00Z"
+                    },
+                    "futureOpaque": {
+                      "keep": true
+                    }
+                  },
+                  "nativeHooks": {
+                    "schemaVersion": 1,
+                    "providerPhase": "dispatching",
+                    "handles": [
+                      {
+                        "event": "PostToolUse",
+                        "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "process": {
+                          "schemaVersion": 1,
+                          "kind": "command",
+                          "handleId": "hook-1",
+                          "toolCallId": "call",
+                          "dispatchId": "dispatch",
+                          "execution": {
+                            "planId": "plan",
+                            "sessionId": "session",
+                            "executionEpoch": "epoch"
+                          },
+                          "generation": 1,
+                          "state": "ended",
+                          "owner": {
+                            "bootId": "boot",
+                            "pid": 123,
+                            "pidStart": "start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "child": {
+                            "bootId": "boot",
+                            "pid": 456,
+                            "pidStart": "child-start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "stopObservation": "owned_completion"
+                        },
+                        "observation": {
+                          "id": "rule",
+                          "hookId": "rule",
+                          "event": "PostToolUse",
+                          "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                          "handleId": "hook-1",
+                          "decision": "deny",
+                          "reason": "actual local policy",
+                          "outcome": "ok",
+                          "exitCode": 0,
+                          "durationMs": 12
+                        }
+                      }
+                    ],
+                    "intent": {
+                      "messageId": "original-tool-message",
+                      "argsDigest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                    },
+                    "grant": {
+                      "grantId": "original-grant",
+                      "toolCallId": "call",
+                      "granted": true,
+                      "duration": "once",
+                      "scope": "local.file.write"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expected": true
+    },
+    {
+      "name": "grant cannot be recorded before Provider admission",
+      "work": {
+        "budget": {
+          "attempts": {
+            "attempt": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "execution": {
+                      "planId": "plan",
+                      "sessionId": "session",
+                      "executionEpoch": "epoch"
+                    },
+                    "recorder": {
+                      "bootId": "boot",
+                      "pid": 123,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-18T01:00:00Z"
+                    },
+                    "futureOpaque": {
+                      "keep": true
+                    }
+                  },
+                  "nativeHooks": {
+                    "schemaVersion": 1,
+                    "providerPhase": "prepared",
+                    "handles": [
+                      {
+                        "event": "PreToolUse",
+                        "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "process": {
+                          "schemaVersion": 1,
+                          "kind": "command",
+                          "handleId": "hook-1",
+                          "toolCallId": "call",
+                          "dispatchId": "dispatch",
+                          "execution": {
+                            "planId": "plan",
+                            "sessionId": "session",
+                            "executionEpoch": "epoch"
+                          },
+                          "generation": 1,
+                          "state": "ended",
+                          "owner": {
+                            "bootId": "boot",
+                            "pid": 123,
+                            "pidStart": "start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "child": {
+                            "bootId": "boot",
+                            "pid": 456,
+                            "pidStart": "child-start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "stopObservation": "owned_completion"
+                        },
+                        "observation": {
+                          "id": "rule",
+                          "hookId": "rule",
+                          "event": "PreToolUse",
+                          "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                          "handleId": "hook-1",
+                          "decision": "deny",
+                          "reason": "actual local policy",
+                          "outcome": "ok",
+                          "exitCode": 0,
+                          "durationMs": 12
+                        }
+                      }
+                    ],
+                    "intent": {
+                      "messageId": "original-tool-message",
+                      "argsDigest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                    },
+                    "grant": {
+                      "grantId": "original-grant",
+                      "toolCallId": "call",
+                      "granted": true,
+                      "duration": "once",
+                      "scope": "local.file.write"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expected": "native_work_hooks_invalid"
+    },
+    {
+      "name": "foreign once Grant remains blocked",
+      "work": {
+        "budget": {
+          "attempts": {
+            "attempt": {
+              "pendingTools": [
+                {
+                  "toolCallId": "call",
+                  "dispatchId": "dispatch",
+                  "nativeRecorder": {
+                    "schemaVersion": 1,
+                    "runtime": "peer-native",
+                    "execution": {
+                      "planId": "plan",
+                      "sessionId": "session",
+                      "executionEpoch": "epoch"
+                    },
+                    "recorder": {
+                      "bootId": "boot",
+                      "pid": 123,
+                      "pidStart": "start",
+                      "hostId": "host",
+                      "acquiredAt": "2026-11-18T01:00:00Z"
+                    },
+                    "futureOpaque": {
+                      "keep": true
+                    }
+                  },
+                  "nativeHooks": {
+                    "schemaVersion": 1,
+                    "providerPhase": "dispatching",
+                    "handles": [
+                      {
+                        "event": "PostToolUse",
+                        "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "process": {
+                          "schemaVersion": 1,
+                          "kind": "command",
+                          "handleId": "hook-1",
+                          "toolCallId": "call",
+                          "dispatchId": "dispatch",
+                          "execution": {
+                            "planId": "plan",
+                            "sessionId": "session",
+                            "executionEpoch": "epoch"
+                          },
+                          "generation": 1,
+                          "state": "ended",
+                          "owner": {
+                            "bootId": "boot",
+                            "pid": 123,
+                            "pidStart": "start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "child": {
+                            "bootId": "boot",
+                            "pid": 456,
+                            "pidStart": "child-start",
+                            "hostId": "host",
+                            "acquiredAt": "2026-11-18T01:00:00Z"
+                          },
+                          "stopObservation": "owned_completion"
+                        },
+                        "observation": {
+                          "id": "rule",
+                          "hookId": "rule",
+                          "event": "PostToolUse",
+                          "ruleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                          "handleId": "hook-1",
+                          "decision": "deny",
+                          "reason": "actual local policy",
+                          "outcome": "ok",
+                          "exitCode": 0,
+                          "durationMs": 12
+                        }
+                      }
+                    ],
+                    "intent": {
+                      "messageId": "original-tool-message",
+                      "argsDigest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                    },
+                    "grant": {
+                      "grantId": "original-grant",
+                      "toolCallId": "foreign",
+                      "granted": true,
+                      "duration": "once",
+                      "scope": "local.file.write"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expected": "native_work_hooks_invalid"
+    }
+  ]
+}

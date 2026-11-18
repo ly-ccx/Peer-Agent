@@ -12,6 +12,8 @@ pub(super) struct ToolAuthorizationRequest<'a> {
     pub scopes: &'a [ExecutionResourceScope],
     pub read_path: Result<Option<&'a Path>, HostError>,
     pub workspace: &'a Path,
+    pub hooks: Option<&'a peer_store::HookConfig>,
+    pub require_confirmation: bool,
 }
 pub(super) struct ToolAuthorization {
     pub grant: Option<HostPermissionGrant>,
@@ -22,6 +24,17 @@ pub(super) struct ToolAuthorization {
     scope: Option<Value>,
 }
 impl ToolAuthorization {
+    pub(super) fn hook_block(reason: &'static str, terminal: Option<HostError>) -> Self {
+        Self {
+            grant: None,
+            reason: Some(reason),
+            terminal,
+            failure: None,
+            reads: None,
+            scope: None,
+        }
+    }
+
     pub(super) fn denied_facts(&self, call: &str, capability: &str) -> Value {
         denied(
             call,
@@ -97,7 +110,9 @@ impl NativeSessionHost {
             result.reads = Some(ReadScopes::new(workspace, request.tool.to_owned()));
         }
         result.scope = scope.as_ref().map(|s| s.value());
-        let grant = if let Some(scope) = scope.as_ref() {
+        let grant = if request.require_confirmation {
+            None
+        } else if let Some(scope) = scope.as_ref() {
             self.automatic_read_permission(
                 request.identity,
                 request.args,
@@ -118,10 +133,44 @@ impl NativeSessionHost {
             self.request_permission(request.identity, request.args, &episode_time())?
         };
         let prompt = json!({"approval":pending.record(),"tool":request.tool,"arguments":request.args,"scopes":result.scope.as_ref().map(|s|json!([s])).unwrap_or_else(||json!(request.scopes))});
-        let decision = self
-            .wait_owned(pending.wait(permission, prompt, owned), owned, external)
-            .await?;
+        let wait = async {
+            let answer = pending.wait(permission, prompt, owned);
+            let source = async {
+                let Some(hooks) = request.hooks else {
+                    return std::future::pending().await;
+                };
+                let mut tick = tokio::time::interval(std::time::Duration::from_millis(100));
+                loop {
+                    tick.tick().await;
+                    if hooks.check_current().is_err() {
+                        return HostError("native_hook_source_changed");
+                    }
+                }
+            };
+            tokio::select! {
+                biased;
+                error = source => Err(error),
+                answer = answer => Ok(answer),
+            }
+        };
+        let answer = self.wait_owned(wait, owned, external).await?;
+        let source_error = answer.as_ref().err().copied().or_else(|| {
+            request.hooks.and_then(|hooks| {
+                hooks
+                    .check_current()
+                    .err()
+                    .map(|_| HostError("native_hook_source_changed"))
+            })
+        });
+        let decision = if source_error.is_some() {
+            LocalPermissionDecision::Cancel
+        } else {
+            answer?
+        };
         let settled = self.settle_permission(pending, decision, request.args, &episode_time())?;
+        if let Some(error) = source_error {
+            return Ok(ToolAuthorization::hook_block(error.0, Some(error)));
+        }
         result.grant = settled.grant;
         result.reason = settled.reason;
         result.terminal = settled.terminal;

@@ -32,6 +32,7 @@ mod hooks;
 mod permission;
 mod recovery;
 mod tool;
+mod user_input;
 use permission::ToolGrant;
 
 /// Host-owned live access revision. UI/ACP commands change this actual authority;
@@ -68,6 +69,7 @@ pub struct ConversationOptions<'a> {
     pub workspace: &'a Path,
     pub conversation_id: Option<&'a str>,
     pub prompt: &'a str,
+    pub image_paths: &'a [PathBuf],
     pub provider_id: &'a str,
     pub mode: RuntimeMode,
     pub effort: &'a str,
@@ -148,7 +150,8 @@ impl NativeConversationRuntime {
         if external.is_cancelled() {
             return Err(HostError("CANCELLED"));
         }
-        if peer_protocol::javascript_trim(options.prompt).is_empty()
+        if (peer_protocol::javascript_trim(options.prompt).is_empty()
+            && options.image_paths.is_empty())
             || options.prompt.len() > 1024 * 1024
             || options.max_turns == Some(0)
         {
@@ -165,12 +168,31 @@ impl NativeConversationRuntime {
         if !workspace.is_dir() || workspace.to_str().is_none() {
             return Err(HostError("invalid_workspace"));
         }
+        let at = now();
+        let user_message = user_input::message(
+            &workspace,
+            options.prompt,
+            options.image_paths,
+            &at,
+            external,
+        )
+        .await?;
+        if !options.image_paths.is_empty() {
+            let projected =
+                crate::canonical_history::project_history(std::slice::from_ref(&user_message))
+                    .map_err(HostError)?;
+            model
+                .validate_saved_media(&projected)
+                .map_err(|e| HostError(e.code))?;
+        }
+        if external.is_cancelled() {
+            return Err(HostError("CANCELLED"));
+        }
         let hooks = Arc::new(peer_store::HookConfig::observe(&self.home, &workspace)?);
         let skills = Arc::new(peer_store::SkillCatalog::observe(&self.home, &workspace)?);
         let instructions = ProjectInstructions::observe_host(&workspace, &self.home, external)
             .map_err(HostError)?;
         let inventory = McpRegistryStore::new(&self.home).read()?;
-        let at = now();
         let stream = format!("stream-{}", uuid::Uuid::new_v4());
         let owner = crate::recorder::local_recorder(
             &format!("native-conversation-{}", uuid::Uuid::new_v4()),
@@ -194,7 +216,11 @@ impl NativeConversationRuntime {
             Some(id) => id.to_owned(),
             None => store.create_with_model(
                 &NewConversation {
-                    title: &options.prompt.chars().take(80).collect::<String>(),
+                    title: &if options.prompt.trim().is_empty() {
+                        "Image attachment".into()
+                    } else {
+                        options.prompt.chars().take(80).collect::<String>()
+                    },
                     workspace_path: workspace.to_str(),
                     mode: options.mode.as_str(),
                     created_at: &at,
@@ -344,11 +370,16 @@ impl NativeConversationRuntime {
             turns: 0,
             request_admitted: false,
         };
-        let result=async {
-            host.append(&json!({"id":format!("message-{}",uuid::Uuid::new_v4()),"role":"user","content":options.prompt,"createdAt":at}))?;
-            host.publish(ConversationEvent::Started { conversation_id: &conversation }).await?;
-            crate::turn_loop::run(&mut host,options.max_turns,&owned,external).await
-        }.await;
+        let result = async {
+            host.append(&user_message)?;
+            drop(user_message);
+            host.publish(ConversationEvent::Started {
+                conversation_id: &conversation,
+            })
+            .await?;
+            crate::turn_loop::run(&mut host, options.max_turns, &owned, external).await
+        }
+        .await;
         let cleanup = host.finish().await;
         let error = cleanup
             .as_ref()

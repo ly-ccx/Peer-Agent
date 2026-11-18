@@ -13,6 +13,7 @@ pub struct Options {
     pub workspace: Option<String>,
     pub max_turns: Option<usize>,
     pub prompt_parts: Vec<String>,
+    pub image_paths: Vec<std::path::PathBuf>,
 }
 impl Default for Options {
     fn default() -> Self {
@@ -28,6 +29,7 @@ impl Default for Options {
             workspace: None,
             max_turns: None,
             prompt_parts: vec![],
+            image_paths: vec![],
         }
     }
 }
@@ -49,7 +51,7 @@ fn count(s: &str) -> Option<usize> {
 }
 pub(crate) fn parse(args: &[String]) -> Command {
     match parse_inner(args) {
-        Ok(Some(options)) => Command::OrdinaryExec(options),
+        Ok(Some(options)) => Command::OrdinaryExec(Box::new(options)),
         Ok(None) => Command::ExecHelp,
         Err(message) => Command::Usage(message),
     }
@@ -95,6 +97,7 @@ fn parse_inner(args: &[String]) -> Result<Option<Options>, String> {
             "--effort",
             "--mode",
             "--workspace",
+            "--image",
             "--max-turns",
         ]
         .contains(&name)
@@ -142,6 +145,7 @@ fn parse_inner(args: &[String]) -> Result<Option<Options>, String> {
             "--model" => options.model = Some(value),
             "--effort" => options.effort = Some(value),
             "--workspace" => options.workspace = Some(value),
+            "--image" => options.image_paths.push(value.into()),
             "--mode" => {
                 if !["chat", "plan", "goal"].contains(&value.as_str()) {
                     return Err("peer exec: --mode must be chat, plan, or goal".into());

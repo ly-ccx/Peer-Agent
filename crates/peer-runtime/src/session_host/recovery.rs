@@ -157,6 +157,7 @@ impl NativeSessionHost {
             return Ok(existing);
         }
         self.recover_native_mcp_handles(&current, cancel).await?;
+        self.recover_work_hook_processes(&current, cancel).await?;
         self.recover_command_processes(&current, cancel).await?;
         let current = self.current(plan, &super::episode_time())?;
         if !self.dead_native_episode(&current).await {
@@ -165,6 +166,8 @@ impl NativeSessionHost {
         if cancel.is_cancelled() {
             return Err(HostError("CANCELLED"));
         }
+        self.recover_observed_work_pre(&current, cancel)?;
+        let current = self.current(plan, &super::episode_time())?;
         let work = current.goal.facts["delegationOrigin"]["workId"]
             .as_str()
             .ok_or(HostError("work_budget_host_unavailable"))?;

@@ -5,6 +5,7 @@ use crate::{
 };
 use peer_protocol::{ExecutionResourceScope, javascript_json_digest};
 use serde_json::{Value, json};
+mod hooks;
 mod process;
 pub(crate) struct EpisodeBudget {
     pub work: String,
@@ -40,6 +41,7 @@ pub(crate) struct DispatchFacts<'a> {
     pub scopes: &'a [ExecutionResourceScope],
     pub stream: &'a str,
     pub conversation: &'a str,
+    pub hook_intent: Option<&'a peer_protocol::WorkHookIntent>,
 }
 impl EpisodeBudget {
     pub(crate) fn validate_existing(b: &Value) -> Result<(), HostError> {
@@ -210,6 +212,7 @@ impl EpisodeBudget {
             scopes,
             stream,
             conversation,
+            hook_intent,
         } = facts;
         let digest = javascript_json_digest(&json!([self.work, self.attempt, call]))
             .map_err(|_| HostError("work_budget_invalid"))?;
@@ -225,6 +228,9 @@ impl EpisodeBudget {
             // merely by filtering out the scopes this grammar cannot express.
             if !scopes.is_empty() && scopes.len() <= 16 && scopes.iter().all(|s|matches!(s,ExecutionResourceScope::File{..})) {
                 row["declaredScopes"]=json!(scopes);
+            }
+            if let Some(intent) = hook_intent {
+                row["nativeHooks"] = json!({"schemaVersion":1,"providerPhase":"prepared","handles":[],"intent":intent});
             }
             attempt["pendingTools"].as_array_mut().unwrap().push(row);
             b["toolCalls"]=json!(b["toolCalls"].as_u64().unwrap_or(0)+1);Ok(())

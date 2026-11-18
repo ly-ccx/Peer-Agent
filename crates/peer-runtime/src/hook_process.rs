@@ -3,10 +3,11 @@
 use crate::{
     CancellationToken,
     capability::CapabilityError as HostError,
-    hook_policy::{HookVerdict, hook_verdict},
+    hook_policy::{HookDecision, HookVerdict, hook_verdict},
     providers::group_absent,
 };
 use peer_store::{HookDefinition, HookPhase};
+use serde_json::{Value, json};
 use std::{
     path::Path,
     process::Stdio,
@@ -22,7 +23,7 @@ const LIMIT: usize = 64 * 1024;
 pub(crate) trait HookProcessOwner {
     fn starting(&mut self) -> Result<(), HostError>;
     async fn spawned(&mut self, pid: u32) -> Result<(), HostError>;
-    fn current(&self) -> Result<(), HostError>;
+    fn current(&mut self) -> Result<(), HostError>;
 }
 
 pub(crate) struct HookObservation {
@@ -31,6 +32,42 @@ pub(crate) struct HookObservation {
     pub duration_ms: u64,
     pub ended: bool,
     pub interrupted: Option<HostError>,
+}
+
+pub(crate) fn rule_digest(hook: &HookDefinition) -> Result<String, HostError> {
+    peer_protocol::javascript_json_digest(&json!({
+        "id":hook.id,"command":hook.command,"capability":hook.capability_pattern,
+        "arguments":hook.argument_pattern,"timeoutMs":hook.timeout_ms,"failOpen":hook.fail_open
+    }))
+    .map_err(|_| HostError("hook_config_invalid"))
+}
+
+pub(crate) fn decision_name(decision: HookDecision) -> &'static str {
+    match decision {
+        HookDecision::Allow => "allow",
+        HookDecision::Ask => "ask",
+        HookDecision::Deny => "deny",
+    }
+}
+
+pub(crate) fn evidence_record(
+    hook: &HookDefinition,
+    phase: HookPhase,
+    digest: &str,
+    handle: &str,
+    observation: &HookObservation,
+) -> Value {
+    let safe =
+        |text: &str| -> String { text.chars().filter(|c| !c.is_control()).take(256).collect() };
+    let id = if hook.id == hook.command {
+        format!("hook-{}", &digest[..16])
+    } else {
+        safe(&hook.id)
+    };
+    json!({"id":id,"hookId":id,"event":phase.name(),"ruleDigest":digest,
+        "handleId":handle,"decision":decision_name(observation.verdict.decision),
+        "reason":observation.verdict.reason.as_deref().map(safe),"outcome":observation.verdict.outcome,
+        "exitCode":observation.exit_code,"durationMs":observation.duration_ms})
 }
 
 pub(crate) async fn run_hook(
@@ -202,7 +239,7 @@ mod tests {
             }
             Ok(())
         }
-        fn current(&self) -> Result<(), HostError> {
+        fn current(&mut self) -> Result<(), HostError> {
             Ok(())
         }
     }

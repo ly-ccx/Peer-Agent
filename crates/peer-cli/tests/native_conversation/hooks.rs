@@ -455,3 +455,442 @@ fn public_ordinary_hook_configuration_replacement_stops_the_original_child_befor
         String::from_utf8_lossy(&fresh.stderr)
     );
 }
+
+#[test]
+fn public_delegated_hook_denies_the_original_work_call_with_no_provider_effect() {
+    let server = Server::new(vec![
+        reply_tool(
+            "bash",
+            json!({"command":"/usr/bin/touch goal-must-not-exist"}),
+        ),
+        reply_text("Goal policy completed"),
+    ]);
+    let fixture = Fixture::new(&server);
+    std::fs::create_dir_all(fixture.root.path().join("workspace/.peer")).unwrap();
+    put(
+        fixture.root.path().join("workspace/.peer/hooks.json"),
+        &json!({"hooks":{"PreToolUse":[
+            {"id":"goal-policy","command":r#"printf '%s' '{"decision":"deny","reason":"goal-policy"}'"#,
+             "match":{"capabilityId":"local.shell.exec"}}
+        ]}}),
+    );
+    let output = fixture.run();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(server.requests.lock().unwrap().len(), 2);
+    assert!(
+        !fixture
+            .root
+            .path()
+            .join("workspace/goal-must-not-exist")
+            .exists()
+    );
+    let history = fixture.history();
+    let result = history
+        .iter()
+        .flat_map(|row| row["segments"].as_array().into_iter().flatten())
+        .find(|segment| segment["result"]["capabilityId"] == "local.shell.exec")
+        .map(|segment| &segment["result"])
+        .expect("original canonical Tool Result");
+    assert_eq!(result["status"], "denied");
+    assert_eq!(result["evidence"]["dispatchOutcome"], "not_dispatched");
+    assert_eq!(result["evidence"]["hooks"][0]["reason"], "goal-policy");
+    let budget = fixture.budget(|_| {});
+    assert_eq!(budget["toolCalls"], 1);
+    assert!(
+        budget["uncertainDispatches"]
+            .as_array()
+            .is_none_or(|v| v.is_empty())
+    );
+}
+
+fn work_hook_config(fixture: &Fixture, hooks: Value) {
+    let directory = fixture.root.path().join("workspace/.peer");
+    std::fs::create_dir_all(&directory).unwrap();
+    put(directory.join("hooks.json"), &json!({"hooks":hooks}));
+}
+
+fn work_hook_result(fixture: &Fixture, capability: &str) -> Value {
+    fixture
+        .history()
+        .into_iter()
+        .flat_map(|row| row["segments"].as_array().cloned().unwrap_or_default())
+        .find_map(|segment| {
+            let result = &segment["result"];
+            (result["capabilityId"] == capability).then(|| result.clone())
+        })
+        .expect("original canonical Work Tool Result")
+}
+
+#[test]
+fn public_delegated_hook_uses_existing_approval_and_observes_provider_result() {
+    let server = Server::new(vec![
+        reply_tool(
+            "write_file",
+            json!({"path":"work-approved","content":"actual effect"}),
+        ),
+        reply_text("Worker done"),
+    ]);
+    let fixture = Fixture::new(&server);
+    work_hook_config(
+        &fixture,
+        json!({
+            "PreToolUse":[{
+                "id":"must-confirm","command":r#"printf '%s' '{"decision":"ask"}'"#,
+                "match":{"capabilityId":"local.file.write"}
+            }],
+            "PostToolUse":[{
+                "id":"observe-write","command":r#"/bin/cat > hook-observed.json; printf '%s' '{"decision":"deny"}'"#,
+                "match":{"capabilityId":"local.file.write"}
+            }]
+        }),
+    );
+    let (master, child) = permission_pty(&fixture);
+    wait_permission_prompt(&master);
+    assert!(!fixture.root.path().join("workspace/work-approved").exists());
+    rustix::io::write(&master, b"y\n").unwrap();
+    wait_permission_decision(&fixture, "approved");
+    let output = wait_permission_episode(child);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.root.path().join("workspace/work-approved")).unwrap(),
+        "actual effect"
+    );
+    let result = work_hook_result(&fixture, "local.file.write");
+    let observed = get(fixture.root.path().join("workspace/hook-observed.json"));
+    assert_eq!(observed["result"]["toolCallId"], result["toolCallId"]);
+    assert_eq!(observed["result"]["status"], "success");
+    assert_eq!(result["status"], "success");
+    assert_eq!(result["evidence"]["hookFinalDecision"], "ask");
+    assert_eq!(result["evidence"]["hooks"][1]["decision"], "deny");
+    assert_eq!(server.requests.lock().unwrap().len(), 2);
+}
+
+#[test]
+fn public_delegated_hook_ask_rejects_headless_and_revokes_waiting_approval() {
+    for revoke in [false, true] {
+        let server = Server::new(vec![
+            reply_tool(
+                "write_file",
+                json!({"path":"work-not-approved","content":"never"}),
+            ),
+            reply_text("Worker denied"),
+        ]);
+        let fixture = Fixture::new(&server);
+        work_hook_config(
+            &fixture,
+            json!({
+                "PreToolUse":[{"id":"confirm","command":r#"printf '%s' '{"decision":"ask"}'"#}]
+            }),
+        );
+        let output = if revoke {
+            let (master, child) = permission_pty(&fixture);
+            wait_permission_prompt(&master);
+            work_hook_config(&fixture, json!({}));
+            wait_permission_decision(&fixture, "cancelled");
+            wait_permission_episode(child)
+        } else {
+            fixture.run()
+        };
+        assert_eq!(
+            output.status.success(),
+            !revoke,
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result = work_hook_result(&fixture, "local.file.write");
+        assert_eq!(result["evidence"]["dispatchOutcome"], "not_dispatched");
+        assert_eq!(result["evidence"]["hooks"][0]["decision"], "ask");
+        assert_eq!(
+            result["error"]["code"],
+            if revoke {
+                "native_hook_source_changed"
+            } else {
+                "hook_approval_required"
+            }
+        );
+        assert!(
+            !fixture
+                .root
+                .path()
+                .join("workspace/work-not-approved")
+                .exists()
+        );
+        assert_eq!(
+            server.requests.lock().unwrap().len(),
+            if revoke { 1 } else { 2 }
+        );
+    }
+}
+
+fn wait_for_work_hook(fixture: &Fixture) -> u32 {
+    let dir = fixture
+        .root
+        .path()
+        .join("project-runtime/w/coordination-v2/segments");
+    let pid_file = fixture.root.path().join("workspace/hook-child.pid");
+    let deadline = Instant::now() + Duration::from_secs(12);
+    loop {
+        if let Ok(value) = std::fs::read_to_string(&pid_file)
+            && let Ok(pid) = value.trim().parse::<u32>()
+            && std::fs::read_dir(&dir)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .any(|entry| {
+                    std::fs::read_to_string(entry.path()).is_ok_and(|text| {
+                        text.contains("\"nativeHooks\"")
+                            && text.contains("\"state\":\"running\"")
+                            && text.contains(&format!("\"pid\":{pid}"))
+                    })
+                })
+        {
+            return pid;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Hook child identity was not persisted"
+        );
+        thread::sleep(Duration::from_millis(15));
+    }
+}
+
+#[test]
+fn public_delegated_hook_reaps_real_child_after_owner_death_and_retains_unknown() {
+    let server = Server::new(vec![reply_tool(
+        "write_file",
+        json!({"path":"work-unknown","content":"must never dispatch"}),
+    )]);
+    let fixture = Fixture::new(&server);
+    work_hook_config(
+        &fixture,
+        json!({
+            "PreToolUse":[{
+                "id":"hard-stop","timeoutMs":30000,
+                "command":"printf '%s' \"$$\" > hook-child.pid; exec /bin/sleep 30"
+            }]
+        }),
+    );
+    let mut owner = OwnedChild(Some(fixture.command("exec", "p").spawn().unwrap()));
+    let pid = wait_for_work_hook(&fixture);
+    owner.child().kill().unwrap();
+    let _ = owner.output();
+    fixture.age_dead_lease();
+    let reply = fixture.command("recover", "p").output().unwrap();
+    assert!(
+        reply.status.success(),
+        "{}",
+        String::from_utf8_lossy(&reply.stderr)
+    );
+    let after = fixture.budget(|_| {});
+    let uncertain = after["uncertainDispatches"].as_array().unwrap();
+    assert_eq!(uncertain.len(), 1);
+    assert_eq!(uncertain[0]["nativeHooks"]["providerPhase"], "prepared");
+    let hook = &uncertain[0]["nativeHooks"]["handles"][0];
+    assert_eq!(hook["process"]["state"], "ended");
+    assert_eq!(
+        hook["process"]["stopObservation"],
+        "owner_dead_group_absent"
+    );
+    assert!(hook.get("observation").is_none());
+    assert_eq!(hook["process"]["child"]["pid"], pid);
+    assert!(dead_group(pid));
+    assert!(!fixture.root.path().join("workspace/work-unknown").exists());
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
+    let second = fixture.command("recover", "p").output().unwrap();
+    assert!(
+        second.status.success(),
+        "{}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    assert_eq!(fixture.budget(|_| {}), after);
+}
+
+#[test]
+fn public_delegated_hook_post_cancel_preserves_real_provider_result() {
+    let server = Server::new(vec![reply_tool(
+        "write_file",
+        json!({"path":"post-effect","content":"already observed"}),
+    )]);
+    let fixture = Fixture::new(&server);
+    work_hook_config(
+        &fixture,
+        json!({
+            "PostToolUse":[{
+                "id":"post-stop","timeoutMs":30000,
+                "command":"printf '%s' \"$$\" > hook-child.pid; exec /bin/sleep 30"
+            }]
+        }),
+    );
+    let mut owner = OwnedChild(Some(fixture.command("exec", "p").spawn().unwrap()));
+    let pid = wait_for_work_hook(&fixture);
+    rustix::process::kill_process(
+        rustix::process::Pid::from_raw(owner.child().id() as i32).unwrap(),
+        rustix::process::Signal::TERM,
+    )
+    .unwrap();
+    let output = wait_permission_episode(owner);
+    assert!(
+        !output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let result = work_hook_result(&fixture, "local.file.write");
+    assert_eq!(result["status"], "success");
+    assert_eq!(result["evidence"]["hooks"][0]["event"], "PostToolUse");
+    assert_eq!(result["evidence"]["hooks"][0]["outcome"], "CANCELLED");
+    assert_eq!(
+        std::fs::read_to_string(fixture.root.path().join("workspace/post-effect")).unwrap(),
+        "already observed"
+    );
+    assert!(dead_group(pid));
+}
+
+#[cfg(feature = "test-fixtures")]
+#[test]
+fn public_delegated_hook_with_missing_start_identity_remains_unproven() {
+    let server = Server::new(vec![reply_tool(
+        "write_file",
+        json!({"path":"uncertain-start","content":"never replay"}),
+    )]);
+    let fixture = Fixture::new(&server);
+    work_hook_config(
+        &fixture,
+        json!({
+            "PreToolUse":[{"id":"missing-start","command":"printf effect > hook-unproven"}]
+        }),
+    );
+    let original = fixture
+        .command("exec", "p")
+        .env("PEER_NATIVE_EPISODE_HOOK_FAULT", "after_starting")
+        .output()
+        .unwrap();
+    assert_eq!(original.status.code(), Some(77));
+    fixture.age_dead_lease();
+    let recovery = fixture.command("recover", "p").output().unwrap();
+    assert!(!recovery.status.success());
+    assert!(String::from_utf8_lossy(&recovery.stderr).contains("native_execution_stop_unproven"));
+    let budget = fixture.budget(|_| {});
+    let hooks = budget["attempts"]
+        .as_object()
+        .unwrap()
+        .values()
+        .next()
+        .unwrap()["pendingTools"][0]["nativeHooks"]
+        .clone();
+    assert_eq!(hooks["handles"][0]["process"]["state"], "starting");
+    assert!(hooks["handles"][0]["process"].get("child").is_none());
+    assert!(hooks["handles"][0].get("observation").is_none());
+    assert!(
+        !fixture
+            .root
+            .path()
+            .join("workspace/uncertain-start")
+            .exists()
+    );
+    assert!(!fixture.root.path().join("workspace/hook-unproven").exists());
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
+}
+
+#[cfg(feature = "test-fixtures")]
+#[test]
+fn observed_delegated_pre_hook_recovers_unlaunched_original_provider_call() {
+    let server = Server::new(vec![reply_tool(
+        "write_file",
+        json!({"path":"pre-crash-target","content":"never dispatch"}),
+    )]);
+    let fixture = Fixture::new(&server);
+    work_hook_config(
+        &fixture,
+        json!({
+            "PreToolUse":[{
+                "id":"seen-pre","command":r#"printf '%s' '{"decision":"deny","reason":"verified pre"}'"#
+            }]
+        }),
+    );
+    let original = fixture
+        .command("exec", "p")
+        .env("PEER_NATIVE_EPISODE_HOOK_FAULT", "after_pre_observed")
+        .output()
+        .unwrap();
+    assert_eq!(original.status.code(), Some(77));
+    fixture.age_dead_lease();
+    let first = fixture.command("recover", "p").output().unwrap();
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let result = work_hook_result(&fixture, "local.file.write");
+    assert_eq!(result["status"], "cancelled");
+    assert_eq!(result["evidence"]["dispatchOutcome"], "not_dispatched");
+    assert_eq!(result["evidence"]["hooks"][0]["reason"], "verified pre");
+    assert!(
+        !fixture
+            .root
+            .path()
+            .join("workspace/pre-crash-target")
+            .exists()
+    );
+    let after = fixture.budget(|_| {});
+    assert!(
+        after["uncertainDispatches"]
+            .as_array()
+            .is_none_or(|xs| xs.is_empty())
+    );
+    let second = fixture.command("recover", "p").output().unwrap();
+    assert!(
+        second.status.success(),
+        "{}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    assert_eq!(work_hook_result(&fixture, "local.file.write"), result);
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
+}
+
+#[cfg(feature = "test-fixtures")]
+#[test]
+fn observed_delegated_provider_result_survives_unproven_post_hook_start() {
+    let server = Server::new(vec![reply_tool(
+        "write_file",
+        json!({"path":"post-crash-target","content":"observed before the crash"}),
+    )]);
+    let fixture = Fixture::new(&server);
+    work_hook_config(
+        &fixture,
+        json!({
+            "PostToolUse":[{"id":"must-retain-result","command":"printf effect > post-unproven"}]
+        }),
+    );
+    let original = fixture
+        .command("exec", "p")
+        .env("PEER_NATIVE_EPISODE_HOOK_FAULT", "after_post_starting")
+        .output()
+        .unwrap();
+    assert_eq!(original.status.code(), Some(77));
+    assert_eq!(
+        std::fs::read_to_string(fixture.root.path().join("workspace/post-crash-target")).unwrap(),
+        "observed before the crash"
+    );
+    fixture.age_dead_lease();
+    let recovery = fixture.command("recover", "p").output().unwrap();
+    assert!(!recovery.status.success());
+    assert!(String::from_utf8_lossy(&recovery.stderr).contains("native_execution_stop_unproven"));
+    let result = work_hook_result(&fixture, "local.file.write");
+    assert_eq!(result["status"], "success");
+    let reference = format!("tool-result://{}", result["toolCallId"].as_str().unwrap());
+    let indexed = peer_store::EvidenceIndexStore::new(fixture.root.path())
+        .find(&[reference], None)
+        .unwrap();
+    assert_eq!(indexed.len(), 1);
+    assert_eq!(indexed[0]["toolCallId"], result["toolCallId"]);
+    assert!(!fixture.root.path().join("workspace/post-unproven").exists());
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
+}

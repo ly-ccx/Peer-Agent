@@ -24,6 +24,7 @@ mod tool_authorization;
 mod tool_result;
 pub(crate) use crate::capability::now as episode_time;
 pub use episode::{EpisodeOutcome, PermissionInput};
+mod hook_recovery;
 mod recovery;
 mod stop;
 mod unknown;

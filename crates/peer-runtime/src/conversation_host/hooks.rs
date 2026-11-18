@@ -3,7 +3,7 @@
 use super::*;
 use crate::{
     hook_policy::{HookDecision, HookSelector, hook_verdict},
-    hook_process::{HookObservation, HookProcessOwner, run_hook},
+    hook_process::{HookObservation, HookProcessOwner, evidence_record, rule_digest, run_hook},
     recorder,
 };
 use peer_protocol::{NativeOwnedProcess, NativeProcessKind, NativeProcessState, NativeProcessStop};
@@ -87,11 +87,7 @@ impl Host<'_> {
             payload["result"] = result.clone();
         }
         let input = serde_json::to_vec(&payload).map_err(|_| HostError("hook_input_invalid"))?;
-        let rule_digest = peer_protocol::javascript_json_digest(&json!({
-            "id":hook.id,"command":hook.command,"capability":hook.capability_pattern,
-            "arguments":hook.argument_pattern,"timeoutMs":hook.timeout_ms,"failOpen":hook.fail_open
-        }))
-        .map_err(|_| HostError("hook_config_invalid"))?;
+        let rule_digest = rule_digest(hook)?;
         let owner = self.run.owner().clone();
         let access_revision = self.access.snapshot()?.1;
         let process = NativeOwnedProcess {
@@ -135,15 +131,13 @@ impl Host<'_> {
             return Err(HostError("execution_outcome_unknown"));
         }
         let decision = observed.verdict.decision;
-        let id = if hook.id == hook.command {
-            format!("hook-{}", &rule_digest[..16])
-        } else {
-            safe_evidence_text(&hook.id)
-        };
-        let record = json!({"id":id,"hookId":id,"event":phase.name(),"ruleDigest":rule_digest,
-            "handleId":owner.process.handle_id,"decision":decision_name(decision),
-            "reason":observed.verdict.reason.as_deref().map(safe_evidence_text),
-            "outcome":observed.verdict.outcome,"exitCode":observed.exit_code,"durationMs":observed.duration_ms});
+        let record = evidence_record(
+            hook,
+            phase,
+            &rule_digest,
+            &owner.process.handle_id,
+            &observed,
+        );
         owner.process.state = NativeProcessState::Ended;
         owner.process.stop_observation = Some(NativeProcessStop::OwnedCompletion);
         owner.persist(Some(&record))?;
@@ -153,21 +147,7 @@ impl Host<'_> {
     }
 }
 
-pub(super) fn decision_name(decision: HookDecision) -> &'static str {
-    match decision {
-        HookDecision::Allow => "allow",
-        HookDecision::Ask => "ask",
-        HookDecision::Deny => "deny",
-    }
-}
-
-fn safe_evidence_text(value: &str) -> String {
-    value
-        .chars()
-        .filter(|c| !c.is_control())
-        .take(256)
-        .collect()
-}
+pub(super) use crate::hook_process::decision_name;
 
 struct RuleHost<'a, 'h> {
     host: &'a mut Host<'h>,
@@ -211,7 +191,7 @@ impl HookProcessOwner for RuleHost<'_, '_> {
         self.current()
     }
 
-    fn current(&self) -> Result<(), HostError> {
+    fn current(&mut self) -> Result<(), HostError> {
         if self.host.external.is_cancelled() {
             return Err(HostError("CANCELLED"));
         }

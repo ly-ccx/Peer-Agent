@@ -1,3 +1,4 @@
+export { WORK_HOOK_SEMANTIC_FLOOR, nativeWorkHasHookFacts } from './work-hook.ts';
 export type { AttentionCard, BotDecisionSnapshot, BotAttentionItem, BotAttentionRequest, BotAttentionResult } from './attention.ts';
 export type {
   ProjectWorkBudgetLimits,

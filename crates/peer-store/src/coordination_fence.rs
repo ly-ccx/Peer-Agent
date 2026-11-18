@@ -95,7 +95,21 @@ pub(crate) fn floor(value: &Value) -> Result<u64, FenceError> {
         .as_u64()
         .ok_or(FenceError::Unsupported)?;
     if value["schemaVersion"].as_u64() != Some(2)
-        || ![2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13].contains(&reader)
+        || ![
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            11,
+            12,
+            13,
+            peer_protocol::WORK_HOOK_SEMANTIC_FLOOR,
+        ]
+        .contains(&reader)
         || value["minimumWriterVersion"].as_u64() != Some(reader)
         || value["legacyFile"].as_str() != Some("coordination.jsonl")
         || value["generation"]

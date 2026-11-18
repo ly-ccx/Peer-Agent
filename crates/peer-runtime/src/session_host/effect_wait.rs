@@ -11,6 +11,7 @@ pub(super) struct AuthorizationWait<'a> {
     pub input: &'a mut dyn PermissionInput,
     pub reads: Option<&'a mut super::read_scope::ReadScopes>,
     pub command: Option<&'a super::command_process::CommandOwner<'a>>,
+    pub hooks: Option<&'a peer_store::HookConfig>,
 }
 pub(super) struct EffectHost<'a> {
     pub grant: &'a HostPermissionGrant,
@@ -19,6 +20,7 @@ pub(super) struct EffectHost<'a> {
     pub reads: Option<&'a mut super::read_scope::ReadScopes>,
     pub budget: &'a crate::execution_budget::EpisodeBudget,
     pub dispatch: &'a str,
+    pub hooks: Option<&'a peer_store::HookConfig>,
 }
 impl NativeSessionHost {
     pub(super) async fn wait_effect<F: Future>(
@@ -63,7 +65,7 @@ impl NativeSessionHost {
                         tokio::task::yield_now().await;
                         if external.is_cancelled() { owned.cancel();cancelled=true; }
                         let a=authorization.as_ref().unwrap();
-                        let valid=if lost{Err(HostError("HOST_LEASE_LOST"))}else if owned.is_cancelled(){Err(HostError("CANCELLED"))}else if let Some(reads)=a.reads.as_ref(){reads.check(self,a.grant,a.args)}else{self.validate_permission(a.grant,a.args,&episode_time())};
+                        let valid=if lost{Err(HostError("HOST_LEASE_LOST"))}else if owned.is_cancelled(){Err(HostError("CANCELLED"))}else if a.hooks.is_some_and(|hooks| hooks.check_current().is_err()){Err(HostError("native_hook_source_changed"))}else if let Some(reads)=a.reads.as_ref(){reads.check(self,a.grant,a.args)}else{self.validate_permission(a.grant,a.args,&episode_time())};
                         match request {
                             AdmissionRequest::Check(reply)=>{let _=reply.send(valid);},
                             AdmissionRequest::CommandStarting(reply)=>{

@@ -14,7 +14,7 @@ use std::{
     path::PathBuf,
     time::{Duration, Instant},
 };
-pub const HELP: &str = "Usage: peer exec [options] [prompt]\n\nRead a prompt from arguments or stdin and run the native conversation Host.\n\n  --access ask|session|full   This-run policy (default: session); ask requires a TTY\n  --tools file,bash,...      Mode projection intersected with capability allowlist\n  --output-format text|json Final text or structured result (default: text)\n  --provider <id>           This-run configured channel or catalog entry\n  --model <id>              Model id or provider::model; model ids may contain /\n  --effort <level>          This-run supported reasoning effort\n  --mode chat|plan|goal     Existing runtime mode (default: chat)\n  --fast                   ChatGPT/Grok OAuth priority service\n  --workspace <path>        Existing directory; overrides PEER_WORKSPACE_ROOT\n  --max-turns <n>           Positive hard cap; omitted means no implicit cap\n  --                       Treat remaining arguments as prompt text\n\nUse --access full explicitly for trusted tasks requiring unrestricted local actions.\nGrants and Evidence remain mandatory. Runtime completion does not mean task acceptance.";
+pub const HELP: &str = "Usage: peer exec [options] [prompt]\n\nRead a prompt from arguments or stdin and run the native conversation Host.\n\n  --access ask|session|full   This-run policy (default: session); ask requires a TTY\n  --tools file,bash,...      Mode projection intersected with capability allowlist\n  --output-format text|json Final text or structured result (default: text)\n  --provider <id>           This-run configured channel or catalog entry\n  --model <id>              Model id or provider::model; model ids may contain /\n  --effort <level>          This-run supported reasoning effort\n  --mode chat|plan|goal     Existing runtime mode (default: chat)\n  --fast                   ChatGPT/Grok OAuth priority service\n  --workspace <path>        Existing directory; overrides PEER_WORKSPACE_ROOT\n  --image <path>            Attach a local image; may be repeated\n  --max-turns <n>           Positive hard cap; omitted means no implicit cap\n  --                       Treat remaining arguments as prompt text\n\nUse --access full explicitly for trusted tasks requiring unrestricted local actions.\nGrants and Evidence remain mandatory. Runtime completion does not mean task acceptance.";
 fn auth_error(code: &str) -> bool {
     if code == peer_runtime::model::ModelError::AUTH_REJECTED {
         return true;
@@ -133,8 +133,11 @@ pub fn run(options: &Options) -> io::Result<CliExit> {
         .cloned()
         .collect::<Vec<_>>()
         .join(" ");
-    let read = options.prompt_parts.is_empty() || options.prompt_parts == ["-"];
-    if read && io::stdin().is_terminal() {
+    let stdin_is_terminal = io::stdin().is_terminal();
+    let read = options.prompt_parts == ["-"]
+        || options.prompt_parts.is_empty()
+            && (options.image_paths.is_empty() || !stdin_is_terminal);
+    if read && stdin_is_terminal {
         writeln!(
             io::stderr(),
             "peer exec: prompt is required (pass arguments or pipe stdin)"
@@ -161,7 +164,7 @@ pub fn run(options: &Options) -> io::Result<CliExit> {
             prompt
         };
         let prompt = peer_protocol::javascript_trim(&input);
-        if prompt.is_empty() {
+        if prompt.is_empty() && options.image_paths.is_empty() {
             writeln!(
                 io::stderr(),
                 "peer exec: prompt is required (pass arguments or pipe stdin)"
@@ -217,6 +220,7 @@ pub fn run(options: &Options) -> io::Result<CliExit> {
                     workspace: &workspace,
                     conversation_id: None,
                     prompt,
+                    image_paths: &options.image_paths,
                     provider_id: &selected.entry.provider_id,
                     mode,
                     effort: selected.selection["reasoningEffort"]

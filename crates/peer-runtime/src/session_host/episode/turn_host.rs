@@ -1,9 +1,13 @@
 //! Goal-specific authority and canonical settlement behind the shared loop.
+use super::hook_message::HookMessage;
+use super::hooks::{HookResults, SelectedHooks, WorkHookCall, run_hooks};
 use super::*;
 use crate::cognition::ContextPipeline;
 use crate::model::{ModelContinuation, ModelToolCall, ModelTurn};
 use crate::session_host::cognition_host::GoalRequestFrame;
 use crate::turn_loop::TurnHost;
+use crate::{hook_policy::HookDecision, hook_process::decision_name};
+use peer_store::HookPhase;
 use peer_store::{EvidenceIndexStore, HostFileMaterialization, HostToolEvidence};
 
 pub(super) struct GoalTurnHost<'a, 'f> {
@@ -69,6 +73,10 @@ impl TurnHost for GoalTurnHost<'_, '_> {
     async fn execute_call(&mut self, call: ModelToolCall) -> Result<String, HostError> {
         let host = &mut *self.host;
         let frame = self.frame;
+        frame
+            .hooks
+            .check_current()
+            .map_err(|_| HostError("native_hook_source_changed"))?;
         let plan_id = frame.plan;
         let conversation = frame.billing.conversation;
         let workspace = frame.workspace;
@@ -121,41 +129,114 @@ impl TurnHost for GoalTurnHost<'_, '_> {
             role: HostExecutionRole::Worker,
             shell_risk: effect.risk(),
         };
-        let mut authorization = host
-            .authorize_tool(
+        let identity = identity();
+        let selected = SelectedHooks::select(frame.hooks, &capability, &args)?;
+        let intent = selected
+            .any()
+            .then(|| {
+                Ok::<_, HostError>(peer_protocol::WorkHookIntent {
+                    message_id: format!("message-{}", uuid::Uuid::new_v4()),
+                    args_digest: peer_protocol::approval_args_digest(&args)
+                        .map_err(|_| HostError("permission_arguments_invalid"))?,
+                })
+            })
+            .transpose()?;
+        let message = intent.as_ref().map(|intent| HookMessage {
+            intent,
+            conversation,
+            stream,
+            call: &call_id,
+            tool: &call.name,
+            args: &args,
+        });
+        let dispatch_facts = || crate::execution_budget::DispatchFacts {
+            call: &call_id,
+            capability: &capability,
+            scopes: &scopes,
+            stream,
+            conversation,
+            hook_intent: intent.as_ref(),
+        };
+        let prepared = selected
+            .any()
+            .then(|| budget.dispatch(host, dispatch_facts(), &now()))
+            .transpose()?;
+        if let Some(message) = &message {
+            message.publish(host)?;
+        }
+        let hook_call = |dispatch| WorkHookCall {
+            identity,
+            tool: &call.name,
+            args: &args,
+            projection: projection.id(),
+            dispatch,
+        };
+        let mut hooks = if let Some(dispatch) = prepared.as_deref() {
+            run_hooks(
+                host,
+                frame,
+                hook_call(dispatch),
+                &selected.pre,
+                HookPhase::PreToolUse,
+                None,
+            )
+            .await?
+        } else {
+            HookResults::default()
+        };
+        let mut authorization = if let Some(error) = hooks.interrupted {
+            crate::session_host::tool_authorization::ToolAuthorization::hook_block(
+                error.0,
+                Some(error),
+            )
+        } else if hooks.decision == HookDecision::Deny {
+            crate::session_host::tool_authorization::ToolAuthorization::hook_block(
+                "hook_denied",
+                None,
+            )
+        } else {
+            host.authorize_tool(
                 crate::session_host::tool_authorization::ToolAuthorizationRequest {
-                    identity: identity(),
+                    identity,
                     args: &args,
                     tool: &call.name,
                     scopes: &scopes,
                     read_path: effect.read_scope(),
                     workspace,
+                    hooks: Some(frame.hooks),
+                    require_confirmation: hooks.decision == HookDecision::Ask,
                 },
                 permission,
                 cancellation,
                 cancel,
             )
-            .await?;
+            .await?
+        };
         let started_at = now();
-        let dispatch = budget.dispatch(
-            host,
-            crate::execution_budget::DispatchFacts {
-                call: &call_id,
-                capability: &capability,
-                scopes: &scopes,
-                stream,
-                conversation,
-            },
-            &now(),
-        )?;
+        let dispatch = match prepared.as_ref() {
+            Some(value) => value.clone(),
+            None => budget.dispatch(host, dispatch_facts(), &started_at)?,
+        };
         let grant_facts = authorization
             .grant
             .as_ref()
             .map(|g| g.facts().clone())
             .unwrap_or_else(|| authorization.denied_facts(&call_id, &capability));
-        let outcome = if let Some(error) = authorization.failure {
+        let admission_error = if authorization.grant.is_some() {
+            frame
+                .hooks
+                .check_current()
+                .err()
+                .map(|_| HostError("native_hook_source_changed"))
+        } else {
+            None
+        };
+        let outcome = if let Some(error) = authorization.failure.or(admission_error) {
             EffectOutcome::not_dispatched(error.0)
         } else if let Some(grant) = authorization.grant.as_ref() {
+            if message.is_some() {
+                budget.begin_hook_provider(host, &call_id, &dispatch, &grant_facts, &now())?;
+            }
             host.launch_effect(
                 effect,
                 crate::session_host::effect_wait::EffectHost {
@@ -165,6 +246,7 @@ impl TurnHost for GoalTurnHost<'_, '_> {
                     reads: authorization.reads.as_mut(),
                     budget,
                     dispatch: &dispatch,
+                    hooks: Some(frame.hooks),
                 },
                 cancellation,
                 cancel,
@@ -178,20 +260,24 @@ impl TurnHost for GoalTurnHost<'_, '_> {
                     None => "denied",
                 },
                 output: json!({}),
-                error: Some(
-                    authorization
-                        .terminal
-                        .map(|e| e.0)
-                        .unwrap_or("permission_denied"),
-                ),
+                error: Some(authorization.terminal.map(|e| e.0).unwrap_or_else(|| {
+                    match (hooks.decision, authorization.reason) {
+                        (HookDecision::Deny, _) => "hook_denied",
+                        (HookDecision::Ask, Some("permission_unavailable")) => {
+                            "hook_approval_required"
+                        }
+                        (HookDecision::Ask, _) => "hook_approval_denied",
+                        _ => "permission_denied",
+                    }
+                })),
                 artifacts: vec![],
                 ended: true,
                 materialization: None,
                 not_dispatched: true,
             }
         };
-        let permission_terminal = authorization
-            .terminal
+        let permission_terminal = admission_error
+            .or(authorization.terminal)
             .or_else(|| authorization.reads.as_ref().and_then(|r| r.terminal));
         let additional = authorization
             .reads
@@ -228,33 +314,98 @@ impl TurnHost for GoalTurnHost<'_, '_> {
         if !additional.is_empty() {
             result["evidence"]["readScopeDecisions"] = json!(additional);
         }
-        if command_effect && authorization.grant.is_some() && authorization.failure.is_none() {
+        if command_effect
+            && authorization.grant.is_some()
+            && authorization.failure.is_none()
+            && admission_error.is_none()
+        {
             result["evidence"]["nativeProcess"] =
                 json!(budget.read_process(host, &call_id, &dispatch)?);
         }
         if let Some(error) = outcome.error {
             result["error"] = json!({"code":error,"message":error,"recoverable":true})
         }
-        let result = host
-            .archive_tool_result(conversation, result, output_kind, cancellation, cancel)
-            .await?;
         let all_grants = std::iter::once(grant_facts.clone())
             .chain(additional)
             .collect::<Vec<_>>();
-        host.append_episode_message(conversation,&json!({"id":uuid::Uuid::new_v4().to_string(),"role":"assistant","content":"","createdAt":now(),"streamId":stream,"segments":[{"type":"tool-call","tool":call.name,"toolCallId":call_id,"args":args,"result":result}],"permissionGrants":all_grants}))?;
-        let evidence = EvidenceIndexStore::new(&host.home).register(
-            &HostToolEvidence {
-                conversation_id: conversation,
-                plan_id: Some(plan_id),
-                stream_id: Some(stream),
-                tool_name: &call.name,
-                capability_id: &capability,
-                tool_call_id: &call_id,
-                grant: &grant_facts,
-                result: &result,
-            },
-            None,
-        )?;
+        let evidence_store = EvidenceIndexStore::new(&host.home);
+        let index = |result: &Value| {
+            evidence_store.register(
+                &HostToolEvidence {
+                    conversation_id: conversation,
+                    plan_id: Some(plan_id),
+                    stream_id: Some(stream),
+                    tool_name: &call.name,
+                    capability_id: &capability,
+                    tool_call_id: &call_id,
+                    grant: &grant_facts,
+                    result,
+                },
+                None,
+            )
+        };
+        let mut archived = None;
+        let mut post_error = None;
+        let mut post_unknown = None;
+        if !selected.post.is_empty()
+            && authorization.grant.is_some()
+            && outcome.ended
+            && !outcome.not_dispatched
+            && !cancellation.is_cancelled()
+            && !cancel.is_cancelled()
+        {
+            let observed = host
+                .archive_tool_result(
+                    conversation,
+                    result.clone(),
+                    output_kind,
+                    cancellation,
+                    cancel,
+                )
+                .await?;
+            message
+                .as_ref()
+                .ok_or(HostError("native_work_hooks_invalid"))?
+                .commit(host, &all_grants, Some(&observed))?;
+            index(&observed)?;
+            archived = Some(observed);
+            match run_hooks(
+                host,
+                frame,
+                hook_call(&dispatch),
+                &selected.post,
+                HookPhase::PostToolUse,
+                Some(&result),
+            )
+            .await
+            {
+                Ok(after) => {
+                    hooks.records.extend(after.records);
+                    post_error = after.interrupted;
+                }
+                Err(error) => post_unknown = Some(error),
+            }
+        }
+        let mut result = match archived {
+            Some(result) => result,
+            None => {
+                host.archive_tool_result(conversation, result, output_kind, cancellation, cancel)
+                    .await?
+            }
+        };
+        if !hooks.records.is_empty() {
+            result["evidence"]["hooks"] = json!(hooks.records);
+            result["evidence"]["hookFinalDecision"] = json!(decision_name(hooks.decision));
+        }
+        if let Some(message) = &message {
+            message.commit(host, &all_grants, Some(&result))?;
+        } else {
+            host.append_episode_message(conversation,&json!({"id":uuid::Uuid::new_v4().to_string(),"role":"assistant","content":"","createdAt":now(),"streamId":stream,"segments":[{"type":"tool-call","tool":call.name,"toolCallId":call_id,"args":args,"result":result}],"permissionGrants":all_grants}))?;
+        }
+        let evidence = index(&result)?;
+        if let Some(error) = post_unknown {
+            return Err(error);
+        }
         budget.settle(host, &call_id, &dispatch, &result, &now())?;
         if let Some(identity) = &outcome.materialization {
             let reference = format!("tool-result://{call_id}");
@@ -279,7 +430,7 @@ impl TurnHost for GoalTurnHost<'_, '_> {
         // Expiry/cancellation closes this run after saving the real
         // not-dispatched result. A late stdin answer cannot approve
         // another prompt in the same episode.
-        if let Some(error) = permission_terminal {
+        if let Some(error) = permission_terminal.or(post_error) {
             return Err(error);
         }
 
