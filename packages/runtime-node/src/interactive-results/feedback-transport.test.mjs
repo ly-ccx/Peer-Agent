@@ -108,15 +108,53 @@ test('known attachments carry the complete selection through a real already-open
   assert.ok(oldBegin >= 0 && oldEnd > oldBegin);
   assert.equal(createHash('sha256').update(oldCode.slice(oldBegin, oldEnd)).digest('hex'),
     'f943550e04e210417ac7615ceb2facfcbe46757d58b6fe4b5743e8dd70cb65c0');
-  // Other current writer blocks retain the prior proof and exact checks.
+  // The current append/rewrite wrappers have gained the Native execution fence.
+  // Confirm that an ordinary conversation carrying the same wire bytes is
+  // read-only to this Store during the other host's ownership, then can resume.
+  const protectedConversation = reopened.createConversation({ title: 'Protected feedback' });
+  const protectedMessage = { ...restored, id: 'protected-carrier' };
+  reopened.appendMessage(protectedConversation.id, protectedMessage);
+  const protectedBody = path.join(f.rootDir, 'conversations', `${protectedConversation.id}.jsonl`);
+  const indexFile = path.join(f.rootDir, 'conversations', 'index.jsonl');
+  const indexRows = readFileSync(indexFile, 'utf8').trimEnd().split('\n').map(JSON.parse);
+  const protectedRow = indexRows.find(row => row.id === protectedConversation.id);
+  const nativeRuns = JSON.parse(readFileSync(new URL('../../../protocol/contracts/native-cli/conversation-execution.json', import.meta.url), 'utf8'));
+  function setNativeExecution(phase) {
+    const run = structuredClone(nativeRuns.cases.find(entry => entry.name === phase).input);
+    run.identity.conversationId = protectedConversation.id;
+    protectedRow.runtimeExecution = run;
+    writeFileSync(indexFile, indexRows.map(JSON.stringify).join('\n') + '\n');
+  }
+  setNativeExecution('active');
+  const busyIndex = readFileSync(indexFile);
+  const busyBody = readFileSync(protectedBody);
+  const revision = { content: 'Concurrent overwrite' };
+  for (const write of [
+    () => reopened.appendMessage(protectedConversation.id, { id: 'foreign', role: 'user', ...revision }),
+    () => reopened.updateLastMessage(protectedConversation.id, revision.content),
+    () => reopened.updateMessageById(protectedConversation.id, protectedMessage.id, revision),
+    () => reopened.replaceMessages(protectedConversation.id, [{ ...protectedMessage, attachments: [] }]),
+  ]) {
+    assert.throws(write, { message: 'conversation_execution_busy' });
+  }
+  assert.deepEqual(readFileSync(indexFile), busyIndex);
+  assert.deepEqual(readFileSync(protectedBody), busyBody);
+  setNativeExecution('stopped');
+  reopened.updateMessageById(protectedConversation.id, protectedMessage.id, { content: 'Resumed after stop' });
+  const protectedRows = legacyReadJsonl(protectedBody);
+  assert.equal(protectedRows[0].content, 'Resumed after stop');
+  assert.deepEqual(readInteractiveFeedbackAttachment(protectedRows[0].attachments[1]), f.feedback);
+
+  // These hashes pin the reviewed current writer blocks; the frozen JSONL
+  // fixture above retains its original source digest and is still executed.
   const code = readFileSync(new URL('../../../conversation-store/src/index.mjs', import.meta.url), 'utf8');
   const pinnedWriterBlocks = [
     ['function readJsonl(', '\nfunction readJson(', 'f949bb59a56320c71cbe26e4bee7672571fe2c8cf08c92894413b7620e3a94b7'],
     ['function normalizeMeta(', '\n// 一次性数据迁移', 'f6517a5371f61f887e3b58dc22292a5edfc33a27484e87adcea9f9024c955060'],
-    ['  function isEmptyUserMessage(', '\n  const terminalCommitter', 'a361fd9fc24b51a70792f30424e56606f431826233c9b24ce02ca28fcd3ed768'],
-    ['  const messageWrite =', '\n\n  // 会话级累计用量账本', '627b6d84b4d011357a67384253575c7a8b431870939ec233765c53f3ca9af693'],
-    ['    appendMessage: changed(', '\n    commitStreamingMessage:', 'a9b2e4fe91f3d89e7eb0ec8755502ac46e9b17cf90c9feb595b90e06050a5c98'],
-    ['    replaceMessages: changed(', '\n', 'af3abf6e886b6f8f9b449f80273d4a26554123f662087c934933ad279cb8ecb9'],
+    ['  function isEmptyUserMessage(', '\n  const terminalCommitter', '88dcfdce6dfedd297c8574b69612650c601309113acf485175a51705bd037705'],
+    ['  const messageWrite =', '\n\n  // 会话级累计用量账本', '047c361dbac5ac3964c25d8a34687c330e0b364ac1ae3154edbe5cba83deee86'],
+    ['    appendMessage: changed(', '\n    commitStreamingMessage:', '836027b6ca7558203fefa069f2a574dae2159e5f24339d9a4a456a09cebac5d1'],
+    ['    replaceMessages: changed(', '\n', '62bbcd9f9d2775b400c296a38520bb213c6cd90881439ed1f1714f8b9127871d'],
   ];
   for (const [begin, end, digest] of pinnedWriterBlocks) {
     const first = code.indexOf(begin);
