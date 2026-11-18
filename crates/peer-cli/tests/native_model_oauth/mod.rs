@@ -533,7 +533,7 @@ fn lost_conditional_commit_receipt_stops_then_new_task_uses_the_actual_committed
 #[test]
 fn credential_rotation_after_a_real_tool_stops_next_cognition_and_later_task_uses_new_login() {
     let args = serde_json::to_string(
-        &json!({"command":"exec /bin/sh rotation-fixture.sh","timeoutMs":5000}).to_string(),
+        &json!({"command":"/bin/sh rotation-fixture.sh","timeoutMs":5000}).to_string(),
     )
     .unwrap();
     let old = serde_json::to_string(&json!({"path":"input.txt"}).to_string()).unwrap();

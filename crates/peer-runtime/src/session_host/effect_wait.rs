@@ -1,6 +1,9 @@
 //! Ownership heartbeat and fresh dispatch authorization share the control lane.
 use super::*;
-use crate::{CancellationToken, effect_admission::AdmissionRequest};
+use crate::{
+    CancellationToken,
+    effect_admission::{AdmissionRequest, EffectRevocation},
+};
 use std::{future::Future, time::Duration};
 use tokio::sync::mpsc;
 pub(super) struct AuthorizationWait<'a> {
@@ -12,6 +15,7 @@ pub(super) struct AuthorizationWait<'a> {
     pub reads: Option<&'a mut super::read_scope::ReadScopes>,
     pub command: Option<&'a super::command_process::CommandOwner<'a>>,
     pub shell: Option<&'a super::foreground_shell::ShellDispatch<'a>>,
+    pub shell_revocation: Option<&'a EffectRevocation>,
     pub background_start:
         Option<&'a mut Option<tokio::sync::oneshot::Sender<crate::providers::EffectOutcome>>>,
     pub hooks: Option<&'a peer_store::HookConfig>,
@@ -65,12 +69,19 @@ impl NativeSessionHost {
                     && (self.shell_watch.is_some() || self.has_work_background_shells()
                         || authorization.as_ref().is_some_and(|a| a.shell.is_some()))=>{
                     self.check_work_background_shells(owned);
-                    let invalid = match authorization.as_ref().filter(|a| a.shell.is_some()) {
-                        Some(a) => a.hooks.is_some_and(|hooks|hooks.check_current().is_err())
-                            || self.validate_permission(a.grant,a.args,&episode_time()).is_err(),
-                        None => self.shell_watch.as_ref().is_some_and(|watch|watch.check(self).is_err()),
+                    let active = authorization.as_ref().filter(|a| a.shell.is_some());
+                    let current = match active {
+                        Some(a) if a.hooks.is_some_and(|hooks|hooks.check_current().is_err()) =>
+                            Err(HostError("native_hook_source_changed")),
+                        Some(a) => self.validate_permission(a.grant,a.args,&episode_time()),
+                        None => self.shell_watch.as_ref().map_or(Ok(()), |watch| watch.check(self)),
                     };
-                    if invalid { owned.cancel(); }
+                    if let Err(error) = current {
+                        if let Some(observation) = active.and_then(|a| a.shell_revocation) {
+                            observation.record(error);
+                        }
+                        owned.cancel();
+                    }
                     // Work authority reads durable state synchronously. Resume
                     // the I/O lane after each observation even under slow I/O.
                     shell_poll.as_mut().reset(tokio::time::Instant::now() + shell_poll_interval);

@@ -1,7 +1,11 @@
 //! Bounded Host control port. An async Provider cannot mint a permission fact.
 use crate::{CancellationToken, capability::CapabilityError as HostError, recorder::Recorder};
 use serde_json::Value;
-use std::{future::Future, pin::Pin};
+use std::{
+    future::Future,
+    pin::Pin,
+    sync::{Arc, OnceLock},
+};
 use tokio::sync::{mpsc, oneshot};
 pub(crate) type ConnectionDriver = Pin<Box<dyn Future<Output = Result<(), ()>> + Send>>;
 pub(crate) enum AdmissionRequest {
@@ -46,10 +50,22 @@ pub(crate) enum AdmissionRequest {
         reply: oneshot::Sender<Result<(), HostError>>,
     },
 }
+// The current Host records its actual validation failure before cancelling
+// the owned effect. The provider uses it only to describe the interruption.
+#[derive(Clone, Default)]
+pub(crate) struct EffectRevocation(Arc<OnceLock<HostError>>);
+
+impl EffectRevocation {
+    pub(crate) fn record(&self, reason: HostError) {
+        let _ = self.0.set(reason);
+    }
+}
+
 #[derive(Clone)]
 pub struct EffectAdmission {
     pub(crate) sender: mpsc::Sender<AdmissionRequest>,
     cancel: CancellationToken,
+    revocation: Option<EffectRevocation>,
     pub(crate) owner: Option<Recorder>,
 }
 impl EffectAdmission {
@@ -67,6 +83,7 @@ impl EffectAdmission {
             Self {
                 sender,
                 cancel: cancel.clone(),
+                revocation: None,
                 owner: None,
             },
             receiver,
@@ -86,6 +103,19 @@ impl EffectAdmission {
         tokio::select! {biased;_=self.cancel.cancelled()=>return Err(HostError("CANCELLED")),result=self.sender.send(make(send))=>result.map_err(|_|HostError("execution_admission_closed"))?};
         tokio::select! {biased;_=self.cancel.cancelled()=>Err(HostError("CANCELLED")),result=receive=>result.map_err(|_|HostError("execution_admission_closed"))?}
     }
+    pub(crate) fn observe_revocations(&mut self) -> EffectRevocation {
+        let observation = EffectRevocation::default();
+        self.revocation = Some(observation.clone());
+        observation
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    pub(crate) fn revocation_reason(&self) -> Option<HostError> {
+        self.revocation
+            .as_ref()
+            .and_then(|observation| observation.0.get().copied())
+    }
+
     pub async fn check(&self) -> Result<(), HostError> {
         self.request(AdmissionRequest::Check).await
     }

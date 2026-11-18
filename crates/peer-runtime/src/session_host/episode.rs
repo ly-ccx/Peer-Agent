@@ -479,6 +479,7 @@ impl NativeSessionHost {
         };
         let (mut port, mut receiver) =
             crate::effect_admission::EffectAdmission::channel(&effect_cancel);
+        let shell_revocation = shell.as_ref().map(|_| port.observe_revocations());
         port.owner = if shell.is_some() {
             Some(budget.shell_owner()?)
         } else {
@@ -555,6 +556,7 @@ impl NativeSessionHost {
                         reads,
                         command: command.as_ref(),
                         shell: shell.as_ref(),
+                        shell_revocation: shell_revocation.as_ref(),
                         background_start: background.then_some(&mut startup),
                         hooks,
                     }),
@@ -611,6 +613,7 @@ impl NativeSessionHost {
                             reads,
                             command: command.as_ref(),
                             shell: shell.as_ref(),
+                            shell_revocation: shell_revocation.as_ref(),
                             background_start: None,
                             hooks,
                         }),

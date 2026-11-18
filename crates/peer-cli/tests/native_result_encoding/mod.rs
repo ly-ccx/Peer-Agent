@@ -199,7 +199,7 @@ fn shell_failure_stderr_and_ranged_file_metadata_remain_visible_to_the_model() {
     let server = Server::new(vec![
         reply_tool(
             "bash",
-            json!({"command":"printf 'actual error' >&2; exit 7"}),
+            json!({"command":"printf 'actual error' >&2; (exit 7)"}),
         ),
         reply_tool(
             "read_file",

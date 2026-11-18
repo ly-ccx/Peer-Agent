@@ -6,9 +6,8 @@ fn running_shell_rechecks_actual_policy_stops_its_group_and_admits_a_later_task(
     let server = Server::new(vec![
         reply_tool(
             "bash",
-            json!({"command":"printf started > running.txt; exec /bin/sleep 20","timeoutMs":30000}),
+            json!({"command":"printf '%s' \"$$\" > running.tmp; /bin/mv running.tmp running.txt; /bin/sleep 20","timeoutMs":30000}),
         ),
-        reply_text("Policy change observed."),
         reply_text("Later task."),
     ]);
     let f = Fixture::new(&server);
@@ -23,6 +22,10 @@ fn running_shell_rechecks_actual_policy_stops_its_group_and_admits_a_later_task(
         assert!(Instant::now() < deadline, "owned shell never started");
         thread::sleep(Duration::from_millis(10));
     }
+    let pid =
+        rustix::process::Pid::from_raw(std::fs::read_to_string(started).unwrap().parse().unwrap())
+            .unwrap();
+    assert!(rustix::process::test_kill_process_group(pid).is_ok());
     let store = PolicyStore::new(f.root.path());
     let policy = store.read_existing("w").unwrap();
     store
@@ -57,10 +60,11 @@ fn running_shell_rechecks_actual_policy_stops_its_group_and_admits_a_later_task(
         stopped,
         "policy withdrawal did not stop the actually running shell before the original six-second boundary"
     );
-    assert!(
-        result.status.success(),
-        "{}",
-        String::from_utf8_lossy(&result.stderr)
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("execution_outcome_unknown"));
+    assert_eq!(
+        rustix::process::test_kill_process_group(pid),
+        Err(rustix::io::Errno::SRCH)
     );
     let history = f.history();
     let message = history
@@ -72,16 +76,55 @@ fn running_shell_rechecks_actual_policy_stops_its_group_and_admits_a_later_task(
         "previous actual grant stays factual"
     );
     let tool = &message["segments"][0]["result"];
-    assert_eq!(tool["error"]["code"], "permission_policy_changed");
+    assert_eq!(tool["error"]["code"], "execution_outcome_unknown");
     assert_eq!(tool["output"]["stopReason"], "permission_policy_changed");
     assert_eq!(tool["output"]["interrupted"], true);
+    let budget = f.budget(|_| {});
+    assert_eq!(budget["uncertainDispatches"].as_array().unwrap().len(), 1);
     assert_eq!(
-        f.budget(|_| {})["uncertainDispatches"]
-            .as_array()
-            .map_or(0, Vec::len),
-        0
+        budget["uncertainDispatches"][0]["nativeShellGrant"],
+        message["permissionGrants"][0]
     );
+    let artifact_metadata = std::fs::read_dir(f.root.path().join("shell-artifacts"))
+        .unwrap()
+        .map(|entry| {
+            entry
+                .unwrap()
+                .path()
+                .join(tool["output"]["taskId"].as_str().unwrap())
+                .join("metadata.json")
+        })
+        .find(|path| path.is_file())
+        .map(get)
+        .expect("metadata from the original affected command");
+    assert_eq!(
+        artifact_metadata["output"]["stopReason"],
+        tool["output"]["stopReason"]
+    );
+    assert_eq!(artifact_metadata["managedProcessEnded"], true);
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
+
+    f.seed(
+        "overlap",
+        "overlap-chat",
+        "overlap-session",
+        "overlap-work",
+        "overlap-epoch",
+    );
+    let overlapping = f.command("exec", "overlap").output().unwrap();
+    assert!(!overlapping.status.success());
+    assert!(String::from_utf8_lossy(&overlapping.stderr).contains("execution_resource_busy"));
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
+
+    // A different work directory can proceed while the interrupted write
+    // scope still requires its original reconciliation.
     f.seed("p2", "c2", "s2", "work2", "epoch2");
+    let independent = f.root.path().join("independent");
+    std::fs::create_dir(&independent).unwrap();
+    let path = f.root.path().join("goal-plans/p2.json");
+    let mut plan = get(&path);
+    plan["targetWorkspacePath"] = json!(independent);
+    put(path, &plan);
     let later = f.command("exec", "p2").output().unwrap();
     assert!(
         later.status.success(),
@@ -89,5 +132,32 @@ fn running_shell_rechecks_actual_policy_stops_its_group_and_admits_a_later_task(
         String::from_utf8_lossy(&later.stderr)
     );
     assert_eq!(f.history(), history);
-    assert_eq!(server.requests.lock().unwrap().len(), 3);
+    assert_eq!(server.requests.lock().unwrap().len(), 2);
+}
+
+#[test]
+fn actual_interpreter_exit_without_a_command_frame_preserves_captured_output_and_unknown() {
+    let server = Server::new(vec![reply_tool(
+        "bash",
+        json!({"command":"printf 'actual error' >&2; exit 7"}),
+    )]);
+    let f = Fixture::new(&server);
+    let output = f.run();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("execution_outcome_unknown"));
+    let history = f.history();
+    let message = history
+        .iter()
+        .find(|m| m["segments"][0]["tool"] == "bash")
+        .unwrap();
+    let result = &message["segments"][0]["result"];
+    assert_eq!(result["error"]["code"], "execution_outcome_unknown");
+    assert!(result["output"]["exitCode"].is_null());
+    assert_eq!(result["output"]["stderr"], "actual error");
+    assert!(result["evidence"]["artifactRefs"].is_array());
+    let budget = f.budget(|_| {});
+    let unknown = &budget["uncertainDispatches"][0];
+    assert_eq!(unknown["toolCallId"], result["toolCallId"]);
+    assert_eq!(unknown["nativeShellGrant"], message["permissionGrants"][0]);
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
 }

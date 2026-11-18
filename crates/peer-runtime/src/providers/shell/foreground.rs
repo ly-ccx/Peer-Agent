@@ -200,6 +200,14 @@ impl ForegroundShell {
                 },
             )
             .await;
+        let result = result.map_err(|mut error| {
+            if error.code == "CANCELLED"
+                && let Some(reason) = port.revocation_reason()
+            {
+                error.code = reason.0;
+            }
+            error
+        });
         let (mut outcome, stopped) = match result {
             Ok(exit) => {
                 if let Ok(mut remembered) = self.shared.cwd.lock() {
