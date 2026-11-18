@@ -1,7 +1,7 @@
 //! Single ordinary-run owner in the original Conversation index. The index
 //! records execution facts; permissions and results remain their original Stores.
 use crate::{
-    ConversationStore, HistorySnapshot, StoreError,
+    ConversationModelSelection, ConversationStore, HistorySnapshot, StoreError,
     conversation_write::{locks, position, timestamp},
     durable_jsonl as log, files,
 };
@@ -22,6 +22,7 @@ pub struct NewConversationExecution<'a> {
     pub engine: &'a str,
     pub owner: &'a NativeProcessRecorder,
     pub attribution: &'a Value,
+    pub selected_model: Option<&'a ConversationModelSelection<'a>>,
     pub at: &'a str,
 }
 /// A failed initial publication retains only the genuinely minted, empty
@@ -164,7 +165,10 @@ impl ConversationUsageReceipt {
         self.receipt.as_ref()
     }
 }
-fn decode(meta: &Value, conversation: &str) -> Result<Option<ConversationExecution>, StoreError> {
+pub(super) fn decode(
+    meta: &Value,
+    conversation: &str,
+) -> Result<Option<ConversationExecution>, StoreError> {
     let Some(value) = meta.get("runtimeExecution") else {
         return Ok(None);
     };
@@ -223,6 +227,12 @@ impl ConversationStore {
                 !run.permits_new_run() || run.identity.stream_id == intent.stream_id
             }) {
                 return Err(StoreError::ExecutionBusy);
+            }
+            if intent
+                .selected_model
+                .is_some_and(|model| !model.matches(&index[pos]))
+            {
+                return Err(StoreError::VersionChanged);
             }
             if !timestamp(intent.at) {
                 return Err(StoreError::InvalidInput);
@@ -303,6 +313,7 @@ impl ConversationStore {
         ];
         // Match the entire current source before publishing; locks alone do not
         // attest an external writer that ignores the shared protocol.
+        let index_file = directory.join("index.jsonl");
         if self
             .read_committed(id, None, log::MAX_BYTES)?
             .source_revision
@@ -310,7 +321,8 @@ impl ConversationStore {
         {
             return Err(StoreError::VersionChanged);
         }
-        log::replace(&directory.join("index.jsonl"), &log::encode(index)?, cancel)?;
+        current.check_index(&index_file)?;
+        log::replace(&index_file, &log::encode(index)?, cancel)?;
         let finish = (|| {
             #[cfg(feature = "test-fixtures")]
             if directory
@@ -323,7 +335,7 @@ impl ConversationStore {
             }
             let fresh = self.read_committed(id, None, log::MAX_BYTES)?;
             if fresh.history != current.history
-                || log::read(&directory.join("index.jsonl"), None)? != index
+                || log::read(&index_file, None)? != index
                 || before
                     != [
                         files::identity(&directory.join(format!("{id}.jsonl")))?,
@@ -332,6 +344,7 @@ impl ConversationStore {
             {
                 return Err(StoreError::VersionChanged);
             }
+            fresh.check_index(&index_file)?;
             if self
                 .read_committed(id, None, log::MAX_BYTES)?
                 .source_revision

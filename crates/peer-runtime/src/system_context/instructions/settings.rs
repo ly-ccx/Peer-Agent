@@ -10,6 +10,26 @@ pub(super) fn read_host_prompt_settings(
     home: &Path,
     cancel: &CancellationToken,
 ) -> Result<Vec<ConfigInstruction>, &'static str> {
+    project(&read_host_settings(home, cancel)?)
+}
+
+pub(super) fn presentation_locale(
+    home: &Path,
+    cancel: &CancellationToken,
+) -> Result<&'static str, &'static str> {
+    Ok(normalized_locale(&read_host_settings(home, cancel)?))
+}
+
+fn normalized_locale(settings: &Value) -> &'static str {
+    let locale = settings["locale"].as_str().unwrap_or("zh-CN");
+    if javascript_trim(locale).to_lowercase().starts_with("en") {
+        "en-US"
+    } else {
+        "zh-CN"
+    }
+}
+
+fn read_host_settings(home: &Path, cancel: &CancellationToken) -> Result<Value, &'static str> {
     let path = home.join("settings.json");
     let raw = files::read(&path, &mut 0, cancel, &mut |_| {}).map_err(|code| match code {
         "cancelled" => "cancelled",
@@ -41,7 +61,7 @@ pub(super) fn read_host_prompt_settings(
             }
         }
     };
-    project(&settings)
+    Ok(settings)
 }
 fn item(id: &str, title: &str, content: String) -> ConfigInstruction {
     ConfigInstruction {
@@ -95,16 +115,10 @@ pub(super) fn project(settings: &Value) -> Result<Vec<ConfigInstruction>, &'stat
     }
     // createTuiLanguageStore.getPromptSettings uses a literal configured string;
     // otherwise its normalized locale (default zh-CN) supplies the reply language.
-    let locale = settings["locale"].as_str().unwrap_or("zh-CN");
-    let normalized_locale = if javascript_trim(locale).to_lowercase().starts_with("en") {
-        "en-US"
-    } else {
-        "zh-CN"
-    };
     let language = javascript_trim(
         settings["replyLanguage"]
             .as_str()
-            .unwrap_or(normalized_locale),
+            .unwrap_or_else(|| normalized_locale(settings)),
     );
     let name = match language {
         "zh-CN" => Some("Simplified Chinese (简体中文)"),

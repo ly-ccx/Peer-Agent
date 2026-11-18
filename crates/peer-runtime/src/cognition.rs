@@ -60,8 +60,20 @@ impl ContextPipeline {
         provider: &str,
         model: &NativeModel,
     ) -> Result<Self, HostError> {
+        ConversationStore::new(home).bind_context_model(
+            conversation,
+            provider,
+            model.model_id(),
+        )?;
+        Self::open_bound(home, conversation, provider, model)
+    }
+    pub fn open_bound(
+        home: &Path,
+        conversation: &str,
+        provider: &str,
+        model: &NativeModel,
+    ) -> Result<Self, HostError> {
         let store = ConversationStore::new(home);
-        store.bind_context_model(conversation, provider, model.model_id())?;
         let history = store.read_committed(conversation, None, 8 * 1024 * 1024)?;
         if history.history.excluded_from_message_id.is_some() {
             return Err(HostError("native_execution_recovery_required"));

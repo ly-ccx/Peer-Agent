@@ -1,6 +1,7 @@
 use crate::{StoreError, files, identity, valid_id};
 use peer_protocol::{JsonDecodeError, JsonLimits, PersistedHistory, decode_json_bounded};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
 const MAX_HISTORY_BYTES: usize = 8 * 1024 * 1024;
@@ -13,6 +14,17 @@ pub struct ConversationStore {
 pub struct HistorySnapshot {
     pub history: PersistedHistory,
     pub source_revision: String,
+    index_version: Option<files::FileIdentity>,
+}
+impl HistorySnapshot {
+    /// Check the whole index observed by this Store transaction before
+    /// publishing a replacement of that file.
+    pub(crate) fn check_index(&self, index: &Path) -> Result<(), StoreError> {
+        if identity(index)? != self.index_version {
+            return Err(StoreError::VersionChanged);
+        }
+        Ok(())
+    }
 }
 pub struct ConversationMetadataSnapshot {
     pub metadata: Option<Value>,
@@ -115,18 +127,20 @@ impl ConversationStore {
         remaining = remaining
             .checked_sub(index.len())
             .ok_or(StoreError::HistoryLimit)?;
-        let entries = rows(&index, &mut decode)?;
-        let matches: Vec<_> = entries
-            .iter()
-            .filter(|row| row["id"].as_str() == Some(conversation_id))
-            .collect();
-        if matches.is_empty() {
-            return Err(StoreError::NotFound);
+        let mut selected = None;
+        for line in index.split(|byte| *byte == b'\n') {
+            if line.iter().all(u8::is_ascii_whitespace) {
+                continue;
+            }
+            let row = decode.decode(line, StoreError::HistoryCorrupt)?;
+            if !row.is_object() {
+                return Err(StoreError::HistoryCorrupt);
+            }
+            if row["id"] == conversation_id && selected.replace((line, row)).is_some() {
+                return Err(StoreError::HistoryCorrupt);
+            }
         }
-        if matches.len() != 1 {
-            return Err(StoreError::HistoryCorrupt);
-        }
-        let meta = matches[0];
+        let (index_line, meta) = selected.ok_or(StoreError::NotFound)?;
         let revision = if meta.get("contentRevision").is_none_or(Value::is_null) {
             0
         } else {
@@ -180,6 +194,10 @@ impl ConversationStore {
         if before != after {
             return Err(StoreError::VersionChanged);
         }
+        let mut source = Sha256::new();
+        source.update(b"conversation-source-v2\0");
+        source.update(Sha256::digest(index_line));
+        source.update(files::fingerprint(&before[1..]));
         Ok(HistorySnapshot {
             history: PersistedHistory {
                 conversation_id: conversation_id.to_owned(),
@@ -188,7 +206,8 @@ impl ConversationStore {
                 excluded_from_message_id: excluded,
                 requires_runtime_check: true,
             },
-            source_revision: files::fingerprint(&before),
+            source_revision: format!("{:x}", source.finalize()),
+            index_version: before.into_iter().next().flatten(),
         })
     }
 }

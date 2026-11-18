@@ -47,6 +47,7 @@ fn run() -> Result<Value, Box<dyn std::error::Error>> {
                 engine: "peer-native",
                 owner: &owner,
                 attribution: &json!({"id":stream,"streamId":stream}),
+                selected_model: None,
                 at: &owner.acquired_at,
             },
             None,

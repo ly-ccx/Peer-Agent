@@ -5,8 +5,13 @@ use serde_json::{Value, json};
 use std::{collections::BTreeMap, path::Path};
 pub(crate) mod environment;
 mod exec;
+mod session;
 pub use exec::{
-    ExecSelection, ExecSelectionError, ExecSelectionErrorKind, resolve_catalog, resolve_exec,
+    ExecSelection, ExecSelectionError, ExecSelectionErrorKind, resolve_catalog,
+    resolve_exact_session_model, resolve_exec,
+};
+pub use session::{
+    ContextOption, ContextOptions, ContextSelection, SessionModelMetadata, session_models,
 };
 pub(crate) fn trim(s: &str) -> &str {
     // ECMAScript String.trim, including BOM and excluding NEL.

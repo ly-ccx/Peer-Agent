@@ -108,6 +108,7 @@ impl Update {
         {
             return Err(StoreError::VersionChanged);
         }
+        current.check_index(&directory.join("index.jsonl"))?;
         Ok(Self {
             directory,
             _locks: held,
@@ -204,6 +205,8 @@ impl ConversationStore {
             return Err(StoreError::HistoryLimit);
         }
         let marker_file = update.directory.join(format!("{id}.stream.json"));
+        let index_file = update.directory.join("index.jsonl");
+        update.current.check_index(&index_file)?;
         log::replace(&marker_file, marker.as_bytes(), cancel)?;
         update.sidecar_version = files::identity(&marker_file)?;
         // Once the canonical body is published, finish its metadata and cleanup
@@ -212,7 +215,8 @@ impl ConversationStore {
             after("marker")?;
             log::replace(&update.directory.join(format!("{id}.jsonl")), &body, None)?;
             after("body")?;
-            log::replace(&update.directory.join("index.jsonl"), &index, None)?;
+            update.current.check_index(&index_file)?;
+            log::replace(&index_file, &index, None)?;
             after("index")?;
             let stream = update.directory.join(format!("{id}.stream.json"));
             if files::identity(&stream)? != update.sidecar_version {

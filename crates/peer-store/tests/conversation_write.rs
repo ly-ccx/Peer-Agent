@@ -63,6 +63,67 @@ fn source_bound_cas_idempotent_and_later_admission() {
         StoreError::VersionChanged
     );
 }
+#[test]
+fn unrelated_index_publication_preserves_source_but_target_metadata_edit_invalidates_it() {
+    let root = tempfile::tempdir().unwrap();
+    let store = ConversationStore::new(root.path());
+    let first = create(&store);
+    let before = snapshot(&store, &first);
+    let second = create(&store);
+    let other_message = json!({"id":"b","role":"user","content":"independent"});
+    let other = store
+        .commit_message(&snapshot(&store, &second), &other_message, AT, None)
+        .unwrap()
+        .snapshot;
+    assert_eq!(
+        snapshot(&store, &first).source_revision,
+        before.source_revision
+    );
+    let first_message = json!({"id":"a","role":"user","content":"original"});
+    let committed = store
+        .commit_message(&before, &first_message, AT, None)
+        .unwrap()
+        .snapshot;
+    assert_eq!(
+        snapshot(&store, &second).source_revision,
+        other.source_revision
+    );
+    assert_eq!(
+        snapshot(&store, &second).history.messages,
+        vec![other_message]
+    );
+    assert_eq!(committed.history.messages, vec![first_message]);
+
+    let index = root.path().join("conversations/index.jsonl");
+    let mut rows: Vec<serde_json::Value> = fs::read_to_string(&index)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let target = rows.iter_mut().find(|row| row["id"] == first).unwrap();
+    target["future"] = json!({"opaque":true});
+    let edited = rows
+        .iter()
+        .map(|row| format!("{row}\n"))
+        .collect::<String>();
+    fs::write(&index, &edited).unwrap();
+    assert_eq!(
+        snapshot(&store, &first).history.content_revision,
+        committed.history.content_revision
+    );
+    assert_eq!(
+        store
+            .commit_message(
+                &committed,
+                &json!({"id":"stale","role":"user","content":"stale"}),
+                AT,
+                None
+            )
+            .unwrap_err(),
+        StoreError::VersionChanged
+    );
+    assert_eq!(fs::read_to_string(index).unwrap(), edited);
+}
 #[cfg(feature = "test-fixtures")]
 #[test]
 fn body_before_index_failure_preserves_and_reconciles_without_duplicate() {

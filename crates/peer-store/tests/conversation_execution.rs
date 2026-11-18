@@ -5,8 +5,8 @@ use peer_protocol::{
     UsageAmounts, approval_args_digest, normalize_conversation_execution,
 };
 use peer_store::{
-    ConversationExecutionToken, ConversationStore, EvidenceIndexStore, HostToolEvidence,
-    NewConversation, NewConversationExecution, StoreError,
+    ConversationExecutionToken, ConversationModelSelection, ConversationStore, EvidenceIndexStore,
+    HostToolEvidence, NewConversation, NewConversationExecution, StoreError,
 };
 use serde_json::{Value, json};
 use std::{
@@ -69,6 +69,7 @@ fn claim(store: &ConversationStore, id: &str, stream: &str) -> ConversationExecu
                 owner: &owner(),
                 attribution: &json!({"id":stream,"streamId":stream,
         "at":AT,"modelProviderId":"group::provider","model":"model","role":"chat"}),
+                selected_model: None,
                 at: AT,
             },
             None,
@@ -76,6 +77,83 @@ fn claim(store: &ConversationStore, id: &str, stream: &str) -> ConversationExecu
         .unwrap()
         .0
 }
+#[test]
+fn model_selection_and_ordinary_run_claim_use_the_same_current_metadata() {
+    let root = tempfile::tempdir().unwrap();
+    let store = ConversationStore::new(root.path());
+    let first = ConversationModelSelection {
+        provider_id: "group",
+        model: "model",
+        effort: "low",
+    };
+    let next = ConversationModelSelection {
+        effort: "high",
+        ..first
+    };
+    let row = store
+        .create_with_model(
+            &NewConversation {
+                title: "Isolated model update",
+                workspace_path: Some("/workspace"),
+                mode: "chat",
+                created_at: AT,
+            },
+            Some(&first),
+            None,
+        )
+        .unwrap();
+    let id = row["id"].as_str().unwrap();
+    store
+        .update_chat_model(id, "/workspace", &next, AT)
+        .unwrap();
+    let current = store.read_committed(id, None, 8 * 1024 * 1024).unwrap();
+    let intent = NewConversationExecution {
+        stream_id: "stream",
+        engine: "peer-native",
+        owner: &owner(),
+        attribution: &json!({"id":"stream","streamId":"stream",
+            "at":AT,"modelProviderId":"group::model","model":"model","role":"chat"}),
+        selected_model: Some(&first),
+        at: AT,
+    };
+    assert_eq!(
+        store
+            .claim_conversation_execution(&current, &intent, None)
+            .err()
+            .unwrap()
+            .error(),
+        StoreError::VersionChanged
+    );
+    assert!(store.read_conversation_execution(id).unwrap().is_none());
+    let mut run = store
+        .claim_conversation_execution(
+            &current,
+            &NewConversationExecution {
+                selected_model: Some(&next),
+                ..intent
+            },
+            None,
+        )
+        .unwrap()
+        .0;
+    assert_eq!(
+        store.update_chat_model(id, "/workspace", &first, AT),
+        Err(StoreError::ExecutionBusy)
+    );
+    assert_eq!(
+        store.read_metadata(id).unwrap().metadata.unwrap()["effort"],
+        "high"
+    );
+    stop(&store, &mut run);
+    store
+        .update_chat_model(id, "/workspace", &first, AT)
+        .unwrap();
+    assert_eq!(
+        store.read_metadata(id).unwrap().metadata.unwrap()["effort"],
+        "low"
+    );
+}
+
 fn usage(input: u64, output: u64, requests: u64) -> RuntimeTurnUsage {
     RuntimeTurnUsage {
         provider_request_count: requests,
@@ -139,6 +217,7 @@ fn publication_is_continuous_metadata_only_and_cannot_span_external_history_or_m
                 engine: "peer-native",
                 owner: &owner(),
                 attribution: &json!({"id":"stream"}),
+                selected_model: None,
                 at: AT,
             },
             None,
@@ -453,6 +532,7 @@ fn dispatched_unknown_blocks_same_conversation_without_blocking_independent_work
                     engine: "peer-native",
                     owner: &owner(),
                     attribution: &json!({"id":"new"}),
+                    selected_model: None,
                     at: AT
                 },
                 None
@@ -643,6 +723,7 @@ fn malformed_future_or_foreign_execution_is_preserved_and_never_becomes_unowned(
                         engine: "peer-native",
                         owner: &owner(),
                         attribution: &json!({"id":"other"}),
+                        selected_model: None,
                         at: AT
                     },
                     None
@@ -680,6 +761,7 @@ fn claim_child() {
             engine: "peer-native",
             owner: &owner(),
             attribution: &json!({"id":name}),
+            selected_model: None,
             at: AT,
         },
         None,
@@ -795,6 +877,7 @@ fn hard_exit_after_index_retains_actual_owner_and_never_replays_or_expires_it() 
         engine: "peer-native",
         owner: &owner(),
         attribution: &json!({"id":"attempted-replacement"}),
+        selected_model: None,
         at: AT,
     };
     assert_eq!(

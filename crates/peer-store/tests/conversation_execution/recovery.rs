@@ -82,6 +82,7 @@ fn empty_claim_child() {
             engine: "peer-native",
             owner: &owner(),
             attribution: &json!({"id":"uncertain-empty"}),
+            selected_model: None,
             at: AT,
         },
         None,

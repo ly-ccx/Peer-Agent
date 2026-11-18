@@ -165,6 +165,7 @@ fn host() -> (tempfile::TempDir, Host) {
                 engine: "peer-native",
                 owner: &owner,
                 attribution: &json!({"id":"actual-fixture-stream"}),
+                selected_model: None,
                 at: &now(),
             },
             None,

@@ -52,7 +52,7 @@ mod history;
 mod presentation;
 pub use presentation::{DisplayEvent, DisplayReadError, DisplaySnapshot, SessionMetadata};
 mod usage_ledger;
-pub use conversation_write::{MessageCommit, NewConversation};
+pub use conversation_write::{ConversationModelSelection, MessageCommit, NewConversation};
 mod lease;
 mod lock;
 mod policy;

@@ -24,10 +24,14 @@ fn run() -> io::Result<CliExit> {
     let argv: Vec<_> = std::env::args().skip(1).collect();
     let mut out = io::stdout().lock();
     match command(&argv) {
+        Command::Acp => {
+            drop(out);
+            return peer_cli::acp::run();
+        }
         Command::Version => writeln!(out, "peer {}", VERSION.trim())?,
         Command::Help => writeln!(
             out,
-            "Peer native CLI migration candidate\n\nUsage: peer-native [--help|--version|doctor|--classic|bots]\n       peer-native exec [options] [prompt]\n       peer-native exec --plan <canonical-goal-id> [--max-turns N]\n       peer-native recover --plan <canonical-goal-id>\n       peer-native recover --session <conversation-id>\n       peer-native sessions [list]\n       peer-native export <session-id> [--output <path>] [--force]\n       peer-native mcp auth <server-id>\n       peer-native mcp refresh <server-id>\n       peer-native completions <bash|zsh|fish>\n       peer-native models\n       peer-native models <auth|logout|status|reconcile> <configured-channel-id>\n\nNative exec supports ordinary conversations and delegated worker admissions\nwith native model and MCP transports. Unsupported configuration is rejected. OAuth commands update configured\nVault credentials; they do not grant tools. The interactive TUI edits drafts.\nPEER_MODEL_API_KEY, PEER_MODEL_BASE_URL and PEER_MODEL_ID configure the independent\nenvironment model source. No Bun/Node sidecar is started."
+            "Peer native CLI migration candidate\n\nUsage: peer-native [--help|--version|doctor|--classic|bots]\n       peer-native exec [options] [prompt]\n       peer-native acp\n       peer-native exec --plan <canonical-goal-id> [--max-turns N]\n       peer-native recover --plan <canonical-goal-id>\n       peer-native recover --session <conversation-id>\n       peer-native sessions [list]\n       peer-native export <session-id> [--output <path>] [--force]\n       peer-native mcp auth <server-id>\n       peer-native mcp refresh <server-id>\n       peer-native completions <bash|zsh|fish>\n       peer-native models\n       peer-native models <auth|logout|status|reconcile> <configured-channel-id>\n\nNative exec supports ordinary conversations and delegated worker admissions\nwith native model and MCP transports. Unsupported configuration is rejected. OAuth commands update configured\nVault credentials; they do not grant tools. The interactive TUI edits drafts.\nPEER_MODEL_API_KEY, PEER_MODEL_BASE_URL and PEER_MODEL_ID configure the independent\nenvironment model source. No Bun/Node sidecar is started."
         )?,
         Command::Completions(shell) => {
             let data: serde_json::Value =

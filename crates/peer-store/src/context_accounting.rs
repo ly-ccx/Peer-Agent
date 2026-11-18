@@ -323,9 +323,13 @@ impl ConversationStore {
         if bytes.len() > 65536 {
             return Err(StoreError::HistoryLimit);
         }
+        current.check_index(&index)?;
         log::replace(&file, &bytes, None)?;
         before_index()?;
         rows[position]["contextSnapshot"] = next;
+        current
+            .check_index(&index)
+            .map_err(|_| StoreError::ContextCommitUncertain)?;
         log::replace(&index, &log::encode(&rows)?, None)
             .map_err(|_| StoreError::ContextCommitUncertain)?;
         let after = self.read_committed(id, None, 8 * 1024 * 1024)?;

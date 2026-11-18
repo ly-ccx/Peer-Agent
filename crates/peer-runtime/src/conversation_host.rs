@@ -17,8 +17,9 @@ use peer_protocol::{
     ConversationExecutionIdentity, ConversationExecutionPhase, LocalAccessLevel, UsagePurpose,
 };
 use peer_store::{
-    ConversationExecutionToken, ConversationMetadataPublication, ConversationStore,
-    HistorySnapshot, McpRegistryStore, NewConversation, NewConversationExecution,
+    ConversationExecutionToken, ConversationMetadataPublication, ConversationModelSelection,
+    ConversationStore, HistorySnapshot, McpRegistryStore, NewConversation,
+    NewConversationExecution,
 };
 use serde_json::{Value, json};
 use std::{
@@ -69,6 +70,7 @@ pub struct ConversationOptions<'a> {
     pub provider_id: &'a str,
     pub mode: RuntimeMode,
     pub effort: &'a str,
+    pub persist_model_selection: bool,
     pub allowlist: Option<&'a [String]>,
     pub max_turns: Option<usize>,
 }
@@ -79,6 +81,20 @@ pub struct ConversationOutcome {
     pub usage: UsageSnapshot,
     pub lifetime_usage: Option<Value>,
     pub error: Option<&'static str>,
+}
+/// Facts already accepted by the ordinary Host. Rendering these events does
+/// not own the execution or grant permission.
+pub enum ConversationEvent<'a> {
+    Started { conversation_id: &'a str },
+    AssistantText(&'a str),
+    ToolPrepared { call_id: &'a str, tool: &'a str },
+    ToolSettled { call_id: &'a str, status: &'a str },
+}
+pub trait ConversationOutput {
+    fn publish<'a>(
+        &'a mut self,
+        event: ConversationEvent<'a>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), HostError>> + 'a>>;
 }
 /// One Host instance owns the bounded live registry across ordinary sessions.
 /// Discovery is read-only. A dropped runner stays unknown, never implicitly idle.
@@ -122,11 +138,37 @@ impl NativeConversationRuntime {
             access,
         }
     }
+    pub fn update_chat_model(
+        &self,
+        conversation: &str,
+        workspace: &Path,
+        selection: &ConversationModelSelection<'_>,
+    ) -> Result<(), HostError> {
+        let workspace = workspace.to_str().ok_or(HostError("invalid_workspace"))?;
+        ConversationStore::new(&self.home).update_chat_model(
+            conversation,
+            workspace,
+            selection,
+            &now(),
+        )?;
+        Ok(())
+    }
     pub async fn execute(
         &self,
         options: &ConversationOptions<'_>,
         model: &NativeModel,
         permission: &mut dyn PermissionInput,
+        external: &CancellationToken,
+    ) -> Result<ConversationOutcome, HostError> {
+        self.execute_observed(options, model, permission, None, external)
+            .await
+    }
+    pub async fn execute_observed<'a>(
+        &self,
+        options: &ConversationOptions<'_>,
+        model: &'a NativeModel,
+        permission: &'a mut dyn PermissionInput,
+        output: Option<&'a mut dyn ConversationOutput>,
         external: &CancellationToken,
     ) -> Result<ConversationOutcome, HostError> {
         if external.is_cancelled() {
@@ -166,15 +208,23 @@ impl NativeConversationRuntime {
         }
         let store = ConversationStore::new(&self.home);
         store.recover_runtime_usage(None)?;
+        let selected = options
+            .persist_model_selection
+            .then_some(ConversationModelSelection {
+                provider_id: options.provider_id,
+                model: model.model_id(),
+                effort: options.effort,
+            });
         let conversation = match options.conversation_id {
             Some(id) => id.to_owned(),
-            None => store.create(
+            None => store.create_with_model(
                 &NewConversation {
                     title: &options.prompt.chars().take(80).collect::<String>(),
                     workspace_path: workspace.to_str(),
                     mode: options.mode.as_str(),
                     created_at: &at,
                 },
+                selected.as_ref(),
                 None,
             )?["id"]
                 .as_str()
@@ -205,6 +255,12 @@ impl NativeConversationRuntime {
         {
             return Err(HostError("conversation_execution_busy"));
         }
+        if selected
+            .as_ref()
+            .is_some_and(|selection| !selection.matches(&meta))
+        {
+            return Err(HostError("conversation_model_selection_changed"));
+        }
         let context_binding = binding(&meta)?;
         let attribution = json!({"id":stream,"streamId":stream,"at":at,"modelProviderId":format!("{}::{}",options.provider_id,model.model_id()),"model":model.model_id(),"providerName":model.provider(),"role":"chat"});
         let identity = ConversationExecutionIdentity {
@@ -224,8 +280,11 @@ impl NativeConversationRuntime {
             credentials.clone(),
         )?;
         let projection = providers.project_for_mode(options.mode, options.allowlist)?;
-        let pipeline =
-            ContextPipeline::open(&self.home, &conversation, options.provider_id, model)?;
+        let pipeline = if selected.is_some() {
+            ContextPipeline::open_bound(&self.home, &conversation, options.provider_id, model)?
+        } else {
+            ContextPipeline::open(&self.home, &conversation, options.provider_id, model)?
+        };
         let initial = store.read_committed(&conversation, None, 8 * 1024 * 1024)?;
         let identity = ConversationExecutionIdentity {
             conversation_id: conversation.clone(),
@@ -242,6 +301,7 @@ impl NativeConversationRuntime {
                 engine: "peer-native",
                 owner: &owner,
                 attribution: &attribution,
+                selected_model: selected.as_ref(),
                 at: &at,
             },
             None,
@@ -286,6 +346,7 @@ impl NativeConversationRuntime {
             effort: options.effort.into(),
             model,
             permission: Some(permission),
+            output,
             access: self.access.clone(),
             live: self.live.clone(),
             attempt: Some(attempt),
@@ -307,6 +368,7 @@ impl NativeConversationRuntime {
         };
         let result=async {
             host.append(&json!({"id":format!("message-{}",uuid::Uuid::new_v4()),"role":"user","content":options.prompt,"createdAt":at}))?;
+            host.publish(ConversationEvent::Started { conversation_id: &conversation }).await?;
             crate::turn_loop::run(&mut host,options.max_turns,&owned,external).await
         }.await;
         let cleanup = host.finish().await;
@@ -357,6 +419,7 @@ struct Host<'a> {
     effort: String,
     model: &'a NativeModel,
     permission: Option<&'a mut dyn PermissionInput>,
+    output: Option<&'a mut dyn ConversationOutput>,
     access: ConversationAccess,
     live: ExecutionRegistry,
     attempt: Option<Attempt>,
@@ -377,6 +440,12 @@ struct Host<'a> {
     request_admitted: bool,
 }
 impl Host<'_> {
+    async fn publish(&mut self, event: ConversationEvent<'_>) -> Result<(), HostError> {
+        if let Some(output) = &mut self.output {
+            output.publish(event).await?;
+        }
+        Ok(())
+    }
     fn authority(&self) -> Result<(), HostError> {
         if self.owned.is_cancelled() || self.external.is_cancelled() {
             return Err(HostError("CANCELLED"));
@@ -650,7 +719,12 @@ impl crate::turn_loop::TurnHost for Host<'_> {
             .system
             .take()
             .ok_or(HostError("context_response_unavailable"))?;
-        self.append(&json!({"id":format!("message-{}",uuid::Uuid::new_v4()),"role":"assistant","content":turn.content,"createdAt":now(),"streamId":self.identity.stream_id,"contextSnapshot":system["snapshot"],"requestFingerprint":turn.request_fingerprint}))
+        self.append(&json!({"id":format!("message-{}",uuid::Uuid::new_v4()),"role":"assistant","content":turn.content,"createdAt":now(),"streamId":self.identity.stream_id,"contextSnapshot":system["snapshot"],"requestFingerprint":turn.request_fingerprint}))?;
+        if !turn.content.is_empty() {
+            self.publish(ConversationEvent::AssistantText(&turn.content))
+                .await?;
+        }
+        Ok(())
     }
     async fn execute_call(&mut self, call: ModelToolCall) -> Result<String, HostError> {
         self.tool(call).await

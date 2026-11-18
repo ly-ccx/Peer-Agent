@@ -50,6 +50,11 @@ impl Host<'_> {
             None,
         )?;
         self.publication(receipt)?;
+        self.publish(ConversationEvent::ToolPrepared {
+            call_id: &call_id,
+            tool: &call.name,
+        })
+        .await?;
         #[cfg(feature = "test-fixtures")]
         super::fixture_fault(&self.home, "after_prepared");
         let mut grant = self
@@ -196,6 +201,11 @@ impl Host<'_> {
             self.owned.cancel();
             return Err(error);
         }
+        self.publish(ConversationEvent::ToolSettled {
+            call_id: &call_id,
+            status: outcome.status,
+        })
+        .await?;
         if let Some(error) = interrupted.or(grant.terminal) {
             return Err(error);
         }

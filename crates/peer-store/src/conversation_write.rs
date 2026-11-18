@@ -19,6 +19,41 @@ pub struct NewConversation<'a> {
     pub mode: &'a str,
     pub created_at: &'a str,
 }
+/// User-selected model metadata, shared with the existing conversation index.
+pub struct ConversationModelSelection<'a> {
+    pub provider_id: &'a str,
+    pub model: &'a str,
+    pub effort: &'a str,
+}
+impl ConversationModelSelection<'_> {
+    fn validate(&self) -> Result<(), StoreError> {
+        if self.provider_id.is_empty() || self.model.is_empty() {
+            return Err(StoreError::InvalidInput);
+        }
+        Ok(())
+    }
+    fn stored_effort(&self) -> &str {
+        match self.effort {
+            "off" | "low" | "high" | "xhigh" | "max" => self.effort,
+            _ => "default",
+        }
+    }
+    pub fn matches(&self, meta: &Value) -> bool {
+        meta["modelProviderId"] == self.provider_id
+            && meta["model"] == self.model
+            && meta["effort"] == self.stored_effort()
+    }
+    fn apply(&self, meta: &mut Value) {
+        let before = crate::context_model_key(meta);
+        meta["modelProviderId"] = json!(self.provider_id);
+        meta["model"] = json!(self.model);
+        meta["effort"] = json!(self.stored_effort());
+        if crate::context_model_key(meta) != before {
+            meta["contextSnapshot"] = Value::Null;
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct MessageCommit {
     pub snapshot: HistorySnapshot,
@@ -84,7 +119,19 @@ impl ConversationStore {
         input: &NewConversation<'_>,
         cancel: Option<&AtomicBool>,
     ) -> Result<Value, StoreError> {
+        self.create_with_model(input, None, cancel)
+    }
+
+    pub fn create_with_model(
+        &self,
+        input: &NewConversation<'_>,
+        model: Option<&ConversationModelSelection<'_>>,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<Value, StoreError> {
         log::check_cancel(cancel)?;
+        if let Some(model) = model {
+            model.validate()?;
+        }
         if input.title.is_empty()
             || input.title.len() > 1024
             || !["chat", "plan", "goal"].contains(&input.mode)
@@ -98,11 +145,59 @@ impl ConversationStore {
         let file = directory.join("index.jsonl");
         let mut index = log::read(&file, cancel)?;
         let mut meta = json!({"id":uuid::Uuid::new_v4().to_string(),"title":input.title,"workspacePath":input.workspace_path,"mode":input.mode,"fastMode":false,"preferredExecutionIsolation":"none","effort":"default","modelProviderId":null,"status":"active","archivedAt":null,"lastReadAt":input.created_at,"pinnedAt":null,"pinnedOrder":null,"messageCount":0,"contentRevision":0,"contextSnapshot":null,"createdAt":input.created_at,"updatedAt":input.created_at});
+        if let Some(model) = model {
+            model.apply(&mut meta);
+        }
         preview(&mut meta, &[]);
         index.push(meta.clone());
         log::replace(&file, &log::encode(&index)?, cancel)?;
         Ok(meta)
     }
+    /// Change the ordinary chat model before acknowledging the selection.
+    /// An executing or unreconciled conversation still owns its metadata.
+    pub fn update_chat_model(
+        &self,
+        id: &str,
+        workspace: &str,
+        model: &ConversationModelSelection<'_>,
+        at: &str,
+    ) -> Result<(), StoreError> {
+        model.validate()?;
+        if !valid_id(id, false) || !timestamp(at) {
+            return Err(StoreError::InvalidInput);
+        }
+        let directory = self.write_directory()?;
+        let _held = locks(&directory, Some(id), None)?;
+        let file = directory.join("index.jsonl");
+        let version = files::identity(&file)?;
+        let mut index = log::read(&file, None)?;
+        let pos = position(&index, id)?;
+        let row = &mut index[pos];
+        if row["workspacePath"] != workspace
+            || row["mode"] != "chat"
+            || !row["parentConversationId"].is_null()
+            || !row["role"].is_null() && row["role"] != "chat"
+        {
+            return Err(StoreError::OutOfScope);
+        }
+        if crate::conversation_execution::decode(row, id)?.is_some_and(|run| !run.permits_new_run())
+            || files::identity(&directory.join(format!("{id}.stream.json")))?.is_some()
+        {
+            return Err(StoreError::ExecutionBusy);
+        }
+        if model.matches(row) {
+            // A retry after rename with uncertain durability must still sync.
+            return log::sync_dir(&directory);
+        }
+        model.apply(row);
+        row["updatedAt"] = json!(at);
+        let bytes = log::encode(&index)?;
+        if files::identity(&file)? != version {
+            return Err(StoreError::VersionChanged);
+        }
+        log::replace(&file, &bytes, None)
+    }
+
     /// CAS protects both logical revision and actual source identity. A repeated
     /// identical message id is a read receipt, never another append or execution.
     pub fn commit_message(
@@ -181,10 +276,14 @@ impl ConversationStore {
         index[pos]["updatedAt"] = json!(at);
         preview(&mut index[pos], &rows);
         let next_index = log::encode(&index)?;
+        current.check_index(&index_file)?;
         log::append(&body, &log::encode(std::slice::from_ref(message))?, cancel)?;
         // From this point failure is indeterminate to the caller. A retry must
         // reconcile canonical body/index, never discard the durable body.
         after_body().map_err(|_| StoreError::CommitUncertain)?;
+        current
+            .check_index(&index_file)
+            .map_err(|_| StoreError::CommitUncertain)?;
         log::replace(&index_file, &next_index, None).map_err(|_| StoreError::CommitUncertain)?;
         Ok(MessageCommit {
             snapshot: self.read_committed(id, Some(next_revision), log::MAX_BYTES)?,

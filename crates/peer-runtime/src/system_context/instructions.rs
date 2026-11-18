@@ -319,3 +319,12 @@ impl ProjectInstructions {
 
 #[cfg(test)]
 mod tests;
+
+/// Locale for local presentation. Authority and system context validation
+/// continue through the existing Host source projection.
+pub fn presentation_locale(
+    home: &std::path::Path,
+    cancel: &crate::CancellationToken,
+) -> &'static str {
+    settings::presentation_locale(home, cancel).unwrap_or("zh-CN")
+}

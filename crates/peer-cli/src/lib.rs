@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod acp;
 mod cancellation;
 pub mod doctor;
 pub mod export;
@@ -19,6 +20,7 @@ pub const VERSION: &str = include_str!("../../../VERSION");
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command {
     Version,
+    Acp,
     Help,
     Doctor,
     Interactive,
@@ -41,6 +43,13 @@ pub enum Command {
 
 /// Preserve legacy version fast-path precedence before terminal initialization.
 pub fn command(argv: &[String]) -> Command {
+    if argv.first().is_some_and(|arg| arg == "acp") {
+        return if argv.len() == 1 {
+            Command::Acp
+        } else {
+            Command::Usage("Usage: peer acp (stdio; no options)".into())
+        };
+    }
     if argv
         .iter()
         .any(|arg| matches!(arg.as_str(), "--version" | "-v"))
@@ -130,7 +139,10 @@ mod tests {
             command(&["exec".into(), "--version".into()]),
             Command::Version
         );
-        assert_eq!(command(&["acp".into(), "--help".into()]), Command::Help);
+        assert!(matches!(
+            command(&["acp".into(), "--help".into()]),
+            Command::Usage(_)
+        ));
         assert_eq!(command(&[]), Command::Interactive);
         assert_eq!(
             command(&["exec".into()]),

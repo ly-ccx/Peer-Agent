@@ -202,6 +202,7 @@ async fn actual_shell_interruptions_drain_owned_child_keep_facts_and_admit_later
             provider_id: "fixture",
             mode: RuntimeMode::Chat,
             effort: "default",
+            persist_model_selection: false,
             allowlist: None,
             max_turns: None,
         };
@@ -373,6 +374,7 @@ async fn actual_ask_denial_and_explicit_full_grant_have_real_evidence_and_effect
                     provider_id: "fixture",
                     mode: RuntimeMode::Chat,
                     effort: "default",
+                    persist_model_selection: false,
                     allowlist: None,
                     max_turns: None,
                 },
@@ -423,6 +425,7 @@ async fn actual_ordinary_model_file_grant_evidence_usage_stop_and_subsequent_run
         provider_id: "fixture",
         mode: RuntimeMode::Chat,
         effort: "default",
+        persist_model_selection: false,
         allowlist: None,
         max_turns: None,
     };

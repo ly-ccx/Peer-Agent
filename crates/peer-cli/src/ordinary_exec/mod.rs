@@ -222,6 +222,7 @@ pub fn run(options: &Options) -> io::Result<CliExit> {
                     effort: selected.selection["reasoningEffort"]
                         .as_str()
                         .unwrap_or("default"),
+                    persist_model_selection: false,
                     allowlist: allowlist.as_deref(),
                     max_turns: options.max_turns,
                 },

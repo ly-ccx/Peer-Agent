@@ -30,12 +30,51 @@ pub struct ExecSelection {
     pub selection: Value,
     pub entry: ModelCatalogEntry,
 }
+pub fn resolve_exact_session_model(
+    home: &Path,
+    provider: &str,
+    model: &str,
+    effort: Option<&str>,
+) -> Result<ExecSelection, ExecSelectionError> {
+    build_selection(home, effort, false, |entries, _| {
+        let mut matches = entries.iter().filter(|entry| {
+            entry.available && entry.provider_id == provider && entry.model_id == model
+        });
+        let first = matches.next().ok_or_else(|| {
+            error(
+                "model_selection_unavailable",
+                "Unknown or unavailable model",
+            )
+        })?;
+        if matches.next().is_some() {
+            return Err(error(
+                "model_selection_ambiguous",
+                "Ambiguous model identity",
+            ));
+        }
+        Ok(first)
+    })
+}
+
 pub fn resolve_exec(
     home: &Path,
     provider: Option<&str>,
     model: Option<&str>,
     effort: Option<&str>,
     fast: bool,
+) -> Result<ExecSelection, ExecSelectionError> {
+    build_selection(home, effort, fast, |catalog, preferred| {
+        resolve_catalog(catalog, preferred, provider, model)
+    })
+}
+fn build_selection(
+    home: &Path,
+    effort: Option<&str>,
+    fast: bool,
+    choose: impl for<'a> FnOnce(
+        &'a [ModelCatalogEntry],
+        Option<&str>,
+    ) -> Result<&'a ModelCatalogEntry, ExecSelectionError>,
 ) -> Result<ExecSelection, ExecSelectionError> {
     let catalog = load(Some(home)).map_err(|e| configuration_error(e.code, e.code))?;
     if catalog.is_empty() {
@@ -67,7 +106,7 @@ pub fn resolve_exec(
                     .any(|e| e.entry_id.as_deref() == row["id"].as_str())
         })
         .and_then(|v| v["id"].as_str());
-    let entry = resolve_catalog(&catalog, preferred, provider, model)?.clone();
+    let entry = choose(&catalog, preferred)?.clone();
     let effort = effort.unwrap_or(&entry.default_reasoning_effort);
     if !entry
         .supported_reasoning_efforts

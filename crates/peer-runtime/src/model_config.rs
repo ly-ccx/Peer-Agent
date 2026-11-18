@@ -82,6 +82,13 @@ pub struct ResolvedNativeModel {
     pub auth_method: String,
 }
 pub fn resolve_model(config: &Value, selected: &Value) -> Result<ResolvedNativeModel, ModelError> {
+    resolve_with_context(config, selected, None)
+}
+fn resolve_with_context(
+    config: &Value,
+    selected: &Value,
+    context: Option<&crate::model_catalog::ContextSelection>,
+) -> Result<ResolvedNativeModel, ModelError> {
     if config["version"] != 2 {
         return Err(ModelError::new("native_legacy_model_config_unsupported"));
     }
@@ -144,7 +151,26 @@ pub fn resolve_model(config: &Value, selected: &Value) -> Result<ResolvedNativeM
             .ok_or(ModelError::new("model_config_invalid"))?
             .clone(),
     );
-    let resolved = channel::resolve(&Value::Object(flat), selected)?;
+    let mut flat = Value::Object(flat);
+    let session_window = if let Some(context) = context {
+        let declared = crate::model_catalog::ContextOptions::from_declaration(&flat)
+            .filter(|definition| definition.id == context.option_id)
+            .ok_or(ModelError::new("model_context_selection_unavailable"))?;
+        let choice = declared
+            .choice(&context.value)
+            .ok_or(ModelError::new("model_context_selection_unavailable"))?;
+        if flat["modelOptionValues"].is_null() {
+            flat["modelOptionValues"] = serde_json::json!({});
+        }
+        flat["modelOptionValues"]
+            .as_object_mut()
+            .ok_or(ModelError::new("model_config_invalid"))?
+            .insert(context.option_id.clone(), choice.value.clone());
+        choice.window
+    } else {
+        None
+    };
+    let resolved = channel::resolve(&flat, selected)?;
     let model = m["model"]
         .as_str()
         .filter(|s| !s.is_empty())
@@ -164,14 +190,16 @@ pub fn resolve_model(config: &Value, selected: &Value) -> Result<ResolvedNativeM
         .unwrap_or_else(|| "api_key".into());
     let oauth = auth_method != "api_key";
     Ok(ResolvedNativeModel {
-        context_window: resolved.context_window_override.or_else(|| {
-            m.get("contextWindow")
-                .or_else(|| c.get("contextWindow"))
-                .and_then(Value::as_f64)
-                .filter(|n| n.is_finite() && *n > 0.0 && *n <= 9_007_199_254_740_991.0)
-                .map(|n| n.floor() as u64)
-                .filter(|n| *n > 0)
-        }),
+        context_window: session_window
+            .or(resolved.context_window_override)
+            .or_else(|| {
+                m.get("contextWindow")
+                    .or_else(|| c.get("contextWindow"))
+                    .and_then(Value::as_f64)
+                    .filter(|n| n.is_finite() && *n > 0.0 && *n <= 9_007_199_254_740_991.0)
+                    .map(|n| n.floor() as u64)
+                    .filter(|n| *n > 0)
+            }),
         endpoint: resolved.endpoint,
         model: model.into(),
         credential_key: format!(
@@ -196,11 +224,23 @@ pub async fn load_model(
     selected: &Value,
     cancel: &CancellationToken,
 ) -> Result<NativeModel, ModelError> {
+    load_session_model(home, selected, None, cancel).await
+}
+
+pub async fn load_session_model(
+    home: &Path,
+    selected: &Value,
+    context: Option<&crate::model_catalog::ContextSelection>,
+    cancel: &CancellationToken,
+) -> Result<NativeModel, ModelError> {
     if let Some(model) = crate::model_catalog::environment::selected(selected)? {
+        if context.is_some() {
+            return Err(ModelError::new("model_context_selection_unavailable"));
+        }
         return Ok(model);
     }
     let config = read(&home.join("llm-providers.json"))?;
-    let mut resolved = resolve_model(&config, selected)?;
+    let mut resolved = resolve_with_context(&config, selected, context)?;
     let qoder = if resolved.wire == Wire::Qoder {
         let account = crate::qoder::account::Account::load(
             ModelBinding::new(home, &config, selected)?,
@@ -209,7 +249,9 @@ pub async fn load_model(
         resolved.endpoint = account.endpoint().to_string();
         resolved.generation.qoder_metadata = account.metadata().cloned();
         resolved.generation.qoder_dialect = account.dialect();
-        if let Some(metadata) = account.metadata() {
+        if let Some(metadata) = account.metadata()
+            && context.is_none()
+        {
             resolved.context_window = crate::model::wire::qoder_context_window(
                 metadata,
                 resolved

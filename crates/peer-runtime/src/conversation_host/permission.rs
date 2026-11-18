@@ -193,7 +193,8 @@ impl Host<'_> {
             .ok_or(HostError("permission_unavailable"))?;
         let access = self.access.clone();
         let owned = self.owned.clone();
-        let prompt = json!({"approval":row,"tool":tool,"arguments":args,"scopes":[scope]});
+        let prompt =
+            json!({"approval":row,"toolCallId":call,"tool":tool,"arguments":args,"scopes":[scope]});
         let result=self.wait_owned(async {
             let decision=input.decide(prompt,&owned);tokio::pin!(decision);
             let expiry=tokio::time::sleep(Duration::from_secs(300));tokio::pin!(expiry);
