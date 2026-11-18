@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, readdirSync, rmSync, openSync, closeSync, fsyncSync } from 'node:fs';
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, readdirSync, rmSync, openSync, closeSync, fsyncSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
@@ -11,7 +11,7 @@ import { buildInheritedBackground } from './inherited-background.mjs';
 import { validateSelectionReference } from './selection-reference.mjs';
 import { createBackgroundSnapshotStore } from './background-snapshot-store.mjs';
 import path from 'node:path';
-import { contextAccountingModelKey, normalizeContextUsageBreakdown } from '@peer-agent/protocol';
+import { contextAccountingModelKey, normalizeContextUsageBreakdown, normalizeConversationExecution } from '@peer-agent/protocol';
 import { acquireMessageRetentionGuard } from './message-retention-guard.mjs';
 import { withFileLock, withFileLocksAsync } from './conversation-file-lock.mjs';
 import { readJsonlByteWindow } from './jsonl-byte-window.mjs';
@@ -554,6 +554,12 @@ export function createConversationStore(options = {}) {
     return projectSessionPreview({ ...meta, contextSnapshot: durableContextSnapshot(meta) });
   }
 
+  function executionAvailable(id) {
+    const meta = executionMetadata(readIndex(), id);
+    if (!meta) throw new Error('conversation_not_found');
+    checkExecutionAvailable(meta);
+  }
+
   function withMessageCount(meta) {
     if (!meta) return null;
     if (Number.isFinite(Number(meta.messageCount))) {
@@ -1025,8 +1031,9 @@ export function createConversationStore(options = {}) {
 
   function updateMode(id, mode) {
     const index = readIndex();
-    const meta = index.find((c) => c.id === id);
+    const meta = executionMetadata(index, id);
     if (!meta) return null;
+    checkExecutionAvailable(meta);
     meta.mode = normalizeMode(mode);
     meta.updatedAt = new Date().toISOString();
     writeIndex(index);
@@ -1035,8 +1042,9 @@ export function createConversationStore(options = {}) {
 
   function updateFastMode(id, fastMode) {
     const index = readIndex();
-    const meta = index.find((c) => c.id === id);
+    const meta = executionMetadata(index, id);
     if (!meta) return null;
+    checkExecutionAvailable(meta);
     meta.fastMode = fastMode === true;
     meta.updatedAt = new Date().toISOString();
     writeIndex(index);
@@ -1070,8 +1078,9 @@ export function createConversationStore(options = {}) {
   // 不可用则自动回退；这里只负责如实存取用户的选择。
   function updateModelEffort(id, { effort, modelProviderId, model } = {}) {
     const index = readIndex();
-    const meta = index.find((c) => c.id === id);
+    const meta = executionMetadata(index, id);
     if (!meta) return null;
+    checkExecutionAvailable(meta);
     const previousProviderId = normalizeModelProviderId(meta.modelProviderId);
     const previousModel = typeof meta.model === 'string' && meta.model.trim() ? meta.model.trim() : null;
     const previousContextModelKey = contextAccountingModelKey(previousProviderId, previousModel);
@@ -1093,8 +1102,9 @@ export function createConversationStore(options = {}) {
 
   function updateContextSnapshot(id, snapshot = {}) {
     const index = readIndex();
-    const meta = index.find((c) => c.id === id);
+    const meta = executionMetadata(index, id);
     if (!meta) return null;
+    checkExecutionAvailable(meta);
     const contentRevisionRaw = Number(meta.contentRevision);
     const contentRevision = Number.isSafeInteger(contentRevisionRaw) && contentRevisionRaw >= 0
       ? contentRevisionRaw
@@ -1451,13 +1461,14 @@ export function createConversationStore(options = {}) {
   function appendMessage(id, message, { returnMessages = true } = {}) {
     return withFileLock(indexFile, () => {
       const index = readIndex();
-      const meta = index.find((c) => c.id === id);
+      const meta = executionMetadata(index, id);
       if (!meta) return null;
       // Refuse empty user bubbles (no text, no attachments). They only surface as a bare
       // "你" label in the UI and have no durable conversation value.
       if (isEmptyUserMessage(message)) {
         return withMessageCount(meta);
       }
+      checkExecutionAvailable(meta);
       withFileLock(convFile(id), () => appendJsonl(convFile(id), message));
       // 首条用户消息只写短草稿标题，禁止原话全文当永久名。
       // plan/manual 覆盖后不再被消息回填。
@@ -1565,8 +1576,9 @@ export function createConversationStore(options = {}) {
   const terminalCommitter = createTerminalMessageCommitter({ storeDir,
     commitPrepared: async prepared => {
       const result = await withFileLocksAsync([indexFile, prepared.historyFile], () => {
-        const index = readIndex(), meta = index.find(row => row.id === prepared.id);
+        const index = readIndex(), meta = executionMetadata(index, prepared.id);
         if (!meta) throw Object.assign(new Error('Conversation was deleted'), { code: 'CONVERSATION_COMMIT_DELETED' });
+        checkExecutionAvailable(meta);
         if (conversationFileVersion(prepared.historyFile) !== prepared.sourceVersion) return false;
         const marker = readStreamPatchForCommit(prepared.id, prepared.messageId);
         // The target stays provisional across body/index/cleanup failures. An
@@ -1592,6 +1604,7 @@ export function createConversationStore(options = {}) {
     },
   });
   const messageWrite = operation => (...args) => withFileLock(indexFile, () => withFileLock(convFile(args[0]), () => operation(...args)));
+  const historyWrite = operation => messageWrite(guardExecutionWrite(operation));
 
   // 会话级累计用量账本。独立挂在 index meta 上（不在消息 jsonl 里），
   // 因此压缩（replaceMessages 仅重写消息文件）不会触及它 —— 这是修复
@@ -1728,8 +1741,42 @@ export function createConversationStore(options = {}) {
     return { archivedIds, archivedCount: archivedIds.length };
   }
 
+  function checkExecutionAvailable(meta) {
+    if (!Object.hasOwn(meta, 'runtimeExecution')) return null;
+    const run = normalizeConversationExecution(meta.runtimeExecution);
+    if (run.identity.conversationId !== meta.id) throw new Error('conversation_execution_invalid');
+    // A validated stopped phase includes the original stop receipt and settled usage.
+    if (run.phase !== 'stopped') throw new Error('conversation_execution_busy');
+    return run;
+  }
+
+  function executionMetadata(rows, id) {
+    const matches = rows.filter((row) => row.id === id);
+    if (matches.length > 1) throw new Error('conversation_execution_invalid');
+    return matches[0];
+  }
+
+  function guardExecutionWrite(operation) {
+    return (id, ...args) => {
+      const meta = executionMetadata(readIndex(), id);
+      if (meta) checkExecutionAvailable(meta);
+      return operation(id, ...args);
+    };
+  }
+
+  function assertConversationRemovalAllowed(meta) {
+    const run = checkExecutionAvailable(meta);
+    if (run && (run.handles.length > 0 || lstatSync(streamPatchFile(meta.id), { throwIfNoEntry: false }))) {
+      throw new Error('conversation_execution_busy');
+    }
+  }
+
   function deleteConversation(id) {
-    const index = readIndex().filter((c) => c.id !== id);
+    const index = readIndex().filter((meta) => {
+      if (meta.id !== id) return true;
+      assertConversationRemovalAllowed(meta);
+      return false;
+    });
     writeIndex(index);
     try { if (existsSync(convFile(id))) unlinkSync(convFile(id)); } catch {}
     clearStreamPatch(id);
@@ -1757,6 +1804,7 @@ export function createConversationStore(options = {}) {
       else kept.push(meta);
     }
     if (removed.length === 0) return [];
+    for (const meta of removed) assertConversationRemovalAllowed(meta);
     writeIndex(kept);
     for (const meta of removed) {
       try { if (existsSync(convFile(meta.id))) unlinkSync(convFile(meta.id)); } catch {}
@@ -1843,6 +1891,7 @@ export function createConversationStore(options = {}) {
     getConversation,
     readSessionPreview,
     readSessionMeta,
+    assertExecutionAvailable: executionAvailable,
     readConversationWindow,
     readConversationYielding,
     getPersistedConversationHistory,
@@ -1870,15 +1919,15 @@ export function createConversationStore(options = {}) {
     updateModelEffort: metadataWrite(updateModelEffort),
     updateContextSnapshot: metadataWrite(updateContextSnapshot),
     appendMessage: changed(appendMessage, 'messages-updated'),
-    updateLastMessage: changed(messageWrite(updateLastMessage), 'messages-updated'),
-    updateMessageById: changed(messageWrite(updateMessageById), 'messages-updated'),
+    updateLastMessage: changed(historyWrite(updateLastMessage), 'messages-updated'),
+    updateMessageById: changed(historyWrite(updateMessageById), 'messages-updated'),
     commitStreamingMessage: terminalCommitter.commit,
     drainPendingCommits: terminalCommitter.drain,
     // 流式 sidecar 通道：高频、无广播（终态由 updateMessageById 收口并清理）。
     patchStreamingMessage: (...args) => !args[0] || !args[1] || !args[2] || typeof args[2] !== 'object'
-      ? false : messageWrite(patchStreamingMessage)(...args),
-    clearStreamPatch: id => id ? messageWrite(clearStreamPatch)(id) : undefined,
-    replaceMessages: changed(messageWrite(replaceMessages), 'messages-updated'),
+      ? false : historyWrite(patchStreamingMessage)(...args),
+    clearStreamPatch: id => id ? historyWrite(clearStreamPatch)(id) : undefined,
+    replaceMessages: changed(historyWrite(replaceMessages), 'messages-updated'),
     addUsage: metadataWrite(addUsage),
     recordRuntimeTurnUsage: metadataWrite(recordRuntimeTurnUsage),
     archiveConversation: metadataWrite(archiveConversation),

@@ -203,6 +203,8 @@ export interface ConversationStore {
     release(): void;
   };
   listConversations(params?: ConversationListParams): ConversationMeta[] | ConversationListPage;
+  /** Checks the currently persisted owner. Does not reserve a turn. */
+  assertExecutionAvailable(id: string): void;
   listConversationsByWorkspace?(workspacePath: string | null | undefined, params?: ConversationListParams): ConversationMeta[] | ConversationListPage;
   deleteConversationsByWorkspace?(workspacePath: string | null | undefined): ConversationMeta[];
   scheduleMessageCountMigration?(ids?: readonly string[] | null): void;

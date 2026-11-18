@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
@@ -95,4 +95,54 @@ test('deleting with null workspace path is a no-op that removes nothing', () => 
   assert.deepEqual(store.deleteConversationsByWorkspace(undefined), []);
   assert.equal(store.listConversations({ status: 'active' }).length, 1);
   assert.equal(store.getConversation(conv.id)?.id, conv.id);
+});
+
+test('native execution protects single and workspace deletion until all facts are settled', () => {
+  const workspace = '/tmp/native-delete-guard';
+  const sibling = store.createConversation({ title: 'Sibling', workspacePath: workspace });
+  const target = store.createConversation({ title: 'Native', workspacePath: workspace });
+  store.appendMessage(target.id, { id: 'native-message', role: 'user', content: 'Keep the original facts' });
+  const index = join(dir, 'index.jsonl');
+  const body = join(dir, `${target.id}.jsonl`);
+  const bodyBefore = readFileSync(body);
+  const rows = readFileSync(index, 'utf8').trim().split('\n').map(JSON.parse);
+  const row = rows.find(({ id }) => id === target.id);
+  const fixtures = JSON.parse(readFileSync(new URL('../../protocol/contracts/native-cli/conversation-execution.json', import.meta.url), 'utf8'));
+  const setExecution = (name, conversationId = target.id) => {
+    const run = structuredClone(fixtures.cases.find((entry) => entry.name === name).input);
+    run.identity.conversationId = conversationId;
+    row.runtimeExecution = run;
+    writeFileSync(index, rows.map(JSON.stringify).join('\n') + '\n');
+    return readFileSync(index);
+  };
+  for (const [name, expected] of [
+    ['active', 'conversation_execution_busy'],
+    ['unknown-keeps-owner', 'conversation_execution_busy'],
+    ['ended-handle', 'conversation_execution_busy'],
+    ['future-schema', 'conversation_execution_invalid'],
+    ['stopped', 'conversation_execution_invalid'],
+  ]) {
+    const indexBefore = setExecution(name, name === 'stopped' ? sibling.id : target.id);
+    assert.throws(() => store.deleteConversation(target.id), { message: expected });
+    assert.throws(() => store.deleteConversationsByWorkspace(workspace), { message: expected });
+    if (name !== 'ended-handle') {
+      assert.throws(() => store.assertExecutionAvailable(target.id), { message: expected });
+      assert.throws(() => store.updateMode(target.id, 'plan'), { message: expected });
+      assert.throws(() => store.updateModelEffort(target.id, { effort: 'high' }), { message: expected });
+      assert.throws(() => store.appendMessage(target.id, { role: 'user', content: 'Concurrent input' }), { message: expected });
+      assert.throws(() => store.patchStreamingMessage(target.id, 'native-message', { content: 'Foreign patch' }), { message: expected });
+    }
+    assert.deepEqual(readFileSync(index), indexBefore);
+    assert.deepEqual(readFileSync(body), bodyBefore);
+    assert.equal(store.getConversation(sibling.id).id, sibling.id);
+  }
+  setExecution('stopped');
+  assert.doesNotThrow(() => store.assertExecutionAvailable(target.id));
+  const patch = join(dir, `${target.id}.stream.json`);
+  writeFileSync(patch, '{}');
+  assert.throws(() => store.deleteConversation(target.id), { message: 'conversation_execution_busy' });
+  assert.throws(() => store.deleteConversationsByWorkspace(workspace), { message: 'conversation_execution_busy' });
+  rmSync(patch);
+  assert.deepEqual(store.deleteConversationsByWorkspace(workspace).map(({ id }) => id).sort(), [sibling.id, target.id].sort());
+  assert.equal(store.getConversation(target.id), null);
 });

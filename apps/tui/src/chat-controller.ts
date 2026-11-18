@@ -594,6 +594,7 @@ export function createChatController(options: {
   readonly conversationId?: string;
   /** Resolve the persisted conversation at turn start so /new and /resume cannot reuse stale identity. */
   readonly getConversationId?: () => string;
+  readonly assertConversationExecutionAvailable?: (id: string) => void;
   readonly initialMode?: TuiMode;
   readonly sessionController?: RuntimeSessionController;
   readonly planCoordinator?: PlanCoordinator;
@@ -1134,6 +1135,7 @@ export function createChatController(options: {
       const pendingContent = trimmed
         || (images.length > 0 ? `[image${images.length > 1 ? 's' : ''}]` : '');
       const conversationId = resolveConversationId();
+      options.assertConversationExecutionAvailable?.(conversationId);
       let existingSession = sessions.get(sessionId);
       if (existingSession && existingSession.conversationId !== conversationId) {
         if (!sessions.delete(sessionId)) {
@@ -1410,6 +1412,8 @@ export function createChatController(options: {
 
       const before = snapshot.contextAccounting;
       const beforeMessageCount = conversationModelMessages.length;
+      const conversationId = resolveConversationId();
+      options.assertConversationExecutionAvailable?.(conversationId);
       const compactOutcome: { value?: ChatCompactResult } = {};
       const pipeline = createContextAccountingCompactionPipeline<
         { messages: readonly ModelMessage[] },
@@ -1417,7 +1421,7 @@ export function createChatController(options: {
         never
       >({
         identity: {
-          conversationId: resolveConversationId(),
+          conversationId,
           contentRevision: (before?.contentRevision ?? 0) + 1,
           modelKey:
             options.getModelKey?.()

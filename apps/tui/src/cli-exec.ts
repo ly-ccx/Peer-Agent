@@ -192,6 +192,7 @@ export async function runPeerExec(
     model: runtime.model,
     initialMode: options.mode,
     getConversationId: () => persistence.ensureConversation(),
+    assertConversationExecutionAvailable: persistence.assertExecutionAvailable,
     getContextWindow: () => {
       const selection = runtime.modelSelection.getSelection();
       return runtime.modelSelection.catalog.find((entry) => (
