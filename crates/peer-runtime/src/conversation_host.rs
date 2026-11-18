@@ -31,6 +31,7 @@ use std::{
 mod background_shell;
 mod effect;
 mod foreground_shell;
+mod goal_intake;
 mod hooks;
 mod permission;
 mod recovery;

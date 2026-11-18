@@ -98,10 +98,22 @@ pub struct GoalSnapshot {
     pub facts: Value,
     pub source_revision: String,
     pub source_bytes: u64,
+    has_delegation_origin: bool,
 }
 pub struct GoalSelection {
     pub snapshot: Option<GoalSnapshot>,
     pub source_revision: String,
+    index_revision: String,
+}
+/// Identity of one canonical local Goal that met ordinary execution intake.
+/// The Host separately owns capability permission and execution.
+#[derive(Clone)]
+pub struct LocalGoalIntake {
+    plan_id: String,
+    plan_revision: String,
+    index_revision: String,
+    workspace: PathBuf,
+    plan_directory: PathBuf,
 }
 pub struct GoalStore {
     directory: PathBuf,
@@ -156,6 +168,85 @@ impl GoalStore {
         projector: &impl GoalFactProjector,
         cancel: Option<&AtomicBool>,
     ) -> Result<GoalSelection, GoalError> {
+        self.select_by_conversation(conversation, projector, cancel, |goal| {
+            goal.facts["active"] == true
+        })
+    }
+
+    pub fn observe_local_intake(
+        &self,
+        conversation: &str,
+        workspace: &Path,
+        projector: &impl GoalFactProjector,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<Option<LocalGoalIntake>, GoalError> {
+        crate::durable_jsonl::check_cancel(cancel)?;
+        if files::identity(&self.directory.join("index.jsonl"))?.is_none() {
+            return Ok(None);
+        }
+        let selection = self.select_by_conversation(conversation, projector, cancel, |goal| {
+            let facts = &goal.facts;
+            !goal.has_delegation_origin
+                && facts["inheritanceStopped"] == false
+                && matches!(
+                    facts["status"].as_str(),
+                    Some("accepted" | "approved" | "executing")
+                )
+                && !matches!(
+                    facts["runner"]["status"].as_str(),
+                    Some(
+                        "paused"
+                            | "waiting_user"
+                            | "blocked"
+                            | "budget_exhausted"
+                            | "failed"
+                            | "completed"
+                    )
+                )
+                && facts["resourceDirectory"]
+                    .as_str()
+                    .and_then(|path| std::fs::canonicalize(path).ok())
+                    .as_deref()
+                    == Some(workspace)
+        })?;
+        let Some(goal) = selection.snapshot else {
+            return Ok(None);
+        };
+        Ok(Some(LocalGoalIntake {
+            plan_id: goal.facts["planId"]
+                .as_str()
+                .ok_or(GoalError::Invalid)?
+                .into(),
+            plan_revision: goal.source_revision,
+            index_revision: selection.index_revision,
+            workspace: workspace.into(),
+            plan_directory: goal.facts["resourceDirectory"]
+                .as_str()
+                .ok_or(GoalError::Invalid)?
+                .into(),
+        }))
+    }
+
+    pub fn check_local_intake(&self, intake: &LocalGoalIntake) -> Result<(), GoalError> {
+        let index_revision =
+            files::fingerprint(&[files::identity(&self.directory.join("index.jsonl"))?]);
+        if index_revision != intake.index_revision
+            || self.revision(&intake.plan_id)? != intake.plan_revision
+            || std::fs::canonicalize(&intake.plan_directory).as_ref().ok()
+                != Some(&intake.workspace)
+        {
+            return Err(GoalError::Changed);
+        }
+        Ok(())
+    }
+
+    fn select_by_conversation(
+        &self,
+        conversation: &str,
+        projector: &impl GoalFactProjector,
+        cancel: Option<&AtomicBool>,
+        eligible: impl Fn(&GoalSnapshot) -> bool,
+    ) -> Result<GoalSelection, GoalError> {
         if !valid_id(conversation, false) {
             return Err(GoalError::Invalid);
         }
@@ -181,7 +272,7 @@ impl GoalStore {
                 return Err(GoalError::Invalid);
             }
             sources.push((id.to_owned(), snapshot.source_revision.clone()));
-            if snapshot.facts["active"] != true {
+            if !eligible(&snapshot) {
                 continue;
             }
             let updated = snapshot.facts["updatedAt"]
@@ -209,12 +300,14 @@ impl GoalStore {
             }
         }
         crate::durable_jsonl::check_cancel(cancel)?;
-        let bindings = serde_json::json!([files::fingerprint(&[Some(before)]), sources]);
+        let index_revision = files::fingerprint(&[Some(before)]);
+        let bindings = serde_json::json!([index_revision, sources]);
         let source_revision =
             peer_protocol::javascript_json_digest(&bindings).map_err(|_| GoalError::Limit)?;
         Ok(GoalSelection {
             snapshot: selected,
             source_revision,
+            index_revision,
         })
     }
     pub fn revision(&self, id: &str) -> Result<String, GoalError> {
@@ -278,6 +371,7 @@ impl GoalStore {
             facts,
             source_revision: files::fingerprint(&before),
             source_bytes: bytes + progress.map_or(0, |(_, n)| n),
+            has_delegation_origin: !plan["delegationOrigin"].is_null(),
         })
     }
 }

@@ -31,6 +31,7 @@ impl Host<'_> {
         let evidence = effect.evidence();
         let kind = effect.output_kind();
         let permission = effect.permission();
+        let goal_intake = self.observe_goal_intake(permission).await?;
         let risk = effect.risk();
         let read_path = effect.read_scope()?.map(Path::to_owned);
         self.append(&json!({"id":message_id,"role":"assistant","content":"","createdAt":now(),"streamId":self.identity.stream_id,"segments":[{"type":"tool-call","tool":call.name,"toolCallId":call_id,"args":args}],"permissionGrants":[]}))?;
@@ -64,14 +65,17 @@ impl Host<'_> {
             args: &args,
             tool: &call.name,
         };
-        let mut hook = self
-            .tool_hooks(
+        let mut hook = if goal_intake.denial(&self.home).is_some() {
+            hooks::Hooks::default()
+        } else {
+            self.tool_hooks(
                 peer_store::HookPhase::PreToolUse,
                 operation,
                 &dispatch,
                 None,
             )
-            .await;
+            .await
+        };
         if let Some(error) = hook.error
             && !hook.ended_interruption
         {
@@ -89,6 +93,7 @@ impl Host<'_> {
                 risk,
                 read_path,
                 (hook.decision, hook.error),
+                goal_intake,
             )
             .await?;
         // A real permission fact is canonical before dispatch can be confirmed.
@@ -126,6 +131,8 @@ impl Host<'_> {
                         hook.error
                             .map(|error| error.0)
                             .unwrap_or("hook_interrupted")
+                    } else if let Some(reason) = grant.goal_denial {
+                        reason
                     } else if hook.decision == crate::hook_policy::HookDecision::Deny {
                         "hook_denied"
                     } else if hook.decision == crate::hook_policy::HookDecision::Ask

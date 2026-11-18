@@ -51,7 +51,7 @@ mod goal;
 mod goal_source;
 pub use goal::{
     GoalError, GoalExecutionFact, GoalMirrorCommit, GoalMirrorTransaction, GoalSelection,
-    GoalSnapshot, GoalStore,
+    GoalSnapshot, GoalStore, LocalGoalIntake,
 };
 mod history;
 mod hook_config;

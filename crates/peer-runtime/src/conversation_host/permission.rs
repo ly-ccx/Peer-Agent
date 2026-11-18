@@ -1,4 +1,5 @@
 //! Ordinary live authority. A persisted decision is audit, never a reusable grant.
+use super::goal_intake::GoalIntake;
 use super::*;
 use crate::{
     capability::{ProviderPermission, ShellRisk},
@@ -23,6 +24,8 @@ pub(super) struct ToolGrant {
     pub revision: u64,
     pub scopes: Vec<ResolvedReadScope>,
     pub credential_revision: String,
+    goal_intake: GoalIntake,
+    pub goal_denial: Option<&'static str>,
 }
 fn automatic(
     level: LocalAccessLevel,
@@ -77,6 +80,9 @@ impl Host<'_> {
         for scope in &grant.scopes {
             scope.validate()?;
         }
+        if let Some(reason) = grant.goal_intake.denial(&self.home) {
+            return Err(HostError(reason));
+        }
         Ok(())
     }
     pub(super) async fn authorize(
@@ -86,6 +92,7 @@ impl Host<'_> {
         risk: Option<ShellRisk>,
         read_path: Option<PathBuf>,
         hook: (crate::hook_policy::HookDecision, Option<HostError>),
+        goal_intake: GoalIntake,
     ) -> Result<ToolGrant, HostError> {
         use crate::hook_policy::HookDecision;
         let PermissionCall {
@@ -126,8 +133,11 @@ impl Host<'_> {
             .map(|s| s.value())
             .unwrap_or_else(|| json!(capability));
         let permitted = automatic(level, permission, risk, inside);
-        let (granted, reason, terminal) = if let Some(interruption) = hook_interrupted {
+        let mut goal_denial = goal_intake.denial(&self.home);
+        let (mut granted, mut reason, terminal) = if let Some(interruption) = hook_interrupted {
             (false, "hook_interrupted", Some(interruption))
+        } else if let Some(reason) = goal_denial {
+            (false, reason, None)
         } else if hook == HookDecision::Deny {
             (false, "hook_denied", None)
         } else if permitted && hook == HookDecision::Allow {
@@ -148,6 +158,11 @@ impl Host<'_> {
             self.decide(operation, &digest, &scope_value, revision)
                 .await?
         };
+        if granted && let Some(changed) = goal_intake.denial(&self.home) {
+            goal_denial = Some(changed);
+            reason = changed;
+            granted = false;
+        }
         let credential_revision = if granted {
             self.credentials
                 .normalized_conversation(&self.identity)
@@ -166,6 +181,8 @@ impl Host<'_> {
             revision,
             scopes: scope.into_iter().collect(),
             credential_revision,
+            goal_intake,
+            goal_denial,
         };
         if granted {
             self.validate_grant(&grant, args)?;
