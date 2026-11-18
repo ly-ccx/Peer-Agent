@@ -872,11 +872,11 @@ impl crate::turn_loop::TurnHost for Host<'_> {
         let mut usage = std::mem::take(&mut self.usage);
         let home = self.home.clone();
         let model = self.model;
-        let tools = self
-            .worker
-            .as_ref()
-            .map_or(&self.projection, |worker| &worker.projection)
-            .definitions();
+        let tools = match &self.worker {
+            Some(worker) if worker.format_repair => json!([]),
+            Some(worker) => worker.projection.definitions(),
+            None => self.projection.definitions(),
+        };
         let owned = self.owned.clone();
         let external = self.external.clone();
         self.cognition_source = (!self.background_shells.is_empty()).then(|| CognitionSource {

@@ -52,6 +52,7 @@ pub(super) struct Worker {
     pub projection: RuntimeProjection,
     pub calls: usize,
     pub turns: usize,
+    pub format_repair: bool,
     expires: tokio::time::Instant,
     access_revision: u64,
     seen_observations: VecDeque<String>,
@@ -59,6 +60,9 @@ pub(super) struct Worker {
 
 impl Worker {
     pub(super) fn admit_tool(&mut self) -> Result<(), HostError> {
+        if self.format_repair {
+            return Err(HostError("goal_verifier_report_invalid"));
+        }
         if !self.lease.is_verifier() && self.calls >= peer_store::EXPLORER_TOOL_LIMIT {
             return Err(HostError("explorer_tool_limit"));
         }
@@ -113,6 +117,30 @@ impl Host<'_> {
                 Duration::from_millis(peer_store::EXPLORER_TIMEOUT_MS)
             };
         let access_revision = self.access.snapshot()?.1;
+        self.worker = Some(Worker {
+            lease,
+            projection,
+            calls: 0,
+            turns: 0,
+            format_repair: false,
+            expires,
+            access_revision,
+            seen_observations: VecDeque::new(),
+        });
+        self.readonly_worker_turn(mission, max_turns).await
+    }
+
+    pub(super) async fn readonly_worker_turn(
+        &mut self,
+        mission: &str,
+        max_turns: Option<usize>,
+    ) -> Result<String, HostError> {
+        let verifier = self
+            .worker
+            .as_ref()
+            .ok_or(HostError("readonly_owner_unavailable"))?
+            .lease
+            .is_verifier();
         let old_live = std::mem::take(
             &mut self
                 .pipeline
@@ -121,15 +149,6 @@ impl Host<'_> {
                 .live,
         );
         let output = self.output.take();
-        self.worker = Some(Worker {
-            lease,
-            projection,
-            calls: 0,
-            turns: 0,
-            expires,
-            access_revision,
-            seen_observations: VecDeque::new(),
-        });
         let work = async {
             self.append(
                 &json!({"id":format!("message-{}",uuid::Uuid::new_v4()),"role":"user",
@@ -206,7 +225,7 @@ impl Host<'_> {
             .history
             .messages
             .iter()
-            .filter(|row| worker.includes(row))
+            .filter(|row| worker.includes(row) && (!worker.format_repair || row["role"] == "user"))
             .map(|row| {
                 let mut row = row.clone();
                 if let Some(fields) = row.as_object_mut() {
