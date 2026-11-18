@@ -38,9 +38,10 @@ mod conversation_terminal;
 mod conversation_write;
 pub use context_accounting::context_model_key;
 pub use conversation_execution::{
-    ConversationClaimFailure, ConversationExecutionToken, ConversationMetadataPublication,
-    ConversationRecovery, ConversationUsageReceipt, EmptyConversationClaim,
-    NewConversationExecution,
+    ConversationClaimFailure, ConversationExecutionToken, ConversationHookRecord,
+    ConversationMetadataPublication, ConversationRecovery, ConversationUsageReceipt,
+    EmptyConversationClaim, NewConversationExecution, conversation_hook_observation,
+    conversation_hook_process,
 };
 mod goal;
 mod goal_source;
@@ -49,6 +50,8 @@ pub use goal::{
     GoalSnapshot, GoalStore,
 };
 mod history;
+mod hook_config;
+pub use hook_config::{HookConfig, HookDefinition, HookPhase};
 mod presentation;
 pub use presentation::{DisplayEvent, DisplayReadError, DisplaySnapshot, SessionMetadata};
 mod usage_ledger;

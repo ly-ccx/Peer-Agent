@@ -552,3 +552,55 @@ fn native_acp_skill_uses_the_ordinary_host_and_keeps_evidence() {
         .unwrap();
     assert_eq!(evidence[0]["capabilityId"], "local.skill.notes");
 }
+
+#[test]
+fn native_acp_hook_ask_uses_real_editor_approval_and_canonical_evidence() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = root.path().join("workspace");
+    std::fs::create_dir_all(workspace.join(".peer")).unwrap();
+    std::fs::write(workspace.join("source.txt"), "APPROVED-ACP-FIXTURE").unwrap();
+    put(
+        workspace.join(".peer/hooks.json"),
+        &json!({"hooks":{"PreToolUse":[
+            {"id":"review","command":r#"printf '%s' '{"decision":"ask"}'"#}
+        ]}}),
+    );
+    let server = Server::new(vec![
+        reply_tool("read_file", json!({"path":"source.txt"})),
+        reply_text("Done"),
+    ]);
+    let mut client = Client::start(root.path(), &server);
+    client.request(1, "initialize", json!({"protocolVersion":1}));
+    let session = client.create(2, &workspace);
+    client.prompt(3, &session, "Read the source");
+    let approval = loop {
+        let message = client.next();
+        assert_ne!(message["id"], 3, "{message}");
+        if message["method"] == "session/request_permission" {
+            break message;
+        }
+    };
+    assert_eq!(approval["params"]["sessionId"], session);
+    let call = approval["params"]["toolCall"]["toolCallId"]
+        .as_str()
+        .unwrap();
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
+    client.send(json!({"id":approval["id"],"result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}));
+    loop {
+        let message = client.next();
+        if message["id"] == 3 {
+            assert_eq!(message["result"]["stopReason"], "end_turn", "{message}");
+            break;
+        }
+    }
+    client.finish();
+    let requests = server.requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[1].to_string().contains("APPROVED-ACP-FIXTURE"));
+    let store = peer_store::EvidenceIndexStore::new(root.path().join("data"));
+    let records = store
+        .find(&[format!("tool-result://{call}")], None)
+        .unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["capabilityId"], "local.file.read");
+}

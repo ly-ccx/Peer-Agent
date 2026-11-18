@@ -1,6 +1,7 @@
 //! Public ordinary exec, independent of the delegated Goal fixture.
 use super::*;
 use peer_store::ConversationStore;
+mod hooks;
 mod model_errors;
 mod recovery;
 mod skills;
@@ -248,7 +249,7 @@ fn public_ordinary_invalid_inputs_and_non_tty_ask_have_no_data_or_model_effects(
     }
 }
 #[test]
-fn public_ordinary_unmigrated_hook_config_is_preserved_and_blocks_before_model_send() {
+fn public_ordinary_malformed_hook_config_is_preserved_and_blocks_before_model_send() {
     for path in ["data/hooks/hooks.json", "workspace/.peer/hooks.json"] {
         let fixture = Ordinary::new();
         let file = fixture.root.path().join(path);
@@ -262,7 +263,7 @@ fn public_ordinary_unmigrated_hook_config_is_preserved_and_blocks_before_model_s
             "{path}: {}",
             String::from_utf8_lossy(&output.stderr)
         );
-        assert!(String::from_utf8_lossy(&output.stderr).contains("not_migrated"));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("HISTORY_CORRUPT"));
         assert_eq!(
             std::fs::read_to_string(file).unwrap(),
             "preserve the configured extension"

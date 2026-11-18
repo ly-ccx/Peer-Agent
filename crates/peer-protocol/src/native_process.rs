@@ -67,6 +67,10 @@ impl NativeOwnedProcess {
         self.valid_envelope()
             && crate::normalize_session_execution_identity(&self.execution).is_some()
     }
+    pub fn valid_conversation(&self, identity: &crate::ConversationExecutionIdentity) -> bool {
+        self.valid_envelope()
+            && serde_json::to_value(identity).is_ok_and(|expected| expected == self.execution)
+    }
     pub(crate) fn valid_envelope(&self) -> bool {
         let child = self.child.as_ref().is_none_or(|c| {
             c.complete()

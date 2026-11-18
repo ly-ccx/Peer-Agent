@@ -74,8 +74,6 @@ impl NativeConversationRuntime {
         // even if a separate child cannot be proved stopped. This ack does not
         // clear any pending tool, handle, unknown outcome or permission.
         guard.commit_usage(&store, &now())?;
-        self.cancel_prepared(&store, &mut guard, &initial, cancel, deadline)
-            .await?;
         for pending in &initial.pending_tools {
             tokio::task::yield_now().await;
             control(cancel, deadline)?;
@@ -103,10 +101,34 @@ impl NativeConversationRuntime {
             tokio::task::yield_now().await;
             control(cancel, deadline)?;
             let current = guard.current(&store)?;
+            if handle["metadata"]["kind"] == "hook" {
+                let Some(process) = peer_store::conversation_hook_process(handle) else {
+                    continue;
+                };
+                if process.owner != initial.owner || !process.valid_conversation(&initial.identity)
+                {
+                    continue;
+                }
+                match process.state {
+                    Process::NotStarted => guard.handle_ended(&store, handle, &now())?,
+                    Process::Running => {
+                        if let Some(child) = &process.child
+                            && recorder::stop_recorded_group(&initial.owner, child, cancel).await
+                        {
+                            guard.hook_group_ended(&store, handle, &now())?;
+                        }
+                    }
+                    Process::Starting | Process::Ended => {}
+                }
+                continue;
+            }
             if handle_stopped(&initial, &current, handle, cancel).await {
                 guard.handle_ended(&store, handle, &now())?;
             }
         }
+        let current = guard.current(&store)?;
+        self.cancel_prepared(&store, &mut guard, &current, cancel, deadline)
+            .await?;
         self.settle_confirmed(&store, &mut guard, cancel, deadline)
             .await?;
         let current = guard.current(&store)?;
@@ -130,7 +152,12 @@ impl NativeConversationRuntime {
         deadline: Instant,
     ) -> Result<(), HostError> {
         for pending in &run.pending_tools {
-            if pending.phase != peer_protocol::ConversationDispatchPhase::Prepared {
+            if pending.phase != peer_protocol::ConversationDispatchPhase::Prepared
+                || run.handles.iter().any(|h| {
+                    h["toolCallId"] == pending.tool_call_id
+                        && peer_store::conversation_hook_observation(h).is_none()
+                })
+            {
                 continue;
             }
             tokio::task::yield_now().await;
@@ -224,16 +251,19 @@ impl NativeConversationRuntime {
                 continue;
             }
             let current = guard.current(store)?;
-            if current
-                .handles
+            if current.handles.iter().any(|h| {
+                h["toolCallId"] == pending.tool_call_id
+                    && peer_store::conversation_hook_observation(h).is_none_or(|record| {
+                        !result["evidence"]["hooks"]
+                            .as_array()
+                            .is_some_and(|facts| facts.contains(record))
+                    })
+            }) || current
+                .pending_tools
                 .iter()
-                .any(|h| h["toolCallId"] == pending.tool_call_id)
-                || current
-                    .pending_tools
-                    .iter()
-                    .find(|p| p.tool_call_id == pending.tool_call_id)
-                    .and_then(|p| p.native_process.as_ref())
-                    .is_some_and(|p| p.state != Process::Ended)
+                .find(|p| p.tool_call_id == pending.tool_call_id)
+                .and_then(|p| p.native_process.as_ref())
+                .is_some_and(|p| p.state != Process::Ended)
             {
                 continue;
             }

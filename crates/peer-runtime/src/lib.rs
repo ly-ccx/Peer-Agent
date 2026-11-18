@@ -19,6 +19,8 @@ mod execution_budget;
 pub mod git_probe;
 pub mod git_read;
 pub mod goal_facts;
+pub mod hook_policy;
+mod hook_process;
 pub mod live_execution;
 pub mod model;
 pub mod model_auth;

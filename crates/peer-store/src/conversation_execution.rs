@@ -13,6 +13,8 @@ use peer_protocol::{
 };
 use serde_json::Value;
 use std::{path::PathBuf, sync::atomic::AtomicBool};
+mod hooks;
+pub use hooks::{ConversationHookRecord, conversation_hook_observation, conversation_hook_process};
 mod recovery;
 pub use recovery::ConversationRecovery;
 
@@ -679,6 +681,13 @@ impl ConversationStore {
                     if h["toolCallId"] != call_id {
                         return false;
                     }
+                    if hooks::hook_handle(h) {
+                        return conversation_hook_observation(h).is_none_or(|expected| {
+                            !result["evidence"]["hooks"]
+                                .as_array()
+                                .is_some_and(|records| records.contains(expected))
+                        });
+                    }
                     let n = &h["metadata"]["nativeMcp"];
                     !(pending.capability_id.starts_with("local.mcp.")
                         && h["metadata"]["kind"] == "mcp_connection"
@@ -714,6 +723,8 @@ impl ConversationStore {
             }) {
                 return Err(StoreError::EvidenceInvalid);
             }
+            run.handles
+                .retain(|handle| handle["toolCallId"] != call_id || !hooks::hook_handle(handle));
             run.pending_tools.remove(i);
             if run.stop.is_some()
                 && run.pending_tools.is_empty()

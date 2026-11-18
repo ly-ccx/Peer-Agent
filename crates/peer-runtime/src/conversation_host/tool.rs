@@ -57,17 +57,37 @@ impl Host<'_> {
         .await?;
         #[cfg(feature = "test-fixtures")]
         super::fixture_fault(&self.home, "after_prepared");
+        let operation = permission::PermissionCall {
+            call: &call_id,
+            capability: &capability,
+            args: &args,
+            tool: &call.name,
+        };
+        let mut hook = self
+            .tool_hooks(
+                peer_store::HookPhase::PreToolUse,
+                operation,
+                &dispatch,
+                None,
+            )
+            .await;
+        if let Some(error) = hook.error
+            && !hook.ended_interruption
+        {
+            return Err(error);
+        }
+        let read_path = if hook.ended_interruption {
+            None
+        } else {
+            read_path
+        };
         let mut grant = self
             .authorize(
-                permission::PermissionCall {
-                    call: &call_id,
-                    capability: &capability,
-                    args: &args,
-                    tool: &call.name,
-                },
+                operation,
                 permission,
                 risk,
                 read_path,
+                (hook.decision, hook.error),
             )
             .await?;
         // A real permission fact is canonical before dispatch can be confirmed.
@@ -101,7 +121,23 @@ impl Host<'_> {
                         "denied"
                     },
                     output: json!({}),
-                    error: Some("permission_denied"),
+                    error: Some(if hook.ended_interruption {
+                        hook.error
+                            .map(|error| error.0)
+                            .unwrap_or("hook_interrupted")
+                    } else if hook.decision == crate::hook_policy::HookDecision::Deny {
+                        "hook_denied"
+                    } else if hook.decision == crate::hook_policy::HookDecision::Ask
+                        && grant.facts["reason"] == "tui_approval_unavailable"
+                    {
+                        "hook_approval_required"
+                    } else if hook.decision == crate::hook_policy::HookDecision::Ask
+                        && grant.facts["reason"] == "denied_in_tui"
+                    {
+                        "hook_approval_denied"
+                    } else {
+                        "permission_denied"
+                    }),
                     artifacts: vec![],
                     ended: true,
                     materialization: None,
@@ -147,6 +183,34 @@ impl Host<'_> {
         if let Some(error) = outcome.error {
             result["error"] = json!({"code":error,"message":error,"recoverable":true});
         }
+        let mut hook_interrupted = None;
+        let mut hook_unproven = None;
+        if grant.facts["granted"] == true
+            && outcome.ended
+            && !outcome.not_dispatched
+            && interrupted.is_none()
+            && !self.owned.is_cancelled()
+            && !self.external.is_cancelled()
+        {
+            let after = self
+                .tool_hooks(
+                    peer_store::HookPhase::PostToolUse,
+                    operation,
+                    &dispatch,
+                    Some(&result),
+                )
+                .await;
+            hook.records.extend(after.records);
+            if after.ended_interruption {
+                hook_interrupted = after.error;
+            } else {
+                hook_unproven = after.error;
+            }
+        }
+        if !hook.records.is_empty() {
+            result["evidence"]["hooks"] = json!(hook.records);
+            result["evidence"]["hookFinalDecision"] = json!(hooks::decision_name(hook.decision));
+        }
         let home = self.home.clone();
         let conversation = self.identity.conversation_id.clone();
         // Effect completion has already been observed. Content publication is a
@@ -191,6 +255,9 @@ impl Host<'_> {
             },
             None,
         )?;
+        if let Some(error) = hook_unproven {
+            return Err(error);
+        }
         if !outcome.ended || outcome.error == Some("execution_outcome_unknown") {
             return Err(HostError("execution_outcome_unknown"));
         }
@@ -206,7 +273,7 @@ impl Host<'_> {
             status: outcome.status,
         })
         .await?;
-        if let Some(error) = interrupted.or(grant.terminal) {
+        if let Some(error) = interrupted.or(hook_interrupted).or(grant.terminal) {
             return Err(error);
         }
         if self.owned.is_cancelled() || self.external.is_cancelled() {

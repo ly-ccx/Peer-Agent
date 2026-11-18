@@ -49,6 +49,38 @@ const amountKeys = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWrit
 const identity = (v: unknown): v is ConversationExecutionIdentity => object(v)
   && Object.keys(v).length === 3 && keys(v, ['kind', 'conversationId', 'streamId']) && v.kind === 'conversation'
   && typeof v.conversationId === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(v.conversationId) && text(v.streamId, 200);
+function validHookHandle(
+  h: Record<string, unknown>, metadata: Record<string, unknown>,
+  runIdentity: ConversationExecutionIdentity, owner: Recorder, pending: readonly unknown[],
+): boolean {
+  const hook = metadata.nativeHook;
+  if (Object.keys(metadata).length !== 2 || !object(hook)
+    || !keys(hook, ['schemaVersion', 'event', 'ruleDigest', 'process', 'observation'])
+    || hook.schemaVersion !== 1 || !['PreToolUse', 'PostToolUse'].some(v => v === hook.event)
+    || typeof hook.ruleDigest !== 'string' || !/^[a-f0-9]{64}$/.test(hook.ruleDigest)) return false;
+  const p = hook.process;
+  if (!object(p) || !nativeProcessEnvelopeValid(p) || !recorder(p.owner)
+    || !sameRecorder(p.owner, owner) || !identity(p.execution)
+    || p.execution.conversationId !== runIdentity.conversationId || p.execution.streamId !== runIdentity.streamId
+    || p.handleId !== h.handleId || p.toolCallId !== h.toolCallId
+    || h.state !== (p.state === 'ended' ? 'ended' : 'active')
+    || !safe(p.generation) || p.generation > 1 || p.child != null && !recorder(p.child)
+    || !pending.some(row => object(row) && row.toolCallId === p.toolCallId && row.dispatchId === p.dispatchId
+      && (hook.event === 'PreToolUse' || row.phase !== 'prepared'))) return false;
+  if (p.stopObservation !== 'owned_completion') return !Object.hasOwn(hook, 'observation');
+
+  const v = hook.observation;
+  const note = (x: unknown) => typeof x === 'string'
+    && new TextEncoder().encode(x).length <= 1024
+    && !/[\u0000-\u001f\u007f-\u009f]/u.test(x);
+  return object(v) && Object.keys(v).length === 10
+    && v.event === hook.event && v.ruleDigest === hook.ruleDigest && v.handleId === p.handleId
+    && ['allow', 'ask', 'deny'].some(d => d === v.decision)
+    && typeof v.outcome === 'string' && v.outcome.length > 0 && new TextEncoder().encode(v.outcome).length <= 128
+    && (v.exitCode === null || typeof v.exitCode === 'number' && Number.isInteger(v.exitCode)
+      && v.exitCode >= -2147483648 && v.exitCode <= 2147483647)
+    && safe(v.durationMs) && note(v.id) && v.hookId === v.id && (v.reason === null || note(v.reason));
+}
 /** Strict decoding: unknown versions/fields are preserved by the caller and block
  * execution. Return a clone so a parser consumer cannot change the stored fact. */
 export function normalizeConversationExecution(raw: unknown): ConversationExecution {
@@ -104,6 +136,7 @@ export function normalizeConversationExecution(raw: unknown): ConversationExecut
     if (!object(h) || Object.keys(h).length !== 4 || !keys(h, ['handleId', 'toolCallId', 'state', 'metadata'])
       || !text(h.handleId, 512) || handles.has(h.handleId) || !text(h.toolCallId, 200) || !object(h.metadata)
       || !['active', 'ended'].some(v => v === h.state) || raw.phase === 'stopped' && h.state !== 'ended') return invalid();
+    if (h.metadata.kind === 'hook' && !validHookHandle(h, h.metadata, raw.identity, raw.owner, raw.pendingTools)) return invalid();
     handles.add(h.handleId);
   }
   return structuredClone(raw) as unknown as ConversationExecution;

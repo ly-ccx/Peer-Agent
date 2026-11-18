@@ -147,6 +147,10 @@ mod tests {
 mod lease;
 pub use lease::{HostLeaseRecord, HostSurface};
 
+mod conversation_hook;
+pub use conversation_hook::{
+    conversation_hook_observation, conversation_hook_process, valid_conversation_hook_observation,
+};
 mod conversation_execution;
 pub use conversation_execution::{
     ConversationDispatchPhase, ConversationExecution, ConversationExecutionIdentity,

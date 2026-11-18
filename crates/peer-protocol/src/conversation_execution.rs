@@ -251,6 +251,8 @@ impl ConversationExecution {
                 || !h["toolCallId"].as_str().is_some_and(|s| text(s, 200))
                 || !matches!(h["state"].as_str(), Some("active" | "ended"))
                 || !h["metadata"].is_object()
+                || h["metadata"]["kind"] == "hook"
+                    && !crate::conversation_hook::valid_hook_handle(h, self)
                 || self.phase == ConversationExecutionPhase::Stopped && h["state"] != "ended"
             {
                 return false;
@@ -265,20 +267,20 @@ impl ConversationExecution {
             && self.usage_committed
     }
 }
+pub(crate) fn recorder_shape(v: &Value) -> bool {
+    v.as_object().is_some_and(|m| {
+        m.len() == 5
+            && m.keys().all(|k| {
+                ["bootId", "pid", "pidStart", "hostId", "acquiredAt"].contains(&k.as_str())
+            })
+    })
+}
 pub fn normalize_conversation_execution(
     raw: &Value,
 ) -> Result<ConversationExecution, &'static str> {
     if raw["identity"]["kind"] != "conversation" || raw["schemaVersion"] != 1 {
         return Err("conversation_execution_invalid");
     }
-    let recorder_shape = |v: &Value| {
-        v.as_object().is_some_and(|m| {
-            m.len() == 5
-                && m.keys().all(|k| {
-                    ["bootId", "pid", "pidStart", "hostId", "acquiredAt"].contains(&k.as_str())
-                })
-        })
-    };
     if raw.get("usage").is_none()
         || !recorder_shape(&raw["owner"])
         || raw

@@ -14,7 +14,7 @@ fn recovery_command(fixture: &Ordinary, id: &str) -> Command {
         .stderr(Stdio::piped());
     actual
 }
-fn recover(fixture: &Ordinary, id: &str) -> Output {
+pub(super) fn recover(fixture: &Ordinary, id: &str) -> Output {
     wait(recovery_command(fixture, id).spawn().unwrap())
 }
 fn run_facts(fixture: &Ordinary, id: &str) -> peer_protocol::ConversationExecution {
@@ -23,7 +23,11 @@ fn run_facts(fixture: &Ordinary, id: &str) -> peer_protocol::ConversationExecuti
         .unwrap()
         .unwrap()
 }
-fn kill_after_store_publication(fixture: &Ordinary, id: &str, child: &mut std::process::Child) {
+pub(super) fn kill_after_store_publication(
+    fixture: &Ordinary,
+    id: &str,
+    child: &mut std::process::Child,
+) {
     // Observe the end of the actual short Store transaction before testing a
     // crash in the long-running effect. A crash inside a mkdir lock is a
     // separate blocked-recovery case; no unowned lock is deleted here.

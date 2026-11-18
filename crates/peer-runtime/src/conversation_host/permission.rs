@@ -77,14 +77,19 @@ impl Host<'_> {
         permission: ProviderPermission,
         risk: Option<ShellRisk>,
         read_path: Option<PathBuf>,
+        hook: (crate::hook_policy::HookDecision, Option<HostError>),
     ) -> Result<ToolGrant, HostError> {
+        use crate::hook_policy::HookDecision;
         let PermissionCall {
             call,
             capability,
             args,
             ..
         } = operation;
-        self.source_current()?;
+        let (hook, hook_interrupted) = hook;
+        if hook_interrupted.is_none() {
+            self.source_current()?;
+        }
         let digest = peer_protocol::approval_args_digest(args)
             .map_err(|_| HostError("permission_arguments_invalid"))?;
         let (level, revision) = self.access.snapshot()?;
@@ -113,7 +118,11 @@ impl Host<'_> {
             .map(|s| s.value())
             .unwrap_or_else(|| json!(capability));
         let permitted = automatic(level, permission, risk, inside);
-        let (granted, reason, terminal) = if permitted {
+        let (granted, reason, terminal) = if let Some(interruption) = hook_interrupted {
+            (false, "hook_interrupted", Some(interruption))
+        } else if hook == HookDecision::Deny {
+            (false, "hook_denied", None)
+        } else if permitted && hook == HookDecision::Allow {
             (
                 true,
                 if level == LocalAccessLevel::FullLocal {
@@ -129,11 +138,14 @@ impl Host<'_> {
             self.decide(operation, &digest, &scope_value, revision)
                 .await?
         };
-        let credential_revision = self
-            .credentials
-            .normalized_conversation(&self.identity)
-            .map_err(HostError)?
-            .ok_or(HostError("execution_identity_invalid"))?;
+        let credential_revision = if granted {
+            self.credentials
+                .normalized_conversation(&self.identity)
+                .map_err(HostError)?
+                .ok_or(HostError("execution_identity_invalid"))?
+        } else {
+            String::new()
+        };
         let grant = ToolGrant {
             facts: json!({"grantId":format!("grant-{}",uuid::Uuid::new_v4()),"toolCallId":call,"granted":granted,"scope":scope_value,"duration":if granted{"once"}else{"denied"},"decidedAt":now(),"reason":reason,"metadata":{"policyRevision":format!("ordinary:{}:{revision}",self.identity.stream_id)}}),
             additional: vec![],

@@ -28,6 +28,31 @@ add('command-not-started',r=>{r.pendingTools=[{...pending,nativeProcess:commandP
 add('command-running',r=>{r.pendingTools=[{...pending,nativeProcess:{...commandProcess,generation:1,state:'running',child:{...owner,pid:102}}}];});
 add('optional-null',r=>Object.assign(r,{stop:null,pendingTools:[{...pending,nativeProcess:null}]}));
 add('ended-handle',r=>Object.assign(r,{phase:'stopped',stop,handles:[{handleId:'h',toolCallId:'call',state:'ended',metadata:{}}]}),true,true);
+const hookDigest='1'.repeat(64);
+const hookProcess={...commandProcess,handleId:'hook-handle'};
+const hookObservation={id:'review',hookId:'review',event:'PreToolUse',ruleDigest:hookDigest,handleId:hookProcess.handleId,
+  decision:'ask',outcome:'ok',reason:null,exitCode:0,durationMs:16};
+function hookRun(r: any, stage: 'ready'|'running'|'observed'|'unknown') {
+  r.pendingTools=[{...pending,phase:'prepared'}];
+  const child={...owner,pid:102};
+  const process=stage==='ready' ? hookProcess : stage==='running'
+    ? {...hookProcess,generation:1,state:'running',child}
+    : {...hookProcess,generation:1,state:'ended',child,stopObservation:stage==='observed'?'owned_completion':'owner_dead_group_absent'};
+  r.handles=[{handleId:hookProcess.handleId,toolCallId:'call',state:process.state==='ended'?'ended':'active',
+    metadata:{kind:'hook',nativeHook:{schemaVersion:1,event:'PreToolUse',ruleDigest:hookDigest,process:structuredClone(process),
+      ...(stage==='observed'?{observation:structuredClone(hookObservation)}:{})}}}];
+}
+add('hook-pre-can-own-a-prepared-call',r=>hookRun(r,'ready'));
+add('hook-running-owns-actual-child',r=>hookRun(r,'running'));
+add('hook-observation-awaits-original-publication',r=>hookRun(r,'observed'));
+add('hook-stopped-group-with-unknown-result',r=>{hookRun(r,'unknown');r.phase='stopping';});
+add('hook-post-requires-provider-dispatch',r=>{hookRun(r,'ready');r.handles[0].metadata.nativeHook.event='PostToolUse';},false);
+add('hook-must-match-original-dispatch',r=>{hookRun(r,'ready');r.pendingTools[0].dispatchId='foreign';},false);
+add('hook-owner-must-match',r=>{hookRun(r,'ready');r.handles[0].metadata.nativeHook.process.owner={...owner,pid:103};},false);
+add('hook-observed-end-requires-a-receipt',r=>{hookRun(r,'observed');delete r.handles[0].metadata.nativeHook.observation;},false);
+add('hook-recovery-cannot-invent-observed-decision',r=>{hookRun(r,'unknown');r.handles[0].metadata.nativeHook.observation=hookObservation;},false);
+add('hook-observation-must-match-rule',r=>{hookRun(r,'observed');r.handles[0].metadata.nativeHook.observation.ruleDigest='2'.repeat(64);},false);
+add('hook-cannot-retain-raw-stdout',r=>{hookRun(r,'observed');r.handles[0].metadata.nativeHook.observation.stdout='unexpected';},false);
 for (const [name,modify] of [
  ['future-schema',(r:any)=>{r.schemaVersion=2;}],['extra-root',(r:any)=>{r.extra=true;}],
  ['fake-goal',(r:any)=>{r.identity={planId:'p',sessionId:'s',executionEpoch:'e',generation:'g',goalRevision:1};}],

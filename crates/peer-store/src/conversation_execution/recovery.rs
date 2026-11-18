@@ -71,10 +71,16 @@ impl ConversationRecovery {
             .iter()
             .find(|p| p.tool_call_id == call)
             .ok_or(StoreError::ExecutionChanged)?;
+        let hook_records = run
+            .handles
+            .iter()
+            .filter(|handle| handle["toolCallId"] == call)
+            .map(conversation_hook_observation)
+            .collect::<Option<Vec<_>>>()
+            .ok_or(StoreError::ExecutionChanged)?;
         if run.phase == Phase::Active
             || pending.phase != DispatchPhase::Prepared
             || pending.native_process.is_some()
-            || run.handles.iter().any(|h| h["toolCallId"] == call)
         {
             return Err(StoreError::ExecutionChanged);
         }
@@ -125,6 +131,20 @@ impl ConversationRecovery {
             grants.push(serde_json::json!({"grantId":format!("grant-{}",uuid::Uuid::new_v4()),"toolCallId":call,"granted":false,"duration":"denied","decidedAt":at,"reason":"permission_cancelled"}));
         }
         segment["result"] = serde_json::json!({"toolCallId":call,"capabilityId":pending.capability_id,"status":"cancelled","output":{},"outputPreview":{"kind":"json"},"completedAt":at,"error":{"code":"CANCELLED","message":"Original owner ended before dispatch","recoverable":true},"evidence":{"evidenceId":format!("evidence-{}",uuid::Uuid::new_v4()),"toolCallId":call,"summary":"Original owner ended before dispatch","artifactRefs":[],"dispatchOutcome":"not_dispatched"}});
+        if !hook_records.is_empty() {
+            segment["result"]["evidence"]["hooks"] = serde_json::json!(hook_records);
+            let decision = hook_records
+                .iter()
+                .map(|record| record["decision"].as_str())
+                .max_by_key(|decision| match decision {
+                    Some("deny") => 2,
+                    Some("ask") => 1,
+                    _ => 0,
+                })
+                .flatten()
+                .unwrap_or("allow");
+            segment["result"]["evidence"]["hookFinalDecision"] = serde_json::json!(decision);
+        }
         self.current(store)?;
         store.commit_terminal_message(
             &snapshot,
@@ -233,6 +253,44 @@ impl ConversationRecovery {
             process.stop_observation = Some(observation);
             Ok(())
         })?;
+        Ok(())
+    }
+    /// The original owner is gone and the observed child group is absent.
+    /// This changes process lifetime only, retaining the unknown Hook outcome.
+    pub fn hook_group_ended(
+        &mut self,
+        store: &ConversationStore,
+        before: &Value,
+        at: &str,
+    ) -> Result<(), StoreError> {
+        let run = self.current(store)?;
+        if !run.handles.contains(before) {
+            return Err(StoreError::ExecutionChanged);
+        }
+        let mut process = conversation_hook_process(before).ok_or(StoreError::ExecutionInvalid)?;
+        if process.state != peer_protocol::NativeProcessState::Running {
+            return Err(StoreError::ExecutionChanged);
+        }
+        let meta = &before["metadata"]["nativeHook"];
+        let event = match meta["event"].as_str() {
+            Some("PreToolUse") => crate::HookPhase::PreToolUse,
+            Some("PostToolUse") => crate::HookPhase::PostToolUse,
+            _ => return Err(StoreError::ExecutionInvalid),
+        };
+        process.state = peer_protocol::NativeProcessState::Ended;
+        process.stop_observation = Some(NativeProcessStop::OwnerDeadGroupAbsent);
+        store.record_conversation_hook(
+            &mut self.token,
+            &ConversationHookRecord {
+                process: &process,
+                event,
+                rule_digest: meta["ruleDigest"]
+                    .as_str()
+                    .ok_or(StoreError::ExecutionInvalid)?,
+                observation: None,
+            },
+            at,
+        )?;
         Ok(())
     }
     pub fn handle_ended(

@@ -278,6 +278,9 @@ pub(crate) fn require_migrated_hooks(home: &Path, workspace: &Path) -> Result<()
 }
 
 impl RuntimeProjection {
+    pub(crate) fn id(&self) -> &str {
+        &self.id
+    }
     pub(crate) fn has_capability(&self, capability: &str) -> bool {
         self.tools.iter().any(|t| t.capability == capability)
     }

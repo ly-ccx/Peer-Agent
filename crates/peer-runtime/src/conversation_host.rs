@@ -28,6 +28,7 @@ use std::{
     time::Duration,
 };
 mod effect;
+mod hooks;
 mod permission;
 mod recovery;
 mod tool;
@@ -164,7 +165,7 @@ impl NativeConversationRuntime {
         if !workspace.is_dir() || workspace.to_str().is_none() {
             return Err(HostError("invalid_workspace"));
         }
-        crate::providers::require_migrated_hooks(&self.home, &workspace)?;
+        let hooks = Arc::new(peer_store::HookConfig::observe(&self.home, &workspace)?);
         let skills = Arc::new(peer_store::SkillCatalog::observe(&self.home, &workspace)?);
         let instructions = ProjectInstructions::observe_host(&workspace, &self.home, external)
             .map_err(HostError)?;
@@ -333,6 +334,7 @@ impl NativeConversationRuntime {
             servers: inventory.host_context_servers(),
             registry: inventory.source_revision,
             skills,
+            hooks,
             credentials,
             providers,
             projection,
@@ -407,6 +409,7 @@ struct Host<'a> {
     servers: Vec<Value>,
     registry: String,
     skills: Arc<peer_store::SkillCatalog>,
+    hooks: Arc<peer_store::HookConfig>,
     credentials: crate::mcp_oauth::CredentialEpoch,
     providers: ProviderRegistry,
     projection: RuntimeProjection,
@@ -427,7 +430,9 @@ impl Host<'_> {
         if self.owned.is_cancelled() || self.external.is_cancelled() {
             return Err(HostError("CANCELLED"));
         }
-        crate::providers::require_migrated_hooks(&self.home, &self.workspace)?;
+        self.hooks
+            .check_current()
+            .map_err(|_| HostError("native_hook_source_changed"))?;
         self.skills
             .check_current()
             .map_err(|_| HostError("native_skill_source_changed"))?;
