@@ -324,6 +324,22 @@ pub(super) fn observed_evidence(
     refs: &[String],
     cancel: Option<&AtomicBool>,
 ) -> Result<HashSet<String>, GoalError> {
+    observed_scoped_evidence(home, conversation, plan, refs, cancel, None)
+}
+
+pub(super) struct VerifierEvidence<'a> {
+    pub id: &'a str,
+    pub stream: &'a str,
+}
+
+pub(super) fn observed_scoped_evidence(
+    home: &Path,
+    conversation: &str,
+    plan: &str,
+    refs: &[String],
+    cancel: Option<&AtomicBool>,
+    verifier: Option<VerifierEvidence<'_>>,
+) -> Result<HashSet<String>, GoalError> {
     let refs: Vec<_> = refs
         .iter()
         .cloned()
@@ -336,6 +352,9 @@ pub(super) fn observed_evidence(
         .filter(|row| {
             row["conversationId"] == conversation
                 && row["planId"].as_str().is_none_or(|owner| owner == plan)
+                && verifier
+                    .as_ref()
+                    .is_none_or(|scope| row["planId"] == plan && row["streamId"] == scope.stream)
                 && row["toolCallId"].is_string()
                 && row["capabilityId"]
                     .as_str()
@@ -354,6 +373,14 @@ pub(super) fn observed_evidence(
         if msg["role"] != "assistant" || msg["pending"] == true {
             continue;
         }
+        if verifier.as_ref().is_some_and(|scope| {
+            msg["nativeVerifierId"] != scope.id
+                || msg["nativeGoalPlanId"] != plan
+                || msg["streamId"] != scope.stream
+                || msg["kind"] != "agent_activity"
+        }) {
+            continue;
+        }
         for segment in msg["segments"].as_array().into_iter().flatten() {
             if segment["type"] != "tool-call" {
                 continue;
@@ -361,6 +388,19 @@ pub(super) fn observed_evidence(
             let Some(call) = segment["toolCallId"].as_str() else {
                 continue;
             };
+            if verifier.as_ref().is_some_and(|scope| {
+                !msg["permissionGrants"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|grant| {
+                        grant["toolCallId"] == call
+                            && grant["granted"] == true
+                            && grant["metadata"]["readonlyWorkerId"] == scope.id
+                    })
+            }) {
+                continue;
+            }
             if pending.as_ref().is_some_and(|run| {
                 run.pending_tools
                     .iter()

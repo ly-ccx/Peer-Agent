@@ -4,6 +4,7 @@ use super::*;
 use crate::{goal_facts::leaf_tasks, system_context::goal_runner, turn_loop};
 use peer_store::{
     GoalStore, LocalGoalIntake, OrdinaryRunner, RunnerAdmission, RunnerPhase, RunnerStop,
+    VerifierReceipt,
 };
 
 const NO_PROGRESS_LIMIT: usize = 3;
@@ -12,6 +13,7 @@ pub(super) struct Runner {
     pub lease: OrdinaryRunner,
     pub frame: Option<(LocalGoalIntake, Value)>,
     tick: Option<Tick>,
+    verification: Option<VerifierReceipt>,
 }
 
 pub(super) enum RunnerOutcome {
@@ -56,16 +58,18 @@ impl Host<'_> {
         max_turns: Option<usize>,
     ) -> Result<Option<RunnerOutcome>, HostError> {
         self.source_current()?;
-        if max_turns.is_some_and(|max| self.turns >= max) {
-            return Ok(None);
-        }
         let Some(goal) = self.newly_created_goal()? else {
             return Ok(None);
         };
+        let store = GoalStore::new(&self.home);
+        if max_turns.is_some_and(|max| self.turns >= max)
+            && store.read_local_goal(&goal)?["status"] != "completed"
+        {
+            return Ok(None);
+        }
         let projection = self
             .providers
             .project_for_mode(RuntimeMode::Goal, self.allowlist.as_deref())?;
-        let store = GoalStore::new(&self.home);
         let admission = store.begin_ordinary_runner(&goal, &self.identity, &now(), || {
             self.source_current().map_err(|error| error.0)
         })?;
@@ -79,6 +83,7 @@ impl Host<'_> {
             lease: lease.clone(),
             tick: None,
             frame: None,
+            verification: None,
         });
         self.mode = RuntimeMode::Goal;
         self.projection = projection;
@@ -101,7 +106,20 @@ impl Host<'_> {
             self.source_current()?;
             let (source, plan) = store.read_ordinary_runner(lease)?;
             match plan["status"].as_str() {
-                Some("completed") => return Ok(RunnerStop::Verify),
+                Some("completed") => {
+                    let remaining = max_turns.map(|max| max.saturating_sub(self.turns));
+                    if remaining == Some(0) {
+                        return Ok(RunnerStop::BudgetExhausted);
+                    }
+                    let result = match self.run_goal_verifier(store, lease, remaining).await {
+                        Err(HostError("goal_verifier_budget_exhausted")) => {
+                            return Ok(RunnerStop::BudgetExhausted);
+                        }
+                        result => result?,
+                    };
+                    self.runner.as_mut().expect("owned Runner").verification = result;
+                    return Ok(RunnerStop::Verify);
+                }
                 Some("failed") => return Ok(RunnerStop::Failed),
                 _ => {}
             }
@@ -173,7 +191,7 @@ impl Host<'_> {
     }
 
     pub(super) fn check_runner(&self) -> Result<(), HostError> {
-        if self.explorer.is_none()
+        if self.worker.is_none()
             && let Some(runner) = &self.runner
         {
             let store = GoalStore::new(&self.home);
@@ -187,7 +205,7 @@ impl Host<'_> {
     }
 
     pub(super) fn prepare_runner_frame(&mut self) -> Result<(), HostError> {
-        if self.explorer.is_none()
+        if self.worker.is_none()
             && let Some(runner) = &mut self.runner
         {
             runner.frame = Some(GoalStore::new(&self.home).read_ordinary_runner(&runner.lease)?);
@@ -212,6 +230,7 @@ impl Host<'_> {
             &runner.lease,
             &run,
             stop,
+            runner.verification.as_ref(),
             &now(),
             || {
                 let latest = current().map_err(|error| error.0)?;

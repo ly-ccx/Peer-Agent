@@ -18,6 +18,7 @@ mod ordinary_create;
 mod runner;
 mod task_update;
 mod tool_view;
+mod verifier;
 pub use explorer::{
     AutomaticInspect, EXPLORER_TIMEOUT_MS, EXPLORER_TOOL_LIMIT, ExplorerDispatch, ExplorerLease,
     ExplorerSettlement,
@@ -26,6 +27,7 @@ pub use mirror::{GoalExecutionFact, GoalMirrorCommit, GoalMirrorTransaction};
 pub use ordinary_create::{GoalPublication, OrdinaryGoalDraft, OrdinaryGoalKind};
 pub use runner::{OrdinaryRunner, RunnerAdmission, RunnerPhase, RunnerStop};
 pub use task_update::GoalTaskPublication;
+pub use verifier::{VerifierLease, VerifierReceipt, VerifierSettlement};
 static TASK: S<'static> = S::Object(&[("status", S::Full), ("subtasks", S::Each(&TASK))]);
 const RUNNER: S<'static> = S::Object(&[
     ("enabled", S::Full),
@@ -197,6 +199,39 @@ impl GoalStore {
         projector: &impl GoalFactProjector,
         cancel: Option<&AtomicBool>,
     ) -> Result<Option<LocalGoalIntake>, GoalError> {
+        self.observe_local_goal(conversation, workspace, projector, cancel, |facts| {
+            matches!(
+                facts["status"].as_str(),
+                Some("accepted" | "approved" | "executing")
+            )
+        })
+    }
+
+    pub fn observe_runner_intake(
+        &self,
+        conversation: &str,
+        workspace: &Path,
+        projector: &impl GoalFactProjector,
+        created: &std::collections::HashSet<&str>,
+    ) -> Result<Option<LocalGoalIntake>, GoalError> {
+        self.observe_local_goal(conversation, workspace, projector, None, |facts| {
+            matches!(
+                facts["status"].as_str(),
+                Some("accepted" | "approved" | "executing" | "completed")
+            ) && facts["planId"]
+                .as_str()
+                .is_some_and(|id| created.contains(id))
+        })
+    }
+
+    fn observe_local_goal(
+        &self,
+        conversation: &str,
+        workspace: &Path,
+        projector: &impl GoalFactProjector,
+        cancel: Option<&AtomicBool>,
+        eligible: impl Fn(&Value) -> bool,
+    ) -> Result<Option<LocalGoalIntake>, GoalError> {
         crate::durable_jsonl::check_cancel(cancel)?;
         if files::identity(&self.directory.join("index.jsonl"))?.is_none() {
             return Ok(None);
@@ -205,10 +240,7 @@ impl GoalStore {
             let facts = &goal.facts;
             !goal.has_delegation_origin
                 && facts["inheritanceStopped"] == false
-                && matches!(
-                    facts["status"].as_str(),
-                    Some("accepted" | "approved" | "executing")
-                )
+                && eligible(facts)
                 && !matches!(
                     facts["runner"]["status"].as_str(),
                     Some(

@@ -310,7 +310,11 @@ impl NativeConversationRuntime {
             EvidenceIndexStore::new(&self.home).register(
                 &HostToolEvidence {
                     conversation_id: &run.identity.conversation_id,
-                    plan_id: None,
+                    plan_id: (message["kind"] == "agent_activity"
+                        && (message["nativeVerifierId"].is_string()
+                            || message["nativeExplorerId"].is_string()))
+                    .then(|| message["nativeGoalPlanId"].as_str())
+                    .flatten(),
                     stream_id: Some(&run.identity.stream_id),
                     tool_name: segment["tool"]
                         .as_str()

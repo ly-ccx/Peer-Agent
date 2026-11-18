@@ -123,14 +123,12 @@ impl Host<'_> {
         }
         let store = GoalStore::new(&self.home);
         let projector = crate::goal_facts::TuiGoalProjector::new(&now()).map_err(HostError)?;
-        Ok(store
-            .observe_local_intake(
-                &self.identity.conversation_id,
-                &self.workspace,
-                &projector,
-                None,
-            )?
-            .filter(|goal| new_goals.contains(goal.plan_id())))
+        Ok(store.observe_runner_intake(
+            &self.identity.conversation_id,
+            &self.workspace,
+            &projector,
+            &new_goals,
+        )?)
     }
 
     pub(super) async fn drive_deterministic_inspect(

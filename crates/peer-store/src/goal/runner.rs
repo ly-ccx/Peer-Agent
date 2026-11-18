@@ -9,6 +9,7 @@ use serde_json::json;
 pub struct OrdinaryRunner {
     pub(super) goal: LocalGoalIntake,
     identity: ConversationExecutionIdentity,
+    verify_only: bool,
 }
 
 pub enum RunnerAdmission {
@@ -46,6 +47,10 @@ pub enum RunnerStop {
 impl OrdinaryRunner {
     pub fn plan_id(&self) -> &str {
         self.goal.plan_id()
+    }
+
+    pub(super) fn stream_id(&self) -> &str {
+        &self.identity.stream_id
     }
 
     pub(super) fn owns(&self, plan: &Value) -> bool {
@@ -97,7 +102,7 @@ impl GoalStore {
             || !plan["delegationOrigin"].is_null()
             || !matches!(
                 plan["status"].as_str(),
-                Some("accepted" | "approved" | "executing")
+                Some("accepted" | "approved" | "executing" | "completed")
             )
             || plan["runner"]["requestedInput"].is_object()
             || plan["runner"]["nativeRunnerOwner"].is_string()
@@ -108,7 +113,9 @@ impl GoalStore {
         if !plan["runner"].is_object() {
             plan["runner"] = json!({"turnCount":0,"roundCount":0,"toolCallCount":0,"explorers":[]});
         }
-        let authorized = plan["approval"]["decision"] == "approve"
+        let verify_only = plan["status"] == "completed";
+        let authorized = verify_only
+            || plan["approval"]["decision"] == "approve"
             || plan["status"] == "executing"
             || plan["workflowKind"] == "goal_self_driven"
                 && (plan["activation"]["kind"] == "accepted_goal" || plan["status"] == "accepted");
@@ -122,8 +129,10 @@ impl GoalStore {
             transaction.publish(goal.plan_id(), &goal.plan_revision, &plan, at, admit)?;
             return Ok(RunnerAdmission::Waiting(plan));
         }
-        plan["status"] = json!("executing");
-        timing_started(&mut plan, at);
+        if !verify_only {
+            plan["status"] = json!("executing");
+            timing_started(&mut plan, at);
+        }
         let runner = &mut plan["runner"];
         let counters = runner.as_object_mut().ok_or(GoalError::Invalid)?;
         // Legacy display budgets are informative. Actual admission is governed
@@ -134,14 +143,19 @@ impl GoalStore {
         runner["nativeRunnerOwner"] = json!(identity.stream_id);
         runner["enabled"] = json!(true);
         runner["status"] = json!("running");
-        runner["intent"] = json!("execute");
-        runner["phase"] = json!(RunnerPhase::Orient.as_str());
+        runner["intent"] = json!(if verify_only { "verify" } else { "execute" });
+        runner["phase"] = json!(if verify_only {
+            "verify"
+        } else {
+            RunnerPhase::Orient.as_str()
+        });
         runner["updatedAt"] = json!(at);
         plan["updatedAt"] = json!(at);
         transaction.publish(goal.plan_id(), &goal.plan_revision, &plan, at, admit)?;
         Ok(RunnerAdmission::Started(OrdinaryRunner {
             goal: goal.clone(),
             identity: identity.clone(),
+            verify_only,
         }))
     }
 
@@ -157,6 +171,7 @@ impl GoalStore {
         };
         let plan = self.read_local_goal(&goal)?;
         if !runner.owns(&plan)
+            || runner.verify_only && plan["status"] != "completed"
             || !valid_runner_owner(&plan, &runner.identity.stream_id)
             || plan["originWorkspacePath"].as_str().map(Path::new) != Some(&goal.workspace)
             || !plan["parentPlanId"].is_null()
@@ -205,6 +220,7 @@ impl GoalStore {
         runner: &OrdinaryRunner,
         run: &ConversationExecution,
         requested: RunnerStop,
+        verification: Option<&VerifierReceipt>,
         at: &str,
         admit: impl FnOnce() -> Result<(), &'static str>,
     ) -> Result<Value, GoalError> {
@@ -217,26 +233,17 @@ impl GoalStore {
             ("blocked", Some("execution_outcome_unknown"))
         } else {
             match requested {
-                RunnerStop::Verify => self.ordinary_goal_verification(&plan)?,
+                RunnerStop::Verify => self.verified_completion(&plan, runner, verification)?,
                 RunnerStop::Failed => ("failed", Some("goal_failed")),
                 RunnerStop::Blocked(reason) => ("blocked", Some(reason)),
                 RunnerStop::Waiting(reason) => ("waiting_user", Some(reason)),
                 RunnerStop::BudgetExhausted => ("budget_exhausted", Some("max_turns")),
             }
         };
-        if matches!(requested, RunnerStop::Verify)
-            && status == "blocked"
-            && plan["status"] == "completed"
-        {
-            // Leaf settlement is provisional until the plan's completion gate
-            // and independent review both pass.
-            plan["status"] = json!("executing");
-            if let Some(timing) = plan["timing"].as_object_mut() {
-                for key in ["completedAt", "wallClockMs", "activeMs"] {
-                    timing.remove(key);
-                }
-            }
+        if !matches!(status, "completed" | "waiting_user") {
+            reopen_unverified(&mut plan);
         }
+        super::verifier::interrupt_verifier(&mut plan, at)?;
         set_stopped(&mut plan, status, reason, at);
         transaction.publish(source.plan_id(), &source.plan_revision, &plan, at, admit)?;
         Ok(plan)
@@ -274,13 +281,15 @@ impl GoalStore {
             } else {
                 "execution_outcome_unknown"
             };
+            super::verifier::interrupt_verifier(&mut plan, at)?;
+            reopen_unverified(&mut plan);
             set_stopped(&mut plan, "blocked", Some(reason), at);
             transaction.publish(&id, &revision, &plan, at, admit)?;
         }
         Ok(())
     }
 
-    fn ordinary_goal_verification(
+    pub(super) fn ordinary_goal_verification(
         &self,
         plan: &Value,
     ) -> Result<(&'static str, Option<&'static str>), GoalError> {
@@ -317,7 +326,7 @@ impl GoalStore {
             let id = criterion["id"].as_str().ok_or(GoalError::Invalid)?;
             match criterion["kind"].as_str() {
                 Some("manual") => manual.push(id),
-                Some("model_review") => return Ok(("blocked", Some("goal_verifier_required"))),
+                Some("model_review") => return Ok(("blocked", Some("goal_model_review_required"))),
                 Some("test" | "command" | "file-exists" | "file-contains") => {
                     let evidence = plan["criterionResults"]
                         .as_array()
@@ -366,6 +375,18 @@ impl GoalStore {
             return Ok(("waiting_user", Some("manual_dod_confirmation_required")));
         }
         Ok(("blocked", Some("goal_verifier_required")))
+    }
+}
+
+fn reopen_unverified(plan: &mut Value) {
+    if plan["status"] == "completed" {
+        // Settled leaves are provisional until an independent review passes.
+        plan["status"] = json!("executing");
+        if let Some(timing) = plan["timing"].as_object_mut() {
+            for key in ["completedAt", "wallClockMs", "activeMs"] {
+                timing.remove(key);
+            }
+        }
     }
 }
 

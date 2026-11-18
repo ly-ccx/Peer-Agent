@@ -54,6 +54,7 @@ pub use goal::{
     ExplorerSettlement, GoalError, GoalExecutionFact, GoalMirrorCommit, GoalMirrorTransaction,
     GoalPublication, GoalSelection, GoalSnapshot, GoalStore, GoalTaskPublication, LocalGoalIntake,
     OrdinaryGoalDraft, OrdinaryGoalKind, OrdinaryRunner, RunnerAdmission, RunnerPhase, RunnerStop,
+    VerifierLease, VerifierReceipt, VerifierSettlement,
 };
 mod history;
 mod hook_config;

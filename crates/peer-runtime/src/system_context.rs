@@ -7,6 +7,7 @@ mod continuity;
 pub(crate) mod explorer;
 pub(crate) mod goal_runner;
 mod ordinary;
+pub(crate) mod verifier;
 pub use ordinary::{ConversationContext, assemble_conversation_context};
 pub mod instructions;
 fn hash(s: &str) -> String {

@@ -72,13 +72,26 @@ pub(crate) fn assemble(
     lease: &peer_store::ExplorerLease,
     at: &str,
 ) -> Result<Value, &'static str> {
+    assemble_readonly(
+        workspace,
+        provider,
+        model,
+        conversation,
+        sections(&lease.id, &lease.plan, &lease.title, &lease.request)?,
+        at,
+    )
+}
+
+pub(super) fn assemble_readonly(
+    workspace: &str,
+    provider: &str,
+    model: &str,
+    conversation: &str,
+    contexts: impl IntoIterator<Item = Value>,
+    at: &str,
+) -> Result<Value, &'static str> {
     let mut sources = runtime_sections(workspace, provider, model);
-    sources.extend(sections(
-        &lease.id,
-        &lease.plan,
-        &lease.title,
-        &lease.request,
-    )?);
+    sources.extend(contexts);
     sources.sort_by_key(|section| (rank(&section["layer"]), section["priority"].as_i64()));
     let rendered = sources
         .iter()

@@ -24,7 +24,7 @@ pub(super) struct ToolGrant {
     pub revision: u64,
     pub scopes: Vec<ResolvedReadScope>,
     pub credential_revision: String,
-    explorer_id: Option<String>,
+    readonly_worker_id: Option<String>,
     goal_intake: GoalIntake,
     pub goal_denial: Option<&'static str>,
 }
@@ -68,13 +68,13 @@ impl Host<'_> {
         grant: &ToolGrant,
         args: &Value,
     ) -> Result<(), HostError> {
-        let projection = match &grant.explorer_id {
+        let projection = match &grant.readonly_worker_id {
             None => &self.projection,
             Some(id) => {
                 &self
-                    .explorer
+                    .worker
                     .as_ref()
-                    .filter(|worker| worker.lease.id == *id)
+                    .filter(|worker| worker.lease.id() == id)
                     .ok_or(HostError("permission_policy_changed"))?
                     .projection
             }
@@ -151,7 +151,7 @@ impl Host<'_> {
             .unwrap_or_else(|| json!(capability));
         let permitted = automatic(level, permission, risk, inside);
         let mut goal_denial = goal_intake.denial(&self.home);
-        let (mut granted, mut reason, terminal) = if self.explorer.is_some()
+        let (mut granted, mut reason, terminal) = if self.worker.is_some()
             && (permission != ProviderPermission::Read || inside == Some(false))
         {
             (false, "explorer_scope_denied", None)
@@ -194,7 +194,7 @@ impl Host<'_> {
         } else {
             String::new()
         };
-        let grant = ToolGrant {
+        let mut grant = ToolGrant {
             facts: json!({"grantId":format!("grant-{}",uuid::Uuid::new_v4()),"toolCallId":call,"granted":granted,"scope":scope_value,"duration":if granted{"once"}else{"denied"},"decidedAt":now(),"reason":reason,"metadata":{"policyRevision":format!("ordinary:{}:{revision}",self.identity.stream_id)}}),
             additional: vec![],
             terminal,
@@ -204,10 +204,16 @@ impl Host<'_> {
             revision,
             scopes: scope.into_iter().collect(),
             credential_revision,
-            explorer_id: self.explorer.as_ref().map(|worker| worker.lease.id.clone()),
+            readonly_worker_id: self
+                .worker
+                .as_ref()
+                .map(|worker| worker.lease.id().to_owned()),
             goal_intake,
             goal_denial,
         };
+        if let Some(worker) = &self.worker {
+            grant.facts["metadata"]["readonlyWorkerId"] = json!(worker.lease.id());
+        }
         if granted {
             self.validate_grant(&grant, args)?;
         }
@@ -376,7 +382,7 @@ impl Host<'_> {
         let inside = root.covers(Path::new(&target.facts.path));
         let scope = if inside { root } else { target };
         let level = self.access.snapshot()?.0;
-        let (granted, reason, terminal) = if self.explorer.is_some() && !inside {
+        let (granted, reason, terminal) = if self.worker.is_some() && !inside {
             (false, "explorer_scope_denied", None)
         } else if level == LocalAccessLevel::FullLocal || inside {
             (true, "host_policy_read", None)

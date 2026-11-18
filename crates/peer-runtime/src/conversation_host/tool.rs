@@ -7,18 +7,16 @@ use crate::{
 };
 use peer_protocol::{ConversationDispatchPhase, ConversationPendingTool};
 use peer_store::{EvidenceIndexStore, HostToolEvidence};
+use sha2::{Digest, Sha256};
 impl Host<'_> {
     pub(super) async fn tool(&mut self, call: ModelToolCall) -> Result<String, HostError> {
         self.source_current()?;
-        if let Some(worker) = &mut self.explorer {
-            if worker.calls >= peer_store::EXPLORER_TOOL_LIMIT {
-                return Err(HostError("explorer_tool_limit"));
-            }
-            worker.calls += 1;
+        if let Some(worker) = &mut self.worker {
+            worker.admit_tool()?;
         }
         self.reap_background_shells(true).await?;
         let projection = self
-            .explorer
+            .worker
             .as_ref()
             .map_or(&self.projection, |worker| &worker.projection);
         let effect = self.providers.prepare(
@@ -42,7 +40,7 @@ impl Host<'_> {
         let permission = effect.permission();
         let goal_intake = self.observe_goal_intake(permission).await?;
         let risk = effect.risk();
-        let read_path = if self.explorer.is_some() {
+        let read_path = if self.worker.is_some() {
             effect.confined_read_scope()?
         } else {
             effect.read_scope()?
@@ -79,7 +77,7 @@ impl Host<'_> {
             args: &args,
             tool: &call.name,
         };
-        let mut hook = if self.explorer.is_some() || goal_intake.denial(&self.home).is_some() {
+        let mut hook = if self.worker.is_some() || goal_intake.denial(&self.home).is_some() {
             hooks::Hooks::default()
         } else {
             self.tool_hooks(
@@ -171,6 +169,20 @@ impl Host<'_> {
         };
         #[cfg(feature = "test-fixtures")]
         super::fixture_fault(&self.home, "after_effect");
+        let observation = if self
+            .worker
+            .as_ref()
+            .is_some_and(|worker| worker.lease.is_verifier())
+            && outcome.status == "success"
+            && !outcome.not_dispatched
+            && outcome.ended
+        {
+            let facts = serde_json::to_vec(&(&capability, &args, &outcome.output))
+                .map_err(|_| HostError("readonly_evidence_invalid"))?;
+            Some(format!("{:x}", Sha256::digest(facts)))
+        } else {
+            None
+        };
         let mut result = json!({"toolCallId":call_id,"capabilityId":capability,"status":outcome.status,"output":outcome.output,"outputPreview":{"kind":"json"},"completedAt":now(),"evidence":{"evidenceId":format!("evidence-{}",uuid::Uuid::new_v4()),"toolCallId":call_id,"summary":format!("{}: {}",call.name,outcome.status),"artifactRefs":outcome.artifacts}});
         if let Some(extra) = evidence {
             result["evidence"]
@@ -212,7 +224,7 @@ impl Host<'_> {
         }
         let mut hook_interrupted = None;
         let mut hook_unproven = None;
-        if self.explorer.is_none()
+        if self.worker.is_none()
             && grant.facts["granted"] == true
             && (outcome.ended || background)
             && !outcome.not_dispatched
@@ -278,10 +290,7 @@ impl Host<'_> {
         EvidenceIndexStore::new(&self.home).register(
             &HostToolEvidence {
                 conversation_id: &self.identity.conversation_id,
-                plan_id: self
-                    .explorer
-                    .as_ref()
-                    .map(|worker| worker.lease.plan.as_str()),
+                plan_id: self.worker.as_ref().map(|worker| worker.lease.plan_id()),
                 stream_id: Some(&self.identity.stream_id),
                 tool_name: &call.name,
                 capability_id: &capability,
@@ -315,6 +324,9 @@ impl Host<'_> {
         if let Err(error) = self.publication(receipt) {
             self.owned.cancel();
             return Err(error);
+        }
+        if let (Some(worker), Some(observation)) = (&mut self.worker, observation) {
+            worker.observe(observation);
         }
         self.publish(ConversationEvent::ToolSettled {
             call_id: &call_id,

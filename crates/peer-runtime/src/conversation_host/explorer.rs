@@ -1,28 +1,13 @@
 //! Explorer is a bounded read-only turn under the live ordinary Host owner.
+use super::readonly_worker::WorkerLease;
 use super::*;
 use crate::providers::goal::explorer::{CAPABILITY, ExplorerRequest};
-use peer_protocol::{JsonLimits, collect_tool_result_evidence_refs, decode_json_bounded};
+use peer_protocol::{JsonLimits, decode_json_bounded};
 use peer_store::{
-    AutomaticInspect, EvidenceIndexStore, ExplorerDispatch, ExplorerLease, ExplorerSettlement,
-    GoalStore, LocalGoalIntake,
+    AutomaticInspect, ExplorerDispatch, ExplorerLease, ExplorerSettlement, GoalStore,
+    LocalGoalIntake,
 };
 use std::collections::BTreeSet;
-
-pub(super) struct Worker {
-    pub lease: ExplorerLease,
-    pub projection: RuntimeProjection,
-    pub calls: usize,
-    pub expires: tokio::time::Instant,
-    pub access_revision: u64,
-}
-
-const READ_CAPABILITIES: &[&str] = &[
-    "local.git.query",
-    "local.file.read",
-    "local.file.list",
-    "local.file.search",
-    "local.search.aggregate",
-];
 
 pub(super) fn settled_parent_calls<'a>(
     history: &'a HistorySnapshot,
@@ -33,9 +18,7 @@ pub(super) fn settled_parent_calls<'a>(
         .history
         .messages
         .iter()
-        .filter(move |message| {
-            message["streamId"] == stream && !message["nativeExplorerId"].is_string()
-        })
+        .filter(move |message| message["streamId"] == stream && message["kind"] != "agent_activity")
         .flat_map(move |message| {
             message["segments"]
                 .as_array()
@@ -90,20 +73,6 @@ impl Host<'_> {
         let projector = crate::goal_facts::TuiGoalProjector::new(&now()).map_err(HostError)?;
         let request =
             serde_json::to_value(request).map_err(|_| HostError("explorer_request_invalid"))?;
-        let projection = self.providers.project_for_mode(
-            RuntimeMode::Explorer,
-            Some(
-                &READ_CAPABILITIES
-                    .iter()
-                    .filter(|id| {
-                        self.allowlist
-                            .as_ref()
-                            .is_none_or(|allowed| allowed.iter().any(|entry| entry == **id))
-                    })
-                    .map(|id| (*id).to_owned())
-                    .collect::<Vec<_>>(),
-            ),
-        )?;
         let Some(lease) = store.begin_explorer(
             ExplorerDispatch {
                 id,
@@ -122,166 +91,48 @@ impl Host<'_> {
             // A registered request can await a real Goal and its approval.
             return Ok(None);
         };
-        let old_live = std::mem::take(
-            &mut self
-                .pipeline
-                .as_mut()
-                .ok_or(HostError("native_pipeline_unavailable"))?
-                .live,
+        let mission = format!(
+            "Explorer mission for plan \"{}\".\nQuestion: {}",
+            lease.title,
+            lease.request["question"]
+                .as_str()
+                .ok_or(HostError("explorer_request_invalid"))?
         );
-        let output = self.output.take();
-        let authority = self.access.snapshot()?.1;
-        self.explorer = Some(Worker {
-            lease,
-            projection,
-            calls: 0,
-            access_revision: authority,
-            expires: tokio::time::Instant::now()
-                + Duration::from_millis(peer_store::EXPLORER_TIMEOUT_MS),
-        });
-        let work = async {
+        let work = self
+            .run_readonly_worker(
+                WorkerLease::Explorer(Box::new(lease)),
+                &mission,
+                Some(peer_store::EXPLORER_TOOL_LIMIT + 1),
+            )
+            .await;
+        let result = work.and_then(|content| {
             let worker = self
-                .explorer
+                .worker
                 .as_ref()
                 .ok_or(HostError("explorer_owner_unavailable"))?;
-            let mission = format!(
-                "Explorer mission for plan \"{}\".\nQuestion: {}",
-                worker.lease.title,
-                worker.lease.request["question"]
-                    .as_str()
-                    .ok_or(HostError("explorer_request_invalid"))?
-            );
-            self.append(
-                &json!({"id":format!("message-{}",uuid::Uuid::new_v4()),"role":"user",
-                "content":mission,"createdAt":now(),"streamId":self.identity.stream_id}),
-            )?;
-            let owned = self.owned.clone();
-            let external = self.external.clone();
-            let run = crate::turn_loop::run(
-                self,
-                Some(peer_store::EXPLORER_TOOL_LIMIT + 1),
-                &owned,
-                &external,
-            )
-            .await?;
-            if run.stop != crate::turn_loop::LoopStop::Replied {
-                return Err(HostError("explorer_turn_limit"));
-            }
-            self.source_current()?;
-            self.explorer_report(&run.content)
-        }
-        .await;
-        self.output = output;
-        self.pipeline
-            .as_mut()
-            .ok_or(HostError("native_pipeline_unavailable"))?
-            .live = old_live;
+            let WorkerLease::Explorer(lease) = &worker.lease else {
+                return Err(HostError("explorer_owner_unavailable"));
+            };
+            report(lease, worker.calls, &content, self.worker_evidence(worker)?)
+        });
         let worker = self
-            .explorer
+            .worker
             .as_ref()
             .ok_or(HostError("explorer_owner_unavailable"))?;
-        let failure = work.as_ref().err().copied();
-        let settlement = match work {
+        let WorkerLease::Explorer(lease) = &worker.lease else {
+            return Err(HostError("explorer_owner_unavailable"));
+        };
+        let failure = result.as_ref().err().copied();
+        let settlement = match result {
             Ok(report) => ExplorerSettlement::Completed(report),
             Err(error) => ExplorerSettlement::Failed(error.0),
         };
-        let next = store.finish_explorer(&worker.lease, settlement, &now(), || {
+        let next = store.finish_explorer(lease, settlement, &now(), || {
             self.check_worker_settled(failure.is_none())
                 .map_err(|e| e.0)
         });
-        self.explorer = None;
+        self.worker = None;
         failure.map_or(Ok(next?), Err)
-    }
-
-    fn check_worker_settled(&self, success: bool) -> Result<(), HostError> {
-        if success {
-            self.source_current()?;
-        }
-        let run = self
-            .store
-            .read_conversation_execution(&self.identity.conversation_id)?
-            .ok_or(HostError("explorer_owner_unavailable"))?;
-        if run.identity != self.identity
-            || run.owner != *self.run.owner()
-            || run.phase != ConversationExecutionPhase::Active
-            || !run.pending_tools.is_empty()
-        {
-            return Err(HostError("explorer_stop_unproven"));
-        }
-        Ok(())
-    }
-
-    pub(super) fn check_explorer(&self) -> Result<(), HostError> {
-        if let Some(worker) = &self.explorer {
-            if tokio::time::Instant::now() >= worker.expires {
-                return Err(HostError("explorer_timed_out"));
-            }
-            if self.access.snapshot()?.1 != worker.access_revision {
-                return Err(HostError("permission_policy_changed"));
-            }
-            GoalStore::new(&self.home).check_explorer(&worker.lease)?;
-        }
-        Ok(())
-    }
-
-    pub(super) fn project_active_history(&self) -> Result<Value, HostError> {
-        let Some(worker) = &self.explorer else {
-            return crate::canonical_history::project_history(&self.expected.history.messages)
-                .map_err(HostError);
-        };
-        let worker_rows = self
-            .expected
-            .history
-            .messages
-            .iter()
-            .filter(|row| row["nativeExplorerId"] == worker.lease.id)
-            .map(|message| {
-                let mut message = message.clone();
-                if let Some(row) = message.as_object_mut() {
-                    row.remove("kind");
-                }
-                message
-            })
-            .collect::<Vec<_>>();
-        crate::canonical_history::project_history(&worker_rows).map_err(HostError)
-    }
-
-    fn explorer_report(&self, content: &str) -> Result<Value, HostError> {
-        let worker = self
-            .explorer
-            .as_ref()
-            .ok_or(HostError("explorer_owner_unavailable"))?;
-        let mut observed = Vec::new();
-        for message in self
-            .expected
-            .history
-            .messages
-            .iter()
-            .filter(|row| row["nativeExplorerId"] == worker.lease.id)
-        {
-            for segment in message["segments"].as_array().into_iter().flatten() {
-                let result = &segment["result"];
-                let Some(call) = segment["toolCallId"].as_str() else {
-                    continue;
-                };
-                if result["toolCallId"] != call || result["status"] != "success" {
-                    continue;
-                }
-                let refs = collect_tool_result_evidence_refs(Some(call), result)
-                    .map_err(|_| HostError("explorer_evidence_invalid"))?;
-                for row in EvidenceIndexStore::new(&self.home).find(&refs, None)? {
-                    if row["conversationId"] == self.identity.conversation_id
-                        && row["streamId"] == self.identity.stream_id
-                        && row["planId"] == worker.lease.plan
-                        && row["toolCallId"] == call
-                        && row["capabilityId"] == result["capabilityId"]
-                    {
-                        observed.extend(row["evidenceRef"].as_str().map(str::to_owned));
-                    }
-                }
-            }
-        }
-        report(&worker.lease, worker.calls, content, observed)
     }
 }
 
@@ -289,12 +140,12 @@ fn report(
     lease: &ExplorerLease,
     calls: usize,
     content: &str,
-    actual: Vec<String>,
+    actual: BTreeSet<String>,
 ) -> Result<Value, HostError> {
     if actual.is_empty() {
         return Err(HostError("explorer_completed_without_tool_evidence"));
     }
-    let allowed: BTreeSet<String> = actual.into_iter().collect();
+    let allowed = actual;
     let parsed = decode_json_bounded(
         content.as_bytes(),
         JsonLimits {

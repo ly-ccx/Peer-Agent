@@ -71,7 +71,7 @@ impl Host<'_> {
         }
         let (mut port, mut requests) = EffectAdmission::channel(&effect_cancel);
         port.owner = Some(self.run.owner().clone());
-        port.confined_reads = self.explorer.is_some();
+        port.confined_reads = self.worker.is_some();
         effect.admission(port);
         let primary = handle.clone();
         let mut provider_call =
