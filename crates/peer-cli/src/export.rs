@@ -46,7 +46,7 @@ fn operation(
     if let Some(target) = target {
         target.publish(&source, &mut spool, cancel)?;
     } else {
-        crate::finish_stdout(stdout::copy(&mut spool, cancel))?;
+        stdout::copy(&mut spool, cancel)?;
     }
     Ok(())
 }
@@ -58,14 +58,14 @@ pub fn run(options: &Options) -> io::Result<CliExit> {
     crate::cancellation::run_blocking(|cancel| {
         match operation(&home, options, &cancel).and_then(|()| {
             if let Some(path) = &options.output_path {
-                crate::finish_stdout(stdout::text(
+                stdout::text(
                     &format!(
                         "Exported {} to {}\n",
                         options.session_id,
                         crate::text::diagnostic(path)
                     ),
                     &cancel,
-                ))
+                )
                 .map_err(|e| {
                     io::Error::new(e.kind(), format!("export_publication_unknown: {e}"))
                 })?;

@@ -74,23 +74,7 @@ fn blocked_stdout_cancels_and_broken_pipe_fails_without_preventing_a_later_expor
     let root = tempfile::tempdir().unwrap();
     let before = fixture(root.path());
     let mut child = Owned::spawn(root.path(), &["export", "a"]);
-    let stdout = child.0.as_ref().unwrap().stdout.as_ref().unwrap();
-    let mut fds = [rustix::event::PollFd::new(
-        stdout,
-        rustix::event::PollFlags::IN,
-    )];
-    assert_eq!(
-        rustix::event::poll(
-            &mut fds,
-            Some(&rustix::event::Timespec {
-                tv_sec: 5,
-                tv_nsec: 0
-            })
-        )
-        .unwrap(),
-        1
-    );
-    assert!(fds[0].revents().contains(rustix::event::PollFlags::IN));
+    wait_for_stdout(child.0.as_ref().unwrap());
     child.signal();
     let out = child.finish();
     assert_eq!(
@@ -134,6 +118,29 @@ fn blocked_stdout_cancels_and_broken_pipe_fails_without_preventing_a_later_expor
         fs::read(root.path().join("conversations/a.jsonl")).unwrap(),
         before
     );
+}
+
+fn wait_for_stdout(child: &Child) {
+    let stdout = child.stdout.as_ref().unwrap();
+    let mut fds = [rustix::event::PollFd::new(
+        stdout,
+        rustix::event::PollFlags::IN,
+    )];
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let timeout = deadline.saturating_duration_since(Instant::now());
+        assert!(!timeout.is_zero(), "export did not start writing to stdout");
+        let timeout = rustix::event::Timespec {
+            tv_sec: timeout.as_secs().try_into().unwrap(),
+            tv_nsec: timeout.subsec_nanos().into(),
+        };
+        match rustix::event::poll(&mut fds, Some(&timeout)) {
+            Err(rustix::io::Errno::INTR) => continue,
+            result => assert_eq!(result.unwrap(), 1),
+        }
+        assert!(fds[0].revents().contains(rustix::event::PollFlags::IN));
+        return;
+    }
 }
 #[test]
 fn signal_during_publication_lock_wait_preserves_old_target_and_later_force_succeeds() {

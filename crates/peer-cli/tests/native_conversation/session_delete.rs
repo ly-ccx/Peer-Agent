@@ -368,21 +368,27 @@ fn fixture_session_delete_retains_actual_unresolved_dispatch_even_after_recovery
 }
 
 #[test]
-fn closed_stdout_preserves_the_outcome_of_shell_commands_and_file_publications() {
+fn closed_stdout_distinguishes_export_delivery_from_settled_shell_commands() {
     let fixture = Ordinary::new();
     seed(&fixture);
     let destination = fixture.workspace().join("saved.md");
     let exported = destination.to_str().unwrap();
-    let commands: &[&[&str]] = &[
-        &["--help"],
-        &["sessions", "list"],
-        &["export", SELECTED],
-        &["export", SELECTED, "--output", exported],
-        &["sessions", "delete", SELECTED, "--yes"],
+    let commands: &[(&[&str], i32, &str)] = &[
+        (&["--help"], 0, ""),
+        (&["sessions", "list"], 0, ""),
+        (&["export", SELECTED], 1, "peer export:"),
+        (
+            &["export", SELECTED, "--output", exported],
+            1,
+            "export_publication_unknown",
+        ),
+        (&["sessions", "delete", SELECTED, "--yes"], 0, ""),
     ];
-    for args in commands {
+    for (args, exit, diagnostic) in commands {
+        let (reader, writer) = rustix::pipe::pipe().unwrap();
+        drop(reader);
         let specimen = fixture.command(None);
-        let mut child = Command::new(specimen.get_program())
+        let child = Command::new(specimen.get_program())
             .env_clear()
             .envs(
                 specimen
@@ -392,16 +398,20 @@ fn closed_stdout_preserves_the_outcome_of_shell_commands_and_file_publications()
             .current_dir(fixture.workspace())
             .args(*args)
             .stdin(Stdio::null())
-            .stdout(Stdio::piped())
+            .stdout(Stdio::from(writer))
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        drop(child.stdout.take().unwrap());
         let output = wait(child);
-        assert!(
-            output.status.success() && output.stderr.is_empty(),
-            "{args:?}: {output:?}"
-        );
+        assert_eq!(output.status.code(), Some(*exit), "{args:?}: {output:?}");
+        if diagnostic.is_empty() {
+            assert!(output.stderr.is_empty(), "{args:?}: {output:?}");
+        } else {
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains(*diagnostic),
+                "{args:?}: {output:?}"
+            );
+        }
     }
     assert!(
         std::fs::read_to_string(&destination)

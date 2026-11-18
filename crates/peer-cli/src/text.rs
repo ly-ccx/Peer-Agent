@@ -50,7 +50,8 @@ pub(crate) fn escape_json_controls(encoded: &str) -> String {
         .collect()
 }
 
-/// A final stdout write cannot change the outcome of a settled command.
+/// Preserve a settled command's exit status when its final display is dropped.
+/// Commands that require successful delivery on stdout must propagate write errors.
 pub fn finish_stdout(write: io::Result<()>) -> io::Result<()> {
     match write {
         Err(error) if error.kind() == io::ErrorKind::BrokenPipe => Ok(()),
