@@ -6,7 +6,6 @@ use std::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     },
-    time::Instant,
 };
 use tokio::{
     io::{AsyncRead, AsyncReadExt},
@@ -226,19 +225,7 @@ pub(crate) async fn run(request: Request<'_>) -> Result<Output, GitReadError> {
     }
 }
 async fn stop_group(pid: u32, child: &mut tokio::process::Child) -> Result<(), GitReadError> {
-    if let Some(pid) = rustix::process::Pid::from_raw(pid as i32) {
-        let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
-    }
-    let _ = child.start_kill();
-    let mut ended = tokio::time::timeout(Duration::from_secs(1), child.wait())
-        .await
-        .is_ok_and(|r| r.is_ok());
-    let deadline = Instant::now() + Duration::from_secs(1);
-    while !crate::providers::group_absent(pid) && Instant::now() < deadline {
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    }
-    ended &= crate::providers::group_absent(pid);
-    if ended {
+    if crate::recorder::stop_owned_group(child, pid, Duration::from_secs(2)).await {
         Ok(())
     } else {
         Err(GitReadError {

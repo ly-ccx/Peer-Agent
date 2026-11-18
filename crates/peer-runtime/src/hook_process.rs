@@ -4,7 +4,7 @@ use crate::{
     CancellationToken,
     capability::CapabilityError as HostError,
     hook_policy::{HookDecision, HookVerdict, hook_verdict},
-    providers::group_absent,
+    recorder::{group_absent, stop_owned_group},
 };
 use peer_store::{HookDefinition, HookPhase};
 use serde_json::{Value, json};
@@ -191,20 +191,7 @@ async fn read(pipe: &mut (impl AsyncRead + Unpin)) -> Result<Vec<u8>, HostError>
 }
 
 async fn stop(child: &mut Child, pid: u32) -> bool {
-    if let Some(group) = rustix::process::Pid::from_raw(pid as i32) {
-        let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
-    }
-    let _ = child.start_kill();
-    let reaped = tokio::time::timeout(Duration::from_secs(2), child.wait())
-        .await
-        .is_ok_and(|r| r.is_ok());
-    for _ in 0..20 {
-        if group_absent(pid) {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    reaped && group_absent(pid)
+    stop_owned_group(child, pid, Duration::from_millis(2200)).await
 }
 
 #[cfg(test)]

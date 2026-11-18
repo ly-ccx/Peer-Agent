@@ -36,7 +36,7 @@ pub(crate) async fn stop_recorded_group(
         // Once signalled, finish the actual bounded group observation even if
         // cancellation arrives. Cancellation is not a substitute for absence.
         for _ in 0..20 {
-            if crate::providers::group_absent(child.pid) {
+            if group_absent(child.pid) {
                 return true;
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
@@ -44,5 +44,5 @@ pub(crate) async fn stop_recorded_group(
     } else if !proof.allows_settlement() {
         return false;
     }
-    crate::providers::group_absent(child.pid)
+    group_absent(child.pid)
 }

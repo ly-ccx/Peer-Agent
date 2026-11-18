@@ -7,6 +7,43 @@ mod recovery;
 pub(crate) use recovery::stop_recorded_group;
 #[cfg(target_os = "linux")]
 use std::io::Read;
+use std::time::Duration;
+
+pub(crate) fn group_absent(pid: u32) -> bool {
+    rustix::process::Pid::from_raw(pid as i32).is_some_and(|group| {
+        rustix::process::test_kill_process_group(group) == Err(rustix::io::Errno::SRCH)
+    })
+}
+
+/// A reaped leader can leave descendants in its group until their reaper runs.
+/// Both observations share one deadline and must succeed before reporting stop.
+pub(crate) async fn stop_owned_group(
+    child: &mut tokio::process::Child,
+    pid: u32,
+    budget: Duration,
+) -> bool {
+    use tokio::time::{Instant, sleep_until, timeout_at};
+
+    let deadline = Instant::now() + budget;
+    if let Some(group) = rustix::process::Pid::from_raw(pid as i32) {
+        let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
+    }
+    let _ = child.start_kill();
+    if !timeout_at(deadline, child.wait())
+        .await
+        .is_ok_and(|result| result.is_ok())
+    {
+        return false;
+    }
+    while !group_absent(pid) {
+        let now = Instant::now();
+        if now >= deadline {
+            return false;
+        }
+        sleep_until((now + Duration::from_millis(10)).min(deadline)).await;
+    }
+    true
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecorderProof {

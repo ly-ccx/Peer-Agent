@@ -1,4 +1,5 @@
 use super::*;
+use crate::recorder::stop_owned_group;
 use peer_store::ShellArtifacts;
 use std::{process::Stdio, time::Duration};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
@@ -465,20 +466,7 @@ fn artifact_failed(outcome: &mut EffectOutcome) {
 }
 
 async fn terminate(child: &mut tokio::process::Child, pid: u32) -> bool {
-    if let Some(pid) = rustix::process::Pid::from_raw(pid as i32) {
-        let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
-    }
-    let _ = child.start_kill();
-    let reaped = tokio::time::timeout(Duration::from_secs(2), child.wait())
-        .await
-        .is_ok_and(|result| result.is_ok());
-    for _ in 0..20 {
-        if group_absent(pid) {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    reaped && group_absent(pid)
+    stop_owned_group(child, pid, Duration::from_millis(2200)).await
 }
 
 const PREVIEW_BYTES: usize = 65_536;
@@ -547,12 +535,6 @@ impl CapturedStream {
         self.file.flush().await?;
         self.file.sync_all().await
     }
-}
-
-pub(crate) fn group_absent(pid: u32) -> bool {
-    rustix::process::Pid::from_raw(pid as i32).is_some_and(|p| {
-        rustix::process::test_kill_process_group(p) == Err(rustix::io::Errno::SRCH)
-    })
 }
 
 pub(crate) fn shell_stop_outcome(

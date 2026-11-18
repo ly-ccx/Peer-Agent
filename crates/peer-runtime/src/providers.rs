@@ -25,8 +25,9 @@ pub use skill::{skill_id, wire_skill_name};
 mod tool_artifact;
 mod web;
 pub use crate::effect_admission::EffectAdmission;
+pub(crate) use crate::recorder::group_absent;
 pub(crate) use shell::{
-    background_start_fields, group_absent, restore_background_start_fields, shell_stop_outcome,
+    background_start_fields, restore_background_start_fields, shell_stop_outcome,
 };
 pub(crate) mod interaction;
 mod shell_risk;
