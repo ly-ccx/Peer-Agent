@@ -1,7 +1,10 @@
 //! Existing ordinary exec argv contract. No terminal, Store or credential access.
-use crate::Command;
+use crate::{Command, bot_exec::BotExecOptions};
+use std::collections::HashSet;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Options {
+    pub bot: Option<BotExecOptions>,
     pub access: String,
     pub tools: Option<Vec<String>>,
     pub output_format: String,
@@ -18,6 +21,7 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            bot: None,
             access: "session".into(),
             tools: None,
             output_format: "text".into(),
@@ -56,8 +60,24 @@ pub(crate) fn parse(args: &[String]) -> Command {
         Err(message) => Command::Usage(message),
     }
 }
+fn valid_wait_ms(value: &str) -> Option<u64> {
+    let bytes = value.as_bytes();
+    if bytes.is_empty() || bytes.len() > 7 || !matches!(bytes[0], b'1'..=b'9') {
+        return None;
+    }
+    if !bytes.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    let parsed = value.parse::<u64>().ok()?;
+    (parsed <= 1_800_000).then_some(parsed)
+}
+
 fn parse_inner(args: &[String]) -> Result<Option<Options>, String> {
     let mut options = Options::default();
+    let mut explicit: HashSet<&str> = HashSet::new();
+    let mut bot = false;
+    let mut input_id: Option<String> = None;
+    let mut wait_ms: Option<u64> = None;
     let mut i = 0;
     let mut positional = false;
     while i < args.len() {
@@ -81,14 +101,21 @@ fn parse_inner(args: &[String]) -> Result<Option<Options>, String> {
         let (name, inline) = arg
             .split_once('=')
             .map_or((arg.as_str(), None), |(a, b)| (a, Some(b)));
+        if name == "--bot" && inline.is_none() {
+            bot = true;
+            continue;
+        }
         if name == "--fast" {
             if inline.is_some() {
                 return Err("peer exec: --fast does not take a value".into());
             }
+            explicit.insert("--fast");
             options.fast = true;
             continue;
         }
         if ![
+            "--input-id",
+            "--wait-ms",
             "--access",
             "--tools",
             "--output-format",
@@ -117,13 +144,24 @@ fn parse_inner(args: &[String]) -> Result<Option<Options>, String> {
             }
         };
         match name {
+            "--input-id" => {
+                if !peer_project_agent::is_valid_input_id(&value) {
+                    return Err("peer exec: invalid --input-id".into());
+                }
+                input_id = Some(value);
+            }
+            "--wait-ms" => {
+                wait_ms = Some(valid_wait_ms(&value).ok_or("peer exec: invalid --wait-ms")?);
+            }
             "--access" => {
+                explicit.insert("--access");
                 if !["ask", "session", "full"].contains(&value.as_str()) {
                     return Err("peer exec: --access must be ask, session, or full".into());
                 }
                 options.access = value;
             }
             "--tools" => {
+                explicit.insert("--tools");
                 let v = value
                     .split(',')
                     .map(str::trim)
@@ -141,23 +179,63 @@ fn parse_inner(args: &[String]) -> Result<Option<Options>, String> {
                 }
                 options.output_format = value;
             }
-            "--provider" => options.provider = Some(value),
-            "--model" => options.model = Some(value),
-            "--effort" => options.effort = Some(value),
+            "--provider" => {
+                explicit.insert("--provider");
+                options.provider = Some(value);
+            }
+            "--model" => {
+                explicit.insert("--model");
+                options.model = Some(value);
+            }
+            "--effort" => {
+                explicit.insert("--effort");
+                options.effort = Some(value);
+            }
             "--workspace" => options.workspace = Some(value),
-            "--image" => options.image_paths.push(value.into()),
+            "--image" => {
+                explicit.insert("--image");
+                options.image_paths.push(value.into());
+            }
             "--mode" => {
+                explicit.insert("--mode");
                 if !["chat", "plan", "goal"].contains(&value.as_str()) {
                     return Err("peer exec: --mode must be chat, plan, or goal".into());
                 }
                 options.mode = value;
             }
             "--max-turns" => {
+                explicit.insert("--max-turns");
                 options.max_turns =
                     Some(count(&value).ok_or("peer exec: --max-turns must be a positive integer")?)
             }
             _ => unreachable!(),
         }
+    }
+    if bot
+        && [
+            "--access",
+            "--tools",
+            "--provider",
+            "--model",
+            "--effort",
+            "--mode",
+            "--fast",
+            "--max-turns",
+            "--image",
+        ]
+        .iter()
+        .any(|flag| explicit.contains(flag))
+    {
+        return Err("peer exec: --bot uses the bound Bot policy and model".into());
+    }
+    if !bot && (input_id.is_some() || wait_ms.is_some()) {
+        return Err("peer exec: --input-id and --wait-ms require --bot".into());
+    }
+    if bot {
+        options.bot = Some(BotExecOptions {
+            input_id,
+            wait_ms: wait_ms.unwrap_or(1_800_000),
+        });
     }
     Ok(Some(options))
 }
@@ -251,5 +329,57 @@ mod tests {
             );
         }
         assert!(tools(Some(&["browser_open_panel".into()])).is_err());
+    }
+
+    #[test]
+    fn bot_exec_arguments_match_ts_cli_contract() {
+        let ok = parse(&[
+            "--bot".into(),
+            "--input-id".into(),
+            "req-1".into(),
+            "--wait-ms=5000".into(),
+            "--output-format".into(),
+            "json".into(),
+            "hello".into(),
+        ]);
+        let Command::OrdinaryExec(opts) = ok else {
+            panic!("expected OrdinaryExec, got {ok:?}");
+        };
+        assert_eq!(
+            opts.bot,
+            Some(BotExecOptions {
+                input_id: Some("req-1".into()),
+                wait_ms: 5000,
+            })
+        );
+        assert_eq!(opts.output_format, "json");
+        assert_eq!(opts.prompt_parts, vec!["hello"]);
+
+        assert_eq!(
+            parse(&["--input-id".into(), "req-1".into(), "hi".into()]),
+            Command::Usage("peer exec: --input-id and --wait-ms require --bot".into())
+        );
+        assert_eq!(
+            parse(&[
+                "--bot".into(),
+                "--model".into(),
+                "gpt-4o".into(),
+                "hi".into()
+            ]),
+            Command::Usage("peer exec: --bot uses the bound Bot policy and model".into())
+        );
+        assert_eq!(
+            parse(&["--bot".into(), "--wait-ms".into(), "0".into(), "hi".into()]),
+            Command::Usage("peer exec: invalid --wait-ms".into())
+        );
+        assert_eq!(
+            parse(&[
+                "--bot".into(),
+                "--input-id".into(),
+                "../bad".into(),
+                "hi".into()
+            ]),
+            Command::Usage("peer exec: invalid --input-id".into())
+        );
     }
 }

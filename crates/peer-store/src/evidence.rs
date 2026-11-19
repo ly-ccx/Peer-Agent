@@ -118,6 +118,24 @@ impl EvidenceIndexStore {
         }
         Ok(out)
     }
+    /// List all indexed Evidence records associated with `conversation_id` (read-only).
+    pub fn list_for_conversation(
+        &self,
+        conversation_id: &str,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<Vec<Value>, StoreError> {
+        if !text(conversation_id, 200) {
+            return Err(StoreError::EvidenceInvalid);
+        }
+        let mut out = Vec::new();
+        for row in log::read(&self.file, cancel)? {
+            validate_record(&row)?;
+            if row["conversationId"].as_str() == Some(conversation_id) {
+                out.push(row);
+            }
+        }
+        Ok(out)
+    }
     /// Bounded, strict source facts. Missing refs remain missing, never success.
     pub fn find(
         &self,

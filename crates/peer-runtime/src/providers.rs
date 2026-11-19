@@ -83,6 +83,10 @@ impl ProviderCall {
             goal_runner: None,
         }
     }
+    /// Construct a host-issued correlation context for a projected capability call.
+    pub fn for_host(conversation: &str, tool_call: &str, started_at: &str) -> Self {
+        Self::new(conversation, tool_call, started_at)
+    }
     pub fn conversation_id(&self) -> &str {
         &self.conversation
     }
@@ -237,6 +241,11 @@ impl ProviderRegistry {
         self.providers.push(Box::new(goal::GoalProvider(mode)));
         self.providers
             .push(Box::new(interaction::UnavailableInputProvider));
+    }
+    /// Register an additional governed capability provider into this registry.
+    /// All tools still pass through `project_for_mode` before becoming model-visible.
+    pub fn register(&mut self, provider: Box<dyn CapabilityProvider>) {
+        self.providers.push(provider);
     }
     pub fn project(&self) -> Result<RuntimeProjection, HostError> {
         let mut tools = Vec::new();

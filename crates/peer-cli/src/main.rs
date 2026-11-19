@@ -69,6 +69,10 @@ fn run() -> io::Result<CliExit> {
             drop(out);
             return peer_cli::doctor::run();
         }
+        Command::BotsJson => {
+            drop(out);
+            return peer_cli::bots::list_json();
+        }
         Command::SessionsResume(id) => {
             drop(out);
             return peer_cli::sessions::resume(&id);

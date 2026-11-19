@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
 pub mod acp;
+pub mod bot_exec;
+pub mod bots;
 mod cancellation;
 pub mod doctor;
 pub mod export;
@@ -25,6 +27,7 @@ pub enum Command {
     Acp,
     Help,
     Doctor,
+    BotsJson,
     Interactive,
     Models,
     SessionsList,
@@ -68,6 +71,12 @@ pub fn command(argv: &[String]) -> Command {
     }
     if argv.first().is_some_and(|s| s == "result") {
         return interactive_result::parse(&argv[1..]);
+    }
+    if argv
+        .first()
+        .is_some_and(|s| s == "__interactive-maintenance")
+    {
+        return Command::ResultCleanupReceipt;
     }
     if argv.first().is_some_and(|s| s == "result-cleanup-receipt") {
         return if argv.len() == 1 {
@@ -140,6 +149,7 @@ pub fn command(argv: &[String]) -> Command {
                 _ => Command::Unavailable("exec: invalid max turns".into()),
             }
         }
+        Some("bots") if argv.len() == 2 && argv[1] == "--json" => Command::BotsJson,
         None | Some("bots" | "--classic") if argv.len() <= 1 => Command::Interactive,
         Some(name) => Command::Unavailable(name.to_owned()),
         _ => Command::Interactive,

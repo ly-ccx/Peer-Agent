@@ -2048,6 +2048,7 @@ dependencies = [
  "base64 0.22.1",
  "crossterm",
  "md-5",
+ "peer-project-agent",
  "peer-protocol",
  "peer-runtime",
  "peer-store",

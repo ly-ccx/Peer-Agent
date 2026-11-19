@@ -14,7 +14,7 @@ use std::{
     path::PathBuf,
     time::{Duration, Instant},
 };
-pub const HELP: &str = "Usage: peer exec [options] [prompt]\n\nRead a prompt from arguments or stdin and run the native conversation Host.\n\n  --access ask|session|full   This-run policy (default: session); ask requires a TTY\n  --tools file,bash,...      Mode projection intersected with capability allowlist\n  --output-format text|json Final text or structured result (default: text)\n  --provider <id>           This-run configured channel or catalog entry\n  --model <id>              Model id or provider::model; model ids may contain /\n  --effort <level>          This-run supported reasoning effort\n  --mode chat|plan|goal     Existing runtime mode (default: chat)\n  --fast                   ChatGPT/Grok OAuth priority service\n  --workspace <path>        Existing directory; overrides PEER_WORKSPACE_ROOT\n  --image <path>            Attach a local image; may be repeated\n  --max-turns <n>           Positive hard cap; omitted means no implicit cap\n  --                       Treat remaining arguments as prompt text\n\nUse --access full explicitly for trusted tasks requiring unrestricted local actions.\nGrants and Evidence remain mandatory. Runtime completion does not mean task acceptance.";
+pub const HELP: &str = "Usage: peer exec [options] [prompt]\n\nRead a prompt from arguments or stdin and run the native conversation Host.\n\n  --bot                     Send input to the bound workspace Bot and wait for reply\n  --input-id <id>           Idempotent Bot input id (requires --bot)\n  --wait-ms <ms>            Wait budget 1..1800000 ms for Bot reply (requires --bot)\n  --access ask|session|full   This-run policy (default: session); ask requires a TTY\n  --tools file,bash,...      Mode projection intersected with capability allowlist\n  --output-format text|json Final text or structured result (default: text)\n  --provider <id>           This-run configured channel or catalog entry\n  --model <id>              Model id or provider::model; model ids may contain /\n  --effort <level>          This-run supported reasoning effort\n  --mode chat|plan|goal     Existing runtime mode (default: chat)\n  --fast                   ChatGPT/Grok OAuth priority service\n  --workspace <path>        Existing directory; overrides PEER_WORKSPACE_ROOT\n  --image <path>            Attach a local image; may be repeated\n  --max-turns <n>           Positive hard cap; omitted means no implicit cap\n  --                       Treat remaining arguments as prompt text\n\nUse --access full explicitly for trusted tasks requiring unrestricted local actions.\nGrants and Evidence remain mandatory. Runtime completion does not mean task acceptance.";
 fn auth_error(code: &str) -> bool {
     if code == peer_runtime::model::ModelError::AUTH_REJECTED {
         return true;
@@ -161,6 +161,18 @@ pub fn run(options: &Options) -> io::Result<CliExit> {
                 "peer exec: prompt is required (pass arguments or pipe stdin)"
             )?;
             return Ok(CliExit::Usage);
+        }
+        if let Some(ref bot_opts) = options.bot {
+            return crate::bot_exec::run(
+                &home,
+                &workspace,
+                prompt,
+                bot_opts,
+                &options.output_format,
+                started,
+                &cancel,
+            )
+            .await;
         }
         let selected = match peer_runtime::model_catalog::resolve_exec(
             &home,

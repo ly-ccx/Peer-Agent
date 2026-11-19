@@ -10,15 +10,19 @@
 pub mod acceptance;
 pub mod directory;
 pub mod drafts;
+pub mod host;
 pub mod inbox;
 pub mod input_queue;
 pub mod memory;
 pub mod objectives;
 pub mod profile;
+pub mod provider;
 pub mod registry;
 pub mod reply;
+pub mod runner;
 pub mod scheduler;
 pub mod supervisor;
+pub mod system_context;
 pub mod worktree;
 
 use std::{fmt, fs, io::Write, path::Path};
@@ -38,8 +42,10 @@ pub use directory::{
     project_bot_list_message, project_reply_questions, sort_bot_list,
 };
 pub use drafts::{
-    DraftAttachment, DraftEnvelope, DraftQuote, DraftSnapshot, DraftWriteRequest, InputDraftStore,
+    DraftAttachment, DraftBody, DraftEnvelope, DraftQuote, DraftSnapshot, DraftWriteRequest,
+    InputDraftStore,
 };
+pub use host::{HostTickReport, LeaseStatus, NativeProjectHost, bot_list_json};
 pub use inbox::{InboxBatch, InboxCursor, ProjectInbox};
 pub use input_queue::{
     ConsumeOutcome, InputQueue, ProjectInput, SubmitInputRequest, input_message_id,
@@ -58,10 +64,15 @@ pub use profile::{
     BOT_AVATAR_COLORS, BOT_AVATAR_SHAPES, BotAvatar, BotProfile, BotProfileStore, CreateBotProfile,
     clean_display_name, generate_avatar,
 };
+pub use provider::{ProjectCapabilityProvider, TurnExecutionState};
 pub use registry::{ProjectRegistry, ProjectRegistryEntry};
 pub use reply::{
     ComposeReplyInput, ComposedReply, SessionStatusFact, StatusClaim, Surfacing, SurfacingDecision,
     SurfacingEvent, compose_reply, decide_surfacing, normalize_proactivity,
+};
+pub use runner::{
+    AgentTurnOutcome, CircuitBreaker, ProjectAgentActivity, ProjectAgentRunner, RunTurnOptions,
+    TurnEndKind,
 };
 pub use scheduler::{
     ExecutionScheduler, QueueEntry, QueuedBehind, ScheduleDecision, SelectionOutcome, SlotKind,
@@ -70,6 +81,7 @@ pub use scheduler::{
 pub use supervisor::{
     SessionSupervisor, SpawnCriterion, SpawnSessionRequest, WorkSessionReport, WorkSessionSummary,
 };
+pub use system_context::{ProjectAgentContextInput, assemble_project_agent_context};
 pub use worktree::{GoalWorktreeAdapter, HandoffOutcome, WorktreeHandle};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -70,6 +70,59 @@ pub struct EffectAdmission {
     pub(crate) confined_reads: bool,
 }
 impl EffectAdmission {
+    /// Bounded read-only Host admission port for `project_agent` turns:
+    /// allows `Check`, `ReadScope`, and fixed read-only `git_query` command
+    /// observation while `cancel` is active and `still_admitted()` returns true;
+    /// denies all shell/MCP write handles and connection drivers.
+    pub fn spawn_read_only_host<F>(
+        cancel: CancellationToken,
+        still_admitted: F,
+    ) -> (Self, tokio::task::JoinHandle<()>)
+    where
+        F: Fn() -> bool + Send + 'static,
+    {
+        let (sender, mut rx) = mpsc::channel::<AdmissionRequest>(64);
+        let loop_cancel = cancel.clone();
+        let handle = tokio::spawn(async move {
+            while let Some(req) = rx.recv().await {
+                let ok = if loop_cancel.is_cancelled() {
+                    Err(HostError("CANCELLED"))
+                } else if !still_admitted() {
+                    Err(HostError("lease_unavailable"))
+                } else {
+                    Ok(())
+                };
+                match req {
+                    AdmissionRequest::Check(reply)
+                    | AdmissionRequest::ReadScope { reply, .. }
+                    | AdmissionRequest::CommandStarting(reply)
+                    | AdmissionRequest::CommandStarted { reply, .. } => {
+                        let _ = reply.send(ok);
+                    }
+                    AdmissionRequest::ForegroundShellOpen { reply, .. }
+                    | AdmissionRequest::ForegroundShellBind { reply, .. }
+                    | AdmissionRequest::BackgroundShellStarted { reply, .. }
+                    | AdmissionRequest::Child { reply, .. }
+                    | AdmissionRequest::Connection { reply, .. } => {
+                        let _ = reply.send(Err(HostError("read_only_host_denied")));
+                    }
+                    AdmissionRequest::StopBackgroundShell { reply, .. } => {
+                        let _ = reply.send(Err(HostError("read_only_host_denied")));
+                    }
+                }
+            }
+        });
+        (
+            Self {
+                sender,
+                cancel,
+                revocation: None,
+                owner: None,
+                confined_reads: false,
+            },
+            handle,
+        )
+    }
     pub(crate) fn blocking_guard(&self) -> BlockingAdmission {
         BlockingAdmission {
             port: self.clone(),

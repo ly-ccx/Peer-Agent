@@ -297,20 +297,16 @@ impl MemoryStore {
     }
 
     pub fn index_file(&self, workspace_id: Option<&str>) -> Result<PathBuf, ProjectError> {
-        match workspace_id {
-            Some(ws) => {
-                if !is_valid_workspace_id(ws) {
-                    return Err(ProjectError::code("INVALID_WORKSPACE"));
-                }
-                Ok(self
-                    .data_home
-                    .join("projects")
-                    .join(ws)
-                    .join("memory")
-                    .join("index.sqlite"))
-            }
-            None => Ok(self.data_home.join("memory").join("index.sqlite")),
+        if let Some(ws) = workspace_id
+            && !is_valid_workspace_id(ws)
+        {
+            return Err(ProjectError::code("INVALID_WORKSPACE"));
         }
+        Ok(self
+            .data_home
+            .join("cache")
+            .join("memory-index")
+            .join("memory-index.sqlite"))
     }
 
     fn fold_file(&self, file: &Path) -> Vec<MemoryItem> {
@@ -397,6 +393,11 @@ impl MemoryStore {
             _ => return Err(ProjectError::code("INVALID_MEMORY")),
         };
         self.append_item(&file, &item)?;
+        if let Ok(idx_path) = self.index_file(item.workspace_id.as_deref())
+            && let Ok(idx) = MemoryIndex::open(&idx_path)
+        {
+            let _ = idx.upsert(&item);
+        }
         Ok(item)
     }
 
@@ -427,6 +428,11 @@ impl MemoryStore {
             }
         }
         self.append_item(&file, &current)?;
+        if let Ok(idx_path) = self.index_file(workspace_id)
+            && let Ok(idx) = MemoryIndex::open(&idx_path)
+        {
+            let _ = idx.remove(&current.id);
+        }
         Ok(current)
     }
 
