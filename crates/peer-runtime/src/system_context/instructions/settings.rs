@@ -84,6 +84,40 @@ fn validate_legacy_metadata(settings: &Value) -> Result<(), &'static str> {
         return Err("context_settings_invalid");
     }
 
+    for key in ["activeWorkspace", "appMode", "effort", "updateChannel"] {
+        if settings
+            .get(key)
+            .is_some_and(|v| !v.is_null() && !v.is_string())
+        {
+            return Err("context_settings_invalid");
+        }
+    }
+    if settings
+        .get("workspaces")
+        .is_some_and(|v| !v.is_null() && !v.is_array())
+    {
+        return Err("context_settings_invalid");
+    }
+    for key in [
+        "appearance",
+        "appshots",
+        "composerDrafts",
+        "developer",
+        "fallbackVision",
+        "inputPrediction",
+        "memory",
+        "modelRouting",
+        "remoteAccess",
+        "workbench",
+    ] {
+        if settings
+            .get(key)
+            .is_some_and(|v| !v.is_null() && !v.is_object())
+        {
+            return Err("context_settings_invalid");
+        }
+    }
+
     if let Some(project) = settings.get("projectAgent") {
         let project = project.as_object().ok_or("context_settings_invalid")?;
         for (key, value) in project {
@@ -94,6 +128,12 @@ fn validate_legacy_metadata(settings: &Value) -> Result<(), &'static str> {
                 "shellIntroPending" | "shellIntroDismissed" => {
                     return Err("context_settings_invalid");
                 }
+                "proactivity" | "digestTime" if value.is_null() || value.is_string() => {}
+                "proactivity" | "digestTime" => return Err("context_settings_invalid"),
+                "quietHours" if value.is_null() || value.is_object() => {}
+                "quietHours" => return Err("context_settings_invalid"),
+                "concurrency" if value.is_null() || value.is_number() => {}
+                "concurrency" => return Err("context_settings_invalid"),
                 _ => return Err("native_capability_inventory_unsupported"),
             }
         }
@@ -114,6 +154,21 @@ pub(super) fn project(settings: &Value) -> Result<Vec<ConfigInstruction>, &'stat
                 | "themeMode"
                 | "localAccessLevel"
                 | "projectAgent"
+                | "activeWorkspace"
+                | "workspaces"
+                | "appearance"
+                | "appMode"
+                | "appshots"
+                | "composerDrafts"
+                | "developer"
+                | "effort"
+                | "fallbackVision"
+                | "inputPrediction"
+                | "memory"
+                | "modelRouting"
+                | "remoteAccess"
+                | "updateChannel"
+                | "workbench"
         )
     }) {
         return Err("native_capability_inventory_unsupported");

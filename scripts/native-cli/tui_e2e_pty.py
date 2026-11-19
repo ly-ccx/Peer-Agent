@@ -239,6 +239,31 @@ def run_all(binary: Path, output: Path):
         c2_ws = output / 'case2-ws'
         c2_home = output / 'case2-home'
         c2_ws.mkdir(); c2_home.mkdir()
+        seeded_settings = json.dumps({
+            'schemaVersion': 3,
+            'activeWorkspace': str(c2_ws),
+            'workspaces': [{'id': 'ws-case2', 'path': str(c2_ws)}],
+            'appearance': {'mode': 'dark'},
+            'workbench': {'open': False},
+            'developer': {'projectAgentMode': False},
+            'effort': 'high',
+            'fallbackVision': {'providerId': 'mock'},
+            'inputPrediction': {'enabled': False},
+            'modelRouting': {'roles': {}, 'tiers': {}},
+            'remoteAccess': {'enabled': False},
+            'updateChannel': 'beta',
+            'composerDrafts': {},
+            'localAccessLevel': 'ask_before_local',
+            'projectAgent': {
+                'shell': 'bots',
+                'shellIntroPending': False,
+                'shellIntroDismissed': True,
+                'proactivity': 'standard',
+                'quietHours': {'enabled': False, 'start': '22:00', 'end': '08:00'},
+                'digestTime': '09:00',
+            },
+        })
+        (c2_home / 'settings.json').write_text(seeded_settings)
         r2 = PtyRunner(binary, c2_ws, c2_home, ['--classic'], extra_env=env)
         try:
             r2.wait_text('Peer·对话')
@@ -257,6 +282,7 @@ def run_all(binary: Path, output: Path):
 
             r2.send(b'Continue classic\r')
             r2.wait_text('Classicresumedcleanly')
+            assert (c2_home / 'settings.json').read_text() == seeded_settings
             r2.send(b'\x03')
             code = r2.wait_exit()
             assert code == 0, f'case2 exit={code}'

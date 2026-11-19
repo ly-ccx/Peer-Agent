@@ -148,6 +148,12 @@ fn settings_are_read_only_and_unsupported_values_do_not_become_defaults() {
             "{\"projectAgent\":{\"shellIntroDismissed\":\"yes\"}}",
             "context_settings_invalid",
         ),
+        ("{\"workspaces\":\"bad\"}", "context_settings_invalid"),
+        ("{\"appearance\":true}", "context_settings_invalid"),
+        (
+            "{\"projectAgent\":{\"quietHours\":\"bad\"}}",
+            "context_settings_invalid",
+        ),
     ] {
         std::fs::write(&file, raw).unwrap();
         assert!(
@@ -155,6 +161,53 @@ fn settings_are_read_only_and_unsupported_values_do_not_become_defaults() {
         );
         assert_eq!(std::fs::read_to_string(&file).unwrap(), raw);
     }
+    let desktop_shared = serde_json::json!({
+        "schemaVersion": 3,
+        "locale": "zh-CN",
+        "activeWorkspace": "/tmp/ws",
+        "workspaces": [{"id": "ws-1", "path": "/tmp/ws"}],
+        "appearance": {"mode": "dark"},
+        "appshots": {"enabled": false},
+        "appMode": "work",
+        "composerDrafts": {},
+        "developer": {"projectAgentMode": false},
+        "effort": "high",
+        "fallbackVision": {"providerId": "p1"},
+        "inputPrediction": {"enabled": false},
+        "localAccessLevel": "full_local",
+        "memory": {"enabled": true},
+        "modelRouting": {"roles": {}, "tiers": {}},
+        "remoteAccess": {"enabled": false},
+        "updateChannel": "beta",
+        "workbench": {"open": false},
+        "projectAgent": {
+            "shell": "bots",
+            "shellIntroPending": false,
+            "shellIntroDismissed": true,
+            "proactivity": "standard",
+            "quietHours": {"enabled": false, "start": "22:00", "end": "08:00"},
+            "digestTime": "09:00",
+            "concurrency": 4
+        }
+    });
+    let desktop_raw = serde_json::to_string(&desktop_shared).unwrap();
+    std::fs::write(&file, &desktop_raw).unwrap();
+    let desktop_result =
+        ProjectInstructions::observe_host(root.path(), root.path(), &CancellationToken::new())
+            .unwrap();
+    assert_eq!(desktop_result.sections().len(), 2);
+    let rendered_desktop = serde_json::to_string(&desktop_result.sections()).unwrap();
+    for meta_key in [
+        "workbench",
+        "modelRouting",
+        "inputPrediction",
+        "fallbackVision",
+        "remoteAccess",
+    ] {
+        assert!(!rendered_desktop.contains(meta_key));
+    }
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), desktop_raw);
+
     std::fs::write(&file, "{\"schemaVersion\":3e0,\"locale\":\"en-US\"}").unwrap();
     let result =
         ProjectInstructions::observe_host(root.path(), root.path(), &CancellationToken::new())
