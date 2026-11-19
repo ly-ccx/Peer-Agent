@@ -12,7 +12,7 @@ import { dirname, relative, resolve } from 'node:path';
 import type {
   CapabilityManifest,
   CapabilityProvider,
-  RuntimeToolResult,
+  PermissionGrant,
 } from '@peer-agent/runtime-core';
 import type { RuntimeSdkToolCall } from '@peer-agent/runtime-sdk';
 
@@ -147,13 +147,6 @@ function countOccurrences(content: string, needle: string): number {
   return count;
 }
 
-function cancelledResult(call: RuntimeSdkToolCall, clock: ReturnType<typeof createProviderRuntimeClock>): RuntimeToolResult {
-  return createNodeToolResult({
-    clock, call, status: 'cancelled', summary: 'File capability was cancelled.',
-    error: { code: 'aborted', message: 'aborted', recoverable: true },
-  });
-}
-
 export function createNodeFileProvider(options: NodeFileProviderOptions): CapabilityProvider {
   if (!options?.workspaceRoot) throw new TypeError('Node file provider requires workspaceRoot.');
   const workspaceRoot = resolve(options.workspaceRoot);
@@ -166,7 +159,33 @@ export function createNodeFileProvider(options: NodeFileProviderOptions): Capabi
     capabilities: NODE_FILE_CAPABILITY_MANIFESTS,
     async execute(request, context) {
       const call = request.toolCall as RuntimeSdkToolCall;
-      if (context.signal?.aborted) return cancelledResult(call, clock);
+      let admittedGrant: PermissionGrant | undefined;
+      let mutationStarted = false;
+      const admit = (grant: PermissionGrant) => {
+        if (options.beforeFileEffect) {
+          options.beforeFileEffect(call, grant);
+          admittedGrant = grant;
+        }
+      };
+      const automaticReadGrant = (reason: string) => createNodePermissionGrant({ clock, call, decision: 'allow', reason });
+      const admitRead = (reason: string) => {
+        if (options.beforeFileEffect) admit(automaticReadGrant(reason));
+      };
+      const failure = (reason: string, cancelled = false) => {
+        // A failed or interrupted mutation can leave effects even if the
+        // underlying filesystem promise rejected. Keep the admitted grant.
+        const unknown = admittedGrant !== undefined && mutationStarted;
+        const code = unknown ? 'execution_outcome_unknown' : reason;
+        const grant = admittedGrant ?? (cancelled && !options.beforeFileEffect
+          ? undefined : createNodePermissionGrant({ clock, call, decision: 'deny', reason }));
+        return createNodeToolResult({
+          clock, call, status: cancelled && !unknown ? 'cancelled' : 'failed',
+          summary: unknown ? 'File capability outcome is unknown.'
+            : cancelled ? 'File capability was cancelled.' : `File capability failed: ${reason}.`,
+          grant, error: { code, message: code, recoverable: true },
+        });
+      };
+      if (context.signal?.aborted) return failure('aborted', true);
       const input = asRecord(request.input ?? request.toolCall.input);
 
       try {
@@ -175,15 +194,16 @@ export function createNodeFileProvider(options: NodeFileProviderOptions): Capabi
         const displayPath = relativeDisplayPath(workspaceRoot, targetPath);
 
         if (request.capabilityId === 'local.file.read') {
+          admitRead('file_read');
           const fileStat = await stat(targetPath);
           if (!fileStat.isFile()) throw new Error('not_a_file');
           if (fileStat.size > maxReadBytes) throw new Error('file_too_large');
           const content = await readFile(targetPath, 'utf8');
-          if (context.signal?.aborted) return cancelledResult(call, clock);
+          if (context.signal?.aborted) return failure('aborted', true);
           const range = parseFileReadLineRange(input);
           const slice = sliceFileReadLines(content, range);
           readSnapshots.set(targetPath, hashContent(content));
-          const grant = createNodePermissionGrant({ clock, call, decision: 'allow', reason: 'file_read' });
+          const grant = admittedGrant ?? automaticReadGrant('file_read');
           const output = slice.ranged
             ? {
                 path: displayPath,
@@ -212,6 +232,7 @@ export function createNodeFileProvider(options: NodeFileProviderOptions): Capabi
         }
 
         if (request.capabilityId === 'local.file.list') {
+          admitRead('file_list');
           const directoryStat = await stat(targetPath);
           if (!directoryStat.isDirectory()) throw new Error('not_a_directory');
           const entries = (await readdir(targetPath, { withFileTypes: true }))
@@ -221,7 +242,7 @@ export function createNodeFileProvider(options: NodeFileProviderOptions): Capabi
               path: relativeDisplayPath(workspaceRoot, resolve(targetPath, entry.name)),
               type: entry.isDirectory() ? 'directory' : entry.isFile() ? 'file' : 'other',
             }));
-          const grant = createNodePermissionGrant({ clock, call, decision: 'allow', reason: 'file_list' });
+          const grant = admittedGrant ?? automaticReadGrant('file_list');
           return createNodeToolResult({
             clock, call, status: 'completed', summary: `Listed ${displayPath}.`,
             output: { path: displayPath, entries }, outputPreview: { path: displayPath, entries: entries.slice(0, 50) },
@@ -231,6 +252,7 @@ export function createNodeFileProvider(options: NodeFileProviderOptions): Capabi
 
         if (request.capabilityId === 'local.file.search') {
           const query = requireString(input, 'query');
+          admitRead('file_search');
           const searchResult = await runNodeFileSearch({
             workspaceRoot,
             targetPath,
@@ -239,7 +261,7 @@ export function createNodeFileProvider(options: NodeFileProviderOptions): Capabi
             maxResults: input.max_results as number | undefined,
             signal: context.signal,
           });
-          const grant = createNodePermissionGrant({ clock, call, decision: 'allow', reason: 'file_search' });
+          const grant = admittedGrant ?? automaticReadGrant('file_search');
           return createNodeToolResult({
             clock, call, status: 'completed', summary: `Found ${searchResult.matchCount} match(es) under ${displayPath}.`,
             output: {
@@ -314,18 +336,22 @@ export function createNodeFileProvider(options: NodeFileProviderOptions): Capabi
               error: { code: reason, message: reason, recoverable: true },
             });
           }
-          if (context.signal?.aborted) return cancelledResult(call, clock);
+          if (context.signal?.aborted) return failure('aborted', true);
           const scopeDenial = typeof context.metadata?.executionGate === 'function' ? context.metadata.executionGate(providerFileScopes(targetPath)) : null;
           if (scopeDenial) throw new Error(scopeDenial);
+          const issueGrant = () => createNodePermissionGrant({ clock, call, decision: 'allow',
+            reason: approval.reason ?? 'approved', metadata: { policyRevision: approval.policyRevision } });
+          if (options.beforeFileEffect) admit(issueGrant());
+          mutationStarted = true;
           await mkdir(dirname(targetPath), { recursive: true });
           if (typeof approval.validate === 'function' && !approval.validate()) throw new Error('permission_policy_changed');
           const reason = typeof context.metadata?.executionGate === 'function' ? context.metadata.executionGate(providerFileScopes(targetPath)) : null;
           if (reason) throw new Error(reason);
-          if (context.signal?.aborted) return cancelledResult(call, clock);
+          if (context.signal?.aborted) return failure('aborted', true);
           await writeFile(targetPath, content, 'utf8');
           readSnapshots.set(targetPath, hashContent(content));
           const operation = request.capabilityId.endsWith('.edit') ? 'edit' : 'write';
-          const grant = createNodePermissionGrant({ clock, call, decision: 'allow', reason: approval.reason ?? 'approved', metadata: { policyRevision: approval.policyRevision } });
+          const grant = admittedGrant ?? issueGrant();
           return createNodeToolResult({
             clock, call, status: 'completed', summary: `${operation === 'edit' ? 'Edited' : 'Wrote'} ${displayPath}.`,
             output: { path: displayPath, bytes: Buffer.byteLength(content), contentHash: readSnapshots.get(targetPath) },
@@ -339,12 +365,7 @@ export function createNodeFileProvider(options: NodeFileProviderOptions): Capabi
         const reason = error instanceof FileReadRangeError
           ? error.code
           : error instanceof Error ? error.message : 'file_capability_failed';
-        if (reason === 'aborted') return cancelledResult(call, clock);
-        return createNodeToolResult({
-          clock, call, status: 'failed', summary: `File capability failed: ${reason}.`,
-          grant: createNodePermissionGrant({ clock, call, decision: 'deny', reason }),
-          error: { code: reason, message: reason, recoverable: true },
-        });
+        return failure(reason, reason === 'aborted');
       }
     },
   };

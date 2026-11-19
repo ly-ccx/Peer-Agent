@@ -80,11 +80,11 @@ function validBackgroundShellHandle(
   });
 }
 function validPersistentShellHandle(
-  h: Record<string, unknown>, metadata: Record<string, unknown>, run: Record<string, unknown>,
+  h: Record<string, unknown>, metadata: Record<string, unknown>,
   runIdentity: ConversationExecutionIdentity, owner: Recorder, pending: readonly unknown[],
 ): boolean {
   const session = metadata.nativeShellSession;
-  if (run.engine !== 'peer-native' || Object.keys(metadata).length !== 2 || !object(session)
+  if (Object.keys(metadata).length !== 2 || !object(session)
     || Object.keys(session).length !== 3 || !keys(session, ['schemaVersion', 'process', 'command'])
     || session.schemaVersion !== 1 || !Object.hasOwn(session, 'command')) return false;
   const process = session.process;
@@ -187,7 +187,7 @@ export function normalizeConversationExecution(raw: unknown): ConversationExecut
     if (h.metadata.kind === 'hook' && !validHookHandle(h, h.metadata, raw.identity, raw.owner, raw.pendingTools)) return invalid();
     if (h.metadata.kind === 'shell_background' && !validBackgroundShellHandle(h, h.metadata, raw, raw.identity, raw.owner, raw.pendingTools)) return invalid();
     if (h.metadata.kind === 'shell_session') {
-      if (shellSessionSeen || !validPersistentShellHandle(h, h.metadata, raw, raw.identity, raw.owner, raw.pendingTools)) return invalid();
+      if (shellSessionSeen || !validPersistentShellHandle(h, h.metadata, raw.identity, raw.owner, raw.pendingTools)) return invalid();
       shellSessionSeen = true;
     }
     handles.add(h.handleId);

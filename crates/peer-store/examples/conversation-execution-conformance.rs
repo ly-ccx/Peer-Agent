@@ -27,10 +27,52 @@ fn run() -> Result<Value, Box<dyn std::error::Error>> {
             Err(e) => json!({"ok":false,"code":e.code()}),
         });
     }
+    if v["op"] == "read-evidence" {
+        let call_id = v["call"].as_str().ok_or("tool call id")?;
+        let rows = peer_store::EvidenceIndexStore::new(&root)
+            .find(&[format!("tool-result://{call_id}")], None)?;
+        return Ok(json!({ "records": rows }));
+    }
+    if v["op"] == "verify-usage" {
+        let run = store
+            .read_conversation_execution(id)?
+            .ok_or("execution required")?;
+        if !run.usage_committed {
+            return Err("usage acknowledgement required".into());
+        }
+        let usage = run.usage.ok_or("observed usage required")?;
+        let receipt = store.record_runtime_turn_usage(id, &usage, &run.attribution, None)?;
+        return Ok(json!({ "receipt": receipt }));
+    }
+    if v["op"] == "read-tool" {
+        let snapshot = store.read_committed(id, None, 8 * 1024 * 1024)?;
+        let call_id = v["call"].as_str().ok_or("tool call id")?;
+        for message in snapshot.history.messages {
+            let Some(segment) = message["segments"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|segment| segment["type"] == "tool-call" && segment["toolCallId"] == call_id)
+            else {
+                continue;
+            };
+            let args_digest = peer_protocol::approval_args_digest(&segment["args"])
+                .map_err(|_| "tool args digest")?;
+            return Ok(json!({
+                "message": message,
+                "argsDigest": args_digest,
+                "revision": snapshot.history.content_revision,
+            }));
+        }
+        return Err("tool message not found".into());
+    }
     if v["op"] != "claim" {
         return Err("operation".into());
     }
-    let h = store.read_committed(id, None, 8 * 1024 * 1024)?;
+    let h = match store.read_committed(id, None, 8 * 1024 * 1024) {
+        Ok(history) => history,
+        Err(error) => return Ok(json!({"ok":false, "code":error.code()})),
+    };
     let owner = NativeProcessRecorder {
         boot_id: "fixture-boot".into(),
         pid: std::process::id(),

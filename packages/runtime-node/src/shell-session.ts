@@ -37,6 +37,12 @@ export interface RunNodeShellSessionCommandOptions {
   readonly signal?: AbortSignal;
   /** Recheck host authority after queueing, immediately before each command write. Throw to refuse dispatch. */
   readonly beforeExecute?: (cwd: string) => void;
+  readonly ownership?: NodeShellCommandOwnership;
+}
+
+export interface NodeShellCommandOwnership {
+  beforeSpawn(): { started(pid: number | undefined): void; stopped(): void };
+  beforeWrite(pid: number | undefined): void;
 }
 
 export interface NodeShellSessionManager {
@@ -61,6 +67,7 @@ interface LiveSession {
   readonly key: string;
   readonly child: ChildProcess;
   readonly complete: (output: { completedAt: string }) => void;
+  readonly recordStop?: () => void;
   cwd: string;
   stdout: string;
   stderr: string;
@@ -222,6 +229,7 @@ export function createNodeShellSessionManager(
     if (session.stopping) return session.stopping;
     session.dead = true;
     const stop = drain(session, interrupt).then(() => {
+      session.recordStop?.();
       if (sessions.get(session.key) === session) sessions.delete(session.key);
       session.complete({ completedAt: now() });
     });
@@ -230,7 +238,8 @@ export function createNodeShellSessionManager(
     return stop;
   };
 
-  const spawnSession = (key: string, cwd: string, toolCallId?: string): LiveSession => {
+  const spawnSession = (key: string, cwd: string, toolCallId?: string, ownership?: NodeShellCommandOwnership): LiveSession => {
+    const record = ownership?.beforeSpawn();
     const child = spawn(shellPath, ['-s'], {
       cwd,
       env: {
@@ -249,6 +258,7 @@ export function createNodeShellSessionManager(
       key,
       child,
       complete: close,
+      recordStop: record?.stopped,
       cwd,
       stdout: '',
       stderr: '',
@@ -289,10 +299,12 @@ export function createNodeShellSessionManager(
     sessions.set(key, session);
     if (toolCallId) trackExecutionHandle({ conversationId: key, handleId: `shell-session:${randomUUID()}`, toolCallId,
       completion, stop: () => stopSession(session) });
+    try { record?.started(child.pid); }
+    catch (error) { void stopSession(session).catch(() => {}); throw error; }
     return session;
   };
 
-  const ensureSession = async (key: string, admit: () => void, toolCallId?: string): Promise<{ session: LiveSession; rebuilt: boolean }> => {
+  const ensureSession = async (key: string, admit: () => void, toolCallId?: string, ownership?: NodeShellCommandOwnership): Promise<{ session: LiveSession; rebuilt: boolean }> => {
     const existing = sessions.get(key);
     if (existing && !existing.dead && existing.child.exitCode == null) {
       return { session: existing, rebuilt: false };
@@ -300,7 +312,7 @@ export function createNodeShellSessionManager(
     const rebuilt = spawnedKeys.has(key);
     if (existing) await stopSession(existing);
     admit();
-    return { session: spawnSession(key, workspaceRoot, toolCallId), rebuilt };
+    return { session: spawnSession(key, workspaceRoot, toolCallId, ownership), rebuilt };
   };
 
   const writeScript = (session: LiveSession, script: string): void => {
@@ -316,6 +328,7 @@ export function createNodeShellSessionManager(
     admit: (cwd: string) => void,
     requestedCwd?: string,
     toolCallId?: string,
+    ownership?: NodeShellCommandOwnership,
   ): Promise<NodeShellSessionCommandResult> => {
     const previous = queues.get(key) ?? Promise.resolve();
     const start = async () => {
@@ -323,7 +336,7 @@ export function createNodeShellSessionManager(
         if (disposed) throw new Error('shell_session_closed');
         admit(requestedCwd || sessions.get(key)?.cwd || workspaceRoot);
       };
-      const current = await ensureSession(key, check, toolCallId);
+      const current = await ensureSession(key, check, toolCallId, ownership);
       return work(current.session, current.rebuilt);
     };
     const run = previous.then(start, start);
@@ -356,7 +369,7 @@ export function createNodeShellSessionManager(
           await stopSession(session);
           if (disposed) throw new Error('shell_session_closed');
           runOptions.beforeExecute?.(requestedCwd || workspaceRoot);
-          session = spawnSession(key, workspaceRoot, runOptions.toolCallId);
+          session = spawnSession(key, workspaceRoot, runOptions.toolCallId, runOptions.ownership);
           rebuilt = true;
         }
 
@@ -377,9 +390,11 @@ pwd
         let startStdout = session.stdout.length;
         let startStderr = session.stderr.length;
         try {
+          runOptions.ownership?.beforeWrite(session.child.pid);
           writeScript(session, script);
-        } catch {
+        } catch (error) {
           await stopSession(session);
+          if (runOptions.ownership) throw error;
           if (disposed) throw new Error('shell_session_closed');
           runOptions.beforeExecute?.(requestedCwd || workspaceRoot);
           session = spawnSession(key, workspaceRoot, runOptions.toolCallId);
@@ -473,7 +488,7 @@ pwd
           completedAt: now(),
           sessionRebuilt: rebuilt,
         };
-      }, cwd => runOptions.beforeExecute?.(cwd), requestedCwd, runOptions.toolCallId);
+      }, cwd => runOptions.beforeExecute?.(cwd), requestedCwd, runOptions.toolCallId, runOptions.ownership);
     },
     disposeConversation(conversationId) {
       return disposeKey(sessionConversationKey(conversationId, conversationId));

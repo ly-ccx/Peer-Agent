@@ -118,8 +118,7 @@ impl NativeShellSession {
             })
         };
         let process = &self.process;
-        run.engine == "peer-native"
-            && process.owner == run.owner
+        process.owner == run.owner
             && process.valid_conversation(&run.identity)
             && (!matches!(
                 process.state,

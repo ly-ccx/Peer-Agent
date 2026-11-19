@@ -63,6 +63,8 @@ export interface CreateTuiRuntimeOptions {
   readonly goalPlanStore?: ReturnType<typeof createGoalPlanStore>;
   readonly sessionApprovals?: Set<string>;
   readonly captureExecution?: import('./tui-host.ts').CreateTuiHostOptions['captureExecution'];
+  readonly ownedTool?: import('./tui-host.ts').CreateTuiHostOptions['ownedTool'];
+  readonly resolveOwnedCognition?: import('./provider-chat-model.ts').CreateProviderChatModelOptions['resolveOwnedCognition'];
 }
 
 export interface TuiRuntime {
@@ -95,6 +97,7 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
     goalPlanStore: options.goalPlanStore,
     sessionApprovals: options.sessionApprovals,
     captureExecution: options.captureExecution,
+    ownedTool: options.ownedTool,
   });
   if (options.toolAllowlist) {
     host = restrictTuiHostTools(host, options.toolAllowlist);
@@ -359,6 +362,7 @@ export function createTuiRuntime(options: CreateTuiRuntimeOptions): TuiRuntime {
         getContextWindow: () => contextSelection.getContextWindow(),
         toolDefinitionsForMode: (mode) => host.toolDefinitionsForMode?.(mode) ?? host.toolDefinitions,
         getSystemPrompt: systemPrompt,
+        resolveOwnedCognition: options.resolveOwnedCognition,
       })
     : createUnavailableChatModel(missingModelConfigurationMessage());
 

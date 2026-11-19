@@ -136,12 +136,12 @@ export function createGoalPlanEvidence({ storeDir, getActivePlanByConversation }
     return getActivePlanByConversation(normalizedConversationId)?.planId ?? null;
   }
 
-  function recordEvidenceRefs(entry = {}, { durable = false } = {}) {
+  function recordEvidenceRefs(entry = {}, { durable = false, protectToolOrigin = false } = {}) {
     if (!normalizeEvidenceRefList(entry.evidenceRefs ?? entry.evidenceRef).length) return [];
-    return withStoreFileLock(evidenceIndexFile, () => recordEvidenceRefsLocked(entry, { durable }));
+    return withStoreFileLock(evidenceIndexFile, () => recordEvidenceRefsLocked(entry, { durable, protectToolOrigin }));
   }
 
-  function recordEvidenceRefsLocked(entry = {}, { durable = false } = {}) {
+  function recordEvidenceRefsLocked(entry = {}, { durable = false, protectToolOrigin = false } = {}) {
     refreshEvidenceCache();
     const refs = normalizeEvidenceRefList(entry.evidenceRefs ?? entry.evidenceRef);
     if (refs.length === 0) return [];
@@ -168,8 +168,12 @@ export function createGoalPlanEvidence({ storeDir, getActivePlanByConversation }
     const mergedRecords = [];
     for (const record of records) {
       const previous = findEvidenceIndexRecords([record.evidenceRef])[0];
+      const canonical = protectToolOrigin && record.evidenceRef === `tool-result://${record.toolCallId}`;
+      if (canonical && previous && ['conversationId', 'streamId', 'toolCallId', 'capabilityId'].some(
+        field => record[field] !== previous[field],
+      )) throw Object.assign(new Error('conversation_execution_evidence_conflict'), { code: 'conversation_execution_evidence_conflict' });
       const merged = mergeEvidenceIndexRecords(previous, record);
-      if (previous && (merged.interactiveInspection || merged.userArtifacts?.some(item => item.kind === 'interactive')) && JSON.stringify(previous) === JSON.stringify(merged)) {
+      if (previous && (canonical || merged.interactiveInspection || merged.userArtifacts?.some(item => item.kind === 'interactive')) && JSON.stringify(previous) === JSON.stringify(merged)) {
         if (durable) syncJsonl(evidenceIndexFile);
         mergedRecords.push(merged);
         continue;

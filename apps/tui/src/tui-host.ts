@@ -127,6 +127,12 @@ export interface CreateTuiHostOptions {
   readonly goalPlanStore?: ReturnType<typeof createGoalPlanStore>;
   readonly sessionApprovals?: Set<string>;
   readonly captureExecution?: (execution: RuntimeSdkProviderExecution, toolContext: Record<string, unknown>) => RuntimeSdkProviderExecution;
+  readonly ownedTool?: {
+    beforeFileEffect(call: import('@peer-agent/runtime-sdk').RuntimeSdkToolCall, grant: import('@peer-agent/runtime-core').PermissionGrant): void;
+    ownForeground: NonNullable<import('@peer-agent/runtime-node').NodeShellProviderOptions['ownForeground']>;
+    checkScope(): void;
+    deferEvidence(): boolean;
+  };
 }
 
 
@@ -336,11 +342,17 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
       hookRunner,
       requestPermission,
       git: { artifactRoot: path.join(userDataPath, 'artifacts') },
-      executionGate: (call, scopes) => projectAuthorityReason(executionContext.getStore(), call.capabilityId, scopes),
+      executionGate: (call, scopes) => {
+        const reason = projectAuthorityReason(executionContext.getStore(), call.capabilityId, scopes);
+        if (!reason && scopes) resolvedOptions.ownedTool?.checkScope();
+        return reason;
+      },
+      ...(resolvedOptions.ownedTool ? { file: { beforeFileEffect: resolvedOptions.ownedTool.beforeFileEffect } } : {}),
       shell: {
         taskManager: shellTaskManager,
         sessionManager: shellSessionManager,
         artifactRoot,
+        ownForeground: resolvedOptions.ownedTool?.ownForeground,
       },
     }));
   }
@@ -433,6 +445,7 @@ export function createTuiHost(options: string | CreateTuiHostOptions): TuiHost {
       conversationId: options.conversationId, workspaceId: localContext?.project?.workspaceId,
       streamId: options.streamId, resolveAccessPolicy: () => accessFor(localContext).resolution,
       checkAccessPolicy: () => projectAuthorityReason(localContext, options.capabilityId) }) ?? execution;
+    if (resolvedOptions.ownedTool?.deferEvidence()) return execution;
     const evidenceRefs = collectToolEvidenceRefs({
       toolCallId: options.toolCallId,
       execution,

@@ -14,6 +14,7 @@ import path from 'node:path';
 import { contextAccountingModelKey, normalizeContextUsageBreakdown, normalizeConversationExecution } from '@peer-agent/protocol';
 import { acquireMessageRetentionGuard } from './message-retention-guard.mjs';
 import { withFileLock, withFileLocksAsync } from './conversation-file-lock.mjs';
+import { createOrdinaryExecutionAdmission } from './ordinary-execution-admission.mjs';
 import { readJsonlByteWindow } from './jsonl-byte-window.mjs';
 import { createTerminalMessageCommitter, conversationFileVersion } from './terminal-message-committer.mjs';
 import {normalizeContextSnapshot,projectDurableContextSnapshot,unknownCompactionContext,mergeContextSnapshot} from './context-accounting.mjs';
@@ -35,11 +36,16 @@ function readJsonl(filePath) {
     .filter(Boolean);
 }
 
-function writeJsonl(filePath, rows, { durable = false } = {}) {
+function writeJsonl(filePath, rows, options) {
+  replaceText(filePath, rows.map((row) => JSON.stringify(row)).join('\n') + (rows.length ? '\n' : ''), options);
+}
+
+function replaceText(filePath, text, { durable = false, beforeReplace, mode } = {}) {
   mkdirSync(path.dirname(filePath), { recursive: true });
   const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
-  writeFileSync(temporaryPath, rows.map((row) => JSON.stringify(row)).join('\n') + (rows.length ? '\n' : ''), {encoding:'utf8',flush:durable});
   try {
+    writeFileSync(temporaryPath, text, {encoding:'utf8',flush:durable,mode});
+    beforeReplace?.();
     renameSync(temporaryPath, filePath);
     if (durable) syncDirectory(path.dirname(filePath));
   } catch (error) {
@@ -382,6 +388,17 @@ export function createConversationStore(options = {}) {
     forgetPreviewIndex();
     writeJsonl(indexFile, rows, options);
   }
+  const executionAdmission = createOrdinaryExecutionAdmission({
+    indexFile, convFile, streamPatchFile, contextSnapshotFile,
+    writeIndexText(text, beforeReplace) {
+      forgetPreviewIndex();
+      replaceText(indexFile, text, { durable: true, beforeReplace });
+    },
+    writeHistoryText(file, text, beforeReplace) {
+      replaceText(file, text, { durable: true, beforeReplace, mode: 0o600 });
+    },
+    commitUsage: recordRuntimeTurnUsage,
+  });
   function appendIndex(row) {
     forgetPreviewIndex();
     appendJsonl(indexFile, row);
@@ -1892,6 +1909,7 @@ export function createConversationStore(options = {}) {
     readSessionPreview,
     readSessionMeta,
     assertExecutionAvailable: executionAvailable,
+    ordinaryExecutionAdmission: executionAdmission,
     readConversationWindow,
     readConversationYielding,
     getPersistedConversationHistory,

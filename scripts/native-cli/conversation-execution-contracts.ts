@@ -112,6 +112,12 @@ add('persistent-shell-spawn-matches-first-dispatch',r=>persistentShell(r,'not_st
 add('persistent-shell-starting-keeps-original-dispatch',r=>persistentShell(r,'starting'));
 add('persistent-shell-idle-outlives-its-first-call',r=>persistentShell(r,'running'));
 add('persistent-shell-binds-separate-command',r=>persistentShell(r,'running',true));
+add('legacy-persistent-shell-starting',r=>{r.engine='peer-ts';persistentShell(r,'starting');});
+add('legacy-persistent-shell-idle',r=>{r.engine='peer-ts';persistentShell(r,'running');});
+add('legacy-persistent-shell-bound-command',r=>{r.engine='peer-ts';persistentShell(r,'running',true);});
+add('legacy-persistent-shell-rejects-stale-command-generation',r=>{
+  r.engine='peer-ts';persistentShell(r,'running',true).command!.generation=0;
+},false);
 add('persistent-shell-ended-keeps-unknown-command',r=>{
   persistentShell(r,'ended',true);r.phase='recovery_required';r.stop=stop;r.pendingTools[0].phase='outcome_unknown';
 });
