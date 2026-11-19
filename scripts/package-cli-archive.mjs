@@ -44,6 +44,8 @@ export function parseTargetSpec(spec) {
  *   targetSpec?: string,
  *   repositoryRoot?: string,
  *   distDir?: string,
+ *   native?: boolean,
+ *   cargoReleaseDir?: string,
  *   stageDir?: string,
  *   outputDir?: string,
  * }} [options]
@@ -57,16 +59,31 @@ export function packageCliArchive(options = {}) {
     throw new Error(`Unknown CLI target ${targetSpec}`);
   }
 
-  const distDir = options.distDir ?? join(repositoryRoot, 'apps/tui/dist');
   const peerName = platform === 'win32' ? 'peer.exe' : 'peer';
   const helperName = platform === 'win32' ? 'peer-credential-helper.exe' : 'peer-credential-helper';
-  const peerSrc = join(distDir, peerName);
-  const helperSrc = join(distDir, helperName);
-  if (!existsSync(peerSrc) || !existsSync(helperSrc)) {
-    throw new Error(
-      `Missing built CLI binaries in ${distDir} (need ${peerName} + ${helperName}). ` +
-        'Run `pnpm --filter @peer-agent/tui build` first.',
-    );
+  let peerSrc;
+  let helperSrc;
+  if (options.native) {
+    const cargoDir = options.cargoReleaseDir ?? join(repositoryRoot, 'target/release');
+    const nativePeerName = platform === 'win32' ? 'peer-native.exe' : 'peer-native';
+    peerSrc = join(cargoDir, nativePeerName);
+    helperSrc = join(cargoDir, helperName);
+    if (!existsSync(peerSrc) || !existsSync(helperSrc)) {
+      throw new Error(
+        `Missing built native Rust CLI binaries in ${cargoDir} (need ${nativePeerName} + ${helperName}). ` +
+          'Run `cargo build --locked --release -p peer-cli --bin peer-native -p peer-credential-helper --bin peer-credential-helper` first.',
+      );
+    }
+  } else {
+    const distDir = options.distDir ?? join(repositoryRoot, 'apps/tui/dist');
+    peerSrc = join(distDir, peerName);
+    helperSrc = join(distDir, helperName);
+    if (!existsSync(peerSrc) || !existsSync(helperSrc)) {
+      throw new Error(
+        `Missing built CLI binaries in ${distDir} (need ${peerName} + ${helperName}). ` +
+          'Build native CLI binaries or pass --native / --dist-dir <dir>.',
+      );
+    }
   }
 
   const folder = `peer-${target.os}-${target.arch}`;
@@ -112,6 +129,23 @@ export function packageCliArchive(options = {}) {
 const isDirectRun =
   Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isDirectRun) {
-  const result = packageCliArchive({ targetSpec: process.argv[2] });
+  const args = process.argv.slice(2);
+  let native = false;
+  let distDir;
+  let targetSpec;
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === '--native') {
+      native = true;
+    } else if (arg === '--dist-dir') {
+      distDir = args[++i];
+      if (!distDir) throw new Error('--dist-dir requires a path');
+    } else if (!arg.startsWith('-')) {
+      targetSpec = arg;
+    } else {
+      throw new Error(`Unknown option: ${arg}`);
+    }
+  }
+  const result = packageCliArchive({ targetSpec, native, distDir });
   console.log(`Packaged CLI → ${result.archivePath}`);
 }

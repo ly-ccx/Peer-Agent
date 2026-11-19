@@ -9,6 +9,15 @@ use std::{
 const SHELL_CONTRACT: &str =
     include_str!("../../../packages/protocol/contracts/native-cli/shell-completions.json");
 
+fn stamp_help_version(template: &str) -> String {
+    if let Some((first, rest)) = template.split_once('\n')
+        && first.starts_with("peer ")
+    {
+        return format!("peer {}\n{rest}", VERSION.trim());
+    }
+    template.to_owned()
+}
+
 fn main() -> ExitCode {
     let result = run();
     match result {
@@ -31,8 +40,16 @@ fn run() -> io::Result<CliExit> {
         Command::Version => finish_stdout(writeln!(out, "peer {}", VERSION.trim()))?,
         Command::Help => finish_stdout(writeln!(
             out,
-            "Peer native CLI migration candidate\n\nUsage: peer-native [--help|--version|doctor|--classic|bots]\n       peer-native exec [options] [prompt]\n       peer-native acp\n       peer-native exec --plan <canonical-goal-id> [--max-turns N]\n       peer-native recover --plan <canonical-goal-id>\n       peer-native recover --session <conversation-id>\n       peer-native sessions [list | resume <id> | delete <id> [--yes]]\n       peer-native export <session-id> [--output <path>] [--force]\n       peer result <interactive-result://…> [--json]\n       peer result-cleanup-receipt < request.json\n       peer-native mcp auth <server-id>\n       peer-native mcp refresh <server-id>\n       peer-native completions <bash|zsh|fish>\n       peer-native models\n       peer-native models <auth|logout|status|reconcile> <configured-channel-id>\n\nNative exec supports ordinary conversations and delegated worker admissions\nwith native model and MCP transports. Unsupported configuration is rejected. OAuth commands update configured\nVault credentials; they do not grant tools. Use sessions resume <id> to open an existing conversation.\nPEER_MODEL_API_KEY, PEER_MODEL_BASE_URL and PEER_MODEL_ID configure the independent\nenvironment model source. No Bun/Node sidecar is started."
+            "peer {}\n\nUsage:\n  peer                      Open this project bot (or ask to bind it)\n  peer bots [--json]        Browse your bots (or list as JSON)\n  peer --classic            Open ordinary task mode, even when a bot is bound\n  peer --version            Print version\n  peer --help               Show this help\n  peer update [--check]     Install or check the newest release on this channel\n  peer sessions             List, resume, or delete stored sessions\n  peer models               List configured models (or auth|logout|status|reconcile <channel>)\n  peer doctor               Check the local install\n  peer completions          Print a shell completion script (<bash|zsh|fish>)\n  peer export <id>          Export a stored session as Markdown\n  peer exec [options] [prompt]\n  peer acp                  Run the ACP agent on stdio\n  peer result <interactive-result://…> [--json]\n  peer result-cleanup-receipt < request.json\n  peer recover --session <conversation-id> | --plan <goal-id>\n  peer mcp <auth|refresh> <server-id>\n\nUse `peer exec --help`, `peer update --help`, `peer sessions --help`, `peer doctor --help`,\n`peer completions --help`, or `peer export --help` for subcommand details.\nInside bot mode, press F2 or type /classic to switch to task mode.\nNo Bun/Node sidecar is started.",
+            VERSION.trim()
         ))?,
+        Command::Update { check_only } => {
+            drop(out);
+            return peer_cli::update::run(check_only);
+        }
+        Command::UpdateHelp => {
+            finish_stdout(writeln!(out, "{}", peer_cli::update::help_text()))?;
+        }
         Command::Completions(shell) => {
             let data: serde_json::Value =
                 serde_json::from_str(SHELL_CONTRACT).expect("verified shell contract");
@@ -41,14 +58,16 @@ fn run() -> io::Result<CliExit> {
         Command::CompletionsHelp => {
             let data: serde_json::Value =
                 serde_json::from_str(SHELL_CONTRACT).expect("verified shell contract");
-            finish_stdout(writeln!(out, "{}", data["help"].as_str().unwrap()))?;
+            let help = stamp_help_version(data["help"].as_str().unwrap());
+            finish_stdout(writeln!(out, "{help}"))?;
         }
         Command::ShellHelp(topic) => {
             let data: serde_json::Value = serde_json::from_str(include_str!(
                 "../../../packages/protocol/contracts/native-cli/session-shell.json"
             ))
             .expect("verified shell contract");
-            finish_stdout(writeln!(out, "{}", data["help"][topic].as_str().unwrap()))?;
+            let help = stamp_help_version(data["help"][topic].as_str().unwrap());
+            finish_stdout(writeln!(out, "{help}"))?;
         }
         Command::Export(options) => {
             drop(out);

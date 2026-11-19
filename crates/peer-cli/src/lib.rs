@@ -17,6 +17,7 @@ pub mod sessions;
 mod shell_args;
 pub mod terminal;
 mod text;
+pub mod update;
 pub use text::finish_stdout;
 
 pub const VERSION: &str = include_str!("../../../VERSION");
@@ -35,6 +36,8 @@ pub enum Command {
     SessionsDelete { id: String, yes: bool },
     Completions(String),
     CompletionsHelp,
+    Update { check_only: bool },
+    UpdateHelp,
     Usage(String),
     ShellHelp(&'static str),
     Export(export::Options),
@@ -68,6 +71,9 @@ pub fn command(argv: &[String]) -> Command {
     }
     if argv.first().is_some_and(|s| s == "exec") && argv.get(1).is_none_or(|s| s != "--plan") {
         return ordinary_exec::parse(&argv[1..]);
+    }
+    if argv.first().is_some_and(|s| s == "update") {
+        return update::parse(&argv[1..]);
     }
     if argv.first().is_some_and(|s| s == "result") {
         return interactive_result::parse(&argv[1..]);
@@ -151,6 +157,8 @@ pub fn command(argv: &[String]) -> Command {
         }
         Some("bots") if argv.len() == 2 && argv[1] == "--json" => Command::BotsJson,
         Some("bots") if argv.len() == 1 => Command::Interactive(terminal::InteractiveMode::Bots),
+        Some("version") if argv.len() == 1 => Command::Version,
+        Some("help") if argv.len() == 1 => Command::Help,
         Some("--classic") if argv.len() == 1 => {
             Command::Interactive(terminal::InteractiveMode::Classic)
         }

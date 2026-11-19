@@ -135,10 +135,38 @@ describe('macOS CLI signed helper assembly', () => {
     assert.match(cli.slice(prepare, archive), /prepare-macos-cli-helper\.mjs.*needs\.meta\.outputs\.version/);
     assert.match(cli.slice(download, prepare), /if: matrix\.target == 'darwin-arm64'/);
     assert.match(cli.slice(prepare, archive), /if: matrix\.target == 'darwin-arm64'/);
+    assert.doesNotMatch(cli, /setup-bun/);
+    assert.doesNotMatch(cli, /@peer-agent\/tui build/);
+    assert.match(cli, /cargo build --locked --release -p peer-cli --bin peer-native/);
   });
 });
 
 describe('packageCliArchive', () => {
+  it('packages native Rust target/release/peer-native as peer when native:true', () => {
+    const root = mkdtempSync(join(tmpdir(), 'peer-cli-native-pkg-'));
+    const releaseDir = join(root, 'target', 'release');
+    mkdirSync(releaseDir, { recursive: true });
+    writeFileSync(join(releaseDir, 'peer-native'), '#!/bin/sh\necho native-peer\n');
+    writeFileSync(join(releaseDir, 'peer-credential-helper'), '#!/bin/sh\necho helper\n');
+    chmodSync(join(releaseDir, 'peer-native'), 0o755);
+    chmodSync(join(releaseDir, 'peer-credential-helper'), 0o755);
+
+    const result = packageCliArchive({
+      targetSpec: 'darwin-arm64',
+      repositoryRoot: root,
+      native: true,
+      cargoReleaseDir: releaseDir,
+      stageDir: join(root, 'cli-stage'),
+      outputDir: join(root, 'cli-dist'),
+    });
+
+    assert.equal(result.archive, 'peer-darwin-arm64.tar.gz');
+    const tar = spawnSync('tar', ['-tzf', result.archivePath], { encoding: 'utf8' });
+    assert.equal(tar.status, 0, tar.stderr);
+    assert.match(tar.stdout, /peer-darwin-arm64\/peer$/m);
+    assert.match(tar.stdout, /peer-darwin-arm64\/peer-credential-helper$/m);
+    rmSync(root, { recursive: true, force: true });
+  });
   it('builds peer-linux-x64.tar.gz with the CLI, helper and maintenance launcher', () => {
     const root = mkdtempSync(join(tmpdir(), 'peer-cli-pkg-'));
     const distDir = join(root, 'dist');
