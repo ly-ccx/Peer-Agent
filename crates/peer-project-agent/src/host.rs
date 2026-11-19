@@ -227,6 +227,17 @@ impl NativeProjectHost {
             .unwrap_or(false)
     }
 
+    /// Read-only inspection of an existing active lease holder (never creates files or steals lease).
+    pub fn leases_status_readonly(&self, workspace_id: &str) -> Option<String> {
+        let record = self.leases.inspect(workspace_id).ok()??;
+        let now_ms = parse_iso_ms(&now_iso()).unwrap_or(0);
+        let hb_ms = parse_iso_ms(&record.heartbeat_at).unwrap_or(0);
+        if now_ms.saturating_sub(hb_ms) > 30_000 {
+            return None;
+        }
+        Some(record.host_id)
+    }
+
     pub fn release_lease(&self, workspace_id: &str) -> Result<(), ProjectError> {
         let token = self
             .held_leases

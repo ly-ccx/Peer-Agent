@@ -88,7 +88,7 @@ finally:
             drain(time.monotonic() + 0.1)
             os.write(master, b'\r')
             drain(time.monotonic() + 0.1)
-            assert '发送尚未启用' in visible_text()
+            assert '原草稿已保留' in visible_text()
             fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 20, 60, 0, 0))
             os.kill(native_pid, signal.SIGWINCH)
             drain(time.monotonic() + 0.1)
@@ -217,8 +217,13 @@ if __name__ == '__main__':
     args.output = args.output.resolve()
     args.output.mkdir(parents=True)
     results = []
-    for name, action in [('normal', 'exit'), ('unicode-paste-resize-draft', 'edit'), ('sigterm', 'sigterm'), ('ctrl-d', 'eof')]:
-        results.append(check(args.binary.resolve(), args.output, name, action=action))
+    for name, action, extra_args in [
+        ('normal', 'exit', ()),
+        ('unicode-paste-resize-draft', 'edit', ('--classic',)),
+        ('sigterm', 'sigterm', ()),
+        ('ctrl-d', 'eof', ()),
+    ]:
+        results.append(check(args.binary.resolve(), args.output, name, args=extra_args, action=action))
     for name, code in [('normal', 0), ('error', 1), ('panic', 101)]:
         results.append(check(args.fixture.resolve(), args.output, 'guard-' + name, args=[name], action='automatic', expected=code))
     results.append(check(args.binary.resolve(), args.output, 'oversized-terminal', action='oversize', expected=1, size=(4000, 4000)))

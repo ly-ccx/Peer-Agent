@@ -123,7 +123,7 @@ fn run() -> io::Result<CliExit> {
             drop(out);
             return peer_cli::models::run();
         }
-        Command::Interactive => {
+        Command::Interactive(mode) => {
             drop(out);
             if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
                 writeln!(
@@ -132,7 +132,7 @@ fn run() -> io::Result<CliExit> {
                 )?;
                 return Ok(CliExit::Usage);
             }
-            peer_cli::terminal::run()?;
+            return peer_cli::terminal::run_mode(mode);
         }
     }
     Ok(CliExit::Ok)

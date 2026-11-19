@@ -15,15 +15,16 @@ const STREAM_PREFIX: &str = "Peer  ";
 const STREAM_TRUNCATED: &str = "Peer  ［较早的流式正文已折叠］ ";
 
 #[derive(Default)]
-pub(super) struct Display {
+pub(in crate::terminal) struct Display {
     pub accepted: bool,
     pub revision: usize,
     pub live: String,
     pub notice: Option<&'static str>,
+    pub conversation_id: Option<String>,
     truncated: bool,
 }
 
-pub(super) struct OutputPort(pub watch::Sender<Display>);
+pub(in crate::terminal) struct OutputPort(pub watch::Sender<Display>);
 impl ConversationOutput for OutputPort {
     fn publish<'a>(
         &'a mut self,
@@ -52,8 +53,9 @@ impl ConversationOutput for OutputPort {
                     }
                     display.live.push_str(&text);
                 }
-                ConversationEvent::Started { .. } => {
+                ConversationEvent::Started { conversation_id } => {
                     display.accepted = true;
+                    display.conversation_id = Some(conversation_id.to_owned());
                     display.revision += 1;
                 }
                 ConversationEvent::AssistantText(_) => {
@@ -70,7 +72,7 @@ impl ConversationOutput for OutputPort {
     }
 }
 
-pub(super) struct Approval {
+pub(in crate::terminal) struct Approval {
     pub text: String,
     pub reply: oneshot::Sender<LocalPermissionDecision>,
     pub scroll: usize,
@@ -82,7 +84,7 @@ impl Approval {
     }
 }
 
-pub(super) struct PermissionPort {
+pub(in crate::terminal) struct PermissionPort {
     pub requests: mpsc::Sender<Approval>,
     pub display: watch::Sender<Display>,
 }
@@ -135,7 +137,7 @@ impl PermissionInput for PermissionPort {
     }
 }
 
-pub(super) fn bounded_text(text: &str, limit: usize) -> String {
+pub(in crate::terminal) fn bounded_text(text: &str, limit: usize) -> String {
     let mut end = text.len().min(limit);
     while !text.is_char_boundary(end) {
         end -= 1;

@@ -138,4 +138,6 @@ run('python3', ['scripts/native-cli/pty_checks.py', '--binary', 'target/release/
   '--fixture', 'target/release/examples/terminal-lifecycle', '--output', join(output, 'pty')]);
 run('python3', ['scripts/native-cli/resume_pty.py', '--binary', 'target/release/peer-native',
   '--output', join(output, 'resume-pty')]);
+run('python3', ['scripts/native-cli/tui_e2e_pty.py', '--binary', 'target/release/peer-native',
+  '--output', join(output, 'tui-e2e-pty')]);
 process.stdout.write(`Native scoped verification passed; PTY evidence: ${output}\n`);

@@ -24,7 +24,7 @@ use tokio::{
     task::{JoinHandle, LocalSet},
 };
 
-mod ports;
+pub(super) mod ports;
 use ports::{Approval, Display, OutputPort, PermissionPort, bounded_text};
 
 const CONTROLS: &str = "Enter 发送 · ↑/↓ 阅读 · PgUp 更早 · PgDn 最新 · Ctrl-C 退出";

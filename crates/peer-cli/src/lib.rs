@@ -28,7 +28,7 @@ pub enum Command {
     Help,
     Doctor,
     BotsJson,
-    Interactive,
+    Interactive(terminal::InteractiveMode),
     Models,
     SessionsList,
     SessionsResume(String),
@@ -150,9 +150,12 @@ pub fn command(argv: &[String]) -> Command {
             }
         }
         Some("bots") if argv.len() == 2 && argv[1] == "--json" => Command::BotsJson,
-        None | Some("bots" | "--classic") if argv.len() <= 1 => Command::Interactive,
+        Some("bots") if argv.len() == 1 => Command::Interactive(terminal::InteractiveMode::Bots),
+        Some("--classic") if argv.len() == 1 => {
+            Command::Interactive(terminal::InteractiveMode::Classic)
+        }
+        None => Command::Interactive(terminal::InteractiveMode::Auto),
         Some(name) => Command::Unavailable(name.to_owned()),
-        _ => Command::Interactive,
     }
 }
 
@@ -170,7 +173,18 @@ mod tests {
             command(&["acp".into(), "--help".into()]),
             Command::Usage(_)
         ));
-        assert_eq!(command(&[]), Command::Interactive);
+        assert_eq!(
+            command(&[]),
+            Command::Interactive(terminal::InteractiveMode::Auto)
+        );
+        assert_eq!(
+            command(&["bots".into()]),
+            Command::Interactive(terminal::InteractiveMode::Bots)
+        );
+        assert_eq!(
+            command(&["--classic".into()]),
+            Command::Interactive(terminal::InteractiveMode::Classic)
+        );
         assert_eq!(
             command(&["exec".into()]),
             Command::OrdinaryExec(Box::default())
