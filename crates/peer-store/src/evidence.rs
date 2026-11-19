@@ -100,6 +100,24 @@ impl EvidenceIndexStore {
             file: data_home.as_ref().join("goal-plans/evidence-index.jsonl"),
         }
     }
+    /// Bounded read of all indexed Evidence rows belonging to `plan_id`.
+    pub fn list_for_plan(
+        &self,
+        plan_id: &str,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<Vec<Value>, StoreError> {
+        if !text(plan_id, 200) {
+            return Err(StoreError::EvidenceInvalid);
+        }
+        let mut out = Vec::new();
+        for row in log::read(&self.file, cancel)? {
+            validate_record(&row)?;
+            if row["planId"].as_str() == Some(plan_id) {
+                out.push(row);
+            }
+        }
+        Ok(out)
+    }
     /// Bounded, strict source facts. Missing refs remain missing, never success.
     pub fn find(
         &self,

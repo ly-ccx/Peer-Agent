@@ -7,6 +7,7 @@
 //! delegated session supervision, verification/acceptance, and the single-threaded
 //! ProjectAgentRunner actor. Never depends on terminal UI crates.
 
+pub mod acceptance;
 pub mod directory;
 pub mod drafts;
 pub mod inbox;
@@ -15,11 +16,21 @@ pub mod memory;
 pub mod objectives;
 pub mod profile;
 pub mod registry;
+pub mod reply;
+pub mod scheduler;
+pub mod supervisor;
+pub mod worktree;
 
 use std::{fmt, fs, io::Write, path::Path};
 use tempfile::NamedTempFile;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
+pub use acceptance::{
+    AcceptanceDecision, AcceptanceFacts, CHANGED_FILE_CONFIRM_LIMIT, HostAuthorityFacts,
+    VerificationCheck, VerificationVerdict, anchor_requests_review, compute_verification_verdict,
+    decide_session_acceptance, evaluate_acceptance_close_gate, handoff_question_id,
+    verdict_ref_for,
+};
 pub use directory::{
     AttentionItem, AttentionKind, BotDirectory, BotListFilter, BotListItem, BotListMessage,
     BotListSession, BotRowState, InteractionPage, QuestionState, ReplyQuestionStatus,
@@ -48,6 +59,18 @@ pub use profile::{
     clean_display_name, generate_avatar,
 };
 pub use registry::{ProjectRegistry, ProjectRegistryEntry};
+pub use reply::{
+    ComposeReplyInput, ComposedReply, SessionStatusFact, StatusClaim, Surfacing, SurfacingDecision,
+    SurfacingEvent, compose_reply, decide_surfacing, normalize_proactivity,
+};
+pub use scheduler::{
+    ExecutionScheduler, QueueEntry, QueuedBehind, ScheduleDecision, SelectionOutcome, SlotKind,
+    normalize_concurrency, slot_of,
+};
+pub use supervisor::{
+    SessionSupervisor, SpawnCriterion, SpawnSessionRequest, WorkSessionReport, WorkSessionSummary,
+};
+pub use worktree::{GoalWorktreeAdapter, HandoffOutcome, WorktreeHandle};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectError {
