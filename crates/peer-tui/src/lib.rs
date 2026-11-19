@@ -1,9 +1,11 @@
 #![forbid(unsafe_code)]
 
 mod composer;
+mod resumed_view;
 mod view;
 
 pub use composer::{Action, Composer, Effect, MAX_DRAFT_BYTES, action_for_event};
+pub use resumed_view::{ResumeView, render_resume};
 pub use view::render;
 
 pub fn terminal_text(text: &str) -> String {

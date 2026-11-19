@@ -221,6 +221,7 @@ async fn original_grant_revocation_stops_background_shell_during_the_next_model_
     let options = ConversationOptions {
         workspace: workspace.path(),
         conversation_id: Some(&conversation),
+        resume_from: None,
         prompt: "Launch one bounded background operation",
         image_paths: &[],
         provider_id: "fixture",
@@ -297,6 +298,7 @@ async fn actual_shell_interruptions_drain_owned_child_keep_facts_and_admit_later
         let options = ConversationOptions {
             workspace: workspace.path(),
             conversation_id: Some(&conversation),
+            resume_from: None,
             prompt: "Run the bounded foreground command",
             image_paths: &[],
             provider_id: "fixture",
@@ -485,6 +487,7 @@ async fn actual_ask_denial_and_explicit_full_grant_have_real_evidence_and_effect
                 &ConversationOptions {
                     workspace: workspace.path(),
                     conversation_id: None,
+                    resume_from: None,
                     prompt: "Run the requested command",
                     image_paths: &[],
                     provider_id: "fixture",
@@ -537,6 +540,7 @@ async fn actual_ordinary_model_file_grant_evidence_usage_stop_and_subsequent_run
     let options = ConversationOptions {
         workspace: workspace.path(),
         conversation_id: None,
+        resume_from: None,
         prompt: "Read input.txt and answer",
         image_paths: &[],
         provider_id: "fixture",

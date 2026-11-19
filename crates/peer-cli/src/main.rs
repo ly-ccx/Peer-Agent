@@ -31,7 +31,7 @@ fn run() -> io::Result<CliExit> {
         Command::Version => finish_stdout(writeln!(out, "peer {}", VERSION.trim()))?,
         Command::Help => finish_stdout(writeln!(
             out,
-            "Peer native CLI migration candidate\n\nUsage: peer-native [--help|--version|doctor|--classic|bots]\n       peer-native exec [options] [prompt]\n       peer-native acp\n       peer-native exec --plan <canonical-goal-id> [--max-turns N]\n       peer-native recover --plan <canonical-goal-id>\n       peer-native recover --session <conversation-id>\n       peer-native sessions [list | delete <id> [--yes]]\n       peer-native export <session-id> [--output <path>] [--force]\n       peer result <interactive-result://…> [--json]\n       peer result-cleanup-receipt < request.json\n       peer-native mcp auth <server-id>\n       peer-native mcp refresh <server-id>\n       peer-native completions <bash|zsh|fish>\n       peer-native models\n       peer-native models <auth|logout|status|reconcile> <configured-channel-id>\n\nNative exec supports ordinary conversations and delegated worker admissions\nwith native model and MCP transports. Unsupported configuration is rejected. OAuth commands update configured\nVault credentials; they do not grant tools. The interactive TUI edits drafts.\nPEER_MODEL_API_KEY, PEER_MODEL_BASE_URL and PEER_MODEL_ID configure the independent\nenvironment model source. No Bun/Node sidecar is started."
+            "Peer native CLI migration candidate\n\nUsage: peer-native [--help|--version|doctor|--classic|bots]\n       peer-native exec [options] [prompt]\n       peer-native acp\n       peer-native exec --plan <canonical-goal-id> [--max-turns N]\n       peer-native recover --plan <canonical-goal-id>\n       peer-native recover --session <conversation-id>\n       peer-native sessions [list | resume <id> | delete <id> [--yes]]\n       peer-native export <session-id> [--output <path>] [--force]\n       peer result <interactive-result://…> [--json]\n       peer result-cleanup-receipt < request.json\n       peer-native mcp auth <server-id>\n       peer-native mcp refresh <server-id>\n       peer-native completions <bash|zsh|fish>\n       peer-native models\n       peer-native models <auth|logout|status|reconcile> <configured-channel-id>\n\nNative exec supports ordinary conversations and delegated worker admissions\nwith native model and MCP transports. Unsupported configuration is rejected. OAuth commands update configured\nVault credentials; they do not grant tools. Use sessions resume <id> to open an existing conversation.\nPEER_MODEL_API_KEY, PEER_MODEL_BASE_URL and PEER_MODEL_ID configure the independent\nenvironment model source. No Bun/Node sidecar is started."
         ))?,
         Command::Completions(shell) => {
             let data: serde_json::Value =
@@ -68,6 +68,10 @@ fn run() -> io::Result<CliExit> {
         Command::Doctor => {
             drop(out);
             return peer_cli::doctor::run();
+        }
+        Command::SessionsResume(id) => {
+            drop(out);
+            return peer_cli::sessions::resume(&id);
         }
         Command::SessionsDelete { id, yes } => {
             drop(out);

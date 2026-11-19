@@ -48,6 +48,7 @@ async fn main() -> io::Result<()> {
             &ConversationOptions {
                 workspace: &workspace,
                 conversation_id: Some(&id),
+                resume_from: None,
                 prompt: "Continue in the existing conversation from Rust.",
                 image_paths: &[],
                 provider_id: &selected.entry.provider_id,

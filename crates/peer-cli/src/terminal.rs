@@ -16,6 +16,8 @@ use std::{
     },
     time::Duration,
 };
+mod resumed;
+pub(crate) use resumed::resume;
 
 static TERMINAL_ACTIVE: AtomicBool = AtomicBool::new(false);
 static PANIC_HOOK: Once = Once::new();
@@ -83,9 +85,12 @@ impl TerminalGuard {
     }
 
     pub fn draw(&mut self, composer: &Composer) -> io::Result<()> {
+        self.draw_frame(|frame| peer_tui::render(frame, composer))
+    }
+
+    fn draw_frame(&mut self, render: impl FnOnce(&mut ratatui::Frame<'_>)) -> io::Result<()> {
         check_size()?;
-        self.terminal
-            .draw(|frame| peer_tui::render(frame, composer))?;
+        self.terminal.draw(render)?;
         Ok(())
     }
 }

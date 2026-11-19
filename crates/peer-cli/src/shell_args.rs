@@ -77,7 +77,7 @@ fn sessions(argv: &[String]) -> Command {
             yes,
         };
     }
-    Command::Unavailable(format!("sessions {action}"))
+    Command::SessionsResume(args[1].clone())
 }
 fn export(argv: &[String]) -> Command {
     let mut positional = Vec::new();

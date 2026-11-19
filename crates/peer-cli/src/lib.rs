@@ -28,6 +28,7 @@ pub enum Command {
     Interactive,
     Models,
     SessionsList,
+    SessionsResume(String),
     SessionsDelete { id: String, yes: bool },
     Completions(String),
     CompletionsHelp,

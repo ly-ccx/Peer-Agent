@@ -11,7 +11,7 @@ use unicode_width::UnicodeWidthStr;
 const MAX_RENDER_DRAFT_BYTES: usize = 8192;
 
 /// Only a bounded window around the caret is laid out, even for a 1 MiB paste.
-fn draft_view(
+pub(crate) fn draft_view(
     composer: &Composer,
     width: usize,
     height: usize,

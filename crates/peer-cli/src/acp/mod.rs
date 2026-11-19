@@ -419,6 +419,7 @@ impl Connection {
                         &ConversationOptions {
                             workspace: &workspace,
                             conversation_id: existing.as_deref(),
+                            resume_from: None,
                             prompt: &prompt,
                             image_paths: &[],
                             provider_id: &provider,

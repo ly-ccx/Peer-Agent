@@ -1,5 +1,29 @@
 use peer_protocol::CliExit;
 use std::io::{self, IsTerminal, Write};
+
+pub fn resume(id: &str) -> io::Result<CliExit> {
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        writeln!(
+            io::stderr(),
+            "peer sessions resume needs a TTY. Use `peer exec` for a headless turn."
+        )?;
+        return Ok(CliExit::Usage);
+    }
+    let home =
+        peer_protocol::data_home().ok_or_else(|| io::Error::other("data home unavailable"))?;
+    match peer_store::ConversationStore::new(&home).read_metadata(id) {
+        Ok(snapshot) if snapshot.metadata.is_some() => crate::terminal::resume(home, id.to_owned()),
+        Ok(_) | Err(peer_store::StoreError::NotFound) => {
+            writeln!(
+                io::stderr(),
+                "peer sessions: session not found: {}",
+                crate::text::diagnostic(id)
+            )?;
+            Ok(CliExit::Runtime)
+        }
+        Err(error) => Err(io::Error::other(error)),
+    }
+}
 pub fn list() -> io::Result<CliExit> {
     let Some(home) = peer_protocol::data_home() else {
         writeln!(io::stderr(), "peer sessions: data home unavailable")?;

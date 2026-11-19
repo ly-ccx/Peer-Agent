@@ -17,7 +17,8 @@ use crate::{
     usage_accounting::{RequestMetadata, RuntimeUsageAccounting, UsageSnapshot},
 };
 use peer_protocol::{
-    ConversationExecutionIdentity, ConversationExecutionPhase, LocalAccessLevel, UsagePurpose,
+    ConversationExecution, ConversationExecutionIdentity, ConversationExecutionPhase,
+    LocalAccessLevel, UsagePurpose,
 };
 use peer_store::{
     ConversationExecutionToken, ConversationMetadataPublication, ConversationModelSelection,
@@ -81,6 +82,7 @@ impl ConversationAccess {
 pub struct ConversationOptions<'a> {
     pub workspace: &'a Path,
     pub conversation_id: Option<&'a str>,
+    pub resume_from: Option<&'a ConversationExecution>,
     pub prompt: &'a str,
     pub image_paths: &'a [PathBuf],
     pub provider_id: &'a str,
@@ -191,6 +193,10 @@ impl NativeConversationRuntime {
             && options.image_paths.is_empty())
             || options.prompt.len() > 1024 * 1024
             || options.max_turns == Some(0)
+            || options.resume_from.is_some_and(|run| {
+                options.conversation_id != Some(run.identity.conversation_id.as_str())
+                    || !run.permits_new_run()
+            })
         {
             return Err(HostError("invalid_conversation_input"));
         }
@@ -335,18 +341,20 @@ impl NativeConversationRuntime {
             .live
             .begin(&identity)
             .map_err(|_| HostError("native_execution_owner_unavailable"))?;
-        let claimed = store.claim_conversation_execution(
-            &initial,
-            &NewConversationExecution {
-                stream_id: &stream,
-                engine: "peer-native",
-                owner: &owner,
-                attribution: &attribution,
-                selected_model: selected.as_ref(),
-                at: &at,
-            },
-            None,
-        );
+        let intent = NewConversationExecution {
+            stream_id: &stream,
+            engine: "peer-native",
+            owner: &owner,
+            attribution: &attribution,
+            selected_model: selected.as_ref(),
+            at: &at,
+        };
+        let claimed = match options.resume_from {
+            Some(stopped) => {
+                store.claim_resumed_conversation_execution(&initial, &intent, stopped, None)
+            }
+            None => store.claim_conversation_execution(&initial, &intent, None),
+        };
         let (run, publication) = match claimed {
             Ok(claimed) => claimed,
             Err(error) => {

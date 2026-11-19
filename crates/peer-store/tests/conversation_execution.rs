@@ -156,6 +156,61 @@ fn model_selection_and_ordinary_run_claim_use_the_same_current_metadata() {
     );
 }
 
+#[test]
+fn resume_claim_requires_the_same_stopped_execution_under_the_writer_lock() {
+    let (root, store, id) = seed();
+    let mut token = claim(&store, &id, "first");
+    stop(&store, &mut token);
+    let stopped = store.read_conversation_execution(&id).unwrap().unwrap();
+    let intent = NewConversationExecution {
+        stream_id: "resumed",
+        engine: "peer-native",
+        owner: &owner(),
+        attribution: &json!({"id":"resumed","streamId":"resumed","at":AT,
+            "modelProviderId":"group::model","model":"model","role":"chat"}),
+        selected_model: None,
+        at: AT,
+    };
+    let snapshot = || store.read_committed(&id, None, 8 * 1024 * 1024).unwrap();
+    let mut newer = claim(&store, &id, "another-turn");
+    stop(&store, &mut newer);
+    let index = root.path().join("conversations/index.jsonl");
+    let existing = fs::read(&index).unwrap();
+    assert_eq!(
+        store
+            .claim_resumed_conversation_execution(&snapshot(), &intent, &stopped, None)
+            .err()
+            .unwrap()
+            .error(),
+        StoreError::ExecutionChanged
+    );
+    assert_eq!(fs::read(&index).unwrap(), existing);
+    // Simulate an offline legacy replacement after the UI observed the prior stop.
+    let mut replacement: Value = serde_json::from_slice(&existing).unwrap();
+    replacement
+        .as_object_mut()
+        .unwrap()
+        .remove("runtimeExecution");
+    let bytes = format!("{replacement}\n");
+    fs::write(&index, &bytes).unwrap();
+    assert_eq!(
+        store
+            .claim_resumed_conversation_execution(&snapshot(), &intent, &stopped, None)
+            .err()
+            .unwrap()
+            .error(),
+        StoreError::ExecutionUnrecorded
+    );
+    assert_eq!(fs::read(&index).unwrap(), bytes.as_bytes());
+    fs::write(&index, existing).unwrap();
+    let latest = store.read_conversation_execution(&id).unwrap().unwrap();
+    assert!(
+        store
+            .claim_resumed_conversation_execution(&snapshot(), &intent, &latest, None)
+            .is_ok()
+    );
+}
+
 fn usage(input: u64, output: u64, requests: u64) -> RuntimeTurnUsage {
     RuntimeTurnUsage {
         provider_request_count: requests,

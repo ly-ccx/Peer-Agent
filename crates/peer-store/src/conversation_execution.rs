@@ -202,6 +202,32 @@ impl ConversationStore {
         (ConversationExecutionToken, ConversationMetadataPublication),
         ConversationClaimFailure,
     > {
+        self.claim_execution(expected, intent, None, cancel)
+    }
+    /// Continue only the exact execution observed before an interactive submit.
+    /// The original record and stopped state are checked under the write lock.
+    pub fn claim_resumed_conversation_execution(
+        &self,
+        expected: &HistorySnapshot,
+        intent: &NewConversationExecution<'_>,
+        stopped: &ConversationExecution,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<
+        (ConversationExecutionToken, ConversationMetadataPublication),
+        ConversationClaimFailure,
+    > {
+        self.claim_execution(expected, intent, Some(stopped), cancel)
+    }
+    fn claim_execution(
+        &self,
+        expected: &HistorySnapshot,
+        intent: &NewConversationExecution<'_>,
+        stopped: Option<&ConversationExecution>,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<
+        (ConversationExecutionToken, ConversationMetadataPublication),
+        ConversationClaimFailure,
+    > {
         let mut cleanup = None;
         let result = (|| {
             let id = &expected.history.conversation_id;
@@ -227,10 +253,19 @@ impl ConversationStore {
             {
                 return Err(StoreError::OutOfScope);
             }
-            if decode(&index[pos], id)?.is_some_and(|run| {
+            let current_run = decode(&index[pos], id)?;
+            if current_run.as_ref().is_some_and(|run| {
                 !run.permits_new_run() || run.identity.stream_id == intent.stream_id
             }) {
                 return Err(StoreError::ExecutionBusy);
+            }
+            if let Some(stopped) = stopped {
+                let current = current_run
+                    .as_ref()
+                    .ok_or(StoreError::ExecutionUnrecorded)?;
+                if stopped != current {
+                    return Err(StoreError::ExecutionChanged);
+                }
             }
             if intent
                 .selected_model

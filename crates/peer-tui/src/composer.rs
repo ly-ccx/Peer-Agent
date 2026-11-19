@@ -39,6 +39,10 @@ impl Composer {
     pub fn cursor(&self) -> usize {
         self.cursor
     }
+    /// Call only on a Host receipt after the input commit.
+    pub fn accepted(&mut self) {
+        *self = Self::default();
+    }
     pub fn apply(&mut self, action: Action) -> Effect {
         match action {
             Action::Interrupt if self.draft.is_empty() || self.confirm_discard => {

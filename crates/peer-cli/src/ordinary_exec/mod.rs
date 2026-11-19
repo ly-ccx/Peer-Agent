@@ -210,6 +210,7 @@ pub fn run(options: &Options) -> io::Result<CliExit> {
                 &ConversationOptions {
                     workspace: &workspace,
                     conversation_id: None,
+                    resume_from: None,
                     prompt,
                     image_paths: &options.image_paths,
                     provider_id: &selected.entry.provider_id,
