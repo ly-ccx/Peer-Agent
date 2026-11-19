@@ -59,6 +59,13 @@ pub struct ToolTimelineRow {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserInputPrompt {
+    pub question: String,
+    pub options: Vec<String>,
+    pub tool_call_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClassicMessage {
     pub id: String,
     pub revision: u64,
@@ -101,6 +108,7 @@ pub struct ClassicView<'a> {
     pub composer: &'a Composer,
     pub status: &'a str,
     pub approval: Option<(&'a str, usize)>,
+    pub user_input: Option<(&'a UserInputPrompt, usize)>,
     pub model_picker: &'a ModelPickerState,
     pub overlay: &'a ClassicOverlay,
     pub slash_selected: usize,
@@ -583,12 +591,195 @@ struct DockSpec<'a, 's> {
     slash_rows: u16,
     overlay_dock_h: u16,
     model_dock_h: u16,
+    user_input_dock_h: u16,
     notice_text: Option<&'a str>,
     notice_is_error: bool,
     show_goal_banner: bool,
     composer_rows: u16,
     status_rows: u16,
     total_height: u16,
+}
+
+fn wrap_plain_lines(text: &str, max_w: usize, max_lines: usize) -> Vec<String> {
+    let safe = terminal_text(text);
+    let trimmed = safe.trim();
+    if trimmed.is_empty() || max_w == 0 || max_lines == 0 {
+        return Vec::new();
+    }
+    let mut out: Vec<String> = Vec::new();
+    for raw_line in trimmed.lines() {
+        if out.len() >= max_lines {
+            break;
+        }
+        let mut cur = String::new();
+        let mut cur_w = 0usize;
+        for ch in raw_line.chars() {
+            let mut buf = [0u8; 4];
+            let cw = ch.encode_utf8(&mut buf).width().max(1);
+            if cur_w + cw > max_w && !cur.is_empty() {
+                out.push(std::mem::take(&mut cur));
+                cur_w = 0;
+                if out.len() >= max_lines {
+                    break;
+                }
+            }
+            cur.push(ch);
+            cur_w += cw;
+        }
+        if !cur.is_empty() && out.len() < max_lines {
+            out.push(cur);
+        }
+    }
+    out
+}
+
+fn user_input_dock_layout(
+    prompt: &UserInputPrompt,
+    dock_width: u16,
+    panel_budget: u16,
+) -> (Vec<String>, usize, bool) {
+    let rem = panel_budget.saturating_sub(2);
+    let show_footer = rem >= 3;
+    let footer_h = u16::from(show_footer);
+    let avail_q_and_opts = rem.saturating_sub(footer_h);
+    let q_cap = if avail_q_and_opts >= 3 { 2 } else { 1 };
+    let text_w = usize::from(dock_width.saturating_sub(2)).max(1);
+    let q_lines = wrap_plain_lines(&prompt.question, text_w, q_cap);
+    let q_h = q_lines.len() as u16;
+    let avail_opts = usize::from(avail_q_and_opts.saturating_sub(q_h)).max(1);
+    let vis_opts = prompt.options.len().min(6).min(avail_opts);
+    (q_lines, vis_opts, show_footer)
+}
+
+fn user_input_dock_height(prompt: &UserInputPrompt, dock_width: u16, panel_budget: u16) -> u16 {
+    let (q_lines, vis_opts, show_footer) = user_input_dock_layout(prompt, dock_width, panel_budget);
+    (2 + q_lines.len() as u16 + vis_opts as u16 + u16::from(show_footer)).min(panel_budget)
+}
+
+fn render_user_input_dock(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    prompt: &UserInputPrompt,
+    selected: usize,
+    locale: TuiLocale,
+    palette: &TuiPalette,
+) {
+    if area.height < 3 || area.width == 0 || prompt.options.is_empty() {
+        return;
+    }
+    let pw = usize::from(area.width).max(1);
+    let (q_lines, vis_opts, show_footer) = user_input_dock_layout(prompt, area.width, area.height);
+
+    let divider_area = Rect { height: 1, ..area };
+    frame.render_widget(
+        Paragraph::new(Line::styled(
+            SEPARATOR.repeat(pw),
+            Style::new().fg(palette.border).bg(palette.background),
+        )),
+        divider_area,
+    );
+
+    let body_area = Rect {
+        x: area.x,
+        y: area.y + 1,
+        width: area.width,
+        height: area.height - 1,
+    };
+    let panel_bg = palette.panel;
+    frame.render_widget(Block::new().style(Style::new().bg(panel_bg)), body_area);
+
+    let mut y = body_area.y;
+    let y_end = body_area.y + body_area.height;
+    let push_line = |frame: &mut Frame<'_>, row_y: &mut u16, line: Line<'static>| {
+        if *row_y < y_end {
+            frame.render_widget(
+                Paragraph::new(line).style(Style::new().bg(panel_bg)),
+                Rect {
+                    x: body_area.x,
+                    y: *row_y,
+                    width: body_area.width,
+                    height: 1,
+                },
+            );
+            *row_y += 1;
+        }
+    };
+
+    let hide_hint = if locale.is_zh() {
+        " · Esc 收起"
+    } else {
+        " · Esc hide"
+    };
+    let header = Line::from(vec![
+        Span::styled(
+            clip_bot_line(" Ask user", pw),
+            Style::new()
+                .fg(palette.accent)
+                .bg(panel_bg)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            clip_bot_line(hide_hint, pw.saturating_sub(9)),
+            Style::new().fg(palette.muted).bg(panel_bg),
+        ),
+    ]);
+    push_line(frame, &mut y, header);
+
+    for q in q_lines {
+        push_line(
+            frame,
+            &mut y,
+            Line::styled(
+                clip_bot_line(&format!(" {q}"), pw),
+                Style::new().fg(palette.text).bg(panel_bg),
+            ),
+        );
+    }
+
+    let total = prompt.options.len();
+    let sel = selected.min(total - 1);
+    let mut start = 0usize;
+    if total > vis_opts {
+        start = sel.saturating_sub(vis_opts / 2);
+        if start + vis_opts > total {
+            start = total - vis_opts;
+        }
+    }
+    for (idx, opt) in prompt.options.iter().enumerate().skip(start).take(vis_opts) {
+        let is_sel = idx == sel;
+        let prefix = if is_sel { " › " } else { "   " };
+        let shortcut = if idx < 9 {
+            format!("[{}]", idx + 1)
+        } else {
+            "[•]".to_owned()
+        };
+        let row_text = clip_bot_line(&format!("{prefix}{shortcut} {}", terminal_text(opt)), pw);
+        let style = if is_sel {
+            Style::new()
+                .fg(palette.accent)
+                .bg(panel_bg)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::new().fg(palette.muted).bg(panel_bg)
+        };
+        push_line(frame, &mut y, Line::styled(row_text, style));
+    }
+
+    if show_footer {
+        let hint = if locale.is_zh() {
+            " ↑↓ 选择 · 1-9 / Enter 确认 · 下方可直接输入自由回复"
+        } else {
+            " ↑↓ select · 1-9 / Enter confirm · type free text below"
+        };
+        push_line(
+            frame,
+            &mut y,
+            Line::styled(
+                clip_bot_line(hint, pw),
+                Style::new().fg(palette.muted).bg(panel_bg),
+            ),
+        );
+    }
 }
 
 fn plan_dock_spec<'a, 's>(
@@ -630,40 +821,52 @@ fn plan_dock_spec<'a, 's>(
         + status_rows;
     let panel_budget = max_dock_h.saturating_sub(base);
 
-    let (model_dock_h, overlay_dock_h, slash_rows) = if view.model_picker.open && panel_budget >= 4
-    {
-        (view.model_picker.dock_height(panel_budget), 0, 0)
-    } else if !view.overlay.is_modal()
-        && view.approval.is_none()
-        && !view.model_picker.open
-        && panel_budget >= 3
-    {
-        let oh = view.overlay.dock_height(panel_budget);
-        if oh > 0 {
-            (0, oh, 0)
-        } else if !slash_items.is_empty() {
+    let (model_dock_h, overlay_dock_h, user_input_dock_h, slash_rows) =
+        if view.model_picker.open && panel_budget >= 4 {
+            (view.model_picker.dock_height(panel_budget), 0, 0, 0)
+        } else if !view.overlay.is_modal()
+            && view.approval.is_none()
+            && !view.model_picker.open
+            && panel_budget >= 3
+        {
+            let oh = view.overlay.dock_height(panel_budget);
+            if oh > 0 {
+                (0, oh, 0, 0)
+            } else if !slash_items.is_empty() {
+                let sr = ((slash_items.len().min(6) as u16) + 1).min(panel_budget);
+                (0, 0, 0, if sr >= 2 { sr } else { 0 })
+            } else if let Some((prompt, _)) = view.user_input
+                && !view.is_running
+                && !prompt.options.is_empty()
+                && panel_budget >= 4
+            {
+                (
+                    0,
+                    0,
+                    user_input_dock_height(prompt, dock_width, panel_budget),
+                    0,
+                )
+            } else {
+                (0, 0, 0, 0)
+            }
+        } else if view.approval.is_none()
+            && !view.model_picker.open
+            && !overlay_open
+            && !slash_items.is_empty()
+            && panel_budget >= 2
+        {
             let sr = ((slash_items.len().min(6) as u16) + 1).min(panel_budget);
-            (0, 0, if sr >= 2 { sr } else { 0 })
+            (0, 0, 0, if sr >= 2 { sr } else { 0 })
         } else {
-            (0, 0, 0)
-        }
-    } else if view.approval.is_none()
-        && !view.model_picker.open
-        && !overlay_open
-        && !slash_items.is_empty()
-        && panel_budget >= 2
-    {
-        let sr = ((slash_items.len().min(6) as u16) + 1).min(panel_budget);
-        (0, 0, if sr >= 2 { sr } else { 0 })
-    } else {
-        (0, 0, 0)
-    };
-    let total_height = base + model_dock_h + overlay_dock_h + slash_rows;
+            (0, 0, 0, 0)
+        };
+    let total_height = base + model_dock_h + overlay_dock_h + user_input_dock_h + slash_rows;
     DockSpec {
         slash_items,
         slash_rows,
         overlay_dock_h,
         model_dock_h,
+        user_input_dock_h,
         notice_text,
         notice_is_error,
         show_goal_banner,
@@ -695,6 +898,8 @@ fn render_composer_dock(
         constraints.push(Constraint::Length(spec.model_dock_h));
     } else if spec.overlay_dock_h > 0 {
         constraints.push(Constraint::Length(spec.overlay_dock_h));
+    } else if spec.user_input_dock_h > 0 {
+        constraints.push(Constraint::Length(spec.user_input_dock_h));
     } else if spec.slash_rows > 0 {
         constraints.push(Constraint::Length(spec.slash_rows));
     }
@@ -728,6 +933,11 @@ fn render_composer_dock(
         slot += 1;
     } else if spec.overlay_dock_h > 0 {
         render_classic_overlay(frame, areas[slot], view.overlay, overlay_ctx, palette);
+        slot += 1;
+    } else if spec.user_input_dock_h > 0
+        && let Some((prompt, selected)) = view.user_input
+    {
+        render_user_input_dock(frame, areas[slot], prompt, selected, view.locale, palette);
         slot += 1;
     } else if spec.slash_rows > 0 {
         render_slash_menu(
@@ -987,6 +1197,7 @@ pub fn render_classic(frame: &mut Frame<'_>, view: ClassicView<'_>) {
         && view.live_stream.is_empty()
         && view.live_thinking.trim().is_empty()
         && view.approval.is_none()
+        && view.user_input.is_none()
         && !view.is_running
         && !view.overlay.is_modal();
 
@@ -1372,6 +1583,7 @@ mod tests {
                         composer: &composer,
                         status: "",
                         approval: None,
+                        user_input: None,
                         model_picker: &picker,
                         overlay: &ClassicOverlay::None,
                         slash_selected: 0,
@@ -1455,6 +1667,7 @@ mod tests {
                         composer: &composer,
                         status: "",
                         approval: None,
+                        user_input: None,
                         model_picker: &picker,
                         overlay: &ClassicOverlay::None,
                         slash_selected: 0,
@@ -1505,6 +1718,7 @@ mod tests {
                         composer: &composer,
                         status: "",
                         approval: None,
+                        user_input: None,
                         model_picker: &picker,
                         overlay: &ClassicOverlay::None,
                         slash_selected: 0,
@@ -1555,6 +1769,7 @@ mod tests {
                         composer: &composer,
                         status: "",
                         approval: None,
+                        user_input: None,
                         model_picker: &picker,
                         overlay: &ClassicOverlay::None,
                         slash_selected: 0,
@@ -1611,6 +1826,7 @@ mod tests {
                     composer: &composer,
                     status: "",
                     approval: None,
+                    user_input: None,
                     model_picker: &picker,
                     overlay: &ClassicOverlay::None,
                     slash_selected: 0,
@@ -1624,5 +1840,86 @@ mod tests {
         assert!(text.contains("◆ Peer"));
         assert!(text.contains("mode agent · access Ask"));
         assert!(text.contains("0%"));
+    }
+
+    #[test]
+    fn classic_user_input_card_renders_question_options_and_hints_safely() {
+        let mut cache = ByteBudgetLru::new(MARKDOWN_WRAP_CACHE_BYTES, 16);
+        let composer = Composer::default();
+        let anchor = ReadingAnchor::FollowingLatest;
+        let picker = ModelPickerState::default();
+        let prompt = UserInputPrompt {
+            question: "需要我先做哪一件？".into(),
+            options: vec![
+                "A 核对 ADR 133 §3".into(),
+                "B 盘点剩余缺口".into(),
+                "C 梳理合回策略".into(),
+            ],
+            tool_call_id: Some("call-ask".into()),
+        };
+        let msgs = vec![ClassicMessage {
+            id: "u1".into(),
+            revision: 1,
+            role: "user".into(),
+            text: "看一下状态".into(),
+            thinking: None,
+            tools: Vec::new(),
+            continuation: false,
+        }];
+        for (w, h) in [(120, 40), (48, 16)] {
+            let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+            term.draw(|f| {
+                render_classic(
+                    f,
+                    ClassicView {
+                        title: "Peer",
+                        workspace_label: "~/Documents/Develop/peer-dev",
+                        model_badge: "gpt-6.1-sol · ChatGPT 订阅",
+                        effort_badge: "default",
+                        mode_badge: "chat",
+                        access_badge: "ask",
+                        context_percent: Some(5),
+                        quota_label: None,
+                        quota_remaining: None,
+                        fast_mode: false,
+                        fast_available: false,
+                        goal_status: GoalMenuStatus::None,
+                        goal_banner: None,
+                        is_running: false,
+                        activity_label: None,
+                        animation_frame: 0,
+                        running_elapsed_ms: 0,
+                        tools_expanded: false,
+                        notice: None,
+                        notice_is_error: false,
+                        palette: &DARK_PALETTE,
+                        scheme_id: 0,
+                        current_theme: ThemeMode::Dark,
+                        locale: TuiLocale::ZhCn,
+                        messages: &msgs,
+                        live_stream: "",
+                        live_thinking: "",
+                        anchor: &anchor,
+                        composer: &composer,
+                        status: "",
+                        approval: None,
+                        user_input: Some((&prompt, 1)),
+                        model_picker: &picker,
+                        overlay: &ClassicOverlay::None,
+                        slash_selected: 0,
+                        wrap_cache: &mut cache,
+                    },
+                );
+            })
+            .unwrap();
+            let text = buffer_text(&term);
+            assert!(text.contains("Ask user"));
+            assert!(text.contains("需要我先做哪一件？"));
+            assert!(text.contains("[1] A 核对 ADR 133"));
+            assert!(text.contains("› [2] B 盘点剩余缺口"));
+            if w == 120 {
+                assert!(text.contains("1-9 / Enter 确认"));
+            }
+        }
     }
 }

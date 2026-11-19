@@ -39,9 +39,9 @@ use peer_tui::{
     Effect, GoalMenuStatus, GoalPickerRow, HistoryDirection, LeaderAction, LeaderKeyState,
     MARKDOWN_WRAP_CACHE_BYTES, ModelPickerEvent, ModelPickerState, ReadingAnchor, RenderedBlock,
     ResumeSessionRow, SlashFilterContext, ThemeMode, ToolRowStatus, ToolTimelineRow, TuiLocale,
-    WORKING_ANIMATION_INTERVAL_MS, WrapCacheKey, action_for_event, compact_workspace_path,
-    filter_classic_slash_items, format_topbar_quota, parse_classic_command, render_classic,
-    terminal_text,
+    UserInputPrompt, WORKING_ANIMATION_INTERVAL_MS, WrapCacheKey, action_for_event,
+    compact_workspace_path, filter_classic_slash_items, format_topbar_quota, parse_classic_command,
+    render_classic, terminal_text,
 };
 use serde_json::Value;
 use std::{
@@ -77,6 +77,12 @@ struct ActiveCompaction {
     task: JoinHandle<Result<CompactOutcome, &'static str>>,
     started_at: Instant,
     cancelling: bool,
+}
+
+struct PendingUserInput {
+    prompt: UserInputPrompt,
+    selected: usize,
+    dismissed: bool,
 }
 
 pub(super) struct ClassicSession<'a> {
@@ -117,6 +123,7 @@ pub(super) struct ClassicSession<'a> {
     last_anim_draw: Option<Instant>,
     tools_expanded: bool,
     approval: Option<Approval>,
+    pending_user_input: Option<PendingUserInput>,
     model_picker: ModelPickerState,
     overlay: ClassicOverlay,
     leader: LeaderKeyState,
@@ -175,6 +182,7 @@ impl<'a> ClassicSession<'a> {
             last_anim_draw: None,
             tools_expanded: false,
             approval: None,
+            pending_user_input: None,
             model_picker: ModelPickerState::default(),
             overlay: ClassicOverlay::None,
             leader: LeaderKeyState::default(),
@@ -415,6 +423,11 @@ impl<'a> ClassicSession<'a> {
         match TranscriptReader::new(&self.home).read_page(conv_id, cursor.as_ref(), limits, None) {
             Ok(page) => {
                 self.older = page.older;
+                let pending_prompt = if cursor.is_none() {
+                    find_pending_user_input(&page.rows)
+                } else {
+                    None
+                };
                 let mut rows = Vec::with_capacity(page.rows.len());
                 let mut streams = Vec::with_capacity(page.rows.len());
                 for (idx, row) in page.rows.into_iter().enumerate() {
@@ -442,6 +455,23 @@ impl<'a> ClassicSession<'a> {
                         first.continuation = false;
                     }
                     self.messages = rows;
+                    match pending_prompt {
+                        Some(found) => match self.pending_user_input.as_mut() {
+                            Some(existing) if existing.prompt == found => {
+                                existing.selected = existing.selected.min(found.options.len() - 1);
+                            }
+                            _ => {
+                                self.pending_user_input = Some(PendingUserInput {
+                                    prompt: found,
+                                    selected: 0,
+                                    dismissed: false,
+                                });
+                            }
+                        },
+                        None => {
+                            self.pending_user_input = None;
+                        }
+                    }
                 }
                 true
             }
@@ -614,6 +644,7 @@ impl<'a> ClassicSession<'a> {
 
         self.conversation_id = Some(id.to_owned());
         self.interrupted_preview.clear();
+        self.pending_user_input = None;
         self.anchor.jump_to_latest();
         self.reload_transcript(None);
         self.refresh_context_percent();
@@ -744,6 +775,7 @@ impl<'a> ClassicSession<'a> {
         self.goal_plans.clear();
         self.selected_goal_plan_id = None;
         self.interrupted_preview.clear();
+        self.pending_user_input = None;
         self.anchor.jump_to_latest();
         self.composer.accepted();
         self.set_notice(notice, false);
@@ -915,6 +947,18 @@ impl<'a> ClassicSession<'a> {
             && self.status_is_error;
         let status = notice_str.unwrap_or("");
         let approval_view = self.approval.as_ref().map(|a| (a.text.as_str(), a.scroll));
+        let user_input_view = if !is_running
+            && self.approval.is_none()
+            && !self.model_picker.open
+            && !self.overlay.is_open()
+        {
+            self.pending_user_input
+                .as_ref()
+                .filter(|p| !p.dismissed && !p.prompt.options.is_empty())
+                .map(|p| (&p.prompt, p.selected))
+        } else {
+            None
+        };
         let mut shown_size = None;
         terminal.draw_frame(|frame| {
             shown_size = Some((frame.area().width, frame.area().height));
@@ -952,6 +996,7 @@ impl<'a> ClassicSession<'a> {
                     composer: &self.composer,
                     status,
                     approval: approval_view,
+                    user_input: user_input_view,
                     model_picker: &self.model_picker,
                     overlay: &self.overlay,
                     slash_selected: self.slash_selected,
@@ -998,6 +1043,7 @@ impl<'a> ClassicSession<'a> {
         self.selected_model = Some(selected.entry.model_id.clone());
         self.selected_display_name = Some(selected.entry.display_name.clone());
         self.interrupted_preview.clear();
+        self.pending_user_input = None;
         self.anchor.jump_to_latest();
 
         let (display_tx, display_rx) = watch::channel(Display::default());
@@ -1039,7 +1085,7 @@ impl<'a> ClassicSession<'a> {
                 display: display_tx,
             };
             let outcome = runtime
-                .execute_observed(
+                .execute_interactive(
                     &ConversationOptions {
                         workspace: &workspace,
                         conversation_id: conv_id.as_deref(),
@@ -1289,6 +1335,66 @@ impl<'a> ClassicSession<'a> {
                 true
             }
             _ => false,
+        }
+    }
+
+    fn handle_user_input_key(&mut self, key: KeyEvent) -> Option<bool> {
+        if self.is_busy() {
+            return None;
+        }
+        let pending = self.pending_user_input.as_mut()?;
+        if pending.dismissed || pending.prompt.options.is_empty() {
+            return None;
+        }
+        let count = pending.prompt.options.len();
+        let draft_empty = self.composer.draft().is_empty();
+        let draft_trimmed_empty = self.composer.draft().trim().is_empty();
+        match key.code {
+            KeyCode::Up => {
+                pending.selected = if pending.selected == 0 {
+                    count - 1
+                } else {
+                    pending.selected - 1
+                };
+                Some(true)
+            }
+            KeyCode::Left if draft_empty => {
+                pending.selected = if pending.selected == 0 {
+                    count - 1
+                } else {
+                    pending.selected - 1
+                };
+                Some(true)
+            }
+            KeyCode::Down | KeyCode::Tab => {
+                pending.selected = (pending.selected + 1) % count;
+                Some(true)
+            }
+            KeyCode::Right if draft_empty => {
+                pending.selected = (pending.selected + 1) % count;
+                Some(true)
+            }
+            KeyCode::Esc if self.anchor.is_following() => {
+                pending.dismissed = true;
+                self.set_notice("已收起选项卡片，可直接输入回复。", false);
+                Some(true)
+            }
+            KeyCode::Char(c @ '1'..='9') if key.modifiers.is_empty() && draft_empty => {
+                let idx = (c as usize) - ('1' as usize);
+                if idx < count {
+                    let answer = pending.prompt.options[idx].clone();
+                    self.submit_prompt(answer);
+                    Some(true)
+                } else {
+                    Some(false)
+                }
+            }
+            KeyCode::Enter if key.modifiers.is_empty() && draft_trimmed_empty => {
+                let answer = pending.prompt.options[pending.selected.min(count - 1)].clone();
+                self.submit_prompt(answer);
+                Some(true)
+            }
+            _ => None,
         }
     }
 
@@ -2118,6 +2224,10 @@ impl<'a> ClassicSession<'a> {
                                             }
                                             _ => {}
                                         }
+                                    } else if let Some(redraw) = self.handle_user_input_key(key) {
+                                        if redraw {
+                                            dirty = true;
+                                        }
                                     } else if key.code == KeyCode::Esc
                                         && !self.anchor.is_following()
                                     {
@@ -2286,7 +2396,21 @@ fn parse_iso8601_millis(raw: &str) -> Option<u64> {
     u64::try_from(utc_ms).ok()
 }
 
+fn is_request_user_input_tool(capability_id: &str, raw_tool: &str) -> bool {
+    let cap = capability_id.to_ascii_lowercase();
+    let raw = raw_tool.to_ascii_lowercase();
+    cap == "local.interaction.request_user_input"
+        || cap == "request_user_input"
+        || cap.ends_with(".request_user_input")
+        || raw == "local.interaction.request_user_input"
+        || raw == "request_user_input"
+        || raw.ends_with(".request_user_input")
+}
+
 fn tool_display_name(capability_id: &str, raw_tool: &str) -> String {
+    if is_request_user_input_tool(capability_id, raw_tool) {
+        return "Ask user".to_owned();
+    }
     let known = |id: &str| -> Option<&'static str> {
         match id.to_ascii_lowercase().as_str() {
             "local.shell.exec" | "bash" | "shell" => Some("Bash"),
@@ -2301,7 +2425,6 @@ fn tool_display_name(capability_id: &str, raw_tool: &str) -> String {
             | "grep"
             | "glob" => Some("Search"),
             "local.git.query" | "git_query" => Some("Git"),
-            "local.interaction.request_user_input" | "request_user_input" => Some("Ask user"),
             "read_tool_result" | "local.tool.read_result" => Some("Read result"),
             "web_fetch" | "local.web.fetch" => Some("Fetch"),
             "web_search" | "local.web.search" => Some("Web search"),
@@ -2354,7 +2477,7 @@ fn tool_argument_summary(
     let raw_lower = raw_tool.to_ascii_lowercase();
     let is_cap = |c: &str, t: &str| cap_lower == c || raw_lower == t;
 
-    if is_cap("local.interaction.request_user_input", "request_user_input")
+    if is_request_user_input_tool(capability_id, raw_tool)
         && let Some(q) = str_arg(args, "question")
     {
         return bounded_text(q, 120);
@@ -2442,7 +2565,125 @@ fn push_detail_line(out: &mut Vec<String>, raw: &str) {
     }
 }
 
-fn extract_tool_detail_lines(result: Option<&Value>) -> Vec<String> {
+fn parse_string_options(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str())
+        .map(|s| bounded_text(s.trim(), 160))
+        .filter(|s| !s.is_empty())
+        .take(12)
+        .collect()
+}
+
+fn extract_user_input_options(
+    args: Option<&Value>,
+    result: Option<&Value>,
+    detail_lines: &[String],
+) -> Vec<String> {
+    for candidate in [
+        args.and_then(|a| a.get("options")),
+        result
+            .and_then(|r| r.get("output"))
+            .and_then(|o| o.get("options")),
+        result
+            .and_then(|r| r.get("metadata"))
+            .and_then(|m| m.get("options")),
+    ] {
+        let parsed = parse_string_options(candidate);
+        if !parsed.is_empty() {
+            return parsed;
+        }
+    }
+    let mut recovered = Vec::new();
+    for line in detail_lines {
+        let trimmed = line.trim();
+        if let Some((num, rest)) = trimmed.split_once('.')
+            && !num.is_empty()
+            && num.chars().all(|c| c.is_ascii_digit())
+        {
+            let opt = bounded_text(rest.trim(), 160);
+            if !opt.is_empty() {
+                recovered.push(opt);
+            }
+        }
+    }
+    recovered.truncate(12);
+    recovered
+}
+
+fn extract_user_input_prompt(seg: &Value) -> Option<UserInputPrompt> {
+    if seg["type"].as_str() != Some("tool-call") {
+        return None;
+    }
+    let result = seg.get("result").filter(|v| !v.is_null())?;
+    if !matches!(result["status"].as_str(), Some("completed" | "success")) {
+        return None;
+    }
+    let raw_tool = seg["tool"].as_str().unwrap_or("");
+    let capability_id = result["capabilityId"].as_str().unwrap_or(raw_tool);
+    if !is_request_user_input_tool(capability_id, raw_tool) {
+        return None;
+    }
+    let args = seg.get("args");
+    let question = str_arg(args, "question")
+        .or_else(|| {
+            result["output"]["question"]
+                .as_str()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+        })
+        .or_else(|| {
+            result["metadata"]["question"]
+                .as_str()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+        })
+        .map(|s| bounded_text(s, 400))?;
+    let detail_lines = extract_tool_detail_lines(raw_tool, capability_id, args, Some(result));
+    let options = extract_user_input_options(args, Some(result), &detail_lines);
+    let tool_call_id = seg["toolCallId"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned);
+    Some(UserInputPrompt {
+        question,
+        options,
+        tool_call_id,
+    })
+}
+
+fn find_pending_user_input(rows: &[TranscriptRow]) -> Option<UserInputPrompt> {
+    for row in rows.iter().rev() {
+        let TranscriptRow::Message { raw, .. } = row else {
+            continue;
+        };
+        match raw["role"].as_str() {
+            Some("user") => break,
+            Some("assistant") => {
+                if let Some(segments) = raw["segments"].as_array() {
+                    for seg in segments.iter().rev() {
+                        if let Some(prompt) = extract_user_input_prompt(seg)
+                            && !prompt.options.is_empty()
+                        {
+                            return Some(prompt);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn extract_tool_detail_lines(
+    raw_tool: &str,
+    capability_id: &str,
+    args: Option<&Value>,
+    result: Option<&Value>,
+) -> Vec<String> {
     let Some(res) = result else {
         return Vec::new();
     };
@@ -2452,6 +2693,12 @@ fn extract_tool_detail_lines(result: Option<&Value>) -> Vec<String> {
             push_detail_line(&mut out, msg);
         } else if let Some(msg) = err.as_str() {
             push_detail_line(&mut out, msg);
+        }
+    }
+    if is_request_user_input_tool(capability_id, raw_tool) && out.is_empty() {
+        let options = extract_user_input_options(args, Some(res), &[]);
+        for (idx, opt) in options.iter().enumerate() {
+            push_detail_line(&mut out, &format!("{}. {}", idx + 1, opt));
         }
     }
     if let Some(preview) = res["outputPreview"]["text"].as_str() {
@@ -2606,10 +2853,15 @@ fn parse_transcript_row(row: TranscriptRow, idx: usize) -> (Option<String>, Clas
                         call_id,
                         tool_name: tool_display_name(&capability_id, raw_tool),
                         summary: tool_argument_summary(&capability_id, raw_tool, args, result),
-                        capability_id,
+                        capability_id: capability_id.clone(),
                         status,
                         duration_ms,
-                        detail_lines: extract_tool_detail_lines(result),
+                        detail_lines: extract_tool_detail_lines(
+                            raw_tool,
+                            &capability_id,
+                            args,
+                            result,
+                        ),
                     });
                 }
                 Some("tool-result") if tools.is_empty() => {
@@ -2817,5 +3069,85 @@ mod tests {
         assert_eq!(m_seg.thinking.as_deref(), Some("思考步骤一"));
         let (_, m_fb) = parse_transcript_row(fallback_row, 1);
         assert_eq!(m_fb.thinking.as_deref(), Some("顶层思考字段"));
+    }
+
+    #[test]
+    fn find_pending_user_input_extracts_latest_completed_question_until_user_reply() {
+        let range = || peer_protocol::TranscriptRange { start: 0, end: 1 };
+        let user_q = TranscriptRow::Message {
+            raw: json!({
+                "id": "u1",
+                "role": "user",
+                "content": "最近重点是什么"
+            }),
+            range: range(),
+        };
+        let denied_ask = TranscriptRow::Message {
+            raw: json!({
+                "id": "a-denied",
+                "role": "assistant",
+                "content": "",
+                "segments": [{
+                    "type": "tool-call",
+                    "tool": "request_user_input",
+                    "toolCallId": "c0",
+                    "args": {"question": "Headless denied?", "options": ["X", "Y"]},
+                    "result": {
+                        "capabilityId": "local.interaction.request_user_input",
+                        "status": "denied",
+                        "error": {"code": "request_user_input_unavailable"}
+                    }
+                }]
+            }),
+            range: range(),
+        };
+        assert_eq!(
+            find_pending_user_input(&[user_q.clone(), denied_ask.clone()]),
+            None
+        );
+
+        let completed_ask = TranscriptRow::Message {
+            raw: json!({
+                "id": "a-ask",
+                "role": "assistant",
+                "content": "",
+                "segments": [{
+                    "type": "tool-call",
+                    "tool": "request_user_input",
+                    "toolCallId": "c1",
+                    "args": {"question": "需要我先做哪一件？", "options": ["A 核对", "B 盘点", "C 梳理"]},
+                    "result": {
+                        "capabilityId": "local.interaction.request_user_input",
+                        "status": "completed",
+                        "output": {"ok": true, "acknowledged": true}
+                    }
+                }]
+            }),
+            range: range(),
+        };
+        let found = find_pending_user_input(&[user_q.clone(), completed_ask.clone()]).unwrap();
+        assert_eq!(found.question, "需要我先做哪一件？");
+        assert_eq!(found.options, vec!["A 核对", "B 盘点", "C 梳理"]);
+        assert_eq!(found.tool_call_id.as_deref(), Some("c1"));
+
+        let (_, msg) = parse_transcript_row(completed_ask.clone(), 0);
+        assert_eq!(msg.tools[0].tool_name, "Ask user");
+        assert_eq!(
+            msg.tools[0].detail_lines,
+            vec!["1. A 核对", "2. B 盘点", "3. C 梳理"]
+        );
+
+        let user_reply = TranscriptRow::Message {
+            raw: json!({
+                "id": "u2",
+                "role": "user",
+                "content": "A 核对"
+            }),
+            range: range(),
+        };
+        assert_eq!(
+            find_pending_user_input(&[user_q, completed_ask, user_reply]),
+            None
+        );
     }
 }

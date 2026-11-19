@@ -156,7 +156,11 @@ impl Host<'_> {
         {
             (false, "explorer_scope_denied", None)
         } else if permission == ProviderPermission::UserInput {
-            (false, crate::providers::interaction::UNAVAILABLE, None)
+            if self.interactive_user_input {
+                (true, crate::providers::interaction::SELF_GRANT_REASON, None)
+            } else {
+                (false, crate::providers::interaction::UNAVAILABLE, None)
+            }
         } else if let Some(interruption) = hook_interrupted {
             (false, "hook_interrupted", Some(interruption))
         } else if let Some(reason) = goal_denial {

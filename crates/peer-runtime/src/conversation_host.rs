@@ -146,6 +146,13 @@ pub struct NativeConversationRuntime {
     live: ExecutionRegistry,
     access: ConversationAccess,
 }
+#[derive(Clone, Copy)]
+enum ExecutionSurface {
+    Headless,
+    Observed,
+    Interactive,
+}
+
 impl NativeConversationRuntime {
     pub fn new(home: impl AsRef<Path>, access: ConversationAccess) -> Self {
         Self {
@@ -394,6 +401,7 @@ impl NativeConversationRuntime {
             completed_shells: BTreeMap::new(),
             foreground_authority: None,
             cognition_source: None,
+            interactive_user_input: false,
             worker: None,
             explorer_requests: BTreeSet::new(),
             runner: None,
@@ -446,8 +454,15 @@ impl NativeConversationRuntime {
         permission: &mut dyn PermissionInput,
         external: &CancellationToken,
     ) -> Result<ConversationOutcome, HostError> {
-        self.execute_owned(options, model, permission, None, external, true)
-            .await
+        self.execute_owned(
+            options,
+            model,
+            permission,
+            None,
+            external,
+            ExecutionSurface::Headless,
+        )
+        .await
     }
     pub async fn execute_observed<'a>(
         &self,
@@ -457,8 +472,33 @@ impl NativeConversationRuntime {
         output: Option<&'a mut dyn ConversationOutput>,
         external: &CancellationToken,
     ) -> Result<ConversationOutcome, HostError> {
-        self.execute_owned(options, model, permission, output, external, false)
-            .await
+        self.execute_owned(
+            options,
+            model,
+            permission,
+            output,
+            external,
+            ExecutionSurface::Observed,
+        )
+        .await
+    }
+    pub async fn execute_interactive<'a>(
+        &self,
+        options: &ConversationOptions<'_>,
+        model: &'a NativeModel,
+        permission: &'a mut dyn PermissionInput,
+        output: Option<&'a mut dyn ConversationOutput>,
+        external: &CancellationToken,
+    ) -> Result<ConversationOutcome, HostError> {
+        self.execute_owned(
+            options,
+            model,
+            permission,
+            output,
+            external,
+            ExecutionSurface::Interactive,
+        )
+        .await
     }
     async fn execute_owned<'a>(
         &self,
@@ -467,8 +507,10 @@ impl NativeConversationRuntime {
         permission: &'a mut dyn PermissionInput,
         output: Option<&'a mut dyn ConversationOutput>,
         external: &CancellationToken,
-        headless: bool,
+        surface: ExecutionSurface,
     ) -> Result<ConversationOutcome, HostError> {
+        let headless = matches!(surface, ExecutionSurface::Headless);
+        let interactive_user_input = matches!(surface, ExecutionSurface::Interactive);
         if external.is_cancelled() {
             return Err(HostError("CANCELLED"));
         }
@@ -608,7 +650,7 @@ impl NativeConversationRuntime {
             skills.clone(),
             crate::providers::ShellHostMode::Conversation,
         )?;
-        providers.add_ordinary_tools(options.mode);
+        providers.add_ordinary_tools(options.mode, interactive_user_input);
         let projection = providers.project_for_mode(options.mode, options.allowlist)?;
         let pipeline = if selected.is_some() {
             ContextPipeline::open_bound(&self.home, &conversation, options.provider_id, model)?
@@ -705,6 +747,7 @@ impl NativeConversationRuntime {
             completed_shells: BTreeMap::new(),
             foreground_authority: None,
             cognition_source: None,
+            interactive_user_input,
             worker: None,
             explorer_requests: BTreeSet::new(),
             runner: None,
@@ -722,7 +765,13 @@ impl NativeConversationRuntime {
             if result.stop == crate::turn_loop::LoopStop::Replied {
                 host.drive_requested_explorers().await?;
             }
-            if headless && result.stop != crate::turn_loop::LoopStop::UserInputUnavailable {
+            if headless
+                && !matches!(
+                    result.stop,
+                    crate::turn_loop::LoopStop::UserInputUnavailable
+                        | crate::turn_loop::LoopStop::RequestedUserInput
+                )
+            {
                 runner_stop = host.drive_new_goal(options.max_turns).await?;
             }
             Ok::<_, HostError>(result)
@@ -818,6 +867,7 @@ struct Host<'a> {
     completed_shells: BTreeMap<String, crate::providers::EffectOutcome>,
     foreground_authority: Option<foreground_shell::ForegroundAuthority>,
     cognition_source: Option<CognitionSource>,
+    interactive_user_input: bool,
     worker: Option<readonly_worker::Worker>,
     explorer_requests: BTreeSet<String>,
     runner: Option<runner::Runner>,

@@ -25,12 +25,14 @@ pub(crate) trait TurnHost {
 pub(crate) enum ToolStep {
     Continue(String),
     UserInputUnavailable,
+    RequestedUserInput,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum LoopStop {
     Replied,
     UserInputUnavailable,
+    RequestedUserInput,
     MaxTurns,
 }
 impl LoopStop {
@@ -38,6 +40,7 @@ impl LoopStop {
         match self {
             Self::Replied => "replied",
             Self::UserInputUnavailable => crate::providers::interaction::UNAVAILABLE,
+            Self::RequestedUserInput => "requested_user_input",
             Self::MaxTurns => "max_turns",
         }
     }
@@ -96,6 +99,13 @@ pub(crate) async fn run(
                 ToolStep::UserInputUnavailable => {
                     return Ok(LoopOutcome {
                         stop: LoopStop::UserInputUnavailable,
+                        content,
+                        tool_calls,
+                    });
+                }
+                ToolStep::RequestedUserInput => {
+                    return Ok(LoopOutcome {
+                        stop: LoopStop::RequestedUserInput,
                         content,
                         tool_calls,
                     });

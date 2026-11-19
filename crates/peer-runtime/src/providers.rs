@@ -237,10 +237,12 @@ impl ProviderRegistry {
         )?));
         Ok(registry)
     }
-    pub(crate) fn add_ordinary_tools(&mut self, mode: RuntimeMode) {
+    pub(crate) fn add_ordinary_tools(&mut self, mode: RuntimeMode, interactive_user_input: bool) {
         self.providers.push(Box::new(goal::GoalProvider(mode)));
         self.providers
-            .push(Box::new(interaction::UnavailableInputProvider));
+            .push(Box::new(interaction::InteractionProvider::new(
+                interactive_user_input,
+            )));
     }
     /// Register an additional governed capability provider into this registry.
     /// All tools still pass through `project_for_mode` before becoming model-visible.

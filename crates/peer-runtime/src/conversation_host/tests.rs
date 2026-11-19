@@ -633,3 +633,118 @@ async fn actual_ordinary_model_file_grant_evidence_usage_stop_and_subsequent_run
         2
     );
 }
+
+#[tokio::test]
+async fn interactive_user_input_self_grants_settles_stops_batch_and_continues() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    let batch = json!({
+        "choices": [{
+            "index": 0,
+            "delta": {
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        "id": "ask-1",
+                        "type": "function",
+                        "function": {
+                            "name": "request_user_input",
+                            "arguments": json!({"question": "Which plan?", "options": ["Option A", "Option B"]}).to_string()
+                        }
+                    },
+                    {
+                        "index": 1,
+                        "id": "write-blocked",
+                        "type": "function",
+                        "function": {
+                            "name": "write_file",
+                            "arguments": json!({"path": "should-not-exist.txt", "content": "x"}).to_string()
+                        }
+                    }
+                ]
+            },
+            "finish_reason": "tool_calls"
+        }]
+    });
+    let ask_stream = format!(
+        "data: {batch}\n\ndata: {{\"choices\":[],\"usage\":{{\"prompt_tokens\":10,\"completion_tokens\":2,\"total_tokens\":12}}}}\n\ndata: [DONE]\n\n"
+    );
+    let (endpoint, served) = server(vec![ask_stream, stream("text")]);
+    let model = model(endpoint);
+    let runtime = NativeConversationRuntime::new(
+        root.path(),
+        ConversationAccess::new(LocalAccessLevel::AskBeforeLocal),
+    );
+    let options = ConversationOptions {
+        workspace: workspace.path(),
+        conversation_id: None,
+        resume_from: None,
+        prompt: "Need a choice",
+        image_paths: &[],
+        provider_id: "fixture",
+        mode: RuntimeMode::Chat,
+        effort: "default",
+        persist_model_selection: false,
+        allowlist: None,
+        max_turns: None,
+    };
+    let outcome = runtime
+        .execute_interactive(
+            &options,
+            &model,
+            &mut NoInput,
+            None,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome.error, None);
+    assert!(!workspace.path().join("should-not-exist.txt").exists());
+    let row = canonical_tool(root.path(), &outcome.session_id);
+    assert_eq!(row["permissionGrants"][0]["granted"], true);
+    assert_eq!(
+        row["permissionGrants"][0]["reason"],
+        crate::providers::interaction::SELF_GRANT_REASON
+    );
+    let seg = row["segments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["tool"] == "request_user_input")
+        .unwrap();
+    assert_eq!(seg["result"]["status"], "success");
+    assert_eq!(seg["result"]["output"]["question"], "Which plan?");
+    assert_eq!(
+        seg["result"]["output"]["options"],
+        json!(["Option A", "Option B"])
+    );
+    assert_eq!(seg["result"]["output"]["control"]["terminal"], true);
+
+    let followup = runtime
+        .execute_interactive(
+            &ConversationOptions {
+                conversation_id: Some(&outcome.session_id),
+                prompt: "Option A",
+                ..options
+            },
+            &model,
+            &mut NoInput,
+            None,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(followup.error, None);
+    assert_eq!(followup.content, "Native complete.");
+    let requests = served.join().unwrap();
+    assert_eq!(requests.len(), 2);
+    let manifest_desc = requests[0]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["function"]["name"] == "request_user_input")
+        .unwrap()["function"]["description"]
+        .as_str()
+        .unwrap();
+    assert!(manifest_desc.contains("stop the current turn to wait for their reply"));
+}

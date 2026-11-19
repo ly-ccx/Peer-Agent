@@ -23,7 +23,7 @@ pub use bounded_cache::{
     STREAMING_BUFFER_BYTES,
 };
 pub use classic_view::{
-    ClassicMessage, ClassicView, ToolRowStatus, ToolTimelineRow, render_classic,
+    ClassicMessage, ClassicView, ToolRowStatus, ToolTimelineRow, UserInputPrompt, render_classic,
 };
 pub use commands::{
     BotSubView, CardNumbers, CardOperation, ClassicCommand, HistoryDirection, ProjectCommand,

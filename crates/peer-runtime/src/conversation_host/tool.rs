@@ -40,7 +40,8 @@ impl Host<'_> {
         let evidence = effect.evidence();
         let kind = effect.output_kind();
         let permission = effect.permission();
-        let input_unavailable = permission == ProviderPermission::UserInput;
+        let is_user_input = permission == ProviderPermission::UserInput;
+        let input_unavailable = is_user_input && !self.interactive_user_input;
         let goal_intake = self.observe_goal_intake(permission).await?;
         let risk = effect.risk();
         let read_path = if self.worker.is_some() {
@@ -81,20 +82,18 @@ impl Host<'_> {
             args: &args,
             tool: &call.name,
         };
-        let mut hook = if input_unavailable
-            || self.worker.is_some()
-            || goal_intake.denial(&self.home).is_some()
-        {
-            hooks::Hooks::default()
-        } else {
-            self.tool_hooks(
-                peer_store::HookPhase::PreToolUse,
-                operation,
-                &dispatch,
-                None,
-            )
-            .await
-        };
+        let mut hook =
+            if is_user_input || self.worker.is_some() || goal_intake.denial(&self.home).is_some() {
+                hooks::Hooks::default()
+            } else {
+                self.tool_hooks(
+                    peer_store::HookPhase::PreToolUse,
+                    operation,
+                    &dispatch,
+                    None,
+                )
+                .await
+            };
         if let Some(error) = hook.error
             && !hook.ended_interruption
         {
@@ -206,7 +205,7 @@ impl Host<'_> {
             result["evidence"]["permissionGrantId"] = grant.facts["grantId"].clone();
             result["evidence"]["status"] = json!(outcome.status);
         }
-        if input_unavailable {
+        if is_user_input {
             result["evidence"]["permissionGrantId"] = grant.facts["grantId"].clone();
         }
         if outcome.not_dispatched {
@@ -237,6 +236,7 @@ impl Host<'_> {
         let mut hook_interrupted = None;
         let mut hook_unproven = None;
         if self.worker.is_none()
+            && !is_user_input
             && grant.facts["granted"] == true
             && (outcome.ended || background)
             && !outcome.not_dispatched
@@ -356,6 +356,9 @@ impl Host<'_> {
         }
         if input_unavailable {
             return Ok(ToolStep::UserInputUnavailable);
+        }
+        if is_user_input {
+            return Ok(ToolStep::RequestedUserInput);
         }
         if outcome.status == "denied" && self.repairing_goal() {
             return Err(HostError("permission_denied"));
