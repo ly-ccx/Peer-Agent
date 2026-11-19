@@ -66,12 +66,18 @@ fn row_to_classic(row: TranscriptRow, idx: usize) -> ClassicMessage {
             revision: 1,
             role: raw["role"].as_str().unwrap_or("assistant").to_owned(),
             text: raw["content"].as_str().unwrap_or("").to_owned(),
+            thinking: None,
+            tools: Vec::new(),
+            continuation: false,
         },
         _ => ClassicMessage {
             id: format!("other-{idx}"),
             revision: 1,
             role: "system".into(),
             text: "unreadable".into(),
+            thinking: None,
+            tools: Vec::new(),
+            continuation: false,
         },
     }
 }
@@ -182,6 +188,7 @@ fn main() {
                         activity_label: None,
                         animation_frame: 0,
                         running_elapsed_ms: 0,
+                        tools_expanded: false,
                         notice: None,
                         notice_is_error: false,
                         palette: &DARK_PALETTE,
@@ -333,6 +340,9 @@ fn main() {
         role: "assistant".into(),
         text: giant_text,
         revision: 999_999,
+        thinking: None,
+        tools: Vec::new(),
+        continuation: false,
     });
     for term in [&mut term_wide, &mut term_narrow] {
         term.draw(|f| {
@@ -356,6 +366,7 @@ fn main() {
                     activity_label: None,
                     animation_frame: 0,
                     running_elapsed_ms: 0,
+                    tools_expanded: false,
                     notice: None,
                     notice_is_error: false,
                     palette: &DARK_PALETTE,
@@ -454,6 +465,7 @@ fn main() {
                     activity_label: Some("soak"),
                     animation_frame: 0,
                     running_elapsed_ms: 0,
+                    tools_expanded: false,
                     notice: None,
                     notice_is_error: false,
                     palette: &DARK_PALETTE,

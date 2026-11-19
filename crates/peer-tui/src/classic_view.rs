@@ -9,7 +9,7 @@ use crate::{
     Composer,
     bounded_cache::{ByteBudgetLru, ReadingAnchor},
     commands::clip_bot_line,
-    markdown::{RenderedBlock, StyledLine, WrapCacheKey, render_markdown_themed, stable_hash},
+    markdown::{RenderedBlock, WrapCacheKey, render_markdown_themed, stable_hash},
     model_picker::{ModelPickerState, render_model_picker_dock},
     overlays::{ClassicOverlay, OverlayContext, render_classic_overlay},
     slash_menu::{
@@ -18,9 +18,11 @@ use crate::{
     },
     terminal_text,
     theme::{
-        BRAND_MARK, CARET_SELECTED, ONLINE_DOT, RUNNING_ACTIVITY_LABEL, SEPARATOR, ThemeMode,
-        TuiLocale, TuiPalette, USER_RAIL_BAR, activity_sweep_color, context_meter_parts,
-        context_usage_color, fill_canvas, format_running_elapsed, subscription_quota_color,
+        BRAND_MARK, CARET_SELECTED, ONLINE_DOT, QUOTE_PREFIX, RUNNING_ACTIVITY_LABEL, SEPARATOR,
+        TOOL_DETAIL_PIPE, TOOL_GLYPH_CANCELLED, TOOL_GLYPH_COMPLETED, TOOL_GLYPH_FAILED,
+        TOOL_GLYPH_RUNNING, TOOL_GLYPH_RUNNING_PULSE, TOOL_GLYPH_UNKNOWN, ThemeMode, TuiLocale,
+        TuiPalette, USER_RAIL_BAR, activity_sweep_color, context_meter_parts, context_usage_color,
+        fill_canvas, format_running_elapsed, format_tool_duration, subscription_quota_color,
         thinking_status_label,
     },
     view::draft_view_styled,
@@ -35,12 +37,36 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolRowStatus {
+    Completed,
+    Failed,
+    Cancelled,
+    Denied,
+    Running,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolTimelineRow {
+    pub call_id: String,
+    pub capability_id: String,
+    pub tool_name: String,
+    pub summary: String,
+    pub status: ToolRowStatus,
+    pub duration_ms: Option<u64>,
+    pub detail_lines: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClassicMessage {
     pub id: String,
     pub revision: u64,
     pub role: String,
     pub text: String,
+    pub thinking: Option<String>,
+    pub tools: Vec<ToolTimelineRow>,
+    pub continuation: bool,
 }
 
 pub struct ClassicView<'a> {
@@ -61,6 +87,7 @@ pub struct ClassicView<'a> {
     pub activity_label: Option<&'a str>,
     pub animation_frame: usize,
     pub running_elapsed_ms: u64,
+    pub tools_expanded: bool,
     pub notice: Option<&'a str>,
     pub notice_is_error: bool,
     pub palette: &'static TuiPalette,
@@ -197,10 +224,165 @@ fn render_topbar(frame: &mut Frame<'_>, area: Rect, divider_area: Rect, view: &C
     );
 }
 
-fn push_railed_block(
+fn is_evidence_detail(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    lower.contains("tool-result://")
+        || lower.contains("local-shell-artifact://")
+        || lower.contains("artifact://")
+        || lower.contains("evidence://")
+        || lower.contains("evidence")
+        || lower.contains("artifact")
+}
+
+fn render_thinking_lines(thinking: &str, col_w: usize, palette: &TuiPalette) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let bg = palette.background;
+    lines.push(Line::styled(
+        "Thinking",
+        Style::new().fg(palette.muted).bg(bg),
+    ));
+    let quote_w = col_w.saturating_sub(2).max(6);
+    let block = render_markdown_themed(
+        thinking,
+        quote_w,
+        Style::new()
+            .fg(palette.muted)
+            .bg(bg)
+            .add_modifier(Modifier::ITALIC),
+        8,
+        palette,
+    );
+    let quote_style = Style::new().fg(palette.subtle).bg(bg);
+    for styled in block.lines {
+        let mut spans = vec![Span::styled(QUOTE_PREFIX, quote_style)];
+        spans.extend(styled.to_ratatui_line().spans);
+        lines.push(Line::from(spans));
+    }
+    lines
+}
+
+fn render_tool_timeline_lines(
+    row: &ToolTimelineRow,
+    col_w: usize,
+    animation_frame: usize,
+    expanded: bool,
+    palette: &TuiPalette,
+) -> Vec<Line<'static>> {
+    let bg = palette.background;
+    let (glyph, glyph_fg) = match row.status {
+        ToolRowStatus::Completed => (TOOL_GLYPH_COMPLETED, palette.tool),
+        ToolRowStatus::Failed | ToolRowStatus::Denied => (TOOL_GLYPH_FAILED, palette.tool_failed),
+        ToolRowStatus::Cancelled => (TOOL_GLYPH_CANCELLED, palette.tool_cancelled),
+        ToolRowStatus::Running => {
+            let g = if (animation_frame / 3).is_multiple_of(2) {
+                TOOL_GLYPH_RUNNING
+            } else {
+                TOOL_GLYPH_RUNNING_PULSE
+            };
+            (g, palette.tool_running)
+        }
+        ToolRowStatus::Unknown => (TOOL_GLYPH_UNKNOWN, palette.tool_detail),
+    };
+
+    let mut out = Vec::new();
+    let glyph_span = Span::styled(format!("{glyph} "), Style::new().fg(glyph_fg).bg(bg));
+    let safe_name = terminal_text(&row.tool_name);
+    let name_w = col_w.saturating_sub(4).max(1);
+    let name_clipped = clip_bot_line(&safe_name, name_w);
+    let name_span = Span::styled(
+        name_clipped.clone(),
+        Style::new().fg(palette.text_soft).bg(bg),
+    );
+    let mut spans = vec![glyph_span, name_span];
+    let left_w = 2 + name_clipped.width();
+
+    if col_w >= 28 {
+        let dur = format_tool_duration(row.status == ToolRowStatus::Running, row.duration_ms);
+        let dur_col = format!("{dur:>7}");
+        let dur_fg = if row.status == ToolRowStatus::Running {
+            palette.accent
+        } else {
+            palette.subtle
+        };
+        let (toggle_txt, toggle_fg) = if row.detail_lines.is_empty() {
+            ("  ", palette.subtle)
+        } else if expanded {
+            (" −", palette.muted)
+        } else {
+            (" +", palette.muted)
+        };
+        let right_reserve = 2 + 7 + 2; // 2 gap + 7 duration + 2 toggle
+        let gap_after_name = if col_w > left_w + 2 { 2 } else { 0 };
+        if gap_after_name > 0 {
+            spans.push(Span::styled("  ", Style::new().bg(bg)));
+        }
+        let summary_budget = col_w.saturating_sub(left_w + gap_after_name + right_reserve);
+        let summary_txt = if summary_budget >= 4 && !row.summary.is_empty() {
+            clip_bot_line(&terminal_text(&row.summary), summary_budget)
+        } else {
+            String::new()
+        };
+        let summary_w = summary_txt.width();
+        if !summary_txt.is_empty() {
+            spans.push(Span::styled(
+                summary_txt,
+                Style::new().fg(palette.muted).bg(bg),
+            ));
+        }
+        let used = left_w + gap_after_name + summary_w;
+        let pad_w = col_w.saturating_sub(used + right_reserve);
+        if pad_w + 2 > 0 {
+            spans.push(Span::styled(" ".repeat(pad_w + 2), Style::new().bg(bg)));
+        }
+        spans.push(Span::styled(dur_col, Style::new().fg(dur_fg).bg(bg)));
+        spans.push(Span::styled(toggle_txt, Style::new().fg(toggle_fg).bg(bg)));
+    } else if col_w > left_w + 2 && !row.summary.is_empty() {
+        spans.push(Span::styled("  ", Style::new().bg(bg)));
+        let clipped = clip_bot_line(
+            &terminal_text(&row.summary),
+            col_w.saturating_sub(left_w + 2),
+        );
+        spans.push(Span::styled(clipped, Style::new().fg(palette.muted).bg(bg)));
+    }
+    out.push(Line::from(spans));
+
+    if expanded && !row.detail_lines.is_empty() {
+        let detail_budget = col_w.saturating_sub(2).max(4);
+        for detail in row.detail_lines.iter().take(4) {
+            let clean = terminal_text(detail);
+            let mut dspans = vec![Span::styled(
+                format!("{TOOL_DETAIL_PIPE} "),
+                Style::new().fg(palette.subtle).bg(bg),
+            )];
+            if is_evidence_detail(&clean) && detail_budget > 12 {
+                dspans.push(Span::styled(
+                    "evidence ",
+                    Style::new().fg(palette.success).bg(bg),
+                ));
+                let rest = clip_bot_line(&clean, detail_budget.saturating_sub(9));
+                dspans.push(Span::styled(
+                    rest,
+                    Style::new().fg(palette.text_soft).bg(bg),
+                ));
+            } else {
+                let clipped = clip_bot_line(&clean, detail_budget);
+                dspans.push(Span::styled(
+                    clipped,
+                    Style::new().fg(palette.tool_detail).bg(bg),
+                ));
+            }
+            out.push(Line::from(dspans));
+        }
+    }
+    out
+}
+
+fn push_railed_lines(
     out: &mut Vec<Line<'static>>,
     role: &str,
-    block: &RenderedBlock,
+    lines: Vec<Line<'static>>,
+    continuation: bool,
+    trailing_blank: bool,
     use_rail: bool,
     palette: &TuiPalette,
 ) {
@@ -237,32 +419,38 @@ fn push_railed_block(
     };
 
     if !use_rail {
-        let short_hdr = match role {
-            "user" => "YOU",
-            "tool" => "TOOL",
-            "system" => "SYS",
-            _ => "PEER",
-        };
-        out.push(Line::styled(short_hdr, rail_style));
-        for styled in &block.lines {
-            out.push(styled.to_ratatui_line());
+        if !continuation {
+            let short_hdr = match role {
+                "user" => "YOU",
+                "tool" => "TOOL",
+                "system" => "SYS",
+                _ => "PEER",
+            };
+            out.push(Line::styled(short_hdr, rail_style));
         }
-        out.push(Line::styled("", Style::new().bg(palette.background)));
+        out.extend(lines);
+        if trailing_blank {
+            out.push(Line::styled("", Style::new().bg(palette.background)));
+        }
         return;
     }
 
     let bg = Style::new().bg(palette.background);
     let bar_style = Style::new().fg(palette.user).bg(palette.background);
-    if block.lines.is_empty() {
-        let mut spans = vec![Span::styled(rail_label, rail_style), Span::styled(" ", bg)];
+    if lines.is_empty() {
+        let mut spans = if continuation {
+            vec![Span::styled("      ", bg)]
+        } else {
+            vec![Span::styled(rail_label, rail_style), Span::styled(" ", bg)]
+        };
         if user_bar {
             spans.push(Span::styled(USER_RAIL_BAR, bar_style));
         }
         out.push(Line::from(spans));
     } else {
-        for (idx, styled) in block.lines.iter().enumerate() {
-            let mut spans = Vec::with_capacity(styled.to_ratatui_line().spans.len() + 3);
-            if idx == 0 {
+        for (idx, line) in lines.into_iter().enumerate() {
+            let mut spans = Vec::with_capacity(line.spans.len() + 3);
+            if idx == 0 && !continuation {
                 spans.push(Span::styled(rail_label, rail_style));
                 spans.push(Span::styled(" ", bg));
             } else {
@@ -271,11 +459,13 @@ fn push_railed_block(
             if user_bar {
                 spans.push(Span::styled(USER_RAIL_BAR, bar_style));
             }
-            spans.extend(styled.to_ratatui_line().spans);
+            spans.extend(line.spans);
             out.push(Line::from(spans));
         }
     }
-    out.push(Line::styled("", bg));
+    if trailing_blank {
+        out.push(Line::styled("", bg));
+    }
 }
 
 fn render_composer_status_bar(
@@ -561,10 +751,10 @@ fn render_composer_dock(
         let activity_chars = activity.chars().count();
         let elapsed = format_running_elapsed(view.running_elapsed_ms);
         let label = view.activity_label.map(str::trim).filter(|s| !s.is_empty());
-        let suffix = if rw < 30 || label.is_none() {
-            format!("  · {elapsed}")
+        let suffix_body = if rw < 30 || label.is_none() {
+            format!("· {elapsed}")
         } else {
-            format!("  {} · {elapsed}", label.unwrap_or_default())
+            format!("{} · {elapsed}", label.unwrap_or_default())
         };
         let show_badge = rw >= badge_w + 4;
         let left_budget = if show_badge {
@@ -595,9 +785,10 @@ fn render_composer_dock(
             left_w += cw;
         }
         let suffix_budget = left_budget.saturating_sub(left_w);
-        if suffix_budget > 0 {
-            let clipped_suffix = clip_bot_line(&terminal_text(&suffix), suffix_budget);
-            left_w += clipped_suffix.width();
+        if suffix_budget >= 3 {
+            spans.push(Span::styled("  ", Style::new().bg(palette.background)));
+            let clipped_suffix = clip_bot_line(&terminal_text(&suffix_body), suffix_budget - 2);
+            left_w += 2 + clipped_suffix.width();
             spans.push(Span::styled(
                 clipped_suffix,
                 Style::new().fg(palette.text_soft).bg(palette.background),
@@ -885,8 +1076,19 @@ pub fn render_classic(frame: &mut Frame<'_>, view: ClassicView<'_>) {
         frame.render_widget(Paragraph::new(visible), body_area);
     } else {
         let use_rail = body_w >= 24;
+        let has_running_tool = view.messages.last().is_some_and(|m| {
+            m.role == "assistant" && m.tools.iter().any(|t| t.status == ToolRowStatus::Running)
+        });
+        let show_thinking = view.is_running
+            && view.live_stream.is_empty()
+            && view.approval.is_none()
+            && view.activity_label.is_none()
+            && !has_running_tool;
+        let last_is_assistant = view.messages.last().is_some_and(|m| m.role == "assistant");
+        let tail_follows_assistant = !view.live_stream.is_empty() || show_thinking;
         let mut all_lines: Vec<Line<'static>> = Vec::new();
-        for msg in view.messages {
+
+        for (idx, msg) in view.messages.iter().enumerate() {
             let wrap_w = if !use_rail {
                 body_w
             } else if msg.role == "user" {
@@ -894,26 +1096,64 @@ pub fn render_classic(frame: &mut Frame<'_>, view: ClassicView<'_>) {
             } else {
                 body_w.saturating_sub(6).max(8)
             };
-            let key = WrapCacheKey {
-                item_hash: stable_hash(&msg.id),
-                revision: msg.revision,
-                width: wrap_w as u16,
-                scheme: view.scheme_id,
-            };
-            let block = if let Some(cached) = view.wrap_cache.get(&key) {
-                cached.clone()
-            } else {
-                let computed = render_markdown_themed(
-                    &msg.text,
+            let mut body_lines: Vec<Line<'static>> = Vec::new();
+            if let Some(thinking) = msg
+                .thinking
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                body_lines.extend(render_thinking_lines(thinking, wrap_w, palette));
+                if !msg.text.is_empty() || !msg.tools.is_empty() {
+                    body_lines.push(Line::styled("", Style::new().bg(palette.background)));
+                }
+            }
+            if !msg.text.is_empty() {
+                let key = WrapCacheKey {
+                    item_hash: stable_hash(&msg.id),
+                    revision: msg.revision,
+                    width: wrap_w as u16,
+                    scheme: view.scheme_id,
+                };
+                let block = if let Some(cached) = view.wrap_cache.get(&key) {
+                    cached.clone()
+                } else {
+                    let computed = render_markdown_themed(
+                        &msg.text,
+                        wrap_w,
+                        Style::new().fg(palette.text).bg(palette.background),
+                        200,
+                        palette,
+                    );
+                    view.wrap_cache.insert(key, computed.clone());
+                    computed
+                };
+                body_lines.extend(block.lines.into_iter().map(|s| s.to_ratatui_line()));
+            }
+            for tool in &msg.tools {
+                body_lines.extend(render_tool_timeline_lines(
+                    tool,
                     wrap_w,
-                    Style::new().fg(palette.text).bg(palette.background),
-                    200,
+                    view.animation_frame,
+                    view.tools_expanded,
                     palette,
-                );
-                view.wrap_cache.insert(key, computed.clone());
-                computed
-            };
-            push_railed_block(&mut all_lines, &msg.role, &block, use_rail, palette);
+                ));
+            }
+            if body_lines.is_empty() && msg.role != "user" {
+                continue;
+            }
+            let next_continues = view.messages.get(idx + 1).is_some_and(|n| n.continuation);
+            let last_continues =
+                idx + 1 == view.messages.len() && msg.role == "assistant" && tail_follows_assistant;
+            push_railed_lines(
+                &mut all_lines,
+                &msg.role,
+                body_lines,
+                msg.continuation,
+                !(next_continues || last_continues),
+                use_rail,
+                palette,
+            );
         }
 
         if !view.live_stream.is_empty() {
@@ -929,21 +1169,32 @@ pub fn render_classic(frame: &mut Frame<'_>, view: ClassicView<'_>) {
                 120,
                 palette,
             );
-            push_railed_block(&mut all_lines, "assistant", &live_block, use_rail, palette);
-        } else if view.is_running && view.approval.is_none() && view.activity_label.is_none() {
-            let label = thinking_status_label(view.animation_frame / 4);
-            let thinking_block = RenderedBlock {
-                lines: vec![StyledLine::plain(
-                    label.to_owned(),
-                    Style::new().fg(palette.muted).bg(palette.background),
-                )],
-                truncated: false,
-                total_bytes: label.len(),
-            };
-            push_railed_block(
+            let lines = live_block
+                .lines
+                .into_iter()
+                .map(|s| s.to_ratatui_line())
+                .collect();
+            push_railed_lines(
                 &mut all_lines,
                 "assistant",
-                &thinking_block,
+                lines,
+                last_is_assistant,
+                true,
+                use_rail,
+                palette,
+            );
+        } else if show_thinking {
+            let label = thinking_status_label(view.animation_frame / 4);
+            let line = Line::styled(
+                label.to_owned(),
+                Style::new().fg(palette.muted).bg(palette.background),
+            );
+            push_railed_lines(
+                &mut all_lines,
+                "assistant",
+                vec![line],
+                last_is_assistant,
+                true,
                 use_rail,
                 palette,
             );
@@ -1004,12 +1255,46 @@ mod tests {
                 revision: 1,
                 role: "user".into(),
                 text: "请帮我写一段 Rust 代码".into(),
+                thinking: None,
+                tools: Vec::new(),
+                continuation: false,
             },
             ClassicMessage {
                 id: "a1".into(),
                 revision: 1,
                 role: "assistant".into(),
                 text: "好的：\n```rust\nfn main() { println!(\"ok\"); }\n```".into(),
+                thinking: None,
+                tools: Vec::new(),
+                continuation: false,
+            },
+            ClassicMessage {
+                id: "a2".into(),
+                revision: 1,
+                role: "assistant".into(),
+                text: String::new(),
+                thinking: None,
+                tools: vec![
+                    ToolTimelineRow {
+                        call_id: "c1".into(),
+                        capability_id: "local.file.list".into(),
+                        tool_name: "List".into(),
+                        summary: "~/Documents/Develop/peer-dev".into(),
+                        status: ToolRowStatus::Completed,
+                        duration_ms: Some(120),
+                        detail_lines: vec!["list_files: success · tool-result://c1".into()],
+                    },
+                    ToolTimelineRow {
+                        call_id: "c2".into(),
+                        capability_id: "local.git.query".into(),
+                        tool_name: "Git".into(),
+                        summary: "snapshot .".into(),
+                        status: ToolRowStatus::Failed,
+                        duration_ms: Some(210),
+                        detail_lines: vec!["git_not_repository".into()],
+                    },
+                ],
+                continuation: true,
             },
         ];
         anchor.scroll_up(2, 20, Some("u1".into()));
@@ -1037,6 +1322,7 @@ mod tests {
                         activity_label: Some("正在思考…"),
                         animation_frame: 6,
                         running_elapsed_ms: 8_000,
+                        tools_expanded: true,
                         notice: None,
                         notice_is_error: false,
                         palette: &DARK_PALETTE,
@@ -1063,14 +1349,86 @@ mod tests {
                 assert!(text.contains("剩余72% · plus"));
                 assert!(text.contains("YOU"));
                 assert!(text.contains("PEER"));
-                assert!(text.contains("working..."));
-                assert!(text.contains("· 8s"));
+                assert!(!text.contains("TOOL "));
+                assert!(text.contains("✓ List"));
+                assert!(text.contains("✗ Git"));
+                assert!(text.contains("┆ evidence"));
+                assert!(text.contains("working...  正在思考… · 8s"));
                 assert!(text.contains("PEER / ACTIVE"));
                 assert!(text.contains("mode agent · access Approve"));
                 assert!(text.contains("GPT-6.1 Sol · high"));
                 assert!(text.contains("42%"));
             }
         }
+
+        let pending_msgs = vec![
+            msgs[0].clone(),
+            ClassicMessage {
+                id: "a-run".into(),
+                revision: 1,
+                role: "assistant".into(),
+                text: String::new(),
+                thinking: None,
+                tools: vec![ToolTimelineRow {
+                    call_id: "c3".into(),
+                    capability_id: "local.shell.exec".into(),
+                    tool_name: "Bash".into(),
+                    summary: "git status".into(),
+                    status: ToolRowStatus::Running,
+                    duration_ms: None,
+                    detail_lines: vec!["running detail".into()],
+                }],
+                continuation: false,
+            },
+        ];
+        let mut running_tool_term = Terminal::new(TestBackend::new(100, 20)).unwrap();
+        running_tool_term
+            .draw(|f| {
+                render_classic(
+                    f,
+                    ClassicView {
+                        title: "Peer",
+                        workspace_label: "~/Documents/Develop/peer-dev",
+                        model_badge: "GPT-6.1 Sol · ChatGPT 订阅",
+                        effort_badge: "high",
+                        mode_badge: "chat",
+                        access_badge: "ask",
+                        context_percent: Some(0),
+                        quota_label: None,
+                        quota_remaining: None,
+                        fast_mode: false,
+                        fast_available: false,
+                        goal_status: GoalMenuStatus::None,
+                        goal_banner: None,
+                        is_running: true,
+                        activity_label: None,
+                        animation_frame: 6,
+                        running_elapsed_ms: 8_000,
+                        tools_expanded: false,
+                        notice: None,
+                        notice_is_error: false,
+                        palette: &DARK_PALETTE,
+                        scheme_id: 0,
+                        current_theme: ThemeMode::Dark,
+                        locale: TuiLocale::ZhCn,
+                        messages: &pending_msgs,
+                        live_stream: "",
+                        anchor: &anchor,
+                        composer: &composer,
+                        status: "",
+                        approval: None,
+                        model_picker: &picker,
+                        overlay: &ClassicOverlay::None,
+                        slash_selected: 0,
+                        wrap_cache: &mut cache,
+                    },
+                );
+            })
+            .unwrap();
+        let running_tool_text = buffer_text(&running_tool_term);
+        assert!(running_tool_text.contains("◇ Bash"));
+        assert!(running_tool_text.contains("now +"));
+        assert!(!running_tool_text.contains("Thinking.."));
 
         let mut pending_term = Terminal::new(TestBackend::new(100, 20)).unwrap();
         pending_term
@@ -1095,6 +1453,7 @@ mod tests {
                         activity_label: None,
                         animation_frame: 6,
                         running_elapsed_ms: 8_000,
+                        tools_expanded: false,
                         notice: None,
                         notice_is_error: false,
                         palette: &DARK_PALETTE,
@@ -1116,8 +1475,7 @@ mod tests {
             })
             .unwrap();
         let pending_text = buffer_text(&pending_term);
-        assert!(pending_text.contains("working..."));
-        assert!(pending_text.contains("· 8s"));
+        assert!(pending_text.contains("working...  · 8s"));
         assert!(pending_text.contains("PEER / ACTIVE"));
         assert!(pending_text.contains("Thinking.."));
     }
@@ -1150,6 +1508,7 @@ mod tests {
                     activity_label: None,
                     animation_frame: 0,
                     running_elapsed_ms: 0,
+                    tools_expanded: false,
                     notice: None,
                     notice_is_error: false,
                     palette: &DARK_PALETTE,

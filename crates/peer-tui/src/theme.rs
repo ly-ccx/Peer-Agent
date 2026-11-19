@@ -229,6 +229,14 @@ pub const HEADING_H3: &str = "• ";
 pub const LIST_BULLET: &str = "• ";
 pub const QUOTE_PREFIX: &str = "│ ";
 
+pub const TOOL_GLYPH_COMPLETED: &str = "✓";
+pub const TOOL_GLYPH_FAILED: &str = "✗";
+pub const TOOL_GLYPH_CANCELLED: &str = "○";
+pub const TOOL_GLYPH_RUNNING: &str = "◇";
+pub const TOOL_GLYPH_RUNNING_PULSE: &str = "◆";
+pub const TOOL_GLYPH_UNKNOWN: &str = "·";
+pub const TOOL_DETAIL_PIPE: &str = "┆";
+
 pub fn palette_for(scheme: ThemeScheme) -> &'static TuiPalette {
     match scheme {
         ThemeScheme::Dark => &DARK_PALETTE,
@@ -439,6 +447,23 @@ pub fn thinking_status_label(frame: usize) -> &'static str {
     }
 }
 
+/// Elapsed duration label for tool timeline rows (`tool-result-summary.ts`).
+pub fn format_tool_duration(is_running: bool, duration_ms: Option<u64>) -> String {
+    if is_running {
+        return "now".to_owned();
+    }
+    let Some(ms) = duration_ms else {
+        return "—".to_owned();
+    };
+    if ms < 1_000 {
+        format!("{:.1}s", (ms as f64 / 1000.0).max(0.1))
+    } else if ms < 10_000 {
+        format!("{:.1}s", ms as f64 / 1000.0)
+    } else {
+        format!("{}s", (ms as f64 / 1000.0).round() as u64)
+    }
+}
+
 /// Replace `/Users/<name>` or `/home/<name>` prefix with `~` (`composer-status.ts`).
 pub fn compact_workspace_path(path: &str) -> String {
     let trimmed = path.trim().trim_end_matches(['/', '\\']);
@@ -543,5 +568,11 @@ mod tests {
         assert_eq!(thinking_status_label(1), "Thinking..");
         assert_eq!(thinking_status_label(2), "Thinking...");
         assert_eq!(thinking_status_label(3), "Thinking.");
+        assert_eq!(format_tool_duration(true, Some(500)), "now");
+        assert_eq!(format_tool_duration(false, None), "—");
+        assert_eq!(format_tool_duration(false, Some(40)), "0.1s");
+        assert_eq!(format_tool_duration(false, Some(200)), "0.2s");
+        assert_eq!(format_tool_duration(false, Some(2_500)), "2.5s");
+        assert_eq!(format_tool_duration(false, Some(12_400)), "12s");
     }
 }

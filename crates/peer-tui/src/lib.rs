@@ -22,7 +22,9 @@ pub use bounded_cache::{
     ByteBudgetLru, ByteSized, DISPLAY_PAGE_CACHE_BYTES, MARKDOWN_WRAP_CACHE_BYTES, ReadingAnchor,
     STREAMING_BUFFER_BYTES,
 };
-pub use classic_view::{ClassicMessage, ClassicView, render_classic};
+pub use classic_view::{
+    ClassicMessage, ClassicView, ToolRowStatus, ToolTimelineRow, render_classic,
+};
 pub use commands::{
     BotSubView, CardNumbers, CardOperation, ClassicCommand, HistoryDirection, ProjectCommand,
     clip_bot_line, format_bot_when, parse_classic_command, parse_project_command,
@@ -47,10 +49,13 @@ pub use slash_menu::{
     filter_classic_slash_items, filter_slash_items, render_slash_menu,
 };
 pub use theme::{
-    DARK_PALETTE, LIGHT_PALETTE, RUNNING_ACTIVITY_LABEL, ThemeMode, ThemeScheme, TuiLocale,
-    TuiPalette, WORKING_ANIMATION_INTERVAL_MS, activity_sweep_color, activity_sweep_intensity,
+    DARK_PALETTE, LIGHT_PALETTE, RUNNING_ACTIVITY_LABEL, TOOL_DETAIL_PIPE, TOOL_GLYPH_CANCELLED,
+    TOOL_GLYPH_COMPLETED, TOOL_GLYPH_FAILED, TOOL_GLYPH_RUNNING, TOOL_GLYPH_RUNNING_PULSE,
+    TOOL_GLYPH_UNKNOWN, ThemeMode, ThemeScheme, TuiLocale, TuiPalette,
+    WORKING_ANIMATION_INTERVAL_MS, activity_sweep_color, activity_sweep_intensity,
     blend_hsl_colors, compact_workspace_path, context_meter_parts, format_running_elapsed,
-    format_topbar_quota, palette_for, subscription_quota_color, thinking_status_label,
+    format_tool_duration, format_topbar_quota, palette_for, subscription_quota_color,
+    thinking_status_label,
 };
 pub use view::render;
 pub use wordmark::{B3Variant, b3_wordmark_lines};

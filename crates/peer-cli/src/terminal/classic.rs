@@ -38,10 +38,12 @@ use peer_tui::{
     Action, ByteBudgetLru, ClassicCommand, ClassicMessage, ClassicOverlay, ClassicView, Composer,
     Effect, GoalMenuStatus, GoalPickerRow, HistoryDirection, LeaderAction, LeaderKeyState,
     MARKDOWN_WRAP_CACHE_BYTES, ModelPickerEvent, ModelPickerState, ReadingAnchor, RenderedBlock,
-    ResumeSessionRow, SlashFilterContext, ThemeMode, TuiLocale, WORKING_ANIMATION_INTERVAL_MS,
-    WrapCacheKey, action_for_event, compact_workspace_path, filter_classic_slash_items,
-    format_topbar_quota, parse_classic_command, render_classic, terminal_text,
+    ResumeSessionRow, SlashFilterContext, ThemeMode, ToolRowStatus, ToolTimelineRow, TuiLocale,
+    WORKING_ANIMATION_INTERVAL_MS, WrapCacheKey, action_for_event, compact_workspace_path,
+    filter_classic_slash_items, format_topbar_quota, parse_classic_command, render_classic,
+    terminal_text,
 };
+use serde_json::Value;
 use std::{
     io,
     path::PathBuf,
@@ -112,6 +114,7 @@ pub(super) struct ClassicSession<'a> {
     active: Option<ActiveTurn>,
     compacting: Option<ActiveCompaction>,
     last_anim_draw: Option<Instant>,
+    tools_expanded: bool,
     approval: Option<Approval>,
     model_picker: ModelPickerState,
     overlay: ClassicOverlay,
@@ -169,6 +172,7 @@ impl<'a> ClassicSession<'a> {
             active: None,
             compacting: None,
             last_anim_draw: None,
+            tools_expanded: false,
             approval: None,
             model_picker: ModelPickerState::default(),
             overlay: ClassicOverlay::None,
@@ -404,32 +408,37 @@ impl<'a> ClassicSession<'a> {
             return false;
         };
         let limits = TranscriptLimits {
-            records: 24,
+            records: MAX_DISPLAY_MESSAGES,
             ..TranscriptLimits::default()
         };
         match TranscriptReader::new(&self.home).read_page(conv_id, cursor.as_ref(), limits, None) {
             Ok(page) => {
                 self.older = page.older;
                 let mut rows = Vec::with_capacity(page.rows.len());
+                let mut streams = Vec::with_capacity(page.rows.len());
                 for (idx, row) in page.rows.into_iter().enumerate() {
-                    let (id, role, text) = format_transcript_row(row, idx);
-                    rows.push(ClassicMessage {
-                        id,
-                        revision: 1,
-                        role,
-                        text,
-                    });
+                    let (stream_id, msg) = parse_transcript_row(row, idx);
+                    streams.push(stream_id);
+                    rows.push(msg);
                 }
+                apply_continuation(&mut rows, &streams);
                 if cursor.is_some() {
-                    rows.extend(std::mem::take(&mut self.messages));
+                    let existing = std::mem::take(&mut self.messages);
+                    rows.extend(existing);
                     if rows.len() > MAX_DISPLAY_MESSAGES {
                         rows.truncate(MAX_DISPLAY_MESSAGES);
+                    }
+                    if let Some(first) = rows.first_mut() {
+                        first.continuation = false;
                     }
                     self.messages = rows;
                 } else {
                     if rows.len() > MAX_DISPLAY_MESSAGES {
                         let drop_n = rows.len() - MAX_DISPLAY_MESSAGES;
                         rows.drain(..drop_n);
+                    }
+                    if let Some(first) = rows.first_mut() {
+                        first.continuation = false;
                     }
                     self.messages = rows;
                 }
@@ -827,6 +836,7 @@ impl<'a> ClassicSession<'a> {
             .map(|a| a.display.borrow().live.clone())
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| self.interrupted_preview.clone());
+        let live_stream = live_buf.strip_prefix("Peer  ").unwrap_or(&live_buf);
         let workspace_label = compact_workspace_path(&self.workspace.to_string_lossy());
         let model_badge = self.model_badge();
         let effort_badge = self.selected_effort.as_deref().unwrap_or("default");
@@ -923,6 +933,7 @@ impl<'a> ClassicSession<'a> {
                     activity_label,
                     animation_frame,
                     running_elapsed_ms,
+                    tools_expanded: self.tools_expanded,
                     notice: notice_str,
                     notice_is_error,
                     palette,
@@ -930,7 +941,7 @@ impl<'a> ClassicSession<'a> {
                     current_theme,
                     locale,
                     messages: &self.messages,
-                    live_stream: &live_buf,
+                    live_stream,
                     anchor: &self.anchor,
                     composer: &self.composer,
                     status,
@@ -1128,6 +1139,7 @@ impl<'a> ClassicSession<'a> {
         }
         if need_reload {
             self.reload_transcript(None);
+            self.refresh_context_percent();
         }
         if let Some(active) = finished {
             let live_tail = active.display.borrow().live.clone();
@@ -1982,6 +1994,17 @@ impl<'a> ClassicSession<'a> {
                         } else if key.code == KeyCode::F(3) {
                             self.open_model_picker();
                             dirty = true;
+                        } else if key.code == KeyCode::Char('o')
+                            && key.modifiers.contains(KeyModifiers::CONTROL)
+                        {
+                            self.tools_expanded = !self.tools_expanded;
+                            let msg = if self.tools_expanded {
+                                "已展开工具详情（Ctrl+O 收起）"
+                            } else {
+                                "已收起工具详情（Ctrl+O 展开）"
+                            };
+                            self.set_notice(msg, false);
+                            dirty = true;
                         } else if key.code == KeyCode::Char('d')
                             && key.modifiers.contains(KeyModifiers::CONTROL)
                             && self.composer.draft().is_empty()
@@ -2178,12 +2201,335 @@ impl<'a> ClassicSession<'a> {
     }
 }
 
-fn format_transcript_row(row: TranscriptRow, idx: usize) -> (String, String, String) {
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = y - i64::from(m <= 2);
+    let era = y.div_euclid(400);
+    let yoe = y.rem_euclid(400);
+    let doy = (153 * (m + if m > 2 { -3 } else { 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+fn parse_iso8601_millis(raw: &str) -> Option<u64> {
+    let s = raw.trim();
+    if s.len() < 19 || !s.is_ascii() {
+        return None;
+    }
+    let bytes = s.as_bytes();
+    if bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || !(bytes[10] == b'T' || bytes[10] == b't' || bytes[10] == b' ')
+        || bytes[13] != b':'
+        || bytes[16] != b':'
+    {
+        return None;
+    }
+    let year: i64 = s[0..4].parse().ok()?;
+    let month: i64 = s[5..7].parse().ok()?;
+    let day: i64 = s[8..10].parse().ok()?;
+    let hour: i64 = s[11..13].parse().ok()?;
+    let min: i64 = s[14..16].parse().ok()?;
+    let sec: i64 = s[17..19].parse().ok()?;
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || !(0..24).contains(&hour)
+        || !(0..60).contains(&min)
+        || !(0..60).contains(&sec)
+    {
+        return None;
+    }
+    let mut rest = &s[19..];
+    let mut ms: i64 = 0;
+    if let Some(after_dot) = rest.strip_prefix('.') {
+        let digits: String = after_dot
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
+        rest = &after_dot[digits.len()..];
+        let mut frac = [b'0'; 3];
+        for (i, b) in digits.bytes().take(3).enumerate() {
+            frac[i] = b;
+        }
+        ms = std::str::from_utf8(&frac).ok()?.parse().ok()?;
+    }
+    let offset_ms: i64 = if rest.is_empty() || rest == "Z" || rest == "z" {
+        0
+    } else if (rest.starts_with('+') || rest.starts_with('-')) && rest.len() >= 6 {
+        let sign = if rest.starts_with('-') { -1 } else { 1 };
+        let parts = &rest[1..];
+        if parts.as_bytes().get(2) != Some(&b':') {
+            return None;
+        }
+        let oh: i64 = parts[0..2].parse().ok()?;
+        let om: i64 = parts[3..5].parse().ok()?;
+        if oh >= 24 || om >= 60 {
+            return None;
+        }
+        sign * (oh * 3600 + om * 60) * 1000
+    } else {
+        return None;
+    };
+    let days = days_from_civil(year, month, day);
+    let utc_ms = (days * 86_400 + hour * 3600 + min * 60 + sec) * 1000 + ms - offset_ms;
+    u64::try_from(utc_ms).ok()
+}
+
+fn tool_display_name(capability_id: &str, raw_tool: &str) -> String {
+    let known = |id: &str| -> Option<&'static str> {
+        match id.to_ascii_lowercase().as_str() {
+            "local.shell.exec" | "bash" | "shell" => Some("Bash"),
+            "local.file.read" | "read_file" | "read" => Some("Read"),
+            "local.file.write" | "write_file" | "write" | "edit_file" => Some("Write"),
+            "local.file.list" | "list_files" | "list" => Some("List"),
+            "local.search.content"
+            | "local.search.files"
+            | "local.search.aggregate"
+            | "search_files"
+            | "batch_search"
+            | "grep"
+            | "glob" => Some("Search"),
+            "local.git.query" | "git_query" => Some("Git"),
+            "local.interaction.request_user_input" | "request_user_input" => Some("Ask user"),
+            "read_tool_result" | "local.tool.read_result" => Some("Read result"),
+            "web_fetch" | "local.web.fetch" => Some("Fetch"),
+            "web_search" | "local.web.search" => Some("Web search"),
+            _ => None,
+        }
+    };
+    if let Some(name) = known(capability_id).or_else(|| known(raw_tool)) {
+        return name.to_owned();
+    }
+    let base = if !raw_tool.trim().is_empty() {
+        raw_tool.trim()
+    } else {
+        capability_id.trim()
+    };
+    let leaf = base.split('.').rfind(|s| !s.is_empty()).unwrap_or("tool");
+    if let Some(name) = known(leaf) {
+        return name.to_owned();
+    }
+    let mut chars = leaf.chars();
+    match chars.next() {
+        Some(c) => format!("{}{}", c.to_uppercase(), chars.as_str()),
+        None => "Tool".to_owned(),
+    }
+}
+
+fn compact_path_display(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.starts_with("/Users/") || trimmed.starts_with("/home/") {
+        compact_workspace_path(trimmed)
+    } else {
+        trimmed.to_owned()
+    }
+}
+
+fn str_arg<'a>(args: Option<&'a Value>, key: &str) -> Option<&'a str> {
+    args?
+        .get(key)?
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+}
+
+fn tool_argument_summary(
+    capability_id: &str,
+    raw_tool: &str,
+    args: Option<&Value>,
+    result: Option<&Value>,
+) -> String {
+    let cap_lower = capability_id.to_ascii_lowercase();
+    let raw_lower = raw_tool.to_ascii_lowercase();
+    let is_cap = |c: &str, t: &str| cap_lower == c || raw_lower == t;
+
+    if is_cap("local.interaction.request_user_input", "request_user_input")
+        && let Some(q) = str_arg(args, "question")
+    {
+        return bounded_text(q, 120);
+    }
+    if is_cap("local.shell.exec", "bash")
+        && let Some(cmd) = str_arg(args, "command")
+    {
+        return bounded_text(cmd, 120);
+    }
+    if (is_cap("local.file.read", "read_file")
+        || is_cap("local.file.write", "write_file")
+        || is_cap("local.file.write", "edit_file")
+        || is_cap("local.file.list", "list_files"))
+        && let Some(p) = str_arg(args, "path").or_else(|| str_arg(args, "file"))
+    {
+        return bounded_text(&compact_path_display(p), 120);
+    }
+    if is_cap("local.git.query", "git_query") {
+        let op = str_arg(args, "operation");
+        let path = str_arg(args, "path").map(compact_path_display);
+        let summary = match (op, path) {
+            (Some(o), Some(p)) => format!("{o} {p}"),
+            (Some(o), None) => o.to_owned(),
+            (None, Some(p)) => p,
+            (None, None) => String::new(),
+        };
+        if !summary.is_empty() {
+            return bounded_text(&summary, 120);
+        }
+    }
+    if (is_cap("local.search.content", "search_files")
+        || is_cap("local.search.files", "batch_search")
+        || is_cap("local.search.aggregate", "grep")
+        || raw_lower == "glob")
+        && let Some(q) = str_arg(args, "query")
+            .or_else(|| str_arg(args, "pattern"))
+            .or_else(|| str_arg(args, "path"))
+    {
+        return bounded_text(&compact_path_display(q), 120);
+    }
+    if (raw_lower == "read_tool_result" || cap_lower == "local.tool.read_result")
+        && let Some(args_val) = args
+        && let Some(bytes) = args_val["reference"]["bytes"].as_u64()
+    {
+        let offset = args_val["offset"].as_u64().unwrap_or(0);
+        return if offset > 0 {
+            format!("{bytes}B @ {offset}")
+        } else {
+            format!("{bytes}B")
+        };
+    }
+    for key in [
+        "path",
+        "command",
+        "query",
+        "action",
+        "operation",
+        "url",
+        "name",
+        "id",
+    ] {
+        if let Some(val) = str_arg(args, key) {
+            return bounded_text(&compact_path_display(val), 120);
+        }
+    }
+    if let Some(obj) = args.and_then(|v| v.as_object())
+        && !obj.is_empty()
+    {
+        let keys: Vec<&str> = obj.keys().map(String::as_str).take(3).collect();
+        return keys.join(", ");
+    }
+    if let Some(summary) = result.and_then(|r| r["evidence"]["summary"].as_str()) {
+        return bounded_text(summary.trim(), 120);
+    }
+    String::new()
+}
+
+fn push_detail_line(out: &mut Vec<String>, raw: &str) {
+    if out.len() >= 4 {
+        return;
+    }
+    let clean = bounded_text(raw.trim(), 160);
+    if !clean.is_empty() && !out.iter().any(|existing| existing == &clean) {
+        out.push(clean);
+    }
+}
+
+fn extract_tool_detail_lines(result: Option<&Value>) -> Vec<String> {
+    let Some(res) = result else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    if let Some(err) = res.get("error").filter(|v| !v.is_null()) {
+        if let Some(msg) = err["message"].as_str().or_else(|| err["code"].as_str()) {
+            push_detail_line(&mut out, msg);
+        } else if let Some(msg) = err.as_str() {
+            push_detail_line(&mut out, msg);
+        }
+    }
+    if let Some(preview) = res["outputPreview"]["text"].as_str() {
+        for line in preview.lines() {
+            if !line.trim().is_empty() {
+                push_detail_line(&mut out, line);
+            }
+        }
+    }
+    if let Some(output) = res.get("output").filter(|v| !v.is_null()) {
+        if let Some(text) = output.as_str() {
+            for line in text.lines() {
+                if !line.trim().is_empty() {
+                    push_detail_line(&mut out, line);
+                }
+            }
+        } else if let Some(obj) = output.as_object() {
+            for key in ["stdout", "stderr", "content"] {
+                if let Some(s) = obj.get(key).and_then(|v| v.as_str()) {
+                    for line in s.lines() {
+                        if !line.trim().is_empty() {
+                            push_detail_line(&mut out, line);
+                        }
+                    }
+                }
+            }
+            if let Some(entries) = obj.get("entries").and_then(|v| v.as_array())
+                && !entries.is_empty()
+            {
+                let names: Vec<&str> = entries
+                    .iter()
+                    .filter_map(|e| e["name"].as_str())
+                    .take(5)
+                    .collect();
+                if !names.is_empty() {
+                    push_detail_line(
+                        &mut out,
+                        &format!("{} entries: {}", entries.len(), names.join(", ")),
+                    );
+                }
+            }
+        }
+    }
+    if let Some(summary) = res["evidence"]["summary"].as_str() {
+        push_detail_line(&mut out, summary);
+    }
+    if let Some(refs) = res["evidence"]["artifactRefs"].as_array() {
+        for r in refs {
+            if let Some(s) = r.as_str() {
+                push_detail_line(&mut out, s);
+            }
+        }
+    }
+    out
+}
+
+fn apply_continuation(rows: &mut [ClassicMessage], streams: &[Option<String>]) {
+    let mut prev_stream: Option<&str> = None;
+    let mut prev_assistant = false;
+    let mut prev_has_tools = false;
+    for (idx, msg) in rows.iter_mut().enumerate() {
+        let cur_stream = streams.get(idx).and_then(|s| s.as_deref());
+        let is_assistant = msg.role == "assistant";
+        msg.continuation = prev_assistant
+            && is_assistant
+            && ((cur_stream.is_some() && cur_stream == prev_stream)
+                || !msg.tools.is_empty()
+                || prev_has_tools);
+        prev_assistant = is_assistant;
+        prev_stream = cur_stream;
+        prev_has_tools = !msg.tools.is_empty();
+    }
+    if let Some(first) = rows.first_mut() {
+        first.continuation = false;
+    }
+}
+
+fn parse_transcript_row(row: TranscriptRow, idx: usize) -> (Option<String>, ClassicMessage) {
     let TranscriptRow::Message { raw, .. } = row else {
         return (
-            format!("corrupt-{idx}"),
-            "system".into(),
-            "历史中有一条无法读取的记录。".into(),
+            None,
+            ClassicMessage {
+                id: format!("corrupt-{idx}"),
+                revision: 1,
+                role: "system".into(),
+                text: "历史中有一条无法读取的记录。".into(),
+                thinking: None,
+                tools: Vec::new(),
+                continuation: false,
+            },
         );
     };
     let val = &raw;
@@ -2192,33 +2538,96 @@ fn format_transcript_row(row: TranscriptRow, idx: usize) -> (String, String, Str
         .map(str::to_owned)
         .unwrap_or_else(|| format!("row-{idx}"));
     let role = val["role"].as_str().unwrap_or("assistant").to_owned();
-    let content = val["content"]
+    let stream_id = val["streamId"].as_str().map(str::to_owned);
+    let started_ms = val["createdAt"].as_str().and_then(parse_iso8601_millis);
+    let mut text = val["content"]
         .as_str()
         .map(|s| bounded_text(s, 16 * 1024))
         .unwrap_or_default();
-    if !content.is_empty() {
-        return (id, role, content);
-    }
+    let mut thinking_parts = Vec::new();
+    let mut tools = Vec::new();
+    let mut text_parts = Vec::new();
+
     if let Some(segments) = val["segments"].as_array() {
-        let mut parts = Vec::new();
         for seg in segments {
             match seg["type"].as_str() {
-                Some("tool-call") => {
-                    let tool = seg["tool"].as_str().unwrap_or("tool");
-                    parts.push(format!("[工具调用] {tool}"));
+                Some("text") => {
+                    if let Some(s) = seg["content"].as_str()
+                        && !s.is_empty()
+                    {
+                        text_parts.push(bounded_text(s, 16 * 1024));
+                    }
                 }
-                Some("tool-result") => {
-                    let status = seg["status"].as_str().unwrap_or("done");
-                    parts.push(format!("[工具结果] {status}"));
+                Some("thinking") => {
+                    if let Some(s) = seg["content"].as_str()
+                        && !s.trim().is_empty()
+                    {
+                        thinking_parts.push(bounded_text(s.trim(), 4 * 1024));
+                    }
+                }
+                Some("tool-call") => {
+                    let raw_tool = seg["tool"].as_str().unwrap_or("tool");
+                    let call_id = seg["toolCallId"].as_str().unwrap_or("").to_owned();
+                    let result = seg.get("result").filter(|v| !v.is_null());
+                    let capability_id = result
+                        .and_then(|r| r["capabilityId"].as_str())
+                        .unwrap_or(raw_tool)
+                        .to_owned();
+                    let status = match result.and_then(|r| r["status"].as_str()) {
+                        None => ToolRowStatus::Running,
+                        Some("success" | "completed") => ToolRowStatus::Completed,
+                        Some("failed") => ToolRowStatus::Failed,
+                        Some("denied") => ToolRowStatus::Denied,
+                        Some("cancelled") => ToolRowStatus::Cancelled,
+                        Some("running") => ToolRowStatus::Running,
+                        Some(_) => ToolRowStatus::Unknown,
+                    };
+                    let completed_ms = result
+                        .and_then(|r| r["completedAt"].as_str())
+                        .and_then(parse_iso8601_millis);
+                    let duration_ms = match (started_ms, completed_ms) {
+                        (Some(s), Some(e)) => e.checked_sub(s),
+                        _ => None,
+                    };
+                    let args = seg.get("args");
+                    tools.push(ToolTimelineRow {
+                        call_id,
+                        tool_name: tool_display_name(&capability_id, raw_tool),
+                        summary: tool_argument_summary(&capability_id, raw_tool, args, result),
+                        capability_id,
+                        status,
+                        duration_ms,
+                        detail_lines: extract_tool_detail_lines(result),
+                    });
+                }
+                Some("tool-result") if tools.is_empty() => {
+                    let status_raw = seg["status"].as_str().unwrap_or("done");
+                    text_parts.push(format!("[工具结果] {status_raw}"));
                 }
                 _ => {}
             }
         }
-        if !parts.is_empty() {
-            return (id, "tool".to_owned(), parts.join(" · "));
-        }
     }
-    (id, role, String::new())
+    if text.is_empty() && !text_parts.is_empty() {
+        text = text_parts.join("\n");
+    }
+    let thinking = if thinking_parts.is_empty() {
+        None
+    } else {
+        Some(thinking_parts.join("\n"))
+    };
+    (
+        stream_id,
+        ClassicMessage {
+            id,
+            revision: 1,
+            role,
+            text,
+            thinking,
+            tools,
+            continuation: false,
+        },
+    )
 }
 
 pub(super) async fn run_classic_shell(
@@ -2232,4 +2641,133 @@ pub(super) async fn run_classic_shell(
     LocalSet::new()
         .run_until(session.run(terminal, shutdown))
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn transcript_tool_rows_and_grouping_match_opentui_timeline() {
+        let range = || peer_protocol::TranscriptRange { start: 0, end: 1 };
+        let user_row = TranscriptRow::Message {
+            raw: json!({
+                "id": "m0",
+                "role": "user",
+                "content": "看一下最近的重点"
+            }),
+            range: range(),
+        };
+        let intro_row = TranscriptRow::Message {
+            raw: json!({
+                "id": "m1",
+                "role": "assistant",
+                "streamId": "stream-1",
+                "createdAt": "2026-11-19T13:03:06.600Z",
+                "content": "我先查看状态。"
+            }),
+            range: range(),
+        };
+        let git_fail_row = TranscriptRow::Message {
+            raw: json!({
+                "id": "m2",
+                "role": "assistant",
+                "streamId": "stream-1",
+                "createdAt": "2026-11-19T13:03:06.628Z",
+                "content": "",
+                "segments": [{
+                    "type": "tool-call",
+                    "tool": "git_query",
+                    "toolCallId": "c1",
+                    "args": {"path": "/Users/alice/Documents/peer-dev", "operation": "snapshot"},
+                    "result": {
+                        "capabilityId": "local.git.query",
+                        "status": "failed",
+                        "completedAt": "2026-11-19T13:03:06.876Z",
+                        "error": {"code": "git_not_repository", "message": "git_not_repository"}
+                    }
+                }]
+            }),
+            range: range(),
+        };
+        let list_ok_row = TranscriptRow::Message {
+            raw: json!({
+                "id": "m3",
+                "role": "assistant",
+                "streamId": "stream-1",
+                "createdAt": "2026-11-19T13:03:12.504Z",
+                "content": "",
+                "segments": [{
+                    "type": "tool-call",
+                    "tool": "list_files",
+                    "toolCallId": "c2",
+                    "args": {"path": "/Users/alice/Documents/peer-dev"},
+                    "result": {
+                        "capabilityId": "local.file.list",
+                        "status": "success",
+                        "completedAt": "2026-11-19T13:03:12.630Z",
+                        "evidence": {"summary": "list_files: success"}
+                    }
+                }]
+            }),
+            range: range(),
+        };
+        let bash_running_row = TranscriptRow::Message {
+            raw: json!({
+                "id": "m4",
+                "role": "assistant",
+                "streamId": "stream-1",
+                "createdAt": "2026-11-19T13:03:36.226Z",
+                "content": "",
+                "segments": [{
+                    "type": "tool-call",
+                    "tool": "bash",
+                    "toolCallId": "c3",
+                    "args": {"command": "git status"}
+                }]
+            }),
+            range: range(),
+        };
+
+        let mut streams = Vec::new();
+        let mut msgs = Vec::new();
+        for (idx, row) in [
+            user_row,
+            intro_row,
+            git_fail_row,
+            list_ok_row,
+            bash_running_row,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let (s, m) = parse_transcript_row(row, idx);
+            streams.push(s);
+            msgs.push(m);
+        }
+        apply_continuation(&mut msgs, &streams);
+
+        assert!(!msgs[0].continuation);
+        assert!(!msgs[1].continuation);
+        assert!(msgs[2].continuation);
+        assert!(msgs[3].continuation);
+        assert!(msgs[4].continuation);
+
+        assert_eq!(msgs[2].tools[0].tool_name, "Git");
+        assert_eq!(msgs[2].tools[0].status, ToolRowStatus::Failed);
+        assert_eq!(msgs[2].tools[0].summary, "snapshot ~/Documents/peer-dev");
+        assert_eq!(msgs[2].tools[0].duration_ms, Some(248));
+        assert_eq!(msgs[2].tools[0].detail_lines, vec!["git_not_repository"]);
+
+        assert_eq!(msgs[3].tools[0].tool_name, "List");
+        assert_eq!(msgs[3].tools[0].status, ToolRowStatus::Completed);
+        assert_eq!(msgs[3].tools[0].summary, "~/Documents/peer-dev");
+        assert_eq!(msgs[3].tools[0].duration_ms, Some(126));
+
+        assert_eq!(msgs[4].tools[0].tool_name, "Bash");
+        assert_eq!(msgs[4].tools[0].status, ToolRowStatus::Running);
+        assert_eq!(msgs[4].tools[0].summary, "git status");
+        assert_eq!(msgs[4].tools[0].duration_ms, None);
+    }
 }
