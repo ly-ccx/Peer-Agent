@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { realpathSync, existsSync } from 'node:fs';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -19,6 +19,60 @@ test('an idle managed shell remains a native handle until the shared stop barrie
   assert.equal(executionHandlesLive(conversationId),true,'command completion does not prove its persistent shell has exited');
   await stopExecutionHandles(conversationId);
   assert.equal(executionHandlesLive(conversationId),false);
+});
+
+test('persistent Shell stop waits for a resistant descendant after its leader exits', posixOnly, async t => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'peer-original-shell-group-'));
+  t.after(() => import('node:fs/promises').then(({ rm }) => rm(workspaceRoot, { recursive: true, force: true })));
+  const manager = createNodeShellSessionManager({ workspaceRoot, shellPath: '/bin/sh', killGraceMs: 80 });
+  const conversationId = 'original-group-stop';
+  const groupAlive = (pid: number) => {
+    try { process.kill(-pid, 0); return true; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false; throw error; }
+  };
+  const result = await manager.runCommand({ conversationId, toolCallId: 'start-child', timeoutMs: 5000,
+    command: `printf '%s\\n' "$$" > leader
+/bin/sh -c 'trap "" INT TERM; : > ready; exec /bin/sleep 30' </dev/null >/dev/null 2>&1 &
+while [ ! -f ready ]; do /bin/sleep 0.01; done`,
+  });
+  assert.equal(result.status, 'completed');
+  const leader = Number(await readFile(path.join(workspaceRoot, 'leader'), 'utf8'));
+  assert(Number.isSafeInteger(leader) && leader > 1);
+  t.after(async () => {
+    if (groupAlive(leader)) process.kill(-leader, 'SIGKILL');
+    await manager.disposeAll();
+  });
+  assert(groupAlive(leader));
+  await stopExecutionHandles(conversationId);
+  assert.equal(groupAlive(leader), false, 'the original process group still exists after stop');
+  assert.equal(executionHandlesLive(conversationId), false);
+  const next = await manager.runCommand({ conversationId, toolCallId: 'next-call', command: 'printf ready', timeoutMs: 5000 });
+  assert.equal(next.stdout, 'ready');
+  assert.equal(next.sessionRebuilt, true);
+});
+
+test('an exited Shell leader drains children still holding its output pipes', posixOnly, async t => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'peer-drain-shell-pipes-'));
+  t.after(() => import('node:fs/promises').then(({ rm }) => rm(workspaceRoot, { recursive: true, force: true })));
+  const manager = createNodeShellSessionManager({ workspaceRoot, shellPath: '/bin/sh', killGraceMs: 80 });
+  t.after(() => manager.disposeAll());
+  const conversationId = 'shell-open-pipe-stop';
+  const result = await manager.runCommand({
+    conversationId, toolCallId: 'exit-shell', timeoutMs: 5000,
+    command: `printf '%s\\n' "$$" > leader
+/bin/sh -c 'trap "" INT TERM; : > ready; exec /bin/sleep 30' &
+while [ ! -f ready ]; do /bin/sleep 0.01; done
+printf 'last output'
+exit`,
+  });
+  assert.equal(result.exitCode, null, 'no command completion trailer was written');
+  assert.equal(result.stdout, 'last output');
+  const leader = Number(await readFile(path.join(workspaceRoot, 'leader'), 'utf8'));
+  assert(Number.isSafeInteger(leader) && leader > 1);
+  t.after(() => { try { process.kill(-leader, 'SIGKILL'); } catch {} });
+  await manager.disposeConversation(conversationId);
+  assert.throws(() => process.kill(-leader, 0), { code: 'ESRCH' });
+  assert.equal(executionHandlesLive(conversationId), false);
 });
 
 function createManager(t: test.TestContext, workspaceRoot: string) {

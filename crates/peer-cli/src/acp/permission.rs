@@ -44,24 +44,21 @@ impl PermissionInput for ApprovalPort {
             else {
                 return Deny;
             };
-            let Some(next) = self.connection.next_approval.get().checked_add(1) else {
-                return Deny;
-            };
-            self.connection.next_approval.set(next);
             let approval = PendingApproval {
                 pending: &self.connection.pending,
-                id: format!("peer-approval-{next}"),
+                id: format!("peer-approval-{}", uuid::Uuid::new_v4()),
             };
             let (reply, receive) = tokio::sync::oneshot::channel();
             approval
                 .pending
                 .borrow_mut()
                 .insert(approval.id.clone(), reply);
+            let tool = super::tool_update::pending(call, tool, &prompt["arguments"]);
             let message = json!({
                 "jsonrpc":"2.0",
                 "id":approval.id,
                 "method":"session/request_permission",
-                "params":{"sessionId":self.session,"toolCall":{"toolCallId":call,"title":tool,"status":"pending"},
+                "params":{"sessionId":self.session,"toolCall":tool,
                     "options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},
                                {"optionId":"deny","name":"Reject","kind":"reject_once"}]}
             });
@@ -127,14 +124,20 @@ impl ConversationOutput for OutputPort {
                     }
                     assistant_text(remainder)
                 }
-                ConversationEvent::ToolPrepared { call_id, tool } => json!({
-                    "sessionUpdate":"tool_call","toolCallId":call_id,"title":tool,"status":"pending"
-                }),
-                ConversationEvent::ToolSettled { call_id, status } => json!({
-                    "sessionUpdate":"tool_call_update","toolCallId":call_id,
-                    "status":if status == "success" { "completed" } else { "failed" },
-                    "_meta":{"peer":{"evidenceRef":format!("tool-result://{call_id}")}}
-                }),
+                ConversationEvent::ToolPrepared {
+                    call_id,
+                    tool,
+                    arguments,
+                } => {
+                    let mut update = super::tool_update::pending(call_id, tool, arguments);
+                    update["sessionUpdate"] = json!("tool_call");
+                    update
+                }
+                ConversationEvent::ToolSettled {
+                    call_id,
+                    result,
+                    evidence_ref,
+                } => super::tool_update::settled(call_id, result, evidence_ref),
             };
             self.connection
                 .writer

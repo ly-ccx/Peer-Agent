@@ -70,6 +70,7 @@ impl Host<'_> {
         self.publish(ConversationEvent::ToolPrepared {
             call_id: &call_id,
             tool: &call.name,
+            arguments: &args,
         })
         .await?;
         #[cfg(feature = "test-fixtures")]
@@ -298,29 +299,36 @@ impl Host<'_> {
         )?;
         #[cfg(feature = "test-fixtures")]
         super::fixture_fault(&self.home, "after_tool_facts");
-        EvidenceIndexStore::new(&self.home).register(
-            &HostToolEvidence {
-                conversation_id: &self.identity.conversation_id,
-                plan_id: self.worker.as_ref().map(|worker| worker.lease.plan_id()),
-                stream_id: Some(&self.identity.stream_id),
-                tool_name: &call.name,
-                capability_id: &capability,
-                tool_call_id: &call_id,
-                grant: &grant.facts,
-                result: &result,
-            },
-            None,
-        )?;
+        // The first entry is the canonical tool-result reference. Keep just
+        // that reference when handing off to a potentially slow output port.
+        let evidence_ref = EvidenceIndexStore::new(&self.home)
+            .register(
+                &HostToolEvidence {
+                    conversation_id: &self.identity.conversation_id,
+                    plan_id: self.worker.as_ref().map(|worker| worker.lease.plan_id()),
+                    stream_id: Some(&self.identity.stream_id),
+                    tool_name: &call.name,
+                    capability_id: &capability,
+                    tool_call_id: &call_id,
+                    grant: &grant.facts,
+                    result: &result,
+                },
+                None,
+            )?
+            .into_iter()
+            .next()
+            .and_then(|record| record["evidenceRef"].as_str().map(str::to_owned));
         if let Some(error) = hook_unproven {
             return Err(error);
         }
+        let settled = ConversationEvent::ToolSettled {
+            call_id: &call_id,
+            result: &result,
+            evidence_ref: evidence_ref.as_deref(),
+        };
         if background {
             self.acknowledge_background_start(&call_id)?;
-            self.publish(ConversationEvent::ToolSettled {
-                call_id: &call_id,
-                status: outcome.status,
-            })
-            .await?;
+            self.publish(settled).await?;
             if let Some(error) = hook_interrupted.or(grant.terminal) {
                 return Err(error);
             }
@@ -339,11 +347,7 @@ impl Host<'_> {
         if let (Some(worker), Some(observation)) = (&mut self.worker, observation) {
             worker.observe(observation);
         }
-        self.publish(ConversationEvent::ToolSettled {
-            call_id: &call_id,
-            status: outcome.status,
-        })
-        .await?;
+        self.publish(settled).await?;
         if let Some(error) = interrupted.or(hook_interrupted).or(grant.terminal) {
             return Err(error);
         }

@@ -36,7 +36,8 @@ impl NativeConversationRuntime {
         if initial.engine == "peer-ts" {
             // A validated legacy stop is an observation of the original
             // execution, also when its enclosing Host is still alive. It
-            // admits the same ledger transaction and no new effects.
+            // admits the same ledger transaction and reconciliation of saved
+            // tool facts. Never infer an outcome from the stop itself.
             if initial.stop.is_none() {
                 return Err(HostError("native_execution_owner_unknown"));
             }
@@ -49,6 +50,8 @@ impl NativeConversationRuntime {
                 return Err(HostError("native_execution_stop_unproven"));
             }
             guard.commit_usage(&store, &now())?;
+            self.settle_confirmed(&store, &mut guard, cancel, deadline)
+                .await?;
             return Ok(guard.current(&store)?);
         }
         if initial.engine != "peer-native" {

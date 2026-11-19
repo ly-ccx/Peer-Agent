@@ -78,6 +78,90 @@ fn ordinary_recovery_settles_billing_only_after_a_canonical_legacy_stop() {
     assert_eq!(std::fs::read(ledger).unwrap(), repaired_ledger);
 }
 
+#[test]
+fn ordinary_recovery_settles_a_legacy_tool_only_with_matching_saved_facts() {
+    for (with_result, correct_digest) in [(true, true), (false, true), (true, false)] {
+        let fixture = Ordinary::new();
+        let store = ConversationStore::new(fixture.home());
+        let meta = store
+            .create(
+                &peer_store::NewConversation {
+                    title: "Legacy observation",
+                    workspace_path: None,
+                    mode: "chat",
+                    created_at: AT,
+                },
+                None,
+            )
+            .unwrap();
+        let id = meta["id"].as_str().unwrap();
+        let history = store.read_committed(id, None, 1024 * 1024).unwrap();
+        let args = json!({"path":"actual.txt","content":"original write"});
+        let digest =
+            peer_protocol::approval_args_digest(if correct_digest { &args } else { &Value::Null })
+                .unwrap();
+        let mut segment =
+            json!({"type":"tool-call","tool":"write_file","toolCallId":"legacy-call","args":args});
+        if with_result {
+            segment["result"] = json!({
+                "toolCallId":"legacy-call","capabilityId":"local.file.write","status":"success",
+                "output":{"path":"actual.txt","bytes":14},"outputPreview":{"path":"actual.txt"},"completedAt":AT,
+                "evidence":{"evidenceId":"legacy-evidence","toolCallId":"legacy-call","summary":"Wrote actual.txt.","artifactRefs":[]}
+            });
+        }
+        store.commit_message(&history, &json!({
+            "id":"legacy-tool-message","role":"assistant","content":"","createdAt":AT,"streamId":"legacy-stream",
+            "segments":[segment], "permissionGrants":[{
+                "grantId":"legacy-grant","capabilityId":"local.file.write","toolCallId":"legacy-call",
+                "granted":true,"decidedAt":AT,"scope":"local.file.write","duration":"once"
+            }],
+        }), AT, None).unwrap();
+        let directory = fixture.home().join("conversations");
+        let index = directory.join("index.jsonl");
+        let body = directory.join(format!("{id}.jsonl"));
+        let body_before = std::fs::read(&body).unwrap();
+        let mut metadata: Value = get(&index);
+        let owner = json!({"bootId":"legacy-boot","pid":std::process::id(),"pidStart":"legacy-start","hostId":"legacy-test","acquiredAt":AT});
+        let stop = json!({"owner":owner,"observedAt":AT,"runnerIdle":true,"admissionClosed":true,"handlesEnded":true});
+        metadata["runtimeExecution"] = json!({
+            "schemaVersion":1,"engine":"peer-ts","identity":{"kind":"conversation","conversationId":id,"streamId":"legacy-stream"},
+            "owner":owner,"revision":5,"phase":"recovery_required","handles":[],"stop":stop,
+            "pendingTools":[{"toolCallId":"legacy-call","dispatchId":"legacy-dispatch","messageId":"legacy-tool-message",
+                "capabilityId":"local.file.write","argsDigest":digest,"declaredScopes":[],"phase":"outcome_unknown"}],
+            "usage":null,"unknownUsage":false,"attribution":{"id":"legacy-stream","streamId":"legacy-stream","at":AT},
+            "usageCommitted":true,"updatedAt":AT,
+        });
+        std::fs::write(&index, format!("{metadata}\n")).unwrap();
+        let index_before = std::fs::read(&index).unwrap();
+
+        let output = recover(&fixture, id);
+        let settled = with_result && correct_digest;
+        assert_eq!(
+            output.status.code(),
+            Some(i32::from(!settled)),
+            "{output:?}"
+        );
+        let facts: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(facts["facts"]["stop"], stop);
+        let evidence = fixture.home().join("goal-plans/evidence-index.jsonl");
+        if settled {
+            assert_eq!(facts["facts"]["phase"], "stopped");
+            let rows = std::fs::read_to_string(&evidence).unwrap();
+            assert_eq!(rows.lines().count(), 1);
+            assert_eq!(get(&evidence)["evidenceRef"], "tool-result://legacy-call");
+            let after = std::fs::read(&index).unwrap();
+            assert!(recover(&fixture, id).status.success());
+            assert_eq!(std::fs::read(&index).unwrap(), after);
+            assert_eq!(std::fs::read_to_string(&evidence).unwrap(), rows);
+        } else {
+            assert_eq!(facts["facts"]["phase"], "recovery_required");
+            assert_eq!(std::fs::read(index).unwrap(), index_before);
+            assert!(!evidence.exists());
+        }
+        assert_eq!(std::fs::read(body).unwrap(), body_before);
+    }
+}
+
 fn run_facts(fixture: &Ordinary, id: &str) -> peer_protocol::ConversationExecution {
     ConversationStore::new(fixture.home())
         .read_conversation_execution(id)
@@ -253,6 +337,49 @@ fn public_ordinary_recovery_invalid_or_missing_session_creates_no_data() {
         assert_eq!(recover(&fixture, id).status.code(), Some(1));
         assert!(!fixture.home().exists());
     }
+}
+
+#[test]
+fn public_ordinary_recovery_distinguishes_an_unrecorded_execution_from_a_missing_session() {
+    let fixture = Ordinary::new();
+    let store = ConversationStore::new(fixture.home());
+    let mut meta = store
+        .create(
+            &peer_store::NewConversation {
+                title: "Older conversation",
+                workspace_path: None,
+                mode: "chat",
+                created_at: AT,
+            },
+            None,
+        )
+        .unwrap();
+    let id = meta["id"].as_str().unwrap().to_owned();
+    let index = fixture.home().join("conversations/index.jsonl");
+    let unrecorded = std::fs::read(&index).unwrap();
+    let result = recover(&fixture, &id);
+    assert_eq!(result.status.code(), Some(1), "{result:?}");
+    assert!(result.stdout.is_empty(), "{result:?}");
+    let diagnostic = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        diagnostic.contains("conversation_execution_unrecorded"),
+        "{diagnostic}"
+    );
+    assert!(diagnostic.contains("旧版 Peer"), "{diagnostic}");
+    assert_eq!(std::fs::read(&index).unwrap(), unrecorded);
+    assert!(!fixture.home().join("usage").exists());
+
+    let missing = recover(&fixture, "missing");
+    assert_eq!(missing.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("NOT_FOUND"));
+
+    meta["runtimeExecution"] = json!({"schemaVersion":2});
+    let future = format!("{meta}\n");
+    std::fs::write(&index, &future).unwrap();
+    let invalid = recover(&fixture, &id);
+    assert_eq!(invalid.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&invalid.stderr).contains("conversation_execution_invalid"));
+    assert_eq!(std::fs::read_to_string(&index).unwrap(), future);
 }
 
 #[cfg(target_os = "macos")]

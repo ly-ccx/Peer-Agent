@@ -102,11 +102,21 @@ pub struct ConversationOutcome {
 /// Presentation events from the ordinary Host. Assistant deltas are provisional
 /// display text; AssistantText is published after the complete text is committed.
 pub enum ConversationEvent<'a> {
-    Started { conversation_id: &'a str },
+    Started {
+        conversation_id: &'a str,
+    },
     AssistantDelta(&'a str),
     AssistantText(&'a str),
-    ToolPrepared { call_id: &'a str, tool: &'a str },
-    ToolSettled { call_id: &'a str, status: &'a str },
+    ToolPrepared {
+        call_id: &'a str,
+        tool: &'a str,
+        arguments: &'a Value,
+    },
+    ToolSettled {
+        call_id: &'a str,
+        result: &'a Value,
+        evidence_ref: Option<&'a str>,
+    },
 }
 pub trait ConversationOutput {
     fn publish<'a>(

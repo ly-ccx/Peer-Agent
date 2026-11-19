@@ -2062,6 +2062,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "url",
+ "uuid",
 ]
 
 [[package]]

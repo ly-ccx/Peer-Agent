@@ -42,6 +42,12 @@ pub fn run(session: &str) -> io::Result<CliExit> {
                     safe = peer_tui::terminal_text(session)
                 )?;
             }
+            if error.0 == peer_store::StoreError::ExecutionUnrecorded.code() {
+                writeln!(
+                    io::stderr(),
+                    "会话存在，但没有可恢复的执行记录。如果它由旧版 Peer 打开，请在原宿主确认执行已停稳，并核对未完成的操作。"
+                )?;
+            }
             Ok(if error.0 == "CANCELLED" {
                 CliExit::Cancelled
             } else {

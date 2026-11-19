@@ -6,6 +6,7 @@ import { trackExecutionHandle } from './project-agent/execution-handles.mjs';
 const DEFAULT_KILL_GRACE_MS = 2_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 2_000_000;
 const STDERR_DRAIN_MS = 15;
+const GROUP_CONFIRM_MS = 750;
 
 export type NodeShellSessionStatus = 'completed' | 'failed' | 'cancelled' | 'timeout';
 
@@ -58,14 +59,17 @@ export interface CreateNodeShellSessionManagerOptions {
 
 interface LiveSession {
   readonly key: string;
-  child: ChildProcess;
+  readonly child: ChildProcess;
+  readonly complete: (output: { completedAt: string }) => void;
   cwd: string;
   stdout: string;
   stderr: string;
   waiters: Array<(chunk: string) => void>;
   dead: boolean;
+  closed: boolean;
+  groupEnded: boolean;
+  stopping?: Promise<void>;
   bootstrapped: boolean;
-  completion: Promise<{ completedAt: string }>;
 }
 
 function parseCommandTrailer(chunk: string, marker: string): {
@@ -127,16 +131,21 @@ function capText(buffer: string, next: string, maxBytes: number): { text: string
   return { text: buffer + chunk.subarray(0, remaining).toString('utf8'), truncated: true };
 }
 
-function terminateGroup(child: ChildProcess, signal: NodeJS.Signals): void {
-  if (child.exitCode != null || child.signalCode != null) return;
+function terminateGroup(session: LiveSession, signal: NodeJS.Signals): void {
+  if (groupEnded(session)) return;
+  const { child } = session;
   if (child.pid) {
     try {
       process.kill(-child.pid, signal);
       return;
-    } catch {
-      // Fall through to the direct child when the process group is already gone.
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ESRCH') {
+        session.groupEnded = true;
+        return;
+      }
     }
   }
+  if (child.exitCode != null || child.signalCode != null) return;
   try {
     child.kill(signal);
   } catch {
@@ -144,10 +153,33 @@ function terminateGroup(child: ChildProcess, signal: NodeJS.Signals): void {
   }
 }
 
+function groupEnded(session: LiveSession): boolean {
+  if (session.groupEnded) return true;
+  const pid = session.child.pid;
+  if (!pid) return session.closed;
+  try {
+    process.kill(-pid, 0);
+  } catch (error) {
+    // Once the original group is absent, never signal a later reuse of its ID.
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') session.groupEnded = true;
+  }
+  return session.groupEnded;
+}
+
 function wait(ms: number): Promise<void> {
   return new Promise((resolveWait) => {
     setTimeout(resolveWait, ms);
   });
+}
+
+async function waitForStop(session: LiveSession, budgetMs: number): Promise<boolean> {
+  const deadline = performance.now() + budgetMs;
+  for (;;) {
+    if (groupEnded(session) && session.closed) return true;
+    const remaining = deadline - performance.now();
+    if (remaining <= 0) return false;
+    await wait(Math.min(25, remaining));
+  }
 }
 
 export function createNodeShellSessionManager(
@@ -164,18 +196,38 @@ export function createNodeShellSessionManager(
   const sessions = new Map<string, LiveSession>();
   const queues = new Map<string, Promise<unknown>>();
   const spawnedKeys = new Set<string>();
+  let disposed = false;
   const onProcessExit = (): void => {
     for (const session of sessions.values()) {
-      terminateGroup(session.child, 'SIGKILL');
+      terminateGroup(session, 'SIGKILL');
     }
   };
   process.once('exit', onProcessExit);
 
-  const drop = (session: LiveSession): void => {
+  const drain = async (session: LiveSession, interrupt: boolean): Promise<void> => {
+    if (interrupt) {
+      terminateGroup(session, 'SIGINT');
+      if (await waitForStop(session, Math.min(killGraceMs, 400))) return;
+    }
+    if (groupEnded(session) && session.closed) return;
+    terminateGroup(session, 'SIGTERM');
+    if (await waitForStop(session, killGraceMs)) return;
+    terminateGroup(session, 'SIGKILL');
+    if (!await waitForStop(session, GROUP_CONFIRM_MS)) {
+      throw new Error('shell_session_stop_unconfirmed');
+    }
+  };
+
+  const stopSession = (session: LiveSession, interrupt = false): Promise<void> => {
+    if (session.stopping) return session.stopping;
     session.dead = true;
-    if (sessions.get(session.key) === session) sessions.delete(session.key);
-    terminateGroup(session.child, 'SIGTERM');
-    setTimeout(() => terminateGroup(session.child, 'SIGKILL'), killGraceMs).unref?.();
+    const stop = drain(session, interrupt).then(() => {
+      if (sessions.get(session.key) === session) sessions.delete(session.key);
+      session.complete({ completedAt: now() });
+    });
+    session.stopping = stop;
+    void stop.catch(() => { session.stopping = undefined; });
+    return stop;
   };
 
   const spawnSession = (key: string, cwd: string, toolCallId?: string): LiveSession => {
@@ -196,13 +248,15 @@ export function createNodeShellSessionManager(
     const session: LiveSession = {
       key,
       child,
+      complete: close,
       cwd,
       stdout: '',
       stderr: '',
       waiters: [],
       dead: false,
+      closed: false,
+      groupEnded: false,
       bootstrapped: !options.bootstrapScript,
-      completion,
     };
     const notify = (): void => {
       const snapshot = session.stdout;
@@ -219,26 +273,33 @@ export function createNodeShellSessionManager(
     });
     const markDead = (): void => {
       session.dead = true;
-      if (sessions.get(key) === session) sessions.delete(key);
       notify();
     };
-    child.once('close', markDead);
-    child.once('close', () => close({ completedAt: now() }));
+    child.once('exit', () => {
+      markDead();
+      void stopSession(session).catch(() => {});
+    });
+    child.once('close', () => {
+      session.closed = true;
+      markDead();
+      void stopSession(session).catch(() => {});
+    });
     child.once('error', markDead);
     spawnedKeys.add(key);
     sessions.set(key, session);
     if (toolCallId) trackExecutionHandle({ conversationId: key, handleId: `shell-session:${randomUUID()}`, toolCallId,
-      completion, stop: () => { drop(session); return completion; } });
+      completion, stop: () => stopSession(session) });
     return session;
   };
 
-  const ensureSession = (key: string, toolCallId?: string): { session: LiveSession; rebuilt: boolean } => {
+  const ensureSession = async (key: string, admit: () => void, toolCallId?: string): Promise<{ session: LiveSession; rebuilt: boolean }> => {
     const existing = sessions.get(key);
     if (existing && !existing.dead && existing.child.exitCode == null) {
       return { session: existing, rebuilt: false };
     }
     const rebuilt = spawnedKeys.has(key);
-    if (existing) drop(existing);
+    if (existing) await stopSession(existing);
+    admit();
     return { session: spawnSession(key, workspaceRoot, toolCallId), rebuilt };
   };
 
@@ -257,37 +318,22 @@ export function createNodeShellSessionManager(
     toolCallId?: string,
   ): Promise<NodeShellSessionCommandResult> => {
     const previous = queues.get(key) ?? Promise.resolve();
-    const run = previous.then(
-      () => {
+    const start = async () => {
+      const check = () => {
+        if (disposed) throw new Error('shell_session_closed');
         admit(requestedCwd || sessions.get(key)?.cwd || workspaceRoot);
-        const current = ensureSession(key, toolCallId);
-        return work(current.session, current.rebuilt);
-      },
-      () => {
-        admit(requestedCwd || sessions.get(key)?.cwd || workspaceRoot);
-        const current = ensureSession(key, toolCallId);
-        return work(current.session, current.rebuilt);
-      },
-    );
+      };
+      const current = await ensureSession(key, check, toolCallId);
+      return work(current.session, current.rebuilt);
+    };
+    const run = previous.then(start, start);
     queues.set(key, run.catch(() => undefined));
     return run;
   };
 
   const disposeKey = async (key: string): Promise<void> => {
     const session = sessions.get(key);
-    if (!session) return;
-    drop(session);
-    await wait(25);
-  };
-
-  const interruptThenDiscard = async (
-    session: LiveSession,
-    reason: 'timeout' | 'cancelled',
-  ): Promise<void> => {
-    terminateGroup(session.child, 'SIGINT');
-    await wait(Math.min(killGraceMs, 400));
-    if (!session.dead) drop(session);
-    void reason;
+    if (session) await stopSession(session);
   };
 
   return {
@@ -302,10 +348,14 @@ export function createNodeShellSessionManager(
         : undefined;
 
       return runLocked(key, async (initial, alreadyRebuilt) => {
+        if (disposed) throw new Error('shell_session_closed');
         runOptions.beforeExecute?.(requestedCwd || initial.cwd);
         let session = initial;
         let rebuilt = alreadyRebuilt;
         if (session.dead) {
+          await stopSession(session);
+          if (disposed) throw new Error('shell_session_closed');
+          runOptions.beforeExecute?.(requestedCwd || workspaceRoot);
           session = spawnSession(key, workspaceRoot, runOptions.toolCallId);
           rebuilt = true;
         }
@@ -329,8 +379,9 @@ pwd
         try {
           writeScript(session, script);
         } catch {
+          await stopSession(session);
+          if (disposed) throw new Error('shell_session_closed');
           runOptions.beforeExecute?.(requestedCwd || workspaceRoot);
-          drop(session);
           session = spawnSession(key, workspaceRoot, runOptions.toolCallId);
           session.bootstrapped = Boolean(bootstrap) || session.bootstrapped;
           rebuilt = true;
@@ -343,14 +394,14 @@ pwd
         let cancelled = false;
         const abort = (): void => {
           cancelled = true;
-          void interruptThenDiscard(session, 'cancelled');
+          void stopSession(session, true).catch(() => {});
         };
         if (runOptions.signal?.aborted) abort();
         else runOptions.signal?.addEventListener('abort', abort, { once: true });
 
         const timeout = setTimeout(() => {
           timedOut = true;
-          void interruptThenDiscard(session, 'timeout');
+          void stopSession(session, true).catch(() => {});
         }, Math.max(1, runOptions.timeoutMs));
         timeout.unref?.();
 
@@ -367,7 +418,7 @@ pwd
             };
             const check = (buffer: string): void => {
               parsed = parseCommandTrailer(buffer.slice(startStdout), marker);
-              if (parsed || session.dead || timedOut || cancelled) finish();
+              if (parsed || session.closed || timedOut || cancelled) finish();
             };
             session.waiters.push(check);
             session.child.once('error', rejectDone);
@@ -428,8 +479,11 @@ pwd
       return disposeKey(sessionConversationKey(conversationId, conversationId));
     },
     async disposeAll() {
+      disposed = true;
+      const outcomes = await Promise.allSettled([...sessions.keys()].map(disposeKey));
+      const failed = outcomes.find((outcome) => outcome.status === 'rejected');
+      if (failed) throw failed.reason;
       process.removeListener('exit', onProcessExit);
-      await Promise.all([...sessions.keys()].map((key) => disposeKey(key)));
     },
   };
 }

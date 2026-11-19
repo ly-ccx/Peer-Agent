@@ -14,7 +14,7 @@ impl ConversationStore {
     /// the OS on process death. Existing mkdir locks are never expired/deleted.
     pub fn try_conversation_recovery(&self, id: &str) -> Result<ConversationRecovery, StoreError> {
         self.read_conversation_execution(id)?
-            .ok_or(StoreError::NotFound)?;
+            .ok_or(StoreError::ExecutionUnrecorded)?;
         let path = std::fs::canonicalize(&self.directory).map_err(|_| StoreError::ReadFailed)?;
         if !std::fs::symlink_metadata(&self.directory)
             .map_err(|_| StoreError::ReadFailed)?

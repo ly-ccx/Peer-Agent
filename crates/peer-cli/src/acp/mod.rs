@@ -1,6 +1,7 @@
 //! ACP v1 stdio is a presentation and control adapter for ordinary runs.
 mod permission;
 mod stdio;
+mod tool_update;
 
 use peer_protocol::{CliExit, JsonLimits, LocalAccessLevel, decode_json_bounded};
 use peer_runtime::{
@@ -15,7 +16,7 @@ use peer_runtime::{
 use peer_store::ConversationModelSelection;
 use serde_json::{Value, json};
 use std::{
-    cell::{Cell, RefCell},
+    cell::RefCell,
     collections::BTreeMap,
     io,
     path::{Path, PathBuf},
@@ -42,7 +43,6 @@ struct Connection {
     writer: stdio::Writer<io::Stdout>,
     shutdown: CancellationToken,
     pending: Pending,
-    next_approval: Cell<u64>,
     home: PathBuf,
     chinese: bool,
     runtime: NativeConversationRuntime,
@@ -71,7 +71,6 @@ pub fn run() -> io::Result<CliExit> {
                     writer: stdio::Writer::new(io::stdout(), &cancel)?,
                     shutdown: cancel.clone(),
                     pending: RefCell::default(),
-                    next_approval: Cell::new(0),
                     runtime: NativeConversationRuntime::new(
                         &home,
                         ConversationAccess::new(LocalAccessLevel::AskBeforeLocal),
@@ -230,7 +229,7 @@ impl Connection {
         let catalog = session_models(&self.home).map_err(|_| Fault::AUTH)?;
         let context = default_context(entry(&catalog, &model)?, None);
         let config = config_options(&catalog, &model, context.as_ref(), self.chinese)?;
-        let id = format!("peer-session-{}", sessions.len() + 1);
+        let id = uuid::Uuid::new_v4().to_string();
         sessions.insert(
             id.clone(),
             Session {

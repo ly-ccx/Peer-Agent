@@ -123,6 +123,104 @@ impl Drop for Client {
 }
 
 #[test]
+fn native_acp_reconnect_does_not_reuse_a_stale_session_id() {
+    let root = tempfile::tempdir().unwrap();
+    let first_workspace = root.path().join("first");
+    let second_workspace = root.path().join("second");
+    std::fs::create_dir(&first_workspace).unwrap();
+    std::fs::create_dir(&second_workspace).unwrap();
+    let server = Server::new(vec![reply_text("New session reply")]);
+    let mut first = Client::start(root.path(), &server);
+    first.request(1, "initialize", json!({"protocolVersion":1}));
+    let stale = first.create(2, &first_workspace);
+    first.finish();
+
+    let mut second = Client::start(root.path(), &server);
+    second.request(1, "initialize", json!({"protocolVersion":1}));
+    let current = second.create(2, &second_workspace);
+    second.prompt(3, &stale, "Stale prompt from the first workspace");
+    let rejected = second.next();
+    assert_eq!(rejected["id"], 3, "{rejected}");
+    assert_eq!(rejected["error"]["code"], -32602, "{rejected}");
+    assert_ne!(stale, current);
+    assert!(server.requests.lock().unwrap().is_empty());
+
+    second.prompt(4, &current, "Current workspace prompt");
+    loop {
+        let frame = second.next();
+        if frame["id"] == 4 {
+            assert_eq!(frame["result"]["stopReason"], "end_turn", "{frame}");
+            break;
+        }
+        assert_eq!(frame["params"]["sessionId"], current, "{frame}");
+    }
+    second.finish();
+    let requests = server.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert!(
+        requests[0]["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["role"] == "user" && row["content"] == "Current workspace prompt")
+    );
+}
+
+#[test]
+fn native_acp_reconnect_does_not_accept_a_stale_approval_response() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = root.path().join("workspace");
+    std::fs::create_dir(&workspace).unwrap();
+    let effect = workspace.join("effect.txt");
+    let tool = || {
+        reply_tool(
+            "write_file",
+            json!({"path":"effect.txt","content":"fixture"}),
+        )
+    };
+    let server = Server::new(vec![tool(), tool(), reply_text("Finished")]);
+
+    let request_approval = |client: &mut Client| loop {
+        let frame = client.next();
+        if frame["method"] == "session/request_permission" {
+            return frame["id"].clone();
+        }
+        assert_eq!(frame["method"], "session/update", "{frame}");
+    };
+
+    let mut first = Client::start(root.path(), &server);
+    first.request(1, "initialize", json!({"protocolVersion":1}));
+    let session = first.create(2, &workspace);
+    first.prompt(3, &session, "First write");
+    let stale = request_approval(&mut first);
+    first.finish();
+    assert!(!effect.exists());
+
+    let mut second = Client::start(root.path(), &server);
+    second.request(1, "initialize", json!({"protocolVersion":1}));
+    let session = second.create(2, &workspace);
+    second.prompt(3, &session, "Second write");
+    let current = request_approval(&mut second);
+    second.send(
+        json!({"id":stale,"result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}),
+    );
+    second
+        .send(json!({"id":current,"result":{"outcome":{"outcome":"selected","optionId":"deny"}}}));
+    loop {
+        let frame = second.next();
+        if frame["id"] == 3 {
+            assert_eq!(frame["result"]["stopReason"], "end_turn", "{frame}");
+            break;
+        }
+        assert_eq!(frame["params"]["sessionId"], session, "{frame}");
+    }
+    second.finish();
+    assert!(!effect.exists(), "stale approval reached the file provider");
+    assert_ne!(stale, current);
+    assert_eq!(server.requests.lock().unwrap().len(), 3);
+}
+
+#[test]
 fn native_acp_two_prompts_keep_permission_and_conversation_isolated() {
     let root = tempfile::tempdir().unwrap();
     let dirs = [root.path().join("first"), root.path().join("second")];
@@ -165,6 +263,10 @@ fn native_acp_two_prompts_keep_permission_and_conversation_isolated() {
         match message["method"].as_str() {
             Some("session/request_permission") => {
                 assert_eq!(
+                    message["params"]["toolCall"]["rawInput"],
+                    json!({"path":"effect.txt","content":"only once"})
+                );
+                assert_eq!(
                     calls.get(session),
                     message["params"]["toolCall"]["toolCallId"]
                         .as_str()
@@ -176,6 +278,12 @@ fn native_acp_two_prompts_keep_permission_and_conversation_isolated() {
             Some("session/update") => {
                 let update = &message["params"]["update"];
                 assert_eq!(update["sessionUpdate"], "tool_call");
+                assert_eq!(update["status"], "pending");
+                assert_eq!(
+                    update["rawInput"],
+                    json!({"path":"effect.txt","content":"only once"})
+                );
+                assert!(update.get("_meta").is_none());
                 calls.insert(
                     session.to_owned(),
                     update["toolCallId"].as_str().unwrap().to_owned(),
@@ -207,10 +315,17 @@ fn native_acp_two_prompts_keep_permission_and_conversation_isolated() {
         }}));
     }
     let mut done = std::collections::BTreeMap::new();
+    let mut write_update = None;
     while done.len() < 2 {
         let message = client.next();
         if let Some(id) = message["id"].as_u64() {
             done.insert(id, message["result"]["stopReason"].clone());
+        }
+        let update = &message["params"]["update"];
+        if update["sessionUpdate"] == "tool_call_update"
+            && message["params"]["sessionId"] == sessions[0]
+        {
+            assert!(write_update.replace(update.clone()).is_none());
         }
     }
     assert_eq!(done[&10], "end_turn");
@@ -221,6 +336,16 @@ fn native_acp_two_prompts_keep_permission_and_conversation_isolated() {
     );
     assert!(!dirs[1].join("effect.txt").exists());
     let evidence = peer_store::EvidenceIndexStore::new(root.path().join("data"));
+    let write = write_update.unwrap();
+    let detail = write["content"][0]["content"]["text"].as_str().unwrap();
+    let recorded: Value = serde_json::from_str(detail).unwrap();
+    assert!(recorded["path"].as_str().unwrap().ends_with("effect.txt"));
+    assert_eq!(write["status"], "completed");
+    assert_eq!(write["toolCallId"], calls[&sessions[0]]);
+    assert_eq!(
+        write["_meta"]["peer"]["evidenceRef"],
+        format!("tool-result://{}", calls[&sessions[0]])
+    );
     for call in calls.values() {
         let rows = evidence
             .find(&[format!("tool-result://{call}")], None)
@@ -1144,6 +1269,12 @@ fn native_acp_settles_an_unavailable_question_and_accepts_a_later_prompt() {
     let update = &settled["params"]["update"];
     assert_eq!(update["sessionUpdate"], "tool_call_update");
     assert_eq!(update["status"], "failed");
+    assert!(
+        !update["content"][0]["content"]["text"]
+            .as_str()
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(update["toolCallId"], call["toolCallId"]);
     let reference = update["_meta"]["peer"]["evidenceRef"].as_str().unwrap();
     let rows = peer_store::EvidenceIndexStore::new(root.path().join("data"))
