@@ -108,6 +108,8 @@ impl ConversationOutput for OutputPort {
 
 pub(in crate::terminal) struct Approval {
     pub text: String,
+    pub card: peer_tui::ApprovalCard,
+    pub selected: usize,
     pub reply: oneshot::Sender<LocalPermissionDecision>,
     pub scroll: usize,
     pub shown_at: Option<(u16, u16)>,
@@ -115,6 +117,64 @@ pub(in crate::terminal) struct Approval {
 impl Approval {
     pub fn expired(&self) -> bool {
         self.reply.is_closed()
+    }
+}
+
+pub(in crate::terminal) fn build_approval_card(
+    tool: &str,
+    prompt: &Value,
+) -> peer_tui::ApprovalCard {
+    let cap = prompt["capabilityId"]
+        .as_str()
+        .or_else(|| prompt["approval"]["capabilityId"].as_str())
+        .or_else(|| prompt["scopes"][0]["capabilityId"].as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let action = match cap {
+        Some(c) if c != tool => format!("{tool} ({c})"),
+        _ => tool.to_owned(),
+    };
+    let raw_location = prompt["scopes"][0]["path"]
+        .as_str()
+        .or_else(|| prompt["workspacePath"].as_str())
+        .or_else(|| prompt["scopes"][0]["workspacePath"].as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Current workspace");
+    let location = if raw_location.starts_with("/Users/") || raw_location.starts_with("/home/") {
+        peer_tui::compact_workspace_path(raw_location)
+    } else {
+        raw_location.to_owned()
+    };
+    let reason = prompt["reason"]
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("This action needs your approval before local execution.");
+    let risk = prompt["riskLevel"]
+        .as_str()
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "runtime governed".to_owned());
+    let raw_args = if prompt["arguments"].is_null() {
+        "No arguments".to_owned()
+    } else if let Some(s) = prompt["arguments"].as_str() {
+        s.to_owned()
+    } else {
+        serde_json::to_string(&prompt["arguments"]).unwrap_or_else(|_| "No arguments".to_owned())
+    };
+    let single_line = raw_args.split_whitespace().collect::<Vec<_>>().join(" ");
+    let compact_args = if single_line.is_empty() {
+        "No arguments".to_owned()
+    } else {
+        bounded_text(&single_line, 240)
+    };
+    peer_tui::ApprovalCard {
+        action: peer_tui::terminal_text(&action),
+        location: peer_tui::terminal_text(&location),
+        reason: peer_tui::terminal_text(reason),
+        risk: peer_tui::terminal_text(&risk),
+        arguments: peer_tui::terminal_text(&compact_args),
     }
 }
 
@@ -148,11 +208,14 @@ impl PermissionInput for PermissionPort {
                 });
                 return Deny;
             }
+            let card = build_approval_card(tool, &prompt);
             let (reply, receive) = oneshot::channel();
             if self
                 .requests
                 .try_send(Approval {
                     text,
+                    card,
+                    selected: 0,
                     reply,
                     scroll: 0,
                     shown_at: None,

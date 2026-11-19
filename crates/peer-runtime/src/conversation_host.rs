@@ -27,7 +27,7 @@ use peer_store::{
 };
 use serde_json::{Value, json};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Duration,
@@ -49,33 +49,73 @@ mod verifier;
 use permission::ToolGrant;
 use runner::RunnerOutcome;
 
+struct AccessState {
+    level: LocalAccessLevel,
+    revision: u64,
+    session_approvals: HashSet<String>,
+}
+
 /// Host-owned live access revision. UI/ACP commands change this actual authority;
 /// persisted approval history alone never constructs it or a ToolGrant.
 #[derive(Clone)]
-pub struct ConversationAccess(Arc<Mutex<(LocalAccessLevel, u64)>>);
+pub struct ConversationAccess(Arc<Mutex<AccessState>>);
 impl ConversationAccess {
     pub fn new(level: LocalAccessLevel) -> Self {
-        Self(Arc::new(Mutex::new((level, 0))))
+        Self(Arc::new(Mutex::new(AccessState {
+            level,
+            revision: 0,
+            session_approvals: HashSet::new(),
+        })))
     }
     pub fn set(&self, level: LocalAccessLevel) -> Result<(), HostError> {
         let mut state = self
             .0
             .lock()
             .map_err(|_| HostError("permission_unavailable"))?;
-        if state.0 != level {
-            state.1 = state
-                .1
+        if state.level != level {
+            state.revision = state
+                .revision
                 .checked_add(1)
                 .filter(|n| *n <= 9_007_199_254_740_991)
                 .ok_or(HostError("permission_revision_limit"))?;
-            state.0 = level;
+            state.level = level;
+            state.session_approvals.clear();
         }
         Ok(())
+    }
+    pub fn clear_session_approvals(&self) {
+        if let Ok(mut state) = self.0.lock() {
+            state.session_approvals.clear();
+        }
+    }
+    pub(super) fn has_session_approval(&self, revision: u64, key: &str) -> Result<bool, HostError> {
+        let state = self
+            .0
+            .lock()
+            .map_err(|_| HostError("permission_unavailable"))?;
+        Ok(state.revision == revision && state.session_approvals.contains(key))
+    }
+    pub(super) fn remember_session_approval(
+        &self,
+        revision: u64,
+        key: String,
+    ) -> Result<bool, HostError> {
+        let mut state = self
+            .0
+            .lock()
+            .map_err(|_| HostError("permission_unavailable"))?;
+        if state.revision != revision {
+            return Ok(false);
+        }
+        if state.session_approvals.len() < 512 {
+            state.session_approvals.insert(key);
+        }
+        Ok(true)
     }
     fn snapshot(&self) -> Result<(LocalAccessLevel, u64), HostError> {
         self.0
             .lock()
-            .map(|s| *s)
+            .map(|s| (s.level, s.revision))
             .map_err(|_| HostError("permission_unavailable"))
     }
 }

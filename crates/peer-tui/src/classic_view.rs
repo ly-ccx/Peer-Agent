@@ -33,9 +33,18 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Paragraph},
+    widgets::{Block, BorderType, Borders, Paragraph},
 };
 use unicode_width::UnicodeWidthStr;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApprovalCard {
+    pub action: String,
+    pub location: String,
+    pub reason: String,
+    pub risk: String,
+    pub arguments: String,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolRowStatus {
@@ -107,7 +116,7 @@ pub struct ClassicView<'a> {
     pub anchor: &'a ReadingAnchor,
     pub composer: &'a Composer,
     pub status: &'a str,
-    pub approval: Option<(&'a str, usize)>,
+    pub approval: Option<(&'a ApprovalCard, usize)>,
     pub user_input: Option<(&'a UserInputPrompt, usize)>,
     pub model_picker: &'a ModelPickerState,
     pub overlay: &'a ClassicOverlay,
@@ -591,6 +600,7 @@ struct DockSpec<'a, 's> {
     slash_rows: u16,
     overlay_dock_h: u16,
     model_dock_h: u16,
+    approval_dock_h: u16,
     user_input_dock_h: u16,
     notice_text: Option<&'a str>,
     notice_is_error: bool,
@@ -598,6 +608,176 @@ struct DockSpec<'a, 's> {
     composer_rows: u16,
     status_rows: u16,
     total_height: u16,
+}
+
+fn approval_dock_height(panel_budget: u16) -> u16 {
+    panel_budget.min(12)
+}
+
+fn render_approval_dock(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    card: &ApprovalCard,
+    selected: usize,
+    locale: TuiLocale,
+    palette: &TuiPalette,
+) {
+    if area.height < 4 || area.width == 0 {
+        return;
+    }
+    let panel_bg = palette.panel;
+    let content_area = if area.height >= 7 && area.width >= 16 {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::new().fg(palette.danger).bg(palette.background))
+            .style(Style::new().bg(panel_bg));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        if inner.width >= 14 {
+            Rect {
+                x: inner.x + 1,
+                y: inner.y,
+                width: inner.width - 2,
+                height: inner.height,
+            }
+        } else {
+            inner
+        }
+    } else {
+        frame.render_widget(Block::new().style(Style::new().bg(panel_bg)), area);
+        area
+    };
+    if content_area.height == 0 || content_area.width == 0 {
+        return;
+    }
+    let cw = usize::from(content_area.width);
+    let mut y = content_area.y;
+    let y_end = content_area.y + content_area.height;
+    let push_line = |frame: &mut Frame<'_>, row_y: &mut u16, line: Line<'static>| {
+        if *row_y < y_end {
+            frame.render_widget(
+                Paragraph::new(line).style(Style::new().bg(panel_bg)),
+                Rect {
+                    x: content_area.x,
+                    y: *row_y,
+                    width: content_area.width,
+                    height: 1,
+                },
+            );
+            *row_y += 1;
+        }
+    };
+
+    let title = if locale.is_zh() {
+        "Approval required · 本地授权请求"
+    } else {
+        "Approval required"
+    };
+    push_line(
+        frame,
+        &mut y,
+        Line::styled(
+            clip_bot_line(title, cw),
+            Style::new()
+                .fg(palette.danger_soft)
+                .bg(panel_bg)
+                .add_modifier(Modifier::BOLD),
+        ),
+    );
+
+    let avail = content_area.height.saturating_sub(4);
+    let show_hint = avail >= 6;
+    let detail_rows: Vec<(&str, &str, ratatui::style::Color)> = match avail {
+        0 => Vec::new(),
+        1 => vec![("Action  ", &card.action, palette.danger_soft)],
+        2 => vec![
+            ("Action  ", &card.action, palette.danger_soft),
+            ("Args    ", &card.arguments, palette.text_soft),
+        ],
+        3 => vec![
+            ("Action  ", &card.action, palette.danger_soft),
+            ("Where   ", &card.location, palette.muted),
+            ("Args    ", &card.arguments, palette.text_soft),
+        ],
+        4 => vec![
+            ("Action  ", &card.action, palette.danger_soft),
+            ("Where   ", &card.location, palette.muted),
+            ("Risk    ", &card.risk, palette.warning),
+            ("Args    ", &card.arguments, palette.text_soft),
+        ],
+        _ => vec![
+            ("Action  ", &card.action, palette.danger_soft),
+            ("Where   ", &card.location, palette.muted),
+            ("Reason  ", &card.reason, palette.muted),
+            ("Risk    ", &card.risk, palette.warning),
+            ("Args    ", &card.arguments, palette.text_soft),
+        ],
+    };
+    for (prefix, val, fg) in detail_rows {
+        let label_w = prefix.width();
+        let line = if cw <= label_w {
+            Line::styled(
+                clip_bot_line(prefix.trim_end(), cw),
+                Style::new().fg(fg).bg(panel_bg),
+            )
+        } else {
+            let val_clean = clip_bot_line(&terminal_text(val), cw - label_w);
+            Line::from(vec![
+                Span::styled(prefix.to_owned(), Style::new().fg(fg).bg(panel_bg)),
+                Span::styled(val_clean, Style::new().fg(fg).bg(panel_bg)),
+            ])
+        };
+        push_line(frame, &mut y, line);
+    }
+
+    let sel = selected.min(2);
+    let options = if locale.is_zh() {
+        [
+            ("1. 允许本次", palette.success),
+            ("2. 本会话允许此操作", palette.diff_hunk),
+            ("3. 拒绝", palette.danger_soft),
+        ]
+    } else {
+        [
+            ("1. Allow once", palette.success),
+            ("2. Allow this operation this session", palette.diff_hunk),
+            ("3. Deny", palette.danger_soft),
+        ]
+    };
+    for (idx, (label, fg)) in options.iter().enumerate() {
+        let is_sel = idx == sel;
+        let caret = if is_sel { "› " } else { "  " };
+        let style = if is_sel {
+            Style::new()
+                .fg(*fg)
+                .bg(panel_bg)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::new().fg(palette.muted).bg(panel_bg)
+        };
+        push_line(
+            frame,
+            &mut y,
+            Line::styled(clip_bot_line(&format!("{caret}{label}"), cw), style),
+        );
+    }
+
+    if show_hint {
+        let hint = if locale.is_zh() {
+            "↑/↓ 选择 · Enter 确认 · 1/y 允许本次 · 2 本会话允许 · 3/n/Esc 拒绝"
+        } else {
+            "↑/↓ select · Enter confirm · 1/y once · 2 session · 3/n/Esc deny"
+        };
+        push_line(
+            frame,
+            &mut y,
+            Line::styled(
+                clip_bot_line(hint, cw),
+                Style::new().fg(palette.muted).bg(panel_bg),
+            ),
+        );
+    }
 }
 
 fn wrap_plain_lines(text: &str, max_w: usize, max_lines: usize) -> Vec<String> {
@@ -821,9 +1001,11 @@ fn plan_dock_spec<'a, 's>(
         + status_rows;
     let panel_budget = max_dock_h.saturating_sub(base);
 
-    let (model_dock_h, overlay_dock_h, user_input_dock_h, slash_rows) =
+    let (model_dock_h, approval_dock_h, overlay_dock_h, user_input_dock_h, slash_rows) =
         if view.model_picker.open && panel_budget >= 4 {
-            (view.model_picker.dock_height(panel_budget), 0, 0, 0)
+            (view.model_picker.dock_height(panel_budget), 0, 0, 0, 0)
+        } else if view.approval.is_some() && panel_budget >= 4 {
+            (0, approval_dock_height(panel_budget), 0, 0, 0)
         } else if !view.overlay.is_modal()
             && view.approval.is_none()
             && !view.model_picker.open
@@ -831,10 +1013,10 @@ fn plan_dock_spec<'a, 's>(
         {
             let oh = view.overlay.dock_height(panel_budget);
             if oh > 0 {
-                (0, oh, 0, 0)
+                (0, 0, oh, 0, 0)
             } else if !slash_items.is_empty() {
                 let sr = ((slash_items.len().min(6) as u16) + 1).min(panel_budget);
-                (0, 0, 0, if sr >= 2 { sr } else { 0 })
+                (0, 0, 0, 0, if sr >= 2 { sr } else { 0 })
             } else if let Some((prompt, _)) = view.user_input
                 && !view.is_running
                 && !prompt.options.is_empty()
@@ -843,11 +1025,12 @@ fn plan_dock_spec<'a, 's>(
                 (
                     0,
                     0,
+                    0,
                     user_input_dock_height(prompt, dock_width, panel_budget),
                     0,
                 )
             } else {
-                (0, 0, 0, 0)
+                (0, 0, 0, 0, 0)
             }
         } else if view.approval.is_none()
             && !view.model_picker.open
@@ -856,16 +1039,18 @@ fn plan_dock_spec<'a, 's>(
             && panel_budget >= 2
         {
             let sr = ((slash_items.len().min(6) as u16) + 1).min(panel_budget);
-            (0, 0, 0, if sr >= 2 { sr } else { 0 })
+            (0, 0, 0, 0, if sr >= 2 { sr } else { 0 })
         } else {
-            (0, 0, 0, 0)
+            (0, 0, 0, 0, 0)
         };
-    let total_height = base + model_dock_h + overlay_dock_h + user_input_dock_h + slash_rows;
+    let total_height =
+        base + model_dock_h + approval_dock_h + overlay_dock_h + user_input_dock_h + slash_rows;
     DockSpec {
         slash_items,
         slash_rows,
         overlay_dock_h,
         model_dock_h,
+        approval_dock_h,
         user_input_dock_h,
         notice_text,
         notice_is_error,
@@ -896,6 +1081,8 @@ fn render_composer_dock(
     }
     if spec.model_dock_h > 0 {
         constraints.push(Constraint::Length(spec.model_dock_h));
+    } else if spec.approval_dock_h > 0 {
+        constraints.push(Constraint::Length(spec.approval_dock_h));
     } else if spec.overlay_dock_h > 0 {
         constraints.push(Constraint::Length(spec.overlay_dock_h));
     } else if spec.user_input_dock_h > 0 {
@@ -930,6 +1117,11 @@ fn render_composer_dock(
 
     if spec.model_dock_h > 0 {
         render_model_picker_dock(frame, areas[slot], view.model_picker, palette);
+        slot += 1;
+    } else if spec.approval_dock_h > 0
+        && let Some((card, selected)) = view.approval
+    {
+        render_approval_dock(frame, areas[slot], card, selected, view.locale, palette);
         slot += 1;
     } else if spec.overlay_dock_h > 0 {
         render_classic_overlay(frame, areas[slot], view.overlay, overlay_ctx, palette);
@@ -1285,24 +1477,7 @@ pub fn render_classic(frame: &mut Frame<'_>, view: ClassicView<'_>) {
     let body_w = usize::from(body_area.width).max(1);
     let body_h = usize::from(body_area.height);
 
-    if let Some((approval_text, scroll_top)) = view.approval {
-        let block = render_markdown_themed(
-            approval_text,
-            body_w,
-            Style::new().fg(palette.warning).bg(palette.background),
-            512,
-            palette,
-        );
-        let last = block.lines.len().saturating_sub(body_h);
-        let visible: Vec<Line<'static>> = block
-            .lines
-            .iter()
-            .skip(scroll_top.min(last))
-            .take(body_h)
-            .map(|l| l.to_ratatui_line())
-            .collect();
-        frame.render_widget(Paragraph::new(visible), body_area);
-    } else {
+    {
         let use_rail = body_w >= 24;
         let has_running_tool = view.messages.last().is_some_and(|m| {
             m.role == "assistant" && m.tools.iter().any(|t| t.status == ToolRowStatus::Running)
@@ -1920,6 +2095,87 @@ mod tests {
             if w == 120 {
                 assert!(text.contains("1-9 / Enter 确认"));
             }
+        }
+    }
+
+    #[test]
+    fn classic_approval_card_keeps_history_visible_and_renders_selector() {
+        let mut cache = ByteBudgetLru::new(MARKDOWN_WRAP_CACHE_BYTES, 16);
+        let composer = Composer::default();
+        let anchor = ReadingAnchor::FollowingLatest;
+        let picker = ModelPickerState::default();
+        let card = ApprovalCard {
+            action: "git_query (local.git.query)".into(),
+            location: "/Library/Developer/CommandLineTools/usr/share/git-core/gitconfig".into(),
+            reason: "Outside workspace file read requires approval.".into(),
+            risk: "l1_local_read".into(),
+            arguments: "{\"operation\":\"log\",\"limit\":25}".into(),
+        };
+        let msgs = vec![ClassicMessage {
+            id: "u1".into(),
+            revision: 1,
+            role: "user".into(),
+            text: "查看最近提交历史".into(),
+            thinking: None,
+            tools: Vec::new(),
+            continuation: false,
+        }];
+        for (w, h) in [(120, 40), (48, 22), (48, 18)] {
+            let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+            term.draw(|f| {
+                render_classic(
+                    f,
+                    ClassicView {
+                        title: "Peer",
+                        workspace_label: "~/Documents/Develop/peer-dev",
+                        model_badge: "gpt-6.1-sol · ChatGPT 订阅",
+                        effort_badge: "default",
+                        mode_badge: "chat",
+                        access_badge: "ask",
+                        context_percent: Some(5),
+                        quota_label: None,
+                        quota_remaining: None,
+                        fast_mode: false,
+                        fast_available: false,
+                        goal_status: GoalMenuStatus::None,
+                        goal_banner: None,
+                        is_running: true,
+                        activity_label: Some("等待授权…"),
+                        animation_frame: 2,
+                        running_elapsed_ms: 4_000,
+                        tools_expanded: false,
+                        notice: None,
+                        notice_is_error: false,
+                        palette: &DARK_PALETTE,
+                        scheme_id: 0,
+                        current_theme: ThemeMode::Dark,
+                        locale: TuiLocale::ZhCn,
+                        messages: &msgs,
+                        live_stream: "",
+                        live_thinking: "",
+                        anchor: &anchor,
+                        composer: &composer,
+                        status: "",
+                        approval: Some((&card, 1)),
+                        user_input: None,
+                        model_picker: &picker,
+                        overlay: &ClassicOverlay::None,
+                        slash_selected: 0,
+                        wrap_cache: &mut cache,
+                    },
+                );
+            })
+            .unwrap();
+            let text = buffer_text(&term);
+            if h >= 22 {
+                assert!(text.contains("查看最近提交历史"));
+            }
+            assert!(text.contains("Approval required"));
+            assert!(text.contains("本地授权请求"));
+            assert!(text.contains("Action  git_query"));
+            assert!(text.contains("Args"));
+            assert!(text.contains("› 2. 本会话允许此操作"));
+            assert!(text.contains("3. 拒绝"));
         }
     }
 }

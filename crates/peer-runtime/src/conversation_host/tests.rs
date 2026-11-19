@@ -748,3 +748,129 @@ async fn interactive_user_input_self_grants_settles_stops_batch_and_continues() 
         .unwrap();
     assert!(manifest_desc.contains("stop the current turn to wait for their reply"));
 }
+
+#[tokio::test]
+async fn session_approval_permits_identical_operation_until_access_revision_changes() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    struct SessionInput(Arc<AtomicUsize>, Arc<std::sync::Mutex<Vec<Value>>>);
+    impl PermissionInput for SessionInput {
+        fn decide<'a>(
+            &'a mut self,
+            prompt: Value,
+            _cancel: &'a CancellationToken,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = LocalPermissionDecision> + 'a>>
+        {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            self.1.lock().unwrap().push(prompt);
+            Box::pin(async { LocalPermissionDecision::ApproveSession })
+        }
+    }
+
+    let root = tempfile::tempdir().unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    let args = json!({"path": "session-file.txt", "content": "ok"});
+    let (endpoint, _served) = server(vec![
+        tool_stream("write_file", args.clone()),
+        stream("text"),
+        tool_stream("write_file", args.clone()),
+        stream("text"),
+        tool_stream("write_file", args.clone()),
+        stream("text"),
+    ]);
+    let model = model(endpoint);
+    let access = ConversationAccess::new(LocalAccessLevel::AskBeforeLocal);
+    let runtime = NativeConversationRuntime::new(root.path(), access.clone());
+    let prompts_count = Arc::new(AtomicUsize::new(0));
+    let seen_prompts = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut input = SessionInput(prompts_count.clone(), seen_prompts.clone());
+
+    let first = runtime
+        .execute_interactive(
+            &ConversationOptions {
+                workspace: workspace.path(),
+                conversation_id: None,
+                resume_from: None,
+                prompt: "Write once",
+                image_paths: &[],
+                provider_id: "fixture",
+                mode: RuntimeMode::Chat,
+                effort: "default",
+                persist_model_selection: false,
+                allowlist: None,
+                max_turns: None,
+            },
+            &model,
+            &mut input,
+            None,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(first.error, None);
+    assert_eq!(prompts_count.load(Ordering::SeqCst), 1);
+    let captured = seen_prompts.lock().unwrap().clone();
+    assert_eq!(captured[0]["capabilityId"], "local.file.write");
+    assert_eq!(captured[0]["riskLevel"], "L2_local_write");
+    let first_grant = canonical_tool(root.path(), &first.session_id);
+    assert_eq!(
+        first_grant["permissionGrants"][0]["reason"],
+        "approved_for_tui_session"
+    );
+    assert_eq!(first_grant["permissionGrants"][0]["duration"], "session");
+
+    let second = runtime
+        .execute_interactive(
+            &ConversationOptions {
+                workspace: workspace.path(),
+                conversation_id: Some(&first.session_id),
+                resume_from: None,
+                prompt: "Write twice without re-prompting",
+                image_paths: &[],
+                provider_id: "fixture",
+                mode: RuntimeMode::Chat,
+                effort: "default",
+                persist_model_selection: false,
+                allowlist: None,
+                max_turns: None,
+            },
+            &model,
+            &mut input,
+            None,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(second.error, None);
+    assert_eq!(prompts_count.load(Ordering::SeqCst), 1);
+
+    // Changing access policy bumps revision and invalidates prior session approvals.
+    access.set(LocalAccessLevel::SessionLocal).unwrap();
+    access.set(LocalAccessLevel::AskBeforeLocal).unwrap();
+    let third = runtime
+        .execute_interactive(
+            &ConversationOptions {
+                workspace: workspace.path(),
+                conversation_id: Some(&first.session_id),
+                resume_from: None,
+                prompt: "Write after policy reset",
+                image_paths: &[],
+                provider_id: "fixture",
+                mode: RuntimeMode::Chat,
+                effort: "default",
+                persist_model_selection: false,
+                allowlist: None,
+                max_turns: None,
+            },
+            &model,
+            &mut input,
+            None,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(third.error, None);
+    assert_eq!(prompts_count.load(Ordering::SeqCst), 2);
+}

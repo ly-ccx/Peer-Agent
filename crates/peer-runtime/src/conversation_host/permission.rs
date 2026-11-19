@@ -28,6 +28,32 @@ pub(super) struct ToolGrant {
     goal_intake: GoalIntake,
     pub goal_denial: Option<&'static str>,
 }
+struct DecisionContext<'a> {
+    risk_level: &'a str,
+    reason: &'a str,
+    session_key: Option<String>,
+}
+
+fn risk_label(permission: ProviderPermission, risk: Option<ShellRisk>) -> &'static str {
+    match permission {
+        ProviderPermission::Read => "L1_local_read",
+        ProviderPermission::FileWrite => "L2_local_write",
+        ProviderPermission::Shell => risk.map_or("L3_external_write", ShellRisk::as_str),
+        ProviderPermission::Mcp => "L3_external_write",
+        _ => "runtime_governed",
+    }
+}
+
+fn approval_duration(granted: bool, reason: &str) -> &'static str {
+    if !granted {
+        "denied"
+    } else if reason == "approved_for_tui_session" {
+        "session"
+    } else {
+        "once"
+    }
+}
+
 fn automatic(
     level: LocalAccessLevel,
     permission: ProviderPermission,
@@ -59,6 +85,29 @@ fn automatic(
                 ))
 }
 impl Host<'_> {
+    fn session_op_key(
+        &self,
+        revision: u64,
+        capability: &str,
+        args: &Value,
+    ) -> Result<String, HostError> {
+        let key = peer_protocol::permission_operation_key(peer_protocol::PermissionOperation {
+            capability_id: capability,
+            args,
+            conversation_id: Some(&self.identity.conversation_id),
+            workspace_path: self.workspace.to_str(),
+            session_id: Some(&self.identity.conversation_id),
+            plan_id: None,
+        })
+        .map_err(|_| HostError("permission_arguments_invalid"))?;
+        Ok(format!("op:{revision}:{key}"))
+    }
+    fn session_read_key(&self, revision: u64, capability: &str, canonical_path: &str) -> String {
+        format!(
+            "read:{revision}:{}:{capability}:{canonical_path}",
+            self.identity.conversation_id
+        )
+    }
     pub(super) fn validate_grant(&self, grant: &ToolGrant, args: &Value) -> Result<(), HostError> {
         self.source_current()?;
         self.validate_grant_binding(grant, args)
@@ -184,8 +233,34 @@ impl Host<'_> {
                 None,
             )
         } else {
-            self.decide(operation, &digest, &scope_value, revision)
+            let session_key = (self.worker.is_none() && hook == HookDecision::Allow)
+                .then(|| self.session_op_key(revision, capability, args))
+                .transpose()?;
+            if let Some(key) = session_key.as_deref()
+                && self.access.has_session_approval(revision, key)?
+            {
+                (true, "approved_for_tui_session", None)
+            } else {
+                let reason_hint = if hook == HookDecision::Ask {
+                    "Hook policy requires approval before local execution."
+                } else if permission == ProviderPermission::Read && inside == Some(false) {
+                    "Outside workspace file read requires approval."
+                } else {
+                    "This action needs your approval before local execution."
+                };
+                self.decide(
+                    operation,
+                    &digest,
+                    &scope_value,
+                    revision,
+                    DecisionContext {
+                        risk_level: risk_label(permission, risk),
+                        reason: reason_hint,
+                        session_key,
+                    },
+                )
                 .await?
+            }
         };
         if granted && let Some(changed) = goal_intake.denial(&self.home) {
             goal_denial = Some(changed);
@@ -200,8 +275,9 @@ impl Host<'_> {
         } else {
             String::new()
         };
+        let duration = approval_duration(granted, reason);
         let mut grant = ToolGrant {
-            facts: json!({"grantId":format!("grant-{}",uuid::Uuid::new_v4()),"toolCallId":call,"granted":granted,"scope":scope_value,"duration":if granted{"once"}else{"denied"},"decidedAt":now(),"reason":reason,"metadata":{"policyRevision":format!("ordinary:{}:{revision}",self.identity.stream_id)}}),
+            facts: json!({"grantId":format!("grant-{}",uuid::Uuid::new_v4()),"toolCallId":call,"granted":granted,"scope":scope_value,"duration":duration,"decidedAt":now(),"reason":reason,"metadata":{"policyRevision":format!("ordinary:{}:{revision}",self.identity.stream_id)}}),
             additional: vec![],
             terminal,
             capability: capability.into(),
@@ -231,6 +307,7 @@ impl Host<'_> {
         digest: &str,
         scope: &Value,
         revision: u64,
+        ctx: DecisionContext<'_>,
     ) -> Result<(bool, &'static str, Option<HostError>), HostError> {
         let PermissionCall {
             call,
@@ -268,8 +345,17 @@ impl Host<'_> {
             .ok_or(HostError("permission_unavailable"))?;
         let access = self.access.clone();
         let owned = self.owned.clone();
-        let prompt =
-            json!({"approval":row,"toolCallId":call,"tool":tool,"arguments":args,"scopes":[scope]});
+        let prompt = json!({
+            "approval": row,
+            "toolCallId": call,
+            "tool": tool,
+            "capabilityId": capability,
+            "workspacePath": self.workspace.to_string_lossy(),
+            "reason": ctx.reason,
+            "riskLevel": ctx.risk_level,
+            "arguments": args,
+            "scopes": [scope],
+        });
         let result=self.wait_owned(async {
             let decision=input.decide(prompt,&owned);tokio::pin!(decision);
             let expiry=tokio::time::sleep(Duration::from_secs(300));tokio::pin!(expiry);
@@ -293,7 +379,10 @@ impl Host<'_> {
         }
         let policy_changed =
             !cancelled && (changed || self.access.snapshot()?.1 != revision || current.is_err());
-        let permitted = decision == LocalPermissionDecision::Approve && !policy_changed;
+        let permitted = matches!(
+            decision,
+            LocalPermissionDecision::Approve | LocalPermissionDecision::ApproveSession
+        ) && !policy_changed;
         let state = if permitted {
             ApprovalState::Approved
         } else if policy_changed {
@@ -309,7 +398,7 @@ impl Host<'_> {
             Some("permission_policy_changed")
         } else {
             match decision {
-                LocalPermissionDecision::Approve => None,
+                LocalPermissionDecision::Approve | LocalPermissionDecision::ApproveSession => None,
                 LocalPermissionDecision::Deny => Some("local_user_denied"),
                 LocalPermissionDecision::Unavailable => Some("permission_unavailable"),
                 LocalPermissionDecision::Cancel => Some("permission_cancelled"),
@@ -345,6 +434,15 @@ impl Host<'_> {
         }
         Ok(match decision {
             LocalPermissionDecision::Approve => (true, "approved_once_in_tui", None),
+            LocalPermissionDecision::ApproveSession => {
+                if let Some(key) = ctx.session_key
+                    && self.access.remember_session_approval(revision, key)?
+                {
+                    (true, "approved_for_tui_session", None)
+                } else {
+                    (true, "approved_once_in_tui", None)
+                }
+            }
             LocalPermissionDecision::Deny => (false, "denied_in_tui", None),
             LocalPermissionDecision::Unavailable => (false, "tui_approval_unavailable", None),
             LocalPermissionDecision::Cancel => {
@@ -393,20 +491,35 @@ impl Host<'_> {
         } else if level == LocalAccessLevel::FullLocal || inside {
             (true, "host_policy_read", None)
         } else {
-            self.decide(
-                PermissionCall {
-                    call: &grant.call,
-                    capability: &grant.capability,
-                    tool: "git_query",
-                    args,
-                },
-                &scope.approval_digest(&grant.digest)?,
-                &scope.value(),
-                grant.revision,
-            )
-            .await?
+            let read_key = self.worker.is_none().then(|| {
+                self.session_read_key(grant.revision, &grant.capability, &scope.facts.path)
+            });
+            if let Some(key) = read_key.as_deref()
+                && self.access.has_session_approval(grant.revision, key)?
+            {
+                (true, "approved_for_tui_session", None)
+            } else {
+                self.decide(
+                    PermissionCall {
+                        call: &grant.call,
+                        capability: &grant.capability,
+                        tool: "git_query",
+                        args,
+                    },
+                    &scope.approval_digest(&grant.digest)?,
+                    &scope.value(),
+                    grant.revision,
+                    DecisionContext {
+                        risk_level: "L1_local_read",
+                        reason: "Outside workspace file read requires approval.",
+                        session_key: read_key,
+                    },
+                )
+                .await?
+            }
         };
-        grant.additional.push(json!({"grantId":format!("grant-{}",uuid::Uuid::new_v4()),"toolCallId":grant.call,"granted":granted,"scope":scope.value(),"duration":if granted{"once"}else{"denied"},"decidedAt":now(),"reason":reason}));
+        let duration = approval_duration(granted, reason);
+        grant.additional.push(json!({"grantId":format!("grant-{}",uuid::Uuid::new_v4()),"toolCallId":grant.call,"granted":granted,"scope":scope.value(),"duration":duration,"decidedAt":now(),"reason":reason}));
         grant.terminal = terminal;
         if !granted {
             return Err(terminal.unwrap_or(HostError("git_read_permission_denied")));

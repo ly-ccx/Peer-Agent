@@ -57,7 +57,7 @@ use tokio::{
 
 const MAX_DISPLAY_MESSAGES: usize = 64;
 const IDLE_STATUS: &str = "";
-const APPROVAL_STATUS: &str = "y 允许本次 · n / Esc 拒绝 · Ctrl+C 停止";
+const APPROVAL_STATUS: &str = "等待授权…";
 const QUOTA_REFRESH_INTERVAL: Duration = Duration::from_secs(300);
 
 struct ActiveTurn {
@@ -642,6 +642,7 @@ impl<'a> ClassicSession<'a> {
         self.fast_mode = metadata["fastMode"] == true;
         self.refresh_fast_available();
 
+        self.access.clear_session_approvals();
         self.conversation_id = Some(id.to_owned());
         self.interrupted_preview.clear();
         self.pending_user_input = None;
@@ -767,6 +768,7 @@ impl<'a> ClassicSession<'a> {
     }
 
     fn reset_conversation(&mut self, notice: &str) {
+        self.access.clear_session_approvals();
         self.conversation_id = None;
         self.workspace = self.launch_workspace.clone();
         self.messages.clear();
@@ -904,7 +906,11 @@ impl<'a> ClassicSession<'a> {
             .map(|q| format_topbar_quota(q.remaining_percent, q.plan_label.as_deref(), locale));
         let quota_remaining = self.quota.as_ref().map(|q| q.remaining_percent);
         let activity_label = if self.approval.is_some() {
-            Some(APPROVAL_STATUS)
+            Some(if locale.is_zh() {
+                APPROVAL_STATUS
+            } else {
+                "Awaiting approval…"
+            })
         } else if let Some(comp) = self.compacting.as_ref() {
             if comp.cancelling {
                 Some(if locale.is_zh() {
@@ -932,21 +938,17 @@ impl<'a> ClassicSession<'a> {
         } else {
             None
         };
-        let notice_str = if self.approval.is_some() && !is_running {
-            Some(APPROVAL_STATUS)
-        } else if let Some(s) = self.composer.status {
+        let notice_str = if let Some(s) = self.composer.status {
             Some(s)
         } else if !self.status.is_empty() {
             Some(self.status.as_str())
         } else {
             None
         };
-        let notice_is_error = notice_str.is_some()
-            && self.composer.status.is_none()
-            && !(self.approval.is_some() && !is_running)
-            && self.status_is_error;
+        let notice_is_error =
+            notice_str.is_some() && self.composer.status.is_none() && self.status_is_error;
         let status = notice_str.unwrap_or("");
-        let approval_view = self.approval.as_ref().map(|a| (a.text.as_str(), a.scroll));
+        let approval_view = self.approval.as_ref().map(|a| (&a.card, a.selected));
         let user_input_view = if !is_running
             && self.approval.is_none()
             && !self.model_picker.open
@@ -1297,21 +1299,31 @@ impl<'a> ClassicSession<'a> {
         if key.kind == KeyEventKind::Release {
             return false;
         }
+        let no_ctrl_alt = !key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
+        let check_viewport = |session: &mut Self| -> bool {
+            if terminal_size.0 < 30 || terminal_size.1 < 10 {
+                session.set_notice(
+                    "终端视口过小，无法完整核验授权详情，请调大窗口或按 n / 3 / Esc 拒绝。",
+                    true,
+                );
+                false
+            } else {
+                true
+            }
+        };
         match key.code {
-            KeyCode::Up => {
-                approval.scroll = approval.scroll.saturating_sub(1);
+            KeyCode::Up | KeyCode::Left => {
+                approval.selected = (approval.selected + 2) % 3;
                 true
             }
-            KeyCode::Down => {
-                approval.scroll = approval.scroll.saturating_add(1);
+            KeyCode::Down | KeyCode::Right | KeyCode::Tab => {
+                approval.selected = (approval.selected + 1) % 3;
                 true
             }
-            KeyCode::Char('y') | KeyCode::Char('Y')
-                if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
-            {
-                if terminal_size.0 < 30 || terminal_size.1 < 10 {
-                    self.status =
-                        "终端视口过小，无法完整核验授权详情，请调大窗口或按 n 拒绝。".to_owned();
+            KeyCode::Char('1') | KeyCode::Char('y') | KeyCode::Char('Y') if no_ctrl_alt => {
+                if !check_viewport(self) {
                     return true;
                 }
                 if let Some(a) = self.approval.take() {
@@ -1319,9 +1331,34 @@ impl<'a> ClassicSession<'a> {
                 }
                 true
             }
-            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+            KeyCode::Char('2') if no_ctrl_alt => {
+                if !check_viewport(self) {
+                    return true;
+                }
+                if let Some(a) = self.approval.take() {
+                    let _ = a.reply.send(LocalPermissionDecision::ApproveSession);
+                }
+                true
+            }
+            KeyCode::Char('3') | KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc
+                if no_ctrl_alt =>
+            {
                 if let Some(a) = self.approval.take() {
                     let _ = a.reply.send(LocalPermissionDecision::Deny);
+                }
+                true
+            }
+            KeyCode::Enter if key.modifiers.is_empty() => {
+                let decision = match approval.selected.min(2) {
+                    0 => LocalPermissionDecision::Approve,
+                    1 => LocalPermissionDecision::ApproveSession,
+                    _ => LocalPermissionDecision::Deny,
+                };
+                if decision != LocalPermissionDecision::Deny && !check_viewport(self) {
+                    return true;
+                }
+                if let Some(a) = self.approval.take() {
+                    let _ = a.reply.send(decision);
                 }
                 true
             }
@@ -3149,5 +3186,36 @@ mod tests {
             find_pending_user_input(&[user_q, completed_ask, user_reply]),
             None
         );
+    }
+
+    #[test]
+    fn build_approval_card_extracts_action_location_reason_risk_and_compact_args() {
+        let prompt = json!({
+            "tool": "git_query",
+            "capabilityId": "local.git.query",
+            "workspacePath": "/Users/yinliang/Documents/Develop/peer-dev",
+            "reason": "Outside workspace file read requires approval.",
+            "riskLevel": "L1_local_read",
+            "arguments": {"operation": "log", "path": "/Users/yinliang/Documents/Develop/peer-dev/Peer-Agent", "limit": 25},
+            "scopes": [{
+                "kind": "file-read",
+                "capabilityId": "local.git.query",
+                "path": "/Library/Developer/CommandLineTools/usr/share/git-core/gitconfig",
+                "workspacePath": "/Users/yinliang/Documents/Develop/peer-dev"
+            }]
+        });
+        let card = super::super::resumed::ports::build_approval_card("git_query", &prompt);
+        assert_eq!(card.action, "git_query (local.git.query)");
+        assert_eq!(
+            card.location,
+            "/Library/Developer/CommandLineTools/usr/share/git-core/gitconfig"
+        );
+        assert_eq!(
+            card.reason,
+            "Outside workspace file read requires approval."
+        );
+        assert_eq!(card.risk, "l1_local_read");
+        assert!(card.arguments.contains("\"operation\":\"log\""));
+        assert!(!card.arguments.contains('\n'));
     }
 }

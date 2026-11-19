@@ -105,6 +105,7 @@ impl PendingPermission {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LocalPermissionDecision {
     Approve,
+    ApproveSession,
     Deny,
     Cancel,
     Unavailable,
@@ -529,7 +530,7 @@ impl NativeSessionHost {
             )
         } else {
             match decision {
-                LocalPermissionDecision::Approve => (
+                LocalPermissionDecision::Approve | LocalPermissionDecision::ApproveSession => (
                     ApprovalState::Approved,
                     ApprovalDecision::LocalUser,
                     None,
