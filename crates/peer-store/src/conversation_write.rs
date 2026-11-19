@@ -12,6 +12,17 @@ use std::{
     time::Duration,
 };
 
+/// Host creation intent for a project-agent or delegated work-session conversation.
+pub struct NewProjectConversation<'a> {
+    pub id: Option<&'a str>,
+    pub title: &'a str,
+    pub workspace_id: &'a str,
+    pub workspace_path: Option<&'a str>,
+    pub role: &'a str,
+    pub parent_conversation_id: Option<&'a str>,
+    pub mode: &'a str,
+    pub created_at: &'a str,
+}
 /// Host creation intent. UI text/metadata cannot choose a persisted id.
 pub struct NewConversation<'a> {
     pub title: &'a str,
@@ -152,6 +163,101 @@ impl ConversationStore {
         index.push(meta.clone());
         log::replace(&file, &log::encode(&index)?, cancel)?;
         Ok(meta)
+    }
+    /// Create a canonical `project_agent` or `work_session` conversation in the shared index.
+    pub fn create_project_conversation(
+        &self,
+        input: &NewProjectConversation<'_>,
+        model: Option<&ConversationModelSelection<'_>>,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<Value, StoreError> {
+        log::check_cancel(cancel)?;
+        if let Some(model) = model {
+            model.validate()?;
+        }
+        if input.title.is_empty()
+            || input.title.len() > 1024
+            || !valid_id(input.workspace_id, true)
+            || !matches!(input.role, "project_agent" | "work_session")
+            || !matches!(input.mode, "chat" | "plan" | "goal" | "project_agent")
+            || !timestamp(input.created_at)
+            || input.workspace_path.is_some_and(|p| p.len() > 16_384)
+            || input
+                .parent_conversation_id
+                .is_some_and(|id| !valid_id(id, false))
+            || input.id.is_some_and(|id| !valid_id(id, false))
+        {
+            return Err(StoreError::InvalidInput);
+        }
+        let directory = self.write_directory()?;
+        let _held = locks(&directory, None, cancel)?;
+        let file = directory.join("index.jsonl");
+        let mut index = log::read(&file, cancel)?;
+        let id = input
+            .id
+            .map(str::to_owned)
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        if index.iter().any(|row| row["id"] == id) {
+            return Err(StoreError::VersionChanged);
+        }
+        let mut meta = json!({
+            "id": id,
+            "title": input.title,
+            "workspacePath": input.workspace_path,
+            "workspaceId": input.workspace_id,
+            "role": input.role,
+            "mode": input.mode,
+            "fastMode": false,
+            "preferredExecutionIsolation": "none",
+            "effort": "default",
+            "modelProviderId": null,
+            "status": "active",
+            "archivedAt": null,
+            "lastReadAt": input.created_at,
+            "pinnedAt": null,
+            "pinnedOrder": null,
+            "messageCount": 0,
+            "contentRevision": 0,
+            "contextSnapshot": null,
+            "createdAt": input.created_at,
+            "updatedAt": input.created_at
+        });
+        if let Some(parent) = input.parent_conversation_id {
+            meta["parentConversationId"] = json!(parent);
+        }
+        if let Some(model) = model {
+            model.apply(&mut meta);
+        }
+        preview(&mut meta, &[]);
+        index.push(meta.clone());
+        log::replace(&file, &log::encode(&index)?, cancel)?;
+        Ok(meta)
+    }
+    /// Append a message to a conversation using the canonical index→body lock,
+    /// returning `already_committed = true` if an identical message id already exists.
+    pub fn append_message_idempotent(
+        &self,
+        conversation_id: &str,
+        message: &Value,
+        at: &str,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<MessageCommit, StoreError> {
+        let current = self.read_committed(conversation_id, None, log::MAX_BYTES)?;
+        if let Some(existing) = current
+            .history
+            .messages
+            .iter()
+            .find(|m| m["id"] == message["id"])
+        {
+            if existing != message {
+                return Err(StoreError::VersionChanged);
+            }
+            return Ok(MessageCommit {
+                snapshot: current,
+                already_committed: true,
+            });
+        }
+        self.commit_message(&current, message, at, cancel)
     }
     /// Change the ordinary chat model before acknowledging the selection.
     /// An executing or unreconciled conversation still owns its metadata.

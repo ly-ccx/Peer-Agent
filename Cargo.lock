@@ -2083,6 +2083,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "peer-project-agent"
+version = "0.1.0-rc.40"
+dependencies = [
+ "flate2",
+ "peer-protocol",
+ "peer-runtime",
+ "peer-store",
+ "regex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "time",
+ "tokio",
+ "tokio-util",
+ "uuid",
+]
+
+[[package]]
 name = "peer-protocol"
 version = "0.1.0-rc.40"
 dependencies = [

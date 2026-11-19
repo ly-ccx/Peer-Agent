@@ -67,7 +67,9 @@ pub use hook_config::{HookConfig, HookDefinition, HookPhase};
 mod presentation;
 pub use presentation::{DisplayEvent, DisplayReadError, DisplaySnapshot, SessionMetadata};
 mod usage_ledger;
-pub use conversation_write::{ConversationModelSelection, MessageCommit, NewConversation};
+pub use conversation_write::{
+    ConversationModelSelection, MessageCommit, NewConversation, NewProjectConversation,
+};
 mod lease;
 mod lock;
 mod policy;

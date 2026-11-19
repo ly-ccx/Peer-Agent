@@ -6,6 +6,7 @@ members = [
   "crates/peer-cli",
   "crates/peer-store",
   "crates/peer-runtime",
+  "crates/peer-project-agent",
 ]
 resolver = "3"
 
