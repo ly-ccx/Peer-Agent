@@ -10,7 +10,7 @@ struct Item {
 #[derive(Default)]
 pub(super) struct Responses {
     pub(super) text: String,
-    thought: String,
+    pub(super) thought: String,
     items: BTreeMap<usize, Item>,
     pub(super) usage: Option<Value>,
     pub done: bool,
@@ -177,7 +177,14 @@ impl Responses {
             }
             calls.push(call(item.name, &item.args)?);
         }
-        finish(self.text, calls, self.usage, Wire::Responses, fingerprint)
+        finish(
+            self.text,
+            self.thought,
+            calls,
+            self.usage,
+            Wire::Responses,
+            fingerprint,
+        )
     }
 }
 fn index(v: &Value) -> Result<usize, ModelError> {

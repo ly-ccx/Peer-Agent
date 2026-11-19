@@ -2,7 +2,7 @@ use super::*;
 #[derive(Default)]
 pub(super) struct Gemini {
     pub(super) text: String,
-    thought: String,
+    pub(super) thought: String,
     calls: Vec<ModelToolCall>,
     pub(super) usage: Option<Value>,
     native: Vec<Value>,
@@ -77,7 +77,14 @@ impl Gemini {
         if !self.done {
             return Err(ModelError::new("model_stream_incomplete"));
         }
-        let mut turn = finish(self.text, self.calls, self.usage, Wire::Gemini, fingerprint)?;
+        let mut turn = finish(
+            self.text,
+            self.thought,
+            self.calls,
+            self.usage,
+            Wire::Gemini,
+            fingerprint,
+        )?;
         turn.continuation =
             (!self.native.is_empty()).then_some(super::super::continuation::Continuation {
                 binding: String::new(),

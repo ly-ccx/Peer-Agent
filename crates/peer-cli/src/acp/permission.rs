@@ -110,6 +110,7 @@ impl ConversationOutput for OutputPort {
                     self.conversation.replace(Some(conversation_id.to_owned()));
                     return Ok(());
                 }
+                ConversationEvent::ThinkingDelta(_) => return Ok(()),
                 ConversationEvent::AssistantDelta(text) => {
                     self.shown_text_bytes += text.len();
                     assistant_text(text)

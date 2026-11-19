@@ -67,10 +67,16 @@ pub struct ModelToolCall {
 }
 pub struct ModelTurn {
     pub content: String,
+    pub thinking: String,
     pub calls: Vec<ModelToolCall>,
     pub usage: Option<Value>,
     pub request_fingerprint: String,
     pub(crate) continuation: Option<continuation::Continuation>,
+}
+
+pub(crate) enum ModelDelta<'a> {
+    Text(&'a str),
+    Thinking(&'a str),
 }
 impl NativeModel {
     pub fn context_window(&self) -> Option<u64> {
@@ -268,15 +274,16 @@ impl NativeModel {
 }
 impl PreparedRequest<'_> {
     pub async fn send(self, cancel: &CancellationToken) -> Result<ModelTurn, ModelError> {
-        self.send_with_text(cancel, async |_: &str| Ok(())).await
+        self.send_with_deltas(cancel, async |_: ModelDelta<'_>| Ok(()))
+            .await
     }
 
-    /// Observe only newly decoded assistant text. The terminal validation below
-    /// still controls the returned turn and all tool intent.
-    pub(crate) async fn send_with_text(
+    /// Observe only newly decoded assistant text and reasoning deltas.
+    /// The terminal validation below still controls the returned turn and all tool intent.
+    pub(crate) async fn send_with_deltas(
         self,
         cancel: &CancellationToken,
-        mut publish: impl std::ops::AsyncFnMut(&str) -> Result<(), ModelError>,
+        mut publish: impl std::ops::AsyncFnMut(ModelDelta<'_>) -> Result<(), ModelError>,
     ) -> Result<ModelTurn, ModelError> {
         let model = self.owner;
         let request_fingerprint = self.fingerprint;
@@ -339,6 +346,7 @@ impl PreparedRequest<'_> {
             }
             let decoder = stream.as_mut().expect("one request decoder");
             let mut shown = 0;
+            let mut shown_thinking = 0;
             while let Some(chunk) = response.chunk().await.map_err(|e| {
                 let mut error = ModelError::new("model_stream_interrupted");
                 if model.wire == wire::Wire::Qoder && !e.is_timeout() {
@@ -347,9 +355,14 @@ impl PreparedRequest<'_> {
                 error
             })? {
                 decoder.push(&chunk)?;
+                let thinking = decoder.preview_thinking();
+                if thinking.len() > shown_thinking {
+                    publish(ModelDelta::Thinking(&thinking[shown_thinking..])).await?;
+                    shown_thinking = thinking.len();
+                }
                 let text = decoder.preview_text();
                 if text.len() > shown {
-                    publish(&text[shown..]).await?;
+                    publish(ModelDelta::Text(&text[shown..])).await?;
                     shown = text.len();
                 }
                 if decoder.terminal() {

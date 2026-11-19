@@ -15,7 +15,7 @@ pub(super) struct ChatStream {
     pub(super) usage: Option<Value>,
     reason: Option<String>,
     done: bool,
-    thought: String,
+    pub(super) thought: String,
 }
 impl ChatStream {
     pub fn push(&mut self, chunk: &[u8]) -> Result<(), ModelError> {
@@ -70,7 +70,10 @@ impl ChatStream {
             self.reason = Some(r.into())
         }
         let d = &c["delta"];
-        if let Some(t) = d["reasoning_content"].as_str() {
+        if let Some(t) = d["reasoning_content"]
+            .as_str()
+            .or_else(|| d["reasoning"].as_str())
+        {
             if self.thought.len() + t.len() > 512 * 1024 {
                 return Err(ModelError::new("model_text_limit"));
             }
@@ -167,8 +170,15 @@ impl ChatStream {
                 arguments,
             })
         }
+        let continuation = (!self.thought.is_empty()).then(|| continuation::Continuation {
+            binding: String::new(),
+            text: String::new(),
+            wire: wire::Wire::Chat,
+            blocks: vec![json!({"reasoning_content":self.thought})],
+        });
         Ok(ModelTurn {
             content: self.text,
+            thinking: self.thought,
             calls,
             usage: self
                 .usage
@@ -176,12 +186,7 @@ impl ChatStream {
                 .map(|u| super::usage::normalize(wire::Wire::Chat, u))
                 .transpose()?,
             request_fingerprint: fingerprint,
-            continuation: (!self.thought.is_empty()).then(|| continuation::Continuation {
-                binding: String::new(),
-                text: String::new(),
-                wire: wire::Wire::Chat,
-                blocks: vec![json!({"reasoning_content":self.thought})],
-            }),
+            continuation,
         })
     }
 }

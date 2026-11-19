@@ -119,6 +119,7 @@ pub enum ConversationEvent<'a> {
     Started {
         conversation_id: &'a str,
     },
+    ThinkingDelta(&'a str),
     AssistantDelta(&'a str),
     AssistantText(&'a str),
     ToolPrepared {
@@ -1175,15 +1176,26 @@ impl CognitionHost for Host<'_> {
         let result = self
             .wait_owned(async {
                 let result = prepared
-                    .send_with_text(request.owned, async |text: &str| {
-                        if show_delta && let Some(output) = output.as_mut() {
-                            output
-                                .publish(ConversationEvent::AssistantDelta(text))
-                                .await
-                                .map_err(|error| ModelError::new(error.0))?;
-                        }
-                        Ok(())
-                    })
+                    .send_with_deltas(
+                        request.owned,
+                        async |delta: crate::model::ModelDelta<'_>| {
+                            if show_delta && let Some(output) = output.as_mut() {
+                                let event = match delta {
+                                    crate::model::ModelDelta::Text(text) => {
+                                        ConversationEvent::AssistantDelta(text)
+                                    }
+                                    crate::model::ModelDelta::Thinking(thinking) => {
+                                        ConversationEvent::ThinkingDelta(thinking)
+                                    }
+                                };
+                                output
+                                    .publish(event)
+                                    .await
+                                    .map_err(|error| ModelError::new(error.0))?;
+                            }
+                            Ok(())
+                        },
+                    )
                     .await;
                 *observed = Some(ModelObservation::capture(&result));
                 result
@@ -1258,7 +1270,9 @@ impl crate::turn_loop::TurnHost for Host<'_> {
             .system
             .take()
             .ok_or(HostError("context_response_unavailable"))?;
-        self.append(&json!({"id":format!("message-{}",uuid::Uuid::new_v4()),"role":"assistant","content":turn.content,"createdAt":now(),"streamId":self.identity.stream_id,"contextSnapshot":system["snapshot"],"requestFingerprint":turn.request_fingerprint}))?;
+        let mut record = json!({"id":format!("message-{}",uuid::Uuid::new_v4()),"role":"assistant","content":turn.content,"createdAt":now(),"streamId":self.identity.stream_id,"contextSnapshot":system["snapshot"],"requestFingerprint":turn.request_fingerprint});
+        crate::turn_loop::apply_assistant_thinking(&mut record, turn);
+        self.append(&record)?;
         if !turn.content.is_empty() {
             self.publish(ConversationEvent::AssistantText(&turn.content))
                 .await?;

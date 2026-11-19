@@ -17,6 +17,7 @@ struct Host {
 fn turn(text: &str, names: &[&str]) -> ModelTurn {
     ModelTurn {
         content: text.into(),
+        thinking: String::new(),
         calls: names
             .iter()
             .map(|s| ModelToolCall {

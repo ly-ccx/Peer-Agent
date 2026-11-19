@@ -72,7 +72,10 @@ impl TurnHost for GoalTurnHost<'_, '_> {
             .system
             .take()
             .ok_or(HostError("context_response_unavailable"))?;
-        self.host.append_episode_message(self.frame.billing.conversation,&json!({"id":uuid::Uuid::new_v4().to_string(),"role":"assistant","content":turn.content,"createdAt":now(),"streamId":self.stream,"contextSnapshot":system["snapshot"],"requestFingerprint":turn.request_fingerprint}))
+        let mut record = json!({"id":uuid::Uuid::new_v4().to_string(),"role":"assistant","content":turn.content,"createdAt":now(),"streamId":self.stream,"contextSnapshot":system["snapshot"],"requestFingerprint":turn.request_fingerprint});
+        crate::turn_loop::apply_assistant_thinking(&mut record, turn);
+        self.host
+            .append_episode_message(self.frame.billing.conversation, &record)
     }
     async fn execute_call(&mut self, call: ModelToolCall) -> Result<ToolStep, HostError> {
         let host = &mut *self.host;

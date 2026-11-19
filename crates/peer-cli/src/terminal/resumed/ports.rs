@@ -14,14 +14,47 @@ const MAX_APPROVAL: usize = 8192;
 const STREAM_PREFIX: &str = "Peer  ";
 const STREAM_TRUNCATED: &str = "Peer  ［较早的流式正文已折叠］ ";
 
+const THINKING_TRUNCATED: &str = "… ";
+
 #[derive(Default)]
 pub(in crate::terminal) struct Display {
     pub accepted: bool,
     pub revision: usize,
+    pub delta_revision: usize,
     pub live: String,
+    pub live_thinking: String,
     pub notice: Option<&'static str>,
     pub conversation_id: Option<String>,
     truncated: bool,
+    thinking_truncated: bool,
+}
+
+fn push_live_chunk(
+    buf: &mut String,
+    truncated: &mut bool,
+    text: &str,
+    initial_prefix: &str,
+    truncated_prefix: &str,
+) {
+    let max = MAX_PREVIEW.saturating_sub(truncated_prefix.len());
+    let start = next_boundary(text, text.len().saturating_sub(max));
+    let clean = peer_tui::terminal_text(&text[start..]);
+    if buf.is_empty() && !initial_prefix.is_empty() {
+        buf.push_str(initial_prefix);
+    }
+    if start != 0 || buf.len() + clean.len() > MAX_PREVIEW {
+        let prefix = if *truncated {
+            truncated_prefix
+        } else {
+            initial_prefix
+        };
+        let remove = (buf.len() + clean.len() + truncated_prefix.len())
+            .saturating_sub(MAX_PREVIEW + prefix.len());
+        let end = next_boundary(buf, (prefix.len() + remove).min(buf.len()));
+        buf.replace_range(..end, truncated_prefix);
+        *truncated = true;
+    }
+    buf.push_str(&clean);
 }
 
 pub(in crate::terminal) struct OutputPort(pub watch::Sender<Display>);
@@ -32,38 +65,39 @@ impl ConversationOutput for OutputPort {
     ) -> Pin<Box<dyn Future<Output = Result<(), CapabilityError>> + 'a>> {
         Box::pin(async move {
             self.0.send_modify(|display| match event {
+                ConversationEvent::ThinkingDelta(text) => {
+                    push_live_chunk(
+                        &mut display.live_thinking,
+                        &mut display.thinking_truncated,
+                        text,
+                        "",
+                        THINKING_TRUNCATED,
+                    );
+                    display.delta_revision += 1;
+                }
                 ConversationEvent::AssistantDelta(text) => {
-                    let max = MAX_PREVIEW - STREAM_TRUNCATED.len();
-                    let start = next_boundary(text, text.len().saturating_sub(max));
-                    let text = peer_tui::terminal_text(&text[start..]);
-                    if display.live.is_empty() {
-                        display.live.push_str(STREAM_PREFIX);
-                    }
-                    if start != 0 || display.live.len() + text.len() > MAX_PREVIEW {
-                        let prefix = if display.truncated {
-                            STREAM_TRUNCATED
-                        } else {
-                            STREAM_PREFIX
-                        };
-                        let remove = (display.live.len() + text.len() + STREAM_TRUNCATED.len())
-                            .saturating_sub(MAX_PREVIEW + prefix.len());
-                        let end = next_boundary(&display.live, prefix.len() + remove);
-                        display.live.replace_range(..end, STREAM_TRUNCATED);
-                        display.truncated = true;
-                    }
-                    display.live.push_str(&text);
+                    push_live_chunk(
+                        &mut display.live,
+                        &mut display.truncated,
+                        text,
+                        STREAM_PREFIX,
+                        STREAM_TRUNCATED,
+                    );
+                    display.delta_revision += 1;
                 }
                 ConversationEvent::Started { conversation_id } => {
                     display.accepted = true;
                     display.conversation_id = Some(conversation_id.to_owned());
                     display.revision += 1;
                 }
-                ConversationEvent::AssistantText(_) => {
+                ConversationEvent::AssistantText(_) | ConversationEvent::ToolPrepared { .. } => {
                     display.live.clear();
+                    display.live_thinking.clear();
                     display.truncated = false;
+                    display.thinking_truncated = false;
                     display.revision += 1;
                 }
-                ConversationEvent::ToolPrepared { .. } | ConversationEvent::ToolSettled { .. } => {
+                ConversationEvent::ToolSettled { .. } => {
                     display.revision += 1;
                 }
             });

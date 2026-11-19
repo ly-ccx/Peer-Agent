@@ -21,6 +21,7 @@ pub(super) struct Anthropic {
     blocks: BTreeMap<usize, Block>,
     closed: HashSet<usize>,
     pub(super) text: String,
+    pub(super) thought: String,
     pub(super) usage: Option<Value>,
     reason: Option<String>,
     started: bool,
@@ -57,6 +58,9 @@ impl Anthropic {
                     Some("thinking") => {
                         let mut text = String::new();
                         append(&mut text, &b["thinking"], 512 * 1024)?;
+                        if !text.is_empty() {
+                            append(&mut self.thought, &b["thinking"], 512 * 1024)?;
+                        }
                         Block::Thinking {
                             text,
                             signature: String::new(),
@@ -107,7 +111,8 @@ impl Anthropic {
                         append(&mut self.text, &d["text"], 512 * 1024)?
                     }
                     (Block::Thinking { text, .. }, Some("thinking_delta")) => {
-                        append(text, &d["thinking"], 512 * 1024)?
+                        append(text, &d["thinking"], 512 * 1024)?;
+                        append(&mut self.thought, &d["thinking"], 512 * 1024)?;
                     }
                     (Block::Thinking { signature, .. }, Some("signature_delta")) => {
                         append(signature, &d["signature"], 65536)?
@@ -204,7 +209,14 @@ impl Anthropic {
         if (self.reason.as_deref() == Some("tool_use")) == calls.is_empty() {
             return Err(ModelError::new("model_stream_invalid"));
         }
-        let mut turn = finish(self.text, calls, self.usage, Wire::Anthropic, fingerprint)?;
+        let mut turn = finish(
+            self.text,
+            self.thought,
+            calls,
+            self.usage,
+            Wire::Anthropic,
+            fingerprint,
+        )?;
         turn.continuation =
             (!blocks.is_empty()).then_some(super::super::continuation::Continuation {
                 binding: String::new(),

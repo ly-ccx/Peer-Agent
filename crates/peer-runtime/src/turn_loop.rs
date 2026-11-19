@@ -73,7 +73,7 @@ pub(crate) async fn run(
         turns = turns
             .checked_add(1)
             .ok_or(CapabilityError("runtime_counter_limit"))?;
-        if !turn.content.is_empty() {
+        if !turn.content.is_empty() || !turn.thinking.is_empty() {
             host.record_assistant(&turn).await?;
             content = std::mem::take(&mut turn.content);
         }
@@ -109,6 +109,24 @@ pub(crate) async fn run(
         content,
         tool_calls,
     })
+}
+
+pub(crate) fn apply_assistant_thinking(record: &mut serde_json::Value, turn: &ModelTurn) {
+    if turn.thinking.is_empty() {
+        return;
+    }
+    let mut segments = vec![serde_json::json!({
+        "type": "thinking",
+        "content": turn.thinking,
+    })];
+    if !turn.content.is_empty() {
+        segments.push(serde_json::json!({
+            "type": "text",
+            "content": turn.content,
+        }));
+    }
+    record["thinkingContent"] = serde_json::json!(turn.thinking);
+    record["segments"] = serde_json::Value::Array(segments);
 }
 
 #[cfg(test)]

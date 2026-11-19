@@ -67,6 +67,7 @@ struct ActiveTurn {
     prompts: mpsc::Receiver<Approval>,
     accepted: bool,
     revision: usize,
+    delta_revision: usize,
     started_at: Instant,
     cancelling: bool,
 }
@@ -830,13 +831,17 @@ impl<'a> ClassicSession<'a> {
     }
 
     fn draw(&mut self, terminal: &mut TerminalGuard) -> io::Result<()> {
-        let live_buf = self
+        let (live_buf, live_thinking_buf) = self
             .active
             .as_ref()
-            .map(|a| a.display.borrow().live.clone())
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| self.interrupted_preview.clone());
+            .map(|a| {
+                let d = a.display.borrow();
+                (d.live.clone(), d.live_thinking.clone())
+            })
+            .filter(|(live, thinking)| !live.is_empty() || !thinking.is_empty())
+            .unwrap_or_else(|| (self.interrupted_preview.clone(), String::new()));
         let live_stream = live_buf.strip_prefix("Peer  ").unwrap_or(&live_buf);
+        let live_thinking = live_thinking_buf.as_str();
         let workspace_label = compact_workspace_path(&self.workspace.to_string_lossy());
         let model_badge = self.model_badge();
         let effort_badge = self.selected_effort.as_deref().unwrap_or("default");
@@ -942,6 +947,7 @@ impl<'a> ClassicSession<'a> {
                     locale,
                     messages: &self.messages,
                     live_stream,
+                    live_thinking,
                     anchor: &self.anchor,
                     composer: &self.composer,
                     status,
@@ -1067,6 +1073,7 @@ impl<'a> ClassicSession<'a> {
             prompts: perm_rx,
             accepted: false,
             revision: 0,
+            delta_revision: 0,
             started_at: Instant::now(),
             cancelling: false,
         });
@@ -1093,14 +1100,15 @@ impl<'a> ClassicSession<'a> {
         }
         self.maybe_spawn_quota_refresh(false);
         if let Some(active) = self.active.as_mut() {
-            let (accepted, revision, notice, conv_id, has_live) = {
+            let (accepted, revision, delta_revision, notice, conv_id, has_live) = {
                 let d = active.display.borrow();
                 (
                     d.accepted,
                     d.revision,
+                    d.delta_revision,
                     d.notice,
                     d.conversation_id.clone(),
-                    !d.live.is_empty(),
+                    !d.live.is_empty() || !d.live_thinking.is_empty(),
                 )
             };
             if let Some(cid) = conv_id
@@ -1117,6 +1125,10 @@ impl<'a> ClassicSession<'a> {
             if revision != active.revision {
                 active.revision = revision;
                 need_reload = true;
+                dirty = true;
+            }
+            if delta_revision != active.delta_revision {
+                active.delta_revision = delta_revision;
                 dirty = true;
             }
             if let Some(n) = notice {
@@ -2611,6 +2623,12 @@ fn parse_transcript_row(row: TranscriptRow, idx: usize) -> (Option<String>, Clas
     if text.is_empty() && !text_parts.is_empty() {
         text = text_parts.join("\n");
     }
+    if thinking_parts.is_empty()
+        && let Some(raw_thinking) = val["thinkingContent"].as_str()
+        && !raw_thinking.trim().is_empty()
+    {
+        thinking_parts.push(bounded_text(raw_thinking.trim(), 4 * 1024));
+    }
     let thinking = if thinking_parts.is_empty() {
         None
     } else {
@@ -2769,5 +2787,35 @@ mod tests {
         assert_eq!(msgs[4].tools[0].status, ToolRowStatus::Running);
         assert_eq!(msgs[4].tools[0].summary, "git status");
         assert_eq!(msgs[4].tools[0].duration_ms, None);
+    }
+
+    #[test]
+    fn parse_transcript_row_reads_thinking_segments_and_thinking_content_fallback() {
+        let range = || peer_protocol::TranscriptRange { start: 0, end: 1 };
+        let seg_row = TranscriptRow::Message {
+            raw: json!({
+                "id": "m-seg",
+                "role": "assistant",
+                "content": "回答",
+                "segments": [
+                    {"type": "thinking", "content": "思考步骤一"},
+                    {"type": "text", "content": "回答"}
+                ]
+            }),
+            range: range(),
+        };
+        let fallback_row = TranscriptRow::Message {
+            raw: json!({
+                "id": "m-fb",
+                "role": "assistant",
+                "content": "结论",
+                "thinkingContent": "顶层思考字段"
+            }),
+            range: range(),
+        };
+        let (_, m_seg) = parse_transcript_row(seg_row, 0);
+        assert_eq!(m_seg.thinking.as_deref(), Some("思考步骤一"));
+        let (_, m_fb) = parse_transcript_row(fallback_row, 1);
+        assert_eq!(m_fb.thinking.as_deref(), Some("顶层思考字段"));
     }
 }

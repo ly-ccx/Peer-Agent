@@ -96,6 +96,18 @@ impl Stream {
             },
         }
     }
+    pub fn preview_thinking(&self) -> &str {
+        match self {
+            Self::Chat(s) => &s.thought,
+            // Mirror preview_text so failed retryable Qoder attempts cannot emit duplicate thinking.
+            Self::Qoder(_) => "",
+            Self::Other(s) => match &s.decoder {
+                Decoder::Anthropic(d) => &d.thought,
+                Decoder::Responses(d) => &d.thought,
+                Decoder::Gemini(d) => &d.thought,
+            },
+        }
+    }
     pub fn finish(self, fingerprint: String) -> Result<ModelTurn, ModelError> {
         match self {
             Self::Chat(s) => s.finish(fingerprint),
@@ -139,6 +151,7 @@ fn call(name: String, args: &str) -> Result<ModelToolCall, ModelError> {
 }
 fn finish(
     text: String,
+    thinking: String,
     calls: Vec<ModelToolCall>,
     usage: Option<Value>,
     wire: Wire,
@@ -149,6 +162,7 @@ fn finish(
     }
     Ok(ModelTurn {
         content: text,
+        thinking,
         calls,
         usage: usage
             .as_ref()
@@ -329,5 +343,58 @@ mod argument_budget_tests {
         stream.push(sse.as_bytes()).unwrap();
         let turn = stream.finish("fp-meta".into()).unwrap();
         assert_eq!(turn.content, "Hello");
+    }
+
+    #[test]
+    fn stream_decoders_expose_live_and_final_thinking_across_wires() {
+        let mut chat = Stream::new(Wire::Chat);
+        chat.push(
+            b"data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"plan \"}}]}\n\n",
+        )
+        .unwrap();
+        assert_eq!(chat.preview_thinking(), "plan ");
+        chat.push(
+            b"data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning\":\"step\"}}]}\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
+        )
+        .unwrap();
+        assert_eq!(chat.preview_thinking(), "plan step");
+        let turn = chat.finish("fp-chat".into()).unwrap();
+        assert_eq!(turn.thinking, "plan step");
+        assert_eq!(turn.content, "done");
+
+        let mut anthropic = Stream::new(Wire::Anthropic);
+        anthropic
+            .push(
+                concat!(
+                    "data: {\"type\":\"message_start\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n",
+                    "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"first \"}}\n\n",
+                    "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"second\"}}\n\n",
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+        assert_eq!(anthropic.preview_thinking(), "first second");
+        anthropic
+            .push(
+                concat!(
+                    "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+                    "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+                    "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}}\n\n",
+                    "data: {\"type\":\"content_block_stop\",\"index\":1}\n\n",
+                    "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":2}}\n\n",
+                    "data: {\"type\":\"message_stop\"}\n\n",
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+        let turn = anthropic.finish("fp-anth".into()).unwrap();
+        assert_eq!(turn.thinking, "first second");
+        assert_eq!(turn.content, "ok");
+
+        let mut qoder = Stream::new(Wire::Qoder);
+        qoder
+            .push(b"data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"hidden\"}}]}\n\n")
+            .unwrap();
+        assert_eq!(qoder.preview_thinking(), "");
     }
 }

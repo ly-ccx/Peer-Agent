@@ -96,6 +96,7 @@ pub struct ClassicView<'a> {
     pub locale: TuiLocale,
     pub messages: &'a [ClassicMessage],
     pub live_stream: &'a str,
+    pub live_thinking: &'a str,
     pub anchor: &'a ReadingAnchor,
     pub composer: &'a Composer,
     pub status: &'a str,
@@ -235,10 +236,20 @@ fn is_evidence_detail(line: &str) -> bool {
 }
 
 fn render_thinking_lines(thinking: &str, col_w: usize, palette: &TuiPalette) -> Vec<Line<'static>> {
+    render_thinking_lines_with_label("Thinking", thinking, col_w, 48, palette)
+}
+
+fn render_thinking_lines_with_label(
+    label: &str,
+    thinking: &str,
+    col_w: usize,
+    max_lines: usize,
+    palette: &TuiPalette,
+) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     let bg = palette.background;
     lines.push(Line::styled(
-        "Thinking",
+        label.to_owned(),
         Style::new().fg(palette.muted).bg(bg),
     ));
     let quote_w = col_w.saturating_sub(2).max(6);
@@ -249,7 +260,7 @@ fn render_thinking_lines(thinking: &str, col_w: usize, palette: &TuiPalette) -> 
             .fg(palette.muted)
             .bg(bg)
             .add_modifier(Modifier::ITALIC),
-        8,
+        max_lines,
         palette,
     );
     let quote_style = Style::new().fg(palette.subtle).bg(bg);
@@ -493,7 +504,12 @@ fn render_composer_status_bar(
 
     let effective_pct = match view.context_percent {
         Some(p) => Some(p),
-        None if view.messages.is_empty() && view.live_stream.is_empty() => Some(0),
+        None if view.messages.is_empty()
+            && view.live_stream.is_empty()
+            && view.live_thinking.trim().is_empty() =>
+        {
+            Some(0)
+        }
         None => None,
     };
     let bar_w = if narrow || compact { 6 } else { 12 };
@@ -969,6 +985,7 @@ pub fn render_classic(frame: &mut Frame<'_>, view: ClassicView<'_>) {
 
     let is_welcome = view.messages.is_empty()
         && view.live_stream.is_empty()
+        && view.live_thinking.trim().is_empty()
         && view.approval.is_none()
         && !view.is_running
         && !view.overlay.is_modal();
@@ -1079,13 +1096,16 @@ pub fn render_classic(frame: &mut Frame<'_>, view: ClassicView<'_>) {
         let has_running_tool = view.messages.last().is_some_and(|m| {
             m.role == "assistant" && m.tools.iter().any(|t| t.status == ToolRowStatus::Running)
         });
+        let has_live_thinking = !view.live_thinking.trim().is_empty();
+        let has_live_stream = !view.live_stream.is_empty();
         let show_thinking = view.is_running
-            && view.live_stream.is_empty()
+            && !has_live_stream
+            && !has_live_thinking
             && view.approval.is_none()
             && view.activity_label.is_none()
             && !has_running_tool;
         let last_is_assistant = view.messages.last().is_some_and(|m| m.role == "assistant");
-        let tail_follows_assistant = !view.live_stream.is_empty() || show_thinking;
+        let tail_follows_assistant = has_live_stream || has_live_thinking || show_thinking;
         let mut all_lines: Vec<Line<'static>> = Vec::new();
 
         for (idx, msg) in view.messages.iter().enumerate() {
@@ -1156,24 +1176,40 @@ pub fn render_classic(frame: &mut Frame<'_>, view: ClassicView<'_>) {
             );
         }
 
-        if !view.live_stream.is_empty() {
+        if has_live_thinking || has_live_stream {
             let wrap_w = if use_rail {
                 body_w.saturating_sub(6).max(8)
             } else {
                 body_w
             };
-            let live_block = render_markdown_themed(
-                view.live_stream,
-                wrap_w,
-                Style::new().fg(palette.text).bg(palette.background),
-                120,
-                palette,
-            );
-            let lines = live_block
-                .lines
-                .into_iter()
-                .map(|s| s.to_ratatui_line())
-                .collect();
+            let mut lines: Vec<Line<'static>> = Vec::new();
+            if has_live_thinking {
+                let label = if view.is_running && !has_live_stream {
+                    thinking_status_label(view.animation_frame / 4)
+                } else {
+                    "Thinking"
+                };
+                lines.extend(render_thinking_lines_with_label(
+                    label,
+                    view.live_thinking.trim(),
+                    wrap_w,
+                    48,
+                    palette,
+                ));
+                if has_live_stream {
+                    lines.push(Line::styled("", Style::new().bg(palette.background)));
+                }
+            }
+            if has_live_stream {
+                let live_block = render_markdown_themed(
+                    view.live_stream,
+                    wrap_w,
+                    Style::new().fg(palette.text).bg(palette.background),
+                    120,
+                    palette,
+                );
+                lines.extend(live_block.lines.into_iter().map(|s| s.to_ratatui_line()));
+            }
             push_railed_lines(
                 &mut all_lines,
                 "assistant",
@@ -1331,6 +1367,7 @@ mod tests {
                         locale: TuiLocale::ZhCn,
                         messages: &msgs,
                         live_stream: "流式输出...",
+                        live_thinking: "",
                         anchor: &anchor,
                         composer: &composer,
                         status: "",
@@ -1413,6 +1450,7 @@ mod tests {
                         locale: TuiLocale::ZhCn,
                         messages: &pending_msgs,
                         live_stream: "",
+                        live_thinking: "",
                         anchor: &anchor,
                         composer: &composer,
                         status: "",
@@ -1462,6 +1500,7 @@ mod tests {
                         locale: TuiLocale::ZhCn,
                         messages: &msgs[..1],
                         live_stream: "",
+                        live_thinking: "",
                         anchor: &anchor,
                         composer: &composer,
                         status: "",
@@ -1478,6 +1517,56 @@ mod tests {
         assert!(pending_text.contains("working...  · 8s"));
         assert!(pending_text.contains("PEER / ACTIVE"));
         assert!(pending_text.contains("Thinking.."));
+
+        let mut live_thinking_term = Terminal::new(TestBackend::new(100, 20)).unwrap();
+        live_thinking_term
+            .draw(|f| {
+                render_classic(
+                    f,
+                    ClassicView {
+                        title: "Peer",
+                        workspace_label: "~/Documents/Develop/peer-dev",
+                        model_badge: "GPT-6.1 Sol · ChatGPT 订阅",
+                        effort_badge: "high",
+                        mode_badge: "chat",
+                        access_badge: "ask",
+                        context_percent: Some(0),
+                        quota_label: None,
+                        quota_remaining: None,
+                        fast_mode: false,
+                        fast_available: false,
+                        goal_status: GoalMenuStatus::None,
+                        goal_banner: None,
+                        is_running: true,
+                        activity_label: None,
+                        animation_frame: 6,
+                        running_elapsed_ms: 8_000,
+                        tools_expanded: false,
+                        notice: None,
+                        notice_is_error: false,
+                        palette: &DARK_PALETTE,
+                        scheme_id: 0,
+                        current_theme: ThemeMode::Dark,
+                        locale: TuiLocale::ZhCn,
+                        messages: &msgs[..1],
+                        live_stream: "",
+                        live_thinking: "先检查最近的提交记录。",
+                        anchor: &anchor,
+                        composer: &composer,
+                        status: "",
+                        approval: None,
+                        model_picker: &picker,
+                        overlay: &ClassicOverlay::None,
+                        slash_selected: 0,
+                        wrap_cache: &mut cache,
+                    },
+                );
+            })
+            .unwrap();
+        let live_thinking_text = buffer_text(&live_thinking_term);
+        assert!(live_thinking_text.contains("PEER"));
+        assert!(live_thinking_text.contains("Thinking.."));
+        assert!(live_thinking_text.contains("先检查最近的提交记录。"));
     }
 
     #[test]
@@ -1517,6 +1606,7 @@ mod tests {
                     locale: TuiLocale::ZhCn,
                     messages: &[],
                     live_stream: "",
+                    live_thinking: "",
                     anchor: &anchor,
                     composer: &composer,
                     status: "",
