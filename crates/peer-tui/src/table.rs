@@ -7,7 +7,10 @@
 //! fallback only when even single-grapheme column floors exceed the viewport.
 
 use crate::{
-    markdown::{StyledLine, tokenize_inline_markdown, wrap_inline_markdown, wrap_plain_into},
+    markdown::{
+        LineLink, StyledLine, push_or_merge_link, tokenize_inline_markdown,
+        wrap_inline_markdown_with_ids, wrap_plain_into,
+    },
     theme::TuiPalette,
 };
 use ratatui::style::{Modifier, Style};
@@ -102,10 +105,17 @@ pub struct TableSpec<'a> {
     pub borders: TableBorders,
 }
 
+#[derive(Debug, Clone)]
+struct PreparedSpan {
+    range: Range<usize>,
+    style: Style,
+    link: Option<(String, u32)>,
+}
+
 #[derive(Debug, Clone, Default)]
 struct PreparedCell {
     plain: String,
-    spans: Vec<(Range<usize>, Style)>,
+    spans: Vec<PreparedSpan>,
 }
 
 #[derive(Debug, Clone)]
@@ -156,7 +166,12 @@ fn split_cell_br_lines(raw: &str) -> Vec<&str> {
     parts
 }
 
-fn prepare_cell(raw: &str, base_style: Style, palette: &TuiPalette) -> PreparedCell {
+fn prepare_cell(
+    raw: &str,
+    base_style: Style,
+    palette: &TuiPalette,
+    next_link_id: &mut u32,
+) -> PreparedCell {
     let logical_lines = split_cell_br_lines(raw);
     let mut plain = String::new();
     let mut spans = Vec::new();
@@ -169,18 +184,22 @@ fn prepare_cell(raw: &str, base_style: Style, palette: &TuiPalette) -> PreparedC
         segs.clear();
         if logical.contains('\t') {
             let normalized = logical.replace('\t', " ");
-            tokenize_inline_markdown(&normalized, base_style, palette, &mut segs);
+            tokenize_inline_markdown(&normalized, base_style, palette, next_link_id, &mut segs);
         } else {
-            tokenize_inline_markdown(logical, base_style, palette, &mut segs);
+            tokenize_inline_markdown(logical, base_style, palette, next_link_id, &mut segs);
         }
-        for (text, style) in segs.drain(..) {
-            if text.is_empty() {
+        for seg in segs.drain(..) {
+            if seg.text.is_empty() {
                 continue;
             }
             let start = plain.len();
-            plain.push_str(&text);
+            plain.push_str(&seg.text);
             let end = plain.len();
-            spans.push((start..end, style));
+            spans.push(PreparedSpan {
+                range: start..end,
+                style: seg.style,
+                link: seg.link,
+            });
         }
     }
 
@@ -616,13 +635,17 @@ fn emit_table_row(
         .collect();
     let num_visual_lines = wrapped.iter().map(Vec::len).max().unwrap_or(1);
     let v_str = ctx.borders.v().to_string();
+    let v_w = v_str.width();
 
     for vis_line in 0..num_visual_lines {
         if out.len() >= max_lines {
             return true;
         }
         let mut spans: Vec<(String, Style)> = Vec::new();
+        let mut links: Vec<LineLink> = Vec::new();
+        let mut col_cursor = 0usize;
         spans.push((v_str.clone(), ctx.border_style));
+        col_cursor += v_w;
 
         for (col, &col_w) in ctx.col_widths.iter().enumerate() {
             let cell = cells.get(col).unwrap_or(&empty_cell);
@@ -635,19 +658,36 @@ fn emit_table_row(
                 .unwrap_or(TableAlignment::Left);
             let (left_pad, right_pad) = alignment_padding(vis_w, col_w, align);
 
-            spans.push((" ".repeat(CELL_PADDING + left_pad), ctx.pad_style));
-            for (span_range, span_style) in &cell.spans {
-                let s = span_range.start.max(range.start);
-                let e = span_range.end.min(range.end);
+            let left_w = CELL_PADDING + left_pad;
+            spans.push((" ".repeat(left_w), ctx.pad_style));
+            col_cursor += left_w;
+            for prepared in &cell.spans {
+                let s = prepared.range.start.max(range.start);
+                let e = prepared.range.end.min(range.end);
                 if s < e {
-                    spans.push((cell.plain[s..e].to_owned(), *span_style));
+                    let chunk = &cell.plain[s..e];
+                    let chunk_w = chunk.width();
+                    spans.push((chunk.to_owned(), prepared.style));
+                    if let Some((target, id)) = &prepared.link {
+                        push_or_merge_link(
+                            &mut links,
+                            col_cursor,
+                            col_cursor + chunk_w,
+                            target,
+                            *id,
+                        );
+                    }
+                    col_cursor += chunk_w;
                 }
             }
-            spans.push((" ".repeat(right_pad + CELL_PADDING), ctx.pad_style));
+            let right_w = right_pad + CELL_PADDING;
+            spans.push((" ".repeat(right_w), ctx.pad_style));
+            col_cursor += right_w;
             spans.push((v_str.clone(), ctx.border_style));
+            col_cursor += v_w;
         }
 
-        out.push(StyledLine::from_spans(spans));
+        out.push(StyledLine::from_spans_with_links(spans, links));
     }
 
     false
@@ -671,8 +711,18 @@ struct StackedCtx<'a> {
     width: usize,
     base_style: Style,
     palette: &'a TuiPalette,
+    next_link_id: &'a mut u32,
     out: &'a mut Vec<StyledLine>,
     max_lines: usize,
+}
+
+fn shift_line_links(mut links: Vec<LineLink>, delta: usize) -> Vec<LineLink> {
+    let d = u16::try_from(delta).unwrap_or(u16::MAX);
+    for link in &mut links {
+        link.col_start = link.col_start.saturating_add(d);
+        link.col_end = link.col_end.saturating_add(d);
+    }
+    links
 }
 
 fn push_labeled_inline(
@@ -689,11 +739,12 @@ fn push_labeled_inline(
     if prefix_w + 6 <= ctx.width {
         let body_w = ctx.width.saturating_sub(prefix_w).max(1);
         let mut wrapped = Vec::new();
-        wrap_inline_markdown(
+        wrap_inline_markdown_with_ids(
             value,
             body_w,
             ctx.base_style,
             ctx.palette,
+            ctx.next_link_id,
             &mut wrapped,
             remaining_budget,
         );
@@ -710,7 +761,9 @@ fn push_labeled_inline(
             let mut spans = Vec::with_capacity(line.spans.len() + 1);
             spans.push(prefix);
             spans.extend(line.spans);
-            ctx.out.push(StyledLine::from_spans(spans));
+            let links = shift_line_links(line.links, prefix_w);
+            ctx.out
+                .push(StyledLine::from_spans_with_links(spans, links));
         }
         return false;
     }
@@ -729,11 +782,12 @@ fn push_labeled_inline(
     }
     let body_w = ctx.width.saturating_sub(2).max(1);
     let mut wrapped = Vec::new();
-    wrap_inline_markdown(
+    wrap_inline_markdown_with_ids(
         value,
         body_w,
         ctx.base_style,
         ctx.palette,
+        ctx.next_link_id,
         &mut wrapped,
         ctx.max_lines.saturating_sub(ctx.out.len()),
     );
@@ -745,7 +799,9 @@ fn push_labeled_inline(
         let mut spans = Vec::with_capacity(line.spans.len() + 1);
         spans.push(("  ".to_owned(), indent_style));
         spans.extend(line.spans);
-        ctx.out.push(StyledLine::from_spans(spans));
+        let links = shift_line_links(line.links, 2);
+        ctx.out
+            .push(StyledLine::from_spans_with_links(spans, links));
     }
     false
 }
@@ -755,6 +811,7 @@ fn render_stacked_fallback(
     width: usize,
     base_style: Style,
     palette: &TuiPalette,
+    next_link_id: &mut u32,
     out: &mut Vec<StyledLine>,
     max_lines: usize,
 ) -> bool {
@@ -786,6 +843,7 @@ fn render_stacked_fallback(
         width,
         base_style,
         palette,
+        next_link_id,
         out,
         max_lines,
     };
@@ -825,6 +883,27 @@ pub fn render_table_lines(
     out: &mut Vec<StyledLine>,
     max_lines: usize,
 ) -> bool {
+    let mut next_link_id = 1u32;
+    render_table_lines_with_ids(
+        spec,
+        width,
+        base_style,
+        palette,
+        &mut next_link_id,
+        out,
+        max_lines,
+    )
+}
+
+pub(crate) fn render_table_lines_with_ids(
+    spec: &TableSpec<'_>,
+    width: usize,
+    base_style: Style,
+    palette: &TuiPalette,
+    next_link_id: &mut u32,
+    out: &mut Vec<StyledLine>,
+    max_lines: usize,
+) -> bool {
     let num_cols = spec.headers.len();
     if num_cols == 0 {
         return false;
@@ -841,7 +920,7 @@ pub fn render_table_lines(
     let header_cells: Vec<PreparedCell> = (0..num_cols)
         .map(|col| {
             let raw = spec.headers.get(col).map(String::as_str).unwrap_or("");
-            prepare_cell(raw, header_style, palette)
+            prepare_cell(raw, header_style, palette, next_link_id)
         })
         .collect();
 
@@ -852,7 +931,7 @@ pub fn render_table_lines(
             (0..num_cols)
                 .map(|col| {
                     let raw = row.get(col).map(String::as_str).unwrap_or("");
-                    prepare_cell(raw, body_style, palette)
+                    prepare_cell(raw, body_style, palette, next_link_id)
                 })
                 .collect()
         })
@@ -860,7 +939,15 @@ pub fn render_table_lines(
 
     let Some(col_widths) = compute_column_widths(num_cols, &header_cells, &body_cells, width)
     else {
-        return render_stacked_fallback(spec, width.max(1), body_style, palette, out, max_lines);
+        return render_stacked_fallback(
+            spec,
+            width.max(1),
+            body_style,
+            palette,
+            next_link_id,
+            out,
+            max_lines,
+        );
     };
 
     let b = spec.borders;
@@ -1224,5 +1311,87 @@ mod tests {
             24,
         ));
         assert_eq!(capped.len(), 24);
+    }
+
+    fn slice_display_cols(line: &StyledLine, col_start: u16, col_end: u16) -> String {
+        let mut out = String::new();
+        let mut col = 0u16;
+        for (text, _) in &line.spans {
+            for g in text.graphemes(true) {
+                let gw = g.width() as u16;
+                if col >= col_start && col < col_end {
+                    out.push_str(g);
+                }
+                col = col.saturating_add(gw);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn table_cells_and_stacked_fallback_project_exact_hyperlink_columns() {
+        let headers = vec!["文档".into(), "路径".into()];
+        let rows = vec![vec![
+            "[架构 133](file:///Users/foo/133.md)".into(),
+            "`crates/peer-tui/src/table.rs`".into(),
+        ]];
+        let spec = TableSpec {
+            headers: &headers,
+            rows: &rows,
+            alignments: &[],
+            borders: TableBorders::ROUNDED,
+        };
+
+        let mut wide_out = Vec::new();
+        assert!(!render_table_lines(
+            &spec,
+            80,
+            Style::new().fg(DARK_PALETTE.text),
+            &DARK_PALETTE,
+            &mut wide_out,
+            32,
+        ));
+        let wide_links: Vec<(&StyledLine, &LineLink)> = wide_out
+            .iter()
+            .flat_map(|line| line.links.iter().map(move |link| (line, link)))
+            .collect();
+        assert_eq!(wide_links.len(), 2);
+        assert_eq!(wide_links[0].1.target, "file:///Users/foo/133.md");
+        assert_eq!(
+            slice_display_cols(
+                wide_links[0].0,
+                wide_links[0].1.col_start,
+                wide_links[0].1.col_end
+            ),
+            "架构 133"
+        );
+        assert_eq!(wide_links[1].1.target, "crates/peer-tui/src/table.rs");
+        assert_eq!(
+            slice_display_cols(
+                wide_links[1].0,
+                wide_links[1].1.col_start,
+                wide_links[1].1.col_end
+            ),
+            "crates/peer-tui/src/table.rs"
+        );
+
+        let mut stacked_out = Vec::new();
+        render_table_lines(
+            &spec,
+            14,
+            Style::new().fg(DARK_PALETTE.text),
+            &DARK_PALETTE,
+            &mut stacked_out,
+            32,
+        );
+        let stacked_links: Vec<(&StyledLine, &LineLink)> = stacked_out
+            .iter()
+            .flat_map(|line| line.links.iter().map(move |link| (line, link)))
+            .collect();
+        assert!(!stacked_links.is_empty());
+        for (line, link) in stacked_links {
+            let sliced = slice_display_cols(line, link.col_start, link.col_end);
+            assert!(!sliced.trim().is_empty());
+        }
     }
 }

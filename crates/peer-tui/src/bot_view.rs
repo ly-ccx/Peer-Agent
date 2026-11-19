@@ -13,7 +13,10 @@ use crate::{
     Composer,
     bounded_cache::{ByteBudgetLru, ReadingAnchor},
     commands::{clip_bot_line, format_bot_when},
-    markdown::{RenderedBlock, WrapCacheKey, render_markdown_themed, stable_hash},
+    markdown::{
+        LineLink, RenderedBlock, ScreenHyperlink, WrapCacheKey, project_line_links,
+        render_markdown_themed, stable_hash, stamp_screen_link_id,
+    },
     model_picker::{ModelPickerState, render_model_picker},
     overlays::{ClassicOverlay, OverlayContext, render_classic_overlay},
     slash_menu::{BOT_SLASH_ITEMS, GoalMenuStatus, filter_slash_items, render_slash_menu},
@@ -369,6 +372,7 @@ fn render_conversation_body(
     palette: &TuiPalette,
     scheme_id: u8,
     locale: TuiLocale,
+    out_links: &mut Vec<ScreenHyperlink>,
 ) {
     let width = usize::from(area.width).max(1);
     let height = usize::from(area.height);
@@ -377,10 +381,10 @@ fn render_conversation_body(
     }
 
     let mut rendered_card_ids = Vec::new();
-    let mut all_lines: Vec<Line<'static>> = Vec::new();
+    let mut all_lines: Vec<(Line<'static>, Vec<LineLink>)> = Vec::new();
     let focused_card_num = cards.get(selected_card).map(|c| c.number);
 
-    for msg in messages {
+    for (msg_idx, msg) in messages.iter().enumerate() {
         if msg.kind != "system_card" {
             let (prefix, header_style) = if msg.role == "user" {
                 (
@@ -412,26 +416,29 @@ fn render_conversation_body(
                     Style::new().fg(palette.muted).bg(palette.background),
                 ));
             }
-            all_lines.push(Line::from(header_spans));
+            all_lines.push((Line::from(header_spans), Vec::new()));
         }
 
         if let Some(ref echo) = msg.reply_to_echo
             && !echo.is_empty()
         {
-            all_lines.push(Line::from(vec![
-                Span::styled(
-                    "回复: ",
-                    Style::new().fg(palette.muted).bg(palette.background),
-                ),
-                Span::styled(
-                    QUOTE_PREFIX,
-                    Style::new().fg(palette.border_focus).bg(palette.background),
-                ),
-                Span::styled(
-                    clip_bot_line(echo, width.saturating_sub(8).max(8)),
-                    Style::new().fg(palette.text_soft).bg(palette.background),
-                ),
-            ]));
+            all_lines.push((
+                Line::from(vec![
+                    Span::styled(
+                        "回复: ",
+                        Style::new().fg(palette.muted).bg(palette.background),
+                    ),
+                    Span::styled(
+                        QUOTE_PREFIX,
+                        Style::new().fg(palette.border_focus).bg(palette.background),
+                    ),
+                    Span::styled(
+                        clip_bot_line(echo, width.saturating_sub(8).max(8)),
+                        Style::new().fg(palette.text_soft).bg(palette.background),
+                    ),
+                ]),
+                Vec::new(),
+            ));
         }
 
         let body_text = msg
@@ -454,15 +461,29 @@ fn render_conversation_body(
                 wrap_cache.insert(cache_key, computed.clone());
                 computed
             };
+            let block_prefix =
+                (cache_key.item_hash as u32) ^ ((msg_idx as u32).wrapping_add(1) << 12);
             for styled in &block.lines {
-                all_lines.push(styled.to_ratatui_line());
+                let links = styled
+                    .links
+                    .iter()
+                    .cloned()
+                    .map(|mut link| {
+                        link.id = stamp_screen_link_id(block_prefix, link.id);
+                        link
+                    })
+                    .collect();
+                all_lines.push((styled.to_ratatui_line(), links));
             }
         }
 
         if !msg.marks.is_empty() {
-            all_lines.push(Line::styled(
-                format!("结果: {}", msg.marks.join(" · ")),
-                Style::new().fg(palette.success).bg(palette.background),
+            all_lines.push((
+                Line::styled(
+                    format!("结果: {}", msg.marks.join(" · ")),
+                    Style::new().fg(palette.success).bg(palette.background),
+                ),
+                Vec::new(),
             ));
         }
 
@@ -471,37 +492,54 @@ fn render_conversation_body(
         {
             rendered_card_ids.push(cnum);
             let is_focused = card_focus && focused_card_num == Some(cnum);
+            let mut card_lines = Vec::new();
             push_card_lines(
-                &mut all_lines,
+                &mut card_lines,
                 card,
                 is_focused,
                 selected_option,
                 width,
                 palette,
             );
+            for line in card_lines {
+                all_lines.push((line, Vec::new()));
+            }
         } else if let Some(cnum) = msg.card_number {
-            all_lines.push(Line::styled(
-                format!("卡片 [#{cnum}]"),
-                Style::new().fg(palette.warning).bg(palette.background),
+            all_lines.push((
+                Line::styled(
+                    format!("卡片 [#{cnum}]"),
+                    Style::new().fg(palette.warning).bg(palette.background),
+                ),
+                Vec::new(),
             ));
         }
 
-        all_lines.push(Line::styled("", Style::new().bg(palette.background)));
+        all_lines.push((
+            Line::styled("", Style::new().bg(palette.background)),
+            Vec::new(),
+        ));
     }
 
     // Any remaining active cards not directly attached to a visible message
     for card in cards {
         if !rendered_card_ids.contains(&card.number) {
             let is_focused = card_focus && focused_card_num == Some(card.number);
+            let mut card_lines = Vec::new();
             push_card_lines(
-                &mut all_lines,
+                &mut card_lines,
                 card,
                 is_focused,
                 selected_option,
                 width,
                 palette,
             );
-            all_lines.push(Line::styled("", Style::new().bg(palette.background)));
+            for line in card_lines {
+                all_lines.push((line, Vec::new()));
+            }
+            all_lines.push((
+                Line::styled("", Style::new().bg(palette.background)),
+                Vec::new(),
+            ));
         }
     }
 
@@ -516,7 +554,16 @@ fn render_conversation_body(
             palette,
         );
         for styled in &rendered.lines {
-            all_lines.push(styled.to_ratatui_line());
+            let links = styled
+                .links
+                .iter()
+                .cloned()
+                .map(|mut link| {
+                    link.id = stamp_screen_link_id(0x000f_fffd, link.id);
+                    link
+                })
+                .collect();
+            all_lines.push((styled.to_ratatui_line(), links));
         }
     }
 
@@ -537,15 +584,30 @@ fn render_conversation_body(
     let back = anchor.lines_back().min(max_back);
     let end = all_lines.len().saturating_sub(back);
     let start = end.saturating_sub(height);
-    let visible: Vec<Line<'static>> = all_lines
+    let visible_slice: Vec<(Line<'static>, Vec<LineLink>)> = all_lines
         .into_iter()
         .skip(start)
         .take(end - start)
         .collect();
+    let mut visible: Vec<Line<'static>> = Vec::with_capacity(visible_slice.len());
+    for (vis_row, (line, links)) in visible_slice.into_iter().enumerate() {
+        project_line_links(&links, area, vis_row, out_links);
+        visible.push(line);
+    }
     frame.render_widget(Paragraph::new(visible), area);
 }
 
 pub fn render_bot_shell(frame: &mut Frame<'_>, view: BotShellView<'_>) {
+    let mut ignored = Vec::new();
+    render_bot_shell_with_links(frame, view, &mut ignored);
+}
+
+pub fn render_bot_shell_with_links(
+    frame: &mut Frame<'_>,
+    view: BotShellView<'_>,
+    out_links: &mut Vec<ScreenHyperlink>,
+) {
+    out_links.clear();
     let full_area = frame.area();
     if full_area.width == 0 || full_area.height == 0 {
         return;
@@ -843,6 +905,7 @@ pub fn render_bot_shell(frame: &mut Frame<'_>, view: BotShellView<'_>) {
                 palette,
                 view.scheme_id,
                 view.locale,
+                out_links,
             );
         }
         BotScreen::Tasks => {
@@ -898,8 +961,20 @@ pub fn render_bot_shell(frame: &mut Frame<'_>, view: BotShellView<'_>) {
                 usize::from(body_area.height).max(1),
                 palette,
             );
-            let lines: Vec<Line<'static>> =
-                rendered.lines.iter().map(|l| l.to_ratatui_line()).collect();
+            let mut lines: Vec<Line<'static>> = Vec::with_capacity(rendered.lines.len());
+            for (vis_row, styled) in rendered.lines.iter().enumerate() {
+                let stamped: Vec<LineLink> = styled
+                    .links
+                    .iter()
+                    .cloned()
+                    .map(|mut link| {
+                        link.id = stamp_screen_link_id(0x000f_fffc, link.id);
+                        link
+                    })
+                    .collect();
+                project_line_links(&stamped, body_area, vis_row, out_links);
+                lines.push(styled.to_ratatui_line());
+            }
             frame.render_widget(Paragraph::new(lines), body_area);
         }
         BotScreen::Memory => {
@@ -1154,7 +1229,11 @@ pub fn render_bot_shell(frame: &mut Frame<'_>, view: BotShellView<'_>) {
     }
 
     if view.model_picker.open {
+        out_links.clear();
         render_model_picker(frame, full_area, view.model_picker, palette);
+    }
+    if active_dock.is_some_and(|ov| ov.is_modal()) {
+        out_links.clear();
     }
 }
 
@@ -1483,5 +1562,127 @@ mod tests {
         assert!(en_idle.contains("[1] Shall I familiarize myself with this project?"));
         assert!(en_idle.contains("1. Familiarize with project"));
         assert!(en_idle.contains("Tab to select cards · arrows to choose · Enter to act"));
+    }
+
+    #[test]
+    fn bot_conversation_and_task_detail_project_screen_hyperlinks() {
+        let mut term = Terminal::new(TestBackend::new(84, 16)).unwrap();
+        let composer = Composer::default();
+        let picker = ModelPickerState::default();
+        let anchor = ReadingAnchor::default();
+        let mut cache = ByteBudgetLru::new(MARKDOWN_WRAP_CACHE_BYTES, 64);
+        let doc_path = "/Users/yinliang/Documents/Develop/peer-dev/Peer-Knowledge/knowledge/decisions/133-unified-rust-core-and-dual-host-architecture.md";
+        let msgs = vec![BotMessageView {
+            id: "b1".into(),
+            revision: 1,
+            kind: "text".into(),
+            role: "assistant".into(),
+            content: format!("请查阅 `{doc_path}` 与 [Docs](https://example.com/docs)"),
+            reply_to_echo: None,
+            card_number: None,
+            card_summary: None,
+            marks: Vec::new(),
+            created_at: None,
+        }];
+
+        let mut links = Vec::new();
+        term.draw(|f| {
+            render_bot_shell_with_links(
+                f,
+                BotShellView {
+                    screen: &BotScreen::Conversation,
+                    palette: &DARK_PALETTE,
+                    scheme_id: 0,
+                    current_theme: ThemeMode::Dark,
+                    locale: TuiLocale::ZhCn,
+                    is_host: true,
+                    bots: &[],
+                    selected_bot: 0,
+                    active_bot_name: Some("peer-dev"),
+                    lease_banner: None,
+                    messages: &msgs,
+                    live_activity: None,
+                    tasks: &[],
+                    memories: &[],
+                    objectives: &[],
+                    cards: &[],
+                    card_focus: false,
+                    selected_card: 0,
+                    selected_card_option: 0,
+                    slash_selected: 0,
+                    anchor: &anchor,
+                    composer: &composer,
+                    draft_warning: None,
+                    notice: None,
+                    model_picker: &picker,
+                    overlay: None,
+                    wrap_cache: &mut cache,
+                },
+                &mut links,
+            );
+        })
+        .unwrap();
+
+        let buf = term.backend().buffer();
+        let docs = links
+            .iter()
+            .find(|l| l.target == "https://example.com/docs")
+            .expect("Docs link projected");
+        let docs_text: String = (docs.col_start..docs.col_end)
+            .map(|x| buf[(x, docs.row)].symbol())
+            .collect();
+        assert_eq!(docs_text, "Docs");
+
+        let path_text: String = links
+            .iter()
+            .filter(|l| l.target == doc_path)
+            .flat_map(|l| (l.col_start..l.col_end).map(move |x| buf[(x, l.row)].symbol()))
+            .collect();
+        assert_eq!(path_text, doc_path);
+
+        // TaskDetail screen also projects links from Markdown body
+        let detail = BotScreen::TaskDetail {
+            title: "ADR 核验".into(),
+            body: "证据见 `crates/peer-tui/src/bot_view.rs:42`".into(),
+        };
+        let mut detail_links = Vec::new();
+        term.draw(|f| {
+            render_bot_shell_with_links(
+                f,
+                BotShellView {
+                    screen: &detail,
+                    palette: &DARK_PALETTE,
+                    scheme_id: 0,
+                    current_theme: ThemeMode::Dark,
+                    locale: TuiLocale::ZhCn,
+                    is_host: true,
+                    bots: &[],
+                    selected_bot: 0,
+                    active_bot_name: Some("peer-dev"),
+                    lease_banner: None,
+                    messages: &[],
+                    live_activity: None,
+                    tasks: &[],
+                    memories: &[],
+                    objectives: &[],
+                    cards: &[],
+                    card_focus: false,
+                    selected_card: 0,
+                    selected_card_option: 0,
+                    slash_selected: 0,
+                    anchor: &anchor,
+                    composer: &composer,
+                    draft_warning: None,
+                    notice: None,
+                    model_picker: &picker,
+                    overlay: None,
+                    wrap_cache: &mut cache,
+                },
+                &mut detail_links,
+            );
+        })
+        .unwrap();
+        assert_eq!(detail_links.len(), 1);
+        assert_eq!(detail_links[0].target, "crates/peer-tui/src/bot_view.rs:42");
     }
 }

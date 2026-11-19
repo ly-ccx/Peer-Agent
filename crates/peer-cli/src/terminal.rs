@@ -5,11 +5,11 @@ use crossterm::{
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use peer_protocol::CliExit;
-use peer_tui::Composer;
+use peer_tui::{Composer, ScreenHyperlink};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{
-    io::{self, Stdout},
-    path::PathBuf,
+    io::{self, Stdout, Write as _},
+    path::{Path, PathBuf},
     sync::{
         Once,
         atomic::{AtomicBool, Ordering},
@@ -18,6 +18,7 @@ use std::{
 mod bot_shell;
 mod capability_store;
 mod classic;
+mod hyperlinks;
 mod model_picker_adapter;
 mod resumed;
 mod theme_store;
@@ -38,14 +39,21 @@ pub(super) enum ShellOutcome {
 }
 
 static TERMINAL_ACTIVE: AtomicBool = AtomicBool::new(false);
+static OSC8_ACTIVE: AtomicBool = AtomicBool::new(false);
 static PANIC_HOOK: Once = Once::new();
 const MAX_TERMINAL_CELLS: u32 = 200_000;
 
 pub struct TerminalGuard {
     terminal: Terminal<CrosstermBackend<Stdout>>,
+    hyperlink_overlay: hyperlinks::HyperlinkOverlayState,
 }
 
 fn restore() {
+    if OSC8_ACTIVE.swap(false, Ordering::SeqCst) {
+        let mut stdout = io::stdout();
+        let _ = stdout.write_all(b"\x1b]8;;\x1b\\\x1b[0m");
+        let _ = stdout.flush();
+    }
     if TERMINAL_ACTIVE.swap(false, Ordering::SeqCst) {
         let _ = terminal::disable_raw_mode();
         let _ = execute!(
@@ -94,7 +102,10 @@ impl TerminalGuard {
                 Hide
             )?;
             let terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
-            Ok(Self { terminal })
+            Ok(Self {
+                terminal,
+                hyperlink_overlay: hyperlinks::HyperlinkOverlayState::detect(),
+            })
         })();
         if result.is_err() {
             restore();
@@ -108,7 +119,30 @@ impl TerminalGuard {
 
     fn draw_frame(&mut self, render: impl FnOnce(&mut ratatui::Frame<'_>)) -> io::Result<()> {
         check_size()?;
-        self.terminal.draw(render)?;
+        let completed = self.terminal.draw(render)?;
+        self.hyperlink_overlay
+            .clear_active(completed.buffer, completed.area, &mut io::stdout())?;
+        Ok(())
+    }
+
+    fn draw_frame_with_links(
+        &mut self,
+        workspace: &Path,
+        render: impl FnOnce(&mut ratatui::Frame<'_>, &mut Vec<ScreenHyperlink>),
+    ) -> io::Result<()> {
+        check_size()?;
+        let mut links = Vec::new();
+        let completed = self.terminal.draw(|frame| render(frame, &mut links))?;
+        let active = self.hyperlink_overlay.apply(
+            completed.buffer,
+            completed.area,
+            &links,
+            workspace,
+            &mut io::stdout(),
+        )?;
+        if active {
+            OSC8_ACTIVE.store(true, Ordering::SeqCst);
+        }
         Ok(())
     }
 }

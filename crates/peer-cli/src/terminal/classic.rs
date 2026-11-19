@@ -41,7 +41,7 @@ use peer_tui::{
     ResumeSessionRow, SlashFilterContext, ThemeMode, ToolRowStatus, ToolTimelineRow, TuiLocale,
     UserInputPrompt, WORKING_ANIMATION_INTERVAL_MS, WrapCacheKey, action_for_event,
     compact_workspace_path, filter_classic_slash_items, format_topbar_quota, parse_classic_command,
-    render_classic, terminal_text,
+    render_classic_with_links, terminal_text,
 };
 use serde_json::Value;
 use std::{
@@ -962,9 +962,9 @@ impl<'a> ClassicSession<'a> {
             None
         };
         let mut shown_size = None;
-        terminal.draw_frame(|frame| {
+        terminal.draw_frame_with_links(&self.workspace, |frame, links| {
             shown_size = Some((frame.area().width, frame.area().height));
-            render_classic(
+            render_classic_with_links(
                 frame,
                 ClassicView {
                     title: "Peer",
@@ -1004,6 +1004,7 @@ impl<'a> ClassicSession<'a> {
                     slash_selected: self.slash_selected,
                     wrap_cache: &mut self.wrap_cache,
                 },
+                links,
             );
         })?;
         self.last_anim_draw = if is_running {

@@ -26,7 +26,7 @@ use peer_tui::{
     BotSubView, BotTaskRow, ByteBudgetLru, CardNumbers, CardOperation, ClassicOverlay, Composer,
     Effect, MARKDOWN_WRAP_CACHE_BYTES, ModelPickerEvent, ModelPickerState, ProjectCommand,
     ReadingAnchor, RenderedBlock, ThemeMode, TuiLocale, WrapCacheKey, action_for_event,
-    filter_slash_items, parse_project_command, render_bot_shell, terminal_text,
+    filter_slash_items, parse_project_command, render_bot_shell_with_links, terminal_text,
 };
 use std::{
     collections::HashMap,
@@ -1025,8 +1025,8 @@ impl<'a> BotShellState<'a> {
         let palette = self.prefs.palette();
         let scheme_id = self.prefs.scheme.cache_id();
         let locale = self.prefs.locale;
-        terminal.draw_frame(|frame| {
-            render_bot_shell(
+        terminal.draw_frame_with_links(&self.workspace, |frame, links| {
+            render_bot_shell_with_links(
                 frame,
                 BotShellView {
                     screen: &self.screen,
@@ -1057,6 +1057,7 @@ impl<'a> BotShellState<'a> {
                     overlay: Some(&self.overlay),
                     wrap_cache: &mut self.wrap_cache,
                 },
+                links,
             );
         })
     }

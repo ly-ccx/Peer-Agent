@@ -9,7 +9,10 @@ use crate::{
     Composer,
     bounded_cache::{ByteBudgetLru, ReadingAnchor},
     commands::clip_bot_line,
-    markdown::{RenderedBlock, WrapCacheKey, render_markdown_themed, stable_hash},
+    markdown::{
+        LineLink, RenderedBlock, ScreenHyperlink, StyledLine, WrapCacheKey, project_line_links,
+        render_markdown_themed, stable_hash, stamp_screen_link_id,
+    },
     model_picker::{ModelPickerState, render_model_picker_dock},
     overlays::{ClassicOverlay, OverlayContext, render_classic_overlay},
     slash_menu::{
@@ -405,10 +408,37 @@ fn render_tool_timeline_lines(
     out
 }
 
+struct VisualLine {
+    line: Line<'static>,
+    links: Vec<LineLink>,
+}
+
+impl VisualLine {
+    fn plain(line: Line<'static>) -> Self {
+        Self {
+            line,
+            links: Vec::new(),
+        }
+    }
+
+    fn from_styled(styled: StyledLine, block_prefix: u32) -> Self {
+        let line = styled.to_ratatui_line();
+        let links = styled
+            .links
+            .into_iter()
+            .map(|mut link| {
+                link.id = stamp_screen_link_id(block_prefix, link.id);
+                link
+            })
+            .collect();
+        Self { line, links }
+    }
+}
+
 fn push_railed_lines(
-    out: &mut Vec<Line<'static>>,
+    out: &mut Vec<VisualLine>,
     role: &str,
-    lines: Vec<Line<'static>>,
+    lines: Vec<VisualLine>,
     continuation: bool,
     trailing_blank: bool,
     use_rail: bool,
@@ -454,11 +484,14 @@ fn push_railed_lines(
                 "system" => "SYS",
                 _ => "PEER",
             };
-            out.push(Line::styled(short_hdr, rail_style));
+            out.push(VisualLine::plain(Line::styled(short_hdr, rail_style)));
         }
         out.extend(lines);
         if trailing_blank {
-            out.push(Line::styled("", Style::new().bg(palette.background)));
+            out.push(VisualLine::plain(Line::styled(
+                "",
+                Style::new().bg(palette.background),
+            )));
         }
         return;
     }
@@ -474,10 +507,11 @@ fn push_railed_lines(
         if user_bar {
             spans.push(Span::styled(USER_RAIL_BAR, bar_style));
         }
-        out.push(Line::from(spans));
+        out.push(VisualLine::plain(Line::from(spans)));
     } else {
-        for (idx, line) in lines.into_iter().enumerate() {
-            let mut spans = Vec::with_capacity(line.spans.len() + 3);
+        let rail_cols: u16 = if user_bar { 8 } else { 6 };
+        for (idx, vline) in lines.into_iter().enumerate() {
+            let mut spans = Vec::with_capacity(vline.line.spans.len() + 3);
             if idx == 0 && !continuation {
                 spans.push(Span::styled(rail_label, rail_style));
                 spans.push(Span::styled(" ", bg));
@@ -487,12 +521,20 @@ fn push_railed_lines(
             if user_bar {
                 spans.push(Span::styled(USER_RAIL_BAR, bar_style));
             }
-            spans.extend(line.spans);
-            out.push(Line::from(spans));
+            spans.extend(vline.line.spans);
+            let mut links = vline.links;
+            for link in &mut links {
+                link.col_start = link.col_start.saturating_add(rail_cols);
+                link.col_end = link.col_end.saturating_add(rail_cols);
+            }
+            out.push(VisualLine {
+                line: Line::from(spans),
+                links,
+            });
         }
     }
     if trailing_blank {
-        out.push(Line::styled("", bg));
+        out.push(VisualLine::plain(Line::styled("", bg)));
     }
 }
 
@@ -1311,6 +1353,16 @@ fn render_composer_dock(
 }
 
 pub fn render_classic(frame: &mut Frame<'_>, view: ClassicView<'_>) {
+    let mut ignored = Vec::new();
+    render_classic_with_links(frame, view, &mut ignored);
+}
+
+pub fn render_classic_with_links(
+    frame: &mut Frame<'_>,
+    view: ClassicView<'_>,
+    out_links: &mut Vec<ScreenHyperlink>,
+) {
+    out_links.clear();
     let full_area = frame.area();
     if full_area.width == 0 || full_area.height == 0 {
         return;
@@ -1492,7 +1544,7 @@ pub fn render_classic(frame: &mut Frame<'_>, view: ClassicView<'_>) {
             && !has_running_tool;
         let last_is_assistant = view.messages.last().is_some_and(|m| m.role == "assistant");
         let tail_follows_assistant = has_live_stream || has_live_thinking || show_thinking;
-        let mut all_lines: Vec<Line<'static>> = Vec::new();
+        let mut all_lines: Vec<VisualLine> = Vec::new();
 
         for (idx, msg) in view.messages.iter().enumerate() {
             let wrap_w = if !use_rail {
@@ -1502,16 +1554,23 @@ pub fn render_classic(frame: &mut Frame<'_>, view: ClassicView<'_>) {
             } else {
                 body_w.saturating_sub(6).max(8)
             };
-            let mut body_lines: Vec<Line<'static>> = Vec::new();
+            let mut body_lines: Vec<VisualLine> = Vec::new();
             if let Some(thinking) = msg
                 .thinking
                 .as_deref()
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
             {
-                body_lines.extend(render_thinking_lines(thinking, wrap_w, palette));
+                body_lines.extend(
+                    render_thinking_lines(thinking, wrap_w, palette)
+                        .into_iter()
+                        .map(VisualLine::plain),
+                );
                 if !msg.text.is_empty() || !msg.tools.is_empty() {
-                    body_lines.push(Line::styled("", Style::new().bg(palette.background)));
+                    body_lines.push(VisualLine::plain(Line::styled(
+                        "",
+                        Style::new().bg(palette.background),
+                    )));
                 }
             }
             if !msg.text.is_empty() {
@@ -1534,16 +1593,26 @@ pub fn render_classic(frame: &mut Frame<'_>, view: ClassicView<'_>) {
                     view.wrap_cache.insert(key, computed.clone());
                     computed
                 };
-                body_lines.extend(block.lines.into_iter().map(|s| s.to_ratatui_line()));
+                let block_prefix = (key.item_hash as u32) ^ ((idx as u32).wrapping_add(1) << 12);
+                body_lines.extend(
+                    block
+                        .lines
+                        .into_iter()
+                        .map(|s| VisualLine::from_styled(s, block_prefix)),
+                );
             }
             for tool in &msg.tools {
-                body_lines.extend(render_tool_timeline_lines(
-                    tool,
-                    wrap_w,
-                    view.animation_frame,
-                    view.tools_expanded,
-                    palette,
-                ));
+                body_lines.extend(
+                    render_tool_timeline_lines(
+                        tool,
+                        wrap_w,
+                        view.animation_frame,
+                        view.tools_expanded,
+                        palette,
+                    )
+                    .into_iter()
+                    .map(VisualLine::plain),
+                );
             }
             if body_lines.is_empty() && msg.role != "user" {
                 continue;
@@ -1568,22 +1637,29 @@ pub fn render_classic(frame: &mut Frame<'_>, view: ClassicView<'_>) {
             } else {
                 body_w
             };
-            let mut lines: Vec<Line<'static>> = Vec::new();
+            let mut lines: Vec<VisualLine> = Vec::new();
             if has_live_thinking {
                 let label = if view.is_running && !has_live_stream {
                     thinking_status_label(view.animation_frame / 4)
                 } else {
                     "Thinking"
                 };
-                lines.extend(render_thinking_lines_with_label(
-                    label,
-                    view.live_thinking.trim(),
-                    wrap_w,
-                    48,
-                    palette,
-                ));
+                lines.extend(
+                    render_thinking_lines_with_label(
+                        label,
+                        view.live_thinking.trim(),
+                        wrap_w,
+                        48,
+                        palette,
+                    )
+                    .into_iter()
+                    .map(VisualLine::plain),
+                );
                 if has_live_stream {
-                    lines.push(Line::styled("", Style::new().bg(palette.background)));
+                    lines.push(VisualLine::plain(Line::styled(
+                        "",
+                        Style::new().bg(palette.background),
+                    )));
                 }
             }
             if has_live_stream {
@@ -1594,7 +1670,12 @@ pub fn render_classic(frame: &mut Frame<'_>, view: ClassicView<'_>) {
                     120,
                     palette,
                 );
-                lines.extend(live_block.lines.into_iter().map(|s| s.to_ratatui_line()));
+                lines.extend(
+                    live_block
+                        .lines
+                        .into_iter()
+                        .map(|s| VisualLine::from_styled(s, 0x000f_fffe)),
+                );
             }
             push_railed_lines(
                 &mut all_lines,
@@ -1614,7 +1695,7 @@ pub fn render_classic(frame: &mut Frame<'_>, view: ClassicView<'_>) {
             push_railed_lines(
                 &mut all_lines,
                 "assistant",
-                vec![line],
+                vec![VisualLine::plain(line)],
                 last_is_assistant,
                 true,
                 use_rail,
@@ -1626,11 +1707,19 @@ pub fn render_classic(frame: &mut Frame<'_>, view: ClassicView<'_>) {
         let back = view.anchor.lines_back().min(max_back);
         let end = all_lines.len().saturating_sub(back);
         let start = end.saturating_sub(body_h);
-        let visible: Vec<Line<'static>> = all_lines
+        let visible_slice: Vec<VisualLine> = all_lines
             .into_iter()
             .skip(start)
             .take(end - start)
             .collect();
+        let suppress_body_links = view.model_picker.open || view.overlay.is_modal();
+        let mut visible: Vec<Line<'static>> = Vec::with_capacity(visible_slice.len());
+        for (vis_row, vline) in visible_slice.into_iter().enumerate() {
+            if !suppress_body_links {
+                project_line_links(&vline.links, body_area, vis_row, out_links);
+            }
+            visible.push(vline.line);
+        }
         frame.render_widget(Paragraph::new(visible), body_area);
     }
 
@@ -2263,5 +2352,163 @@ mod tests {
         assert!(text.contains("Peer-Agent"));
         assert!(text.contains("codex/native-rust-cli"));
         assert!(!text.contains("[1]"));
+    }
+
+    #[test]
+    fn classic_projects_screen_hyperlinks_through_rails_and_suppresses_under_modal() {
+        let mut term = Terminal::new(TestBackend::new(90, 18)).unwrap();
+        let composer = Composer::default();
+        let picker = ModelPickerState::default();
+        let anchor = ReadingAnchor::default();
+        let mut cache = ByteBudgetLru::new(MARKDOWN_WRAP_CACHE_BYTES, 64);
+        let adr = "/Users/yinliang/Documents/Develop/peer-dev/Peer-Knowledge/knowledge/decisions/133-unified-rust-core-and-dual-host-architecture.md";
+        let msgs = vec![
+            ClassicMessage {
+                id: "m-link".into(),
+                revision: 1,
+                role: "assistant".into(),
+                text: format!("阅读 [架构](file:///tmp/arch.md) 和 `{adr}`"),
+                thinking: None,
+                tools: Vec::new(),
+                continuation: false,
+            },
+            ClassicMessage {
+                id: "m-link-2".into(),
+                revision: 1,
+                role: "assistant".into(),
+                text: "第二条消息：https://example.com/second".into(),
+                thinking: None,
+                tools: Vec::new(),
+                continuation: false,
+            },
+        ];
+
+        let mut links = Vec::new();
+        term.draw(|f| {
+            render_classic_with_links(
+                f,
+                ClassicView {
+                    title: "Peer",
+                    workspace_label: "~/Documents/Develop/peer-dev",
+                    model_badge: "gpt-6.1-sol",
+                    effort_badge: "default",
+                    mode_badge: "chat",
+                    access_badge: "ask",
+                    context_percent: None,
+                    quota_label: None,
+                    quota_remaining: None,
+                    fast_mode: false,
+                    fast_available: false,
+                    goal_status: GoalMenuStatus::None,
+                    goal_banner: None,
+                    is_running: false,
+                    activity_label: None,
+                    animation_frame: 0,
+                    running_elapsed_ms: 0,
+                    tools_expanded: false,
+                    notice: None,
+                    notice_is_error: false,
+                    palette: &DARK_PALETTE,
+                    scheme_id: 0,
+                    current_theme: ThemeMode::Dark,
+                    locale: TuiLocale::ZhCn,
+                    messages: &msgs,
+                    live_stream: "",
+                    live_thinking: "",
+                    anchor: &anchor,
+                    composer: &composer,
+                    status: "",
+                    approval: None,
+                    user_input: None,
+                    model_picker: &picker,
+                    overlay: &ClassicOverlay::None,
+                    slash_selected: 0,
+                    wrap_cache: &mut cache,
+                },
+                &mut links,
+            );
+        })
+        .unwrap();
+
+        let buf = term.backend().buffer();
+        let read_buffer_span = |l: &ScreenHyperlink| {
+            let mut out = String::new();
+            let mut x = l.col_start;
+            while x < l.col_end {
+                let sym = buf[(x, l.row)].symbol();
+                out.push_str(sym);
+                x = x.saturating_add(sym.width().max(1) as u16);
+            }
+            out
+        };
+
+        let arch = links
+            .iter()
+            .find(|l| l.target == "file:///tmp/arch.md")
+            .expect("arch markdown link projected");
+        assert_eq!(read_buffer_span(arch), "架构");
+
+        let adr_links: Vec<&ScreenHyperlink> = links.iter().filter(|l| l.target == adr).collect();
+        assert!(!adr_links.is_empty());
+        assert!(adr_links.iter().all(|l| l.id == adr_links[0].id));
+        let adr_rendered: String = adr_links.iter().map(|l| read_buffer_span(l)).collect();
+        assert_eq!(adr_rendered, adr);
+
+        let second = links
+            .iter()
+            .find(|l| l.target == "https://example.com/second")
+            .expect("second message link projected");
+        assert_eq!(read_buffer_span(second), "https://example.com/second");
+        assert_ne!(second.id, arch.id);
+        assert_ne!(second.id, adr_links[0].id);
+
+        // Modal overlay clears body hyperlinks so hidden text behind modal is not clickable.
+        let mut modal_links = Vec::new();
+        term.draw(|f| {
+            render_classic_with_links(
+                f,
+                ClassicView {
+                    title: "Peer",
+                    workspace_label: "~/Documents/Develop/peer-dev",
+                    model_badge: "gpt-6.1-sol",
+                    effort_badge: "default",
+                    mode_badge: "chat",
+                    access_badge: "ask",
+                    context_percent: None,
+                    quota_label: None,
+                    quota_remaining: None,
+                    fast_mode: false,
+                    fast_available: false,
+                    goal_status: GoalMenuStatus::None,
+                    goal_banner: None,
+                    is_running: false,
+                    activity_label: None,
+                    animation_frame: 0,
+                    running_elapsed_ms: 0,
+                    tools_expanded: false,
+                    notice: None,
+                    notice_is_error: false,
+                    palette: &DARK_PALETTE,
+                    scheme_id: 0,
+                    current_theme: ThemeMode::Dark,
+                    locale: TuiLocale::ZhCn,
+                    messages: &msgs,
+                    live_stream: "",
+                    live_thinking: "",
+                    anchor: &anchor,
+                    composer: &composer,
+                    status: "",
+                    approval: None,
+                    user_input: None,
+                    model_picker: &picker,
+                    overlay: &ClassicOverlay::Help { scroll: 0 },
+                    slash_selected: 0,
+                    wrap_cache: &mut cache,
+                },
+                &mut modal_links,
+            );
+        })
+        .unwrap();
+        assert!(modal_links.is_empty());
     }
 }

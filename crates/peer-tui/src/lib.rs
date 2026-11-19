@@ -18,6 +18,7 @@ pub mod wordmark;
 
 pub use bot_view::{
     BotCardRow, BotMessageView, BotRowView, BotScreen, BotShellView, BotTaskRow, render_bot_shell,
+    render_bot_shell_with_links,
 };
 pub use bounded_cache::{
     ByteBudgetLru, ByteSized, DISPLAY_PAGE_CACHE_BYTES, MARKDOWN_WRAP_CACHE_BYTES, ReadingAnchor,
@@ -25,7 +26,7 @@ pub use bounded_cache::{
 };
 pub use classic_view::{
     ApprovalCard, ClassicMessage, ClassicView, ToolRowStatus, ToolTimelineRow, UserInputPrompt,
-    render_classic,
+    render_classic, render_classic_with_links,
 };
 pub use commands::{
     BotSubView, CardNumbers, CardOperation, ClassicCommand, HistoryDirection, ProjectCommand,
@@ -34,7 +35,8 @@ pub use commands::{
 pub use composer::{Action, Composer, Effect, MAX_DRAFT_BYTES, action_for_event};
 pub use leader_key::{LeaderAction, LeaderKeyState};
 pub use markdown::{
-    MAX_MARKDOWN_INPUT_BYTES, MAX_WRAPPED_LINES_PER_ITEM, RenderedBlock, StyledLine, WrapCacheKey,
+    LineLink, MAX_MARKDOWN_INPUT_BYTES, MAX_SCREEN_HYPERLINKS_PER_FRAME,
+    MAX_WRAPPED_LINES_PER_ITEM, RenderedBlock, ScreenHyperlink, StyledLine, WrapCacheKey,
     render_markdown_bounded, render_markdown_themed, stable_hash,
 };
 pub use model_picker::{
@@ -62,6 +64,10 @@ pub use theme::{
 };
 pub use view::render;
 pub use wordmark::{B3Variant, b3_wordmark_lines};
+
+pub fn display_width(text: &str) -> usize {
+    unicode_width::UnicodeWidthStr::width(text)
+}
 
 pub fn terminal_text(text: &str) -> String {
     text.chars()
