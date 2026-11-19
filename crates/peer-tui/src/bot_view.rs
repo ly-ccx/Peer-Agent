@@ -140,12 +140,20 @@ fn push_card_lines(
     } else {
         palette.panel
     };
-    let header_text = format!(
-        "  [#{}] {} · {}",
-        card.number,
-        card.kind,
-        clip_bot_line(&card.title, width.saturating_sub(14).max(12))
-    );
+    let header_text = if card.kind.trim().is_empty() {
+        format!(
+            " [{}] {}",
+            card.number,
+            clip_bot_line(&card.title, width.saturating_sub(8).max(12))
+        )
+    } else {
+        format!(
+            " [{}] {} · {}",
+            card.number,
+            card.kind,
+            clip_bot_line(&card.title, width.saturating_sub(12).max(12))
+        )
+    };
     lines.push(Line::styled(
         header_text,
         Style::new()
@@ -156,8 +164,8 @@ fn push_card_lines(
     if !card.summary.is_empty() {
         lines.push(Line::styled(
             format!(
-                "  {}",
-                clip_bot_line(&card.summary, width.saturating_sub(4).max(8))
+                " {}",
+                clip_bot_line(&card.summary, width.saturating_sub(3).max(8))
             ),
             Style::new().fg(palette.text_soft).bg(surface_bg),
         ));
@@ -177,10 +185,7 @@ fn push_card_lines(
         } else {
             Style::new().fg(palette.text_soft).bg(surface_bg)
         };
-        lines.push(Line::styled(
-            format!("  {caret}{}. {}", idx + 1, act),
-            style,
-        ));
+        lines.push(Line::styled(format!(" {caret}{}. {}", idx + 1, act), style));
     }
 }
 
@@ -363,6 +368,7 @@ fn render_conversation_body(
     wrap_cache: &mut ByteBudgetLru<WrapCacheKey, RenderedBlock>,
     palette: &TuiPalette,
     scheme_id: u8,
+    locale: TuiLocale,
 ) {
     let width = usize::from(area.width).max(1);
     let height = usize::from(area.height);
@@ -515,9 +521,13 @@ fn render_conversation_body(
     }
 
     if all_lines.is_empty() {
+        let empty_text = if locale.is_zh() {
+            "这里暂时没有内容"
+        } else {
+            "Nothing here yet"
+        };
         frame.render_widget(
-            Paragraph::new("输入消息开始与项目机器人对话。输入 `/help` 查看命令。")
-                .style(Style::new().fg(palette.muted).bg(palette.background)),
+            Paragraph::new(empty_text).style(Style::new().fg(palette.muted).bg(palette.background)),
             area,
         );
         return;
@@ -832,6 +842,7 @@ pub fn render_bot_shell(frame: &mut Frame<'_>, view: BotShellView<'_>) {
                 view.wrap_cache,
                 palette,
                 view.scheme_id,
+                view.locale,
             );
         }
         BotScreen::Tasks => {
@@ -946,8 +957,13 @@ pub fn render_bot_shell(frame: &mut Frame<'_>, view: BotShellView<'_>) {
             frame.render_widget(Paragraph::new(lines), body_area);
         }
         BotScreen::Cards => {
+            let cards_hdr = if view.locale.is_zh() {
+                "待处理 · ↑↓选卡片 · ←→选按钮 · Enter 执行 · `/action N 选项` · `/approve N` · `/deny N` · Esc 返回"
+            } else {
+                "Needs you · Up/down card · Left/right option · Enter to act · /action N option · Esc back"
+            };
             let mut lines = vec![Line::styled(
-                "待处理卡片（`/approve N` · `/deny N` · `/answer N <回复>` · Esc 返回）",
+                clip_bot_line(cards_hdr, usize::from(body_area.width).max(1)),
                 Style::new()
                     .fg(palette.text_soft)
                     .bg(palette.background)
@@ -1036,10 +1052,12 @@ pub fn render_bot_shell(frame: &mut Frame<'_>, view: BotShellView<'_>) {
         let (status_line, status_fg) = if let Some(warn) = view.draft_warning {
             (clip_bot_line(warn, sw), palette.warning)
         } else if view.card_focus {
-            (
-                clip_bot_line("←/→ 选按钮 · ↑/↓ 换卡片 · Enter 执行 · Esc 回到输入", sw),
-                palette.info,
-            )
+            let hint = if view.locale.is_zh() {
+                "←/→ 选按钮 · ↑/↓ 换卡片 · Enter 执行 · Esc 回到输入"
+            } else {
+                "Left/right option · up/down card · Enter to act · Esc back to typing"
+            };
+            (clip_bot_line(hint, sw), palette.info)
         } else if !view.anchor.is_following() {
             (
                 clip_bot_line("↑ 正在阅读历史 · PgDn/End 或 `/latest` 回到最新", sw),
@@ -1050,10 +1068,12 @@ pub fn render_bot_shell(frame: &mut Frame<'_>, view: BotShellView<'_>) {
         } else if let Some(s) = view.composer.status {
             (clip_bot_line(s, sw), palette.info)
         } else if !view.cards.is_empty() && matches!(view.screen, BotScreen::Conversation) {
-            (
-                clip_bot_line("Tab 选择待处理卡片 · /help 查看命令", sw),
-                palette.muted,
-            )
+            let hint = if view.locale.is_zh() {
+                "Tab 选择卡片 · 方向键切换选项 · 回车执行"
+            } else {
+                "Tab to select cards · arrows to choose · Enter to act"
+            };
+            (clip_bot_line(hint, sw), palette.muted)
         } else {
             (String::new(), palette.muted)
         };
@@ -1365,5 +1385,103 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn bot_conversation_renders_familiarize_card_and_focus_hint() {
+        let mut cache = ByteBudgetLru::new(MARKDOWN_WRAP_CACHE_BYTES, 128);
+        let anchor = ReadingAnchor::FollowingLatest;
+        let composer = Composer::default();
+        let picker = ModelPickerState::default();
+
+        let mut render_with = |locale: TuiLocale, card_focus: bool| -> String {
+            let zh = locale.is_zh();
+            let cards = vec![BotCardRow {
+                number: 1,
+                card_id: "offer:familiarize:ws-demo".into(),
+                kind: String::new(),
+                title: if zh {
+                    "要我先熟悉一下这个项目吗？"
+                } else {
+                    "Shall I familiarize myself with this project?"
+                }
+                .into(),
+                summary: String::new(),
+                actions: vec![
+                    if zh {
+                        "先熟悉一下项目"
+                    } else {
+                        "Familiarize with project"
+                    }
+                    .into(),
+                ],
+            }];
+            let mut term = Terminal::new(TestBackend::new(100, 24)).unwrap();
+            term.draw(|f| {
+                render_bot_shell(
+                    f,
+                    BotShellView {
+                        screen: &BotScreen::Conversation,
+                        palette: &DARK_PALETTE,
+                        scheme_id: 0,
+                        current_theme: ThemeMode::Dark,
+                        locale,
+                        is_host: true,
+                        bots: &[],
+                        selected_bot: 0,
+                        active_bot_name: Some("peer-dev"),
+                        lease_banner: None,
+                        messages: &[],
+                        live_activity: None,
+                        tasks: &[],
+                        memories: &[],
+                        objectives: &[],
+                        cards: &cards,
+                        card_focus,
+                        selected_card: 0,
+                        selected_card_option: 0,
+                        slash_selected: 0,
+                        anchor: &anchor,
+                        composer: &composer,
+                        draft_warning: None,
+                        notice: None,
+                        model_picker: &picker,
+                        overlay: None,
+                        wrap_cache: &mut cache,
+                    },
+                );
+            })
+            .unwrap();
+            let buf = term.backend().buffer().clone();
+            let mut rendered = String::new();
+            let mut skip_next = false;
+            for cell in &buf.content {
+                if skip_next {
+                    skip_next = false;
+                    continue;
+                }
+                let sym = cell.symbol();
+                rendered.push_str(sym);
+                if sym.width() > 1 {
+                    skip_next = true;
+                }
+            }
+            rendered
+        };
+
+        let zh_idle = render_with(TuiLocale::ZhCn, false);
+        assert!(zh_idle.contains("[1] 要我先熟悉一下这个项目吗？"));
+        assert!(zh_idle.contains("1. 先熟悉一下项目"));
+        assert!(zh_idle.contains("Tab 选择卡片 · 方向键切换选项 · 回车执行"));
+        assert!(!zh_idle.contains("F2 · 普通任务模式"));
+
+        let zh_focus = render_with(TuiLocale::ZhCn, true);
+        assert!(zh_focus.contains("› 1. 先熟悉一下项目"));
+        assert!(zh_focus.contains("←/→ 选按钮 · ↑/↓ 换卡片 · Enter 执行 · Esc 回到输入"));
+
+        let en_idle = render_with(TuiLocale::EnUs, false);
+        assert!(en_idle.contains("[1] Shall I familiarize myself with this project?"));
+        assert!(en_idle.contains("1. Familiarize with project"));
+        assert!(en_idle.contains("Tab to select cards · arrows to choose · Enter to act"));
     }
 }

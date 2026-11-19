@@ -17,7 +17,8 @@ use super::{
 };
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use peer_project_agent::{
-    BotProfile, DraftBody, DraftWriteRequest, LeaseStatus, MemoryFilter, NativeProjectHost,
+    BotProfile, DraftBody, DraftWriteRequest, FamiliarizeKind, LeaseStatus, MemoryFilter,
+    NativeProjectHost,
 };
 use peer_runtime::{CancellationToken, model_catalog::resolve_exec};
 use peer_tui::{
@@ -41,6 +42,28 @@ struct ActiveTick {
     task: JoinHandle<Result<(), String>>,
 }
 
+#[derive(Debug, Clone)]
+enum BotCardAction {
+    StartFamiliarize,
+    Command(String),
+}
+
+fn is_transient_nav_command(raw: &str) -> bool {
+    matches!(
+        parse_project_command(raw),
+        ProjectCommand::Classic
+            | ProjectCommand::Quit
+            | ProjectCommand::Help
+            | ProjectCommand::Version
+            | ProjectCommand::View(_)
+            | ProjectCommand::Model
+            | ProjectCommand::Theme(_)
+            | ProjectCommand::Language(_)
+            | ProjectCommand::Older
+            | ProjectCommand::Latest
+    )
+}
+
 struct BotShellState<'a> {
     home: PathBuf,
     workspace: PathBuf,
@@ -57,6 +80,7 @@ struct BotShellState<'a> {
     memories: Vec<String>,
     objectives: Vec<String>,
     cards: Vec<BotCardRow>,
+    card_actions: Vec<Vec<BotCardAction>>,
     card_numbers: CardNumbers,
     card_focus: bool,
     selected_card: usize,
@@ -65,6 +89,7 @@ struct BotShellState<'a> {
     anchor: ReadingAnchor,
     composer: Composer,
     draft_revision: u64,
+    has_persisted_draft: bool,
     draft_warning: Option<String>,
     notice: Option<String>,
     selected_provider: Option<String>,
@@ -145,6 +170,7 @@ impl<'a> BotShellState<'a> {
             memories: Vec::new(),
             objectives: Vec::new(),
             cards: Vec::new(),
+            card_actions: Vec::new(),
             card_numbers: CardNumbers::default(),
             card_focus: false,
             selected_card: 0,
@@ -153,6 +179,7 @@ impl<'a> BotShellState<'a> {
             anchor: ReadingAnchor::FollowingLatest,
             composer: Composer::default(),
             draft_revision: 0,
+            has_persisted_draft: false,
             draft_warning: None,
             notice: None,
             selected_provider,
@@ -212,7 +239,11 @@ impl<'a> BotShellState<'a> {
                 Ok(snap) => {
                     self.draft_revision = snap.revision;
                     self.draft_warning = None;
-                    if self.composer.draft().is_empty() && !snap.draft.text.is_empty() {
+                    self.has_persisted_draft = !snap.draft.text.is_empty();
+                    if self.composer.draft().is_empty()
+                        && !snap.draft.text.is_empty()
+                        && !is_transient_nav_command(&snap.draft.text)
+                    {
                         self.composer.apply(Action::Insert(snap.draft.text));
                     }
                 }
@@ -226,11 +257,13 @@ impl<'a> BotShellState<'a> {
         }
 
         // Load bounded paginated bot interactions
+        let mut familiarize_offer = None;
         if let Ok(page) =
             self.host
                 .directory()
                 .read_interactions(&ws_id, self.interaction_limit, None)
         {
+            familiarize_offer = page.familiarize_offer;
             let by_id: HashMap<String, String> = page
                 .messages
                 .iter()
@@ -309,8 +342,10 @@ impl<'a> BotShellState<'a> {
             })
             .collect();
 
-        // Pending cards (open approvals & awaiting_approval sessions)
+        // Pending cards (open approvals & awaiting_approval sessions + first-open familiarize offer)
+        let zh = self.prefs.locale.is_zh();
         let mut cards = Vec::new();
+        let mut card_actions = Vec::new();
         for s in &sessions {
             if let Some(ref aid) = s.approval_id
                 && s.phase == "awaiting_approval"
@@ -319,21 +354,66 @@ impl<'a> BotShellState<'a> {
                 cards.push(BotCardRow {
                     number: num,
                     card_id: aid.clone(),
-                    kind: "计划批准".to_owned(),
+                    kind: if zh { "计划批准" } else { "Approval" }.to_owned(),
                     title: s.title.clone(),
-                    summary: format!("委派会话 {} 等待计划批准", s.session_id),
-                    actions: vec![format!("/approve {num}"), format!("/deny {num}")],
+                    summary: if zh {
+                        format!("委派会话 {} 等待计划批准", s.session_id)
+                    } else {
+                        format!("Work session {} awaits plan approval", s.session_id)
+                    },
+                    actions: vec![
+                        if zh { "批准" } else { "Approve" }.to_owned(),
+                        if zh { "拒绝" } else { "Deny" }.to_owned(),
+                    ],
                 });
+                card_actions.push(vec![
+                    BotCardAction::Command(format!("/approve {num}")),
+                    BotCardAction::Command(format!("/deny {num}")),
+                ]);
             }
         }
+        if familiarize_offer.is_some() {
+            let card_id = format!("offer:familiarize:{ws_id}");
+            let num = self.card_numbers.assign(&ws_id, &card_id);
+            cards.push(BotCardRow {
+                number: num,
+                card_id,
+                kind: String::new(),
+                title: if zh {
+                    "要我先熟悉一下这个项目吗？"
+                } else {
+                    "Shall I familiarize myself with this project?"
+                }
+                .to_owned(),
+                summary: String::new(),
+                actions: vec![
+                    if zh {
+                        "先熟悉一下项目"
+                    } else {
+                        "Familiarize with project"
+                    }
+                    .to_owned(),
+                ],
+            });
+            card_actions.push(vec![BotCardAction::StartFamiliarize]);
+        }
         self.cards = cards;
+        self.card_actions = card_actions;
         if self.cards.is_empty() {
             self.card_focus = false;
             self.selected_card = 0;
             self.selected_card_option = 0;
-        } else if self.selected_card >= self.cards.len() {
-            self.selected_card = self.cards.len() - 1;
-            self.selected_card_option = 0;
+        } else {
+            if self.selected_card >= self.cards.len() {
+                self.selected_card = self.cards.len() - 1;
+                self.selected_card_option = 0;
+            }
+            let act_len = self.cards[self.selected_card].actions.len();
+            if act_len == 0 {
+                self.selected_card_option = 0;
+            } else if self.selected_card_option >= act_len {
+                self.selected_card_option = act_len - 1;
+            }
         }
 
         // Memories & Objectives (bounded read)
@@ -365,6 +445,33 @@ impl<'a> BotShellState<'a> {
         }
     }
 
+    fn clear_persisted_draft(&mut self) {
+        if !self.has_persisted_draft {
+            return;
+        }
+        let Some(ws_id) = self.active_workspace_id.as_deref() else {
+            return;
+        };
+        if self
+            .host
+            .drafts()
+            .write(DraftWriteRequest {
+                workspace_id: ws_id,
+                surface: "tui",
+                revision: self.draft_revision,
+                draft: DraftBody::default(),
+                pending: vec![],
+                uploads: vec![],
+            })
+            .is_ok()
+        {
+            self.has_persisted_draft = false;
+            if let Ok(snap) = self.host.drafts().read(ws_id, "tui", false) {
+                self.draft_revision = snap.revision;
+            }
+        }
+    }
+
     fn save_draft(&mut self) {
         let Some(ref ws_id) = self.active_workspace_id else {
             return;
@@ -382,12 +489,77 @@ impl<'a> BotShellState<'a> {
         }) {
             Ok(rev) => {
                 self.draft_revision = rev;
+                self.has_persisted_draft = !self.composer.draft().is_empty();
                 self.draft_warning = None;
                 self.notice = Some("草稿已保存。".to_owned());
             }
             Err(err) => {
                 self.draft_warning =
                     Some(format!("草稿保存失败（{}），本地编辑已保留。", err.code));
+            }
+        }
+    }
+
+    fn execute_card_action(&mut self, card_idx: usize, opt_idx: usize) -> Option<ShellOutcome> {
+        let action = self
+            .card_actions
+            .get(card_idx)
+            .and_then(|acts| acts.get(opt_idx))
+            .cloned()?;
+        self.card_focus = false;
+        match action {
+            BotCardAction::StartFamiliarize => {
+                let ws_id = self.active_workspace_id.clone()?;
+                let selection = resolve_exec(
+                    &self.home,
+                    self.selected_provider.as_deref(),
+                    self.selected_model.as_deref(),
+                    self.selected_effort.as_deref(),
+                    false,
+                )
+                .map(|r| r.selection)
+                .unwrap_or(serde_json::Value::Null);
+                match self.host.start_familiarize(&ws_id, selection) {
+                    Ok(res) => {
+                        self.screen = BotScreen::Conversation;
+                        match res.kind {
+                            FamiliarizeKind::Research { .. } => {
+                                self.notice = Some(
+                                    if res.reused {
+                                        "项目熟悉任务已在进行中。"
+                                    } else {
+                                        "已开始只读熟悉项目，正在后台推进…"
+                                    }
+                                    .to_owned(),
+                                );
+                                self.refresh_snapshot(false);
+                                self.trigger_background_tick();
+                            }
+                            FamiliarizeKind::Blank => {
+                                self.notice = Some("已询问项目职责。".to_owned());
+                                self.refresh_snapshot(false);
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        if err.code == "desktop_approval_required" {
+                            self.notice =
+                                Some("请在桌面处理这个操作（当前终端为只读客户端）。".to_owned());
+                        } else {
+                            self.notice = Some(format!("启动熟悉项目失败（{}）。", err.code));
+                        }
+                    }
+                }
+                None
+            }
+            BotCardAction::Command(cmd) => {
+                if cmd.ends_with(' ') {
+                    self.composer.accepted();
+                    self.composer.apply(Action::Insert(cmd));
+                    None
+                } else {
+                    self.handle_submit(&cmd)
+                }
             }
         }
     }
@@ -448,17 +620,8 @@ impl<'a> BotShellState<'a> {
                     Ok(_) => {
                         self.composer.accepted();
                         // Clear persisted draft after durable commit receipt.
-                        let _ = self.host.drafts().write(DraftWriteRequest {
-                            workspace_id: &ws_id,
-                            surface: "tui",
-                            revision: self.draft_revision,
-                            draft: DraftBody::default(),
-                            pending: vec![],
-                            uploads: vec![],
-                        });
-                        if let Ok(snap) = self.host.drafts().read(&ws_id, "tui", false) {
-                            self.draft_revision = snap.revision;
-                        }
+                        self.has_persisted_draft = true;
+                        self.clear_persisted_draft();
                         self.anchor.jump_to_latest();
                         self.screen = BotScreen::Conversation;
                         self.notice = Some("已接收，正在推进…".to_owned());
@@ -478,11 +641,13 @@ impl<'a> BotShellState<'a> {
             ProjectCommand::RetryInput(id) => {
                 self.notice = Some(format!("已触发重试输入 {id}…"));
                 self.composer.accepted();
+                self.clear_persisted_draft();
                 self.trigger_background_tick();
                 None
             }
             ProjectCommand::View(sub) => {
                 self.composer.accepted();
+                self.clear_persisted_draft();
                 self.screen = match sub {
                     BotSubView::Bots => BotScreen::BotList,
                     BotSubView::Tasks => BotScreen::Tasks,
@@ -495,6 +660,7 @@ impl<'a> BotShellState<'a> {
             }
             ProjectCommand::Task(num) => {
                 self.composer.accepted();
+                self.clear_persisted_draft();
                 let ws_id = self.active_workspace_id.as_deref()?;
                 let Some(row) = self.tasks.iter().find(|t| t.number == num) else {
                     self.notice = Some(format!("未找到任务 #{num}。"));
@@ -531,6 +697,7 @@ impl<'a> BotShellState<'a> {
             }
             ProjectCommand::Result(_) => {
                 self.composer.accepted();
+                self.clear_persisted_draft();
                 self.notice = Some(
                     "可使用 `peer result <interactive-result://…>` 查看完整固定结果。".to_owned(),
                 );
@@ -542,16 +709,17 @@ impl<'a> BotShellState<'a> {
                 text: answer_text,
             } => {
                 let ws_id = self.active_workspace_id.clone()?;
-                let Some(card) = self.cards.iter().find(|c| c.number == number).cloned() else {
+                let Some(card_idx) = self.cards.iter().position(|c| c.number == number) else {
                     self.notice = Some(format!("未找到待处理卡片 #{number}。"));
                     return None;
                 };
-                let holds = matches!(
-                    self.host.ensure_lease(&ws_id),
-                    Ok(LeaseStatus::Acquired { .. })
-                );
+                let card = self.cards[card_idx].clone();
                 match operation {
                     CardOperation::Approve | CardOperation::Deny => {
+                        let holds = matches!(
+                            self.host.ensure_lease(&ws_id),
+                            Ok(LeaseStatus::Acquired { .. })
+                        );
                         let approved = matches!(operation, CardOperation::Approve);
                         let label = if approved { "已批准" } else { "已拒绝" };
                         match self.host.supervisor().decide_plan_approval(
@@ -562,6 +730,7 @@ impl<'a> BotShellState<'a> {
                         ) {
                             Ok(_) => {
                                 self.composer.accepted();
+                                self.clear_persisted_draft();
                                 self.notice = Some(format!("卡片 #{number} {label}。"));
                                 self.refresh_snapshot(false);
                                 if approved {
@@ -581,21 +750,36 @@ impl<'a> BotShellState<'a> {
                             .is_ok()
                         {
                             self.composer.accepted();
+                            self.clear_persisted_draft();
                             self.notice = Some(format!("已回复卡片 #{number}。"));
                             self.refresh_snapshot(false);
                             self.trigger_background_tick();
                         }
                     }
-                    CardOperation::Action { .. } => {
-                        self.notice = Some(
-                            "请使用 `/approve N`、`/deny N` 或 `/answer N <回复>`。".to_owned(),
-                        );
+                    CardOperation::Action { option } => {
+                        let Some(opt_idx) = option.checked_sub(1) else {
+                            self.notice = Some(format!("卡片 #{number} 不存在选项 {option}。"));
+                            return None;
+                        };
+                        if self
+                            .card_actions
+                            .get(card_idx)
+                            .and_then(|acts| acts.get(opt_idx))
+                            .is_none()
+                        {
+                            self.notice = Some(format!("卡片 #{number} 不存在选项 {option}。"));
+                            return None;
+                        }
+                        self.composer.accepted();
+                        self.clear_persisted_draft();
+                        return self.execute_card_action(card_idx, opt_idx);
                     }
                 }
                 None
             }
             ProjectCommand::Takeover => {
                 self.composer.accepted();
+                self.clear_persisted_draft();
                 if let Some(ws_id) = self.active_workspace_id.clone() {
                     match self.host.ensure_lease(&ws_id) {
                         Ok(LeaseStatus::Acquired { .. }) => {
@@ -614,10 +798,12 @@ impl<'a> BotShellState<'a> {
             }
             ProjectCommand::Classic => {
                 self.composer.accepted();
+                self.clear_persisted_draft();
                 Some(ShellOutcome::SwitchToClassic)
             }
             ProjectCommand::Model => {
                 self.composer.accepted();
+                self.clear_persisted_draft();
                 match load_picker_groups(&self.home) {
                     Ok(groups) => {
                         self.model_picker.open_with(
@@ -635,6 +821,7 @@ impl<'a> BotShellState<'a> {
             }
             ProjectCommand::Theme(arg) => {
                 self.composer.accepted();
+                self.clear_persisted_draft();
                 match arg {
                     Some(raw) => match ThemeMode::parse(&raw) {
                         Some(m) => self.apply_theme_mode(m),
@@ -655,6 +842,7 @@ impl<'a> BotShellState<'a> {
             }
             ProjectCommand::Language(arg) => {
                 self.composer.accepted();
+                self.clear_persisted_draft();
                 match arg {
                     Some(raw) => match TuiLocale::parse(&raw) {
                         Some(l) => self.apply_locale(l),
@@ -671,6 +859,7 @@ impl<'a> BotShellState<'a> {
             }
             ProjectCommand::Older => {
                 self.composer.accepted();
+                self.clear_persisted_draft();
                 self.interaction_limit = (self.interaction_limit + 40).min(400);
                 self.refresh_snapshot(false);
                 self.anchor.scroll_up(12, 10_000, None);
@@ -678,6 +867,7 @@ impl<'a> BotShellState<'a> {
             }
             ProjectCommand::Latest => {
                 self.composer.accepted();
+                self.clear_persisted_draft();
                 self.anchor.jump_to_latest();
                 self.screen = BotScreen::Conversation;
                 self.refresh_snapshot(false);
@@ -685,15 +875,21 @@ impl<'a> BotShellState<'a> {
             }
             ProjectCommand::Help => {
                 self.composer.accepted();
+                self.clear_persisted_draft();
                 self.screen = BotScreen::Help;
                 None
             }
             ProjectCommand::Version => {
                 self.composer.accepted();
+                self.clear_persisted_draft();
                 self.notice = Some(format!("peer {}", crate::VERSION.trim()));
                 None
             }
-            ProjectCommand::Quit => Some(ShellOutcome::Quit),
+            ProjectCommand::Quit => {
+                self.composer.accepted();
+                self.clear_persisted_draft();
+                Some(ShellOutcome::Quit)
+            }
             ProjectCommand::Invalid => {
                 self.notice = Some("命令格式无效，输入 `/help` 查看帮助。".to_owned());
                 None
@@ -1104,32 +1300,18 @@ impl<'a> BotShellState<'a> {
                                                 dirty = true;
                                             }
                                             KeyCode::Enter => {
-                                                if let Some(cmd) = self
-                                                    .cards
-                                                    .get(self.selected_card)
-                                                    .and_then(|c| {
-                                                        c.actions.get(self.selected_card_option)
-                                                    })
-                                                    .cloned()
-                                                {
-                                                    self.card_focus = false;
-                                                    if cmd.ends_with(' ') {
-                                                        self.composer.accepted();
-                                                        self.composer.apply(Action::Insert(cmd));
-                                                    } else if let Some(outcome) =
-                                                        self.handle_submit(&cmd)
-                                                    {
-                                                        if let Some(active) =
-                                                            self.active_tick.take()
-                                                        {
-                                                            active.cancel.cancel();
-                                                            let _ = active.task.await;
-                                                        }
-                                                        self.host.close();
-                                                        return Ok(outcome);
+                                                if let Some(outcome) = self.execute_card_action(
+                                                    self.selected_card,
+                                                    self.selected_card_option,
+                                                ) {
+                                                    if let Some(active) = self.active_tick.take() {
+                                                        active.cancel.cancel();
+                                                        let _ = active.task.await;
                                                     }
-                                                    dirty = true;
+                                                    self.host.close();
+                                                    return Ok(outcome);
                                                 }
+                                                dirty = true;
                                             }
                                             KeyCode::Char(c)
                                                 if !key.modifiers.intersects(
@@ -1139,6 +1321,67 @@ impl<'a> BotShellState<'a> {
                                                 self.card_focus = false;
                                                 self.composer.apply(Action::Insert(c.to_string()));
                                                 self.slash_selected = 0;
+                                                dirty = true;
+                                            }
+                                            _ => {}
+                                        }
+                                    } else if self.screen == BotScreen::Cards
+                                        && self.composer.draft().is_empty()
+                                        && !self.cards.is_empty()
+                                        && matches!(
+                                            key.code,
+                                            KeyCode::Up
+                                                | KeyCode::Down
+                                                | KeyCode::Left
+                                                | KeyCode::Right
+                                                | KeyCode::Enter
+                                                | KeyCode::Tab
+                                        )
+                                    {
+                                        match key.code {
+                                            KeyCode::Up => {
+                                                self.selected_card =
+                                                    self.selected_card.saturating_sub(1);
+                                                self.selected_card_option = 0;
+                                                dirty = true;
+                                            }
+                                            KeyCode::Down => {
+                                                if self.selected_card + 1 < self.cards.len() {
+                                                    self.selected_card += 1;
+                                                    self.selected_card_option = 0;
+                                                }
+                                                dirty = true;
+                                            }
+                                            KeyCode::Left => {
+                                                self.selected_card_option =
+                                                    self.selected_card_option.saturating_sub(1);
+                                                dirty = true;
+                                            }
+                                            KeyCode::Right => {
+                                                if let Some(c) = self.cards.get(self.selected_card)
+                                                    && self.selected_card_option + 1
+                                                        < c.actions.len()
+                                                {
+                                                    self.selected_card_option += 1;
+                                                }
+                                                dirty = true;
+                                            }
+                                            KeyCode::Tab => {
+                                                self.screen = BotScreen::Conversation;
+                                                dirty = true;
+                                            }
+                                            KeyCode::Enter => {
+                                                if let Some(outcome) = self.execute_card_action(
+                                                    self.selected_card,
+                                                    self.selected_card_option,
+                                                ) {
+                                                    if let Some(active) = self.active_tick.take() {
+                                                        active.cancel.cancel();
+                                                        let _ = active.task.await;
+                                                    }
+                                                    self.host.close();
+                                                    return Ok(outcome);
+                                                }
                                                 dirty = true;
                                             }
                                             _ => {}
@@ -1326,4 +1569,21 @@ pub(super) async fn run_bot_shell(
     LocalSet::new()
         .run_until(state.run(terminal, shutdown))
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_transient_nav_command;
+
+    #[test]
+    fn transient_nav_commands_are_not_restored_as_composer_drafts() {
+        assert!(is_transient_nav_command("/classic"));
+        assert!(is_transient_nav_command("/bots"));
+        assert!(is_transient_nav_command("/help"));
+        assert!(is_transient_nav_command("/model"));
+        assert!(!is_transient_nav_command("请继续"));
+        assert!(!is_transient_nav_command("/answer 1 好的"));
+        assert!(!is_transient_nav_command("/approve 1"));
+        assert!(!is_transient_nav_command("/action 1 1"));
+    }
 }

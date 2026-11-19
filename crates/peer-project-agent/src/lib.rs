@@ -37,15 +37,19 @@ pub use acceptance::{
 };
 pub use directory::{
     AttentionItem, AttentionKind, BotDirectory, BotListFilter, BotListItem, BotListMessage,
-    BotListSession, BotRowState, InteractionPage, QuestionState, ReplyQuestionStatus,
-    filter_bot_list, is_visible_bot_message, project_bot_attention, project_bot_list_item,
-    project_bot_list_message, project_reply_questions, sort_bot_list,
+    BotListSession, BotRowState, FamiliarizeOffer, InteractionPage, QuestionState,
+    ReplyQuestionStatus, default_familiarize_offer, filter_bot_list, is_visible_bot_message,
+    project_bot_attention, project_bot_list_item, project_bot_list_message,
+    project_reply_questions, sort_bot_list,
 };
 pub use drafts::{
     DraftAttachment, DraftBody, DraftEnvelope, DraftQuote, DraftSnapshot, DraftWriteRequest,
     InputDraftStore,
 };
-pub use host::{HostTickReport, LeaseStatus, NativeProjectHost, bot_list_json};
+pub use host::{
+    FAMILIARIZE_READ_CAPABILITIES, FamiliarizeKind, HostTickReport, LeaseStatus, NativeProjectHost,
+    RESPONSIBILITY_QUESTION, StartFamiliarizeResult, bot_list_json,
+};
 pub use inbox::{InboxBatch, InboxCursor, ProjectInbox};
 pub use input_queue::{
     ConsumeOutcome, InputQueue, ProjectInput, SubmitInputRequest, input_message_id,

@@ -7,21 +7,61 @@
 use crate::{
     AgentTurnOutcome, BotDirectory, BotProfile, BotProfileStore, CreateBotProfile, InputDraftStore,
     InputQueue, MemoryStore, ObjectiveStore, ProjectError, ProjectInbox, ProjectInput,
-    ProjectRegistry, ProjectRegistryEntry, SessionSupervisor, SubmitInputRequest, WatchHost,
-    now_iso, parse_iso_ms,
+    ProjectRegistry, ProjectRegistryEntry, SessionSupervisor, SpawnCriterion, SpawnSessionRequest,
+    SubmitInputRequest, WatchHost, now_iso, parse_iso_ms,
     runner::{ProjectAgentRunner, RunTurnOptions},
 };
 use peer_runtime::{CancellationToken, model::NativeModel, session_host::PermissionInput};
 use peer_store::{
     AcquireLease, ApprovalStore, ConversationStore, HostIdentity, HostLeaseRecord, HostLeaseStore,
-    HostSurface, LeaseToken, NewProjectConversation, PolicyStore,
+    HostSurface, LeaseToken, NewProjectConversation, PolicyStore, StoreError,
 };
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
+    fs,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
+
+pub const FAMILIARIZE_READ_CAPABILITIES: [&str; 5] = [
+    "local.file.list",
+    "local.file.read",
+    "local.git.query",
+    "local.file.search",
+    "local.search.aggregate",
+];
+pub const RESPONSIBILITY_QUESTION: &str = "这个机器人主要负责什么";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FamiliarizeKind {
+    Blank,
+    Research { session_id: Option<String> },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartFamiliarizeResult {
+    pub kind: FamiliarizeKind,
+    pub reused: bool,
+}
+
+fn read_git_head_snapshot(ws_path: &Path) -> Option<(String, Option<String>)> {
+    let git_dir = ws_path.join(".git");
+    if !git_dir.is_dir() {
+        return None;
+    }
+    let head = fs::read_to_string(git_dir.join("HEAD")).ok()?;
+    let ref_path = head.trim().strip_prefix("ref:")?.trim();
+    let branch = ref_path.strip_prefix("refs/heads/")?.trim();
+    if branch.is_empty() {
+        return None;
+    }
+    let commit = fs::read_to_string(git_dir.join(ref_path))
+        .ok()
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty());
+    Some((branch.to_owned(), commit))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LeaseStatus {
@@ -469,6 +509,228 @@ impl NativeProjectHost {
         }))
     }
 
+    /// Trigger the first-open project familiarization workflow (`familiarize-template.mjs`):
+    /// empty/dotfile-only directories ask the responsibility question directly in conversation;
+    /// non-empty directories spawn one idempotent read-only `research` session.
+    pub fn start_familiarize(
+        &self,
+        workspace_id: &str,
+        worker_model_selection: Value,
+    ) -> Result<StartFamiliarizeResult, ProjectError> {
+        let mut profile = self
+            .profiles
+            .read(workspace_id)
+            .filter(BotProfile::is_active)
+            .ok_or_else(|| ProjectError::code("BOT_NOT_BOUND"))?;
+
+        if let Some(existing) = profile.familiarize.as_ref()
+            && existing["plan"].is_object()
+            && (existing["kind"] == "blank" || existing["dispatched"] == true)
+        {
+            let kind = if existing["kind"] == "blank" {
+                FamiliarizeKind::Blank
+            } else {
+                FamiliarizeKind::Research {
+                    session_id: existing["sessionId"].as_str().map(str::to_owned),
+                }
+            };
+            return Ok(StartFamiliarizeResult { kind, reused: true });
+        }
+
+        let ws_entry = self
+            .registry
+            .get(workspace_id)?
+            .ok_or_else(|| ProjectError::code("NOT_FOUND"))?;
+        let ws_path = PathBuf::from(&ws_entry.path);
+        let dir_entries =
+            fs::read_dir(&ws_path).map_err(|_| ProjectError::code("WORKSPACE_UNREADABLE"))?;
+        let mut names = Vec::new();
+        for entry in dir_entries {
+            let entry = entry.map_err(|_| ProjectError::code("WORKSPACE_UNREADABLE"))?;
+            names.push(entry.file_name().to_string_lossy().into_owned());
+        }
+        let is_blank = names
+            .iter()
+            .all(|n| n.trim().is_empty() || n.trim().starts_with('.'));
+
+        let conv_id = profile
+            .agent_conversation_id
+            .clone()
+            .ok_or_else(|| ProjectError::code("CONVERSATION_REQUIRED"))?;
+        let at = now_iso();
+
+        if is_blank {
+            match self
+                .conversations
+                .read_committed(&conv_id, None, 1024 * 1024)
+            {
+                Ok(_) => {}
+                Err(StoreError::NotFound) => {
+                    self.conversations.create_project_conversation(
+                        &NewProjectConversation {
+                            id: Some(&conv_id),
+                            title: &profile.display_name,
+                            workspace_id,
+                            workspace_path: Some(&ws_entry.path),
+                            role: "project_agent",
+                            parent_conversation_id: None,
+                            mode: "project_agent",
+                            created_at: &at,
+                        },
+                        None,
+                        None,
+                    )?;
+                }
+                Err(err) => return Err(err.into()),
+            }
+            self.conversations.append_message_idempotent(
+                &conv_id,
+                &json!({
+                    "id": format!("assistant-{}", uuid::Uuid::new_v4()),
+                    "role": "assistant",
+                            "kind": "agent_reply",
+                    "content": RESPONSIBILITY_QUESTION,
+                    "createdAt": at,
+                }),
+                &at,
+                None,
+            )?;
+            profile.familiarize = Some(json!({
+                "kind": "blank",
+                "plan": {
+                    "kind": "blank",
+                    "question": RESPONSIBILITY_QUESTION,
+                    "task": Value::Null,
+                },
+                "dispatched": false,
+                "startedAt": at,
+            }));
+            self.profiles.save(profile)?;
+            return Ok(StartFamiliarizeResult {
+                kind: FamiliarizeKind::Blank,
+                reused: false,
+            });
+        }
+
+        match self.ensure_lease(workspace_id)? {
+            LeaseStatus::Acquired { .. } => {}
+            LeaseStatus::HeldByOther(_) => {
+                return Err(ProjectError::code("desktop_approval_required"));
+            }
+        }
+
+        let display_name = if profile.display_name.trim().is_empty() {
+            "这个项目"
+        } else {
+            profile.display_name.trim()
+        };
+        let git_head = read_git_head_snapshot(&ws_path);
+        let mut lines = vec![
+            format!("只读熟悉「{display_name}」。"),
+            "查看目录、AGENTS.md、脚本和最近提交。".to_owned(),
+            "只使用结构化文件读取与 git_query。不要使用 shell，不要写入、修改或执行会改变工作区的操作。".to_owned(),
+            "用 git_query 核对当前仓库身份、工作树和最近提交；非 Git 目录如实记录，不用旧分支/提交快照代替当前检查。".to_owned(),
+            "交付带证据引用的阅读结果；记忆是否写入由宿主按用户设置决定。无法核实的内容标为未知，并说明原因。".to_owned(),
+            "本次目标是了解项目。发现缺陷或缺失文件也应先完成阅读报告，不要为新增修复、扩大检查或写入记忆要求用户选择。只有完成本次读取所必需且无法自行查明的决定才向用户提问。".to_owned(),
+        ];
+        if let Some((ref branch, ref commit)) = git_head {
+            lines.push(format!("建立任务时的分支快照（需重新核对）：{branch}"));
+            if let Some(sha) = commit {
+                lines.push(format!("建立任务时的提交快照（需重新核对）：{sha}"));
+            }
+        } else {
+            lines.push("没有可读的 git 分支。".to_owned());
+        }
+        let brief = lines.join("\n");
+        let caps: Vec<String> = FAMILIARIZE_READ_CAPABILITIES
+            .iter()
+            .map(|c| (*c).to_owned())
+            .collect();
+        let criteria = vec![
+            SpawnCriterion {
+                id: Some("c1".to_owned()),
+                kind: "model_review".to_owned(),
+                description: "用文件读取工具看过项目结构".to_owned(),
+                command: None,
+                path: None,
+                expect: None,
+            },
+            SpawnCriterion {
+                id: Some("c2".to_owned()),
+                kind: "model_review".to_owned(),
+                description: "确认过的事实带有证据引用".to_owned(),
+                command: None,
+                path: None,
+                expect: None,
+            },
+            SpawnCriterion {
+                id: Some("c3".to_owned()),
+                kind: "model_review".to_owned(),
+                description: "以当前 Git 读取事实核对仓库身份、工作树与最近提交；非仓库如实记录"
+                    .to_owned(),
+                command: None,
+                path: None,
+                expect: None,
+            },
+        ];
+
+        let summary = self.supervisor.spawn_session(
+            SpawnSessionRequest {
+                workspace_id: workspace_id.to_owned(),
+                workspace_path: ws_path,
+                parent_conversation_id: conv_id,
+                anchor_message_ids: vec![format!("lifecycle-familiarize-{workspace_id}")],
+                input_id: format!("familiarize-{workspace_id}"),
+                surface: "tui".to_owned(),
+                title: "熟悉项目".to_owned(),
+                brief: brief.clone(),
+                kind: "research".to_owned(),
+                read_only: true,
+                required_capabilities: caps.clone(),
+                success_criteria: criteria,
+                priority: "normal".to_owned(),
+                depends_on: vec![],
+                supersedes: None,
+                objective_id: None,
+                isolation: "none".to_owned(),
+                worker_model_selection,
+            },
+            true,
+        )?;
+
+        let git_json = match git_head {
+            Some((branch, commit)) => json!({ "branch": branch, "commit": commit }),
+            None => Value::Null,
+        };
+        profile.familiarize = Some(json!({
+            "kind": "research",
+            "plan": {
+                "kind": "research",
+                "question": Value::Null,
+                "task": {
+                    "kind": "research",
+                    "readOnly": true,
+                    "title": "熟悉项目",
+                    "brief": brief,
+                    "requiredCapabilities": caps,
+                    "allowedCapabilities": caps,
+                    "git": git_json,
+                }
+            },
+            "dispatched": true,
+            "sessionId": summary.session_id,
+            "startedAt": at,
+        }));
+        self.profiles.save(profile)?;
+
+        Ok(StartFamiliarizeResult {
+            kind: FamiliarizeKind::Research {
+                session_id: Some(summary.session_id),
+            },
+            reused: false,
+        })
+    }
+
     pub fn close(&self) {
         self.release_all_leases();
     }
@@ -487,4 +749,107 @@ pub fn bot_list_json(host: &NativeProjectHost) -> Value {
         by_ws.insert(ws.clone(), host.supervisor().list_bot_sessions(&ws));
     }
     json!(host.directory().list(&by_ws))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn start_familiarize_spawns_readonly_research_session_and_is_idempotent() {
+        let data_dir = tempdir().unwrap();
+        let ws_dir = tempdir().unwrap();
+        fs::write(ws_dir.path().join("README.md"), "# Demo repo\n").unwrap();
+        fs::create_dir_all(ws_dir.path().join(".git/refs/heads")).unwrap();
+        fs::write(ws_dir.path().join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        fs::write(
+            ws_dir.path().join(".git/refs/heads/main"),
+            "abcdef1234567890\n",
+        )
+        .unwrap();
+
+        let host = NativeProjectHost::new(data_dir.path(), "0.1.0-test", None).unwrap();
+        let (entry, _) = host.bind_workspace(ws_dir.path(), Some("Demo")).unwrap();
+
+        let page_before = host
+            .directory()
+            .read_interactions(&entry.workspace_id, 50, None)
+            .unwrap();
+        assert!(page_before.familiarize_offer.is_some());
+
+        let first = host
+            .start_familiarize(&entry.workspace_id, json!({}))
+            .unwrap();
+        assert!(!first.reused);
+        let session_id = match first.kind {
+            FamiliarizeKind::Research { session_id } => session_id.expect("session_id"),
+            FamiliarizeKind::Blank => panic!("expected research plan for non-empty repo"),
+        };
+
+        let sessions = host.supervisor().list_sessions(&entry.workspace_id);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, session_id);
+        assert!(sessions[0].read_only);
+
+        let prof = host.profiles().read(&entry.workspace_id).unwrap();
+        let fam = prof.familiarize.expect("familiarize persisted");
+        assert_eq!(fam["kind"], "research");
+        assert_eq!(fam["dispatched"], true);
+        assert!(
+            fam["plan"]["task"]["brief"]
+                .as_str()
+                .unwrap()
+                .contains("main")
+        );
+
+        let page_after = host
+            .directory()
+            .read_interactions(&entry.workspace_id, 50, None)
+            .unwrap();
+        assert!(page_after.familiarize_offer.is_none());
+
+        let second = host
+            .start_familiarize(&entry.workspace_id, json!({}))
+            .unwrap();
+        assert!(second.reused);
+        assert_eq!(
+            host.supervisor().list_sessions(&entry.workspace_id).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn start_familiarize_blank_workspace_asks_responsibility_question_without_spawning() {
+        let data_dir = tempdir().unwrap();
+        let ws_dir = tempdir().unwrap();
+        fs::write(ws_dir.path().join(".gitkeep"), "").unwrap();
+
+        let host = NativeProjectHost::new(data_dir.path(), "0.1.0-test", None).unwrap();
+        let (entry, _) = host.bind_workspace(ws_dir.path(), Some("Blank")).unwrap();
+
+        let res = host
+            .start_familiarize(&entry.workspace_id, json!({}))
+            .unwrap();
+        assert!(!res.reused);
+        assert_eq!(res.kind, FamiliarizeKind::Blank);
+        assert_eq!(
+            host.supervisor().list_sessions(&entry.workspace_id).len(),
+            0
+        );
+
+        let page = host
+            .directory()
+            .read_interactions(&entry.workspace_id, 50, None)
+            .unwrap();
+        assert!(page.familiarize_offer.is_none());
+        assert!(
+            page.messages
+                .iter()
+                .any(|m| m["content"] == RESPONSIBILITY_QUESTION)
+        );
+
+        let prof = host.profiles().read(&entry.workspace_id).unwrap();
+        assert_eq!(prof.familiarize.unwrap()["kind"], "blank");
+    }
 }

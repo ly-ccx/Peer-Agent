@@ -116,10 +116,27 @@ pub struct ReplyQuestionStatus {
     pub answered_by: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FamiliarizeOffer {
+    pub kind: String,
+    pub text: String,
+    pub action: String,
+}
+
+pub fn default_familiarize_offer() -> FamiliarizeOffer {
+    FamiliarizeOffer {
+        kind: "familiarize".to_owned(),
+        text: "要我先熟悉一下这个项目吗？".to_owned(),
+        action: "先熟悉一下".to_owned(),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct InteractionPage {
     pub messages: Vec<Value>,
     pub next_cursor: Option<String>,
+    pub familiarize_offer: Option<FamiliarizeOffer>,
 }
 
 fn clip(value: &str, limit: usize) -> String {
@@ -565,10 +582,13 @@ impl BotDirectory {
             .profiles
             .read(workspace_id)
             .ok_or_else(|| ProjectError::code("NOT_FOUND"))?;
+        let familiarize_offer = (before_message_id.is_none() && profile.familiarize.is_none())
+            .then(default_familiarize_offer);
         let Some(conv_id) = profile.agent_conversation_id.as_deref() else {
             return Ok(InteractionPage {
                 messages: Vec::new(),
                 next_cursor: None,
+                familiarize_offer,
             });
         };
         let snapshot = match self
@@ -580,6 +600,7 @@ impl BotDirectory {
                 return Ok(InteractionPage {
                     messages: Vec::new(),
                     next_cursor: None,
+                    familiarize_offer,
                 });
             }
             Err(e) => return Err(e.into()),
@@ -610,6 +631,7 @@ impl BotDirectory {
         Ok(InteractionPage {
             messages: page,
             next_cursor,
+            familiarize_offer,
         })
     }
 
@@ -731,5 +753,39 @@ mod tests {
         let listed2 = directory.list(&HashMap::new());
         assert_eq!(listed2[0].state.unread, 0);
         assert_eq!(listed2[0].state.needs_you, 1);
+    }
+
+    #[test]
+    fn read_interactions_emits_familiarize_offer_until_started_even_without_conv_file() {
+        let dir = tempdir().unwrap();
+        let profiles = BotProfileStore::new(dir.path());
+        profiles
+            .create(&CreateBotProfile {
+                workspace_id: "ws-fresh",
+                display_name: "FreshBot",
+                managed: false,
+                agent_conversation_id: "conv-missing-on-disk",
+                avatar_salt: "",
+            })
+            .unwrap();
+
+        let directory = BotDirectory::new(dir.path());
+        let first_page = directory.read_interactions("ws-fresh", 50, None).unwrap();
+        assert_eq!(
+            first_page.familiarize_offer,
+            Some(default_familiarize_offer())
+        );
+
+        let paged = directory
+            .read_interactions("ws-fresh", 50, Some("cursor-1"))
+            .unwrap();
+        assert_eq!(paged.familiarize_offer, None);
+
+        let mut prof = profiles.read("ws-fresh").unwrap();
+        prof.familiarize = Some(json!({ "kind": "research", "dispatched": true }));
+        profiles.save(prof).unwrap();
+
+        let after_started = directory.read_interactions("ws-fresh", 50, None).unwrap();
+        assert_eq!(after_started.familiarize_offer, None);
     }
 }
