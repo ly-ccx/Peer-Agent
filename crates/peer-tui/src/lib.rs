@@ -35,6 +35,7 @@ pub use markdown::{
 };
 pub use model_picker::{
     ModelPickerEvent, ModelPickerGroup, ModelPickerOption, ModelPickerState, render_model_picker,
+    render_model_picker_dock,
 };
 pub use overlays::{
     ClassicOverlay, GoalPickerRow, McpPickerRow, OverlayContext, ResumeSessionRow, SkillPickerRow,
@@ -46,7 +47,9 @@ pub use slash_menu::{
     filter_classic_slash_items, filter_slash_items, render_slash_menu,
 };
 pub use theme::{
-    DARK_PALETTE, LIGHT_PALETTE, ThemeMode, ThemeScheme, TuiLocale, TuiPalette, palette_for,
+    DARK_PALETTE, LIGHT_PALETTE, ThemeMode, ThemeScheme, TuiLocale, TuiPalette,
+    compact_workspace_path, context_meter_parts, format_topbar_quota, palette_for,
+    subscription_quota_color,
 };
 pub use view::render;
 pub use wordmark::{B3Variant, b3_wordmark_lines};

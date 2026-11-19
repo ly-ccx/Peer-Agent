@@ -334,12 +334,7 @@ impl PreparedRequest<'_> {
                     ModelError::http(status, &body)
                 });
             }
-            if !response
-                .headers()
-                .get(reqwest::header::CONTENT_TYPE)
-                .and_then(|v| v.to_str().ok())
-                .is_some_and(|v| v.split(';').next() == Some("text/event-stream"))
-            {
+            if !sse_content_type_allowed(response.headers()) {
                 return Err(ModelError::new("model_content_type_invalid"));
             }
             let decoder = stream.as_mut().expect("one request decoder");
@@ -378,6 +373,23 @@ impl PreparedRequest<'_> {
         result.map_err(|error| error.observed(request_fingerprint, observation))
     }
 }
+fn sse_content_type_allowed(headers: &reqwest::header::HeaderMap) -> bool {
+    let Some(raw) = headers.get(reqwest::header::CONTENT_TYPE) else {
+        return true;
+    };
+    let Ok(value) = raw.to_str() else {
+        return false;
+    };
+    matches!(
+        value
+            .split(';')
+            .next()
+            .map(|s| s.trim().to_ascii_lowercase())
+            .as_deref(),
+        Some("text/event-stream" | "text/plain" | "application/octet-stream" | "")
+    )
+}
+
 fn decode(bytes: &[u8], max: usize) -> Result<Value, ModelError> {
     decode_json_bounded(
         bytes,
@@ -395,6 +407,30 @@ fn decode(bytes: &[u8], max: usize) -> Result<Value, ModelError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sse_content_type_check_allows_missing_and_sse_proxies_only() {
+        let empty = reqwest::header::HeaderMap::new();
+        assert!(sse_content_type_allowed(&empty));
+
+        for ok in [
+            "text/event-stream",
+            "text/event-stream; charset=utf-8",
+            "TEXT/EVENT-STREAM",
+            "text/plain;charset=UTF-8",
+            "application/octet-stream",
+        ] {
+            let mut h = reqwest::header::HeaderMap::new();
+            h.insert(reqwest::header::CONTENT_TYPE, ok.parse().unwrap());
+            assert!(sse_content_type_allowed(&h), "expected allowed: {ok}");
+        }
+
+        for bad in ["text/html", "application/json", "application/xml"] {
+            let mut h = reqwest::header::HeaderMap::new();
+            h.insert(reqwest::header::CONTENT_TYPE, bad.parse().unwrap());
+            assert!(!sse_content_type_allowed(&h), "expected rejected: {bad}");
+        }
+    }
+
     #[test]
     fn canonical_lowering_matches_actual_openai_compatible_encoder() {
         let f: Value = serde_json::from_str(include_str!(

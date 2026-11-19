@@ -316,4 +316,18 @@ mod argument_budget_tests {
         assert!(call("write_file".into(), &args).is_err());
         assert!(call("write_file".into(), "{\"content\":").is_err());
     }
+
+    #[test]
+    fn responses_decoder_ignores_harmless_metadata_events() {
+        let sse = concat!(
+            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"r1\"}}\n\n",
+            "data: {\"type\":\"response.metadata\",\"response\":{\"id\":\"r1\"}}\n\n",
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hello\"}\n\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Hello\"}]}]}}\n\n",
+        );
+        let mut stream = Stream::new(Wire::Responses);
+        stream.push(sse.as_bytes()).unwrap();
+        let turn = stream.finish("fp-meta".into()).unwrap();
+        assert_eq!(turn.content, "Hello");
+    }
 }

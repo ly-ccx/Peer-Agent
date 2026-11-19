@@ -266,7 +266,8 @@ def run_all(binary: Path, output: Path):
         (c2_home / 'settings.json').write_text(seeded_settings)
         r2 = PtyRunner(binary, c2_ws, c2_home, ['--classic'], extra_env=env)
         try:
-            r2.wait_text('Peer·对话')
+            r2.wait_text('◆Peer')
+            r2.wait_text('modeagent')
             r2.send(b'Write demo.txt\r')
             r2.wait_text('本地授权请求')
             r2.send(b'y')
@@ -298,7 +299,8 @@ def run_all(binary: Path, output: Path):
         try:
             r3.wait_text('暂无已绑定的项目机器人')
             r3.send(b'\x1bOQ')  # F2
-            r3.wait_text('·对话')
+            r3.wait_text('◆Peer')
+            r3.wait_text('modeagent')
             r3.send(b'/bots\r')
             r3.wait_text('暂无已绑定的项目机器人')
             r3.send(b'\x03')
@@ -315,7 +317,8 @@ def run_all(binary: Path, output: Path):
         c4_ws.mkdir(); c4_home.mkdir()
         r4 = PtyRunner(binary, c4_ws, c4_home, ['--classic'], extra_env=env)
         try:
-            r4.wait_text('Peer·对话')
+            r4.wait_text('◆Peer')
+            r4.wait_text('modeagent')
             r4.send(b'First topic\r')
             r4.wait_text('Echo:Firsttopic')
             r4.drain(0.2)
@@ -404,7 +407,8 @@ def run_all(binary: Path, output: Path):
             r5a.wait_text('把这个目录绑定为机器人')
             r5a.wait_text('否，进入普通任务模式')
             r5a.send(b'\x1b[C\r')  # Right arrow -> No, Enter -> Classic
-            r5a.wait_text('Peer·对话')
+            r5a.wait_text('◆Peer')
+            r5a.wait_text('modeagent')
             r5a.send(b'\x03')
             code = r5a.wait_exit()
             assert code == 0, f'case5a exit={code}'
@@ -419,7 +423,8 @@ def run_all(binary: Path, output: Path):
         try:
             r5b.wait_text('把这个目录绑定为机器人')
             r5b.send(b'\x1b')  # Esc -> Classic
-            r5b.wait_text('Peer·对话')
+            r5b.wait_text('◆Peer')
+            r5b.wait_text('modeagent')
             r5b.send(b'\x03')
             code = r5b.wait_exit()
             assert code == 0, f'case5b exit={code}'

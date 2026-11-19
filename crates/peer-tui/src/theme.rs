@@ -245,6 +245,62 @@ pub fn context_usage_color(percent: Option<u8>, palette: &TuiPalette) -> Color {
     }
 }
 
+/// Topbar subscription quota color (`apps/tui/src/tui-subscription-quota.ts`).
+pub fn subscription_quota_color(remaining: Option<u8>, palette: &TuiPalette) -> Color {
+    match remaining {
+        Some(r) if r <= 10 => palette.danger,
+        Some(r) if r <= 30 => palette.warning,
+        Some(_) => palette.success,
+        None => palette.muted,
+    }
+}
+
+/// Compact topbar subscription quota text (`剩余72% · plus` / `72% · plus`).
+pub fn format_topbar_quota(remaining: u8, plan_label: Option<&str>, locale: TuiLocale) -> String {
+    let plan = plan_label.map(str::trim).filter(|s| !s.is_empty());
+    if locale.is_zh() {
+        match plan {
+            Some(p) => format!("剩余{remaining}% · {p}"),
+            None => format!("剩余{remaining}%"),
+        }
+    } else {
+        match plan {
+            Some(p) => format!("{remaining}% · {p}"),
+            None => format!("{remaining}%"),
+        }
+    }
+}
+
+/// Visual block meter (`███░░░`) matching `apps/tui/src/composer-status-view.tsx`.
+pub fn context_meter_parts(percent: Option<u8>, width: usize) -> (String, String) {
+    if width == 0 {
+        return (String::new(), String::new());
+    }
+    let bounded = usize::from(percent.unwrap_or(0).min(100));
+    let filled = (((bounded as f64 / 100.0) * width as f64).round() as usize).min(width);
+    ("█".repeat(filled), "░".repeat(width.saturating_sub(filled)))
+}
+
+/// Replace `/Users/<name>` or `/home/<name>` prefix with `~` (`composer-status.ts`).
+pub fn compact_workspace_path(path: &str) -> String {
+    let trimmed = path.trim().trim_end_matches(['/', '\\']);
+    let clean = if trimmed.is_empty() {
+        path.trim()
+    } else {
+        trimmed
+    };
+    let clean = if clean.is_empty() { "." } else { clean };
+    for prefix in ["/Users/", "/home/"] {
+        if let Some(rest) = clean.strip_prefix(prefix) {
+            if let Some(idx) = rest.find('/') {
+                return format!("~{}", &rest[idx..]);
+            }
+            return "~".to_owned();
+        }
+    }
+    clean.to_owned()
+}
+
 /// Fill an entire frame/area with the Frost canvas background.
 pub fn fill_canvas(frame: &mut Frame<'_>, area: Rect, bg: Color) {
     frame.render_widget(Block::default().style(Style::new().bg(bg)), area);
@@ -271,6 +327,34 @@ mod tests {
         assert_eq!(
             context_usage_color(Some(40), &DARK_PALETTE),
             DARK_PALETTE.user
+        );
+        assert_eq!(
+            subscription_quota_color(Some(8), &DARK_PALETTE),
+            DARK_PALETTE.danger
+        );
+        assert_eq!(
+            subscription_quota_color(Some(25), &DARK_PALETTE),
+            DARK_PALETTE.warning
+        );
+        assert_eq!(
+            subscription_quota_color(Some(72), &DARK_PALETTE),
+            DARK_PALETTE.success
+        );
+        assert_eq!(
+            format_topbar_quota(72, Some("plus"), TuiLocale::ZhCn),
+            "剩余72% · plus"
+        );
+        assert_eq!(
+            format_topbar_quota(72, Some("plus"), TuiLocale::EnUs),
+            "72% · plus"
+        );
+        assert_eq!(
+            context_meter_parts(Some(50), 12),
+            ("██████".to_owned(), "░░░░░░".to_owned())
+        );
+        assert_eq!(
+            compact_workspace_path("/Users/alice/Documents/peer-dev"),
+            "~/Documents/peer-dev"
         );
     }
 }

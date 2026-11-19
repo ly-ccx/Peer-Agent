@@ -27,6 +27,9 @@ use peer_runtime::{
     model_catalog::{resolve_exact_session_model, resolve_exec, supports_fast_mode},
     providers::RuntimeMode,
     session_host::LocalPermissionDecision,
+    subscription_quota::{
+        SubscriptionQuotaSnapshot, fetch_subscription_quota, supports_subscription_quota,
+    },
 };
 use peer_store::{
     ConversationModelSelection, ConversationStore, GoalStore, TranscriptLimits, TranscriptReader,
@@ -36,20 +39,26 @@ use peer_tui::{
     Effect, GoalMenuStatus, GoalPickerRow, HistoryDirection, LeaderAction, LeaderKeyState,
     MARKDOWN_WRAP_CACHE_BYTES, ModelPickerEvent, ModelPickerState, ReadingAnchor, RenderedBlock,
     ResumeSessionRow, SlashFilterContext, ThemeMode, TuiLocale, WrapCacheKey, action_for_event,
-    filter_classic_slash_items, parse_classic_command, render_classic, terminal_text,
+    compact_workspace_path, filter_classic_slash_items, format_topbar_quota, parse_classic_command,
+    render_classic, terminal_text,
 };
-use std::{io, path::PathBuf, rc::Rc, time::Duration};
+use std::{
+    io,
+    path::PathBuf,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 use tokio::{
     sync::{mpsc, watch},
     task::{JoinHandle, LocalSet},
 };
 
 const MAX_DISPLAY_MESSAGES: usize = 64;
-const IDLE_STATUS: &str =
-    "Enter 发送 · /resume 恢复会话 · /model 选模型 · Ctrl+X 快捷键 · /help 帮助";
-const ACTIVE_STATUS: &str = "本轮进行中 · ↑/↓ 阅读 · End/PgDn 最新 · Ctrl-C 停止本轮";
-const COMPACTING_STATUS: &str = "正在压缩上下文… · Ctrl-C 取消";
-const APPROVAL_STATUS: &str = "y 仅允许本次 · n / Esc 拒绝 · ↑/↓ 滚动 · Ctrl-C 停止本轮";
+const IDLE_STATUS: &str = "";
+const ACTIVE_STATUS: &str = "正在执行 · Ctrl+C 停止";
+const COMPACTING_STATUS: &str = "正在压缩上下文… · Ctrl+C 取消";
+const APPROVAL_STATUS: &str = "y 允许本次 · n / Esc 拒绝 · Ctrl+C 停止";
+const QUOTA_REFRESH_INTERVAL: Duration = Duration::from_secs(300);
 
 struct ActiveTurn {
     cancel: CancellationToken,
@@ -82,6 +91,13 @@ pub(super) struct ClassicSession<'a> {
     selected_display_name: Option<String>,
     selected_effort: Option<String>,
     context_percent: Option<u8>,
+    quota: Option<SubscriptionQuotaSnapshot>,
+    quota_provider_id: Option<String>,
+    quota_fetched_at: Option<Instant>,
+    quota_task: Option<(
+        CancellationToken,
+        JoinHandle<Option<SubscriptionQuotaSnapshot>>,
+    )>,
     goal_plans: Vec<GoalPickerRow>,
     selected_goal_plan_id: Option<String>,
     composer: Composer,
@@ -89,6 +105,7 @@ pub(super) struct ClassicSession<'a> {
     older: Option<TranscriptCursor>,
     anchor: ReadingAnchor,
     status: String,
+    status_is_error: bool,
     interrupted_preview: String,
     active: Option<ActiveTurn>,
     compacting: Option<ActiveCompaction>,
@@ -133,6 +150,10 @@ impl<'a> ClassicSession<'a> {
             selected_display_name,
             selected_effort,
             context_percent: None,
+            quota: None,
+            quota_provider_id: None,
+            quota_fetched_at: None,
+            quota_task: None,
             goal_plans: Vec::new(),
             selected_goal_plan_id: None,
             composer: Composer::default(),
@@ -140,6 +161,7 @@ impl<'a> ClassicSession<'a> {
             older: None,
             anchor: ReadingAnchor::FollowingLatest,
             status: IDLE_STATUS.to_owned(),
+            status_is_error: false,
             interrupted_preview: String::new(),
             active: None,
             compacting: None,
@@ -156,6 +178,81 @@ impl<'a> ClassicSession<'a> {
 
     fn is_busy(&self) -> bool {
         self.active.is_some() || self.compacting.is_some()
+    }
+
+    fn set_notice(&mut self, message: impl Into<String>, is_error: bool) {
+        self.status = message.into();
+        self.status_is_error = is_error;
+    }
+
+    fn clear_notice(&mut self) {
+        self.status.clear();
+        self.status_is_error = false;
+    }
+
+    fn cancel_quota_task(&mut self) {
+        if let Some((cancel, _task)) = self.quota_task.take() {
+            cancel.cancel();
+        }
+    }
+
+    fn maybe_spawn_quota_refresh(&mut self, force: bool) {
+        let provider_id = self
+            .selected_provider
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned);
+        if provider_id != self.quota_provider_id {
+            self.cancel_quota_task();
+            self.quota = None;
+            self.quota_provider_id = provider_id.clone();
+            self.quota_fetched_at = None;
+        }
+        let Some(provider_id) = provider_id else {
+            return;
+        };
+        if !supports_subscription_quota(&self.home, &provider_id) {
+            self.cancel_quota_task();
+            self.quota = None;
+            return;
+        }
+        let stale = match self.quota_fetched_at {
+            None => true,
+            Some(at) => at.elapsed() >= QUOTA_REFRESH_INTERVAL,
+        };
+        if !force && !stale {
+            return;
+        }
+        if self.quota_task.is_some() {
+            if !force {
+                return;
+            }
+            self.cancel_quota_task();
+        }
+        let home = self.home.clone();
+        let cancel = CancellationToken::new();
+        let task_cancel = cancel.clone();
+        self.quota_fetched_at = Some(Instant::now());
+        let task = tokio::task::spawn_local(async move {
+            fetch_subscription_quota(&home, &provider_id, &task_cancel).await
+        });
+        self.quota_task = Some((cancel, task));
+    }
+
+    async fn shutdown_tasks(&mut self) {
+        if let Some((cancel, task)) = self.quota_task.take() {
+            cancel.cancel();
+            let _ = task.await;
+        }
+        if let Some(active) = self.active.take() {
+            active.cancel.cancel();
+            let _ = active.task.await;
+        }
+        if let Some(comp) = self.compacting.take() {
+            comp.cancel.cancel();
+            let _ = comp.task.await;
+        }
     }
 
     fn model_badge(&self) -> String {
@@ -509,13 +606,15 @@ impl<'a> ClassicSession<'a> {
         self.refresh_goal_plans();
         self.overlay = ClassicOverlay::None;
         self.composer.accepted();
+        self.maybe_spawn_quota_refresh(true);
 
         let title = metadata["title"].as_str().unwrap_or(id);
-        self.status = if let Some(note) = model_notice {
+        let msg = if let Some(note) = model_notice {
             format!("已恢复会话：{}（{note}）", terminal_text(title))
         } else {
             format!("已恢复会话：{}", terminal_text(title))
         };
+        self.set_notice(msg, false);
     }
 
     fn apply_mode(&mut self, next: RuntimeMode) {
@@ -525,7 +624,7 @@ impl<'a> ClassicSession<'a> {
                 .runtime
                 .update_ordinary_mode(cid, &self.workspace, next)
         {
-            self.status = format!("切换模式失败（{}）。", err.0);
+            self.set_notice(format!("切换模式失败（{}）。", err.0), true);
             return;
         }
         self.mode = next;
@@ -535,7 +634,7 @@ impl<'a> ClassicSession<'a> {
             RuntimeMode::Goal => "Goal",
             other => other.as_str(),
         };
-        self.status = format!("运行模式已切换为 {label}。");
+        self.set_notice(format!("运行模式已切换为 {label}。"), false);
     }
 
     fn apply_access(&mut self, next_wire: &str) {
@@ -546,7 +645,7 @@ impl<'a> ClassicSession<'a> {
         };
         if self.access.set(next).is_ok() {
             self.access_level = next;
-            self.status = format!("本地权限策略已切换为 {next_wire}。");
+            self.set_notice(format!("本地权限策略已切换为 {next_wire}。"), false);
         }
     }
 
@@ -569,7 +668,10 @@ impl<'a> ClassicSession<'a> {
                 .runtime
                 .update_ordinary_model(cid, &self.workspace, &sel)
             {
-                self.status = format!("保存模型选择失败（{}），请停止当前执行后再试。", err.0);
+                self.set_notice(
+                    format!("保存模型选择失败（{}），请停止当前执行后再试。", err.0),
+                    true,
+                );
                 return;
             }
         }
@@ -579,7 +681,8 @@ impl<'a> ClassicSession<'a> {
         self.selected_effort = effort;
         self.refresh_fast_available();
         self.refresh_context_percent();
-        self.status = format!("当前模型已切换为 {}。", self.model_badge());
+        self.maybe_spawn_quota_refresh(true);
+        self.set_notice(format!("当前模型已切换为 {}。", self.model_badge()), false);
     }
 
     fn apply_theme_mode(&mut self, next_mode: ThemeMode) {
@@ -588,14 +691,17 @@ impl<'a> ClassicSession<'a> {
                 self.prefs.mode = next_mode;
                 self.prefs.scheme = scheme;
                 self.wrap_cache.clear();
-                self.status = format!(
-                    "主题已切换为 {}（配色: {}）。",
-                    next_mode.as_str(),
-                    scheme.as_str()
+                self.set_notice(
+                    format!(
+                        "主题已切换为 {}（配色: {}）。",
+                        next_mode.as_str(),
+                        scheme.as_str()
+                    ),
+                    false,
                 );
             }
             Err(err) => {
-                self.status = format!("保存主题失败：{err}");
+                self.set_notice(format!("保存主题失败：{err}"), true);
             }
         }
     }
@@ -604,10 +710,13 @@ impl<'a> ClassicSession<'a> {
         match theme_store::save_locale(&self.home, next_locale) {
             Ok(()) => {
                 self.prefs.locale = next_locale;
-                self.status = format!("界面语言已切换为 {}。", next_locale.as_str());
+                self.set_notice(
+                    format!("界面语言已切换为 {}。", next_locale.as_str()),
+                    false,
+                );
             }
             Err(err) => {
-                self.status = format!("保存语言失败：{err}");
+                self.set_notice(format!("保存语言失败：{err}"), true);
             }
         }
     }
@@ -623,20 +732,20 @@ impl<'a> ClassicSession<'a> {
         self.interrupted_preview.clear();
         self.anchor.jump_to_latest();
         self.composer.accepted();
-        self.status = notice.to_owned();
+        self.set_notice(notice, false);
     }
 
     fn start_compaction(&mut self) {
         if self.is_busy() {
-            self.status = "当前回合进行中，无法压缩上下文。".to_owned();
+            self.set_notice("当前回合进行中，无法压缩上下文。", false);
             return;
         }
         let Some(conv_id) = self.conversation_id.clone() else {
-            self.status = "当前尚无已保存会话可压缩。".to_owned();
+            self.set_notice("当前尚无已保存会话可压缩。", false);
             return;
         };
         if self.messages.len() < 2 {
-            self.status = "当前对话轮次较少，暂无需压缩上下文。".to_owned();
+            self.set_notice("当前对话轮次较少，暂无需压缩上下文。", false);
             return;
         }
         let selected = match resolve_exec(
@@ -648,7 +757,10 @@ impl<'a> ClassicSession<'a> {
         ) {
             Ok(s) => s,
             Err(err) => {
-                self.status = format!("模型未就绪（{}），无法压缩上下文。", err.detail);
+                self.set_notice(
+                    format!("模型未就绪（{}），无法压缩上下文。", err.detail),
+                    true,
+                );
                 return;
             }
         };
@@ -696,7 +808,7 @@ impl<'a> ClassicSession<'a> {
                 .map_err(|e| e.0)
         });
         self.compacting = Some(ActiveCompaction { cancel, task });
-        self.status = COMPACTING_STATUS.to_owned();
+        self.clear_notice();
     }
 
     fn draw(&mut self, terminal: &mut TerminalGuard) -> io::Result<()> {
@@ -706,17 +818,9 @@ impl<'a> ClassicSession<'a> {
             .map(|a| a.display.borrow().live.clone())
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| self.interrupted_preview.clone());
-        let title = match &self.conversation_id {
-            Some(id) => format!("Peer · 对话  {}", terminal_text(id)),
-            None => "Peer · 对话".to_owned(),
-        };
-        let workspace_label = self
-            .workspace
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("")
-            .to_owned();
+        let workspace_label = compact_workspace_path(&self.workspace.to_string_lossy());
         let model_badge = self.model_badge();
+        let effort_badge = self.selected_effort.as_deref().unwrap_or("default");
         let mode_badge = self.mode.as_str();
         let access_badge = self.access_badge();
         let goal_status = self.goal_menu_status();
@@ -726,17 +830,34 @@ impl<'a> ClassicSession<'a> {
         let scheme_id = self.prefs.scheme.cache_id();
         let current_theme = self.prefs.mode;
         let locale = self.prefs.locale;
-        let status = if self.approval.is_some() {
-            APPROVAL_STATUS.to_owned()
+        let quota_label = self
+            .quota
+            .as_ref()
+            .map(|q| format_topbar_quota(q.remaining_percent, q.plan_label.as_deref(), locale));
+        let quota_remaining = self.quota.as_ref().map(|q| q.remaining_percent);
+        let activity_label = if self.approval.is_some() {
+            Some(APPROVAL_STATUS)
         } else if self.compacting.is_some() {
-            COMPACTING_STATUS.to_owned()
+            Some(COMPACTING_STATUS)
         } else if self.active.is_some() {
-            ACTIVE_STATUS.to_owned()
-        } else if let Some(s) = self.composer.status {
-            s.to_owned()
+            Some(ACTIVE_STATUS)
         } else {
-            self.status.clone()
+            None
         };
+        let notice_str = if self.approval.is_some() && !is_running {
+            Some(APPROVAL_STATUS)
+        } else if let Some(s) = self.composer.status {
+            Some(s)
+        } else if !self.status.is_empty() {
+            Some(self.status.as_str())
+        } else {
+            None
+        };
+        let notice_is_error = notice_str.is_some()
+            && self.composer.status.is_none()
+            && !(self.approval.is_some() && !is_running)
+            && self.status_is_error;
+        let status = notice_str.unwrap_or("");
         let approval_view = self.approval.as_ref().map(|a| (a.text.as_str(), a.scroll));
         let mut shown_size = None;
         terminal.draw_frame(|frame| {
@@ -744,17 +865,23 @@ impl<'a> ClassicSession<'a> {
             render_classic(
                 frame,
                 ClassicView {
-                    title: &title,
+                    title: "Peer",
                     workspace_label: &workspace_label,
                     model_badge: &model_badge,
+                    effort_badge,
                     mode_badge,
                     access_badge,
                     context_percent: self.context_percent,
+                    quota_label: quota_label.as_deref(),
+                    quota_remaining,
                     fast_mode: self.fast_mode,
                     fast_available: self.fast_available,
                     goal_status,
                     goal_banner: goal_banner.as_deref(),
                     is_running,
+                    activity_label,
+                    notice: notice_str,
+                    notice_is_error,
                     palette,
                     scheme_id,
                     current_theme,
@@ -763,7 +890,7 @@ impl<'a> ClassicSession<'a> {
                     live_stream: &live_buf,
                     anchor: &self.anchor,
                     composer: &self.composer,
-                    status: &status,
+                    status,
                     approval: approval_view,
                     model_picker: &self.model_picker,
                     overlay: &self.overlay,
@@ -780,7 +907,7 @@ impl<'a> ClassicSession<'a> {
 
     fn submit_prompt(&mut self, prompt: String) {
         if self.is_busy() {
-            self.status = "当前回合进行中，请等待完成或按 Ctrl-C 停止本轮。".to_owned();
+            self.set_notice("当前回合进行中，请等待完成或按 Ctrl-C 停止本轮。", true);
             return;
         }
         let selected = match resolve_exec(
@@ -792,9 +919,12 @@ impl<'a> ClassicSession<'a> {
         ) {
             Ok(s) => s,
             Err(err) => {
-                self.status = format!(
-                    "模型未就绪（{}），原草稿已保留。输入 `/model` 选择模型。",
-                    err.detail
+                self.set_notice(
+                    format!(
+                        "模型未就绪（{}），原草稿已保留。输入 `/model` 选择模型。",
+                        err.detail
+                    ),
+                    true,
                 );
                 return;
             }
@@ -879,13 +1009,28 @@ impl<'a> ClassicSession<'a> {
             accepted: false,
             revision: 0,
         });
-        self.status = ACTIVE_STATUS.to_owned();
+        self.clear_notice();
     }
 
     async fn poll_active(&mut self) -> bool {
         let mut dirty = false;
         let mut finished = None;
         let mut need_reload = false;
+        if self
+            .quota_task
+            .as_ref()
+            .is_some_and(|(_, t)| t.is_finished())
+            && let Some((_, task)) = self.quota_task.take()
+        {
+            self.quota_fetched_at = Some(Instant::now());
+            if let Ok(Some(snap)) = task.await
+                && self.quota_provider_id.as_deref() == Some(snap.provider_id.as_str())
+            {
+                self.quota = Some(snap);
+                dirty = true;
+            }
+        }
+        self.maybe_spawn_quota_refresh(false);
         if let Some(active) = self.active.as_mut() {
             let (accepted, revision, notice, conv_id, has_live) = {
                 let d = active.display.borrow();
@@ -915,6 +1060,7 @@ impl<'a> ClassicSession<'a> {
             }
             if let Some(n) = notice {
                 self.status = n.to_owned();
+                self.status_is_error = false;
                 dirty = true;
             }
             if has_live {
@@ -943,7 +1089,8 @@ impl<'a> ClassicSession<'a> {
                     self.reload_transcript(None);
                     self.refresh_context_percent();
                     self.refresh_goal_plans();
-                    self.status = IDLE_STATUS.to_owned();
+                    self.maybe_spawn_quota_refresh(true);
+                    self.clear_notice();
                 }
                 Ok(Err("CANCELLED")) => {
                     if !live_tail.is_empty() {
@@ -953,21 +1100,24 @@ impl<'a> ClassicSession<'a> {
                     self.reload_transcript(None);
                     self.refresh_context_percent();
                     self.refresh_goal_plans();
-                    self.status = "本轮已停止，可继续输入下一条消息。".to_owned();
+                    self.set_notice("本轮已停止，可继续输入下一条消息。", false);
                 }
                 Ok(Err("conversation_execution_busy")) => {
                     self.reload_transcript(None);
                     let cid = self.conversation_id.as_deref().unwrap_or("");
-                    self.status = format!(
-                        "会话仍在执行或有结果待核对（conversation_execution_busy） · peer recover --session {cid}"
+                    self.set_notice(
+                        format!(
+                            "会话仍在执行或有结果待核对（conversation_execution_busy） · peer recover --session {cid}"
+                        ),
+                        true,
                     );
                 }
                 Ok(Err(code)) => {
                     self.reload_transcript(None);
-                    self.status = format!("执行未完成（{code}）；原草稿或历史已保留。");
+                    self.set_notice(format!("执行未完成（{code}）；原草稿或历史已保留。"), true);
                 }
                 Err(_) => {
-                    self.status = "内部执行任务异常结束。".to_owned();
+                    self.set_notice("内部执行任务异常结束。", true);
                 }
             }
             dirty = true;
@@ -980,22 +1130,25 @@ impl<'a> ClassicSession<'a> {
                 Ok(Ok(outcome)) => {
                     self.reload_transcript(None);
                     self.refresh_context_percent();
-                    self.status = format!(
-                        "已完成上下文压缩（{} · 原 {} 条消息）。",
-                        outcome.method, outcome.original_message_count
+                    self.set_notice(
+                        format!(
+                            "已完成上下文压缩（{} · 原 {} 条消息）。",
+                            outcome.method, outcome.original_message_count
+                        ),
+                        false,
                     );
                 }
                 Ok(Err("CANCELLED")) => {
-                    self.status = "已取消上下文压缩。".to_owned();
+                    self.set_notice("已取消上下文压缩。", false);
                 }
                 Ok(Err("native_context_pressure")) => {
-                    self.status = "当前对话轮次较少，暂无需压缩上下文。".to_owned();
+                    self.set_notice("当前对话轮次较少，暂无需压缩上下文。", false);
                 }
                 Ok(Err(code)) => {
-                    self.status = format!("上下文压缩未完成（{code}）。");
+                    self.set_notice(format!("上下文压缩未完成（{code}）。"), true);
                 }
                 Err(_) => {
-                    self.status = "上下文压缩任务异常结束。".to_owned();
+                    self.set_notice("上下文压缩任务异常结束。", true);
                 }
             }
             dirty = true;
@@ -1551,7 +1704,7 @@ impl<'a> ClassicSession<'a> {
                 self.composer.accepted();
                 match ThemeMode::parse(&raw) {
                     Some(m) => self.apply_theme_mode(m),
-                    None => self.status = "主题仅支持 dark / light / system。".to_owned(),
+                    None => self.set_notice("主题仅支持 dark / light / system。", true),
                 }
                 None
             }
@@ -1565,7 +1718,7 @@ impl<'a> ClassicSession<'a> {
                 self.composer.accepted();
                 match TuiLocale::parse(&raw) {
                     Some(l) => self.apply_locale(l),
-                    None => self.status = "语言仅支持 zh-CN / en-US。".to_owned(),
+                    None => self.set_notice("语言仅支持 zh-CN / en-US。", true),
                 }
                 None
             }
@@ -1619,15 +1772,15 @@ impl<'a> ClassicSession<'a> {
                         if !self.anchor.is_following() {
                             self.anchor.scroll_down(12);
                             if self.anchor.is_following() {
-                                self.status = IDLE_STATUS.to_owned();
+                                self.clear_notice();
                             }
                         } else {
-                            self.status = "已在最新位置。".to_owned();
+                            self.set_notice("已在最新位置。", false);
                         }
                     }
                     HistoryDirection::Latest => {
                         self.anchor.jump_to_latest();
-                        self.status = "已回到最新对话。".to_owned();
+                        self.set_notice("已回到最新对话。", false);
                     }
                 }
                 None
@@ -1687,7 +1840,7 @@ impl<'a> ClassicSession<'a> {
             }
             ClassicCommand::Quit => Some(ShellOutcome::Quit),
             ClassicCommand::Invalid => {
-                self.status = "未知命令，输入 `/help` 查看支持命令。".to_owned();
+                self.set_notice("未知命令，输入 `/help` 查看支持命令。", true);
                 None
             }
         }
@@ -1698,17 +1851,11 @@ impl<'a> ClassicSession<'a> {
         terminal: &mut TerminalGuard,
         shutdown: &CancellationToken,
     ) -> io::Result<ShellOutcome> {
+        self.maybe_spawn_quota_refresh(true);
         self.draw(terminal)?;
         loop {
             if shutdown.is_cancelled() {
-                if let Some(active) = self.active.take() {
-                    active.cancel.cancel();
-                    let _ = active.task.await;
-                }
-                if let Some(comp) = self.compacting.take() {
-                    comp.cancel.cancel();
-                    let _ = comp.task.await;
-                }
+                self.shutdown_tasks().await;
                 return Ok(ShellOutcome::Quit);
             }
 
@@ -1767,6 +1914,7 @@ impl<'a> ClassicSession<'a> {
                             }
                         } else if key.code == KeyCode::F(2) {
                             if !self.is_busy() {
+                                self.shutdown_tasks().await;
                                 return Ok(ShellOutcome::SwitchToBots);
                             }
                         } else if key.code == KeyCode::F(3) {
@@ -1776,24 +1924,20 @@ impl<'a> ClassicSession<'a> {
                             && key.modifiers.contains(KeyModifiers::CONTROL)
                             && self.composer.draft().is_empty()
                         {
-                            if let Some(active) = self.active.take() {
-                                active.cancel.cancel();
-                                let _ = active.task.await;
-                            }
-                            if let Some(comp) = self.compacting.take() {
-                                comp.cancel.cancel();
-                                let _ = comp.task.await;
-                            }
+                            self.shutdown_tasks().await;
                             return Ok(ShellOutcome::Quit);
                         } else {
                             match self.leader.resolve(key) {
                                 LeaderAction::Armed => {
-                                    self.status = "Ctrl+X · M 模型 · O 模式 · P 权限 · N 新建 · L 恢复 · 1/2/3 模式".to_owned();
+                                    self.set_notice(
+                                        "Ctrl+X · M 模型 · O 模式 · P 权限 · N 新建 · L 恢复 · 1/2/3 模式",
+                                        false,
+                                    );
                                     dirty = true;
                                 }
                                 LeaderAction::Consumed => {}
                                 LeaderAction::Cancelled => {
-                                    self.status = IDLE_STATUS.to_owned();
+                                    self.clear_notice();
                                     dirty = true;
                                 }
                                 LeaderAction::Command(cmd) => {
@@ -1870,14 +2014,7 @@ impl<'a> ClassicSession<'a> {
                                                 self.slash_selected = 0;
                                                 if let Some(outcome) = self.handle_command(&chosen)
                                                 {
-                                                    if let Some(active) = self.active.take() {
-                                                        active.cancel.cancel();
-                                                        let _ = active.task.await;
-                                                    }
-                                                    if let Some(comp) = self.compacting.take() {
-                                                        comp.cancel.cancel();
-                                                        let _ = comp.task.await;
-                                                    }
+                                                    self.shutdown_tasks().await;
                                                     return Ok(outcome);
                                                 }
                                                 dirty = true;
@@ -1888,7 +2025,7 @@ impl<'a> ClassicSession<'a> {
                                         && !self.anchor.is_following()
                                     {
                                         self.anchor.jump_to_latest();
-                                        self.status = "已回到最新对话。".to_owned();
+                                        self.set_notice("已回到最新对话。", false);
                                         dirty = true;
                                     } else if key.code == KeyCode::Up
                                         && self.composer.draft().is_empty()
@@ -1920,11 +2057,11 @@ impl<'a> ClassicSession<'a> {
                                     {
                                         if let Some(active) = self.active.as_ref() {
                                             active.cancel.cancel();
-                                            self.status = "正在停止本轮…".to_owned();
+                                            self.set_notice("正在停止本轮…", false);
                                         }
                                         if let Some(comp) = self.compacting.as_ref() {
                                             comp.cancel.cancel();
-                                            self.status = "正在取消压缩…".to_owned();
+                                            self.set_notice("正在取消压缩…", false);
                                         }
                                         dirty = true;
                                     } else if let Some(action) = action_for_event(Event::Key(key)) {
@@ -1932,31 +2069,20 @@ impl<'a> ClassicSession<'a> {
                                             Action::Submit => {
                                                 let text = self.composer.draft().to_owned();
                                                 if let Some(outcome) = self.handle_command(&text) {
-                                                    if let Some(active) = self.active.take() {
-                                                        active.cancel.cancel();
-                                                        let _ = active.task.await;
-                                                    }
-                                                    if let Some(comp) = self.compacting.take() {
-                                                        comp.cancel.cancel();
-                                                        let _ = comp.task.await;
-                                                    }
+                                                    self.shutdown_tasks().await;
                                                     return Ok(outcome);
                                                 }
                                                 dirty = true;
                                             }
                                             other => match self.composer.apply(other) {
                                                 Effect::Quit => {
-                                                    if let Some(active) = self.active.take() {
-                                                        active.cancel.cancel();
-                                                        let _ = active.task.await;
-                                                    }
-                                                    if let Some(comp) = self.compacting.take() {
-                                                        comp.cancel.cancel();
-                                                        let _ = comp.task.await;
-                                                    }
+                                                    self.shutdown_tasks().await;
                                                     return Ok(ShellOutcome::Quit);
                                                 }
                                                 Effect::Redraw => {
+                                                    if !self.is_busy() {
+                                                        self.clear_notice();
+                                                    }
                                                     self.slash_selected = 0;
                                                     dirty = true;
                                                 }

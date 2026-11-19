@@ -134,15 +134,19 @@ impl Responses {
             Some(
                 "response.created"
                 | "response.in_progress"
+                | "response.queued"
+                | "response.metadata"
                 | "response.output_item.added"
                 | "response.output_item.done"
                 | "response.content_part.added"
                 | "response.content_part.done"
                 | "response.output_text.done"
+                | "response.output_text.annotation.added"
                 | "response.reasoning_summary_part.added"
                 | "response.reasoning_summary_part.done"
                 | "response.reasoning_summary_text.done"
-                | "response.reasoning_text.done",
+                | "response.reasoning_text.done"
+                | "keepalive",
             ) => {}
             _ => return Err(ModelError::new("model_event_unsupported")),
         }

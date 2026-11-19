@@ -38,6 +38,7 @@ pub mod qoder;
 pub mod recorder;
 pub mod session_control;
 pub mod session_host;
+pub mod subscription_quota;
 pub mod system_context;
 pub mod usage_accounting;
 pub use tokio_util::sync::CancellationToken;

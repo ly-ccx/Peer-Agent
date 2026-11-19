@@ -102,6 +102,20 @@ impl ModelPickerState {
         self.error = None;
     }
 
+    pub fn dock_height(&self, max_h: u16) -> u16 {
+        if !self.open {
+            return 0;
+        }
+        let rows = self
+            .groups
+            .get(self.active_group)
+            .map_or(1, |g| g.models.len().max(1))
+            .min(6) as u16;
+        let tabs = u16::from(!self.groups.is_empty());
+        let chrome = 1 + 1 + tabs + 1;
+        (rows + chrome).min(max_h).max(4.min(max_h))
+    }
+
     pub fn current_model(&self) -> Option<&ModelPickerOption> {
         self.groups
             .get(self.active_group)
@@ -251,61 +265,127 @@ pub fn render_model_picker(
         Block::default().style(Style::new().bg(palette.panel)),
         popup,
     );
+    render_model_picker_body(frame, popup, state, palette, palette.panel, false);
+}
 
-    let outer = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Min(1),
-        Constraint::Length(1),
-        Constraint::Length(1),
-    ])
-    .split(popup);
-
-    let pw = usize::from(popup.width).max(1);
+/// Docked open-top terminal layer anchored above the composer divider (`app.tsx`).
+pub fn render_model_picker_dock(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    state: &ModelPickerState,
+    palette: &TuiPalette,
+) {
+    if !state.open || area.width < 12 || area.height < 4 {
+        return;
+    }
     frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(
-                " 模型选择 ",
+        Block::default().style(Style::new().bg(palette.background)),
+        area,
+    );
+    render_model_picker_body(frame, area, state, palette, palette.background, true);
+}
+
+fn render_model_picker_body(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    state: &ModelPickerState,
+    palette: &TuiPalette,
+    bg: ratatui::style::Color,
+    docked: bool,
+) {
+    let pw = usize::from(area.width).max(1);
+    let mut constraints = Vec::new();
+    if docked {
+        constraints.push(Constraint::Length(1)); // Full top hairline divider
+    }
+    constraints.push(Constraint::Length(1)); // Title
+    if !state.groups.is_empty() {
+        constraints.push(Constraint::Length(1)); // Provider tabs
+    }
+    constraints.push(Constraint::Min(1)); // Model rows
+    if docked {
+        constraints.push(Constraint::Length(1)); // Footer hint
+    } else {
+        constraints.push(Constraint::Length(1)); // Separator
+        constraints.push(Constraint::Length(1)); // Footer hint
+    }
+    let outer = Layout::vertical(constraints).split(area);
+    let mut slot = 0usize;
+
+    if docked {
+        frame.render_widget(
+            Paragraph::new(Line::styled(
+                SEPARATOR.repeat(pw),
+                Style::new().fg(palette.border).bg(bg),
+            )),
+            outer[slot],
+        );
+        slot += 1;
+        frame.render_widget(
+            Paragraph::new(Line::styled(
+                " 模型选择",
                 Style::new()
                     .fg(palette.info)
-                    .bg(palette.panel)
+                    .bg(bg)
                     .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                SEPARATOR.repeat(pw.saturating_sub(10)),
-                Style::new().fg(palette.border).bg(palette.panel),
-            ),
-        ])),
-        outer[0],
-    );
+            )),
+            outer[slot],
+        );
+        slot += 1;
+    } else {
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(
+                    " 模型选择 ",
+                    Style::new()
+                        .fg(palette.info)
+                        .bg(bg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    SEPARATOR.repeat(pw.saturating_sub(10)),
+                    Style::new().fg(palette.border).bg(bg),
+                ),
+            ])),
+            outer[slot],
+        );
+        slot += 1;
+    }
 
     // Provider tabs row (windowed horizontally so active group remains visible)
-    let mut tab_spans = Vec::new();
-    if state.groups.is_empty() {
-        tab_spans.push(Span::styled(
-            "无已配置模型",
-            Style::new().fg(palette.muted).bg(palette.panel),
-        ));
-    } else {
-        let cap = pw.saturating_sub(4).clamp(1, 20);
+    if state.groups.is_empty() && !docked {
+        // Rendered inside empty list fallback when docked
+        frame.render_widget(
+            Paragraph::new(Line::styled(
+                "无已配置模型",
+                Style::new().fg(palette.muted).bg(bg),
+            )),
+            outer[slot],
+        );
+    } else if !state.groups.is_empty() {
+        let mut tab_spans = Vec::new();
+        let cap = pw.saturating_sub(6).clamp(1, 20);
         let clipped: Vec<String> = state
             .groups
             .iter()
-            .map(|g| clip_bot_line(&g.label, cap))
+            .map(|g| {
+                let raw = clip_bot_line(&g.label, cap);
+                if docked { format!("[{raw}]") } else { raw }
+            })
             .collect();
         let (start, end) = visible_tab_range(&clipped, state.active_group, pw);
-        let muted = Style::new().fg(palette.muted).bg(palette.panel);
+        let muted = Style::new().fg(palette.muted).bg(bg);
         if start > 0 {
             tab_spans.push(Span::styled("‹ ", muted));
         }
         for (i, label) in clipped.iter().enumerate().take(end).skip(start) {
             if i > start {
-                tab_spans.push(Span::styled("  ", Style::new().bg(palette.panel)));
+                tab_spans.push(Span::styled("  ", Style::new().bg(bg)));
             }
             let style = if i == state.active_group {
                 Style::new()
                     .fg(palette.accent)
-                    .bg(palette.panel)
+                    .bg(bg)
                     .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
             } else {
                 muted
@@ -321,15 +401,16 @@ pub fn render_model_picker(
         if end < clipped.len() {
             tab_spans.push(Span::styled(" ›", muted));
         }
+        frame.render_widget(
+            Paragraph::new(Line::from(tab_spans)).style(Style::new().bg(bg)),
+            outer[slot],
+        );
+        slot += 1;
     }
-    frame.render_widget(
-        Paragraph::new(Line::from(tab_spans)).style(Style::new().bg(palette.panel)),
-        outer[1],
-    );
 
     // Model list inside active provider group (caret selection, internal scroll)
-    let list_h = usize::from(outer[2].height);
-    let list_w = usize::from(outer[2].width);
+    let list_h = usize::from(outer[slot].height);
+    let list_w = usize::from(outer[slot].width);
     let mut rows = Vec::new();
     if let Some(group) = state.groups.get(state.active_group) {
         let top = state.active_model.saturating_sub(list_h.saturating_sub(1));
@@ -358,43 +439,46 @@ pub fn render_model_picker(
                 list_w.saturating_sub(mark.width() + suffix.width().min(list_w / 2)),
             );
             let main_style = if !m.available {
-                Style::new().fg(palette.muted).bg(palette.panel)
+                Style::new().fg(palette.muted).bg(bg)
             } else if focused {
                 Style::new()
                     .fg(palette.accent)
-                    .bg(palette.panel)
+                    .bg(bg)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::new().fg(palette.text).bg(palette.panel)
+                Style::new().fg(palette.text).bg(bg)
             };
             let mut spans = vec![Span::styled(main_text, main_style)];
             if selected {
-                spans.push(Span::styled(
-                    mark,
-                    Style::new().fg(palette.success).bg(palette.panel),
-                ));
+                spans.push(Span::styled(mark, Style::new().fg(palette.success).bg(bg)));
             }
             if !suffix.is_empty() {
                 spans.push(Span::styled(
                     clip_bot_line(&suffix, list_w / 2),
-                    Style::new().fg(palette.muted).bg(palette.panel),
+                    Style::new().fg(palette.muted).bg(bg),
                 ));
             }
             rows.push(Line::from(spans));
         }
+    } else if docked {
+        rows.push(Line::styled(
+            "  无已配置模型",
+            Style::new().fg(palette.muted).bg(bg),
+        ));
     }
-    frame.render_widget(
-        Paragraph::new(rows).style(Style::new().bg(palette.panel)),
-        outer[2],
-    );
+    frame.render_widget(Paragraph::new(rows).style(Style::new().bg(bg)), outer[slot]);
+    slot += 1;
 
-    frame.render_widget(
-        Paragraph::new(Line::styled(
-            SEPARATOR.repeat(pw),
-            Style::new().fg(palette.border).bg(palette.panel),
-        )),
-        outer[3],
-    );
+    if !docked {
+        frame.render_widget(
+            Paragraph::new(Line::styled(
+                SEPARATOR.repeat(pw),
+                Style::new().fg(palette.border).bg(bg),
+            )),
+            outer[slot],
+        );
+        slot += 1;
+    }
 
     // Footer status (busy / error / controls)
     let footer = if let Some(ref err) = state.error {
@@ -408,11 +492,14 @@ pub fn render_model_picker(
         )
     };
     let footer_style = if state.error.is_some() {
-        Style::new().fg(palette.danger_soft).bg(palette.panel)
+        Style::new().fg(palette.danger_soft).bg(bg)
     } else {
-        Style::new().fg(palette.muted).bg(palette.panel)
+        Style::new().fg(palette.muted).bg(bg)
     };
-    frame.render_widget(Paragraph::new(Line::styled(footer, footer_style)), outer[4]);
+    frame.render_widget(
+        Paragraph::new(Line::styled(footer, footer_style)),
+        outer[slot],
+    );
 }
 
 #[cfg(test)]
