@@ -22,10 +22,10 @@ use peer_project_agent::{
 use peer_runtime::{CancellationToken, model_catalog::resolve_exec};
 use peer_tui::{
     Action, BOT_SLASH_ITEMS, BotCardRow, BotMessageView, BotRowView, BotScreen, BotShellView,
-    BotSubView, BotTaskRow, ByteBudgetLru, CardNumbers, CardOperation, Composer, Effect,
-    MARKDOWN_WRAP_CACHE_BYTES, ModelPickerEvent, ModelPickerState, ProjectCommand, ReadingAnchor,
-    RenderedBlock, ThemeMode, TuiLocale, WrapCacheKey, action_for_event, filter_slash_items,
-    parse_project_command, render_bot_shell, terminal_text,
+    BotSubView, BotTaskRow, ByteBudgetLru, CardNumbers, CardOperation, ClassicOverlay, Composer,
+    Effect, MARKDOWN_WRAP_CACHE_BYTES, ModelPickerEvent, ModelPickerState, ProjectCommand,
+    ReadingAnchor, RenderedBlock, ThemeMode, TuiLocale, WrapCacheKey, action_for_event,
+    filter_slash_items, parse_project_command, render_bot_shell, terminal_text,
 };
 use std::{
     collections::HashMap,
@@ -71,6 +71,7 @@ struct BotShellState<'a> {
     selected_model: Option<String>,
     selected_effort: Option<String>,
     model_picker: ModelPickerState,
+    overlay: ClassicOverlay,
     wrap_cache: ByteBudgetLru<WrapCacheKey, RenderedBlock>,
     active_tick: Option<ActiveTick>,
     last_refresh: Instant,
@@ -158,6 +159,7 @@ impl<'a> BotShellState<'a> {
             selected_model,
             selected_effort,
             model_picker: ModelPickerState::default(),
+            overlay: ClassicOverlay::None,
             wrap_cache: ByteBudgetLru::new(MARKDOWN_WRAP_CACHE_BYTES, 512),
             active_tick: None,
             last_refresh: Instant::now(),
@@ -633,59 +635,36 @@ impl<'a> BotShellState<'a> {
             }
             ProjectCommand::Theme(arg) => {
                 self.composer.accepted();
-                let next_mode = match arg {
+                match arg {
                     Some(raw) => match ThemeMode::parse(&raw) {
-                        Some(m) => m,
+                        Some(m) => self.apply_theme_mode(m),
                         None => {
                             self.notice = Some("主题仅支持 dark / light / system。".to_owned());
-                            return None;
                         }
                     },
-                    None => match self.prefs.mode {
-                        ThemeMode::Dark => ThemeMode::Light,
-                        ThemeMode::Light => ThemeMode::System,
-                        ThemeMode::System => ThemeMode::Dark,
-                    },
-                };
-                match theme_store::save_theme_mode(&self.home, next_mode) {
-                    Ok(scheme) => {
-                        self.prefs.mode = next_mode;
-                        self.prefs.scheme = scheme;
-                        self.wrap_cache.clear();
-                        self.notice = Some(format!(
-                            "主题已切换为 {}（配色: {}）。",
-                            next_mode.as_str(),
-                            scheme.as_str()
-                        ));
-                    }
-                    Err(err) => {
-                        self.notice = Some(format!("保存主题失败：{err}"));
+                    None => {
+                        let sel = match self.prefs.mode {
+                            ThemeMode::Dark => 0,
+                            ThemeMode::Light => 1,
+                            ThemeMode::System => 2,
+                        };
+                        self.overlay = ClassicOverlay::Theme { selected: sel };
                     }
                 }
                 None
             }
             ProjectCommand::Language(arg) => {
                 self.composer.accepted();
-                let next_locale = match arg {
+                match arg {
                     Some(raw) => match TuiLocale::parse(&raw) {
-                        Some(l) => l,
+                        Some(l) => self.apply_locale(l),
                         None => {
                             self.notice = Some("语言仅支持 zh-CN / en-US。".to_owned());
-                            return None;
                         }
                     },
-                    None => match self.prefs.locale {
-                        TuiLocale::ZhCn => TuiLocale::EnUs,
-                        TuiLocale::EnUs => TuiLocale::ZhCn,
-                    },
-                };
-                match theme_store::save_locale(&self.home, next_locale) {
-                    Ok(()) => {
-                        self.prefs.locale = next_locale;
-                        self.notice = Some(format!("界面语言已切换为 {}。", next_locale.as_str()));
-                    }
-                    Err(err) => {
-                        self.notice = Some(format!("保存语言失败：{err}"));
+                    None => {
+                        let sel = if self.prefs.locale.is_zh() { 0 } else { 1 };
+                        self.overlay = ClassicOverlay::Language { selected: sel };
                     }
                 }
                 None
@@ -709,11 +688,127 @@ impl<'a> BotShellState<'a> {
                 self.screen = BotScreen::Help;
                 None
             }
+            ProjectCommand::Version => {
+                self.composer.accepted();
+                self.notice = Some(format!("peer {}", crate::VERSION.trim()));
+                None
+            }
             ProjectCommand::Quit => Some(ShellOutcome::Quit),
             ProjectCommand::Invalid => {
                 self.notice = Some("命令格式无效，输入 `/help` 查看帮助。".to_owned());
                 None
             }
+        }
+    }
+
+    fn apply_theme_mode(&mut self, next_mode: ThemeMode) {
+        match theme_store::save_theme_mode(&self.home, next_mode) {
+            Ok(scheme) => {
+                self.prefs.mode = next_mode;
+                self.prefs.scheme = scheme;
+                self.wrap_cache.clear();
+                self.notice = Some(format!(
+                    "主题已切换为 {}（配色: {}）。",
+                    next_mode.as_str(),
+                    scheme.as_str()
+                ));
+            }
+            Err(err) => {
+                self.notice = Some(format!("保存主题失败：{err}"));
+            }
+        }
+    }
+
+    fn apply_locale(&mut self, next_locale: TuiLocale) {
+        match theme_store::save_locale(&self.home, next_locale) {
+            Ok(()) => {
+                self.prefs.locale = next_locale;
+                self.notice = Some(format!("界面语言已切换为 {}。", next_locale.as_str()));
+            }
+            Err(err) => {
+                self.notice = Some(format!("保存语言失败：{err}"));
+            }
+        }
+    }
+
+    fn handle_overlay_key(&mut self, code: KeyCode) -> bool {
+        match &mut self.overlay {
+            ClassicOverlay::Theme { selected } => match code {
+                KeyCode::Esc => {
+                    self.overlay = ClassicOverlay::None;
+                    true
+                }
+                KeyCode::Up | KeyCode::Left => {
+                    *selected = (*selected + 2) % 3;
+                    true
+                }
+                KeyCode::Down | KeyCode::Right | KeyCode::Tab => {
+                    *selected = (*selected + 1) % 3;
+                    true
+                }
+                KeyCode::Char('1') => {
+                    self.overlay = ClassicOverlay::None;
+                    self.apply_theme_mode(ThemeMode::Dark);
+                    true
+                }
+                KeyCode::Char('2') => {
+                    self.overlay = ClassicOverlay::None;
+                    self.apply_theme_mode(ThemeMode::Light);
+                    true
+                }
+                KeyCode::Char('3') => {
+                    self.overlay = ClassicOverlay::None;
+                    self.apply_theme_mode(ThemeMode::System);
+                    true
+                }
+                KeyCode::Enter => {
+                    let chosen = match *selected % 3 {
+                        0 => ThemeMode::Dark,
+                        1 => ThemeMode::Light,
+                        _ => ThemeMode::System,
+                    };
+                    self.overlay = ClassicOverlay::None;
+                    self.apply_theme_mode(chosen);
+                    true
+                }
+                _ => false,
+            },
+            ClassicOverlay::Language { selected } => match code {
+                KeyCode::Esc => {
+                    self.overlay = ClassicOverlay::None;
+                    true
+                }
+                KeyCode::Up | KeyCode::Left => {
+                    *selected = (*selected + 1) % 2;
+                    true
+                }
+                KeyCode::Down | KeyCode::Right | KeyCode::Tab => {
+                    *selected = (*selected + 1) % 2;
+                    true
+                }
+                KeyCode::Char('1') => {
+                    self.overlay = ClassicOverlay::None;
+                    self.apply_locale(TuiLocale::ZhCn);
+                    true
+                }
+                KeyCode::Char('2') => {
+                    self.overlay = ClassicOverlay::None;
+                    self.apply_locale(TuiLocale::EnUs);
+                    true
+                }
+                KeyCode::Enter => {
+                    let chosen = if *selected % 2 == 0 {
+                        TuiLocale::ZhCn
+                    } else {
+                        TuiLocale::EnUs
+                    };
+                    self.overlay = ClassicOverlay::None;
+                    self.apply_locale(chosen);
+                    true
+                }
+                _ => false,
+            },
+            _ => false,
         }
     }
 
@@ -741,6 +836,7 @@ impl<'a> BotShellState<'a> {
                     screen: &self.screen,
                     palette,
                     scheme_id,
+                    current_theme: self.prefs.mode,
                     locale,
                     is_host,
                     bots: &self.bots,
@@ -762,6 +858,7 @@ impl<'a> BotShellState<'a> {
                     draft_warning: self.draft_warning.as_deref(),
                     notice: self.notice.as_deref(),
                     model_picker: &self.model_picker,
+                    overlay: Some(&self.overlay),
                     wrap_cache: &mut self.wrap_cache,
                 },
             );
@@ -827,6 +924,7 @@ impl<'a> BotShellState<'a> {
                     }
                     Event::Paste(pasted) => {
                         if !self.model_picker.open
+                            && !self.overlay.is_open()
                             && !matches!(
                                 self.screen,
                                 BotScreen::BotList | BotScreen::BindWorkspace { .. }
@@ -856,6 +954,10 @@ impl<'a> BotShellState<'a> {
                                 }
                             }
                             dirty = true;
+                        } else if self.overlay.is_open() {
+                            if self.handle_overlay_key(key.code) {
+                                dirty = true;
+                            }
                         } else if key.code == KeyCode::F(2) {
                             if let Some(active) = self.active_tick.take() {
                                 active.cancel.cancel();
@@ -1050,7 +1152,11 @@ impl<'a> BotShellState<'a> {
                                     } else if slash_count > 0
                                         && matches!(
                                             key.code,
-                                            KeyCode::Up | KeyCode::Down | KeyCode::Tab
+                                            KeyCode::Up
+                                                | KeyCode::Down
+                                                | KeyCode::Tab
+                                                | KeyCode::Esc
+                                                | KeyCode::Enter
                                         )
                                     {
                                         match key.code {
@@ -1067,6 +1173,11 @@ impl<'a> BotShellState<'a> {
                                                     (self.slash_selected + 1) % slash_count;
                                                 dirty = true;
                                             }
+                                            KeyCode::Esc => {
+                                                self.composer.accepted();
+                                                self.slash_selected = 0;
+                                                dirty = true;
+                                            }
                                             KeyCode::Tab => {
                                                 let completed = {
                                                     let items = filter_slash_items(
@@ -1079,6 +1190,36 @@ impl<'a> BotShellState<'a> {
                                                 };
                                                 self.composer.accepted();
                                                 self.composer.apply(Action::Insert(completed));
+                                                self.slash_selected = 0;
+                                                dirty = true;
+                                            }
+                                            KeyCode::Enter => {
+                                                let draft = self.composer.draft().to_owned();
+                                                let cmd = if !matches!(
+                                                    parse_project_command(&draft),
+                                                    ProjectCommand::Invalid
+                                                ) {
+                                                    draft
+                                                } else {
+                                                    let items =
+                                                        filter_slash_items(&draft, BOT_SLASH_ITEMS);
+                                                    items[self.slash_selected.min(items.len() - 1)]
+                                                        .command
+                                                        .to_owned()
+                                                };
+                                                if cmd.ends_with(' ') {
+                                                    self.composer.accepted();
+                                                    self.composer.apply(Action::Insert(cmd));
+                                                } else if let Some(outcome) =
+                                                    self.handle_submit(&cmd)
+                                                {
+                                                    if let Some(active) = self.active_tick.take() {
+                                                        active.cancel.cancel();
+                                                        let _ = active.task.await;
+                                                    }
+                                                    self.host.close();
+                                                    return Ok(outcome);
+                                                }
                                                 self.slash_selected = 0;
                                                 dirty = true;
                                             }

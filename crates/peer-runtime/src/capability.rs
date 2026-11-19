@@ -75,7 +75,7 @@ pub(crate) fn read_capability(capability: &str) -> bool {
     )
 }
 
-pub(crate) fn now() -> String {
+pub fn now() -> String {
     time::OffsetDateTime::now_utc()
         .format(
             &time::format_description::parse_borrowed::<2>(

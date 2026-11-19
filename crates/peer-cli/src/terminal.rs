@@ -16,6 +16,7 @@ use std::{
     },
 };
 mod bot_shell;
+mod capability_store;
 mod classic;
 mod model_picker_adapter;
 mod resumed;

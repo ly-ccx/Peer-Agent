@@ -5,8 +5,10 @@ pub mod bounded_cache;
 pub mod classic_view;
 pub mod commands;
 mod composer;
+pub mod leader_key;
 pub mod markdown;
 pub mod model_picker;
+pub mod overlays;
 mod resumed_view;
 pub mod slash_menu;
 pub mod theme;
@@ -22,10 +24,11 @@ pub use bounded_cache::{
 };
 pub use classic_view::{ClassicMessage, ClassicView, render_classic};
 pub use commands::{
-    BotSubView, CardNumbers, CardOperation, ClassicCommand, ProjectCommand, clip_bot_line,
-    format_bot_when, parse_classic_command, parse_project_command,
+    BotSubView, CardNumbers, CardOperation, ClassicCommand, HistoryDirection, ProjectCommand,
+    clip_bot_line, format_bot_when, parse_classic_command, parse_project_command,
 };
 pub use composer::{Action, Composer, Effect, MAX_DRAFT_BYTES, action_for_event};
+pub use leader_key::{LeaderAction, LeaderKeyState};
 pub use markdown::{
     MAX_MARKDOWN_INPUT_BYTES, MAX_WRAPPED_LINES_PER_ITEM, RenderedBlock, StyledLine, WrapCacheKey,
     render_markdown_bounded, render_markdown_themed, stable_hash,
@@ -33,9 +36,14 @@ pub use markdown::{
 pub use model_picker::{
     ModelPickerEvent, ModelPickerGroup, ModelPickerOption, ModelPickerState, render_model_picker,
 };
+pub use overlays::{
+    ClassicOverlay, GoalPickerRow, McpPickerRow, OverlayContext, ResumeSessionRow, SkillPickerRow,
+    render_classic_overlay,
+};
 pub use resumed_view::{ResumeView, render_resume};
 pub use slash_menu::{
-    BOT_SLASH_ITEMS, CLASSIC_SLASH_ITEMS, SlashItem, filter_slash_items, render_slash_menu,
+    BOT_SLASH_ITEMS, CLASSIC_SLASH_ITEMS, GoalMenuStatus, SlashFilterContext, SlashItem,
+    filter_classic_slash_items, filter_slash_items, render_slash_menu,
 };
 pub use theme::{
     DARK_PALETTE, LIGHT_PALETTE, ThemeMode, ThemeScheme, TuiLocale, TuiPalette, palette_for,

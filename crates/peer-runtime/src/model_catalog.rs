@@ -145,6 +145,30 @@ pub(crate) fn project(value: &Value) -> Result<Vec<ModelCatalogEntry>, ModelErro
     Ok(out)
 }
 
+pub fn supports_fast_mode(home: &Path, provider_id: &str, model_id: &str) -> bool {
+    let file = home.join("llm-providers.json");
+    let Ok(true) = file.try_exists() else {
+        return false;
+    };
+    let Ok(doc) = model_config::read(&file) else {
+        return false;
+    };
+    let Ok(flat) = rows(&doc) else {
+        return false;
+    };
+    flat.iter().any(|row| {
+        let row_group = group(row);
+        let row_id = text(row, "id");
+        let row_model = text(row, "model");
+        (row_group == Some(provider_id) || row_id == Some(provider_id))
+            && row_model == Some(model_id)
+            && matches!(
+                text(row, "authMethod"),
+                Some("oauth_chatgpt" | "oauth_grok")
+            )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

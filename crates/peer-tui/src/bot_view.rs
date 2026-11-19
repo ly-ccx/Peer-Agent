@@ -15,10 +15,12 @@ use crate::{
     commands::{clip_bot_line, format_bot_when},
     markdown::{RenderedBlock, WrapCacheKey, render_markdown_themed, stable_hash},
     model_picker::{ModelPickerState, render_model_picker},
-    slash_menu::{BOT_SLASH_ITEMS, filter_slash_items, render_slash_menu},
+    overlays::{ClassicOverlay, OverlayContext, render_classic_overlay},
+    slash_menu::{BOT_SLASH_ITEMS, GoalMenuStatus, filter_slash_items, render_slash_menu},
     terminal_text,
     theme::{
-        CARET_IDLE, CARET_SELECTED, QUOTE_PREFIX, SEPARATOR, TuiLocale, TuiPalette, fill_canvas,
+        CARET_IDLE, CARET_SELECTED, QUOTE_PREFIX, SEPARATOR, ThemeMode, TuiLocale, TuiPalette,
+        fill_canvas,
     },
     view::draft_view_styled,
 };
@@ -99,6 +101,7 @@ pub struct BotShellView<'a> {
     pub screen: &'a BotScreen,
     pub palette: &'static TuiPalette,
     pub scheme_id: u8,
+    pub current_theme: ThemeMode,
     pub locale: TuiLocale,
     pub is_host: bool,
     pub bots: &'a [BotRowView],
@@ -120,6 +123,7 @@ pub struct BotShellView<'a> {
     pub draft_warning: Option<&'a str>,
     pub notice: Option<&'a str>,
     pub model_picker: &'a ModelPickerState,
+    pub overlay: Option<&'a ClassicOverlay>,
     pub wrap_cache: &'a mut ByteBudgetLru<WrapCacheKey, RenderedBlock>,
 }
 
@@ -647,7 +651,11 @@ pub fn render_bot_shell(frame: &mut Frame<'_>, view: BotShellView<'_>) {
     let is_list = matches!(view.screen, BotScreen::BotList);
     let has_lease_banner = !is_list && view.lease_banner.is_some();
     let show_composer = !is_list;
-    let slash_items = if show_composer && !view.model_picker.open {
+    let active_dock = view
+        .overlay
+        .filter(|ov| show_composer && ov.is_open() && !ov.is_modal() && !view.model_picker.open);
+    let dock_h = active_dock.map_or(0, |ov| ov.dock_height(area.height.saturating_sub(8)));
+    let slash_items = if show_composer && !view.model_picker.open && active_dock.is_none() {
         filter_slash_items(view.composer.draft(), BOT_SLASH_ITEMS)
     } else {
         Vec::new()
@@ -655,7 +663,7 @@ pub fn render_bot_shell(frame: &mut Frame<'_>, view: BotShellView<'_>) {
     let slash_rows = if slash_items.is_empty() {
         0u16
     } else {
-        (slash_items.len().min(5) as u16) + 1
+        (slash_items.len().min(6) as u16) + 1
     };
 
     let mut constraints = vec![Constraint::Length(1)];
@@ -664,7 +672,9 @@ pub fn render_bot_shell(frame: &mut Frame<'_>, view: BotShellView<'_>) {
     }
     constraints.push(Constraint::Min(1));
     if show_composer {
-        if slash_rows > 0 && area.height >= 10 {
+        if dock_h > 0 && area.height >= 10 {
+            constraints.push(Constraint::Length(dock_h));
+        } else if slash_rows > 0 && area.height >= 10 {
             constraints.push(Constraint::Length(slash_rows));
         }
         constraints.push(Constraint::Length(1)); // status/notice
@@ -928,12 +938,14 @@ pub fn render_bot_shell(frame: &mut Frame<'_>, view: BotShellView<'_>) {
                 /memory            查看项目记忆\n\
                 /objectives        查看项目目标\n\
                 /model             打开模型选择器 (F3)\n\
-                /theme <mode>      切换主题 (dark / light / system)\n\
-                /language <lang>   切换语言 (zh-CN / en-US)\n\
+                /theme [mode]      打开主题选择器或切换 (dark / light / system)\n\
+                /language [lang]   打开语言选择器或切换 (zh-CN / en-US)\n\
+                /diagnostics       查看机器人诊断\n\
                 /takeover          接管当前工作区宿主租约\n\
                 /older / /latest   阅读更早历史 / 回到最新\n\
                 /classic           切换到普通任务对话模式 (F2)\n\
                 /save-draft        立即保存草稿\n\
+                /version           显示版本\n\
                 /quit              退出";
             frame.render_widget(
                 Paragraph::new(help_text)
@@ -945,7 +957,21 @@ pub fn render_bot_shell(frame: &mut Frame<'_>, view: BotShellView<'_>) {
     }
 
     if show_composer {
-        if slash_rows > 0 && area.height >= 10 {
+        if let Some(ov) = active_dock
+            && dock_h > 0
+            && area.height >= 10
+        {
+            let ctx = OverlayContext {
+                current_mode: "bot",
+                current_access: "ask",
+                current_theme: view.current_theme,
+                current_locale: view.locale,
+                fast_available: false,
+                goal_status: GoalMenuStatus::None,
+            };
+            render_classic_overlay(frame, areas[slot], ov, &ctx, palette);
+            slot += 1;
+        } else if slash_rows > 0 && area.height >= 10 {
             render_slash_menu(
                 frame,
                 areas[slot],
@@ -1043,6 +1069,7 @@ pub fn render_bot_shell(frame: &mut Frame<'_>, view: BotShellView<'_>) {
             frame.render_widget(Paragraph::new(lines), input_area);
             if !view.model_picker.open
                 && !view.card_focus
+                && active_dock.is_none()
                 && let Some((x, y)) = caret
             {
                 frame.set_cursor_position((
@@ -1095,6 +1122,7 @@ mod tests {
                     screen: &BotScreen::BotList,
                     palette: &DARK_PALETTE,
                     scheme_id: 0,
+                    current_theme: ThemeMode::Dark,
                     locale: TuiLocale::ZhCn,
                     is_host: true,
                     bots: &bots,
@@ -1116,6 +1144,7 @@ mod tests {
                     draft_warning: None,
                     notice: None,
                     model_picker: &picker,
+                    overlay: None,
                     wrap_cache: &mut cache,
                 },
             );
@@ -1164,6 +1193,7 @@ mod tests {
                         screen: &BotScreen::Conversation,
                         palette: &DARK_PALETTE,
                         scheme_id: 0,
+                        current_theme: ThemeMode::Dark,
                         locale: TuiLocale::ZhCn,
                         is_host: true,
                         bots: &bots,
@@ -1185,6 +1215,7 @@ mod tests {
                         draft_warning: Some("草稿恢复失败，可继续输入或 /save-draft"),
                         notice: None,
                         model_picker: &picker,
+                        overlay: None,
                         wrap_cache: &mut cache,
                     },
                 );

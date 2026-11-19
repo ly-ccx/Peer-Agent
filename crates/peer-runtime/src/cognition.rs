@@ -285,7 +285,8 @@ impl ContextPipeline {
                     return Err(HostError("native_context_pressure"));
                 }
                 drop(prepared);
-                self.compact(host, f, accounting, &history, &projected)
+                let _ = self
+                    .compact(host, f, accounting, &history, &projected)
                     .await?;
                 compacted = true;
                 continue;
@@ -295,7 +296,8 @@ impl ContextPipeline {
                 .await?;
             let turn = match turn {
                 Err(error) if error.context_overflow_status.is_some() && !compacted => {
-                    self.compact(host, f, accounting, &checked, &projected)
+                    let _ = self
+                        .compact(host, f, accounting, &checked, &projected)
                         .await?;
                     compacted = true;
                     continue;
@@ -309,14 +311,14 @@ impl ContextPipeline {
             });
         }
     }
-    async fn compact(
+    pub(crate) async fn compact(
         &mut self,
         host: &mut impl CognitionHost,
         f: &CognitionRequest<'_>,
         accounting: &mut RuntimeUsageAccounting,
         history: &HistorySnapshot,
         projected: &Value,
-    ) -> Result<(), HostError> {
+    ) -> Result<(String, usize), HostError> {
         Self::guard(host, f)?;
         let messages = projected["messages"]
             .as_array()
@@ -434,7 +436,7 @@ impl ContextPipeline {
             committed.snapshot.history.content_revision,
         )?;
         self.persist_for_host(host, &store, &committed.snapshot, "post_compaction")?;
-        Ok(())
+        Ok((method.to_owned(), messages.len()))
     }
 
     fn persist_for_host(

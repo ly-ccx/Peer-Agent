@@ -10,11 +10,14 @@ use crate::{
     commands::clip_bot_line,
     markdown::{RenderedBlock, WrapCacheKey, render_markdown_themed, stable_hash},
     model_picker::{ModelPickerState, render_model_picker},
-    slash_menu::{CLASSIC_SLASH_ITEMS, filter_slash_items, render_slash_menu},
+    overlays::{ClassicOverlay, OverlayContext, render_classic_overlay},
+    slash_menu::{
+        GoalMenuStatus, SlashFilterContext, filter_classic_slash_items, render_slash_menu,
+    },
     terminal_text,
     theme::{
-        BRAND_MARK, CARET_SELECTED, ONLINE_DOT, SEPARATOR, TuiLocale, TuiPalette, USER_RAIL_BAR,
-        context_usage_color, fill_canvas,
+        BRAND_MARK, CARET_SELECTED, ONLINE_DOT, SEPARATOR, ThemeMode, TuiLocale, TuiPalette,
+        USER_RAIL_BAR, context_usage_color, fill_canvas,
     },
     view::draft_view_styled,
     wordmark::b3_wordmark_lines,
@@ -43,9 +46,14 @@ pub struct ClassicView<'a> {
     pub mode_badge: &'a str,
     pub access_badge: &'a str,
     pub context_percent: Option<u8>,
+    pub fast_mode: bool,
+    pub fast_available: bool,
+    pub goal_status: GoalMenuStatus,
+    pub goal_banner: Option<&'a str>,
     pub is_running: bool,
     pub palette: &'static TuiPalette,
     pub scheme_id: u8,
+    pub current_theme: ThemeMode,
     pub locale: TuiLocale,
     pub messages: &'a [ClassicMessage],
     pub live_stream: &'a str,
@@ -54,6 +62,7 @@ pub struct ClassicView<'a> {
     pub status: &'a str,
     pub approval: Option<(&'a str, usize)>,
     pub model_picker: &'a ModelPickerState,
+    pub overlay: &'a ClassicOverlay,
     pub slash_selected: usize,
     pub wrap_cache: &'a mut ByteBudgetLru<WrapCacheKey, RenderedBlock>,
 }
@@ -78,15 +87,30 @@ pub fn render_classic(frame: &mut Frame<'_>, view: ClassicView<'_>) {
         return;
     }
 
-    let slash_items = if view.approval.is_none() && !view.model_picker.open {
-        filter_slash_items(view.composer.draft(), CLASSIC_SLASH_ITEMS)
+    let overlay_open = view.overlay.is_open();
+    let dock_h = if !view.overlay.is_modal() && view.approval.is_none() && !view.model_picker.open {
+        view.overlay.dock_height(area.height.saturating_sub(8))
+    } else {
+        0
+    };
+    let show_goal_banner =
+        view.goal_banner.is_some() && !overlay_open && view.approval.is_none() && area.height >= 12;
+
+    let slash_items = if view.approval.is_none() && !view.model_picker.open && !overlay_open {
+        filter_classic_slash_items(
+            view.composer.draft(),
+            SlashFilterContext {
+                fast_available: view.fast_available,
+                goal_status: view.goal_status,
+            },
+        )
     } else {
         Vec::new()
     };
     let slash_rows = if slash_items.is_empty() {
         0u16
     } else {
-        (slash_items.len().min(5) as u16) + 1
+        (slash_items.len().min(6) as u16) + 1
     };
 
     let mut constraints = vec![
@@ -94,7 +118,12 @@ pub fn render_classic(frame: &mut Frame<'_>, view: ClassicView<'_>) {
         Constraint::Length(1), // Topbar thin divider
         Constraint::Min(1),    // Main viewport / Welcome B3 wordmark
     ];
-    if slash_rows > 0 && area.height >= 11 {
+    if show_goal_banner {
+        constraints.push(Constraint::Length(1));
+    }
+    if dock_h > 0 && area.height >= 11 {
+        constraints.push(Constraint::Length(dock_h));
+    } else if slash_rows > 0 && area.height >= 11 {
         constraints.push(Constraint::Length(slash_rows));
     }
     constraints.push(Constraint::Length(1)); // Quiet composer divider
@@ -196,9 +225,9 @@ pub fn render_classic(frame: &mut Frame<'_>, view: ClassicView<'_>) {
     } else if view.messages.is_empty() && view.live_stream.is_empty() {
         let (mut wlines, wm_w) = b3_wordmark_lines(body_area.width, palette);
         let hint = if view.locale.is_zh() {
-            "输入消息开始对话 · /model 选模型 · /bots 机器人 · /help 帮助"
+            "输入消息开始对话 · /resume 恢复会话 · /model 选模型 · /help 帮助"
         } else {
-            "Send a message · /model model · /bots bots · /help commands"
+            "Send a message · /resume session · /model model · /help commands"
         };
         let total_rows = wlines.len() + 2;
         let top_pad = body_h.saturating_sub(total_rows) / 2;
@@ -326,7 +355,30 @@ pub fn render_classic(frame: &mut Frame<'_>, view: ClassicView<'_>) {
         frame.render_widget(Paragraph::new(visible), body_area);
     }
 
-    if slash_rows > 0 && area.height >= 11 {
+    let overlay_ctx = OverlayContext {
+        current_mode: view.mode_badge,
+        current_access: view.access_badge,
+        current_theme: view.current_theme,
+        current_locale: view.locale,
+        fast_available: view.fast_available,
+        goal_status: view.goal_status,
+    };
+
+    if show_goal_banner && let Some(banner) = view.goal_banner {
+        frame.render_widget(
+            Paragraph::new(Line::styled(
+                clip_bot_line(banner, usize::from(areas[slot].width)),
+                Style::new().fg(palette.info).bg(palette.background),
+            )),
+            areas[slot],
+        );
+        slot += 1;
+    }
+
+    if dock_h > 0 && area.height >= 11 {
+        render_classic_overlay(frame, areas[slot], view.overlay, &overlay_ctx, palette);
+        slot += 1;
+    } else if slash_rows > 0 && area.height >= 11 {
         render_slash_menu(
             frame,
             areas[slot],
@@ -388,6 +440,7 @@ pub fn render_classic(frame: &mut Frame<'_>, view: ClassicView<'_>) {
         frame.render_widget(Paragraph::new(draft_lines), input_area);
         if view.approval.is_none()
             && !view.model_picker.open
+            && !overlay_open
             && let Some((x, y)) = caret
         {
             frame.set_cursor_position((
@@ -417,9 +470,19 @@ pub fn render_classic(frame: &mut Frame<'_>, view: ClassicView<'_>) {
         palette.muted
     };
 
+    let mode_label = match view.mode_badge {
+        "chat" => "Agent",
+        "plan" => "Plan",
+        "goal" => "Goal",
+        other => other,
+    };
+    let fast_suffix = if view.fast_mode { " · fast" } else { "" };
     let right_badge = match view.context_percent {
-        Some(pct) => format!("{} · {} · ctx {}%", view.mode_badge, view.access_badge, pct),
-        None => format!("{} · {}", view.mode_badge, view.access_badge),
+        Some(pct) => format!(
+            "{mode_label}{fast_suffix} · {} · ctx {pct}%",
+            view.access_badge
+        ),
+        None => format!("{mode_label}{fast_suffix} · {}", view.access_badge),
     };
     let right_fg = if view.context_percent.is_some() {
         context_usage_color(view.context_percent, palette)
@@ -452,6 +515,8 @@ pub fn render_classic(frame: &mut Frame<'_>, view: ClassicView<'_>) {
 
     if view.model_picker.open {
         render_model_picker(frame, full_area, view.model_picker, palette);
+    } else if view.overlay.is_modal() {
+        render_classic_overlay(frame, full_area, view.overlay, &overlay_ctx, palette);
     }
 }
 
@@ -495,9 +560,14 @@ mod tests {
                         mode_badge: "chat",
                         access_badge: "session",
                         context_percent: Some(42),
+                        fast_mode: false,
+                        fast_available: true,
+                        goal_status: GoalMenuStatus::None,
+                        goal_banner: None,
                         is_running: false,
                         palette: &DARK_PALETTE,
                         scheme_id: 0,
+                        current_theme: ThemeMode::Dark,
                         locale: TuiLocale::ZhCn,
                         messages: &msgs,
                         live_stream: "Peer  流式输出...",
@@ -506,6 +576,7 @@ mod tests {
                         status: "就绪",
                         approval: None,
                         model_picker: &picker,
+                        overlay: &ClassicOverlay::None,
                         slash_selected: 0,
                         wrap_cache: &mut cache,
                     },
@@ -532,9 +603,14 @@ mod tests {
                     mode_badge: "chat",
                     access_badge: "ask",
                     context_percent: None,
+                    fast_mode: false,
+                    fast_available: false,
+                    goal_status: GoalMenuStatus::None,
+                    goal_banner: None,
                     is_running: false,
                     palette: &DARK_PALETTE,
                     scheme_id: 0,
+                    current_theme: ThemeMode::Dark,
                     locale: TuiLocale::ZhCn,
                     messages: &[],
                     live_stream: "",
@@ -543,6 +619,7 @@ mod tests {
                     status: "就绪",
                     approval: None,
                     model_picker: &picker,
+                    overlay: &ClassicOverlay::None,
                     slash_selected: 0,
                     wrap_cache: &mut cache,
                 },

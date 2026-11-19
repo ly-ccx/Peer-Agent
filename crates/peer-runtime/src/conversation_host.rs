@@ -101,6 +101,18 @@ pub struct ConversationOutcome {
     pub error: Option<&'static str>,
     pub goal: Option<Value>,
 }
+pub struct CompactOutcome {
+    pub method: String,
+    pub original_message_count: usize,
+}
+pub struct CompactOptions<'a> {
+    pub workspace: &'a Path,
+    pub conversation_id: &'a str,
+    pub resume_from: Option<&'a ConversationExecution>,
+    pub provider_id: &'a str,
+    pub mode: RuntimeMode,
+    pub effort: &'a str,
+}
 /// Presentation events from the ordinary Host. Assistant deltas are provisional
 /// display text; AssistantText is published after the complete text is committed.
 pub enum ConversationEvent<'a> {
@@ -155,6 +167,276 @@ impl NativeConversationRuntime {
             &now(),
         )?;
         Ok(())
+    }
+    pub fn update_ordinary_mode(
+        &self,
+        conversation: &str,
+        workspace: &Path,
+        mode: RuntimeMode,
+    ) -> Result<(), HostError> {
+        if !matches!(
+            mode,
+            RuntimeMode::Chat | RuntimeMode::Plan | RuntimeMode::Goal
+        ) {
+            return Err(HostError("runtime_mode_invalid"));
+        }
+        let workspace =
+            std::fs::canonicalize(workspace).map_err(|_| HostError("invalid_workspace"))?;
+        let workspace = workspace.to_str().ok_or(HostError("invalid_workspace"))?;
+        ConversationStore::new(&self.home).update_ordinary_mode(
+            conversation,
+            workspace,
+            mode.as_str(),
+            &now(),
+        )?;
+        Ok(())
+    }
+    pub fn update_ordinary_model(
+        &self,
+        conversation: &str,
+        workspace: &Path,
+        selection: &ConversationModelSelection<'_>,
+    ) -> Result<(), HostError> {
+        let workspace =
+            std::fs::canonicalize(workspace).map_err(|_| HostError("invalid_workspace"))?;
+        let workspace = workspace.to_str().ok_or(HostError("invalid_workspace"))?;
+        ConversationStore::new(&self.home).update_ordinary_model(
+            conversation,
+            workspace,
+            selection,
+            &now(),
+        )?;
+        Ok(())
+    }
+    pub async fn compact_conversation(
+        &self,
+        options: &CompactOptions<'_>,
+        model: &NativeModel,
+        external: &CancellationToken,
+    ) -> Result<CompactOutcome, HostError> {
+        let workspace = options.workspace;
+        let conversation_id = options.conversation_id;
+        let resume_from = options.resume_from;
+        let provider_id = options.provider_id;
+        let mode = options.mode;
+        let effort = options.effort;
+        if external.is_cancelled() {
+            return Err(HostError("CANCELLED"));
+        }
+        if !matches!(
+            mode,
+            RuntimeMode::Chat | RuntimeMode::Plan | RuntimeMode::Goal
+        ) {
+            return Err(HostError("runtime_mode_invalid"));
+        }
+        if resume_from.is_some_and(|run| {
+            run.identity.conversation_id != conversation_id || !run.permits_new_run()
+        }) {
+            return Err(HostError("conversation_execution_busy"));
+        }
+        let workspace =
+            std::fs::canonicalize(workspace).map_err(|_| HostError("invalid_workspace"))?;
+        if !workspace.is_dir() || workspace.to_str().is_none() {
+            return Err(HostError("invalid_workspace"));
+        }
+        let at = now();
+        let hooks = Arc::new(peer_store::HookConfig::observe(&self.home, &workspace)?);
+        let skills = Arc::new(peer_store::SkillCatalog::observe(&self.home, &workspace)?);
+        let instructions = ProjectInstructions::observe_host(&workspace, &self.home, external)
+            .map_err(HostError)?;
+        let inventory = McpRegistryStore::new(&self.home).read()?;
+        let store = ConversationStore::new(&self.home);
+        let meta = store
+            .read_metadata(conversation_id)?
+            .metadata
+            .ok_or(HostError("conversation_unavailable"))?;
+        if meta["workspacePath"].as_str() != workspace.to_str() || meta["mode"] != mode.as_str() {
+            return Err(HostError("conversation_scope_changed"));
+        }
+        if meta
+            .get("role")
+            .is_some_and(|v| !v.is_null() && v != "chat")
+            || meta
+                .get("parentConversationId")
+                .is_some_and(|v| !v.is_null())
+        {
+            return Err(HostError("out_of_scope"));
+        }
+        if store
+            .read_conversation_execution(conversation_id)?
+            .is_some_and(|r| !r.permits_new_run())
+        {
+            return Err(HostError("conversation_execution_busy"));
+        }
+        let context_binding = binding(&meta)?;
+        let stream = format!("stream-{}", uuid::Uuid::new_v4());
+        let owner = crate::recorder::local_recorder(
+            &format!("native-compaction-{}", uuid::Uuid::new_v4()),
+            &at,
+        )
+        .await
+        .ok_or(HostError("native_recorder_unavailable"))?;
+        if external.is_cancelled() {
+            return Err(HostError("CANCELLED"));
+        }
+        let attribution = json!({"id":stream,"streamId":stream,"at":at,"modelProviderId":format!("{provider_id}::{}",model.model_id()),"model":model.model_id(),"providerName":model.provider(),"role":"chat"});
+        let identity = ConversationExecutionIdentity {
+            conversation_id: conversation_id.to_owned(),
+            stream_id: stream.clone(),
+        };
+        let credentials = crate::mcp_oauth::CredentialEpoch::open_conversation(
+            &self.home,
+            &identity,
+            &inventory.source_revision,
+        )
+        .map_err(HostError)?;
+        let providers = ProviderRegistry::with_extensions(
+            &inventory,
+            &json!({"recorder":owner}),
+            &self.home,
+            credentials.clone(),
+            skills.clone(),
+            crate::providers::ShellHostMode::Conversation,
+        )?;
+        let projection = providers.project_for_mode(mode, None)?;
+        let pipeline = if meta["modelProviderId"].is_string() && meta["model"].is_string() {
+            ContextPipeline::open_bound(&self.home, conversation_id, provider_id, model)?
+        } else {
+            ContextPipeline::open(&self.home, conversation_id, provider_id, model)?
+        };
+        let initial = store.read_committed(conversation_id, None, 8 * 1024 * 1024)?;
+        let attempt = self
+            .live
+            .begin(&identity)
+            .map_err(|_| HostError("native_execution_owner_unavailable"))?;
+        let intent = NewConversationExecution {
+            stream_id: &stream,
+            engine: "peer-native",
+            owner: &owner,
+            attribution: &attribution,
+            selected_model: None,
+            at: &at,
+        };
+        let claimed = match resume_from {
+            Some(stopped) => {
+                store.claim_resumed_conversation_execution(&initial, &intent, stopped, None)
+            }
+            None => store.claim_conversation_execution(&initial, &intent, None),
+        };
+        let (run, publication) = match claimed {
+            Ok(claimed) => claimed,
+            Err(error) => {
+                let _ = self.live.close_admission(&identity);
+                attempt.finish();
+                let _ = self.live.forget_ended(&identity);
+                let original = error.error();
+                if let Some(cleanup) = error.into_cleanup() {
+                    cleanup.close_unstarted(&store, &now())?;
+                }
+                return Err(original.into());
+            }
+        };
+        let owned = attempt.cancellation();
+        let mut expected = initial;
+        expected.source_revision = publication
+            .advance(
+                conversation_id,
+                expected.history.content_revision,
+                &expected.source_revision,
+            )?
+            .into();
+        struct CompactionDenyPermission;
+        impl PermissionInput for CompactionDenyPermission {
+            fn decide<'a>(
+                &'a mut self,
+                _prompt: Value,
+                _cancel: &'a CancellationToken,
+            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = LocalPermissionDecision> + 'a>>
+            {
+                Box::pin(async { LocalPermissionDecision::Deny })
+            }
+        }
+        let mut deny_permission = CompactionDenyPermission;
+        let mut host = Host {
+            home: self.home.clone(),
+            store: ConversationStore::new(&self.home),
+            run,
+            identity,
+            workspace,
+            mode,
+            effort: effort.into(),
+            model,
+            permission: Some(&mut deny_permission),
+            output: None,
+            access: self.access.clone(),
+            live: self.live.clone(),
+            attempt: Some(attempt),
+            owned: owned.clone(),
+            external: external.clone(),
+            expected,
+            binding: context_binding,
+            instructions,
+            servers: inventory.host_context_servers(),
+            registry: inventory.source_revision,
+            skills,
+            hooks,
+            credentials,
+            providers,
+            projection,
+            allowlist: None,
+            pipeline: Some(pipeline),
+            usage: RuntimeUsageAccounting::default(),
+            system: None,
+            turns: 0,
+            request_admitted: false,
+            background_shells: BTreeMap::new(),
+            completed_shells: BTreeMap::new(),
+            foreground_authority: None,
+            cognition_source: None,
+            worker: None,
+            explorer_requests: BTreeSet::new(),
+            runner: None,
+        };
+        let result = async {
+            host.source_current()?;
+            let history = host
+                .store
+                .read_committed(conversation_id, None, 8 * 1024 * 1024)?;
+            if history.history.excluded_from_message_id.is_some() {
+                return Err(HostError("native_execution_recovery_required"));
+            }
+            let projected = crate::canonical_history::project_history(&history.history.messages)
+                .map_err(HostError)?;
+            let mut usage = std::mem::take(&mut host.usage);
+            let mut pipeline = host
+                .pipeline
+                .take()
+                .ok_or(HostError("native_pipeline_unavailable"))?;
+            let home = host.home.clone();
+            let tools = json!([]);
+            let req = CognitionRequest {
+                home: &home,
+                model,
+                tools: &tools,
+                owned: &owned,
+                external,
+            };
+            let res = pipeline
+                .compact(&mut host, &req, &mut usage, &history, &projected)
+                .await;
+            host.pipeline = Some(pipeline);
+            host.usage = usage;
+            let (method, original_message_count) = res?;
+            Ok(CompactOutcome {
+                method,
+                original_message_count,
+            })
+        }
+        .await;
+        let cleanup = host.finish().await;
+        let outcome = result?;
+        cleanup?;
+        Ok(outcome)
     }
     pub async fn execute(
         &self,

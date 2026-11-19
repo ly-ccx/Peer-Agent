@@ -304,6 +304,84 @@ impl ConversationStore {
         log::replace(&file, &bytes, None)
     }
 
+    fn mutate_ordinary_metadata(
+        &self,
+        id: &str,
+        workspace: &str,
+        at: &str,
+        apply: impl FnOnce(&mut Value, &Path) -> Result<bool, StoreError>,
+    ) -> Result<(), StoreError> {
+        if !valid_id(id, false) || !timestamp(at) {
+            return Err(StoreError::InvalidInput);
+        }
+        let directory = self.write_directory()?;
+        let _held = locks(&directory, Some(id), None)?;
+        let file = directory.join("index.jsonl");
+        let version = files::identity(&file)?;
+        let mut index = log::read(&file, None)?;
+        let pos = position(&index, id)?;
+        let row = &mut index[pos];
+        if row["workspacePath"] != workspace
+            || !matches!(row["mode"].as_str(), Some("chat" | "plan" | "goal"))
+            || !row["parentConversationId"].is_null()
+            || !row["role"].is_null() && row["role"] != "chat"
+        {
+            return Err(StoreError::OutOfScope);
+        }
+        if crate::conversation_execution::decode(row, id)?.is_some_and(|run| !run.permits_new_run())
+            || files::identity(&directory.join(format!("{id}.stream.json")))?.is_some()
+        {
+            return Err(StoreError::ExecutionBusy);
+        }
+        if !apply(row, &directory)? {
+            return log::sync_dir(&directory);
+        }
+        row["updatedAt"] = json!(at);
+        let bytes = log::encode(&index)?;
+        if files::identity(&file)? != version {
+            return Err(StoreError::VersionChanged);
+        }
+        log::replace(&file, &bytes, None)
+    }
+
+    /// Change the runtime mode (`chat` / `plan` / `goal`) of an idle ordinary conversation.
+    pub fn update_ordinary_mode(
+        &self,
+        id: &str,
+        workspace: &str,
+        mode: &str,
+        at: &str,
+    ) -> Result<(), StoreError> {
+        if !matches!(mode, "chat" | "plan" | "goal") {
+            return Err(StoreError::InvalidInput);
+        }
+        self.mutate_ordinary_metadata(id, workspace, at, |row, _| {
+            if row["mode"] == mode {
+                return Ok(false);
+            }
+            row["mode"] = json!(mode);
+            Ok(true)
+        })
+    }
+
+    /// Change the selected model of an idle ordinary conversation (`chat` / `plan` / `goal`).
+    pub fn update_ordinary_model(
+        &self,
+        id: &str,
+        workspace: &str,
+        model: &ConversationModelSelection<'_>,
+        at: &str,
+    ) -> Result<(), StoreError> {
+        model.validate()?;
+        self.mutate_ordinary_metadata(id, workspace, at, |row, _| {
+            if model.matches(row) {
+                return Ok(false);
+            }
+            model.apply(row);
+            Ok(true)
+        })
+    }
+
     /// CAS protects both logical revision and actual source identity. A repeated
     /// identical message id is a read receipt, never another append or execution.
     pub fn commit_message(

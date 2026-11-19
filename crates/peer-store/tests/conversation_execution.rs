@@ -1022,3 +1022,58 @@ fn real_usage_receipt_cannot_acknowledge_another_data_root_even_with_copied_ids(
     );
     assert!(!other.path().join("usage/requests.jsonl").exists());
 }
+
+#[test]
+fn update_ordinary_mode_and_model_reject_busy_conversations() {
+    let root = tempfile::tempdir().unwrap();
+    let store = ConversationStore::new(root.path());
+    let first = ConversationModelSelection {
+        provider_id: "openai",
+        model: "gpt-4o",
+        effort: "low",
+    };
+    let next = ConversationModelSelection {
+        provider_id: "anthropic",
+        model: "claude-3-7-sonnet",
+        effort: "high",
+    };
+    let id = store
+        .create_with_model(
+            &NewConversation {
+                title: "mode",
+                workspace_path: Some("/workspace"),
+                mode: "chat",
+                created_at: AT,
+            },
+            Some(&first),
+            None,
+        )
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    store
+        .update_ordinary_mode(&id, "/workspace", "plan", AT)
+        .unwrap();
+    assert_eq!(
+        store.read_metadata(&id).unwrap().metadata.unwrap()["mode"],
+        "plan"
+    );
+    store
+        .update_ordinary_model(&id, "/workspace", &next, AT)
+        .unwrap();
+    let meta = store.read_metadata(&id).unwrap().metadata.unwrap();
+    assert_eq!(meta["model"], "claude-3-7-sonnet");
+    assert_eq!(meta["effort"], "high");
+
+    let mut run = claim(&store, &id, "stream");
+    assert_eq!(
+        store.update_ordinary_mode(&id, "/workspace", "chat", AT),
+        Err(StoreError::ExecutionBusy)
+    );
+    assert_eq!(
+        store.update_ordinary_model(&id, "/workspace", &first, AT),
+        Err(StoreError::ExecutionBusy)
+    );
+    stop(&store, &mut run);
+}

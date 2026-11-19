@@ -58,13 +58,25 @@ impl MountedSkill {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillCatalogEntry {
+    pub manifest: SkillManifest,
+    pub scope: SkillScope,
+    pub enabled: bool,
+}
+
 pub struct SkillCatalog {
     pub mounted: Vec<MountedSkill>,
     inventories: [(PathBuf, Option<files::FileIdentity>); 3],
 }
 
+struct DiscoveredCatalog {
+    entries: Vec<(MountedSkill, bool)>,
+    inventories: [(PathBuf, Option<files::FileIdentity>); 3],
+}
+
 impl SkillCatalog {
-    pub fn observe(data_home: &Path, workspace: &Path) -> Result<Self, StoreError> {
+    fn discover(data_home: &Path, workspace: &Path) -> Result<DiscoveredCatalog, StoreError> {
         let workspace = fs::canonicalize(workspace).map_err(|_| StoreError::InvalidInput)?;
         let workspace_key = workspace.to_str().ok_or(StoreError::InvalidInput)?;
         let global = data_home.join("skills");
@@ -84,13 +96,44 @@ impl SkillCatalog {
         for skill in workspace_skills.into_iter().chain(installed_skills) {
             available.entry(skill.manifest.id.clone()).or_insert(skill);
         }
-        let result = Self {
-            mounted: available
-                .into_iter()
-                .filter(|(id, _)| enabled(&settings, workspace_key, id))
-                .map(|(_, skill)| skill)
-                .collect(),
+        let entries = available
+            .into_iter()
+            .map(|(id, skill)| {
+                let is_enabled = enabled(&settings, workspace_key, &id);
+                (skill, is_enabled)
+            })
+            .collect();
+        Ok(DiscoveredCatalog {
+            entries,
             inventories,
+        })
+    }
+
+    pub fn list_all(
+        data_home: &Path,
+        workspace: &Path,
+    ) -> Result<Vec<SkillCatalogEntry>, StoreError> {
+        let discovered = Self::discover(data_home, workspace)?;
+        Ok(discovered
+            .entries
+            .into_iter()
+            .map(|(skill, is_enabled)| SkillCatalogEntry {
+                enabled: is_enabled,
+                manifest: skill.manifest,
+                scope: skill.scope,
+            })
+            .collect())
+    }
+
+    pub fn observe(data_home: &Path, workspace: &Path) -> Result<Self, StoreError> {
+        let discovered = Self::discover(data_home, workspace)?;
+        let result = Self {
+            mounted: discovered
+                .entries
+                .into_iter()
+                .filter_map(|(skill, is_enabled)| is_enabled.then_some(skill))
+                .collect(),
+            inventories: discovered.inventories,
         };
         result.check_current()?;
         Ok(result)
@@ -280,6 +323,15 @@ mod tests {
         );
         assert_eq!(entries[1].scope, SkillScope::Installed);
         assert_eq!(entries[1].manifest.description, "borrowed summary");
+
+        write(json!({"disabled":["disabled"]}));
+        let all = SkillCatalog::list_all(&home, &workspace).unwrap();
+        assert_eq!(
+            all.iter()
+                .map(|e| (e.manifest.id.as_str(), e.enabled))
+                .collect::<Vec<_>>(),
+            [("disabled", false), ("linked", true), ("shared", true)]
+        );
     }
     #[test]
     fn load_binds_the_selected_package_to_its_observed_file_and_installation() {

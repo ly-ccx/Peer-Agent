@@ -65,7 +65,9 @@ mod history;
 mod hook_config;
 pub use hook_config::{HookConfig, HookDefinition, HookPhase};
 mod presentation;
-pub use presentation::{DisplayEvent, DisplayReadError, DisplaySnapshot, SessionMetadata};
+pub use presentation::{
+    DisplayEvent, DisplayReadError, DisplaySnapshot, ResumableSessionRow, SessionMetadata,
+};
 mod usage_ledger;
 pub use conversation_write::{
     ConversationModelSelection, MessageCommit, NewConversation, NewProjectConversation,
@@ -74,7 +76,7 @@ mod lease;
 mod lock;
 mod policy;
 mod skill_catalog;
-pub use skill_catalog::{MountedSkill, SkillCatalog, SkillScope};
+pub use skill_catalog::{MountedSkill, SkillCatalog, SkillCatalogEntry, SkillScope};
 mod skill_manifest;
 pub use skill_manifest::SkillManifest;
 mod transcript;

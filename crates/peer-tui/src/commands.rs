@@ -46,8 +46,16 @@ pub enum ProjectCommand {
     Older,
     Latest,
     Help,
+    Version,
     Quit,
     Invalid,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HistoryDirection {
+    Earlier,
+    Later,
+    Latest,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,14 +63,24 @@ pub enum ClassicCommand {
     Text(String),
     Bots,
     NewSession,
+    Clear,
+    Compact,
     Model,
-    Mode(String),
-    Access(String),
+    Mode(Option<String>),
+    Permissions(Option<String>),
+    Fast,
     Theme(Option<String>),
     Language(Option<String>),
-    Older,
-    Latest,
+    Skill,
+    Mcp,
+    Resume(Option<String>),
+    History(HistoryDirection),
+    Goals,
+    GoalPause,
+    GoalResume,
+    GoalCancel,
     Help,
+    Version,
     Quit,
     Invalid,
 }
@@ -115,6 +133,7 @@ pub fn parse_project_command(input: &str) -> ProjectCommand {
             "older" => ProjectCommand::Older,
             "latest" => ProjectCommand::Latest,
             "help" => ProjectCommand::Help,
+            "version" => ProjectCommand::Version,
             "quit" | "exit" => ProjectCommand::Quit,
             "save-draft" => ProjectCommand::SaveDraft,
             _ => ProjectCommand::Invalid,
@@ -178,35 +197,64 @@ pub fn parse_classic_command(input: &str) -> ClassicCommand {
         return ClassicCommand::Text(text.to_owned());
     }
     let mut parts = text[1..].split_whitespace();
-    let Some(name) = parts.next() else {
+    let Some(raw_name) = parts.next() else {
         return ClassicCommand::Invalid;
     };
+    let name = raw_name.to_ascii_lowercase();
     let args: Vec<&str> = parts.collect();
     if args.is_empty() {
-        return match name {
+        return match name.as_str() {
             "bots" => ClassicCommand::Bots,
             "new" => ClassicCommand::NewSession,
+            "clear" => ClassicCommand::Clear,
+            "compact" => ClassicCommand::Compact,
             "model" => ClassicCommand::Model,
+            "mode" => ClassicCommand::Mode(None),
+            "permissions" | "permission" | "access" => ClassicCommand::Permissions(None),
+            "fast" => ClassicCommand::Fast,
             "theme" => ClassicCommand::Theme(None),
             "language" | "lang" => ClassicCommand::Language(None),
-            "older" => ClassicCommand::Older,
-            "latest" => ClassicCommand::Latest,
+            "skill" | "skills" => ClassicCommand::Skill,
+            "mcp" => ClassicCommand::Mcp,
+            "resume" => ClassicCommand::Resume(None),
+            "history" | "older" => ClassicCommand::History(HistoryDirection::Earlier),
+            "latest" => ClassicCommand::History(HistoryDirection::Latest),
+            "goals" | "goal" => ClassicCommand::Goals,
+            "goal-pause" => ClassicCommand::GoalPause,
+            "goal-resume" => ClassicCommand::GoalResume,
+            "goal-cancel" => ClassicCommand::GoalCancel,
             "help" => ClassicCommand::Help,
+            "version" => ClassicCommand::Version,
             "quit" | "exit" => ClassicCommand::Quit,
             _ => ClassicCommand::Invalid,
         };
     }
-    match name {
-        "mode" if args.len() == 1 && matches!(args[0], "chat" | "plan" | "goal") => {
-            ClassicCommand::Mode(args[0].to_owned())
-        }
-        "access" if args.len() == 1 && matches!(args[0], "ask" | "session" | "full") => {
-            ClassicCommand::Access(args[0].to_owned())
-        }
-        "theme" if args.len() == 1 => ClassicCommand::Theme(Some(args[0].to_owned())),
-        "language" | "lang" if args.len() == 1 => {
-            ClassicCommand::Language(Some(args[0].to_owned()))
-        }
+    if args.len() != 1 {
+        return ClassicCommand::Invalid;
+    }
+    let arg_lc = args[0].to_ascii_lowercase();
+    match name.as_str() {
+        "mode" => match arg_lc.as_str() {
+            "chat" | "agent" => ClassicCommand::Mode(Some("chat".into())),
+            "plan" => ClassicCommand::Mode(Some("plan".into())),
+            "goal" => ClassicCommand::Mode(Some("goal".into())),
+            _ => ClassicCommand::Invalid,
+        },
+        "access" | "permissions" | "permission" => match arg_lc.as_str() {
+            "ask" => ClassicCommand::Permissions(Some("ask".into())),
+            "session" | "approve" => ClassicCommand::Permissions(Some("session".into())),
+            "full" => ClassicCommand::Permissions(Some("full".into())),
+            _ => ClassicCommand::Invalid,
+        },
+        "theme" => ClassicCommand::Theme(Some(args[0].to_owned())),
+        "language" | "lang" => ClassicCommand::Language(Some(args[0].to_owned())),
+        "resume" if is_valid_id(args[0]) => ClassicCommand::Resume(Some(args[0].to_owned())),
+        "history" => match arg_lc.as_str() {
+            "earlier" | "older" => ClassicCommand::History(HistoryDirection::Earlier),
+            "later" | "newer" => ClassicCommand::History(HistoryDirection::Later),
+            "latest" => ClassicCommand::History(HistoryDirection::Latest),
+            _ => ClassicCommand::Invalid,
+        },
         _ => ClassicCommand::Invalid,
     }
 }
@@ -345,6 +393,51 @@ mod tests {
             parse_classic_command("/language zh"),
             ClassicCommand::Language(Some("zh".into()))
         );
+        assert_eq!(
+            parse_classic_command("/resume"),
+            ClassicCommand::Resume(None)
+        );
+        assert_eq!(
+            parse_classic_command("/resume sess-1"),
+            ClassicCommand::Resume(Some("sess-1".into()))
+        );
+        assert_eq!(parse_classic_command("/mode"), ClassicCommand::Mode(None));
+        assert_eq!(
+            parse_classic_command("/mode agent"),
+            ClassicCommand::Mode(Some("chat".into()))
+        );
+        assert_eq!(
+            parse_classic_command("/permissions"),
+            ClassicCommand::Permissions(None)
+        );
+        assert_eq!(
+            parse_classic_command("/access approve"),
+            ClassicCommand::Permissions(Some("session".into()))
+        );
+        assert_eq!(parse_classic_command("/fast"), ClassicCommand::Fast);
+        assert_eq!(parse_classic_command("/skill"), ClassicCommand::Skill);
+        assert_eq!(parse_classic_command("/mcp"), ClassicCommand::Mcp);
+        assert_eq!(parse_classic_command("/clear"), ClassicCommand::Clear);
+        assert_eq!(parse_classic_command("/compact"), ClassicCommand::Compact);
+        assert_eq!(
+            parse_classic_command("/history later"),
+            ClassicCommand::History(HistoryDirection::Later)
+        );
+        assert_eq!(parse_classic_command("/goals"), ClassicCommand::Goals);
+        assert_eq!(
+            parse_classic_command("/goal-pause"),
+            ClassicCommand::GoalPause
+        );
+        assert_eq!(
+            parse_classic_command("/goal-resume"),
+            ClassicCommand::GoalResume
+        );
+        assert_eq!(
+            parse_classic_command("/goal-cancel"),
+            ClassicCommand::GoalCancel
+        );
+        assert_eq!(parse_classic_command("/version"), ClassicCommand::Version);
+        assert_eq!(parse_project_command("/version"), ProjectCommand::Version);
         assert_eq!(
             parse_project_command("hello world"),
             ProjectCommand::Text("hello world".into())

@@ -282,6 +282,92 @@ def run_all(binary: Path, output: Path):
         finally:
             r3.close()
 
+        # Case 4: Classic /new -> Ctrl+X L resume -> /help -> /version -> /mode & Ctrl+X 1 -> /permissions -> /theme -> /skill -> /mcp -> /compact
+        c4_ws = output / 'case4-ws'
+        c4_home = output / 'case4-home'
+        c4_ws.mkdir(); c4_home.mkdir()
+        r4 = PtyRunner(binary, c4_ws, c4_home, ['--classic'], extra_env=env)
+        try:
+            r4.wait_text('Peer·对话')
+            r4.send(b'First topic\r')
+            r4.wait_text('Echo:Firsttopic')
+            r4.drain(0.2)
+
+            since = len(r4.captured)
+            r4.send(b'/new\r')
+            r4.wait_text('已开始新会话', since=since)
+
+            since = len(r4.captured)
+            r4.send(b'\x18l')  # Ctrl+X then l -> Resume picker
+            r4.wait_text('恢复会话', since=since)
+            r4.wait_text('Firsttopic', since=since)
+
+            since = len(r4.captured)
+            r4.send(b'\r')
+            r4.wait_text('已恢复会话', since=since)
+            r4.wait_text('Echo:Firsttopic', since=since)
+
+            since = len(r4.captured)
+            r4.send(b'/help\r')
+            r4.wait_text('帮助·快捷键', since=since)
+            r4.send(b'\x1b')
+            r4.drain(0.08)
+
+            since = len(r4.captured)
+            r4.send(b'/version\r')
+            r4.wait_text('peer0.', since=since)
+
+            since = len(r4.captured)
+            r4.send(b'/mode\r')
+            r4.wait_text('选择下一条消息的运行模式', since=since)
+            since = len(r4.captured)
+            r4.send(b'2')
+            r4.wait_text('运行模式已切换为Plan', since=since)
+
+            since = len(r4.captured)
+            r4.send(b'\x181')  # Ctrl+X then 1 -> Agent
+            r4.wait_text('运行模式已切换为Agent', since=since)
+
+            since = len(r4.captured)
+            r4.send(b'/permissions\r')
+            r4.wait_text('本地权限策略', since=since)
+            r4.send(b'\x1b')
+            r4.drain(0.08)
+
+            since = len(r4.captured)
+            r4.send(b'/theme\r')
+            r4.wait_text('主题·PeerFrost', since=since)
+            r4.send(b'\x1b')
+            r4.drain(0.08)
+
+            since = len(r4.captured)
+            r4.send(b'/skill\r')
+            r4.wait_text('Skills技能管理', since=since)
+            r4.send(b'\x1b')
+            r4.drain(0.08)
+
+            since = len(r4.captured)
+            r4.send(b'/mcp\r')
+            r4.wait_text('MCPServers管理', since=since)
+            r4.send(b'\x1b')
+            r4.drain(0.08)
+
+            since = len(r4.captured)
+            r4.send(b'Continue classic\r')
+            r4.wait_text('Classicresumedcleanly', since=since)
+            r4.drain(0.2)
+
+            since = len(r4.captured)
+            r4.send(b'/compact\r')
+            r4.wait_text('已完成上下文压缩', since=since)
+
+            r4.send(b'\x03')
+            code = r4.wait_exit()
+            assert code == 0, f'case4 exit={code}'
+            results.append({'case': 'classic-resume-pickers-and-leader-chords', 'passed': True})
+        finally:
+            r4.close()
+
         assert not model.errors, f'Mock model server errors: {model.errors}'
         (output / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
         print(json.dumps({'passed': len(results), 'results': results}))

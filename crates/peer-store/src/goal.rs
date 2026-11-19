@@ -192,6 +192,53 @@ impl GoalStore {
         })
     }
 
+    /// Read-only list of all goal plans associated with a conversation, sorted newest first.
+    pub fn list_by_conversation(
+        &self,
+        conversation: &str,
+        projector: &impl GoalFactProjector,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<Vec<GoalSnapshot>, GoalError> {
+        if !valid_id(conversation, false) {
+            return Err(GoalError::Invalid);
+        }
+        let path = self.directory.join("index.jsonl");
+        let Some(before) = files::identity(&path)? else {
+            return Ok(Vec::new());
+        };
+        let rows = crate::durable_jsonl::read(&path, cancel)?;
+        let mut ids = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for row in rows {
+            crate::durable_jsonl::check_cancel(cancel)?;
+            let id = row["planId"]
+                .as_str()
+                .filter(|id| valid_id(id, false))
+                .ok_or(GoalError::Invalid)?;
+            if !ids.insert(id.to_owned()) {
+                return Err(GoalError::Invalid);
+            }
+            if row["conversationId"] != conversation {
+                continue;
+            }
+            let snapshot = self.read(id, projector, cancel)?;
+            if snapshot.facts["conversationId"] != conversation {
+                return Err(GoalError::Invalid);
+            }
+            out.push(snapshot);
+        }
+        if files::identity(&path)?.as_ref() != Some(&before) {
+            return Err(GoalError::Changed);
+        }
+        out.sort_by(|a, b| {
+            b.facts["updatedAt"]
+                .as_str()
+                .unwrap_or("")
+                .cmp(a.facts["updatedAt"].as_str().unwrap_or(""))
+        });
+        Ok(out)
+    }
+
     pub fn observe_local_intake(
         &self,
         conversation: &str,
