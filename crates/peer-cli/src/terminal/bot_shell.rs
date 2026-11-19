@@ -944,13 +944,15 @@ impl<'a> BotShellState<'a> {
                                     model_id,
                                     effort,
                                 } => {
-                                    self.selected_provider = Some(provider_id.clone());
-                                    self.selected_model = Some(model_id.clone());
+                                    let label = self
+                                        .model_picker
+                                        .current_display_label()
+                                        .unwrap_or_else(|| model_id.clone());
+                                    self.selected_provider = Some(provider_id);
+                                    self.selected_model = Some(model_id);
                                     self.selected_effort = effort;
                                     self.model_picker.close();
-                                    self.notice = Some(format!(
-                                        "本终端会话模型已设为 {provider_id}::{model_id}。"
-                                    ));
+                                    self.notice = Some(format!("本终端会话模型已设为 {label}。"));
                                 }
                             }
                             dirty = true;

@@ -79,6 +79,7 @@ pub(super) struct ClassicSession<'a> {
     fast_available: bool,
     selected_provider: Option<String>,
     selected_model: Option<String>,
+    selected_display_name: Option<String>,
     selected_effort: Option<String>,
     context_percent: Option<u8>,
     goal_plans: Vec<GoalPickerRow>,
@@ -105,10 +106,12 @@ impl<'a> ClassicSession<'a> {
         let runtime = Rc::new(NativeConversationRuntime::new(&home, access.clone()));
         let mut selected_provider = None;
         let mut selected_model = None;
+        let mut selected_display_name = None;
         let mut selected_effort = None;
         if let Ok(resolved) = resolve_exec(&home, None, None, None, false) {
             selected_provider = Some(resolved.entry.provider_id);
             selected_model = Some(resolved.entry.model_id);
+            selected_display_name = Some(resolved.entry.display_name);
             selected_effort = resolved.selection["reasoningEffort"]
                 .as_str()
                 .map(str::to_owned);
@@ -127,6 +130,7 @@ impl<'a> ClassicSession<'a> {
             fast_available: false,
             selected_provider,
             selected_model,
+            selected_display_name,
             selected_effort,
             context_percent: None,
             goal_plans: Vec::new(),
@@ -155,10 +159,16 @@ impl<'a> ClassicSession<'a> {
     }
 
     fn model_badge(&self) -> String {
-        match (&self.selected_provider, &self.selected_model) {
-            (Some(p), Some(m)) => format!("{p}::{m}"),
-            (_, Some(m)) => m.clone(),
-            _ => "未配置模型".to_owned(),
+        if let Some(name) = self
+            .selected_display_name
+            .as_deref()
+            .filter(|s| !s.is_empty())
+        {
+            return name.to_owned();
+        }
+        match &self.selected_model {
+            Some(m) => m.clone(),
+            None => "未配置模型".to_owned(),
         }
     }
 
@@ -476,6 +486,7 @@ impl<'a> ClassicSession<'a> {
                 Ok(sel) => {
                     self.selected_provider = Some(sel.entry.provider_id);
                     self.selected_model = Some(sel.entry.model_id);
+                    self.selected_display_name = Some(sel.entry.display_name);
                     self.selected_effort = sel
                         .selection
                         .get("reasoningEffort")
@@ -543,6 +554,7 @@ impl<'a> ClassicSession<'a> {
         &mut self,
         provider_id: String,
         model_id: String,
+        display_name: Option<String>,
         effort: Option<String>,
     ) {
         if let Some(ref cid) = self.conversation_id
@@ -563,6 +575,7 @@ impl<'a> ClassicSession<'a> {
         }
         self.selected_provider = Some(provider_id);
         self.selected_model = Some(model_id);
+        self.selected_display_name = display_name;
         self.selected_effort = effort;
         self.refresh_fast_available();
         self.refresh_context_percent();
@@ -788,6 +801,7 @@ impl<'a> ClassicSession<'a> {
         };
         self.selected_provider = Some(selected.entry.provider_id.clone());
         self.selected_model = Some(selected.entry.model_id.clone());
+        self.selected_display_name = Some(selected.entry.display_name.clone());
         self.interrupted_preview.clear();
         self.anchor.jump_to_latest();
 
@@ -1732,8 +1746,14 @@ impl<'a> ClassicSession<'a> {
                                     model_id,
                                     effort,
                                 } => {
+                                    let display_label = self.model_picker.current_display_label();
                                     self.model_picker.close();
-                                    self.apply_model_selection(provider_id, model_id, effort);
+                                    self.apply_model_selection(
+                                        provider_id,
+                                        model_id,
+                                        display_label,
+                                        effort,
+                                    );
                                 }
                             }
                             dirty = true;

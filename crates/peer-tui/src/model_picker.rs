@@ -17,6 +17,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Clear, Paragraph},
 };
+use unicode_width::UnicodeWidthStr;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelPickerOption {
@@ -107,6 +108,17 @@ impl ModelPickerState {
             .and_then(|g| g.models.get(self.active_model))
     }
 
+    pub fn current_display_label(&self) -> Option<String> {
+        let group = self.groups.get(self.active_group)?;
+        let model = group.models.get(self.active_model)?;
+        if group.label != "Models" && !group.label.is_empty() && !model.display_name.contains(" · ")
+        {
+            Some(format!("{} · {}", model.display_name, group.label))
+        } else {
+            Some(model.display_name.clone())
+        }
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent) -> ModelPickerEvent {
         if !self.open || key.kind == KeyEventKind::Release {
             return ModelPickerEvent::None;
@@ -191,6 +203,31 @@ impl ModelPickerState {
     }
 }
 
+fn tab_row_width(labels: &[String], start: usize, end: usize, total: usize) -> usize {
+    let left = if start > 0 { 2 } else { 0 };
+    let right = if end < total { 2 } else { 0 };
+    let tabs: usize = labels[start..end].iter().map(|s| s.width()).sum();
+    let seps = end.saturating_sub(start).saturating_sub(1) * 2;
+    left + tabs + seps + right
+}
+
+fn visible_tab_range(labels: &[String], active: usize, max_w: usize) -> (usize, usize) {
+    if labels.is_empty() {
+        return (0, 0);
+    }
+    let total = labels.len();
+    let active = active.min(total - 1);
+    let mut start = 0;
+    let mut end = active + 1;
+    while start < active && tab_row_width(labels, start, end, total) > max_w {
+        start += 1;
+    }
+    while end < total && tab_row_width(labels, start, end + 1, total) <= max_w {
+        end += 1;
+    }
+    (start, end)
+}
+
 pub fn render_model_picker(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -242,7 +279,7 @@ pub fn render_model_picker(
         outer[0],
     );
 
-    // Provider tabs row
+    // Provider tabs row (windowed horizontally so active group remains visible)
     let mut tab_spans = Vec::new();
     if state.groups.is_empty() {
         tab_spans.push(Span::styled(
@@ -250,8 +287,19 @@ pub fn render_model_picker(
             Style::new().fg(palette.muted).bg(palette.panel),
         ));
     } else {
-        for (i, g) in state.groups.iter().enumerate() {
-            if i > 0 {
+        let cap = pw.saturating_sub(4).clamp(1, 20);
+        let clipped: Vec<String> = state
+            .groups
+            .iter()
+            .map(|g| clip_bot_line(&g.label, cap))
+            .collect();
+        let (start, end) = visible_tab_range(&clipped, state.active_group, pw);
+        let muted = Style::new().fg(palette.muted).bg(palette.panel);
+        if start > 0 {
+            tab_spans.push(Span::styled("‹ ", muted));
+        }
+        for (i, label) in clipped.iter().enumerate().take(end).skip(start) {
+            if i > start {
                 tab_spans.push(Span::styled("  ", Style::new().bg(palette.panel)));
             }
             let style = if i == state.active_group {
@@ -260,9 +308,18 @@ pub fn render_model_picker(
                     .bg(palette.panel)
                     .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
             } else {
-                Style::new().fg(palette.muted).bg(palette.panel)
+                muted
             };
-            tab_spans.push(Span::styled(clip_bot_line(&g.label, 18), style));
+            let shown = if start + 1 == end {
+                let reserve = usize::from(start > 0) * 2 + usize::from(end < clipped.len()) * 2;
+                clip_bot_line(label, pw.saturating_sub(reserve).max(1))
+            } else {
+                label.clone()
+            };
+            tab_spans.push(Span::styled(shown, style));
+        }
+        if end < clipped.len() {
+            tab_spans.push(Span::styled(" ›", muted));
         }
     }
     frame.render_widget(
@@ -298,7 +355,7 @@ pub fn render_model_picker(
             };
             let main_text = clip_bot_line(
                 &format!("{caret}{}", m.display_name),
-                list_w.saturating_sub(mark.len() + suffix.len().min(list_w / 2)),
+                list_w.saturating_sub(mark.width() + suffix.width().min(list_w / 2)),
             );
             let main_style = if !m.available {
                 Style::new().fg(palette.muted).bg(palette.panel)
@@ -430,5 +487,69 @@ mod tests {
             ModelPickerEvent::Close
         );
         assert!(!picker.open);
+    }
+
+    #[test]
+    fn current_display_label_and_tab_windowing_keep_active_provider_visible() {
+        use crate::theme::DARK_PALETTE;
+        use ratatui::{Terminal, backend::TestBackend};
+
+        let mut picker = ModelPickerState::default();
+        assert_eq!(picker.current_display_label(), None);
+
+        let providers = [
+            ("p1", "ChatGPT 订阅服务", "gpt-6.1-sol", "GPT-6.1 Sol"),
+            (
+                "p2",
+                "DeepSeek 官方渠道",
+                "deepseek-flash",
+                "DeepSeek Flash",
+            ),
+            ("p3", "OpenCode Go 平台", "glm-5.3-flash", "GLM-5.3 Flash"),
+            ("p4", "GLM Coding Plan（国区）", "glm-5.3", "GLM-5.3"),
+            ("p5", "Grok 官方直连渠道", "grok-4.7", "Grok-4.7"),
+        ];
+        let groups: Vec<ModelPickerGroup> = providers
+            .iter()
+            .map(|(pid, label, mid, dname)| ModelPickerGroup {
+                group_id: (*pid).into(),
+                label: (*label).into(),
+                models: vec![ModelPickerOption {
+                    record_id: format!("{pid}:{mid}"),
+                    provider_id: (*pid).into(),
+                    model_id: (*mid).into(),
+                    display_name: (*dname).into(),
+                    available: true,
+                    supports_reasoning: true,
+                    efforts: vec!["default".into()],
+                    badges: vec!["tools".into()],
+                }],
+            })
+            .collect();
+        picker.open_with(groups, Some("p5".into()), Some("grok-4.7".into()), None);
+        assert_eq!(
+            picker.current_display_label().as_deref(),
+            Some("Grok-4.7 · Grok 官方直连渠道")
+        );
+
+        let mut term = Terminal::new(TestBackend::new(74, 18)).unwrap();
+        term.draw(|f| render_model_picker(f, f.area(), &picker, &DARK_PALETTE))
+            .unwrap();
+        let buf = term.backend().buffer().clone();
+        let mut rendered = String::new();
+        let mut skip_next = false;
+        for cell in &buf.content {
+            if skip_next {
+                skip_next = false;
+                continue;
+            }
+            let sym = cell.symbol();
+            rendered.push_str(sym);
+            if sym.width() > 1 {
+                skip_next = true;
+            }
+        }
+        assert!(rendered.contains("‹"));
+        assert!(rendered.contains("Grok 官方直连渠道"));
     }
 }
