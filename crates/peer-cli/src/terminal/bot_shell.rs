@@ -996,34 +996,26 @@ impl<'a> BotShellState<'a> {
                                         *confirm_yes = !*confirm_yes;
                                         dirty = true;
                                     }
-                                    KeyCode::Char('y') | KeyCode::Char('Y') => {
-                                        *confirm_yes = true;
-                                        dirty = true;
+                                    code if matches!(
+                                        code,
+                                        KeyCode::Char('n' | 'N') | KeyCode::Esc
+                                    ) || (code == KeyCode::Enter && !*confirm_yes) =>
+                                    {
+                                        self.host.close();
+                                        return Ok(ShellOutcome::SwitchToClassic);
                                     }
-                                    KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-                                        self.screen = BotScreen::BotList;
-                                        self.refresh_snapshot(false);
-                                        dirty = true;
-                                    }
-                                    KeyCode::Enter => {
-                                        if *confirm_yes {
-                                            match self.host.bind_workspace(&self.workspace, None) {
-                                                Ok((entry, profile)) => {
-                                                    self.active_workspace_id =
-                                                        Some(entry.workspace_id);
-                                                    self.active_bot_name =
-                                                        Some(profile.display_name);
-                                                    self.screen = BotScreen::Conversation;
-                                                    self.refresh_snapshot(true);
-                                                }
-                                                Err(err) => {
-                                                    self.notice =
-                                                        Some(format!("绑定失败（{}）。", err.code));
-                                                }
+                                    KeyCode::Char('y' | 'Y') | KeyCode::Enter => {
+                                        match self.host.bind_workspace(&self.workspace, None) {
+                                            Ok((entry, profile)) => {
+                                                self.active_workspace_id = Some(entry.workspace_id);
+                                                self.active_bot_name = Some(profile.display_name);
+                                                self.screen = BotScreen::Conversation;
+                                                self.refresh_snapshot(true);
                                             }
-                                        } else {
-                                            self.screen = BotScreen::BotList;
-                                            self.refresh_snapshot(false);
+                                            Err(err) => {
+                                                self.notice =
+                                                    Some(format!("绑定失败（{}）。", err.code));
+                                            }
                                         }
                                         dirty = true;
                                     }

@@ -211,7 +211,8 @@ def run_all(binary: Path, output: Path):
         c1_ws.mkdir(); c1_home.mkdir()
         r1 = PtyRunner(binary, c1_ws, c1_home, [], extra_env=env)
         try:
-            r1.wait_text('当前目录尚未绑定项目机器人')
+            r1.wait_text('把这个目录绑定为机器人')
+            r1.wait_text('否，进入普通任务模式')
             r1.send(b'\r')  # Confirm bind
             r1.wait_text('·case1-ws')
             r1.send(b'Hello native bot\r')
@@ -367,6 +368,39 @@ def run_all(binary: Path, output: Path):
             results.append({'case': 'classic-resume-pickers-and-leader-chords', 'passed': True})
         finally:
             r4.close()
+
+        # Case 5: BindWorkspace refusal (No / Esc) enters Classic mode with zero disk writes
+        c5a_ws = output / 'case5a-ws'
+        c5a_home = output / 'case5a-home'
+        c5a_ws.mkdir(); c5a_home.mkdir()
+        r5a = PtyRunner(binary, c5a_ws, c5a_home, [], extra_env=env)
+        try:
+            r5a.wait_text('把这个目录绑定为机器人')
+            r5a.wait_text('否，进入普通任务模式')
+            r5a.send(b'\x1b[C\r')  # Right arrow -> No, Enter -> Classic
+            r5a.wait_text('Peer·对话')
+            r5a.send(b'\x03')
+            code = r5a.wait_exit()
+            assert code == 0, f'case5a exit={code}'
+            assert not list(c5a_home.rglob('*')), 'Bind refusal via No wrote unexpected persistent files'
+        finally:
+            r5a.close()
+
+        c5b_ws = output / 'case5b-ws'
+        c5b_home = output / 'case5b-home'
+        c5b_ws.mkdir(); c5b_home.mkdir()
+        r5b = PtyRunner(binary, c5b_ws, c5b_home, [], extra_env=env)
+        try:
+            r5b.wait_text('把这个目录绑定为机器人')
+            r5b.send(b'\x1b')  # Esc -> Classic
+            r5b.wait_text('Peer·对话')
+            r5b.send(b'\x03')
+            code = r5b.wait_exit()
+            assert code == 0, f'case5b exit={code}'
+            assert not list(c5b_home.rglob('*')), 'Bind refusal via Esc wrote unexpected persistent files'
+        finally:
+            r5b.close()
+        results.append({'case': 'bind-refusal-enters-classic-without-writing', 'passed': True})
 
         assert not model.errors, f'Mock model server errors: {model.errors}'
         (output / 'results.json').write_text(json.dumps(results, indent=2) + '\n')

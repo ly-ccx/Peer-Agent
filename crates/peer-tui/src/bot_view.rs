@@ -565,7 +565,8 @@ pub fn render_bot_shell(frame: &mut Frame<'_>, view: BotShellView<'_>) {
         confirm_yes,
     } = view.screen
     {
-        // Centered Frost bind prompt matching ProjectApp.tsx:193-205
+        // Centered Frost bind prompt matching ProjectApp.tsx:193-205 & project-copy.ts:13-15,43-45
+        let zh = view.locale.is_zh();
         let w = usize::from(area.width);
         let h = usize::from(area.height);
         let yes_style = if *confirm_yes {
@@ -586,24 +587,35 @@ pub fn render_bot_shell(frame: &mut Frame<'_>, view: BotShellView<'_>) {
         };
         let ws_clean = clip_bot_line(workspace_path, w.saturating_sub(4).max(8));
         let yes_txt = format!(
-            "{}是，在此目录创建机器人  Y",
+            "{}{}  Y",
             if *confirm_yes {
                 CARET_SELECTED
             } else {
                 CARET_IDLE
+            },
+            if zh {
+                "是，创建机器人"
+            } else {
+                "Yes, create a bot"
             }
         );
         let no_txt = format!(
-            "{}否，查看已有机器人列表  N",
+            "{}{}  N",
             if !*confirm_yes {
                 CARET_SELECTED
             } else {
                 CARET_IDLE
+            },
+            if zh {
+                "否，进入普通任务模式"
+            } else {
+                "No, open task mode"
             }
         );
-        let lines = vec![
+        let horizontal = yes_txt.width() + 3 + no_txt.width() <= w.saturating_sub(4);
+        let mut lines = vec![
             Line::styled(
-                if view.locale.is_zh() {
+                if zh {
                     "Peer · 机器人模式"
                 } else {
                     "Peer · Bot mode"
@@ -615,7 +627,11 @@ pub fn render_bot_shell(frame: &mut Frame<'_>, view: BotShellView<'_>) {
             ),
             Line::styled("", Style::new().bg(palette.background)),
             Line::styled(
-                "当前目录尚未绑定项目机器人：",
+                if zh {
+                    "把这个目录绑定为机器人？"
+                } else {
+                    "Bind this directory to a bot?"
+                },
                 Style::new().fg(palette.text).bg(palette.background),
             ),
             Line::styled(
@@ -623,14 +639,36 @@ pub fn render_bot_shell(frame: &mut Frame<'_>, view: BotShellView<'_>) {
                 Style::new().fg(palette.muted).bg(palette.background),
             ),
             Line::styled("", Style::new().bg(palette.background)),
-            Line::styled(yes_txt, yes_style),
-            Line::styled(no_txt, no_style),
-            Line::styled("", Style::new().bg(palette.background)),
-            Line::styled(
-                "←/→ 选择 · Enter 确认 · Esc 查看列表",
-                Style::new().fg(palette.muted).bg(palette.background),
-            ),
         ];
+        let options_start_row = lines.len() as u16;
+        if horizontal {
+            lines.push(Line::from(vec![
+                Span::styled(yes_txt.clone(), yes_style),
+                Span::styled("   ", Style::new().bg(palette.background)),
+                Span::styled(no_txt, no_style),
+            ]));
+        } else {
+            lines.push(Line::styled(yes_txt.clone(), yes_style));
+            lines.push(Line::styled(no_txt, no_style));
+        }
+        if let Some(msg) = view.notice.filter(|s| !s.is_empty()) {
+            lines.push(Line::styled(
+                clip_bot_line(&terminal_text(msg), w.saturating_sub(4).max(8)),
+                Style::new().fg(palette.warning).bg(palette.background),
+            ));
+        }
+        lines.push(Line::styled("", Style::new().bg(palette.background)));
+        lines.push(Line::styled(
+            clip_bot_line(
+                if zh {
+                    "←/→ 选择 · 回车确认 · Esc 进入普通任务模式"
+                } else {
+                    "←/→ to choose · Enter to confirm · Esc for task mode"
+                },
+                w.saturating_sub(4).max(8),
+            ),
+            Style::new().fg(palette.muted).bg(palette.background),
+        ));
         let content_w = lines.iter().map(|l| l.width()).max().unwrap_or(1).min(w) as u16;
         let top_pad = h.saturating_sub(lines.len()) / 2;
         let left_pad = w.saturating_sub(usize::from(content_w)) / 2;
@@ -641,9 +679,18 @@ pub fn render_bot_shell(frame: &mut Frame<'_>, view: BotShellView<'_>) {
             height: area.height.saturating_sub(top_pad as u16),
         };
         frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), bind_rect);
-        let option_row = if *confirm_yes { 5 } else { 6 };
-        let cy = (bind_rect.y + option_row).min(full_area.y + full_area.height - 1);
-        let cx = bind_rect.x.min(full_area.x + full_area.width - 1);
+        let (cursor_dx, cursor_dy) = if horizontal {
+            let dx = if *confirm_yes {
+                0u16
+            } else {
+                (yes_txt.width() + 3) as u16
+            };
+            (dx, options_start_row)
+        } else {
+            (0u16, options_start_row + u16::from(!*confirm_yes))
+        };
+        let cy = (bind_rect.y + cursor_dy).min(full_area.y + full_area.height - 1);
+        let cx = (bind_rect.x + cursor_dx).min(full_area.x + full_area.width - 1);
         frame.set_cursor_position((cx, cy));
         return;
     }
@@ -1221,6 +1268,102 @@ mod tests {
                 );
             })
             .unwrap();
+        }
+    }
+
+    #[test]
+    fn bind_workspace_prompt_matches_opentui_zh_and_en() {
+        let mut cache = ByteBudgetLru::new(MARKDOWN_WRAP_CACHE_BYTES, 128);
+        let anchor = ReadingAnchor::FollowingLatest;
+        let composer = Composer::default();
+        let picker = ModelPickerState::default();
+        let screen = BotScreen::BindWorkspace {
+            workspace_path: "/tmp/demo-project".into(),
+            confirm_yes: true,
+        };
+
+        for (locale, expected) in [
+            (
+                TuiLocale::ZhCn,
+                [
+                    "Peer · 机器人模式",
+                    "把这个目录绑定为机器人？",
+                    "是，创建机器人  Y",
+                    "否，进入普通任务模式  N",
+                    "←/→ 选择 · 回车确认 · Esc 进入普通任务模式",
+                ],
+            ),
+            (
+                TuiLocale::EnUs,
+                [
+                    "Peer · Bot mode",
+                    "Bind this directory to a bot?",
+                    "Yes, create a bot  Y",
+                    "No, open task mode  N",
+                    "←/→ to choose · Enter to confirm · Esc for task mode",
+                ],
+            ),
+        ] {
+            for (w, h) in [(120, 40), (32, 14)] {
+                let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+                term.draw(|f| {
+                    render_bot_shell(
+                        f,
+                        BotShellView {
+                            screen: &screen,
+                            palette: &DARK_PALETTE,
+                            scheme_id: 0,
+                            current_theme: ThemeMode::Dark,
+                            locale,
+                            is_host: true,
+                            bots: &[],
+                            selected_bot: 0,
+                            active_bot_name: None,
+                            lease_banner: None,
+                            messages: &[],
+                            live_activity: None,
+                            tasks: &[],
+                            memories: &[],
+                            objectives: &[],
+                            cards: &[],
+                            card_focus: false,
+                            selected_card: 0,
+                            selected_card_option: 0,
+                            slash_selected: 0,
+                            anchor: &anchor,
+                            composer: &composer,
+                            draft_warning: None,
+                            notice: None,
+                            model_picker: &picker,
+                            overlay: None,
+                            wrap_cache: &mut cache,
+                        },
+                    );
+                })
+                .unwrap();
+                if w == 120 {
+                    let buf = term.backend().buffer().clone();
+                    let mut rendered = String::new();
+                    let mut skip_next = false;
+                    for cell in &buf.content {
+                        if skip_next {
+                            skip_next = false;
+                            continue;
+                        }
+                        let sym = cell.symbol();
+                        rendered.push_str(sym);
+                        if sym.width() > 1 {
+                            skip_next = true;
+                        }
+                    }
+                    for needle in expected {
+                        assert!(
+                            rendered.contains(needle),
+                            "missing {needle:?} in bind screen ({locale:?})"
+                        );
+                    }
+                }
+            }
         }
     }
 }
