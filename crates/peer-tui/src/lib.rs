@@ -11,6 +11,7 @@ pub mod model_picker;
 pub mod overlays;
 mod resumed_view;
 pub mod slash_menu;
+pub mod table;
 pub mod theme;
 mod view;
 pub mod wordmark;
@@ -49,6 +50,7 @@ pub use slash_menu::{
     BOT_SLASH_ITEMS, CLASSIC_SLASH_ITEMS, GoalMenuStatus, SlashFilterContext, SlashItem,
     filter_classic_slash_items, filter_slash_items, render_slash_menu,
 };
+pub use table::{TableAlignment, TableBorders, TableSpec, render_table_lines};
 pub use theme::{
     DARK_PALETTE, LIGHT_PALETTE, RUNNING_ACTIVITY_LABEL, TOOL_DETAIL_PIPE, TOOL_GLYPH_CANCELLED,
     TOOL_GLYPH_COMPLETED, TOOL_GLYPH_FAILED, TOOL_GLYPH_RUNNING, TOOL_GLYPH_RUNNING_PULSE,

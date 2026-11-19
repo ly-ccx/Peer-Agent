@@ -2178,4 +2178,90 @@ mod tests {
             assert!(text.contains("3. 拒绝"));
         }
     }
+
+    #[test]
+    fn classic_renders_rounded_markdown_table_under_peer_rail() {
+        let mut cache = ByteBudgetLru::new(MARKDOWN_WRAP_CACHE_BYTES, 16);
+        let composer = Composer::default();
+        let anchor = ReadingAnchor::FollowingLatest;
+        let picker = ModelPickerState::default();
+        let msgs = vec![
+            ClassicMessage {
+                id: "u1".into(),
+                revision: 1,
+                role: "user".into(),
+                text: "当前仓库状态是什么".into(),
+                thinking: None,
+                tools: Vec::new(),
+                continuation: false,
+            },
+            ClassicMessage {
+                id: "a1".into(),
+                revision: 1,
+                role: "assistant".into(),
+                text: "| 仓库 | 当前分支 | 主线位置 | 说明 |\n|---|---|---|---|\n| Peer-Knowledge | `codex/coding-agent-engineering-charter` | `origin/main` 停在 `7600b00` (11-10, ADR 127) | ADR 133 及全部对齐改动只在分支上，未合入 main |\n| Peer-Agent | `fix/bot-thread-latest-floating` | `origin/main` 为 `48e88a25` (RC29 相关) | 最近提交是桌面端「返回最新消息」浮动按钮等体验修复；Rust CLI 线在 `codex/native-rust-cli` |".into(),
+                thinking: None,
+                tools: Vec::new(),
+                continuation: false,
+            },
+        ];
+
+        let mut term = Terminal::new(TestBackend::new(110, 28)).unwrap();
+        term.draw(|f| {
+            render_classic(
+                f,
+                ClassicView {
+                    title: "Peer",
+                    workspace_label: "~/Documents/Develop/peer-dev",
+                    model_badge: "gpt-6.1-sol · ChatGPT 订阅",
+                    effort_badge: "default",
+                    mode_badge: "chat",
+                    access_badge: "ask",
+                    context_percent: Some(5),
+                    quota_label: None,
+                    quota_remaining: None,
+                    fast_mode: false,
+                    fast_available: false,
+                    goal_status: GoalMenuStatus::None,
+                    goal_banner: None,
+                    is_running: false,
+                    activity_label: None,
+                    animation_frame: 0,
+                    running_elapsed_ms: 0,
+                    tools_expanded: false,
+                    notice: None,
+                    notice_is_error: false,
+                    palette: &DARK_PALETTE,
+                    scheme_id: 0,
+                    current_theme: ThemeMode::Dark,
+                    locale: TuiLocale::ZhCn,
+                    messages: &msgs,
+                    live_stream: "",
+                    live_thinking: "",
+                    anchor: &anchor,
+                    composer: &composer,
+                    status: "",
+                    approval: None,
+                    user_input: None,
+                    model_picker: &picker,
+                    overlay: &ClassicOverlay::None,
+                    slash_selected: 0,
+                    wrap_cache: &mut cache,
+                },
+            );
+        })
+        .unwrap();
+
+        let text = buffer_text(&term);
+        assert!(text.contains("PEER"));
+        assert!(text.contains('╭'));
+        assert!(text.contains('╰'));
+        assert!(text.contains('├'));
+        assert!(text.contains('┼'));
+        assert!(text.contains('┤'));
+        assert!(text.contains("Peer-Knowledge"));
+        assert!(text.contains("Peer-Agent"));
+        assert!(text.contains("codex/native-rust-cli"));
+        assert!(!text.contains("[1]"));
+    }
 }

@@ -5,6 +5,7 @@
 
 use crate::{
     bounded_cache::ByteSized,
+    table::{TableAlignment, TableBorders, TableSpec, render_table_lines},
     terminal_text,
     theme::{
         DARK_PALETTE, HEADING_H1, HEADING_H2, HEADING_H3, LIST_BULLET, QUOTE_PREFIX, TuiPalette,
@@ -36,7 +37,7 @@ impl StyledLine {
         }
     }
 
-    fn from_spans(spans: Vec<(String, Style)>) -> Self {
+    pub(crate) fn from_spans(spans: Vec<(String, Style)>) -> Self {
         let bytes = spans
             .iter()
             .map(|(text, _)| text.len() + 32)
@@ -162,7 +163,7 @@ fn push_wrapped_segments(
     emit_line(&mut cur_spans, &mut cur_bytes, col, out);
 }
 
-fn wrap_plain_into(
+pub(crate) fn wrap_plain_into(
     text: &str,
     width: usize,
     style: Style,
@@ -172,8 +173,8 @@ fn wrap_plain_into(
     push_wrapped_segments(vec![(text.to_owned(), style)], width, None, out, max_lines);
 }
 
-/// Format inline `**bold**` and `` `code` `` spans within one unwrapped text line, then wrap to `width`.
-fn tokenize_inline_markdown(
+/// Format inline `**bold**`, `~~strike~~`, and `` `code` `` spans within one unwrapped text line.
+pub(crate) fn tokenize_inline_markdown(
     text: &str,
     base_style: Style,
     palette: &TuiPalette,
@@ -213,6 +214,22 @@ fn tokenize_inline_markdown(
             plain_start = i;
             continue;
         }
+        if bytes[i..].starts_with(b"~~")
+            && let Some(end_rel) = text[i + 2..].find("~~")
+            && end_rel > 0
+        {
+            if i > plain_start {
+                segments.push((text[plain_start..i].to_owned(), base_style));
+            }
+            let strike_end = i + 2 + end_rel;
+            segments.push((
+                text[i + 2..strike_end].to_owned(),
+                base_style.add_modifier(Modifier::CROSSED_OUT),
+            ));
+            i = strike_end + 2;
+            plain_start = i;
+            continue;
+        }
         let ch_len = text[i..].chars().next().map_or(1, char::len_utf8);
         i += ch_len;
     }
@@ -221,7 +238,7 @@ fn tokenize_inline_markdown(
     }
 }
 
-fn wrap_inline_markdown(
+pub(crate) fn wrap_inline_markdown(
     text: &str,
     width: usize,
     base_style: Style,
@@ -234,23 +251,7 @@ fn wrap_inline_markdown(
     push_wrapped_segments(segments, width, None, out, max_lines);
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TableAlignment {
-    Left,
-    Center,
-    Right,
-}
-
-const GRID_GAP: usize = 3;
 const MAX_TABLE_COLUMNS: usize = 32;
-
-struct TableCtx<'a> {
-    width: usize,
-    base_style: Style,
-    palette: &'a TuiPalette,
-    out: &'a mut Vec<StyledLine>,
-    max_lines: usize,
-}
 
 fn is_heading_line(trimmed: &str) -> bool {
     ["# ", "## ", "### ", "#### ", "##### ", "###### "]
@@ -281,6 +282,24 @@ fn is_table_row(line: &str) -> bool {
     !line.trim().is_empty() && line.contains('|')
 }
 
+fn has_unescaped_backtick(s: &str) -> bool {
+    let mut escaped = false;
+    for ch in s.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if ch == '`' {
+            return true;
+        }
+    }
+    false
+}
+
 fn split_table_row(line: &str) -> Vec<String> {
     let mut s = line.trim();
     if let Some(rest) = s.strip_prefix('|') {
@@ -294,17 +313,27 @@ fn split_table_row(line: &str) -> Vec<String> {
     let mut cells = Vec::new();
     let mut cur = String::new();
     let mut escaped = false;
-    for ch in s.chars() {
+    let mut in_code = false;
+    for (idx, ch) in s.char_indices() {
         if escaped {
             cur.push(ch);
             escaped = false;
             continue;
         }
-        if ch == '\\' {
+        if ch == '\\' && (!in_code || s[idx + 1..].starts_with('|')) {
             escaped = true;
             continue;
         }
-        if ch == '|' {
+        if ch == '`' {
+            if in_code {
+                in_code = false;
+            } else if has_unescaped_backtick(&s[idx + 1..]) {
+                in_code = true;
+            }
+            cur.push(ch);
+            continue;
+        }
+        if ch == '|' && !in_code {
             cells.push(cur.trim().to_owned());
             cur.clear();
             if cells.len() >= MAX_TABLE_COLUMNS {
@@ -336,7 +365,7 @@ fn is_table_separator(line: &str) -> bool {
                 .unwrap_or(trimmed)
                 .strip_suffix(':')
                 .unwrap_or_else(|| trimmed.strip_prefix(':').unwrap_or(trimmed));
-            inner.len() >= 2 && inner.bytes().all(|b| b == b'-')
+            !inner.is_empty() && inner.bytes().all(|b| b == b'-')
         })
 }
 
@@ -353,283 +382,6 @@ fn parse_table_alignments(sep: &str) -> Vec<TableAlignment> {
             }
         })
         .collect()
-}
-
-fn inline_segments_and_width(
-    cell: &str,
-    base_style: Style,
-    palette: &TuiPalette,
-) -> (Vec<(String, Style)>, usize) {
-    let mut segs = Vec::new();
-    tokenize_inline_markdown(cell, base_style, palette, &mut segs);
-    let vis_w = segs.iter().map(|(text, _)| text.width()).sum();
-    (segs, vis_w)
-}
-
-fn alignment_padding(vis_width: usize, col_width: usize, align: TableAlignment) -> (usize, usize) {
-    let gap = col_width.saturating_sub(vis_width);
-    match align {
-        TableAlignment::Right => (gap, 0),
-        TableAlignment::Center => {
-            let left = gap / 2;
-            (left, gap - left)
-        }
-        TableAlignment::Left => (0, gap),
-    }
-}
-
-fn pad_plain(text: &str, target_w: usize, align: TableAlignment) -> String {
-    let (left, right) = alignment_padding(text.width(), target_w, align);
-    format!("{}{text}{}", " ".repeat(left), " ".repeat(right))
-}
-
-fn is_summary_table(headers: &[String], rows: &[Vec<String>], palette: &TuiPalette) -> bool {
-    if headers.len() != 2 || rows.is_empty() {
-        return false;
-    }
-    let first = headers[0].trim().to_ascii_lowercase();
-    let second = headers[1].trim().to_ascii_lowercase();
-    let header_matches = matches!(
-        first.as_str(),
-        "项" | "字段" | "属性" | "key" | "field" | "property"
-    ) || matches!(
-        second.as_str(),
-        "结果" | "值" | "说明" | "value" | "result" | "description"
-    );
-    header_matches
-        && rows.iter().all(|row| {
-            let cell = row.first().map(String::as_str).unwrap_or("");
-            inline_segments_and_width(cell, Style::default(), palette).1 <= 16
-        })
-}
-
-fn push_labeled_inline(
-    ctx: &mut TableCtx<'_>,
-    label_prefix: String,
-    label_style: Style,
-    value: &str,
-) -> bool {
-    if ctx.out.len() >= ctx.max_lines {
-        return true;
-    }
-    let prefix_w = label_prefix.width();
-    let remaining_budget = ctx.max_lines.saturating_sub(ctx.out.len());
-    if prefix_w + 10 <= ctx.width {
-        let body_w = ctx.width.saturating_sub(prefix_w).max(1);
-        let mut wrapped = Vec::new();
-        wrap_inline_markdown(
-            value,
-            body_w,
-            ctx.base_style,
-            ctx.palette,
-            &mut wrapped,
-            remaining_budget,
-        );
-        let indent_style = Style::new().bg(ctx.palette.background);
-        for (idx, line) in wrapped.into_iter().enumerate() {
-            if ctx.out.len() >= ctx.max_lines {
-                return true;
-            }
-            let prefix = if idx == 0 {
-                (label_prefix.clone(), label_style)
-            } else {
-                (" ".repeat(prefix_w), indent_style)
-            };
-            let mut spans = Vec::with_capacity(line.spans.len() + 1);
-            spans.push(prefix);
-            spans.extend(line.spans);
-            ctx.out.push(StyledLine::from_spans(spans));
-        }
-        return false;
-    }
-
-    let mut head = Vec::new();
-    wrap_plain_into(
-        label_prefix.trim_end(),
-        ctx.width,
-        label_style,
-        &mut head,
-        remaining_budget,
-    );
-    ctx.out.extend(head);
-    if ctx.out.len() >= ctx.max_lines {
-        return true;
-    }
-    let body_w = ctx.width.saturating_sub(2).max(1);
-    let mut wrapped = Vec::new();
-    wrap_inline_markdown(
-        value,
-        body_w,
-        ctx.base_style,
-        ctx.palette,
-        &mut wrapped,
-        ctx.max_lines.saturating_sub(ctx.out.len()),
-    );
-    let indent_style = Style::new().bg(ctx.palette.background);
-    for line in wrapped {
-        if ctx.out.len() >= ctx.max_lines {
-            return true;
-        }
-        let mut spans = Vec::with_capacity(line.spans.len() + 1);
-        spans.push(("  ".to_owned(), indent_style));
-        spans.extend(line.spans);
-        ctx.out.push(StyledLine::from_spans(spans));
-    }
-    false
-}
-
-fn render_key_value_table(ctx: &mut TableCtx<'_>, rows: &[Vec<String>]) -> bool {
-    let key_w = rows
-        .iter()
-        .map(|row| row.first().map_or(0, |s| s.trim().width()))
-        .max()
-        .unwrap_or(0);
-    let key_style = Style::new()
-        .fg(ctx.palette.muted)
-        .bg(ctx.palette.background)
-        .add_modifier(Modifier::BOLD);
-    let gap = " ".repeat(GRID_GAP);
-    for row in rows {
-        let key = row.first().map(String::as_str).unwrap_or("");
-        let val = row.get(1).map(String::as_str).unwrap_or("");
-        let label = format!("{}{gap}", pad_plain(key, key_w, TableAlignment::Left));
-        if push_labeled_inline(ctx, label, key_style, val) {
-            return true;
-        }
-    }
-    false
-}
-
-fn render_data_table(
-    ctx: &mut TableCtx<'_>,
-    headers: &[String],
-    rows: &[Vec<String>],
-    alignments: &[TableAlignment],
-    col_widths: &[usize],
-) -> bool {
-    if ctx.out.len() >= ctx.max_lines {
-        return true;
-    }
-    let build_row = |cells: &[String], row_style: Style| -> StyledLine {
-        let mut spans = Vec::new();
-        for (col, &col_w) in col_widths.iter().enumerate() {
-            let cell = cells.get(col).map(String::as_str).unwrap_or("");
-            let align = alignments.get(col).copied().unwrap_or(TableAlignment::Left);
-            let (cell_segs, vis_w) = inline_segments_and_width(cell, row_style, ctx.palette);
-            let (left, right) = alignment_padding(vis_w, col_w, align);
-            if left > 0 {
-                spans.push((" ".repeat(left), row_style));
-            }
-            spans.extend(cell_segs);
-            let trail = right
-                + if col + 1 < col_widths.len() {
-                    GRID_GAP
-                } else {
-                    0
-                };
-            if trail > 0 {
-                spans.push((" ".repeat(trail), row_style));
-            }
-        }
-        StyledLine::from_spans(spans)
-    };
-
-    let header_style = Style::new()
-        .fg(ctx.palette.text_soft)
-        .bg(ctx.palette.background)
-        .add_modifier(Modifier::BOLD);
-    ctx.out.push(build_row(headers, header_style));
-
-    if ctx.out.len() >= ctx.max_lines {
-        return !rows.is_empty();
-    }
-    let rule = col_widths
-        .iter()
-        .map(|&w| "─".repeat(w.max(1)))
-        .collect::<Vec<_>>()
-        .join(&" ".repeat(GRID_GAP));
-    ctx.out.push(StyledLine::plain(
-        rule,
-        Style::new()
-            .fg(ctx.palette.muted)
-            .bg(ctx.palette.background),
-    ));
-
-    for row in rows {
-        if ctx.out.len() >= ctx.max_lines {
-            return true;
-        }
-        ctx.out.push(build_row(row, ctx.base_style));
-    }
-    false
-}
-
-fn render_stacked_table(ctx: &mut TableCtx<'_>, headers: &[String], rows: &[Vec<String>]) -> bool {
-    let label_w = headers.iter().map(|h| h.width()).max().unwrap_or(0);
-    let idx_style = Style::new()
-        .fg(ctx.palette.muted)
-        .bg(ctx.palette.background)
-        .add_modifier(Modifier::BOLD);
-    let label_style = Style::new()
-        .fg(ctx.palette.muted)
-        .bg(ctx.palette.background);
-    let blank_style = Style::new().bg(ctx.palette.background);
-
-    for (row_idx, row) in rows.iter().enumerate() {
-        if ctx.out.len() >= ctx.max_lines {
-            return true;
-        }
-        ctx.out
-            .push(StyledLine::plain(format!("[{}]", row_idx + 1), idx_style));
-        for (col_idx, header) in headers.iter().enumerate() {
-            let val = row.get(col_idx).map(String::as_str).unwrap_or("");
-            let prefix = format!("  {}  ", pad_plain(header, label_w, TableAlignment::Left));
-            if push_labeled_inline(ctx, prefix, label_style, val) {
-                return true;
-            }
-        }
-        if row_idx + 1 < rows.len() {
-            if ctx.out.len() >= ctx.max_lines {
-                return true;
-            }
-            ctx.out.push(StyledLine::plain(String::new(), blank_style));
-        }
-    }
-    false
-}
-
-fn render_table_block(
-    ctx: &mut TableCtx<'_>,
-    headers: &[String],
-    rows: &[Vec<String>],
-    alignments: &[TableAlignment],
-) -> bool {
-    if headers.is_empty() {
-        return false;
-    }
-    if is_summary_table(headers, rows, ctx.palette) {
-        return render_key_value_table(ctx, rows);
-    }
-    let col_widths: Vec<usize> = headers
-        .iter()
-        .enumerate()
-        .map(|(col, header)| {
-            let mut max_w = inline_segments_and_width(header, ctx.base_style, ctx.palette).1;
-            for row in rows {
-                let cell = row.get(col).map(String::as_str).unwrap_or("");
-                let w = inline_segments_and_width(cell, ctx.base_style, ctx.palette).1;
-                max_w = max_w.max(w);
-            }
-            max_w
-        })
-        .collect();
-    let natural_width =
-        col_widths.iter().sum::<usize>() + headers.len().saturating_sub(1) * GRID_GAP;
-    if natural_width <= ctx.width {
-        render_data_table(ctx, headers, rows, alignments, &col_widths)
-    } else {
-        render_stacked_table(ctx, headers, rows)
-    }
 }
 
 fn is_keyword(word: &str) -> bool {
@@ -934,42 +686,54 @@ pub fn render_markdown_themed(
         {
             let headers = split_table_row(raw_line);
             let alignments = parse_table_alignments(raw_lines[line_idx + 1]);
-            let mut row_idx = line_idx + 2;
-            let mut rows = Vec::new();
-            while row_idx < raw_lines.len() {
-                let candidate = raw_lines[row_idx];
-                let c_trim = candidate.trim_start();
-                if !is_table_row(candidate) || c_trim.starts_with("```") || is_heading_line(c_trim)
-                {
-                    break;
-                }
-                if rows.len() >= effective_max {
-                    truncated = true;
-                    row_idx += 1;
-                    while row_idx < raw_lines.len()
-                        && is_table_row(raw_lines[row_idx])
-                        && !raw_lines[row_idx].trim_start().starts_with("```")
-                        && !is_heading_line(raw_lines[row_idx].trim_start())
+            if !headers.is_empty() && headers.len() == alignments.len() {
+                let mut row_idx = line_idx + 2;
+                let mut rows = Vec::new();
+                while row_idx < raw_lines.len() {
+                    let candidate = raw_lines[row_idx];
+                    let c_trim = candidate.trim_start();
+                    if !is_table_row(candidate)
+                        || c_trim.starts_with("```")
+                        || c_trim.starts_with("> ")
+                        || is_heading_line(c_trim)
                     {
-                        row_idx += 1;
+                        break;
                     }
-                    break;
+                    if rows.len() >= effective_max {
+                        truncated = true;
+                        row_idx += 1;
+                        while row_idx < raw_lines.len()
+                            && is_table_row(raw_lines[row_idx])
+                            && !raw_lines[row_idx].trim_start().starts_with("```")
+                            && !raw_lines[row_idx].trim_start().starts_with("> ")
+                            && !is_heading_line(raw_lines[row_idx].trim_start())
+                        {
+                            row_idx += 1;
+                        }
+                        break;
+                    }
+                    rows.push(split_table_row(candidate));
+                    row_idx += 1;
                 }
-                rows.push(split_table_row(candidate));
-                row_idx += 1;
+                let spec = TableSpec {
+                    headers: &headers,
+                    rows: &rows,
+                    alignments: &alignments,
+                    borders: TableBorders::ROUNDED,
+                };
+                if render_table_lines(
+                    &spec,
+                    width.max(1),
+                    base_style,
+                    palette,
+                    &mut lines,
+                    effective_max,
+                ) {
+                    truncated = true;
+                }
+                line_idx = row_idx;
+                continue;
             }
-            let mut ctx = TableCtx {
-                width: width.max(1),
-                base_style,
-                palette,
-                out: &mut lines,
-                max_lines: effective_max,
-            };
-            if render_table_block(&mut ctx, &headers, &rows, &alignments) {
-                truncated = true;
-            }
-            line_idx = row_idx;
-            continue;
         }
 
         if is_horizontal_rule(raw_line) {
@@ -1170,9 +934,9 @@ mod tests {
     }
 
     #[test]
-    fn markdown_renders_gfm_data_summary_and_stacked_tables() {
-        // 1. DataTable on wide viewport: aligned CJK columns, inline code styling, header rule without `│`
-        let data_md = "| 仓库 | 分支 | 数量 |\n|:---|---:|---:|\n| **peer** | `main` | 12 |\n| docs | `next` | 3 |";
+    fn markdown_renders_gfm_rounded_tables_and_narrow_fallback() {
+        // 1. Wide 3-column table renders with rounded borders, uniform width, and inline styles
+        let data_md = "| 仓库 | 分支 | 数量 |\n|:---|---:|---:|\n| **peer** | `main` | 12 |\n| ~~old~~ | `next` | 3 |";
         let data_block = render_markdown_themed(
             data_md,
             80,
@@ -1181,34 +945,54 @@ mod tests {
             &DARK_PALETTE,
         );
         let data_text = plain_lines(&data_block);
-        assert_eq!(data_text.len(), 4);
-        assert!(data_text[0].contains("仓库"));
-        assert!(data_text[1].contains("─"));
-        assert!(!data_text.join("\n").contains('│'));
-        assert!(!data_text.join("\n").contains('|'));
-        assert_eq!(data_text[0].width(), data_text[1].width());
-        assert_eq!(data_text[2].width(), data_text[3].width());
-        assert!(data_block.lines[2].spans.iter().any(|(t, s)| {
+        assert_eq!(data_text.len(), 7);
+        assert!(data_text[0].starts_with('╭') && data_text[0].ends_with('╮'));
+        assert!(data_text[2].starts_with('├') && data_text[2].contains('┼'));
+        assert!(data_text[6].starts_with('╰') && data_text[6].ends_with('╯'));
+        let grid_w = data_text[0].width();
+        for line in &data_text {
+            assert_eq!(line.width(), grid_w);
+        }
+        assert!(data_block.lines[3].spans.iter().any(|(t, s)| {
             t == "main" && s.fg == Some(DARK_PALETTE.code) && s.bg == Some(DARK_PALETTE.code_bg)
         }));
+        assert!(
+            data_block.lines[3]
+                .spans
+                .iter()
+                .any(|(t, s)| { t == "peer" && s.add_modifier.contains(Modifier::BOLD) })
+        );
+        assert!(
+            data_block.lines[5]
+                .spans
+                .iter()
+                .any(|(t, s)| { t == "old" && s.add_modifier.contains(Modifier::CROSSED_OUT) })
+        );
 
-        // 2. Wide 4-column table on narrow viewport switches to StackedTable
-        let wide_md = "| 仓库 | 当前分支 | 主线位置 | 说明 |\n|---|---|---|---|\n| Peer-Knowledge | `codex/charter` | `origin/main` 7600b00 | ADR 133 只在分支上，未合入 main |\n| Peer-Agent | `fix/floating` | `origin/main` 48e88a25 | 最近提交为桌面体验修复 |";
-        let stacked_block = render_markdown_themed(
+        // 2. Wide 4-column screenshot-style table at width=72 wraps inside rounded grid (not stacked!)
+        let wide_md = "| 仓库 | 当前分支 | 主线位置 | 说明 |\n|---|---|---|---|\n| Peer-Knowledge | `codex/coding-agent-engineering-charter` | `origin/main` 停在 `7600b00` (11-10, ADR 127) | ADR 133 只在分支上，未合入 main |\n| Peer-Agent | `fix/bot-thread-latest-floating` | `origin/main` 为 `48e88a25` (RC29 相关) | 最近提交为桌面体验修复；Rust CLI 线在 `codex/native-rust-cli` |";
+        let wrapped_block = render_markdown_themed(
             wide_md,
             72,
             Style::new().fg(DARK_PALETTE.text),
-            64,
+            128,
             &DARK_PALETTE,
         );
-        let stacked_text = plain_lines(&stacked_block).join("\n");
-        assert!(stacked_text.contains("[1]"));
-        assert!(stacked_text.contains("[2]"));
-        assert!(stacked_text.contains("仓库"));
-        assert!(stacked_text.contains("当前分支"));
-        assert!(!stacked_text.contains("|---|"));
+        let wrapped_lines = plain_lines(&wrapped_block);
+        let wrapped_text = wrapped_lines.join("\n");
+        assert!(wrapped_text.contains('╭'));
+        assert!(wrapped_text.contains('╰'));
+        assert!(wrapped_text.contains("Peer-Knowledge"));
+        assert!(wrapped_text.contains("Peer-Agent"));
+        assert!(!wrapped_text.contains("[1]"));
+        assert!(!wrapped_text.contains("|---|"));
+        let wide_grid_w = wrapped_lines[0].width();
+        assert!(wide_grid_w <= 72);
+        for line in &wrapped_lines {
+            assert_eq!(line.width(), wide_grid_w);
+        }
 
-        // 3. KeyValueTable for 2-column summary headers
+        // 3. 2-column summary table renders with consistent rounded grid borders too
         let summary_md = "| 项 | 结果 |\n|---|---|\n| 状态 | `ok` |\n| 数量 | 42 |";
         let summary_block = render_markdown_themed(
             summary_md,
@@ -1218,9 +1002,47 @@ mod tests {
             &DARK_PALETTE,
         );
         let summary_text = plain_lines(&summary_block).join("\n");
-        assert!(!summary_text.contains("─"));
-        assert!(!summary_text.contains('|'));
+        assert!(summary_text.contains('╭'));
+        assert!(summary_text.contains('╰'));
         assert!(summary_text.contains("状态"));
         assert!(summary_text.contains("ok"));
+
+        // 4. Backtick-escaped pipe stays inside cell 0
+        let pipe_md = "| 命令 | 说明 |\n|---|---|\n| `a | b` | 管道示例 |";
+        let pipe_block = render_markdown_themed(
+            pipe_md,
+            80,
+            Style::new().fg(DARK_PALETTE.text),
+            64,
+            &DARK_PALETTE,
+        );
+        let pipe_lines = plain_lines(&pipe_block);
+        assert!(pipe_lines[3].contains("a | b"));
+        assert_eq!(pipe_lines[0].matches('┬').count(), 1);
+
+        // 5. Extreme narrow width=14 falls back to stacked cards
+        let narrow_block = render_markdown_themed(
+            wide_md,
+            14,
+            Style::new().fg(DARK_PALETTE.text),
+            64,
+            &DARK_PALETTE,
+        );
+        let narrow_text = plain_lines(&narrow_block).join("\n");
+        assert!(narrow_text.contains("[1]"));
+        assert!(narrow_text.contains("[2]"));
+
+        // 6. Non-table prose containing `|` followed by regular text renders as prose
+        let prose_md = "使用 | 作为分隔符\n这行是普通文本";
+        let prose_block = render_markdown_themed(
+            prose_md,
+            80,
+            Style::new().fg(DARK_PALETTE.text),
+            32,
+            &DARK_PALETTE,
+        );
+        let prose_text = plain_lines(&prose_block).join("\n");
+        assert!(!prose_text.contains('╭'));
+        assert!(prose_text.contains("使用 | 作为分隔符"));
     }
 }
