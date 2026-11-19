@@ -9,7 +9,7 @@ use crate::{
     Composer,
     bounded_cache::{ByteBudgetLru, ReadingAnchor},
     commands::clip_bot_line,
-    markdown::{RenderedBlock, WrapCacheKey, render_markdown_themed, stable_hash},
+    markdown::{RenderedBlock, StyledLine, WrapCacheKey, render_markdown_themed, stable_hash},
     model_picker::{ModelPickerState, render_model_picker_dock},
     overlays::{ClassicOverlay, OverlayContext, render_classic_overlay},
     slash_menu::{
@@ -18,9 +18,10 @@ use crate::{
     },
     terminal_text,
     theme::{
-        BRAND_MARK, CARET_SELECTED, ONLINE_DOT, SEPARATOR, ThemeMode, TuiLocale, TuiPalette,
-        USER_RAIL_BAR, context_meter_parts, context_usage_color, fill_canvas,
-        subscription_quota_color,
+        BRAND_MARK, CARET_SELECTED, ONLINE_DOT, RUNNING_ACTIVITY_LABEL, SEPARATOR, ThemeMode,
+        TuiLocale, TuiPalette, USER_RAIL_BAR, activity_sweep_color, context_meter_parts,
+        context_usage_color, fill_canvas, format_running_elapsed, subscription_quota_color,
+        thinking_status_label,
     },
     view::draft_view_styled,
     wordmark::b3_wordmark_lines,
@@ -58,6 +59,8 @@ pub struct ClassicView<'a> {
     pub goal_banner: Option<&'a str>,
     pub is_running: bool,
     pub activity_label: Option<&'a str>,
+    pub animation_frame: usize,
+    pub running_elapsed_ms: u64,
     pub notice: Option<&'a str>,
     pub notice_is_error: bool,
     pub palette: &'static TuiPalette,
@@ -553,33 +556,69 @@ fn render_composer_dock(
     if view.is_running {
         let rw = usize::from(areas[slot].width).max(1);
         let badge = "PEER / ACTIVE";
-        let act = view
-            .activity_label
-            .filter(|s| !s.is_empty())
-            .unwrap_or(if view.locale.is_zh() {
-                "正在思考…"
-            } else {
-                "Working…"
-            });
-        let left = clip_bot_line(act, rw.saturating_sub(badge.width() + 2).max(4));
-        let gap = rw.saturating_sub(left.width() + badge.width());
-        let mut spans = vec![Span::styled(
-            left,
-            Style::new().fg(palette.accent).bg(palette.background),
-        )];
-        if gap >= 2 {
+        let badge_w = badge.width();
+        let activity = RUNNING_ACTIVITY_LABEL;
+        let activity_chars = activity.chars().count();
+        let elapsed = format_running_elapsed(view.running_elapsed_ms);
+        let label = view.activity_label.map(str::trim).filter(|s| !s.is_empty());
+        let suffix = if rw < 30 || label.is_none() {
+            format!("  · {elapsed}")
+        } else {
+            format!("  {} · {elapsed}", label.unwrap_or_default())
+        };
+        let show_badge = rw >= badge_w + 4;
+        let left_budget = if show_badge {
+            rw.saturating_sub(badge_w + 2)
+        } else {
+            rw
+        };
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        let mut left_w = 0usize;
+        for (idx, ch) in activity.chars().enumerate() {
+            let mut buf = [0u8; 4];
+            let s = ch.encode_utf8(&mut buf);
+            let cw = s.width();
+            if left_w + cw > left_budget {
+                break;
+            }
             spans.push(Span::styled(
-                " ".repeat(gap),
-                Style::new().bg(palette.background),
+                s.to_owned(),
+                Style::new()
+                    .fg(activity_sweep_color(
+                        idx,
+                        view.animation_frame,
+                        activity_chars,
+                        palette,
+                    ))
+                    .bg(palette.background),
             ));
+            left_w += cw;
+        }
+        let suffix_budget = left_budget.saturating_sub(left_w);
+        if suffix_budget > 0 {
+            let clipped_suffix = clip_bot_line(&terminal_text(&suffix), suffix_budget);
+            left_w += clipped_suffix.width();
             spans.push(Span::styled(
-                "PEER",
-                Style::new().fg(palette.subtle).bg(palette.background),
+                clipped_suffix,
+                Style::new().fg(palette.text_soft).bg(palette.background),
             ));
-            spans.push(Span::styled(
-                " / ACTIVE",
-                Style::new().fg(palette.accent).bg(palette.background),
-            ));
+        }
+        if show_badge {
+            let gap = rw.saturating_sub(left_w + badge_w);
+            if gap >= 2 {
+                spans.push(Span::styled(
+                    " ".repeat(gap),
+                    Style::new().bg(palette.background),
+                ));
+                spans.push(Span::styled(
+                    "PEER",
+                    Style::new().fg(palette.subtle).bg(palette.background),
+                ));
+                spans.push(Span::styled(
+                    " / ACTIVE",
+                    Style::new().fg(palette.accent).bg(palette.background),
+                ));
+            }
         }
         frame.render_widget(Paragraph::new(Line::from(spans)), areas[slot]);
         slot += 1;
@@ -740,6 +779,7 @@ pub fn render_classic(frame: &mut Frame<'_>, view: ClassicView<'_>) {
     let is_welcome = view.messages.is_empty()
         && view.live_stream.is_empty()
         && view.approval.is_none()
+        && !view.is_running
         && !view.overlay.is_modal();
 
     if is_welcome {
@@ -890,6 +930,23 @@ pub fn render_classic(frame: &mut Frame<'_>, view: ClassicView<'_>) {
                 palette,
             );
             push_railed_block(&mut all_lines, "assistant", &live_block, use_rail, palette);
+        } else if view.is_running && view.approval.is_none() && view.activity_label.is_none() {
+            let label = thinking_status_label(view.animation_frame / 4);
+            let thinking_block = RenderedBlock {
+                lines: vec![StyledLine::plain(
+                    label.to_owned(),
+                    Style::new().fg(palette.muted).bg(palette.background),
+                )],
+                truncated: false,
+                total_bytes: label.len(),
+            };
+            push_railed_block(
+                &mut all_lines,
+                "assistant",
+                &thinking_block,
+                use_rail,
+                palette,
+            );
         }
 
         let max_back = all_lines.len().saturating_sub(body_h);
@@ -978,6 +1035,8 @@ mod tests {
                         goal_banner: None,
                         is_running: true,
                         activity_label: Some("正在思考…"),
+                        animation_frame: 6,
+                        running_elapsed_ms: 8_000,
                         notice: None,
                         notice_is_error: false,
                         palette: &DARK_PALETTE,
@@ -1004,12 +1063,63 @@ mod tests {
                 assert!(text.contains("剩余72% · plus"));
                 assert!(text.contains("YOU"));
                 assert!(text.contains("PEER"));
+                assert!(text.contains("working..."));
+                assert!(text.contains("· 8s"));
                 assert!(text.contains("PEER / ACTIVE"));
                 assert!(text.contains("mode agent · access Approve"));
                 assert!(text.contains("GPT-6.1 Sol · high"));
                 assert!(text.contains("42%"));
             }
         }
+
+        let mut pending_term = Terminal::new(TestBackend::new(100, 20)).unwrap();
+        pending_term
+            .draw(|f| {
+                render_classic(
+                    f,
+                    ClassicView {
+                        title: "Peer",
+                        workspace_label: "~/Documents/Develop/peer-dev",
+                        model_badge: "GPT-6.1 Sol · ChatGPT 订阅",
+                        effort_badge: "high",
+                        mode_badge: "chat",
+                        access_badge: "ask",
+                        context_percent: Some(0),
+                        quota_label: None,
+                        quota_remaining: None,
+                        fast_mode: false,
+                        fast_available: false,
+                        goal_status: GoalMenuStatus::None,
+                        goal_banner: None,
+                        is_running: true,
+                        activity_label: None,
+                        animation_frame: 6,
+                        running_elapsed_ms: 8_000,
+                        notice: None,
+                        notice_is_error: false,
+                        palette: &DARK_PALETTE,
+                        scheme_id: 0,
+                        current_theme: ThemeMode::Dark,
+                        locale: TuiLocale::ZhCn,
+                        messages: &msgs[..1],
+                        live_stream: "",
+                        anchor: &anchor,
+                        composer: &composer,
+                        status: "",
+                        approval: None,
+                        model_picker: &picker,
+                        overlay: &ClassicOverlay::None,
+                        slash_selected: 0,
+                        wrap_cache: &mut cache,
+                    },
+                );
+            })
+            .unwrap();
+        let pending_text = buffer_text(&pending_term);
+        assert!(pending_text.contains("working..."));
+        assert!(pending_text.contains("· 8s"));
+        assert!(pending_text.contains("PEER / ACTIVE"));
+        assert!(pending_text.contains("Thinking.."));
     }
 
     #[test]
@@ -1038,6 +1148,8 @@ mod tests {
                     goal_banner: None,
                     is_running: false,
                     activity_label: None,
+                    animation_frame: 0,
+                    running_elapsed_ms: 0,
                     notice: None,
                     notice_is_error: false,
                     palette: &DARK_PALETTE,

@@ -38,9 +38,9 @@ use peer_tui::{
     Action, ByteBudgetLru, ClassicCommand, ClassicMessage, ClassicOverlay, ClassicView, Composer,
     Effect, GoalMenuStatus, GoalPickerRow, HistoryDirection, LeaderAction, LeaderKeyState,
     MARKDOWN_WRAP_CACHE_BYTES, ModelPickerEvent, ModelPickerState, ReadingAnchor, RenderedBlock,
-    ResumeSessionRow, SlashFilterContext, ThemeMode, TuiLocale, WrapCacheKey, action_for_event,
-    compact_workspace_path, filter_classic_slash_items, format_topbar_quota, parse_classic_command,
-    render_classic, terminal_text,
+    ResumeSessionRow, SlashFilterContext, ThemeMode, TuiLocale, WORKING_ANIMATION_INTERVAL_MS,
+    WrapCacheKey, action_for_event, compact_workspace_path, filter_classic_slash_items,
+    format_topbar_quota, parse_classic_command, render_classic, terminal_text,
 };
 use std::{
     io,
@@ -55,8 +55,6 @@ use tokio::{
 
 const MAX_DISPLAY_MESSAGES: usize = 64;
 const IDLE_STATUS: &str = "";
-const ACTIVE_STATUS: &str = "正在执行 · Ctrl+C 停止";
-const COMPACTING_STATUS: &str = "正在压缩上下文… · Ctrl+C 取消";
 const APPROVAL_STATUS: &str = "y 允许本次 · n / Esc 拒绝 · Ctrl+C 停止";
 const QUOTA_REFRESH_INTERVAL: Duration = Duration::from_secs(300);
 
@@ -67,11 +65,15 @@ struct ActiveTurn {
     prompts: mpsc::Receiver<Approval>,
     accepted: bool,
     revision: usize,
+    started_at: Instant,
+    cancelling: bool,
 }
 
 struct ActiveCompaction {
     cancel: CancellationToken,
     task: JoinHandle<Result<CompactOutcome, &'static str>>,
+    started_at: Instant,
+    cancelling: bool,
 }
 
 pub(super) struct ClassicSession<'a> {
@@ -109,6 +111,7 @@ pub(super) struct ClassicSession<'a> {
     interrupted_preview: String,
     active: Option<ActiveTurn>,
     compacting: Option<ActiveCompaction>,
+    last_anim_draw: Option<Instant>,
     approval: Option<Approval>,
     model_picker: ModelPickerState,
     overlay: ClassicOverlay,
@@ -165,6 +168,7 @@ impl<'a> ClassicSession<'a> {
             interrupted_preview: String::new(),
             active: None,
             compacting: None,
+            last_anim_draw: None,
             approval: None,
             model_picker: ModelPickerState::default(),
             overlay: ClassicOverlay::None,
@@ -807,7 +811,12 @@ impl<'a> ClassicSession<'a> {
                 .await
                 .map_err(|e| e.0)
         });
-        self.compacting = Some(ActiveCompaction { cancel, task });
+        self.compacting = Some(ActiveCompaction {
+            cancel,
+            task,
+            started_at: Instant::now(),
+            cancelling: false,
+        });
         self.clear_notice();
     }
 
@@ -826,6 +835,18 @@ impl<'a> ClassicSession<'a> {
         let goal_status = self.goal_menu_status();
         let goal_banner = self.goal_banner();
         let is_running = self.is_busy();
+        let running_elapsed_ms = if let Some(active) = self.active.as_ref() {
+            active.started_at.elapsed().as_millis() as u64
+        } else if let Some(comp) = self.compacting.as_ref() {
+            comp.started_at.elapsed().as_millis() as u64
+        } else {
+            0
+        };
+        let animation_frame = if is_running {
+            (running_elapsed_ms / WORKING_ANIMATION_INTERVAL_MS) as usize
+        } else {
+            0
+        };
         let palette = self.prefs.palette();
         let scheme_id = self.prefs.scheme.cache_id();
         let current_theme = self.prefs.mode;
@@ -837,10 +858,30 @@ impl<'a> ClassicSession<'a> {
         let quota_remaining = self.quota.as_ref().map(|q| q.remaining_percent);
         let activity_label = if self.approval.is_some() {
             Some(APPROVAL_STATUS)
-        } else if self.compacting.is_some() {
-            Some(COMPACTING_STATUS)
-        } else if self.active.is_some() {
-            Some(ACTIVE_STATUS)
+        } else if let Some(comp) = self.compacting.as_ref() {
+            if comp.cancelling {
+                Some(if locale.is_zh() {
+                    "正在取消…"
+                } else {
+                    "Cancelling…"
+                })
+            } else {
+                Some(if locale.is_zh() {
+                    "正在压缩上下文…"
+                } else {
+                    "Compacting…"
+                })
+            }
+        } else if let Some(active) = self.active.as_ref() {
+            if active.cancelling {
+                Some(if locale.is_zh() {
+                    "正在取消…"
+                } else {
+                    "Cancelling…"
+                })
+            } else {
+                None
+            }
         } else {
             None
         };
@@ -880,6 +921,8 @@ impl<'a> ClassicSession<'a> {
                     goal_banner: goal_banner.as_deref(),
                     is_running,
                     activity_label,
+                    animation_frame,
+                    running_elapsed_ms,
                     notice: notice_str,
                     notice_is_error,
                     palette,
@@ -899,6 +942,11 @@ impl<'a> ClassicSession<'a> {
                 },
             );
         })?;
+        self.last_anim_draw = if is_running {
+            Some(Instant::now())
+        } else {
+            None
+        };
         if let (Some(approval), Some(size)) = (self.approval.as_mut(), shown_size) {
             approval.shown_at = Some(size);
         }
@@ -1008,6 +1056,8 @@ impl<'a> ClassicSession<'a> {
             prompts: perm_rx,
             accepted: false,
             revision: 0,
+            started_at: Instant::now(),
+            cancelling: false,
         });
         self.clear_notice();
     }
@@ -1156,6 +1206,16 @@ impl<'a> ClassicSession<'a> {
         if self.approval.as_ref().is_some_and(Approval::expired) {
             self.approval = None;
             dirty = true;
+        }
+        if self.is_busy() {
+            if self
+                .last_anim_draw
+                .is_none_or(|t| t.elapsed() >= Duration::from_millis(WORKING_ANIMATION_INTERVAL_MS))
+            {
+                dirty = true;
+            }
+        } else {
+            self.last_anim_draw = None;
         }
         dirty
     }
@@ -1798,13 +1858,14 @@ impl<'a> ClassicSession<'a> {
             }
             ClassicCommand::GoalPause => {
                 self.composer.accepted();
-                if let Some(active) = self.active.as_ref()
+                if let Some(active) = self.active.as_mut()
                     && self.mode == RuntimeMode::Goal
                 {
+                    active.cancelling = true;
                     active.cancel.cancel();
-                    self.status = "正在安全边界停止当前目标回合…".to_owned();
+                    self.set_notice("正在安全边界停止当前目标回合…", false);
                 } else {
-                    self.status = "当前无运行中的目标执行回合。".to_owned();
+                    self.set_notice("当前无运行中的目标执行回合。", false);
                 }
                 None
             }
@@ -1814,17 +1875,18 @@ impl<'a> ClassicSession<'a> {
                     self.mode = RuntimeMode::Goal;
                     self.submit_prompt("继续推进当前未完成的目标。".to_owned());
                 } else {
-                    self.status = "当前无已暂停的目标可继续。".to_owned();
+                    self.set_notice("当前无已暂停的目标可继续。", false);
                 }
                 None
             }
             ClassicCommand::GoalCancel => {
                 self.composer.accepted();
-                if let Some(active) = self.active.as_ref() {
+                if let Some(active) = self.active.as_mut() {
+                    active.cancelling = true;
                     active.cancel.cancel();
-                    self.status = "正在取消当前目标执行…".to_owned();
+                    self.set_notice("正在取消当前目标执行…", false);
                 } else {
-                    self.status = "当前无活跃运行中的目标。".to_owned();
+                    self.set_notice("当前无活跃运行中的目标。", false);
                 }
                 None
             }
@@ -2055,11 +2117,13 @@ impl<'a> ClassicSession<'a> {
                                         && key.modifiers.contains(KeyModifiers::CONTROL)
                                         && self.is_busy()
                                     {
-                                        if let Some(active) = self.active.as_ref() {
+                                        if let Some(active) = self.active.as_mut() {
+                                            active.cancelling = true;
                                             active.cancel.cancel();
                                             self.set_notice("正在停止本轮…", false);
                                         }
-                                        if let Some(comp) = self.compacting.as_ref() {
+                                        if let Some(comp) = self.compacting.as_mut() {
+                                            comp.cancelling = true;
                                             comp.cancel.cancel();
                                             self.set_notice("正在取消压缩…", false);
                                         }

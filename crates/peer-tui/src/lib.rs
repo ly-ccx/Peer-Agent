@@ -47,9 +47,10 @@ pub use slash_menu::{
     filter_classic_slash_items, filter_slash_items, render_slash_menu,
 };
 pub use theme::{
-    DARK_PALETTE, LIGHT_PALETTE, ThemeMode, ThemeScheme, TuiLocale, TuiPalette,
-    compact_workspace_path, context_meter_parts, format_topbar_quota, palette_for,
-    subscription_quota_color,
+    DARK_PALETTE, LIGHT_PALETTE, RUNNING_ACTIVITY_LABEL, ThemeMode, ThemeScheme, TuiLocale,
+    TuiPalette, WORKING_ANIMATION_INTERVAL_MS, activity_sweep_color, activity_sweep_intensity,
+    blend_hsl_colors, compact_workspace_path, context_meter_parts, format_running_elapsed,
+    format_topbar_quota, palette_for, subscription_quota_color, thinking_status_label,
 };
 pub use view::render;
 pub use wordmark::{B3Variant, b3_wordmark_lines};

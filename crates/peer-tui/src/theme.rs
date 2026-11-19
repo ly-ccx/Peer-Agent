@@ -281,6 +281,164 @@ pub fn context_meter_parts(percent: Option<u8>, width: usize) -> (String, String
     ("█".repeat(filled), "░".repeat(width.saturating_sub(filled)))
 }
 
+pub const RUNNING_ACTIVITY_LABEL: &str = "working...";
+pub const WORKING_ANIMATION_INTERVAL_MS: u64 = 80;
+const SWEEP_FALLOFF: f64 = 2.0;
+const SWEEP_LEAD: usize = 6;
+
+fn rgb_to_hsl(r: u8, g: u8, b: u8) -> (f64, f64, f64) {
+    let rn = f64::from(r) / 255.0;
+    let gn = f64::from(g) / 255.0;
+    let bn = f64::from(b) / 255.0;
+    let max = rn.max(gn).max(bn);
+    let min = rn.min(gn).min(bn);
+    let l = (max + min) / 2.0;
+    if (max - min).abs() < f64::EPSILON {
+        return (0.0, 0.0, l);
+    }
+    let d = max - min;
+    let s = if l > 0.5 {
+        d / (2.0 - max - min)
+    } else {
+        d / (max + min)
+    };
+    let h = if (max - rn).abs() < f64::EPSILON {
+        (gn - bn) / d + if gn < bn { 6.0 } else { 0.0 }
+    } else if (max - gn).abs() < f64::EPSILON {
+        (bn - rn) / d + 2.0
+    } else {
+        (rn - gn) / d + 4.0
+    };
+    (h / 6.0, s, l)
+}
+
+fn hue_to_rgb(p: f64, q: f64, mut t: f64) -> f64 {
+    if t < 0.0 {
+        t += 1.0;
+    }
+    if t > 1.0 {
+        t -= 1.0;
+    }
+    if t < 1.0 / 6.0 {
+        return p + (q - p) * 6.0 * t;
+    }
+    if t < 0.5 {
+        return q;
+    }
+    if t < 2.0 / 3.0 {
+        return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
+    }
+    p
+}
+
+fn hsl_to_rgb(h: f64, s: f64, l: f64) -> (u8, u8, u8) {
+    if s.abs() < 1e-12 {
+        let v = (l * 255.0).round().clamp(0.0, 255.0) as u8;
+        return (v, v, v);
+    }
+    let q = if l < 0.5 {
+        l * (1.0 + s)
+    } else {
+        l + s - l * s
+    };
+    let p = 2.0 * l - q;
+    let r = (hue_to_rgb(p, q, h + 1.0 / 3.0) * 255.0)
+        .round()
+        .clamp(0.0, 255.0) as u8;
+    let g = (hue_to_rgb(p, q, h) * 255.0).round().clamp(0.0, 255.0) as u8;
+    let b = (hue_to_rgb(p, q, h - 1.0 / 3.0) * 255.0)
+        .round()
+        .clamp(0.0, 255.0) as u8;
+    (r, g, b)
+}
+
+fn lerp_hue(a: f64, b: f64, t: f64) -> f64 {
+    let mut delta = b - a;
+    if delta > 0.5 {
+        delta -= 1.0;
+    }
+    if delta < -0.5 {
+        delta += 1.0;
+    }
+    (a + delta * t + 1.0) % 1.0
+}
+
+pub fn blend_hsl_colors(from: Color, to: Color, t: f64) -> Color {
+    let (Color::Rgb(r1, g1, b1), Color::Rgb(r2, g2, b2)) = (from, to) else {
+        return from;
+    };
+    let (h1, s1, l1) = rgb_to_hsl(r1, g1, b1);
+    let (h2, s2, l2) = rgb_to_hsl(r2, g2, b2);
+    let tt = t.clamp(0.0, 1.0);
+    let (r, g, b) = hsl_to_rgb(
+        lerp_hue(h1, h2, tt),
+        s1 + (s2 - s1) * tt,
+        l1 + (l2 - l1) * tt,
+    );
+    Color::Rgb(r, g, b)
+}
+
+/// Specular highlight intensity sweeping across `working...` (`composer-status-view.tsx`).
+pub fn activity_sweep_intensity(index: usize, frame: usize, length: usize) -> f64 {
+    if length == 0 {
+        return 0.0;
+    }
+    let period = length + SWEEP_LEAD * 2;
+    let pos = (frame % period) as f64 - SWEEP_LEAD as f64;
+    let dist = (index as f64 - pos).abs();
+    let t = (1.0 - dist / SWEEP_FALLOFF).clamp(0.0, 1.0);
+    t * t
+}
+
+/// Resting lime with a white highlight band that sweeps left to right (`composer-status-view.tsx`).
+pub fn activity_sweep_color(
+    index: usize,
+    frame: usize,
+    length: usize,
+    palette: &TuiPalette,
+) -> Color {
+    let rest = blend_hsl_colors(palette.accent, palette.muted, 0.35);
+    blend_hsl_colors(
+        rest,
+        palette.brand_highlight,
+        activity_sweep_intensity(index, frame, length),
+    )
+}
+
+/// Compact day/hour/minute/second elapsed time (`tool-result-summary.ts`).
+pub fn format_running_elapsed(elapsed_ms: u64) -> String {
+    let mut remaining = elapsed_ms / 1_000;
+    let days = remaining / 86_400;
+    remaining %= 86_400;
+    let hours = remaining / 3_600;
+    remaining %= 3_600;
+    let minutes = remaining / 60;
+    let seconds = remaining % 60;
+    let mut out = String::new();
+    if days > 0 {
+        out.push_str(&format!("{days}d"));
+    }
+    if hours > 0 {
+        out.push_str(&format!("{hours}h"));
+    }
+    if minutes > 0 {
+        out.push_str(&format!("{minutes}m"));
+    }
+    if seconds > 0 || out.is_empty() {
+        out.push_str(&format!("{seconds}s"));
+    }
+    out
+}
+
+/// Trailing three-dot animation for pending `PEER` placeholders (`tool-result-summary.ts`).
+pub fn thinking_status_label(frame: usize) -> &'static str {
+    match frame % 3 {
+        0 => "Thinking.",
+        1 => "Thinking..",
+        _ => "Thinking...",
+    }
+}
+
 /// Replace `/Users/<name>` or `/home/<name>` prefix with `~` (`composer-status.ts`).
 pub fn compact_workspace_path(path: &str) -> String {
     let trimmed = path.trim().trim_end_matches(['/', '\\']);
@@ -356,5 +514,34 @@ mod tests {
             compact_workspace_path("/Users/alice/Documents/peer-dev"),
             "~/Documents/peer-dev"
         );
+    }
+
+    #[test]
+    fn working_animation_sweep_elapsed_and_thinking_match_opentui() {
+        let len = RUNNING_ACTIVITY_LABEL.chars().count();
+        assert_eq!(len, 10);
+        let rest = activity_sweep_color(0, 0, len, &DARK_PALETTE);
+        for idx in 0..len {
+            assert_eq!(activity_sweep_intensity(idx, 0, len), 0.0);
+            assert_eq!(activity_sweep_color(idx, 0, len, &DARK_PALETTE), rest);
+        }
+        assert_eq!(activity_sweep_intensity(0, 6, len), 1.0);
+        assert_eq!(
+            activity_sweep_color(0, 6, len, &DARK_PALETTE),
+            DARK_PALETTE.brand_highlight
+        );
+        // Sweep moves left -> right across frames 6..15.
+        for idx in 0..len {
+            assert_eq!(activity_sweep_intensity(idx, 6 + idx, len), 1.0);
+        }
+        assert_eq!(format_running_elapsed(0), "0s");
+        assert_eq!(format_running_elapsed(8_000), "8s");
+        assert_eq!(format_running_elapsed(65_000), "1m5s");
+        assert_eq!(format_running_elapsed(3_723_000), "1h2m3s");
+        assert_eq!(format_running_elapsed(93_600_000), "1d2h");
+        assert_eq!(thinking_status_label(0), "Thinking.");
+        assert_eq!(thinking_status_label(1), "Thinking..");
+        assert_eq!(thinking_status_label(2), "Thinking...");
+        assert_eq!(thinking_status_label(3), "Thinking.");
     }
 }

@@ -125,3 +125,120 @@ fn interactive_facts_are_preserved_and_unsupported_mutation_is_explicit() {
         row["userArtifacts"]
     );
 }
+#[test]
+fn large_append_only_evidence_index_over_8mib_and_4096_rows_works_without_history_limit() {
+    use std::io::{BufWriter, Write};
+
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path().join("goal-plans");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("evidence-index.jsonl");
+    let pad = "x".repeat(2000);
+    {
+        let mut w = BufWriter::new(fs::File::create(&file).unwrap());
+        let interactive_row = json!({
+            "evidenceRef": "tool-result://early-interactive",
+            "createdAt": AT,
+            "conversationId": "conv-old",
+            "toolCallId": "early-interactive",
+            "capabilityId": "local.shell.exec",
+            "toolName": "bash",
+            "userArtifacts": [{"kind": "interactive", "ref": "interactive://early", "opaque": "keep"}],
+            "bodyPreview": &pad,
+        });
+        writeln!(w, "{interactive_row}").unwrap();
+        for idx in 1..4600usize {
+            let evidence_ref = if idx == 2000 {
+                "tool-result://early-normal".to_owned()
+            } else {
+                format!("tool-result://hist-{idx}")
+            };
+            let call_id = if idx == 2000 {
+                "early-normal".to_owned()
+            } else {
+                format!("hist-{idx}")
+            };
+            let row = json!({
+                "evidenceRef": evidence_ref,
+                "createdAt": AT,
+                "conversationId": "conv-old",
+                "toolCallId": call_id,
+                "capabilityId": "local.file.list",
+                "toolName": "list_files",
+                "bodyPreview": &pad,
+            });
+            writeln!(w, "{row}").unwrap();
+        }
+        w.flush().unwrap();
+    }
+    let seeded_len = fs::metadata(&file).unwrap().len();
+    assert!(
+        seeded_len > 8 * 1024 * 1024,
+        "expected seeded log > 8 MiB, got {seeded_len}"
+    );
+
+    let s = EvidenceIndexStore::new(root.path());
+    let (g, r) = facts();
+    let saved = s.register(&report(&g, &r), None).unwrap();
+    assert_eq!(saved.len(), 3);
+    let after_register_len = fs::metadata(&file).unwrap().len();
+    assert!(after_register_len > seeded_len);
+
+    // Repeating the identical report must remain idempotent without rewriting or failing.
+    assert_eq!(s.register(&report(&g, &r), None).unwrap(), saved);
+    assert_eq!(fs::metadata(&file).unwrap().len(), after_register_len);
+
+    let found = s
+        .find(
+            &[
+                "tool-result://early-normal".into(),
+                "tool-result://call".into(),
+            ],
+            None,
+        )
+        .unwrap();
+    assert_eq!(found.len(), 2);
+    assert_eq!(found[0]["evidenceRef"], "tool-result://early-normal");
+    assert_eq!(found[1]["evidenceRef"], "tool-result://call");
+
+    let by_plan = s.list_for_plan("plan", None).unwrap();
+    assert_eq!(by_plan.len(), 3);
+    let by_conv = s.list_for_conversation("conversation", None).unwrap();
+    assert_eq!(by_conv.len(), 3);
+
+    // Early interactive facts in the large log still block mutation.
+    let mut blocked_grant = g.clone();
+    let mut blocked_result = r.clone();
+    blocked_grant["toolCallId"] = json!("early-interactive");
+    blocked_result["toolCallId"] = json!("early-interactive");
+    blocked_result["evidence"]["toolCallId"] = json!("early-interactive");
+    blocked_result["evidence"]["artifactRefs"] = json!([]);
+    blocked_result["evidence"]["refs"] = json!([]);
+    let blocked_report = HostToolEvidence {
+        conversation_id: "conversation",
+        plan_id: Some("plan"),
+        stream_id: Some("stream"),
+        tool_name: "write_file",
+        capability_id: "local.file.write",
+        tool_call_id: "early-interactive",
+        grant: &blocked_grant,
+        result: &blocked_result,
+    };
+    assert_eq!(
+        s.register(&blocked_report, None).unwrap_err(),
+        StoreError::EvidenceUnsupported
+    );
+    assert_eq!(fs::metadata(&file).unwrap().len(), after_register_len);
+
+    // Trailing partial record must still fail cleanly without corrupting prior bytes.
+    let mut f = fs::OpenOptions::new().append(true).open(&file).unwrap();
+    f.write_all(b"{partial").unwrap();
+    f.sync_all().unwrap();
+    drop(f);
+    let corrupt_len = fs::metadata(&file).unwrap().len();
+    assert_eq!(
+        s.register(&report(&g, &r), None).unwrap_err(),
+        StoreError::HistoryCorrupt
+    );
+    assert_eq!(fs::metadata(&file).unwrap().len(), corrupt_len);
+}

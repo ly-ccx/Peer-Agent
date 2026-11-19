@@ -1,14 +1,20 @@
 //! Existing goal-plans/evidence-index.jsonl registration seam.
 //! Registration records a Host tool result; it does not prove goal acceptance.
-use crate::{DirectoryLock, StoreError, durable_jsonl as log};
-use peer_protocol::{collect_tool_result_evidence_refs, javascript_trim};
+use crate::{DirectoryLock, StoreError, durable_jsonl as log, files};
+use peer_protocol::{
+    JsonDecodeError, JsonLimits, collect_tool_result_evidence_refs, decode_json_bounded,
+    javascript_json_string, javascript_trim,
+};
 use serde_json::{Value, json};
 use std::{
     collections::{HashMap, HashSet},
+    io::{BufRead, BufReader, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     sync::atomic::AtomicBool,
     time::Duration,
 };
+
+const MAX_RECORD_BYTES: usize = log::MAX_BYTES;
 /// Host-owned execution report, never accepted from a renderer/model endpoint.
 /// Deliberately not Deserialize. Tool output and assistant prose are not reports.
 pub struct HostToolEvidence<'a> {
@@ -94,6 +100,125 @@ fn validate_record(row: &Value) -> Result<(), StoreError> {
     }
     Ok(())
 }
+fn trim_ascii_whitespace(mut bytes: &[u8]) -> &[u8] {
+    while let Some(first) = bytes.first()
+        && first.is_ascii_whitespace()
+    {
+        bytes = &bytes[1..];
+    }
+    while let Some(last) = bytes.last()
+        && last.is_ascii_whitespace()
+    {
+        bytes = &bytes[..bytes.len() - 1];
+    }
+    bytes
+}
+fn json_escaped_inner(s: &str) -> Result<String, StoreError> {
+    let encoded = javascript_json_string(&json!(s)).map_err(|_| StoreError::HistoryLimit)?;
+    Ok(encoded
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .unwrap_or(encoded.as_str())
+        .to_owned())
+}
+fn scan_records(
+    path: &Path,
+    cancel: Option<&AtomicBool>,
+    needles: &[String],
+    mut on_record: impl FnMut(Value) -> Result<(), StoreError>,
+) -> Result<(), StoreError> {
+    log::check_cancel(cancel)?;
+    let Some((mut file, before)) = files::open(path, u64::MAX)? else {
+        return Ok(());
+    };
+    if before.size == 0 {
+        return Ok(());
+    }
+    file.seek(SeekFrom::End(-1))
+        .map_err(|_| StoreError::ReadFailed)?;
+    let mut last = [0u8; 1];
+    file.read_exact(&mut last)
+        .map_err(|_| StoreError::ReadFailed)?;
+    if last[0] != b'\n' {
+        return Err(StoreError::HistoryCorrupt);
+    }
+    file.seek(SeekFrom::Start(0))
+        .map_err(|_| StoreError::ReadFailed)?;
+
+    let strict_all = before.size <= log::MAX_BYTES as u64;
+    let mut reader = BufReader::with_capacity(64 * 1024, file);
+    let mut line = Vec::with_capacity(1024);
+    let mut offset: u64 = 0;
+    let mut row_idx: usize = 0;
+    loop {
+        line.clear();
+        loop {
+            let buf = reader.fill_buf().map_err(|_| StoreError::ReadFailed)?;
+            if buf.is_empty() {
+                break;
+            }
+            if let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+                let take = pos + 1;
+                if line.len().saturating_add(take) > MAX_RECORD_BYTES {
+                    return Err(StoreError::HistoryLimit);
+                }
+                line.extend_from_slice(&buf[..take]);
+                reader.consume(take);
+                break;
+            }
+            if line.len().saturating_add(buf.len()) > MAX_RECORD_BYTES {
+                return Err(StoreError::HistoryLimit);
+            }
+            line.extend_from_slice(buf);
+            let len = buf.len();
+            reader.consume(len);
+        }
+        if line.is_empty() {
+            break;
+        }
+        offset = offset.saturating_add(line.len() as u64);
+        row_idx += 1;
+        if row_idx.is_multiple_of(256) {
+            log::check_cancel(cancel)?;
+        }
+        let trimmed = trim_ascii_whitespace(&line);
+        if trimmed.is_empty() {
+            continue;
+        }
+        let text = std::str::from_utf8(trimmed).map_err(|_| StoreError::HistoryCorrupt)?;
+        let is_last_line = offset >= before.size;
+        if !(strict_all
+            || is_last_line
+            || needles.is_empty()
+            || needles.iter().any(|n| text.contains(n.as_str())))
+        {
+            continue;
+        }
+        let decoded = decode_json_bounded(
+            trimmed,
+            JsonLimits {
+                bytes: MAX_RECORD_BYTES,
+                nodes: 65_536,
+                depth: 64,
+                string_bytes: MAX_RECORD_BYTES,
+            },
+        )
+        .map_err(|e| match e {
+            JsonDecodeError::LimitExceeded => StoreError::HistoryLimit,
+            _ => StoreError::HistoryCorrupt,
+        })?;
+        if !decoded.value.is_object() {
+            return Err(StoreError::HistoryCorrupt);
+        }
+        validate_record(&decoded.value)?;
+        on_record(decoded.value)?;
+    }
+    log::check_cancel(cancel)?;
+    if offset != before.size || files::identity(path)?.as_ref() != Some(&before) {
+        return Err(StoreError::VersionChanged);
+    }
+    Ok(())
+}
 impl EvidenceIndexStore {
     pub fn new(data_home: impl AsRef<Path>) -> Self {
         Self {
@@ -109,13 +234,14 @@ impl EvidenceIndexStore {
         if !text(plan_id, 200) {
             return Err(StoreError::EvidenceInvalid);
         }
+        let needles = [json_escaped_inner(plan_id)?];
         let mut out = Vec::new();
-        for row in log::read(&self.file, cancel)? {
-            validate_record(&row)?;
+        scan_records(&self.file, cancel, &needles, |row| {
             if row["planId"].as_str() == Some(plan_id) {
                 out.push(row);
             }
-        }
+            Ok(())
+        })?;
         Ok(out)
     }
     /// List all indexed Evidence records associated with `conversation_id` (read-only).
@@ -127,13 +253,14 @@ impl EvidenceIndexStore {
         if !text(conversation_id, 200) {
             return Err(StoreError::EvidenceInvalid);
         }
+        let needles = [json_escaped_inner(conversation_id)?];
         let mut out = Vec::new();
-        for row in log::read(&self.file, cancel)? {
-            validate_record(&row)?;
+        scan_records(&self.file, cancel, &needles, |row| {
             if row["conversationId"].as_str() == Some(conversation_id) {
                 out.push(row);
             }
-        }
+            Ok(())
+        })?;
         Ok(out)
     }
     /// Bounded, strict source facts. Missing refs remain missing, never success.
@@ -145,10 +272,17 @@ impl EvidenceIndexStore {
         if refs.len() > 1024 || refs.iter().any(|r| !text(r, 8192)) {
             return Err(StoreError::EvidenceInvalid);
         }
+        if refs.is_empty() {
+            log::check_cancel(cancel)?;
+            return Ok(Vec::new());
+        }
         let wanted: HashSet<_> = refs.iter().map(String::as_str).collect();
+        let needles = wanted
+            .iter()
+            .map(|r| json_escaped_inner(r))
+            .collect::<Result<Vec<_>, _>>()?;
         let mut found = HashMap::new();
-        for row in log::read(&self.file, cancel)? {
-            validate_record(&row)?;
+        scan_records(&self.file, cancel, &needles, |row| {
             let id = row["evidenceRef"].as_str().unwrap();
             if wanted.contains(id) {
                 // Generic facts use the existing merge order. Complex interactive receipts
@@ -159,7 +293,8 @@ impl EvidenceIndexStore {
                 };
                 found.insert(merged["evidenceRef"].as_str().unwrap().to_owned(), merged);
             }
-        }
+            Ok(())
+        })?;
         Ok(refs.iter().filter_map(|r| found.get(r).cloned()).collect())
     }
     pub fn register(
@@ -193,22 +328,23 @@ impl EvidenceIndexStore {
         let parent = log::directory(self.file.parent().unwrap())?;
         let file = parent.join("evidence-index.jsonl");
         let _lock = DirectoryLock::acquire(&file, Duration::from_millis(100), cancel)?;
-        let mut history = log::read(&file, cancel)?;
-        for row in &history {
-            validate_record(row)?;
-        }
         let mut existing = HashMap::<String, Value>::new();
         let wanted: HashSet<_> = refs.iter().map(String::as_str).collect();
-        for old in &history {
-            let key = old["evidenceRef"].as_str().unwrap();
-            if wanted.contains(key) {
-                let row = match existing.remove(key) {
-                    Some(previous) => merge(previous, old)?,
-                    None => old.clone(),
+        let needles = wanted
+            .iter()
+            .map(|r| json_escaped_inner(r))
+            .collect::<Result<Vec<_>, _>>()?;
+        scan_records(&file, cancel, &needles, |old| {
+            let key = old["evidenceRef"].as_str().unwrap().to_owned();
+            if wanted.contains(key.as_str()) {
+                let row = match existing.remove(&key) {
+                    Some(previous) => merge(previous, &old)?,
+                    None => old,
                 };
-                existing.insert(key.to_owned(), row);
+                existing.insert(key, row);
             }
-        }
+            Ok(())
+        })?;
         let mut saved = Vec::new();
         let mut changes = Vec::new();
         for evidence_ref in refs {
@@ -234,9 +370,8 @@ impl EvidenceIndexStore {
             saved.push(merged);
         }
         if !changes.is_empty() {
-            history.extend(changes.iter().cloned());
-            log::encode(&history)?;
-            log::append(&file, &log::encode(&changes)?, cancel)?;
+            let encoded = log::encode(&changes)?;
+            log::append_to_limit(&file, &encoded, u64::MAX, cancel)?;
         }
         Ok(saved)
     }
