@@ -10,18 +10,22 @@
 //!   `/answer N ...`, `/memory`, `/objectives`, `/model`, `/takeover`, `/older`, `/latest`,
 //!   `/save-draft`, `/classic`, `/help`, `/quit`) + `F2` Classic switch + `F3` ModelPicker.
 
-use super::{ShellOutcome, TerminalGuard, model_picker_adapter::load_picker_groups};
+use super::{
+    ShellOutcome, TerminalGuard,
+    model_picker_adapter::load_picker_groups,
+    theme_store::{self, TerminalPreferences},
+};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use peer_project_agent::{
     BotProfile, DraftBody, DraftWriteRequest, LeaseStatus, MemoryFilter, NativeProjectHost,
 };
 use peer_runtime::{CancellationToken, model_catalog::resolve_exec};
 use peer_tui::{
-    Action, BotCardRow, BotMessageView, BotRowView, BotScreen, BotShellView, BotSubView,
-    BotTaskRow, ByteBudgetLru, CardNumbers, CardOperation, Composer, Effect,
+    Action, BOT_SLASH_ITEMS, BotCardRow, BotMessageView, BotRowView, BotScreen, BotShellView,
+    BotSubView, BotTaskRow, ByteBudgetLru, CardNumbers, CardOperation, Composer, Effect,
     MARKDOWN_WRAP_CACHE_BYTES, ModelPickerEvent, ModelPickerState, ProjectCommand, ReadingAnchor,
-    RenderedBlock, WrapCacheKey, action_for_event, parse_project_command, render_bot_shell,
-    terminal_text,
+    RenderedBlock, ThemeMode, TuiLocale, WrapCacheKey, action_for_event, filter_slash_items,
+    parse_project_command, render_bot_shell, terminal_text,
 };
 use std::{
     collections::HashMap,
@@ -37,9 +41,10 @@ struct ActiveTick {
     task: JoinHandle<Result<(), String>>,
 }
 
-struct BotShellState {
+struct BotShellState<'a> {
     home: PathBuf,
     workspace: PathBuf,
+    prefs: &'a mut TerminalPreferences,
     host: Arc<NativeProjectHost>,
     screen: BotScreen,
     bots: Vec<BotRowView>,
@@ -53,6 +58,10 @@ struct BotShellState {
     objectives: Vec<String>,
     cards: Vec<BotCardRow>,
     card_numbers: CardNumbers,
+    card_focus: bool,
+    selected_card: usize,
+    selected_card_option: usize,
+    slash_selected: usize,
     anchor: ReadingAnchor,
     composer: Composer,
     draft_revision: u64,
@@ -68,8 +77,13 @@ struct BotShellState {
     interaction_limit: usize,
 }
 
-impl BotShellState {
-    fn open(home: PathBuf, workspace: PathBuf, force_list: bool) -> io::Result<Self> {
+impl<'a> BotShellState<'a> {
+    fn open(
+        home: PathBuf,
+        workspace: PathBuf,
+        force_list: bool,
+        prefs: &'a mut TerminalPreferences,
+    ) -> io::Result<Self> {
         let host = Arc::new(
             NativeProjectHost::new(&home, crate::VERSION.trim(), None)
                 .map_err(|e| io::Error::other(e.to_string()))?,
@@ -117,6 +131,7 @@ impl BotShellState {
         let mut state = Self {
             home,
             workspace,
+            prefs,
             host,
             screen: initial_screen,
             bots: Vec::new(),
@@ -130,6 +145,10 @@ impl BotShellState {
             objectives: Vec::new(),
             cards: Vec::new(),
             card_numbers: CardNumbers::default(),
+            card_focus: false,
+            selected_card: 0,
+            selected_card_option: 0,
+            slash_selected: 0,
             anchor: ReadingAnchor::FollowingLatest,
             composer: Composer::default(),
             draft_revision: 0,
@@ -210,6 +229,16 @@ impl BotShellState {
                 .directory()
                 .read_interactions(&ws_id, self.interaction_limit, None)
         {
+            let by_id: HashMap<String, String> = page
+                .messages
+                .iter()
+                .filter_map(|m| {
+                    let id = m["id"].as_str()?;
+                    let content = m["content"].as_str().unwrap_or("");
+                    (!id.is_empty() && !content.is_empty())
+                        .then(|| (id.to_owned(), content.to_owned()))
+                })
+                .collect();
             self.messages = page
                 .messages
                 .into_iter()
@@ -219,6 +248,24 @@ impl BotShellState {
                     let kind = m["kind"].as_str().unwrap_or("agent_reply").to_owned();
                     let content = m["content"].as_str().unwrap_or("").to_owned();
                     let created_at = m["createdAt"].as_str().map(str::to_owned);
+                    let reply_to_echo = m["replyTo"]
+                        .as_array()
+                        .or_else(|| m["meta"]["replyTo"].as_array())
+                        .and_then(|arr| arr.first())
+                        .and_then(|v| v.as_str())
+                        .and_then(|rid| by_id.get(rid))
+                        .cloned();
+                    let marks: Vec<String> = m["marks"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|mk| {
+                            mk["outcome"]
+                                .as_str()
+                                .or_else(|| mk["state"].as_str())
+                                .map(str::to_owned)
+                        })
+                        .collect();
                     let card_number = m["cards"]
                         .as_array()
                         .and_then(|arr| arr.first())
@@ -236,6 +283,8 @@ impl BotShellState {
                         kind,
                         content,
                         created_at,
+                        reply_to_echo,
+                        marks,
                         card_number,
                         card_summary,
                     }
@@ -276,6 +325,14 @@ impl BotShellState {
             }
         }
         self.cards = cards;
+        if self.cards.is_empty() {
+            self.card_focus = false;
+            self.selected_card = 0;
+            self.selected_card_option = 0;
+        } else if self.selected_card >= self.cards.len() {
+            self.selected_card = self.cards.len() - 1;
+            self.selected_card_option = 0;
+        }
 
         // Memories & Objectives (bounded read)
         self.memories = self
@@ -574,6 +631,65 @@ impl BotShellState {
                 }
                 None
             }
+            ProjectCommand::Theme(arg) => {
+                self.composer.accepted();
+                let next_mode = match arg {
+                    Some(raw) => match ThemeMode::parse(&raw) {
+                        Some(m) => m,
+                        None => {
+                            self.notice = Some("主题仅支持 dark / light / system。".to_owned());
+                            return None;
+                        }
+                    },
+                    None => match self.prefs.mode {
+                        ThemeMode::Dark => ThemeMode::Light,
+                        ThemeMode::Light => ThemeMode::System,
+                        ThemeMode::System => ThemeMode::Dark,
+                    },
+                };
+                match theme_store::save_theme_mode(&self.home, next_mode) {
+                    Ok(scheme) => {
+                        self.prefs.mode = next_mode;
+                        self.prefs.scheme = scheme;
+                        self.wrap_cache.clear();
+                        self.notice = Some(format!(
+                            "主题已切换为 {}（配色: {}）。",
+                            next_mode.as_str(),
+                            scheme.as_str()
+                        ));
+                    }
+                    Err(err) => {
+                        self.notice = Some(format!("保存主题失败：{err}"));
+                    }
+                }
+                None
+            }
+            ProjectCommand::Language(arg) => {
+                self.composer.accepted();
+                let next_locale = match arg {
+                    Some(raw) => match TuiLocale::parse(&raw) {
+                        Some(l) => l,
+                        None => {
+                            self.notice = Some("语言仅支持 zh-CN / en-US。".to_owned());
+                            return None;
+                        }
+                    },
+                    None => match self.prefs.locale {
+                        TuiLocale::ZhCn => TuiLocale::EnUs,
+                        TuiLocale::EnUs => TuiLocale::ZhCn,
+                    },
+                };
+                match theme_store::save_locale(&self.home, next_locale) {
+                    Ok(()) => {
+                        self.prefs.locale = next_locale;
+                        self.notice = Some(format!("界面语言已切换为 {}。", next_locale.as_str()));
+                    }
+                    Err(err) => {
+                        self.notice = Some(format!("保存语言失败：{err}"));
+                    }
+                }
+                None
+            }
             ProjectCommand::Older => {
                 self.composer.accepted();
                 self.interaction_limit = (self.interaction_limit + 40).min(400);
@@ -614,11 +730,19 @@ impl BotShellState {
                     format!("Bot  正在推进（{}）…", act.phase)
                 }
             });
+        let is_host = self.lease_banner.is_none();
+        let palette = self.prefs.palette();
+        let scheme_id = self.prefs.scheme.cache_id();
+        let locale = self.prefs.locale;
         terminal.draw_frame(|frame| {
             render_bot_shell(
                 frame,
                 BotShellView {
                     screen: &self.screen,
+                    palette,
+                    scheme_id,
+                    locale,
+                    is_host,
                     bots: &self.bots,
                     selected_bot: self.selected_bot,
                     active_bot_name: self.active_bot_name.as_deref(),
@@ -629,6 +753,10 @@ impl BotShellState {
                     memories: &self.memories,
                     objectives: &self.objectives,
                     cards: &self.cards,
+                    card_focus: self.card_focus,
+                    selected_card: self.selected_card,
+                    selected_card_option: self.selected_card_option,
+                    slash_selected: self.slash_selected,
                     anchor: &self.anchor,
                     composer: &self.composer,
                     draft_warning: self.draft_warning.as_deref(),
@@ -843,7 +971,127 @@ impl BotShellState {
                                 },
                                 _ => {
                                     // Conversation & sub-views
-                                    if key.code == KeyCode::Esc
+                                    let slash_count =
+                                        filter_slash_items(self.composer.draft(), BOT_SLASH_ITEMS)
+                                            .len();
+                                    if self.card_focus && self.screen == BotScreen::Conversation {
+                                        match key.code {
+                                            KeyCode::Esc | KeyCode::Tab => {
+                                                self.card_focus = false;
+                                                dirty = true;
+                                            }
+                                            KeyCode::Up => {
+                                                self.selected_card =
+                                                    self.selected_card.saturating_sub(1);
+                                                self.selected_card_option = 0;
+                                                dirty = true;
+                                            }
+                                            KeyCode::Down => {
+                                                if self.selected_card + 1 < self.cards.len() {
+                                                    self.selected_card += 1;
+                                                    self.selected_card_option = 0;
+                                                }
+                                                dirty = true;
+                                            }
+                                            KeyCode::Left => {
+                                                self.selected_card_option =
+                                                    self.selected_card_option.saturating_sub(1);
+                                                dirty = true;
+                                            }
+                                            KeyCode::Right => {
+                                                if let Some(c) = self.cards.get(self.selected_card)
+                                                    && self.selected_card_option + 1
+                                                        < c.actions.len()
+                                                {
+                                                    self.selected_card_option += 1;
+                                                }
+                                                dirty = true;
+                                            }
+                                            KeyCode::Enter => {
+                                                if let Some(cmd) = self
+                                                    .cards
+                                                    .get(self.selected_card)
+                                                    .and_then(|c| {
+                                                        c.actions.get(self.selected_card_option)
+                                                    })
+                                                    .cloned()
+                                                {
+                                                    self.card_focus = false;
+                                                    if cmd.ends_with(' ') {
+                                                        self.composer.accepted();
+                                                        self.composer.apply(Action::Insert(cmd));
+                                                    } else if let Some(outcome) =
+                                                        self.handle_submit(&cmd)
+                                                    {
+                                                        if let Some(active) =
+                                                            self.active_tick.take()
+                                                        {
+                                                            active.cancel.cancel();
+                                                            let _ = active.task.await;
+                                                        }
+                                                        self.host.close();
+                                                        return Ok(outcome);
+                                                    }
+                                                    dirty = true;
+                                                }
+                                            }
+                                            KeyCode::Char(c)
+                                                if !key.modifiers.intersects(
+                                                    KeyModifiers::CONTROL | KeyModifiers::ALT,
+                                                ) =>
+                                            {
+                                                self.card_focus = false;
+                                                self.composer.apply(Action::Insert(c.to_string()));
+                                                self.slash_selected = 0;
+                                                dirty = true;
+                                            }
+                                            _ => {}
+                                        }
+                                    } else if slash_count > 0
+                                        && matches!(
+                                            key.code,
+                                            KeyCode::Up | KeyCode::Down | KeyCode::Tab
+                                        )
+                                    {
+                                        match key.code {
+                                            KeyCode::Up => {
+                                                self.slash_selected = if self.slash_selected == 0 {
+                                                    slash_count.saturating_sub(1)
+                                                } else {
+                                                    self.slash_selected - 1
+                                                };
+                                                dirty = true;
+                                            }
+                                            KeyCode::Down => {
+                                                self.slash_selected =
+                                                    (self.slash_selected + 1) % slash_count;
+                                                dirty = true;
+                                            }
+                                            KeyCode::Tab => {
+                                                let completed = {
+                                                    let items = filter_slash_items(
+                                                        self.composer.draft(),
+                                                        BOT_SLASH_ITEMS,
+                                                    );
+                                                    items[self.slash_selected.min(items.len() - 1)]
+                                                        .command
+                                                        .to_owned()
+                                                };
+                                                self.composer.accepted();
+                                                self.composer.apply(Action::Insert(completed));
+                                                self.slash_selected = 0;
+                                                dirty = true;
+                                            }
+                                            _ => {}
+                                        }
+                                    } else if key.code == KeyCode::Tab
+                                        && self.screen == BotScreen::Conversation
+                                        && !self.cards.is_empty()
+                                    {
+                                        self.card_focus = true;
+                                        self.selected_card_option = 0;
+                                        dirty = true;
+                                    } else if key.code == KeyCode::Esc
                                         && self.screen != BotScreen::Conversation
                                     {
                                         self.screen = BotScreen::Conversation;
@@ -899,7 +1147,10 @@ impl BotShellState {
                                                     self.host.close();
                                                     return Ok(ShellOutcome::Quit);
                                                 }
-                                                Effect::Redraw => dirty = true,
+                                                Effect::Redraw => {
+                                                    self.slash_selected = 0;
+                                                    dirty = true;
+                                                }
                                                 Effect::None => {}
                                             },
                                         }
@@ -932,10 +1183,11 @@ pub(super) async fn run_bot_shell(
     home: PathBuf,
     workspace: PathBuf,
     force_list: bool,
+    prefs: &mut TerminalPreferences,
     terminal: &mut TerminalGuard,
     shutdown: &CancellationToken,
 ) -> io::Result<ShellOutcome> {
-    let state = BotShellState::open(home, workspace, force_list)?;
+    let state = BotShellState::open(home, workspace, force_list, prefs)?;
     LocalSet::new()
         .run_until(state.run(terminal, shutdown))
         .await

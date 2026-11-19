@@ -1,4 +1,4 @@
-use super::TerminalGuard;
+use super::{TerminalGuard, theme_store};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use peer_protocol::{CliExit, LocalAccessLevel, TranscriptCursor, TranscriptRow};
 use peer_runtime::{
@@ -205,6 +205,7 @@ impl Session {
                 });
                 (status, None)
             };
+            let prefs = theme_store::load_preferences(&self.home);
             peer_tui::render_resume(
                 frame,
                 ResumeView {
@@ -215,6 +216,7 @@ impl Session {
                     composer: &self.composer,
                     status,
                     approval,
+                    palette: prefs.palette(),
                 },
             );
         })?;

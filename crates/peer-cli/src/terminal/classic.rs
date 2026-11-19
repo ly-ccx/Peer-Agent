@@ -9,6 +9,7 @@ use super::{
     ShellOutcome, TerminalGuard,
     model_picker_adapter::load_picker_groups,
     resumed::ports::{Approval, Display, OutputPort, PermissionPort, bounded_text},
+    theme_store::{self, TerminalPreferences},
 };
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use peer_protocol::{LocalAccessLevel, TranscriptCursor, TranscriptRow};
@@ -21,9 +22,10 @@ use peer_runtime::{
 };
 use peer_store::{TranscriptLimits, TranscriptReader};
 use peer_tui::{
-    Action, ByteBudgetLru, ClassicCommand, ClassicMessage, ClassicView, Composer, Effect,
-    MARKDOWN_WRAP_CACHE_BYTES, ModelPickerEvent, ModelPickerState, ReadingAnchor, RenderedBlock,
-    WrapCacheKey, action_for_event, parse_classic_command, render_classic, terminal_text,
+    Action, ByteBudgetLru, CLASSIC_SLASH_ITEMS, ClassicCommand, ClassicMessage, ClassicView,
+    Composer, Effect, MARKDOWN_WRAP_CACHE_BYTES, ModelPickerEvent, ModelPickerState, ReadingAnchor,
+    RenderedBlock, ThemeMode, TuiLocale, WrapCacheKey, action_for_event, filter_slash_items,
+    parse_classic_command, render_classic, terminal_text,
 };
 use std::{io, path::PathBuf, rc::Rc, time::Duration};
 use tokio::{
@@ -45,9 +47,10 @@ struct ActiveTurn {
     revision: usize,
 }
 
-pub(super) struct ClassicSession {
+pub(super) struct ClassicSession<'a> {
     home: PathBuf,
     workspace: PathBuf,
+    prefs: &'a mut TerminalPreferences,
     conversation_id: Option<String>,
     runtime: Rc<NativeConversationRuntime>,
     access: ConversationAccess,
@@ -65,11 +68,12 @@ pub(super) struct ClassicSession {
     active: Option<ActiveTurn>,
     approval: Option<Approval>,
     model_picker: ModelPickerState,
+    slash_selected: usize,
     wrap_cache: ByteBudgetLru<WrapCacheKey, RenderedBlock>,
 }
 
-impl ClassicSession {
-    fn new(home: PathBuf, workspace: PathBuf) -> Self {
+impl<'a> ClassicSession<'a> {
+    fn new(home: PathBuf, workspace: PathBuf, prefs: &'a mut TerminalPreferences) -> Self {
         let access = ConversationAccess::new(LocalAccessLevel::AskBeforeLocal);
         let runtime = Rc::new(NativeConversationRuntime::new(&home, access.clone()));
         let mut selected_provider = None;
@@ -85,6 +89,7 @@ impl ClassicSession {
         Self {
             home,
             workspace,
+            prefs,
             conversation_id: None,
             runtime,
             access,
@@ -102,6 +107,7 @@ impl ClassicSession {
             active: None,
             approval: None,
             model_picker: ModelPickerState::default(),
+            slash_selected: 0,
             wrap_cache: ByteBudgetLru::new(MARKDOWN_WRAP_CACHE_BYTES, 512),
         }
     }
@@ -190,9 +196,19 @@ impl ClassicSession {
             Some(id) => format!("Peer · 对话  {}", terminal_text(id)),
             None => "Peer · 对话".to_owned(),
         };
+        let workspace_label = self
+            .workspace
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_owned();
         let model_badge = self.model_badge();
         let mode_badge = self.mode.as_str();
         let access_badge = self.access_badge();
+        let is_running = self.active.is_some();
+        let palette = self.prefs.palette();
+        let scheme_id = self.prefs.scheme.cache_id();
+        let locale = self.prefs.locale;
         let status = if self.approval.is_some() {
             APPROVAL_STATUS.to_owned()
         } else if self.active.is_some() {
@@ -210,9 +226,15 @@ impl ClassicSession {
                 frame,
                 ClassicView {
                     title: &title,
+                    workspace_label: &workspace_label,
                     model_badge: &model_badge,
                     mode_badge,
                     access_badge,
+                    context_percent: None,
+                    is_running,
+                    palette,
+                    scheme_id,
+                    locale,
                     messages: &self.messages,
                     live_stream: &live_buf,
                     anchor: &self.anchor,
@@ -220,6 +242,7 @@ impl ClassicSession {
                     status: &status,
                     approval: approval_view,
                     model_picker: &self.model_picker,
+                    slash_selected: self.slash_selected,
                     wrap_cache: &mut self.wrap_cache,
                 },
             );
@@ -507,6 +530,65 @@ impl ClassicSession {
                 self.composer.accepted();
                 None
             }
+            ClassicCommand::Theme(arg) => {
+                let next_mode = match arg {
+                    Some(raw) => match ThemeMode::parse(&raw) {
+                        Some(m) => m,
+                        None => {
+                            self.status = "主题仅支持 dark / light / system。".to_owned();
+                            return None;
+                        }
+                    },
+                    None => match self.prefs.mode {
+                        ThemeMode::Dark => ThemeMode::Light,
+                        ThemeMode::Light => ThemeMode::System,
+                        ThemeMode::System => ThemeMode::Dark,
+                    },
+                };
+                match theme_store::save_theme_mode(&self.home, next_mode) {
+                    Ok(scheme) => {
+                        self.prefs.mode = next_mode;
+                        self.prefs.scheme = scheme;
+                        self.wrap_cache.clear();
+                        self.status = format!(
+                            "主题已切换为 {}（配色: {}）。",
+                            next_mode.as_str(),
+                            scheme.as_str()
+                        );
+                    }
+                    Err(err) => {
+                        self.status = format!("保存主题失败：{err}");
+                    }
+                }
+                self.composer.accepted();
+                None
+            }
+            ClassicCommand::Language(arg) => {
+                let next_locale = match arg {
+                    Some(raw) => match TuiLocale::parse(&raw) {
+                        Some(l) => l,
+                        None => {
+                            self.status = "语言仅支持 zh-CN / en-US。".to_owned();
+                            return None;
+                        }
+                    },
+                    None => match self.prefs.locale {
+                        TuiLocale::ZhCn => TuiLocale::EnUs,
+                        TuiLocale::EnUs => TuiLocale::ZhCn,
+                    },
+                };
+                match theme_store::save_locale(&self.home, next_locale) {
+                    Ok(()) => {
+                        self.prefs.locale = next_locale;
+                        self.status = format!("界面语言已切换为 {}。", next_locale.as_str());
+                    }
+                    Err(err) => {
+                        self.status = format!("保存语言失败：{err}");
+                    }
+                }
+                self.composer.accepted();
+                None
+            }
             ClassicCommand::Older => {
                 self.composer.accepted();
                 if let Some(cursor) = self.older.clone() {
@@ -607,6 +689,43 @@ impl ClassicSession {
                                 let _ = active.task.await;
                             }
                             return Ok(ShellOutcome::Quit);
+                        } else if key.code == KeyCode::Up
+                            && !filter_slash_items(self.composer.draft(), CLASSIC_SLASH_ITEMS)
+                                .is_empty()
+                        {
+                            let len =
+                                filter_slash_items(self.composer.draft(), CLASSIC_SLASH_ITEMS)
+                                    .len();
+                            self.slash_selected = if self.slash_selected == 0 {
+                                len.saturating_sub(1)
+                            } else {
+                                self.slash_selected - 1
+                            };
+                            dirty = true;
+                        } else if key.code == KeyCode::Down
+                            && !filter_slash_items(self.composer.draft(), CLASSIC_SLASH_ITEMS)
+                                .is_empty()
+                        {
+                            let len =
+                                filter_slash_items(self.composer.draft(), CLASSIC_SLASH_ITEMS)
+                                    .len();
+                            self.slash_selected = (self.slash_selected + 1) % len;
+                            dirty = true;
+                        } else if key.code == KeyCode::Tab
+                            && !filter_slash_items(self.composer.draft(), CLASSIC_SLASH_ITEMS)
+                                .is_empty()
+                        {
+                            let completed = {
+                                let items =
+                                    filter_slash_items(self.composer.draft(), CLASSIC_SLASH_ITEMS);
+                                items[self.slash_selected.min(items.len() - 1)]
+                                    .command
+                                    .to_owned()
+                            };
+                            self.composer.accepted();
+                            self.composer.apply(Action::Insert(completed));
+                            self.slash_selected = 0;
+                            dirty = true;
                         } else if key.code == KeyCode::Up && self.composer.draft().is_empty() {
                             self.anchor.scroll_up(3, 10_000, None);
                             dirty = true;
@@ -653,7 +772,10 @@ impl ClassicSession {
                                         }
                                         return Ok(ShellOutcome::Quit);
                                     }
-                                    Effect::Redraw => dirty = true,
+                                    Effect::Redraw => {
+                                        self.slash_selected = 0;
+                                        dirty = true;
+                                    }
                                     Effect::None => {}
                                 },
                             }
@@ -725,10 +847,11 @@ fn format_transcript_row(row: TranscriptRow, idx: usize) -> (String, String, Str
 pub(super) async fn run_classic_shell(
     home: PathBuf,
     workspace: PathBuf,
+    prefs: &mut TerminalPreferences,
     terminal: &mut TerminalGuard,
     shutdown: &CancellationToken,
 ) -> io::Result<ShellOutcome> {
-    let session = ClassicSession::new(home, workspace);
+    let session = ClassicSession::new(home, workspace, prefs);
     LocalSet::new()
         .run_until(session.run(terminal, shutdown))
         .await

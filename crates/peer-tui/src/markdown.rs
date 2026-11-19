@@ -1,11 +1,17 @@
-//! Bounded block-level Markdown, code-fence, and diff formatter for Ratatui (ADR 130).
+//! Bounded block-level Markdown, code-fence syntax highlighting, and diff formatter for Ratatui (ADR 130).
 //!
 //! Processes sanitized text in bounded byte/line slices so even a 10 MiB single
 //! message never constructs a million-line Paragraph or stalls the draw loop.
 
-use crate::{bounded_cache::ByteSized, terminal_text};
+use crate::{
+    bounded_cache::ByteSized,
+    terminal_text,
+    theme::{
+        DARK_PALETTE, HEADING_H1, HEADING_H2, HEADING_H3, LIST_BULLET, QUOTE_PREFIX, TuiPalette,
+    },
+};
 use ratatui::{
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
 };
 use unicode_segmentation::UnicodeSegmentation;
@@ -64,6 +70,7 @@ pub struct WrapCacheKey {
     pub item_hash: u64,
     pub revision: u64,
     pub width: u16,
+    pub scheme: u8,
 }
 
 pub fn stable_hash(text: &str) -> u64 {
@@ -76,6 +83,76 @@ pub fn stable_hash(text: &str) -> u64 {
     hash
 }
 
+fn push_wrapped_segments(
+    segments: Vec<(String, Style)>,
+    width: usize,
+    fill_style: Option<Style>,
+    out: &mut Vec<StyledLine>,
+    max_lines: usize,
+) {
+    let w = width.max(1);
+    let pad_target = w.min(240);
+    let emit_line = |spans: &mut Vec<(String, Style)>,
+                     bytes: &mut usize,
+                     col: usize,
+                     out: &mut Vec<StyledLine>| {
+        if out.len() >= max_lines {
+            spans.clear();
+            *bytes = 0;
+            return;
+        }
+        if let Some(bg_style) = fill_style
+            && col < pad_target
+        {
+            let pad = " ".repeat(pad_target - col);
+            *bytes += pad.len() + 32;
+            spans.push((pad, bg_style));
+        }
+        out.push(StyledLine {
+            spans: std::mem::take(spans),
+            bytes: (*bytes).max(32),
+        });
+        *bytes = 0;
+    };
+
+    if segments.is_empty() {
+        let mut spans = Vec::new();
+        let mut bytes = 0usize;
+        emit_line(&mut spans, &mut bytes, 0, out);
+        return;
+    }
+
+    let mut cur_spans: Vec<(String, Style)> = Vec::new();
+    let mut cur_bytes = 0usize;
+    let mut col = 0usize;
+
+    for (seg_text, seg_style) in segments {
+        let mut buf = String::new();
+        for grapheme in seg_text.graphemes(true) {
+            let glyph = if grapheme == "\t" { "    " } else { grapheme };
+            let gw = glyph.width().min(w);
+            if col + gw > w && col > 0 {
+                if !buf.is_empty() {
+                    cur_bytes += buf.len() + 32;
+                    cur_spans.push((std::mem::take(&mut buf), seg_style));
+                }
+                emit_line(&mut cur_spans, &mut cur_bytes, col, out);
+                col = 0;
+                if out.len() >= max_lines {
+                    return;
+                }
+            }
+            buf.push_str(glyph);
+            col += gw;
+        }
+        if !buf.is_empty() {
+            cur_bytes += buf.len() + 32;
+            cur_spans.push((buf, seg_style));
+        }
+    }
+    emit_line(&mut cur_spans, &mut cur_bytes, col, out);
+}
+
 fn wrap_plain_into(
     text: &str,
     width: usize,
@@ -83,41 +160,20 @@ fn wrap_plain_into(
     out: &mut Vec<StyledLine>,
     max_lines: usize,
 ) {
-    let w = width.max(1);
-    let mut line = String::new();
-    let mut col = 0usize;
-    for grapheme in text.graphemes(true) {
-        let glyph = if grapheme == "\t" { "    " } else { grapheme };
-        let gw = glyph.width().min(w);
-        if col + gw > w && !line.is_empty() {
-            if out.len() >= max_lines {
-                return;
-            }
-            out.push(StyledLine::plain(std::mem::take(&mut line), style));
-            col = 0;
-        }
-        line.push_str(glyph);
-        col += gw;
-    }
-    if out.len() < max_lines {
-        out.push(StyledLine::plain(line, style));
-    }
+    push_wrapped_segments(vec![(text.to_owned(), style)], width, None, out, max_lines);
 }
 
 /// Format inline `**bold**` and `` `code` `` spans within one unwrapped text line, then wrap to `width`.
-fn wrap_inline_markdown(
+fn tokenize_inline_markdown(
     text: &str,
-    width: usize,
     base_style: Style,
-    out: &mut Vec<StyledLine>,
-    max_lines: usize,
+    palette: &TuiPalette,
+    segments: &mut Vec<(String, Style)>,
 ) {
-    let w = width.max(1);
-    // Tokenize into styled segments (code backticks and **bold**).
-    let mut segments: Vec<(String, Style)> = Vec::new();
     let bytes = text.as_bytes();
     let mut i = 0usize;
     let mut plain_start = 0usize;
+    let code_style = base_style.fg(palette.code).bg(palette.code_bg);
     while i < bytes.len() {
         if bytes[i] == b'`'
             && let Some(end_rel) = text[i + 1..].find('`')
@@ -127,7 +183,7 @@ fn wrap_inline_markdown(
                 segments.push((text[plain_start..i].to_owned(), base_style));
             }
             let code_end = i + 1 + end_rel;
-            segments.push((text[i + 1..code_end].to_owned(), base_style.fg(Color::Cyan)));
+            segments.push((text[i + 1..code_end].to_owned(), code_style));
             i = code_end + 1;
             plain_start = i;
             continue;
@@ -154,59 +210,221 @@ fn wrap_inline_markdown(
     if plain_start < bytes.len() {
         segments.push((text[plain_start..].to_owned(), base_style));
     }
-    if segments.is_empty() {
-        if out.len() < max_lines {
-            out.push(StyledLine::plain(String::new(), base_style));
-        }
-        return;
-    }
-
-    let mut cur_spans: Vec<(String, Style)> = Vec::new();
-    let mut cur_bytes = 0usize;
-    let mut col = 0usize;
-
-    for (seg_text, seg_style) in segments {
-        let mut buf = String::new();
-        for grapheme in seg_text.graphemes(true) {
-            let glyph = if grapheme == "\t" { "    " } else { grapheme };
-            let gw = glyph.width().min(w);
-            if col + gw > w && (col > 0) {
-                if !buf.is_empty() {
-                    cur_bytes += buf.len() + 32;
-                    cur_spans.push((std::mem::take(&mut buf), seg_style));
-                }
-                if out.len() >= max_lines {
-                    return;
-                }
-                out.push(StyledLine {
-                    spans: std::mem::take(&mut cur_spans),
-                    bytes: cur_bytes,
-                });
-                cur_bytes = 0;
-                col = 0;
-            }
-            buf.push_str(glyph);
-            col += gw;
-        }
-        if !buf.is_empty() {
-            cur_bytes += buf.len() + 32;
-            cur_spans.push((buf, seg_style));
-        }
-    }
-    if out.len() < max_lines {
-        out.push(StyledLine {
-            spans: cur_spans,
-            bytes: cur_bytes.max(32),
-        });
-    }
 }
 
-/// Render a bounded Markdown / code / diff slice into wrapped Ratatui lines.
+fn wrap_inline_markdown(
+    text: &str,
+    width: usize,
+    base_style: Style,
+    palette: &TuiPalette,
+    out: &mut Vec<StyledLine>,
+    max_lines: usize,
+) {
+    let mut segments = Vec::new();
+    tokenize_inline_markdown(text, base_style, palette, &mut segments);
+    push_wrapped_segments(segments, width, None, out, max_lines);
+}
+
+fn is_keyword(word: &str) -> bool {
+    matches!(
+        word,
+        "fn" | "let"
+            | "mut"
+            | "const"
+            | "pub"
+            | "struct"
+            | "enum"
+            | "impl"
+            | "trait"
+            | "for"
+            | "while"
+            | "loop"
+            | "if"
+            | "else"
+            | "match"
+            | "return"
+            | "async"
+            | "await"
+            | "use"
+            | "mod"
+            | "type"
+            | "where"
+            | "function"
+            | "var"
+            | "class"
+            | "import"
+            | "export"
+            | "from"
+            | "as"
+            | "def"
+            | "try"
+            | "catch"
+            | "except"
+            | "finally"
+            | "raise"
+            | "throw"
+            | "new"
+            | "in"
+            | "of"
+            | "func"
+            | "go"
+            | "defer"
+            | "select"
+            | "switch"
+            | "case"
+            | "default"
+            | "break"
+            | "continue"
+            | "readonly"
+            | "interface"
+            | "extends"
+    )
+}
+
+fn is_literal(word: &str) -> bool {
+    matches!(
+        word,
+        "true"
+            | "false"
+            | "null"
+            | "nil"
+            | "None"
+            | "Some"
+            | "Ok"
+            | "Err"
+            | "True"
+            | "False"
+            | "undefined"
+            | "self"
+            | "Self"
+            | "this"
+            | "super"
+    )
+}
+
+fn highlight_code_line(line: &str, lang: &str, palette: &TuiPalette) -> Vec<(String, Style)> {
+    let bg = palette.code_bg;
+    let base = Style::new().fg(palette.text).bg(bg);
+    if line.is_empty() {
+        return vec![("  ".to_owned(), base)];
+    }
+    let mut segs: Vec<(String, Style)> = vec![("  ".to_owned(), base)];
+    let trimmed = line.trim_start();
+    let hash_comment_lang = matches!(
+        lang,
+        "py" | "python" | "sh" | "bash" | "zsh" | "yaml" | "yml" | "toml" | "rb" | "ruby"
+    );
+
+    let bytes = line.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let rest = &line[i..];
+        if rest.starts_with("//")
+            || (hash_comment_lang && trimmed.starts_with('#') && bytes[i] == b'#')
+        {
+            segs.push((rest.to_owned(), Style::new().fg(palette.muted).bg(bg)));
+            break;
+        }
+        let b = bytes[i];
+        if b == b'"' || b == b'\'' || b == b'`' {
+            let quote = b;
+            let mut j = i + 1;
+            while j < bytes.len() {
+                if bytes[j] == b'\\' {
+                    j = (j + 2).min(bytes.len());
+                    continue;
+                }
+                if bytes[j] == quote {
+                    j += 1;
+                    break;
+                }
+                j += 1;
+            }
+            while j < bytes.len() && !line.is_char_boundary(j) {
+                j += 1;
+            }
+            segs.push((
+                line[i..j].to_owned(),
+                Style::new().fg(palette.success).bg(bg),
+            ));
+            i = j;
+            continue;
+        }
+        if b.is_ascii_digit() {
+            let mut j = i + 1;
+            while j < bytes.len()
+                && (bytes[j].is_ascii_alphanumeric()
+                    || matches!(bytes[j], b'.' | b'_' | b'x' | b'X'))
+            {
+                j += 1;
+            }
+            segs.push((
+                line[i..j].to_owned(),
+                Style::new().fg(palette.warning).bg(bg),
+            ));
+            i = j;
+            continue;
+        }
+        if b.is_ascii_alphabetic() || b == b'_' {
+            let mut j = i + 1;
+            while j < bytes.len() && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
+                j += 1;
+            }
+            let word = &line[i..j];
+            let style = if is_keyword(word) {
+                Style::new().fg(palette.accent).bg(bg)
+            } else if is_literal(word) {
+                Style::new().fg(palette.warning).bg(bg)
+            } else if word.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
+                Style::new().fg(palette.info).bg(bg)
+            } else if line[j..].trim_start().starts_with('(') {
+                Style::new().fg(palette.accent_soft).bg(bg)
+            } else {
+                base
+            };
+            segs.push((word.to_owned(), style));
+            i = j;
+            continue;
+        }
+        let ch_len = line[i..].chars().next().map_or(1, char::len_utf8);
+        let style = if matches!(
+            b,
+            b'+' | b'-' | b'*' | b'/' | b'=' | b'<' | b'>' | b'!' | b'&' | b'|'
+        ) {
+            Style::new().fg(palette.text_soft).bg(bg)
+        } else {
+            base
+        };
+        let chunk = &line[i..i + ch_len];
+        if let Some((prev, prev_style)) = segs.last_mut()
+            && *prev_style == style
+        {
+            prev.push_str(chunk);
+        } else {
+            segs.push((chunk.to_owned(), style));
+        }
+        i += ch_len;
+    }
+    segs
+}
+
+/// Render a bounded Markdown / code / diff slice using the default dark Frost palette.
 pub fn render_markdown_bounded(
     raw: &str,
     width: usize,
     base_style: Style,
     max_lines: usize,
+) -> RenderedBlock {
+    render_markdown_themed(raw, width, base_style, max_lines, &DARK_PALETTE)
+}
+
+/// Render a bounded Markdown / code / diff slice into wrapped Ratatui lines using `palette`.
+pub fn render_markdown_themed(
+    raw: &str,
+    width: usize,
+    base_style: Style,
+    max_lines: usize,
+    palette: &TuiPalette,
 ) -> RenderedBlock {
     let sanitized = terminal_text(raw);
     let mut truncated = false;
@@ -224,7 +442,7 @@ pub fn render_markdown_bounded(
     let effective_max = max_lines.clamp(1, MAX_WRAPPED_LINES_PER_ITEM);
     let mut lines: Vec<StyledLine> = Vec::new();
     let mut in_code_fence = false;
-    let mut fence_is_diff = false;
+    let mut fence_lang = String::new();
 
     for raw_line in slice.split('\n') {
         if lines.len() >= effective_max {
@@ -235,27 +453,26 @@ pub fn render_markdown_bounded(
         if let Some(rest) = trimmed.strip_prefix("```") {
             if !in_code_fence {
                 in_code_fence = true;
-                let lang = rest.trim();
-                fence_is_diff = lang.eq_ignore_ascii_case("diff");
-                let badge = if lang.is_empty() {
+                fence_lang = rest.trim().to_ascii_lowercase();
+                let badge = if fence_lang.is_empty() {
                     "── code ──".to_owned()
                 } else {
-                    format!("── {lang} ──")
+                    format!("── {fence_lang} ──")
                 };
                 wrap_plain_into(
                     &badge,
                     width,
-                    Style::new().fg(Color::DarkGray),
+                    Style::new().fg(palette.muted).bg(palette.background),
                     &mut lines,
                     effective_max,
                 );
             } else {
                 in_code_fence = false;
-                fence_is_diff = false;
+                fence_lang.clear();
                 wrap_plain_into(
                     "──────────",
                     width,
-                    Style::new().fg(Color::DarkGray),
+                    Style::new().fg(palette.muted).bg(palette.background),
                     &mut lines,
                     effective_max,
                 );
@@ -264,57 +481,137 @@ pub fn render_markdown_bounded(
         }
 
         if in_code_fence {
-            let code_style = if fence_is_diff {
-                if raw_line.starts_with('+') && !raw_line.starts_with("+++") {
-                    Style::new().fg(Color::Green)
-                } else if raw_line.starts_with('-') && !raw_line.starts_with("---") {
-                    Style::new().fg(Color::Red)
-                } else if raw_line.starts_with("@@") {
-                    Style::new().fg(Color::Cyan)
+            let code_bg_style = Style::new().bg(palette.code_bg);
+            if fence_lang == "diff" {
+                let diff_fg = if raw_line.starts_with("@@") {
+                    palette.diff_hunk
+                } else if raw_line.starts_with("+++")
+                    || raw_line.starts_with("---")
+                    || raw_line.starts_with("diff --git ")
+                    || raw_line.starts_with("index ")
+                {
+                    palette.diff_meta
+                } else if raw_line.starts_with('+') {
+                    palette.diff_add
+                } else if raw_line.starts_with('-') {
+                    palette.diff_delete
                 } else {
-                    Style::new().fg(Color::Gray)
-                }
+                    palette.text
+                };
+                push_wrapped_segments(
+                    vec![(
+                        format!("  {raw_line}"),
+                        Style::new().fg(diff_fg).bg(palette.code_bg),
+                    )],
+                    width,
+                    Some(code_bg_style),
+                    &mut lines,
+                    effective_max,
+                );
             } else {
-                Style::new().fg(Color::Gray)
-            };
-            let indented = format!("  {raw_line}");
-            wrap_plain_into(&indented, width, code_style, &mut lines, effective_max);
+                let segs = highlight_code_line(raw_line, &fence_lang, palette);
+                push_wrapped_segments(segs, width, Some(code_bg_style), &mut lines, effective_max);
+            }
             continue;
         }
 
-        // Heading
-        if trimmed.starts_with("### ") || trimmed.starts_with("## ") || trimmed.starts_with("# ") {
-            let heading = trimmed.trim_start_matches('#').trim_start();
-            wrap_plain_into(
-                heading,
-                width,
-                base_style.add_modifier(Modifier::BOLD),
-                &mut lines,
-                effective_max,
-            );
+        // Headings (`apps/tui/src/tui-theme.ts` MARKDOWN_CHROME)
+        if let Some(h3) = trimmed.strip_prefix("### ") {
+            let segs = vec![
+                (
+                    HEADING_H3.to_owned(),
+                    Style::new()
+                        .fg(palette.accent)
+                        .bg(palette.background)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                (
+                    h3.trim_start().to_owned(),
+                    base_style.fg(palette.text).add_modifier(Modifier::BOLD),
+                ),
+            ];
+            push_wrapped_segments(segs, width, None, &mut lines, effective_max);
+            continue;
+        }
+        if let Some(h2) = trimmed.strip_prefix("## ") {
+            let segs = vec![
+                (
+                    HEADING_H2.to_owned(),
+                    Style::new()
+                        .fg(palette.info)
+                        .bg(palette.background)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                (
+                    h2.trim_start().to_owned(),
+                    base_style.fg(palette.info).add_modifier(Modifier::BOLD),
+                ),
+            ];
+            push_wrapped_segments(segs, width, None, &mut lines, effective_max);
+            continue;
+        }
+        if let Some(h1) = trimmed.strip_prefix("# ") {
+            let segs = vec![
+                (
+                    HEADING_H1.to_owned(),
+                    Style::new()
+                        .fg(palette.accent)
+                        .bg(palette.background)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                (
+                    h1.trim_start().to_owned(),
+                    base_style.fg(palette.accent).add_modifier(Modifier::BOLD),
+                ),
+            ];
+            push_wrapped_segments(segs, width, None, &mut lines, effective_max);
             continue;
         }
 
         // Blockquote
         if let Some(quoted) = trimmed.strip_prefix("> ") {
-            let line_text = format!("│ {quoted}");
-            wrap_inline_markdown(
-                &line_text,
-                width,
-                Style::new().fg(Color::DarkGray),
-                &mut lines,
-                effective_max,
-            );
+            let mut segs = vec![(
+                QUOTE_PREFIX.to_owned(),
+                Style::new().fg(palette.border_focus).bg(palette.background),
+            )];
+            tokenize_inline_markdown(quoted, base_style.fg(palette.text_soft), palette, &mut segs);
+            push_wrapped_segments(segs, width, None, &mut lines, effective_max);
             continue;
         }
 
-        wrap_inline_markdown(raw_line, width, base_style, &mut lines, effective_max);
+        // Unordered list bullets (`- ` or `* `)
+        if let Some(bullet_body) = trimmed
+            .strip_prefix("- ")
+            .or_else(|| trimmed.strip_prefix("* "))
+        {
+            let indent_len = raw_line.len().saturating_sub(trimmed.len());
+            let indent = " ".repeat(indent_len.min(16));
+            let mut segs = vec![
+                (indent, base_style),
+                (
+                    LIST_BULLET.to_owned(),
+                    Style::new().fg(palette.accent).bg(palette.background),
+                ),
+            ];
+            tokenize_inline_markdown(bullet_body, base_style, palette, &mut segs);
+            push_wrapped_segments(segs, width, None, &mut lines, effective_max);
+            continue;
+        }
+
+        wrap_inline_markdown(
+            raw_line,
+            width,
+            base_style,
+            palette,
+            &mut lines,
+            effective_max,
+        );
     }
 
     if truncated {
         let notice = StyledLine::plain(
             "… ［单条内容超过单页渲染预算，已按块折叠］".to_owned(),
-            Style::new().fg(Color::Yellow),
+            Style::new().fg(palette.warning).bg(palette.background),
         );
         if lines.len() >= effective_max && !lines.is_empty() {
             *lines.last_mut().unwrap() = notice;
@@ -334,22 +631,52 @@ pub fn render_markdown_bounded(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme::LIGHT_PALETTE;
 
     #[test]
     fn markdown_handles_code_diff_bold_and_caps_10mb_single_message() {
-        let md = "# 标题\n这是 **加粗** 和 `code`。\n```diff\n+added\n-removed\n@@ -1 +1 @@\n```";
-        let rendered = render_markdown_bounded(md, 40, Style::default(), 64);
+        let md = "# 标题\n- 项目条目\n这是 **加粗** 和 `code`。\n```rust\nfn demo() -> usize { 42 }\n```\n```diff\n+added\n-removed\n@@ -1 +1 @@\n```";
+        let rendered = render_markdown_themed(
+            md,
+            40,
+            Style::new().fg(DARK_PALETTE.text),
+            64,
+            &DARK_PALETTE,
+        );
         assert!(!rendered.truncated);
-        assert!(rendered.lines.len() >= 6);
+        assert!(rendered.lines.len() >= 8);
         assert!(rendered.lines.iter().any(|l| {
-            l.spans
-                .iter()
-                .any(|(t, s)| t.contains("+added") && s.fg == Some(Color::Green))
+            l.spans.iter().any(|(t, s)| {
+                t.contains("+added")
+                    && s.fg == Some(DARK_PALETTE.diff_add)
+                    && s.bg == Some(DARK_PALETTE.code_bg)
+            })
+        }));
+        assert!(rendered.lines.iter().any(|l| {
+            l.spans.iter().any(|(t, s)| {
+                t.contains("-removed")
+                    && s.fg == Some(DARK_PALETTE.diff_delete)
+                    && s.bg == Some(DARK_PALETTE.code_bg)
+            })
         }));
         assert!(rendered.lines.iter().any(|l| {
             l.spans
                 .iter()
-                .any(|(t, s)| t.contains("-removed") && s.fg == Some(Color::Red))
+                .any(|(t, s)| t == "fn" && s.fg == Some(DARK_PALETTE.accent))
+        }));
+
+        // Light palette uses light code surface
+        let light = render_markdown_themed(
+            "`x`",
+            40,
+            Style::new().fg(LIGHT_PALETTE.text),
+            16,
+            &LIGHT_PALETTE,
+        );
+        assert!(light.lines.iter().any(|l| {
+            l.spans.iter().any(|(t, s)| {
+                t == "x" && s.fg == Some(LIGHT_PALETTE.code) && s.bg == Some(LIGHT_PALETTE.code_bg)
+            })
         }));
 
         // 10 MiB single message must finish fast and cap output cleanly.

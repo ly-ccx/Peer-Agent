@@ -225,7 +225,7 @@ def run_all(binary: Path, output: Path):
             r1.send(b'\x1b')
             r1.drain(0.1)
             r1.send(b'/bots\r')
-            r1.wait_text('▸')
+            r1.wait_text('›')
             assert 'F2·普通任务模式' not in visible_text(bytes(r1.captured))
             r1.send(b'\x03')
             code = r1.wait_exit()

@@ -41,6 +41,8 @@ pub enum ProjectCommand {
     Takeover,
     Classic,
     Model,
+    Theme(Option<String>),
+    Language(Option<String>),
     Older,
     Latest,
     Help,
@@ -56,6 +58,8 @@ pub enum ClassicCommand {
     Model,
     Mode(String),
     Access(String),
+    Theme(Option<String>),
+    Language(Option<String>),
     Older,
     Latest,
     Help,
@@ -106,6 +110,8 @@ pub fn parse_project_command(input: &str) -> ProjectCommand {
             "takeover" => ProjectCommand::Takeover,
             "classic" => ProjectCommand::Classic,
             "model" => ProjectCommand::Model,
+            "theme" => ProjectCommand::Theme(None),
+            "language" | "lang" => ProjectCommand::Language(None),
             "older" => ProjectCommand::Older,
             "latest" => ProjectCommand::Latest,
             "help" => ProjectCommand::Help,
@@ -113,6 +119,12 @@ pub fn parse_project_command(input: &str) -> ProjectCommand {
             "save-draft" => ProjectCommand::SaveDraft,
             _ => ProjectCommand::Invalid,
         };
+    }
+    if name == "theme" && args.len() == 1 {
+        return ProjectCommand::Theme(Some(args[0].to_owned()));
+    }
+    if matches!(name, "language" | "lang") && args.len() == 1 {
+        return ProjectCommand::Language(Some(args[0].to_owned()));
     }
     if name == "retry-input" && args.len() == 1 && is_valid_id(args[0]) {
         return ProjectCommand::RetryInput(args[0].to_owned());
@@ -175,6 +187,8 @@ pub fn parse_classic_command(input: &str) -> ClassicCommand {
             "bots" => ClassicCommand::Bots,
             "new" => ClassicCommand::NewSession,
             "model" => ClassicCommand::Model,
+            "theme" => ClassicCommand::Theme(None),
+            "language" | "lang" => ClassicCommand::Language(None),
             "older" => ClassicCommand::Older,
             "latest" => ClassicCommand::Latest,
             "help" => ClassicCommand::Help,
@@ -188,6 +202,10 @@ pub fn parse_classic_command(input: &str) -> ClassicCommand {
         }
         "access" if args.len() == 1 && matches!(args[0], "ask" | "session" | "full") => {
             ClassicCommand::Access(args[0].to_owned())
+        }
+        "theme" if args.len() == 1 => ClassicCommand::Theme(Some(args[0].to_owned())),
+        "language" | "lang" if args.len() == 1 => {
+            ClassicCommand::Language(Some(args[0].to_owned()))
         }
         _ => ClassicCommand::Invalid,
     }
@@ -311,6 +329,22 @@ mod tests {
             }
         );
         assert_eq!(parse_project_command("/task 0"), ProjectCommand::Invalid);
+        assert_eq!(
+            parse_project_command("/theme light"),
+            ProjectCommand::Theme(Some("light".into()))
+        );
+        assert_eq!(
+            parse_project_command("/language en-US"),
+            ProjectCommand::Language(Some("en-US".into()))
+        );
+        assert_eq!(
+            parse_classic_command("/theme system"),
+            ClassicCommand::Theme(Some("system".into()))
+        );
+        assert_eq!(
+            parse_classic_command("/language zh"),
+            ClassicCommand::Language(Some("zh".into()))
+        );
         assert_eq!(
             parse_project_command("hello world"),
             ProjectCommand::Text("hello world".into())

@@ -5,14 +5,17 @@
 //! - Busy state prevents re-entry while keeping the list readable.
 //! - Escape closes the picker without sending messages or clearing composer drafts.
 
-use crate::commands::clip_bot_line;
+use crate::{
+    commands::clip_bot_line,
+    theme::{CARET_IDLE, CARET_SELECTED, CHECK_CURRENT, SEPARATOR, TuiPalette},
+};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, Clear, Paragraph},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -188,11 +191,16 @@ impl ModelPickerState {
     }
 }
 
-pub fn render_model_picker(frame: &mut Frame<'_>, area: Rect, state: &ModelPickerState) {
+pub fn render_model_picker(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    state: &ModelPickerState,
+    palette: &TuiPalette,
+) {
     if !state.open || area.width < 12 || area.height < 6 {
         return;
     }
-    let w = area.width.clamp(12, 72);
+    let w = area.width.clamp(12, 74);
     let h = area.height.clamp(6, 18);
     let popup = Rect {
         x: area.x + area.width.saturating_sub(w) / 2,
@@ -201,46 +209,70 @@ pub fn render_model_picker(frame: &mut Frame<'_>, area: Rect, state: &ModelPicke
         height: h,
     };
     frame.render_widget(Clear, popup);
-    let block = Block::default().borders(Borders::ALL).title(" 模型选择 ");
-    let inner = block.inner(popup);
-    frame.render_widget(block, popup);
+    // Peer Frost terminal layer (open-top panel, quiet hairline, no heavy box shadow)
+    frame.render_widget(
+        Block::default().style(Style::new().bg(palette.panel)),
+        popup,
+    );
 
-    if inner.height < 3 || inner.width < 6 {
-        return;
-    }
-
-    let chunks = Layout::vertical([
+    let outer = Layout::vertical([
+        Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Min(1),
         Constraint::Length(1),
+        Constraint::Length(1),
     ])
-    .split(inner);
+    .split(popup);
+
+    let pw = usize::from(popup.width).max(1);
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(
+                " 模型选择 ",
+                Style::new()
+                    .fg(palette.info)
+                    .bg(palette.panel)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                SEPARATOR.repeat(pw.saturating_sub(10)),
+                Style::new().fg(palette.border).bg(palette.panel),
+            ),
+        ])),
+        outer[0],
+    );
 
     // Provider tabs row
     let mut tab_spans = Vec::new();
     if state.groups.is_empty() {
         tab_spans.push(Span::styled(
             "无已配置模型",
-            Style::new().fg(Color::DarkGray),
+            Style::new().fg(palette.muted).bg(palette.panel),
         ));
     } else {
         for (i, g) in state.groups.iter().enumerate() {
             if i > 0 {
-                tab_spans.push(Span::raw("  "));
+                tab_spans.push(Span::styled("  ", Style::new().bg(palette.panel)));
             }
             let style = if i == state.active_group {
-                Style::new().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+                Style::new()
+                    .fg(palette.accent)
+                    .bg(palette.panel)
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
             } else {
-                Style::new().fg(Color::DarkGray)
+                Style::new().fg(palette.muted).bg(palette.panel)
             };
             tab_spans.push(Span::styled(clip_bot_line(&g.label, 18), style));
         }
     }
-    frame.render_widget(Paragraph::new(Line::from(tab_spans)), chunks[0]);
+    frame.render_widget(
+        Paragraph::new(Line::from(tab_spans)).style(Style::new().bg(palette.panel)),
+        outer[1],
+    );
 
     // Model list inside active provider group (caret selection, internal scroll)
-    let list_h = usize::from(chunks[1].height);
-    let list_w = usize::from(chunks[1].width);
+    let list_h = usize::from(outer[2].height);
+    let list_w = usize::from(outer[2].width);
     let mut rows = Vec::new();
     if let Some(group) = state.groups.get(state.active_group) {
         let top = state.active_model.saturating_sub(list_h.saturating_sub(1));
@@ -248,8 +280,8 @@ pub fn render_model_picker(frame: &mut Frame<'_>, area: Rect, state: &ModelPicke
             let focused = idx == state.active_model;
             let selected = state.selected_provider.as_deref() == Some(m.provider_id.as_str())
                 && state.selected_model.as_deref() == Some(m.model_id.as_str());
-            let caret = if focused { "▸ " } else { "  " };
-            let mark = if selected { "✓ " } else { "  " };
+            let caret = if focused { CARET_SELECTED } else { CARET_IDLE };
+            let mark = if selected { CHECK_CURRENT } else { "" };
             let suffix = if !m.available {
                 " [不可用]".to_owned()
             } else if focused && !m.efforts.is_empty() {
@@ -264,39 +296,66 @@ pub fn render_model_picker(frame: &mut Frame<'_>, area: Rect, state: &ModelPicke
             } else {
                 String::new()
             };
-            let line = format!("{caret}{mark}{}{suffix}", m.display_name);
-            let style = if !m.available {
-                Style::new().fg(Color::DarkGray)
+            let main_text = clip_bot_line(
+                &format!("{caret}{}", m.display_name),
+                list_w.saturating_sub(mark.len() + suffix.len().min(list_w / 2)),
+            );
+            let main_style = if !m.available {
+                Style::new().fg(palette.muted).bg(palette.panel)
             } else if focused {
-                Style::new().add_modifier(Modifier::BOLD)
+                Style::new()
+                    .fg(palette.accent)
+                    .bg(palette.panel)
+                    .add_modifier(Modifier::BOLD)
             } else {
-                Style::default()
+                Style::new().fg(palette.text).bg(palette.panel)
             };
-            rows.push(Line::styled(clip_bot_line(&line, list_w), style));
+            let mut spans = vec![Span::styled(main_text, main_style)];
+            if selected {
+                spans.push(Span::styled(
+                    mark,
+                    Style::new().fg(palette.success).bg(palette.panel),
+                ));
+            }
+            if !suffix.is_empty() {
+                spans.push(Span::styled(
+                    clip_bot_line(&suffix, list_w / 2),
+                    Style::new().fg(palette.muted).bg(palette.panel),
+                ));
+            }
+            rows.push(Line::from(spans));
         }
     }
-    frame.render_widget(Paragraph::new(rows), chunks[1]);
+    frame.render_widget(
+        Paragraph::new(rows).style(Style::new().bg(palette.panel)),
+        outer[2],
+    );
+
+    frame.render_widget(
+        Paragraph::new(Line::styled(
+            SEPARATOR.repeat(pw),
+            Style::new().fg(palette.border).bg(palette.panel),
+        )),
+        outer[3],
+    );
 
     // Footer status (busy / error / controls)
     let footer = if let Some(ref err) = state.error {
-        clip_bot_line(err, usize::from(chunks[2].width))
+        clip_bot_line(err, pw)
     } else if state.busy {
         "正在保存模型配置…".to_owned()
     } else {
         clip_bot_line(
             "←/→ 供应商 · ↑/↓ 模型 · Tab 思考强度 · Enter 确认 · Esc 关闭",
-            usize::from(chunks[2].width),
+            pw,
         )
     };
     let footer_style = if state.error.is_some() {
-        Style::new().fg(Color::Yellow)
+        Style::new().fg(palette.danger_soft).bg(palette.panel)
     } else {
-        Style::new().fg(Color::DarkGray)
+        Style::new().fg(palette.muted).bg(palette.panel)
     };
-    frame.render_widget(
-        Paragraph::new(Line::styled(footer, footer_style)),
-        chunks[2],
-    );
+    frame.render_widget(Paragraph::new(Line::styled(footer, footer_style)), outer[4]);
 }
 
 #[cfg(test)]

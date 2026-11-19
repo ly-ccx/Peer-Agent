@@ -8,7 +8,10 @@ mod composer;
 pub mod markdown;
 pub mod model_picker;
 mod resumed_view;
+pub mod slash_menu;
+pub mod theme;
 mod view;
+pub mod wordmark;
 
 pub use bot_view::{
     BotCardRow, BotMessageView, BotRowView, BotScreen, BotShellView, BotTaskRow, render_bot_shell,
@@ -25,13 +28,20 @@ pub use commands::{
 pub use composer::{Action, Composer, Effect, MAX_DRAFT_BYTES, action_for_event};
 pub use markdown::{
     MAX_MARKDOWN_INPUT_BYTES, MAX_WRAPPED_LINES_PER_ITEM, RenderedBlock, StyledLine, WrapCacheKey,
-    render_markdown_bounded, stable_hash,
+    render_markdown_bounded, render_markdown_themed, stable_hash,
 };
 pub use model_picker::{
     ModelPickerEvent, ModelPickerGroup, ModelPickerOption, ModelPickerState, render_model_picker,
 };
 pub use resumed_view::{ResumeView, render_resume};
+pub use slash_menu::{
+    BOT_SLASH_ITEMS, CLASSIC_SLASH_ITEMS, SlashItem, filter_slash_items, render_slash_menu,
+};
+pub use theme::{
+    DARK_PALETTE, LIGHT_PALETTE, ThemeMode, ThemeScheme, TuiLocale, TuiPalette, palette_for,
+};
 pub use view::render;
+pub use wordmark::{B3Variant, b3_wordmark_lines};
 
 pub fn terminal_text(text: &str) -> String {
     text.chars()

@@ -1,10 +1,14 @@
-use crate::{Composer, view::draft_view};
+use crate::{
+    Composer,
+    theme::{BRAND_MARK, CARET_SELECTED, SEPARATOR, TuiPalette, fill_canvas},
+    view::draft_view_styled,
+};
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout},
+    layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
-    text::Line,
-    widgets::{Block, Borders, Paragraph, Wrap},
+    text::{Line, Span},
+    widgets::{Paragraph, Wrap},
 };
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
@@ -17,6 +21,7 @@ pub struct ResumeView<'a> {
     pub composer: &'a Composer,
     pub status: &'a str,
     pub approval: Option<(&'a str, usize)>,
+    pub palette: &'static TuiPalette,
 }
 
 fn wrap<'a>(text: impl IntoIterator<Item = &'a str>, width: usize) -> Vec<String> {
@@ -42,6 +47,21 @@ fn wrap<'a>(text: impl IntoIterator<Item = &'a str>, width: usize) -> Vec<String
 }
 
 pub fn render_resume(frame: &mut Frame<'_>, view: ResumeView<'_>) {
+    let full_area = frame.area();
+    if full_area.width == 0 || full_area.height == 0 {
+        return;
+    }
+    let palette = view.palette;
+    fill_canvas(frame, full_area, palette.background);
+
+    let hpad: u16 = if full_area.width >= 20 { 1 } else { 0 };
+    let area = Rect {
+        x: full_area.x + hpad,
+        y: full_area.y,
+        width: full_area.width.saturating_sub(hpad * 2),
+        height: full_area.height,
+    };
+
     let areas = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(1),
@@ -49,11 +69,25 @@ pub fn render_resume(frame: &mut Frame<'_>, view: ResumeView<'_>) {
         Constraint::Length(4),
         Constraint::Length(2),
     ])
-    .split(frame.area());
+    .split(area);
+
     frame.render_widget(
-        Paragraph::new(view.title).style(Style::new().add_modifier(Modifier::BOLD)),
+        Paragraph::new(Line::from(vec![
+            Span::styled(
+                format!("{BRAND_MARK} "),
+                Style::new().fg(palette.accent).bg(palette.background),
+            ),
+            Span::styled(
+                view.title,
+                Style::new()
+                    .fg(palette.text_soft)
+                    .bg(palette.background)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ])),
         areas[0],
     );
+
     let width = usize::from(areas[1].width).max(1);
     let height = usize::from(areas[1].height);
     let lines = if let Some((approval, top)) = view.approval {
@@ -63,7 +97,7 @@ pub fn render_resume(frame: &mut Frame<'_>, view: ResumeView<'_>) {
             .into_iter()
             .skip(top.min(last))
             .take(height)
-            .map(Line::raw)
+            .map(|l| Line::styled(l, Style::new().fg(palette.warning).bg(palette.background)))
             .collect::<Vec<_>>()
     } else {
         let live = (!view.live.is_empty()).then_some(view.live);
@@ -75,18 +109,66 @@ pub fn render_resume(frame: &mut Frame<'_>, view: ResumeView<'_>) {
         lines
             .into_iter()
             .skip(end.saturating_sub(height))
-            .map(Line::raw)
+            .map(|l| {
+                let fg = if l.starts_with("Peer") {
+                    palette.accent
+                } else if l.starts_with("你") {
+                    palette.user
+                } else if l.starts_with("工具") {
+                    palette.tool_detail
+                } else {
+                    palette.text
+                };
+                Line::styled(l, Style::new().fg(fg).bg(palette.background))
+            })
             .collect::<Vec<_>>()
     };
     frame.render_widget(Paragraph::new(lines), areas[1]);
-    frame.render_widget(Block::default().borders(Borders::TOP), areas[2]);
-    let (lines, caret) = draft_view(view.composer, areas[3].width.into(), areas[3].height.into());
-    frame.render_widget(Paragraph::new(lines), areas[3]);
-    if let (None, Some((x, y))) = (view.approval, caret) {
-        frame.set_cursor_position((areas[3].x + x, areas[3].y + y));
-    }
+
     frame.render_widget(
-        Paragraph::new(view.status).wrap(Wrap { trim: false }),
+        Paragraph::new(Line::styled(
+            SEPARATOR.repeat(usize::from(areas[2].width)),
+            Style::new().fg(palette.subtle).bg(palette.background),
+        )),
+        areas[2],
+    );
+
+    if areas[3].width >= 4 {
+        let cols = Layout::horizontal([Constraint::Length(2), Constraint::Min(1)]).split(areas[3]);
+        frame.render_widget(
+            Paragraph::new(Line::styled(
+                CARET_SELECTED,
+                Style::new().fg(palette.accent).bg(palette.background),
+            )),
+            cols[0],
+        );
+        let input_area = cols[1];
+        let (lines, caret) = draft_view_styled(
+            view.composer,
+            input_area.width.into(),
+            input_area.height.into(),
+            Style::new().fg(palette.input_fg).bg(palette.input_bg),
+        );
+        frame.render_widget(Paragraph::new(lines), input_area);
+        if let (None, Some((x, y))) = (view.approval, caret) {
+            frame.set_cursor_position((
+                (input_area.x + x).min(full_area.x + full_area.width - 1),
+                (input_area.y + y).min(full_area.y + full_area.height - 1),
+            ));
+        } else {
+            frame.set_cursor_position((input_area.x, input_area.y));
+        }
+    }
+
+    let status_fg = if view.approval.is_some() {
+        palette.warning
+    } else {
+        palette.muted
+    };
+    frame.render_widget(
+        Paragraph::new(view.status)
+            .style(Style::new().fg(status_fg).bg(palette.background))
+            .wrap(Wrap { trim: false }),
         areas[4],
     );
 }

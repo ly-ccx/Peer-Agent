@@ -19,6 +19,7 @@ mod bot_shell;
 mod classic;
 mod model_picker_adapter;
 mod resumed;
+mod theme_store;
 pub(crate) use resumed::resume;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,12 +136,14 @@ pub fn run_mode(initial_mode: InteractiveMode) -> io::Result<CliExit> {
     crate::cancellation::run(|shutdown| async move {
         let mut terminal = TerminalGuard::enter()?;
         let mut current = initial_mode;
+        let mut prefs = theme_store::load_preferences(&home);
         loop {
             let outcome = match current {
                 InteractiveMode::Classic => {
                     classic::run_classic_shell(
                         home.clone(),
                         workspace.clone(),
+                        &mut prefs,
                         &mut terminal,
                         &shutdown,
                     )
@@ -151,6 +154,7 @@ pub fn run_mode(initial_mode: InteractiveMode) -> io::Result<CliExit> {
                         home.clone(),
                         workspace.clone(),
                         true,
+                        &mut prefs,
                         &mut terminal,
                         &shutdown,
                     )
@@ -161,6 +165,7 @@ pub fn run_mode(initial_mode: InteractiveMode) -> io::Result<CliExit> {
                         home.clone(),
                         workspace.clone(),
                         false,
+                        &mut prefs,
                         &mut terminal,
                         &shutdown,
                     )

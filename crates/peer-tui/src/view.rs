@@ -2,6 +2,7 @@ use crate::Composer;
 use ratatui::{
     Frame,
     layout::{Constraint, Layout},
+    style::Style,
     text::Line,
     widgets::{Block, Borders, Paragraph, Wrap},
 };
@@ -15,6 +16,15 @@ pub(crate) fn draft_view(
     composer: &Composer,
     width: usize,
     height: usize,
+) -> (Vec<Line<'static>>, Option<(u16, u16)>) {
+    draft_view_styled(composer, width, height, Style::default())
+}
+
+pub(crate) fn draft_view_styled(
+    composer: &Composer,
+    width: usize,
+    height: usize,
+    style: Style,
 ) -> (Vec<Line<'static>>, Option<(u16, u16)>) {
     if width == 0 || height == 0 {
         return (Vec::new(), None);
@@ -75,7 +85,7 @@ pub(crate) fn draft_view(
         .into_iter()
         .skip(top)
         .take(height)
-        .map(Line::raw)
+        .map(|s| Line::styled(s, style))
         .collect();
     (
         visible,

@@ -13,8 +13,8 @@ use peer_project_agent::NativeProjectHost;
 use peer_protocol::TranscriptRow;
 use peer_store::{TranscriptLimits, TranscriptReader};
 use peer_tui::{
-    ByteBudgetLru, ClassicMessage, ClassicView, Composer, MARKDOWN_WRAP_CACHE_BYTES,
-    ModelPickerState, ReadingAnchor, RenderedBlock, WrapCacheKey, render_classic,
+    ByteBudgetLru, ClassicMessage, ClassicView, Composer, DARK_PALETTE, MARKDOWN_WRAP_CACHE_BYTES,
+    ModelPickerState, ReadingAnchor, RenderedBlock, TuiLocale, WrapCacheKey, render_classic,
 };
 use ratatui::{Terminal, backend::TestBackend};
 use serde_json::json;
@@ -165,9 +165,15 @@ fn main() {
                     f,
                     ClassicView {
                         title: "Peer · 1000-Turn Probe",
+                        workspace_label: "bench",
                         model_badge: "bench",
                         mode_badge: "chat",
                         access_badge: "session",
+                        context_percent: Some(25),
+                        is_running: false,
+                        palette: &DARK_PALETTE,
+                        scheme_id: 0,
+                        locale: TuiLocale::ZhCn,
                         messages: &msgs,
                         live_stream: "",
                         anchor: &anchor,
@@ -175,6 +181,7 @@ fn main() {
                         status: "ok",
                         approval: None,
                         model_picker: &picker,
+                        slash_selected: 0,
                         wrap_cache: &mut cache,
                     },
                 );
@@ -318,9 +325,15 @@ fn main() {
                 f,
                 ClassicView {
                     title: "Peer · 1GiB Probe",
+                    workspace_label: "bench",
                     model_badge: "bench",
                     mode_badge: "chat",
                     access_badge: "session",
+                    context_percent: Some(50),
+                    is_running: false,
+                    palette: &DARK_PALETTE,
+                    scheme_id: 0,
+                    locale: TuiLocale::ZhCn,
                     messages: &msgs_1g,
                     live_stream: "",
                     anchor: &anchor,
@@ -328,6 +341,7 @@ fn main() {
                     status: "ok",
                     approval: None,
                     model_picker: &picker,
+                    slash_selected: 0,
                     wrap_cache: &mut cache,
                 },
             );
@@ -395,9 +409,15 @@ fn main() {
                 f,
                 ClassicView {
                     title: "Peer · Soak Probe",
+                    workspace_label: "bench",
                     model_badge: "bench",
                     mode_badge: "chat",
                     access_badge: "session",
+                    context_percent: Some(15),
+                    is_running: true,
+                    palette: &DARK_PALETTE,
+                    scheme_id: 0,
+                    locale: TuiLocale::ZhCn,
                     messages: &msgs,
                     live_stream: "Peer  streaming soak delta...",
                     anchor: &anchor,
@@ -405,6 +425,7 @@ fn main() {
                     status: "soak",
                     approval: None,
                     model_picker: &picker,
+                    slash_selected: 0,
                     wrap_cache: &mut cache,
                 },
             );
