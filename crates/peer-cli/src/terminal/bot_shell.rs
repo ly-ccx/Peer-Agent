@@ -97,6 +97,7 @@ struct BotShellState<'a> {
     notice: Option<String>,
     selected_provider: Option<String>,
     selected_model: Option<String>,
+    selected_display_name: Option<String>,
     selected_effort: Option<String>,
     model_picker: ModelPickerState,
     overlay: ClassicOverlay,
@@ -148,10 +149,12 @@ impl<'a> BotShellState<'a> {
 
         let mut selected_provider = None;
         let mut selected_model = None;
+        let mut selected_display_name = None;
         let mut selected_effort = None;
         if let Ok(resolved) = resolve_exec(&home, None, None, None, false) {
             selected_provider = Some(resolved.entry.provider_id);
             selected_model = Some(resolved.entry.model_id);
+            selected_display_name = Some(resolved.entry.display_name);
             selected_effort = resolved.selection["reasoningEffort"]
                 .as_str()
                 .map(str::to_owned);
@@ -189,6 +192,7 @@ impl<'a> BotShellState<'a> {
             notice: None,
             selected_provider,
             selected_model,
+            selected_display_name,
             selected_effort,
             model_picker: ModelPickerState::default(),
             overlay: ClassicOverlay::None,
@@ -1047,6 +1051,14 @@ impl<'a> BotShellState<'a> {
                 }
             });
         let is_host = self.lease_banner.is_none();
+        let is_running = self.is_running_activity();
+        let model_badge = self
+            .selected_display_name
+            .as_deref()
+            .or(self.selected_model.as_deref())
+            .unwrap_or("");
+        let effort_badge = self.selected_effort.as_deref().unwrap_or("default");
+        let ws_str = self.workspace.to_string_lossy();
         let palette = self.prefs.palette();
         let scheme_id = self.prefs.scheme.cache_id();
         let locale = self.prefs.locale;
@@ -1063,6 +1075,10 @@ impl<'a> BotShellState<'a> {
                     bots: &self.bots,
                     selected_bot: self.selected_bot,
                     active_bot_name: self.active_bot_name.as_deref(),
+                    workspace_path: Some(ws_str.as_ref()),
+                    model_badge,
+                    effort_badge,
+                    is_running,
                     lease_banner: self.lease_banner.as_deref(),
                     messages: &self.messages,
                     live_activity: live_activity.as_deref(),
@@ -1095,6 +1111,10 @@ impl<'a> BotShellState<'a> {
                 "queued" | "starting" | "running" | "verifying"
             )
         })
+    }
+
+    fn is_running_activity(&self) -> bool {
+        self.active_tick.is_some() || self.has_running_session()
     }
 
     async fn run(
@@ -1148,7 +1168,7 @@ impl<'a> BotShellState<'a> {
             }
 
             if self.screen == BotScreen::Conversation
-                && self.has_running_session()
+                && self.is_running_activity()
                 && self.last_anim_tick.elapsed()
                     >= Duration::from_millis(WORKING_ANIMATION_INTERVAL_MS)
             {
@@ -1159,7 +1179,7 @@ impl<'a> BotShellState<'a> {
 
             // Crossterm's Unix TTY source needs a positive poll budget to read the fd.
             let poll_ms = if self.active_tick.is_some()
-                || (self.screen == BotScreen::Conversation && self.has_running_session())
+                || (self.screen == BotScreen::Conversation && self.is_running_activity())
             {
                 15
             } else {
@@ -1198,6 +1218,7 @@ impl<'a> BotShellState<'a> {
                                         .unwrap_or_else(|| model_id.clone());
                                     self.selected_provider = Some(provider_id);
                                     self.selected_model = Some(model_id);
+                                    self.selected_display_name = Some(label.clone());
                                     self.selected_effort = effort;
                                     self.model_picker.close();
                                     self.notice = Some(format!("本终端会话模型已设为 {label}。"));

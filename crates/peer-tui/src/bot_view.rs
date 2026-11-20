@@ -1,13 +1,11 @@
 //! Pure Ratatui Bot-list & Bot-conversation shell views (ADR 122, ADR 84, ADR 85, ADR 130).
 //!
-//! Matches `apps/tui/src/project-agent/{ProjectApp,BotListView,BotConversationView,CardLine}.tsx`
-//! and Peer Frost palette tokens while keeping all ADR 122 chrome guarantees:
+//! Renders the Peer Frost 2.0 Bot interface while preserving all ADR 122 chrome guarantees:
 //! - List header is `"Peer"` (no host/client banner on list page; no persistent `F2 · 普通任务模式`).
-//! - Opened Bot header is `"Peer · <Name>"` with subtle host/client status on right.
-//! - List rows use 3-line structure (name + right-aligned `MM-DD HH:mm`, `待处理 N    进行中 N`,
-//!   clipped preview on its own line) + `› ` caret selection (no full-row background block).
-//! - Full-width thin `─` divider above full-width `› ` composer.
-//! - Draft recovery warning displays cleanly and never blocks typing.
+//! - Opened Bot header renders `◆ Peer · <Name>` + workspace path + status pill + hairline rule.
+//! - Empty conversation displays centered B3 wordmark hero, identity, and rounded Frost 2.0 cards.
+//! - Active conversation displays Crush/Frost 2.0 left rails (`YOU  ▌`, `BOT`) with rounded cards.
+//! - Rounded elevated composer frame with pill action focus in placeholder + bottom status bar.
 
 use crate::{
     Composer,
@@ -22,17 +20,19 @@ use crate::{
     slash_menu::{BOT_SLASH_ITEMS, GoalMenuStatus, filter_slash_items, render_slash_menu},
     terminal_text,
     theme::{
-        CARET_IDLE, CARET_SELECTED, QUOTE_PREFIX, RUNNING_ACTIVITY_LABEL, SEPARATOR, ThemeMode,
-        TuiLocale, TuiPalette, activity_sweep_color, fill_canvas,
+        BRAND_MARK, CARET_IDLE, CARET_SELECTED, ONLINE_DOT, QUOTE_PREFIX, RUNNING_ACTIVITY_LABEL,
+        SEPARATOR, ThemeMode, TuiLocale, TuiPalette, USER_RAIL_BAR, activity_sweep_color,
+        compact_workspace_path, fill_canvas,
     },
     view::draft_view_styled,
+    wordmark::b3_wordmark_lines,
 };
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Paragraph, Wrap},
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -110,6 +110,10 @@ pub struct BotShellView<'a> {
     pub bots: &'a [BotRowView],
     pub selected_bot: usize,
     pub active_bot_name: Option<&'a str>,
+    pub workspace_path: Option<&'a str>,
+    pub model_badge: &'a str,
+    pub effort_badge: &'a str,
+    pub is_running: bool,
     pub lease_banner: Option<&'a str>,
     pub messages: &'a [BotMessageView],
     pub live_activity: Option<&'a str>,
@@ -298,6 +302,289 @@ fn render_bot_running_bar(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn short_model_name(model_badge: &str) -> &str {
+    model_badge
+        .split(" · ")
+        .next()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(model_badge)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_rounded_card_lines(
+    lines: &mut Vec<(Line<'static>, Vec<LineLink>)>,
+    card: &BotCardRow,
+    focused: bool,
+    selected_option: usize,
+    max_width: usize,
+    left_indent: usize,
+    palette: &TuiPalette,
+    locale: TuiLocale,
+    show_numbered_actions: bool,
+) {
+    let zh = locale.is_zh();
+    let surface_bg = if focused {
+        palette.selection
+    } else {
+        palette.panel
+    };
+    let bg_canvas = Style::new().bg(palette.background);
+
+    if max_width < 22 {
+        let pad_str = " ".repeat(left_indent);
+        let mut legacy = Vec::new();
+        push_card_lines(
+            &mut legacy,
+            card,
+            focused,
+            selected_option,
+            max_width,
+            palette,
+            show_numbered_actions,
+        );
+        for line in legacy {
+            let mut spans = Vec::new();
+            if left_indent > 0 {
+                spans.push(Span::styled(pad_str.clone(), bg_canvas));
+            }
+            spans.extend(line.spans);
+            lines.push((Line::from(spans), Vec::new()));
+        }
+        return;
+    }
+
+    let box_w = max_width.min(76);
+    let inner_w = box_w.saturating_sub(4);
+    let border_fg = if focused {
+        palette.border_focus
+    } else {
+        palette.border
+    };
+    let indent_span = (left_indent > 0).then(|| Span::styled(" ".repeat(left_indent), bg_canvas));
+    let left_edge = Span::styled("│", Style::new().fg(border_fg).bg(palette.background));
+    let right_edge = Span::styled("│", Style::new().fg(border_fg).bg(palette.background));
+    let space_fill = Style::new().bg(surface_bg);
+
+    let make_border_row = |ch_left: &str, ch_right: &str| -> Line<'static> {
+        let mut spans = Vec::with_capacity(2);
+        if let Some(ref ind) = indent_span {
+            spans.push(ind.clone());
+        }
+        spans.push(Span::styled(
+            format!("{ch_left}{}{ch_right}", SEPARATOR.repeat(box_w - 2)),
+            Style::new().fg(border_fg).bg(palette.background),
+        ));
+        Line::from(spans)
+    };
+
+    let make_content_row = |inner_spans: Vec<Span<'static>>, used_w: usize| -> Line<'static> {
+        let pad = inner_w.saturating_sub(used_w);
+        let mut spans = Vec::with_capacity(inner_spans.len() + 6);
+        if let Some(ref ind) = indent_span {
+            spans.push(ind.clone());
+        }
+        spans.push(left_edge.clone());
+        spans.push(Span::styled(" ", space_fill));
+        spans.extend(inner_spans);
+        if pad > 0 {
+            spans.push(Span::styled(" ".repeat(pad), space_fill));
+        }
+        spans.push(Span::styled(" ", space_fill));
+        spans.push(right_edge.clone());
+        Line::from(spans)
+    };
+
+    lines.push((make_border_row("╭", "╮"), Vec::new()));
+
+    // 1. Header row: [N] · kind · title (left) + status badge (right)
+    let badge_text = if card.actions.is_empty() {
+        ""
+    } else if focused {
+        if zh { "● 已选中" } else { "● Focused" }
+    } else if zh {
+        "Tab 选择"
+    } else {
+        "Tab"
+    };
+    let badge_w = badge_text.width();
+    let show_badge = !badge_text.is_empty() && inner_w >= badge_w + 14;
+    let left_budget = if show_badge {
+        inner_w.saturating_sub(badge_w + 2)
+    } else {
+        inner_w
+    };
+
+    let num_str = format!("[{}]", card.number);
+    let kind_str = if card.kind.trim().is_empty() {
+        String::new()
+    } else {
+        format!(" {} ·", terminal_text(&card.kind))
+    };
+    let prefix_w = num_str.width() + kind_str.width() + 1;
+    let title_budget = left_budget.saturating_sub(prefix_w);
+    let clean_title = clip_bot_line(&terminal_text(&card.title), title_budget);
+    let mut header_spans = vec![Span::styled(
+        num_str,
+        Style::new()
+            .fg(palette.warning)
+            .bg(surface_bg)
+            .add_modifier(Modifier::BOLD),
+    )];
+    let mut left_w = header_spans[0].width();
+    if !kind_str.is_empty() && left_w + kind_str.width() < left_budget {
+        left_w += kind_str.width();
+        header_spans.push(Span::styled(
+            kind_str,
+            Style::new().fg(palette.accent_soft).bg(surface_bg),
+        ));
+    }
+    if left_w + 1 < left_budget && !clean_title.is_empty() {
+        let max_t = left_budget.saturating_sub(left_w + 1);
+        let t = clip_bot_line(&clean_title, max_t);
+        left_w += 1 + t.width();
+        header_spans.push(Span::styled(" ", space_fill));
+        header_spans.push(Span::styled(
+            t,
+            Style::new()
+                .fg(palette.text)
+                .bg(surface_bg)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    if show_badge {
+        let gap = inner_w.saturating_sub(left_w + badge_w);
+        if gap > 0 {
+            header_spans.push(Span::styled(" ".repeat(gap), space_fill));
+        }
+        let badge_style = if focused {
+            Style::new()
+                .fg(palette.accent)
+                .bg(surface_bg)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::new().fg(palette.muted).bg(surface_bg)
+        };
+        header_spans.push(Span::styled(badge_text, badge_style));
+        left_w += gap + badge_w;
+    }
+    lines.push((make_content_row(header_spans, left_w), Vec::new()));
+
+    // 2. Optional summary row
+    let has_summary = !card.summary.trim().is_empty();
+    if has_summary {
+        let sum = clip_bot_line(&terminal_text(&card.summary), inner_w);
+        let sw = sum.width();
+        lines.push((
+            make_content_row(
+                vec![Span::styled(
+                    sum,
+                    Style::new().fg(palette.text_soft).bg(surface_bg),
+                )],
+                sw,
+            ),
+            Vec::new(),
+        ));
+    }
+
+    // 3. Actions inside box: numbered rows on `/cards`, pill chips on Conversation
+    if show_numbered_actions {
+        for (idx, act) in card.actions.iter().enumerate() {
+            let active_opt = focused && idx == selected_option;
+            let caret = if active_opt {
+                CARET_SELECTED
+            } else {
+                CARET_IDLE
+            };
+            let style = if active_opt {
+                Style::new()
+                    .fg(palette.accent)
+                    .bg(surface_bg)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::new().fg(palette.text_soft).bg(surface_bg)
+            };
+            let row_txt = clip_bot_line(
+                &format!("{caret}{}. {}", idx + 1, terminal_text(act)),
+                inner_w,
+            );
+            let rw = row_txt.width();
+            lines.push((
+                make_content_row(vec![Span::styled(row_txt, style)], rw),
+                Vec::new(),
+            ));
+        }
+    } else if !card.actions.is_empty() {
+        if !has_summary {
+            lines.push((make_content_row(Vec::new(), 0), Vec::new()));
+        }
+        let mut pill_spans: Vec<Span<'static>> = Vec::new();
+        let mut pill_w = 0usize;
+        for (idx, act) in card.actions.iter().enumerate() {
+            let active_opt = focused && idx == selected_option;
+            let sep_w = usize::from(idx > 0) * 2;
+            let chrome_w = if active_opt { 6 } else { 4 };
+            let avail = inner_w.saturating_sub(pill_w + sep_w + chrome_w);
+            if avail < 4 {
+                break;
+            }
+            if sep_w > 0 {
+                pill_spans.push(Span::styled("  ", space_fill));
+                pill_w += sep_w;
+            }
+            if active_opt {
+                pill_spans.push(Span::styled(
+                    "› ",
+                    Style::new()
+                        .fg(palette.accent)
+                        .bg(surface_bg)
+                        .add_modifier(Modifier::BOLD),
+                ));
+                pill_w += 2;
+            }
+            let act_clipped = clip_bot_line(&terminal_text(act), avail);
+            let chip = format!("[ {act_clipped} ]");
+            let chip_w = chip.width();
+            let chip_style = if active_opt {
+                Style::new()
+                    .fg(palette.text_selection_fg)
+                    .bg(palette.accent)
+                    .add_modifier(Modifier::BOLD)
+            } else if focused {
+                Style::new().fg(palette.muted).bg(surface_bg)
+            } else {
+                Style::new().fg(palette.text_soft).bg(palette.panel_raised)
+            };
+            pill_spans.push(Span::styled(chip, chip_style));
+            pill_w += chip_w;
+        }
+        lines.push((make_content_row(pill_spans, pill_w), Vec::new()));
+
+        if focused {
+            let hint = if zh {
+                "←/→ 切选项 · Enter 执行 · Esc 返回"
+            } else {
+                "←/→ option · Enter run · Esc back"
+            };
+            let clipped = clip_bot_line(hint, inner_w);
+            let hw = clipped.width();
+            lines.push((
+                make_content_row(
+                    vec![Span::styled(
+                        clipped,
+                        Style::new().fg(palette.muted).bg(surface_bg),
+                    )],
+                    hw,
+                ),
+                Vec::new(),
+            ));
+        }
+    }
+
+    lines.push((make_border_row("╰", "╯"), Vec::new()));
+}
+
+#[allow(clippy::too_many_arguments)]
 fn push_card_lines(
     lines: &mut Vec<Line<'static>>,
     card: &BotCardRow,
@@ -361,7 +648,7 @@ fn push_card_lines(
             lines.push(Line::styled(format!(" {caret}{}. {}", idx + 1, act), style));
         }
     }
-    // In Conversation view, card actions stay on the composer row, not inside the card box.
+    // In Conversation view, pill chips render inside `push_rounded_card_lines`.
 }
 
 fn render_bot_list(
@@ -529,10 +816,376 @@ fn render_bot_list(
     );
 }
 
+fn push_inline_task_rows(
+    lines: &mut Vec<(Line<'static>, Vec<LineLink>)>,
+    tasks: &[BotTaskRow],
+    width: usize,
+    left_indent: usize,
+    show_section_title: bool,
+    palette: &TuiPalette,
+    locale: TuiLocale,
+) {
+    if tasks.is_empty() {
+        return;
+    }
+    let bg_style = Style::new().bg(palette.background);
+    let indent = " ".repeat(left_indent);
+    if show_section_title {
+        let title = if locale.is_zh() {
+            "── 委派任务 ──"
+        } else {
+            "── Delegated tasks ──"
+        };
+        let clipped = clip_bot_line(title, width);
+        let text = if left_indent > 0 {
+            format!("{indent}{clipped}")
+        } else {
+            clipped
+        };
+        lines.push((
+            Line::styled(text, Style::new().fg(palette.subtle).bg(palette.background)),
+            Vec::new(),
+        ));
+    }
+    for task in tasks {
+        let glyph = match task.status.as_str() {
+            "running" => '›',
+            "completed" | "accepted" => '✓',
+            "failed" => '×',
+            _ => '·',
+        };
+        let fg = match task.status.as_str() {
+            "failed" => palette.danger,
+            "completed" | "accepted" => palette.success,
+            _ => palette.text_soft,
+        };
+        let raw_title = if task.title.trim().is_empty() {
+            task.session_id.as_str()
+        } else {
+            task.title.as_str()
+        };
+        let clean_title = terminal_text(raw_title);
+        let status_label = project_status_label(locale, &task.status);
+        let clipped = clip_bot_line(&format!("{glyph} {clean_title} · {status_label}"), width);
+        let mut spans = Vec::with_capacity(2);
+        if left_indent > 0 {
+            spans.push(Span::styled(indent.clone(), bg_style));
+        }
+        spans.push(Span::styled(
+            clipped,
+            Style::new().fg(fg).bg(palette.background),
+        ));
+        lines.push((Line::from(spans), Vec::new()));
+    }
+}
+
+fn render_bot_topbar(
+    frame: &mut Frame<'_>,
+    header_area: Rect,
+    divider_area: Option<Rect>,
+    view: &BotShellView<'_>,
+) {
+    let palette = view.palette;
+    let zh = view.locale.is_zh();
+    let hw = usize::from(header_area.width).max(1);
+    let bg = Style::new().bg(palette.background);
+
+    let brand = format!("{BRAND_MARK} ");
+    let name_part = match view
+        .active_bot_name
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        Some(name) => format!(
+            "Peer · {}",
+            clip_bot_line(name, hw.saturating_sub(24).max(6))
+        ),
+        None => "Peer".to_owned(),
+    };
+    let subview_tag = match view.screen {
+        BotScreen::Tasks => Some(if zh { " · 任务" } else { " · Tasks" }),
+        BotScreen::TaskDetail { .. } => Some(if zh { " · 任务详情" } else { " · Task" }),
+        BotScreen::Memory => Some(if zh { " · 记忆" } else { " · Memory" }),
+        BotScreen::Objectives => Some(if zh { " · 目标" } else { " · Objectives" }),
+        BotScreen::Cards => Some(if zh { " · 待处理" } else { " · Needs you" }),
+        BotScreen::Help => Some(if zh { " · 命令" } else { " · Help" }),
+        _ => None,
+    };
+
+    let dot_str = format!("{ONLINE_DOT} ");
+    let dot_color = if view.is_host {
+        palette.success
+    } else {
+        palette.warning
+    };
+    let host_label = if view.is_host {
+        if zh {
+            "由本终端运行"
+        } else {
+            "Running here"
+        }
+    } else if zh {
+        "客户端 · 只读"
+    } else {
+        "Client · read-only"
+    };
+
+    let pending_count = view.cards.len();
+    let running_count = view
+        .tasks
+        .iter()
+        .filter(|t| is_running_session_status(&t.status))
+        .count();
+    let pending_label = if pending_count > 0 {
+        Some(if zh {
+            format!(" · 待处理 {pending_count}")
+        } else {
+            format!(" · needs you {pending_count}")
+        })
+    } else {
+        None
+    };
+    let running_label = if running_count > 0 {
+        Some(if zh {
+            format!(" · 进行中 {running_count}")
+        } else {
+            format!(" · running {running_count}")
+        })
+    } else {
+        None
+    };
+
+    let base_right_w = dot_str.width() + host_label.width();
+    let base_left_w = brand.width() + name_part.width();
+    let mut extra_right_w = 0usize;
+    let show_pending = pending_label
+        .as_ref()
+        .is_some_and(|s| base_left_w + base_right_w + s.width() + 4 <= hw);
+    if show_pending {
+        extra_right_w += pending_label.as_ref().map_or(0, |s| s.width());
+    }
+    let show_running = running_label
+        .as_ref()
+        .is_some_and(|s| base_left_w + base_right_w + extra_right_w + s.width() + 4 <= hw);
+    if show_running {
+        extra_right_w += running_label.as_ref().map_or(0, |s| s.width());
+    }
+    let total_right_w = base_right_w + extra_right_w;
+
+    let show_subview =
+        subview_tag.is_some_and(|tag| base_left_w + tag.width() + total_right_w + 3 <= hw);
+    let subview_w = if show_subview {
+        subview_tag.map_or(0, |t| t.width())
+    } else {
+        0
+    };
+    let ws_budget = hw.saturating_sub(base_left_w + subview_w + total_right_w + 4);
+    let ws_part = view
+        .workspace_path
+        .map(compact_workspace_path)
+        .filter(|s| !s.is_empty() && ws_budget >= 8)
+        .map(|s| format!("  {}", clip_bot_line(&s, ws_budget.saturating_sub(2))))
+        .unwrap_or_default();
+
+    let left_w = base_left_w + subview_w + ws_part.width();
+    let gap = hw.saturating_sub(left_w + total_right_w);
+
+    let mut spans = vec![
+        Span::styled(
+            brand,
+            Style::new().fg(palette.accent).bg(palette.background),
+        ),
+        Span::styled(
+            name_part,
+            Style::new()
+                .fg(palette.text)
+                .bg(palette.background)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ];
+    if show_subview && let Some(tag) = subview_tag {
+        spans.push(Span::styled(
+            tag,
+            Style::new().fg(palette.accent_soft).bg(palette.background),
+        ));
+    }
+    if !ws_part.is_empty() {
+        spans.push(Span::styled(
+            ws_part,
+            Style::new().fg(palette.muted).bg(palette.background),
+        ));
+    }
+    if gap >= 2 {
+        spans.push(Span::styled(" ".repeat(gap), bg));
+        spans.push(Span::styled(
+            dot_str,
+            Style::new().fg(dot_color).bg(palette.background),
+        ));
+        spans.push(Span::styled(
+            host_label,
+            Style::new().fg(palette.muted).bg(palette.background),
+        ));
+        if show_pending && let Some(lbl) = pending_label {
+            spans.push(Span::styled(
+                lbl,
+                Style::new().fg(palette.warning).bg(palette.background),
+            ));
+        }
+        if show_running && let Some(lbl) = running_label {
+            spans.push(Span::styled(
+                lbl,
+                Style::new().fg(palette.tool_running).bg(palette.background),
+            ));
+        }
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)), header_area);
+
+    if let Some(div_area) = divider_area {
+        frame.render_widget(
+            Paragraph::new(Line::styled(
+                SEPARATOR.repeat(usize::from(div_area.width)),
+                Style::new().fg(palette.border).bg(palette.background),
+            )),
+            div_area,
+        );
+    }
+}
+
+fn render_bot_status_bar(frame: &mut Frame<'_>, area: Rect, view: &BotShellView<'_>) {
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+    let palette = view.palette;
+    let zh = view.locale.is_zh();
+    let sw = usize::from(area.width).max(1);
+    let narrow = sw < 56;
+    let bg = Style::new().bg(palette.background);
+    let subtle = Style::new().fg(palette.subtle).bg(palette.background);
+    let muted = Style::new().fg(palette.muted).bg(palette.background);
+    let soft = Style::new().fg(palette.text_soft).bg(palette.background);
+    let accent = Style::new()
+        .fg(palette.accent)
+        .bg(palette.background)
+        .add_modifier(Modifier::BOLD);
+
+    let host_val = if view.is_host {
+        if zh { "本机宿主" } else { "local" }
+    } else if zh {
+        "只读客户端"
+    } else {
+        "client"
+    };
+    let host_fg = if view.is_host {
+        palette.success
+    } else {
+        palette.warning
+    };
+
+    let mut left_spans = vec![
+        Span::styled("mode ", subtle),
+        Span::styled("bot", accent),
+        Span::styled(" · ", subtle),
+        Span::styled("host ", subtle),
+        Span::styled(host_val, Style::new().fg(host_fg).bg(palette.background)),
+    ];
+
+    let pending_count = view.cards.len();
+    if pending_count > 0 && (narrow || sw >= 72) {
+        left_spans.push(Span::styled(" · ", subtle));
+        left_spans.push(Span::styled(
+            if zh {
+                format!("待处理 {pending_count}")
+            } else {
+                format!("needs you {pending_count}")
+            },
+            Style::new().fg(palette.warning).bg(palette.background),
+        ));
+    }
+
+    let running_count = view
+        .tasks
+        .iter()
+        .filter(|t| is_running_session_status(&t.status))
+        .count();
+    if running_count > 0 && (narrow || sw >= 84) {
+        left_spans.push(Span::styled(" · ", subtle));
+        left_spans.push(Span::styled(
+            if zh {
+                format!("进行中 {running_count}")
+            } else {
+                format!("running {running_count}")
+            },
+            Style::new().fg(palette.tool_running).bg(palette.background),
+        ));
+    }
+
+    let left_w: usize = left_spans.iter().map(|s| s.width()).sum();
+
+    let model_raw = short_model_name(view.model_badge).trim();
+    let has_model = !model_raw.is_empty();
+    let model_text = if has_model {
+        model_raw.to_owned()
+    } else if zh {
+        "未配置模型".to_owned()
+    } else {
+        "no model".to_owned()
+    };
+    let effort_text = if view.effort_badge.trim().is_empty() {
+        "default"
+    } else {
+        view.effort_badge.trim()
+    };
+    let hint_suffix = if sw >= 96 {
+        if zh {
+            " · / 命令 · F3 模型"
+        } else {
+            " · / cmds · F3 model"
+        }
+    } else {
+        ""
+    };
+
+    let model_budget = if narrow {
+        sw.saturating_sub(effort_text.width() + hint_suffix.width() + 4)
+    } else {
+        sw.saturating_sub(left_w + effort_text.width() + hint_suffix.width() + 7)
+    };
+    let clipped_model = clip_bot_line(&model_text, model_budget.max(4));
+    let mut right_spans = vec![
+        Span::styled(clipped_model, if has_model { soft } else { muted }),
+        Span::styled(" · ", subtle),
+        Span::styled(effort_text, soft),
+    ];
+    if !hint_suffix.is_empty() {
+        right_spans.push(Span::styled(hint_suffix, muted));
+    }
+    let right_w: usize = right_spans.iter().map(|s| s.width()).sum();
+
+    if narrow && area.height >= 2 {
+        frame.render_widget(
+            Paragraph::new(vec![Line::from(left_spans), Line::from(right_spans)]),
+            area,
+        );
+        return;
+    }
+
+    let gap = sw.saturating_sub(left_w + right_w);
+    if gap >= 2 {
+        let mut combined = left_spans;
+        combined.push(Span::styled(" ".repeat(gap), bg));
+        combined.extend(right_spans);
+        frame.render_widget(Paragraph::new(Line::from(combined)), area);
+    } else {
+        frame.render_widget(Paragraph::new(Line::from(left_spans)), area);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn render_conversation_body(
     frame: &mut Frame<'_>,
     area: Rect,
+    active_bot_name: Option<&str>,
+    workspace_path: Option<&str>,
     messages: &[BotMessageView],
     cards: &[BotCardRow],
     tasks: &[BotTaskRow],
@@ -553,15 +1206,237 @@ fn render_conversation_body(
         return;
     }
 
-    let mut rendered_card_ids = Vec::new();
-    let mut all_lines: Vec<(Line<'static>, Vec<LineLink>)> = Vec::new();
+    let zh = locale.is_zh();
+    let bg = Style::new().bg(palette.background);
     let focused_card_num = cards.get(selected_card).map(|c| c.number);
 
+    // Centered empty-state Hero when no messages or live stream are present yet.
+    if messages.is_empty() && live_activity.is_none() {
+        if height >= 12 && width >= 30 {
+            let mut hero_lines: Vec<(Line<'static>, Vec<LineLink>)> = Vec::new();
+            if height >= 18 && width >= 42 {
+                let (wm_lines, wm_w) = b3_wordmark_lines(area.width, palette);
+                let wm_pad = width.saturating_sub(usize::from(wm_w)) / 2;
+                let wm_pad_str = (wm_pad > 0).then(|| " ".repeat(wm_pad));
+                for line in wm_lines {
+                    if let Some(ref pad) = wm_pad_str {
+                        let mut spans = vec![Span::styled(pad.clone(), bg)];
+                        spans.extend(line.spans);
+                        hero_lines.push((Line::from(spans), Vec::new()));
+                    } else {
+                        hero_lines.push((line, Vec::new()));
+                    }
+                }
+                hero_lines.push((Line::styled("", bg), Vec::new()));
+            }
+
+            let bot_name = active_bot_name
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or("Peer");
+            let ws_short = workspace_path
+                .map(compact_workspace_path)
+                .filter(|s| !s.is_empty());
+            let mut id_spans = vec![
+                Span::styled(
+                    format!("{BRAND_MARK} "),
+                    Style::new().fg(palette.accent).bg(palette.background),
+                ),
+                Span::styled(
+                    clip_bot_line(bot_name, width.saturating_sub(4).max(6)),
+                    Style::new()
+                        .fg(palette.text)
+                        .bg(palette.background)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ];
+            let mut id_w: usize = id_spans.iter().map(|s| s.width()).sum();
+            if let Some(ws) = ws_short {
+                let budget = width.saturating_sub(id_w + 5);
+                if budget >= 6 {
+                    let ws_piece = format!("  ·  {}", clip_bot_line(&ws, budget));
+                    id_w += ws_piece.width();
+                    id_spans.push(Span::styled(
+                        ws_piece,
+                        Style::new().fg(palette.muted).bg(palette.background),
+                    ));
+                }
+            }
+            let id_pad = width.saturating_sub(id_w) / 2;
+            if id_pad > 0 {
+                id_spans.insert(0, Span::styled(" ".repeat(id_pad), bg));
+            }
+            hero_lines.push((Line::from(id_spans), Vec::new()));
+
+            let subtitle = if zh {
+                "输入消息即可对话或委派任务 · /tasks 任务 · /bots 切换 · /model 模型"
+            } else {
+                "Send a message to chat or delegate · /tasks · /bots · /model"
+            };
+            let sub_clipped = clip_bot_line(subtitle, width);
+            let sub_pad = width.saturating_sub(sub_clipped.width()) / 2;
+            hero_lines.push((
+                Line::styled(
+                    format!("{}{sub_clipped}", " ".repeat(sub_pad)),
+                    Style::new().fg(palette.muted).bg(palette.background),
+                ),
+                Vec::new(),
+            ));
+
+            if !cards.is_empty() {
+                let card_max_w = width.saturating_sub(4).min(76);
+                let card_pad = width.saturating_sub(card_max_w) / 2;
+                for card in cards {
+                    hero_lines.push((Line::styled("", bg), Vec::new()));
+                    let is_focused = card_focus && focused_card_num == Some(card.number);
+                    push_rounded_card_lines(
+                        &mut hero_lines,
+                        card,
+                        is_focused,
+                        selected_option,
+                        card_max_w,
+                        card_pad,
+                        palette,
+                        locale,
+                        false,
+                    );
+                }
+            }
+
+            if !tasks.is_empty() {
+                hero_lines.push((Line::styled("", bg), Vec::new()));
+                let block_w = width.saturating_sub(4).min(76);
+                let task_pad = width.saturating_sub(block_w) / 2;
+                push_inline_task_rows(
+                    &mut hero_lines,
+                    tasks,
+                    block_w,
+                    task_pad,
+                    false,
+                    palette,
+                    locale,
+                );
+            }
+
+            if hero_lines.len() <= height {
+                let top_pad = (height - hero_lines.len()) / 2;
+                let mut padded = Vec::with_capacity(top_pad + hero_lines.len());
+                for _ in 0..top_pad {
+                    padded.push(Line::styled("", bg));
+                }
+                for (line, _) in hero_lines {
+                    padded.push(line);
+                }
+                frame.render_widget(Paragraph::new(padded), area);
+                return;
+            }
+
+            // Overflow fallback cleanly pages from bottom.
+            let start = hero_lines.len().saturating_sub(height);
+            let visible: Vec<Line<'static>> =
+                hero_lines.into_iter().skip(start).map(|(l, _)| l).collect();
+            frame.render_widget(Paragraph::new(visible), area);
+            return;
+        }
+
+        // Tiny viewport fallback when height < 12 or width < 30.
+        let mut tiny_lines: Vec<(Line<'static>, Vec<LineLink>)> = Vec::new();
+        for card in cards {
+            let is_focused = card_focus && focused_card_num == Some(card.number);
+            push_rounded_card_lines(
+                &mut tiny_lines,
+                card,
+                is_focused,
+                selected_option,
+                width,
+                0,
+                palette,
+                locale,
+                false,
+            );
+            tiny_lines.push((Line::styled("", bg), Vec::new()));
+        }
+        push_inline_task_rows(&mut tiny_lines, tasks, width, 0, false, palette, locale);
+        if tiny_lines.is_empty() {
+            let empty_text = if zh {
+                "这里暂时没有内容"
+            } else {
+                "Nothing here yet"
+            };
+            frame.render_widget(
+                Paragraph::new(empty_text)
+                    .style(Style::new().fg(palette.muted).bg(palette.background)),
+                area,
+            );
+            return;
+        }
+        let start = tiny_lines.len().saturating_sub(height);
+        let visible: Vec<Line<'static>> =
+            tiny_lines.into_iter().skip(start).map(|(l, _)| l).collect();
+        frame.render_widget(Paragraph::new(visible), area);
+        return;
+    }
+
+    // Active conversation stream with Crush/Frost 2.0 left rail when width permits.
+    let use_rail = width >= 44;
+    let body_indent = if use_rail { 6usize } else { 0usize };
+    let mut rendered_card_ids = Vec::new();
+    let mut all_lines: Vec<(Line<'static>, Vec<LineLink>)> = Vec::new();
+
     for (msg_idx, msg) in messages.iter().enumerate() {
-        if msg.kind != "system_card" {
-            let (prefix, header_style) = if msg.role == "user" {
+        let is_system_card = msg.kind == "system_card";
+        let is_user = msg.role == "user";
+        let rail_cols: usize = if !use_rail || is_system_card {
+            0
+        } else if is_user {
+            8
+        } else {
+            6
+        };
+        let stamp = msg
+            .created_at
+            .as_deref()
+            .map(format_bot_when)
+            .unwrap_or_default();
+        let mut emitted_first_rail = false;
+
+        let push_rail_prefix = |spans: &mut Vec<Span<'static>>, is_first: bool| {
+            if !use_rail || is_system_card {
+                return;
+            }
+            if is_user {
+                if is_first {
+                    spans.push(Span::styled(
+                        " YOU  ",
+                        Style::new()
+                            .fg(palette.user)
+                            .bg(palette.background)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                } else {
+                    spans.push(Span::styled("      ", bg));
+                }
+                spans.push(Span::styled(
+                    USER_RAIL_BAR,
+                    Style::new().fg(palette.user).bg(palette.background),
+                ));
+            } else if is_first {
+                spans.push(Span::styled(
+                    " BOT  ",
+                    Style::new()
+                        .fg(palette.accent)
+                        .bg(palette.background)
+                        .add_modifier(Modifier::BOLD),
+                ));
+            } else {
+                spans.push(Span::styled("      ", bg));
+            }
+        };
+
+        if !use_rail && !is_system_card {
+            let (prefix, header_style) = if is_user {
                 (
-                    "你",
+                    "YOU",
                     Style::new()
                         .fg(palette.user)
                         .bg(palette.background)
@@ -569,23 +1444,18 @@ fn render_conversation_body(
                 )
             } else {
                 (
-                    "Bot",
+                    "BOT",
                     Style::new()
                         .fg(palette.accent)
                         .bg(palette.background)
                         .add_modifier(Modifier::BOLD),
                 )
             };
-            let stamp = msg
-                .created_at
-                .as_deref()
-                .map(format_bot_when)
-                .unwrap_or_default();
             let mut header_spans = vec![Span::styled(prefix, header_style)];
             if !stamp.is_empty() {
-                header_spans.push(Span::styled("  ", Style::new().bg(palette.background)));
+                header_spans.push(Span::styled("  ", bg));
                 header_spans.push(Span::styled(
-                    stamp,
+                    stamp.clone(),
                     Style::new().fg(palette.muted).bg(palette.background),
                 ));
             }
@@ -595,23 +1465,24 @@ fn render_conversation_body(
         if let Some(ref echo) = msg.reply_to_echo
             && !echo.is_empty()
         {
-            all_lines.push((
-                Line::from(vec![
-                    Span::styled(
-                        "回复: ",
-                        Style::new().fg(palette.muted).bg(palette.background),
-                    ),
-                    Span::styled(
-                        QUOTE_PREFIX,
-                        Style::new().fg(palette.border_focus).bg(palette.background),
-                    ),
-                    Span::styled(
-                        clip_bot_line(echo, width.saturating_sub(8).max(8)),
-                        Style::new().fg(palette.text_soft).bg(palette.background),
-                    ),
-                ]),
-                Vec::new(),
+            let content_w = width.saturating_sub(rail_cols + 8).max(8);
+            let mut spans = Vec::new();
+            let is_first = !emitted_first_rail;
+            emitted_first_rail = true;
+            push_rail_prefix(&mut spans, is_first);
+            spans.push(Span::styled(
+                if zh { "回复: " } else { "Reply: " },
+                Style::new().fg(palette.muted).bg(palette.background),
             ));
+            spans.push(Span::styled(
+                QUOTE_PREFIX,
+                Style::new().fg(palette.border_focus).bg(palette.background),
+            ));
+            spans.push(Span::styled(
+                clip_bot_line(echo, content_w),
+                Style::new().fg(palette.text_soft).bg(palette.background),
+            ));
+            all_lines.push((Line::from(spans), Vec::new()));
         }
 
         let body_text = msg
@@ -619,45 +1490,83 @@ fn render_conversation_body(
             .as_deref()
             .filter(|s| !s.is_empty())
             .unwrap_or(msg.content.as_str());
-        if !body_text.is_empty() && !(msg.kind == "system_card" && msg.card_number.is_some()) {
+        if !body_text.is_empty() && !(is_system_card && msg.card_number.is_some()) {
+            let content_w = width.saturating_sub(rail_cols).max(12);
             let body_style = Style::new().fg(palette.text).bg(palette.background);
             let cache_key = WrapCacheKey {
                 item_hash: stable_hash(&msg.id),
                 revision: msg.revision,
-                width: area.width,
+                width: content_w as u16,
                 scheme: scheme_id,
             };
             let block = if let Some(cached) = wrap_cache.get(&cache_key) {
                 cached.clone()
             } else {
-                let computed = render_markdown_themed(body_text, width, body_style, 160, palette);
+                let computed =
+                    render_markdown_themed(body_text, content_w, body_style, 160, palette);
                 wrap_cache.insert(cache_key, computed.clone());
                 computed
             };
             let block_prefix =
                 (cache_key.item_hash as u32) ^ ((msg_idx as u32).wrapping_add(1) << 12);
             for styled in &block.lines {
-                let links = styled
+                let is_first = !emitted_first_rail;
+                emitted_first_rail = true;
+                let mut links: Vec<LineLink> = styled
                     .links
                     .iter()
                     .cloned()
                     .map(|mut link| {
                         link.id = stamp_screen_link_id(block_prefix, link.id);
+                        link.col_start = link.col_start.saturating_add(rail_cols as u16);
+                        link.col_end = link.col_end.saturating_add(rail_cols as u16);
                         link
                     })
                     .collect();
-                all_lines.push((styled.to_ratatui_line(), links));
+                let mut line = styled.to_ratatui_line();
+                if use_rail && !is_system_card {
+                    let line_w = rail_cols + line.width();
+                    let mut spans = Vec::with_capacity(line.spans.len() + 4);
+                    push_rail_prefix(&mut spans, is_first);
+                    spans.extend(line.spans);
+                    if is_first && !stamp.is_empty() && line_w + 2 + stamp.width() <= width {
+                        spans.push(Span::styled(" ".repeat(width - line_w - stamp.width()), bg));
+                        spans.push(Span::styled(
+                            stamp.clone(),
+                            Style::new().fg(palette.muted).bg(palette.background),
+                        ));
+                    }
+                    line = Line::from(spans);
+                }
+                all_lines.push((line, std::mem::take(&mut links)));
             }
         }
 
+        if use_rail && !is_system_card && !emitted_first_rail {
+            let mut spans = Vec::new();
+            push_rail_prefix(&mut spans, true);
+            all_lines.push((Line::from(spans), Vec::new()));
+        }
+
         if !msg.marks.is_empty() {
-            all_lines.push((
-                Line::styled(
-                    format!("结果: {}", msg.marks.join(" · ")),
-                    Style::new().fg(palette.success).bg(palette.background),
+            let mark_indent = if is_system_card { 0 } else { body_indent };
+            let mark_text = clip_bot_line(
+                &format!(
+                    "✓ {}: {}",
+                    if zh { "结果" } else { "Result" },
+                    msg.marks.join(" · ")
                 ),
-                Vec::new(),
+                width.saturating_sub(mark_indent).max(8),
+            );
+            let mut spans = Vec::new();
+            if mark_indent > 0 {
+                spans.push(Span::styled(" ".repeat(mark_indent), bg));
+            }
+            spans.push(Span::styled(
+                mark_text,
+                Style::new().fg(palette.success).bg(palette.background),
             ));
+            all_lines.push((Line::from(spans), Vec::new()));
         }
 
         if let Some(cnum) = msg.card_number
@@ -665,128 +1574,110 @@ fn render_conversation_body(
         {
             rendered_card_ids.push(cnum);
             let is_focused = card_focus && focused_card_num == Some(cnum);
-            let mut card_lines = Vec::new();
-            push_card_lines(
-                &mut card_lines,
+            let card_max_w = width.saturating_sub(body_indent).max(12);
+            push_rounded_card_lines(
+                &mut all_lines,
                 card,
                 is_focused,
                 selected_option,
-                width,
+                card_max_w,
+                body_indent,
                 palette,
+                locale,
                 false,
             );
-            for line in card_lines {
-                all_lines.push((line, Vec::new()));
-            }
         } else if let Some(cnum) = msg.card_number {
-            all_lines.push((
-                Line::styled(
-                    format!("卡片 [#{cnum}]"),
-                    Style::new().fg(palette.warning).bg(palette.background),
-                ),
-                Vec::new(),
+            let mut spans = Vec::new();
+            if body_indent > 0 {
+                spans.push(Span::styled(" ".repeat(body_indent), bg));
+            }
+            spans.push(Span::styled(
+                format!("卡片 [#{cnum}]"),
+                Style::new().fg(palette.warning).bg(palette.background),
             ));
+            all_lines.push((Line::from(spans), Vec::new()));
         }
 
-        all_lines.push((
-            Line::styled("", Style::new().bg(palette.background)),
-            Vec::new(),
-        ));
+        all_lines.push((Line::styled("", bg), Vec::new()));
     }
 
-    // Any remaining active cards not directly attached to a visible message
+    // Remaining active cards not attached to a visible message
     for card in cards {
         if !rendered_card_ids.contains(&card.number) {
             let is_focused = card_focus && focused_card_num == Some(card.number);
-            let mut card_lines = Vec::new();
-            push_card_lines(
-                &mut card_lines,
+            let card_max_w = width.saturating_sub(body_indent).max(12);
+            push_rounded_card_lines(
+                &mut all_lines,
                 card,
                 is_focused,
                 selected_option,
-                width,
+                card_max_w,
+                body_indent,
                 palette,
+                locale,
                 false,
             );
-            for line in card_lines {
-                all_lines.push((line, Vec::new()));
-            }
-            all_lines.push((
-                Line::styled("", Style::new().bg(palette.background)),
-                Vec::new(),
-            ));
+            all_lines.push((Line::styled("", bg), Vec::new()));
         }
     }
 
     if !tasks.is_empty() {
         if !all_lines.is_empty() && all_lines.last().is_some_and(|(line, _)| line.width() > 0) {
-            all_lines.push((
-                Line::styled("", Style::new().bg(palette.background)),
-                Vec::new(),
-            ));
+            all_lines.push((Line::styled("", bg), Vec::new()));
         }
-        for task in tasks {
-            let glyph = match task.status.as_str() {
-                "running" => '›',
-                "completed" | "accepted" => '✓',
-                "failed" => '×',
-                _ => '·',
-            };
-            let fg = match task.status.as_str() {
-                "failed" => palette.danger,
-                "completed" | "accepted" => palette.success,
-                _ => palette.text_soft,
-            };
-            let raw_title = if task.title.trim().is_empty() {
-                task.session_id.as_str()
-            } else {
-                task.title.as_str()
-            };
-            let clean_title = terminal_text(raw_title);
-            let status_label = project_status_label(locale, &task.status);
-            let row_text = clip_bot_line(&format!("{glyph} {clean_title} · {status_label}"), width);
-            all_lines.push((
-                Line::styled(row_text, Style::new().fg(fg).bg(palette.background)),
-                Vec::new(),
-            ));
-        }
+        push_inline_task_rows(
+            &mut all_lines,
+            tasks,
+            width.saturating_sub(body_indent).max(12),
+            body_indent,
+            true,
+            palette,
+            locale,
+        );
     }
 
     if let Some(live) = live_activity
         && !live.trim().is_empty()
     {
+        let content_w = width.saturating_sub(body_indent).max(12);
         let rendered = render_markdown_themed(
             live,
-            width,
+            content_w,
             Style::new().fg(palette.info).bg(palette.background),
             48,
             palette,
         );
-        for styled in &rendered.lines {
-            let links = styled
+        for (line_idx, styled) in rendered.lines.iter().enumerate() {
+            let links: Vec<LineLink> = styled
                 .links
                 .iter()
                 .cloned()
                 .map(|mut link| {
                     link.id = stamp_screen_link_id(0x000f_fffd, link.id);
+                    link.col_start = link.col_start.saturating_add(body_indent as u16);
+                    link.col_end = link.col_end.saturating_add(body_indent as u16);
                     link
                 })
                 .collect();
-            all_lines.push((styled.to_ratatui_line(), links));
+            let mut line = styled.to_ratatui_line();
+            if use_rail {
+                let mut spans = Vec::with_capacity(line.spans.len() + 2);
+                if line_idx == 0 {
+                    spans.push(Span::styled(
+                        " BOT  ",
+                        Style::new()
+                            .fg(palette.accent)
+                            .bg(palette.background)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                } else {
+                    spans.push(Span::styled("      ", bg));
+                }
+                spans.extend(line.spans);
+                line = Line::from(spans);
+            }
+            all_lines.push((line, links));
         }
-    }
-
-    if all_lines.is_empty() {
-        let empty_text = if locale.is_zh() {
-            "这里暂时没有内容"
-        } else {
-            "Nothing here yet"
-        };
-        frame.render_widget(
-            Paragraph::new(empty_text).style(Style::new().fg(palette.muted).bg(palette.background)),
-            area,
-        );
-        return;
     }
 
     let max_back = all_lines.len().saturating_sub(height);
@@ -846,27 +1737,52 @@ pub fn render_bot_shell_with_links(
         confirm_yes,
     } = view.screen
     {
-        // Centered Frost bind prompt matching ProjectApp.tsx:193-205 & project-copy.ts:13-15,43-45
+        // Centered Frost 2.0 bind prompt matching ProjectApp.tsx & project-copy.ts
         let zh = view.locale.is_zh();
         let w = usize::from(area.width);
         let h = usize::from(area.height);
-        let yes_style = if *confirm_yes {
-            Style::new()
-                .fg(palette.accent)
-                .bg(palette.background)
-                .add_modifier(Modifier::BOLD)
+        let use_card = w >= 38 && h >= 12;
+        let surf_bg = if use_card {
+            palette.panel
         } else {
-            Style::new().fg(palette.muted).bg(palette.background)
+            palette.background
+        };
+        let content_budget = if use_card {
+            w.saturating_sub(8).min(62)
+        } else {
+            w.saturating_sub(4).max(8)
+        };
+        let yes_style = if *confirm_yes {
+            if use_card {
+                Style::new()
+                    .fg(palette.text_selection_fg)
+                    .bg(palette.accent)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::new()
+                    .fg(palette.accent)
+                    .bg(surf_bg)
+                    .add_modifier(Modifier::BOLD)
+            }
+        } else {
+            Style::new().fg(palette.muted).bg(surf_bg)
         };
         let no_style = if !*confirm_yes {
-            Style::new()
-                .fg(palette.accent)
-                .bg(palette.background)
-                .add_modifier(Modifier::BOLD)
+            if use_card {
+                Style::new()
+                    .fg(palette.text_selection_fg)
+                    .bg(palette.accent)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::new()
+                    .fg(palette.accent)
+                    .bg(surf_bg)
+                    .add_modifier(Modifier::BOLD)
+            }
         } else {
-            Style::new().fg(palette.muted).bg(palette.background)
+            Style::new().fg(palette.muted).bg(surf_bg)
         };
-        let ws_clean = clip_bot_line(workspace_path, w.saturating_sub(4).max(8));
+        let ws_clean = clip_bot_line(workspace_path, content_budget);
         let yes_txt = format!(
             "{}{}  Y",
             if *confirm_yes {
@@ -893,39 +1809,60 @@ pub fn render_bot_shell_with_links(
                 "No, open task mode"
             }
         );
-        let horizontal = yes_txt.width() + 3 + no_txt.width() <= w.saturating_sub(4);
-        let mut lines = vec![
+        let horizontal = yes_txt.width() + 3 + no_txt.width() <= content_budget;
+        let title_lbl = if zh {
+            "Peer · 机器人模式"
+        } else {
+            "Peer · Bot mode"
+        };
+        let header_line = if use_card {
+            Line::from(vec![
+                Span::styled(
+                    format!("{BRAND_MARK} "),
+                    Style::new().fg(palette.accent).bg(surf_bg),
+                ),
+                Span::styled(
+                    title_lbl,
+                    Style::new()
+                        .fg(palette.accent)
+                        .bg(surf_bg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ])
+        } else {
             Line::styled(
-                if zh {
-                    "Peer · 机器人模式"
-                } else {
-                    "Peer · Bot mode"
-                },
+                title_lbl,
                 Style::new()
                     .fg(palette.accent)
-                    .bg(palette.background)
+                    .bg(surf_bg)
+                    .add_modifier(Modifier::BOLD),
+            )
+        };
+        let mut lines = vec![
+            header_line,
+            Line::styled("", Style::new().bg(surf_bg)),
+            Line::styled(
+                clip_bot_line(
+                    if zh {
+                        "把这个目录绑定为机器人？"
+                    } else {
+                        "Bind this directory to a bot?"
+                    },
+                    content_budget,
+                ),
+                Style::new()
+                    .fg(palette.text)
+                    .bg(surf_bg)
                     .add_modifier(Modifier::BOLD),
             ),
-            Line::styled("", Style::new().bg(palette.background)),
-            Line::styled(
-                if zh {
-                    "把这个目录绑定为机器人？"
-                } else {
-                    "Bind this directory to a bot?"
-                },
-                Style::new().fg(palette.text).bg(palette.background),
-            ),
-            Line::styled(
-                ws_clean,
-                Style::new().fg(palette.muted).bg(palette.background),
-            ),
-            Line::styled("", Style::new().bg(palette.background)),
+            Line::styled(ws_clean, Style::new().fg(palette.muted).bg(surf_bg)),
+            Line::styled("", Style::new().bg(surf_bg)),
         ];
         let options_start_row = lines.len() as u16;
         if horizontal {
             lines.push(Line::from(vec![
                 Span::styled(yes_txt.clone(), yes_style),
-                Span::styled("   ", Style::new().bg(palette.background)),
+                Span::styled("   ", Style::new().bg(surf_bg)),
                 Span::styled(no_txt, no_style),
             ]));
         } else {
@@ -934,11 +1871,11 @@ pub fn render_bot_shell_with_links(
         }
         if let Some(msg) = view.notice.filter(|s| !s.is_empty()) {
             lines.push(Line::styled(
-                clip_bot_line(&terminal_text(msg), w.saturating_sub(4).max(8)),
-                Style::new().fg(palette.warning).bg(palette.background),
+                clip_bot_line(&terminal_text(msg), content_budget),
+                Style::new().fg(palette.warning).bg(surf_bg),
             ));
         }
-        lines.push(Line::styled("", Style::new().bg(palette.background)));
+        lines.push(Line::styled("", Style::new().bg(surf_bg)));
         lines.push(Line::styled(
             clip_bot_line(
                 if zh {
@@ -946,10 +1883,60 @@ pub fn render_bot_shell_with_links(
                 } else {
                     "←/→ to choose · Enter to confirm · Esc for task mode"
                 },
-                w.saturating_sub(4).max(8),
+                content_budget,
             ),
-            Style::new().fg(palette.muted).bg(palette.background),
+            Style::new().fg(palette.muted).bg(surf_bg),
         ));
+
+        if use_card {
+            let max_line_w = lines.iter().map(|l| l.width()).max().unwrap_or(24);
+            let card_w = (max_line_w + 4).clamp(38, w.min(66)) as u16;
+            let card_h = (lines.len() as u16 + 2).min(area.height);
+            let box_rect = Rect {
+                x: area.x + area.width.saturating_sub(card_w) / 2,
+                y: area.y + area.height.saturating_sub(card_h) / 2,
+                width: card_w,
+                height: card_h,
+            };
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::new().fg(palette.border_focus).bg(palette.background))
+                .style(Style::new().bg(palette.panel));
+            let raw_inner = block.inner(box_rect);
+            frame.render_widget(block, box_rect);
+            let inner = if raw_inner.width >= 10 {
+                Rect {
+                    x: raw_inner.x + 1,
+                    y: raw_inner.y,
+                    width: raw_inner.width - 2,
+                    height: raw_inner.height,
+                }
+            } else {
+                raw_inner
+            };
+            frame.render_widget(
+                Paragraph::new(lines)
+                    .style(Style::new().bg(palette.panel))
+                    .wrap(Wrap { trim: false }),
+                inner,
+            );
+            let (cursor_dx, cursor_dy) = if horizontal {
+                let dx = if *confirm_yes {
+                    0u16
+                } else {
+                    (yes_txt.width() + 3) as u16
+                };
+                (dx, options_start_row)
+            } else {
+                (0u16, options_start_row + u16::from(!*confirm_yes))
+            };
+            let cy = (inner.y + cursor_dy).min(full_area.y + full_area.height - 1);
+            let cx = (inner.x + cursor_dx).min(full_area.x + full_area.width - 1);
+            frame.set_cursor_position((cx, cy));
+            return;
+        }
+
         let content_w = lines.iter().map(|l| l.width()).max().unwrap_or(1).min(w) as u16;
         let top_pad = h.saturating_sub(lines.len()) / 2;
         let left_pad = w.saturating_sub(usize::from(content_w)) / 2;
@@ -977,12 +1964,13 @@ pub fn render_bot_shell_with_links(
     }
 
     let is_list = matches!(view.screen, BotScreen::BotList);
+    let has_header_divider = !is_list && area.height >= 10;
     let has_lease_banner = !is_list && view.lease_banner.is_some();
     let show_composer = !is_list;
     let active_dock = view
         .overlay
         .filter(|ov| show_composer && ov.is_open() && !ov.is_modal() && !view.model_picker.open);
-    let dock_h = active_dock.map_or(0, |ov| ov.dock_height(area.height.saturating_sub(8)));
+    let dock_h = active_dock.map_or(0, |ov| ov.dock_height(area.height.saturating_sub(10)));
     let draft = view.composer.draft();
     let slash_open = show_composer
         && !view.model_picker.open
@@ -1036,11 +2024,48 @@ pub fn render_bot_shell_with_links(
                     project_status_label(view.locale, &t.status)
                 )
             })
+            .or_else(|| {
+                view.is_running.then(|| {
+                    if view.locale.is_zh() {
+                        "正在推进回复 · 进行中".to_owned()
+                    } else {
+                        "Processing reply · Running".to_owned()
+                    }
+                })
+            })
     } else {
         None
     };
 
+    let use_framed_composer = show_composer && area.height >= 12 && area.width >= 20;
+    let status_bar_rows: u16 = if !show_composer || area.height < 8 {
+        0
+    } else if area.width < 56 && area.height >= 12 {
+        2
+    } else {
+        1
+    };
+    let composer_inner_w = if use_framed_composer {
+        usize::from(area.width).saturating_sub(6).max(1)
+    } else {
+        usize::from(area.width).saturating_sub(2).max(1)
+    };
+    let composer_inner_rows: u16 = if draft.is_empty() {
+        1
+    } else {
+        let (lines, _) = draft_view_styled(view.composer, composer_inner_w, 3, Style::default());
+        (lines.len() as u16).clamp(1, 3)
+    };
+    let composer_rows = if use_framed_composer {
+        composer_inner_rows + 2
+    } else {
+        composer_inner_rows
+    };
+
     let mut constraints = vec![Constraint::Length(1)];
+    if has_header_divider {
+        constraints.push(Constraint::Length(1));
+    }
     if has_lease_banner {
         constraints.push(Constraint::Length(1));
     }
@@ -1057,8 +2082,13 @@ pub fn render_bot_shell_with_links(
         if running_bar_label.is_some() {
             constraints.push(Constraint::Length(1)); // shared working... sweep bar
         }
-        constraints.push(Constraint::Length(1)); // thin `─` divider
-        constraints.push(Constraint::Length(3)); // `› ` full-width composer
+        if !use_framed_composer {
+            constraints.push(Constraint::Length(1)); // compact thin divider
+        }
+        constraints.push(Constraint::Length(composer_rows));
+        if status_bar_rows > 0 {
+            constraints.push(Constraint::Length(status_bar_rows));
+        }
     } else {
         constraints.push(Constraint::Length(1));
     }
@@ -1066,9 +2096,17 @@ pub fn render_bot_shell_with_links(
     let areas = Layout::vertical(constraints).split(area);
     let mut slot = 0usize;
 
-    // ADR 122 §2 Header: list page is simply "Peer" (no host/client banner, no mode tag).
+    // ADR 122 §2 Header: BotList is strictly "Peer" (no host/client banner, no ◆ prefix).
     let header_area = areas[slot];
-    let hw = usize::from(header_area.width).max(1);
+    slot += 1;
+    let header_divider_area = if has_header_divider {
+        let div = areas[slot];
+        slot += 1;
+        Some(div)
+    } else {
+        None
+    };
+
     if is_list {
         frame.render_widget(
             Paragraph::new(Line::styled(
@@ -1081,47 +2119,8 @@ pub fn render_bot_shell_with_links(
             header_area,
         );
     } else {
-        let title_str = match view.active_bot_name {
-            Some(name) if !name.trim().is_empty() => {
-                format!(
-                    "Peer · {}",
-                    clip_bot_line(name, hw.saturating_sub(24).max(6))
-                )
-            }
-            _ => "Peer".to_owned(),
-        };
-        let right_label = if view.is_host {
-            if view.locale.is_zh() {
-                "由本终端运行"
-            } else {
-                "Running here"
-            }
-        } else if view.locale.is_zh() {
-            "客户端 · 只读"
-        } else {
-            "Client · read-only"
-        };
-        let gap = hw.saturating_sub(title_str.width() + right_label.width());
-        let mut spans = vec![Span::styled(
-            title_str,
-            Style::new()
-                .fg(palette.accent)
-                .bg(palette.background)
-                .add_modifier(Modifier::BOLD),
-        )];
-        if gap >= 2 {
-            spans.push(Span::styled(
-                " ".repeat(gap),
-                Style::new().bg(palette.background),
-            ));
-            spans.push(Span::styled(
-                right_label,
-                Style::new().fg(palette.muted).bg(palette.background),
-            ));
-        }
-        frame.render_widget(Paragraph::new(Line::from(spans)), header_area);
+        render_bot_topbar(frame, header_area, header_divider_area, &view);
     }
-    slot += 1;
 
     if let Some(banner) = view.lease_banner
         && has_lease_banner
@@ -1154,6 +2153,8 @@ pub fn render_bot_shell_with_links(
             render_conversation_body(
                 frame,
                 body_area,
+                view.active_bot_name,
+                view.workspace_path,
                 view.messages,
                 view.cards,
                 view.tasks,
@@ -1311,16 +2312,23 @@ pub fn render_bot_shell_with_links(
                     Style::new().fg(palette.muted).bg(palette.background),
                 ));
             } else {
+                let card_w = usize::from(body_area.width).max(1);
                 for (idx, c) in view.cards.iter().enumerate() {
-                    push_card_lines(
-                        &mut lines,
+                    let mut card_lines = Vec::new();
+                    push_rounded_card_lines(
+                        &mut card_lines,
                         c,
                         idx == view.selected_card,
                         view.selected_card_option,
-                        usize::from(body_area.width).max(1),
+                        card_w,
+                        0,
                         palette,
+                        view.locale,
                         true,
                     );
+                    for (l, _) in card_lines {
+                        lines.push(l);
+                    }
                     lines.push(Line::styled("", Style::new().bg(palette.background)));
                 }
             }
@@ -1423,31 +2431,70 @@ pub fn render_bot_shell_with_links(
             slot += 1;
         }
 
-        // ADR 122 §4: crisp full-width hairline divider (`─`)
-        let div_w = usize::from(areas[slot].width);
-        frame.render_widget(
-            Paragraph::new(Line::styled(
-                SEPARATOR.repeat(div_w),
-                Style::new().fg(palette.subtle).bg(palette.background),
-            )),
-            areas[slot],
-        );
-        slot += 1;
+        if !use_framed_composer {
+            let div_w = usize::from(areas[slot].width);
+            frame.render_widget(
+                Paragraph::new(Line::styled(
+                    SEPARATOR.repeat(div_w),
+                    Style::new().fg(palette.subtle).bg(palette.background),
+                )),
+                areas[slot],
+            );
+            slot += 1;
+        }
 
-        // Composer row: left Frost accent caret `› ` + full-width input
-        let composer_area = areas[slot];
-        if composer_area.width >= 4 {
-            let cols = Layout::horizontal([Constraint::Length(2), Constraint::Min(1)])
-                .split(composer_area);
+        let composer_rect = areas[slot];
+        slot += 1;
+        let (inner_rect, composer_bg) = if use_framed_composer {
+            let actively_editing =
+                !view.card_focus && !view.model_picker.open && active_dock.is_none();
+            let border_fg = if actively_editing {
+                palette.border_focus
+            } else {
+                palette.border
+            };
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::new().fg(border_fg).bg(palette.background))
+                .style(Style::new().bg(palette.panel));
+            let raw_inner = block.inner(composer_rect);
+            frame.render_widget(block, composer_rect);
+            let padded = if raw_inner.width >= 10 {
+                Rect {
+                    x: raw_inner.x + 1,
+                    y: raw_inner.y,
+                    width: raw_inner.width - 2,
+                    height: raw_inner.height,
+                }
+            } else {
+                raw_inner
+            };
+            (padded, palette.panel)
+        } else {
+            (composer_rect, palette.input_bg)
+        };
+
+        if inner_rect.width >= 4 && inner_rect.height >= 1 {
+            let cols =
+                Layout::horizontal([Constraint::Length(2), Constraint::Min(1)]).split(inner_rect);
+            let caret_fg = if view.is_running {
+                palette.warning
+            } else {
+                palette.accent
+            };
             frame.render_widget(
                 Paragraph::new(Line::styled(
                     CARET_SELECTED,
-                    Style::new().fg(palette.accent).bg(palette.background),
+                    Style::new()
+                        .fg(caret_fg)
+                        .bg(composer_bg)
+                        .add_modifier(Modifier::BOLD),
                 )),
                 cols[0],
             );
             let input_area = cols[1];
-            let (lines, caret) = if view.composer.draft().is_empty() {
+            let (lines, caret) = if draft.is_empty() {
                 let focused_action = (matches!(view.screen, BotScreen::Conversation)
                     && view.card_focus)
                     .then(|| {
@@ -1459,17 +2506,21 @@ pub fn render_bot_shell_with_links(
                         })
                     })
                     .flatten();
-                let placeholder = focused_action.unwrap_or(if view.locale.is_zh() {
-                    "跟机器人说话"
-                } else {
-                    "Message this bot"
-                });
+                let (placeholder, placeholder_fg) = match focused_action {
+                    Some(act) => (act, palette.accent_soft),
+                    None => (
+                        if view.locale.is_zh() {
+                            "跟机器人说话"
+                        } else {
+                            "Message this bot"
+                        },
+                        palette.input_placeholder,
+                    ),
+                };
                 (
                     vec![Line::styled(
                         clip_bot_line(&terminal_text(placeholder), usize::from(input_area.width)),
-                        Style::new()
-                            .fg(palette.input_placeholder)
-                            .bg(palette.input_bg),
+                        Style::new().fg(placeholder_fg).bg(composer_bg),
                     )],
                     Some((0u16, 0u16)),
                 )
@@ -1478,7 +2529,7 @@ pub fn render_bot_shell_with_links(
                     view.composer,
                     usize::from(input_area.width),
                     usize::from(input_area.height),
-                    Style::new().fg(palette.input_fg).bg(palette.input_bg),
+                    Style::new().fg(palette.input_fg).bg(composer_bg),
                 )
             };
             frame.render_widget(Paragraph::new(lines), input_area);
@@ -1495,7 +2546,11 @@ pub fn render_bot_shell_with_links(
                 frame.set_cursor_position((input_area.x, input_area.y));
             }
         } else {
-            frame.set_cursor_position((composer_area.x, composer_area.y));
+            frame.set_cursor_position((composer_rect.x, composer_rect.y));
+        }
+
+        if status_bar_rows > 0 {
+            render_bot_status_bar(frame, areas[slot], &view);
         }
     } else if !is_list {
         frame.set_cursor_position((area.x, area.y));
@@ -1547,6 +2602,10 @@ mod tests {
                     bots: &bots,
                     selected_bot: 0,
                     active_bot_name: None,
+                    workspace_path: None,
+                    model_badge: "",
+                    effort_badge: "",
+                    is_running: false,
                     lease_banner: Some("SHOULD NOT APPEAR ON LIST PAGE"),
                     messages: &[],
                     live_activity: None,
@@ -1619,6 +2678,10 @@ mod tests {
                         bots: &bots,
                         selected_bot: 0,
                         active_bot_name: Some("Peer-Agent"),
+                        workspace_path: Some("/Users/demo/peer-dev"),
+                        model_badge: "claude-sonnet-4-5 · Anthropic",
+                        effort_badge: "high",
+                        is_running: false,
                         lease_banner: None,
                         messages: &msgs,
                         live_activity: None,
@@ -1693,6 +2756,10 @@ mod tests {
                             bots: &[],
                             selected_bot: 0,
                             active_bot_name: None,
+                            workspace_path: None,
+                            model_badge: "",
+                            effort_badge: "",
+                            is_running: false,
                             lease_banner: None,
                             messages: &[],
                             live_activity: None,
@@ -1802,7 +2869,7 @@ mod tests {
                 summary: String::new(),
                 actions,
             }];
-            let mut term = Terminal::new(TestBackend::new(100, 24)).unwrap();
+            let mut term = Terminal::new(TestBackend::new(100, 32)).unwrap();
             term.draw(|f| {
                 render_bot_shell(
                     f,
@@ -1816,6 +2883,10 @@ mod tests {
                         bots: &[],
                         selected_bot: 0,
                         active_bot_name: Some("peer-dev"),
+                        workspace_path: Some("/Users/demo/Documents/Develop/peer-dev"),
+                        model_badge: "claude-sonnet-4-5 · Anthropic",
+                        effort_badge: "high",
+                        is_running: false,
                         lease_banner: None,
                         messages: &[],
                         live_activity: None,
@@ -1843,7 +2914,18 @@ mod tests {
         };
 
         let zh_idle = render_with(&mut cache, TuiLocale::ZhCn, false, 0, false);
+        assert!(zh_idle.contains("◆ Peer · peer-dev"));
+        assert!(zh_idle.contains("~/Documents/Develop/peer-dev"));
+        assert!(zh_idle.contains("由本终端运行"));
+        assert!(zh_idle.contains("──"));
+        assert!(zh_idle.contains("██") && zh_idle.contains("agent"));
+        assert!(zh_idle.contains("╭") && zh_idle.contains("╰"));
         assert!(zh_idle.contains("[1] 要我先熟悉一下这个项目吗？"));
+        assert!(zh_idle.contains("[ 先熟悉一下项目 ]"));
+        assert!(zh_idle.contains("mode bot"));
+        assert!(zh_idle.contains("host 本机宿主"));
+        assert!(zh_idle.contains("claude-sonnet-4-5"));
+        assert!(zh_idle.contains("high"));
         assert!(zh_idle.contains("跟机器人说话"));
         assert!(!zh_idle.contains("1. 先熟悉一下项目"));
         assert!(!zh_idle.contains("跟机器人说话，或输入 /help"));
@@ -1851,6 +2933,7 @@ mod tests {
         assert!(!zh_idle.contains("F2 · 普通任务模式"));
 
         let zh_focus = render_with(&mut cache, TuiLocale::ZhCn, true, 0, false);
+        assert!(zh_focus.contains("● 已选中"));
         assert!(zh_focus.contains("先熟悉一下项目"));
         assert!(!zh_focus.contains("1. 先熟悉一下项目"));
         assert!(!zh_focus.contains("跟机器人说话"));
@@ -1863,15 +2946,65 @@ mod tests {
 
         let en_idle = render_with(&mut cache, TuiLocale::EnUs, false, 0, false);
         assert!(en_idle.contains("[1] Shall I familiarize myself with this project?"));
+        assert!(en_idle.contains("[ Familiarize with project ]"));
+        assert!(en_idle.contains("mode bot"));
+        assert!(en_idle.contains("host local"));
         assert!(en_idle.contains("Message this bot"));
         assert!(!en_idle.contains("1. Familiarize with project"));
         assert!(!en_idle.contains("Message this bot, or /help"));
         assert!(!en_idle.contains("Tab to select cards"));
 
         let en_focus = render_with(&mut cache, TuiLocale::EnUs, true, 0, false);
+        assert!(en_focus.contains("● Focused"));
         assert!(en_focus.contains("Familiarize with project"));
         assert!(!en_focus.contains("1. Familiarize with project"));
         assert!(!en_focus.contains("Message this bot"));
+
+        // Narrow & tiny empty-state stress checks
+        for (w, h) in [(120, 40), (40, 14), (16, 8)] {
+            let mut small = Terminal::new(TestBackend::new(w, h)).unwrap();
+            small
+                .draw(|f| {
+                    render_bot_shell(
+                        f,
+                        BotShellView {
+                            screen: &BotScreen::Conversation,
+                            palette: &DARK_PALETTE,
+                            scheme_id: 0,
+                            current_theme: ThemeMode::Dark,
+                            locale: TuiLocale::ZhCn,
+                            is_host: true,
+                            bots: &[],
+                            selected_bot: 0,
+                            active_bot_name: Some("peer-dev"),
+                            workspace_path: Some("/Users/demo/peer-dev"),
+                            model_badge: "claude-sonnet-4-5 · Anthropic",
+                            effort_badge: "high",
+                            is_running: false,
+                            lease_banner: None,
+                            messages: &[],
+                            live_activity: None,
+                            tasks: &[],
+                            memories: &[],
+                            objectives: &[],
+                            cards: &[],
+                            card_focus: false,
+                            selected_card: 0,
+                            selected_card_option: 0,
+                            slash_selected: 0,
+                            animation_frame: 0,
+                            anchor: &anchor,
+                            composer: &composer,
+                            draft_warning: None,
+                            notice: None,
+                            model_picker: &picker,
+                            overlay: None,
+                            wrap_cache: &mut cache,
+                        },
+                    );
+                })
+                .unwrap();
+        }
     }
 
     #[test]
@@ -1921,6 +3054,10 @@ mod tests {
                     bots: &[],
                     selected_bot: 0,
                     active_bot_name: Some("peer-dev"),
+                    workspace_path: None,
+                    model_badge: "gpt-5",
+                    effort_badge: "medium",
+                    is_running: false,
                     lease_banner: None,
                     messages: &[],
                     live_activity: None,
@@ -1968,6 +3105,10 @@ mod tests {
                         bots: &[],
                         selected_bot: 0,
                         active_bot_name: Some("peer-dev"),
+                        workspace_path: None,
+                        model_badge: "",
+                        effort_badge: "",
+                        is_running: false,
                         lease_banner: None,
                         messages: &[],
                         live_activity: None,
@@ -2009,6 +3150,10 @@ mod tests {
                         bots: &[],
                         selected_bot: 0,
                         active_bot_name: Some("peer-dev"),
+                        workspace_path: None,
+                        model_badge: "",
+                        effort_badge: "",
+                        is_running: false,
                         lease_banner: None,
                         messages: &[],
                         live_activity: None,
@@ -2058,6 +3203,10 @@ mod tests {
                         bots: &[],
                         selected_bot: 0,
                         active_bot_name: Some("peer-dev"),
+                        workspace_path: None,
+                        model_badge: "",
+                        effort_badge: "",
+                        is_running: false,
                         lease_banner: None,
                         messages: &[],
                         live_activity: None,
@@ -2121,6 +3270,10 @@ mod tests {
                     bots: &[],
                     selected_bot: 0,
                     active_bot_name: Some("peer-dev"),
+                    workspace_path: None,
+                    model_badge: "gpt-5",
+                    effort_badge: "high",
+                    is_running: false,
                     lease_banner: None,
                     messages: &msgs,
                     live_activity: None,
@@ -2182,6 +3335,10 @@ mod tests {
                     bots: &[],
                     selected_bot: 0,
                     active_bot_name: Some("peer-dev"),
+                    workspace_path: None,
+                    model_badge: "gpt-5",
+                    effort_badge: "high",
+                    is_running: false,
                     lease_banner: None,
                     messages: &[],
                     live_activity: None,
