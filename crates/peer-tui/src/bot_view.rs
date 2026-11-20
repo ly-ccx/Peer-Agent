@@ -1135,12 +1135,20 @@ fn render_bot_status_bar(frame: &mut Frame<'_>, area: Rect, view: &BotShellView<
     } else {
         view.effort_badge.trim()
     };
-    let hint_suffix = if sw >= 96 {
+    let hint_suffix = if sw >= 112 {
         if zh {
-            " · / 命令 · F3 模型"
+            " · /classic 普通对话 · / 命令 · F3 模型"
         } else {
-            " · / cmds · F3 model"
+            " · /classic chat · / cmds · F3 model"
         }
+    } else if sw >= 88 {
+        if zh {
+            " · /classic 普通对话 · F3 模型"
+        } else {
+            " · /classic chat · F3 model"
+        }
+    } else if sw >= 72 {
+        " · /classic"
     } else {
         ""
     };
@@ -1269,9 +1277,15 @@ fn render_conversation_body(
             hero_lines.push((Line::from(id_spans), Vec::new()));
 
             let subtitle = if zh {
-                "输入消息即可对话或委派任务 · /tasks 任务 · /bots 切换 · /model 模型"
+                if width >= 88 {
+                    "输入消息即可对话或委派任务 · /tasks 任务 · /bots 切换 · /model 模型 · /classic 普通对话"
+                } else {
+                    "/tasks 任务 · /bots 切换 · /model 模型 · /classic 普通对话"
+                }
+            } else if width >= 76 {
+                "Send a message to chat or delegate · /tasks · /bots · /model · /classic chat"
             } else {
-                "Send a message to chat or delegate · /tasks · /bots · /model"
+                "/tasks · /bots · /model · /classic chat"
             };
             let sub_clipped = clip_bot_line(subtitle, width);
             let sub_pad = width.saturating_sub(sub_clipped.width()) / 2;
@@ -2926,6 +2940,7 @@ mod tests {
         assert!(zh_idle.contains("host 本机宿主"));
         assert!(zh_idle.contains("claude-sonnet-4-5"));
         assert!(zh_idle.contains("high"));
+        assert!(zh_idle.contains("/classic 普通对话"));
         assert!(zh_idle.contains("跟机器人说话"));
         assert!(!zh_idle.contains("1. 先熟悉一下项目"));
         assert!(!zh_idle.contains("跟机器人说话，或输入 /help"));
@@ -2949,6 +2964,7 @@ mod tests {
         assert!(en_idle.contains("[ Familiarize with project ]"));
         assert!(en_idle.contains("mode bot"));
         assert!(en_idle.contains("host local"));
+        assert!(en_idle.contains("/classic chat"));
         assert!(en_idle.contains("Message this bot"));
         assert!(!en_idle.contains("1. Familiarize with project"));
         assert!(!en_idle.contains("Message this bot, or /help"));
@@ -2961,7 +2977,7 @@ mod tests {
         assert!(!en_focus.contains("Message this bot"));
 
         // Narrow & tiny empty-state stress checks
-        for (w, h) in [(120, 40), (40, 14), (16, 8)] {
+        for (w, h) in [(120, 40), (80, 24), (40, 14), (16, 8)] {
             let mut small = Terminal::new(TestBackend::new(w, h)).unwrap();
             small
                 .draw(|f| {
@@ -3004,6 +3020,11 @@ mod tests {
                     );
                 })
                 .unwrap();
+            if w == 80 {
+                let text = buffer_text(&small);
+                assert!(text.contains("/classic 普通对话"));
+                assert!(text.contains("claude-sonnet-4-5"));
+            }
         }
     }
 
