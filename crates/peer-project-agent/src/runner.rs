@@ -257,6 +257,19 @@ impl ProjectAgentRunner {
         }
 
         let conv_store = ConversationStore::new(&self.data_home);
+        let conv_dir = self.data_home.join("conversations");
+        let conv_file = conv_dir.join(format!("{}.jsonl", opts.conversation_id));
+        if !conv_file.exists()
+            && conv_store
+                .read_committed(opts.conversation_id, None, 1024 * 1024)
+                .is_ok()
+        {
+            let _ = std::fs::create_dir_all(&conv_dir);
+            let _ = std::fs::OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(&conv_file);
+        }
         let history_messages = conv_store
             .read_committed(opts.conversation_id, None, 4 * 1024 * 1024)
             .map(|snap| snap.history.messages)
@@ -378,7 +391,7 @@ impl ProjectAgentRunner {
             holds_lease: opts.holds_lease,
         }));
 
-        let mut registry = ProviderRegistry::default();
+        let mut registry = ProviderRegistry::for_project_agent();
         registry.register(Box::new(ProjectCapabilityProvider::new(
             &self.data_home,
             Arc::clone(&self.supervisor),
@@ -433,7 +446,9 @@ impl ProjectAgentRunner {
             }
             self.set_activity_phase("thinking", None, false);
             let mut model_turn = match model
-                .turn_with_history(
+                .turn_with_materialized_history(
+                    &self.data_home,
+                    opts.conversation_id,
                     &system_prompt,
                     &json!({"messages": live_messages}),
                     &tools_json,
@@ -621,7 +636,9 @@ impl ProjectAgentRunner {
         if needs_synthesis {
             self.set_activity_phase("thinking", None, false);
             match model
-                .turn_with_history(
+                .turn_with_materialized_history(
+                    &self.data_home,
+                    opts.conversation_id,
                     &system_prompt,
                     &json!({"messages": live_messages}),
                     &json!([]),

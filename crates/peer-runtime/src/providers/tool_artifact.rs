@@ -18,7 +18,7 @@ impl CapabilityProvider for ToolArtifactProvider {
         .expect("compiled artifact manifest");
         let mut manifest = v["readerManifest"].clone();
         if self.0 {
-            manifest["modeScopes"] = json!(["chat", "plan", "goal"]);
+            manifest["modeScopes"] = json!(["chat", "plan", "goal", "project_agent"]);
         }
         vec![("read_tool_result".into(), manifest)]
     }

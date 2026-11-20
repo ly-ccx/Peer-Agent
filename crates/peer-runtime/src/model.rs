@@ -188,6 +188,32 @@ impl NativeModel {
             .send(cancel)
             .await
     }
+    /// Run a model turn that materializes oversized tool results (> 6000 UTF-16 chars)
+    /// into `<home>/conversations/<conversation_id>.tool-results/` before wire encoding,
+    /// matching `ContextPipeline::result_views`.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn turn_with_materialized_history(
+        &self,
+        home: &std::path::Path,
+        conversation_id: &str,
+        context: &str,
+        history: &Value,
+        tools: &Value,
+        live: &LiveHistory,
+        cancel: &CancellationToken,
+    ) -> Result<ModelTurn, ModelError> {
+        let sources = ToolResultEncoding::collect(history)?;
+        let home_buf = home.to_path_buf();
+        let conv = conversation_id.to_owned();
+        let mat_cancel = cancel.clone();
+        let encoding =
+            tokio::task::spawn_blocking(move || sources.materialize(&home_buf, &conv, &mat_cancel))
+                .await
+                .map_err(|_| ModelError::new("model_tool_result_encoding_unavailable"))??;
+        self.prepare_request_with_tool_results(context, history, tools, live, &encoding)?
+            .send(cancel)
+            .await
+    }
     pub fn prepare_request<'a>(
         &'a self,
         context: &str,

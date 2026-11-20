@@ -979,3 +979,109 @@ async fn failed_bot_user_turn_preserves_unexecuted_input_and_recovers_on_retry()
         .expect("canonical reply persisted after retry");
     assert_eq!(reply["content"], "Recovered on retry.");
 }
+
+#[tokio::test]
+async fn bot_materializes_oversized_tool_results_and_can_read_tool_result() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let mut big = "line-content-0123456789\n".repeat(500);
+    big.push_str("\nUNIQUE_TAIL_MARKER\n");
+    fs::write(ws.path().join("BIG.md"), &big).unwrap();
+
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, _) = host
+        .bind_workspace(ws.path(), Some("MaterializeBot"))
+        .unwrap();
+
+    let input_id = "in-mat-1";
+    let anchor = input_message_id(input_id).unwrap();
+    host.submit_user_input(
+        &entry.workspace_id,
+        input_id,
+        "Read BIG.md and summarize",
+        None,
+    )
+    .unwrap();
+
+    let anchor_clone = anchor.clone();
+    let server = start_mock_server(vec![
+        // Round 0: call read_file on BIG.md (> 6000 UTF-16 chars)
+        Box::new(|_req| responses_sse_tool_call("big-1", "read_file", &json!({"path": "BIG.md"}))),
+        // Round 1: verify read_tool_result is projected and BIG.md was materialized as local_file_ref
+        Box::new(|req| {
+            let has_reader = req["tools"]
+                .as_array()
+                .expect("responses tools array")
+                .iter()
+                .any(|t| t["name"].as_str() == Some("read_tool_result"));
+            assert!(has_reader, "project_agent must project read_tool_result");
+
+            let input = req["input"].as_array().expect("responses input array");
+            let fc_out = input
+                .iter()
+                .find(|item| item["type"] == "function_call_output")
+                .expect("round 1 function_call_output");
+            let out_str = fc_out["output"].as_str().expect("output string");
+            let parsed: Value = serde_json::from_str(out_str).expect("materialized json");
+            assert_eq!(
+                parsed["kind"], "local_file_ref",
+                "oversized read_file must materialize as local_file_ref: {parsed}"
+            );
+            let native_ref = parsed["nativeContentRef"].clone();
+            assert!(native_ref.is_object(), "expected nativeContentRef object");
+            let tail_offset = native_ref["bytes"]
+                .as_u64()
+                .unwrap_or(0)
+                .saturating_sub(2048);
+            responses_sse_tool_call(
+                "big-2",
+                "read_tool_result",
+                &json!({"reference": native_ref, "offset": tail_offset, "length": 2048}),
+            )
+        }),
+        // Round 2: verify read_tool_result returned the full content including UNIQUE_TAIL_MARKER
+        Box::new(move |req| {
+            let input = req["input"].as_array().expect("responses input array");
+            let outputs: Vec<_> = input
+                .iter()
+                .filter(|item| item["type"] == "function_call_output")
+                .collect();
+            assert_eq!(outputs.len(), 2, "expected 2 tool outputs in round 2");
+            let second_out = outputs[1]["output"].as_str().unwrap_or("");
+            assert!(
+                second_out.contains("UNIQUE_TAIL_MARKER"),
+                "read_tool_result must return full file tail: {second_out}"
+            );
+            responses_sse_tool_call(
+                "big-3",
+                "post_reply",
+                &json!({
+                    "replyTo": [anchor_clone],
+                    "text": "Read full BIG.md with tail marker."
+                }),
+            )
+        }),
+    ]);
+
+    let model = mock_model_with_wire(&server.endpoint, Wire::Responses);
+    let cancel = CancellationToken::new();
+    let mut perm = AutoAllowPermission;
+    let tick = host
+        .tick(&entry.workspace_id, &model, json!({}), &mut perm, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(tick.bot_turns_run, 1);
+    assert!(
+        matches!(
+            tick.last_turn.as_ref().map(|t| &t.end),
+            Some(TurnEndKind::ReplyCommitted { .. })
+        ),
+        "expected ReplyCommitted, got {:?}",
+        tick.last_turn.as_ref().map(|t| &t.end)
+    );
+    let reply = host
+        .find_reply_for_input(&entry.workspace_id, input_id)
+        .unwrap()
+        .expect("canonical reply persisted");
+    assert_eq!(reply["content"], "Read full BIG.md with tail marker.");
+}

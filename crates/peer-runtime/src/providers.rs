@@ -183,6 +183,10 @@ impl Default for ProviderRegistry {
     }
 }
 impl ProviderRegistry {
+    pub fn for_project_agent() -> Self {
+        Self::builtins(true, ShellHostMode::OneShot)
+    }
+
     fn builtins(result_reader_in_all_chat_modes: bool, shell_mode: ShellHostMode) -> Self {
         Self {
             providers: vec![
