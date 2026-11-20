@@ -22,15 +22,15 @@ use crate::{
     slash_menu::{BOT_SLASH_ITEMS, GoalMenuStatus, filter_slash_items, render_slash_menu},
     terminal_text,
     theme::{
-        CARET_IDLE, CARET_SELECTED, QUOTE_PREFIX, SEPARATOR, ThemeMode, TuiLocale, TuiPalette,
-        fill_canvas,
+        CARET_IDLE, CARET_SELECTED, QUOTE_PREFIX, RUNNING_ACTIVITY_LABEL, SEPARATOR, ThemeMode,
+        TuiLocale, TuiPalette, activity_sweep_color, fill_canvas,
     },
     view::draft_view_styled,
 };
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Paragraph, Wrap},
 };
@@ -121,6 +121,7 @@ pub struct BotShellView<'a> {
     pub selected_card: usize,
     pub selected_card_option: usize,
     pub slash_selected: usize,
+    pub animation_frame: usize,
     pub anchor: &'a ReadingAnchor,
     pub composer: &'a Composer,
     pub draft_warning: Option<&'a str>,
@@ -130,6 +131,173 @@ pub struct BotShellView<'a> {
     pub wrap_cache: &'a mut ByteBudgetLru<WrapCacheKey, RenderedBlock>,
 }
 
+fn project_status_label(locale: TuiLocale, status: &str) -> &str {
+    let zh = locale.is_zh();
+    match status {
+        "running" => {
+            if zh {
+                "进行中"
+            } else {
+                "Running"
+            }
+        }
+        "waiting_user" => {
+            if zh {
+                "等你回答"
+            } else {
+                "Waiting for you"
+            }
+        }
+        "waiting_approval" => {
+            if zh {
+                "待批准"
+            } else {
+                "Waiting for approval"
+            }
+        }
+        "accepted" => {
+            if zh {
+                "已签收"
+            } else {
+                "Accepted"
+            }
+        }
+        "result_ready" => {
+            if zh {
+                "待签收"
+            } else {
+                "Ready to confirm"
+            }
+        }
+        "queued" => {
+            if zh {
+                "排队中"
+            } else {
+                "Queued"
+            }
+        }
+        "starting" => {
+            if zh {
+                "启动中"
+            } else {
+                "Starting"
+            }
+        }
+        "verifying" => {
+            if zh {
+                "核验中"
+            } else {
+                "Verifying"
+            }
+        }
+        "paused" => {
+            if zh {
+                "已暂停"
+            } else {
+                "Paused"
+            }
+        }
+        "completed" => {
+            if zh {
+                "已完成"
+            } else {
+                "Completed"
+            }
+        }
+        "failed" => {
+            if zh {
+                "失败"
+            } else {
+                "Failed"
+            }
+        }
+        "cancelled" => {
+            if zh {
+                "已取消"
+            } else {
+                "Cancelled"
+            }
+        }
+        _ => status,
+    }
+}
+
+fn is_running_session_status(status: &str) -> bool {
+    matches!(status, "queued" | "starting" | "running" | "verifying")
+}
+
+fn render_bot_running_bar(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    status_label: &str,
+    animation_frame: usize,
+    palette: &TuiPalette,
+) {
+    let rw = usize::from(area.width).max(1);
+    let badge = "PEER / ACTIVE";
+    let badge_w = badge.width();
+    let activity = RUNNING_ACTIVITY_LABEL;
+    let activity_chars = activity.chars().count();
+    let show_badge = rw >= badge_w + 4;
+    let left_budget = if show_badge {
+        rw.saturating_sub(badge_w + 2)
+    } else {
+        rw
+    };
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut left_w = 0usize;
+    for (idx, ch) in activity.chars().enumerate() {
+        let mut buf = [0u8; 4];
+        let s = ch.encode_utf8(&mut buf);
+        let cw = s.width();
+        if left_w + cw > left_budget {
+            break;
+        }
+        spans.push(Span::styled(
+            s.to_owned(),
+            Style::new()
+                .fg(activity_sweep_color(
+                    idx,
+                    animation_frame,
+                    activity_chars,
+                    palette,
+                ))
+                .bg(palette.background),
+        ));
+        left_w += cw;
+    }
+    let clean_label = terminal_text(status_label);
+    let suffix_budget = left_budget.saturating_sub(left_w);
+    if !clean_label.is_empty() && suffix_budget >= 3 {
+        spans.push(Span::styled("  ", Style::new().bg(palette.background)));
+        let clipped = clip_bot_line(&clean_label, suffix_budget - 2);
+        left_w += 2 + clipped.width();
+        spans.push(Span::styled(
+            clipped,
+            Style::new().fg(palette.text_soft).bg(palette.background),
+        ));
+    }
+    if show_badge {
+        let gap = rw.saturating_sub(left_w + badge_w);
+        if gap >= 2 {
+            spans.push(Span::styled(
+                " ".repeat(gap),
+                Style::new().bg(palette.background),
+            ));
+            spans.push(Span::styled(
+                "PEER",
+                Style::new().fg(palette.subtle).bg(palette.background),
+            ));
+            spans.push(Span::styled(
+                " / ACTIVE",
+                Style::new().fg(palette.accent).bg(palette.background),
+            ));
+        }
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+#[allow(clippy::too_many_arguments)]
 fn push_card_lines(
     lines: &mut Vec<Line<'static>>,
     card: &BotCardRow,
@@ -137,6 +305,7 @@ fn push_card_lines(
     selected_option: usize,
     width: usize,
     palette: &TuiPalette,
+    show_actions: bool,
 ) {
     let surface_bg = if focused {
         palette.selection
@@ -173,23 +342,26 @@ fn push_card_lines(
             Style::new().fg(palette.text_soft).bg(surface_bg),
         ));
     }
-    for (idx, act) in card.actions.iter().enumerate() {
-        let active_opt = focused && idx == selected_option;
-        let caret = if active_opt {
-            CARET_SELECTED
-        } else {
-            CARET_IDLE
-        };
-        let style = if active_opt {
-            Style::new()
-                .fg(palette.accent)
-                .bg(surface_bg)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::new().fg(palette.text_soft).bg(surface_bg)
-        };
-        lines.push(Line::styled(format!(" {caret}{}. {}", idx + 1, act), style));
+    if show_actions {
+        for (idx, act) in card.actions.iter().enumerate() {
+            let active_opt = focused && idx == selected_option;
+            let caret = if active_opt {
+                CARET_SELECTED
+            } else {
+                CARET_IDLE
+            };
+            let style = if active_opt {
+                Style::new()
+                    .fg(palette.accent)
+                    .bg(surface_bg)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::new().fg(palette.text_soft).bg(surface_bg)
+            };
+            lines.push(Line::styled(format!(" {caret}{}. {}", idx + 1, act), style));
+        }
     }
+    // In Conversation view, card actions stay on the composer row, not inside the card box.
 }
 
 fn render_bot_list(
@@ -363,6 +535,7 @@ fn render_conversation_body(
     area: Rect,
     messages: &[BotMessageView],
     cards: &[BotCardRow],
+    tasks: &[BotTaskRow],
     card_focus: bool,
     selected_card: usize,
     selected_option: usize,
@@ -500,6 +673,7 @@ fn render_conversation_body(
                 selected_option,
                 width,
                 palette,
+                false,
             );
             for line in card_lines {
                 all_lines.push((line, Vec::new()));
@@ -532,12 +706,47 @@ fn render_conversation_body(
                 selected_option,
                 width,
                 palette,
+                false,
             );
             for line in card_lines {
                 all_lines.push((line, Vec::new()));
             }
             all_lines.push((
                 Line::styled("", Style::new().bg(palette.background)),
+                Vec::new(),
+            ));
+        }
+    }
+
+    if !tasks.is_empty() {
+        if !all_lines.is_empty() && all_lines.last().is_some_and(|(line, _)| line.width() > 0) {
+            all_lines.push((
+                Line::styled("", Style::new().bg(palette.background)),
+                Vec::new(),
+            ));
+        }
+        for task in tasks {
+            let glyph = match task.status.as_str() {
+                "running" => '›',
+                "completed" | "accepted" => '✓',
+                "failed" => '×',
+                _ => '·',
+            };
+            let fg = match task.status.as_str() {
+                "failed" => palette.danger,
+                "completed" | "accepted" => palette.success,
+                _ => palette.text_soft,
+            };
+            let raw_title = if task.title.trim().is_empty() {
+                task.session_id.as_str()
+            } else {
+                task.title.as_str()
+            };
+            let clean_title = terminal_text(raw_title);
+            let status_label = project_status_label(locale, &task.status);
+            let row_text = clip_bot_line(&format!("{glyph} {clean_title} · {status_label}"), width);
+            all_lines.push((
+                Line::styled(row_text, Style::new().fg(fg).bg(palette.background)),
                 Vec::new(),
             ));
         }
@@ -774,15 +983,61 @@ pub fn render_bot_shell_with_links(
         .overlay
         .filter(|ov| show_composer && ov.is_open() && !ov.is_modal() && !view.model_picker.open);
     let dock_h = active_dock.map_or(0, |ov| ov.dock_height(area.height.saturating_sub(8)));
-    let slash_items = if show_composer && !view.model_picker.open && active_dock.is_none() {
-        filter_slash_items(view.composer.draft(), BOT_SLASH_ITEMS)
+    let draft = view.composer.draft();
+    let slash_open = show_composer
+        && !view.model_picker.open
+        && active_dock.is_none()
+        && draft.starts_with('/')
+        && !draft.contains(char::is_whitespace);
+    let slash_items = if slash_open {
+        filter_slash_items(draft, BOT_SLASH_ITEMS)
     } else {
         Vec::new()
     };
-    let slash_rows = if slash_items.is_empty() {
+    let slash_rows = if !slash_open {
         0u16
+    } else if slash_items.is_empty() {
+        2u16
     } else {
         (slash_items.len().min(6) as u16) + 1
+    };
+    let transient_status: Option<(String, Color)> = if let Some(warn) = view.draft_warning {
+        Some((warn.to_owned(), palette.warning))
+    } else if !view.anchor.is_following() {
+        Some((
+            if view.locale.is_zh() {
+                "↑ 正在阅读历史 · PgDn/End 或 `/latest` 回到最新".to_owned()
+            } else {
+                "↑ Reading history · PgDn/End or `/latest` for latest".to_owned()
+            },
+            palette.info,
+        ))
+    } else if let Some(n) = view.notice.filter(|s| !s.is_empty()) {
+        Some((n.to_owned(), palette.info))
+    } else {
+        view.composer
+            .status
+            .filter(|s| !s.is_empty())
+            .map(|s| (s.to_owned(), palette.info))
+    };
+    let running_bar_label: Option<String> = if show_composer && area.height >= 8 {
+        view.tasks
+            .iter()
+            .find(|t| is_running_session_status(&t.status))
+            .map(|t| {
+                let name = if t.title.trim().is_empty() {
+                    t.session_id.as_str()
+                } else {
+                    t.title.as_str()
+                };
+                format!(
+                    "{} · {}",
+                    terminal_text(name),
+                    project_status_label(view.locale, &t.status)
+                )
+            })
+    } else {
+        None
     };
 
     let mut constraints = vec![Constraint::Length(1)];
@@ -791,12 +1046,17 @@ pub fn render_bot_shell_with_links(
     }
     constraints.push(Constraint::Min(1));
     if show_composer {
+        if transient_status.is_some() {
+            constraints.push(Constraint::Length(1)); // transient notice / draft warning / reading history
+        }
         if dock_h > 0 && area.height >= 10 {
             constraints.push(Constraint::Length(dock_h));
         } else if slash_rows > 0 && area.height >= 10 {
             constraints.push(Constraint::Length(slash_rows));
         }
-        constraints.push(Constraint::Length(1)); // status/notice
+        if running_bar_label.is_some() {
+            constraints.push(Constraint::Length(1)); // shared working... sweep bar
+        }
         constraints.push(Constraint::Length(1)); // thin `─` divider
         constraints.push(Constraint::Length(3)); // `› ` full-width composer
     } else {
@@ -896,6 +1156,7 @@ pub fn render_bot_shell_with_links(
                 body_area,
                 view.messages,
                 view.cards,
+                view.tasks,
                 view.card_focus,
                 view.selected_card,
                 view.selected_card_option,
@@ -1058,6 +1319,7 @@ pub fn render_bot_shell_with_links(
                         view.selected_card_option,
                         usize::from(body_area.width).max(1),
                         palette,
+                        true,
                     );
                     lines.push(Line::styled("", Style::new().bg(palette.background)));
                 }
@@ -1095,6 +1357,19 @@ pub fn render_bot_shell_with_links(
     }
 
     if show_composer {
+        if let Some((ref status_line, status_fg)) = transient_status {
+            let status_area = areas[slot];
+            let sw = usize::from(status_area.width);
+            frame.render_widget(
+                Paragraph::new(Line::styled(
+                    clip_bot_line(status_line, sw),
+                    Style::new().fg(status_fg).bg(palette.background),
+                )),
+                status_area,
+            );
+            slot += 1;
+        }
+
         if let Some(ov) = active_dock
             && dock_h > 0
             && area.height >= 10
@@ -1110,56 +1385,43 @@ pub fn render_bot_shell_with_links(
             render_classic_overlay(frame, areas[slot], ov, &ctx, palette);
             slot += 1;
         } else if slash_rows > 0 && area.height >= 10 {
-            render_slash_menu(
-                frame,
-                areas[slot],
-                &slash_items,
-                view.slash_selected,
-                view.locale,
-                palette,
-            );
+            if slash_items.is_empty() {
+                let sw = usize::from(areas[slot].width).max(1);
+                let invalid_hint = if view.locale.is_zh() {
+                    "命令无效或卡片已过期。输入 / 查看命令。"
+                } else {
+                    "Invalid command or expired card. Type / for commands."
+                };
+                frame.render_widget(
+                    Paragraph::new(vec![
+                        Line::styled(
+                            SEPARATOR.repeat(sw),
+                            Style::new().fg(palette.subtle).bg(palette.background),
+                        ),
+                        Line::styled(
+                            clip_bot_line(invalid_hint, sw),
+                            Style::new().fg(palette.muted).bg(palette.background),
+                        ),
+                    ]),
+                    areas[slot],
+                );
+            } else {
+                render_slash_menu(
+                    frame,
+                    areas[slot],
+                    &slash_items,
+                    view.slash_selected,
+                    view.locale,
+                    palette,
+                );
+            }
             slot += 1;
         }
 
-        // Single quiet status / InputRecoveryStatus row right above divider (`ProjectApp.tsx:214-215`)
-        let status_area = areas[slot];
-        let sw = usize::from(status_area.width);
-        let (status_line, status_fg) = if let Some(warn) = view.draft_warning {
-            (clip_bot_line(warn, sw), palette.warning)
-        } else if view.card_focus {
-            let hint = if view.locale.is_zh() {
-                "←/→ 选按钮 · ↑/↓ 换卡片 · Enter 执行 · Esc 回到输入"
-            } else {
-                "Left/right option · up/down card · Enter to act · Esc back to typing"
-            };
-            (clip_bot_line(hint, sw), palette.info)
-        } else if !view.anchor.is_following() {
-            (
-                clip_bot_line("↑ 正在阅读历史 · PgDn/End 或 `/latest` 回到最新", sw),
-                palette.info,
-            )
-        } else if let Some(n) = view.notice {
-            (clip_bot_line(n, sw), palette.info)
-        } else if let Some(s) = view.composer.status {
-            (clip_bot_line(s, sw), palette.info)
-        } else if !view.cards.is_empty() && matches!(view.screen, BotScreen::Conversation) {
-            let hint = if view.locale.is_zh() {
-                "Tab 选择卡片 · 方向键切换选项 · 回车执行"
-            } else {
-                "Tab to select cards · arrows to choose · Enter to act"
-            };
-            (clip_bot_line(hint, sw), palette.muted)
-        } else {
-            (String::new(), palette.muted)
-        };
-        frame.render_widget(
-            Paragraph::new(Line::styled(
-                status_line,
-                Style::new().fg(status_fg).bg(palette.background),
-            )),
-            status_area,
-        );
-        slot += 1;
+        if let Some(ref bar_label) = running_bar_label {
+            render_bot_running_bar(frame, areas[slot], bar_label, view.animation_frame, palette);
+            slot += 1;
+        }
 
         // ADR 122 §4: crisp full-width hairline divider (`─`)
         let div_w = usize::from(areas[slot].width);
@@ -1186,14 +1448,25 @@ pub fn render_bot_shell_with_links(
             );
             let input_area = cols[1];
             let (lines, caret) = if view.composer.draft().is_empty() {
-                let placeholder = if view.locale.is_zh() {
-                    "跟机器人说话，或输入 /help"
+                let focused_action = (matches!(view.screen, BotScreen::Conversation)
+                    && view.card_focus)
+                    .then(|| {
+                        view.cards.get(view.selected_card).and_then(|c| {
+                            (!c.actions.is_empty()).then(|| {
+                                c.actions[view.selected_card_option.min(c.actions.len() - 1)]
+                                    .as_str()
+                            })
+                        })
+                    })
+                    .flatten();
+                let placeholder = focused_action.unwrap_or(if view.locale.is_zh() {
+                    "跟机器人说话"
                 } else {
-                    "Message this bot, or /help"
-                };
+                    "Message this bot"
+                });
                 (
                     vec![Line::styled(
-                        clip_bot_line(placeholder, usize::from(input_area.width)),
+                        clip_bot_line(&terminal_text(placeholder), usize::from(input_area.width)),
                         Style::new()
                             .fg(palette.input_placeholder)
                             .bg(palette.input_bg),
@@ -1285,6 +1558,7 @@ mod tests {
                     selected_card: 0,
                     selected_card_option: 0,
                     slash_selected: 0,
+                    animation_frame: 0,
                     anchor: &anchor,
                     composer: &composer,
                     draft_warning: None,
@@ -1356,6 +1630,7 @@ mod tests {
                         selected_card: 0,
                         selected_card_option: 0,
                         slash_selected: 0,
+                        animation_frame: 0,
                         anchor: &anchor,
                         composer: &composer,
                         draft_warning: Some("草稿恢复失败，可继续输入或 /save-draft"),
@@ -1429,6 +1704,7 @@ mod tests {
                             selected_card: 0,
                             selected_card_option: 0,
                             slash_selected: 0,
+                            animation_frame: 0,
                             anchor: &anchor,
                             composer: &composer,
                             draft_warning: None,
@@ -1466,15 +1742,53 @@ mod tests {
         }
     }
 
+    fn buffer_text(term: &Terminal<TestBackend>) -> String {
+        let buf = term.backend().buffer().clone();
+        let mut rendered = String::new();
+        let mut skip_next = false;
+        for cell in &buf.content {
+            if skip_next {
+                skip_next = false;
+                continue;
+            }
+            let sym = cell.symbol();
+            rendered.push_str(sym);
+            if sym.width() > 1 {
+                skip_next = true;
+            }
+        }
+        rendered
+    }
+
     #[test]
-    fn bot_conversation_renders_familiarize_card_and_focus_hint() {
+    fn bot_conversation_keeps_actions_in_composer_placeholder() {
         let mut cache = ByteBudgetLru::new(MARKDOWN_WRAP_CACHE_BYTES, 128);
         let anchor = ReadingAnchor::FollowingLatest;
         let composer = Composer::default();
         let picker = ModelPickerState::default();
 
-        let mut render_with = |locale: TuiLocale, card_focus: bool| -> String {
+        let render_with = |cache: &mut ByteBudgetLru<WrapCacheKey, RenderedBlock>,
+                           locale: TuiLocale,
+                           card_focus: bool,
+                           selected_option: usize,
+                           multi_action: bool|
+         -> String {
             let zh = locale.is_zh();
+            let actions = if multi_action {
+                vec![
+                    if zh { "批准" } else { "Approve" }.into(),
+                    if zh { "拒绝" } else { "Deny" }.into(),
+                ]
+            } else {
+                vec![
+                    if zh {
+                        "先熟悉一下项目"
+                    } else {
+                        "Familiarize with project"
+                    }
+                    .into(),
+                ]
+            };
             let cards = vec![BotCardRow {
                 number: 1,
                 card_id: "offer:familiarize:ws-demo".into(),
@@ -1486,14 +1800,7 @@ mod tests {
                 }
                 .into(),
                 summary: String::new(),
-                actions: vec![
-                    if zh {
-                        "先熟悉一下项目"
-                    } else {
-                        "Familiarize with project"
-                    }
-                    .into(),
-                ],
+                actions,
             }];
             let mut term = Terminal::new(TestBackend::new(100, 24)).unwrap();
             term.draw(|f| {
@@ -1518,10 +1825,163 @@ mod tests {
                         cards: &cards,
                         card_focus,
                         selected_card: 0,
-                        selected_card_option: 0,
+                        selected_card_option: selected_option,
                         slash_selected: 0,
+                        animation_frame: 0,
                         anchor: &anchor,
                         composer: &composer,
+                        draft_warning: None,
+                        notice: None,
+                        model_picker: &picker,
+                        overlay: None,
+                        wrap_cache: cache,
+                    },
+                );
+            })
+            .unwrap();
+            buffer_text(&term)
+        };
+
+        let zh_idle = render_with(&mut cache, TuiLocale::ZhCn, false, 0, false);
+        assert!(zh_idle.contains("[1] 要我先熟悉一下这个项目吗？"));
+        assert!(zh_idle.contains("跟机器人说话"));
+        assert!(!zh_idle.contains("1. 先熟悉一下项目"));
+        assert!(!zh_idle.contains("跟机器人说话，或输入 /help"));
+        assert!(!zh_idle.contains("Tab 选择卡片"));
+        assert!(!zh_idle.contains("F2 · 普通任务模式"));
+
+        let zh_focus = render_with(&mut cache, TuiLocale::ZhCn, true, 0, false);
+        assert!(zh_focus.contains("先熟悉一下项目"));
+        assert!(!zh_focus.contains("1. 先熟悉一下项目"));
+        assert!(!zh_focus.contains("跟机器人说话"));
+        assert!(!zh_focus.contains("Tab 选择卡片"));
+
+        let zh_opt2 = render_with(&mut cache, TuiLocale::ZhCn, true, 1, true);
+        assert!(zh_opt2.contains("拒绝"));
+        assert!(!zh_opt2.contains("1. 批准"));
+        assert!(!zh_opt2.contains("跟机器人说话"));
+
+        let en_idle = render_with(&mut cache, TuiLocale::EnUs, false, 0, false);
+        assert!(en_idle.contains("[1] Shall I familiarize myself with this project?"));
+        assert!(en_idle.contains("Message this bot"));
+        assert!(!en_idle.contains("1. Familiarize with project"));
+        assert!(!en_idle.contains("Message this bot, or /help"));
+        assert!(!en_idle.contains("Tab to select cards"));
+
+        let en_focus = render_with(&mut cache, TuiLocale::EnUs, true, 0, false);
+        assert!(en_focus.contains("Familiarize with project"));
+        assert!(!en_focus.contains("1. Familiarize with project"));
+        assert!(!en_focus.contains("Message this bot"));
+    }
+
+    #[test]
+    fn bot_conversation_renders_inline_sessions_working_bar_slash_invalid_and_cards_actions() {
+        let mut cache = ByteBudgetLru::new(MARKDOWN_WRAP_CACHE_BYTES, 128);
+        let anchor = ReadingAnchor::FollowingLatest;
+        let picker = ModelPickerState::default();
+        let tasks = vec![
+            BotTaskRow {
+                number: 1,
+                session_id: "s-run".into(),
+                title: "运行中任务".into(),
+                status: "running".into(),
+                accepted: false,
+                updated_at: String::new(),
+            },
+            BotTaskRow {
+                number: 2,
+                session_id: "s-done".into(),
+                title: "已完成任务".into(),
+                status: "completed".into(),
+                accepted: true,
+                updated_at: String::new(),
+            },
+            BotTaskRow {
+                number: 3,
+                session_id: "s-fail".into(),
+                title: "失败任务".into(),
+                status: "failed".into(),
+                accepted: false,
+                updated_at: String::new(),
+            },
+        ];
+
+        let composer_empty = Composer::default();
+        let mut term = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        term.draw(|f| {
+            render_bot_shell(
+                f,
+                BotShellView {
+                    screen: &BotScreen::Conversation,
+                    palette: &DARK_PALETTE,
+                    scheme_id: 0,
+                    current_theme: ThemeMode::Dark,
+                    locale: TuiLocale::ZhCn,
+                    is_host: true,
+                    bots: &[],
+                    selected_bot: 0,
+                    active_bot_name: Some("peer-dev"),
+                    lease_banner: None,
+                    messages: &[],
+                    live_activity: None,
+                    tasks: &tasks,
+                    memories: &[],
+                    objectives: &[],
+                    cards: &[],
+                    card_focus: false,
+                    selected_card: 0,
+                    selected_card_option: 0,
+                    slash_selected: 0,
+                    animation_frame: 6,
+                    anchor: &anchor,
+                    composer: &composer_empty,
+                    draft_warning: None,
+                    notice: None,
+                    model_picker: &picker,
+                    overlay: None,
+                    wrap_cache: &mut cache,
+                },
+            );
+        })
+        .unwrap();
+        let with_tasks = buffer_text(&term);
+        assert!(with_tasks.contains("› 运行中任务 · 进行中"));
+        assert!(with_tasks.contains("✓ 已完成任务 · 已完成"));
+        assert!(with_tasks.contains("× 失败任务 · 失败"));
+        assert!(with_tasks.contains("working..."));
+        assert!(with_tasks.contains("PEER / ACTIVE"));
+
+        let mut composer_invalid = Composer::default();
+        composer_invalid.apply(crate::Action::Insert("/nope".into()));
+        let mut slash_term = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        slash_term
+            .draw(|f| {
+                render_bot_shell(
+                    f,
+                    BotShellView {
+                        screen: &BotScreen::Conversation,
+                        palette: &DARK_PALETTE,
+                        scheme_id: 0,
+                        current_theme: ThemeMode::Dark,
+                        locale: TuiLocale::ZhCn,
+                        is_host: true,
+                        bots: &[],
+                        selected_bot: 0,
+                        active_bot_name: Some("peer-dev"),
+                        lease_banner: None,
+                        messages: &[],
+                        live_activity: None,
+                        tasks: &[],
+                        memories: &[],
+                        objectives: &[],
+                        cards: &[],
+                        card_focus: false,
+                        selected_card: 0,
+                        selected_card_option: 0,
+                        slash_selected: 0,
+                        animation_frame: 0,
+                        anchor: &anchor,
+                        composer: &composer_invalid,
                         draft_warning: None,
                         notice: None,
                         model_picker: &picker,
@@ -1531,37 +1991,99 @@ mod tests {
                 );
             })
             .unwrap();
-            let buf = term.backend().buffer().clone();
-            let mut rendered = String::new();
-            let mut skip_next = false;
-            for cell in &buf.content {
-                if skip_next {
-                    skip_next = false;
-                    continue;
-                }
-                let sym = cell.symbol();
-                rendered.push_str(sym);
-                if sym.width() > 1 {
-                    skip_next = true;
-                }
-            }
-            rendered
-        };
+        let slash_out = buffer_text(&slash_term);
+        assert!(slash_out.contains("输入 / 查看命令。"));
 
-        let zh_idle = render_with(TuiLocale::ZhCn, false);
-        assert!(zh_idle.contains("[1] 要我先熟悉一下这个项目吗？"));
-        assert!(zh_idle.contains("1. 先熟悉一下项目"));
-        assert!(zh_idle.contains("Tab 选择卡片 · 方向键切换选项 · 回车执行"));
-        assert!(!zh_idle.contains("F2 · 普通任务模式"));
+        let mut en_slash_term = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        en_slash_term
+            .draw(|f| {
+                render_bot_shell(
+                    f,
+                    BotShellView {
+                        screen: &BotScreen::Conversation,
+                        palette: &DARK_PALETTE,
+                        scheme_id: 0,
+                        current_theme: ThemeMode::Dark,
+                        locale: TuiLocale::EnUs,
+                        is_host: true,
+                        bots: &[],
+                        selected_bot: 0,
+                        active_bot_name: Some("peer-dev"),
+                        lease_banner: None,
+                        messages: &[],
+                        live_activity: None,
+                        tasks: &[],
+                        memories: &[],
+                        objectives: &[],
+                        cards: &[],
+                        card_focus: false,
+                        selected_card: 0,
+                        selected_card_option: 0,
+                        slash_selected: 0,
+                        animation_frame: 0,
+                        anchor: &anchor,
+                        composer: &composer_invalid,
+                        draft_warning: None,
+                        notice: None,
+                        model_picker: &picker,
+                        overlay: None,
+                        wrap_cache: &mut cache,
+                    },
+                );
+            })
+            .unwrap();
+        assert!(buffer_text(&en_slash_term).contains("Type / for commands."));
 
-        let zh_focus = render_with(TuiLocale::ZhCn, true);
-        assert!(zh_focus.contains("› 1. 先熟悉一下项目"));
-        assert!(zh_focus.contains("←/→ 选按钮 · ↑/↓ 换卡片 · Enter 执行 · Esc 回到输入"));
-
-        let en_idle = render_with(TuiLocale::EnUs, false);
-        assert!(en_idle.contains("[1] Shall I familiarize myself with this project?"));
-        assert!(en_idle.contains("1. Familiarize with project"));
-        assert!(en_idle.contains("Tab to select cards · arrows to choose · Enter to act"));
+        // /cards screen still keeps numbered action rows inside the card list
+        let cards = vec![BotCardRow {
+            number: 1,
+            card_id: "c1".into(),
+            kind: "计划批准".into(),
+            title: "计划审批".into(),
+            summary: String::new(),
+            actions: vec!["批准".into(), "拒绝".into()],
+        }];
+        let mut cards_term = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        cards_term
+            .draw(|f| {
+                render_bot_shell(
+                    f,
+                    BotShellView {
+                        screen: &BotScreen::Cards,
+                        palette: &DARK_PALETTE,
+                        scheme_id: 0,
+                        current_theme: ThemeMode::Dark,
+                        locale: TuiLocale::ZhCn,
+                        is_host: true,
+                        bots: &[],
+                        selected_bot: 0,
+                        active_bot_name: Some("peer-dev"),
+                        lease_banner: None,
+                        messages: &[],
+                        live_activity: None,
+                        tasks: &[],
+                        memories: &[],
+                        objectives: &[],
+                        cards: &cards,
+                        card_focus: true,
+                        selected_card: 0,
+                        selected_card_option: 0,
+                        slash_selected: 0,
+                        animation_frame: 0,
+                        anchor: &anchor,
+                        composer: &composer_empty,
+                        draft_warning: None,
+                        notice: None,
+                        model_picker: &picker,
+                        overlay: None,
+                        wrap_cache: &mut cache,
+                    },
+                );
+            })
+            .unwrap();
+        let cards_out = buffer_text(&cards_term);
+        assert!(cards_out.contains("1. 批准"));
+        assert!(cards_out.contains("2. 拒绝"));
     }
 
     #[test]
@@ -1610,6 +2132,7 @@ mod tests {
                     selected_card: 0,
                     selected_card_option: 0,
                     slash_selected: 0,
+                    animation_frame: 0,
                     anchor: &anchor,
                     composer: &composer,
                     draft_warning: None,
@@ -1670,6 +2193,7 @@ mod tests {
                     selected_card: 0,
                     selected_card_option: 0,
                     slash_selected: 0,
+                    animation_frame: 0,
                     anchor: &anchor,
                     composer: &composer,
                     draft_warning: None,

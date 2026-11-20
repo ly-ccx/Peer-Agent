@@ -25,8 +25,9 @@ use peer_tui::{
     Action, BOT_SLASH_ITEMS, BotCardRow, BotMessageView, BotRowView, BotScreen, BotShellView,
     BotSubView, BotTaskRow, ByteBudgetLru, CardNumbers, CardOperation, ClassicOverlay, Composer,
     Effect, MARKDOWN_WRAP_CACHE_BYTES, ModelPickerEvent, ModelPickerState, ProjectCommand,
-    ReadingAnchor, RenderedBlock, ThemeMode, TuiLocale, WrapCacheKey, action_for_event,
-    filter_slash_items, parse_project_command, render_bot_shell_with_links, terminal_text,
+    ReadingAnchor, RenderedBlock, ThemeMode, TuiLocale, WORKING_ANIMATION_INTERVAL_MS,
+    WrapCacheKey, action_for_event, filter_slash_items, parse_project_command,
+    render_bot_shell_with_links, terminal_text,
 };
 use std::{
     collections::HashMap,
@@ -86,6 +87,8 @@ struct BotShellState<'a> {
     selected_card: usize,
     selected_card_option: usize,
     slash_selected: usize,
+    animation_frame: usize,
+    last_anim_tick: Instant,
     anchor: ReadingAnchor,
     composer: Composer,
     draft_revision: u64,
@@ -176,6 +179,8 @@ impl<'a> BotShellState<'a> {
             selected_card: 0,
             selected_card_option: 0,
             slash_selected: 0,
+            animation_frame: 0,
+            last_anim_tick: Instant::now(),
             anchor: ReadingAnchor::FollowingLatest,
             composer: Composer::default(),
             draft_revision: 0,
@@ -887,7 +892,9 @@ impl<'a> BotShellState<'a> {
             ProjectCommand::Help => {
                 self.composer.accepted();
                 self.clear_persisted_draft();
-                self.screen = BotScreen::Help;
+                self.composer.apply(Action::Insert("/".to_owned()));
+                self.slash_selected = 0;
+                self.screen = BotScreen::Conversation;
                 None
             }
             ProjectCommand::Version => {
@@ -902,7 +909,14 @@ impl<'a> BotShellState<'a> {
                 Some(ShellOutcome::Quit)
             }
             ProjectCommand::Invalid => {
-                self.notice = Some("命令格式无效，输入 `/help` 查看帮助。".to_owned());
+                self.notice = Some(
+                    if self.prefs.locale.is_zh() {
+                        "命令无效或卡片已过期。输入 / 查看命令。"
+                    } else {
+                        "Invalid command or expired card. Type / for commands."
+                    }
+                    .to_owned(),
+                );
                 None
             }
         }
@@ -1060,6 +1074,7 @@ impl<'a> BotShellState<'a> {
                     selected_card: self.selected_card,
                     selected_card_option: self.selected_card_option,
                     slash_selected: self.slash_selected,
+                    animation_frame: self.animation_frame,
                     anchor: &self.anchor,
                     composer: &self.composer,
                     draft_warning: self.draft_warning.as_deref(),
@@ -1070,6 +1085,15 @@ impl<'a> BotShellState<'a> {
                 },
                 links,
             );
+        })
+    }
+
+    fn has_running_session(&self) -> bool {
+        self.tasks.iter().any(|t| {
+            matches!(
+                t.status.as_str(),
+                "queued" | "starting" | "running" | "verifying"
+            )
         })
     }
 
@@ -1123,8 +1147,24 @@ impl<'a> BotShellState<'a> {
                 dirty = true;
             }
 
+            if self.screen == BotScreen::Conversation
+                && self.has_running_session()
+                && self.last_anim_tick.elapsed()
+                    >= Duration::from_millis(WORKING_ANIMATION_INTERVAL_MS)
+            {
+                self.animation_frame = self.animation_frame.wrapping_add(1);
+                self.last_anim_tick = Instant::now();
+                dirty = true;
+            }
+
             // Crossterm's Unix TTY source needs a positive poll budget to read the fd.
-            let poll_ms = if self.active_tick.is_some() { 5 } else { 25 };
+            let poll_ms = if self.active_tick.is_some()
+                || (self.screen == BotScreen::Conversation && self.has_running_session())
+            {
+                15
+            } else {
+                25
+            };
             if event::poll(Duration::from_millis(poll_ms))? {
                 match event::read()? {
                     Event::Resize(_, _) => {
@@ -1325,6 +1365,10 @@ impl<'a> BotShellState<'a> {
                                                 }
                                                 dirty = true;
                                             }
+                                            KeyCode::Backspace => {
+                                                self.card_focus = false;
+                                                dirty = true;
+                                            }
                                             KeyCode::Char(c)
                                                 if !key.modifiers.intersects(
                                                     KeyModifiers::CONTROL | KeyModifiers::ALT,
@@ -1476,10 +1520,17 @@ impl<'a> BotShellState<'a> {
                                         }
                                     } else if key.code == KeyCode::Tab
                                         && self.screen == BotScreen::Conversation
+                                        && self.composer.draft().is_empty()
                                         && !self.cards.is_empty()
                                     {
                                         self.card_focus = true;
                                         self.selected_card_option = 0;
+                                        dirty = true;
+                                    } else if key.code == KeyCode::Esc
+                                        && self.composer.draft().starts_with('/')
+                                    {
+                                        self.composer.accepted();
+                                        self.slash_selected = 0;
                                         dirty = true;
                                     } else if key.code == KeyCode::Esc
                                         && self.screen != BotScreen::Conversation
