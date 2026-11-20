@@ -6,7 +6,7 @@ use peer_runtime::{
     session_host::{LocalPermissionDecision, PermissionInput},
 };
 use serde_json::{Value, json};
-use std::{future::Future, pin::Pin, time::Duration};
+use std::{future::Future, pin::Pin};
 use tokio::sync::{mpsc, oneshot, watch};
 
 const MAX_PREVIEW: usize = 8192;
@@ -189,7 +189,7 @@ impl PermissionInput for PermissionPort {
         cancel: &'a CancellationToken,
     ) -> Pin<Box<dyn Future<Output = LocalPermissionDecision> + 'a>> {
         Box::pin(async move {
-            use LocalPermissionDecision::{Cancel, Deny, Timeout};
+            use LocalPermissionDecision::{Cancel, Deny};
             if cancel.is_cancelled() {
                 return Cancel;
             }
@@ -228,7 +228,6 @@ impl PermissionInput for PermissionPort {
                 biased;
                 _ = cancel.cancelled() => Cancel,
                 answer = receive => answer.unwrap_or(Deny),
-                _ = tokio::time::sleep(Duration::from_secs(60)) => Timeout,
             }
         })
     }

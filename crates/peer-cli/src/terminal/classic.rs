@@ -257,7 +257,8 @@ pub(super) struct ClassicSession<'a> {
 
 impl<'a> ClassicSession<'a> {
     fn new(home: PathBuf, workspace: PathBuf, prefs: &'a mut TerminalPreferences) -> Self {
-        let access = ConversationAccess::new(LocalAccessLevel::AskBeforeLocal);
+        let initial_access = prefs.local_access_level;
+        let access = ConversationAccess::new(initial_access);
         let runtime = Rc::new(NativeConversationRuntime::new(&home, access.clone()));
         let mut selected_provider = None;
         let mut selected_model = None;
@@ -279,7 +280,7 @@ impl<'a> ClassicSession<'a> {
             conversation_id: None,
             runtime,
             access,
-            access_level: LocalAccessLevel::AskBeforeLocal,
+            access_level: initial_access,
             mode: RuntimeMode::Chat,
             fast_mode: false,
             fast_available: false,
@@ -1032,7 +1033,14 @@ impl<'a> ClassicSession<'a> {
         };
         if self.access.set(next).is_ok() {
             self.access_level = next;
-            self.set_notice(format!("本地权限策略已切换为 {next_wire}。"), false);
+            self.prefs.local_access_level = next;
+            match theme_store::save_local_access_level(&self.home, next) {
+                Ok(()) => self.set_notice(format!("本地权限策略已切换为 {next_wire}。"), false),
+                Err(err) => self.set_notice(
+                    format!("本地权限策略已切换为 {next_wire}（写入 settings.json 失败：{err}）。"),
+                    true,
+                ),
+            }
         }
     }
 
@@ -1600,6 +1608,13 @@ impl<'a> ClassicSession<'a> {
                         format!(
                             "会话仍在执行或有结果待核对（conversation_execution_busy） · peer recover --session {cid}"
                         ),
+                        true,
+                    );
+                }
+                Ok(Err("waiting_user")) => {
+                    self.reload_transcript(None);
+                    self.set_notice(
+                        "本地授权等待已超时（工具未执行）。可继续发送消息，或输入 /permissions 调整权限策略。",
                         true,
                     );
                 }

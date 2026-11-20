@@ -3,6 +3,7 @@
 //! Strictly read-only on open (never writes files when `settings.json` is absent)
 //! and preserves all unrelated/Desktop keys during atomic updates.
 
+use peer_protocol::LocalAccessLevel;
 use peer_tui::{DARK_PALETTE, LIGHT_PALETTE, ThemeMode, ThemeScheme, TuiLocale, TuiPalette};
 use serde_json::{Map, Value};
 use std::{
@@ -16,6 +17,15 @@ pub(in crate::terminal) struct TerminalPreferences {
     pub mode: ThemeMode,
     pub scheme: ThemeScheme,
     pub locale: TuiLocale,
+    pub local_access_level: LocalAccessLevel,
+}
+
+fn parse_selectable_access_level(raw: &str) -> LocalAccessLevel {
+    match raw.trim() {
+        "session_local" => LocalAccessLevel::SessionLocal,
+        "full_local" => LocalAccessLevel::FullLocal,
+        _ => LocalAccessLevel::AskBeforeLocal,
+    }
 }
 
 impl TerminalPreferences {
@@ -68,10 +78,11 @@ pub(in crate::terminal) fn resolve_scheme(mode: ThemeMode) -> ThemeScheme {
     }
 }
 
-/// Strictly read-only preference load (defaults to `Dark` & `ZhCn` when absent).
+/// Strictly read-only preference load (defaults to `Dark`, `ZhCn`, and `AskBeforeLocal` when absent).
 pub(in crate::terminal) fn load_preferences(home: &Path) -> TerminalPreferences {
     let mut mode = ThemeMode::Dark;
     let mut locale = TuiLocale::ZhCn;
+    let mut local_access_level = LocalAccessLevel::AskBeforeLocal;
 
     if let Ok(raw) = fs::read_to_string(settings_path(home))
         && let Ok(Value::Object(map)) = serde_json::from_str::<Value>(&raw)
@@ -90,12 +101,16 @@ pub(in crate::terminal) fn load_preferences(home: &Path) -> TerminalPreferences 
         {
             locale = l;
         }
+        if let Some(access) = map.get("localAccessLevel").and_then(Value::as_str) {
+            local_access_level = parse_selectable_access_level(access);
+        }
     }
 
     TerminalPreferences {
         mode,
         scheme: resolve_scheme(mode),
         locale,
+        local_access_level,
     }
 }
 
@@ -139,6 +154,21 @@ pub(in crate::terminal) fn save_locale(home: &Path, locale: TuiLocale) -> io::Re
     update_settings_key(home, "language", Value::String(locale.as_str().to_owned()))
 }
 
+pub(in crate::terminal) fn save_local_access_level(
+    home: &Path,
+    level: LocalAccessLevel,
+) -> io::Result<()> {
+    let selectable = match level {
+        LocalAccessLevel::RestrictedLocal => LocalAccessLevel::AskBeforeLocal,
+        other => other,
+    };
+    update_settings_key(
+        home,
+        "localAccessLevel",
+        Value::String(selectable.as_str().to_owned()),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,6 +183,7 @@ mod tests {
         let prefs = load_preferences(home);
         assert_eq!(prefs.mode, ThemeMode::Dark);
         assert_eq!(prefs.locale, TuiLocale::ZhCn);
+        assert_eq!(prefs.local_access_level, LocalAccessLevel::AskBeforeLocal);
         assert!(!home.join("settings.json").exists());
 
         // Seed unrelated Desktop keys
@@ -169,21 +200,31 @@ mod tests {
         let scheme = save_theme_mode(home, ThemeMode::Light).unwrap();
         assert_eq!(scheme, ThemeScheme::Light);
         save_locale(home, TuiLocale::EnUs).unwrap();
+        save_local_access_level(home, LocalAccessLevel::FullLocal).unwrap();
 
         let updated: Value =
             serde_json::from_str(&fs::read_to_string(home.join("settings.json")).unwrap()).unwrap();
         assert_eq!(updated["desktopDensity"], "compact");
         assert_eq!(updated["themeMode"], "light");
         assert_eq!(updated["language"], "en-US");
+        assert_eq!(updated["localAccessLevel"], "full_local");
 
         let reloaded = load_preferences(home);
         assert_eq!(reloaded.mode, ThemeMode::Light);
         assert_eq!(reloaded.scheme, ThemeScheme::Light);
         assert_eq!(reloaded.locale, TuiLocale::EnUs);
+        assert_eq!(reloaded.local_access_level, LocalAccessLevel::FullLocal);
+
+        save_local_access_level(home, LocalAccessLevel::SessionLocal).unwrap();
+        assert_eq!(
+            load_preferences(home).local_access_level,
+            LocalAccessLevel::SessionLocal
+        );
 
         // Corrupt JSON is never clobbered
         fs::write(home.join("settings.json"), b"{corrupt").unwrap();
         assert!(save_theme_mode(home, ThemeMode::Dark).is_err());
+        assert!(save_local_access_level(home, LocalAccessLevel::FullLocal).is_err());
         assert_eq!(fs::read(home.join("settings.json")).unwrap(), b"{corrupt");
     }
 }
