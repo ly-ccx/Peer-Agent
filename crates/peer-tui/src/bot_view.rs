@@ -25,7 +25,7 @@ use crate::{
         compact_workspace_path, fill_canvas,
     },
     view::draft_view_styled,
-    wordmark::b3_wordmark_lines,
+    wordmark::b3_wordmark_lines_animated,
 };
 use ratatui::{
     Frame,
@@ -132,6 +132,7 @@ pub struct BotShellView<'a> {
     pub notice: Option<&'a str>,
     pub model_picker: &'a ModelPickerState,
     pub overlay: Option<&'a ClassicOverlay>,
+    pub wordmark_elapsed_ms: Option<u64>,
     pub wrap_cache: &'a mut ByteBudgetLru<WrapCacheKey, RenderedBlock>,
 }
 
@@ -1206,6 +1207,7 @@ fn render_conversation_body(
     palette: &TuiPalette,
     scheme_id: u8,
     locale: TuiLocale,
+    wordmark_elapsed_ms: Option<u64>,
     out_links: &mut Vec<ScreenHyperlink>,
 ) {
     let width = usize::from(area.width).max(1);
@@ -1223,7 +1225,8 @@ fn render_conversation_body(
         if height >= 12 && width >= 30 {
             let mut hero_lines: Vec<(Line<'static>, Vec<LineLink>)> = Vec::new();
             if height >= 18 && width >= 42 {
-                let (wm_lines, wm_w) = b3_wordmark_lines(area.width, palette);
+                let (wm_lines, wm_w) =
+                    b3_wordmark_lines_animated(area.width, palette, wordmark_elapsed_ms);
                 let wm_pad = width.saturating_sub(usize::from(wm_w)) / 2;
                 let wm_pad_str = (wm_pad > 0).then(|| " ".repeat(wm_pad));
                 for line in wm_lines {
@@ -2181,6 +2184,7 @@ pub fn render_bot_shell_with_links(
                 palette,
                 view.scheme_id,
                 view.locale,
+                view.wordmark_elapsed_ms,
                 out_links,
             );
         }
@@ -2572,7 +2576,7 @@ pub fn render_bot_shell_with_links(
 
     if view.model_picker.open {
         out_links.clear();
-        render_model_picker(frame, full_area, view.model_picker, palette);
+        render_model_picker(frame, full_area, view.model_picker, view.locale, palette);
     }
     if active_dock.is_some_and(|ov| ov.is_modal()) {
         out_links.clear();
@@ -2638,6 +2642,7 @@ mod tests {
                     notice: None,
                     model_picker: &picker,
                     overlay: None,
+                    wordmark_elapsed_ms: None,
                     wrap_cache: &mut cache,
                 },
             );
@@ -2714,6 +2719,7 @@ mod tests {
                         notice: None,
                         model_picker: &picker,
                         overlay: None,
+                        wordmark_elapsed_ms: None,
                         wrap_cache: &mut cache,
                     },
                 );
@@ -2792,6 +2798,7 @@ mod tests {
                             notice: None,
                             model_picker: &picker,
                             overlay: None,
+                            wordmark_elapsed_ms: None,
                             wrap_cache: &mut cache,
                         },
                     );
@@ -2919,6 +2926,7 @@ mod tests {
                         notice: None,
                         model_picker: &picker,
                         overlay: None,
+                        wordmark_elapsed_ms: None,
                         wrap_cache: cache,
                     },
                 );
@@ -3015,6 +3023,7 @@ mod tests {
                             notice: None,
                             model_picker: &picker,
                             overlay: None,
+                            wordmark_elapsed_ms: None,
                             wrap_cache: &mut cache,
                         },
                     );
@@ -3097,6 +3106,7 @@ mod tests {
                     notice: None,
                     model_picker: &picker,
                     overlay: None,
+                    wordmark_elapsed_ms: None,
                     wrap_cache: &mut cache,
                 },
             );
@@ -3148,6 +3158,7 @@ mod tests {
                         notice: None,
                         model_picker: &picker,
                         overlay: None,
+                        wordmark_elapsed_ms: None,
                         wrap_cache: &mut cache,
                     },
                 );
@@ -3193,6 +3204,7 @@ mod tests {
                         notice: None,
                         model_picker: &picker,
                         overlay: None,
+                        wordmark_elapsed_ms: None,
                         wrap_cache: &mut cache,
                     },
                 );
@@ -3246,6 +3258,7 @@ mod tests {
                         notice: None,
                         model_picker: &picker,
                         overlay: None,
+                        wordmark_elapsed_ms: None,
                         wrap_cache: &mut cache,
                     },
                 );
@@ -3313,6 +3326,7 @@ mod tests {
                     notice: None,
                     model_picker: &picker,
                     overlay: None,
+                    wordmark_elapsed_ms: None,
                     wrap_cache: &mut cache,
                 },
                 &mut links,
@@ -3378,6 +3392,7 @@ mod tests {
                     notice: None,
                     model_picker: &picker,
                     overlay: None,
+                    wordmark_elapsed_ms: None,
                     wrap_cache: &mut cache,
                 },
                 &mut detail_links,

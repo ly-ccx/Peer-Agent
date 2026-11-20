@@ -25,9 +25,9 @@ use peer_tui::{
     Action, BOT_SLASH_ITEMS, BotCardRow, BotMessageView, BotRowView, BotScreen, BotShellView,
     BotSubView, BotTaskRow, ByteBudgetLru, CardNumbers, CardOperation, ClassicOverlay, Composer,
     Effect, MARKDOWN_WRAP_CACHE_BYTES, ModelPickerEvent, ModelPickerState, ProjectCommand,
-    ReadingAnchor, RenderedBlock, ThemeMode, TuiLocale, WORKING_ANIMATION_INTERVAL_MS,
-    WrapCacheKey, action_for_event, filter_slash_items, parse_project_command,
-    render_bot_shell_with_links, terminal_text,
+    ReadingAnchor, RenderedBlock, ThemeMode, TuiLocale, WORDMARK_ANIMATION_TICK_MS,
+    WORKING_ANIMATION_INTERVAL_MS, WrapCacheKey, action_for_event, filter_slash_items,
+    parse_project_command, render_bot_shell_with_links, terminal_text,
 };
 use std::{
     collections::HashMap,
@@ -89,6 +89,8 @@ struct BotShellState<'a> {
     slash_selected: usize,
     animation_frame: usize,
     last_anim_tick: Instant,
+    wordmark_started_at: Instant,
+    last_wordmark_tick: Instant,
     anchor: ReadingAnchor,
     composer: Composer,
     draft_revision: u64,
@@ -184,6 +186,8 @@ impl<'a> BotShellState<'a> {
             slash_selected: 0,
             animation_frame: 0,
             last_anim_tick: Instant::now(),
+            wordmark_started_at: Instant::now(),
+            last_wordmark_tick: Instant::now(),
             anchor: ReadingAnchor::FollowingLatest,
             composer: Composer::default(),
             draft_revision: 0,
@@ -1062,6 +1066,10 @@ impl<'a> BotShellState<'a> {
         let palette = self.prefs.palette();
         let scheme_id = self.prefs.scheme.cache_id();
         let locale = self.prefs.locale;
+        let wordmark_elapsed_ms = (self.screen == BotScreen::Conversation
+            && self.messages.is_empty()
+            && live_activity.is_none())
+        .then(|| self.wordmark_started_at.elapsed().as_millis() as u64);
         terminal.draw_frame_with_links(&self.workspace, |frame, links| {
             render_bot_shell_with_links(
                 frame,
@@ -1097,11 +1105,24 @@ impl<'a> BotShellState<'a> {
                     notice: self.notice.as_deref(),
                     model_picker: &self.model_picker,
                     overlay: Some(&self.overlay),
+                    wordmark_elapsed_ms,
                     wrap_cache: &mut self.wrap_cache,
                 },
                 links,
             );
         })
+    }
+
+    fn is_hero_wordmark_visible(&self) -> bool {
+        self.screen == BotScreen::Conversation
+            && self.messages.is_empty()
+            && !self.model_picker.open
+            && !self.overlay.is_open()
+            && self
+                .host
+                .runner()
+                .current_activity()
+                .is_none_or(|a| a.finished_at.is_some())
     }
 
     fn has_running_session(&self) -> bool {
@@ -1174,6 +1195,13 @@ impl<'a> BotShellState<'a> {
             {
                 self.animation_frame = self.animation_frame.wrapping_add(1);
                 self.last_anim_tick = Instant::now();
+                dirty = true;
+            }
+            if self.is_hero_wordmark_visible()
+                && self.last_wordmark_tick.elapsed()
+                    >= Duration::from_millis(WORDMARK_ANIMATION_TICK_MS)
+            {
+                self.last_wordmark_tick = Instant::now();
                 dirty = true;
             }
 

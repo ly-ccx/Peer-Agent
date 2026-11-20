@@ -65,7 +65,10 @@ pub use theme::{
     thinking_status_label,
 };
 pub use view::render;
-pub use wordmark::{B3Variant, b3_wordmark_lines};
+pub use wordmark::{
+    B3Variant, WORDMARK_ANIMATION_TICK_MS, b3_wordmark_lines, b3_wordmark_lines_animated,
+    breathe_signal_color,
+};
 
 pub fn display_width(text: &str) -> usize {
     unicode_width::UnicodeWidthStr::width(text)

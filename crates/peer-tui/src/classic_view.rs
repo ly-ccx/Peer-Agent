@@ -33,7 +33,7 @@ use crate::{
         thinking_status_label,
     },
     view::draft_view_styled,
-    wordmark::b3_wordmark_lines,
+    wordmark::b3_wordmark_lines_animated,
 };
 use ratatui::{
     Frame,
@@ -129,7 +129,23 @@ pub struct ClassicView<'a> {
     pub model_picker: &'a ModelPickerState,
     pub overlay: &'a ClassicOverlay,
     pub slash_selected: usize,
+    pub wordmark_elapsed_ms: Option<u64>,
     pub wrap_cache: &'a mut ByteBudgetLru<WrapCacheKey, RenderedBlock>,
+}
+
+/// Outer Frost breathing margins (`apps/tui/src/responsive-layout.ts`).
+pub fn responsive_outer_padding(width: u16, height: u16) -> (u16, u16) {
+    let hpad = if width >= 120 {
+        3
+    } else if width >= 80 {
+        2
+    } else if width >= 60 {
+        1
+    } else {
+        0
+    };
+    let vpad = u16::from(width >= 60 && height >= 18);
+    (hpad, vpad)
 }
 
 fn short_model_name(model_badge: &str) -> &str {
@@ -549,6 +565,15 @@ fn render_composer_status_bar(
     view: &ClassicView<'_>,
     palette: &TuiPalette,
 ) {
+    let area = if area.width >= 40 {
+        Rect {
+            x: area.x + 1,
+            width: area.width - 1,
+            ..area
+        }
+    } else {
+        area
+    };
     let sw = usize::from(area.width).max(1);
     let narrow = sw < 56;
     let compact = !narrow && sw < 88;
@@ -865,7 +890,7 @@ fn user_input_dock_layout(
     prompt: &UserInputPrompt,
     dock_width: u16,
     panel_budget: u16,
-) -> (Vec<String>, usize, bool) {
+) -> (Vec<String>, usize, bool, bool) {
     let rem = panel_budget.saturating_sub(2);
     let show_footer = rem >= 3;
     let footer_h = u16::from(show_footer);
@@ -874,14 +899,18 @@ fn user_input_dock_layout(
     let text_w = usize::from(dock_width.saturating_sub(2)).max(1);
     let q_lines = wrap_plain_lines(&prompt.question, text_w, q_cap);
     let q_h = q_lines.len() as u16;
-    let avail_opts = usize::from(avail_q_and_opts.saturating_sub(q_h)).max(1);
+    let opt_target = prompt.options.len().min(6) as u16;
+    let breathe = rem >= 5 && avail_q_and_opts > q_h + opt_target;
+    let avail_opts = usize::from(avail_q_and_opts.saturating_sub(q_h + u16::from(breathe))).max(1);
     let vis_opts = prompt.options.len().min(6).min(avail_opts);
-    (q_lines, vis_opts, show_footer)
+    (q_lines, vis_opts, show_footer, breathe)
 }
 
 fn user_input_dock_height(prompt: &UserInputPrompt, dock_width: u16, panel_budget: u16) -> u16 {
-    let (q_lines, vis_opts, show_footer) = user_input_dock_layout(prompt, dock_width, panel_budget);
-    (2 + q_lines.len() as u16 + vis_opts as u16 + u16::from(show_footer)).min(panel_budget)
+    let (q_lines, vis_opts, show_footer, breathe) =
+        user_input_dock_layout(prompt, dock_width, panel_budget);
+    (2 + q_lines.len() as u16 + vis_opts as u16 + u16::from(show_footer) + u16::from(breathe))
+        .min(panel_budget)
 }
 
 fn render_user_input_dock(
@@ -896,7 +925,8 @@ fn render_user_input_dock(
         return;
     }
     let pw = usize::from(area.width).max(1);
-    let (q_lines, vis_opts, show_footer) = user_input_dock_layout(prompt, area.width, area.height);
+    let (q_lines, vis_opts, show_footer, breathe) =
+        user_input_dock_layout(prompt, area.width, area.height);
 
     let divider_area = Rect { height: 1, ..area };
     frame.render_widget(
@@ -913,15 +943,15 @@ fn render_user_input_dock(
         width: area.width,
         height: area.height - 1,
     };
-    let panel_bg = palette.panel;
-    frame.render_widget(Block::new().style(Style::new().bg(panel_bg)), body_area);
+    let dock_bg = palette.background;
+    frame.render_widget(Block::new().style(Style::new().bg(dock_bg)), body_area);
 
     let mut y = body_area.y;
     let y_end = body_area.y + body_area.height;
     let push_line = |frame: &mut Frame<'_>, row_y: &mut u16, line: Line<'static>| {
         if *row_y < y_end {
             frame.render_widget(
-                Paragraph::new(line).style(Style::new().bg(panel_bg)),
+                Paragraph::new(line).style(Style::new().bg(dock_bg)),
                 Rect {
                     x: body_area.x,
                     y: *row_y,
@@ -943,12 +973,12 @@ fn render_user_input_dock(
             clip_bot_line(" Ask user", pw),
             Style::new()
                 .fg(palette.accent)
-                .bg(panel_bg)
+                .bg(dock_bg)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             clip_bot_line(hide_hint, pw.saturating_sub(9)),
-            Style::new().fg(palette.muted).bg(panel_bg),
+            Style::new().fg(palette.muted).bg(dock_bg),
         ),
     ]);
     push_line(frame, &mut y, header);
@@ -959,9 +989,13 @@ fn render_user_input_dock(
             &mut y,
             Line::styled(
                 clip_bot_line(&format!(" {q}"), pw),
-                Style::new().fg(palette.text).bg(panel_bg),
+                Style::new().fg(palette.text).bg(dock_bg),
             ),
         );
+    }
+
+    if breathe {
+        push_line(frame, &mut y, Line::styled("", Style::new().bg(dock_bg)));
     }
 
     let total = prompt.options.len();
@@ -981,16 +1015,26 @@ fn render_user_input_dock(
         } else {
             "[•]".to_owned()
         };
-        let row_text = clip_bot_line(&format!("{prefix}{shortcut} {}", terminal_text(opt)), pw);
+        let label_text = clip_bot_line(
+            &format!("{shortcut} {}", terminal_text(opt)),
+            pw.saturating_sub(prefix.width()),
+        );
         let style = if is_sel {
             Style::new()
                 .fg(palette.accent)
-                .bg(panel_bg)
+                .bg(dock_bg)
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::new().fg(palette.muted).bg(panel_bg)
+            Style::new().fg(palette.text_soft).bg(dock_bg)
         };
-        push_line(frame, &mut y, Line::styled(row_text, style));
+        push_line(
+            frame,
+            &mut y,
+            Line::from(vec![
+                Span::styled(prefix, style),
+                Span::styled(label_text, style),
+            ]),
+        );
     }
 
     if show_footer {
@@ -1004,7 +1048,7 @@ fn render_user_input_dock(
             &mut y,
             Line::styled(
                 clip_bot_line(hint, pw),
-                Style::new().fg(palette.muted).bg(panel_bg),
+                Style::new().fg(palette.muted).bg(dock_bg),
             ),
         );
     }
@@ -1195,7 +1239,7 @@ fn render_composer_dock(
     }
 
     if spec.model_dock_h > 0 {
-        render_model_picker_dock(frame, areas[slot], view.model_picker, palette);
+        render_model_picker_dock(frame, areas[slot], view.model_picker, view.locale, palette);
         slot += 1;
     } else if spec.approval_dock_h > 0
         && let Some((card, selected)) = view.approval
@@ -1419,12 +1463,12 @@ pub fn render_classic_with_links(
     let palette = view.palette;
     fill_canvas(frame, full_area, palette.background);
 
-    let hpad: u16 = if full_area.width >= 20 { 1 } else { 0 };
+    let (hpad, vpad) = responsive_outer_padding(full_area.width, full_area.height);
     let area = Rect {
         x: full_area.x + hpad,
-        y: full_area.y,
+        y: full_area.y + vpad,
         width: full_area.width.saturating_sub(hpad * 2),
-        height: full_area.height,
+        height: full_area.height.saturating_sub(vpad * 2),
     };
     if area.width == 0 || area.height == 0 {
         frame.set_cursor_position((full_area.x, full_area.y));
@@ -1515,7 +1559,8 @@ pub fn render_classic_with_links(
             main_area.height.saturating_sub(2),
             false,
         );
-        let (wm_lines, wm_w) = b3_wordmark_lines(welcome_w, palette);
+        let (wm_lines, wm_w) =
+            b3_wordmark_lines_animated(welcome_w, palette, view.wordmark_elapsed_ms);
         let wm_h = wm_lines.len() as u16;
         let show_wm = wm_h > 0 && main_area.height >= spec.total_height + wm_h + 2;
         let group_h = if show_wm {
@@ -1599,7 +1644,15 @@ pub fn render_classic_with_links(
         Constraint::Length(spec.total_height.min(conv_main_area.height)),
     ])
     .split(conv_main_area);
-    let body_area = body_dock[0];
+    let body_area = if body_dock[0].height >= 4 {
+        Rect {
+            y: body_dock[0].y + 1,
+            height: body_dock[0].height - 1,
+            ..body_dock[0]
+        }
+    } else {
+        body_dock[0]
+    };
     let dock_area = body_dock[1];
     let body_w = usize::from(body_area.width).max(1);
     let body_h = usize::from(body_area.height);
@@ -1931,6 +1984,7 @@ mod tests {
                         model_picker: &picker,
                         overlay: &ClassicOverlay::None,
                         slash_selected: 0,
+                        wordmark_elapsed_ms: None,
                         wrap_cache: &mut cache,
                     },
                 );
@@ -2016,6 +2070,7 @@ mod tests {
                         model_picker: &picker,
                         overlay: &ClassicOverlay::None,
                         slash_selected: 0,
+                        wordmark_elapsed_ms: None,
                         wrap_cache: &mut cache,
                     },
                 );
@@ -2068,6 +2123,7 @@ mod tests {
                         model_picker: &picker,
                         overlay: &ClassicOverlay::None,
                         slash_selected: 0,
+                        wordmark_elapsed_ms: None,
                         wrap_cache: &mut cache,
                     },
                 );
@@ -2120,6 +2176,7 @@ mod tests {
                         model_picker: &picker,
                         overlay: &ClassicOverlay::None,
                         slash_selected: 0,
+                        wordmark_elapsed_ms: None,
                         wrap_cache: &mut cache,
                     },
                 );
@@ -2178,6 +2235,7 @@ mod tests {
                     model_picker: &picker,
                     overlay: &ClassicOverlay::None,
                     slash_selected: 0,
+                    wordmark_elapsed_ms: None,
                     wrap_cache: &mut cache,
                 },
             );
@@ -2256,6 +2314,7 @@ mod tests {
                         model_picker: &picker,
                         overlay: &ClassicOverlay::None,
                         slash_selected: 0,
+                        wordmark_elapsed_ms: None,
                         wrap_cache: &mut cache,
                     },
                 );
@@ -2336,6 +2395,7 @@ mod tests {
                         model_picker: &picker,
                         overlay: &ClassicOverlay::None,
                         slash_selected: 0,
+                        wordmark_elapsed_ms: None,
                         wrap_cache: &mut cache,
                     },
                 );
@@ -2422,6 +2482,7 @@ mod tests {
                     model_picker: &picker,
                     overlay: &ClassicOverlay::None,
                     slash_selected: 0,
+                    wordmark_elapsed_ms: None,
                     wrap_cache: &mut cache,
                 },
             );
@@ -2511,6 +2572,7 @@ mod tests {
                     model_picker: &picker,
                     overlay: &ClassicOverlay::None,
                     slash_selected: 0,
+                    wordmark_elapsed_ms: None,
                     wrap_cache: &mut cache,
                 },
                 &mut links,
@@ -2592,6 +2654,7 @@ mod tests {
                     model_picker: &picker,
                     overlay: &ClassicOverlay::Help { scroll: 0 },
                     slash_selected: 0,
+                    wordmark_elapsed_ms: None,
                     wrap_cache: &mut cache,
                 },
                 &mut modal_links,
@@ -2709,6 +2772,7 @@ mod tests {
                         model_picker: &picker,
                         overlay: &ClassicOverlay::None,
                         slash_selected: 0,
+                        wordmark_elapsed_ms: None,
                         wrap_cache: &mut cache,
                     },
                     &mut wide_links,
@@ -2774,6 +2838,7 @@ mod tests {
                         model_picker: &picker,
                         overlay: &ClassicOverlay::None,
                         slash_selected: 0,
+                        wordmark_elapsed_ms: None,
                         wrap_cache: &mut cache,
                     },
                 );
@@ -2827,6 +2892,7 @@ mod tests {
                         model_picker: &picker,
                         overlay: &ClassicOverlay::None,
                         slash_selected: 0,
+                        wordmark_elapsed_ms: None,
                         wrap_cache: &mut cache,
                     },
                 );
@@ -2838,5 +2904,112 @@ mod tests {
         assert!(approval_text.contains("[1] 批准并执行"));
         assert!(approval_text.contains("[2] 修改计划"));
         assert!(approval_text.contains("[3] 拒绝"));
+    }
+
+    #[test]
+    fn frost_responsive_margins_ask_dock_canvas_and_status_indent() {
+        assert_eq!(responsive_outer_padding(140, 30), (3, 1));
+        assert_eq!(responsive_outer_padding(100, 24), (2, 1));
+        assert_eq!(responsive_outer_padding(68, 16), (1, 0));
+        assert_eq!(responsive_outer_padding(48, 16), (0, 0));
+
+        let composer = Composer::default();
+        let anchor = ReadingAnchor::default();
+        let picker = ModelPickerState::default();
+        let mut cache = ByteBudgetLru::new(MARKDOWN_WRAP_CACHE_BYTES, 16);
+        let msgs = vec![ClassicMessage {
+            id: "m1".into(),
+            revision: 1,
+            role: "user".into(),
+            text: "hi".into(),
+            thinking: None,
+            tools: vec![],
+            continuation: false,
+        }];
+        let prompt = UserInputPrompt {
+            question: "选择执行策略".into(),
+            options: vec!["运行测试".into(), "跳过".into()],
+            tool_call_id: None,
+        };
+
+        let mut term = Terminal::new(TestBackend::new(120, 24)).unwrap();
+        term.draw(|f| {
+            render_classic(
+                f,
+                ClassicView {
+                    title: "Peer",
+                    workspace_label: "~/Documents/Develop/peer-dev",
+                    model_badge: "gpt-6.1-sol",
+                    effort_badge: "high",
+                    mode_badge: "chat",
+                    access_badge: "ask",
+                    context_percent: Some(5),
+                    quota_label: None,
+                    quota_remaining: None,
+                    fast_mode: false,
+                    fast_available: false,
+                    goal_status: GoalMenuStatus::None,
+                    goal_panel: None,
+                    plan_approval: None,
+                    is_running: false,
+                    activity_label: None,
+                    animation_frame: 0,
+                    running_elapsed_ms: 0,
+                    tools_expanded: false,
+                    notice: None,
+                    notice_is_error: false,
+                    palette: &DARK_PALETTE,
+                    scheme_id: 0,
+                    current_theme: ThemeMode::Dark,
+                    locale: TuiLocale::ZhCn,
+                    messages: &msgs,
+                    live_stream: "",
+                    live_thinking: "",
+                    anchor: &anchor,
+                    composer: &composer,
+                    status: "",
+                    approval: None,
+                    user_input: Some((&prompt, 0)),
+                    model_picker: &picker,
+                    overlay: &ClassicOverlay::None,
+                    slash_selected: 0,
+                    wordmark_elapsed_ms: Some(0),
+                    wrap_cache: &mut cache,
+                },
+            );
+        })
+        .unwrap();
+
+        assert_eq!(responsive_outer_padding(48, 22), (0, 0));
+
+        let buf = term.backend().buffer();
+        let row_text = |y: u16| -> String {
+            (0..buf.area.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+        };
+        // vpad=1 keeps row 0 empty background canvas; hpad=3 insets topbar & body to x=3.
+        assert!(row_text(0).trim().is_empty());
+        assert_eq!(buf[(0, 1)].symbol(), " ");
+
+        // Status bar indents 1 column further inside x=3 (starts "mode agent" at x=4).
+        let status_y = (0..24)
+            .find(|&y| row_text(y).contains("mode agent"))
+            .unwrap();
+        assert_eq!(buf[(3, status_y)].symbol(), " ");
+        assert_eq!(buf[(4, status_y)].symbol(), "m");
+
+        // Ask user dock sits on canvas background (not palette.panel) with aligned [1] / [2].
+        let ask1_y = (0..24).find(|&y| row_text(y).contains("[1]")).unwrap();
+        let ask2_y = (0..24).find(|&y| row_text(y).contains("[2]")).unwrap();
+        assert_eq!(buf[(3, ask1_y)].bg, DARK_PALETTE.background);
+        assert_eq!(buf[(3, ask2_y)].bg, DARK_PALETTE.background);
+        let x1 = (0..buf.area.width)
+            .find(|&x| buf[(x, ask1_y)].symbol() == "[" && buf[(x + 1, ask1_y)].symbol() == "1")
+            .unwrap();
+        let x2 = (0..buf.area.width)
+            .find(|&x| buf[(x, ask2_y)].symbol() == "[" && buf[(x + 1, ask2_y)].symbol() == "2")
+            .unwrap();
+        assert_eq!(x1, x2);
     }
 }

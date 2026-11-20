@@ -41,8 +41,8 @@ use peer_tui::{
     LeaderAction, LeaderKeyState, MARKDOWN_WRAP_CACHE_BYTES, ModelPickerEvent, ModelPickerState,
     PlanApprovalCard, ReadingAnchor, RenderedBlock, ResumeSessionRow, SlashFilterContext,
     ThemeMode, ToolRowStatus, ToolTimelineRow, TuiLocale, UserInputPrompt,
-    WORKING_ANIMATION_INTERVAL_MS, WrapCacheKey, action_for_event, compact_workspace_path,
-    filter_classic_slash_items, format_topbar_quota, parse_classic_command,
+    WORDMARK_ANIMATION_TICK_MS, WORKING_ANIMATION_INTERVAL_MS, WrapCacheKey, action_for_event,
+    compact_workspace_path, filter_classic_slash_items, format_topbar_quota, parse_classic_command,
     render_classic_with_links, terminal_text,
 };
 use serde_json::Value;
@@ -241,6 +241,8 @@ pub(super) struct ClassicSession<'a> {
     active: Option<ActiveTurn>,
     compacting: Option<ActiveCompaction>,
     last_anim_draw: Option<Instant>,
+    wordmark_started_at: Instant,
+    last_wordmark_draw: Option<Instant>,
     tools_expanded: bool,
     approval: Option<Approval>,
     pending_user_input: Option<PendingUserInput>,
@@ -302,6 +304,8 @@ impl<'a> ClassicSession<'a> {
             active: None,
             compacting: None,
             last_anim_draw: None,
+            wordmark_started_at: Instant::now(),
+            last_wordmark_draw: None,
             tools_expanded: false,
             approval: None,
             pending_user_input: None,
@@ -887,6 +891,7 @@ impl<'a> ClassicSession<'a> {
         current_ws_rows.extend(other_ws_rows);
         self.overlay = ClassicOverlay::Resume {
             rows: current_ws_rows,
+            query: String::new(),
             selected: 0,
         };
     }
@@ -1116,7 +1121,22 @@ impl<'a> ClassicSession<'a> {
         self.pending_user_input = None;
         self.anchor.jump_to_latest();
         self.composer.accepted();
+        self.wordmark_started_at = Instant::now();
+        self.last_wordmark_draw = None;
         self.set_notice(notice, false);
+    }
+
+    fn is_welcome_visible(&self) -> bool {
+        self.messages.is_empty()
+            && !self.is_busy()
+            && self.interrupted_preview.is_empty()
+            && self.approval.is_none()
+            && self.pending_plan_approval().is_none()
+            && self
+                .pending_user_input
+                .as_ref()
+                .is_none_or(|p| p.dismissed || p.prompt.options.is_empty())
+            && !self.overlay.is_modal()
     }
 
     fn start_compaction(&mut self) {
@@ -1298,6 +1318,9 @@ impl<'a> ClassicSession<'a> {
         } else {
             None
         };
+        let welcome_visible = self.is_welcome_visible();
+        let wordmark_elapsed_ms =
+            welcome_visible.then(|| self.wordmark_started_at.elapsed().as_millis() as u64);
         let mut shown_size = None;
         terminal.draw_frame_with_links(&self.workspace, |frame, links| {
             shown_size = Some((frame.area().width, frame.area().height));
@@ -1342,6 +1365,7 @@ impl<'a> ClassicSession<'a> {
                     model_picker: &self.model_picker,
                     overlay: &self.overlay,
                     slash_selected: self.slash_selected,
+                    wordmark_elapsed_ms,
                     wrap_cache: &mut self.wrap_cache,
                 },
                 links,
@@ -1352,6 +1376,7 @@ impl<'a> ClassicSession<'a> {
         } else {
             None
         };
+        self.last_wordmark_draw = welcome_visible.then(Instant::now);
         if let (Some(approval), Some(size)) = (self.approval.as_mut(), shown_size) {
             approval.shown_at = Some(size);
         }
@@ -1631,6 +1656,16 @@ impl<'a> ClassicSession<'a> {
         } else {
             self.last_anim_draw = None;
         }
+        if self.is_welcome_visible() {
+            if self
+                .last_wordmark_draw
+                .is_none_or(|t| t.elapsed() >= Duration::from_millis(WORDMARK_ANIMATION_TICK_MS))
+            {
+                dirty = true;
+            }
+        } else {
+            self.last_wordmark_draw = None;
+        }
         dirty
     }
 
@@ -1779,12 +1814,27 @@ impl<'a> ClassicSession<'a> {
 
     fn handle_overlay_key(&mut self, key: KeyEvent) -> bool {
         if key.code == KeyCode::Esc
+            && let ClassicOverlay::Resume {
+                query, selected, ..
+            } = &mut self.overlay
+            && !query.is_empty()
+        {
+            query.clear();
+            *selected = 0;
+            return true;
+        }
+        if key.code == KeyCode::Esc
             || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
         {
             self.overlay = ClassicOverlay::None;
             return true;
         }
 
+        let filtered_resume = if matches!(self.overlay, ClassicOverlay::Resume { .. }) {
+            self.overlay.filtered_resume_indices()
+        } else {
+            Vec::new()
+        };
         let filtered_skills = if matches!(self.overlay, ClassicOverlay::Skills { .. }) {
             self.overlay.filtered_skill_indices()
         } else {
@@ -1803,11 +1853,15 @@ impl<'a> ClassicSession<'a> {
 
         match &mut self.overlay {
             ClassicOverlay::None => false,
-            ClassicOverlay::Resume { rows, selected } => match key.code {
+            ClassicOverlay::Resume {
+                rows,
+                query,
+                selected,
+            } => match key.code {
                 KeyCode::Up | KeyCode::Left => {
-                    if !rows.is_empty() {
+                    if !filtered_resume.is_empty() {
                         *selected = if *selected == 0 {
-                            rows.len() - 1
+                            filtered_resume.len() - 1
                         } else {
                             *selected - 1
                         };
@@ -1815,15 +1869,35 @@ impl<'a> ClassicSession<'a> {
                     true
                 }
                 KeyCode::Down | KeyCode::Right | KeyCode::Tab => {
-                    if !rows.is_empty() {
-                        *selected = (*selected + 1) % rows.len();
+                    if !filtered_resume.is_empty() {
+                        *selected = (*selected + 1) % filtered_resume.len();
                     }
                     true
                 }
+                KeyCode::Backspace => {
+                    if !query.is_empty() {
+                        query.pop();
+                        *selected = 0;
+                    }
+                    true
+                }
+                KeyCode::Char(c)
+                    if !key.modifiers.intersects(
+                        KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
+                    ) && !c.is_control() =>
+                {
+                    query.push(c);
+                    *selected = 0;
+                    true
+                }
                 KeyCode::Enter => {
-                    if let Some(row) = rows.get(*selected).cloned() {
+                    if let Some(row) = filtered_resume
+                        .get(*selected)
+                        .and_then(|&idx| rows.get(idx))
+                        .cloned()
+                    {
                         self.resume_session_by_id(&row.id);
-                    } else {
+                    } else if rows.is_empty() {
                         self.overlay = ClassicOverlay::None;
                         self.status = "暂无可恢复的历史会话。".to_owned();
                     }

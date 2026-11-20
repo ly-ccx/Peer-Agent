@@ -207,6 +207,7 @@ fn main() {
                         model_picker: &picker,
                         overlay: &ClassicOverlay::None,
                         slash_selected: 0,
+                        wordmark_elapsed_ms: None,
                         wrap_cache: &mut cache,
                     },
                 );
@@ -388,6 +389,7 @@ fn main() {
                     model_picker: &picker,
                     overlay: &ClassicOverlay::None,
                     slash_selected: 0,
+                    wordmark_elapsed_ms: None,
                     wrap_cache: &mut cache,
                 },
             );
@@ -490,6 +492,7 @@ fn main() {
                     model_picker: &picker,
                     overlay: &ClassicOverlay::None,
                     slash_selected: 0,
+                    wordmark_elapsed_ms: None,
                     wrap_cache: &mut cache,
                 },
             );
