@@ -60,8 +60,9 @@ impl LiveHistory {
             .iter()
             .position(|m| m["role"] == "assistant" && m["tool_calls"][0]["id"] == ids[0])
             .ok_or(ModelError::new("model_continuation_identity_changed"))?;
-        if !peer_protocol::javascript_trim(&continuation.text).is_empty() {
-            let expected = crate::canonical_history::sanitize_assistant(&continuation.text);
+        let expected_sanitized = crate::canonical_history::sanitize_assistant(&continuation.text);
+        let expected = peer_protocol::javascript_trim(&expected_sanitized);
+        if !expected.is_empty() {
             if start == 0
                 || messages[start - 1]["role"] != "assistant"
                 || messages[start - 1]["content"] != expected
@@ -208,5 +209,99 @@ mod tests {
         let mut restored = lower(&forged).unwrap();
         LiveHistory::default().apply("instance", &mut restored);
         assert_eq!(restored, original);
+    }
+
+    #[test]
+    fn live_replay_matches_canonical_history_trimmed_assistant_text_with_parallel_tools() {
+        let raw_text = "  刚才那条命令被拒绝了，我换一种方式重新核对。\n\n";
+        let transcript = vec![
+            json!({
+                "id": "m-user",
+                "role": "user",
+                "content": "继续",
+            }),
+            json!({
+                "id": "m-asst",
+                "role": "assistant",
+                "content": raw_text,
+                "thinkingContent": "thought",
+                "segments": [
+                    {"type": "thinking", "content": "thought"},
+                    {"type": "text", "content": raw_text},
+                ],
+            }),
+            json!({
+                "id": "m-call-1",
+                "role": "assistant",
+                "content": "",
+                "segments": [
+                    {"type": "tool-call", "tool": "bash", "toolCallId": "call-1", "args": {"cmd": "echo 1"}},
+                ],
+            }),
+            json!({
+                "id": "m-res-1",
+                "role": "tool",
+                "toolCallId": "call-1",
+                "name": "bash",
+                "content": "ok-1",
+            }),
+            json!({
+                "id": "m-call-2",
+                "role": "assistant",
+                "content": "",
+                "segments": [
+                    {"type": "tool-call", "tool": "bash", "toolCallId": "call-2", "args": {"cmd": "echo 2"}},
+                ],
+            }),
+            json!({
+                "id": "m-res-2",
+                "role": "tool",
+                "toolCallId": "call-2",
+                "name": "bash",
+                "content": "ok-2",
+            }),
+        ];
+        let projected = crate::canonical_history::project_history(&transcript).unwrap();
+        let mut live = LiveHistory::default();
+        live.remember(
+            &projected,
+            &["call-1".into(), "call-2".into()],
+            Some(Continuation {
+                binding: "opencode-go".into(),
+                text: raw_text.to_owned(),
+                wire: Wire::Chat,
+                blocks: vec![json!({"reasoning_content": "thought"})],
+            }),
+        )
+        .unwrap();
+
+        let mut lowered = lower(&projected).unwrap();
+        live.apply("opencode-go", &mut lowered);
+        assert_eq!(lowered.len(), 4);
+        assert_eq!(lowered[0]["role"], "user");
+        assert_eq!(
+            lowered[1]["content"],
+            "刚才那条命令被拒绝了，我换一种方式重新核对。"
+        );
+        assert_eq!(lowered[1]["reasoning_content"], "thought");
+        assert_eq!(lowered[1]["tool_calls"][0]["id"], "call-1");
+        assert_eq!(lowered[1]["tool_calls"][1]["id"], "call-2");
+        assert_eq!(lowered[2]["tool_call_id"], "call-1");
+        assert_eq!(lowered[3]["tool_call_id"], "call-2");
+
+        let mut tampered_live = LiveHistory::default();
+        let err = tampered_live
+            .remember(
+                &projected,
+                &["call-1".into(), "call-2".into()],
+                Some(Continuation {
+                    binding: "opencode-go".into(),
+                    text: "篡改后的正文\n\n".into(),
+                    wire: Wire::Chat,
+                    blocks: vec![json!({"reasoning_content": "thought"})],
+                }),
+            )
+            .unwrap_err();
+        assert_eq!(err.code, "model_continuation_identity_changed");
     }
 }
