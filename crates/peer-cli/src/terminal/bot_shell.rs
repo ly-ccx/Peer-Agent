@@ -18,7 +18,7 @@ use super::{
 };
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use peer_project_agent::{
-    BotProfile, DraftBody, DraftWriteRequest, FamiliarizeKind, HostTickReport, LeaseStatus,
+    BotProfile, DraftBody, DraftWriteRequest, FamiliarizeKind, ForegroundTickReport, LeaseStatus,
     MemoryFilter, NativeProjectHost, QuestionState, TurnEndKind, now_iso, parse_iso_ms,
     project_reply_questions,
 };
@@ -49,9 +49,12 @@ use tokio::{
 
 struct ActiveTick {
     cancel: CancellationToken,
-    task: JoinHandle<Result<HostTickReport, String>>,
-    prompts: mpsc::Receiver<Approval>,
-    display: watch::Receiver<Display>,
+    task: JoinHandle<Result<ForegroundTickReport, String>>,
+}
+
+struct ActiveWorker {
+    cancel: CancellationToken,
+    task: JoinHandle<Result<(), String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -122,6 +125,11 @@ struct BotShellState<'a> {
     overlay: ClassicOverlay,
     wrap_cache: ByteBudgetLru<WrapCacheKey, RenderedBlock>,
     active_tick: Option<ActiveTick>,
+    active_workers: HashMap<String, ActiveWorker>,
+    worker_prompt_tx: mpsc::Sender<Approval>,
+    worker_prompt_rx: mpsc::Receiver<Approval>,
+    worker_display_tx: watch::Sender<Display>,
+    worker_display_rx: watch::Receiver<Display>,
     pending_tick_retrigger: bool,
     takeover_pending_since: Option<Instant>,
     last_activity_revision: u64,
@@ -188,6 +196,8 @@ impl<'a> BotShellState<'a> {
                 .map(str::to_owned);
         }
 
+        let (worker_prompt_tx, worker_prompt_rx) = mpsc::channel(8);
+        let (worker_display_tx, worker_display_rx) = watch::channel(Display::default());
         let mut state = Self {
             home,
             workspace,
@@ -230,6 +240,11 @@ impl<'a> BotShellState<'a> {
             overlay: ClassicOverlay::None,
             wrap_cache: ByteBudgetLru::new(MARKDOWN_WRAP_CACHE_BYTES, 512),
             active_tick: None,
+            active_workers: HashMap::new(),
+            worker_prompt_tx,
+            worker_prompt_rx,
+            worker_display_tx,
+            worker_display_rx,
             pending_tick_retrigger: false,
             takeover_pending_since: None,
             last_activity_revision: 0,
@@ -960,26 +975,89 @@ impl<'a> BotShellState<'a> {
         let cancel = CancellationToken::new();
         let task_cancel = cancel.clone();
         let selection = resolved.selection;
-        let (prompt_tx, prompt_rx) = mpsc::channel(4);
-        let (display_tx, display_rx) = watch::channel(Display::default());
         let task = tokio::task::spawn_local(async move {
             let model = peer_runtime::model_config::load_model(&home, &selection, &task_cancel)
                 .await
                 .map_err(|e| e.code.to_owned())?;
+            host.tick_foreground(&ws_id, &model, worker_selection, &task_cancel)
+                .await
+                .map_err(|e| e.to_string())
+        });
+        self.active_tick = Some(ActiveTick { cancel, task });
+    }
+
+    fn spawn_background_worker(&mut self, ws_id: String, session_id: String) {
+        if self.active_workers.contains_key(&session_id) {
+            return;
+        }
+        let worker_resolved = match self
+            .resolve_role_selection("session_worker")
+            .or_else(|_| self.resolve_role_selection("project_agent"))
+        {
+            Ok(s) => s,
+            Err(err) => {
+                self.notice = Some(format!(
+                    "后台任务无法启动模型（{}）；可按 `/model` 检查配置。",
+                    err.detail
+                ));
+                return;
+            }
+        };
+        let verifier_selection = self
+            .resolve_role_selection("verifier")
+            .ok()
+            .and_then(|r| (r.selection != worker_resolved.selection).then_some(r.selection));
+        let home = self.home.clone();
+        let host = Arc::clone(&self.host);
+        let worker_selection = worker_resolved.selection;
+        let cancel = CancellationToken::new();
+        let task_cancel = cancel.clone();
+        let prompt_tx = self.worker_prompt_tx.clone();
+        let display_tx = self.worker_display_tx.clone();
+        let sid = session_id.clone();
+        let task = tokio::task::spawn_local(async move {
+            let worker_model =
+                peer_runtime::model_config::load_model(&home, &worker_selection, &task_cancel)
+                    .await
+                    .map_err(|e| e.code.to_owned())?;
+            let verifier_model = match verifier_selection {
+                Some(ref vsel) => peer_runtime::model_config::load_model(&home, vsel, &task_cancel)
+                    .await
+                    .ok(),
+                None => None,
+            };
             let mut perm = PermissionPort {
                 requests: prompt_tx,
                 display: display_tx,
             };
-            host.tick(&ws_id, &model, worker_selection, &mut perm, &task_cancel)
-                .await
-                .map_err(|e| e.to_string())
+            Box::pin(host.run_promoted_session(
+                &ws_id,
+                &sid,
+                &worker_model,
+                verifier_model.as_ref(),
+                &mut perm,
+                16,
+                &task_cancel,
+            ))
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string())
         });
-        self.active_tick = Some(ActiveTick {
-            cancel,
-            task,
-            prompts: prompt_rx,
-            display: display_rx,
-        });
+        self.active_workers
+            .insert(session_id, ActiveWorker { cancel, task });
+    }
+
+    async fn shutdown_background_tasks(&mut self) {
+        self.approval = None;
+        if let Some(active) = self.active_tick.take() {
+            active.cancel.cancel();
+            let _ = active.task.await;
+        }
+        let workers: Vec<ActiveWorker> = self.active_workers.drain().map(|(_, w)| w).collect();
+        for worker in workers {
+            worker.cancel.cancel();
+            let _ = worker.task.await;
+        }
     }
 
     fn trigger_if_pending(&mut self) {
@@ -1639,7 +1717,7 @@ impl<'a> BotShellState<'a> {
     }
 
     fn is_running_activity(&self) -> bool {
-        self.active_tick.is_some() || self.has_running_session()
+        self.active_tick.is_some() || !self.active_workers.is_empty() || self.has_running_session()
     }
 
     async fn run(
@@ -1651,40 +1729,39 @@ impl<'a> BotShellState<'a> {
         self.draw(terminal)?;
         loop {
             if shutdown.is_cancelled() {
-                self.approval = None;
-                if let Some(active) = self.active_tick.take() {
-                    active.cancel.cancel();
-                    let _ = active.task.await;
-                }
+                self.shutdown_background_tasks().await;
                 self.host.close();
                 return Ok(ShellOutcome::Quit);
             }
 
             let mut dirty = false;
 
-            if let Some(active) = self.active_tick.as_mut() {
-                if active.display.has_changed().unwrap_or(false)
-                    && let Some(n) = active.display.borrow_and_update().notice
-                {
-                    self.notice = Some(n.to_owned());
-                    dirty = true;
-                }
-                if self.approval.is_none()
-                    && let Ok(req) = active.prompts.try_recv()
-                {
-                    self.approval = Some(req);
-                    self.card_focus = false;
-                    dirty = true;
-                }
+            if self.worker_display_rx.has_changed().unwrap_or(false)
+                && let Some(n) = self.worker_display_rx.borrow_and_update().notice
+            {
+                self.notice = Some(n.to_owned());
+                dirty = true;
+            }
+            if self.approval.is_none()
+                && let Ok(req) = self.worker_prompt_rx.try_recv()
+            {
+                self.approval = Some(req);
+                self.card_focus = false;
+                dirty = true;
             }
 
             if let Some(active) = self.active_tick.as_ref()
                 && active.task.is_finished()
                 && let Some(done) = self.active_tick.take()
             {
-                self.approval = None;
+                if self.active_workers.is_empty() {
+                    self.approval = None;
+                }
                 match done.task.await {
                     Ok(Ok(report)) => {
+                        for sid in &report.promoted_session_ids {
+                            self.spawn_background_worker(report.workspace_id.clone(), sid.clone());
+                        }
                         self.refresh_snapshot(false);
                         if !report.held_lease {
                             self.pending_tick_retrigger = false;
@@ -1715,8 +1792,7 @@ impl<'a> BotShellState<'a> {
                                     self.notice = None;
                                     let made_progress = report.inputs_consumed > 0
                                         || report.bot_turns_run > 0
-                                        || report.sessions_promoted > 0
-                                        || report.sessions_executed > 0
+                                        || !report.promoted_session_ids.is_empty()
                                         || report.wake_turns_run > 0;
                                     let has_more = self
                                         .active_workspace_id
@@ -1743,6 +1819,35 @@ impl<'a> BotShellState<'a> {
                 }
                 dirty = true;
             }
+
+            let finished_sids: Vec<String> = self
+                .active_workers
+                .iter()
+                .filter(|&(_sid, w)| w.task.is_finished())
+                .map(|(sid, _)| sid.clone())
+                .collect();
+            if !finished_sids.is_empty() {
+                let mut any_error: Option<String> = None;
+                for sid in finished_sids {
+                    if let Some(worker) = self.active_workers.remove(&sid) {
+                        match worker.task.await {
+                            Ok(Err(err)) if err != "CANCELLED" => any_error = Some(err),
+                            Err(_) => any_error = Some("worker_panicked".to_owned()),
+                            _ => {}
+                        }
+                    }
+                }
+                if self.active_workers.is_empty() && self.active_tick.is_none() {
+                    self.approval = None;
+                }
+                self.refresh_snapshot(false);
+                if let Some(err) = any_error {
+                    self.notice = Some(format!("后台任务暂停（{}）。", terminal_text(&err)));
+                }
+                self.trigger_if_pending();
+                dirty = true;
+            }
+
             if self.approval.as_ref().is_some_and(Approval::expired) {
                 self.approval = None;
                 dirty = true;
@@ -1760,21 +1865,19 @@ impl<'a> BotShellState<'a> {
             }
 
             // Periodic low-frequency refresh & lease takeover/yield handshake.
-            let refresh_interval =
-                if self.active_tick.is_some() || self.takeover_pending_since.is_some() {
-                    Duration::from_millis(250)
-                } else {
-                    Duration::from_secs(1)
-                };
+            let refresh_interval = if self.active_tick.is_some()
+                || !self.active_workers.is_empty()
+                || self.takeover_pending_since.is_some()
+            {
+                Duration::from_millis(250)
+            } else {
+                Duration::from_secs(1)
+            };
             if self.last_refresh.elapsed() >= refresh_interval {
                 if let Some(ws_id) = self.active_workspace_id.clone() {
                     if self.host.holds_lease(&ws_id) && self.host.takeover_requested(&ws_id) {
-                        self.approval = None;
                         self.pending_tick_retrigger = false;
-                        if let Some(active) = self.active_tick.take() {
-                            active.cancel.cancel();
-                            let _ = active.task.await;
-                        }
+                        self.shutdown_background_tasks().await;
                         let _ = self.host.release_lease(&ws_id);
                         self.refresh_snapshot(false);
                         self.notice = Some(
@@ -1831,6 +1934,7 @@ impl<'a> BotShellState<'a> {
 
             // Crossterm's Unix TTY source needs a positive poll budget to read the fd.
             let poll_ms = if self.active_tick.is_some()
+                || !self.active_workers.is_empty()
                 || (self.screen == BotScreen::Conversation && self.is_running_activity())
             {
                 15
@@ -1889,11 +1993,7 @@ impl<'a> BotShellState<'a> {
                                 dirty = true;
                             }
                         } else if key.code == KeyCode::F(2) {
-                            self.approval = None;
-                            if let Some(active) = self.active_tick.take() {
-                                active.cancel.cancel();
-                                let _ = active.task.await;
-                            }
+                            self.shutdown_background_tasks().await;
                             self.host.close();
                             return Ok(ShellOutcome::SwitchToClassic);
                         } else if key.code == KeyCode::F(3) {
@@ -1910,10 +2010,7 @@ impl<'a> BotShellState<'a> {
                             && key.modifiers.contains(KeyModifiers::CONTROL)
                             && self.composer.draft().is_empty()
                         {
-                            if let Some(active) = self.active_tick.take() {
-                                active.cancel.cancel();
-                                let _ = active.task.await;
-                            }
+                            self.shutdown_background_tasks().await;
                             self.host.close();
                             return Ok(ShellOutcome::Quit);
                         } else {
@@ -1932,6 +2029,7 @@ impl<'a> BotShellState<'a> {
                                         KeyCode::Char('n' | 'N') | KeyCode::Esc
                                     ) || (code == KeyCode::Enter && !*confirm_yes) =>
                                     {
+                                        self.shutdown_background_tasks().await;
                                         self.host.close();
                                         return Ok(ShellOutcome::SwitchToClassic);
                                     }
@@ -1954,6 +2052,7 @@ impl<'a> BotShellState<'a> {
                                     KeyCode::Char('c')
                                         if key.modifiers.contains(KeyModifiers::CONTROL) =>
                                     {
+                                        self.shutdown_background_tasks().await;
                                         self.host.close();
                                         return Ok(ShellOutcome::Quit);
                                     }
@@ -1992,6 +2091,7 @@ impl<'a> BotShellState<'a> {
                                     KeyCode::Char('c')
                                         if key.modifiers.contains(KeyModifiers::CONTROL) =>
                                     {
+                                        self.shutdown_background_tasks().await;
                                         self.host.close();
                                         return Ok(ShellOutcome::Quit);
                                     }
@@ -2040,10 +2140,7 @@ impl<'a> BotShellState<'a> {
                                                     self.selected_card,
                                                     self.selected_card_option,
                                                 ) {
-                                                    if let Some(active) = self.active_tick.take() {
-                                                        active.cancel.cancel();
-                                                        let _ = active.task.await;
-                                                    }
+                                                    self.shutdown_background_tasks().await;
                                                     self.host.close();
                                                     return Ok(outcome);
                                                 }
@@ -2115,10 +2212,7 @@ impl<'a> BotShellState<'a> {
                                                     self.selected_card,
                                                     self.selected_card_option,
                                                 ) {
-                                                    if let Some(active) = self.active_tick.take() {
-                                                        active.cancel.cancel();
-                                                        let _ = active.task.await;
-                                                    }
+                                                    self.shutdown_background_tasks().await;
                                                     self.host.close();
                                                     return Ok(outcome);
                                                 }
@@ -2190,10 +2284,7 @@ impl<'a> BotShellState<'a> {
                                                 } else if let Some(outcome) =
                                                     self.handle_submit(&cmd)
                                                 {
-                                                    if let Some(active) = self.active_tick.take() {
-                                                        active.cancel.cancel();
-                                                        let _ = active.task.await;
-                                                    }
+                                                    self.shutdown_background_tasks().await;
                                                     self.host.close();
                                                     return Ok(outcome);
                                                 }
@@ -2244,20 +2335,25 @@ impl<'a> BotShellState<'a> {
                                         dirty = true;
                                     } else if key.code == KeyCode::Char('c')
                                         && key.modifiers.contains(KeyModifiers::CONTROL)
-                                        && let Some(active) = self.active_tick.as_ref()
+                                        && (self.active_tick.is_some()
+                                            || !self.active_workers.is_empty())
                                     {
-                                        active.cancel.cancel();
-                                        self.notice = Some("正在停止本轮回复…".to_owned());
+                                        if let Some(active) = self.active_tick.as_ref() {
+                                            active.cancel.cancel();
+                                            self.notice = Some("正在停止本轮回复…".to_owned());
+                                        } else {
+                                            for worker in self.active_workers.values() {
+                                                worker.cancel.cancel();
+                                            }
+                                            self.notice = Some("正在停止后台任务…".to_owned());
+                                        }
                                         dirty = true;
                                     } else if let Some(action) = action_for_event(Event::Key(key)) {
                                         match action {
                                             Action::Submit => {
                                                 let text = self.composer.draft().to_owned();
                                                 if let Some(outcome) = self.handle_submit(&text) {
-                                                    if let Some(active) = self.active_tick.take() {
-                                                        active.cancel.cancel();
-                                                        let _ = active.task.await;
-                                                    }
+                                                    self.shutdown_background_tasks().await;
                                                     self.host.close();
                                                     return Ok(outcome);
                                                 }
@@ -2265,10 +2361,7 @@ impl<'a> BotShellState<'a> {
                                             }
                                             other => match self.composer.apply(other) {
                                                 Effect::Quit => {
-                                                    if let Some(active) = self.active_tick.take() {
-                                                        active.cancel.cancel();
-                                                        let _ = active.task.await;
-                                                    }
+                                                    self.shutdown_background_tasks().await;
                                                     self.host.close();
                                                     return Ok(ShellOutcome::Quit);
                                                 }
@@ -2291,7 +2384,7 @@ impl<'a> BotShellState<'a> {
             if dirty {
                 self.draw(terminal)?;
                 tokio::task::yield_now().await;
-            } else if self.active_tick.is_some() {
+            } else if self.active_tick.is_some() || !self.active_workers.is_empty() {
                 tokio::select! {
                     biased;
                     _ = shutdown.cancelled() => {}

@@ -2309,3 +2309,916 @@ async fn confirm_session_result_and_worktree_handoff_merge_and_discard() {
     );
     host.close();
 }
+
+#[tokio::test]
+async fn working_context_notes_handoff_and_work_history_redaction_via_coordination_v2() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, _) = host
+        .bind_workspace(ws.path(), Some("ContinuityBot"))
+        .unwrap();
+
+    host.submit_user_input(
+        &entry.workspace_id,
+        "in-wc-1",
+        "Check release checklist and deploy token sk-secret9876543210abcdef",
+        None,
+    )
+    .unwrap();
+
+    let server = start_mock_server(vec![
+        // 1. Verify Phase-3 tools projected & write initial note (rev 0 -> 1)
+        Box::new(|req| {
+            let tools = tool_names_from_request(req);
+            for required in [
+                "read_work_notes",
+                "write_work_note",
+                "search_work_history",
+                "prepare_context_handoff",
+                "send_agent_message",
+                "coordinate_work",
+                "memory_remember",
+            ] {
+                assert!(
+                    tools.iter().any(|t| t == required),
+                    "expected projected tool {required}"
+                );
+            }
+            for forbidden in ["write_file", "edit_file", "bash", "web_fetch"] {
+                assert!(
+                    !tools.iter().any(|t| t == forbidden),
+                    "project_agent must never project {forbidden}"
+                );
+            }
+            sse_tool_call(
+                "wc-1",
+                "write_work_note",
+                &json!({
+                    "name": "release-checklist",
+                    "text": "Step 1 verified",
+                    "expectedRevision": 0,
+                    "sourceRefs": ["input-in-wc-1"]
+                }),
+            )
+        }),
+        // 2. Verify rev 1 & test stale expectedRevision conflict (rev 0)
+        Box::new(|req| {
+            let out = last_tool_result_json(req).expect("write_work_note output");
+            assert_eq!(out["ok"], true);
+            assert_eq!(out["note"]["revision"], 1);
+            sse_tool_call(
+                "wc-2",
+                "write_work_note",
+                &json!({
+                    "name": "release-checklist",
+                    "text": "Stale conflict attempt",
+                    "expectedRevision": 0
+                }),
+            )
+        }),
+        // 3. Verify conflict rejected, update cleanly with expectedRevision: 1 -> rev 2
+        Box::new(|req| {
+            let out = last_tool_result_json(req).expect("stale write_work_note error");
+            assert_eq!(out["ok"], false);
+            sse_tool_call(
+                "wc-3",
+                "write_work_note",
+                &json!({
+                    "name": "release-checklist",
+                    "text": "Step 1 & 2 verified",
+                    "expectedRevision": 1
+                }),
+            )
+        }),
+        // 4. Verify rev 2, then read_work_notes
+        Box::new(|req| {
+            let out = last_tool_result_json(req).expect("write_work_note rev 2 output");
+            assert_eq!(out["ok"], true);
+            assert_eq!(out["note"]["revision"], 2);
+            sse_tool_call("wc-4", "read_work_notes", &json!({ "limit": 10 }))
+        }),
+        // 5. Verify read_work_notes returns rev 2 note, then prepare_context_handoff
+        Box::new(|req| {
+            let out = last_tool_result_json(req).expect("read_work_notes output");
+            assert_eq!(out["ok"], true);
+            let notes = out["notes"].as_array().expect("notes array");
+            assert!(
+                notes
+                    .iter()
+                    .any(|n| n["name"] == "release-checklist" && n["revision"] == 2),
+                "expected release-checklist rev 2 in {notes:?}"
+            );
+            sse_tool_call(
+                "wc-5",
+                "prepare_context_handoff",
+                &json!({ "hint": "Continue release checklist after compaction" }),
+            )
+        }),
+        // 6. Verify handoff window persisted, then search_work_history with secret redaction
+        Box::new(|req| {
+            let out = last_tool_result_json(req).expect("prepare_context_handoff output");
+            assert_eq!(out["ok"], true);
+            assert!(
+                out["window"]["windowId"]
+                    .as_str()
+                    .is_some_and(|s| !s.is_empty()),
+                "expected non-empty windowId in {out}"
+            );
+            sse_tool_call(
+                "wc-6",
+                "search_work_history",
+                &json!({ "query": "deploy token" }),
+            )
+        }),
+        // 7. Verify secret is redacted, then attempt memory_remember with forbidden runtime field
+        Box::new(|req| {
+            let out = last_tool_result_json(req).expect("search_work_history output");
+            assert_eq!(out["ok"], true);
+            let matches = out["matches"].as_array().expect("matches array");
+            assert!(!matches.is_empty());
+            assert_eq!(matches[0]["redacted"], true);
+            assert_eq!(matches[0]["text"], "[sensitive history content omitted]");
+            sse_tool_call(
+                "wc-7",
+                "memory_remember",
+                &json!({
+                    "kind": "fact",
+                    "text": "Should reject caller trust override",
+                    "trust": "verified"
+                }),
+            )
+        }),
+        // 8. Verify runtime field injection rejected, then valid memory_remember preference
+        Box::new(|req| {
+            let out = last_tool_result_json(req).expect("rejected memory_remember output");
+            assert_eq!(out["ok"], false);
+            sse_tool_call(
+                "wc-8",
+                "memory_remember",
+                &json!({
+                    "kind": "preference",
+                    "text": "Always keep checklists concise"
+                }),
+            )
+        }),
+        // 9. Verify preference saved with scope=user, trust=stated, then reply
+        Box::new(|req| {
+            let out = last_tool_result_json(req).expect("valid memory_remember output");
+            assert_eq!(out["ok"], true);
+            assert_eq!(out["item"]["scope"], "user");
+            assert_eq!(out["item"]["trust"], "stated");
+            sse_tool_call(
+                "wc-9",
+                "post_reply",
+                &json!({
+                    "replyTo": ["in-wc-1"],
+                    "text": "Checklist note, handoff window, and preference stored."
+                }),
+            )
+        }),
+        // 10. Turn 2: assert L7_CONTINUITY project-agent.working-context carries note & handoff hint
+        Box::new(|req| {
+            let sys_text: String = req["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|m| m["role"] == "system")
+                .filter_map(|m| m["content"].as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                sys_text.contains("release-checklist")
+                    && sys_text.contains("Step 1 & 2 verified")
+                    && sys_text.contains("Continue release checklist after compaction"),
+                "expected L7 working-context section in system prompt:\n{sys_text}"
+            );
+            sse_tool_call(
+                "wc-10",
+                "post_reply",
+                &json!({
+                    "replyTo": ["in-wc-2"],
+                    "text": "Resumed with working context intact."
+                }),
+            )
+        }),
+    ]);
+
+    let model = mock_model(&server.endpoint);
+    let cancel = CancellationToken::new();
+    let mut perm = AutoAllowPermission;
+    let tick1 = host
+        .tick(&entry.workspace_id, &model, json!({}), &mut perm, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(tick1.bot_turns_run, 1);
+
+    let coord_state = host.coordination().read_state(&entry.workspace_id).unwrap();
+    assert!(!coord_state["works"].as_object().unwrap().is_empty());
+    assert!(!coord_state["workNotes"].as_object().unwrap().is_empty());
+    assert!(
+        !coord_state["contextWindows"]
+            .as_object()
+            .unwrap()
+            .is_empty()
+    );
+
+    host.submit_user_input(&entry.workspace_id, "in-wc-2", "Continue next steps", None)
+        .unwrap();
+    let tick2 = host
+        .tick(&entry.workspace_id, &model, json!({}), &mut perm, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(tick2.bot_turns_run, 1);
+    host.close();
+}
+
+#[tokio::test]
+async fn work_session_profile_enforces_read_only_ceiling_and_independent_verifier_evaluates_model_review()
+ {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::write(ws.path().join("readme.md"), "peer phase 3\n").unwrap();
+
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("VerifierBot")).unwrap();
+    assert!(matches!(
+        host.ensure_lease(&entry.workspace_id).unwrap(),
+        LeaseStatus::Acquired { .. }
+    ));
+    let conv_id = profile.agent_conversation_id.unwrap();
+    host.submit_user_input(&entry.workspace_id, "in-ver-1", "Review readme.md", None)
+        .unwrap();
+    host.inputs()
+        .consume(&entry.workspace_id, &conv_id, host.conversations(), true)
+        .unwrap();
+    let anchor = input_message_id("in-ver-1").unwrap();
+
+    let spawned = host
+        .supervisor()
+        .spawn_session(
+            SpawnSessionRequest {
+                workspace_id: entry.workspace_id.clone(),
+                workspace_path: ws.path().to_path_buf(),
+                parent_conversation_id: conv_id,
+                anchor_message_ids: vec![anchor],
+                input_id: "in-ver-1".into(),
+                surface: "tui".into(),
+                title: "Read readme cleanly".into(),
+                brief: "Read readme.md and confirm contents without mutating files.".into(),
+                kind: "research".into(),
+                read_only: true,
+                required_capabilities: vec![
+                    "local.file.read".into(),
+                    "local.file.write".into(),
+                    "local.shell.exec".into(),
+                ],
+                success_criteria: vec![
+                    SpawnCriterion {
+                        id: Some("c-file".into()),
+                        kind: "file-exists".into(),
+                        command: None,
+                        path: Some("readme.md".into()),
+                        expect: None,
+                        description: "readme.md exists".into(),
+                    },
+                    SpawnCriterion {
+                        id: Some("c-review".into()),
+                        kind: "model_review".into(),
+                        command: None,
+                        path: None,
+                        expect: None,
+                        description: "Verify readme mentions phase 3".into(),
+                    },
+                ],
+                priority: "normal".into(),
+                depends_on: vec![],
+                supersedes: None,
+                objective_id: None,
+                isolation: "none".into(),
+                worker_model_selection: json!({
+                    "providerId": "openai",
+                    "modelId": "gpt-5.2"
+                }),
+            },
+            true,
+        )
+        .unwrap();
+
+    let plan = host
+        .supervisor()
+        .find_plan_by_session(&entry.workspace_id, &spawned.session_id)
+        .unwrap();
+    let worker_prof = peer_project_agent::resolve_work_session_profile(
+        &plan,
+        "worker",
+        peer_protocol::LocalAccessLevel::SessionLocal,
+    )
+    .expect("work session profile");
+    assert!(worker_prof.allowlist.iter().any(|c| c == "local.file.read"));
+    assert!(
+        !worker_prof
+            .allowlist
+            .iter()
+            .any(|c| c == "local.file.write")
+    );
+    assert!(
+        !worker_prof
+            .allowlist
+            .iter()
+            .any(|c| c == "local.shell.exec")
+    );
+
+    let promoted = host
+        .supervisor()
+        .promote_queued(&entry.workspace_id, true)
+        .unwrap();
+    assert_eq!(promoted.start, vec![spawned.session_id.clone()]);
+
+    let worker_server = start_mock_server(vec![
+        Box::new(|req| {
+            let tools = tool_names_from_request(req);
+            assert!(tools.iter().any(|t| t == "read_file"));
+            for forbidden in ["write_file", "edit_file", "bash", "web_fetch"] {
+                assert!(
+                    !tools.iter().any(|t| t == forbidden),
+                    "read-only worker must not project {forbidden}"
+                );
+            }
+            sse_tool_call("w-read", "read_file", &json!({ "path": "readme.md" }))
+        }),
+        Box::new(|_| sse_text("Read readme.md and confirmed phase 3.")),
+    ]);
+
+    let verifier_server = start_mock_server(vec![
+        Box::new(|req| {
+            let tools = tool_names_from_request(req);
+            assert!(tools.iter().any(|t| t == "read_file"));
+            for forbidden in ["write_file", "edit_file", "bash", "web_fetch"] {
+                assert!(
+                    !tools.iter().any(|t| t == forbidden),
+                    "independent verifier must never project {forbidden}"
+                );
+            }
+            sse_tool_call("v-read", "read_file", &json!({ "path": "readme.md" }))
+        }),
+        Box::new(|req| {
+            let user_text: String = req["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|m| m["role"] == "user")
+                .filter_map(|m| m["content"].as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            let marker = "Known Worker Evidence Refs: ";
+            let line = user_text
+                .lines()
+                .find(|l| l.starts_with(marker))
+                .expect("Known Worker Evidence Refs line in verifier prompt");
+            let known: Vec<String> =
+                serde_json::from_str(line.trim_start_matches(marker).trim()).unwrap();
+            assert!(!known.is_empty(), "expected worker evidence refs");
+            let report = json!({
+                "passed": true,
+                "failedCriteria": [],
+                "missingEvidence": [],
+                "risks": [],
+                "evidenceRefs": [known[0]],
+                "summary": "Independent review passed.",
+            });
+            sse_text(&serde_json::to_string(&report).unwrap())
+        }),
+    ]);
+
+    let worker_model = NativeModel::new(
+        ModelConfig {
+            endpoint: worker_server.endpoint.clone(),
+            model: "gpt-5.2".into(),
+            provider: "openai".into(),
+            wire: Wire::Chat,
+            generation: GenerationOptions::default(),
+        },
+        None,
+        Duration::from_secs(10),
+    )
+    .unwrap();
+    let verifier_model = NativeModel::new(
+        ModelConfig {
+            endpoint: verifier_server.endpoint.clone(),
+            model: "claude-sonnet-4-6".into(),
+            provider: "openai".into(),
+            wire: Wire::Chat,
+            generation: GenerationOptions::default(),
+        },
+        None,
+        Duration::from_secs(10),
+    )
+    .unwrap();
+
+    let cancel = CancellationToken::new();
+    let mut perm = AutoAllowPermission;
+    let ep = host
+        .run_promoted_session(
+            &entry.workspace_id,
+            &spawned.session_id,
+            &worker_model,
+            Some(&verifier_model),
+            &mut perm,
+            8,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(ep.status, "completed");
+
+    let detail = host
+        .supervisor()
+        .read_verification_detail(&entry.workspace_id, &spawned.session_id)
+        .unwrap();
+    assert_eq!(detail["verifierModel"], "claude-sonnet-4-6");
+    assert_eq!(detail["sameFamilyAsWorker"], false);
+    assert_eq!(detail["verificationReport"]["passed"], true);
+    assert_eq!(detail["verdict"]["independentVerifier"], "passed");
+    let reviews = detail["modelReviews"]
+        .as_array()
+        .expect("modelReviews array");
+    assert_eq!(reviews.len(), 1);
+    assert_eq!(reviews[0]["criterionId"], "c-review");
+    assert_eq!(reviews[0]["passed"], true);
+    assert_eq!(reviews[0]["sameFamilyAsWorker"], false);
+    assert_eq!(detail["verdict"]["outcome"], "passed");
+    host.close();
+}
+
+#[tokio::test]
+async fn send_agent_message_and_coordinate_work_query_and_control_through_coordination_v2() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::write(ws.path().join("Cargo.toml"), "[package]\nname = \"demo\"\n").unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, _) = host.bind_workspace(ws.path(), Some("CoordBot")).unwrap();
+
+    host.submit_user_input(
+        &entry.workspace_id,
+        "in-coord-1",
+        "Inspect workspace and adjust child task scope",
+        None,
+    )
+    .unwrap();
+    let anchor = input_message_id("in-coord-1").unwrap();
+
+    let captured_sid: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let sid_writer = Arc::clone(&captured_sid);
+
+    let server = start_mock_server(vec![
+        // 1. spawn_session
+        Box::new(move |_| {
+            sse_tool_call(
+                "coord-1",
+                "spawn_session",
+                &json!({
+                    "anchorMessageIds": [anchor],
+                    "title": "Inspect Cargo files",
+                    "brief": "Read project manifests",
+                    "kind": "research",
+                    "readOnly": true,
+                    "requiredCapabilities": ["local.file.list", "local.file.read"],
+                    "isolation": "none",
+                    "successCriteria": [{
+                        "id": "c-cargo",
+                        "kind": "file-exists",
+                        "path": "Cargo.toml",
+                        "description": "Cargo.toml exists"
+                    }]
+                }),
+            )
+        }),
+        // 2. send_agent_message (mailbox_only)
+        Box::new(move |req| {
+            let sid = extract_spawned_session_id(req).expect("spawned sessionId");
+            *sid_writer.lock().unwrap() = Some(sid.clone());
+            sse_tool_call(
+                "coord-2",
+                "send_agent_message",
+                &json!({
+                    "sessionId": sid,
+                    "purpose": "update",
+                    "text": "Focus on Cargo.toml only",
+                    "delivery": "mailbox_only"
+                }),
+            )
+        }),
+        // 3. coordinate_work query
+        Box::new(|req| {
+            let out = last_tool_result_json(req).expect("send_agent_message output");
+            assert_eq!(out["ok"], true);
+            assert_eq!(out["delivery"], "mailbox_only");
+            let sid = out["sessionId"].as_str().unwrap().to_owned();
+            sse_tool_call(
+                "coord-3",
+                "coordinate_work",
+                &json!({
+                    "action": "query",
+                    "sessionId": sid,
+                    "reason": "check mandate"
+                }),
+            )
+        }),
+        // 4. coordinate_work augment (rev 0 -> 1)
+        Box::new(|req| {
+            let out = last_tool_result_json(req).expect("coordinate_work query output");
+            assert_eq!(out["ok"], true);
+            assert_eq!(out["goalRevision"], 0);
+            let sid = out["session"]["sessionId"].as_str().unwrap().to_owned();
+            sse_tool_call(
+                "coord-4",
+                "coordinate_work",
+                &json!({
+                    "action": "augment",
+                    "sessionId": sid,
+                    "reason": "add scope",
+                    "expectedRevision": 0,
+                    "text": "Also check lib.rs"
+                }),
+            )
+        }),
+        // 5. coordinate_work cancel (rev 1 -> 2)
+        Box::new(|req| {
+            let out = last_tool_result_json(req).expect("coordinate_work augment output");
+            assert_eq!(out["ok"], true);
+            assert_eq!(out["goalRevision"], 1);
+            let sid = out["session"]["sessionId"].as_str().unwrap().to_owned();
+            sse_tool_call(
+                "coord-5",
+                "coordinate_work",
+                &json!({
+                    "action": "cancel",
+                    "sessionId": sid,
+                    "reason": "stop now",
+                    "expectedRevision": 1
+                }),
+            )
+        }),
+        // 6. post_reply
+        Box::new(|req| {
+            let out = last_tool_result_json(req).expect("coordinate_work cancel output");
+            assert_eq!(out["ok"], true);
+            assert_eq!(out["goalRevision"], 2);
+            assert_eq!(out["session"]["status"], "cancelled");
+            sse_tool_call(
+                "coord-6",
+                "post_reply",
+                &json!({
+                    "replyTo": ["in-coord-1"],
+                    "text": "Sent update and closed coordinated work."
+                }),
+            )
+        }),
+    ]);
+
+    let model = mock_model(&server.endpoint);
+    let cancel = CancellationToken::new();
+    let fg = host
+        .tick_foreground(&entry.workspace_id, &model, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(fg.bot_turns_run, 1);
+
+    let sid = captured_sid.lock().unwrap().clone().expect("captured sid");
+    let coord_state = host.coordination().read_state(&entry.workspace_id).unwrap();
+    assert!(
+        coord_state["agentMessages"]
+            .as_object()
+            .unwrap()
+            .values()
+            .any(|m| m["text"] == "Focus on Cargo.toml only"),
+        "expected durable agentMessage in coordination state: {coord_state}"
+    );
+    assert!(
+        coord_state["mandates"]
+            .as_object()
+            .unwrap()
+            .values()
+            .any(|m| m["goalRevision"] == 2),
+        "expected goalRevision=2 mandate in coordination state: {coord_state}"
+    );
+
+    let child_conv = host
+        .conversations()
+        .read_committed(&sid, None, 1024 * 1024)
+        .unwrap();
+    assert!(
+        child_conv
+            .history
+            .messages
+            .iter()
+            .any(|m| m["kind"] == "agent_message" && m["content"] == "Focus on Cargo.toml only"),
+        "expected agent_message record appended into child conversation"
+    );
+    host.close();
+}
+
+#[tokio::test]
+async fn user_input_preempts_pending_wake_events_and_foreground_tick_never_blocks_on_workers() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    fs::write(ws.path().join("hello.txt"), "hello\n").unwrap();
+    let host = Arc::new(NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap());
+    let (entry, _) = host.bind_workspace(ws.path(), Some("PreemptBot")).unwrap();
+
+    // Part A: tick_foreground promotes queued session without running/blocking on worker model calls.
+    host.submit_user_input(&entry.workspace_id, "in-fg-1", "Check hello.txt", None)
+        .unwrap();
+    let anchor1 = input_message_id("in-fg-1").unwrap();
+    let server1 = start_mock_server(vec![
+        Box::new(move |_| {
+            sse_tool_call(
+                "fg-spawn",
+                "spawn_session",
+                &json!({
+                    "anchorMessageIds": [anchor1],
+                    "title": "Read hello",
+                    "brief": "Read hello.txt",
+                    "kind": "research",
+                    "readOnly": true,
+                    "requiredCapabilities": ["local.file.list"],
+                    "isolation": "none",
+                    "successCriteria": [{
+                        "id": "c-hello",
+                        "kind": "file-exists",
+                        "path": "hello.txt",
+                        "description": "hello.txt exists"
+                    }]
+                }),
+            )
+        }),
+        Box::new(|req| {
+            let sid = extract_spawned_session_id(req).unwrap();
+            sse_tool_call(
+                "fg-wait",
+                "wait_for_sessions",
+                &json!({ "sessionIds": [sid] }),
+            )
+        }),
+    ]);
+
+    let model1 = mock_model(&server1.endpoint);
+    let cancel = CancellationToken::new();
+    let fg1 = host
+        .tick_foreground(&entry.workspace_id, &model1, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(fg1.bot_turns_run, 1);
+    assert_eq!(fg1.promoted_session_ids.len(), 1);
+    assert_eq!(fg1.wake_turns_run, 0);
+
+    let promoted_sid = fg1.promoted_session_ids[0].clone();
+    let sessions = host.supervisor().list_sessions(&entry.workspace_id);
+    assert_eq!(
+        sessions
+            .iter()
+            .find(|s| s.session_id == promoted_sid)
+            .unwrap()
+            .status,
+        "running"
+    );
+
+    // Part B: fresh user input submitted mid-turn preempts pending wake events until queue drains.
+    host.inbox()
+        .append(
+            &entry.workspace_id,
+            &[json!({
+                "eventId": "ev-preempt-1",
+                "kind": "session_completed",
+                "workspaceId": entry.workspace_id,
+                "sessionId": promoted_sid,
+                "at": "2026-11-20T12:00:00Z",
+                "payload": { "summary": "background session update" }
+            })],
+        )
+        .unwrap();
+    assert!(host.inbox().has_pending(&entry.workspace_id));
+
+    host.submit_user_input(&entry.workspace_id, "in-fg-2", "First user turn", None)
+        .unwrap();
+    let host_cb = Arc::clone(&host);
+    let ws_id_cb = entry.workspace_id.clone();
+
+    let server2 = start_mock_server(vec![
+        // 1. Turn for in-fg-2 submits in-fg-3 mid-flight so wake must wait
+        Box::new(move |_| {
+            host_cb
+                .submit_user_input(&ws_id_cb, "in-fg-3", "Follow-up mid-turn", None)
+                .unwrap();
+            sse_tool_call(
+                "fg-r2",
+                "post_reply",
+                &json!({
+                    "replyTo": ["in-fg-2"],
+                    "text": "Answered first input while in-fg-3 waits."
+                }),
+            )
+        }),
+        // 2. Turn for in-fg-3 runs before pending wake
+        Box::new(|req| {
+            let sys_or_user: String = req["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|m| m["content"].as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                sys_or_user.contains("Follow-up mid-turn"),
+                "expected in-fg-3 user turn before wake turn"
+            );
+            sse_tool_call(
+                "fg-r3",
+                "post_reply",
+                &json!({
+                    "replyTo": ["in-fg-3"],
+                    "text": "Answered follow-up before wake."
+                }),
+            )
+        }),
+        // 3. Deferred wake turn drains only once user input queue is empty
+        Box::new(|_| {
+            sse_tool_call(
+                "fg-wake",
+                "post_reply",
+                &json!({
+                    "replyTo": ["in-fg-3"],
+                    "surfacing": "silent",
+                    "text": "Wake processed after user queue cleared."
+                }),
+            )
+        }),
+    ]);
+
+    let model2 = mock_model(&server2.endpoint);
+    let fg2 = host
+        .tick_foreground(&entry.workspace_id, &model2, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(fg2.bot_turns_run, 1);
+    assert_eq!(fg2.wake_turns_run, 0);
+    assert!(host.inbox().has_pending(&entry.workspace_id));
+    assert!(host.inputs().has_pending(&entry.workspace_id));
+
+    let fg3 = host
+        .tick_foreground(&entry.workspace_id, &model2, json!({}), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(fg3.bot_turns_run, 1);
+    assert_eq!(fg3.wake_turns_run, 1);
+    assert!(!host.inbox().has_pending(&entry.workspace_id));
+    host.close();
+}
+
+#[tokio::test]
+async fn coordination_v2_state_survives_host_restart_and_lease_handoff() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host_a = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, _) = host_a
+        .bind_workspace(ws.path(), Some("RestartBot"))
+        .unwrap();
+
+    host_a
+        .submit_user_input(
+            &entry.workspace_id,
+            "in-restart-1",
+            "Write durable architecture note before restart",
+            None,
+        )
+        .unwrap();
+
+    let server_a = start_mock_server(vec![
+        Box::new(|_| {
+            sse_tool_call(
+                "ra-1",
+                "write_work_note",
+                &json!({
+                    "name": "arch-note",
+                    "text": "Initial design note",
+                    "expectedRevision": 0
+                }),
+            )
+        }),
+        Box::new(|_| {
+            sse_tool_call(
+                "ra-2",
+                "prepare_context_handoff",
+                &json!({ "hint": "Persist across host restart" }),
+            )
+        }),
+        Box::new(|_| {
+            sse_tool_call(
+                "ra-3",
+                "post_reply",
+                &json!({
+                    "replyTo": ["in-restart-1"],
+                    "text": "Persisted note and handoff window before restart."
+                }),
+            )
+        }),
+    ]);
+
+    let model_a = mock_model(&server_a.endpoint);
+    let cancel = CancellationToken::new();
+    let mut perm = AutoAllowPermission;
+    host_a
+        .tick(&entry.workspace_id, &model_a, json!({}), &mut perm, &cancel)
+        .await
+        .unwrap();
+
+    let state_a = host_a
+        .coordination()
+        .read_state(&entry.workspace_id)
+        .unwrap();
+    assert!(!state_a["workNotes"].as_object().unwrap().is_empty());
+    assert!(!state_a["contextWindows"].as_object().unwrap().is_empty());
+
+    host_a.release_lease(&entry.workspace_id).unwrap();
+    host_a.close();
+
+    // Cold-start brand-new host_b against same home directory
+    let host_b = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    assert!(matches!(
+        host_b.ensure_lease(&entry.workspace_id).unwrap(),
+        LeaseStatus::Acquired { .. }
+    ));
+    let state_b = host_b
+        .coordination()
+        .read_state(&entry.workspace_id)
+        .unwrap();
+    assert_eq!(state_b["workNotes"], state_a["workNotes"]);
+    assert_eq!(state_b["contextWindows"], state_a["contextWindows"]);
+
+    host_b
+        .submit_user_input(
+            &entry.workspace_id,
+            "in-restart-2",
+            "Read and advance note after restart",
+            None,
+        )
+        .unwrap();
+
+    let server_b = start_mock_server(vec![
+        Box::new(|req| {
+            let sys_text: String = req["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|m| m["role"] == "system")
+                .filter_map(|m| m["content"].as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                sys_text.contains("arch-note") && sys_text.contains("Persist across host restart"),
+                "expected pre-restart note and handoff in host_b system prompt:\n{sys_text}"
+            );
+            sse_tool_call("rb-1", "read_work_notes", &json!({}))
+        }),
+        Box::new(|req| {
+            let out = last_tool_result_json(req).expect("read_work_notes output");
+            assert_eq!(out["ok"], true);
+            let notes = out["notes"].as_array().unwrap();
+            assert!(
+                notes
+                    .iter()
+                    .any(|n| n["name"] == "arch-note" && n["revision"] == 1)
+            );
+            sse_tool_call(
+                "rb-2",
+                "write_work_note",
+                &json!({
+                    "name": "arch-note",
+                    "text": "Updated after restart",
+                    "expectedRevision": 1
+                }),
+            )
+        }),
+        Box::new(|req| {
+            let out = last_tool_result_json(req).expect("updated write_work_note output");
+            assert_eq!(out["ok"], true);
+            assert_eq!(out["note"]["revision"], 2);
+            sse_tool_call(
+                "rb-3",
+                "post_reply",
+                &json!({
+                    "replyTo": ["in-restart-2"],
+                    "text": "Updated arch-note to rev 2 after host restart."
+                }),
+            )
+        }),
+    ]);
+
+    let model_b = mock_model(&server_b.endpoint);
+    host_b
+        .tick(&entry.workspace_id, &model_b, json!({}), &mut perm, &cancel)
+        .await
+        .unwrap();
+    host_b.close();
+}

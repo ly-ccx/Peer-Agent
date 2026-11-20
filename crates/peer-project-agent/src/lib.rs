@@ -9,6 +9,7 @@
 
 pub mod acceptance;
 pub mod circuit_breaker;
+pub mod coordination_bridge;
 pub mod digest;
 pub mod directory;
 pub mod drafts;
@@ -25,6 +26,7 @@ pub mod runner;
 pub mod scheduler;
 pub mod supervisor;
 pub mod system_context;
+pub mod verifier;
 pub mod worktree;
 
 use std::{fmt, fs, io::Write, path::Path};
@@ -41,6 +43,9 @@ pub use circuit_breaker::{
     CIRCUIT_COOLDOWN_MS, CIRCUIT_FAILURE_LIMIT, CircuitAdmit, CircuitBreaker, CircuitBreakerState,
     CircuitBreakerStore, FailureOutcome,
 };
+pub use coordination_bridge::{
+    CommitAgentMessageRequest, CoordinationHub, coordination_work_id, sha256_json,
+};
 pub use digest::{DigestItem, DigestQueue, DueDigest, digest_separator};
 pub use directory::{
     AttentionItem, AttentionKind, BotDirectory, BotListFilter, BotListItem, BotListMessage,
@@ -54,8 +59,8 @@ pub use drafts::{
     InputDraftStore,
 };
 pub use host::{
-    FAMILIARIZE_READ_CAPABILITIES, FamiliarizeKind, HostTickReport, LeaseStatus, NativeProjectHost,
-    RESPONSIBILITY_QUESTION, StartFamiliarizeResult, bot_list_json,
+    FAMILIARIZE_READ_CAPABILITIES, FamiliarizeKind, ForegroundTickReport, HostTickReport,
+    LeaseStatus, NativeProjectHost, RESPONSIBILITY_QUESTION, StartFamiliarizeResult, bot_list_json,
 };
 pub use inbox::{InboxBatch, InboxCursor, ProjectInbox};
 pub use input_queue::{
@@ -94,6 +99,11 @@ pub use supervisor::{
     SessionSupervisor, SpawnCriterion, SpawnSessionRequest, WorkSessionReport, WorkSessionSummary,
 };
 pub use system_context::{ProjectAgentContextInput, assemble_project_agent_context};
+pub use verifier::{
+    READ_ONLY_CAPABILITY_CEILING, VerifierIssue, VerifierOutcome, VerifierReport,
+    WORK_SESSION_EXCLUDED_CAPABILITY_PREFIXES, WORKER_CAPABILITY_CEILING, WorkSessionProfile,
+    decode_verifier_report, model_family, resolve_work_session_profile, run_independent_verifier,
+};
 pub use worktree::{GoalWorktreeAdapter, HandoffOutcome, WorktreeHandle};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

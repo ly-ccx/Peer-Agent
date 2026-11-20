@@ -10,10 +10,10 @@
 
 pub use crate::circuit_breaker::CircuitBreaker;
 use crate::{
-    BotProfileStore, MemoryFilter, MemoryStore, ObjectiveStore, ProjectError, ProjectInput,
-    SessionSupervisor, UserAnchorCandidate,
+    BotProfileStore, CoordinationHub, MemoryFilter, MemoryStore, ObjectiveStore, ProjectError,
+    ProjectInput, SessionSupervisor, UserAnchorCandidate,
     circuit_breaker::{CircuitAdmit, CircuitBreakerStore},
-    is_effective_memory, memory_secret_reason, now_iso, parse_iso_ms,
+    coordination_work_id, is_effective_memory, memory_secret_reason, now_iso, parse_iso_ms,
     provider::{ProjectCapabilityProvider, TurnExecutionState},
     system_context::{ProjectAgentContextInput, assemble_project_agent_context},
 };
@@ -93,6 +93,7 @@ pub struct RunTurnOptions<'a> {
 pub struct ProjectAgentRunner {
     data_home: PathBuf,
     supervisor: Arc<SessionSupervisor>,
+    coordination: Arc<CoordinationHub>,
     breaker_store: CircuitBreakerStore,
     last_workspace_id: Mutex<Option<String>>,
     retry_delays_ms: Mutex<Vec<u64>>,
@@ -101,11 +102,20 @@ pub struct ProjectAgentRunner {
 
 impl ProjectAgentRunner {
     pub fn new(data_home: impl AsRef<Path>, supervisor: Arc<SessionSupervisor>) -> Self {
+        Self::with_coordination(data_home, supervisor, Arc::new(CoordinationHub::new()))
+    }
+
+    pub fn with_coordination(
+        data_home: impl AsRef<Path>,
+        supervisor: Arc<SessionSupervisor>,
+        coordination: Arc<CoordinationHub>,
+    ) -> Self {
         let home = data_home.as_ref().to_path_buf();
         Self {
             breaker_store: CircuitBreakerStore::new(&home),
             data_home: home,
             supervisor,
+            coordination,
             last_workspace_id: Mutex::new(None),
             retry_delays_ms: Mutex::new(SAME_PROVIDER_RETRY_DELAYS_MS.to_vec()),
             activity: Mutex::new(None),
@@ -1050,6 +1060,94 @@ impl ProjectAgentRunner {
         let retry_continuity =
             read_retry_continuity(&history_messages, &current_input_anchors, Some(&turn_id));
 
+        let input_ids: Vec<String> = opts
+            .user_inputs
+            .iter()
+            .map(|i| i.input_id.clone())
+            .collect();
+        let coord_active = opts.holds_lease && self.coordination.holds(opts.workspace_id);
+        let work_id = if coord_active {
+            let linked = if opts.kind == "wake" {
+                self.coordination
+                    .read_state(opts.workspace_id)
+                    .ok()
+                    .and_then(|st| {
+                        let wake_sids: HashSet<&str> = opts
+                            .wake_events
+                            .iter()
+                            .filter_map(|e| e["sessionId"].as_str())
+                            .collect();
+                        st["works"].as_object()?.values().find_map(|w| {
+                            let wid = w["workId"].as_str()?;
+                            let owns = w["sessionIds"]
+                                .as_array()?
+                                .iter()
+                                .filter_map(Value::as_str)
+                                .any(|s| wake_sids.contains(s));
+                            owns.then(|| wid.to_owned())
+                        })
+                    })
+            } else {
+                None
+            };
+            linked.unwrap_or_else(|| {
+                let keys: Vec<String> = if !input_ids.is_empty() {
+                    input_ids.clone()
+                } else {
+                    let ev_ids: Vec<String> = opts
+                        .wake_events
+                        .iter()
+                        .filter_map(|e| e["eventId"].as_str().map(str::to_owned))
+                        .collect();
+                    if ev_ids.is_empty() {
+                        vec![turn_id.clone()]
+                    } else {
+                        ev_ids
+                    }
+                };
+                coordination_work_id(opts.conversation_id, &keys)
+            })
+        } else {
+            coordination_work_id(
+                opts.conversation_id,
+                if input_ids.is_empty() {
+                    std::slice::from_ref(&turn_id)
+                } else {
+                    &input_ids
+                },
+            )
+        };
+        let (working_context, agent_messages) = if coord_active {
+            let _ = self.coordination.ensure_work(
+                opts.workspace_id,
+                &work_id,
+                opts.conversation_id,
+                &input_ids,
+                &[],
+                "runnable",
+            );
+            let wc = self.coordination.read_working_context(
+                opts.workspace_id,
+                &work_id,
+                opts.conversation_id,
+            );
+            let msgs = self
+                .coordination
+                .read_agent_messages_for_context(opts.workspace_id, opts.conversation_id);
+            let obs_ids: Vec<String> = msgs
+                .iter()
+                .filter_map(|m| m["messageId"].as_str().map(str::to_owned))
+                .collect();
+            let _ = self.coordination.mark_agent_messages_observed(
+                opts.workspace_id,
+                opts.conversation_id,
+                &obs_ids,
+            );
+            (wc, msgs)
+        } else {
+            (None, Vec::new())
+        };
+
         let LoadedBotHistory {
             mut continuity_summary,
             mut compaction_epoch,
@@ -1087,6 +1185,8 @@ impl ProjectAgentRunner {
                 wake_events: opts.wake_events,
                 continuity_summary: continuity,
                 retry_continuity: retry_continuity.as_ref(),
+                working_context: working_context.as_ref(),
+                agent_messages: &agent_messages,
             })
         };
         let mut system_prompt = build_system_prompt(continuity_summary.as_deref());
@@ -1107,6 +1207,7 @@ impl ProjectAgentRunner {
             worker_model_selection: opts.worker_model_selection.clone(),
             reply_committed_id: None,
             post_reply_rejected: false,
+            work_id: work_id.clone(),
             waiting_session_ids: vec![],
             spawned_session_ids: vec![],
             memory_learned: vec![],
@@ -1115,9 +1216,10 @@ impl ProjectAgentRunner {
         }));
 
         let mut registry = ProviderRegistry::for_project_agent();
-        registry.register(Box::new(ProjectCapabilityProvider::new(
+        registry.register(Box::new(ProjectCapabilityProvider::with_coordination(
             &self.data_home,
             Arc::clone(&self.supervisor),
+            Arc::clone(&self.coordination),
             Arc::clone(&turn_state),
         )));
         let projection = registry.project_for_mode(RuntimeMode::ProjectAgent, None)?;
@@ -1714,6 +1816,24 @@ impl ProjectAgentRunner {
             &finished_at,
             None,
         );
+
+        if coord_active {
+            let end_state = match &final_end {
+                TurnEndKind::ReplyCommitted { .. } => "delivered",
+                TurnEndKind::AwaitingChildren { .. } => "waiting_children",
+                TurnEndKind::UserStopped => "stopped",
+                TurnEndKind::Failed { .. } | TurnEndKind::CircuitOpen => "blocked",
+                TurnEndKind::Yielded => "runnable",
+            };
+            let _ = self.coordination.ensure_work(
+                opts.workspace_id,
+                &work_id,
+                opts.conversation_id,
+                &input_ids,
+                &snapshot.spawned_session_ids,
+                end_state,
+            );
+        }
 
         Ok(AgentTurnOutcome {
             turn_id,

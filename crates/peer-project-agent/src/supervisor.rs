@@ -14,6 +14,7 @@ use crate::{
     memory::create_snapshot,
     now_iso,
     scheduler::{ExecutionScheduler, SelectionOutcome},
+    verifier::{VerifierOutcome, resolve_work_session_profile, run_independent_verifier},
     worktree::{GoalWorktreeAdapter, HandoffOutcome, WorktreeHandle},
 };
 use peer_protocol::LocalAccessLevel;
@@ -1088,6 +1089,31 @@ impl SessionSupervisor {
         cancel: &CancellationToken,
         holds_lease: bool,
     ) -> Result<EpisodeOutcome, ProjectError> {
+        Box::pin(self.run_session_episode_with_verifier(
+            workspace_id,
+            session_id,
+            worker_model,
+            None,
+            permission,
+            max_turns,
+            cancel,
+            holds_lease,
+        ))
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn run_session_episode_with_verifier(
+        &self,
+        workspace_id: &str,
+        session_id: &str,
+        worker_model: &NativeModel,
+        verifier_model: Option<&NativeModel>,
+        permission: &mut impl PermissionInput,
+        max_turns: usize,
+        cancel: &CancellationToken,
+        holds_lease: bool,
+    ) -> Result<EpisodeOutcome, ProjectError> {
         if !holds_lease {
             return Err(ProjectError::code("LEASE_REQUIRED"));
         }
@@ -1116,25 +1142,12 @@ impl SessionSupervisor {
                 .or_else(|| plan["originWorkspacePath"].as_str())
                 .map(PathBuf::from)
                 .ok_or_else(|| ProjectError::code("WORKSPACE_NOT_FOUND"))?;
-            let read_only = plan["delegationOrigin"]["readOnly"] == true;
-            let access = if read_only {
-                LocalAccessLevel::SessionLocal
-            } else {
-                PolicyStore::new(&self.data_home)
-                    .read_existing(workspace_id)
-                    .map(|p| p.access_level)
-                    .unwrap_or(LocalAccessLevel::SessionLocal)
-            };
-            let allowlist: Option<Vec<String>> = if read_only {
-                Some(vec![
-                    "local.file.read".into(),
-                    "local.file.list".into(),
-                    "local.file.search".into(),
-                    "local.git.query".into(),
-                ])
-            } else {
-                None
-            };
+            let ws_access = PolicyStore::new(&self.data_home)
+                .read_existing(workspace_id)
+                .map(|p| p.access_level)
+                .unwrap_or(LocalAccessLevel::SessionLocal);
+            let session_profile = resolve_work_session_profile(&plan, "worker", ws_access)
+                .ok_or_else(|| ProjectError::code("INVALID_PLAN"))?;
             let mut prompt = format!(
                 "Delegated Task: {}\n\nObjective:\n{}\n",
                 plan["title"].as_str().unwrap_or(""),
@@ -1150,8 +1163,10 @@ impl SessionSupervisor {
                     prompt.push_str(&format!("- [{kind}] {desc}\n"));
                 }
             }
-            let runtime =
-                NativeConversationRuntime::new(&self.data_home, ConversationAccess::new(access));
+            let runtime = NativeConversationRuntime::new(
+                &self.data_home,
+                ConversationAccess::new(session_profile.access_level),
+            );
             let conv_out = Box::pin(runtime.execute(
                 &ConversationOptions {
                     workspace: &target_ws,
@@ -1163,7 +1178,7 @@ impl SessionSupervisor {
                     mode: RuntimeMode::Chat,
                     effort: "default",
                     persist_model_selection: false,
-                    allowlist: allowlist.as_deref(),
+                    allowlist: Some(&session_profile.allowlist),
                     max_turns: Some(max_turns.max(1)),
                 },
                 worker_model,
@@ -1205,8 +1220,112 @@ impl SessionSupervisor {
             }
             if final_status == "completed" {
                 self.evaluate_deterministic_criteria(&mut updated);
-                let ev_refs = self.indexed_evidence_refs_for_plan(&updated);
-                let list: Vec<String> = ev_refs.iter().cloned().collect();
+                let mut ev_refs = self.indexed_evidence_refs_for_plan(&updated);
+                let has_model_review = updated["successCriteria"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|c| c["kind"] == "model_review");
+                if verifier_model.is_some() || has_model_review {
+                    updated["delegationOrigin"]["phase"] = json!("verifying");
+                    let _ = self.write_plan(&updated);
+                    let vmodel = verifier_model.unwrap_or(worker_model);
+                    match Box::pin(run_independent_verifier(
+                        &self.data_home,
+                        &updated,
+                        &ev_refs,
+                        vmodel,
+                        cancel,
+                    ))
+                    .await
+                    {
+                        Ok(VerifierOutcome::Verified {
+                            report,
+                            verifier_conversation_id,
+                            verifier_model_id,
+                            same_family_as_worker,
+                            verifier_evidence_refs,
+                        }) => {
+                            updated["delegationOrigin"]["verifierConversationId"] =
+                                json!(verifier_conversation_id);
+                            updated["delegationOrigin"]["verifierModel"] = json!(verifier_model_id);
+                            updated["delegationOrigin"]["sameFamilyAsWorker"] =
+                                json!(same_family_as_worker);
+                            updated["delegationOrigin"]["independentVerifier"] =
+                                json!(if report.passed { "passed" } else { "failed" });
+                            updated["verificationReport"] =
+                                serde_json::to_value(&report).unwrap_or(Value::Null);
+                            for r in verifier_evidence_refs {
+                                ev_refs.insert(r);
+                            }
+                            let review_refs = if report.evidence_refs.is_empty() {
+                                let mut all: Vec<String> = ev_refs.iter().cloned().collect();
+                                all.sort();
+                                all
+                            } else {
+                                report.evidence_refs.clone()
+                            };
+                            let verified_at = now_iso();
+                            let reviews: Vec<Value> = updated["successCriteria"]
+                                .as_array()
+                                .into_iter()
+                                .flatten()
+                                .filter(|c| c["kind"] == "model_review")
+                                .enumerate()
+                                .map(|(idx, c)| {
+                                    let cid = c["id"]
+                                        .as_str()
+                                        .map(str::to_owned)
+                                        .unwrap_or_else(|| format!("c-{}", idx + 1));
+                                    let explicitly_failed = report
+                                        .failed_criteria
+                                        .iter()
+                                        .any(|fc| fc.criterion_id.as_deref() == Some(cid.as_str()));
+                                    let passed = report.passed && !explicitly_failed;
+                                    json!({
+                                        "criterionId": cid,
+                                        "passed": passed,
+                                        "evidenceRefs": review_refs,
+                                        "summary": report.summary,
+                                        "verifierModel": verifier_model_id,
+                                        "sameFamilyAsWorker": same_family_as_worker,
+                                        "verifiedAt": verified_at,
+                                    })
+                                })
+                                .collect();
+                            if !reviews.is_empty() {
+                                updated["modelReviews"] = json!(reviews);
+                            }
+                        }
+                        Ok(VerifierOutcome::InvalidReport {
+                            error,
+                            summary,
+                            verifier_conversation_id,
+                        }) => {
+                            if !verifier_conversation_id.is_empty() {
+                                updated["delegationOrigin"]["verifierConversationId"] =
+                                    json!(verifier_conversation_id);
+                            }
+                            updated["delegationOrigin"]["independentVerifier"] = json!("failed");
+                            updated["verificationReport"] = json!({
+                                "passed": false,
+                                "error": error,
+                                "summary": summary,
+                            });
+                        }
+                        Err(err) => {
+                            updated["delegationOrigin"]["independentVerifier"] = json!("failed");
+                            updated["verificationReport"] = json!({
+                                "passed": false,
+                                "error": err.code,
+                                "summary": err.detail,
+                            });
+                        }
+                    }
+                    updated["delegationOrigin"]["phase"] = json!("completed");
+                }
+                let mut list: Vec<String> = ev_refs.into_iter().collect();
+                list.sort();
                 if !list.is_empty() {
                     updated["evidenceRefs"] = json!(list);
                 }
@@ -1387,6 +1506,7 @@ impl SessionSupervisor {
         for conv_id in [
             plan["conversationId"].as_str(),
             plan["delegationOrigin"]["workerConversationId"].as_str(),
+            plan["delegationOrigin"]["verifierConversationId"].as_str(),
         ]
         .into_iter()
         .flatten()
@@ -1467,7 +1587,10 @@ impl SessionSupervisor {
                 evidence_index: &evidence,
                 host_authority: HostAuthorityFacts {
                     independent_verifier: Some(verifier_state.clone()),
-                    ..Default::default()
+                    verifier_model: plan["delegationOrigin"]["verifierModel"]
+                        .as_str()
+                        .map(str::to_owned),
+                    same_family_as_worker: plan["delegationOrigin"]["sameFamilyAsWorker"].as_bool(),
                 },
                 policy,
                 reported,
@@ -1524,7 +1647,10 @@ impl SessionSupervisor {
                 independent_verifier: plan["delegationOrigin"]["independentVerifier"]
                     .as_str()
                     .map(str::to_owned),
-                ..Default::default()
+                verifier_model: plan["delegationOrigin"]["verifierModel"]
+                    .as_str()
+                    .map(str::to_owned),
+                same_family_as_worker: plan["delegationOrigin"]["sameFamilyAsWorker"].as_bool(),
             },
         );
         Ok(WorkSessionReport {
@@ -1582,7 +1708,10 @@ impl SessionSupervisor {
                 independent_verifier: plan["delegationOrigin"]["independentVerifier"]
                     .as_str()
                     .map(str::to_owned),
-                ..Default::default()
+                verifier_model: plan["delegationOrigin"]["verifierModel"]
+                    .as_str()
+                    .map(str::to_owned),
+                same_family_as_worker: plan["delegationOrigin"]["sameFamilyAsWorker"].as_bool(),
             },
         );
         Ok(json!({
@@ -1591,6 +1720,10 @@ impl SessionSupervisor {
             "status": derive_session_status(&plan),
             "verdict": verdict,
             "criterionResults": plan["criterionResults"],
+            "modelReviews": plan["modelReviews"],
+            "verificationReport": plan["verificationReport"],
+            "verifierModel": plan["delegationOrigin"]["verifierModel"],
+            "sameFamilyAsWorker": plan["delegationOrigin"]["sameFamilyAsWorker"],
             "evidenceRefs": verdict.evidence_refs,
             "changedFiles": self.session_changed_files(&plan),
             "resultAcceptance": plan["resultAcceptance"],

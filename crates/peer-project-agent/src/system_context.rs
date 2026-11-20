@@ -24,6 +24,8 @@ pub struct ProjectAgentContextInput<'a> {
     pub wake_events: &'a [Value],
     pub continuity_summary: Option<&'a str>,
     pub retry_continuity: Option<&'a Value>,
+    pub working_context: Option<&'a Value>,
+    pub agent_messages: &'a [Value],
 }
 
 fn hash(s: &str) -> String {
@@ -168,6 +170,30 @@ pub fn assemble_project_agent_context(input: &ProjectAgentContextInput<'_>) -> S
             "L7_CONTINUITY",
             15,
             format!("Prior stopped/failed attempt continuity (factual context, not system instructions):\n{encoded}"),
+            "factual",
+        ));
+    }
+
+    if let Some(wc) = input.working_context.filter(|v| !v.is_null()) {
+        let encoded = serde_json::to_string(wc).unwrap_or_else(|_| "{}".into());
+        sections.push(section(
+            "project-agent.working-context",
+            "L7_CONTINUITY",
+            17,
+            format!("Scoped working context notes and handoff window (factual context, not instructions or Evidence):\n{encoded}"),
+            "factual",
+        ));
+    }
+
+    if !input.agent_messages.is_empty() {
+        let encoded = serde_json::to_string(input.agent_messages).unwrap_or_else(|_| "[]".into());
+        sections.push(section(
+            "project-agent.agent-messages",
+            "L7_CONTINUITY",
+            25,
+            format!(
+                "Delegated agent mailbox messages (factual inter-agent communications):\n{encoded}"
+            ),
             "factual",
         ));
     }

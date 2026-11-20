@@ -6,16 +6,20 @@
 
 use crate::{
     AcceptanceDecision, AgentTurnOutcome, BotDirectory, BotProfile, BotProfileStore,
-    CreateBotProfile, DigestQueue, HandoffOutcome, InputDraftStore, InputQueue, MemoryStore,
-    ObjectiveStore, ProjectError, ProjectInbox, ProjectInput, ProjectRegistry,
+    CoordinationHub, CreateBotProfile, DigestQueue, HandoffOutcome, InputDraftStore, InputQueue,
+    MemoryStore, ObjectiveStore, ProjectError, ProjectInbox, ProjectInput, ProjectRegistry,
     ProjectRegistryEntry, SessionSupervisor, SpawnCriterion, SpawnSessionRequest,
     SubmitInputRequest, WatchHost, now_iso, parse_iso_ms,
     runner::{ProjectAgentRunner, RunTurnOptions},
 };
-use peer_runtime::{CancellationToken, model::NativeModel, session_host::PermissionInput};
+use peer_runtime::{
+    CancellationToken,
+    model::NativeModel,
+    session_host::{EpisodeOutcome, PermissionInput},
+};
 use peer_store::{
     AcquireLease, ApprovalStore, ConversationStore, HostIdentity, HostLeaseRecord, HostLeaseStore,
-    HostSurface, LeaseToken, NewProjectConversation, PolicyStore, StoreError,
+    HostSurface, NewProjectConversation, PolicyStore, StoreError,
 };
 use serde_json::{Value, json};
 use std::{
@@ -82,13 +86,24 @@ pub struct HostTickReport {
     pub last_turn: Option<AgentTurnOutcome>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ForegroundTickReport {
+    pub workspace_id: String,
+    pub held_lease: bool,
+    pub inputs_consumed: usize,
+    pub bot_turns_run: usize,
+    pub promoted_session_ids: Vec<String>,
+    pub wake_turns_run: usize,
+    pub last_turn: Option<AgentTurnOutcome>,
+}
+
 pub struct NativeProjectHost {
     data_home: PathBuf,
     host_identity: HostIdentity,
     registry: ProjectRegistry,
     profiles: BotProfileStore,
     leases: HostLeaseStore,
-    held_leases: Mutex<HashMap<String, LeaseToken>>,
+    coordination: Arc<CoordinationHub>,
     recovered_workspaces: Mutex<HashMap<String, bool>>,
     inputs: InputQueue,
     drafts: InputDraftStore,
@@ -118,12 +133,17 @@ impl NativeProjectHost {
             app_version,
         )?;
         let supervisor = Arc::new(SessionSupervisor::new(&home, concurrency));
-        let runner = ProjectAgentRunner::new(&home, Arc::clone(&supervisor));
+        let coordination = Arc::new(CoordinationHub::new());
+        let runner = ProjectAgentRunner::with_coordination(
+            &home,
+            Arc::clone(&supervisor),
+            Arc::clone(&coordination),
+        );
         Ok(Self {
             registry: ProjectRegistry::new(&home),
             profiles: BotProfileStore::new(&home),
             leases: HostLeaseStore::new(&home),
-            held_leases: Mutex::new(HashMap::new()),
+            coordination,
             recovered_workspaces: Mutex::new(HashMap::new()),
             inputs: InputQueue::new(&home),
             drafts: InputDraftStore::new(&home),
@@ -187,6 +207,9 @@ impl NativeProjectHost {
     pub fn digests(&self) -> &DigestQueue {
         &self.digests
     }
+    pub fn coordination(&self) -> &Arc<CoordinationHub> {
+        &self.coordination
+    }
 
     /// Bind a local folder to a persistent project Bot (register workspace, create canonical
     /// `project_agent` conversation, create profile, ensure `bot-access.sqlite` exists).
@@ -242,24 +265,15 @@ impl NativeProjectHost {
     /// Acquire or heartbeat the per-workspace host lease (`host.lease`).
     pub fn ensure_lease(&self, workspace_id: &str) -> Result<LeaseStatus, ProjectError> {
         let now_ms = parse_iso_ms(&now_iso()).unwrap_or(0);
-        let mut held = self
-            .held_leases
-            .lock()
-            .map_err(|_| ProjectError::code("STATE_LOCK_POISONED"))?;
-        if let Some(token) = held.get_mut(workspace_id) {
-            match token.heartbeat(now_ms) {
-                Ok(_) => return Ok(LeaseStatus::Acquired { took_over: false }),
-                Err(_) => {
-                    held.remove(workspace_id);
-                }
-            }
+        if self.coordination.heartbeat(workspace_id, now_ms)? {
+            return Ok(LeaseStatus::Acquired { took_over: false });
         }
         match self
             .leases
             .acquire(workspace_id, &self.host_identity, now_ms)?
         {
             AcquireLease::Acquired { token, took_over } => {
-                held.insert(workspace_id.to_owned(), token);
+                self.coordination.insert_lease(workspace_id, token);
                 Ok(LeaseStatus::Acquired { took_over })
             }
             AcquireLease::Held(record) => Ok(LeaseStatus::HeldByOther(record)),
@@ -267,10 +281,7 @@ impl NativeProjectHost {
     }
 
     pub fn holds_lease(&self, workspace_id: &str) -> bool {
-        self.held_leases
-            .lock()
-            .map(|g| g.contains_key(workspace_id))
-            .unwrap_or(false)
+        self.coordination.holds(workspace_id)
     }
 
     pub fn has_pending_work(&self, workspace_id: &str) -> bool {
@@ -295,23 +306,11 @@ impl NativeProjectHost {
     }
 
     pub fn release_lease(&self, workspace_id: &str) -> Result<(), ProjectError> {
-        let token = self
-            .held_leases
-            .lock()
-            .map_err(|_| ProjectError::code("STATE_LOCK_POISONED"))?
-            .remove(workspace_id);
-        if let Some(tok) = token {
-            tok.release()?;
-        }
-        Ok(())
+        self.coordination.release(workspace_id)
     }
 
     pub fn release_all_leases(&self) {
-        if let Ok(mut held) = self.held_leases.lock() {
-            for (_, token) in held.drain() {
-                let _ = token.release();
-            }
-        }
+        self.coordination.release_all();
     }
 
     /// Write `host.yield` targeting the active lease holder (`true` if a holder existed,
@@ -326,14 +325,7 @@ impl NativeProjectHost {
 
     /// Check whether another host has written `host.yield` targeting this host's held lease.
     pub fn takeover_requested(&self, workspace_id: &str) -> bool {
-        self.held_leases
-            .lock()
-            .ok()
-            .and_then(|held| {
-                held.get(workspace_id)
-                    .map(|tok| tok.takeover_requested().unwrap_or(false))
-            })
-            .unwrap_or(false)
+        self.coordination.takeover_requested(workspace_id)
     }
 
     /// Resolve a role model using this bot profile's `modelPolicy` and global `settings.json`.
@@ -381,28 +373,19 @@ impl NativeProjectHost {
         })
     }
 
-    /// Run one full native host synchronization cycle for `workspace_id`:
-    /// 1. Lease acquisition / heartbeat (if another host holds fresh lease, returns immediately as client).
-    /// 2. Startup recovery once per lease epoch.
-    /// 3. Consume durable `InputQueue` into bot conversation.
-    /// 4. Drive main Bot cognition for pending user inputs (user input preempts wakes).
-    /// 5. Promote & execute eligible delegated work sessions via `NativeSessionHost`.
-    /// 6. Drain `ProjectInbox` wake events so main Bot reports verified results and triggers policy acceptance.
-    pub async fn tick(
+    async fn run_user_input_phase(
         &self,
         workspace_id: &str,
         model: &NativeModel,
-        worker_model_selection: Value,
-        worker_permission: &mut impl PermissionInput,
+        worker_model_selection: &Value,
         cancel: &CancellationToken,
-    ) -> Result<HostTickReport, ProjectError> {
-        let mut report = HostTickReport {
+    ) -> Result<Option<(String, PathBuf, ForegroundTickReport, bool)>, ProjectError> {
+        let mut report = ForegroundTickReport {
             workspace_id: workspace_id.to_owned(),
             held_lease: false,
             inputs_consumed: 0,
             bot_turns_run: 0,
-            sessions_promoted: 0,
-            sessions_executed: 0,
+            promoted_session_ids: Vec::new(),
             wake_turns_run: 0,
             last_turn: None,
         };
@@ -426,7 +409,7 @@ impl NativeProjectHost {
                 report.held_lease = true;
             }
             LeaseStatus::HeldByOther(_) => {
-                return Ok(report);
+                return Ok(None);
             }
         }
 
@@ -455,7 +438,7 @@ impl NativeProjectHost {
         if self.takeover_requested(workspace_id) {
             report.held_lease = false;
             let _ = self.release_lease(workspace_id);
-            return Ok(report);
+            return Ok(Some((conv_id, ws_path, report, true)));
         }
 
         // Step 2: Run main Bot turn for each pending user input (user input priority).
@@ -497,13 +480,202 @@ impl NativeProjectHost {
             }
             report.last_turn = Some(outcome);
             if stop_tick {
-                return Ok(report);
+                return Ok(Some((conv_id, ws_path, report, true)));
             }
         }
 
         if self.takeover_requested(workspace_id) {
             report.held_lease = false;
             let _ = self.release_lease(workspace_id);
+            return Ok(Some((conv_id, ws_path, report, true)));
+        }
+
+        Ok(Some((conv_id, ws_path, report, false)))
+    }
+
+    async fn maybe_run_wake_turn(
+        &self,
+        workspace_id: &str,
+        ws_path: &Path,
+        conv_id: &str,
+        model: &NativeModel,
+        worker_model_selection: Value,
+        cancel: &CancellationToken,
+    ) -> Result<Option<AgentTurnOutcome>, ProjectError> {
+        // User-input priority preemption: skip wake turns if fresh user inputs await execution.
+        if self.inputs.has_pending(workspace_id)
+            || cancel.is_cancelled()
+            || !self.holds_lease(workspace_id)
+        {
+            return Ok(None);
+        }
+        let now_ms = parse_iso_ms(&now_iso()).unwrap_or(0);
+        let batch = self.inbox.take_batch(workspace_id, now_ms, true);
+        if batch.events.is_empty() {
+            return Ok(None);
+        }
+        let sessions = self.supervisor.list_sessions(workspace_id);
+        if is_routine_host_wake_wait(&batch.events, &sessions) {
+            let _ = self
+                .inbox
+                .commit_batch(workspace_id, batch.through_seq, true);
+            return Ok(None);
+        }
+        let outcome = Box::pin(self.runner.run_turn(
+            &RunTurnOptions {
+                workspace_id,
+                workspace_path: ws_path,
+                conversation_id: conv_id,
+                kind: "wake",
+                user_inputs: &[],
+                wake_events: &batch.events,
+                worker_model_selection,
+                holds_lease: true,
+            },
+            model,
+            cancel,
+        ))
+        .await?;
+        let ok = !matches!(outcome.end, crate::runner::TurnEndKind::Failed { .. });
+        let _ = self.inbox.commit_batch(workspace_id, batch.through_seq, ok);
+        Ok(Some(outcome))
+    }
+
+    /// Foreground host tick for interactive TUI: runs user inputs, promotes queued workers without
+    /// blocking on them, and drains wake turns only when no fresh user inputs are waiting.
+    pub async fn tick_foreground(
+        &self,
+        workspace_id: &str,
+        model: &NativeModel,
+        worker_model_selection: Value,
+        cancel: &CancellationToken,
+    ) -> Result<ForegroundTickReport, ProjectError> {
+        let Some((conv_id, ws_path, mut report, stopped)) = self
+            .run_user_input_phase(workspace_id, model, &worker_model_selection, cancel)
+            .await?
+        else {
+            return Ok(ForegroundTickReport {
+                workspace_id: workspace_id.to_owned(),
+                held_lease: false,
+                inputs_consumed: 0,
+                bot_turns_run: 0,
+                promoted_session_ids: Vec::new(),
+                wake_turns_run: 0,
+                last_turn: None,
+            });
+        };
+        if stopped {
+            return Ok(report);
+        }
+
+        let promoted = self.supervisor.promote_queued(workspace_id, true)?;
+        report.promoted_session_ids = promoted.start;
+
+        if let Some(outcome) = self
+            .maybe_run_wake_turn(
+                workspace_id,
+                &ws_path,
+                &conv_id,
+                model,
+                worker_model_selection,
+                cancel,
+            )
+            .await?
+        {
+            report.wake_turns_run += 1;
+            report.last_turn = Some(outcome);
+        }
+
+        Ok(report)
+    }
+
+    /// Execute one previously promoted delegated session asynchronously with optional verifier.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn run_promoted_session(
+        &self,
+        workspace_id: &str,
+        session_id: &str,
+        worker_model: &NativeModel,
+        verifier_model: Option<&NativeModel>,
+        worker_permission: &mut impl PermissionInput,
+        max_turns: usize,
+        cancel: &CancellationToken,
+    ) -> Result<EpisodeOutcome, ProjectError> {
+        if !self.holds_lease(workspace_id) {
+            match self.ensure_lease(workspace_id)? {
+                LeaseStatus::Acquired { .. } => {}
+                LeaseStatus::HeldByOther(_) => {
+                    return Err(ProjectError::code("LEASE_HELD_BY_OTHER"));
+                }
+            }
+        }
+        let is_legacy = self
+            .supervisor
+            .find_plan_by_session(workspace_id, session_id)
+            .is_some_and(|p| p["delegationOrigin"]["coordinationBinding"].is_object());
+        if is_legacy {
+            self.release_lease(workspace_id)?;
+        }
+        let run_res = Box::pin(self.supervisor.run_session_episode_with_verifier(
+            workspace_id,
+            session_id,
+            worker_model,
+            verifier_model,
+            worker_permission,
+            max_turns,
+            cancel,
+            true,
+        ))
+        .await;
+        if is_legacy {
+            let _ = self.ensure_lease(workspace_id)?;
+        } else if !cancel.is_cancelled() && self.holds_lease(workspace_id) {
+            let _ = self.ensure_lease(workspace_id);
+        }
+        run_res
+    }
+
+    /// Run one full native host synchronization cycle for `workspace_id`:
+    /// 1. Lease acquisition / heartbeat (if another host holds fresh lease, returns immediately as client).
+    /// 2. Startup recovery once per lease epoch.
+    /// 3. Consume durable `InputQueue` into bot conversation.
+    /// 4. Drive main Bot cognition for pending user inputs (user input preempts wakes).
+    /// 5. Promote & execute eligible delegated work sessions via `NativeSessionHost`.
+    /// 6. Drain `ProjectInbox` wake events unless preempted by fresh user inputs.
+    pub async fn tick(
+        &self,
+        workspace_id: &str,
+        model: &NativeModel,
+        worker_model_selection: Value,
+        worker_permission: &mut impl PermissionInput,
+        cancel: &CancellationToken,
+    ) -> Result<HostTickReport, ProjectError> {
+        let Some((conv_id, ws_path, fg, stopped)) = self
+            .run_user_input_phase(workspace_id, model, &worker_model_selection, cancel)
+            .await?
+        else {
+            return Ok(HostTickReport {
+                workspace_id: workspace_id.to_owned(),
+                held_lease: false,
+                inputs_consumed: 0,
+                bot_turns_run: 0,
+                sessions_promoted: 0,
+                sessions_executed: 0,
+                wake_turns_run: 0,
+                last_turn: None,
+            });
+        };
+        let mut report = HostTickReport {
+            workspace_id: fg.workspace_id,
+            held_lease: fg.held_lease,
+            inputs_consumed: fg.inputs_consumed,
+            bot_turns_run: fg.bot_turns_run,
+            sessions_promoted: 0,
+            sessions_executed: 0,
+            wake_turns_run: fg.wake_turns_run,
+            last_turn: fg.last_turn,
+        };
+        if stopped {
             return Ok(report);
         }
 
@@ -514,27 +686,18 @@ impl NativeProjectHost {
             if cancel.is_cancelled() {
                 break;
             }
-            let is_legacy = self
-                .supervisor
-                .find_plan_by_session(workspace_id, &sid)
-                .is_some_and(|p| p["delegationOrigin"]["coordinationBinding"].is_object());
-            if is_legacy {
-                self.release_lease(workspace_id)?;
-            }
-            let run_res = Box::pin(self.supervisor.run_session_episode(
+            if Box::pin(self.run_promoted_session(
                 workspace_id,
                 &sid,
                 model,
+                None,
                 worker_permission,
                 16,
                 cancel,
-                true,
             ))
-            .await;
-            if is_legacy {
-                let _ = self.ensure_lease(workspace_id)?;
-            }
-            if run_res.is_ok() {
+            .await
+            .is_ok()
+            {
                 report.sessions_executed += 1;
             }
         }
@@ -550,27 +713,18 @@ impl NativeProjectHost {
             let _ = self.ensure_lease(workspace_id);
         }
 
-        // Step 4: Drain ProjectInbox wake events (e.g. report_available / session_ended).
-        let now_ms = parse_iso_ms(&now_iso()).unwrap_or(0);
-        let batch = self.inbox.take_batch(workspace_id, now_ms, true);
-        if !batch.events.is_empty() && !cancel.is_cancelled() && self.holds_lease(workspace_id) {
-            let outcome = Box::pin(self.runner.run_turn(
-                &RunTurnOptions {
-                    workspace_id,
-                    workspace_path: &ws_path,
-                    conversation_id: &conv_id,
-                    kind: "wake",
-                    user_inputs: &[],
-                    wake_events: &batch.events,
-                    worker_model_selection,
-                    holds_lease: true,
-                },
+        // Step 4: Drain ProjectInbox wake events unless preempted by fresh user inputs.
+        if let Some(outcome) = self
+            .maybe_run_wake_turn(
+                workspace_id,
+                &ws_path,
+                &conv_id,
                 model,
+                worker_model_selection,
                 cancel,
-            ))
-            .await?;
-            let ok = !matches!(outcome.end, crate::runner::TurnEndKind::Failed { .. });
-            let _ = self.inbox.commit_batch(workspace_id, batch.through_seq, ok);
+            )
+            .await?
+        {
             report.wake_turns_run += 1;
             report.last_turn = Some(outcome);
         }
@@ -994,6 +1148,53 @@ impl Drop for NativeProjectHost {
     fn drop(&mut self) {
         self.release_all_leases();
     }
+}
+
+/// Host-side routine lifecycle absorption (`wake-wait.mjs#hostWakeWait`): suppress redundant
+/// wake turns when every event in the batch is a routine lifecycle update for an actively
+/// advancing delegated session and no session currently requires user or parent attention.
+fn is_routine_host_wake_wait(events: &[Value], sessions: &[crate::WorkSessionSummary]) -> bool {
+    if events.is_empty() {
+        return false;
+    }
+    if sessions.iter().any(|row| {
+        matches!(
+            row.status.as_str(),
+            "waiting_user" | "waiting_agent" | "result_ready" | "interrupted"
+        )
+    }) {
+        return false;
+    }
+    let mut referenced = Vec::new();
+    for ev in events {
+        let kind = ev["kind"].as_str().unwrap_or("");
+        if !matches!(
+            kind,
+            "session_started"
+                | "session_spawned"
+                | "session_running"
+                | "session_resumed"
+                | "progress"
+                | "session_progress"
+        ) {
+            return false;
+        }
+        let Some(sid) = ev["sessionId"].as_str().filter(|s| !s.is_empty()) else {
+            return false;
+        };
+        if !referenced.contains(&sid) {
+            referenced.push(sid);
+        }
+    }
+    referenced.iter().all(|sid| {
+        sessions.iter().any(|row| {
+            row.session_id == *sid
+                && matches!(
+                    row.status.as_str(),
+                    "queued" | "starting" | "running" | "verifying"
+                )
+        })
+    })
 }
 
 /// Helper for tests and `peer exec --bot` to serialize a compact bot list snapshot.

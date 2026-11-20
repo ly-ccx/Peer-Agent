@@ -4,9 +4,9 @@
 //! `CapabilityProvider -> Manifest -> RuntimeProjection(RuntimeMode::ProjectAgent) -> ToolCall -> PermissionGrant -> Evidence`.
 
 use crate::{
-    BotProfileStore, DigestQueue, MemoryFilter, MemoryStore, ObjectiveStore, ProjectError,
-    SessionSupervisor, SpawnCriterion, SpawnSessionRequest, UpdateObjectiveRequest,
-    UserAnchorCandidate, WriteMemoryRequest,
+    BotProfileStore, CommitAgentMessageRequest, CoordinationHub, DigestQueue, MemoryFilter,
+    MemoryStore, ObjectiveStore, ProjectError, SessionSupervisor, SpawnCriterion,
+    SpawnSessionRequest, UpdateObjectiveRequest, UserAnchorCandidate, WriteMemoryRequest,
     acceptance::verdict_ref_for,
     memory_secret_reason,
     objectives::{CreateObjectiveRequest, ObjectiveBudget, ObjectiveMilestone},
@@ -46,6 +46,7 @@ pub struct TurnExecutionState {
     pub worker_model_selection: Value,
     pub reply_committed_id: Option<String>,
     pub post_reply_rejected: bool,
+    pub work_id: String,
     pub waiting_session_ids: Vec<String>,
     pub spawned_session_ids: Vec<String>,
     pub memory_learned: Vec<String>,
@@ -67,6 +68,7 @@ impl From<ProjectError> for CapFailure {
 pub struct ProjectCapabilityProvider {
     data_home: PathBuf,
     supervisor: Arc<SessionSupervisor>,
+    coordination: Arc<CoordinationHub>,
     state: Arc<Mutex<TurnExecutionState>>,
 }
 
@@ -76,9 +78,24 @@ impl ProjectCapabilityProvider {
         supervisor: Arc<SessionSupervisor>,
         state: Arc<Mutex<TurnExecutionState>>,
     ) -> Self {
+        Self::with_coordination(
+            data_home,
+            supervisor,
+            Arc::new(CoordinationHub::new()),
+            state,
+        )
+    }
+
+    pub fn with_coordination(
+        data_home: impl AsRef<Path>,
+        supervisor: Arc<SessionSupervisor>,
+        coordination: Arc<CoordinationHub>,
+        state: Arc<Mutex<TurnExecutionState>>,
+    ) -> Self {
         Self {
             data_home: data_home.as_ref().to_path_buf(),
             supervisor,
+            coordination,
             state,
         }
     }
@@ -523,6 +540,136 @@ impl CapabilityProvider for ProjectCapabilityProvider {
                     "additionalProperties": false
                 }),
             ),
+            Self::manifest(
+                "send_agent_message",
+                "local.delegation.send_agent_message",
+                "Send a durable parent-to-child update, question, or answer via the coordination mailbox.",
+                json!({
+                    "type": "object",
+                    "required": ["text", "purpose"],
+                    "properties": {
+                        "sessionId": {"type": "string", "maxLength": 200},
+                        "text": {"type": "string", "maxLength": 4000},
+                        "purpose": {"type": "string", "enum": ["update", "question", "answer"]},
+                        "delivery": {"type": "string", "enum": ["mailbox_only", "ensure_turn"]},
+                        "expectedRevision": {"type": "integer", "minimum": 0},
+                        "expectedExecutionEpoch": {"type": "string", "maxLength": 200},
+                        "replyTo": {"type": "string", "maxLength": 200},
+                        "decisionRequest": {"type": "object"},
+                        "decisionAnswer": {"type": "object"}
+                    },
+                    "additionalProperties": false
+                }),
+            ),
+            Self::manifest(
+                "coordinate_work",
+                "local.delegation.coordinate_work",
+                "Query coordination v2 mandate revisions or issue revision-guarded work control actions.",
+                json!({
+                    "type": "object",
+                    "required": ["action", "reason"],
+                    "properties": {
+                        "action": {"type": "string", "enum": ["parallel", "augment", "revise", "query", "answer", "cancel", "replace", "handoff", "resume", "assess"]},
+                        "assessment": {"type": "object"},
+                        "afterSessionId": {"type": "string", "maxLength": 200},
+                        "eventId": {"type": "string", "maxLength": 200},
+                        "payloadOffset": {"type": "integer", "minimum": 0},
+                        "inputId": {"type": "string", "maxLength": 200},
+                        "afterInputId": {"type": "string", "maxLength": 200},
+                        "expectedWorkRevision": {"type": "integer", "minimum": 0},
+                        "workId": {"type": "string", "maxLength": 200},
+                        "sessionId": {"type": "string", "maxLength": 200},
+                        "expectedRevision": {"type": "integer", "minimum": 0},
+                        "reason": {"type": "string", "maxLength": 500},
+                        "text": {"type": "string", "maxLength": 4000},
+                        "replyTo": {"type": "string", "maxLength": 200},
+                        "task": {"type": "object"}
+                    },
+                    "additionalProperties": false
+                }),
+            ),
+            Self::manifest(
+                "memory_remember",
+                "local.memory.remember",
+                "Record a typed durable fact or user preference without overriding runtime-owned metadata.",
+                json!({
+                    "type": "object",
+                    "required": ["text", "kind"],
+                    "properties": {
+                        "text": {"type": "string", "maxLength": 2000},
+                        "kind": {"type": "string", "enum": ["fact", "preference", "decision", "procedure", "responsibility"]},
+                        "anchorMessageId": {"type": "string"},
+                        "pinned": {"type": "boolean"},
+                        "expiresAt": {"type": "string"},
+                        "topicKey": {"type": "string", "maxLength": 120},
+                        "topicValue": {"type": "string", "maxLength": 200}
+                    },
+                    "additionalProperties": false
+                }),
+            ),
+            Self::manifest(
+                "read_work_notes",
+                "local.continuity.read_notes",
+                "Read scoped working-context notes persisted in the Coordination V2 journal.",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "workId": {"type": "string", "maxLength": 200},
+                        "noteId": {"type": "string", "maxLength": 200},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 50}
+                    },
+                    "additionalProperties": false
+                }),
+            ),
+            Self::manifest(
+                "write_work_note",
+                "local.continuity.write_note",
+                "Write or update a named versioned working-context note using optimistic expectedRevision.",
+                json!({
+                    "type": "object",
+                    "required": ["name", "text", "expectedRevision"],
+                    "properties": {
+                        "workId": {"type": "string", "maxLength": 200},
+                        "name": {"type": "string", "maxLength": 120},
+                        "text": {"type": "string", "maxLength": 12000},
+                        "expectedRevision": {"type": "integer", "minimum": 0},
+                        "sourceRefs": {"type": "array", "maxItems": 32, "items": {"type": "string", "maxLength": 300}}
+                    },
+                    "additionalProperties": false
+                }),
+            ),
+            Self::manifest(
+                "search_work_history",
+                "local.continuity.search_history",
+                "Search bounded pages of work conversation history with automatic secret redaction.",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "workId": {"type": "string", "maxLength": 200},
+                        "conversationId": {"type": "string", "maxLength": 200},
+                        "query": {"type": "string", "maxLength": 500},
+                        "before": {"type": "string", "maxLength": 300},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 50}
+                    },
+                    "additionalProperties": false
+                }),
+            ),
+            Self::manifest(
+                "prepare_context_handoff",
+                "local.continuity.prepare_handoff",
+                "Prepare a durable continuity handoff window in Coordination V2.",
+                json!({
+                    "type": "object",
+                    "required": ["hint"],
+                    "properties": {
+                        "workId": {"type": "string", "maxLength": 200},
+                        "hint": {"type": "string", "maxLength": 6000},
+                        "previousWindowId": {"type": "string", "maxLength": 200},
+                        "historyCursor": {"type": "string", "maxLength": 300}
+                    },
+                    "additionalProperties": false
+                }),
+            ),
         ]
     }
 
@@ -536,6 +683,7 @@ impl CapabilityProvider for ProjectCapabilityProvider {
         if !capability.starts_with("local.delegation.")
             && !capability.starts_with("local.memory.")
             && !capability.starts_with("local.objective.")
+            && !capability.starts_with("local.continuity.")
         {
             return Err(HostError("tool_not_projected"));
         }
@@ -544,6 +692,7 @@ impl CapabilityProvider for ProjectCapabilityProvider {
             args,
             data_home: self.data_home.clone(),
             supervisor: Arc::clone(&self.supervisor),
+            coordination: Arc::clone(&self.coordination),
             state: Arc::clone(&self.state),
         }))
     }
@@ -554,6 +703,7 @@ struct PreparedProjectEffect {
     args: Value,
     data_home: PathBuf,
     supervisor: Arc<SessionSupervisor>,
+    coordination: Arc<CoordinationHub>,
     state: Arc<Mutex<TurnExecutionState>>,
 }
 
@@ -592,6 +742,7 @@ impl PreparedEffect for PreparedProjectEffect {
                 &self.args,
                 &self.data_home,
                 &self.supervisor,
+                &self.coordination,
                 &self.state,
                 call.tool_call_id(),
             );
@@ -1149,11 +1300,560 @@ fn execute_objective_capability(
     }
 }
 
+fn spawn_from_args(
+    args: &Value,
+    state: &mut TurnExecutionState,
+    supervisor: &SessionSupervisor,
+    coordination: &CoordinationHub,
+) -> Result<crate::WorkSessionSummary, CapFailure> {
+    let raw_anchors: Vec<String> = args["anchorMessageIds"]
+        .as_array()
+        .ok_or_else(|| ProjectError::code("invalid_input"))?
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect();
+    if raw_anchors.is_empty() {
+        return Err(ProjectError::code("invalid_anchor").into());
+    }
+    let anchors = resolve_anchors_for_state(&raw_anchors, state)?;
+    if let Some(sup) = args["supersedes"].as_str() {
+        check_quote_scope(state, sup)?;
+    }
+    let criteria: Vec<SpawnCriterion> = serde_json::from_value(args["successCriteria"].clone())
+        .map_err(|_| ProjectError::code("invalid_input"))?;
+    let required_caps: Vec<String> = args["requiredCapabilities"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    let depends_on: Vec<String> = args["dependsOn"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    let spawned = supervisor.spawn_session(
+        SpawnSessionRequest {
+            workspace_id: state.workspace_id.clone(),
+            workspace_path: state.workspace_path.clone(),
+            parent_conversation_id: state.conversation_id.clone(),
+            anchor_message_ids: anchors,
+            input_id: state.current_input_id.clone(),
+            surface: "tui".into(),
+            title: args["title"].as_str().unwrap_or("").to_owned(),
+            brief: args["brief"].as_str().unwrap_or("").to_owned(),
+            kind: args["kind"].as_str().unwrap_or("other").to_owned(),
+            read_only: args["readOnly"].as_bool().unwrap_or(true),
+            required_capabilities: required_caps,
+            success_criteria: criteria,
+            priority: args["priority"].as_str().unwrap_or("normal").to_owned(),
+            depends_on,
+            supersedes: args["supersedes"].as_str().map(str::to_owned),
+            objective_id: args["objectiveId"].as_str().map(str::to_owned),
+            isolation: args["isolation"].as_str().unwrap_or("auto").to_owned(),
+            worker_model_selection: state.worker_model_selection.clone(),
+        },
+        state.holds_lease,
+    )?;
+    state.spawned_session_ids.push(spawned.session_id.clone());
+    if !state.work_id.is_empty() && coordination.holds(&state.workspace_id) {
+        let _ = coordination.ensure_work(
+            &state.workspace_id,
+            &state.work_id,
+            &state.conversation_id,
+            &state.current_input_anchors,
+            std::slice::from_ref(&spawned.session_id),
+            "runnable",
+        );
+    }
+    Ok(spawned)
+}
+
+fn execute_continuity_capability(
+    capability: &str,
+    args: &Value,
+    data_home: &Path,
+    coordination: &CoordinationHub,
+    state: &TurnExecutionState,
+    tool_call_id: &str,
+) -> Result<Value, CapFailure> {
+    let work_id = args["workId"]
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| state.work_id.clone());
+    if work_id.is_empty() {
+        return Err(ProjectError::code("working_context_unavailable").into());
+    }
+    match capability {
+        "local.continuity.read_notes" => {
+            if coordination
+                .read_work(&state.workspace_id, &work_id)?
+                .is_none()
+            {
+                return Err(ProjectError::code("working_context_unavailable").into());
+            }
+            let limit = args["limit"].as_u64().unwrap_or(20).clamp(1, 50) as usize;
+            let notes = coordination.read_work_notes(
+                &state.workspace_id,
+                &work_id,
+                None,
+                args["noteId"].as_str(),
+                limit,
+            )?;
+            Ok(json!({ "ok": true, "notes": notes }))
+        }
+        "local.continuity.write_note" => {
+            let work = coordination
+                .read_work(&state.workspace_id, &work_id)?
+                .ok_or_else(|| ProjectError::code("working_context_unavailable"))?;
+            if matches!(
+                work["state"].as_str(),
+                Some("paused" | "cancelled" | "coalesced" | "delivered")
+            ) {
+                return Err(ProjectError::code("work_execution_stopped").into());
+            }
+            let name = args["name"]
+                .as_str()
+                .ok_or_else(|| ProjectError::code("work_note_invalid"))?;
+            let text = args["text"]
+                .as_str()
+                .ok_or_else(|| ProjectError::code("work_note_invalid"))?;
+            let expected_revision = args["expectedRevision"]
+                .as_u64()
+                .ok_or_else(|| ProjectError::code("work_note_invalid"))?;
+            let source_refs: Vec<String> = args["sourceRefs"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let (note, replayed) = coordination.write_work_note(
+                &state.workspace_id,
+                &work_id,
+                &state.conversation_id,
+                name,
+                text,
+                expected_revision,
+                source_refs,
+                tool_call_id,
+            )?;
+            Ok(json!({ "ok": true, "note": note, "replayed": replayed }))
+        }
+        "local.continuity.search_history" => {
+            if coordination
+                .read_work(&state.workspace_id, &work_id)?
+                .is_none()
+            {
+                return Err(ProjectError::code("working_context_unavailable").into());
+            }
+            let conv_id = args["conversationId"]
+                .as_str()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or(&state.conversation_id);
+            let query = args["query"]
+                .as_str()
+                .map(|s| s.trim().to_lowercase())
+                .unwrap_or_default();
+            let before = args["before"]
+                .as_str()
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+            let limit = args["limit"].as_u64().unwrap_or(20).clamp(1, 50) as usize;
+            let snap = ConversationStore::new(data_home)
+                .read_committed(conv_id, None, 4 * 1024 * 1024)
+                .map_err(ProjectError::from)?;
+            let mut matches = Vec::new();
+            let mut seen_before = before.is_none();
+            for m in snap.history.messages.iter().rev() {
+                let id = m["id"].as_str().unwrap_or("");
+                if !seen_before {
+                    if Some(id) == before {
+                        seen_before = true;
+                    }
+                    continue;
+                }
+                if m["meta"]["compaction"].is_object()
+                    || matches!(m["kind"].as_str(), Some("compaction" | "agent_turn"))
+                {
+                    continue;
+                }
+                let raw_text = m["content"].as_str().unwrap_or("");
+                if raw_text.is_empty() {
+                    continue;
+                }
+                if !query.is_empty() && !raw_text.to_lowercase().contains(&query) {
+                    continue;
+                }
+                let redacted = memory_secret_reason(raw_text).is_some();
+                let snippet: String = if redacted {
+                    "[sensitive history content omitted]".to_owned()
+                } else {
+                    raw_text.chars().take(2000).collect()
+                };
+                matches.push(json!({
+                    "messageId": id,
+                    "conversationId": conv_id,
+                    "kind": m["kind"],
+                    "text": snippet,
+                    "redacted": redacted,
+                }));
+                if matches.len() >= limit {
+                    break;
+                }
+            }
+            let next_cursor = matches
+                .last()
+                .and_then(|m| m["messageId"].as_str())
+                .map(str::to_owned);
+            Ok(json!({
+                "ok": true,
+                "matches": matches,
+                "nextCursor": next_cursor,
+                "searchedOnePage": true,
+            }))
+        }
+        "local.continuity.prepare_handoff" => {
+            let work = coordination
+                .read_work(&state.workspace_id, &work_id)?
+                .ok_or_else(|| ProjectError::code("working_context_unavailable"))?;
+            if matches!(
+                work["state"].as_str(),
+                Some("paused" | "cancelled" | "coalesced" | "delivered")
+            ) {
+                return Err(ProjectError::code("work_execution_stopped").into());
+            }
+            let hint = args["hint"]
+                .as_str()
+                .ok_or_else(|| ProjectError::code("context_hint_invalid"))?;
+            let (window, replayed) = coordination.prepare_context_handoff(
+                &state.workspace_id,
+                &work_id,
+                &state.conversation_id,
+                hint,
+                args["previousWindowId"].as_str(),
+                args["historyCursor"].as_str(),
+                tool_call_id,
+            )?;
+            Ok(json!({
+                "ok": true,
+                "window": window,
+                "replayed": replayed,
+                "providerWindowChanged": false,
+            }))
+        }
+        _ => Err(ProjectError::code("tool_not_projected").into()),
+    }
+}
+
+fn execute_send_agent_message(
+    args: &Value,
+    data_home: &Path,
+    supervisor: &SessionSupervisor,
+    coordination: &CoordinationHub,
+    state: &TurnExecutionState,
+    tool_call_id: &str,
+) -> Result<Value, CapFailure> {
+    let sid = args["sessionId"]
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| ProjectError::code("agent_identity_mismatch"))?;
+    let plan = supervisor
+        .find_plan_by_session(&state.workspace_id, sid)
+        .ok_or_else(|| ProjectError::code("agent_out_of_scope"))?;
+    if plan["delegationOrigin"]["workspaceId"].as_str() != Some(state.workspace_id.as_str())
+        || plan["delegationOrigin"]["parentConversationId"].as_str()
+            != Some(state.conversation_id.as_str())
+    {
+        return Err(ProjectError::code("agent_out_of_scope").into());
+    }
+    let child_conv_id = plan["conversationId"]
+        .as_str()
+        .ok_or_else(|| ProjectError::code("agent_conversation_unavailable"))?;
+    let text = args["text"]
+        .as_str()
+        .filter(|s| !s.trim().is_empty() && s.chars().count() <= 4_000)
+        .ok_or_else(|| ProjectError::code("invalid_input"))?;
+    let purpose = args["purpose"]
+        .as_str()
+        .filter(|p| matches!(*p, "update" | "question" | "answer"))
+        .ok_or_else(|| ProjectError::code("invalid_input"))?;
+    let ensure_turn = args["delivery"].as_str() == Some("ensure_turn") || purpose == "answer";
+    let work_id = if !state.work_id.is_empty() {
+        state.work_id.clone()
+    } else {
+        crate::coordination_work_id(
+            &state.conversation_id,
+            std::slice::from_ref(&sid.to_owned()),
+        )
+    };
+    coordination.ensure_work(
+        &state.workspace_id,
+        &work_id,
+        &state.conversation_id,
+        &state.current_input_anchors,
+        &[sid.to_owned()],
+        "runnable",
+    )?;
+    if let Some(exp_rev) = args["expectedRevision"].as_u64() {
+        let coord_state = coordination.read_state(&state.workspace_id)?;
+        let cur_rev = coord_state["mandates"][&work_id]["goalRevision"]
+            .as_u64()
+            .unwrap_or(0);
+        if exp_rev != cur_rev {
+            return Err(ProjectError::code("goal_revision_conflict").into());
+        }
+    }
+
+    let (msg, replayed) = coordination.commit_agent_message(
+        &state.workspace_id,
+        CommitAgentMessageRequest {
+            work_id: &work_id,
+            session_id: sid,
+            direction: "parent_to_child",
+            purpose,
+            text,
+            sender_conversation_id: &state.conversation_id,
+            recipient_conversation_id: child_conv_id,
+            ensure_turn,
+            goal_revision: args["expectedRevision"].as_u64(),
+            execution_epoch: args["expectedExecutionEpoch"].as_str(),
+            reply_to: args["replyTo"].as_str(),
+            decision_answer: args.get("decisionAnswer").filter(|v| v.is_object()),
+            delivery_key: tool_call_id,
+        },
+    )?;
+
+    let at = crate::now_iso();
+    let msg_id = msg["messageId"].as_str().unwrap_or(tool_call_id);
+    ConversationStore::new(data_home)
+        .append_message_idempotent(
+            child_conv_id,
+            &json!({
+                "id": msg_id,
+                "role": "user",
+                "kind": "agent_message",
+                "content": text,
+                "agentMessage": msg,
+                "createdAt": at,
+            }),
+            &at,
+            None,
+        )
+        .map_err(ProjectError::from)?;
+
+    let session_status = supervisor
+        .list_sessions(&state.workspace_id)
+        .into_iter()
+        .find(|s| s.session_id == sid)
+        .map(|s| s.status)
+        .unwrap_or_default();
+    if ensure_turn
+        && !matches!(
+            session_status.as_str(),
+            "accepted" | "cancelled" | "failed" | "superseded"
+        )
+    {
+        let _ = supervisor.message_session(
+            &state.workspace_id,
+            sid,
+            text,
+            if purpose == "answer" {
+                "answer"
+            } else {
+                "amend"
+            },
+            true,
+        );
+    }
+
+    Ok(json!({
+        "ok": true,
+        "messageId": msg_id,
+        "sessionId": sid,
+        "workId": work_id,
+        "delivery": if ensure_turn { "queued" } else { "mailbox_only" },
+        "replayed": replayed,
+    }))
+}
+
+fn execute_coordinate_work(
+    args: &Value,
+    supervisor: &SessionSupervisor,
+    coordination: &CoordinationHub,
+    state: &mut TurnExecutionState,
+    tool_call_id: &str,
+) -> Result<Value, CapFailure> {
+    let action = args["action"]
+        .as_str()
+        .ok_or_else(|| ProjectError::code("invalid_input"))?;
+    let reason = args["reason"]
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| ProjectError::code("invalid_input"))?;
+    let sid_opt = args["sessionId"]
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    let coord_state = coordination.read_state(&state.workspace_id)?;
+    let work_id = args["workId"]
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .or_else(|| {
+            sid_opt.and_then(|sid| {
+                coord_state["works"]
+                    .as_object()?
+                    .values()
+                    .find(|w| {
+                        w["sessionIds"]
+                            .as_array()
+                            .is_some_and(|arr| arr.iter().any(|v| v.as_str() == Some(sid)))
+                    })
+                    .and_then(|w| w["workId"].as_str().map(str::to_owned))
+            })
+        })
+        .unwrap_or_else(|| state.work_id.clone());
+
+    if action == "query" {
+        let mandate = &coord_state["mandates"][&work_id];
+        let work = &coord_state["works"][&work_id];
+        let goal_revision = mandate["goalRevision"].as_u64().unwrap_or(0);
+        let sessions = supervisor.list_sessions(&state.workspace_id);
+        let session =
+            sid_opt.and_then(|sid| sessions.iter().find(|s| s.session_id == sid).cloned());
+        let open_requests: Vec<Value> = coord_state["agentRequests"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .map(|(_, r)| r.clone())
+            .filter(|r| {
+                r["status"] == "open"
+                    && sid_opt.is_none_or(|sid| r["sessionId"].as_str() == Some(sid))
+            })
+            .collect();
+        return Ok(json!({
+            "ok": true,
+            "action": "query",
+            "workId": work_id,
+            "goalRevision": goal_revision,
+            "work": work,
+            "mandate": mandate,
+            "session": session,
+            "sessions": sessions,
+            "agentRequests": open_requests,
+        }));
+    }
+
+    if state.current_input_anchors.is_empty() {
+        return Err(ProjectError::code("current_user_required").into());
+    }
+    if let Some(sid) = sid_opt {
+        check_quote_scope(state, sid)?;
+    }
+
+    coordination.ensure_work(
+        &state.workspace_id,
+        &work_id,
+        &state.conversation_id,
+        &state.current_input_anchors,
+        &sid_opt.map(|s| vec![s.to_owned()]).unwrap_or_default(),
+        "runnable",
+    )?;
+    let mandate = coordination.record_coordination_decision(
+        &state.workspace_id,
+        &work_id,
+        action,
+        reason,
+        args["expectedRevision"].as_u64(),
+        state.current_input_anchors.clone(),
+        tool_call_id,
+        sid_opt,
+    )?;
+
+    let mut extra_session: Value = Value::Null;
+    match action {
+        "cancel" => {
+            let sid = sid_opt.ok_or_else(|| ProjectError::code("invalid_input"))?;
+            let updated =
+                supervisor.control_session(&state.workspace_id, sid, "cancel", reason, true)?;
+            extra_session = json!(updated);
+        }
+        "resume" => {
+            let sid = sid_opt.ok_or_else(|| ProjectError::code("invalid_input"))?;
+            let updated = supervisor.resume_session(&state.workspace_id, sid, true)?;
+            extra_session = json!(updated);
+        }
+        "answer" | "augment" | "revise" => {
+            let sid = sid_opt.ok_or_else(|| ProjectError::code("invalid_input"))?;
+            let text = args["text"].as_str().unwrap_or(reason);
+            let intent = if action == "answer" {
+                "answer"
+            } else {
+                "amend"
+            };
+            let updated =
+                supervisor.message_session(&state.workspace_id, sid, text, intent, true)?;
+            extra_session = json!(updated);
+        }
+        "handoff" => {
+            let sid = sid_opt.ok_or_else(|| ProjectError::code("invalid_input"))?;
+            let _ = supervisor.handoff_worktree(&state.workspace_id, sid, true)?;
+        }
+        "parallel" | "replace" => {
+            if action == "replace"
+                && let Some(old_sid) = sid_opt
+            {
+                let _ = supervisor.control_session(
+                    &state.workspace_id,
+                    old_sid,
+                    "cancel",
+                    reason,
+                    true,
+                )?;
+            }
+            if args["task"].is_object() {
+                let spawned = spawn_from_args(&args["task"], state, supervisor, coordination)?;
+                extra_session = json!(spawned);
+            }
+        }
+        "assess" => {}
+        _ => return Err(ProjectError::code("invalid_input").into()),
+    }
+
+    Ok(json!({
+        "ok": true,
+        "action": action,
+        "workId": work_id,
+        "goalRevision": mandate["goalRevision"],
+        "mandate": mandate,
+        "session": extra_session,
+    }))
+}
+
 fn execute_project_capability(
     capability: &str,
     args: &Value,
     data_home: &Path,
     supervisor: &SessionSupervisor,
+    coordination: &CoordinationHub,
     state_lock: &Mutex<TurnExecutionState>,
     tool_call_id: &str,
 ) -> Result<Value, CapFailure> {
@@ -1172,65 +1872,7 @@ fn execute_project_capability(
                 )
                 .into());
             }
-            let raw_anchors: Vec<String> = args["anchorMessageIds"]
-                .as_array()
-                .ok_or_else(|| ProjectError::code("invalid_input"))?
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_owned)
-                .collect();
-            if raw_anchors.is_empty() {
-                return Err(ProjectError::code("invalid_anchor").into());
-            }
-            let anchors = resolve_anchors_for_state(&raw_anchors, &state)?;
-            if let Some(sup) = args["supersedes"].as_str() {
-                check_quote_scope(&state, sup)?;
-            }
-            let criteria: Vec<SpawnCriterion> =
-                serde_json::from_value(args["successCriteria"].clone())
-                    .map_err(|_| ProjectError::code("invalid_input"))?;
-            let required_caps: Vec<String> = args["requiredCapabilities"]
-                .as_array()
-                .map(|a| {
-                    a.iter()
-                        .filter_map(Value::as_str)
-                        .map(str::to_owned)
-                        .collect()
-                })
-                .unwrap_or_default();
-            let depends_on: Vec<String> = args["dependsOn"]
-                .as_array()
-                .map(|a| {
-                    a.iter()
-                        .filter_map(Value::as_str)
-                        .map(str::to_owned)
-                        .collect()
-                })
-                .unwrap_or_default();
-            let spawned = supervisor.spawn_session(
-                SpawnSessionRequest {
-                    workspace_id: state.workspace_id.clone(),
-                    workspace_path: state.workspace_path.clone(),
-                    parent_conversation_id: state.conversation_id.clone(),
-                    anchor_message_ids: anchors,
-                    input_id: state.current_input_id.clone(),
-                    surface: "tui".into(),
-                    title: args["title"].as_str().unwrap_or("").to_owned(),
-                    brief: args["brief"].as_str().unwrap_or("").to_owned(),
-                    kind: args["kind"].as_str().unwrap_or("other").to_owned(),
-                    read_only: args["readOnly"].as_bool().unwrap_or(true),
-                    required_capabilities: required_caps,
-                    success_criteria: criteria,
-                    priority: args["priority"].as_str().unwrap_or("normal").to_owned(),
-                    depends_on,
-                    supersedes: args["supersedes"].as_str().map(str::to_owned),
-                    objective_id: args["objectiveId"].as_str().map(str::to_owned),
-                    isolation: args["isolation"].as_str().unwrap_or("auto").to_owned(),
-                    worker_model_selection: state.worker_model_selection.clone(),
-                },
-                state.holds_lease,
-            )?;
-            state.spawned_session_ids.push(spawned.session_id.clone());
+            let spawned = spawn_from_args(args, &mut state, supervisor, coordination)?;
             Ok(json!({
                 "ok": true,
                 "sessionId": spawned.session_id,
@@ -1360,6 +2002,17 @@ fn execute_project_capability(
             Ok(json!({ "ok": true, "detail": detail }))
         }
         "local.delegation.search_history" => execute_search_conversation(args, data_home, &state),
+        "local.delegation.send_agent_message" => execute_send_agent_message(
+            args,
+            data_home,
+            supervisor,
+            coordination,
+            &state,
+            tool_call_id,
+        ),
+        "local.delegation.coordinate_work" => {
+            execute_coordinate_work(args, supervisor, coordination, &mut state, tool_call_id)
+        }
         "local.delegation.verify_session" => {
             let sid = args["sessionId"]
                 .as_str()
@@ -1478,6 +2131,73 @@ fn execute_project_capability(
             )?;
             Ok(json!({ "ok": true, "item": item }))
         }
+        "local.memory.remember" => {
+            if let Some(obj) = args.as_object() {
+                for forbidden in [
+                    "trust",
+                    "status",
+                    "sourceRefs",
+                    "scope",
+                    "workspaceId",
+                    "fileAnchors",
+                    "needsReverify",
+                    "conflictId",
+                    "conflictsWith",
+                    "supersededBy",
+                ] {
+                    if obj.contains_key(forbidden) {
+                        return Err(ProjectError::code("invalid_input").into());
+                    }
+                }
+            }
+            let kind = args["kind"]
+                .as_str()
+                .ok_or_else(|| ProjectError::code("invalid_input"))?;
+            let text = args["text"]
+                .as_str()
+                .ok_or_else(|| ProjectError::code("invalid_input"))?;
+            let scope = if kind == "preference" {
+                "user"
+            } else {
+                "project"
+            };
+            let anchor_owned = args["anchorMessageId"]
+                .as_str()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|raw| {
+                    resolve_anchors_for_state(&[raw.to_owned()], &state)
+                        .map(|v| v.into_iter().next().unwrap_or_default())
+                })
+                .transpose()?
+                .or_else(|| state.current_input_anchors.first().cloned())
+                .or_else(|| {
+                    state
+                        .user_anchor_candidates
+                        .last()
+                        .map(|c| c.message_id.clone())
+                });
+            let source_refs = anchor_owned
+                .clone()
+                .map(|a| vec![a])
+                .unwrap_or_else(|| vec![format!("turn:{}", state.turn_id)]);
+            let item = MemoryStore::new(data_home).write(&WriteMemoryRequest {
+                scope,
+                workspace_id: (scope == "project").then_some(state.workspace_id.as_str()),
+                kind,
+                text,
+                trust: "stated",
+                source_refs,
+                pinned: args["pinned"].as_bool().unwrap_or(false),
+                anchor_message_id: anchor_owned.as_deref(),
+                expires_at: args["expiresAt"].as_str(),
+                topic_key: args["topicKey"].as_str(),
+                topic_value: args["topicValue"].as_str(),
+                file_anchors: None,
+            })?;
+            state.memory_learned.push(item.id.clone());
+            Ok(json!({ "ok": true, "item": item }))
+        }
         "local.memory.list" => {
             let items = MemoryStore::new(data_home).list(&MemoryFilter {
                 scope: args["scope"].as_str(),
@@ -1486,6 +2206,9 @@ fn execute_project_capability(
                 status: Some("active"),
             });
             Ok(json!({ "ok": true, "items": items }))
+        }
+        cap if cap.starts_with("local.continuity.") => {
+            execute_continuity_capability(cap, args, data_home, coordination, &state, tool_call_id)
         }
         cap if cap.starts_with("local.objective.") => {
             execute_objective_capability(cap, args, data_home, &state)
