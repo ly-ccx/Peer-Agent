@@ -1,6 +1,7 @@
 use peer_project_agent::{
-    LeaseStatus, MemoryFilter, NativeProjectHost, ProjectCapabilityProvider, SessionSupervisor,
-    SpawnCriterion, SpawnSessionRequest, TurnEndKind, TurnExecutionState, input_message_id,
+    CircuitBreakerStore, LeaseStatus, MemoryFilter, NativeProjectHost, ProjectCapabilityProvider,
+    QuestionState, SessionSupervisor, SpawnCriterion, SpawnSessionRequest, TurnEndKind,
+    TurnExecutionState, input_message_id, project_reply_questions,
 };
 use peer_runtime::{
     CancellationToken,
@@ -1084,4 +1085,515 @@ async fn bot_materializes_oversized_tool_results_and_can_read_tool_result() {
         .unwrap()
         .expect("canonical reply persisted");
     assert_eq!(reply["content"], "Read full BIG.md with tail marker.");
+}
+
+fn sse_streamed_text_then_tool_call(chunks: &[&str], id: &str, name: &str, args: &Value) -> String {
+    let mut out = String::new();
+    for part in chunks {
+        let delta = json!({
+            "choices": [{
+                "index": 0,
+                "delta": {"content": part},
+                "finish_reason": Value::Null
+            }]
+        });
+        out.push_str(&format!("data: {delta}\n\n"));
+    }
+    out.push_str(&sse_tool_call(id, name, args));
+    out
+}
+
+#[tokio::test]
+async fn transient_retry_recovers_without_tripping_breaker_and_auth_error_never_retries() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    host.runner().set_retry_delays_ms(vec![5, 10, 20]);
+    let (entry, profile) = host
+        .bind_workspace(ws.path(), Some("RetryBreaker"))
+        .unwrap();
+    let conv_id = profile.agent_conversation_id.unwrap();
+
+    // 1. Transient HTTP 503 -> retry -> 200 post_reply succeeds cleanly without tripping circuit.
+    let input_ok = "in-transient-1";
+    let anchor_ok = input_message_id(input_ok).unwrap();
+    host.submit_user_input(&entry.workspace_id, input_ok, "Ping server", None)
+        .unwrap();
+    let server_transient = start_http_mock_server(vec![
+        Box::new(|_req| {
+            (
+                503,
+                "application/json",
+                json!({"error":{"message":"temporarily unavailable"}}).to_string(),
+            )
+        }),
+        Box::new(move |_req| {
+            (
+                200,
+                "text/event-stream",
+                sse_tool_call(
+                    "tr-1",
+                    "post_reply",
+                    &json!({
+                        "replyTo": [anchor_ok],
+                        "text": "Recovered after 503."
+                    }),
+                ),
+            )
+        }),
+    ]);
+    let transient_model = mock_model(&server_transient.endpoint);
+    let cancel = CancellationToken::new();
+    let mut perm = AutoAllowPermission;
+    let tick_transient = host
+        .tick(
+            &entry.workspace_id,
+            &transient_model,
+            json!({}),
+            &mut perm,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(server_transient.requests.lock().unwrap().len(), 2);
+    assert!(matches!(
+        tick_transient.last_turn.as_ref().map(|t| &t.end),
+        Some(TurnEndKind::ReplyCommitted { .. })
+    ));
+    let cb = CircuitBreakerStore::new(home.path()).read(&entry.workspace_id);
+    assert_eq!(cb.status, "closed");
+    assert_eq!(cb.failures, 0);
+
+    // 2. Auth error HTTP 401 never retries (exactly 1 HTTP request) and writes unavailableCard + hidden agent_turn.
+    let server_auth = start_http_mock_server(vec![Box::new(|_req| {
+        (
+            401,
+            "application/json",
+            json!({"error":{"message":"invalid api key"}}).to_string(),
+        )
+    })]);
+    let auth_model = mock_model(&server_auth.endpoint);
+    let input_auth = "in-auth-1";
+    host.submit_user_input(&entry.workspace_id, input_auth, "Try with bad auth", None)
+        .unwrap();
+    let tick_auth = host
+        .tick(
+            &entry.workspace_id,
+            &auth_model,
+            json!({}),
+            &mut perm,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(server_auth.requests.lock().unwrap().len(), 1);
+    assert!(matches!(
+        tick_auth.last_turn.as_ref().map(|t| &t.end),
+        Some(TurnEndKind::Failed { code }) if code == "model_auth_rejected"
+    ));
+    let auth_turn_id = tick_auth.last_turn.as_ref().unwrap().turn_id.clone();
+
+    let visible = host
+        .directory()
+        .read_interactions(&entry.workspace_id, 50, None)
+        .unwrap()
+        .messages;
+    assert!(
+        visible.iter().any(|m| {
+            m["id"] == format!("{auth_turn_id}-card")
+                && m["kind"] == "system_card"
+                && m["card"] == "agent_unavailable"
+        }),
+        "expected unavailableCard in visible interactions"
+    );
+    assert!(
+        !visible.iter().any(|m| m["kind"] == "agent_turn"),
+        "agent_turn must remain hidden from visible interactions"
+    );
+    let raw = host
+        .conversations()
+        .read_committed(&conv_id, None, 4 * 1024 * 1024)
+        .unwrap()
+        .history
+        .messages;
+    assert!(
+        raw.iter()
+            .any(|m| m["id"] == auth_turn_id && m["kind"] == "agent_turn"),
+        "expected durable agent_turn in committed store"
+    );
+
+    // 3. 4 more consecutive non-retryable 401 failures (total 5) trip persistent circuit-breaker.json;
+    // a fresh NativeProjectHost reading the same data_home sees CircuitOpen on subsequent wake turn.
+    let mut extra_handlers = Vec::new();
+    for _ in 0..4 {
+        extra_handlers.push(Box::new(|_req: &Value| {
+            (
+                401u16,
+                "application/json",
+                json!({"error":{"message":"invalid api key"}}).to_string(),
+            )
+        }) as HttpScriptHandler);
+    }
+    let server_trip = start_http_mock_server(extra_handlers);
+    let trip_model = mock_model(&server_trip.endpoint);
+    for _ in 0..4 {
+        let _ = host
+            .tick(
+                &entry.workspace_id,
+                &trip_model,
+                json!({}),
+                &mut perm,
+                &cancel,
+            )
+            .await
+            .unwrap();
+    }
+    host.close();
+
+    let persisted_cb = CircuitBreakerStore::new(home.path()).read(&entry.workspace_id);
+    assert_eq!(persisted_cb.status, "open");
+    assert_eq!(persisted_cb.failures, 5);
+
+    let fresh_host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    fresh_host
+        .inbox()
+        .append(
+            &entry.workspace_id,
+            &[json!({
+                "eventId": "ev-wake-cb-1",
+                "kind": "report_available",
+                "sessionId": "sess-1"
+            })],
+        )
+        .unwrap();
+    // Clear pending user inputs to isolate wake-turn circuit block on fresh_host
+    fresh_host
+        .inputs()
+        .mark_executed(&entry.workspace_id, &[input_auth.to_owned()], &[], true)
+        .unwrap();
+    let tick_blocked = fresh_host
+        .tick(
+            &entry.workspace_id,
+            &trip_model,
+            json!({}),
+            &mut perm,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(tick_blocked.wake_turns_run, 1);
+    assert!(matches!(
+        tick_blocked.last_turn.as_ref().map(|t| &t.end),
+        Some(TurnEndKind::CircuitOpen)
+    ));
+}
+
+#[tokio::test]
+async fn bot_turn_records_canonical_usage_ledger_and_durable_agent_turn_with_streaming_activity() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("UsageBot")).unwrap();
+    let conv_id = profile.agent_conversation_id.unwrap();
+
+    let input_id = "in-usage-1";
+    let anchor = input_message_id(input_id).unwrap();
+    host.submit_user_input(&entry.workspace_id, input_id, "Check usage logging", None)
+        .unwrap();
+
+    let server = start_mock_server(vec![Box::new(move |_req| {
+        sse_streamed_text_then_tool_call(
+            &["Preparing reply... ", "almost done."],
+            "u-call-1",
+            "post_reply",
+            &json!({
+                "replyTo": [anchor],
+                "text": "Usage recorded and answer posted."
+            }),
+        )
+    })]);
+    let model = mock_model(&server.endpoint);
+    let cancel = CancellationToken::new();
+    let mut perm = AutoAllowPermission;
+    let tick = host
+        .tick(&entry.workspace_id, &model, json!({}), &mut perm, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(tick.bot_turns_run, 1);
+    let turn_id = tick.last_turn.unwrap().turn_id;
+
+    let ledger_path = home.path().join("usage/requests.jsonl");
+    assert!(ledger_path.is_file(), "usage/requests.jsonl must exist");
+    let ledger_raw = fs::read_to_string(&ledger_path).unwrap();
+    let rows: Vec<Value> = ledger_raw
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let bot_row = rows
+        .iter()
+        .find(|r| r["streamId"] == turn_id)
+        .expect("bot turn usage ledger row");
+    assert_eq!(bot_row["role"], "project_agent");
+    assert_eq!(bot_row["workspaceId"], entry.workspace_id);
+    assert_eq!(bot_row["providerRequestCount"], 1);
+    assert_eq!(bot_row["inputTokens"], 20);
+    assert_eq!(bot_row["outputTokens"], 5);
+    assert_eq!(bot_row["totalTokens"], 25);
+
+    let raw = host
+        .conversations()
+        .read_committed(&conv_id, None, 4 * 1024 * 1024)
+        .unwrap()
+        .history
+        .messages;
+    let turn_rec = raw
+        .iter()
+        .find(|m| m["id"] == turn_id && m["kind"] == "agent_turn")
+        .expect("durable agent_turn message persisted");
+    assert!(turn_rec["rounds"].as_array().is_some_and(|r| !r.is_empty()));
+    assert!(turn_rec["meta"]["diagnosticTiming"]["startedAt"].is_string());
+    assert!(turn_rec["meta"]["diagnosticTiming"]["finishedAt"].is_string());
+    assert!(turn_rec["publicUpdates"].as_array().is_some_and(|u| {
+        u.iter()
+            .any(|p| p["text"].as_str().unwrap_or("").contains("Preparing reply"))
+    }));
+}
+
+#[tokio::test]
+async fn bot_context_overflow_commits_compaction_marker_and_retries_cleanly() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    host.runner().set_retry_delays_ms(vec![5, 10]);
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("CompactBot")).unwrap();
+    let conv_id = profile.agent_conversation_id.unwrap();
+
+    // Seed prior conversation history
+    host.conversations()
+        .append_message_idempotent(
+            &conv_id,
+            &json!({
+                "id": "input-old-1",
+                "role": "user",
+                "kind": "user_input",
+                "content": "Earlier topic",
+                "createdAt": "2026-11-20T01:00:00.000Z"
+            }),
+            "2026-11-20T01:00:00.000Z",
+            None,
+        )
+        .unwrap();
+    host.conversations()
+        .append_message_idempotent(
+            &conv_id,
+            &json!({
+                "id": "reply-old-1",
+                "role": "assistant",
+                "kind": "agent_reply",
+                "content": "OLD_UNCOMPACTED_DETAIL_SHOULD_BE_SUMMARIZED",
+                "createdAt": "2026-11-20T01:01:00.000Z"
+            }),
+            "2026-11-20T01:01:00.000Z",
+            None,
+        )
+        .unwrap();
+
+    let input_id = "in-compact-2";
+    let anchor = input_message_id(input_id).unwrap();
+    host.submit_user_input(&entry.workspace_id, input_id, "Continue now", None)
+        .unwrap();
+
+    let anchor_clone = anchor.clone();
+    let server = start_http_mock_server(vec![
+        // 1. Primary call triggers 413 context overflow
+        Box::new(|_req| {
+            (
+                413,
+                "application/json",
+                json!({"error":{"message":"context_length_exceeded"}}).to_string(),
+            )
+        }),
+        // 2. Compaction LLM summarization call
+        Box::new(|_req| {
+            (
+                200,
+                "text/event-stream",
+                sse_text("Compacted summary of earlier discussion."),
+            )
+        }),
+        // 3. Retried primary call carries compaction continuity & succeeds with post_reply
+        Box::new(move |req| {
+            let sys = req["messages"]
+                .as_array()
+                .and_then(|arr| arr.iter().find(|m| m["role"] == "system"))
+                .and_then(|m| m["content"].as_str())
+                .unwrap_or("");
+            assert!(
+                sys.contains("Compacted summary of earlier discussion."),
+                "system prompt must carry compaction continuity summary"
+            );
+            let serialized = req["messages"].to_string();
+            assert!(
+                !serialized.contains("OLD_UNCOMPACTED_DETAIL_SHOULD_BE_SUMMARIZED"),
+                "compacted old assistant message must be omitted from wire history"
+            );
+            (
+                200,
+                "text/event-stream",
+                sse_tool_call(
+                    "cmp-reply",
+                    "post_reply",
+                    &json!({
+                        "replyTo": [anchor_clone],
+                        "text": "Proceeded cleanly after compaction."
+                    }),
+                ),
+            )
+        }),
+    ]);
+
+    let model = mock_model(&server.endpoint);
+    let cancel = CancellationToken::new();
+    let mut perm = AutoAllowPermission;
+    let tick = host
+        .tick(&entry.workspace_id, &model, json!({}), &mut perm, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(tick.bot_turns_run, 1);
+    assert!(matches!(
+        tick.last_turn.as_ref().map(|t| &t.end),
+        Some(TurnEndKind::ReplyCommitted { .. })
+    ));
+
+    let raw = host
+        .conversations()
+        .read_committed(&conv_id, None, 4 * 1024 * 1024)
+        .unwrap()
+        .history
+        .messages;
+    assert!(
+        raw.iter()
+            .any(|m| m.get("_compaction").is_some_and(Value::is_object)),
+        "expected canonical _compaction marker message"
+    );
+    let visible = host
+        .directory()
+        .read_interactions(&entry.workspace_id, 50, None)
+        .unwrap()
+        .messages;
+    assert!(
+        visible
+            .iter()
+            .all(|m| !m.get("_compaction").is_some_and(Value::is_object)),
+        "_compaction marker must remain hidden from visible interactions"
+    );
+    let reply = host
+        .find_reply_for_input(&entry.workspace_id, input_id)
+        .unwrap()
+        .expect("reply persisted after compaction");
+    assert_eq!(reply["content"], "Proceeded cleanly after compaction.");
+}
+
+#[tokio::test]
+async fn reply_question_card_lifecycle_and_canonical_card_id_answer() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, profile) = host.bind_workspace(ws.path(), Some("QuestionBot")).unwrap();
+    let conv_id = profile.agent_conversation_id.unwrap();
+
+    let input_id = "in-q-1";
+    let anchor = input_message_id(input_id).unwrap();
+    host.submit_user_input(&entry.workspace_id, input_id, "Deploy app", None)
+        .unwrap();
+
+    let server = start_mock_server(vec![Box::new(move |_req| {
+        sse_tool_call(
+            "q-reply-1",
+            "post_reply",
+            &json!({
+                "replyTo": [anchor],
+                "text": "Which environment should I target?",
+                "question": {
+                    "prompt": "Deploy target?",
+                    "options": ["Staging", "Prod"]
+                }
+            }),
+        )
+    })]);
+    let model = mock_model(&server.endpoint);
+    let cancel = CancellationToken::new();
+    let mut perm = AutoAllowPermission;
+    host.tick(&entry.workspace_id, &model, json!({}), &mut perm, &cancel)
+        .await
+        .unwrap();
+
+    let reply = host
+        .find_reply_for_input(&entry.workspace_id, input_id)
+        .unwrap()
+        .expect("question reply posted");
+    let reply_id = reply["id"].as_str().unwrap().to_owned();
+
+    let page_open = host
+        .directory()
+        .read_interactions(&entry.workspace_id, 50, None)
+        .unwrap();
+    let states_open = project_reply_questions(&page_open.messages, i64::MAX / 4);
+    // Use current time for expiry check when no expiresAt is set
+    let states_now = project_reply_questions(&page_open.messages, 1_700_000_000_000);
+    assert_eq!(states_open[&reply_id].state, QuestionState::Open);
+    assert_eq!(states_now[&reply_id].state, QuestionState::Open);
+
+    let canonical_card_id = format!("card:question:reply:{reply_id}");
+    host.submit_user_input(
+        &entry.workspace_id,
+        "in-q-answer-1",
+        "Staging",
+        Some(canonical_card_id),
+    )
+    .unwrap();
+    host.inputs()
+        .consume(&entry.workspace_id, &conv_id, host.conversations(), true)
+        .unwrap();
+
+    let page_answered = host
+        .directory()
+        .read_interactions(&entry.workspace_id, 50, None)
+        .unwrap();
+    let states_answered = project_reply_questions(&page_answered.messages, 1_700_000_000_000);
+    assert_eq!(states_answered[&reply_id].state, QuestionState::Answered);
+}
+
+#[tokio::test]
+async fn dual_host_takeover_yield_handshake_transfers_lease_cleanly() {
+    let home = tempdir().unwrap();
+    let ws = tempdir().unwrap();
+    let host_a = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let host_b = NativeProjectHost::new(home.path(), "0.1.0-test", Some(1)).unwrap();
+    let (entry, _) = host_a.bind_workspace(ws.path(), Some("LeaseBot")).unwrap();
+
+    assert!(matches!(
+        host_a.ensure_lease(&entry.workspace_id).unwrap(),
+        LeaseStatus::Acquired { .. }
+    ));
+    assert!(matches!(
+        host_b.ensure_lease(&entry.workspace_id).unwrap(),
+        LeaseStatus::HeldByOther(_)
+    ));
+
+    // Host B requests takeover -> writes host.yield -> Host A observes takeover_requested()
+    assert!(host_b.request_takeover(&entry.workspace_id).unwrap());
+    assert!(host_a.takeover_requested(&entry.workspace_id));
+    assert!(!host_b.takeover_requested(&entry.workspace_id));
+
+    // Host A yields lease -> Host B acquires cleanly and does NOT see Host A's stale yield
+    host_a.release_lease(&entry.workspace_id).unwrap();
+    assert!(!host_a.holds_lease(&entry.workspace_id));
+    assert!(matches!(
+        host_b.ensure_lease(&entry.workspace_id).unwrap(),
+        LeaseStatus::Acquired { .. }
+    ));
+    assert!(!host_b.takeover_requested(&entry.workspace_id));
+    host_b.close();
 }

@@ -308,6 +308,53 @@ impl NativeProjectHost {
         }
     }
 
+    /// Write `host.yield` targeting the active lease holder (`true` if a holder existed,
+    /// `false` if no active holder exists so the caller may acquire directly).
+    pub fn request_takeover(&self, workspace_id: &str) -> Result<bool, ProjectError> {
+        let now_ms = parse_iso_ms(&now_iso()).unwrap_or(0);
+        let written = self
+            .leases
+            .request_takeover(workspace_id, &self.host_identity, now_ms)?;
+        Ok(written)
+    }
+
+    /// Check whether another host has written `host.yield` targeting this host's held lease.
+    pub fn takeover_requested(&self, workspace_id: &str) -> bool {
+        self.held_leases
+            .lock()
+            .ok()
+            .and_then(|held| {
+                held.get(workspace_id)
+                    .map(|tok| tok.takeover_requested().unwrap_or(false))
+            })
+            .unwrap_or(false)
+    }
+
+    /// Resolve a role model using this bot profile's `modelPolicy` and global `settings.json`.
+    pub fn resolve_bot_model_selection(
+        &self,
+        workspace_id: &str,
+        role: &str,
+        explicit_provider: Option<&str>,
+        explicit_model: Option<&str>,
+        explicit_effort: Option<&str>,
+        fast: bool,
+    ) -> Result<
+        peer_runtime::model_catalog::ExecSelection,
+        peer_runtime::model_catalog::ExecSelectionError,
+    > {
+        let profile = self.profiles.read(workspace_id);
+        peer_runtime::model_catalog::resolve_role_model(
+            &self.data_home,
+            role,
+            profile.as_ref().and_then(|p| p.model_policy.as_ref()),
+            explicit_provider,
+            explicit_model,
+            explicit_effort,
+            fast,
+        )
+    }
+
     /// Submit a durable user input to the shared `InputQueue` (works both as Host and Client).
     pub fn submit_user_input(
         &self,
@@ -399,6 +446,12 @@ impl NativeProjectHost {
             .consume(workspace_id, &conv_id, &self.conversations, true)?;
         report.inputs_consumed = consumed.consumed.len();
 
+        if self.takeover_requested(workspace_id) {
+            report.held_lease = false;
+            let _ = self.release_lease(workspace_id);
+            return Ok(report);
+        }
+
         // Step 2: Run main Bot turn for each pending user input (user input priority).
         for input in &consumed.pending_execution {
             if cancel.is_cancelled() {
@@ -442,6 +495,12 @@ impl NativeProjectHost {
             }
         }
 
+        if self.takeover_requested(workspace_id) {
+            report.held_lease = false;
+            let _ = self.release_lease(workspace_id);
+            return Ok(report);
+        }
+
         // Step 3: Promote queued delegated work sessions and run ready episodes.
         let promoted = self.supervisor.promote_queued(workspace_id, true)?;
         report.sessions_promoted = promoted.start.len();
@@ -472,6 +531,12 @@ impl NativeProjectHost {
             if run_res.is_ok() {
                 report.sessions_executed += 1;
             }
+        }
+
+        if self.takeover_requested(workspace_id) {
+            report.held_lease = false;
+            let _ = self.release_lease(workspace_id);
+            return Ok(report);
         }
 
         // Refresh lease heartbeat after worker execution before draining inbox wakes.

@@ -8,6 +8,7 @@
 //! ProjectAgentRunner actor. Never depends on terminal UI crates.
 
 pub mod acceptance;
+pub mod circuit_breaker;
 pub mod directory;
 pub mod drafts;
 pub mod host;
@@ -34,6 +35,10 @@ pub use acceptance::{
     VerificationCheck, VerificationVerdict, anchor_requests_review, compute_verification_verdict,
     decide_session_acceptance, evaluate_acceptance_close_gate, handoff_question_id,
     verdict_ref_for,
+};
+pub use circuit_breaker::{
+    CIRCUIT_COOLDOWN_MS, CIRCUIT_FAILURE_LIMIT, CircuitAdmit, CircuitBreaker, CircuitBreakerState,
+    CircuitBreakerStore, FailureOutcome,
 };
 pub use directory::{
     AttentionItem, AttentionKind, BotDirectory, BotListFilter, BotListItem, BotListMessage,
@@ -75,8 +80,7 @@ pub use reply::{
     SurfacingEvent, compose_reply, decide_surfacing, normalize_proactivity,
 };
 pub use runner::{
-    AgentTurnOutcome, CircuitBreaker, ProjectAgentActivity, ProjectAgentRunner, RunTurnOptions,
-    TurnEndKind,
+    AgentTurnOutcome, ProjectAgentActivity, ProjectAgentRunner, RunTurnOptions, TurnEndKind,
 };
 pub use scheduler::{
     ExecutionScheduler, QueueEntry, QueuedBehind, ScheduleDecision, SelectionOutcome, SlotKind,

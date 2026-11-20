@@ -8,7 +8,7 @@ mod exec;
 mod session;
 pub use exec::{
     ExecSelection, ExecSelectionError, ExecSelectionErrorKind, resolve_catalog,
-    resolve_exact_session_model, resolve_exec,
+    resolve_exact_session_model, resolve_exec, resolve_role_model,
 };
 pub use session::{
     ContextOption, ContextOptions, ContextSelection, SessionModelMetadata, session_models,

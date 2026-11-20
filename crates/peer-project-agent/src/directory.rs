@@ -181,6 +181,11 @@ fn message_at(message: &Value) -> &str {
 }
 
 pub fn is_visible_bot_message(message: &Value) -> bool {
+    if message.get("_compaction").is_some_and(Value::is_object)
+        || message.get("compaction").is_some_and(Value::is_object)
+    {
+        return false;
+    }
     let kind = message_kind(message);
     if kind == "agent_activity"
         && matches!(
@@ -239,10 +244,18 @@ pub fn project_reply_questions(
     let mut out: HashMap<String, ReplyQuestionStatus> = HashMap::new();
     let mut open_ids: Vec<String> = Vec::new();
     for msg in messages {
+        if msg.get("_compaction").is_some_and(Value::is_object)
+            || msg.get("compaction").is_some_and(Value::is_object)
+        {
+            continue;
+        }
         let kind = message_kind(msg);
         if kind == "user_input" || (kind.is_empty() && msg["role"] == "user") {
             let user_id = msg["id"].as_str().map(str::to_owned);
-            if let Some(target) = msg["answerTo"].as_str() {
+            if let Some(raw_target) = msg["answerTo"].as_str() {
+                let target = raw_target
+                    .strip_prefix("card:question:reply:")
+                    .unwrap_or(raw_target);
                 if let Some(status) = out.get_mut(target) {
                     status.state = QuestionState::Answered;
                     status.answered_by = user_id.clone();
@@ -260,29 +273,41 @@ pub fn project_reply_questions(
             }
             continue;
         }
-        if kind == "agent_reply" && msg["question"].is_object() {
-            let Some(id) = msg["id"].as_str().filter(|s| !s.is_empty()) else {
-                continue;
-            };
-            let expired = msg["question"]["expiresAt"]
-                .as_str()
-                .and_then(parse_iso_ms)
-                .is_some_and(|exp| exp <= now_ms);
-            let state = if expired {
-                QuestionState::Expired
-            } else {
-                QuestionState::Open
-            };
-            out.insert(
-                id.to_owned(),
-                ReplyQuestionStatus {
-                    message_id: id.to_owned(),
-                    state,
-                    answered_by: None,
-                },
-            );
-            if state == QuestionState::Open {
-                open_ids.push(id.to_owned());
+        if kind == "agent_reply" || (kind.is_empty() && msg["role"] == "assistant") {
+            for id in open_ids.drain(..) {
+                if let Some(status) = out.get_mut(&id)
+                    && status.state == QuestionState::Open
+                {
+                    status.state = QuestionState::Superseded;
+                }
+            }
+            if msg["question"].is_object() {
+                let Some(id) = msg["id"].as_str().filter(|s| !s.is_empty()) else {
+                    continue;
+                };
+                let explicitly_answered = msg["question"]["answered"].as_bool() == Some(true);
+                let expired = msg["question"]["expiresAt"]
+                    .as_str()
+                    .and_then(parse_iso_ms)
+                    .is_some_and(|exp| exp <= now_ms);
+                let state = if explicitly_answered {
+                    QuestionState::Answered
+                } else if expired {
+                    QuestionState::Expired
+                } else {
+                    QuestionState::Open
+                };
+                out.insert(
+                    id.to_owned(),
+                    ReplyQuestionStatus {
+                        message_id: id.to_owned(),
+                        state,
+                        answered_by: None,
+                    },
+                );
+                if state == QuestionState::Open {
+                    open_ids.push(id.to_owned());
+                }
             }
         }
     }
@@ -787,5 +812,83 @@ mod tests {
 
         let after_started = directory.read_interactions("ws-fresh", 50, None).unwrap();
         assert_eq!(after_started.familiarize_offer, None);
+    }
+
+    #[test]
+    fn compaction_is_hidden_and_question_lifecycle_handles_card_ids_and_reply_superseding() {
+        let now_ms = 1_700_000_000_000i64;
+        let messages = vec![
+            json!({
+                "id": "compact-1",
+                "role": "user",
+                "content": "Summary",
+                "_compaction": {"method": "structured", "summary": "Summary"}
+            }),
+            json!({
+                "id": "turn-1",
+                "role": "assistant",
+                "kind": "agent_turn",
+                "content": "",
+                "rounds": []
+            }),
+            json!({
+                "id": "reply-q1",
+                "role": "assistant",
+                "kind": "agent_reply",
+                "content": "Pick A or B?",
+                "question": {"options": ["A", "B"]}
+            }),
+            json!({
+                "id": "in-1",
+                "role": "user",
+                "kind": "user_input",
+                "content": "A",
+                "answerTo": "card:question:reply:reply-q1"
+            }),
+            json!({
+                "id": "reply-q2",
+                "role": "assistant",
+                "kind": "agent_reply",
+                "content": "Pick C or D?",
+                "question": {"options": ["C", "D"]}
+            }),
+            json!({
+                "id": "reply-later",
+                "role": "assistant",
+                "kind": "agent_reply",
+                "content": "Never mind, proceeding."
+            }),
+            json!({
+                "id": "reply-q3",
+                "role": "assistant",
+                "kind": "agent_reply",
+                "content": "Already flagged answered",
+                "question": {"options": ["X"], "answered": true}
+            }),
+            json!({
+                "id": "reply-q4",
+                "role": "assistant",
+                "kind": "agent_reply",
+                "content": "Raw target test",
+                "question": {"options": ["Y"]}
+            }),
+            json!({
+                "id": "in-2",
+                "role": "user",
+                "kind": "user_input",
+                "content": "Y",
+                "answerTo": "reply-q4"
+            }),
+        ];
+
+        assert!(!is_visible_bot_message(&messages[0]));
+        assert!(!is_visible_bot_message(&messages[1]));
+        assert!(is_visible_bot_message(&messages[2]));
+
+        let states = project_reply_questions(&messages, now_ms);
+        assert_eq!(states["reply-q1"].state, QuestionState::Answered);
+        assert_eq!(states["reply-q2"].state, QuestionState::Superseded);
+        assert_eq!(states["reply-q3"].state, QuestionState::Answered);
+        assert_eq!(states["reply-q4"].state, QuestionState::Answered);
     }
 }

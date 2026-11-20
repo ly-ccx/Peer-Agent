@@ -74,9 +74,58 @@ pub struct ModelTurn {
     pub(crate) continuation: Option<continuation::Continuation>,
 }
 
-pub(crate) enum ModelDelta<'a> {
+impl ModelTurn {
+    /// Parse normalized provider usage quantities into canonical `UsageAmounts`.
+    pub fn usage_amounts(&self) -> Option<peer_protocol::UsageAmounts> {
+        self.usage
+            .as_ref()
+            .filter(|v| !v.is_null())
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+    }
+}
+
+pub enum ModelDelta<'a> {
     Text(&'a str),
     Thinking(&'a str),
+}
+
+pub const SAME_PROVIDER_RETRY_DELAYS_MS: [u64; 3] = [500, 1_500, 3_000];
+
+/// Bounded same-provider transient backoff policy (ADR 30) unifying generic HTTP/transport
+/// retries (`[500, 1500, 3000]ms`) and Qoder-specific retry hints.
+pub struct SameProviderRetryPolicy {
+    qoder: qoder_retry::Policy,
+    delays_ms: Vec<u64>,
+    generic_attempts: usize,
+}
+
+impl Default for SameProviderRetryPolicy {
+    fn default() -> Self {
+        Self::with_delays_ms(SAME_PROVIDER_RETRY_DELAYS_MS.to_vec())
+    }
+}
+
+impl SameProviderRetryPolicy {
+    pub fn with_delays_ms(delays_ms: Vec<u64>) -> Self {
+        Self {
+            qoder: qoder_retry::Policy::default(),
+            delays_ms,
+            generic_attempts: 0,
+        }
+    }
+
+    pub fn next_delay(&mut self, error: &ModelError) -> Result<Option<Duration>, &'static str> {
+        if error.retry.is_some() {
+            return self.qoder.next(error).map_err(|e| e.code);
+        }
+        if error.is_transient_retryable()
+            && let Some(&ms) = self.delays_ms.get(self.generic_attempts)
+        {
+            self.generic_attempts += 1;
+            return Ok(Some(Duration::from_millis(ms)));
+        }
+        Ok(None)
+    }
 }
 impl NativeModel {
     pub fn context_window(&self) -> Option<u64> {
@@ -190,6 +239,33 @@ impl NativeModel {
     }
     /// Run a model turn that materializes oversized tool results (> 6000 UTF-16 chars)
     /// into `<home>/conversations/<conversation_id>.tool-results/` before wire encoding,
+    /// matching `ContextPipeline::result_views`, while forwarding streaming text/thinking deltas.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn turn_with_materialized_history_and_deltas(
+        &self,
+        home: &std::path::Path,
+        conversation_id: &str,
+        context: &str,
+        history: &Value,
+        tools: &Value,
+        live: &LiveHistory,
+        cancel: &CancellationToken,
+        publish: impl std::ops::AsyncFnMut(ModelDelta<'_>) -> Result<(), ModelError>,
+    ) -> Result<ModelTurn, ModelError> {
+        let sources = ToolResultEncoding::collect(history)?;
+        let home_buf = home.to_path_buf();
+        let conv = conversation_id.to_owned();
+        let mat_cancel = cancel.clone();
+        let encoding =
+            tokio::task::spawn_blocking(move || sources.materialize(&home_buf, &conv, &mat_cancel))
+                .await
+                .map_err(|_| ModelError::new("model_tool_result_encoding_unavailable"))??;
+        self.prepare_request_with_tool_results(context, history, tools, live, &encoding)?
+            .send_with_deltas(cancel, publish)
+            .await
+    }
+    /// Run a model turn that materializes oversized tool results (> 6000 UTF-16 chars)
+    /// into `<home>/conversations/<conversation_id>.tool-results/` before wire encoding,
     /// matching `ContextPipeline::result_views`.
     #[allow(clippy::too_many_arguments)]
     pub async fn turn_with_materialized_history(
@@ -202,17 +278,17 @@ impl NativeModel {
         live: &LiveHistory,
         cancel: &CancellationToken,
     ) -> Result<ModelTurn, ModelError> {
-        let sources = ToolResultEncoding::collect(history)?;
-        let home_buf = home.to_path_buf();
-        let conv = conversation_id.to_owned();
-        let mat_cancel = cancel.clone();
-        let encoding =
-            tokio::task::spawn_blocking(move || sources.materialize(&home_buf, &conv, &mat_cancel))
-                .await
-                .map_err(|_| ModelError::new("model_tool_result_encoding_unavailable"))??;
-        self.prepare_request_with_tool_results(context, history, tools, live, &encoding)?
-            .send(cancel)
-            .await
+        self.turn_with_materialized_history_and_deltas(
+            home,
+            conversation_id,
+            context,
+            history,
+            tools,
+            live,
+            cancel,
+            async |_: ModelDelta<'_>| Ok(()),
+        )
+        .await
     }
     pub fn prepare_request<'a>(
         &'a self,
@@ -498,5 +574,58 @@ mod tests {
                 c["name"]
             );
         }
+    }
+
+    #[test]
+    fn same_provider_retry_policy_retries_transient_only_and_bounds_attempts() {
+        let mut policy = SameProviderRetryPolicy::default();
+        assert_eq!(
+            policy
+                .next_delay(&ModelError::http(503, b"service unavailable"))
+                .unwrap(),
+            Some(Duration::from_millis(500))
+        );
+        assert_eq!(
+            policy
+                .next_delay(&ModelError::http(429, b"rate limit"))
+                .unwrap(),
+            Some(Duration::from_millis(1500))
+        );
+        assert_eq!(
+            policy
+                .next_delay(&ModelError::new("model_timeout"))
+                .unwrap(),
+            Some(Duration::from_millis(3000))
+        );
+        assert_eq!(
+            policy
+                .next_delay(&ModelError::http(500, b"internal error"))
+                .unwrap(),
+            None
+        );
+
+        let mut non_retry = SameProviderRetryPolicy::default();
+        assert_eq!(
+            non_retry
+                .next_delay(&ModelError::http_access_rejection(401).unwrap())
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            non_retry
+                .next_delay(&ModelError::http(400, b"bad request"))
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            non_retry
+                .next_delay(&ModelError::http(413, b"context_length_exceeded"))
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            non_retry.next_delay(&ModelError::new("CANCELLED")).unwrap(),
+            None
+        );
     }
 }

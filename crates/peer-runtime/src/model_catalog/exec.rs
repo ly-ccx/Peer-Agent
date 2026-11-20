@@ -67,15 +67,14 @@ pub fn resolve_exec(
         resolve_catalog(catalog, preferred, provider, model)
     })
 }
-fn build_selection(
-    home: &Path,
-    effort: Option<&str>,
-    fast: bool,
-    choose: impl for<'a> FnOnce(
-        &'a [ModelCatalogEntry],
-        Option<&str>,
-    ) -> Result<&'a ModelCatalogEntry, ExecSelectionError>,
-) -> Result<ExecSelection, ExecSelectionError> {
+
+struct LoadedCatalog {
+    catalog: Vec<ModelCatalogEntry>,
+    flat: Vec<Value>,
+    preferred: Option<String>,
+}
+
+fn load_catalog_state(home: &Path) -> Result<LoadedCatalog, ExecSelectionError> {
     let catalog = load(Some(home)).map_err(|e| configuration_error(e.code, e.code))?;
     if catalog.is_empty() {
         return Err(configuration_error(
@@ -105,13 +104,283 @@ fn build_selection(
                     .iter()
                     .any(|e| e.entry_id.as_deref() == row["id"].as_str())
         })
-        .and_then(|v| v["id"].as_str());
-    let entry = choose(&catalog, preferred)?.clone();
-    let effort = effort.unwrap_or(&entry.default_reasoning_effort);
+        .and_then(|v| v["id"].as_str())
+        .map(str::to_owned);
+    Ok(LoadedCatalog {
+        catalog,
+        flat,
+        preferred,
+    })
+}
+
+fn row_for_entry<'a>(entry: &ModelCatalogEntry, flat: &'a [Value]) -> Option<&'a Value> {
+    entry
+        .entry_id
+        .as_deref()
+        .and_then(|id| flat.iter().find(|r| r["id"] == id))
+}
+
+fn family_for_entry(entry: &ModelCatalogEntry, row: Option<&Value>) -> String {
+    row.and_then(|r| text(r, "providerType").or_else(|| text(r, "provider")))
+        .unwrap_or(&entry.provider_id)
+        .to_lowercase()
+}
+
+fn finish_selection(
+    entry: ModelCatalogEntry,
+    row: Option<&Value>,
+    effort: &str,
+    fast: bool,
+) -> ExecSelection {
+    let family = family_for_entry(&entry, row);
+    let mut selection = json!({
+        "providerId": entry.provider_id,
+        "modelId": entry.model_id,
+        "family": family,
+        "reasoningEffort": effort,
+        "fastMode": fast,
+    });
+    if let Some(id) = &entry.entry_id {
+        selection["modelProviderId"] = json!(id);
+    }
+    ExecSelection { selection, entry }
+}
+
+fn read_settings_model_routing(home: &Path) -> Option<Value> {
+    const MAX_SETTINGS_BYTES: u64 = 2 * 1024 * 1024;
+    let file = home.join("settings.json");
+    let meta = std::fs::metadata(&file).ok()?;
+    if !meta.is_file() || meta.len() > MAX_SETTINGS_BYTES {
+        return None;
+    }
+    let raw = std::fs::read_to_string(&file).ok()?;
+    let doc: Value = serde_json::from_str(&raw).ok()?;
+    doc.get("modelRouting").filter(|v| v.is_object()).cloned()
+}
+
+/// Resolve a role model using `profile.modelPolicy` and `<home>/settings.json` `modelRouting`,
+/// while honoring explicit provider/model overrides first.
+pub fn resolve_role_model(
+    home: &Path,
+    role: &str,
+    project_policy: Option<&Value>,
+    explicit_provider: Option<&str>,
+    explicit_model: Option<&str>,
+    explicit_effort: Option<&str>,
+    fast: bool,
+) -> Result<ExecSelection, ExecSelectionError> {
+    if explicit_provider.is_some() || explicit_model.is_some() {
+        return resolve_exec(
+            home,
+            explicit_provider,
+            explicit_model,
+            explicit_effort,
+            fast,
+        );
+    }
+
+    let LoadedCatalog {
+        catalog,
+        flat,
+        preferred,
+    } = load_catalog_state(home)?;
+    let model_routing = read_settings_model_routing(home);
+
+    let scope = project_policy
+        .and_then(|p| p.get("scope"))
+        .filter(|v| v.is_object());
+    let allowed_ids: Vec<&str> = scope
+        .and_then(|s| s["modelProviderIds"].as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str().map(trim).filter(|s| !s.is_empty()))
+        .collect();
+    let allowed_families: Vec<String> = scope
+        .and_then(|s| s["families"].as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|v| {
+            v.as_str()
+                .map(trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_lowercase)
+        })
+        .collect();
+    let has_scope = !allowed_ids.is_empty() || !allowed_families.is_empty();
+
+    let entry_in_scope = |entry: &ModelCatalogEntry| -> bool {
+        if !allowed_ids.is_empty()
+            && !entry
+                .entry_id
+                .as_deref()
+                .is_some_and(|id| allowed_ids.contains(&id))
+            && !allowed_ids.contains(&entry.provider_id.as_str())
+        {
+            return false;
+        }
+        if !allowed_families.is_empty() {
+            let fam = family_for_entry(entry, row_for_entry(entry, &flat));
+            if !allowed_families.iter().any(|f| f == &fam) {
+                return false;
+            }
+        }
+        true
+    };
+
+    let role_setting = project_policy
+        .and_then(|p| p.get("overrides"))
+        .and_then(|o| o.get(role))
+        .filter(|v| v.is_object())
+        .or_else(|| {
+            model_routing
+                .as_ref()
+                .and_then(|r| r.get("roles"))
+                .and_then(|roles| roles.get(role))
+                .filter(|v| v.is_object())
+        });
+
+    let mut candidate_ids: Vec<&str> = Vec::new();
+    let mut role_effort: Option<&str> = None;
+    let mut force_model_default = false;
+    let mut role_fast = fast;
+
+    if let Some(setting) = role_setting {
+        let tier = match text(setting, "mode") {
+            Some("fixed") => {
+                if let Some(id) = text(setting, "modelProviderId") {
+                    candidate_ids.push(id);
+                }
+                None
+            }
+            Some("tier") => {
+                let tier_obj = text(setting, "tier").and_then(|tier_name| {
+                    model_routing
+                        .as_ref()
+                        .and_then(|r| r.get("tiers"))
+                        .and_then(|t| t.get(tier_name))
+                        .filter(|v| v.is_object())
+                });
+                if let Some(t) = tier_obj {
+                    if let Some(primary) = text(t, "primary") {
+                        candidate_ids.push(primary);
+                    }
+                    if let Some(fallbacks) = t["fallbacks"].as_array() {
+                        for fb in fallbacks {
+                            if let Some(id) = fb.as_str().map(trim).filter(|s| !s.is_empty())
+                                && !candidate_ids.contains(&id)
+                            {
+                                candidate_ids.push(id);
+                            }
+                        }
+                    }
+                }
+                tier_obj
+            }
+            Some("auto") => {
+                if let Some(pool) = setting["pool"].as_array() {
+                    for item in pool {
+                        if let Some(id) = item.as_str().map(trim).filter(|s| !s.is_empty())
+                            && !candidate_ids.contains(&id)
+                        {
+                            candidate_ids.push(id);
+                        }
+                    }
+                }
+                None
+            }
+            _ => None,
+        };
+
+        match setting.get("reasoningEffort") {
+            Some(Value::Null) => {
+                force_model_default = true;
+            }
+            Some(Value::String(s)) if !trim(s).is_empty() => {
+                role_effort = Some(trim(s));
+            }
+            _ => {
+                role_effort = tier.and_then(|t| text(t, "reasoningEffort"));
+            }
+        }
+        role_fast = setting["fastMode"]
+            .as_bool()
+            .or_else(|| tier.and_then(|t| t["fastMode"].as_bool()))
+            .unwrap_or(fast);
+    }
+
+    let matched_entry = candidate_ids.iter().find_map(|cand_id| {
+        catalog.iter().find(|entry| {
+            entry.available
+                && (entry.entry_id.as_deref() == Some(*cand_id) || entry.provider_id == *cand_id)
+                && entry_in_scope(entry)
+        })
+    });
+
+    let chosen = match matched_entry {
+        Some(entry) => entry.clone(),
+        None => {
+            if has_scope {
+                let scoped: Vec<ModelCatalogEntry> = catalog
+                    .iter()
+                    .filter(|e| e.available && entry_in_scope(e))
+                    .cloned()
+                    .collect();
+                if scoped.is_empty() {
+                    return Err(error(
+                        "model_selection_unavailable",
+                        "no configured model satisfies project modelPolicy scope",
+                    ));
+                }
+                resolve_catalog(&scoped, preferred.as_deref(), None, None)?.clone()
+            } else {
+                resolve_catalog(&catalog, preferred.as_deref(), None, None)?.clone()
+            }
+        }
+    };
+
+    let row = row_for_entry(&chosen, &flat);
+    let desired_effort = if force_model_default {
+        chosen.default_reasoning_effort.as_str()
+    } else {
+        role_effort
+            .or(explicit_effort)
+            .unwrap_or(chosen.default_reasoning_effort.as_str())
+    };
+    let final_effort = if chosen
+        .supported_reasoning_efforts
+        .iter()
+        .any(|v| v == desired_effort)
+    {
+        desired_effort.to_owned()
+    } else {
+        chosen.default_reasoning_effort.clone()
+    };
+    let final_fast = role_fast
+        && row
+            .is_some_and(|r| matches!(text(r, "authMethod"), Some("oauth_chatgpt" | "oauth_grok")));
+
+    Ok(finish_selection(chosen, row, &final_effort, final_fast))
+}
+fn build_selection(
+    home: &Path,
+    effort: Option<&str>,
+    fast: bool,
+    choose: impl for<'a> FnOnce(
+        &'a [ModelCatalogEntry],
+        Option<&str>,
+    ) -> Result<&'a ModelCatalogEntry, ExecSelectionError>,
+) -> Result<ExecSelection, ExecSelectionError> {
+    let LoadedCatalog {
+        catalog,
+        flat,
+        preferred,
+    } = load_catalog_state(home)?;
+    let entry = choose(&catalog, preferred.as_deref())?.clone();
+    let effort = effort.unwrap_or(&entry.default_reasoning_effort).to_owned();
     if !entry
         .supported_reasoning_efforts
         .iter()
-        .any(|v| v == effort)
+        .any(|v| v == &effort)
     {
         return Err(error(
             "model_effort_unsupported",
@@ -121,14 +390,7 @@ fn build_selection(
             ),
         ));
     }
-    let row = entry
-        .entry_id
-        .as_deref()
-        .and_then(|id| flat.iter().find(|r| r["id"] == id));
-    let family = row
-        .and_then(|r| text(r, "providerType").or_else(|| text(r, "provider")))
-        .unwrap_or(&entry.provider_id)
-        .to_lowercase();
+    let row = row_for_entry(&entry, &flat);
     if fast
         && !row
             .is_some_and(|r| matches!(text(r, "authMethod"), Some("oauth_chatgpt" | "oauth_grok")))
@@ -138,11 +400,7 @@ fn build_selection(
             "--fast requires a configured ChatGPT or Grok OAuth channel",
         ));
     }
-    let mut selection = json!({"providerId":entry.provider_id,"modelId":entry.model_id,"family":family,"reasoningEffort":effort,"fastMode":fast});
-    if let Some(id) = &entry.entry_id {
-        selection["modelProviderId"] = json!(id);
-    }
-    Ok(ExecSelection { selection, entry })
+    Ok(finish_selection(entry, row, &effort, fast))
 }
 pub fn resolve_catalog<'a>(
     catalog: &'a [ModelCatalogEntry],
@@ -309,5 +567,131 @@ mod tests {
                 .code,
             "model_not_configured"
         );
+    }
+
+    #[test]
+    fn resolve_role_model_respects_settings_routing_and_project_policy_overrides() {
+        let dir = tempfile::tempdir().unwrap();
+        let providers = json!({
+            "version": 2,
+            "channels": [
+                {
+                    "id": "openai-ch",
+                    "name": "OpenAI",
+                    "provider": "openai",
+                    "providerType": "openai",
+                    "authMethod": "api_key",
+                    "apiKeyConfigured": true,
+                    "enabled": true
+                },
+                {
+                    "id": "anthropic-ch",
+                    "name": "Anthropic",
+                    "provider": "anthropic",
+                    "providerType": "anthropic",
+                    "authMethod": "api_key",
+                    "apiKeyConfigured": true,
+                    "enabled": true
+                }
+            ],
+            "models": [
+                {
+                    "id": "openai-default",
+                    "groupId": "openai-ch",
+                    "model": "gpt-5",
+                    "isDefault": true,
+                    "enabled": true,
+                    "reasoningEffortLevels": ["low", "medium", "high"],
+                    "reasoningDefaultEffort": "medium"
+                },
+                {
+                    "id": "anthropic-strong",
+                    "groupId": "anthropic-ch",
+                    "model": "claude-sonnet",
+                    "isDefault": false,
+                    "enabled": true,
+                    "reasoningEffortLevels": ["low", "high"],
+                    "reasoningDefaultEffort": "high"
+                }
+            ]
+        });
+        std::fs::write(
+            dir.path().join("llm-providers.json"),
+            serde_json::to_string(&providers).unwrap(),
+        )
+        .unwrap();
+        let settings = json!({
+            "modelRouting": {
+                "tiers": {
+                    "strong": {
+                        "primary": "anthropic-strong",
+                        "fallbacks": ["openai-default"],
+                        "reasoningEffort": "high"
+                    }
+                },
+                "roles": {
+                    "project_agent": {
+                        "mode": "tier",
+                        "tier": "strong"
+                    },
+                    "session_worker": {
+                        "mode": "fixed",
+                        "modelProviderId": "openai-default",
+                        "reasoningEffort": "low"
+                    }
+                }
+            }
+        });
+        std::fs::write(
+            dir.path().join("settings.json"),
+            serde_json::to_string(&settings).unwrap(),
+        )
+        .unwrap();
+
+        // 1. Global settings tier routing picks anthropic-strong with tier effort
+        let bot =
+            resolve_role_model(dir.path(), "project_agent", None, None, None, None, false).unwrap();
+        assert_eq!(bot.selection["modelProviderId"], "anthropic-strong");
+        assert_eq!(bot.selection["reasoningEffort"], "high");
+
+        // 2. Project policy override + scope allowlist picks openai-default cleanly
+        let policy = json!({
+            "scope": {
+                "families": ["openai"]
+            },
+            "overrides": {
+                "project_agent": {
+                    "mode": "fixed",
+                    "modelProviderId": "openai-default",
+                    "reasoningEffort": null
+                }
+            }
+        });
+        let scoped = resolve_role_model(
+            dir.path(),
+            "project_agent",
+            Some(&policy),
+            None,
+            None,
+            None,
+            false,
+        )
+        .unwrap();
+        assert_eq!(scoped.selection["modelProviderId"], "openai-default");
+        assert_eq!(scoped.selection["reasoningEffort"], "medium");
+
+        // 3. Explicit provider/model wins over role routing
+        let explicit = resolve_role_model(
+            dir.path(),
+            "project_agent",
+            Some(&policy),
+            Some("anthropic-ch"),
+            Some("claude-sonnet"),
+            Some("low"),
+            false,
+        )
+        .unwrap();
+        assert_eq!(explicit.selection["modelProviderId"], "anthropic-strong");
+        assert_eq!(explicit.selection["reasoningEffort"], "low");
     }
 }

@@ -19,10 +19,13 @@ use super::{
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use peer_project_agent::{
     BotProfile, DraftBody, DraftWriteRequest, FamiliarizeKind, HostTickReport, LeaseStatus,
-    MemoryFilter, NativeProjectHost, TurnEndKind,
+    MemoryFilter, NativeProjectHost, QuestionState, TurnEndKind, now_iso, parse_iso_ms,
+    project_reply_questions,
 };
 use peer_runtime::{
-    CancellationToken, model_catalog::resolve_exec, session_host::LocalPermissionDecision,
+    CancellationToken,
+    model_catalog::{ExecSelection, ExecSelectionError, resolve_exec},
+    session_host::LocalPermissionDecision,
 };
 use peer_tui::{
     Action, BOT_SLASH_ITEMS, BotCardRow, BotMessageView, BotRowView, BotScreen, BotShellView,
@@ -54,6 +57,8 @@ struct ActiveTick {
 #[derive(Debug, Clone)]
 enum BotCardAction {
     StartFamiliarize,
+    AnswerQuestion { card_id: String, text: String },
+    RetryTurn,
     Command(String),
 }
 
@@ -109,12 +114,15 @@ struct BotShellState<'a> {
     selected_model: Option<String>,
     selected_display_name: Option<String>,
     selected_effort: Option<String>,
+    user_pinned_model: bool,
     model_picker: ModelPickerState,
     approval: Option<Approval>,
     overlay: ClassicOverlay,
     wrap_cache: ByteBudgetLru<WrapCacheKey, RenderedBlock>,
     active_tick: Option<ActiveTick>,
     pending_tick_retrigger: bool,
+    takeover_pending_since: Option<Instant>,
+    last_activity_revision: u64,
     last_refresh: Instant,
     interaction_limit: usize,
 }
@@ -163,7 +171,13 @@ impl<'a> BotShellState<'a> {
         let mut selected_model = None;
         let mut selected_display_name = None;
         let mut selected_effort = None;
-        if let Ok(resolved) = resolve_exec(&home, None, None, None, false) {
+        let initial_resolved = match active_ws.as_deref() {
+            Some(ws_id) => {
+                host.resolve_bot_model_selection(ws_id, "project_agent", None, None, None, false)
+            }
+            None => resolve_exec(&home, None, None, None, false),
+        };
+        if let Ok(resolved) = initial_resolved {
             selected_provider = Some(resolved.entry.provider_id);
             selected_model = Some(resolved.entry.model_id);
             selected_display_name = Some(resolved.entry.display_name);
@@ -208,12 +222,15 @@ impl<'a> BotShellState<'a> {
             selected_model,
             selected_display_name,
             selected_effort,
+            user_pinned_model: false,
             model_picker: ModelPickerState::default(),
             approval: None,
             overlay: ClassicOverlay::None,
             wrap_cache: ByteBudgetLru::new(MARKDOWN_WRAP_CACHE_BYTES, 512),
             active_tick: None,
             pending_tick_retrigger: false,
+            takeover_pending_since: None,
+            last_activity_revision: 0,
             last_refresh: Instant::now(),
             interaction_limit: 40,
         };
@@ -221,6 +238,38 @@ impl<'a> BotShellState<'a> {
             state.refresh_snapshot(true);
         }
         Ok(state)
+    }
+
+    fn resolve_role_selection(&self, role: &str) -> Result<ExecSelection, ExecSelectionError> {
+        let (p, m, e) = if role == "project_agent" && self.user_pinned_model {
+            (
+                self.selected_provider.as_deref(),
+                self.selected_model.as_deref(),
+                self.selected_effort.as_deref(),
+            )
+        } else {
+            (None, None, None)
+        };
+        match self.active_workspace_id.as_deref() {
+            Some(ws_id) => self
+                .host
+                .resolve_bot_model_selection(ws_id, role, p, m, e, false),
+            None => resolve_exec(&self.home, p, m, e, false),
+        }
+    }
+
+    fn sync_role_model_badge(&mut self) {
+        if self.user_pinned_model {
+            return;
+        }
+        if let Ok(resolved) = self.resolve_role_selection("project_agent") {
+            self.selected_provider = Some(resolved.entry.provider_id);
+            self.selected_model = Some(resolved.entry.model_id);
+            self.selected_display_name = Some(resolved.entry.display_name);
+            self.selected_effort = resolved.selection["reasoningEffort"]
+                .as_str()
+                .map(str::to_owned);
+        }
     }
 
     fn refresh_snapshot(&mut self, load_draft: bool) {
@@ -290,14 +339,15 @@ impl<'a> BotShellState<'a> {
 
         // Load bounded paginated bot interactions
         let mut familiarize_offer = None;
+        let mut raw_messages = Vec::new();
         if let Ok(page) =
             self.host
                 .directory()
                 .read_interactions(&ws_id, self.interaction_limit, None)
         {
             familiarize_offer = page.familiarize_offer;
-            let by_id: HashMap<String, String> = page
-                .messages
+            raw_messages = page.messages;
+            let by_id: HashMap<String, String> = raw_messages
                 .iter()
                 .filter_map(|m| {
                     let id = m["id"].as_str()?;
@@ -306,9 +356,8 @@ impl<'a> BotShellState<'a> {
                         .then(|| (id.to_owned(), content.to_owned()))
                 })
                 .collect();
-            self.messages = page
-                .messages
-                .into_iter()
+            self.messages = raw_messages
+                .iter()
                 .map(|m| {
                     let id = m["id"].as_str().unwrap_or("").to_owned();
                     let role = m["role"].as_str().unwrap_or("assistant").to_owned();
@@ -374,7 +423,7 @@ impl<'a> BotShellState<'a> {
             })
             .collect();
 
-        // Pending cards (open approvals & awaiting_approval sessions + first-open familiarize offer)
+        // Pending cards (plan approvals, open reply questions, un-superseded unavailable retry, familiarize offer)
         let zh = self.prefs.locale.is_zh();
         let mut cards = Vec::new();
         let mut card_actions = Vec::new();
@@ -402,6 +451,103 @@ impl<'a> BotShellState<'a> {
                     BotCardAction::Command(format!("/approve {num}")),
                     BotCardAction::Command(format!("/deny {num}")),
                 ]);
+            }
+        }
+        let now_ms = parse_iso_ms(&now_iso()).unwrap_or(0);
+        let q_states = project_reply_questions(&raw_messages, now_ms);
+        for m in &raw_messages {
+            if m["kind"] == "agent_reply"
+                && m["question"].is_object()
+                && let Some(msg_id) = m["id"].as_str().filter(|s| !s.is_empty())
+                && q_states
+                    .get(msg_id)
+                    .is_some_and(|st| st.state == QuestionState::Open)
+            {
+                let card_id = format!("card:question:reply:{msg_id}");
+                let num = self.card_numbers.assign(&ws_id, &card_id);
+                let prompt = m["question"]["prompt"]
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty());
+                let content = m["content"].as_str().map(str::trim).unwrap_or("");
+                let title: String = prompt.unwrap_or(content).chars().take(120).collect();
+                let summary = match prompt {
+                    Some(p) if !content.is_empty() && p != content => {
+                        content.chars().take(180).collect()
+                    }
+                    _ => String::new(),
+                };
+                let options: Vec<String> = m["question"]["options"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|v| {
+                        v.as_str()
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(str::to_owned)
+                    })
+                    .collect();
+                let (actions, acts) = if !options.is_empty() {
+                    let acts = options
+                        .iter()
+                        .map(|opt| BotCardAction::AnswerQuestion {
+                            card_id: card_id.clone(),
+                            text: opt.clone(),
+                        })
+                        .collect();
+                    (options, acts)
+                } else {
+                    (
+                        vec![if zh { "回复此问题" } else { "Reply" }.to_owned()],
+                        vec![BotCardAction::Command(format!("/answer {num} "))],
+                    )
+                };
+                cards.push(BotCardRow {
+                    number: num,
+                    card_id,
+                    kind: if zh { "等待选择" } else { "Question" }.to_owned(),
+                    title,
+                    summary,
+                    actions,
+                });
+                card_actions.push(acts);
+            }
+        }
+        if let Some(unavail_idx) = raw_messages
+            .iter()
+            .rposition(|m| m["kind"] == "system_card" && m["card"] == "agent_unavailable")
+        {
+            let superseded = raw_messages[unavail_idx + 1..]
+                .iter()
+                .any(|m| matches!(m["kind"].as_str(), Some("agent_reply" | "user_input")));
+            if !superseded {
+                let m = &raw_messages[unavail_idx];
+                let turn_id = m["turnId"]
+                    .as_str()
+                    .or_else(|| m["id"].as_str())
+                    .unwrap_or("retry");
+                let card_id = format!("card:agent_unavailable:{turn_id}");
+                let num = self.card_numbers.assign(&ws_id, &card_id);
+                let title: String = m["content"]
+                    .as_str()
+                    .unwrap_or(if zh {
+                        "代理暂时不可用"
+                    } else {
+                        "Agent unavailable"
+                    })
+                    .chars()
+                    .take(120)
+                    .collect();
+                cards.push(BotCardRow {
+                    number: num,
+                    card_id,
+                    kind: if zh { "代理异常" } else { "Unavailable" }.to_owned(),
+                    title,
+                    summary: String::new(),
+                    actions: vec![if zh { "重试" } else { "Retry" }.to_owned()],
+                });
+                card_actions.push(vec![BotCardAction::RetryTurn]);
             }
         }
         if familiarize_offer.is_some() {
@@ -546,15 +692,11 @@ impl<'a> BotShellState<'a> {
         match action {
             BotCardAction::StartFamiliarize => {
                 let ws_id = self.active_workspace_id.clone()?;
-                let selection = resolve_exec(
-                    &self.home,
-                    self.selected_provider.as_deref(),
-                    self.selected_model.as_deref(),
-                    self.selected_effort.as_deref(),
-                    false,
-                )
-                .map(|r| r.selection)
-                .unwrap_or(serde_json::Value::Null);
+                let selection = self
+                    .resolve_role_selection("session_worker")
+                    .or_else(|_| self.resolve_role_selection("project_agent"))
+                    .map(|r| r.selection)
+                    .unwrap_or(serde_json::Value::Null);
                 match self.host.start_familiarize(&ws_id, selection) {
                     Ok(res) => {
                         self.screen = BotScreen::Conversation;
@@ -588,6 +730,34 @@ impl<'a> BotShellState<'a> {
                 }
                 None
             }
+            BotCardAction::AnswerQuestion { card_id, text } => {
+                let ws_id = self.active_workspace_id.clone()?;
+                let input_id = uuid::Uuid::new_v4().to_string();
+                match self
+                    .host
+                    .submit_user_input(&ws_id, &input_id, &text, Some(card_id))
+                {
+                    Ok(_) => {
+                        self.anchor.jump_to_latest();
+                        self.screen = BotScreen::Conversation;
+                        self.notice = Some("已提交选择，正在推进…".to_owned());
+                        self.refresh_snapshot(false);
+                        self.trigger_background_tick();
+                    }
+                    Err(err) => {
+                        self.notice = Some(format!("提交回答失败（{}）。", err.code));
+                    }
+                }
+                None
+            }
+            BotCardAction::RetryTurn => {
+                let ws_id = self.active_workspace_id.clone()?;
+                self.host.runner().reset_circuit_breaker_for(&ws_id);
+                self.notice = Some("已触发重试…".to_owned());
+                self.refresh_snapshot(false);
+                self.trigger_background_tick();
+                None
+            }
             BotCardAction::Command(cmd) => {
                 if cmd.ends_with(' ') {
                     self.composer.accepted();
@@ -609,13 +779,7 @@ impl<'a> BotShellState<'a> {
         let Some(ws_id) = self.active_workspace_id.clone() else {
             return;
         };
-        let resolved = match resolve_exec(
-            &self.home,
-            self.selected_provider.as_deref(),
-            self.selected_model.as_deref(),
-            self.selected_effort.as_deref(),
-            false,
-        ) {
+        let resolved = match self.resolve_role_selection("project_agent") {
             Ok(s) => s,
             Err(err) => {
                 self.notice = Some(format!(
@@ -625,6 +789,18 @@ impl<'a> BotShellState<'a> {
                 return;
             }
         };
+        if !self.user_pinned_model {
+            self.selected_provider = Some(resolved.entry.provider_id.clone());
+            self.selected_model = Some(resolved.entry.model_id.clone());
+            self.selected_display_name = Some(resolved.entry.display_name.clone());
+            self.selected_effort = resolved.selection["reasoningEffort"]
+                .as_str()
+                .map(str::to_owned);
+        }
+        let worker_selection = self
+            .resolve_role_selection("session_worker")
+            .map(|r| r.selection)
+            .unwrap_or_else(|_| resolved.selection.clone());
         let home = self.home.clone();
         let host = Arc::clone(&self.host);
         let cancel = CancellationToken::new();
@@ -640,7 +816,7 @@ impl<'a> BotShellState<'a> {
                 requests: prompt_tx,
                 display: display_tx,
             };
-            host.tick(&ws_id, &model, selection, &mut perm, &task_cancel)
+            host.tick(&ws_id, &model, worker_selection, &mut perm, &task_cancel)
                 .await
                 .map_err(|e| e.to_string())
         });
@@ -850,11 +1026,41 @@ impl<'a> BotShellState<'a> {
                     match self.host.ensure_lease(&ws_id) {
                         Ok(LeaseStatus::Acquired { .. }) => {
                             self.lease_banner = None;
+                            self.takeover_pending_since = None;
                             self.notice = Some("已取得当前工作区执行权。".to_owned());
+                            self.refresh_snapshot(false);
+                            self.trigger_if_pending();
                         }
-                        Ok(LeaseStatus::HeldByOther(_)) => {
-                            self.notice = Some("另一宿主租约仍活跃，无法强抢；请先关闭桌面端窗口或继续作为客户端发送。".to_owned());
-                        }
+                        Ok(LeaseStatus::HeldByOther(_)) => match self.host.request_takeover(&ws_id)
+                        {
+                            Ok(true) => {
+                                self.takeover_pending_since = Some(Instant::now());
+                                self.notice = Some(
+                                    "已发送接管请求（host.yield），等待原宿主让出执行权…"
+                                        .to_owned(),
+                                );
+                            }
+                            Ok(false) => match self.host.ensure_lease(&ws_id) {
+                                Ok(LeaseStatus::Acquired { .. }) => {
+                                    self.lease_banner = None;
+                                    self.takeover_pending_since = None;
+                                    self.notice = Some("已取得当前工作区执行权。".to_owned());
+                                    self.refresh_snapshot(false);
+                                    self.trigger_if_pending();
+                                }
+                                Ok(LeaseStatus::HeldByOther(_)) => {
+                                    self.notice = Some(
+                                        "另一宿主持有执行权，请稍后再试 /takeover。".to_owned(),
+                                    );
+                                }
+                                Err(err) => {
+                                    self.notice = Some(format!("接管失败（{}）。", err.code));
+                                }
+                            },
+                            Err(err) => {
+                                self.notice = Some(format!("发送接管请求失败（{}）。", err.code));
+                            }
+                        },
                         Err(err) => {
                             self.notice = Some(format!("接管失败（{}）。", err.code));
                         }
@@ -1097,6 +1303,8 @@ impl<'a> BotShellState<'a> {
                     match (act.phase.as_str(), zh) {
                         ("thinking", true) => "思考中…".to_owned(),
                         ("thinking", false) => "Thinking…".to_owned(),
+                        ("responding", true) => "输出中…".to_owned(),
+                        ("responding", false) => "Responding…".to_owned(),
                         ("tool", true) => "调用工具中…".to_owned(),
                         ("tool", false) => "Running tools…".to_owned(),
                         (_, true) => "正在推进…".to_owned(),
@@ -1386,17 +1594,68 @@ impl<'a> BotShellState<'a> {
                 dirty = true;
             }
 
-            // Periodic low-frequency refresh only when viewing an active bot conversation (1s interval).
-            let refresh_interval = if self.active_tick.is_some() {
-                Duration::from_millis(250)
-            } else {
-                Duration::from_secs(1)
-            };
-            if self.screen == BotScreen::Conversation
-                && self.last_refresh.elapsed() >= refresh_interval
-            {
-                self.refresh_snapshot(false);
+            // Live streaming activity revision check (redraws streamed reply deltas without waiting).
+            let activity_rev = self
+                .host
+                .runner()
+                .current_activity()
+                .map_or(0, |a| a.revision);
+            if activity_rev != self.last_activity_revision {
+                self.last_activity_revision = activity_rev;
                 dirty = true;
+            }
+
+            // Periodic low-frequency refresh & lease takeover/yield handshake.
+            let refresh_interval =
+                if self.active_tick.is_some() || self.takeover_pending_since.is_some() {
+                    Duration::from_millis(250)
+                } else {
+                    Duration::from_secs(1)
+                };
+            if self.last_refresh.elapsed() >= refresh_interval {
+                if let Some(ws_id) = self.active_workspace_id.clone() {
+                    if self.host.holds_lease(&ws_id) && self.host.takeover_requested(&ws_id) {
+                        self.approval = None;
+                        self.pending_tick_retrigger = false;
+                        if let Some(active) = self.active_tick.take() {
+                            active.cancel.cancel();
+                            let _ = active.task.await;
+                        }
+                        let _ = self.host.release_lease(&ws_id);
+                        self.refresh_snapshot(false);
+                        self.notice = Some(
+                            "另一宿主请求接管，本终端已让出执行权（已切换为客户端模式）。"
+                                .to_owned(),
+                        );
+                        dirty = true;
+                    } else if let Some(since) = self.takeover_pending_since {
+                        match self.host.ensure_lease(&ws_id) {
+                            Ok(LeaseStatus::Acquired { .. }) => {
+                                self.takeover_pending_since = None;
+                                self.lease_banner = None;
+                                self.notice = Some("已成功接管当前工作区执行权。".to_owned());
+                                self.refresh_snapshot(false);
+                                self.trigger_if_pending();
+                                dirty = true;
+                            }
+                            _ if since.elapsed() >= Duration::from_secs(10) => {
+                                self.takeover_pending_since = None;
+                                self.notice = Some(
+                                    "接管超时：原宿主未在 10 秒内让出执行权，可稍后再试 /takeover。"
+                                        .to_owned(),
+                                );
+                                dirty = true;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                if self.screen == BotScreen::Conversation {
+                    self.refresh_snapshot(false);
+                    dirty = true;
+                } else {
+                    self.last_refresh = Instant::now();
+                }
             }
 
             if self.screen == BotScreen::Conversation
@@ -1460,6 +1719,7 @@ impl<'a> BotShellState<'a> {
                                     self.selected_model = Some(model_id);
                                     self.selected_display_name = Some(label.clone());
                                     self.selected_effort = effort;
+                                    self.user_pinned_model = true;
                                     self.model_picker.close();
                                     self.notice = Some(format!("本终端会话模型已设为 {label}。"));
                                 }
@@ -1527,6 +1787,7 @@ impl<'a> BotShellState<'a> {
                                                 self.active_workspace_id = Some(entry.workspace_id);
                                                 self.active_bot_name = Some(profile.display_name);
                                                 self.screen = BotScreen::Conversation;
+                                                self.sync_role_model_badge();
                                                 self.refresh_snapshot(true);
                                             }
                                             Err(err) => {
@@ -1562,6 +1823,7 @@ impl<'a> BotShellState<'a> {
                                             self.active_bot_name = Some(row.display_name);
                                             self.anchor.jump_to_latest();
                                             self.screen = BotScreen::Conversation;
+                                            self.sync_role_model_badge();
                                             self.refresh_snapshot(true);
                                             self.trigger_if_pending();
                                             dirty = true;

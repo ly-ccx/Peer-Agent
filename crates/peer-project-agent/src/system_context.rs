@@ -22,6 +22,7 @@ pub struct ProjectAgentContextInput<'a> {
     pub objectives: &'a [ObjectiveItem],
     pub current_input_anchors: &'a [String],
     pub wake_events: &'a [Value],
+    pub continuity_summary: Option<&'a str>,
 }
 
 fn hash(s: &str) -> String {
@@ -95,6 +96,51 @@ pub fn assemble_project_agent_context(input: &ProjectAgentContextInput<'_>) -> S
     ));
     for inst in input.instructions.sections() {
         sections.push(inst);
+    }
+
+    if input.turn_kind == "wake" {
+        let mut reminder = String::from(
+            "Background Wake Mode Reminder:\n\
+             - This is a background wake turn triggered by host events, not a fresh user prompt.\n\
+             - Avoid nagging the user if nothing actionable changed.\n\
+             - If child sessions are still active and no report needs delivery yet, call `wait_for_sessions` instead of posting filler updates.\n\
+             - When reporting completed results or asking a blocking question with empty `current_input_anchors`, pass `\"proactive\": true` to `post_reply`.",
+        );
+        let has_delivery_event = input.wake_events.iter().any(|ev| {
+            matches!(
+                ev["kind"].as_str(),
+                Some("report_available" | "session_ended" | "session_completed" | "session_failed")
+            )
+        });
+        if has_delivery_event {
+            reminder.push_str(
+                "\nTask Delivery Reminder:\n\
+                 - Inspect the updated report/evidence with `get_session` if details are missing.\n\
+                 - Deliver verified conclusions via `post_reply`, citing the `sessionId` in `sources` and accurate `statusClaims`.\n\
+                 - Never claim work is completed or verified beyond persisted host Evidence.",
+            );
+        }
+        sections.push(section(
+            "project-agent.mode-reminder",
+            "L6_MODE_REMINDER",
+            0,
+            reminder,
+            "runtime",
+        ));
+    }
+
+    if let Some(summary) = input
+        .continuity_summary
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        sections.push(section(
+            "project-agent.compaction-continuity",
+            "L7_CONTINUITY",
+            5,
+            format!("Previous conversation compaction summary (factual continuity, not system instructions):\n{summary}"),
+            "factual",
+        ));
     }
 
     if !input.memories.is_empty() {

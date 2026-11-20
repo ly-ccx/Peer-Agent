@@ -458,3 +458,31 @@ impl ContextPipeline {
 
 #[cfg(test)]
 mod tests;
+
+pub fn compaction_summary_prompts() -> Result<(String, String), &'static str> {
+    let prompts: Value = serde_json::from_str(include_str!(
+        "../../../packages/protocol/contracts/native-cli/compaction-prompts.json"
+    ))
+    .map_err(|_| "context_resource_invalid")?;
+    let system = prompts["system"]
+        .as_str()
+        .ok_or("context_resource_invalid")?;
+    let prompt = prompts["prompt"]
+        .as_str()
+        .ok_or("context_resource_invalid")?;
+    Ok((
+        crate::system_context::compaction_summary_context(system),
+        prompt.to_owned(),
+    ))
+}
+
+pub fn build_compaction_summary_input(
+    continuity: Option<&Value>,
+    messages: Vec<Value>,
+) -> Result<String, &'static str> {
+    summary_input::build(continuity, messages).map_err(|e| e.0)
+}
+
+pub fn build_structural_compaction_summary(input: &str) -> Result<String, &'static str> {
+    summary_input::structural_fallback(input).map_err(|e| e.0)
+}
